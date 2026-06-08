@@ -34,6 +34,7 @@ import {
   acceptForwardedDriverOffer,
   getDriverClient,
   getDriverIdentityIssue,
+  getPendingDriverTaskCompletion,
   rejectForwardedDriverOffer,
 } from "@/lib/api-client";
 import { formatMoney } from "@/lib/money";
@@ -443,10 +444,27 @@ function isEmphasizedStatus(task: UnifiedDriverTaskView) {
 
 function canSwipeForwardedTask(task: UnifiedDriverTaskView) {
   return (
+    canAcceptForwardedTask(task) &&
+    canRejectForwardedTask(task) &&
+    task.allowedActions.includes("accept") &&
+    task.allowedActions.includes("reject")
+  );
+}
+
+function canAcceptForwardedTask(task: UnifiedDriverTaskView) {
+  return (
     !isOwnedTask(task) &&
     !hasSyncIssue(task) &&
     task.driverActionState === "action_required" &&
-    task.allowedActions.includes("accept") &&
+    task.allowedActions.includes("accept")
+  );
+}
+
+function canRejectForwardedTask(task: UnifiedDriverTaskView) {
+  return (
+    !isOwnedTask(task) &&
+    !hasSyncIssue(task) &&
+    task.driverActionState === "action_required" &&
     task.allowedActions.includes("reject")
   );
 }
@@ -993,7 +1011,7 @@ function TaskCard({
   const fareLabel = order?.quotedFare ? formatMoney(order.quotedFare) : null;
   const deadlineLabel = formatRelativeDeadline(task.deadlineAt);
   const typeLabel = buildTypeLabel(order);
-  const showPrimaryAction = canSwipeForwardedTask(task);
+  const showPrimaryAction = canAcceptForwardedTask(task);
   const showOpenAction =
     !showPrimaryAction &&
     !syncIssue &&
@@ -1314,6 +1332,9 @@ export default function JobsScreen() {
   const [activeNotice, setActiveNotice] = useState<InlineNotice | null>(null);
   const [submittingTaskId, setSubmittingTaskId] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [queuedCompletionTaskId, setQueuedCompletionTaskId] = useState<
+    string | null
+  >(null);
   const router = useRouter();
 
   const loadTasks = async () => {
@@ -1322,6 +1343,9 @@ export default function JobsScreen() {
     try {
       let fetchedTasks: UnifiedDriverTaskView[] = [];
       let degraded = false;
+      const pendingCompletionPromise = getPendingDriverTaskCompletion().catch(
+        () => null,
+      );
 
       try {
         fetchedTasks = await client.listUnifiedDriverTasks();
@@ -1333,6 +1357,8 @@ export default function JobsScreen() {
 
       setTasks(fetchedTasks);
       setFallbackMode(degraded);
+      const pendingCompletion = await pendingCompletionPromise;
+      setQueuedCompletionTaskId(pendingCompletion?.taskId ?? null);
 
       const uniqueOrderIds = [
         ...new Set(fetchedTasks.map((task) => task.orderId).filter(Boolean)),
@@ -1500,6 +1526,23 @@ export default function JobsScreen() {
           }
           title="目前使用本地鏡像備援"
           body="已退回舊任務 API；forwarded 任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
+        />
+      );
+    }
+
+    if (queuedCompletionTaskId) {
+      return (
+        <Banner
+          tone="info"
+          icon={
+            <Ionicons
+              name="cloud-upload-outline"
+              size={15}
+              color={THEME.info}
+            />
+          }
+          title="離線佇列待重送"
+          body={`任務 ${queuedCompletionTaskId} 的完單資料仍在本機佇列，恢復連線後會自動重送。`}
         />
       );
     }

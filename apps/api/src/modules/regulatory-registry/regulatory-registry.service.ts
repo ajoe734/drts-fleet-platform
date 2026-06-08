@@ -433,6 +433,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
   }
 
+  listSupplyPairs() {
+    return this.supplyPairs.map((pair) => ({ ...pair }));
+  }
+
   listLatestDriverLocations() {
     return Array.from(this.latestDriverLocations.values()).map((location) =>
       this.cloneDriverLocation(location),

@@ -619,6 +619,13 @@ export function getPartnerBookingStateHref(
   return `${basePath}/${getPartnerBookingStateScreenMeta(screen).routeSegment}`;
 }
 
+function appendQueryString(href: string, persistentQuery?: string) {
+  if (!persistentQuery) {
+    return href;
+  }
+  return `${href}${href.includes("?") ? "&" : "?"}${persistentQuery}`;
+}
+
 export function PartnerBookingPhoneScreen({
   brand,
   screen,
@@ -1837,10 +1844,12 @@ export function PartnerBookingStateGate({
   brand,
   state,
   basePath,
+  persistentQuery,
 }: {
   brand: PartnerBrandTemplate;
   state: PartnerBookingStateScreenId;
   basePath: string;
+  persistentQuery?: string;
 }) {
   const meta = getPartnerBookingStateScreenMeta(state);
 
@@ -2001,7 +2010,10 @@ export function PartnerBookingStateGate({
                 }}
               >
                 <a
-                  href={`${basePath}${meta.primaryAction.href}`}
+                  href={appendQueryString(
+                    `${basePath}${meta.primaryAction.href}`,
+                    persistentQuery,
+                  )}
                   style={{ textDecoration: "none" }}
                 >
                   <ActionButton
@@ -2011,7 +2023,10 @@ export function PartnerBookingStateGate({
                   />
                 </a>
                 <a
-                  href={`${basePath}${meta.secondaryAction.href}`}
+                  href={appendQueryString(
+                    `${basePath}${meta.secondaryAction.href}`,
+                    persistentQuery,
+                  )}
                   style={{ textDecoration: "none" }}
                 >
                   <ActionButton

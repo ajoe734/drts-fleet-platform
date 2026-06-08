@@ -30,8 +30,11 @@ import type {
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
   CreateDriverMasterCommand,
+  CreateDriverFleetAffiliationCommand,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
+  CreateFleetPartnerCommand,
+  CreateFleetPartnerRevenueShareRuleCommand,
   DriverForwardedOrderAcceptCommand,
   DriverForwardedOrderRejectCommand,
   CreatePartnerChannelEntryCommand,
@@ -41,6 +44,7 @@ import type {
   CreateDriverProfileCommand,
   CreateOwnedOrderCommand,
   CreatePublicInfoVersionCommand,
+  CreateVehicleContractCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePlatformPricingRuleCommand,
@@ -55,9 +59,11 @@ import type {
   CreateReconciliationIssueCommand,
   CompleteVehicleDebrandingCommand,
   CreateMaintenanceRecordCommand,
+  CrossAppResourceLink,
   DispatchExclusivityRecord,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   DispatchCandidate,
   DispatchJobRecord,
   DispatchTraceLogRecord,
@@ -69,6 +75,7 @@ import type {
   DriverLocationSnapshot,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
+  DriverFleetAffiliationRecord,
   DriverLocationHeartbeatCommand,
   DriverProfileRecord,
   DriverRegistryRecord,
@@ -77,6 +84,15 @@ import type {
   DriverStatementRecord,
   DriverTaskRecord,
   UnifiedDriverTaskView,
+  EmptyStateEnvelope,
+  FleetPartnerRecord,
+  FleetPartnerPortalDashboardRecord,
+  FleetPartnerPortalDriverRecord,
+  FleetPartnerPortalQualityMetricsRecord,
+  FleetPartnerPortalTripRecord,
+  FleetPartnerPortalVehicleRecord,
+  FleetPartnerRevenueShareRuleRecord,
+  FleetPartnerStatementRecord,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
   EvidenceGovernanceCatalog,
@@ -137,6 +153,7 @@ import type {
   RejectExclusivityCommand,
   ReimbursementBatchRecord,
   ReconciliationIssueRecord,
+  ResourceActionDescriptor,
   RevokePartnerIngressCredentialCommand,
   RegisterDriverDeviceCommand,
   ReopenComplaintCaseCommand,
@@ -185,13 +202,24 @@ import type {
   TenantCostCenterCoverageReport,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
+  TenantDashboardSummary,
+  TenantFeatureFlagRecord,
+  TenantFeatureFlagVisibilityList,
   TenantIntegrationGovernancePackage,
+  TenantIntegrationReadinessSummary,
+  TenantInvoiceListData,
   TenantInvoiceRecord,
+  TenantNotificationPreferences,
+  TenantOrderListQuery,
   TenantPassengerRecord,
+  TenantPayableLineItem,
+  TenantPayableSummary,
   TenantQuotaLedgerEntry,
   TenantQuotaPolicyRecord,
   TenantQuotaSummary,
   TenantRoleCatalogRecord,
+  TenantServiceProgramRecord,
+  TenantSlaProfileView,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
@@ -205,15 +233,19 @@ import type {
   UpdateDriverProfileCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
+  UpdateFleetPartnerCommand,
+  UpdateFleetPartnerRevenueShareRuleCommand,
   UpdatePlatformAdminUserRoleCommand,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePartnerChannelEntryCommand,
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
+  RecalculateTenantSlaBookingsCommand,
   UpdateTenantSlaProfileCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateVehicleComplianceCommand,
+  UiRefreshMetadata,
   UpsertTenantAddressCommand,
   UpsertTenantApprovalRuleCommand,
   UpsertTenantCostCenterCommand,
@@ -252,6 +284,22 @@ export interface RequestOptions {
 
 interface ListEnvelope<T> {
   items: T[];
+}
+
+interface TenantUsersListEnvelope extends ListEnvelope<TenantUserRoleRecord> {
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refreshMetadata?: UiRefreshMetadata;
+  crossAppLinks?: CrossAppResourceLink[];
+}
+
+interface TenantFeatureFlagListEnvelope {
+  flags: TenantFeatureFlagRecord[];
+  generatedAt: string;
+  refreshTier: TenantFeatureFlagVisibilityList["refreshTier"];
+  availableActions: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  notes: string[];
 }
 
 function snakeToCamelCase(key: string): string {
@@ -318,6 +366,17 @@ export class ApiClient {
   }
 
   /**
+   * Generic GET preserving the success envelope. Useful for callers that
+   * need response metadata such as backend timestamps.
+   */
+  async getEnvelope<T>(
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<T>> {
+    return this.requestEnvelope<T>("GET", path, options);
+  }
+
+  /**
    * Generic POST with envelope unwrapping.
    */
   async post<T>(path: string, options?: RequestOptions): Promise<T> {
@@ -345,6 +404,13 @@ export class ApiClient {
     return this.request<T>("DELETE", path, options);
   }
 
+  async getListEnvelope<T>(
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<ListEnvelope<T>>> {
+    return this.requestEnvelope<ListEnvelope<T>>("GET", path, options);
+  }
+
   private async getList<T>(
     path: string,
     options?: RequestOptions,
@@ -353,11 +419,29 @@ export class ApiClient {
     return Array.isArray(result) ? result : (result.items ?? []);
   }
 
+  private async requestEnvelope<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<T>> {
+    const envelope = await this.fetchEnvelope<T>(method, path, options);
+    return deepToCamelCase(envelope) as ApiSuccessEnvelope<T>;
+  }
+
   private async request<T>(
     method: string,
     path: string,
     options?: RequestOptions,
   ): Promise<T> {
+    const envelope = await this.fetchEnvelope<T>(method, path, options);
+    return deepToCamelCase(envelope.data) as T;
+  }
+
+  private async fetchEnvelope<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<T>> {
     const requestPath = this.pathTransform ? this.pathTransform(path) : path;
     const url = `${this.baseUrl}${requestPath}`;
     const controller = new AbortController();
@@ -395,8 +479,7 @@ export class ApiClient {
         throw new Error(`API error ${response.status}: ${errorText}`);
       }
 
-      const envelope: ApiSuccessEnvelope<T> = await response.json();
-      return deepToCamelCase(envelope.data) as T;
+      return (await response.json()) as ApiSuccessEnvelope<T>;
     } finally {
       clearTimeout(timeoutId);
     }
@@ -414,6 +497,27 @@ export class ApiClient {
     const qs = searchParams.toString();
     const path = qs ? `/api/admin/flags?${qs}` : "/api/admin/flags";
     return this.get<FeatureFlagSummary>(path);
+  }
+
+  async getTenantFeatureFlags(): Promise<TenantFeatureFlagVisibilityList> {
+    return this.get<TenantFeatureFlagVisibilityList>(
+      "/api/tenant/feature-flags",
+    );
+  }
+
+  async listTenantFeatureFlags(): Promise<TenantFeatureFlagListEnvelope> {
+    const response = await this.getTenantFeatureFlags();
+    return {
+      flags: response.items.map((flag) => ({
+        ...flag,
+        rolloutStatus: flag.rolloutState,
+      })),
+      generatedAt: response.refresh.generatedAt,
+      refreshTier: response.refreshTier,
+      availableActions: response.availableActions,
+      notes: response.notes,
+      ...(response.emptyState ? { emptyState: response.emptyState } : {}),
+    };
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {
@@ -551,6 +655,42 @@ export class ApiClient {
     );
   }
 
+  async approveOpsApprovalRequest(
+    approvalRequestId: string,
+    command: ApproveTenantBookingApprovalRequestCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/approve`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async rejectOpsApprovalRequest(
+    approvalRequestId: string,
+    command: RejectTenantBookingApprovalRequestCommand,
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/reject`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async escalateOpsApprovalRequest(
+    approvalRequestId: string,
+    command: EscalateTenantBookingApprovalRequestCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/escalate`,
+      {
+        body: command,
+      },
+    );
+  }
+
   // ── Owned Mobility: Orders ──
 
   async createOrder(command: CreateOwnedOrderCommand) {
@@ -637,6 +777,104 @@ export class ApiClient {
     return this.post(
       `/api/tenant/bookings/${encodeURIComponent(bookingId)}/cancel`,
       { body: command },
+    );
+  }
+
+  async getTenantDashboardSummary(): Promise<TenantDashboardSummary> {
+    return this.get<TenantDashboardSummary>("/api/tenant/dashboard");
+  }
+
+  async listTenantOrders(
+    query: TenantOrderListQuery = {},
+  ): Promise<OwnedOrderRecord[]> {
+    const params = new URLSearchParams();
+    if (query.from) {
+      params.set("from", query.from);
+    }
+    if (query.to) {
+      params.set("to", query.to);
+    }
+    if (query.serviceProduct) {
+      params.set("serviceProduct", query.serviceProduct);
+    }
+    if (query.status) {
+      params.set("status", query.status);
+    }
+    if (query.costCenterCode) {
+      params.set("costCenterCode", query.costCenterCode);
+    }
+    if (query.tenantServiceProgramId) {
+      params.set("tenantServiceProgramId", query.tenantServiceProgramId);
+    }
+    if (query.riderId) {
+      params.set("riderId", query.riderId);
+    }
+    if (query.sourcePlatform) {
+      params.set("sourcePlatform", query.sourcePlatform);
+    }
+    if (query.invoiceStatus) {
+      params.set("invoiceStatus", query.invoiceStatus);
+    }
+
+    return this.getList<OwnedOrderRecord>(
+      `/api/tenant/orders${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async getTenantOrder(orderId: string): Promise<OwnedOrderRecord> {
+    return this.get<OwnedOrderRecord>(
+      `/api/tenant/orders/${encodeURIComponent(orderId)}`,
+    );
+  }
+
+  async listTenantTrips(
+    query: TenantOrderListQuery = {},
+  ): Promise<OwnedOrderRecord[]> {
+    const params = new URLSearchParams();
+    if (query.from) {
+      params.set("from", query.from);
+    }
+    if (query.to) {
+      params.set("to", query.to);
+    }
+    if (query.serviceProduct) {
+      params.set("serviceProduct", query.serviceProduct);
+    }
+    if (query.status) {
+      params.set("status", query.status);
+    }
+    if (query.costCenterCode) {
+      params.set("costCenterCode", query.costCenterCode);
+    }
+    if (query.tenantServiceProgramId) {
+      params.set("tenantServiceProgramId", query.tenantServiceProgramId);
+    }
+    if (query.riderId) {
+      params.set("riderId", query.riderId);
+    }
+    if (query.sourcePlatform) {
+      params.set("sourcePlatform", query.sourcePlatform);
+    }
+    if (query.invoiceStatus) {
+      params.set("invoiceStatus", query.invoiceStatus);
+    }
+
+    return this.getList<OwnedOrderRecord>(
+      `/api/tenant/trips${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async listTenantServicePrograms(): Promise<TenantServiceProgramRecord[]> {
+    return this.getList<TenantServiceProgramRecord>(
+      "/api/tenant/service-programs",
+    );
+  }
+
+  async getTenantServiceProgram(
+    programId: string,
+  ): Promise<TenantServiceProgramRecord> {
+    return this.get<TenantServiceProgramRecord>(
+      `/api/tenant/service-programs/${encodeURIComponent(programId)}`,
     );
   }
 
@@ -1053,8 +1291,58 @@ export class ApiClient {
     return this.getList<TenantInvoiceRecord>("/api/tenant/invoices");
   }
 
+  async listInvoicesRuntime(): Promise<TenantInvoiceListData> {
+    return this.get<TenantInvoiceListData>("/api/tenant/invoices");
+  }
+
   async generateInvoice(command: GenerateTenantInvoiceCommand) {
     return this.post("/api/tenant/invoices/generate", { body: command });
+  }
+
+  async getTenantPayablesSummary(
+    periodMonth?: string,
+  ): Promise<TenantPayableSummary> {
+    const url = periodMonth
+      ? `/api/tenant/payables/summary?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "/api/tenant/payables/summary";
+    return this.get<TenantPayableSummary>(url);
+  }
+
+  async listTenantPayableLineItems(
+    query: Partial<TenantOrderListQuery> & { periodMonth?: string } = {},
+  ): Promise<TenantPayableLineItem[]> {
+    const params = new URLSearchParams();
+    if (query.periodMonth) {
+      params.set("periodMonth", query.periodMonth);
+    }
+    if (query.serviceProduct) {
+      params.set("serviceProduct", query.serviceProduct);
+    }
+    if (query.costCenterCode) {
+      params.set("costCenterCode", query.costCenterCode);
+    }
+    if (query.tenantServiceProgramId) {
+      params.set("tenantServiceProgramId", query.tenantServiceProgramId);
+    }
+    if (query.riderId) {
+      params.set("riderId", query.riderId);
+    }
+    if (query.invoiceStatus) {
+      params.set("invoiceStatus", query.invoiceStatus);
+    }
+
+    return this.getList<TenantPayableLineItem>(
+      `/api/tenant/payables/line-items${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async listTenantStatements(
+    periodMonth?: string,
+  ): Promise<DriverStatementRecord[]> {
+    const url = periodMonth
+      ? `/api/tenant/statements?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "/api/tenant/statements";
+    return this.getList<DriverStatementRecord>(url);
   }
 
   async listDriverStatements(
@@ -1084,6 +1372,74 @@ export class ApiClient {
 
   async generateDriverStatements(command: GenerateDriverStatementCommand) {
     return this.post("/api/driver-statements/generate", { body: command });
+  }
+
+  async listFleetPartnerStatements(
+    fleetPartnerId: string,
+    periodMonth?: string,
+  ): Promise<FleetPartnerStatementRecord[]> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.getList<FleetPartnerStatementRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/statements${query}`,
+    );
+  }
+
+  async listFleetPortalStatements(
+    periodMonth?: string,
+  ): Promise<FleetPartnerStatementRecord[]> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.getList<FleetPartnerStatementRecord>(
+      `/api/fleet-partner/statements${query}`,
+    );
+  }
+
+  async listFleetPortalDashboard(
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalDashboardRecord> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.get<FleetPartnerPortalDashboardRecord>(
+      `/api/fleet-partner/dashboard${query}`,
+    );
+  }
+
+  async listFleetPortalDrivers(): Promise<FleetPartnerPortalDriverRecord[]> {
+    return this.getList<FleetPartnerPortalDriverRecord>(
+      "/api/fleet-partner/drivers",
+    );
+  }
+
+  async listFleetPortalVehicles(): Promise<FleetPartnerPortalVehicleRecord[]> {
+    return this.getList<FleetPartnerPortalVehicleRecord>(
+      "/api/fleet-partner/vehicles",
+    );
+  }
+
+  async listFleetPortalTrips(
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalTripRecord[]> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.getList<FleetPartnerPortalTripRecord>(
+      `/api/fleet-partner/trips${query}`,
+    );
+  }
+
+  async getFleetPortalQualityMetrics(
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalQualityMetricsRecord> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.get<FleetPartnerPortalQualityMetricsRecord>(
+      `/api/fleet-partner/quality-metrics${query}`,
+    );
   }
 
   async listReimbursementBatches(filters?: {
@@ -1596,8 +1952,31 @@ export class ApiClient {
     });
   }
 
-  async deleteWebhookEndpoint(webhookId: string) {
-    return this.delete(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`);
+  async disableWebhookEndpoint(
+    webhookId: string,
+    command?: {
+      reason?: string;
+    },
+  ): Promise<TenantWebhookEndpoint> {
+    const body: UpdateTenantWebhookEndpointCommand = {
+      status: "disabled",
+      ...(command?.reason ? { disableReason: command.reason } : {}),
+    };
+    return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
+      body,
+    });
+  }
+
+  async deleteWebhookEndpoint(
+    webhookId: string,
+    command: DeleteTenantWebhookEndpointCommand,
+  ) {
+    return this.delete(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}`,
+      {
+        body: command,
+      },
+    );
   }
 
   async listWebhookDeliveries(
@@ -1605,6 +1984,15 @@ export class ApiClient {
   ): Promise<WebhookDeliveryRecord[]> {
     return this.getList<WebhookDeliveryRecord>(
       `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries`,
+    );
+  }
+
+  async retryWebhookDelivery(
+    webhookId: string,
+    deliveryId: string,
+  ): Promise<WebhookDeliveryRecord> {
+    return this.post<WebhookDeliveryRecord>(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries/${encodeURIComponent(deliveryId)}/retry`,
     );
   }
 
@@ -1628,8 +2016,18 @@ export class ApiClient {
     );
   }
 
-  async getNotificationPreferences() {
-    return this.get("/api/tenant/notifications");
+  async getTenantIntegrationReadiness(): Promise<TenantIntegrationReadinessSummary> {
+    return this.get<TenantIntegrationReadinessSummary>(
+      "/api/tenant/integration-governance/readiness",
+    );
+  }
+
+  async getTenantIntegrationReadinessSummary(): Promise<TenantIntegrationReadinessSummary> {
+    return this.getTenantIntegrationReadiness();
+  }
+
+  async getNotificationPreferences(): Promise<TenantNotificationPreferences> {
+    return this.get<TenantNotificationPreferences>("/api/tenant/notifications");
   }
 
   async updateNotifications(command: UpdateTenantNotificationsCommand) {
@@ -1640,12 +2038,24 @@ export class ApiClient {
     return this.get("/api/tenant/sla");
   }
 
+  async getSlaProfileView(): Promise<TenantSlaProfileView> {
+    return this.get<TenantSlaProfileView>("/api/tenant/sla/view");
+  }
+
   async updateSlaProfile(command: UpdateTenantSlaProfileCommand) {
     return this.post("/api/tenant/sla", { body: command });
   }
 
-  async listTenantUsers(): Promise<TenantUserRoleRecord[]> {
-    return this.getList<TenantUserRoleRecord>("/api/tenant/users");
+  async recalculateSlaBookings(command: RecalculateTenantSlaBookingsCommand) {
+    return this.post("/api/tenant/sla/recalculate", { body: command });
+  }
+
+  async listTenantUsers(): Promise<
+    TenantUsersListEnvelope | TenantUserRoleRecord[]
+  > {
+    return this.get<TenantUsersListEnvelope | TenantUserRoleRecord[]>(
+      "/api/tenant/users",
+    );
   }
 
   async listTenantRoles(): Promise<TenantRoleCatalogRecord[]> {
@@ -2103,6 +2513,99 @@ export class ApiClient {
     return this.getList<TenantInvoiceRecord>("/api/settlement/invoices");
   }
 
+  async listFleetPartners(): Promise<FleetPartnerRecord[]> {
+    return this.getList<FleetPartnerRecord>("/api/admin/fleet-partners");
+  }
+
+  async createFleetPartner(
+    command: CreateFleetPartnerCommand,
+  ): Promise<FleetPartnerRecord> {
+    return this.post<FleetPartnerRecord>("/api/admin/fleet-partners", {
+      body: command,
+    });
+  }
+
+  async getFleetPartner(fleetPartnerId: string): Promise<FleetPartnerRecord> {
+    return this.get<FleetPartnerRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}`,
+    );
+  }
+
+  async updateFleetPartner(
+    fleetPartnerId: string,
+    command: UpdateFleetPartnerCommand,
+  ): Promise<FleetPartnerRecord> {
+    return this.put<FleetPartnerRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}`,
+      { body: command },
+    );
+  }
+
+  async listFleetPartnerDrivers(
+    fleetPartnerId: string,
+  ): Promise<DriverFleetAffiliationRecord[]> {
+    return this.getList<DriverFleetAffiliationRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/drivers`,
+    );
+  }
+
+  async createDriverFleetAffiliation(
+    driverId: string,
+    command: CreateDriverFleetAffiliationCommand,
+  ): Promise<DriverFleetAffiliationRecord> {
+    return this.post<DriverFleetAffiliationRecord>(
+      `/api/admin/drivers/${encodeURIComponent(driverId)}/fleet-affiliations`,
+      { body: command },
+    );
+  }
+
+  async listFleetPartnerRevenueShareRules(
+    fleetPartnerId: string,
+  ): Promise<FleetPartnerRevenueShareRuleRecord[]> {
+    return this.getList<FleetPartnerRevenueShareRuleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/revenue-share-rules`,
+    );
+  }
+
+  async createFleetPartnerRevenueShareRule(
+    fleetPartnerId: string,
+    command: CreateFleetPartnerRevenueShareRuleCommand,
+  ): Promise<FleetPartnerRevenueShareRuleRecord> {
+    return this.post<FleetPartnerRevenueShareRuleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/revenue-share-rules`,
+      { body: command },
+    );
+  }
+
+  async getFleetPartnerRevenueShareRule(
+    fleetPartnerId: string,
+    ruleId: string,
+  ): Promise<FleetPartnerRevenueShareRuleRecord> {
+    return this.get<FleetPartnerRevenueShareRuleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/revenue-share-rules/${encodeURIComponent(ruleId)}`,
+    );
+  }
+
+  async updateFleetPartnerRevenueShareRule(
+    fleetPartnerId: string,
+    ruleId: string,
+    command: UpdateFleetPartnerRevenueShareRuleCommand,
+  ): Promise<FleetPartnerRevenueShareRuleRecord> {
+    return this.put<FleetPartnerRevenueShareRuleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/revenue-share-rules/${encodeURIComponent(ruleId)}`,
+      { body: command },
+    );
+  }
+
+  async deleteFleetPartnerRevenueShareRule(
+    fleetPartnerId: string,
+    ruleId: string,
+  ): Promise<void> {
+    await this.delete(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/revenue-share-rules/${encodeURIComponent(ruleId)}`,
+    );
+  }
+
   async listSettlementMatrix(): Promise<SettlementMatrixRecord[]> {
     return this.getList<SettlementMatrixRecord>("/api/settlement/matrix");
   }
@@ -2240,6 +2743,17 @@ export class ApiClient {
   async listContracts(): Promise<VehicleContractRecord[]> {
     return this.getList<VehicleContractRecord>(
       "/api/regulatory-registry/contracts",
+    );
+  }
+
+  async createContract(
+    command: CreateVehicleContractCommand,
+  ): Promise<VehicleContractRecord> {
+    return this.post<VehicleContractRecord>(
+      "/api/regulatory-registry/contracts",
+      {
+        body: command,
+      },
     );
   }
 
@@ -2580,6 +3094,21 @@ export function createTenantBearerClient(
   return createBearerClient(baseUrl, accessToken, {
     "x-tenant-id": tenantId,
     "x-realm": "tenant",
+  });
+}
+
+export function createFleetPartnerPortalClient(
+  baseUrl: string,
+  fleetPartnerId: string,
+  defaultHeaders?: Record<string, string>,
+): ApiClient {
+  return new ApiClient({
+    baseUrl,
+    defaultHeaders: {
+      "x-fleet-partner-id": fleetPartnerId,
+      "x-realm": "partner",
+      ...defaultHeaders,
+    },
   });
 }
 

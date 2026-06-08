@@ -7,18 +7,23 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type {
   AddReconciliationIssueCommentCommand,
   ApproveReimbursementBatchCommand,
   AssignReconciliationIssueCommand,
   CreateReconciliationIssueCommand,
+  DriverStatementRecord,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   MarkReimbursementPaidCommand,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
+  TenantOrderListQuery,
+  TenantPayableLineItem,
   PublishDriverFeePlanCommand,
+  TenantPayableSummary,
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
 
@@ -27,6 +32,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { BillingSettlementService } from "./billing-settlement.service";
 
 @Controller()
@@ -93,15 +99,57 @@ export class BillingSettlementController {
     );
   }
 
+  @Get("tenant/payables/summary")
+  async getTenantPayablesSummary(
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantPayableSummary =
+      await this.billingSettlementService.getTenantPayableSummary(
+        this.requireTenantId(tenantId),
+        periodMonth,
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/payables/line-items")
+  async listTenantPayableLineItems(
+    @Query() query: TenantOrderListQuery & { periodMonth?: string },
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantPayableLineItem[] =
+      await this.billingSettlementService.listTenantPayableLineItems(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/statements")
+  async listTenantStatements(
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: DriverStatementRecord[] =
+      await this.billingSettlementService.listTenantStatements(
+        this.requireTenantId(tenantId),
+        periodMonth,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
   @Get("tenant/invoices")
   listTenantInvoices(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.billingSettlementService.listTenantInvoices(
+    const data = this.billingSettlementService.listTenantInvoicesRuntime(
       this.requireTenantId(tenantId),
     );
-    return toApiSuccessEnvelope(toApiListData(items), requestId);
+    return toApiSuccessEnvelope(data, requestId);
   }
 
   @Get("tenant/invoices/:invoiceId")
@@ -131,7 +179,10 @@ export class BillingSettlementController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  // Read consumed on every Platform Admin pricing page load; READ_HEAVY
+  // (180/min, no block) instead of the global default 60/min + 5-min block.
   @Get("driver-fee-plans")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listDriverFeePlans(@Headers("x-request-id") requestId?: string) {
     const items = this.billingSettlementService.listDriverFeePlans();
     return toApiSuccessEnvelope(toApiListData(items), requestId);

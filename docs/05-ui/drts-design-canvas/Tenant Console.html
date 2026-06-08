@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Tenant Console · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#0F2A28"/>
+  <rect x="14" y="22" width="72" height="56" rx="6" fill="#FFFFFF" stroke="#0F766E" stroke-width="2"/>
+  <rect x="20" y="30" width="14" height="40" rx="2" fill="#F0FDFA"/>
+  <rect x="40" y="32" width="38" height="3" rx="1.5" fill="#0F766E"/>
+  <rect x="40" y="40" width="22" height="2.5" rx="1" fill="#5EEAD4"/>
+  <rect x="40" y="48" width="38" height="20" rx="2" fill="#F0FDFA"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="mgmt-primitives.jsx"></script>
+<script type="text/babel" src="mgmt-shell.jsx"></script>
+<script type="text/babel" src="mgmt-auth.jsx"></script>
+<script type="text/babel" src="mgmt-data.jsx"></script>
+<script type="text/babel" src="tenant-screens-1.jsx"></script>
+<script type="text/babel" src="tenant-screens-2.jsx"></script>
+<script type="text/babel" src="tenant-screens-3.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "density": "compact"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const th = buildMgmtTheme({ console: 'tenant', dark: tw.dark, density: tw.density });
+  const W = 1440, H = 900;
+  const Frame = ({ children, chrome, url }) => chrome
+    ? <MacWindow title="Tenant Console · DRTS" url={'https://yamato.drts.io' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
+    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
+  const Bare = ({ children }) => <Frame>{children}</Frame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Tenant Console" subtitle="租戶自助 · YAMATO 範例 · 20 routes · packet TEN-DH-PKT-002 (2026-05-25)" accent="#0F766E">
+        <DCSection id="workspace" title="01 · Workspace">
+          <DCArtboard id="home" label="工作面 / Home" width={W} height={H}><Hero url="/"><TN_Home theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="booking" title="02 · 預約流程" subtitle="Q-TEN04 同步 command · Q-TEN05 editability from availableActions">
+          <DCArtboard id="bookings" label="訂單清單" width={W} height={H}><Hero url="/bookings"><TN_Bookings theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="bk-completed" label="訂單詳情 · completed (read-only)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="completed" /></Bare></DCArtboard>
+          <DCArtboard id="bk-reserve" label="訂單詳情 · 可編輯 (editableUntil 內)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="reserve" /></Bare></DCArtboard>
+          <DCArtboard id="bk-pending" label="訂單詳情 · accepted_pending (Q-TEN04)" width={W} height={H}><Bare><TN_BookingDetail theme={th} state="accepted_pending" /></Bare></DCArtboard>
+          <DCArtboard id="newbooking" label="建立訂單 · 同步 command" width={W} height={H}><Bare><TN_NewBooking theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="directory" title="03 · 通訊錄與規則 · 軟停用 (Q-TEN06)">
+          <DCArtboard id="passengers" label="乘客通訊錄" width={W} height={H}><Bare><TN_Passengers theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="addresses" label="地址簿 · NEW Q-TEN02" width={W} height={H}><Bare><TN_Addresses theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="cc" label="成本中心 · Q-TEN11" width={W} height={H}><Bare><TN_CostCenters theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="rules" label="審批規則 · Q-TEN12" width={W} height={H}><Bare><TN_Rules theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="access" title="04 · 帳號與權限">
+          <DCArtboard id="users" label="使用者 · tc_admin only" width={W} height={H}><Bare><TN_Users theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="integration" title="05 · 整合 · Q-TEN08/09/10">
+          <DCArtboard id="apikeys" label="API 金鑰" width={W} height={H}><Hero url="/api-keys"><TN_ApiKeys theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="apikeys-secret" label="✨ 發 API key · plaintext-once modal (Q-TEN09)" width={W} height={H}><Bare><TN_ApiKeys theme={th} showSecret /></Bare></DCArtboard>
+          <DCArtboard id="webhooks-active" label="Webhook · engine active (real)" width={W} height={H}><Bare><TN_Webhooks theme={th} engineActive /></Bare></DCArtboard>
+          <DCArtboard id="webhooks-empty" label="Webhook · not_provisioned (Q-TEN08)" width={W} height={H}><Bare><TN_Webhooks theme={th} engineActive={false} /></Bare></DCArtboard>
+          <DCArtboard id="notifs" label="通知偏好 · NEW Q-TEN02" width={W} height={H}><Bare><TN_Notifications theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="integration" label="整合就緒度 · aggregated (Q-TEN10)" width={W} height={H}><Hero url="/integration-governance"><TN_Integration theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="sla" label="SLA · 分鐘 (Q-TEN07)" width={W} height={H}><Bare><TN_SLA theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="finance" title="06 · 財務">
+          <DCArtboard id="billing" label="帳務概覽" width={W} height={H}><Bare><TN_Billing theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="invoices" label="發票" width={W} height={H}><Bare><TN_Invoices theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="audit" title="07 · 報表與稽核 · cross-actor (Q-TEN13)">
+          <DCArtboard id="reports" label="報表 · NEW Q-TEN02" width={W} height={H}><Bare><TN_Reports theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="audit" label="稽核 · cross-actor visibility" width={W} height={H}><Hero url="/audit"><TN_Audit theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="system" title="08 · 系統">
+          <DCArtboard id="flags" label="功能旗標 · read-only (Q-X16)" width={W} height={H}><Bare><TN_Flags theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="settings" label="設定" width={W} height={H}><Bare><TN_Settings theme={th} /></Bare></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfy' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

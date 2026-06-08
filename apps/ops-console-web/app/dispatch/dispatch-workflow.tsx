@@ -21,14 +21,15 @@ import type {
   OwnedOrderRecord,
 } from "@drts/contracts";
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
+import { useOpsAssistantContextActions } from "@/components/ops-assistant";
+import { CanvasActivityFeed, CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
   AuthorityBadge,
   DetailMetadataGrid,
-  Timeline,
-  WorkflowEmptyState,
+  buildCanvasTheme,
   WorkflowPanel,
   WorkflowSplitLayout,
 } from "@drts/ui-web";
@@ -91,12 +92,12 @@ interface ActionDraft {
   rejectionReason: string;
 }
 
-interface DispatchTimelineEntry {
+interface DispatchActivityEntry {
   id: string;
   title: string;
   body: string;
   at: string;
-  tone: "default" | "warning" | "critical";
+  tone: "default" | "warn" | "critical";
 }
 
 const AUTO_LOAD_CANDIDATE_LIMIT = 6;
@@ -116,6 +117,12 @@ const TERMINAL_ORDER_STATUSES = new Set<OwnedOrderRecord["status"]>([
   "completed",
   "cancelled",
 ]);
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
 
 function buildDispatchTraceSyncKey(
   order: OwnedOrderRecord | null,
@@ -413,7 +420,7 @@ function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
   );
 }
 
-function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
+function getActivityTone(eventType: string): DispatchActivityEntry["tone"] {
   if (
     eventType.includes("hold") ||
     eventType.includes("blocked") ||
@@ -427,29 +434,29 @@ function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
     eventType.includes("timeout") ||
     eventType.includes("no_supply")
   ) {
-    return "warning";
+    return "warn";
   }
   return "default";
 }
 
-function getTimelineManagementTone(
-  tone: DispatchTimelineEntry["tone"],
-): "info" | "warning" | "danger" {
+function getActivityCanvasTone(
+  tone: DispatchActivityEntry["tone"],
+): "info" | "warn" | "danger" {
   switch (tone) {
     case "critical":
       return "danger";
-    case "warning":
-      return "warning";
+    case "warn":
+      return "warn";
     default:
       return "info";
   }
 }
 
-function buildFallbackTimelineEntries(
+function buildFallbackActivityEntries(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
-): DispatchTimelineEntry[] {
-  const entries: DispatchTimelineEntry[] = [
+): DispatchActivityEntry[] {
+  const entries: DispatchActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
       title: "Order created",
@@ -465,7 +472,7 @@ function buildFallbackTimelineEntries(
       title: "Dispatch job active",
       body: `Job ${job.dispatchJobId} is ${job.status}.`,
       at: job.updatedAt,
-      tone: getTimelineTone(job.status),
+      tone: getActivityTone(job.status),
     });
   }
 
@@ -475,7 +482,7 @@ function buildFallbackTimelineEntries(
       title: "Dispatch timeout",
       body: `Timeout escalated as ${order.dispatchTimeout.escalationAction}.`,
       at: order.dispatchTimeout.timeoutAt,
-      tone: "warning",
+      tone: "warn",
     });
   }
 
@@ -485,7 +492,7 @@ function buildFallbackTimelineEntries(
       title: "No supply escalation",
       body: `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
       at: order.noSupplyEscalation.escalatedAt,
-      tone: "warning",
+      tone: "warn",
     });
   }
 
@@ -503,7 +510,7 @@ function buildFallbackTimelineEntries(
         title: "Override request",
         body: `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
         at: order.exceptionHold.overrideRequest.requestedAt,
-        tone: "warning",
+        tone: "warn",
       });
     }
     if (order.exceptionHold.resolution) {
@@ -523,7 +530,7 @@ function buildFallbackTimelineEntries(
       title: "Manual fare override",
       body: `${order.manualFareOverride.actorId} applied a fare override.`,
       at: order.manualFareOverride.overriddenAt,
-      tone: "warning",
+      tone: "warn",
     });
   }
 
@@ -606,6 +613,12 @@ export function DispatchWorkflow({
   focusOrderId = "",
 }: DispatchWorkflowProps) {
   const { t, locale } = useTranslation();
+  const {
+    setAssistantSelection,
+    clearAssistantSelection,
+    setAssistantScope,
+    clearAssistantScope,
+  } = useOpsAssistantContextActions();
   const client = getOpsClient();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -646,6 +659,25 @@ export function DispatchWorkflow({
   const reloadTimerRef = useRef<number | null>(null);
   const autoLoadedCandidateJobsRef = useRef<Set<string>>(new Set());
   const lastSyncedFocusOrderIdRef = useRef<string>("");
+
+  // Publish the focused order + active board/filter to the assistant Context
+  // Envelope (§5) so "this order" deixis and board-scoped answers resolve.
+  useEffect(() => {
+    if (selectedOrderId) {
+      setAssistantSelection({ kind: "order", id: selectedOrderId });
+    } else {
+      clearAssistantSelection();
+    }
+    return () => clearAssistantSelection();
+  }, [selectedOrderId, setAssistantSelection, clearAssistantSelection]);
+
+  useEffect(() => {
+    setAssistantScope({
+      board: "dispatch",
+      visibleFilters: { filter: filterMode },
+    });
+    return () => clearAssistantScope();
+  }, [filterMode, setAssistantScope, clearAssistantScope]);
 
   useEffect(() => {
     setLiveOrders(orders);
@@ -1409,30 +1441,30 @@ export function DispatchWorkflow({
       ? `${formatDateTime(locale, selectedOrder.reservationWindowStart)} - ${formatDateTime(locale, selectedOrder.reservationWindowEnd)}`
       : t("dispatch.workflow.detail.immediateQueue")
     : "-";
-  const selectedTimelineEntries = selectedOrder
+  const selectedActivityEntries = selectedOrder
     ? selectedDispatchTrace.length > 0
       ? selectedDispatchTrace
           .map(
-            (trace): DispatchTimelineEntry => ({
+            (trace): DispatchActivityEntry => ({
               id: trace.traceId,
               title: formatOpsCodeLabel(locale, trace.eventType),
               body: trace.message,
               at: trace.createdAt,
-              tone: getTimelineTone(trace.eventType),
+              tone: getActivityTone(trace.eventType),
             }),
           )
           .sort(
             (left, right) =>
               new Date(right.at).getTime() - new Date(left.at).getTime(),
           )
-      : buildFallbackTimelineEntries(selectedOrder, selectedJob)
+      : buildFallbackActivityEntries(selectedOrder, selectedJob)
     : [];
-  const selectedTimelineItems = selectedTimelineEntries.map((entry) => ({
+  const selectedActivityItems = selectedActivityEntries.map((entry) => ({
     id: entry.id,
     title: entry.title,
     detail: entry.body,
     timestamp: formatDateTime(locale, entry.at),
-    tone: getTimelineManagementTone(entry.tone),
+    tone: getActivityCanvasTone(entry.tone),
   }));
 
   const renderActionDraftForm = (
@@ -2580,16 +2612,16 @@ export function DispatchWorkflow({
                     items={[
                       {
                         id: "timeline-events",
-                        label: t("dispatch.workflow.detail.timelineEvents"),
-                        value: selectedTimelineEntries.length,
+                        label: t("dispatch.workflow.detail.activityEvents"),
+                        value: selectedActivityEntries.length,
                       },
                       {
                         id: "timeline-latest",
                         label: t("dispatch.workflow.detail.timelineLatest"),
-                        value: selectedTimelineEntries[0]
+                        value: selectedActivityEntries[0]
                           ? formatDateTime(
                               locale,
-                              selectedTimelineEntries[0].at,
+                              selectedActivityEntries[0].at,
                             )
                           : "-",
                       },
@@ -2598,8 +2630,9 @@ export function DispatchWorkflow({
                   {traceLoadingOrderId === selectedOrder.orderId ? (
                     <div className="cell-subcopy">{t("common.loading")}</div>
                   ) : (
-                    <Timeline
-                      items={selectedTimelineItems}
+                    <CanvasActivityFeed
+                      theme={theme}
+                      items={selectedActivityItems}
                       emptyState={t("dispatch.workflow.detail.timelineEmpty")}
                     />
                   )}
@@ -2706,7 +2739,8 @@ export function DispatchWorkflow({
             }
           />
         ) : (
-          <WorkflowEmptyState
+          <CanvasEmptyPanel
+            theme={theme}
             title={t("dispatch.workflow.detail.emptyTitle")}
             description={t("dispatch.workflow.detail.emptyBody")}
           />

@@ -98,6 +98,21 @@ class ProviderPermissionsTest(unittest.TestCase):
 
         self.assertEqual(permission_broker.classify_command(command), "allow")
 
+    def test_canonical_root_pnpm_install_requires_review(self) -> None:
+        command = "pnpm install --frozen-lockfile"
+
+        self.assertEqual(permission_broker.classify_command(command), "defer")
+
+    def test_canonical_root_pnpm_install_via_cd_requires_review(self) -> None:
+        command = f"cd {ROOT} && pnpm install --frozen-lockfile"
+
+        self.assertEqual(permission_broker.classify_command(command), "defer")
+
+    def test_worktree_pnpm_install_remains_allowed(self) -> None:
+        command = f"cd {ROOT / '.artifacts' / 'worktrees' / 'auto' / 'demo'} && pnpm install --frozen-lockfile"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
     def test_pnpm_add_test_dependencies_and_verify_is_auto_allowed(self) -> None:
         command = "pnpm add -D vitest @testing-library/react 2>&1 | tail -20 && pnpm exec vitest --version"
 

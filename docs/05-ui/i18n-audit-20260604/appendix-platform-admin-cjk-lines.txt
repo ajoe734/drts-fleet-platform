@@ -1,0 +1,872 @@
+===== platform-admin-web/app/adapter-registry/components/AdapterList.tsx =====
+149:            "以共享 data-view primitive 呈現 adapter readiness、rollout posture 與財務 authority 歸屬。",
+151:            "這裡的 compact table、filter pills、status chips、owned/forwarded authority badges 都直接走 ui-web 共用層。",
+152:          showing: "目前顯示",
+156:          health: "健康",
+157:          enabled: "啟用",
+161:          all: "全部",
+162:          forwarded: "轉派",
+163:          enabledFilter: "已啟用",
+164:          attention: "需關注",
+165:          actions: "操作",
+===== platform-admin-web/app/adapter-registry/page.tsx =====
+437:              "config / credential 治理在 platform-admin，operational pause / retry 在 ops（Q-ADM17 split authority）。",
+438:            registerAction: "註冊 adapter",
+440:              "註冊 adapter 仍屬高風險治理流程，這個 route 不直接展開 inline 建立。",
+441:            loading: "載入 adapter registry 中...",
+443:              "目前尚未註冊任何 adapter。請先建立第一筆受治理的 adapter 登錄。",
+445:              "Adapter registry 資料暫時不可用，請檢查 Platform Admin adapter API 後再重新整理。",
+446:            bannerFallbackTitle: "mof-bgmt · token 距到期 6 天",
+448:              "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
+450:              `${adapter.platformCode.toLowerCase()} · token 距到期治理檢查`,
+452:              `${adapter.name} 目前 credential 為 ${formatPlatformCodeLabel(locale, adapter.credentialStatus)}，健康狀態為 ${adapter.healthStatus.status.toLowerCase()}。請在 production 受影響前完成 token 治理檢查與輪替。`,
+453:            rotateNow: "立即輪替",
+469:            noPause: "未暫停",
+470:            pauseUnknown: "adapter API 尚未回報 pause 狀態。",
+474:              "建立 config、編輯 credential、輪替 secret、啟停 adapter 仍屬這裡的治理權限。",
+476:              "operational pause TTL 與 failed callback retry 仍屬 ops console，刻意與 Platform Admin 分權。",
+477:            editConfig: "編輯 config",
+478:            editCredential: "編輯 credential",
+479:            rotateCredential: "輪替",
+480:            enableAdapter: "啟用",
+481:            disableAdapter: "停用",
+485:              `${adapter.name} 的「${label}」仍需走 Platform Admin 治理流程。${reason ? ` 已記錄原因：${reason}。` : ""} plaintext-once secret 不會在這裡再次顯示。`,
+487:              `${adapter.name} 的「${label}」仍屬 ops authority，請在 ops console 執行。`,
+489:              `${copyAuditPrefix("稽核收據")}${adapter.name} 已${enabled ? "啟用" : "停用"}。${reason ? ` 原因：${reason}。` : ""}`,
+490:            toggleError: "更新 adapter 狀態失敗。",
+492:              "這個 adapter 沒有回報 ops pause 或 retry 能力。",
+493:            webhookNotConfigured: "未設定",
+495:            reasonRequired: "停用 production adapter 前必須填寫原因。",
+497:              `確認要停用 ${adapter.name} 嗎？這會影響受治理的 adapter readiness。`,
+498:            enableConfirm: (adapter) => `確認要啟用 ${adapter.name} 嗎？`,
+500:              `請輸入停用 ${adapter.name} 的治理原因。`,
+501:            auditReceiptPrefix: "稽核收據",
+502:            notConfigured: "未設定",
+===== platform-admin-web/app/audit/page.tsx =====
+313:            "append-only · legal hold + deletion exception 透過 badge 顯示 (Q-ADM16)",
+314:          refresh: "重新整理 (T6 手動)",
+315:          refreshing: "重新整理中…",
+316:          exportCsv: "匯出 csv",
+321:          all: "全部",
+322:          showing: "顯示",
+325:          expires: "到期",
+326:          case: "案號",
+327:          owner: "負責人",
+328:          reason: "原因",
+329:          loading: "載入稽核紀錄中…",
+330:          emptyLog: "沒有符合目前篩選的稽核紀錄。",
+331:          emptyPolicy: "尚未設定保留政策。",
+332:          emptyHold: "目前沒有作用中的法定保留。",
+333:          emptyExcept: "目前沒有作用中的刪除例外。",
+359:          holdSupported: "支援法定保留",
+===== platform-admin-web/app/feature-flags/page.tsx =====
+558:      label: locale === "en" ? "All" : "全部",
+563:      label: locale === "en" ? "Mid-rollout" : "進行中 rollout",
+568:      label: locale === "en" ? "Rolled out" : "已全面 rollout",
+691:            "只有這裡可寫入。ops、tenant、driver 其他頁面維持 GET feature flag 唯讀檢視。",
+694:          refreshing: "重新整理中...",
+695:          addOverride: "新增 tenant override",
+696:          addOverrideHint: "先切到 tenant 範圍，才能建立 override。",
+697:          riskTitle: "高風險操作必須填寫原因。",
+699:            "toggle 與 tenant override 都維持在這條 write lane，確認後會留下本地 audit receipt。",
+700:          scopeField: "檢視範圍",
+701:          searchField: "搜尋 key",
+702:          searchPlaceholder: "依 flag key 搜尋",
+704:            "切到 tenant 可檢視該 tenant 的有效 override 列；預設仍以平台資料為主。",
+705:          scopeDefault: "平台預設",
+706:          scopeLoading: "載入 tenant 清單中...",
+709:            : "平台預設",
+710:          summaryPlatformDefault: "平台預設",
+714:            "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS 的 table-first 主體。",
+715:          filterLabel: "Rollout 狀態",
+717:          rolloutMid: "進行中 rollout",
+718:          rolloutFull: "已全面 rollout",
+726:          noDescription: "尚未提供描述",
+727:          updatedByValue: "目前 contract 未提供",
+728:          toggle: "切換",
+729:          removeOverride: "移除 override",
+730:          history: "歷史",
+731:          confirmToggleTitle: "確認切換 feature flag",
+732:          confirmToggleBody: "這會變更目前檢視範圍中的有效 feature flag 狀態。",
+733:          confirmOverrideTitle: "建立 tenant override",
+735:            "這會為所選 key 建立 tenant 專屬 override，不影響其他範圍。",
+736:          confirmRemoveOverrideTitle: "移除 tenant override",
+738:            "這會移除 tenant 專屬 override，讓該 tenant 回到平台預設。",
+739:          reasonLabel: "高風險原因",
+741:            "說明 rollout 原因、預期 blast radius 與驗證計畫。",
+742:          reasonRequired: "執行這個高風險操作前必須填寫原因。",
+745:          overrideStateField: "Override 狀態",
+746:          overrideDescriptionField: "Override 描述",
+747:          overrideDescriptionHint: "可留白，沿用既有 flag 描述。",
+752:          confirmEnable: "啟用",
+753:          confirmDisable: "停用",
+754:          confirmCreate: "建立 override",
+755:          confirmRemove: "移除 override",
+758:          scopeMeta: "目前 scope",
+759:          resultMeta: `可見 ${filteredRows.length} 列`,
+760:          enabledMeta: `啟用 ${enabledCount} 列`,
+761:          disabledMeta: `停用 ${disabledCount} 列`,
+762:          overrideMeta: `tenant override ${overrideCount} 列`,
+763:          notesTitle: "延伸備註",
+764:          notesEmpty: "目前範圍沒有額外 contract 備註。",
+765:          historyTitle: "本地 audit receipts",
+766:          historyEmpty: "這個瀏覽 session 尚未記錄任何 receipt。",
+767:          historyHint: "可用 History 列操作聚焦特定 key 的 receipt。",
+768:          historyFocusAll: "目前顯示此瀏覽 session 的所有 receipts。",
+769:          historyFocusKey: `目前聚焦 ${historyKey ?? "全部 key"}`,
+770:          secondaryPanelTitle: "變更控制與延伸細節",
+772:            "高風險原因、延伸備註與本地歷史都收在表格主體下方的次要區塊。",
+773:          actionComposerTitle: "待確認的高風險變更",
+774:          actionComposerIdle: "toggle 與 override 變更都必須先填寫原因再確認。",
+775:          actionApplied: "已記錄 audit receipt",
+777:            "目前 rollout 篩選與搜尋條件沒有符合的 feature flags。",
+778:          laneMeta: "僅此處可寫入",
+779:          notesMeta: "延伸備註收在預設主體之外。",
+780:          receiptsMeta: `本地 receipt ${auditReceipts.length} 筆`,
+781:          showAllReceipts: "顯示全部 receipts",
+===== platform-admin-web/app/fleet/page.tsx =====
+248:    return locale === "en" ? "Refreshing..." : "更新中...";
+254:        : `快照時間 ${formatDateTime(refreshMetadata.generatedAt)}`;
+259:          : "即時"
+267:    return locale === "en" ? "Awaiting first snapshot" : "等待首個快照";
+271:    : `快照時間 ${formatDateTime(lastFetchedAt)}`;
+293:    refresh_tab: "重新整理",
+294:    create_driver: "新增司機",
+295:    create_contract: "建立合約",
+296:    update_vehicle_compliance: "更新合規",
+297:    open_ops_vehicle: "ops 操作面",
+298:    activate_driver: "啟用",
+299:    suspend_driver: "暫停",
+300:    retire_driver: "退役",
+301:    revoke_device_binding: "撤銷綁定",
+302:    approve_exclusivity: "核准",
+303:    reject_exclusivity: "退回",
+304:    initiate_offboarding: "啟動 offboarding",
+305:    advance_offboarding_step: "推進",
+306:    complete_debranding: "完成除標識",
+307:    open_ops_driver: "ops 操作面",
+417:        title: "治理資料線尚未 provision",
+418:        description: "sitemap 已保留此 tab，但背後資料線目前尚未配置完成。",
+423:        title: "此 tab 載入失敗",
+424:        description: "讀取失敗，請重新整理或先檢查上游依賴。",
+429:        title: "目前身分沒有權限",
+430:        description: "可看頁殼，但沒有這個 tab 的資料讀取權限。",
+435:        title: "外部依賴暫時不可用",
+436:        description: "這個 tab 依賴 companion service 或外部系統，目前不可用。",
+441:        title: "目前焦點下沒有符合資料",
+442:        description: "底層資料存在，但目前 tab 或篩選條件將結果收斂成 0 筆。",
+448:        title: "目前尚無資料",
+449:        description: "治理工作面已就緒，但此刻還沒有需要處理的列。",
+484:    initiated: "已啟動",
+485:    dispatch_disabled: "已停用派遣",
+486:    debranding_pending: "等待除標識",
+487:    debranding_verified: "除標識已驗證",
+488:    completed: "已完成",
+489:    none: "未開始",
+657:            : `確認執行「${actionLabel(locale, descriptor.action)}」？`,
+665:          locale === "en" ? "Reason is required." : "此操作必須填寫原因。",
+696:              locale === "en" ? "Driver name" : "司機姓名",
+713:              locale === "en" ? "Vehicle ID" : "車輛編號",
+720:              locale === "en" ? "Partner ID" : "合作方編號",
+847:                : "此操作尚未接到 mutation endpoint。",
+1007:            {locale === "en" ? "Read-only" : "唯讀"}
+1036:                  : "目前不可用";
+1052:                      : "處理中..."
+1067:        h: locale === "en" ? "Plate" : "車牌",
+1079:        h: locale === "en" ? "Coverage" : "營運範圍",
+1089:        h: locale === "en" ? "Compliance" : "合規",
+1108:                  : "排他已核准"
+1111:                  : "排他待審"}
+1117:        h: locale === "en" ? "Dispatchable" : "派遣資格",
+1129:                  : "可派遣"
+1132:                  : "已阻擋"}
+1140:                : "目前沒有阻擋原因",
+1145:        h: locale === "en" ? "Actions" : "操作",
+1163:        h: locale === "en" ? "Driver" : "司機",
+1173:        h: locale === "en" ? "License" : "執照",
+1184:                : "有效"
+1187:                : "需處理"}
+1192:        h: locale === "en" ? "Dispatch readiness" : "派遣狀態",
+1210:                : "可派遣",
+1214:        h: locale === "en" ? "Binding" : "裝置綁定",
+1225:                : "目前沒有裝置",
+1230:        h: locale === "en" ? "Actions" : "操作",
+1264:        h: locale === "en" ? "Contract" : "合約",
+1270:        h: locale === "en" ? "Counterparty" : "合作方",
+1276:        h: locale === "en" ? "Vehicle" : "車輛",
+1282:        h: locale === "en" ? "Term" : "有效期間",
+1291:        h: locale === "en" ? "Actions" : "操作",
+1306:        h: locale === "en" ? "Driver" : "司機",
+1316:        h: locale === "en" ? "Device" : "裝置",
+1326:        h: locale === "en" ? "State" : "狀態",
+1339:        h: locale === "en" ? "Last seen" : "最後更新",
+1344:        h: locale === "en" ? "Actions" : "操作",
+1368:        h: locale === "en" ? "Review" : "審核",
+1378:        h: locale === "en" ? "Provider" : "排他對象",
+1388:        h: locale === "en" ? "State" : "狀態",
+1409:        h: locale === "en" ? "Actions" : "操作",
+1439:        h: locale === "en" ? "Vehicle" : "車輛",
+1445:        h: locale === "en" ? "Current state" : "目前狀態",
+1467:        h: locale === "en" ? "Evidence" : "證據 / 工單",
+1477:        h: locale === "en" ? "Timeline" : "時間點",
+1489:        h: locale === "en" ? "Actions" : "操作",
+1612:          locale === "en" ? "Fleet & compliance governance" : "車隊與合規治理"
+1630:                    : "符合 canvas 的篩選面保留到下一輪整合。",
+1634:              {locale === "en" ? "Filter" : "篩選"}
+1643:              {locale === "en" ? "Refresh" : "重新整理"}
+1656:              locale === "en" ? "Fleet data refresh failed" : "車隊資料更新失敗"
+1661:                {locale === "en" ? "Retry" : "重試"}
+1681:                : "目前快照不是最新狀態"
+1695:                : `${blockedDrivers.length} 位司機需要合規處理`
+1700:                : "在阻擋原因解除前，ops 端仍持續套用 dispatch.compliance.license_warn_30d。"
+1704:                {locale === "en" ? "Export list" : "匯出名單"}
+1719:                : "vehicle / driver 的 dispatchable 不可能在 exclusivity 通過前變為 true。"
+1731:                : "每一步轉換需 timestamp · actor · evidence · audit"
+1822:                  {locale === "en" ? "Refresh tab" : "重新整理"}
+===== platform-admin-web/app/health/page.tsx =====
+251:    return locale === "en" ? `${value} min` : `${value} 分鐘`;
+272:  return locale === "en" ? title : `${title} 通道`;
+282:      return "正常";
+284:      return "降級";
+286:      return "中斷";
+288:      return "未知";
+290:      return "啟用";
+292:      return "即將到期";
+294:      return "缺失";
+310:      zh: "派遣延遲超過門檻",
+314:      zh: "錄音回補佇列待處理",
+318:      zh: "司機狀態更新延遲",
+322:      zh: "Webhook 失敗量異常",
+326:      zh: "資格審核佇列升高",
+330:      zh: "Adapter 健康降級",
+347:      return route === "platform" ? "平台" : "維運";
+421:            "平台層告警 · dispatch lag · webhook queue · adapter health",
+423:          alertsTitle: "Active alerts · 跨模組告警總覽",
+472:            "平台層告警 · dispatch lag · webhook queue · adapter health",
+473:          refresh: "重整",
+474:          alertsTitle: "Active alerts · 跨模組告警總覽",
+475:          alertsEmpty: "目前沒有有效告警，平台指標都在門檻內。",
+477:          adaptersEmpty: "目前沒有 adapter 健康紀錄。",
+482:            "目前 dispatch lag、queue depth 與 redispatch 指標都在門檻內。",
+483:          webhookEmpty: "Webhook 投遞與重試都在門檻內，暫時不需人工介入。",
+484:          filingEmpty: "申報、報表與 eligibility backlog 目前都在門檻內。",
+485:          loadingAlerts: "正在載入健康訊號...",
+486:          loadingAdapters: "正在載入 adapter inventory...",
+487:          openAlert: "查看",
+489:            "Latency 與 24h volume 會在 adapter telemetry API 暴露後補齊。",
+493:              sub: (count: number) => `${count} 筆延遲訂單`,
+497:              sub: (count: number) => `近 1 小時失敗 ${count} 筆`,
+501:              sub: (count: number) => `${count} 筆人工審核`,
+505:              sub: (count: number) => `${count} 筆工作仍在佇列`,
+800:                : "無法更新平台健康資料"
+913:                                : `目前 ${measured} · critical 門檻 ${threshold}`}
+1020:          title={`${copy.adaptersTitle} · ${adapterRows.length} ${locale === "en" ? "entries" : "筆"}`}
+===== platform-admin-web/app/notices/page.tsx =====
+198:    return locale === "en" ? "Not scheduled" : "未排定";
+294:            "critical / maintenance severity 會推 cross-app banner 到 ops / tenant / driver (Q-ADM15)。",
+298:          createNotice: "建立公告",
+299:          enterMaintenance: "進入維護",
+300:          refresh: "重新整理",
+301:          refreshing: "重新整理中",
+302:          emptyNotices: "目前沒有平台公告。",
+303:          emptyHistory: "目前沒有跨應用廣播紀錄。",
+304:          noticeComposerTitle: "建立公告",
+306:            "發佈給平台營運、租戶或司機端的 cross-app banner。",
+307:          noticeTitle: "標題",
+308:          noticeBody: "內容",
+309:          noticeAudience: "對象",
+311:          publishNotice: "發佈公告",
+312:          publishing: "發佈中",
+313:          activeNoticeGuardrailTitle: "進入維護前應先發 maintenance notice",
+315:            "先發佈 maintenance severity notice，再啟用全平台 maintenance mode。",
+316:          currentMaintenance: "Maintenance mode · 目前狀態",
+317:          currentMaintenanceSubtitle: "全平台 dispatch 與入站流量控管。",
+318:          internalReason: "原因 · 內部紀錄",
+319:          scheduledStart: "預定起始",
+320:          scheduledEnd: "預定結束",
+321:          saveMaintenance: "保存維護設定",
+322:          previewTitle: "當前 maintenance notice (preview)",
+323:          previewFallback: "啟用維護模式後，將推送跨應用中斷公告。",
+324:          previewTargets: "目標對象：ops · tenant · driver",
+325:          reasonRequired: "高風險 maintenance 動作必須填寫原因後才能保存。",
+326:          confirmTitle: "確認更新 maintenance mode",
+328:            "這是高風險動作。保存後會改變全平台 dispatch 與 webhook 行為。",
+329:          confirmReasonLabel: "稽核原因",
+330:          confirmCancel: "取消",
+331:          confirmApply: "套用維護更新",
+332:          resolving: "處理中",
+337:            "啟用後將停止 dispatch、webhook 投遞與 partner 入站。",
+339:            "例如：計畫性維護、partner outage mitigation、compliance hold",
+342:          createdAt: "更新",
+343:          audience: "對象",
+1099:            subtitle="Broadcast history · 跨 app 投遞結果"
+===== platform-admin-web/app/page.tsx =====
+313:          title: "平台治理工作首頁",
+315:            `DRTS 平台控制平面 · 您今日有 ${count} 件需治理事項`,
+316:          openAll: "展開所有",
+317:          openAudit: "前往稽核",
+318:          loading: "載入治理快照中...",
+319:          noSnapshot: "目前沒有可用的治理快照。",
+320:          loadErrorTitle: "無法載入治理快照",
+321:          quickLinksTitle: "模組捷徑",
+322:          todayTitle: "今日治理待辦",
+323:          todaySubtitle: "跨模組需要平台治理人介入",
+324:          recentTitle: "近期高敏感操作 · 平台層審計足跡 (24h)",
+325:          kpiTenants: "活躍租戶",
+326:          kpiPartners: "合作夥伴 entry",
+327:          kpiDrivers: "活躍司機",
+328:          kpiRecon: "待結算對帳",
+329:          partnerReadiness: (count: number) => `${count} 待 readiness`,
+330:          driverDelta: (count: number) => `${count} 筆 stale`,
+332:            `${eligible} 可派 · ${total} 總數`,
+335:          reconSub: (count: number) => `${count} 筆重大平台告警`,
+336:          noAudit: "目前沒有稽核紀錄。",
+337:          noTodos: "目前沒有路由到平台端的治理阻塞。",
+338:          auditTime: "時間",
+339:          auditModule: "模組",
+340:          auditAction: "動作",
+341:          auditActor: "操作者",
+343:          queueCount: (count: number) => `${count} 件`,
+347:              label: "租戶 · Tenants",
+352:              label: "合作夥伴 · Partners",
+357:              label: "費率 · Pricing",
+362:              label: "結算 · Payments",
+367:              label: "車隊 · Fleet",
+372:              label: "稽核 · Audit",
+518:                : "BGMT 派遣回報 token 將於 6 天內到期",
+524:                : `${formatDateTime(tokenAlert.observedAt)} 量測值 ${tokenAlert.measuredValue}。需先輪替 client credential，否則今日完成單將無法回報。`,
+529:                : "前往 adapter-registry",
+545:                : "超過 3% 警戒值。建議檢查 adapter 健康並啟動 manual fallback 觀察。",
+547:            actionLabel: locale === "en" ? "Open adapter" : "查看 adapter",
+559:                : `${rollbackTenant.code} 處於 rollback_hold`,
+563:                : "客訴 cmp_0894 升級為 inc_0212 後，rollout 已暫停。需平台與營運共識下一步。",
+565:            actionLabel: locale === "en" ? "Open tenant" : "查看租戶",
+686:                    : `${formatCount(metrics.bankPartners)} 銀行 · ${formatCount(metrics.hotelPartners + metrics.enterprisePartners)} 飯店 / 企業`
+704:                      : "穩定"
+724:                  (locale === "en" ? "no open issue ids" : "目前無待處理 issue")
+===== platform-admin-web/app/partners/[entrySlug]/page.tsx =====
+1133:          notFoundTitle: "Partner entry 目前不可用",
+1134:          notFoundBody: "找不到指定的 partner entry。",
+1135:          updateErrorTitle: "Partner entry 更新失敗",
+1136:          issueErrorTitle: "Credential 發行失敗",
+1138:            "目前無法從 Platform Admin API 取得資料；此頁改用符合畫布的 preview fixture 供本地驗證。",
+1147:          preview: "預覽 entry",
+1148:          issueCredential: "發行 credential",
+1149:          rotateCredential: "輪替 credential",
+1150:          save: "儲存變更",
+1152:            "在不脫離平台治理模型的前提下，更新此 entry 的 branding、routing、auth 與 eligibility 設定。",
+1153:          overviewTitle: "Entry 基本資料",
+1155:            "集中檢視此 partner entry 的平台 routing、識別與上線姿態。",
+1157:          readinessReady: "可推進上線",
+1158:          readinessBlocked: "仍有 readiness 缺口",
+1160:            "必要 gate 已全部轉綠，可在不模糊治理邊界下推進 promotion。",
+1162:            "在 branding、contract、audit 與 credential 缺口補齊前，不應直接導流。",
+1165:            "完整 plaintext secret 只在發行當下顯示一次；下方清單只保留遮罩資訊。",
+1166:          credentialsEmpty: "此 entry 目前沒有可用的 ingress credential。",
+1169:            "partner-facing 顯示名稱、入口路由、色彩與支援資訊。",
+1172:            "即使使用 partner 專屬 credential，驗證權限仍保留在平台側。",
+1175:            "檢視此 entry 的 contract snapshot、adapter posture 與 fallback policy。",
+1178:            "平台稽核需要完整保留建立、更新、credential 事件與 request lineage。",
+1179:          routeHint: "公開入口預覽",
+1180:          accentHint: "套用到 partner skin 的品牌 accent",
+1181:          contractEmpty: "此 entry 尚未綁定 eligibility contract snapshot。",
+1185:            title: "Ingress credential 已產生 · only shown once",
+1186:            warningTitle: "關閉此視窗後將永久隱藏完整 secret",
+1188:              "若遺失必須重新建立並立即輪替。之後平台只保留遮罩後綴，不可還原完整值。",
+1189:            secretName: "Credential 名稱",
+1191:            secretHint: "請現在複製。完整 secret 不會再被回傳。",
+1194:            createdBy: "建立者",
+1195:            createdAt: "建立時間",
+1196:            stored: "我已將這組 credential 妥善保存於安全位置。",
+1197:            cancel: "取消",
+1198:            complete: "完成 · 我已保存此 key",
+1199:            copyLabel: "複製",
+1203:            issueTitle: "發行 ingress credential",
+1204:            rotateTitle: "輪替 ingress credential",
+1205:            subtitle: "HIGH-RISK ACTION · 必填 audit reason",
+1206:            fieldLabel: "輪替原因",
+1207:            hint: "請填寫操作原因。此動作會留下 audit 記錄，且完整 secret 只會顯示一次。",
+1209:              "例如：CTBC World Elite entry 首次 production 上線",
+1210:            placeholderRotate: "例如：金鑰外洩演練後輪替 / 季度例行更新",
+1211:            cancel: "取消",
+1212:            issueConfirm: "發行 credential",
+1213:            rotateConfirm: "輪替 credential",
+1216:            activateTitle: "啟用 partner entry",
+1217:            deactivateTitle: "停用 partner entry",
+1218:            revokeTitle: "撤銷 partner entry",
+1219:            revokeCredentialTitle: "撤銷 ingress credential",
+1220:            mediumSubtitle: "MEDIUM-RISK ACTION · 產出 audit receipt",
+1221:            highSubtitle: "HIGH-RISK ACTION · 必填 audit reason",
+1223:              "啟用後，此 entry 會在 readiness 條件滿足時可承接平台治理流量。",
+1225:              "停用會保留 registry 紀錄，但封鎖新的平台治理流量。",
+1227:              "entry 層級撤銷不可逆，僅適用於合約終止或安全撤出等情境。",
+1229:              "撤銷後此 credential 不可再用於 ingress。若需要不中斷流量，應先輪替再撤銷。",
+1230:            fieldLabel: "Audit 原因",
+1232:              "請具體說明操作原因。此動作會寫入 Platform Admin audit 歷史。",
+1233:            fieldPlaceholder: "例如：合作終止 / 安全事件調查後撤銷",
+1234:            cancel: "取消",
+1235:            activateConfirm: "啟用",
+1236:            deactivateConfirm: "停用",
+1237:            revokeConfirm: "撤銷 entry",
+1238:            revokeCredentialConfirm: "撤銷 credential",
+1678:        k: locale === "en" ? "Contract ID" : "契約 ID",
+1698:            : "需進 ops queue"
+1701:            : "無 timeout fallback",
+1713:        k: locale === "en" ? "Audit source" : "Audit 來源",
+1722:        k: locale === "en" ? "Created by" : "建立者",
+1726:        k: locale === "en" ? "Created at" : "建立時間",
+1731:        k: locale === "en" ? "Updated by" : "更新者",
+1735:        k: locale === "en" ? "Updated at" : "更新時間",
+1740:        k: locale === "en" ? "Revoked at" : "撤銷時間",
+1745:        k: locale === "en" ? "Revoke reason" : "撤銷原因",
+1979:            : "停用 entry"
+1982:            : "啟用 entry"}
+2013:        {locale === "en" ? "Revoke entry" : "撤銷 entry"}
+2056:              locale === "en" ? "Preview fixture mode" : "Preview fixture 模式"
+2224:                title={locale === "en" ? "Governance actions" : "治理動作"}
+2228:                    : "集中執行狀態切換與高風險 lifecycle 控制。"
+2237:                        k: locale === "en" ? "Status" : "狀態",
+2241:                        k: locale === "en" ? "Traffic posture" : "流量姿態",
+2245:                            : "可承接平台治理流量"
+2248:                            : "仍維持封鎖",
+2267:                          : "停用"
+2270:                          : "啟用"}
+2282:                      {locale === "en" ? "Revoke entry" : "撤銷 entry"}
+2390:                      : "此處只顯示治理綁定，不展開 operational delivery 細節。"
+2412:                            : "已綁定"
+2415:                            : "缺口"}
+2421:                          {locale === "en" ? "Audit source" : "Audit 來源"}
+2428:                        {locale === "en" ? "platform-owned" : "平台治理"}
+2531:                        : "此流程在 fulfill 前不要求 partner-side eligibility verification。"
+2535:                          : "Eligibility 仍由平台治理，且已有對應 contract snapshot。"
+2574:                  : "將 contract snapshot 與平台 adapter registry 對照。"
+2610:                          : "timeout 時需進 ops_console"
+2613:                          : "無 timeout fallback"}
+2625:                        : "snapshot 已綁定"
+2628:                        : "缺少 snapshot"}
+2719:                    title={locale === "en" ? "Entry revoked" : "Entry 已撤銷"}
+2724:                        : "此 entry 應持續維持流量封鎖。")
+===== platform-admin-web/app/partners/page.tsx =====
+231:          title: "合作夥伴 entry",
+233:            "銀行 / 飯店 / 企業 partner 入口、auth 模式、eligibility、品牌",
+234:          searchPlaceholder: "搜尋 entry、租戶、憑證...",
+235:          filterAction: "篩選",
+236:          createAction: "建立 entry",
+237:          createTitle: "建立 partner entry",
+239:            "在正式導流前先補齊 routing、auth mode、eligibility mode 與品牌 metadata。",
+240:          refresh: "重新整理",
+241:          last30Days: "近 30 天",
+242:          errorTitle: "無法載入 partner entries",
+244:            all: "全部",
+247:            attention: "待處理",
+250:          openDetail: "查看 entry 詳情",
+===== platform-admin-web/app/payments/page.tsx =====
+763:          breadcrumbParent: "計價與結算",
+764:          pageTitle: "結算治理",
+767:          export: "匯出",
+768:          openIssue: "開立 issue",
+769:          searchPlaceholder: "搜尋訂單、租戶、司機...",
+770:          queueSubtitle: "先在總表追蹤財務例外，再往下做證據與狀態處理。",
+771:          queueProfileTitle: "Queue 總覽",
+772:          queueProfileSubtitle: "目前治理切面",
+773:          releaseControlsTitle: "產出控制",
+775:            "不離開 payments route 直接產 invoice 與 statements。",
+778:            "指派、補 evidence、結案與重開都維持在同一個 control plane。",
+779:          createIssueTitle: "開立 reconciliation issue",
+781:            "一次補齊 actor、context 與第一筆 evidence note。",
+782:          outstandingLabel: "當期 outstanding",
+783:          exposureLabel: "差額累計",
+784:          handlingLabel: "平均處理時間",
+785:          reopenRateLabel: "reopen 率",
+786:          reopenDeltaWarn: `warn 閾值 ${REOPEN_WARN_THRESHOLD}%`,
+788:          reopenBannerTitle: "Reopen 率超過警戒值",
+790:            `最近 30 天 issue 視窗中已有 ${rate} 項目曾被重開。至少 ${count} 筆需要提高 queue hygiene，避免再次循環。`,
+791:          queueWindow: "近 30 天 issue 視窗",
+792:          linkedExposure: "關聯金額",
+795:          actorLabel: "財務操作人 ID",
+1248:        : "目前範圍沒有結算矩陣資料。",
+1252:        : "沒有符合篩選條件的租戶 invoice。",
+1256:        : "尚未產生司機結算單。",
+1260:        : "目前沒有 reconciliation issue，佇列已清空。",
+1267:    { value: "all", label: locale === "en" ? "All" : "全部" },
+1354:      {locale === "en" ? "Close" : "關閉"}
+1357:  const cancelLabel = locale === "en" ? "Cancel" : "取消";
+1444:                      : "無關聯單據"
+1461:                      : "resolved issue 視窗"
+1464:                      : "以 active queue age 補位"
+1608:                      label={locale === "en" ? "External order" : "外部訂單"}
+===== platform-admin-web/app/payments/reimbursements/[batchId]/page.tsx =====
+275:          reason: "差額 TWD 1,820 × 99 筆",
+283:        : "目前 reimbursement detail API 無法使用，頁面改以 route-local fallback 資料渲染 canvas 對齊內容。",
+497:          : "高風險核准操作必須填寫原因。",
+518:          : `已記錄核准原因：${reason}`,
+555:          : "批次已標記為已付款，且已記錄匯款憑證。",
+567:        {locale === "en" ? "Loading…" : "載入中…"}
+577:          title={locale === "en" ? "Reimbursement batch" : "代墊批次"}
+581:              {locale === "en" ? "Back to payments" : "返回結算治理"}
+589:            title={locale === "en" ? "Batch unavailable" : "找不到批次"}
+594:                : "Route 已建立，但找不到對應的代墊批次資料。")
+653:              {locale === "en" ? "Queue" : "批次佇列"}
+660:              {locale === "en" ? "Copy batch ID" : "複製批次 ID"}
+671:            title={locale === "en" ? "Refresh failed" : "重新整理失敗"}
+683:                : "Fallback 代墊批次詳情"
+695:              : "Audit-derived workflow 視圖"
+700:              : "六狀態 stepper 對齊 canvas；目前狀態由 batch 的核准、匯款憑證與付款時間推導呈現。"
+708:            title={locale === "en" ? "Audit receipt" : "稽核收據"}
+716:            locale === "en" ? "State machine · Q-ADM12" : "狀態機 · Q-ADM12"
+786:            title={locale === "en" ? "Approve reason flow" : "核准原因流程"}
+790:                : "高風險操作在核准前必須填寫原因。"
+796:                  {locale === "en" ? "Approval reason" : "核准原因"}
+804:                      : "說明 sponsor exposure、佐證或 audit context。"
+812:                  {locale === "en" ? "Remittance proof" : "匯款憑證"}
+835:                  title={locale === "en" ? "Action failed" : "操作失敗"}
+851:                      : "儲存中…"
+854:                      : "核准"}
+870:                      : "儲存中…"
+873:                      : "標記已付款"}
+886:                : "狀態時間軸 · audit-derived"
+926:            title={locale === "en" ? "Batch summary" : "批次摘要"}
+933:                  ? "以 route-local fallback finance context 補齊 canvas body 密度。"
+934:                  : "以 route-local finance context 補齊 canvas body 密度。"
+940:                  {locale === "en" ? "Approval gate:" : "核准關卡："}
+945:                    : "已完成"
+948:                    : "待 super-admin 簽核"}
+952:                  {locale === "en" ? "Export posture:" : "匯出姿態："}
+957:                    : "已附憑證"
+960:                    : "尚未匯出"}
+964:                  {locale === "en" ? "Settlement target:" : "結算對象："}
+970:                  {locale === "en" ? "Evidence scope:" : "佐證範圍："}
+973:                {locale === "en" ? "line items" : "筆 line item"}
+985:              : `${lineItemRows.length} 筆來源構成此批次總額。`
+1002:                : "此批次目前沒有可顯示的 reimbursement line item。"}
+===== platform-admin-web/app/payments/reimbursements/page.tsx =====
+128:  { id: "all", label: "全部", tone: "neutral" },
+256:    submitter: "平台財務 / Platform Finance",
+440:        目前沒有符合此狀態的代墊批次。
+452:        title="代墊批次 · Reimbursement batches"
+453:        subtitle="draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 6 狀態 state machine)"
+465:                ? "無法載入代墊批次"
+478:                ? "正在載入代墊批次…"
+===== platform-admin-web/app/pricing/page.tsx =====
+338:    name: "輪椅服務補助",
+348:    name: "夜間機場接送補助",
+364:    base: "NT$ 85 / 起",
+370:    base: "NT$ 120 / 起",
+376:    base: "NT$ 180 / 起",
+382:    base: "NT$ 95 / 起",
+467:      publishedBy: "張薇",
+509:            發佈版本
+512:            high-risk action 需要填寫原因，並在 audit receipt 中保留
+513:            actor、reason 與 trace evidence。
+539:          <CanvasField theme={theme} label="生效開始" required>
+548:          <CanvasField theme={theme} label="生效結束">
+558:        <CanvasField theme={theme} label="高風險原因" required>
+563:            placeholder="請描述 pricing publish 的治理原因、影響範圍與核准依據。"
+573:            title="無法發佈草稿"
+580:            取消
+605:            {publishing ? "發佈中…" : "確認發佈"}
+734:      ? "建立 passenger 草稿"
+736:        ? "建立 driver plan 草稿"
+738:          ? "建立 subsidy 草稿"
+739:          : "檢視版本歷史";
+742:      ? "發佈 driver fee plan"
+744:        ? "發佈 subsidy rule"
+745:        : "發佈";
+832:    { h: "名稱", k: "ruleName", w: 220 },
+856:    { h: "名稱", k: "planName", w: 240 },
+879:    { h: "名稱", k: "name", w: 220 },
+931:      setPublishError("沒有可發佈的 draft pricing rule。");
+935:      setPublishError("高風險原因至少需要 12 個字。");
+983:        subtitle="draft → published → retired · 發佈為 atomic replace (Q-ADM10)"
+1022:          body="後端為唯一計價真值；前端任何 manual override 必須走 override governance 並保留 actor type 與必填欄位。"
+1030:            title="pricing workspace 載入失敗"
+1050:            title={`${publishButtonLabel} 尚未接上 mutation`}
+1051:            body="目前高風險 publish modal 與 atomic replace 流程只接在 passenger pricing；driver / subsidy 先保留 parity 結構與治理提示。"
+1081:                    目前沒有 passenger pricing 版本。
+1094:                title={`服務 bucket fee 拆解 · ${
+1149:                          base: "NT$ 85 / 起",
+1155:                          base: "NT$ 120 / 起",
+1161:                          base: "NT$ 180 / 起",
+1167:                          base: "NT$ 95 / 起",
+1211:                subtitle="version model · 發佈前比對 canonical active 與候選 draft"
+1247:                      <p style={helperStyle}>沒有 active pricing rule。</p>
+1311:                        目前沒有待發佈的 pricing draft。
+1337:                        ? `${selectedDraft.version} 已進入 publish queue`
+1338:                        : "目前沒有可發佈的 draft",
+1347:                          : "需要 active 與 draft 才能比對",
+1355:                        : "開啟 modal 並填寫必填 reason",
+1361:                      body: publishReceipt ?? "發佈後會在此留下 receipt 摘要",
+1385:                subtitle="manual override 只允許記錄式治理，不得覆蓋 canonical quoted fare authority"
+1423:                  目前沒有 driver fee plan 版本。
+1460:                      <p style={helperStyle}>目前沒有已發佈司機費用方案。</p>
+1482:                        現有後端僅回傳 published fee plan；draft
+1483:                        比對區先保留治理空位。
+1518:                  <p style={helperStyle}>目前沒有可展示的 fee structure。</p>
+1539:                subtitle="補助規則與 reimbursement queue 採獨立治理，但共用 quoted fare authority"
+1570:                subtitle="manual override actor 與 evidence obligations"
+1609:              subtitle="cross-tab history 可依 type、scope、period 篩選"
+1668:              title="所有已發佈版本 · 跨 tab 歷史"
+1672:                  目前篩選條件下沒有可顯示的版本歷史。
+===== platform-admin-web/app/switchboard/page.tsx =====
+498:            "route name 保留為 /switchboard · 1 個公開資訊版本可產生多個車牌貼 (Q-ADM14)",
+499:          createDraft: "建立草稿",
+500:          publishVersion: "發佈版本",
+501:          refresh: "重新整理",
+502:          tabVersions: "版本",
+503:          tabPlacards: "牌貼",
+504:          tabHistory: "歷史",
+506:          versionsSubtitle: "effective from / to · 公開電話 · 狀態",
+508:            `目前發行牌貼 · ${code} (source ${src})`,
+509:          placardPreviewEmpty: "目前尚未產生牌貼。",
+510:          downloadPdf: "下載 PDF",
+511:          generatePlacard: "產生新 placard",
+512:          placardListTitle: "牌貼版本",
+513:          placardListSubtitle: "每張牌貼皆可追溯到來源公開資訊版本",
+514:          historyVersionsTitle: "公開資訊版本歷史",
+515:          historyVersionsSubtitle: "已發佈版本為不可變的揭露紀錄。",
+516:          historyPlacardsTitle: "牌貼沿革",
+517:          historyPlacardsSubtitle: "已發行牌貼及其來源公開資訊版本。",
+518:          loading: "載入交換台中...",
+519:          noVersions: "目前沒有公開資訊版本。",
+520:          noPlacards: "目前沒有牌貼版本。",
+521:          noHistory: "目前尚無已發佈歷史。",
+522:          colVersion: "版本",
+525:          colCall: "叫車電話",
+526:          colComplaint: "客訴電話",
+527:          colStatus: "狀態",
+528:          colUpdated: "更新",
+529:          colPlacard: "牌貼",
+530:          colSource: "來源版本",
+531:          colTemplate: "範本",
+532:          colArtifact: "成品",
+533:          colActions: "操作",
+534:          colPublishedAt: "發佈時間",
+535:          colPublishedBy: "發佈者",
+536:          publish: "發佈",
+537:          publishing: "發佈中...",
+538:          deleteDraft: "刪除",
+539:          deleting: "刪除中...",
+540:          immutable: "不可變",
+541:          createTitle: "建立公開資訊草稿",
+542:          createSubtitle: "中度風險 · 發佈前皆為草稿。",
+543:          publishTitle: "發佈公開資訊版本",
+545:            "高風險 · 發佈會替換目前生效的揭露資訊；需填寫原因以產生稽核憑據。",
+546:          publishNoDrafts: "目前沒有可發佈的草稿版本。",
+547:          publishPick: "選擇草稿版本",
+548:          publishReasonLabel: "原因（必填）",
+549:          publishReasonPh: "為何現在發佈此版本？",
+550:          confirmPublish: "確認發佈",
+551:          generateTitle: "產生新牌貼",
+552:          generateSubtitle: "中度風險 · 牌貼會綁定所選的來源公開資訊版本。",
+553:          confirmGenerate: "產生牌貼",
+554:          generating: "產生中...",
+555:          cancel: "取消",
+556:          fTitle: "標題",
+557:          fCallPhone: "叫車電話",
+558:          fComplaintPhone: "客訴電話",
+559:          fEffectiveFrom: "生效起",
+560:          fEffectiveTo: "生效迄（選填）",
+561:          fCallRate: "叫車費率說明",
+562:          fFare: "計費說明",
+563:          fPayment: "支付方式說明",
+564:          fSource: "來源公開資訊版本",
+565:          fVersionCode: "版本代碼",
+566:          fTemplate: "範本",
+567:          fArtifact: "成品檔 id（選填）",
+569:            `稽核憑據：已發佈公開資訊 ${id}。原因：${reason}`,
+570:          receiptCreate: "稽核憑據：已建立公開資訊草稿。",
+571:          receiptGenerate: (code: string) => `稽核憑據：已產生牌貼 ${code}。`,
+573:            `稽核憑據：已發佈牌貼 ${code}。`,
+575:            no_draft_versions: "目前沒有可發佈的草稿版本。",
+576:            no_draft_selected: "請選擇要發佈的草稿版本。",
+577:            reason_required: "發佈需填寫原因。",
+578:            title_required: "需填寫標題。",
+579:            no_source_version: "請選擇來源公開資訊版本。",
+580:            source_retired: "所選來源版本已停用。",
+581:            version_code_conflict: "此版本代碼已被使用。",
+582:            already_published: "已發佈（不可變）。",
+583:            no_public_info_version: "請先建立公開資訊版本再產生牌貼。",
+1500:                      {locale === "en" ? "Call" : "叫車"}{" "}
+1502:                      {locale === "en" ? "Complaint" : "客訴"}{" "}
+===== platform-admin-web/app/tenant-governance/page.tsx =====
+119:    : `${formatCount(value)}/月`;
+144:    return "超標";
+147:    return "警戒";
+149:  return "正常";
+316:          title: "跨租戶治理",
+319:          errorTitle: "無法載入跨租戶治理熱圖",
+320:          loading: "正在載入跨租戶治理熱圖…",
+321:          empty: "目前沒有 tenant governance 資料。",
+322:          cardTitle: "Quota 使用熱圖 · top 8 tenant · 本月",
+331:            quotaWarn: "quota 警戒 (>80%)",
+332:            approvalBacklog: "跨租戶審批 backlog",
+333:            costCenterAnomaly: "cost-center 異常",
+334:            riskSignals: "治理風險訊號",
+336:          quotaWarnSub: (count: number) => `跨 ${count} 個租戶`,
+338:            hours === null ? "目前沒有逾時待審" : `平均 ${hours} 小時`,
+339:          costCenterSub: "缺少 cost center owner 或 active rule",
+345:            `approver 缺口 ${noApproverSignals} · quota critical ${quotaCriticalSignals} · stale approval ${pendingSignals}`,
+460:                  : "需治理補件"
+474:                  : "待分流"
+===== platform-admin-web/app/tenants/[tenantId]/page.tsx =====
+235:    return "已確認";
+238:    return "邀請中";
+240:  return "未邀請";
+619:              k: "QUOTA / 月",
+693:          title="租戶詳情"
+761:              在 Tenant Console 開啟
+770:              進入 rollback_hold
+803:          title="Rollout 進度 · state machine"
+825:                  ? "租戶已具備 production rollback 條件。"
+826:                  : "推進到 production 前，需先補齊 rollback plan。"
+842:              body={`${acknowledgedRoles ?? 0}/${totalRoles} 角色已邀請並確認。`}
+852:                  : "尚未記錄額外 cutover note。"
+===== platform-admin-web/app/tenants/page.tsx =====
+405:            quotas: "配額/月",
+406:            integration: "介接",
+407:            updated: "更新",
+454:          title: "租戶",
+455:          subtitle: "管理 tenant 從建立到 production rollout 的完整生命週期。",
+456:          filterAction: "篩選",
+457:          exportAction: "匯出",
+458:          createTitle: "建立租戶",
+460:            "在第一次 promotion 前，先補齊租戶主檔、配額、模組與 onboarding defaults。",
+461:          createSummaryTitle: "Bootstrap 摘要",
+463:            "在租戶進入 live roster 之前，先把初始 rollout package 固定下來。",
+464:          errorTitle: "無法載入租戶治理資料",
+465:          filterPill: "最近 30 天",
+471:            quotas: "配額/月",
+472:            integration: "介接",
+473:            updated: "更新",
+476:            all: "全部",
+483:            enabled: "已啟用",
+484:            disabled: "可選",
+487:            modules: "已選模組",
+488:            quota: "每月 bookings",
+489:            api: "每月 API 呼叫",
+490:            status: "狀態",
+491:            integration: "介接模式",
+492:            admin: "Bootstrap 管理員",
+496:          searchPlaceholder: "搜尋租戶、平台人員、介接…",
+497:          breadcrumb: ["租戶治理", "租戶"],
+499:            workspace: "工作面",
+500:            governance: "租戶治理",
+501:            fleet: "車隊與法遵",
+502:            pricing: "計價與結算",
+503:            platform: "平台層",
+504:            home: "工作首頁",
+505:            health: "平台健康",
+506:            tenants: "租戶",
+507:            partners: "合作夥伴 entry",
+508:            users: "平台人員",
+509:            fleetPage: "車隊與合規",
+510:            switchboard: "法定資訊與牌貼",
+511:            pricingPage: "計價",
+512:            payments: "結算治理",
+513:            notices: "公告與維護",
+514:            audit: "稽核與證據",
+515:            flags: "功能旗標",
+516:            adapters: "介接登錄",
+1043:                            : "在正式啟用前先設定初始月配額範圍。"}
+1107:                            : "把首批啟用模組明確列出。"}
+1169:                            : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
+===== platform-admin-web/app/users/page.tsx =====
+40:// a single Card/Table with NAME / EMAIL / ROLE / STATUS / 更新 / ACTIONS. The
+302:          title: "平台人員",
+303:          subtitle: "6 個角色 · RBAC 守門以後端為準",
+305:          refreshing: "重新整理中…",
+306:          invite: "邀請",
+307:          inviteTitle: "邀請平台人員",
+309:            "先建立內部使用者主檔與初始角色，再讓該使用者進入 tenant 或 ops workflow。",
+314:          colUpdated: "更新",
+316:          actionRole: "更新角色",
+317:          actionSuspend: "停用",
+318:          actionActivate: "啟用",
+319:          alreadySuspended: "已停用",
+320:          roleTitle: "更新角色",
+321:          roleSubtitle: "中風險變更，套用後立即生效並寫入稽核軌跡。",
+322:          roleField: "角色",
+323:          suspendTitle: "停用平台人員",
+325:            "高風險變更，需填寫原因確認後才停用；確認後使用者隨即失去平台存取權限。",
+326:          reasonField: "原因",
+327:          reasonHint: "高風險停用確認必填。",
+328:          reasonPlaceholder: "例如：離職 / 疑似憑證外洩",
+329:          activateTitle: "重新啟用平台人員",
+330:          activateSubtitle: "恢復此使用者的平台存取權限；確認後立即生效。",
+331:          confirmSuspend: "確認停用",
+332:          confirmActivate: "確認啟用",
+333:          save: "儲存",
+===== platform-admin-web/components/admin-shell.tsx =====
+92:  { key: "workspace", zh: "工作面", en: "Workspace" },
+93:  { key: "tenant", zh: "租戶治理", en: "Tenant Governance" },
+94:  { key: "fleet", zh: "人員與車隊", en: "People & Fleet" },
+95:  { key: "commerce", zh: "平台與商務", en: "Platform & Commerce" },
+96:  { key: "ops", zh: "平台維運", en: "Platform Ops & Risk" },
+104:    zh: "工作首頁",
+111:    zh: "租戶",
+118:    zh: "跨租戶治理",
+125:    zh: "合作夥伴",
+132:    zh: "平台人員",
+139:    zh: "車隊與法遵",
+146:    zh: "公開資訊",
+153:    zh: "費率治理",
+160:    zh: "結算與帳務",
+167:    zh: "代墊批次",
+174:    zh: "平台 Adapter",
+181:    zh: "平台健康",
+188:    zh: "公告與維護",
+195:    zh: "稽核與證據",
+202:    zh: "功能旗標",
+266:    return locale === "zh" ? "尚未檢查" : "not checked";
+321:      label: locale === "zh" ? "API 檢查中" : "API checking",
+328:      label: locale === "zh" ? "API 健康" : "API healthy",
+335:      label: locale === "zh" ? "API 降級" : "API degraded",
+342:      label: locale === "zh" ? "API 失聯" : "API down",
+385:        <span>{locale === "zh" ? "最後檢查" : "last checked"}</span>
+397:        <span>{locale === "en" ? "中文" : "English"}</span>
+511:          ? "搜尋租戶、合作夥伴、稽核事件…"
+532:          {locale === "zh" ? "平台管理員" : "Platform Admin"}
+559:    ...(hasDetailCrumb ? [locale === "zh" ? "詳情" : "Detail"] : []),
+587:        title={locale === "zh" ? "通知" : "Notifications"}
+===== platform-admin-web/components/assistant/platform-assistant-overlay.tsx =====
+310:          launcher: "開啟平台助理",
+312:          label: "平台助理",
+313:          subtitle: "治理操作輔助",
+315:          status: "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
+316:          inputLabel: "輸入平台助理問題",
+317:          inputPlaceholder: "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
+318:          send: "送出",
+319:          sending: "分析中",
+320:          newSession: "新對話",
+321:          minimize: "最小化",
+322:          close: "關閉",
+323:          reset: "重設位置",
+324:          emptyTitle: "平台助理已就緒",
+326:            "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
+327:          thinking: "我正在讀取目前 Platform Admin route context 並整理回答...",
+===== platform-admin-web/components/assistant/route-context.ts =====
+130:    zh: "本頁含高風險操作，需 modal 確認、填寫原因並產生稽核紀錄。",
+139:    zh: "本頁具平台寫入權限（唯一可寫旗標的 App），變更會即時影響其他 App。",
+148:    zh: "憑證/密鑰僅在發行或輪替當下以明文顯示一次，之後不可再檢視。",
+157:    zh: "維護模式為高風險操作，啟用會跨 App 推送橫幅到 ops/tenant/driver。",
+166:    zh: "稽核證據治理：法律保留與刪除例外為高風險操作，需原因並記錄擁有者。",
+175:    zh: "此路由的頁面實作由 body-parity 工作項負責，可能尚未上線；metadata 已就緒。",
+184:    zh: "未在 Platform Admin 路由註冊表中找到此路徑，已退回首頁 context。",
+203:    title: { zh: "工作首頁", en: "Home" },
+212:    title: { zh: "租戶", en: "Tenants" },
+221:    title: { zh: "租戶詳情", en: "Tenant Detail" },
+233:    title: { zh: "跨租戶治理", en: "Tenant Governance" },
+243:    title: { zh: "合作夥伴", en: "Partner Entries" },
+253:    title: { zh: "合作夥伴詳情", en: "Partner Entry Detail" },
+264:    title: { zh: "平台人員", en: "Platform Staff" },
+274:    title: { zh: "車隊與法遵", en: "Fleet & Compliance" },
+290:    title: { zh: "公開資訊", en: "Public Info & Placards" },
+300:    title: { zh: "費率治理", en: "Pricing" },
+315:    title: { zh: "結算與帳務", en: "Payments" },
+332:    title: { zh: "代墊批次", en: "Reimbursements" },
+344:    title: { zh: "代墊批次詳情", en: "Reimbursement Batch Detail" },
+356:    title: { zh: "平台 Adapter", en: "Adapter Registry" },
+367:    title: { zh: "平台健康", en: "Platform Health" },
+376:    title: { zh: "公告與維護", en: "Notices & Maintenance" },
+386:    title: { zh: "稽核與證據", en: "Audit & Evidence" },
+397:    title: { zh: "功能旗標", en: "Feature Flags" },

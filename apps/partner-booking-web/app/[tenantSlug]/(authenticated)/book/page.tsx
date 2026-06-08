@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { PartnerBookingReferenceFunnel } from "@drts/ui-web/partner-booking";
+import { PartnerBookingForm } from "@/components/partner-booking-form";
 import {
   PartnerAuthorityError,
   getPartnerRouteContext,
@@ -7,17 +7,33 @@ import {
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
+  searchParams: Promise<{
+    eligibilityVerificationId?: string | string[];
+  }>;
 };
 
-export default async function PartnerBookPage({ params }: PageProps) {
+export default async function PartnerBookPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { tenantSlug } = await params;
+  const resolvedSearchParams = await searchParams;
   try {
-    const { brand } = await getPartnerRouteContext(tenantSlug);
+    const { brand, entry } = await getPartnerRouteContext(tenantSlug);
+    const eligibilityVerificationId =
+      (Array.isArray(resolvedSearchParams.eligibilityVerificationId)
+        ? resolvedSearchParams.eligibilityVerificationId[0]
+        : resolvedSearchParams.eligibilityVerificationId) ?? null;
+
+    if (!entry) {
+      redirect(`/${tenantSlug}/inactive`);
+    }
+
     return (
-      <PartnerBookingReferenceFunnel
+      <PartnerBookingForm
         brand={brand}
-        activeScreen="book"
-        basePath={`/${tenantSlug}`}
+        entry={entry}
+        eligibilityVerificationId={eligibilityVerificationId}
       />
     );
   } catch (error) {

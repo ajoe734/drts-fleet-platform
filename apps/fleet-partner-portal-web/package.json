@@ -1,0 +1,30 @@
+{
+  "name": "@drts/fleet-partner-portal-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build --webpack",
+    "dev": "next dev --hostname 0.0.0.0 --port 3007",
+    "lint": "eslint . --max-warnings=0",
+    "start": "next start --port 3007",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "@drts/api-client": "workspace:*",
+    "@drts/control-plane-auth": "workspace:*",
+    "@drts/contracts": "workspace:*",
+    "@drts/shared-types": "workspace:*",
+    "@drts/ui-web": "workspace:*",
+    "@tailwindcss/postcss": "^4.2.4",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.9.0",
+    "next": "^16.2.3",
+    "postcss": "^8.5.10",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.4"
+  }
+}

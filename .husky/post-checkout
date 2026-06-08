@@ -1,0 +1,77 @@
+#!/usr/bin/env sh
+# post-checkout: audit branch switches that occur in the canonical
+# workspace root. The orchestrator's contract is that supervisor-spawned
+# workers operate inside isolated git worktrees under
+# `.artifacts/worktrees/auto/`, never on the canonical root. When the
+# canonical root's branch silently moves out from under the supervisor,
+# tasks vanish from ai-status.json and the dashboard appears to "lose
+# work" until someone catches the drift.
+#
+# This hook does NOT block the checkout (git has no pre-checkout hook).
+# It records the event with enough provenance to identify the culprit,
+# and emits a stderr warning so the operator sees the drift in their
+# terminal immediately.
+#
+# Arguments per git's hook contract:
+#   $1 — previous HEAD sha
+#   $2 — new HEAD sha
+#   $3 — flag: 1 if branch checkout, 0 if file checkout
+#
+# Auto-revert is intentionally NOT in scope here — see
+# scripts/canonical-root-watchdog.py which can recover from drift with
+# safety checks for uncommitted work.
+
+set -e
+
+# Only act on branch checkouts; file checkouts are noise.
+if [ "$3" != "1" ]; then
+  exit 0
+fi
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+CANONICAL_ROOT="/home/edna/workspace/drts-fleet-platform"
+
+# Only fire when the checkout happened in the canonical root, not in any
+# of the .artifacts/worktrees/auto/* worker worktrees where switching
+# branches is fine.
+if [ "$ROOT_DIR" != "$CANONICAL_ROOT" ]; then
+  exit 0
+fi
+
+prev_sha="$1"
+new_sha="$2"
+new_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+prev_branch="$(git name-rev --name-only --no-undefined "$prev_sha" 2>/dev/null || echo '?')"
+ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+log_file="$ROOT_DIR/.orchestrator/logs/canonical-root-checkouts.jsonl"
+
+mkdir -p "$(dirname "$log_file")"
+
+# Best-effort caller provenance: walk up the parent chain capturing PID
+# and command. Helps identify which worker process did the switch.
+ppid=$PPID
+chain=""
+depth=0
+while [ "$ppid" != "1" ] && [ "$depth" -lt 6 ] && [ -r "/proc/$ppid/comm" ]; do
+  comm=$(cat /proc/$ppid/comm 2>/dev/null || echo "?")
+  chain="$chain $ppid=$comm"
+  next=$(awk '/^PPid:/{print $2}' "/proc/$ppid/status" 2>/dev/null || echo "1")
+  ppid=$next
+  depth=$((depth + 1))
+done
+
+# JSON line (manually composed; sh has no jq guarantee).
+printf '{"ts":"%s","event":"canonical_root_branch_switch","prev_branch":"%s","new_branch":"%s","prev_sha":"%s","new_sha":"%s","caller_chain":"%s"}\n' \
+  "$ts" "$prev_branch" "$new_branch" "$prev_sha" "$new_sha" "$chain" >> "$log_file"
+
+# Visible warning to stderr — operator sees this in their terminal AND
+# any worker process that did the switch will see it in their captured
+# output, which is often surfaced via the chair-review log.
+printf "\n\033[33mWARNING: canonical workspace root branch switched\033[0m\n" >&2
+printf "  prev: %s (%s)\n" "$prev_branch" "$(echo "$prev_sha" | cut -c1-12)" >&2
+printf "  new:  %s (%s)\n" "$new_branch" "$(echo "$new_sha" | cut -c1-12)" >&2
+printf "  caller chain (PID=comm):%s\n" "$chain" >&2
+printf "  Workers SHOULD switch in their isolated worktrees, not here.\n" >&2
+printf "  See: ops/canonical-root-lock/README.md\n" >&2
+
+exit 0

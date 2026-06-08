@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { managementMainShellStyle } from "@drts/ui-web";
-import { AdminNav } from "@/components/admin-nav";
+import { PlatformAdminAssistantProvider } from "@/components/assistant/route-context";
+import { AdminShell } from "@/components/admin-shell";
 import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
@@ -17,11 +17,12 @@ export default async function RootLayout({
 
   return (
     <html lang={locale}>
-      <body style={{ margin: 0, display: "flex", minHeight: "100vh" }}>
+      <body style={{ margin: 0, minHeight: "100vh", overflow: "hidden" }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <AdminNav />
-          <main style={managementMainShellStyle()}>{children}</main>
+          <PlatformAdminAssistantProvider>
+            <AdminShell>{children}</AdminShell>
+          </PlatformAdminAssistantProvider>
         </LanguageProvider>
       </body>
     </html>

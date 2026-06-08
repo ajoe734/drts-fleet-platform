@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -23,7 +25,7 @@ class CommandExistsTests(unittest.TestCase):
             local_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             local_cli.chmod(0o755)
 
-            with mock.patch.object(common, "ROOT", root):
+            with mock.patch.object(common, "ROOT", root), mock.patch.dict("os.environ", {"PATH": ""}):
                 self.assertEqual(common.command_exists("gemini"), str(local_cli))
 
     def test_finds_cli_from_additional_search_root(self) -> None:
@@ -39,6 +41,29 @@ class CommandExistsTests(unittest.TestCase):
 
             with mock.patch.object(common, "ROOT", code_root), mock.patch.dict("os.environ", {"PATH": ""}):
                 self.assertEqual(common.command_exists("gemini", search_roots=[workspace_root]), str(local_cli))
+
+
+class JsonlAppendTests(unittest.TestCase):
+    def test_append_jsonl_keeps_every_line_parseable_under_concurrency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "activity.jsonl"
+
+            def worker(worker_id: int) -> None:
+                for index in range(50):
+                    common.append_jsonl(path, {"worker": worker_id, "index": index})
+
+            threads = [threading.Thread(target=worker, args=(worker_id,)) for worker_id in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 200)
+            for line in lines:
+                payload = json.loads(line)
+                self.assertIn("worker", payload)
+                self.assertIn("index", payload)
 
 
 if __name__ == "__main__":

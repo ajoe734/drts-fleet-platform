@@ -94,7 +94,10 @@ the intended operator surface is a project VM:
 
 1. Use Node.js 22 and pnpm 10.
 2. Copy `.env.example` to `.env` if repo-local overrides are needed.
-3. Run `pnpm install`.
+3. Run `python3 scripts/ensure-local-node-modules.py repair`.
+   This wraps the canonical-root install path so `node_modules` stays linked to
+   the local `.pnpm` virtual store instead of inheriting symlinks from an
+   isolated auto-worker worktree.
 4. Run `./scripts/dev-up.sh` to start PostgreSQL, Redis, and Mailpit.
 5. Run `pnpm db:init` to apply migrations and seeds.
 6. Start the required app surfaces on the VM.
@@ -150,6 +153,8 @@ local-only artifacts that should never be committed.
 
 Common commands:
 
+- `python3 scripts/ensure-local-node-modules.py check`
+- `python3 scripts/ensure-local-node-modules.py repair`
 - `pnpm dev:api`
 - `pnpm dev:tenant`
 - `pnpm dev:platform-admin`
@@ -164,6 +169,13 @@ Common commands:
 - `pnpm db:seed:reference`
 - `pnpm db:seed:demo`
 - `pnpm db:verify`
+
+If app verification suddenly starts failing with `React` namespace errors,
+missing `vitest` declarations, or `pnpm` warnings about an unexpected virtual
+store location, run `python3 scripts/ensure-local-node-modules.py repair`
+before debugging the application code itself. Those symptoms usually mean the
+canonical root's `node_modules/.modules.yaml` has been rewired away from the
+local `.pnpm` store.
 
 ## Operator Rules
 

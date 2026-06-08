@@ -102,34 +102,61 @@ export async function requestDashboardRefresh() {
 
 // ── Parsers ───────────────────────────────────────────────────────────────────
 
+const LOG_ENTRY_START_RE = /(?=\{"(?:ts|timestamp)"\s*:)/g;
+
+function extractJsonLineObjects(line) {
+  const cleaned = String(line || "").replace(/\u0000/g, "").trim();
+  if (!cleaned) return [];
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? [parsed]
+      : [];
+  } catch {
+    const starts = Array.from(cleaned.matchAll(LOG_ENTRY_START_RE))
+      .map((match) => match.index)
+      .filter((index) => index !== undefined);
+    if (!starts.length) return [];
+
+    starts.push(cleaned.length);
+    return starts
+      .slice(0, -1)
+      .map((start, index) =>
+        cleaned.slice(start, starts[index + 1]).trim(),
+      )
+      .map((segment) => {
+        try {
+          return JSON.parse(segment);
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry) => entry && typeof entry === "object");
+  }
+}
+
 export function parseJsonLines(text) {
   return text
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && line.startsWith("{"))
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
+    .flatMap((line) => extractJsonLineObjects(line));
 }
 
-export function parseRecentJsonLines(text, limit = 24) {
+export function parseRecentJsonLines(text, limit = 24, excludeTypes = null) {
   const parsed = [];
   const lines = text.split("\n");
 
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index].trim();
-    if (!line || !line.startsWith("{")) continue;
-    try {
-      parsed.unshift(JSON.parse(line));
+    const entries = extractJsonLineObjects(lines[index]);
+    for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+      const entry = entries[entryIndex];
+      // Skip pure-noise event types (e.g. permission_hook) so a flood of them
+      // can't push every high-signal event out of the recent window.
+      if (excludeTypes && excludeTypes.has(entry.type)) continue;
+      parsed.unshift(entry);
       if (parsed.length >= limit) break;
-    } catch {
-      // Ignore malformed log lines in the preview path.
     }
+    if (parsed.length >= limit) break;
   }
 
   return parsed;

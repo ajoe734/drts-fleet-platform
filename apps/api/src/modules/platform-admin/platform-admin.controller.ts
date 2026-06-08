@@ -7,6 +7,7 @@ import {
   Param,
   Post,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type {
   CreatePlatformPricingRuleCommand,
@@ -27,8 +28,18 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { PlatformAdminService } from "./platform-admin.service";
 
+// The platform-admin console is an authenticated read-heavy surface: the
+// dashboard alone fans out ~6 GETs on load (page.tsx loadSnapshot) and every
+// governance page adds more, all funneling through one shared bootstrap-actor
+// throttle bucket. Under the global default (60 req/min + 5-min block,
+// rate-limit.constants.ts) a brief navigation burst locked the whole console
+// out with "429 ThrottlerException" for 5 minutes. READ_HEAVY (180/min, no
+// block) matches how the sibling read modules (platform-presence, owned-
+// mobility, tenant-partner) already protect their list endpoints.
+@Throttle(READ_HEAVY_RATE_LIMIT)
 @Controller("platform-admin")
 export class PlatformAdminController {
   constructor(private readonly platformAdminService: PlatformAdminService) {}

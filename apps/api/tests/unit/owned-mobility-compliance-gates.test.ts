@@ -297,7 +297,7 @@ describe("OwnedMobilityService compliance gates", () => {
           requestId: null,
         },
         verifiedAt: "2026-05-29T00:00:00.000Z",
-        expiresAt: "2026-05-30T00:00:00.000Z",
+        expiresAt: "2036-05-30T00:00:00.000Z",
         createdAt: "2026-05-29T00:00:00.000Z",
         updatedAt: "2026-05-29T00:00:00.000Z",
         auditMetadata: {

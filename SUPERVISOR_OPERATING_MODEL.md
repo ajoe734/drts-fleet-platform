@@ -155,7 +155,34 @@ Primary implementation tasks must not close with `done` until all of the followi
   - `Reviewer: <reviewer>`
 - the owner has pushed the task-scoped commit with a normal non-force push
 - the owner records `PUSH_REMOTE` and `PUSH_BRANCH` when finalizing the task
+- the owner records `INTEGRATION_STATUS` so machine truth distinguishes branch-only closeout from merge/deploy closeout
 - if a safe normal push is not possible, the task must stay open with a blocker/progress note
+
+## Integration Closeout Gate
+
+`done` is a task state, not a release claim. For canonical implementation work,
+branch closeout is only the first layer of the development loop.
+
+Use these completion levels:
+
+- `branch_pushed`: review approved, committed, and pushed, but not merged to `dev`
+- `pr_open` / `ci_pending` / `ci_failed`: integration is still being worked or blocked
+- `merged_to_dev`: the delivered commit is reachable from `origin/dev`
+- `deploy_blocked`: merged, but dev deploy is blocked or failed
+- `dev_deployed`: included in a successful `Deploy - Dev` workflow run
+- `not_applicable`: support-only sidecar work with no canonical product deploy target
+
+Workers and chairman reviews must not report "development complete", "ready on
+dev", or "published to dev" unless the task or umbrella has evidence for
+`INTEGRATION_STATUS=dev_deployed`.
+
+If a worker cannot complete PR, CI, merge, or dev deploy, it must leave a
+machine-truth trail instead of silently ending:
+
+- record the exact `INTEGRATION_STATUS`
+- attach PR / CI / merge / deploy evidence when available
+- create or hand off an explicit integration closeout follow-up when work remains
+- keep the task open with `progress` or `blocker` if branch closeout itself is incomplete
 
 Support-only tasks may skip commit evidence only when they are explicitly non-canonical:
 

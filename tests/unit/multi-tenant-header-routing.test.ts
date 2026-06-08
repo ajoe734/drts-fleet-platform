@@ -62,12 +62,26 @@ describe("multi-tenant header controller routing", () => {
         tenantId: "tenant-alpha",
         status: "issued",
       })),
-      listTenantInvoices: vi.fn(() => [
-        {
-          invoiceId: "inv-tenant-alpha-001",
-          tenantId: "tenant-alpha",
+      listTenantInvoicesRuntime: vi.fn(() => ({
+        items: [
+          {
+            invoiceId: "inv-tenant-alpha-001",
+            tenantId: "tenant-alpha",
+          },
+        ],
+        pageInfo: {
+          totalItems: 1,
+          totalPages: 1,
+          page: 1,
+          pageSize: 50,
         },
-      ]),
+        refresh: {
+          generatedAt: "2026-06-02T02:00:00.000Z",
+          staleAfterMs: 30000,
+          dataFreshness: "fresh",
+          source: "live",
+        },
+      })),
       getTenantInvoice: vi.fn(() => ({
         invoiceId: "inv-tenant-alpha-001",
         tenantId: "tenant-alpha",
@@ -126,9 +140,9 @@ describe("multi-tenant header controller routing", () => {
       invoiceCommand,
       requestId,
     );
-    expect(billingSettlementService.listTenantInvoices).toHaveBeenCalledWith(
-      "tenant-alpha",
-    );
+    expect(
+      billingSettlementService.listTenantInvoicesRuntime,
+    ).toHaveBeenCalledWith("tenant-alpha");
     expect(billingSettlementService.getTenantInvoice).toHaveBeenCalledWith(
       "tenant-alpha",
       "inv-tenant-alpha-001",
@@ -154,6 +168,7 @@ describe("multi-tenant header controller routing", () => {
     } as unknown as TenantPartnerService;
     const controller = new TenantPartnerController(
       tenantPartnerService,
+      {} as never,
       {} as never,
     );
 
@@ -197,6 +212,7 @@ describe("multi-tenant header controller routing", () => {
     } as unknown as TenantPartnerService;
     const controller = new TenantPartnerController(
       tenantPartnerService,
+      {} as never,
       {} as never,
     );
     const requestId = "req-tenant-partner-alpha";

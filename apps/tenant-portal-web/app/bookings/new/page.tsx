@@ -35,6 +35,18 @@ const SUBTYPE_LABELS: Record<
     guidance:
       "Use when airport routing, flight context, or sponsor/benefit references matter.",
   },
+  insurance_replacement_vehicle: {
+    label: "Insurance Replacement Vehicle",
+    reservationPolicy: "Modify or cancel up to 120 minutes before the window.",
+    guidance:
+      "Use when claim, policy, or replacement-period context must stay attached to the booking.",
+  },
+  travel_agency_transfer: {
+    label: "Travel Agency Transfer",
+    reservationPolicy: "Modify or cancel up to 90 minutes before the window.",
+    guidance:
+      "Use when group transfer, meeting point, or agency roster context drives the trip.",
+  },
 };
 
 function toIsoString(localDateTime: string): string {

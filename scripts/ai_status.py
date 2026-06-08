@@ -8,10 +8,16 @@ import shutil
 import subprocess
 import sys
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
 
 ROOT = Path(
     os.environ.get("AI_STATUS_ROOT")
@@ -20,6 +26,7 @@ ROOT = Path(
 ).resolve()
 STATUS_FILE = ROOT / "ai-status.json"
 LOG_FILE = ROOT / "ai-activity-log.jsonl"
+TASK_ARCHIVE_FILE = ROOT / "ai-task-archive.jsonl"
 CURRENT_WORK_FILE = ROOT / "current-work.md"
 DOCS_SITE_DIR = ROOT / "docs-site"
 
@@ -128,6 +135,74 @@ NON_CANONICAL_LAYER_FILES = {
     "current-work.md",
     "docs-site/index.html",
 }
+LOG_ENTRY_START_RE = re.compile(r'(?=\{"(?:ts|timestamp)"\s*:)')
+
+
+def _jsonl_lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+@contextmanager
+def _hold_jsonl_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = _jsonl_lock_path(path).open("a+", encoding="utf-8")
+    try:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _append_jsonl_line(path: Path, line: str) -> None:
+    payload = (line + "\n").encode("utf-8")
+    with _hold_jsonl_lock(path):
+        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+        try:
+            written = 0
+            while written < len(payload):
+                chunk = os.write(fd, payload[written:])
+                if chunk == 0:
+                    raise OSError(f"short write while appending {path}")
+                written += chunk
+        finally:
+            os.close(fd)
+
+
+def _normalize_log_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    if "ts" not in entry and entry.get("timestamp"):
+        entry["ts"] = entry["timestamp"]
+    if "message" not in entry and entry.get("summary"):
+        entry["message"] = entry["summary"]
+    if "type" not in entry and entry.get("action"):
+        entry["type"] = entry["action"]
+    return entry
+
+
+def _decode_log_line(line: str) -> list[dict[str, Any]]:
+    cleaned = line.replace("\x00", "").strip()
+    if not cleaned:
+        return []
+    try:
+        entry = json.loads(cleaned)
+        return [_normalize_log_entry(entry)] if isinstance(entry, dict) else []
+    except json.JSONDecodeError:
+        starts = [match.start() for match in LOG_ENTRY_START_RE.finditer(cleaned)]
+        if not starts:
+            return []
+        starts.append(len(cleaned))
+        entries: list[dict[str, Any]] = []
+        for index, start in enumerate(starts[:-1]):
+            fragment = cleaned[start:starts[index + 1]].strip()
+            try:
+                entry = json.loads(fragment)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(entry, dict):
+                entries.append(_normalize_log_entry(entry))
+        return entries
 
 
 def default_canonical_document_layers() -> dict[str, list[str]]:
@@ -380,6 +455,65 @@ def git_commit_exists(commit_hash: str) -> bool:
     return result.returncode == 0
 
 
+INTEGRATION_STATUS_VALUES = {
+    "not_applicable",
+    "branch_pushed",
+    "pr_open",
+    "ci_pending",
+    "ci_failed",
+    "merged_to_dev",
+    "deploy_blocked",
+    "dev_deployed",
+}
+
+
+def integration_metadata_from_env(commit_required: bool, timestamp: str) -> dict[str, Any]:
+    integration_status = os.environ.get("INTEGRATION_STATUS", "").strip().lower()
+    if not integration_status:
+        integration_status = "branch_pushed" if commit_required else "not_applicable"
+    if integration_status not in INTEGRATION_STATUS_VALUES:
+        allowed = ", ".join(sorted(INTEGRATION_STATUS_VALUES))
+        raise SystemExit(f"INTEGRATION_STATUS must be one of: {allowed}")
+
+    pr_url = os.environ.get("PR_URL", "").strip()
+    ci_status = os.environ.get("CI_STATUS", "").strip()
+    ci_run_url = os.environ.get("CI_RUN_URL", "").strip()
+    merged_ref = os.environ.get("MERGED_REF", "").strip()
+    merge_commit = os.environ.get("MERGE_COMMIT", "").strip()
+    dev_deploy_run_url = os.environ.get("DEV_DEPLOY_RUN_URL", "").strip()
+    dev_deploy_sha = os.environ.get("DEV_DEPLOY_SHA", "").strip()
+    dev_deploy_source_ref = os.environ.get("DEV_DEPLOY_SOURCE_REF", "").strip()
+
+    if integration_status == "merged_to_dev" and not (merged_ref or merge_commit):
+        raise SystemExit("INTEGRATION_STATUS=merged_to_dev requires MERGED_REF or MERGE_COMMIT")
+    if integration_status == "dev_deployed":
+        if not (merged_ref or merge_commit):
+            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires MERGED_REF or MERGE_COMMIT")
+        if not dev_deploy_run_url or not dev_deploy_sha:
+            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires DEV_DEPLOY_RUN_URL and DEV_DEPLOY_SHA")
+    if integration_status == "ci_failed" and not (ci_status or ci_run_url):
+        raise SystemExit("INTEGRATION_STATUS=ci_failed requires CI_STATUS or CI_RUN_URL")
+    if integration_status == "deploy_blocked" and not (dev_deploy_run_url or dev_deploy_source_ref or merged_ref):
+        raise SystemExit("INTEGRATION_STATUS=deploy_blocked requires deploy or merge evidence")
+
+    metadata: dict[str, Any] = {
+        "integration_status": integration_status,
+        "integration_recorded_at": timestamp,
+    }
+    optional_fields = {
+        "pr_url": pr_url,
+        "ci_status": ci_status,
+        "ci_run_url": ci_run_url,
+        "merged_ref": merged_ref,
+        "merge_commit": merge_commit,
+        "dev_deploy_run_url": dev_deploy_run_url,
+        "dev_deploy_sha": dev_deploy_sha,
+        "dev_deploy_source_ref": dev_deploy_source_ref,
+    }
+    metadata.update({key: value for key, value in optional_fields.items() if value})
+    return metadata
+
+
 def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, Any]:
     commit_required = task_requires_commit(task)
     no_commit_required = os.environ.get("NO_COMMIT_REQUIRED", "").strip().lower() in {"1", "true", "yes"}
@@ -392,6 +526,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
     push_commit = os.environ.get("PUSH_COMMIT", "").strip() or commit_hash
     reviewer = canonical_agent_name(task.get("reviewer"))
     timestamp = iso_now()
+    integration_metadata = integration_metadata_from_env(commit_required, timestamp)
 
     if commit_required:
         if no_commit_required:
@@ -419,6 +554,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "push_ref": push_ref or f"{push_remote}/{push_branch}",
             "push_commit": push_commit,
             "push_recorded_at": timestamp,
+            **integration_metadata,
         }
 
     if no_commit_required:
@@ -428,8 +564,9 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "commit_agent": canonical_agent_name(commit_agent),
             "commit_reviewer": reviewer,
             "commit_recorded_at": timestamp,
+            **integration_metadata,
         }
-    return {}
+    return integration_metadata
 
 
 def iso_now() -> str:
@@ -559,24 +696,15 @@ def load_logs() -> list[dict[str, Any]]:
         return []
     logs: list[dict[str, Any]] = []
     for line_no, line in enumerate(LOG_FILE.read_text(encoding="utf-8").splitlines(), start=1):
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
-        try:
-            entry = json.loads(line)
-            if isinstance(entry, dict):
-                # Tolerate legacy or external review log schemas so summary generation
-                # does not fail when adjacent tooling writes timestamp/summary fields.
-                if "ts" not in entry and entry.get("timestamp"):
-                    entry["ts"] = entry["timestamp"]
-                if "message" not in entry and entry.get("summary"):
-                    entry["message"] = entry["summary"]
-                if "type" not in entry and entry.get("action"):
-                    entry["type"] = entry["action"]
-            logs.append(entry)
-        except json.JSONDecodeError as exc:
+        entries = _decode_log_line(line)
+        if entries:
+            logs.extend(entries)
+            continue
+        if line.replace("\x00", "").strip():
             print(
-                f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}: {exc}",
+                f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}",
                 file=sys.stderr,
             )
     return logs
@@ -589,13 +717,118 @@ def atomic_write_text(path: Path, content: str) -> None:
     tmp_path.replace(path)
 
 
+def _retention_keeps() -> dict[str, int]:
+    """Resolve status-file retention keep counts from orchestrator config.
+
+    ai_status.py is the dominant writer of ai-status.json (the worker
+    ``ai-status.sh`` CLI runs it on every status mutation), so the same prune
+    that ``supervisor.write_status_with_prune`` applies MUST also live here —
+    otherwise handoffs/tasks regrow unbounded (17.8k handoffs / 8.7 MB by the
+    2026-05-31 incident) and the file blows past the 256 KB cap the
+    chair/coordination worker Read tool enforces, re-breaking machine-truth
+    reads. Keeps are read from the orchestrator config (config.local.json
+    overrides config.json), matching the supervisor. See
+    feedback_ai_status_handoff_bloat.
+    """
+    supervisor_cfg: dict[str, Any] = {}
+    for name in ("config.json", "config.local.json"):
+        path = ROOT / ".orchestrator" / name
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                section = data.get("supervisor") if isinstance(data, dict) else None
+                if isinstance(section, dict):
+                    supervisor_cfg.update(section)
+        except (OSError, ValueError):
+            continue
+    return {
+        "handoffs": int(supervisor_cfg.get("handoff_keep_count", 200)),
+        "tasks": int(supervisor_cfg.get("task_keep_count", 150)),
+        "blockers": int(supervisor_cfg.get("blocker_keep_count", 100)),
+    }
+
+
+def archive_task_bodies(dropped: list[dict[str, Any]]) -> None:
+    """Append the full bodies of pruned done-tasks to ``ai-task-archive.jsonl``
+    so completed-task detail (summary/owner/review notes/artifacts) stays
+    auditable after the live status file drops them — ``archived_task_ids`` only
+    keeps the id. Append-only JSONL + O_APPEND is used deliberately: ai_status.py
+    is the dominant, highly concurrent writer (~153k invocations), so a
+    read-modify-write of a single JSON object would race and lose records. A task
+    is dropped from ``state["tasks"]`` exactly once, so no de-dup is needed here.
+    Best-effort: archival must never block or fail a status write."""
+    if not dropped:
+        return
+    stamp = iso_now()
+    try:
+        with TASK_ARCHIVE_FILE.open("a", encoding="utf-8") as handle:
+            for task in dropped:
+                if not task.get("id"):
+                    continue
+                record = dict(task)
+                record["_archived_at"] = stamp
+                record["_archived_by"] = "ai_status.py"
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def prune_state_for_size(state: dict[str, Any]) -> None:
+    """Bound the unbounded audit tails (done handoffs, done tasks, resolved
+    blockers) in place. Mirrors supervisor.{prune_done_handoffs,prune_done_tasks,
+    prune_blockers}; pending handoffs and open blockers are never trimmed, and
+    dropped done-task ids are recorded in ``archived_task_ids`` (dependency-safe
+    because ``dependencies_satisfied`` treats a missing dep as archived/done).
+    Dropped done-task bodies are appended to ``ai-task-archive.jsonl`` first so
+    their detail stays auditable (see ``archive_task_bodies``)."""
+    keeps = _retention_keeps()
+
+    handoffs = state.get("handoffs")
+    if isinstance(handoffs, list):
+        keep = keeps["handoffs"]
+        done = [x for x in handoffs if str(x.get("status") or "").lower() == "done"]
+        if len(done) > keep:
+            pending = [x for x in handoffs if str(x.get("status") or "").lower() != "done"]
+            state["handoffs"] = pending + done[-keep:]
+
+    tasks = state.get("tasks")
+    if isinstance(tasks, list):
+        keep = keeps["tasks"]
+        done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
+        if len(done) > keep:
+            dropped = done[:-keep] if keep > 0 else done
+            dropped_ids = {t.get("id") for t in dropped if t.get("id")}
+            if dropped_ids:
+                archive_task_bodies(dropped)
+                state["tasks"] = [
+                    t
+                    for t in tasks
+                    if str(t.get("status") or "").lower() != "done" or t.get("id") not in dropped_ids
+                ]
+                archived = state.setdefault("archived_task_ids", [])
+                if isinstance(archived, list):
+                    already = set(archived)
+                    for tid in (t.get("id") for t in dropped):
+                        if tid and tid not in already:
+                            archived.append(tid)
+                            already.add(tid)
+
+    blockers = state.get("blockers")
+    if isinstance(blockers, list):
+        keep = keeps["blockers"]
+        resolved = [b for b in blockers if str(b.get("status") or "").lower() == "resolved"]
+        if len(resolved) > keep:
+            dropped = {id(b) for b in (resolved[:-keep] if keep > 0 else resolved)}
+            state["blockers"] = [b for b in blockers if id(b) not in dropped]
+
+
 def save_state(state: dict[str, Any]) -> None:
+    prune_state_for_size(state)
     atomic_write_text(STATUS_FILE, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
 
 
 def append_log(entry: dict[str, Any]) -> None:
-    with LOG_FILE.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    _append_jsonl_line(LOG_FILE, json.dumps(entry, ensure_ascii=False))
 
 
 def ensure_agent(name: str, *, allow_retired: bool = False) -> dict[str, Any]:
@@ -858,6 +1091,148 @@ def apply_unblock_parent_resolution(
             "message": parent_message,
         }
     )
+
+
+# Closeout commit subject pattern: `<TASK-ID>: <summary>`. Deliberately
+# excludes `wip(<TASK-ID>):` anchor commits — they carry the trailer but are
+# not closeouts. Mirrors scripts/git/check_commit_trailers.py SUBJECT_RE,
+# minus the optional `wip(...)` prefix.
+CLOSEOUT_SUBJECT_RE = re.compile(r"^([A-Z][A-Z0-9-]*[A-Z0-9]):\s+\S")
+GIT_LOG_RECORD_SEP = "\x1e"
+GIT_LOG_FIELD_SEP = "\x1f"
+
+
+def _git_log_closeouts(ref: str) -> dict[str, dict[str, str]]:
+    """Return {task_id: {sha, subject, body, commit_date}} for the most recent
+    closeout commit reachable from `ref` for each task ID. A commit is a
+    closeout if its subject matches CLOSEOUT_SUBJECT_RE and the captured
+    task_id is also present as a `Task-ID:` trailer.
+    """
+    fmt = GIT_LOG_FIELD_SEP.join(
+        ["%H", "%cI", "%s", "%(trailers:key=Task-ID,valueonly,separator=%x1d)"]
+    ) + GIT_LOG_RECORD_SEP
+    try:
+        result = subprocess.run(
+            ["git", "log", ref, f"--format={fmt}"],
+            cwd=str(ROOT),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return {}
+    if result.returncode != 0:
+        return {}
+    closeouts: dict[str, dict[str, str]] = {}
+    for record in result.stdout.split(GIT_LOG_RECORD_SEP):
+        record = record.strip("\n")
+        if not record:
+            continue
+        parts = record.split(GIT_LOG_FIELD_SEP)
+        if len(parts) < 4:
+            continue
+        sha, commit_date, subject, trailers_raw = parts[0], parts[1], parts[2], parts[3]
+        match = CLOSEOUT_SUBJECT_RE.match(subject)
+        if not match:
+            continue
+        subject_task_id = match.group(1)
+        # Strip the trailing `(#NNN)` PR suffix GitHub adds on squash merges
+        # before checking trailer consistency.
+        trailer_task_ids = {
+            value.strip() for value in trailers_raw.split("\x1d") if value.strip()
+        }
+        if trailer_task_ids and subject_task_id not in trailer_task_ids:
+            continue
+        existing = closeouts.get(subject_task_id)
+        if existing is None or commit_date > existing.get("commit_date", ""):
+            closeouts[subject_task_id] = {
+                "sha": sha,
+                "subject": subject,
+                "commit_date": commit_date,
+            }
+    return closeouts
+
+
+def _git_remote_branch_for_ref(ref: str) -> tuple[str, str]:
+    """Split `origin/dev` → (`origin`, `dev`). Falls back to (`origin`, ref)."""
+    if "/" in ref:
+        remote, _, branch = ref.partition("/")
+        return remote, branch
+    return "origin", ref
+
+
+def apply_git_merge_reconciliation(
+    state: dict[str, Any], *, ref: str | None = None
+) -> list[dict[str, str]]:
+    """Bridge artifact-merged → state-machine-done drift.
+
+    Workers that ship via PR + merge but skip `ai-status.sh done` leave the
+    state machine stuck in `in_progress`/`review`/`backlog` even though the
+    closeout commit is on the integration trunk. This walks `ref` (default
+    origin/dev), finds closeout commits keyed by Task-ID, and finalizes any
+    task whose closeout has merged but whose state machine never advanced.
+
+    Returns a list of `{task_id, sha, prior_status}` dicts for everything it
+    moved.
+    """
+    target_ref = (ref or os.environ.get("RECONCILE_REF") or "origin/dev").strip() or "origin/dev"
+    closeouts = _git_log_closeouts(target_ref)
+    if not closeouts:
+        return []
+    remote, branch = _git_remote_branch_for_ref(target_ref)
+    timestamp = iso_now()
+    reconciled: list[dict[str, str]] = []
+    for task in state.get("tasks", []):
+        if task.get("status") == "done":
+            continue
+        task_id = str(task.get("id") or "")
+        closeout = closeouts.get(task_id)
+        if not closeout:
+            continue
+        prior_status = str(task.get("status") or "")
+        actor = canonical_agent_name(task.get("owner")) or current_actor()
+        task["status"] = "done"
+        task["last_update"] = timestamp
+        task["next"] = f"reconciled from {remote}/{branch}@{closeout['sha'][:12]}"
+        task["commit_hash"] = closeout["sha"]
+        task["commit_subject"] = closeout["subject"]
+        task["commit_agent"] = actor
+        task["commit_reviewer"] = canonical_agent_name(task.get("reviewer"))
+        task["commit_recorded_at"] = timestamp
+        task["push_remote"] = remote
+        task["push_branch"] = branch
+        task["push_ref"] = target_ref
+        task["push_commit"] = closeout["sha"]
+        task["push_recorded_at"] = timestamp
+        task["reconciled_from_git_at"] = timestamp
+        task["reconciled_from_git_ref"] = target_ref
+        task["reconciled_from_git_prior_status"] = prior_status
+        task.pop("waiting_for", None)
+        mark_blockers_resolved(state, task_id)
+        mark_handoffs_done(state, task_id)
+        # Unblock parents are not auto-resumed here: parent resume needs
+        # PARENT_STATUS/PARENT_NEXT input that the human flow supplies. We
+        # only resolve their open blocker/handoff via the calls above.
+        append_log(
+            {
+                "ts": timestamp,
+                "agent": actor,
+                "type": "reconciled_from_git",
+                "task_id": task_id,
+                "message": task["next"],
+                "commit_hash": closeout["sha"],
+                "prior_status": prior_status,
+                "ref": target_ref,
+            }
+        )
+        reconciled.append(
+            {
+                "task_id": task_id,
+                "sha": closeout["sha"],
+                "prior_status": prior_status,
+            }
+        )
+    return reconciled
 
 
 def validate_state(state: dict[str, Any]) -> None:
@@ -1288,8 +1663,9 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     open_blockers = [blocker for blocker in state.get("blockers", []) if blocker.get("status") == "open"]
     if open_blockers:
         for blocker in open_blockers:
+            message = blocker.get("message") or blocker.get("reason") or ""
             lines.append(
-                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {blocker['message']} | {blocker['status']} |"
+                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {message} | {blocker['status']} |"
             )
     else:
         lines.append("| _(none)_ | - | - | - | - |")
@@ -1352,6 +1728,25 @@ def sync_docs_site() -> None:
             shutil.copy2(path, DOCS_SITE_DIR / target_name)
 
 
+def sync_task_briefs(state: dict[str, Any]) -> None:
+    orchestrator_dir = ROOT / ".orchestrator"
+    if not orchestrator_dir.exists():
+        return
+    sys.path.insert(0, str(orchestrator_dir))
+    try:
+        from common import ensure_task_brief, load_config  # type: ignore
+
+        config = load_config(orchestrator_dir / "config.json")
+        for task in state.get("tasks", []):
+            if isinstance(task, dict) and task.get("id"):
+                ensure_task_brief(config, task=task, status=state, runtime_state=state)
+    finally:
+        try:
+            sys.path.remove(str(orchestrator_dir))
+        except ValueError:
+            pass
+
+
 def sync_all(state: dict[str, Any]) -> None:
     sync_canonical_document_metadata(state)
     normalize_state_agents(state)
@@ -1361,6 +1756,7 @@ def sync_all(state: dict[str, Any]) -> None:
     recompute_workload(state)
     state["updated_at"] = iso_now()
     save_state(state)
+    sync_task_briefs(state)
     logs = load_logs()
     write_current_work(state, logs)
     sync_docs_site()
@@ -1759,11 +2155,84 @@ def command_mode(state: dict[str, Any], args: list[str]) -> None:
 
 
 def command_sync(state: dict[str, Any], _args: list[str]) -> None:
+    # Bridge git-merged closeouts → state-machine `done` for tasks whose
+    # workers shipped via PR + merge but skipped `ai-status.sh done`. The
+    # supervisor calls `ai-status.sh sync` on every reassignment cycle, so
+    # this catches drift soon after a merge lands on origin/dev.
+    apply_git_merge_reconciliation(state)
     return None
+
+
+def command_reconcile_from_git(state: dict[str, Any], args: list[str]) -> None:
+    ref = args[0].strip() if args else os.environ.get("RECONCILE_REF", "").strip() or "origin/dev"
+    reconciled = apply_git_merge_reconciliation(state, ref=ref)
+    if not reconciled:
+        print(f"reconcile-from-git: no drift found against {ref}")
+        return
+    print(f"reconcile-from-git: finalized {len(reconciled)} task(s) against {ref}")
+    for entry in reconciled:
+        print(
+            f"  {entry['task_id']}: {entry['prior_status']} -> done "
+            f"(commit {entry['sha'][:12]})"
+        )
 
 
 def command_prompt(state: dict[str, Any], _args: list[str]) -> None:
     print(build_onboarding_prompt(state))
+
+
+def command_show(state: dict[str, Any], args: list[str]) -> None:
+    """Print ONE task as JSON. Cheap alternative to ``Read ai-status.json``
+    (which is ~2 MB and burns ~500K input tokens every time a worker reads
+    it). Usage: ``show <TASK-ID>``."""
+    if not args:
+        raise SystemExit("Usage: show <task-id>")
+    task_id = args[0].strip()
+    for task in state.get("tasks", []) or []:
+        if str(task.get("id") or "").strip() == task_id:
+            print(json.dumps(task, ensure_ascii=False, indent=2))
+            return
+    raise SystemExit(f"Task not found: {task_id}")
+
+
+def command_list(state: dict[str, Any], args: list[str]) -> None:
+    """Print compact one-line-per-task summary (id, status, owner, reviewer,
+    last_update). Filterable by --status / --owner / --reviewer / --phase to
+    keep output small. Usage:
+
+      list                              # all tasks
+      list --status in_progress         # only tasks in this status
+      list --owner Codex2 --status todo # combine filters
+    """
+    filters = {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--") and i + 1 < len(args):
+            filters[a[2:]] = args[i + 1].strip()
+            i += 2
+        else:
+            i += 1
+    tasks = state.get("tasks", []) or []
+    rows = []
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        if any(str(t.get(k) or "") != v for k, v in filters.items()):
+            continue
+        rows.append(t)
+    for t in rows:
+        print(
+            "{id:<32s} {status:<16s} owner={owner:<10s} reviewer={reviewer:<10s} {last}".format(
+                id=str(t.get("id") or "")[:32],
+                status=str(t.get("status") or "")[:16],
+                owner=str(t.get("owner") or "-")[:10],
+                reviewer=str(t.get("reviewer") or "-")[:10],
+                last=str(t.get("last_update") or "")[:19],
+            )
+        )
+    if not rows:
+        print("(no matches)")
 
 
 def command_audit(state: dict[str, Any], args: list[str]) -> None:
@@ -1784,6 +2253,8 @@ def main(argv: list[str]) -> int:
     read_only_commands = {
         "audit": command_audit,
         "prompt": command_prompt,
+        "show": command_show,
+        "list": command_list,
     }
 
     commands = {
@@ -1798,6 +2269,7 @@ def main(argv: list[str]) -> int:
         "approve": command_approve,
         "mode": command_mode,
         "sync": command_sync,
+        "reconcile-from-git": command_reconcile_from_git,
     }
 
     if command in read_only_commands:

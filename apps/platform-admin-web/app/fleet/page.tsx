@@ -1,1603 +1,1833 @@
-/**
- * Fleet & Devices Management Page
- * Vehicle registry, driver registry, and contract management.
- */
-
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  actionButtonStyle,
-  emptyStateStyle,
-  fieldLabelStyle,
-  inputStyle,
-  textMutedStyle,
-  toggleButtonStyle,
-  toggleGroupStyle,
-} from "@/components/platform-ui";
-import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import {
-  formatPlatformCodeLabel,
-  getPlatformLabel,
-} from "@/lib/localized-labels";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import type {
-  ReportJobDetailRecord,
-  ReportJobType,
+  CrossAppResourceLink,
   CreateDriverMasterCommand,
+  CreateVehicleContractCommand,
+  DispatchExclusivityRecord,
   DriverDeviceBindingSummary,
   DriverRegistryRecord,
-  InitiateVehicleOffboardingCommand,
-  SubmitExclusivityReviewCommand,
+  EmptyStateEnvelope,
+  EmptyReason,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+  UpdateDriverMasterLifecycleCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import {
-  CalloutBanner,
-  DataViewCard,
-  KpiCard,
-  KpiRow,
-  PageHeader,
-  StatusChip,
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasIcon,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
 } from "@drts/ui-web";
 
-function badgeClassForLifecycle(status: string) {
-  if (status === "active") return "platform-ui-badge--success";
-  if (
-    status === "expired" ||
-    status === "terminated" ||
-    status === "revoked" ||
-    status === "rejected" ||
-    status === "retired" ||
-    status === "suspended"
-  ) {
-    return "platform-ui-badge--warning";
+const REFRESH_TIER: RefreshTier = "medium_slow";
+const REFRESH_INTERVAL_MS = 30_000;
+const OPS_CONSOLE_ORIGIN =
+  process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.replace(/\/$/, "") ?? "";
+
+const theme = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
+
+type TabKey =
+  | "vehicles"
+  | "drivers"
+  | "contracts"
+  | "device_binding"
+  | "exclusivity"
+  | "offboarding";
+
+type ActionContext =
+  | { kind: "page"; tab: TabKey }
+  | { kind: "vehicle"; vehicle: GovernedVehicleRecord }
+  | { kind: "driver"; driver: GovernedDriverRecord }
+  | { kind: "contract"; contract: GovernedContractRecord }
+  | {
+      kind: "binding";
+      driver: GovernedDriverRecord;
+      binding: DriverDeviceBindingSummary;
+    }
+  | { kind: "exclusivity"; exclusivity: GovernedExclusivityRecord }
+  | { kind: "offboarding"; vehicle: GovernedVehicleRecord };
+
+type GovernedVehicleRecord = VehicleRegistryRecord &
+  Record<string, unknown> & {
+    availableActions?: ResourceActionDescriptor[];
+    offboardingAvailableActions?: ResourceActionDescriptor[];
+    opsLink?: CrossAppResourceLink | null;
+  };
+
+type GovernedDriverRecord = DriverRegistryRecord &
+  Record<string, unknown> & {
+    availableActions?: ResourceActionDescriptor[];
+    opsLink?: CrossAppResourceLink | null;
+  };
+
+type GovernedContractRecord = VehicleContractRecord &
+  Record<string, unknown> & {
+    availableActions?: ResourceActionDescriptor[];
+  };
+
+type GovernedExclusivityRecord = DispatchExclusivityRecord &
+  Record<string, unknown> & {
+    availableActions?: ResourceActionDescriptor[];
+  };
+
+type DeviceBindingRow = Record<string, unknown> & {
+  driver: GovernedDriverRecord;
+  binding: DriverDeviceBindingSummary;
+};
+
+type EmptyConfig = {
+  tone: CanvasTone;
+  title: string;
+  description: string;
+};
+
+type FleetListEnvelope<T> = {
+  items?: T[];
+  emptyState?: EmptyStateEnvelope;
+  refreshMetadata?: UiRefreshMetadata;
+};
+
+type FleetTabState<T> = {
+  items: T[];
+  emptyState: EmptyStateEnvelope | null;
+  refreshMetadata: UiRefreshMetadata | null;
+};
+
+const TAB_ORDER: TabKey[] = [
+  "vehicles",
+  "drivers",
+  "contracts",
+  "device_binding",
+  "exclusivity",
+  "offboarding",
+];
+
+const TAB_QUERY_ALIAS: Record<string, TabKey> = {
+  vehicles: "vehicles",
+  drivers: "drivers",
+  contracts: "contracts",
+  device: "device_binding",
+  device_binding: "device_binding",
+  exclusivity: "exclusivity",
+  offboard: "offboarding",
+  offboarding: "offboarding",
+};
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "grid",
+  gap: 16,
+};
+
+const stackedCellStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+};
+
+const primaryCellTextStyle: CSSProperties = {
+  color: theme.text,
+  fontWeight: 600,
+};
+
+const secondaryCellTextStyle: CSSProperties = {
+  color: theme.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.4,
+  whiteSpace: "normal",
+};
+
+const mutedMonoTextStyle: CSSProperties = {
+  ...secondaryCellTextStyle,
+  fontFamily: theme.monoFamily,
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const tabButtonStyle = (selected: boolean): CSSProperties => ({
+  appearance: "none",
+  border: `1px solid ${selected ? theme.accentBorder : theme.border}`,
+  background: selected ? theme.accentBg : theme.surface,
+  color: selected ? theme.accent : theme.text,
+  borderRadius: 999,
+  padding: "8px 12px",
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: selected ? 700 : 500,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+});
+
+const emptyPanelStyle = (tone: CanvasTone): CSSProperties => {
+  const map: Record<CanvasTone, { bg: string; border: string; fg: string }> = {
+    accent: {
+      bg: theme.accentBg,
+      border: theme.accentBorder,
+      fg: theme.accent,
+    },
+    danger: {
+      bg: theme.dangerBg,
+      border: theme.dangerBorder,
+      fg: theme.danger,
+    },
+    info: { bg: theme.infoBg, border: theme.infoBorder, fg: theme.info },
+    neutral: {
+      bg: theme.neutralBg,
+      border: theme.neutralBorder,
+      fg: theme.textMuted,
+    },
+    success: {
+      bg: theme.successBg,
+      border: theme.successBorder,
+      fg: theme.success,
+    },
+    warn: { bg: theme.warnBg, border: theme.warnBorder, fg: theme.warn },
+  };
+  const resolved = map[tone];
+  return {
+    borderRadius: 10,
+    padding: 18,
+    background: resolved.bg,
+    border: `1px dashed ${resolved.border}`,
+    display: "grid",
+    gap: 10,
+    color: resolved.fg,
+  };
+};
+
+const stepperRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 0,
+  alignItems: "center",
+  padding: "6px 0",
+};
+
+function opsHref(route: string) {
+  return OPS_CONSOLE_ORIGIN ? `${OPS_CONSOLE_ORIGIN}${route}` : route;
+}
+
+function resolveCrossAppHref(
+  link: CrossAppResourceLink | null | undefined,
+  fallbackRoute: string,
+) {
+  return link?.route?.trim() ? link.route : opsHref(fallbackRoute);
+}
+
+function formatFreshness(
+  locale: Locale,
+  lastFetchedAt: string | null,
+  loading: boolean,
+  refreshMetadata?: UiRefreshMetadata | null,
+) {
+  if (loading) {
+    return locale === "en" ? "Refreshing..." : "更新中...";
   }
-  return "platform-ui-badge--neutral";
+  if (refreshMetadata) {
+    const prefix =
+      locale === "en"
+        ? `Snapshot ${formatDateTime(refreshMetadata.generatedAt)}`
+        : `快照時間 ${formatDateTime(refreshMetadata.generatedAt)}`;
+    const suffix =
+      refreshMetadata.source === "live"
+        ? locale === "en"
+          ? "live"
+          : "即時"
+        : formatPlatformCodeLabel(locale, refreshMetadata.source);
+    return `${prefix} · ${suffix} · ${formatPlatformCodeLabel(
+      locale,
+      refreshMetadata.dataFreshness,
+    )}`;
+  }
+  if (!lastFetchedAt) {
+    return locale === "en" ? "Awaiting first snapshot" : "等待首個快照";
+  }
+  return locale === "en"
+    ? `Snapshot ${formatDateTime(lastFetchedAt)}`
+    : `快照時間 ${formatDateTime(lastFetchedAt)}`;
 }
 
-function createInitialDriverForm(): CreateDriverMasterCommand {
+function actionLabel(locale: string, action: string) {
+  const en: Record<string, string> = {
+    refresh_tab: "Refresh",
+    create_driver: "Create driver",
+    create_contract: "Create contract",
+    update_vehicle_compliance: "Update compliance",
+    open_ops_vehicle: "ops-console",
+    activate_driver: "Activate",
+    suspend_driver: "Suspend",
+    retire_driver: "Retire",
+    revoke_device_binding: "Revoke binding",
+    approve_exclusivity: "Approve",
+    reject_exclusivity: "Reject",
+    initiate_offboarding: "Initiate",
+    advance_offboarding_step: "Advance",
+    complete_debranding: "Complete debranding",
+    open_ops_driver: "ops-console",
+  };
+  const zh: Record<string, string> = {
+    refresh_tab: "重新整理",
+    create_driver: "新增司機",
+    create_contract: "建立合約",
+    update_vehicle_compliance: "更新合規",
+    open_ops_vehicle: "ops 操作面",
+    activate_driver: "啟用",
+    suspend_driver: "暫停",
+    retire_driver: "退役",
+    revoke_device_binding: "撤銷綁定",
+    approve_exclusivity: "核准",
+    reject_exclusivity: "退回",
+    initiate_offboarding: "啟動 offboarding",
+    advance_offboarding_step: "推進",
+    complete_debranding: "完成除標識",
+    open_ops_driver: "ops 操作面",
+  };
+  return (locale === "en" ? en : zh)[action] ?? action;
+}
+
+function makeAction(
+  action: string,
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+  enabled = true,
+  requiresReason = false,
+  disabledReasonCode?: string,
+): ResourceActionDescriptor {
   return {
-    name: "",
-    phone: "",
-    email: "",
-    licensesValid: false,
-    supportedServiceBuckets: ["standard_taxi"],
+    action,
+    enabled,
+    riskLevel,
+    requiresReason,
+    ...(disabledReasonCode ? { disabledReasonCode } : {}),
   };
 }
 
-function createInitialExclusivityForm(): SubmitExclusivityReviewCommand {
+function normalizeFleetListEnvelope<T>(
+  payload: T[] | FleetListEnvelope<T>,
+): FleetTabState<T> {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload,
+      emptyState: null,
+      refreshMetadata: null,
+    };
+  }
   return {
-    declarationFileId: "",
-    exclusiveProviderName: "",
-    effectiveStart: "",
-    effectiveEnd: "",
+    items: payload.items ?? [],
+    emptyState: payload.emptyState ?? null,
+    refreshMetadata: payload.refreshMetadata ?? null,
   };
 }
 
-function createInitialOffboardingForm(): InitiateVehicleOffboardingCommand {
-  return {
-    reason: "",
-    requestedBy: "",
-    debrandingRequired: true,
-    debrandingDueAt: "",
-    debrandingTicketId: "",
-    notes: "",
-  };
+function refreshTone(
+  refreshMetadata: UiRefreshMetadata | null | undefined,
+  loading: boolean,
+): CanvasTone {
+  if (loading) {
+    return "warn";
+  }
+  switch (refreshMetadata?.dataFreshness) {
+    case "degraded":
+      return "warn";
+    case "stale":
+    case "unknown":
+      return "neutral";
+    case "fresh":
+    default:
+      return "success";
+  }
 }
 
-const FLEET_REPORT_JOB_TYPES = [
-  "vehicle_roster",
-  "driver_roster",
-  "contract_roster",
-] as const satisfies ReportJobType[];
+function emptyStateConfig(locale: string, reason: EmptyReason): EmptyConfig {
+  if (locale === "en") {
+    switch (reason) {
+      case "not_provisioned":
+        return {
+          tone: "warn",
+          title: "Governance lane not provisioned",
+          description:
+            "The tab exists in the sitemap, but the backing lane is not provisioned yet.",
+        };
+      case "fetch_failed":
+        return {
+          tone: "danger",
+          title: "Unable to load this tab",
+          description:
+            "The read failed. Refresh or inspect the upstream dependency.",
+        };
+      case "permission_denied":
+        return {
+          tone: "danger",
+          title: "Permission denied",
+          description:
+            "The current actor can see the shell but is not allowed to read this tab.",
+        };
+      case "external_unavailable":
+        return {
+          tone: "warn",
+          title: "External dependency unavailable",
+          description:
+            "This tab depends on a companion service that is currently unavailable.",
+        };
+      case "filtered_empty":
+        return {
+          tone: "info",
+          title: "No rows match the current focus",
+          description:
+            "Underlying data exists, but the current tab or focus narrows the result to zero rows.",
+        };
+      case "no_data":
+      default:
+        return {
+          tone: "info",
+          title: "Nothing has been recorded yet",
+          description:
+            "This governance lane is ready, but there are no rows to review.",
+        };
+    }
+  }
 
-type FleetReportJobType = (typeof FLEET_REPORT_JOB_TYPES)[number];
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        tone: "warn",
+        title: "治理資料線尚未 provision",
+        description: "sitemap 已保留此 tab，但背後資料線目前尚未配置完成。",
+      };
+    case "fetch_failed":
+      return {
+        tone: "danger",
+        title: "此 tab 載入失敗",
+        description: "讀取失敗，請重新整理或先檢查上游依賴。",
+      };
+    case "permission_denied":
+      return {
+        tone: "danger",
+        title: "目前身分沒有權限",
+        description: "可看頁殼，但沒有這個 tab 的資料讀取權限。",
+      };
+    case "external_unavailable":
+      return {
+        tone: "warn",
+        title: "外部依賴暫時不可用",
+        description: "這個 tab 依賴 companion service 或外部系統，目前不可用。",
+      };
+    case "filtered_empty":
+      return {
+        tone: "info",
+        title: "目前焦點下沒有符合資料",
+        description: "底層資料存在，但目前 tab 或篩選條件將結果收斂成 0 筆。",
+      };
+    case "no_data":
+    default:
+      return {
+        tone: "info",
+        title: "目前尚無資料",
+        description: "治理工作面已就緒，但此刻還沒有需要處理的列。",
+      };
+  }
+}
 
-function sleep(milliseconds: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
-  });
+function deriveOffboardingWorkflowState(vehicle: VehicleRegistryRecord) {
+  const offboarding = vehicle.supplyLifecycle.offboarding;
+  if (offboarding.status === "none") {
+    return "none";
+  }
+  if (offboarding.status === "completed") {
+    return "completed";
+  }
+  if (offboarding.debrandingStatus === "completed") {
+    return "debranding_verified";
+  }
+  if (offboarding.debrandingStatus === "pending") {
+    return "debranding_pending";
+  }
+  if (!vehicle.dispatchableFlag) {
+    return "dispatch_disabled";
+  }
+  return "initiated";
+}
+
+function workflowLabel(locale: string, state: string) {
+  const en: Record<string, string> = {
+    initiated: "initiated",
+    dispatch_disabled: "dispatch_disabled",
+    debranding_pending: "debranding_pending",
+    debranding_verified: "debranding_verified",
+    completed: "completed",
+    none: "none",
+  };
+  const zh: Record<string, string> = {
+    initiated: "已啟動",
+    dispatch_disabled: "已停用派遣",
+    debranding_pending: "等待除標識",
+    debranding_verified: "除標識已驗證",
+    completed: "已完成",
+    none: "未開始",
+  };
+  return (locale === "en" ? en : zh)[state] ?? state;
+}
+
+function actionTone(descriptor: ResourceActionDescriptor): {
+  variant: "primary" | "secondary" | "ghost";
+  danger?: boolean;
+} {
+  if (
+    descriptor.action.startsWith("reject") ||
+    descriptor.action === "suspend_driver"
+  ) {
+    return { variant: "secondary", danger: true };
+  }
+  if (
+    descriptor.riskLevel === "high" &&
+    descriptor.enabled &&
+    !descriptor.action.startsWith("open_ops")
+  ) {
+    return { variant: "primary" };
+  }
+  return { variant: "secondary" };
+}
+
+function renderStackedCell(
+  primary: ReactNode,
+  secondary?: ReactNode,
+  tertiary?: ReactNode,
+) {
+  return (
+    <div style={stackedCellStyle}>
+      <div style={primaryCellTextStyle}>{primary}</div>
+      {secondary ? <div style={secondaryCellTextStyle}>{secondary}</div> : null}
+      {tertiary ? <div style={mutedMonoTextStyle}>{tertiary}</div> : null}
+    </div>
+  );
+}
+
+function openExternal(href: string) {
+  window.open(href, "_blank", "noopener,noreferrer");
 }
 
 export default function FleetPage() {
-  const { t, locale } = useTranslation();
+  const { locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
-  const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
-  const [contracts, setContracts] = useState<VehicleContractRecord[]>([]);
-  const [reportJobs, setReportJobs] = useState<
-    Partial<Record<FleetReportJobType, ReportJobDetailRecord>>
-  >({});
+  const searchParams = useSearchParams();
+  const queryTab = TAB_QUERY_ALIAS[searchParams.get("tab") ?? ""] ?? "vehicles";
+  const previewEmptyReason = searchParams.get(
+    "emptyReason",
+  ) as EmptyReason | null;
+
+  const [activeTab, setActiveTab] = useState<TabKey>(queryTab);
+  const [vehicles, setVehicles] = useState<GovernedVehicleRecord[]>([]);
+  const [drivers, setDrivers] = useState<GovernedDriverRecord[]>([]);
+  const [contracts, setContracts] = useState<GovernedContractRecord[]>([]);
+  const [exclusivities, setExclusivities] = useState<
+    GovernedExclusivityRecord[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<
-    "vehicles" | "drivers" | "contracts"
-  >("vehicles");
-  const [driverForm, setDriverForm] = useState<CreateDriverMasterCommand>(
-    createInitialDriverForm(),
-  );
-  const [creatingDriver, setCreatingDriver] = useState(false);
-  const [driverActionId, setDriverActionId] = useState<string | null>(null);
-  const [bindingActionId, setBindingActionId] = useState<string | null>(null);
-  const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
-  const [reportActionId, setReportActionId] =
-    useState<FleetReportJobType | null>(null);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(
-    null,
-  );
-  const [exclusivityForm, setExclusivityForm] =
-    useState<SubmitExclusivityReviewCommand>(createInitialExclusivityForm());
-  const [offboardingForm, setOffboardingForm] =
-    useState<InitiateVehicleOffboardingCommand>(createInitialOffboardingForm());
+  const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [vehiclesEmptyState, setVehiclesEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [driversEmptyState, setDriversEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [contractsEmptyState, setContractsEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [exclusivitiesEmptyState, setExclusivitiesEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [vehiclesRefreshMetadata, setVehiclesRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [driversRefreshMetadata, setDriversRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [contractsRefreshMetadata, setContractsRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
+  const [exclusivitiesRefreshMetadata, setExclusivitiesRefreshMetadata] =
+    useState<UiRefreshMetadata | null>(null);
 
-  const loadData = useCallback(async () => {
+  useEffect(() => {
+    setActiveTab(queryTab);
+  }, [queryTab]);
+
+  const loadFleet = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [v, d, c] = await Promise.all([
-        client.listVehicles(),
-        client.listDrivers(),
-        client.listContracts(),
-      ]);
-      setVehicles(v || []);
-      setDrivers(d || []);
-      setContracts(c || []);
-      setSelectedVehicleId((current) => {
-        if (
-          current &&
-          (v || []).some((vehicle) => vehicle.vehicleId === current)
-        ) {
-          return current;
-        }
-        return v?.[0]?.vehicleId ?? null;
-      });
-      const jobs = await client.listReportJobs();
-      const latestFleetJobs = await FLEET_REPORT_JOB_TYPES.reduce<
-        Promise<Partial<Record<FleetReportJobType, ReportJobDetailRecord>>>
-      >(async (accumulatorPromise, jobType) => {
-        const accumulator = await accumulatorPromise;
-        const latestJob = jobs.find((job) => job.jobType === jobType);
-        if (!latestJob) {
-          return accumulator;
-        }
-        const detail = await client.getReportJob(latestJob.jobId);
-        accumulator[jobType] = detail;
-        return accumulator;
-      }, Promise.resolve({}));
-      setReportJobs(latestFleetJobs);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+      const [nextVehicles, nextDrivers, nextContracts, nextExclusivities] =
+        await Promise.all([
+          client.get<
+            GovernedVehicleRecord[] | FleetListEnvelope<GovernedVehicleRecord>
+          >("/api/regulatory-registry/vehicles"),
+          client.get<
+            GovernedDriverRecord[] | FleetListEnvelope<GovernedDriverRecord>
+          >("/api/regulatory-registry/drivers"),
+          client.get<
+            GovernedContractRecord[] | FleetListEnvelope<GovernedContractRecord>
+          >("/api/regulatory-registry/contracts"),
+          client.get<
+            | GovernedExclusivityRecord[]
+            | FleetListEnvelope<GovernedExclusivityRecord>
+          >("/api/regulatory-registry/exclusivities"),
+        ]);
+      const vehicleState = normalizeFleetListEnvelope(nextVehicles);
+      const driverState = normalizeFleetListEnvelope(nextDrivers);
+      const contractState = normalizeFleetListEnvelope(nextContracts);
+      const exclusivityState = normalizeFleetListEnvelope(nextExclusivities);
+      setVehicles(vehicleState.items);
+      setDrivers(driverState.items);
+      setContracts(contractState.items);
+      setExclusivities(exclusivityState.items);
+      setVehiclesEmptyState(vehicleState.emptyState);
+      setDriversEmptyState(driverState.emptyState);
+      setContractsEmptyState(contractState.emptyState);
+      setExclusivitiesEmptyState(exclusivityState.emptyState);
+      setVehiclesRefreshMetadata(vehicleState.refreshMetadata);
+      setDriversRefreshMetadata(driverState.refreshMetadata);
+      setContractsRefreshMetadata(contractState.refreshMetadata);
+      setExclusivitiesRefreshMetadata(exclusivityState.refreshMetadata);
+      setLastFetchedAt(new Date().toISOString());
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error ? nextError.message : String(nextError),
+      );
     } finally {
       setLoading(false);
     }
   }, [client]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    void loadFleet();
+    const timer = window.setInterval(() => {
+      void loadFleet();
+    }, REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [loadFleet]);
 
-  const selectedVehicle =
-    vehicles.find((vehicle) => vehicle.vehicleId === selectedVehicleId) ??
-    vehicles[0] ??
-    null;
-  const pendingOffboardingVehicles = vehicles.filter((vehicle) => {
-    const offboardingStatus = vehicle.supplyLifecycle.offboarding.status;
-    return offboardingStatus !== "none" && offboardingStatus !== "completed";
-  });
-  const complianceWarnings = [
-    ...vehicles
-      .filter(
-        (vehicle) =>
-          !vehicle.dispatchableFlag ||
-          vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
-      )
-      .map((vehicle) => ({
-        id: vehicle.vehicleId,
-        message:
+  const updateUrlForTab = useCallback((tab: TabKey) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set(
+      "tab",
+      tab === "device_binding"
+        ? "device"
+        : tab === "offboarding"
+          ? "offboard"
+          : tab,
+    );
+    const url = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState(null, "", url);
+  }, []);
+
+  const runAction = useCallback(
+    async (descriptor: ResourceActionDescriptor, context: ActionContext) => {
+      if (!descriptor.enabled) {
+        if (descriptor.disabledReasonCode) {
+          window.alert(
+            formatPlatformCodeLabel(locale, descriptor.disabledReasonCode),
+          );
+        }
+        return;
+      }
+
+      let reason: string | null = null;
+      if (descriptor.riskLevel !== "low") {
+        const confirmed = window.confirm(
           locale === "en"
-            ? `${vehicle.vehicleId} is not dispatchable until compliance holds are cleared.`
-            : `${vehicle.vehicleId} 仍不可派遣，需先清除合規 hold。`,
-      })),
-    ...drivers
-      .filter(
+            ? `Confirm ${actionLabel(locale, descriptor.action)}?`
+            : `確認執行「${actionLabel(locale, descriptor.action)}」？`,
+        );
+        if (!confirmed) {
+          return;
+        }
+      }
+      if (descriptor.requiresReason) {
+        reason = window.prompt(
+          locale === "en" ? "Reason is required." : "此操作必須填寫原因。",
+        );
+        if (!reason?.trim()) {
+          return;
+        }
+      }
+
+      const key =
+        context.kind === "page"
+          ? `${descriptor.action}:${context.tab}`
+          : context.kind === "vehicle"
+            ? `${descriptor.action}:${context.vehicle.vehicleId}`
+            : context.kind === "driver"
+              ? `${descriptor.action}:${context.driver.driverId}`
+              : context.kind === "contract"
+                ? `${descriptor.action}:${context.contract.contractId}`
+                : context.kind === "binding"
+                  ? `${descriptor.action}:${context.binding.bindingId}`
+                  : context.kind === "exclusivity"
+                    ? `${descriptor.action}:${context.exclusivity.vehicleId}`
+                    : `${descriptor.action}:${context.vehicle.vehicleId}`;
+      setBusyAction(key);
+      setError(null);
+
+      try {
+        switch (descriptor.action) {
+          case "refresh_tab":
+            await loadFleet();
+            break;
+          case "create_driver": {
+            const name = window.prompt(
+              locale === "en" ? "Driver name" : "司機姓名",
+            );
+            if (!name?.trim()) {
+              return;
+            }
+            const command: CreateDriverMasterCommand = {
+              name: name.trim(),
+              supportedServiceBuckets: ["standard_taxi"],
+              licensesValid: true,
+            };
+            await client.createDriverMaster(command);
+            await loadFleet();
+            break;
+          }
+          case "create_contract": {
+            const defaultVehicleId = vehicles[0]?.vehicleId ?? "";
+            const vehicleId = window.prompt(
+              locale === "en" ? "Vehicle ID" : "車輛編號",
+              defaultVehicleId,
+            );
+            if (!vehicleId?.trim()) {
+              return;
+            }
+            const partnerId = window.prompt(
+              locale === "en" ? "Partner ID" : "合作方編號",
+              "partner_demo",
+            );
+            if (!partnerId?.trim()) {
+              return;
+            }
+            const today = new Date().toISOString().slice(0, 10);
+            const command: CreateVehicleContractCommand = {
+              vehicleId: vehicleId.trim(),
+              partnerId: partnerId.trim(),
+              partnerType: "fleet_partner",
+              contractType: "standard",
+              serviceScope: "standard_taxi",
+              startAt: today,
+              endAt: "2026-12-31",
+            };
+            await client.createContract(command);
+            await loadFleet();
+            break;
+          }
+          case "update_vehicle_compliance":
+            if (context.kind !== "vehicle") {
+              return;
+            }
+            await client.updateVehicleCompliance(context.vehicle.vehicleId, {
+              dispatchableFlag: !context.vehicle.dispatchableFlag,
+            });
+            await loadFleet();
+            break;
+          case "activate_driver":
+          case "suspend_driver":
+          case "retire_driver":
+            if (context.kind !== "driver") {
+              return;
+            }
+            await client.updateDriverMasterLifecycle(context.driver.driverId, {
+              lifecycleStatus:
+                descriptor.action === "activate_driver"
+                  ? "active"
+                  : descriptor.action === "suspend_driver"
+                    ? "suspended"
+                    : "retired",
+              reason,
+            } satisfies UpdateDriverMasterLifecycleCommand);
+            await loadFleet();
+            break;
+          case "revoke_device_binding":
+            if (context.kind !== "binding") {
+              return;
+            }
+            await client.revokeDriverDeviceBinding({
+              bindingId: context.binding.bindingId,
+              deviceId: context.binding.deviceId,
+            });
+            await loadFleet();
+            break;
+          case "approve_exclusivity":
+            if (context.kind !== "exclusivity") {
+              return;
+            }
+            await client.approveExclusivity(context.exclusivity.vehicleId, {
+              reviewerId: "platform-admin-web",
+            });
+            await loadFleet();
+            break;
+          case "reject_exclusivity":
+            if (context.kind !== "exclusivity") {
+              return;
+            }
+            await client.rejectExclusivity(context.exclusivity.vehicleId, {
+              reviewerId: "platform-admin-web",
+              reason,
+            });
+            await loadFleet();
+            break;
+          case "initiate_offboarding":
+            if (context.kind !== "offboarding") {
+              return;
+            }
+            await client.initiateVehicleOffboarding(context.vehicle.vehicleId, {
+              reason: reason ?? "governance_offboarding",
+              requestedBy: "platform-admin-web",
+              debrandingRequired: true,
+              debrandingDueAt: new Date(Date.now() + 7 * 86400_000)
+                .toISOString()
+                .slice(0, 10),
+            });
+            await loadFleet();
+            break;
+          case "complete_debranding":
+            if (context.kind !== "offboarding") {
+              return;
+            }
+            await client.completeVehicleDebranding(context.vehicle.vehicleId, {
+              debrandingTicketId:
+                context.vehicle.supplyLifecycle.offboarding
+                  .debrandingTicketId ?? "ticket-confirmed",
+              notes: reason ?? null,
+            });
+            await loadFleet();
+            break;
+          case "open_ops_vehicle":
+            if (context.kind !== "vehicle") {
+              return;
+            }
+            openExternal(
+              resolveCrossAppHref(
+                context.vehicle.opsLink,
+                `/vehicles/${context.vehicle.vehicleId}`,
+              ),
+            );
+            break;
+          case "open_ops_driver":
+            if (context.kind !== "driver") {
+              return;
+            }
+            openExternal(
+              resolveCrossAppHref(
+                context.driver.opsLink,
+                `/drivers/${context.driver.driverId}`,
+              ),
+            );
+            break;
+          default:
+            window.alert(
+              locale === "en"
+                ? "This action is not wired to a mutation endpoint yet."
+                : "此操作尚未接到 mutation endpoint。",
+            );
+        }
+      } catch (nextError) {
+        setError(
+          nextError instanceof Error ? nextError.message : String(nextError),
+        );
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [client, loadFleet, locale, vehicles],
+  );
+
+  const tabLabels: Record<TabKey, string> =
+    locale === "en"
+      ? {
+          vehicles: "Vehicles",
+          drivers: "Drivers",
+          contracts: "Contracts",
+          device_binding: "Device Binding",
+          exclusivity: "Exclusivity Reviews",
+          offboarding: "Offboarding",
+        }
+      : {
+          vehicles: "Vehicles",
+          drivers: "Drivers",
+          contracts: "Contracts",
+          device_binding: "Device Binding",
+          exclusivity: "Exclusivity Reviews",
+          offboarding: "Offboarding",
+        };
+
+  const activeBindings = useMemo<DeviceBindingRow[]>(
+    () =>
+      drivers.flatMap((driver) =>
+        driver.deviceBindings.map((binding: DriverDeviceBindingSummary) => ({
+          driver,
+          binding,
+        })),
+      ),
+    [drivers],
+  );
+
+  const offboardingVehicles = useMemo(
+    () =>
+      vehicles.filter(
+        (vehicle) => vehicle.supplyLifecycle.offboarding.status !== "none",
+      ),
+    [vehicles],
+  );
+
+  const blockedDrivers = useMemo(
+    () =>
+      drivers.filter(
         (driver) =>
           !driver.dispatchEligible ||
           driver.eligibilityBlockedReasons.length > 0,
-      )
-      .map((driver) => ({
-        id: driver.driverId,
-        message:
-          locale === "en"
-            ? `${driver.driverId} is blocked from dispatch eligibility review.`
-            : `${driver.driverId} 目前被阻擋，需完成派遣資格審查。`,
-      })),
-  ].slice(0, 5);
-  const fleetWorkflowCopy =
-    locale === "en"
-      ? {
-          summaryTitle: "Compliance workflow",
-          summaryNote:
-            "Drivers, vehicles, contracts, exclusivity, and offboarding stay visible in one governance lane so operators can clear dispatch blockers before publication or payout windows.",
-          blockedVehicles: "Blocked vehicles",
-          blockedDrivers: "Blocked drivers",
-          pendingExclusivity: "Pending exclusivity",
-          pendingOffboarding: "Pending offboarding",
-          exportVehicles: "Export vehicles",
-          exportDrivers: "Export drivers",
-          exportContracts: "Export contracts",
-          exportHint:
-            "Exports create governed report jobs and only download server-signed artifacts.",
-          exportIdle: "No governed artifact generated yet.",
-          exportPending: "Preparing governed export…",
-          exportReady: "Latest artifact ready",
-          exportOpen: "Open signed download",
-          warningTitle: "Immediate warnings",
-        }
-      : {
-          summaryTitle: "合規流程總覽",
-          summaryNote:
-            "把司機、車輛、合約、獨家供應與下線流程放在同一條治理視角，方便先清掉 dispatch blocker，再進入發布或結算窗口。",
-          blockedVehicles: "受阻車輛",
-          blockedDrivers: "受阻司機",
-          pendingExclusivity: "待審獨家供應",
-          pendingOffboarding: "待完成下線",
-          exportVehicles: "匯出車輛",
-          exportDrivers: "匯出司機",
-          exportContracts: "匯出合約",
-          exportHint:
-            "匯出會建立受治理的 report job，只透過伺服器簽發的 artifact URL 下載。",
-          exportIdle: "尚未建立受治理 artifact。",
-          exportPending: "正在準備受治理匯出…",
-          exportReady: "最新 artifact 已就緒",
-          exportOpen: "開啟簽名下載",
-          warningTitle: "即時警示",
-        };
-
-  const requestFleetReport = useCallback(
-    async (jobType: FleetReportJobType) => {
-      setReportActionId(jobType);
-      setError(null);
-      try {
-        const accepted = await client.createReportJob({
-          jobType,
-          format: "xlsx",
-        });
-        let detail: ReportJobDetailRecord | null = null;
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-          detail = await client.getReportJob(accepted.jobId);
-          if (detail?.artifact?.downloadMetadata.downloadUrl) {
-            break;
-          }
-          await sleep(150);
-        }
-        if (!detail) {
-          throw new Error("Unable to load report job detail.");
-        }
-        setReportJobs((current) => ({
-          ...current,
-          [jobType]: detail,
-        }));
-        if (detail.artifact?.downloadMetadata.downloadUrl) {
-          window.open(
-            detail.artifact.downloadMetadata.downloadUrl,
-            "_blank",
-            "noopener,noreferrer",
-          );
-        }
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setReportActionId(null);
-      }
-    },
-    [client],
+      ),
+    [drivers],
   );
 
-  useEffect(() => {
-    if (!selectedVehicle) {
-      return;
+  const tabCounts: Record<TabKey, number> = {
+    vehicles: vehicles.length,
+    drivers: drivers.length,
+    contracts: contracts.length,
+    device_binding: activeBindings.length,
+    exclusivity: exclusivities.length,
+    offboarding: offboardingVehicles.length,
+  };
+
+  const pageActions = useMemo<Record<TabKey, ResourceActionDescriptor[]>>(
+    () => ({
+      vehicles: [makeAction("refresh_tab", "low")],
+      drivers: [
+        makeAction("create_driver", "medium"),
+        makeAction("refresh_tab", "low"),
+      ],
+      contracts: [
+        makeAction("create_contract", "medium"),
+        makeAction("refresh_tab", "low"),
+      ],
+      device_binding: [makeAction("refresh_tab", "low")],
+      exclusivity: [makeAction("refresh_tab", "low")],
+      offboarding: [
+        makeAction("initiate_offboarding", "high", true, true),
+        makeAction(
+          "advance_offboarding_step",
+          "medium",
+          false,
+          false,
+          "not_provisioned",
+        ),
+        makeAction("refresh_tab", "low"),
+      ],
+    }),
+    [],
+  );
+
+  const activeRefreshMetadata = useMemo(() => {
+    switch (activeTab) {
+      case "vehicles":
+      case "offboarding":
+        return vehiclesRefreshMetadata;
+      case "drivers":
+      case "device_binding":
+        return driversRefreshMetadata;
+      case "contracts":
+        return contractsRefreshMetadata;
+      case "exclusivity":
+        return exclusivitiesRefreshMetadata;
+      default:
+        return null;
     }
-    setExclusivityForm({
-      declarationFileId:
-        selectedVehicle.supplyLifecycle.exclusivity.declarationFileId ?? "",
-      exclusiveProviderName:
-        selectedVehicle.supplyLifecycle.exclusivity.providerName ?? "",
-      effectiveStart:
-        selectedVehicle.supplyLifecycle.exclusivity.effectiveStart ?? "",
-      effectiveEnd:
-        selectedVehicle.supplyLifecycle.exclusivity.effectiveEnd ?? "",
-    });
-    setOffboardingForm({
-      reason: selectedVehicle.supplyLifecycle.offboarding.reason ?? "",
-      requestedBy:
-        selectedVehicle.supplyLifecycle.offboarding.requestedBy ?? "",
-      effectiveAt:
-        selectedVehicle.supplyLifecycle.offboarding.effectiveAt ?? "",
-      debrandingRequired:
-        selectedVehicle.supplyLifecycle.offboarding.debrandingRequired,
-      debrandingDueAt:
-        selectedVehicle.supplyLifecycle.offboarding.debrandingDueAt ?? "",
-      debrandingTicketId:
-        selectedVehicle.supplyLifecycle.offboarding.debrandingTicketId ?? "",
-      notes: selectedVehicle.supplyLifecycle.offboarding.notes ?? "",
-    });
-  }, [selectedVehicle]);
+  }, [
+    activeTab,
+    contractsRefreshMetadata,
+    driversRefreshMetadata,
+    exclusivitiesRefreshMetadata,
+    vehiclesRefreshMetadata,
+  ]);
 
-  const submitDriver = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      setCreatingDriver(true);
-      setError(null);
-      try {
-        await client.createDriverMaster({
-          ...driverForm,
-          name: driverForm.name.trim(),
-          phone: driverForm.phone?.trim() || null,
-          email: driverForm.email?.trim() || null,
-        });
-        setDriverForm(createInitialDriverForm());
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setCreatingDriver(false);
+  const envelopeEmptyReason = useMemo<EmptyReason | null>(() => {
+    switch (activeTab) {
+      case "vehicles":
+      case "offboarding":
+        return vehiclesEmptyState?.reason ?? null;
+      case "drivers":
+      case "device_binding":
+        return driversEmptyState?.reason ?? null;
+      case "contracts":
+        return contractsEmptyState?.reason ?? null;
+      case "exclusivity":
+        return exclusivitiesEmptyState?.reason ?? null;
+      default:
+        return null;
+    }
+  }, [
+    activeTab,
+    contractsEmptyState,
+    driversEmptyState,
+    exclusivitiesEmptyState,
+    vehiclesEmptyState,
+  ]);
+
+  const activeEmptyReason =
+    previewEmptyReason ||
+    envelopeEmptyReason ||
+    (error ? "fetch_failed" : tabCounts[activeTab] === 0 ? "no_data" : null);
+
+  const activePageActions = pageActions[activeTab];
+  const emptyConfig = activeEmptyReason
+    ? emptyStateConfig(locale, activeEmptyReason)
+    : null;
+
+  const renderActionButtons = useCallback(
+    (actions: ResourceActionDescriptor[], context: ActionContext) => {
+      if (actions.length === 0) {
+        return (
+          <CanvasPill theme={theme} tone="neutral">
+            {locale === "en" ? "Read-only" : "唯讀"}
+          </CanvasPill>
+        );
       }
-    },
-    [client, driverForm, loadData],
-  );
-
-  const runDriverLifecycleAction = useCallback(
-    async (
-      driverId: string,
-      lifecycleStatus: DriverRegistryRecord["lifecycleStatus"],
-    ) => {
-      setDriverActionId(`${driverId}:${lifecycleStatus}`);
-      setError(null);
-      try {
-        await client.updateDriverMasterLifecycle(driverId, {
-          lifecycleStatus,
-        });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setDriverActionId(null);
-      }
-    },
-    [client, loadData],
-  );
-
-  const revokeDriverDeviceBinding = useCallback(
-    async (driverId: string, binding: DriverDeviceBindingSummary) => {
-      setBindingActionId(binding.bindingId);
-      setError(null);
-      try {
-        await client.revokeDriverDeviceBinding({
-          bindingId: binding.bindingId,
-          deviceId: binding.deviceId,
-        });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setBindingActionId(null);
-      }
-    },
-    [client, loadData],
-  );
-
-  const setVehicleDispatchable = useCallback(
-    async (vehicleId: string, dispatchableFlag: boolean) => {
-      setVehicleActionId(`${vehicleId}:dispatch:${dispatchableFlag}`);
-      setError(null);
-      try {
-        await client.updateVehicleCompliance(vehicleId, { dispatchableFlag });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setVehicleActionId(null);
-      }
-    },
-    [client, loadData],
-  );
-
-  const submitVehicleExclusivity = useCallback(
-    async (vehicleId: string) => {
-      setVehicleActionId(`${vehicleId}:exclusivity:submit`);
-      setError(null);
-      try {
-        await client.submitExclusivityReview(vehicleId, {
-          declarationFileId: exclusivityForm.declarationFileId?.trim() || null,
-          exclusiveProviderName:
-            exclusivityForm.exclusiveProviderName?.trim() || null,
-          effectiveStart: exclusivityForm.effectiveStart?.trim() || null,
-          effectiveEnd: exclusivityForm.effectiveEnd?.trim() || null,
-        });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setVehicleActionId(null);
-      }
-    },
-    [client, exclusivityForm, loadData],
-  );
-
-  const approveVehicleExclusivity = useCallback(
-    async (vehicleId: string) => {
-      setVehicleActionId(`${vehicleId}:exclusivity:approve`);
-      setError(null);
-      try {
-        await client.approveExclusivity(vehicleId, {
-          reviewerId: "platform-admin-web",
-        });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setVehicleActionId(null);
-      }
-    },
-    [client, loadData],
-  );
-
-  const rejectVehicleExclusivity = useCallback(
-    async (vehicleId: string) => {
-      setVehicleActionId(`${vehicleId}:exclusivity:reject`);
-      setError(null);
-      try {
-        await client.rejectExclusivity(vehicleId, {
-          reviewerId: "platform-admin-web",
-          reason: "Rejected from fleet admin review console.",
-        });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setVehicleActionId(null);
-      }
-    },
-    [client, loadData],
-  );
-
-  const startVehicleOffboarding = useCallback(
-    async (vehicleId: string) => {
-      setVehicleActionId(`${vehicleId}:offboarding:start`);
-      setError(null);
-      try {
-        await client.initiateVehicleOffboarding(vehicleId, {
-          reason: offboardingForm.reason.trim(),
-          requestedBy: offboardingForm.requestedBy?.trim() || null,
-          effectiveAt: offboardingForm.effectiveAt?.trim() || null,
-          debrandingRequired: offboardingForm.debrandingRequired ?? true,
-          debrandingDueAt: offboardingForm.debrandingDueAt?.trim() || null,
-          debrandingTicketId:
-            offboardingForm.debrandingTicketId?.trim() || null,
-          notes: offboardingForm.notes?.trim() || null,
-        });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setVehicleActionId(null);
-      }
-    },
-    [client, loadData, offboardingForm],
-  );
-
-  const completeVehicleDebranding = useCallback(
-    async (vehicleId: string) => {
-      setVehicleActionId(`${vehicleId}:offboarding:complete`);
-      setError(null);
-      try {
-        await client.completeVehicleDebranding(vehicleId, {
-          debrandingTicketId:
-            offboardingForm.debrandingTicketId?.trim() || null,
-          notes: offboardingForm.notes?.trim() || null,
-        });
-        await loadData();
-      } catch (e: any) {
-        setError(e?.message || String(e));
-      } finally {
-        setVehicleActionId(null);
-      }
-    },
-    [client, loadData, offboardingForm],
-  );
-
-  if (loading) {
-    return <div style={emptyStateStyle}>{t("fleet.loading")}</div>;
-  }
-
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader
-        eyebrow={locale === "en" ? "Fleet Governance" : "車隊治理"}
-        title={t("fleet.title")}
-        subtitle={t("fleet.subtitle", {
-          vehicles: vehicles.length,
-          drivers: drivers.length,
-          contracts: contracts.length,
-        })}
-        actions={
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {(
-              [
-                ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
-                ["driver_roster", fleetWorkflowCopy.exportDrivers],
-                ["contract_roster", fleetWorkflowCopy.exportContracts],
-              ] as const
-            ).map(([jobType, label]) => (
-              <button
-                key={jobType}
-                type="button"
-                style={actionButtonStyle({ tone: "secondary" })}
-                disabled={reportActionId === jobType}
-                onClick={() => void requestFleetReport(jobType)}
-              >
-                {reportActionId === jobType
-                  ? fleetWorkflowCopy.exportPending
-                  : label}
-              </button>
-            ))}
-            <button
-              type="button"
-              style={actionButtonStyle({ tone: "secondary" })}
-              onClick={() => void loadData()}
-            >
-              {t("common.refresh")}
-            </button>
-          </div>
-        }
-      />
-
-      {error && (
-        <CalloutBanner
-          tone="danger"
-          title={getPlatformLabel(locale, "error")}
-          description={error}
-        />
-      )}
-
-      <CalloutBanner
-        tone="warning"
-        eyebrow={fleetWorkflowCopy.summaryTitle}
-        title={
-          locale === "en"
-            ? "Drivers, vehicles, contracts, and offboarding blockers stay visible in one governance lane."
-            : "司機、車輛、合約與下線阻塞集中在同一條治理路徑。"
-        }
-        description={fleetWorkflowCopy.summaryNote}
-        meta={
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <StatusChip
-              tone="warning"
-              label={`${fleetWorkflowCopy.blockedVehicles} · ${
-                vehicles.filter(
-                  (vehicle) =>
-                    !vehicle.dispatchableFlag ||
-                    vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
-                ).length
-              }`}
-            />
-            <StatusChip
-              tone="danger"
-              label={`${fleetWorkflowCopy.pendingOffboarding} · ${pendingOffboardingVehicles.length}`}
-            />
-            <StatusChip
-              tone="info"
-              label={`${fleetWorkflowCopy.pendingExclusivity} · ${
-                vehicles.filter(
-                  (vehicle) =>
-                    vehicle.supplyLifecycle.exclusivity.reviewStatus ===
-                    "pending",
-                ).length
-              }`}
-            />
-          </div>
-        }
-      />
-
-      <KpiRow minWidth="220px">
-        {[
-          {
-            label: fleetWorkflowCopy.blockedVehicles,
-            value: vehicles.filter(
-              (vehicle) =>
-                !vehicle.dispatchableFlag ||
-                vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
-            ).length,
-          },
-          {
-            label: fleetWorkflowCopy.blockedDrivers,
-            value: drivers.filter(
-              (driver) =>
-                !driver.dispatchEligible ||
-                driver.eligibilityBlockedReasons.length > 0,
-            ).length,
-          },
-          {
-            label: fleetWorkflowCopy.pendingExclusivity,
-            value: vehicles.filter(
-              (vehicle) =>
-                vehicle.supplyLifecycle.exclusivity.reviewStatus === "pending",
-            ).length,
-          },
-          {
-            label: fleetWorkflowCopy.pendingOffboarding,
-            value: pendingOffboardingVehicles.length,
-          },
-        ].map((card) => (
-          <KpiCard
-            key={card.label}
-            label={card.label}
-            value={card.value}
-            tone={
-              card.label === fleetWorkflowCopy.pendingExclusivity
-                ? "info"
-                : card.label === fleetWorkflowCopy.pendingOffboarding
-                  ? "danger"
-                  : "warning"
-            }
-          />
-        ))}
-      </KpiRow>
-
-      {complianceWarnings.length > 0 && (
-        <CalloutBanner
-          tone="warning"
-          title={fleetWorkflowCopy.warningTitle}
-          description={
-            <div style={{ display: "grid", gap: 6 }}>
-              {complianceWarnings.map((warning) => (
-                <div key={warning.id} style={{ fontSize: 13 }}>
-                  {warning.message}
-                </div>
-              ))}
-            </div>
-          }
-        />
-      )}
-
-      <DataViewCard
-        title={locale === "en" ? "Operational focus" : "操作焦點"}
-        subtitle={fleetWorkflowCopy.exportHint}
-        filters={
-          <div style={toggleGroupStyle}>
-            <button
-              type="button"
-              style={toggleButtonStyle(activeTab === "vehicles")}
-              onClick={() => setActiveTab("vehicles")}
-            >
-              {t("fleet.tab.vehicles")} ({vehicles.length})
-            </button>
-            <button
-              type="button"
-              style={toggleButtonStyle(activeTab === "drivers")}
-              onClick={() => setActiveTab("drivers")}
-            >
-              {t("fleet.tab.drivers")} ({drivers.length})
-            </button>
-            <button
-              type="button"
-              style={toggleButtonStyle(activeTab === "contracts")}
-              onClick={() => setActiveTab("contracts")}
-            >
-              {t("fleet.tab.contracts")} ({contracts.length})
-            </button>
-          </div>
-        }
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {(
-            [
-              ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
-              ["driver_roster", fleetWorkflowCopy.exportDrivers],
-              ["contract_roster", fleetWorkflowCopy.exportContracts],
-            ] as const
-          ).map(([jobType, label]) => {
-            const reportJob = reportJobs[jobType];
+      return (
+        <div style={actionRowStyle}>
+          {actions.map((descriptor, index) => {
+            const resolved = actionTone(descriptor);
+            const keyBase =
+              context.kind === "page"
+                ? context.tab
+                : context.kind === "vehicle"
+                  ? context.vehicle.vehicleId
+                  : context.kind === "driver"
+                    ? context.driver.driverId
+                    : context.kind === "contract"
+                      ? context.contract.contractId
+                      : context.kind === "binding"
+                        ? context.binding.bindingId
+                        : context.kind === "exclusivity"
+                          ? context.exclusivity.vehicleId
+                          : context.vehicle.vehicleId;
+            const busy = busyAction === `${descriptor.action}:${keyBase}`;
+            const title = descriptor.enabled
+              ? undefined
+              : descriptor.disabledReasonCode
+                ? formatPlatformCodeLabel(locale, descriptor.disabledReasonCode)
+                : locale === "en"
+                  ? "Unavailable"
+                  : "目前不可用";
             return (
-              <div
-                key={`${jobType}:artifact`}
-                style={{
-                  border: "1px solid rgba(148,163,184,0.35)",
-                  borderRadius: 14,
-                  padding: 12,
-                  background: "rgba(255,255,255,0.78)",
-                  display: "grid",
-                  gap: 8,
-                }}
-              >
-                <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
-                <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-                  {reportJob?.artifact
-                    ? `${fleetWorkflowCopy.exportReady} · ${formatDateTime(reportJob.artifact.expiresAt)}`
-                    : reportActionId === jobType
-                      ? fleetWorkflowCopy.exportPending
-                      : fleetWorkflowCopy.exportIdle}
-                </p>
-                {reportJob?.artifact ? (
-                  <a
-                    href={reportJob.artifact.downloadMetadata.downloadUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                    style={actionButtonStyle({ tone: "secondary" })}
-                  >
-                    {fleetWorkflowCopy.exportOpen}
-                  </a>
-                ) : null}
-              </div>
+              <span key={`${descriptor.action}-${index}`} title={title}>
+                <CanvasBtn
+                  theme={theme}
+                  size="xs"
+                  variant={resolved.variant}
+                  {...(resolved.danger !== undefined
+                    ? { danger: resolved.danger }
+                    : {})}
+                  disabled={!descriptor.enabled || busy}
+                  onClick={() => void runAction(descriptor, context)}
+                >
+                  {busy
+                    ? locale === "en"
+                      ? "Working..."
+                      : "處理中..."
+                    : actionLabel(locale, descriptor.action)}
+                </CanvasBtn>
+              </span>
             );
           })}
         </div>
-      </DataViewCard>
+      );
+    },
+    [busyAction, locale, runAction],
+  );
 
-      {activeTab === "drivers" && (
-        <div className="platform-ui-card" style={{ marginBottom: 16 }}>
-          <form
-            onSubmit={submitDriver}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: 12,
-              alignItems: "end",
-            }}
+  const vehicleColumns = useMemo<CanvasTableColumn<GovernedVehicleRecord>[]>(
+    () => [
+      {
+        h: locale === "en" ? "Plate" : "車牌",
+        w: 124,
+        r: (row) =>
+          renderStackedCell(
+            row.plateNo,
+            row.vehicleId,
+            row.supplyLifecycle.lastTrace?.occurredAt
+              ? formatDateTime(row.supplyLifecycle.lastTrace.occurredAt)
+              : row.updatedAt,
+          ),
+      },
+      {
+        h: locale === "en" ? "Coverage" : "營運範圍",
+        w: 210,
+        r: (row) =>
+          renderStackedCell(
+            row.operatingArea,
+            row.supportedServiceBuckets.join(" · "),
+            row.supplyLifecycle.contract.contractId ?? "—",
+          ),
+      },
+      {
+        h: locale === "en" ? "Compliance" : "合規",
+        w: 180,
+        r: (row) => (
+          <div style={stackedCellStyle}>
+            <CanvasPill
+              theme={theme}
+              tone={row.insuranceStatus === "valid" ? "success" : "danger"}
+              dot
+            >
+              {formatPlatformCodeLabel(locale, row.insuranceStatus)}
+            </CanvasPill>
+            <CanvasPill
+              theme={theme}
+              tone={row.exclusivityApproved ? "success" : "warn"}
+              dot
+            >
+              {row.exclusivityApproved
+                ? locale === "en"
+                  ? "exclusivity approved"
+                  : "排他已核准"
+                : locale === "en"
+                  ? "exclusivity pending"
+                  : "排他待審"}
+            </CanvasPill>
+          </div>
+        ),
+      },
+      {
+        h: locale === "en" ? "Dispatchable" : "派遣資格",
+        w: 220,
+        r: (row) =>
+          renderStackedCell(
+            <CanvasPill
+              theme={theme}
+              tone={row.dispatchableFlag ? "success" : "danger"}
+              dot
+            >
+              {row.dispatchableFlag
+                ? locale === "en"
+                  ? "dispatchable"
+                  : "可派遣"
+                : locale === "en"
+                  ? "blocked"
+                  : "已阻擋"}
+            </CanvasPill>,
+            row.supplyLifecycle.dispatch.blockedReasons.length
+              ? row.supplyLifecycle.dispatch.blockedReasons
+                  .map((item: string) => formatPlatformCodeLabel(locale, item))
+                  .join(" · ")
+              : locale === "en"
+                ? "No active dispatch blocks"
+                : "目前沒有阻擋原因",
+            row.supplyLifecycle.insurance.endAt ?? "—",
+          ),
+      },
+      {
+        h: locale === "en" ? "Actions" : "操作",
+        w: 210,
+        r: (row) =>
+          renderActionButtons(
+            row.availableActions ?? [
+              makeAction("update_vehicle_compliance", "medium"),
+              makeAction("open_ops_vehicle", "low"),
+            ],
+            { kind: "vehicle", vehicle: row },
+          ),
+      },
+    ],
+    [locale, renderActionButtons],
+  );
+
+  const driverColumns = useMemo<CanvasTableColumn<GovernedDriverRecord>[]>(
+    () => [
+      {
+        h: locale === "en" ? "Driver" : "司機",
+        w: 210,
+        r: (row) =>
+          renderStackedCell(
+            row.name,
+            row.driverId,
+            row.deviceBindings[0]?.deviceId ?? "—",
+          ),
+      },
+      {
+        h: locale === "en" ? "License" : "執照",
+        w: 140,
+        r: (row) => (
+          <CanvasPill
+            theme={theme}
+            tone={row.licensesValid ? "success" : "warn"}
+            dot
           >
-            <label>
-              <div style={fieldLabelStyle}>{t("fleet.col.name")}</div>
-              <input
-                style={inputStyle}
-                value={driverForm.name}
-                onChange={(event) =>
-                  setDriverForm((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-                required
-              />
-            </label>
-            <label>
-              <div style={fieldLabelStyle}>{t("fleet.form.phone")}</div>
-              <input
-                style={inputStyle}
-                value={driverForm.phone ?? ""}
-                onChange={(event) =>
-                  setDriverForm((current) => ({
-                    ...current,
-                    phone: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              <div style={fieldLabelStyle}>{t("fleet.form.email")}</div>
-              <input
-                style={inputStyle}
-                value={driverForm.email ?? ""}
-                onChange={(event) =>
-                  setDriverForm((current) => ({
-                    ...current,
-                    email: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                minHeight: 40,
-              }}
+            {row.licensesValid
+              ? locale === "en"
+                ? "valid"
+                : "有效"
+              : locale === "en"
+                ? "warning"
+                : "需處理"}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: locale === "en" ? "Dispatch readiness" : "派遣狀態",
+        w: 220,
+        r: (row) =>
+          renderStackedCell(
+            <CanvasPill
+              theme={theme}
+              tone={row.dispatchEligible ? "success" : "warn"}
+              dot
             >
-              <input
-                type="checkbox"
-                checked={driverForm.licensesValid ?? false}
-                onChange={(event) =>
-                  setDriverForm((current) => ({
-                    ...current,
-                    licensesValid: event.target.checked,
-                  }))
-                }
-              />
-              <span>{t("fleet.form.licensesValid")}</span>
-            </label>
-            <button
-              className="platform-ui-btn"
-              type="submit"
-              disabled={creatingDriver}
+              {formatPlatformCodeLabel(locale, row.lifecycleStatus)}
+            </CanvasPill>,
+            row.supportedServiceBuckets.join(" · "),
+            row.eligibilityBlockedReasons.length
+              ? row.eligibilityBlockedReasons
+                  .map((item: string) => formatPlatformCodeLabel(locale, item))
+                  .join(" · ")
+              : locale === "en"
+                ? "Ready for dispatch"
+                : "可派遣",
+          ),
+      },
+      {
+        h: locale === "en" ? "Binding" : "裝置綁定",
+        w: 180,
+        r: (row) =>
+          renderStackedCell(
+            row.deviceBindings[0]?.deviceLabel ??
+              row.deviceBindings[0]?.deviceId ??
+              "—",
+            row.deviceBindings[0]
+              ? formatPlatformCodeLabel(locale, row.deviceBindings[0].status)
+              : locale === "en"
+                ? "No active device"
+                : "目前沒有裝置",
+            row.updatedAt,
+          ),
+      },
+      {
+        h: locale === "en" ? "Actions" : "操作",
+        w: 280,
+        r: (row) =>
+          renderActionButtons(
+            row.availableActions ?? [
+              makeAction(
+                "activate_driver",
+                "medium",
+                row.lifecycleStatus !== "active",
+              ),
+              makeAction(
+                "suspend_driver",
+                "high",
+                row.lifecycleStatus === "active",
+                true,
+              ),
+              makeAction(
+                "retire_driver",
+                "high",
+                row.lifecycleStatus !== "retired",
+                true,
+              ),
+              makeAction("open_ops_driver", "low"),
+            ],
+            { kind: "driver", driver: row },
+          ),
+      },
+    ],
+    [locale, renderActionButtons],
+  );
+
+  const contractColumns = useMemo<CanvasTableColumn<GovernedContractRecord>[]>(
+    () => [
+      {
+        h: locale === "en" ? "Contract" : "合約",
+        w: 140,
+        r: (row) =>
+          renderStackedCell(row.contractId, row.contractType, row.status),
+      },
+      {
+        h: locale === "en" ? "Counterparty" : "合作方",
+        w: 220,
+        r: (row) =>
+          renderStackedCell(row.partnerId, row.partnerType, row.serviceScope),
+      },
+      {
+        h: locale === "en" ? "Vehicle" : "車輛",
+        w: 120,
+        k: "vehicleId",
+        mono: true,
+      },
+      {
+        h: locale === "en" ? "Term" : "有效期間",
+        w: 220,
+        r: (row) =>
+          renderStackedCell(
+            `${row.startAt} → ${row.endAt}`,
+            row.lifecycleStatus,
+          ),
+      },
+      {
+        h: locale === "en" ? "Actions" : "操作",
+        w: 140,
+        r: (row) =>
+          renderActionButtons(
+            row.availableActions ?? [makeAction("refresh_tab", "low")],
+            { kind: "contract", contract: row },
+          ),
+      },
+    ],
+    [locale, renderActionButtons],
+  );
+
+  const bindingColumns = useMemo<CanvasTableColumn<DeviceBindingRow>[]>(
+    () => [
+      {
+        h: locale === "en" ? "Driver" : "司機",
+        w: 220,
+        r: (row) =>
+          renderStackedCell(
+            row.driver.name,
+            row.driver.driverId,
+            row.driver.lifecycleStatus,
+          ),
+      },
+      {
+        h: locale === "en" ? "Device" : "裝置",
+        w: 240,
+        r: (row) =>
+          renderStackedCell(
+            row.binding.deviceId,
+            row.binding.deviceLabel ?? "—",
+            row.binding.issuedAt,
+          ),
+      },
+      {
+        h: locale === "en" ? "State" : "狀態",
+        w: 120,
+        r: (row) => (
+          <CanvasPill
+            theme={theme}
+            tone={row.binding.status === "active" ? "success" : "neutral"}
+            dot
+          >
+            {formatPlatformCodeLabel(locale, row.binding.status)}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: locale === "en" ? "Last seen" : "最後更新",
+        w: 150,
+        r: (row) => formatDateTime(row.binding.refreshedAt),
+      },
+      {
+        h: locale === "en" ? "Actions" : "操作",
+        w: 140,
+        r: (row) =>
+          renderActionButtons(
+            [
+              makeAction(
+                "revoke_device_binding",
+                "high",
+                row.binding.status === "active",
+                true,
+              ),
+            ],
+            { kind: "binding", driver: row.driver, binding: row.binding },
+          ),
+      },
+    ],
+    [locale, renderActionButtons],
+  );
+
+  const exclusivityColumns = useMemo<
+    CanvasTableColumn<GovernedExclusivityRecord>[]
+  >(
+    () => [
+      {
+        h: locale === "en" ? "Review" : "審核",
+        w: 130,
+        r: (row) =>
+          renderStackedCell(
+            row.vehicleId,
+            row.declarationStatus,
+            row.updatedAt,
+          ),
+      },
+      {
+        h: locale === "en" ? "Provider" : "排他對象",
+        w: 210,
+        r: (row) =>
+          renderStackedCell(
+            row.exclusiveProviderName ?? "—",
+            `${row.effectiveStart ?? "—"} → ${row.effectiveEnd ?? "—"}`,
+            row.reviewerId ?? "—",
+          ),
+      },
+      {
+        h: locale === "en" ? "State" : "狀態",
+        w: 160,
+        r: (row) => (
+          <CanvasPill
+            theme={theme}
+            tone={
+              row.reviewStatus === "approved"
+                ? "success"
+                : row.reviewStatus === "rejected"
+                  ? "danger"
+                  : row.reviewStatus === "pending"
+                    ? "warn"
+                    : "info"
+            }
+            dot
+          >
+            {formatPlatformCodeLabel(locale, row.reviewStatus)}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: locale === "en" ? "Actions" : "操作",
+        w: 220,
+        r: (row) =>
+          renderActionButtons(
+            row.availableActions ?? [
+              makeAction(
+                "approve_exclusivity",
+                "high",
+                ["draft", "pending"].includes(row.reviewStatus),
+                true,
+              ),
+              makeAction(
+                "reject_exclusivity",
+                "high",
+                ["draft", "pending"].includes(row.reviewStatus),
+                true,
+              ),
+            ],
+            { kind: "exclusivity", exclusivity: row },
+          ),
+      },
+    ],
+    [locale, renderActionButtons],
+  );
+
+  const offboardingColumns = useMemo<
+    CanvasTableColumn<GovernedVehicleRecord>[]
+  >(
+    () => [
+      {
+        h: locale === "en" ? "Vehicle" : "車輛",
+        w: 140,
+        r: (row) =>
+          renderStackedCell(row.plateNo, row.vehicleId, row.operatingArea),
+      },
+      {
+        h: locale === "en" ? "Current state" : "目前狀態",
+        w: 180,
+        r: (row) => {
+          const state = deriveOffboardingWorkflowState(row);
+          return (
+            <CanvasPill
+              theme={theme}
+              tone={
+                state === "completed"
+                  ? "success"
+                  : state === "debranding_pending"
+                    ? "warn"
+                    : "info"
+              }
+              dot
             >
-              {creatingDriver
-                ? t("fleet.creatingDriver")
-                : t("fleet.createDriver")}
-            </button>
-          </form>
-        </div>
-      )}
+              {workflowLabel(locale, state)}
+            </CanvasPill>
+          );
+        },
+      },
+      {
+        h: locale === "en" ? "Evidence" : "證據 / 工單",
+        w: 220,
+        r: (row) =>
+          renderStackedCell(
+            row.supplyLifecycle.offboarding.debrandingTicketId ?? "—",
+            row.supplyLifecycle.offboarding.reason ?? "—",
+            row.supplyLifecycle.offboarding.debrandingDueAt ?? "—",
+          ),
+      },
+      {
+        h: locale === "en" ? "Timeline" : "時間點",
+        w: 220,
+        r: (row) => {
+          const offboarding = row.supplyLifecycle.offboarding;
+          return renderStackedCell(
+            offboarding.requestedAt ?? "—",
+            offboarding.effectiveAt ?? "—",
+            offboarding.completedAt ?? offboarding.debrandingCompletedAt ?? "—",
+          );
+        },
+      },
+      {
+        h: locale === "en" ? "Actions" : "操作",
+        w: 240,
+        r: (row) =>
+          renderActionButtons(
+            row.offboardingAvailableActions ??
+              row.availableActions ?? [
+                makeAction(
+                  "initiate_offboarding",
+                  "high",
+                  row.supplyLifecycle.offboarding.status === "none",
+                  true,
+                ),
+                makeAction(
+                  "advance_offboarding_step",
+                  "medium",
+                  false,
+                  false,
+                  "not_provisioned",
+                ),
+                makeAction(
+                  "complete_debranding",
+                  "medium",
+                  row.supplyLifecycle.offboarding.debrandingStatus ===
+                    "pending",
+                  true,
+                ),
+              ],
+            { kind: "offboarding", vehicle: row },
+          ),
+      },
+    ],
+    [locale, renderActionButtons],
+  );
 
-      <div className="platform-ui-card" style={{ overflowX: "auto" }}>
-        {activeTab === "vehicles" &&
-          (vehicles.length === 0 ? (
-            <p className="platform-ui-empty">{t("fleet.noVehicles")}</p>
-          ) : (
-            <>
-              <table className="platform-ui-table">
-                <thead>
-                  <tr>
-                    <th>{t("fleet.col.vehicleId")}</th>
-                    <th>{t("fleet.col.plate")}</th>
-                    <th>{t("fleet.col.dispatchable")}</th>
-                    <th>{t("fleet.col.area")}</th>
-                    <th>{t("fleet.col.contract")}</th>
-                    <th>{t("fleet.col.insurance")}</th>
-                    <th>{t("fleet.col.exclusivity")}</th>
-                    <th>{t("fleet.col.offboarding")}</th>
-                    <th>{t("fleet.col.blockedBy")}</th>
-                    <th>{t("fleet.col.lastChange")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vehicles.map((v) => (
-                    <tr
-                      key={v.vehicleId}
-                      onClick={() => setSelectedVehicleId(v.vehicleId)}
-                      style={{
-                        cursor: "pointer",
-                        background:
-                          selectedVehicle?.vehicleId === v.vehicleId
-                            ? "rgba(15, 23, 42, 0.04)"
-                            : undefined,
-                      }}
-                    >
-                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                        {v.vehicleId}
-                      </td>
-                      <td>{v.plateNo || "—"}</td>
-                      <td>
-                        <span
-                          className={`platform-ui-badge ${
-                            v.dispatchableFlag
-                              ? "platform-ui-badge--success"
-                              : "platform-ui-badge--neutral"
-                          }`}
-                        >
-                          {v.dispatchableFlag
-                            ? t("fleet.dispatchable")
-                            : t("fleet.notDispatchable")}
-                        </span>
-                      </td>
-                      <td>{v.operatingArea || "—"}</td>
-                      <td>
-                        <span
-                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
-                        >
-                          {formatPlatformCodeLabel(
-                            locale,
-                            v.supplyLifecycle.contract.lifecycleStatus,
-                          )}
-                        </span>
-                      </td>
-                      <td>
-                        <span
-                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
-                        >
-                          {formatPlatformCodeLabel(
-                            locale,
-                            v.supplyLifecycle.insurance.lifecycleStatus,
-                          )}
-                        </span>
-                      </td>
-                      <td>
-                        <span
-                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
-                        >
-                          {formatPlatformCodeLabel(
-                            locale,
-                            v.supplyLifecycle.exclusivity.lifecycleStatus,
-                          )}
-                        </span>
-                      </td>
-                      <td>
-                        <span
-                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.offboarding.status)}`}
-                        >
-                          {formatPlatformCodeLabel(
-                            locale,
-                            v.supplyLifecycle.offboarding.status,
-                          )}
-                        </span>
-                      </td>
-                      <td style={{ minWidth: 220 }}>
-                        {v.supplyLifecycle.dispatch.blockedReasons.length >
-                        0 ? (
-                          v.supplyLifecycle.dispatch.blockedReasons.map(
-                            (reason) => (
-                              <div key={reason}>
-                                {formatPlatformCodeLabel(locale, reason)}
-                              </div>
-                            ),
-                          )
-                        ) : (
-                          <span className="platform-ui-badge platform-ui-badge--success">
-                            {t("fleet.noneBlocked")}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ minWidth: 220 }}>
-                        {v.supplyLifecycle.lastTrace ? (
-                          <div>
-                            <div>{v.supplyLifecycle.lastTrace.message}</div>
-                            <div style={textMutedStyle}>
-                              {formatDateTime(
-                                v.supplyLifecycle.lastTrace.occurredAt,
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          t("fleet.lastChangeNone")
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+  const renderActiveTable = () => {
+    switch (activeTab) {
+      case "vehicles":
+        return (
+          <CanvasTable theme={theme} columns={vehicleColumns} rows={vehicles} />
+        );
+      case "drivers":
+        return (
+          <CanvasTable theme={theme} columns={driverColumns} rows={drivers} />
+        );
+      case "contracts":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={contractColumns}
+            rows={contracts}
+          />
+        );
+      case "device_binding":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={bindingColumns}
+            rows={activeBindings}
+          />
+        );
+      case "exclusivity":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={exclusivityColumns}
+            rows={exclusivities}
+          />
+        );
+      case "offboarding":
+        return (
+          <CanvasTable
+            theme={theme}
+            columns={offboardingColumns}
+            rows={offboardingVehicles}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
-              {selectedVehicle && (
+  const tabs = TAB_ORDER.map((tab) => (
+    <button
+      key={tab}
+      type="button"
+      style={tabButtonStyle(activeTab === tab)}
+      onClick={() => {
+        setActiveTab(tab);
+        updateUrlForTab(tab);
+      }}
+    >
+      <span>{tabLabels[tab]}</span>
+      <CanvasPill
+        theme={theme}
+        tone={
+          tab === "exclusivity" && tabCounts[tab] > 0
+            ? "warn"
+            : tab === "offboarding" && tabCounts[tab] > 0
+              ? "accent"
+              : "neutral"
+        }
+      >
+        {tabCounts[tab]}
+      </CanvasPill>
+    </button>
+  ));
+
+  const activeTabLabel = tabLabels[activeTab];
+  const activeHeaderActions = activePageActions.filter(
+    (descriptor) => descriptor.action !== "refresh_tab",
+  );
+  const activeFreshnessLabel = formatFreshness(
+    locale,
+    lastFetchedAt,
+    loading,
+    activeRefreshMetadata,
+  );
+
+  return (
+    <>
+      <CanvasPageHeader
+        theme={theme}
+        title={
+          locale === "en" ? "Fleet & compliance governance" : "車隊與合規治理"
+        }
+        subtitle={
+          locale === "en"
+            ? "vehicles · drivers · contracts · device binding · exclusivity reviews · offboarding state machine"
+            : "vehicles · drivers · contracts · device binding · exclusivity reviews · offboarding state machine"
+        }
+        tabs={tabs}
+        activeTab={tabs[TAB_ORDER.indexOf(activeTab)]}
+        actions={
+          <>
+            <CanvasBtn
+              theme={theme}
+              icon="filter"
+              onClick={() =>
+                window.alert(
+                  locale === "en"
+                    ? "Canvas-aligned filter surface is reserved for the next iteration."
+                    : "符合 canvas 的篩選面保留到下一輪整合。",
+                )
+              }
+            >
+              {locale === "en" ? "Filter" : "篩選"}
+            </CanvasBtn>
+            {activeHeaderActions.length > 0
+              ? renderActionButtons(activeHeaderActions, {
+                  kind: "page",
+                  tab: activeTab,
+                })
+              : null}
+            <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
+              {locale === "en" ? "Refresh" : "重新整理"}
+            </CanvasBtn>
+          </>
+        }
+      />
+
+      <div style={pageBodyStyle}>
+        {error ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={
+              locale === "en" ? "Fleet data refresh failed" : "車隊資料更新失敗"
+            }
+            body={error}
+            actions={
+              <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
+                {locale === "en" ? "Retry" : "重試"}
+              </CanvasBtn>
+            }
+          />
+        ) : null}
+
+        {!error &&
+        activeRefreshMetadata &&
+        activeRefreshMetadata.dataFreshness !== "fresh" ? (
+          <CanvasBanner
+            theme={theme}
+            tone={
+              activeRefreshMetadata.dataFreshness === "degraded"
+                ? "warn"
+                : "info"
+            }
+            icon="info"
+            title={
+              locale === "en"
+                ? "Snapshot is not fully fresh"
+                : "目前快照不是最新狀態"
+            }
+            body={activeFreshnessLabel}
+          />
+        ) : null}
+
+        {activeTab === "drivers" && blockedDrivers.length > 0 ? (
+          <CanvasBanner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={
+              locale === "en"
+                ? `${blockedDrivers.length} drivers need compliance review`
+                : `${blockedDrivers.length} 位司機需要合規處理`
+            }
+            body={
+              locale === "en"
+                ? "dispatch.compliance.license_warn_30d remains enforced in ops-console until these blockers are cleared."
+                : "在阻擋原因解除前，ops 端仍持續套用 dispatch.compliance.license_warn_30d。"
+            }
+            actions={
+              <CanvasBtn theme={theme} variant="secondary">
+                {locale === "en" ? "Export list" : "匯出名單"}
+              </CanvasBtn>
+            }
+          />
+        ) : null}
+
+        {activeTab === "exclusivity" ? (
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            icon="info"
+            title="Exclusivity governance · Q-ADM08"
+            body={
+              locale === "en"
+                ? "Vehicle or driver dispatchable cannot become true until exclusivity is approved."
+                : "vehicle / driver 的 dispatchable 不可能在 exclusivity 通過前變為 true。"
+            }
+          />
+        ) : null}
+
+        {activeTab === "offboarding" ? (
+          <CanvasCard
+            theme={theme}
+            title="Offboarding state machine · Q-ADM09"
+            subtitle={
+              locale === "en"
+                ? "Every transition needs timestamp · actor · evidence · audit"
+                : "每一步轉換需 timestamp · actor · evidence · audit"
+            }
+          >
+            <div style={stepperRowStyle}>
+              {[
+                "initiated",
+                "dispatch_disabled",
+                "debranding_pending",
+                "debranding_verified",
+                "completed",
+              ].map((step, index, all) => (
                 <div
+                  key={step}
                   style={{
-                    marginTop: 20,
-                    display: "grid",
-                    gap: 16,
-                    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                    display: "flex",
+                    alignItems: "center",
+                    flex: index === all.length - 1 ? "0 0 auto" : 1,
                   }}
                 >
-                  <div className="platform-ui-card">
-                    <h3 style={{ marginTop: 0 }}>
-                      {t("fleet.detail.dispatch")}
-                    </h3>
-                    <p style={{ marginTop: 0 }}>
-                      <strong>{selectedVehicle.vehicleId}</strong> ·{" "}
-                      {selectedVehicle.plateNo || "—"}
-                    </p>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {selectedVehicle.supplyLifecycle.dispatch.blockedReasons.map(
-                        (reason) => (
-                          <span
-                            key={reason}
-                            className="platform-ui-badge platform-ui-badge--warning"
-                          >
-                            {formatPlatformCodeLabel(locale, reason)}
-                          </span>
-                        ),
-                      )}
-                      {selectedVehicle.supplyLifecycle.dispatch.blockedReasons
-                        .length === 0 && (
-                        <span className="platform-ui-badge platform-ui-badge--success">
-                          {t("fleet.noneBlocked")}
-                        </span>
-                      )}
-                    </div>
+                  <div
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      border: `1px solid ${
+                        index < 2
+                          ? theme.successBorder
+                          : index === 2
+                            ? theme.warnBorder
+                            : theme.border
+                      }`,
+                      background:
+                        index < 2
+                          ? theme.successBg
+                          : index === 2
+                            ? theme.warnBg
+                            : theme.surfaceLo,
+                      color: index < 3 ? theme.text : theme.textMuted,
+                      fontFamily: theme.monoFamily,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {index + 1}. {step}
+                  </div>
+                  {index < all.length - 1 ? (
                     <div
                       style={{
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                        marginTop: 12,
+                        flex: 1,
+                        height: 2,
+                        margin: "0 4px",
+                        background: index < 2 ? theme.success : theme.border,
                       }}
-                    >
-                      <button
-                        className="platform-ui-btn platform-ui-btn--secondary"
-                        type="button"
-                        disabled={
-                          vehicleActionId ===
-                            `${selectedVehicle.vehicleId}:dispatch:true` ||
-                          selectedVehicle.dispatchableFlag
-                        }
-                        onClick={() =>
-                          setVehicleDispatchable(
-                            selectedVehicle.vehicleId,
-                            true,
-                          )
-                        }
-                      >
-                        {vehicleActionId ===
-                        `${selectedVehicle.vehicleId}:dispatch:true`
-                          ? t("fleet.updatingVehicle")
-                          : t("fleet.markDispatchable")}
-                      </button>
-                      <button
-                        className="platform-ui-btn platform-ui-btn--secondary"
-                        type="button"
-                        disabled={
-                          vehicleActionId ===
-                            `${selectedVehicle.vehicleId}:dispatch:false` ||
-                          !selectedVehicle.dispatchableFlag
-                        }
-                        onClick={() =>
-                          setVehicleDispatchable(
-                            selectedVehicle.vehicleId,
-                            false,
-                          )
-                        }
-                      >
-                        {vehicleActionId ===
-                        `${selectedVehicle.vehicleId}:dispatch:false`
-                          ? t("fleet.updatingVehicle")
-                          : t("fleet.placeDispatchHold")}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="platform-ui-card">
-                    <h3 style={{ marginTop: 0 }}>
-                      {t("fleet.detail.insurance")}
-                    </h3>
-                    <p style={{ margin: "0 0 6px" }}>
-                      {t("fleet.detail.policyId")}:{" "}
-                      {selectedVehicle.supplyLifecycle.insurance.policyId ??
-                        "—"}
-                    </p>
-                    <p style={{ margin: "0 0 6px" }}>
-                      {t("fleet.detail.window")}:{" "}
-                      {selectedVehicle.supplyLifecycle.insurance.startAt
-                        ? `${formatDateTime(selectedVehicle.supplyLifecycle.insurance.startAt)} - ${formatDateTime(selectedVehicle.supplyLifecycle.insurance.endAt || "")}`
-                        : "—"}
-                    </p>
-                    <span
-                      className={`platform-ui-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.insurance.lifecycleStatus)}`}
-                    >
-                      {formatPlatformCodeLabel(
-                        locale,
-                        selectedVehicle.supplyLifecycle.insurance
-                          .lifecycleStatus,
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="platform-ui-card">
-                    <h3 style={{ marginTop: 0 }}>
-                      {t("fleet.detail.exclusivity")}
-                    </h3>
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: 10,
-                        gridTemplateColumns: "1fr 1fr",
-                      }}
-                    >
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.provider")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          value={exclusivityForm.exclusiveProviderName ?? ""}
-                          onChange={(event) =>
-                            setExclusivityForm((current) => ({
-                              ...current,
-                              exclusiveProviderName: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.declarationFile")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          value={exclusivityForm.declarationFileId ?? ""}
-                          onChange={(event) =>
-                            setExclusivityForm((current) => ({
-                              ...current,
-                              declarationFileId: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.effectiveStart")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          placeholder="2026-12-31T00:00:00.000Z"
-                          value={exclusivityForm.effectiveStart ?? ""}
-                          onChange={(event) =>
-                            setExclusivityForm((current) => ({
-                              ...current,
-                              effectiveStart: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.effectiveEnd")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          placeholder="2026-12-31T23:59:59.000Z"
-                          value={exclusivityForm.effectiveEnd ?? ""}
-                          onChange={(event) =>
-                            setExclusivityForm((current) => ({
-                              ...current,
-                              effectiveEnd: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                    </div>
-                    <div style={{ marginTop: 12, marginBottom: 12 }}>
-                      <span
-                        className={`platform-ui-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.exclusivity.lifecycleStatus)}`}
-                      >
-                        {formatPlatformCodeLabel(
-                          locale,
-                          selectedVehicle.supplyLifecycle.exclusivity
-                            .lifecycleStatus,
-                        )}
-                      </span>{" "}
-                      <span style={textMutedStyle}>
-                        {formatPlatformCodeLabel(
-                          locale,
-                          selectedVehicle.supplyLifecycle.exclusivity
-                            .reviewStatus,
-                        )}
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        className="platform-ui-btn platform-ui-btn--secondary"
-                        type="button"
-                        disabled={
-                          vehicleActionId ===
-                          `${selectedVehicle.vehicleId}:exclusivity:submit`
-                        }
-                        onClick={() =>
-                          submitVehicleExclusivity(selectedVehicle.vehicleId)
-                        }
-                      >
-                        {vehicleActionId ===
-                        `${selectedVehicle.vehicleId}:exclusivity:submit`
-                          ? t("fleet.updatingVehicle")
-                          : t("fleet.submitExclusivity")}
-                      </button>
-                      <button
-                        className="platform-ui-btn platform-ui-btn--secondary"
-                        type="button"
-                        disabled={
-                          vehicleActionId ===
-                          `${selectedVehicle.vehicleId}:exclusivity:approve`
-                        }
-                        onClick={() =>
-                          approveVehicleExclusivity(selectedVehicle.vehicleId)
-                        }
-                      >
-                        {vehicleActionId ===
-                        `${selectedVehicle.vehicleId}:exclusivity:approve`
-                          ? t("fleet.updatingVehicle")
-                          : t("fleet.approveExclusivity")}
-                      </button>
-                      <button
-                        className="platform-ui-btn platform-ui-btn--secondary"
-                        type="button"
-                        disabled={
-                          vehicleActionId ===
-                          `${selectedVehicle.vehicleId}:exclusivity:reject`
-                        }
-                        onClick={() =>
-                          rejectVehicleExclusivity(selectedVehicle.vehicleId)
-                        }
-                      >
-                        {vehicleActionId ===
-                        `${selectedVehicle.vehicleId}:exclusivity:reject`
-                          ? t("fleet.updatingVehicle")
-                          : t("fleet.rejectExclusivity")}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="platform-ui-card">
-                    <h3 style={{ marginTop: 0 }}>
-                      {t("fleet.detail.offboarding")}
-                    </h3>
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: 10,
-                        gridTemplateColumns: "1fr 1fr",
-                      }}
-                    >
-                      <label style={{ gridColumn: "1 / -1" }}>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.offboardingReason")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          value={offboardingForm.reason}
-                          onChange={(event) =>
-                            setOffboardingForm((current) => ({
-                              ...current,
-                              reason: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.requestedBy")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          value={offboardingForm.requestedBy ?? ""}
-                          onChange={(event) =>
-                            setOffboardingForm((current) => ({
-                              ...current,
-                              requestedBy: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.debrandingTicket")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          value={offboardingForm.debrandingTicketId ?? ""}
-                          onChange={(event) =>
-                            setOffboardingForm((current) => ({
-                              ...current,
-                              debrandingTicketId: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.effectiveStart")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          placeholder="2026-12-31T00:00:00.000Z"
-                          value={offboardingForm.effectiveAt ?? ""}
-                          onChange={(event) =>
-                            setOffboardingForm((current) => ({
-                              ...current,
-                              effectiveAt: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <div style={fieldLabelStyle}>
-                          {t("fleet.form.debrandingDueAt")}
-                        </div>
-                        <input
-                          style={inputStyle}
-                          placeholder="2026-12-31T23:59:59.000Z"
-                          value={offboardingForm.debrandingDueAt ?? ""}
-                          onChange={(event) =>
-                            setOffboardingForm((current) => ({
-                              ...current,
-                              debrandingDueAt: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                          gridColumn: "1 / -1",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={offboardingForm.debrandingRequired ?? true}
-                          onChange={(event) =>
-                            setOffboardingForm((current) => ({
-                              ...current,
-                              debrandingRequired: event.target.checked,
-                            }))
-                          }
-                        />
-                        <span>{t("fleet.form.debrandingRequired")}</span>
-                      </label>
-                    </div>
-                    <p
-                      style={{
-                        ...textMutedStyle,
-                        marginTop: 12,
-                        marginBottom: 12,
-                      }}
-                    >
-                      {t("fleet.detail.debrandingStatus")}:{" "}
-                      {formatPlatformCodeLabel(
-                        locale,
-                        selectedVehicle.supplyLifecycle.offboarding
-                          .debrandingStatus,
-                      )}
-                    </p>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        className="platform-ui-btn platform-ui-btn--secondary"
-                        type="button"
-                        disabled={
-                          vehicleActionId ===
-                          `${selectedVehicle.vehicleId}:offboarding:start`
-                        }
-                        onClick={() =>
-                          startVehicleOffboarding(selectedVehicle.vehicleId)
-                        }
-                      >
-                        {vehicleActionId ===
-                        `${selectedVehicle.vehicleId}:offboarding:start`
-                          ? t("fleet.updatingVehicle")
-                          : t("fleet.startOffboarding")}
-                      </button>
-                      <button
-                        className="platform-ui-btn platform-ui-btn--secondary"
-                        type="button"
-                        disabled={
-                          vehicleActionId ===
-                            `${selectedVehicle.vehicleId}:offboarding:complete` ||
-                          selectedVehicle.supplyLifecycle.offboarding
-                            .debrandingStatus !== "pending"
-                        }
-                        onClick={() =>
-                          completeVehicleDebranding(selectedVehicle.vehicleId)
-                        }
-                      >
-                        {vehicleActionId ===
-                        `${selectedVehicle.vehicleId}:offboarding:complete`
-                          ? t("fleet.updatingVehicle")
-                          : t("fleet.completeDebranding")}
-                      </button>
-                    </div>
-                  </div>
+                    />
+                  ) : null}
                 </div>
-              )}
-            </>
-          ))}
+              ))}
+            </div>
+          </CanvasCard>
+        ) : null}
 
-        {activeTab === "drivers" &&
-          (drivers.length === 0 ? (
-            <p className="platform-ui-empty">{t("fleet.noDrivers")}</p>
+        <CanvasCard
+          theme={theme}
+          title={activeTabLabel}
+          subtitle={
+            locale === "en"
+              ? `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
+              : `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
+          }
+        >
+          {activeEmptyReason && emptyConfig ? (
+            <div style={emptyPanelStyle(emptyConfig.tone)}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <CanvasIcon name="warn" />
+                <strong>{emptyConfig.title}</strong>
+              </div>
+              <div style={{ color: theme.text, lineHeight: 1.5 }}>
+                {emptyConfig.description}
+              </div>
+              <div style={actionRowStyle}>
+                <CanvasPill theme={theme} tone={emptyConfig.tone}>
+                  {activeEmptyReason}
+                </CanvasPill>
+                <CanvasPill
+                  theme={theme}
+                  tone={refreshTone(activeRefreshMetadata, loading)}
+                  dot
+                >
+                  {activeRefreshMetadata?.dataFreshness ?? "fresh"}
+                </CanvasPill>
+                <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
+                  {locale === "en" ? "Refresh tab" : "重新整理"}
+                </CanvasBtn>
+              </div>
+            </div>
           ) : (
-            <table className="platform-ui-table">
-              <thead>
-                <tr>
-                  <th>{t("fleet.col.driverId")}</th>
-                  <th>{t("fleet.col.name")}</th>
-                  <th>{t("fleet.col.lifecycle")}</th>
-                  <th>{t("fleet.col.workState")}</th>
-                  <th>{t("fleet.col.license")}</th>
-                  <th>{t("fleet.col.profile")}</th>
-                  <th>{t("fleet.col.deviceBindings")}</th>
-                  <th>{t("fleet.col.blockedBy")}</th>
-                  <th>{t("fleet.col.actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {drivers.map((d) => (
-                  <tr key={d.driverId}>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {d.driverId}
-                    </td>
-                    <td>
-                      <div>{d.name || "—"}</div>
-                      <div style={textMutedStyle}>
-                        {d.dispatchEligible
-                          ? t("fleet.driverDispatchEligible")
-                          : t("fleet.driverNotEligible")}
-                      </div>
-                    </td>
-                    <td>
-                      <span
-                        className={`platform-ui-badge ${badgeClassForLifecycle(d.lifecycleStatus)}`}
-                      >
-                        {formatPlatformCodeLabel(locale, d.lifecycleStatus)}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`platform-ui-badge ${
-                          d.workState === "available"
-                            ? "platform-ui-badge--success"
-                            : "platform-ui-badge--neutral"
-                        }`}
-                      >
-                        {formatPlatformCodeLabel(locale, d.workState)}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`platform-ui-badge ${
-                          d.licensesValid
-                            ? "platform-ui-badge--success"
-                            : "platform-ui-badge--warning"
-                        }`}
-                      >
-                        {d.licensesValid
-                          ? t("fleet.licensesValid")
-                          : t("fleet.licensesExpired")}
-                      </span>
-                    </td>
-                    <td>
-                      <div>
-                        {d.profileUpdatedAt
-                          ? t("fleet.profileReady")
-                          : t("fleet.profileMissing")}
-                      </div>
-                      <div style={textMutedStyle}>
-                        {formatDateTime(d.profileUpdatedAt || "")}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      {d.deviceBindings.length > 0 ? (
-                        d.deviceBindings.map((binding) => (
-                          <div
-                            key={binding.bindingId}
-                            style={{ marginBottom: 8 }}
-                          >
-                            <div
-                              style={{ fontFamily: "monospace", fontSize: 12 }}
-                            >
-                              {binding.deviceId}
-                            </div>
-                            <div style={textMutedStyle}>
-                              {binding.deviceLabel || binding.status}
-                            </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: 8,
-                                alignItems: "center",
-                                marginTop: 6,
-                              }}
-                            >
-                              <button
-                                className="platform-ui-btn platform-ui-btn--secondary"
-                                disabled={
-                                  binding.status === "revoked" ||
-                                  bindingActionId === binding.bindingId
-                                }
-                                onClick={() =>
-                                  revokeDriverDeviceBinding(d.driverId, binding)
-                                }
-                                type="button"
-                              >
-                                {bindingActionId === binding.bindingId
-                                  ? t("fleet.revokingDevice")
-                                  : t("fleet.revokeDevice")}
-                              </button>
-                              <span style={textMutedStyle}>
-                                {binding.status === "revoked"
-                                  ? t("fleet.deviceRevoked")
-                                  : t("fleet.deviceRebindHint")}
-                              </span>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <span>{t("fleet.noDeviceBindings")}</span>
-                      )}
-                    </td>
-                    <td style={{ minWidth: 180 }}>
-                      {d.eligibilityBlockedReasons.length > 0 ? (
-                        d.eligibilityBlockedReasons.map((reason) => (
-                          <div key={reason}>
-                            {formatPlatformCodeLabel(locale, reason)}
-                          </div>
-                        ))
-                      ) : (
-                        <span className="platform-ui-badge platform-ui-badge--success">
-                          {t("fleet.noneBlocked")}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      <div
-                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                      >
-                        {(["active", "suspended", "retired"] as const).map(
-                          (nextStatus) => {
-                            const labelKey =
-                              nextStatus === "active"
-                                ? "fleet.activateDriver"
-                                : nextStatus === "suspended"
-                                  ? "fleet.suspendDriver"
-                                  : "fleet.retireDriver";
-                            const busy =
-                              driverActionId === `${d.driverId}:${nextStatus}`;
-                            return (
-                              <button
-                                key={nextStatus}
-                                className="platform-ui-btn platform-ui-btn--secondary"
-                                disabled={
-                                  busy || d.lifecycleStatus === nextStatus
-                                }
-                                onClick={() =>
-                                  runDriverLifecycleAction(
-                                    d.driverId,
-                                    nextStatus,
-                                  )
-                                }
-                              >
-                                {busy ? t("fleet.updatingDriver") : t(labelKey)}
-                              </button>
-                            );
-                          },
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ))}
-
-        {activeTab === "contracts" &&
-          (contracts.length === 0 ? (
-            <p className="platform-ui-empty">{t("fleet.noContracts")}</p>
-          ) : (
-            <table className="platform-ui-table">
-              <thead>
-                <tr>
-                  <th>{t("fleet.col.contractId")}</th>
-                  <th>{t("fleet.col.vehicleId")}</th>
-                  <th>{t("fleet.col.type")}</th>
-                  <th>{t("fleet.col.status")}</th>
-                  <th>{t("pricing.col.effectiveFrom")}</th>
-                  <th>{t("pricing.col.effectiveTo")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((c) => (
-                  <tr key={c.contractId}>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {c.contractId}
-                    </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {c.vehicleId}
-                    </td>
-                    <td>
-                      {c.contractType
-                        ? formatPlatformCodeLabel(locale, c.contractType)
-                        : "—"}
-                    </td>
-                    <td>
-                      <span
-                        className={`platform-ui-badge ${
-                          c.lifecycleStatus === "active"
-                            ? "platform-ui-badge--success"
-                            : "platform-ui-badge--warning"
-                        }`}
-                      >
-                        {formatPlatformCodeLabel(locale, c.lifecycleStatus)}
-                      </span>
-                    </td>
-                    <td>{formatDateTime(c.startAt || "")}</td>
-                    <td>{c.endAt ? formatDateTime(c.endAt) : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ))}
+            renderActiveTable()
+          )}
+        </CanvasCard>
       </div>
-    </div>
+    </>
   );
 }
