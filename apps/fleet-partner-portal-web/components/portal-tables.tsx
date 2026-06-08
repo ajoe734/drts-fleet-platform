@@ -23,13 +23,20 @@ import {
   type FleetTrip,
   type FleetVehicle,
 } from "@/lib/fleet-portal-fixtures";
-import { BiLabel, SvcChip, SvcChips } from "@/lib/fleet-portal-ui";
+import { useTranslation } from "@/lib/i18n";
+import {
+  BiLabel,
+  SvcChip,
+  SvcChips,
+  formatFleetCodeLabel,
+} from "@/lib/fleet-portal-ui";
 
 export function DriversTable({ rows }: { rows: FleetDriver[] }) {
   const theme = buildFleetTheme();
+  const { locale, t } = useTranslation();
   const columns: CanvasTableColumn<FleetDriver>[] = [
     {
-      h: "DRIVER",
+      h: t("table.driver"),
       w: 170,
       r: (r) => (
         <div>
@@ -47,7 +54,7 @@ export function DriversTable({ rows }: { rows: FleetDriver[] }) {
       ),
     },
     {
-      h: "STATUS",
+      h: t("table.status"),
       w: 110,
       r: (r) => (
         <CanvasPill
@@ -63,97 +70,112 @@ export function DriversTable({ rows }: { rows: FleetDriver[] }) {
           }
           dot
         >
-          {r.status}
+          {formatFleetCodeLabel(locale, "driver.status", r.status)}
         </CanvasPill>
       ),
     },
     {
-      h: "可接服務 · service eligibility",
+      h: t("table.serviceEligibility"),
       w: 280,
-      r: (r) => <SvcChips theme={theme} list={r.svc} />,
+      r: (r) => <SvcChips theme={theme} locale={locale} list={r.svc} />,
     },
     {
-      h: "LICENSE",
+      h: t("table.license"),
       w: 120,
       r: (r) =>
         r.license === "valid" ? (
           <CanvasPill theme={theme} tone="success">
-            valid
+            {formatFleetCodeLabel(locale, "driver.license", r.license)}
           </CanvasPill>
         ) : (
           <CanvasPill theme={theme} tone="warn" dot>
-            {r.license}
+            {formatFleetCodeLabel(locale, "driver.license", r.license)}
           </CanvasPill>
         ),
     },
     {
-      h: "DOCS",
+      h: t("table.docs"),
       w: 110,
       r: (r) =>
         r.docs === "complete" ? (
           <CanvasPill theme={theme} tone="success">
-            complete
+            {formatFleetCodeLabel(locale, "driver.docs", r.docs)}
           </CanvasPill>
         ) : (
           <CanvasPill theme={theme} tone="warn" dot>
-            {r.docs}
+            {formatFleetCodeLabel(locale, "driver.docs", r.docs)}
           </CanvasPill>
         ),
     },
     {
-      h: "TRAINING",
+      h: t("table.training"),
       w: 110,
       r: (r) =>
         r.training === "complete" ? (
           <CanvasPill theme={theme} tone="success">
-            complete
+            {formatFleetCodeLabel(locale, "training.status", r.training)}
           </CanvasPill>
         ) : (
           <CanvasPill theme={theme} tone="warn" dot>
-            {r.training}
+            {formatFleetCodeLabel(locale, "training.status", r.training)}
           </CanvasPill>
         ),
     },
-    { h: "30天趟次", k: "trips30", w: 90, mono: true, align: "right" },
-    { h: "評分", k: "rating", w: 70, mono: true, align: "right" },
+    { h: t("table.trips30d"), k: "trips30", w: 90, mono: true, align: "right" },
+    { h: t("table.rating"), k: "rating", w: 70, mono: true, align: "right" },
   ];
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
 }
 
 export function VehiclesTable({ rows }: { rows: FleetVehicle[] }) {
   const theme = buildFleetTheme();
+  const { locale, t } = useTranslation();
   const columns: CanvasTableColumn<FleetVehicle>[] = [
     {
-      h: "PLATE",
+      h: t("table.plate"),
       w: 120,
       mono: true,
       r: (r) => <span style={{ fontWeight: 600 }}>{r.plate}</span>,
     },
-    { h: "MODEL", k: "model", w: 160 },
-    { h: "YEAR", k: "year", w: 70, mono: true, align: "right" },
-    { h: "DRIVER", k: "driver", w: 100 },
+    { h: t("table.model"), k: "model", w: 160 },
     {
-      h: "可接服務 · vehicle eligibility",
-      w: 260,
-      r: (r) => <SvcChips theme={theme} list={r.svc} />,
+      h: t("table.year"),
+      w: 70,
+      mono: true,
+      align: "right",
+      r: (r) => (r.year > 0 ? r.year : "—"),
     },
-    { h: "INSURANCE", k: "insurance", w: 120, mono: true },
+    { h: t("table.driver"), k: "driver", w: 100 },
     {
-      h: "INSPECTION",
+      h: t("table.vehicleEligibility"),
+      w: 260,
+      r: (r) => <SvcChips theme={theme} locale={locale} list={r.svc} />,
+    },
+    {
+      h: t("table.insurance"),
+      w: 120,
+      mono: true,
+      r: (r) =>
+        r.insurance === "valid" || r.insurance === "expired"
+          ? formatFleetCodeLabel(locale, "vehicle.insurance", r.insurance)
+          : r.insurance,
+    },
+    {
+      h: t("table.inspection"),
       w: 120,
       r: (r) =>
         r.inspection === "ok" ? (
           <CanvasPill theme={theme} tone="success">
-            ok
+            {formatFleetCodeLabel(locale, "vehicle.inspection", r.inspection)}
           </CanvasPill>
         ) : (
           <CanvasPill theme={theme} tone="warn" dot>
-            {r.inspection}
+            {formatFleetCodeLabel(locale, "vehicle.inspection", r.inspection)}
           </CanvasPill>
         ),
     },
     {
-      h: "STATUS",
+      h: t("table.status"),
       w: 120,
       r: (r) => (
         <CanvasPill
@@ -161,7 +183,7 @@ export function VehiclesTable({ rows }: { rows: FleetVehicle[] }) {
           tone={r.status === "active" ? "success" : "warn"}
           dot
         >
-          {r.status}
+          {formatFleetCodeLabel(locale, "vehicle.status", r.status)}
         </CanvasPill>
       ),
     },
@@ -169,10 +191,14 @@ export function VehiclesTable({ rows }: { rows: FleetVehicle[] }) {
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
 }
 
-function tripColumns(theme: ReturnType<typeof buildFleetTheme>) {
+function tripColumns(
+  theme: ReturnType<typeof buildFleetTheme>,
+  locale: ReturnType<typeof useTranslation>["locale"],
+  t: ReturnType<typeof useTranslation>["t"],
+) {
   const columns: CanvasTableColumn<FleetTrip>[] = [
     {
-      h: "ORDER",
+      h: t("table.order"),
       k: "id",
       w: 110,
       mono: true,
@@ -180,14 +206,24 @@ function tripColumns(theme: ReturnType<typeof buildFleetTheme>) {
         <span style={{ color: theme.accent, fontWeight: 600 }}>{r.id}</span>
       ),
     },
-    { h: "SERVICE", w: 120, r: (r) => <SvcChip theme={theme} svc={r.svc} /> },
-    { h: "DRIVER", k: "driver", w: 100 },
-    { h: "TENANT", k: "tenant", w: 130, mono: true },
-    { h: "PICKUP", k: "pickup", w: 220 },
-    { h: "FARE", k: "fare", w: 110, mono: true, align: "right" },
-    { h: "車行分潤", k: "commission", w: 110, mono: true, align: "right" },
     {
-      h: "STATUS",
+      h: t("table.service"),
+      w: 120,
+      r: (r) => <SvcChip theme={theme} locale={locale} svc={r.svc} />,
+    },
+    { h: t("table.driver"), k: "driver", w: 100 },
+    { h: t("table.tenant"), k: "tenant", w: 130, mono: true },
+    { h: t("table.pickup"), k: "pickup", w: 220 },
+    { h: t("table.fare"), k: "fare", w: 110, mono: true, align: "right" },
+    {
+      h: t("table.commission"),
+      k: "commission",
+      w: 110,
+      mono: true,
+      align: "right",
+    },
+    {
+      h: t("table.status"),
       w: 120,
       r: (r) => (
         <CanvasPill
@@ -201,32 +237,50 @@ function tripColumns(theme: ReturnType<typeof buildFleetTheme>) {
           }
           dot
         >
-          {r.status}
+          {formatFleetCodeLabel(locale, "trip.status", r.status)}
         </CanvasPill>
       ),
     },
-    { h: "DATE", k: "date", w: 110, mono: true },
+    { h: t("table.date"), k: "date", w: 110, mono: true },
   ];
   return columns;
 }
 
 export function TripsTable({ rows }: { rows: FleetTrip[] }) {
   const theme = buildFleetTheme();
-  return <CanvasTable theme={theme} columns={tripColumns(theme)} rows={rows} />;
+  const { locale, t } = useTranslation();
+  return (
+    <CanvasTable
+      theme={theme}
+      columns={tripColumns(theme, locale, t)}
+      rows={rows}
+    />
+  );
 }
 
 // Dashboard recent-trips strip: same columns minus PICKUP/DATE per the design.
 export function RecentTripsTable({ rows }: { rows: FleetTrip[] }) {
   const theme = buildFleetTheme();
+  const { locale, t } = useTranslation();
   const columns: CanvasTableColumn<FleetTrip>[] = [
-    { h: "ORDER", k: "id", w: 110, mono: true },
-    { h: "SERVICE", w: 120, r: (r) => <SvcChip theme={theme} svc={r.svc} /> },
-    { h: "DRIVER", k: "driver", w: 100 },
-    { h: "TENANT", k: "tenant", w: 130, mono: true },
-    { h: "FARE", k: "fare", w: 110, mono: true, align: "right" },
-    { h: "車行分潤", k: "commission", w: 110, mono: true, align: "right" },
+    { h: t("table.order"), k: "id", w: 110, mono: true },
     {
-      h: "STATUS",
+      h: t("table.service"),
+      w: 120,
+      r: (r) => <SvcChip theme={theme} locale={locale} svc={r.svc} />,
+    },
+    { h: t("table.driver"), k: "driver", w: 100 },
+    { h: t("table.tenant"), k: "tenant", w: 130, mono: true },
+    { h: t("table.fare"), k: "fare", w: 110, mono: true, align: "right" },
+    {
+      h: t("table.commission"),
+      k: "commission",
+      w: 110,
+      mono: true,
+      align: "right",
+    },
+    {
+      h: t("table.status"),
       w: 120,
       r: (r) => (
         <CanvasPill
@@ -240,7 +294,7 @@ export function RecentTripsTable({ rows }: { rows: FleetTrip[] }) {
           }
           dot
         >
-          {r.status}
+          {formatFleetCodeLabel(locale, "trip.status", r.status)}
         </CanvasPill>
       ),
     },
@@ -250,9 +304,10 @@ export function RecentTripsTable({ rows }: { rows: FleetTrip[] }) {
 
 export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
   const theme = buildFleetTheme();
+  const { locale, t } = useTranslation();
   const columns: CanvasTableColumn<FleetStatement>[] = [
     {
-      h: "STATEMENT",
+      h: t("table.statement"),
       k: "id",
       w: 180,
       mono: true,
@@ -260,11 +315,11 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
         <span style={{ color: theme.accent, fontWeight: 600 }}>{r.id}</span>
       ),
     },
-    { h: "PERIOD", k: "period", w: 120, mono: true },
-    { h: "TRIPS", k: "trips", w: 110, mono: true, align: "right" },
-    { h: "PAYABLE", k: "payable", w: 160, mono: true, align: "right" },
+    { h: t("table.period"), k: "period", w: 120, mono: true },
+    { h: t("table.trips"), k: "trips", w: 110, mono: true, align: "right" },
+    { h: t("table.payable"), k: "payable", w: 160, mono: true, align: "right" },
     {
-      h: "STATUS",
+      h: t("table.status"),
       w: 150,
       r: (r) => (
         <CanvasPill
@@ -272,13 +327,13 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
           tone={r.status === "paid" ? "success" : "warn"}
           dot
         >
-          {r.status}
+          {formatFleetCodeLabel(locale, "statement.status", r.status)}
         </CanvasPill>
       ),
     },
-    { h: "ISSUED", k: "issued", w: 130, mono: true },
+    { h: t("table.issued"), k: "issued", w: 130, mono: true },
     {
-      h: "ACTIONS",
+      h: t("table.actions"),
       w: 180,
       r: (r) => (
         <div style={{ display: "flex", gap: 4 }}>
@@ -286,8 +341,8 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
             theme={theme}
             size="xs"
             descriptor={{ action: "download", enabled: true, riskLevel: "low" }}
-            label="下載"
-            en="dl"
+            label={t("actions.download")}
+            en={locale === "zh" ? "download" : undefined}
           />
           <CanvasActionButton
             theme={theme}
@@ -299,8 +354,8 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
               riskLevel: "high",
               requiresReason: true,
             }}
-            label="確認"
-            en="confirm"
+            label={t("actions.confirm")}
+            en={locale === "zh" ? "confirm" : undefined}
           />
         </div>
       ),
@@ -311,9 +366,10 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
 
 export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
   const theme = buildFleetTheme();
+  const { locale, t } = useTranslation();
   const columns: CanvasTableColumn<FleetDoc>[] = [
     {
-      h: "DRIVER",
+      h: t("table.driver"),
       w: 150,
       r: (r) => (
         <div>
@@ -331,12 +387,19 @@ export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
       ),
     },
     {
-      h: "DOCUMENT",
+      h: t("table.document"),
       w: 220,
-      r: (r) => <BiLabel theme={theme} zh={r.doc} en={r.en} />,
+      r: (r) => (
+        <BiLabel
+          theme={theme}
+          locale={locale}
+          zh={formatFleetCodeLabel("zh", "document.name", r.en, r.doc)}
+          en={formatFleetCodeLabel("en", "document.name", r.en)}
+        />
+      ),
     },
     {
-      h: "STATUS",
+      h: t("table.status"),
       w: 160,
       r: (r) => (
         <CanvasPill
@@ -350,25 +413,25 @@ export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
           }
           dot
         >
-          {r.status}
+          {formatFleetCodeLabel(locale, "document.status", r.status)}
         </CanvasPill>
       ),
     },
-    { h: "DUE", k: "due", w: 130, mono: true },
+    { h: t("table.due"), k: "due", w: 130, mono: true },
     {
-      h: "OWNER",
+      h: t("table.owner"),
       w: 110,
       r: (r) => (
         <CanvasPill
           theme={theme}
           tone={r.owner === "fleet" ? "accent" : "neutral"}
         >
-          {r.owner}
+          {formatFleetCodeLabel(locale, "document.owner", r.owner)}
         </CanvasPill>
       ),
     },
     {
-      h: "ACTIONS",
+      h: t("table.actions"),
       w: 200,
       r: (r) => (
         <div style={{ display: "flex", gap: 4 }}>
@@ -376,8 +439,8 @@ export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
             theme={theme}
             size="xs"
             descriptor={{ action: "remind", enabled: true, riskLevel: "low" }}
-            label="提醒司機"
-            en="remind"
+            label={t("actions.remindDriver")}
+            en={locale === "zh" ? "remind" : undefined}
           />
           <CanvasActionButton
             theme={theme}
@@ -388,8 +451,8 @@ export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
               disabledReasonCode: "driver_owned",
               riskLevel: "medium",
             }}
-            label="上傳"
-            en="upload"
+            label={t("actions.upload")}
+            en={locale === "zh" ? "upload" : undefined}
           />
         </div>
       ),
@@ -400,9 +463,10 @@ export function DocumentsTable({ rows }: { rows: FleetDoc[] }) {
 
 export function CasesTable({ rows }: { rows: FleetCase[] }) {
   const theme = buildFleetTheme();
+  const { locale, t } = useTranslation();
   const columns: CanvasTableColumn<FleetCase>[] = [
     {
-      h: "CASE",
+      h: t("table.case"),
       k: "id",
       w: 110,
       mono: true,
@@ -411,21 +475,26 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
       ),
     },
     {
-      h: "TYPE",
+      h: t("table.type"),
       w: 110,
       r: (r) => (
         <CanvasPill
           theme={theme}
           tone={r.type === "incident" ? "danger" : "warn"}
         >
-          {r.type}
+          {formatFleetCodeLabel(locale, "case.type", r.type)}
         </CanvasPill>
       ),
     },
-    { h: "CATEGORY", k: "cat", w: 150, mono: true },
-    { h: "DRIVER", k: "driver", w: 100 },
     {
-      h: "SEV",
+      h: t("table.category"),
+      w: 150,
+      mono: true,
+      r: (r) => formatFleetCodeLabel(locale, "case.category", r.cat),
+    },
+    { h: t("table.driver"), k: "driver", w: 100 },
+    {
+      h: t("table.severity"),
       w: 90,
       r: (r) => (
         <CanvasPill
@@ -439,12 +508,12 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
           }
           dot
         >
-          {r.severity}
+          {formatFleetCodeLabel(locale, "case.severity", r.severity)}
         </CanvasPill>
       ),
     },
     {
-      h: "責任歸屬 · responsibility",
+      h: t("table.responsibility"),
       w: 150,
       r: (r) => (
         <CanvasPill
@@ -458,12 +527,16 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
           }
           dot
         >
-          {r.responsibility}
+          {formatFleetCodeLabel(
+            locale,
+            "case.responsibility",
+            r.responsibility,
+          )}
         </CanvasPill>
       ),
     },
     {
-      h: "SLA",
+      h: t("table.sla"),
       w: 110,
       r: (r) => (
         <CanvasPill
@@ -471,12 +544,12 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
           tone={r.sla === "breached" ? "danger" : "success"}
           dot
         >
-          {r.sla}
+          {formatFleetCodeLabel(locale, "case.sla", r.sla)}
         </CanvasPill>
       ),
     },
     {
-      h: "STATUS",
+      h: t("table.status"),
       w: 120,
       r: (r) => (
         <CanvasPill
@@ -484,12 +557,12 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
           tone={r.status === "in_review" ? "info" : "warn"}
           dot
         >
-          {r.status}
+          {formatFleetCodeLabel(locale, "case.status", r.status)}
         </CanvasPill>
       ),
     },
     {
-      h: "ACTIONS",
+      h: t("table.actions"),
       w: 160,
       r: (r) => (
         <CanvasActionButton
@@ -501,8 +574,8 @@ export function CasesTable({ rows }: { rows: FleetCase[] }) {
             disabledReasonCode: "platform_owned",
             riskLevel: "medium",
           }}
-          label="回覆處理"
-          en="respond"
+          label={t("cases.action.respond")}
+          en={locale === "zh" ? "respond" : undefined}
         />
       ),
     },

@@ -49,14 +49,14 @@ export default async function FleetRevenuePage() {
         style={{
           padding: 24,
           display: "grid",
-          gridTemplateColumns: "1.3fr 1fr",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
           gap: 16,
         }}
       >
         <CanvasCard
           theme={theme}
-          title={`當期分潤 · ${s.period}`}
-          subtitle="組成明細 · 後端計算為準"
+          title={t("revenue.currentPeriod", locale, { period: s.period })}
+          subtitle={t("revenue.breakdownSubtitle", locale)}
         >
           <div style={{ display: "flex", flexDirection: "column" }}>
             {s.lines.map((l) => (
@@ -71,7 +71,12 @@ export default async function FleetRevenuePage() {
                   fontSize: 13,
                 }}
               >
-                <BiLabel theme={theme} zh={l.zh} en={l.en} />
+                <BiLabel
+                  theme={theme}
+                  locale={locale}
+                  zh={t(`revenue.line.${l.en}`, "zh")}
+                  en={t(`revenue.line.${l.en}`, "en")}
+                />
                 <span
                   style={{
                     fontFamily: theme.monoFamily,
@@ -115,16 +120,36 @@ export default async function FleetRevenuePage() {
               theme={theme}
               cols={1}
               items={[
-                { k: "逐趟分潤比例", v: "70 / 30 (車行 / 平台)", mono: true },
-                { k: "機場接送加成", v: "+ 5% commission", mono: true },
-                { k: "管理費", v: "NT$ 36,000 / 月固定", mono: true },
                 {
-                  k: "招募獎金",
-                  v: "NT$ 3,000 / 新司機 (滿 30 趟)",
+                  k: t("revenue.rule.perTripSplit", locale),
+                  v: t("revenue.rule.perTripSplitValue", locale),
                   mono: true,
                 },
-                { k: "罰則觸發", v: "SLA breach · 重大申訴", mono: true },
-                { k: "規則版本", v: "rsr_v8 · 平台治理發佈", mono: true },
+                {
+                  k: t("revenue.rule.airportBonus", locale),
+                  v: t("revenue.rule.airportBonusValue", locale),
+                  mono: true,
+                },
+                {
+                  k: t("revenue.rule.managementFee", locale),
+                  v: t("revenue.rule.managementFeeValue", locale),
+                  mono: true,
+                },
+                {
+                  k: t("revenue.rule.recruitmentBonus", locale),
+                  v: t("revenue.rule.recruitmentBonusValue", locale),
+                  mono: true,
+                },
+                {
+                  k: t("revenue.rule.penaltyTrigger", locale),
+                  v: t("revenue.rule.penaltyTriggerValue", locale),
+                  mono: true,
+                },
+                {
+                  k: t("revenue.rule.version", locale),
+                  v: t("revenue.rule.versionValue", locale),
+                  mono: true,
+                },
               ]}
             />
           </CanvasCard>
@@ -145,7 +170,7 @@ export default async function FleetRevenuePage() {
                   riskLevel: "medium",
                 }}
                 label={t("revenue.dispute", locale)}
-                en="dispute"
+                en={locale === "zh" ? "dispute" : undefined}
               />
               <CanvasActionButton
                 theme={theme}
@@ -158,7 +183,7 @@ export default async function FleetRevenuePage() {
                 variant="primary"
                 icon="check"
                 label={t("revenue.confirm", locale)}
-                en="confirm"
+                en={locale === "zh" ? "confirm" : undefined}
               />
             </div>
           </CanvasCard>

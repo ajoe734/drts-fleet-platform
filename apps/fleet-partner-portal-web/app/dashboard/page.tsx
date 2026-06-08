@@ -7,7 +7,11 @@ import {
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import { loadDashboard } from "@/lib/fleet-portal-data.server";
-import { DataSourceNotice, SvcChip } from "@/lib/fleet-portal-ui";
+import {
+  DataSourceNotice,
+  SvcChip,
+  pickLocalizedText,
+} from "@/lib/fleet-portal-ui";
 import { RecentTripsTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
@@ -57,34 +61,37 @@ export default async function FleetDashboardPage() {
         >
           <CanvasKPI
             theme={theme}
-            label="旗下司機數"
+            label={t("dashboard.kpi.driverCount", locale)}
             value={dashboard.driverCount}
-            sub={dashboard.driverSub}
+            sub={t("dashboard.driverSub", locale, {
+              online: dashboard.driverStatusSummary.online,
+              offline: dashboard.driverStatusSummary.offline,
+            })}
           />
           <CanvasKPI
             theme={theme}
-            label="可接單司機"
+            label={t("dashboard.kpi.dispatchable", locale)}
             value={dashboard.dispatchable}
             deltaTone="up"
           />
           <CanvasKPI
             theme={theme}
-            label="本月完成趟次"
+            label={t("dashboard.kpi.completedTrips", locale)}
             value={dashboard.completedTrips}
             deltaTone="up"
           />
           <CanvasKPI
             theme={theme}
-            label="本月車行分潤"
+            label={t("dashboard.kpi.share", locale)}
             value={dashboard.share}
-            delta="待確認"
+            delta={t("dashboard.kpi.sharePending", locale)}
             deltaTone="neutral"
           />
           <CanvasKPI
             theme={theme}
-            label="本月總營收"
+            label={t("dashboard.kpi.grossRevenue", locale)}
             value={dashboard.grossRevenue}
-            sub="分潤前"
+            sub={t("dashboard.kpi.grossRevenueSub", locale)}
           />
         </div>
 
@@ -106,27 +113,31 @@ export default async function FleetDashboardPage() {
         >
           <CanvasKPI
             theme={theme}
-            label="缺件司機"
+            label={t("dashboard.kpi.missingDocs", locale)}
             value={dashboard.supplemental.missingDocsDrivers}
-            delta={dashboard.supplemental.missingDocsDelta}
+            delta={t("dashboard.kpi.missingDocsDelta", locale)}
             deltaTone="down"
           />
           <CanvasKPI
             theme={theme}
-            label="事故 / 申訴"
+            label={t("dashboard.kpi.openCases", locale)}
             value={dashboard.supplemental.openCases}
-            delta={dashboard.supplemental.openCasesDelta}
+            delta={t("dashboard.kpi.openCasesDelta", locale)}
             deltaTone="down"
           />
           <CanvasKPI
             theme={theme}
-            label="訓練完成率"
+            label={t("dashboard.kpi.trainingCompletion", locale)}
             value={dashboard.supplemental.trainingCompletion}
           />
         </div>
 
         <div
-          style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: 16,
+          }}
         >
           <CanvasCard
             theme={theme}
@@ -136,12 +147,12 @@ export default async function FleetDashboardPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {dashboard.attention.map((banner) => (
                 <CanvasBanner
-                  key={banner.title}
+                  key={banner.title.en}
                   theme={theme}
                   tone={banner.tone}
                   icon="warn"
-                  title={banner.title}
-                  body={banner.body}
+                  title={pickLocalizedText(locale, banner.title)}
+                  body={pickLocalizedText(locale, banner.body)}
                 />
               ))}
             </div>
@@ -159,7 +170,7 @@ export default async function FleetDashboardPage() {
                   style={{ display: "flex", alignItems: "center", gap: 10 }}
                 >
                   <div style={{ width: 84 }}>
-                    <SvcChip theme={theme} svc={r.svc} />
+                    <SvcChip theme={theme} locale={locale} svc={r.svc} />
                   </div>
                   <div
                     style={{

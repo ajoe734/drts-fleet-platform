@@ -136,6 +136,7 @@ export interface ShellProps {
   versionLabel?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  sidebarFooter?: ReactNode;
   hideEnv?: boolean;
   currentPath?: string;
   searchPlaceholder?: string;
@@ -295,6 +296,7 @@ export function Shell({
   versionLabel,
   children,
   footer,
+  sidebarFooter,
   hideEnv = false,
   currentPath,
   searchPlaceholder,
@@ -432,6 +434,17 @@ export function Shell({
             ),
           )}
         </nav>
+
+        {sidebarFooter ? (
+          <div
+            style={{
+              padding: "8px 10px 10px",
+              borderTop: `1px solid ${theme.border}`,
+            }}
+          >
+            {sidebarFooter}
+          </div>
+        ) : null}
 
         {!hideEnv ? (
           <div
