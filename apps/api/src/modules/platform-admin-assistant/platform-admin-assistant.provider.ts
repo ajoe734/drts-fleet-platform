@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
 import { LlmGatewayService } from "../../common/llm-gateway";
+import { OpenClawRuntimeService } from "../../common/openclaw-runtime";
 import { getApprovedSource } from "./knowledge";
 import type {
   PlatformAdminAssistantActionCommand,
@@ -95,6 +96,162 @@ function extractGovernedAction(
   return null;
 }
 
+abstract class StructuredPlatformAdminAssistantProviderBase implements PlatformAdminAssistantProvider {
+  abstract readonly kind: PlatformAdminAssistantProvider["kind"];
+  abstract generate(
+    request: PlatformAdminAssistantProviderRequest,
+  ): Promise<PlatformAdminAssistantProviderResponse>;
+
+  protected parseStructuredResponse(
+    request: PlatformAdminAssistantProviderRequest,
+    text: string,
+  ): PlatformAdminAssistantProviderResponse {
+    const parsed = this.tryParseJson(text);
+    if (!parsed || typeof parsed.answer !== "string") {
+      return this.buildFallbackStructuredResponse(request, text);
+    }
+
+    const citations = Array.isArray(parsed.citations)
+      ? parsed.citations
+          .filter(
+            (
+              entry,
+            ): entry is {
+              title: string;
+              section?: string;
+              href?: string;
+            } =>
+              Boolean(
+                entry &&
+                typeof entry === "object" &&
+                typeof (entry as { title?: unknown }).title === "string",
+              ),
+          )
+          .slice(0, 4)
+      : [];
+    const suggestedPrompts = Array.isArray(parsed.suggestedPrompts)
+      ? parsed.suggestedPrompts
+          .filter((entry): entry is string => typeof entry === "string")
+          .slice(0, 3)
+      : [];
+
+    return {
+      answer: parsed.answer.trim(),
+      citations:
+        citations.length > 0 ? citations : toAssistantCitations(request),
+      suggestedPrompts:
+        suggestedPrompts.length > 0
+          ? suggestedPrompts
+          : this.defaultSuggestedPrompts(),
+      actionPlan: this.normalizeActionPlan(parsed.actionPlan),
+      governedAction: null,
+    };
+  }
+
+  protected buildFallbackStructuredResponse(
+    request: PlatformAdminAssistantProviderRequest,
+    text: string,
+  ): PlatformAdminAssistantProviderResponse {
+    const summary =
+      text.trim() ||
+      `Live ${this.kind} provider returned an empty answer for ${request.session.actor.actorId}.`;
+    return {
+      answer: summary,
+      citations: toAssistantCitations(request),
+      suggestedPrompts: this.defaultSuggestedPrompts(),
+      actionPlan: null,
+      governedAction: null,
+    };
+  }
+
+  protected normalizeActionPlan(
+    actionPlan: unknown,
+  ): PlatformAdminAssistantProviderResponse["actionPlan"] {
+    if (!actionPlan || typeof actionPlan !== "object") {
+      return null;
+    }
+
+    const plan = actionPlan as Record<string, unknown>;
+    if (
+      typeof plan.planId !== "string" ||
+      typeof plan.title !== "string" ||
+      typeof plan.summary !== "string" ||
+      !Array.isArray(plan.steps)
+    ) {
+      return null;
+    }
+
+    const steps = plan.steps
+      .filter(
+        (
+          step,
+        ): step is {
+          stepId: string;
+          title: string;
+          status: "pending" | "in_progress" | "completed";
+        } =>
+          Boolean(
+            step &&
+            typeof step === "object" &&
+            typeof (step as { stepId?: unknown }).stepId === "string" &&
+            typeof (step as { title?: unknown }).title === "string" &&
+            ((step as { status?: unknown }).status === "pending" ||
+              (step as { status?: unknown }).status === "in_progress" ||
+              (step as { status?: unknown }).status === "completed"),
+          ),
+      )
+      .slice(0, 6);
+
+    return {
+      planId: plan.planId,
+      title: plan.title,
+      summary: plan.summary,
+      steps,
+    };
+  }
+
+  protected tryParseJson(text: string): Record<string, unknown> | null {
+    const trimmed = text.trim();
+    const normalized =
+      trimmed.startsWith("```") && trimmed.endsWith("```")
+        ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
+        : trimmed;
+
+    for (const candidate of [
+      normalized,
+      this.extractJsonSlice(normalized),
+    ].filter((value): value is string => Boolean(value))) {
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        if (parsed && typeof parsed === "object") {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  protected defaultSuggestedPrompts() {
+    return [
+      "Summarize the current risk before changing rollout gates.",
+      "List the Platform Admin routes relevant to this issue.",
+      "Draft a safe manual follow-up for the current operator.",
+    ];
+  }
+
+  private extractJsonSlice(text: string) {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      return null;
+    }
+    return text.slice(start, end + 1);
+  }
+}
+
 @Injectable()
 export class MockPlatformAdminAssistantProvider implements PlatformAdminAssistantProvider {
   readonly kind = "mock" as const;
@@ -170,8 +327,13 @@ export class MockPlatformAdminAssistantProvider implements PlatformAdminAssistan
 }
 
 @Injectable()
-export class LlmGatewayPlatformAdminAssistantProvider implements PlatformAdminAssistantProvider {
-  constructor(private readonly llmGatewayService: LlmGatewayService) {}
+export class LlmGatewayPlatformAdminAssistantProvider extends StructuredPlatformAdminAssistantProviderBase {
+  constructor(
+    private readonly llmGatewayService: LlmGatewayService,
+    private readonly openClawRuntimeService: OpenClawRuntimeService,
+  ) {
+    super();
+  }
 
   get kind() {
     return this.llmGatewayService.getConfig().provider;
@@ -182,6 +344,15 @@ export class LlmGatewayPlatformAdminAssistantProvider implements PlatformAdminAs
   ): Promise<PlatformAdminAssistantProviderResponse> {
     if (this.llmGatewayService.isMockProvider()) {
       return new MockPlatformAdminAssistantProvider().generate(request);
+    }
+
+    if (this.llmGatewayService.isOpenClawProvider()) {
+      const result = await this.openClawRuntimeService.runAgentTurn({
+        sessionKey: request.session.sessionId,
+        message: this.buildOpenClawPrompt(request),
+        model: this.llmGatewayService.getConfig().chatModel,
+      });
+      return this.parseStructuredResponse(request, result.text);
     }
 
     const completion = await this.llmGatewayService.completeChat({
@@ -235,136 +406,61 @@ export class LlmGatewayPlatformAdminAssistantProvider implements PlatformAdminAs
     ];
   }
 
-  private parseStructuredResponse(
-    request: PlatformAdminAssistantProviderRequest,
-    text: string,
-  ): PlatformAdminAssistantProviderResponse {
-    const parsed = this.tryParseJson(text);
-    if (!parsed || typeof parsed.answer !== "string") {
-      return this.buildFallbackStructuredResponse(request, text);
-    }
+  private buildOpenClawPrompt(request: PlatformAdminAssistantProviderRequest) {
+    const citations = toAssistantCitations(request);
+    const retrievalContext =
+      request.retrieval.kind === "grounded"
+        ? request.retrieval.untrustedContext.slice(0, 4).map((block) => ({
+            sourcePath: block.sourcePath,
+            section: block.section,
+            text: summarizeChunkText(block.text),
+            hasInjectionRisk: block.hasInjectionRisk,
+          }))
+        : [];
 
-    const citations = Array.isArray(parsed.citations)
-      ? parsed.citations
-          .filter(
-            (
-              entry,
-            ): entry is {
-              title: string;
-              section?: string;
-              href?: string;
-            } =>
-              Boolean(
-                entry &&
-                typeof entry === "object" &&
-                typeof (entry as { title?: unknown }).title === "string",
-              ),
-          )
-          .slice(0, 4)
-      : [];
-    const suggestedPrompts = Array.isArray(parsed.suggestedPrompts)
-      ? parsed.suggestedPrompts
-          .filter((entry): entry is string => typeof entry === "string")
-          .slice(0, 3)
-      : [];
-
-    return {
-      answer: parsed.answer.trim(),
-      citations:
-        citations.length > 0 ? citations : toAssistantCitations(request),
-      suggestedPrompts:
-        suggestedPrompts.length > 0
-          ? suggestedPrompts
-          : this.defaultSuggestedPrompts(),
-      actionPlan: this.normalizeActionPlan(parsed.actionPlan),
-      governedAction: null,
-    };
-  }
-
-  private buildFallbackStructuredResponse(
-    request: PlatformAdminAssistantProviderRequest,
-    text: string,
-  ): PlatformAdminAssistantProviderResponse {
-    const summary =
-      text.trim() ||
-      `Live ${this.kind} provider returned an empty answer for ${request.session.actor.actorId}.`;
-    return {
-      answer: summary,
-      citations: toAssistantCitations(request),
-      suggestedPrompts: this.defaultSuggestedPrompts(),
-      actionPlan: null,
-      governedAction: null,
-    };
-  }
-
-  private normalizeActionPlan(
-    actionPlan: unknown,
-  ): PlatformAdminAssistantProviderResponse["actionPlan"] {
-    if (!actionPlan || typeof actionPlan !== "object") {
-      return null;
-    }
-
-    const plan = actionPlan as Record<string, unknown>;
-    if (
-      typeof plan.planId !== "string" ||
-      typeof plan.title !== "string" ||
-      typeof plan.summary !== "string" ||
-      !Array.isArray(plan.steps)
-    ) {
-      return null;
-    }
-
-    const steps = plan.steps
-      .filter(
-        (
-          step,
-        ): step is {
-          stepId: string;
-          title: string;
-          status: "pending" | "in_progress" | "completed";
-        } =>
-          Boolean(
-            step &&
-            typeof step === "object" &&
-            typeof (step as { stepId?: unknown }).stepId === "string" &&
-            typeof (step as { title?: unknown }).title === "string" &&
-            ((step as { status?: unknown }).status === "pending" ||
-              (step as { status?: unknown }).status === "in_progress" ||
-              (step as { status?: unknown }).status === "completed"),
-          ),
-      )
-      .slice(0, 6);
-
-    return {
-      planId: plan.planId,
-      title: plan.title,
-      summary: plan.summary,
-      steps,
-    };
-  }
-
-  private tryParseJson(text: string): Record<string, unknown> | null {
-    const trimmed = text.trim();
-    const normalized =
-      trimmed.startsWith("```") && trimmed.endsWith("```")
-        ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
-        : trimmed;
-
-    try {
-      const parsed = JSON.parse(normalized) as unknown;
-      return parsed && typeof parsed === "object"
-        ? (parsed as Record<string, unknown>)
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private defaultSuggestedPrompts() {
     return [
-      "Summarize the current risk before changing rollout gates.",
-      "List the Platform Admin routes relevant to this issue.",
-      "Draft a safe manual follow-up for the current operator.",
-    ];
+      "You are answering a DRTS Platform Admin assistant turn through the OpenClaw embedded runtime.",
+      "Return a single strict JSON object and no markdown fences.",
+      'Required top-level keys: "answer", "citations", "suggestedPrompts", "actionPlan".',
+      "Use only the approved-source retrieval context included below.",
+      "Do not claim to execute actions, inspect the filesystem, or call tools unless that fact is explicitly present in the payload.",
+      "",
+      JSON.stringify(
+        {
+          actorId: request.session.actor.actorId,
+          sessionId: request.session.sessionId,
+          message: request.message,
+          history: formatHistory(request),
+          retrievalKind: request.retrieval.kind,
+          retrievalContext,
+          allowedCitationHints: citations,
+          responseContract: {
+            answer: "string",
+            citations: [
+              {
+                title: "string",
+                section: "optional string",
+                href: "optional string",
+              },
+            ],
+            suggestedPrompts: ["string", "string", "string"],
+            actionPlan: {
+              planId: "string",
+              title: "string",
+              summary: "string",
+              steps: [
+                {
+                  stepId: "string",
+                  title: "string",
+                  status: "pending | in_progress | completed",
+                },
+              ],
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    ].join("\n");
   }
 }

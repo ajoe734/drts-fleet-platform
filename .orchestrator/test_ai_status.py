@@ -381,5 +381,137 @@ class CommandListTests(unittest.TestCase):
         self.assertIn("(no matches)", out)
 
 
+# --- Integration gate (branch-strategy.md §11.6 enforcement) ---
+_GATE_SPEC = importlib.util.spec_from_file_location(
+    "integration_gate", ROOT / ".orchestrator" / "integration_gate.py"
+)
+assert _GATE_SPEC is not None and _GATE_SPEC.loader is not None
+integration_gate = importlib.util.module_from_spec(_GATE_SPEC)
+_GATE_SPEC.loader.exec_module(integration_gate)
+
+
+class IntegrationGateUnitTest(unittest.TestCase):
+    def _cfg(self, **gate) -> dict:
+        return {"branch_strategy": {"integration_gate": {"enabled": True, **gate}}}
+
+    def test_disabled_gate_allows_everything(self) -> None:
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": False}}}
+        self.assertIsNone(
+            integration_gate.check_integration_gate({"id": "X"}, "branch_pushed", cfg)
+        )
+
+    def test_branch_only_status_blocks_when_enabled(self) -> None:
+        reason = integration_gate.check_integration_gate(
+            {"id": "I18N-OPS-03"}, "branch_pushed", self._cfg()
+        )
+        self.assertIsNotNone(reason)
+        self.assertIn("I18N-OPS-03", reason)
+        self.assertIn("not integrated to dev", reason)
+
+    def test_integrated_statuses_allow(self) -> None:
+        for status in ("merged_to_dev", "dev_deployed", "not_applicable"):
+            self.assertIsNone(
+                integration_gate.check_integration_gate({"id": "X"}, status, self._cfg()),
+                status,
+            )
+
+    def test_exempt_pattern_allows(self) -> None:
+        cfg = self._cfg(exempt_task_patterns=[r"-SIDECAR-ACCEPTANCE$"])
+        self.assertIsNone(
+            integration_gate.check_integration_gate(
+                {"id": "FOO-SIDECAR-ACCEPTANCE"}, "branch_pushed", cfg
+            )
+        )
+        # non-matching id still blocks
+        self.assertIsNotNone(
+            integration_gate.check_integration_gate({"id": "FOO"}, "branch_pushed", cfg)
+        )
+
+    def test_malformed_exempt_pattern_does_not_crash(self) -> None:
+        cfg = self._cfg(exempt_task_patterns=["[unclosed"])
+        # malformed regex must not raise and must not exempt
+        self.assertIsNotNone(
+            integration_gate.check_integration_gate({"id": "FOO"}, "branch_pushed", cfg)
+        )
+
+
+class IntegrationGateCommandDoneTest(unittest.TestCase):
+    def _task(self) -> dict:
+        return {"id": "I18N-OPS-03", "owner": "Codex", "reviewer": "Claude", "status": "review_approved"}
+
+    def _state(self, task: dict) -> dict:
+        return {"tasks": [task], "blockers": [], "handoffs": []}
+
+    def _done_env(self, **extra: str) -> dict:
+        env = {
+            "AI_NAME": "Codex",
+            "COMMIT_HASH": "abc123",
+            "COMMIT_SUBJECT": "I18N-OPS-03: centralize complaints i18n",
+            "PUSH_REMOTE": "origin",
+            "PUSH_BRANCH": "codex/i18n-ops-03",
+        }
+        env.update(extra)
+        return env
+
+    def test_branch_only_done_is_refused_when_enabled(self) -> None:
+        task = self._task()
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
+        with (
+            mock.patch.dict(os.environ, self._done_env(), clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            with self.assertRaisesRegex(SystemExit, "not integrated to dev"):
+                ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
+        # task must NOT have advanced to done
+        self.assertEqual(task["status"], "review_approved")
+
+    def test_merged_to_dev_done_is_allowed_when_enabled(self) -> None:
+        task = self._task()
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
+        env = self._done_env(INTEGRATION_STATUS="merged_to_dev", MERGED_REF="origin/dev")
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            ai_status.command_done(state, ["I18N-OPS-03", "merged to dev"])
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["integration_status"], "merged_to_dev")
+
+    def test_log_only_allows_branch_only_done_with_canary(self) -> None:
+        task = self._task()
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": True, "log_only": True}}}
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, self._done_env(), clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+            redirect_stderr(stderr),
+        ):
+            ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
+        self.assertEqual(task["status"], "done")
+        self.assertIn("integration-gate canary", stderr.getvalue())
+
+    def test_disabled_gate_allows_branch_only_done(self) -> None:
+        task = self._task()
+        state = self._state(task)
+        cfg = {"branch_strategy": {"integration_gate": {"enabled": False}}}
+        with (
+            mock.patch.dict(os.environ, self._done_env(), clear=True),
+            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
+            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
+            mock.patch.object(ai_status, "append_log"),
+        ):
+            ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
+        self.assertEqual(task["status"], "done")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -428,7 +428,10 @@ export async function loadRevenue(): Promise<RevenueView> {
 
 export interface DashboardView {
   driverCount: string;
-  driverSub: string;
+  driverStatusSummary: {
+    online: string;
+    offline: string;
+  };
   dispatchable: string;
   completedTrips: string;
   share: string;
@@ -460,7 +463,10 @@ const DASHBOARD_FALLBACK: Omit<
   | "supplementalSource"
 > = {
   driverCount: "128",
-  driverSub: "active 96 · offline 32",
+  driverStatusSummary: {
+    online: "96",
+    offline: "32",
+  },
   dispatchable: "96",
   completedTrips: "14,280",
   share: "NT$ 642K",
@@ -500,7 +506,10 @@ export async function loadDashboard(): Promise<DashboardView> {
     );
     return {
       driverCount: record.activeDriverCount.toLocaleString("en-US"),
-      driverSub: `active ${record.onlineDriverCount} · offline ${offline}`,
+      driverStatusSummary: {
+        online: record.onlineDriverCount.toLocaleString("en-US"),
+        offline: offline.toLocaleString("en-US"),
+      },
       dispatchable: record.dispatchEligibleDriverCount.toLocaleString("en-US"),
       completedTrips: record.completedTripCount.toLocaleString("en-US"),
       share: formatMoney(record.shareAmount),

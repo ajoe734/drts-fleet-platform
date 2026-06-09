@@ -11,7 +11,6 @@ const NEXT_CHILD_BOOT_RETRY_DELAY_MS = 500;
 const REQUEST_HEADER_BLOCKLIST = new Set([
   "connection",
   "content-length",
-  "cookie",
   "host",
   "transfer-encoding",
   "x-forwarded-for",

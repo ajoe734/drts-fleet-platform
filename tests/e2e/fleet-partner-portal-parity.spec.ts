@@ -31,7 +31,7 @@ const routeSpecs: RouteSpec[] = [
       /可接單|Available/i,
       /缺件|Missing docs/i,
       /訓練未完成|Training incomplete/i,
-      /service eligibility/i,
+      /可接服務|Service eligibility/i,
     ],
     screenshot: "fleet-drivers.png",
   },
@@ -42,8 +42,8 @@ const routeSpecs: RouteSpec[] = [
     markers: [
       /車輛狀態|Vehicle status/i,
       /新增車輛|Add vehicle/i,
-      /vehicle eligibility/i,
-      /INSURANCE/i,
+      /可接服務|Vehicle eligibility/i,
+      /保險|Insurance/i,
     ],
     screenshot: "fleet-vehicles.png",
   },
@@ -53,9 +53,9 @@ const routeSpecs: RouteSpec[] = [
     title: /趟次|Trips/i,
     markers: [
       /即時叫車|保險代步|機場接送|airport/i,
-      /ORDER/i,
+      /訂單|Order/i,
       /車行分潤/i,
-      /SERVICE/i,
+      /服務別|Service/i,
     ],
     screenshot: "fleet-trips.png",
   },
@@ -76,7 +76,12 @@ const routeSpecs: RouteSpec[] = [
     key: "statements",
     path: "/statements",
     title: /對帳單|Statements/i,
-    markers: [/STATEMENT/i, /PAYABLE/i, /下載|download/i, /確認|confirm/i],
+    markers: [
+      /對帳單|Statement/i,
+      /應付|Payable/i,
+      /下載|download/i,
+      /確認|confirm/i,
+    ],
     screenshot: "fleet-statements.png",
     requiresReason: true,
   },
@@ -87,7 +92,7 @@ const routeSpecs: RouteSpec[] = [
     markers: [
       /需處理|To handle/i,
       /缺件期間影響派工|Missing documents block dispatch/i,
-      /OWNER/i,
+      /責任|Owner/i,
       /上傳|upload/i,
     ],
     screenshot: "fleet-documents.png",
@@ -103,7 +108,12 @@ const routeSpecs: RouteSpec[] = [
     key: "cases",
     path: "/cases",
     title: /事故|申訴|Incidents|Complaints/i,
-    markers: [/CASE/i, /責任歸屬|responsibility/i, /SLA/i, /回覆處理|respond/i],
+    markers: [
+      /案件|Case/i,
+      /責任歸屬|responsibility/i,
+      /SLA/i,
+      /回覆處理|respond/i,
+    ],
     screenshot: "fleet-cases.png",
   },
   {
@@ -172,6 +182,61 @@ test.describe("fleet partner portal parity smoke", () => {
         path: `test-results/fleet-partner-portal-parity/${spec.screenshot}`,
         fullPage: true,
       });
+    }
+  });
+
+  test("shell locale switch, API lamp, and short-page height are stable", async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== FLEET_PROJECT);
+
+    const baseUrl = getBaseUrl(testInfo);
+    await page.context().clearCookies();
+    await page.addInitScript(() => {
+      localStorage.removeItem("drts-locale-v2");
+    });
+    await page.route("**/control-plane-proxy/health", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "healthy" }),
+      });
+    });
+
+    await page.goto(`${baseUrl}/dashboard`, { waitUntil: "domcontentloaded" });
+    await assertSingleShell(page);
+    await expect(page.locator("aside")).toContainText(/API 健康/);
+    await expect(
+      page.getByRole("button", { name: /切換為英文|Switch to English/ }),
+    ).toBeVisible();
+
+    await page
+      .getByRole("button", { name: /切換為英文|Switch to English/ })
+      .click();
+    await expect(page.locator("main")).toContainText(
+      /Fleet Operations Overview/,
+    );
+    await expect(page.locator("main")).not.toContainText(/車行營運總覽/);
+    await expect(page.locator("aside")).toContainText(/API healthy/);
+    await expect(
+      page.getByRole("button", { name: /Switch to Chinese|切換為中文/ }),
+    ).toBeVisible();
+
+    for (const path of ["/revenue", "/quality"]) {
+      await page.goto(`${baseUrl}${path}`, { waitUntil: "domcontentloaded" });
+      const layout = await page.evaluate(() => ({
+        bodyScrollHeight: document.body.scrollHeight,
+        documentScrollHeight: document.documentElement.scrollHeight,
+        viewportHeight: window.innerHeight,
+        bodyOverflow: getComputedStyle(document.body).overflow,
+      }));
+      expect(layout.bodyOverflow).toBe("hidden");
+      expect(layout.bodyScrollHeight).toBeLessThanOrEqual(
+        layout.viewportHeight + 1,
+      );
+      expect(layout.documentScrollHeight).toBeLessThanOrEqual(
+        layout.viewportHeight + 1,
+      );
     }
   });
 });

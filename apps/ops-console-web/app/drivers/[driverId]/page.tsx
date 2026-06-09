@@ -26,7 +26,7 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
-import type { Locale } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasCard as Card,
@@ -140,6 +140,14 @@ const REFRESH_TIER: RefreshTier = "medium";
 const REFRESH_STALE_AFTER_MS = 15_000;
 const STALE_LOCATION_THRESHOLD_MS = 5 * 60 * 1000;
 const REAUTH_THRESHOLD_MS = 72 * 60 * 60 * 1000;
+const DATE_TIME_LOCALE: Record<Locale, string> = {
+  en: "en-US",
+  zh: "zh-TW",
+};
+const LIST_SEPARATOR: Record<Locale, string> = {
+  en: ", ",
+  zh: "、",
+};
 
 const ACTIVE_DRIVER_TASK_STATUSES = new Set<DriverTaskRecord["status"]>([
   "pending_acceptance",
@@ -185,8 +193,20 @@ const monoStyle: CSSProperties = {
   fontFamily: theme.monoFamily,
 };
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
+function detailT(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(`drivers.detailPage.${key}`, locale, params);
+}
+
+function driverActionT(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(`drivers.actions.${key}`, locale, params);
 }
 
 function normalizeOrigin(value: string | null | undefined) {
@@ -201,7 +221,7 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+  return new Intl.DateTimeFormat(DATE_TIME_LOCALE[locale], {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -220,7 +240,11 @@ function formatList(locale: Locale, values: readonly string[]) {
   }
   return values
     .map((value) => formatOpsCodeLabel(locale, value))
-    .join(locale === "zh" ? "、" : ", ");
+    .join(LIST_SEPARATOR[locale]);
+}
+
+function taskDomainLabel(locale: Locale, domain: TaskRow["domain"]) {
+  return detailT(locale, `domain.${domain}`);
 }
 
 async function loadWithError<T>(
@@ -236,7 +260,7 @@ async function loadWithError<T>(
       error:
         error instanceof Error
           ? error.message
-          : copy(locale, "Unknown error", "未知錯誤"),
+          : t("common.unknown", locale),
     };
   }
 }
@@ -289,70 +313,38 @@ function emptyIcon(reason: EmptyReason): DriverActionIcon {
 function emptyTitle(locale: Locale, reason: EmptyReason) {
   switch (reason) {
     case "no_data":
-      return copy(locale, "No records yet", "目前沒有資料");
+      return detailT(locale, "empty.noDataTitle");
     case "not_provisioned":
-      return copy(locale, "Not provisioned", "尚未 provision");
+      return detailT(locale, "empty.notProvisionedTitle");
     case "fetch_failed":
-      return copy(locale, "Snapshot unavailable", "快照暫不可用");
+      return detailT(locale, "empty.snapshotUnavailableTitle");
     case "permission_denied":
-      return copy(locale, "Permission required", "權限不足");
+      return detailT(locale, "empty.permissionRequiredTitle");
     case "external_unavailable":
-      return copy(
-        locale,
-        "External dependency unavailable",
-        "外部相依暫不可用",
-      );
+      return detailT(locale, "empty.externalUnavailableTitle");
     case "filtered_empty":
-      return copy(locale, "No matches after filtering", "套用篩選後沒有結果");
+      return detailT(locale, "empty.filteredEmptyTitle");
     default:
-      return copy(locale, "No records yet", "目前沒有資料");
+      return detailT(locale, "empty.noDataTitle");
   }
 }
 
 function defaultEmptyDescription(locale: Locale, reason: EmptyReason) {
   switch (reason) {
     case "no_data":
-      return copy(
-        locale,
-        "This section is healthy, but there is nothing to show for this driver.",
-        "這個區塊健康可用，但目前這位司機沒有對應資料。",
-      );
+      return detailT(locale, "empty.noDataDescription");
     case "not_provisioned":
-      return copy(
-        locale,
-        "The required upstream record has not been provisioned for this driver yet.",
-        "這位司機所需的上游資料尚未 provision。",
-      );
+      return detailT(locale, "empty.notProvisionedDescription");
     case "fetch_failed":
-      return copy(
-        locale,
-        "The service responded with an error before a usable snapshot could be rendered.",
-        "服務在回傳可用快照前發生錯誤。",
-      );
+      return detailT(locale, "empty.snapshotUnavailableDescription");
     case "permission_denied":
-      return copy(
-        locale,
-        "Your authority can open this page, but this subsection needs a higher-scope read grant.",
-        "你可以進入此頁，但此子區塊需要更高權限才能讀取。",
-      );
+      return detailT(locale, "empty.permissionRequiredDescription");
     case "external_unavailable":
-      return copy(
-        locale,
-        "This section depends on an external or degraded upstream system that is temporarily unavailable.",
-        "此區塊依賴的外部或降級上游系統目前暫不可用。",
-      );
+      return detailT(locale, "empty.externalUnavailableDescription");
     case "filtered_empty":
-      return copy(
-        locale,
-        "The upstream dataset exists, but the current filter left no matching rows.",
-        "上游資料存在，但目前篩選條件沒有留下任何符合的列。",
-      );
+      return detailT(locale, "empty.filteredEmptyDescription");
     default:
-      return copy(
-        locale,
-        "No records are currently available.",
-        "目前沒有可顯示的資料。",
-      );
+      return detailT(locale, "empty.defaultDescription");
   }
 }
 
@@ -467,11 +459,10 @@ function actionTitle(locale: Locale, action: DriverAction) {
       : descriptor.action;
   }
   if (descriptor.requiresReason) {
-    return copy(
-      locale,
-      `${action.label} · requires reason (${descriptor.riskLevel})`,
-      `${action.label} · 需填寫理由（${descriptor.riskLevel}）`,
-    );
+    return detailT(locale, "actionRequiresReason", {
+      label: action.label,
+      riskLevel: descriptor.riskLevel,
+    });
   }
   return action.label;
 }
@@ -608,34 +599,21 @@ function buildRefreshBannerBody(
   const freshnessLabel = formatOpsCodeLabel(locale, metadata.dataFreshness);
   const sectionSummary =
     degradedSections.length > 0
-      ? copy(
-          locale,
-          `Degraded sections: ${degradedSections.join(", ")}`,
-          `降級區塊：${degradedSections.join("、")}`,
-        )
-      : copy(
-          locale,
-          "All driver detail surfaces loaded.",
-          "司機詳情區塊已完整載入。",
-        );
+      ? detailT(locale, "refresh.degradedSections", {
+          sections: degradedSections.join(LIST_SEPARATOR[locale]),
+        })
+      : detailT(locale, "refresh.allSectionsLoaded");
   const snapshotSummary = metadata.generatedAt
-    ? copy(
-        locale,
-        `Generated ${formatDateTime(locale, metadata.generatedAt)}`,
-        `生成時間 ${formatDateTime(locale, metadata.generatedAt)}`,
-      )
-    : copy(
-        locale,
-        "Backend refresh metadata unavailable; showing the latest server-rendered snapshot.",
-        "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
-      );
+    ? detailT(locale, "refresh.generatedAt", {
+        value: formatDateTime(locale, metadata.generatedAt),
+      })
+    : detailT(locale, "refresh.metadataUnavailable");
 
   return [
-    copy(
-      locale,
-      `T3 cadence · ${metadata.source} snapshot · ${freshnessLabel}`,
-      `T3 節奏 · ${metadata.source} 快照 · ${freshnessLabel}`,
-    ),
+    detailT(locale, "refresh.summary", {
+      source: metadata.source,
+      freshness: freshnessLabel,
+    }),
     snapshotSummary,
     sectionSummary,
   ].join(" · ");
@@ -822,7 +800,7 @@ export default async function DriverDetailPage({
     const reason = classifyErrorReason(driversResult.error);
     const backAction: DriverAction = {
       descriptor: { action: "open_registry", enabled: true, riskLevel: "low" },
-      label: copy(locale, "Back to driver registry", "回到司機名冊"),
+      label: detailT(locale, "registryBack"),
       href: "/drivers",
       icon: "arrow",
     };
@@ -830,12 +808,8 @@ export default async function DriverDetailPage({
       <>
         <PageHeader
           theme={theme}
-          title={copy(locale, "Driver detail", "司機詳情")}
-          subtitle={`${driverId} · ${copy(
-            locale,
-            "registry fetch failed",
-            "名冊載入失敗",
-          )}`}
+          title={detailT(locale, "title")}
+          subtitle={`${driverId} · ${detailT(locale, "registryFetchFailed")}`}
           actions={renderDriverAction(backAction, locale)}
         />
         <div style={pageBodyStyle}>
@@ -945,15 +919,15 @@ export default async function DriverDetailPage({
 
   // Refresh + degraded surfaces (the page-level T3 banner).
   const degradedSections = [
-    presenceResult.error ? copy(locale, "platform bindings", "平台綁定") : null,
-    forwardedResult.error ? copy(locale, "relay", "轉派") : null,
-    statementsResult.error ? copy(locale, "earnings", "收入") : null,
-    tasksResult.error ? copy(locale, "active tasks", "進行中任務") : null,
-    incidentsResult.error ? copy(locale, "incidents", "事故") : null,
+    presenceResult.error ? detailT(locale, "section.platformBindings") : null,
+    forwardedResult.error ? detailT(locale, "section.relay") : null,
+    statementsResult.error ? detailT(locale, "section.earnings") : null,
+    tasksResult.error ? detailT(locale, "section.activeTasks") : null,
+    incidentsResult.error ? detailT(locale, "section.incidents") : null,
     shiftsResult.error || attendanceResult.error
-      ? copy(locale, "shifts", "班次")
+      ? detailT(locale, "section.shifts")
       : null,
-    locationsResult.error ? copy(locale, "location", "位置") : null,
+    locationsResult.error ? detailT(locale, "section.location") : null,
   ].filter((entry): entry is string => Boolean(entry));
 
   const refreshMetadata =
@@ -1030,27 +1004,27 @@ export default async function DriverDetailPage({
   const headerActions: DriverAction[] = [
     {
       descriptor: forceOfflineDescriptor,
-      label: copy(locale, "Force offline (per platform)", "強制下線（單平台）"),
+      label: driverActionT(locale, "takePlatformOffline"),
       icon: "warn",
       href: "#platform-bindings",
       variant: "primary",
     },
     {
       descriptor: requestReauthDescriptor,
-      label: copy(locale, "Request re-auth", "請司機 re-auth"),
+      label: driverActionT(locale, "requestReauth"),
       icon: "arrow",
       href: "#platform-bindings",
     },
     activeSuppression
       ? {
           descriptor: liftSuppressionDescriptor,
-          label: copy(locale, "Lift suppression", "解除 suppression"),
+          label: driverActionT(locale, "liftSuppression"),
           icon: "check",
           ...(suppressionIncidentHref ? { href: suppressionIncidentHref } : {}),
         }
       : {
           descriptor: suppressDescriptor,
-          label: copy(locale, "Suppress matching", "suppress matching"),
+          label: driverActionT(locale, "suppressMatching"),
           icon: "x",
           ...(sosIncidentHref ? { href: sosIncidentHref } : {}),
         },
@@ -1058,7 +1032,7 @@ export default async function DriverDetailPage({
 
   const refreshAction: DriverAction = {
     descriptor: { action: "refresh", enabled: true, riskLevel: "low" },
-    label: copy(locale, "Refresh", "重新整理"),
+    label: t("common.refresh", locale),
     icon: "arrow",
     href: `/drivers/${encodeURIComponent(driverId)}`,
   };
@@ -1069,7 +1043,7 @@ export default async function DriverDetailPage({
     resourceType: "driver",
     resourceId: driverId,
     openMode: "new_tab",
-    label: copy(locale, "Adapter registry", "Adapter registry"),
+    label: detailT(locale, "action.adapterRegistry"),
   };
   const adapterRegistryHref = platformAdminOrigin
     ? buildCrossAppHref(platformAdminOrigin, adapterRegistryLink)
@@ -1081,7 +1055,7 @@ export default async function DriverDetailPage({
       "low",
       adapterRegistryHref ? undefined : "platform_admin_origin_unresolved",
     ),
-    label: copy(locale, "Adapter registry ↗", "Adapter registry ↗"),
+    label: detailT(locale, "action.adapterRegistryExternal"),
     icon: "ext",
     ...(adapterRegistryHref ? { href: adapterRegistryHref } : {}),
     openInNewTab: true,
@@ -1139,18 +1113,12 @@ export default async function DriverDetailPage({
     activityItems.push({
       id: "suppression",
       tone: "warn",
-      eyebrow: copy(locale, "Matching suppression", "派遣抑制"),
+      eyebrow: detailT(locale, "activity.matchingSuppression"),
       title: formatOpsCodeLabel(locale, activeSuppression.reasonCode),
-      timestamp: copy(
-        locale,
-        `TTL until ${formatDateTime(locale, activeSuppression.expiresAt)}`,
-        `TTL 至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
-      ),
-      detail: copy(
-        locale,
-        "Driver is held out of matching; ops_manager can extend the TTL.",
-        "司機已被排除於派遣媒合之外；ops_manager 可延長 TTL。",
-      ),
+      timestamp: detailT(locale, "ttlUntil", {
+        value: formatDateTime(locale, activeSuppression.expiresAt),
+      }),
+      detail: detailT(locale, "activity.suppressionDetail"),
       ...(suppressionIncidentHref
         ? {
             actions: (
@@ -1159,7 +1127,7 @@ export default async function DriverDetailPage({
                 prefetch={false}
                 style={{ color: theme.accent, fontSize: "12px" }}
               >
-                {copy(locale, "Open source incident", "前往來源事故")}
+                {detailT(locale, "action.openSourceIncident")}
               </Link>
             ),
           }
@@ -1189,7 +1157,7 @@ export default async function DriverDetailPage({
           prefetch={false}
           style={{ color: theme.accent, fontSize: "12px" }}
         >
-          {copy(locale, "Open incident", "前往事故")}
+          {detailT(locale, "action.openIncident")}
         </Link>
       ),
     });
@@ -1197,31 +1165,27 @@ export default async function DriverDetailPage({
 
   const subtitleParts = [
     driverId,
-    `${copy(locale, "work state", "工作狀態")}: ${formatOpsCodeLabel(
+    `${detailT(locale, "workStateLabel")}: ${formatOpsCodeLabel(
       locale,
       driver.workState,
     )}`,
     formatList(locale, driver.supportedServiceBuckets),
-    `${driver.deviceBindings.length} ${copy(
-      locale,
-      "device binding(s)",
-      "裝置綁定",
-    )}`,
+    `${driver.deviceBindings.length} ${detailT(locale, "deviceBindings")}`,
   ];
 
   const tabs: ReactNode[] = [
-    <span key="overview">{copy(locale, "Overview", "總覽")}</span>,
+    <span key="overview">{detailT(locale, "tab.overview")}</span>,
     <span key="platforms">
-      {copy(locale, "Platform bindings", "平台綁定")}
+      {detailT(locale, "tab.platformBindings")}
     </span>,
-    <span key="tasks">{copy(locale, "Active tasks", "進行中任務")}</span>,
-    <span key="earnings">{copy(locale, "Earnings", "收入")}</span>,
-    <span key="shifts">{copy(locale, "Shifts", "班次")}</span>,
+    <span key="tasks">{detailT(locale, "tab.activeTasks")}</span>,
+    <span key="earnings">{detailT(locale, "tab.earnings")}</span>,
+    <span key="shifts">{detailT(locale, "tab.shifts")}</span>,
     <span
       key="incidents"
       style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
     >
-      {copy(locale, "Incidents", "事故")}
+      {detailT(locale, "tab.incidents")}
       {openDriverIncidents.length > 0 ? (
         <Pill theme={theme} tone="danger">
           {openDriverIncidents.length}
@@ -1232,14 +1196,14 @@ export default async function DriverDetailPage({
 
   const presenceColumns: CanvasTableColumn<PresenceRow>[] = [
     {
-      h: copy(locale, "Platform", "平台"),
+      h: detailT(locale, "col.platform"),
       w: 160,
       r: (row) => (
         <strong>{platformDisplayName(row.presence.platformCode)}</strong>
       ),
     },
     {
-      h: copy(locale, "Account", "帳號"),
+      h: detailT(locale, "col.account"),
       w: 180,
       mono: true,
       r: (row) =>
@@ -1247,12 +1211,12 @@ export default async function DriverDetailPage({
           row.presence.accountId
         ) : (
           <Pill theme={theme} tone="warn">
-            {copy(locale, "unbound", "未綁定")}
+            {detailT(locale, "platform.unbound")}
           </Pill>
         ),
     },
     {
-      h: copy(locale, "Presence", "在線"),
+      h: detailT(locale, "col.presence"),
       w: 150,
       r: (row) => (
         <span style={{ display: "inline-flex", gap: "6px", flexWrap: "wrap" }}>
@@ -1261,14 +1225,14 @@ export default async function DriverDetailPage({
           </Pill>
           {row.presence.reauthRequired ? (
             <Pill theme={theme} tone="warn">
-              {copy(locale, "re-auth", "需 re-auth")}
+              {detailT(locale, "platform.reauth")}
             </Pill>
           ) : null}
         </span>
       ),
     },
     {
-      h: copy(locale, "Eligibility", "資格"),
+      h: detailT(locale, "col.eligibility"),
       w: 120,
       r: (row) => (
         <Pill theme={theme} tone={eligibilityTone(row.presence)}>
@@ -1277,7 +1241,7 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Token", "Token"),
+      h: detailT(locale, "col.token"),
       w: 170,
       mono: true,
       r: (row) =>
@@ -1288,7 +1252,7 @@ export default async function DriverDetailPage({
             {formatDateTime(locale, row.presence.tokenExpiresAt)}
             {tokenExpirySoon(row.presence) ? (
               <Pill theme={theme} tone="warn">
-                {copy(locale, "expiring", "即將到期")}
+                {detailT(locale, "platform.expiring")}
               </Pill>
             ) : null}
           </span>
@@ -1297,7 +1261,7 @@ export default async function DriverDetailPage({
         ),
     },
     {
-      h: copy(locale, "Adapter", "Adapter"),
+      h: detailT(locale, "col.adapter"),
       w: 140,
       r: (row) => (
         <Pill theme={theme} tone={adapterTone(row.adapter)}>
@@ -1309,7 +1273,7 @@ export default async function DriverDetailPage({
 
   const taskColumns: CanvasTableColumn<TaskRow>[] = [
     {
-      h: copy(locale, "Reference", "編號"),
+      h: detailT(locale, "col.reference"),
       w: 150,
       mono: true,
       r: (row) =>
@@ -1326,16 +1290,16 @@ export default async function DriverDetailPage({
         ),
     },
     {
-      h: copy(locale, "Domain", "領域"),
+      h: detailT(locale, "col.domain"),
       w: 110,
       r: (row) => (
         <Pill theme={theme} tone={row.domain === "owned" ? "accent" : "info"}>
-          {row.domain}
+          {taskDomainLabel(locale, row.domain)}
         </Pill>
       ),
     },
     {
-      h: copy(locale, "Status", "狀態"),
+      h: detailT(locale, "col.status"),
       w: 150,
       r: (row) => (
         <Pill theme={theme} tone={row.statusTone} dot>
@@ -1344,25 +1308,25 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Detail", "細節"),
+      h: detailT(locale, "col.detail"),
       r: (row) => row.detail,
     },
   ];
 
   const relayColumns: CanvasTableColumn<RelayRow>[] = [
     {
-      h: copy(locale, "Platform", "平台"),
+      h: detailT(locale, "col.platform"),
       w: 140,
       r: (row) => platformDisplayName(row.order.platformCode),
     },
     {
-      h: copy(locale, "Mirror", "Mirror"),
+      h: detailT(locale, "col.mirror"),
       w: 150,
       mono: true,
       r: (row) => row.order.mirrorOrderId,
     },
     {
-      h: copy(locale, "Error", "錯誤"),
+      h: detailT(locale, "col.error"),
       r: (row) =>
         row.order.lastSyncError ? (
           <span>
@@ -1376,13 +1340,13 @@ export default async function DriverDetailPage({
         ),
     },
     {
-      h: copy(locale, "Fallback", "人工轉派"),
+      h: detailT(locale, "col.fallback"),
       w: 150,
       r: (row) =>
         row.order.manualFallback.required ? (
           <Pill theme={theme} tone="warn">
             {row.order.manualFallback.reason ??
-              copy(locale, "manual fallback", "人工轉派")}
+              detailT(locale, "relay.manualFallback")}
           </Pill>
         ) : (
           "—"
@@ -1392,13 +1356,13 @@ export default async function DriverDetailPage({
 
   const statementColumns: CanvasTableColumn<StatementRow>[] = [
     {
-      h: copy(locale, "Period", "週期"),
+      h: detailT(locale, "col.period"),
       w: 110,
       mono: true,
       r: (row) => row.statement.periodMonth,
     },
     {
-      h: copy(locale, "Payout", "撥款"),
+      h: detailT(locale, "col.payout"),
       w: 110,
       r: (row) => (
         <Pill
@@ -1411,7 +1375,7 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Net", "淨額"),
+      h: detailT(locale, "col.net"),
       w: 130,
       mono: true,
       align: "right",
@@ -1422,7 +1386,7 @@ export default async function DriverDetailPage({
         ),
     },
     {
-      h: copy(locale, "Receipt", "對帳單號"),
+      h: detailT(locale, "col.receipt"),
       mono: true,
       r: (row) => row.statement.receiptNo,
     },
@@ -1430,13 +1394,13 @@ export default async function DriverDetailPage({
 
   const shiftColumns: CanvasTableColumn<ShiftRow>[] = [
     {
-      h: copy(locale, "Shift", "班次"),
+      h: detailT(locale, "col.shift"),
       w: 150,
       mono: true,
       r: (row) => row.shift.shiftId,
     },
     {
-      h: copy(locale, "Status", "狀態"),
+      h: detailT(locale, "col.status"),
       w: 120,
       r: (row) => (
         <Pill theme={theme} tone={shiftTone(row.shift.status)} dot>
@@ -1445,13 +1409,13 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Clock-in", "上班"),
+      h: detailT(locale, "col.clockIn"),
       w: 150,
       mono: true,
       r: (row) => formatDateTime(locale, row.shift.clockedInAt),
     },
     {
-      h: copy(locale, "Attendance", "出勤"),
+      h: detailT(locale, "col.attendance"),
       r: (row) =>
         row.attendance ? (
           <Pill theme={theme} tone={attendanceTone(row.attendance.status)}>
@@ -1465,7 +1429,7 @@ export default async function DriverDetailPage({
 
   const incidentColumns: CanvasTableColumn<IncidentRow>[] = [
     {
-      h: copy(locale, "Incident", "事故"),
+      h: detailT(locale, "col.incident"),
       w: 150,
       mono: true,
       r: (row) => (
@@ -1479,7 +1443,7 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Severity", "嚴重度"),
+      h: detailT(locale, "col.severity"),
       w: 110,
       r: (row) => (
         <Pill
@@ -1492,7 +1456,7 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Status", "狀態"),
+      h: detailT(locale, "col.status"),
       w: 120,
       r: (row) => (
         <Pill theme={theme} tone="neutral">
@@ -1501,7 +1465,7 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Title", "標題"),
+      h: detailT(locale, "col.title"),
       r: (row) => row.incident.title,
     },
   ];
@@ -1537,8 +1501,8 @@ export default async function DriverDetailPage({
               tone={driver.dispatchEligible ? "success" : "danger"}
             >
               {driver.dispatchEligible
-                ? copy(locale, "dispatchable", "可派遣")
-                : copy(locale, "not_dispatchable", "不可派遣")}
+                ? detailT(locale, "dispatchable")
+                : detailT(locale, "notDispatchable")}
             </Pill>
             {sosActive ? (
               <Pill theme={theme} tone="danger" dot>
@@ -1547,7 +1511,7 @@ export default async function DriverDetailPage({
             ) : null}
             {activeSuppression ? (
               <Pill theme={theme} tone="warn">
-                {copy(locale, "matching suppressed", "派遣抑制中")}
+                {detailT(locale, "matchingSuppressed")}
               </Pill>
             ) : null}
           </span>
@@ -1573,11 +1537,7 @@ export default async function DriverDetailPage({
               : "info"
           }
           icon={degradedSections.length > 0 ? "warn" : "clock"}
-          title={copy(
-            locale,
-            `Refresh tier T3 · ${REFRESH_TIER} (15s) · urgent events push`,
-            `刷新層級 T3 · ${REFRESH_TIER}（15 秒）· 緊急事件即時推播`,
-          )}
+          title={detailT(locale, "banner.refreshTier", { tier: REFRESH_TIER })}
           body={buildRefreshBannerBody(
             locale,
             refreshMetadata,
@@ -1591,11 +1551,7 @@ export default async function DriverDetailPage({
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copy(
-              locale,
-              "Driver has an active SOS in response — dispatch actions are disabled",
-              "此司機目前處於 SOS in_response — dispatch action 已停用",
-            )}
+            title={detailT(locale, "banner.sosActive")}
             body={`${sosIncident.incidentId} · ${formatOpsCodeLabel(
               locale,
               sosIncident.severity,
@@ -1609,11 +1565,9 @@ export default async function DriverDetailPage({
                         enabled: true,
                         riskLevel: "low",
                       },
-                      label: copy(
-                        locale,
-                        `Open ${sosIncident.incidentId}`,
-                        `前往 ${sosIncident.incidentId}`,
-                      ),
+                      label: detailT(locale, "banner.openIncidentById", {
+                        incidentId: sosIncident.incidentId,
+                      }),
                       icon: "ext",
                       href: sosIncidentHref,
                       variant: "primary",
@@ -1630,19 +1584,13 @@ export default async function DriverDetailPage({
             theme={theme}
             tone="warn"
             icon="warn"
-            title={copy(
-              locale,
-              "Matching suppression is active for this driver",
-              "此司機目前處於派遣抑制狀態",
-            )}
+            title={detailT(locale, "banner.suppressionActive")}
             body={`${formatOpsCodeLabel(
               locale,
               activeSuppression.reasonCode,
-            )} · ${copy(
-              locale,
-              `TTL until ${formatDateTime(locale, activeSuppression.expiresAt)}`,
-              `TTL 至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
-            )}`}
+            )} · ${detailT(locale, "ttlUntil", {
+              value: formatDateTime(locale, activeSuppression.expiresAt),
+            })}`}
             actions={
               suppressionIncidentHref
                 ? renderDriverAction(
@@ -1652,7 +1600,7 @@ export default async function DriverDetailPage({
                         enabled: true,
                         riskLevel: "low",
                       },
-                      label: copy(locale, "Related incident", "相關事故"),
+                      label: detailT(locale, "action.relatedIncident"),
                       icon: "ext",
                       href: suppressionIncidentHref,
                     },
@@ -1668,11 +1616,7 @@ export default async function DriverDetailPage({
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copy(
-              locale,
-              "Platform presence is degraded",
-              "平台在線狀態降級",
-            )}
+            title={detailT(locale, "banner.platformPresenceDegraded")}
             body={presenceResult.error}
           />
         ) : null}
@@ -1682,16 +1626,14 @@ export default async function DriverDetailPage({
             <div id="platform-bindings">
               <Card
                 theme={theme}
-                title={copy(
-                  locale,
-                  `Platform binding · ${presences.length} platform(s)`,
-                  `平台綁定 · ${presences.length} 個平台`,
-                )}
-                subtitle={copy(
-                  locale,
-                  `${onlinePlatforms.length} online · ${reauthPlatforms.length} re-auth · ${ineligiblePlatforms.length} ineligible`,
-                  `${onlinePlatforms.length} 在線 · ${reauthPlatforms.length} 需 re-auth · ${ineligiblePlatforms.length} 不符資格`,
-                )}
+                title={detailT(locale, "card.platformBindingTitle", {
+                  count: presences.length,
+                })}
+                subtitle={detailT(locale, "card.platformBindingSubtitle", {
+                  online: onlinePlatforms.length,
+                  reauth: reauthPlatforms.length,
+                  ineligible: ineligiblePlatforms.length,
+                })}
                 actions={
                   degradedAdapters.length > 0
                     ? renderDriverAction(adapterRegistryAction, locale)
@@ -1715,11 +1657,7 @@ export default async function DriverDetailPage({
                   renderEmptyState(
                     locale,
                     "no_data",
-                    copy(
-                      locale,
-                      "This driver has no platform bindings yet.",
-                      "這位司機目前沒有任何平台綁定。",
-                    ),
+                    detailT(locale, "card.noPlatformBindings"),
                   )
                 )}
               </Card>
@@ -1728,19 +1666,13 @@ export default async function DriverDetailPage({
             <div id="active-tasks">
               <Card
                 theme={theme}
-                title={copy(
-                  locale,
-                  `Active tasks · ${taskRows.length}`,
-                  `進行中任務 · ${taskRows.length}`,
-                )}
+                title={detailT(locale, "card.activeTasksTitle", {
+                  count: taskRows.length,
+                })}
                 actions={renderDriverAction(
                   {
                     descriptor: markUnavailableDescriptor,
-                    label: copy(
-                      locale,
-                      "Mark unavailable (forwarded)",
-                      "標記 forwarded 不可用",
-                    ),
+                    label: detailT(locale, "action.markUnavailableForwarded"),
                     icon: "x",
                   },
                   locale,
@@ -1759,11 +1691,7 @@ export default async function DriverDetailPage({
                   renderEmptyState(
                     locale,
                     "no_data",
-                    copy(
-                      locale,
-                      "No owned or forwarded tasks are currently in flight.",
-                      "目前沒有進行中的自有或轉派任務。",
-                    ),
+                    detailT(locale, "card.noActiveTasks"),
                   )
                 )}
               </Card>
@@ -1771,30 +1699,24 @@ export default async function DriverDetailPage({
 
             <Card
               theme={theme}
-              title={copy(
-                locale,
-                `Earnings · ${driverStatements.length} statement(s)`,
-                `收入 · ${driverStatements.length} 張對帳單`,
-              )}
+              title={detailT(locale, "card.earningsTitle", {
+                count: driverStatements.length,
+              })}
               subtitle={
                 latestStatement
-                  ? copy(
-                      locale,
-                      `Latest ${latestStatement.periodMonth} · ${formatMinorCurrency(
+                  ? detailT(locale, "card.latestStatement", {
+                      periodMonth: latestStatement.periodMonth,
+                      amount: formatMinorCurrency(
                         latestStatement.netAmount.amountMinor,
                         latestStatement.netAmount.currency,
-                      )} net`,
-                      `最新 ${latestStatement.periodMonth} · 淨額 ${formatMinorCurrency(
-                        latestStatement.netAmount.amountMinor,
-                        latestStatement.netAmount.currency,
-                      )}`,
-                    )
+                      ),
+                    })
                   : undefined
               }
               actions={renderDriverAction(
                 {
                   descriptor: generateStatementDescriptor,
-                  label: copy(locale, "Generate statement", "產生對帳單"),
+                  label: detailT(locale, "action.generateStatement"),
                   icon: "arrow",
                   href: `/reports`,
                 },
@@ -1818,11 +1740,7 @@ export default async function DriverDetailPage({
                 renderEmptyState(
                   locale,
                   "no_data",
-                  copy(
-                    locale,
-                    "No earnings statements have been generated for this driver.",
-                    "這位司機尚未產生任何對帳單。",
-                  ),
+                  detailT(locale, "card.noStatements"),
                 )
               )}
             </Card>
@@ -1832,11 +1750,7 @@ export default async function DriverDetailPage({
             <div id="manual-override">
               <Card
                 theme={theme}
-                title={copy(
-                  locale,
-                  "Manual override & suppression log",
-                  "人工介入與抑制紀錄",
-                )}
+                title={detailT(locale, "card.manualOverrideTitle")}
               >
                 <CanvasActivityFeed
                   theme={theme}
@@ -1845,11 +1759,7 @@ export default async function DriverDetailPage({
                   emptyState={renderEmptyState(
                     locale,
                     "no_data",
-                    copy(
-                      locale,
-                      "No manual overrides or active suppression for this driver.",
-                      "這位司機目前沒有人工介入或派遣抑制紀錄。",
-                    ),
+                    detailT(locale, "card.noManualOverride"),
                   )}
                 />
               </Card>
@@ -1857,11 +1767,9 @@ export default async function DriverDetailPage({
 
             <Card
               theme={theme}
-              title={copy(
-                locale,
-                `Failed relay attempts · ${relayFailures.length} (recent)`,
-                `轉派失敗 · ${relayFailures.length}（近期）`,
-              )}
+              title={detailT(locale, "card.failedRelayTitle", {
+                count: relayFailures.length,
+              })}
               padding={relayRows.length > 0 ? 0 : 16}
             >
               {forwardedResult.error ? (
@@ -1876,22 +1784,16 @@ export default async function DriverDetailPage({
                 renderEmptyState(
                   locale,
                   "no_data",
-                  copy(
-                    locale,
-                    "No forwarded relay failures in the current window.",
-                    "目前時段內沒有轉派失敗。",
-                  ),
+                  detailT(locale, "card.noRelayFailures"),
                 )
               )}
             </Card>
 
             <Card
               theme={theme}
-              title={copy(
-                locale,
-                `Shifts & attendance · ${driverShifts.length}`,
-                `班次與出勤 · ${driverShifts.length}`,
-              )}
+              title={detailT(locale, "card.shiftsTitle", {
+                count: driverShifts.length,
+              })}
               padding={shiftRows.length > 0 ? 0 : 16}
             >
               {shiftsResult.error || attendanceResult.error ? (
@@ -1908,22 +1810,16 @@ export default async function DriverDetailPage({
                 renderEmptyState(
                   locale,
                   "no_data",
-                  copy(
-                    locale,
-                    "No recent shift or attendance entries for this driver.",
-                    "這位司機沒有近期班次或出勤紀錄。",
-                  ),
+                  detailT(locale, "card.noShifts"),
                 )
               )}
             </Card>
 
             <Card
               theme={theme}
-              title={copy(
-                locale,
-                `Recent incidents · ${driverIncidents.length}`,
-                `近期事故 · ${driverIncidents.length}`,
-              )}
+              title={detailT(locale, "card.incidentsTitle", {
+                count: driverIncidents.length,
+              })}
               padding={incidentRows.length > 0 ? 0 : 16}
             >
               {incidentsResult.error ? (
@@ -1942,18 +1838,14 @@ export default async function DriverDetailPage({
                 renderEmptyState(
                   locale,
                   "no_data",
-                  copy(
-                    locale,
-                    "No incidents are linked to this driver.",
-                    "目前沒有與這位司機相關的事故。",
-                  ),
+                  detailT(locale, "card.noIncidents"),
                 )
               )}
             </Card>
 
             <Card
               theme={theme}
-              title={copy(locale, "Location & status", "位置與狀態")}
+              title={detailT(locale, "card.locationStatusTitle")}
             >
               <div
                 style={{
@@ -1969,12 +1861,12 @@ export default async function DriverDetailPage({
                   <CanvasIcon name="pin" size={14} />
                   <span>
                     {locationsResult.error
-                      ? copy(locale, "Location unknown", "位置未知")
+                      ? detailT(locale, "location.unknown")
                       : !locationSnapshot
-                        ? copy(locale, "No location sample", "無位置樣本")
+                        ? detailT(locale, "location.noSample")
                         : locationStale
-                          ? copy(locale, "Location stale", "位置過舊")
-                          : copy(locale, "Location live", "位置即時")}
+                          ? detailT(locale, "location.stale")
+                          : detailT(locale, "location.live")}
                   </span>
                   {locationSnapshot ? (
                     <Pill
@@ -1989,7 +1881,7 @@ export default async function DriverDetailPage({
                 {driver.eligibilityBlockedReasons.length > 0 ? (
                   <div style={{ color: theme.textMuted }}>
                     <strong>
-                      {copy(locale, "Eligibility blocked", "資格阻擋")}:
+                      {detailT(locale, "eligibilityBlocked")}:
                     </strong>{" "}
                     {formatList(locale, driver.eligibilityBlockedReasons)}
                   </div>
@@ -2002,7 +1894,7 @@ export default async function DriverDetailPage({
                         enabled: true,
                         riskLevel: "low",
                       },
-                      label: copy(locale, "Back to drivers", "回到司機名冊"),
+                      label: detailT(locale, "action.backToDrivers"),
                       icon: "arrow",
                       href: "/drivers",
                       variant: "ghost",
@@ -2016,7 +1908,7 @@ export default async function DriverDetailPage({
                         enabled: true,
                         riskLevel: "low",
                       },
-                      label: copy(locale, "Open dispatch", "前往派遣"),
+                      label: detailT(locale, "action.openDispatch"),
                       icon: "ext",
                       href: "/dispatch",
                       variant: "ghost",

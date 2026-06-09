@@ -1,5 +1,6 @@
 export type LlmGatewayProvider =
   | "mock"
+  | "openclaw"
   | "openai"
   | "anthropic"
   | "openrouter"
@@ -25,6 +26,8 @@ type EnvLike = NodeJS.ProcessEnv;
 const DEFAULT_PROVIDER = "mock";
 const DEFAULT_CHAT_MODEL = "mock-chat-v1";
 const DEFAULT_SUMMARIZER_MODEL = "mock-summary-v1";
+const DEFAULT_OPENCLAW_CHAT_MODEL = "openai/gpt-5.5";
+const DEFAULT_OPENCLAW_SUMMARIZER_MODEL = "openai/gpt-5.4-mini";
 const DEFAULT_DAILY_BUDGET_USD = 25;
 const DEFAULT_REQUESTS_PER_MINUTE = 30;
 const DEFAULT_INPUT_TOKENS_PER_MINUTE = 120_000;
@@ -32,6 +35,7 @@ const DEFAULT_OUTPUT_TOKENS_PER_MINUTE = 16_000;
 const DEFAULT_TRANSCRIPT_RETENTION_DAYS = 30;
 const SUPPORTED_PROVIDERS: readonly LlmGatewayProvider[] = [
   "mock",
+  "openclaw",
   "openai",
   "anthropic",
   "openrouter",
@@ -122,7 +126,7 @@ export function resolveLlmGatewayConfig(
 
   let provider = requestedProvider;
 
-  if (provider !== DEFAULT_PROVIDER && !apiKey) {
+  if (provider !== DEFAULT_PROVIDER && provider !== "openclaw" && !apiKey) {
     if (!allowMockFallback) {
       throw new Error(
         "LLM_GATEWAY_API_KEY is required when PLATFORM_ADMIN_ASSISTANT_ENABLED=true and LLM_GATEWAY_PROVIDER is not mock in production",
@@ -139,10 +143,15 @@ export function resolveLlmGatewayConfig(
     ...(apiKey ? { apiKey } : {}),
     ...(baseUrl ? { baseUrl } : {}),
     chatModel:
-      normalizeString(env.LLM_GATEWAY_CHAT_MODEL) || DEFAULT_CHAT_MODEL,
+      normalizeString(env.LLM_GATEWAY_CHAT_MODEL) ||
+      (requestedProvider === "openclaw"
+        ? DEFAULT_OPENCLAW_CHAT_MODEL
+        : DEFAULT_CHAT_MODEL),
     summarizerModel:
       normalizeString(env.LLM_GATEWAY_SUMMARIZER_MODEL) ||
-      DEFAULT_SUMMARIZER_MODEL,
+      (requestedProvider === "openclaw"
+        ? DEFAULT_OPENCLAW_SUMMARIZER_MODEL
+        : DEFAULT_SUMMARIZER_MODEL),
     dailyBudgetUsd: parsePositiveNumber(
       env.LLM_GATEWAY_DAILY_BUDGET_USD,
       DEFAULT_DAILY_BUDGET_USD,

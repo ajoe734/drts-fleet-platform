@@ -1,3 +1,10 @@
+import type {
+  OperationalAlertRecord,
+  PlatformNoticeRecord,
+  PlatformNoticeSeverity,
+  PlatformNoticeStatus,
+} from "@drts/contracts";
+
 export type Locale = "en" | "zh";
 
 const en = {
@@ -40,8 +47,10 @@ const en = {
   "common.hide": "Hide",
   "common.close": "Close",
   "common.approve": "Approve",
+  "common.edit": "Edit",
   "common.error": "Error",
   "common.all": "All",
+  "common.na": "N/A",
   "common.immutableHistory": "Immutable history",
   "common.global": "Global",
   "common.actions": "Actions",
@@ -97,6 +106,186 @@ const en = {
   "home.featureFlags.title": "Feature Flags",
   "home.featureFlags.desc":
     "Feature flag management with tenant-level overrides",
+  "home.banner.tokenExpiry.title":
+    "BGMT dispatch reporting token expires in 6 days",
+  "home.banner.tokenExpiry.desc":
+    "Measured {value} at {observedAt}. Renew the client credential before reporting completion traffic stalls.",
+  "home.banner.tokenExpiry.action": "Open adapter registry",
+  "home.banner.syncFailed.title": "GoCab forwarded · 24h sync_failed 4.2%",
+  "home.banner.syncFailed.desc":
+    "Above the 3% warning threshold. Inspect adapter health and watch manual fallback volume before finance close.",
+  "home.banner.syncFailed.action": "Open adapter",
+  "home.banner.rollback.title": "{tenantCode} is in rollback_hold",
+  "home.banner.rollback.desc":
+    "Customer complaint cmp_0894 escalated into inc_0212. Rollout is paused until platform and ops agree on the next move.",
+  "home.banner.rollback.action": "Open tenant",
+  "home.audit.actorType": "ACTOR TYPE",
+  "home.audit.systemActor": "system",
+  "home.kpi.tenantsSub": "{pilot} pilot · {sandbox} sandbox",
+  "home.kpi.tenantsDelta": "{count} rollback_hold",
+  "home.kpi.partnersSub":
+    "{bank} bank · {hotelEnterprise} hotel / enterprise",
+  "home.kpi.driversStable": "healthy",
+  "home.kpi.reconHintEmpty": "no open issue ids",
+  "home.shortcut.tenants": "Tenants",
+  "home.shortcut.partners": "Partners",
+  "home.shortcut.pricing": "Pricing",
+  "home.shortcut.payments": "Payments",
+  "home.shortcut.fleet": "Fleet",
+  "home.shortcut.audit": "Audit",
+  "home.page.title": "Platform governance home",
+  "home.page.subtitle":
+    "DRTS control plane · {count} governance item(s) need review today.",
+  "home.page.openAll": "Open all",
+  "home.page.openAudit": "Go to audit",
+  "home.page.loading": "Loading governance snapshot...",
+  "home.page.noSnapshot": "No governance snapshot available yet.",
+  "home.page.loadErrorTitle": "Unable to load governance snapshot",
+  "home.page.quickLinksTitle": "Module shortcuts",
+  "home.page.todayTitle": "Today's governance queue",
+  "home.page.todaySubtitle":
+    "Cross-module items where platform governance should intervene.",
+  "home.page.recentTitle":
+    "Recent sensitive operations · platform-layer audit trail (24h)",
+  "home.page.noAudit": "No audit records found.",
+  "home.page.noTodos":
+    "No platform-routed governance blockers at the moment.",
+  "home.kpi.partnerReadiness": "{count} pending readiness",
+  "home.kpi.driverDelta": "{count} stale in dispatch feed",
+  "home.kpi.driverSub": "{eligible} dispatch-eligible · {total} total",
+  "home.kpi.reconDelta": "{partner} partner · {forwarded} forwarded",
+  "home.kpi.reconSub": "{count} critical platform alert(s)",
+  "home.audit.time": "Time",
+  "home.audit.module": "Module",
+  "home.audit.action": "Action",
+  "home.audit.actor": "Actor",
+  "home.audit.request": "Request",
+
+  // ── Platform Admin Shell ──
+  "adminShell.section.workspace": "Workspace",
+  "adminShell.section.tenant": "Tenant Governance",
+  "adminShell.section.partner": "Partner Governance",
+  "adminShell.section.people": "People & Fleet",
+  "adminShell.section.fleet": "Fleet Programs",
+  "adminShell.section.commerce": "Platform & Commerce",
+  "adminShell.section.ops": "Platform Ops & Risk",
+  "adminShell.route.home": "Home",
+  "adminShell.route.tenants": "Tenants",
+  "adminShell.route.tenantGovernance": "Tenant Governance",
+  "adminShell.route.partners": "Partner Entries",
+  "adminShell.route.users": "Platform Staff",
+  "adminShell.route.fleet": "Fleet & Compliance",
+  "adminShell.route.serviceProducts": "Service Products",
+  "adminShell.route.vehicleEligibility": "Vehicle Eligibility Matrix",
+  "adminShell.route.fleetPartners": "Fleet Partners",
+  "adminShell.route.switchboard": "Public Info & Placards",
+  "adminShell.route.pricing": "Pricing",
+  "adminShell.route.payments": "Payments",
+  "adminShell.route.reimbursements": "Reimbursements",
+  "adminShell.route.adapterRegistry": "Adapter Registry",
+  "adminShell.route.health": "Platform Health",
+  "adminShell.route.notices": "Notices & Maintenance",
+  "adminShell.route.audit": "Audit & Evidence",
+  "adminShell.route.featureFlags": "Feature Flags · WRITE",
+  "adminShell.refresh.manual": "manual · audit evidence",
+  "adminShell.refresh.governance": "medium_slow · governance",
+  "adminShell.health.notChecked": "not checked",
+  "adminShell.health.checking": "API checking",
+  "adminShell.health.healthy": "API healthy",
+  "adminShell.health.degraded": "API degraded",
+  "adminShell.health.down": "API down",
+  "adminShell.health.lastChecked": "last checked",
+  "adminShell.brand.sub": "Platform Admin",
+  "adminShell.nav.aria": "Platform Admin navigation",
+  "adminShell.search.aria": "Search",
+  "adminShell.search.placeholder":
+    "Search tenants, partner entries, audit events...",
+  "adminShell.identity.actor": "Platform Admin",
+  "adminShell.breadcrumb.detail": "Detail",
+  "adminShell.notifications": "Notifications",
+  "adminShell.realm": "PLATFORM",
+  "adminShell.environment": "production",
+  "adminShell.language.zh": "中文",
+  "adminShell.language.en": "English",
+
+  // ── Platform Assistant ──
+  "assistant.overlay.prompt.summary":
+    "Summarize what I should check on this page.",
+  "assistant.overlay.prompt.checklist":
+    "Draft an operator checklist for the current route.",
+  "assistant.overlay.prompt.risks":
+    "What risks should I review before changing platform state?",
+  "assistant.overlay.citations": "Sources:",
+  "assistant.overlay.suggestedPrompts": "Suggested next prompts:",
+  "assistant.overlay.receiptTitle": "Action receipt",
+  "assistant.overlay.launcher": "Open platform assistant",
+  "assistant.overlay.badge": "Beta",
+  "assistant.overlay.label": "Assistant",
+  "assistant.overlay.subtitle": "governance copilot",
+  "assistant.overlay.heading": "Platform Admin Assistant",
+  "assistant.overlay.status":
+    "Connected to the dev mock gateway for operation Q&A and action planning.",
+  "assistant.overlay.inputLabel": "Ask the platform assistant",
+  "assistant.overlay.inputPlaceholder":
+    "Ask how to operate this page, what risks matter, or what to do next...",
+  "assistant.overlay.send": "Send",
+  "assistant.overlay.sending": "Thinking",
+  "assistant.overlay.newSession": "New chat",
+  "assistant.overlay.minimize": "Minimize",
+  "assistant.overlay.close": "Close",
+  "assistant.overlay.reset": "Reset position",
+  "assistant.overlay.emptyTitle": "Platform Admin assistant is ready",
+  "assistant.overlay.emptyBody":
+    "Ask about the current page, governance risks, or request an operator checklist.",
+  "assistant.overlay.thinking":
+    "Reading the current Platform Admin route context and preparing an answer...",
+  "assistant.overlay.sessionTitle": "Platform Admin assistant",
+  "assistant.overlay.requestFailedBody":
+    "The assistant could not complete this request.",
+  "assistant.overlay.requestFailedTitle": "Assistant request failed",
+  "assistant.overlay.requestFailedHint":
+    "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
+  "assistant.overlay.actionFailedTitle": "Action execution failed",
+  "assistant.overlay.actionFailedHint":
+    "Review the governed action payload, confirmation reason, and backend audit logs.",
+  "assistant.overlay.promptRail": "Assistant suggested prompts",
+  "assistant.warning.highRiskActions":
+    "This route exposes high-risk actions requiring modal confirmation, a reason, and an audit receipt.",
+  "assistant.warning.writeAuthority":
+    "This route holds platform write authority (the only app that can write flags); changes propagate to other apps.",
+  "assistant.warning.plaintextSecret":
+    "Credentials/secrets are shown in plaintext only once at issue/rotation and cannot be viewed again.",
+  "assistant.warning.maintenanceMode":
+    "Maintenance mode is high-risk; enabling it pushes a cross-app banner to ops/tenant/driver.",
+  "assistant.warning.legalHold":
+    "Evidence governance: legal holds and deletion exceptions are high-risk and require a reason plus a recorded owner.",
+  "assistant.warning.bodyParityPending":
+    "This route's page body is owned by a body-parity work item and may not be live yet; metadata is ready.",
+  "assistant.warning.unknownRoute":
+    "Path is not in the Platform Admin route registry; falling back to home context.",
+  "assistant.route.home.title": "Home",
+  "assistant.route.tenants.title": "Tenants",
+  "assistant.route.tenantDetail.title": "Tenant Detail",
+  "assistant.route.tenantGovernance.title": "Tenant Governance",
+  "assistant.route.partners.title": "Partner Entries",
+  "assistant.route.partnerDetail.title": "Partner Entry Detail",
+  "assistant.route.users.title": "Platform Staff",
+  "assistant.route.fleet.title": "Fleet & Compliance",
+  "assistant.route.serviceProducts.title": "Service Products",
+  "assistant.route.vehicleEligibility.title": "Vehicle Eligibility Matrix",
+  "assistant.route.fleetPartners.title": "Fleet Partners",
+  "assistant.route.fleetPartnerDetail.title": "Fleet Partner Detail",
+  "assistant.route.switchboard.title": "Public Info & Placards",
+  "assistant.route.pricing.title": "Pricing",
+  "assistant.route.payments.title": "Payments",
+  "assistant.route.reimbursements.title": "Reimbursements",
+  "assistant.route.reimbursementBatchDetail.title":
+    "Reimbursement Batch Detail",
+  "assistant.route.adapterRegistry.title": "Adapter Registry",
+  "assistant.route.health.title": "Platform Health",
+  "assistant.route.notices.title": "Notices & Maintenance",
+  "assistant.route.audit.title": "Audit & Evidence",
+  "assistant.route.featureFlags.title": "Feature Flags",
 
   // ── Tenants ──
   "tenants.title": "Tenant Management",
@@ -599,6 +788,178 @@ const en = {
   "pricing.form.effectiveTo": "Effective To",
   "pricing.noRules": "No pricing rules.",
   "pricing.noPlans": "No driver fee plans.",
+  "pricing.pageTitle": "Pricing",
+  "pricing.pageSubtitle":
+    "draft -> published -> retired · publish uses atomic replace (Q-ADM10)",
+  "pricing.loadingWorkspace": "Loading pricing workspace...",
+  "pricing.tab.passenger": "Passenger Pricing",
+  "pricing.tab.driver": "Driver Fee Plans",
+  "pricing.tab.subsidy": "Subsidy / Reimbursement Rules",
+  "pricing.tab.history": "Published Versions",
+  "pricing.action.createPassengerDraft": "Create passenger draft",
+  "pricing.action.createDriverDraft": "Create driver plan draft",
+  "pricing.action.createSubsidyDraft": "Create subsidy draft",
+  "pricing.action.viewHistory": "View version history",
+  "pricing.action.publishDriverPlan": "Publish driver fee plan",
+  "pricing.action.publishSubsidyRule": "Publish subsidy rule",
+  "pricing.banner.authority.title": "Canonical quoted fare authority",
+  "pricing.banner.authority.body":
+    "Backend pricing is the only source of truth. Any manual override must follow governance and retain actor type plus required fields.",
+  "pricing.banner.loadFailure.title": "Pricing workspace failed to load",
+  "pricing.banner.receipt.title": "Audit receipt",
+  "pricing.banner.publishUnsupported.title":
+    "{action} is not wired to a mutation yet",
+  "pricing.banner.publishUnsupported.body":
+    "The high-risk publish modal and atomic replace flow are wired only for passenger pricing right now; driver and subsidy keep parity structure and governance guidance only.",
+  "pricing.bucket.title": "Service bucket fee breakdown",
+  "pricing.bucket.fallback.base": "Canonical backend rule",
+  "pricing.bucket.fallback.continuation": "See pricing rule",
+  "pricing.bucket.fallback.fee": "{feeBps} bps",
+  "pricing.bucket.standard.label": "standard",
+  "pricing.bucket.standard.base": "NT$ 85 / start",
+  "pricing.bucket.standard.continuation": "NT$ 5 / 250m",
+  "pricing.bucket.standard.fee": "1800 bps",
+  "pricing.bucket.business.label": "business",
+  "pricing.bucket.business.base": "NT$ 120 / start",
+  "pricing.bucket.business.continuation": "NT$ 6 / 200m",
+  "pricing.bucket.business.fee": "2200 bps",
+  "pricing.bucket.airport.label": "airport",
+  "pricing.bucket.airport.base": "NT$ 180 / start",
+  "pricing.bucket.airport.continuation": "Flat by zone",
+  "pricing.bucket.airport.fee": "2500 bps",
+  "pricing.bucket.wheelchair.label": "wheelchair",
+  "pricing.bucket.wheelchair.base": "NT$ 95 / start",
+  "pricing.bucket.wheelchair.continuation": "NT$ 5 / 250m",
+  "pricing.bucket.wheelchair.fee": "900 bps · subsidy",
+  "pricing.card.activeDraft.title": "Active / Draft comparison",
+  "pricing.card.activeDraft.subtitle":
+    "Version model · compare canonical active and candidate draft before publish",
+  "pricing.card.publishStepper.title": "Publish stepper",
+  "pricing.card.publishStepper.subtitle":
+    "Select draft -> compare -> capture reason -> atomic replace",
+  "pricing.card.publishStepper.conflictTitle": "Conflict check",
+  "pricing.card.override.title": "Override governance",
+  "pricing.card.override.subtitle":
+    "Manual override is record-only governance and must not overwrite canonical quoted fare authority",
+  "pricing.card.driverComparison.title": "Active / Draft comparison",
+  "pricing.card.driverComparison.subtitle":
+    "Driver settlement plans remain immutable after publish",
+  "pricing.card.driverComparison.draftQueue": "Draft queue",
+  "pricing.card.tripFee.title": "Per-trip fee structure",
+  "pricing.card.tripFee.subtitle": "Must-show fee structure + subsidy linkage",
+  "pricing.card.subsidyLinkage.title": "Subsidy / reimbursement linkage",
+  "pricing.card.subsidyLinkage.subtitle":
+    "Subsidy rules and the reimbursement queue are governed separately but share the quoted fare authority",
+  "pricing.card.subsidyOverride.subtitle":
+    "Manual override actors and evidence obligations",
+  "pricing.card.historyFilters.title": "Published version filters",
+  "pricing.card.historyFilters.subtitle":
+    "Cross-tab history can be filtered by type, scope, and period",
+  "pricing.card.historyTable.title":
+    "All published versions · cross-tab history",
+  "pricing.col.name": "Name",
+  "pricing.col.nameUpper": "NAME",
+  "pricing.col.versionUpper": "VERSION",
+  "pricing.col.statusUpper": "STATUS",
+  "pricing.col.serviceFeeUpper": "SERVICE FEE",
+  "pricing.col.serviceFeeBpsUpper": "SERVICE FEE bps",
+  "pricing.col.reimburseUpper": "REIMBURSE",
+  "pricing.col.scopeUpper": "SCOPE",
+  "pricing.col.effectiveUpper": "EFFECTIVE",
+  "pricing.col.triggerUpper": "TRIGGER",
+  "pricing.col.amountUpper": "AMOUNT / PCT",
+  "pricing.col.typeUpper": "TYPE",
+  "pricing.col.publishedAtUpper": "PUBLISHED AT",
+  "pricing.col.publishedByUpper": "PUBLISHED BY",
+  "pricing.col.canonicalUpper": "CANONICAL",
+  "pricing.col.actorTypesUpper": "ACTOR TYPES",
+  "pricing.col.requiredFieldsUpper": "REQUIRED FIELDS",
+  "pricing.col.planUpper": "PLAN",
+  "pricing.col.publishedUpper": "PUBLISHED",
+  "pricing.col.reimbursementModeUpper": "REIMBURSEMENT MODE",
+  "pricing.col.subsidyLinkageUpper": "SUBSIDY LINKAGE",
+  "pricing.col.queueUpper": "QUEUE",
+  "pricing.col.triggerCountUpper": "TRIGGER COUNT",
+  "pricing.col.canonicalVersionUpper": "CANONICAL VERSION",
+  "pricing.col.manualOverrideUpper": "MANUAL OVERRIDE",
+  "pricing.col.tenantCanSetQuotedFareUpper": "TENANT CAN SET QUOTED FARE",
+  "pricing.col.partnerCanSetQuotedFareUpper": "PARTNER CAN SET QUOTED FARE",
+  "pricing.modal.title": "Publish version",
+  "pricing.modal.body":
+    "High-risk actions require a reason and must retain actor, reason, and trace evidence in the audit receipt.",
+  "pricing.modal.conflictTitle": "Scope conflict check",
+  "pricing.modal.errorTitle": "Unable to publish draft",
+  "pricing.form.publishEffectiveFrom": "Effective Start",
+  "pricing.form.publishEffectiveTo": "Effective End",
+  "pricing.form.publishReason": "High-risk reason",
+  "pricing.form.publishReasonPlaceholder":
+    "Describe the governance reason, impact scope, and approval basis for this pricing publish.",
+  "pricing.state.active": "Active",
+  "pricing.state.current": "Current",
+  "pricing.state.draft": "Draft",
+  "pricing.state.empty": "Empty",
+  "pricing.state.publishCandidate": "Publish candidate",
+  "pricing.state.published": "Published",
+  "pricing.status.draft": "Draft",
+  "pricing.status.published": "Published",
+  "pricing.status.retired": "Retired",
+  "pricing.step.selectDraft.title": "1. Select draft",
+  "pricing.step.selectDraft.ready": "{version} is in the publish queue",
+  "pricing.step.selectDraft.empty":
+    "No publishable draft is available right now",
+  "pricing.step.compare.title": "2. Compare active/draft",
+  "pricing.step.compare.ready": "{activeVersion} -> {draftVersion}",
+  "pricing.step.compare.empty":
+    "Both an active rule and a draft are required for comparison",
+  "pricing.step.reason.title": "3. High-risk reason",
+  "pricing.step.reason.empty": "Open the modal and fill the required reason",
+  "pricing.step.receipt.title": "4. Audit receipt",
+  "pricing.step.receipt.empty":
+    "A receipt summary will appear here after publish",
+  "pricing.empty.passenger": "No passenger pricing versions are available.",
+  "pricing.empty.activeRule": "No active pricing rule is available.",
+  "pricing.empty.publishDraft": "No pricing draft is waiting to publish.",
+  "pricing.empty.driver": "No driver fee plan versions are available.",
+  "pricing.empty.publishedPlans": "No published driver fee plan is available.",
+  "pricing.empty.driverDraft":
+    "The current backend only returns published fee plans; the draft comparison area remains reserved for governance parity.",
+  "pricing.empty.tripFee": "No fee structure is available to display.",
+  "pricing.empty.history": "No version history matches the current filter set.",
+  "pricing.error.noDraft":
+    "There is no draft pricing rule available to publish.",
+  "pricing.error.reasonTooShort":
+    "The high-risk reason must be at least 12 characters.",
+  "pricing.publishConflict.multipleDrafts":
+    "{count} drafts share scope {scope}; publish should confirm the intended winner before atomic replace.",
+  "pricing.publishConflict.activeRetire":
+    "{activeVersion} will be retired for scope {scope} when {draftVersion} publishes.",
+  "pricing.publishReceipt":
+    '{version} published with reason "{reason}" at {timestamp}',
+  "pricing.reimbursement.mixed": "Manual + platform",
+  "pricing.reimbursement.platformOnly": "Platform only",
+  "pricing.scope.business": "business",
+  "pricing.scope.standard": "standard",
+  "pricing.filter.type": "Type",
+  "pricing.filter.scope": "Scope",
+  "pricing.filter.period": "Period",
+  "pricing.filter.option.passenger": "Passenger",
+  "pricing.filter.option.driver": "Driver",
+  "pricing.filter.option.subsidy": "Subsidy",
+  "pricing.filter.option.last90d": "Last 90d",
+  "pricing.filter.option.last30d": "Last 30d",
+  "pricing.tripFee.mixedSubsidyLinkage":
+    "Mixed reimbursement requires subsidy reconciliation",
+  "pricing.tripFee.platformFundedOnly": "Platform funded only",
+  "pricing.subsidy.name.wheelchair": "Wheelchair service subsidy",
+  "pricing.subsidy.name.airportNight": "Night airport transfer subsidy",
+  "pricing.subsidy.amount.wheelchair": "NT$ 180 / trip",
+  "pricing.subsidy.amount.airportNight": "12% fare top-up",
+  "pricing.actor.system": "system",
+  "pricing.actor.platformAdmin": "platform_admin",
+  "pricing.actor.samplePublisher": "Wei Chang",
+  "pricing.value.empty": "-",
+  "pricing.value.open": "open",
+  "pricing.value.rangeArrow": "->",
 
   // ── Vehicle Eligibility ──
   "vehicleEligibility.title": "Vehicle Eligibility Matrix",
@@ -822,12 +1183,57 @@ const en = {
     "Resolution summary is required.",
   "payments.reconciliation.reopenReasonRequired": "Reopen reason is required.",
   "payments.reconciliation.col.issue": "Issue",
+  "payments.reconciliation.col.source": "Source",
+  "payments.reconciliation.col.type": "Type",
+  "payments.reconciliation.col.tenant": "Tenant",
+  "payments.reconciliation.col.externalOrder": "External order",
   "payments.reconciliation.col.summary": "Summary",
   "payments.reconciliation.col.owner": "Owner",
+  "payments.reconciliation.col.status": "Status",
+  "payments.reconciliation.col.updated": "Updated",
   "payments.reconciliation.col.context": "Context",
   "payments.reconciliation.col.notes": "Notes",
   "payments.reconciliation.col.actions": "Actions",
   "payments.reconciliation.empty": "No reconciliation issues.",
+  "payments.page.title": "Settlement governance",
+  "payments.page.subtitle":
+    "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
+  "payments.page.export": "Export",
+  "payments.page.queueSubtitle":
+    "Track finance exceptions before drilling into detailed evidence handling.",
+  "payments.page.createIssueTitle": "Open reconciliation issue",
+  "payments.page.createIssueSubtitle":
+    "Seed actor, context, and the first evidence note in one pass.",
+  "payments.page.outstandingLabel": "Current outstanding",
+  "payments.page.exposureLabel": "Cumulative exposure",
+  "payments.page.linkedExposure": "Linked exposure",
+  "payments.page.noLinkedDocs": "no linked docs",
+  "payments.page.handlingLabel": "Average handling time",
+  "payments.page.handlingResolvedWindow": "resolved issue window",
+  "payments.page.handlingActiveFallback": "active issue age fallback",
+  "payments.page.reopenRateLabel": "Reopen rate",
+  "payments.page.reopenDeltaWarn": "warn threshold {threshold}%",
+  "payments.page.reopenDeltaOk": "ok < {threshold}%",
+  "payments.page.reopenBannerTitle": "Reopen rate exceeded threshold",
+  "payments.page.reopenBannerBody":
+    "{rate} of the current 30-day issue window has already been reopened. {count} row(s) need closer issue hygiene before they recycle again.",
+  "payments.warning.dataLoadError": "Payments data load error: {error}",
+  "payments.warning.reopenRate":
+    "Reopen rate {rate}% exceeds the warning threshold.",
+  "payments.page.queueWindow": "Recent issue window",
+  "payments.page.externalOrder": "External order",
+  "payments.page.financeActorIdRequired": "Finance actor ID is required.",
+  "payments.page.issueSummaryRequired": "Issue summary is required.",
+  "payments.page.resolutionCodeRequired": "Resolution code is required.",
+  "payments.page.issueLabel": "ISSUE",
+  "payments.page.statusLabel": "STATUS",
+  "payments.page.ownerLabel": "OWNER",
+  "payments.page.summaryLabel": "SUMMARY",
+  "payments.page.resolutionLabel": "RESOLUTION",
+  "payments.page.emptyMatrix":
+    "Settlement matrix is empty for the current scope.",
+  "payments.page.emptyInvoices": "No tenant invoices match this filter.",
+  "payments.page.emptyStatements": "No driver statements generated yet.",
   "payments.generateInvoice": "Generate invoice",
   "payments.generating": "Generating...",
   "payments.generateStatements": "Generate statements",
@@ -892,6 +1298,64 @@ const en = {
   "health.metric.reporting.note": "{count} queued/running jobs are still open",
   "health.metric.adapters.title": "Degraded adapter surfaces",
   "health.metric.adapters.note": "{count} adapters are being monitored",
+  "health.alertsTitle": "Active workflow alerts",
+  "health.alertsEmpty": "No active alerts.",
+  "health.adaptersTitle": "Forwarder adapter inventory",
+  "health.adaptersEmpty": "No adapter inventory is reporting yet.",
+  "health.dispatchTitle": "Dispatch operations",
+  "health.webhookTitle": "Webhook delivery",
+  "health.filingTitle": "Filing and review queues",
+  "health.dispatchEmpty": "Queue depth, redispatch load, and dispatch failures",
+  "health.webhookEmpty":
+    "Endpoint availability, queued deliveries, and delivery lag",
+  "health.filingEmpty":
+    "Reporting jobs, recording backlog, and eligibility follow-up",
+  "health.loadingAlerts": "Loading alerts...",
+  "health.loadingAdapters": "Loading adapters...",
+  "health.openAlert": "Open",
+  "health.metricsNote":
+    "Health status, adapter mode, and latest operational signal",
+  "health.refreshError": "Unable to refresh platform health",
+  "health.alert.measurement": "{measured} measured · critical at {threshold}",
+  "health.metric.minutes": "{value} min",
+  "health.tab.alertsWithCount": "Alerts{suffix}",
+  "health.tab.dispatch": "Dispatch",
+  "health.tab.webhook": "Webhook",
+  "health.tab.filing": "Filing",
+  "health.tab.adaptersInventory": "Adapters",
+  "health.adapter.entries": "{count} entries",
+  "health.adapter.sourceSuffix": "{source} channel",
+  "health.routeLabel.platform": "platform",
+  "health.routeLabel.ops": "ops",
+  "health.status.healthy": "Healthy",
+  "health.status.degraded": "Degraded",
+  "health.status.down": "Down",
+  "health.status.unknown": "Unknown",
+  "health.status.active": "Active",
+  "health.status.expiring": "Expiring",
+  "health.status.missing": "Missing",
+  "health.alert.recording_backlog.title": "Recording backlog requires review",
+  "health.alert.driver_state_lag.title": "Driver state updates are stale",
+  "health.alert.adapter_degradation.title": "Adapter degradation detected",
+  "health.summary.dispatch.queueDepth": "Ready queue depth",
+  "health.summary.dispatch.redispatchOrders": "Redispatch orders",
+  "health.summary.dispatch.exceptionHolds": "Exception holds",
+  "health.summary.dispatch.failedOrders": "Dispatch failed orders",
+  "health.summary.webhook.activeEndpoints": "Active endpoints",
+  "health.summary.webhook.disabledEndpoints": "Disabled endpoints",
+  "health.summary.webhook.queuedDeliveries": "Queued deliveries",
+  "health.summary.webhook.oldestQueuedLag": "Oldest queued lag",
+  "health.summary.filing.reportingQueuedJobs": "Reporting queued jobs",
+  "health.summary.filing.recordingBacklog": "Recording backlog",
+  "health.summary.filing.manualReviewQueue": "Manual review queue",
+  "health.summary.filing.eligibilityFailures24h": "Eligibility failures 24h",
+  "health.adapterColumns.adapter": "ADAPTER",
+  "health.adapterColumns.source": "SOURCE",
+  "health.adapterColumns.kind": "KIND",
+  "health.adapterColumns.status": "STATUS",
+  "health.adapterColumns.latency": "LATENCY",
+  "health.adapterColumns.lastEvent": "LAST EVENT",
+  "health.adapterColumns.orders24h": "orders 24h",
 
   // ── Notices ──
   "notices.title": "Notices & Maintenance",
@@ -939,6 +1403,57 @@ const en = {
   "audit.newValues": "New Values",
   "audit.oldValues": "Old Values",
   "audit.empty": "No audit records.",
+  "audit.page.title": "Audit & Evidence Governance",
+  "audit.page.subtitle":
+    "Append-only · legal hold + deletion exception shown via badge (Q-ADM16)",
+  "audit.page.refresh": "Refresh (T6 manual)",
+  "audit.page.refreshing": "Refreshing…",
+  "audit.page.exportCsv": "Export CSV",
+  "audit.page.tabLog": "Audit log",
+  "audit.page.tabPolicy": "Retention policies",
+  "audit.page.tabHold": "Active legal holds",
+  "audit.page.tabExcept": "Deletion exceptions",
+  "audit.page.all": "All",
+  "audit.page.legalHoldTip": "legal hold",
+  "audit.page.deletionExceptionTip": "deletion exception",
+  "audit.page.holdBadge": "HOLD",
+  "audit.page.exemptBadge": "EXEMPT",
+  "audit.page.expires": "expires",
+  "audit.page.case": "case",
+  "audit.page.owner": "owner",
+  "audit.page.reason": "reason",
+  "audit.page.loading": "Loading audit log…",
+  "audit.page.emptyLog": "No audit records match the current filter.",
+  "audit.page.emptyPolicy": "No retention policies configured.",
+  "audit.page.emptyHold": "No active legal holds.",
+  "audit.page.emptyExcept": "No active deletion exceptions.",
+  "audit.page.holdsTitle": "Active legal holds",
+  "audit.page.exceptTitle": "Deletion exceptions",
+  "audit.page.colWhen": "WHEN",
+  "audit.page.colActorType": "ACTOR TYPE",
+  "audit.page.colActor": "ACTOR",
+  "audit.page.colModule": "MODULE",
+  "audit.page.colAction": "ACTION",
+  "audit.page.colResource": "RESOURCE",
+  "audit.page.colRequest": "REQUEST",
+  "audit.page.polFamily": "FAMILY",
+  "audit.page.polAuthority": "AUTHORITY",
+  "audit.page.polRetention": "RETENTION",
+  "audit.page.polDownload": "DOWNLOAD",
+  "audit.page.polHold": "LEGAL HOLD",
+  "audit.page.holdResource": "RESOURCE",
+  "audit.page.holdCase": "CASE",
+  "audit.page.holdReason": "REASON",
+  "audit.page.holdPlacedBy": "PLACED BY",
+  "audit.page.holdPlacedAt": "PLACED AT",
+  "audit.page.exReason": "REASON",
+  "audit.page.exExpires": "EXPIRES",
+  "audit.page.reasonCode": "REASON CODE",
+  "audit.page.signedTtl": "signed url · {minutes}m ttl",
+  "audit.page.noDownload": "no download",
+  "audit.page.holdEnabled": "supported",
+  "audit.page.holdDisabled": "not supported",
+  "audit.page.holdSupported": "Legal hold supported",
 
   // ── Feature Flags ──
   "flags.title": "Feature Flags",
@@ -957,6 +1472,112 @@ const en = {
   "flags.enable": "Enable",
   "flags.disable": "Disable",
   "flags.empty": "No feature flags.",
+  "featureFlagsAdmin.pageTitle": "Feature Flags · WRITE authority",
+  "featureFlagsAdmin.pageSubtitle":
+    "Only this page can write changes. Operations, tenant, and driver surfaces remain read-only feature flag views.",
+  "featureFlagsAdmin.metaPill": "writable only here",
+  "featureFlagsAdmin.refreshing": "Refreshing...",
+  "featureFlagsAdmin.addOverride": "Add tenant override",
+  "featureFlagsAdmin.addOverrideHint":
+    "Select a tenant scope first to create an override.",
+  "featureFlagsAdmin.riskTitle":
+    "High-risk actions require an explicit reason.",
+  "featureFlagsAdmin.riskBody":
+    "Toggle and tenant override changes stay in this write flow and record a local audit receipt after confirmation.",
+  "featureFlagsAdmin.errorBody":
+    "Review the error details, then retry the write flow from this page if needed.",
+  "featureFlagsAdmin.scopeField": "Inspect scope",
+  "featureFlagsAdmin.searchField": "Search key",
+  "featureFlagsAdmin.searchPlaceholder": "Search by flag key",
+  "featureFlagsAdmin.scopeHint":
+    "Switch to a tenant to inspect its effective override rows. The default view stays on platform records.",
+  "featureFlagsAdmin.scopePlatformDefault": "Platform defaults",
+  "featureFlagsAdmin.scopeTenantOverride": "Tenant override · {tenantId}",
+  "featureFlagsAdmin.tenantOptionLabel": "{name} ({code})",
+  "featureFlagsAdmin.scopeLoading": "Loading tenant list...",
+  "featureFlagsAdmin.summaryPlatformDefault": "Platform defaults",
+  "featureFlagsAdmin.summaryTenantOverride": "Tenant overrides",
+  "featureFlagsAdmin.tableTitle": "Feature flag registry",
+  "featureFlagsAdmin.tableSubtitle":
+    "Key, scope, state toggle, updated by, time, and actions stay in the assigned table-first body.",
+  "featureFlagsAdmin.filterLabel": "Rollout state",
+  "featureFlagsAdmin.filterPill": "table-first layout",
+  "featureFlagsAdmin.rolloutMid": "Mid-rollout",
+  "featureFlagsAdmin.rolloutFull": "Rolled out",
+  "featureFlagsAdmin.rolloutDeprecated": "Deprecated",
+  "featureFlagsAdmin.keyHeader": "Key",
+  "featureFlagsAdmin.scopeHeader": "Scope",
+  "featureFlagsAdmin.stateHeader": "State",
+  "featureFlagsAdmin.updatedByHeader": "Updated by",
+  "featureFlagsAdmin.updatedAtHeader": "At",
+  "featureFlagsAdmin.actionsHeader": "Actions",
+  "featureFlagsAdmin.noDescription": "No description provided",
+  "featureFlagsAdmin.updatedByValue": "Contract not exposed",
+  "featureFlagsAdmin.toggle": "Toggle",
+  "featureFlagsAdmin.toggleAriaLabel": "Toggle {key}",
+  "featureFlagsAdmin.removeOverride": "Remove override",
+  "featureFlagsAdmin.history": "History",
+  "featureFlagsAdmin.confirmToggleTitle": "Confirm feature flag toggle",
+  "featureFlagsAdmin.confirmToggleBody":
+    "This will change the effective feature flag state shown in the current scope.",
+  "featureFlagsAdmin.confirmOverrideTitle": "Create tenant override",
+  "featureFlagsAdmin.confirmOverrideBody":
+    "This writes a tenant-specific override for the selected key and leaves other scopes unchanged.",
+  "featureFlagsAdmin.confirmRemoveOverrideTitle": "Remove tenant override",
+  "featureFlagsAdmin.confirmRemoveOverrideBody":
+    "This removes the tenant-specific override and reverts the tenant back to the platform default.",
+  "featureFlagsAdmin.reasonLabel": "High-risk reason",
+  "featureFlagsAdmin.reasonPlaceholder":
+    "Describe the rollout reason, expected blast radius, and validation plan.",
+  "featureFlagsAdmin.reasonRequired":
+    "A high-risk reason is required before this action can run.",
+  "featureFlagsAdmin.overrideTenantField": "Tenant",
+  "featureFlagsAdmin.overrideTenantRequired":
+    "Select a tenant before creating an override.",
+  "featureFlagsAdmin.overrideKeyField": "Flag key",
+  "featureFlagsAdmin.overrideStateField": "Override state",
+  "featureFlagsAdmin.overrideDescriptionField": "Override description",
+  "featureFlagsAdmin.overrideDescriptionHint":
+    "Optional. Leave blank to keep the existing flag description.",
+  "featureFlagsAdmin.confirmEnable": "Enable",
+  "featureFlagsAdmin.confirmDisable": "Disable",
+  "featureFlagsAdmin.confirmCreate": "Create override",
+  "featureFlagsAdmin.confirmRemove": "Remove override",
+  "featureFlagsAdmin.receiptToggleSummary": "{action} {key}",
+  "featureFlagsAdmin.receiptCreateSummary": "Create override {key}",
+  "featureFlagsAdmin.pendingToggleSummary": "{key} · {scope} · {action}",
+  "featureFlagsAdmin.scopeMeta": "Inspect scope",
+  "featureFlagsAdmin.resultMeta": "{count} visible row(s)",
+  "featureFlagsAdmin.enabledMeta": "{count} enabled",
+  "featureFlagsAdmin.disabledMeta": "{count} disabled",
+  "featureFlagsAdmin.overrideMeta": "{count} tenant override row(s)",
+  "featureFlagsAdmin.notesTitle": "Extended notes",
+  "featureFlagsAdmin.notesEmpty":
+    "No additional contract notes are available for the current scope.",
+  "featureFlagsAdmin.historyTitle": "Local audit receipts",
+  "featureFlagsAdmin.historyEmpty":
+    "No local receipts have been recorded in this session yet.",
+  "featureFlagsAdmin.historyHint":
+    "Use the History row action to focus receipts for a specific key.",
+  "featureFlagsAdmin.historyFocusAll":
+    "Showing all receipts recorded in this browser session.",
+  "featureFlagsAdmin.historyFocusKey": "Focused on {key}",
+  "featureFlagsAdmin.secondaryPanelTitle":
+    "Change control & extended details",
+  "featureFlagsAdmin.secondaryPanelSubtitle":
+    "High-risk reason capture, notes, and local history stay below the default table-first body.",
+  "featureFlagsAdmin.actionComposerTitle": "Pending high-risk change",
+  "featureFlagsAdmin.actionComposerIdle":
+    "Toggle and override mutations require an explicit reason before confirmation.",
+  "featureFlagsAdmin.actionApplied": "Audit receipt recorded",
+  "featureFlagsAdmin.receiptBannerBody": "{summary} · {scope} · {requestedAt}",
+  "featureFlagsAdmin.noFlagsInFilter":
+    "No feature flags match the current rollout filter and search query.",
+  "featureFlagsAdmin.laneMeta": "Writable only here",
+  "featureFlagsAdmin.notesMeta":
+    "Extended notes stay outside the default body.",
+  "featureFlagsAdmin.receiptsMeta": "{count} local receipt(s)",
+  "featureFlagsAdmin.showAllReceipts": "Show all receipts",
 
   // ── Tenants (additional) ──
   "tenants.configure": "Configure",
@@ -1094,6 +1715,131 @@ const en = {
   "payments.reimbursementsTitle": "Driver reimbursements",
   "payments.generateInvoiceTitle": "Generate tenant invoice",
   "payments.generateStatementsTitle": "Generate driver statements",
+  "payments.reimbursements.queue.filter.all": "All",
+  "payments.reimbursements.queue.filter.pendingApproval": "Pending approval",
+  "payments.reimbursements.queue.filter.exported": "Exported",
+  "payments.reimbursements.queue.filter.done": "Done",
+  "payments.reimbursements.queue.submitter.platformFinance": "Platform Finance",
+  "payments.reimbursements.queue.headerTitle": "Reimbursement batches",
+  "payments.reimbursements.queue.headerSubtitle":
+    "draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 6-state state machine)",
+  "payments.reimbursements.queue.empty":
+    "No reimbursement batches match this queue state.",
+  "payments.reimbursements.queue.loadError":
+    "Unable to load reimbursement batches",
+  "payments.reimbursements.queue.loading": "Loading reimbursement batches...",
+  "payments.reimbursements.queue.col.batch": "BATCH",
+  "payments.reimbursements.queue.col.scope": "SCOPE",
+  "payments.reimbursements.queue.col.amount": "AMOUNT",
+  "payments.reimbursements.queue.col.state": "STATE",
+  "payments.reimbursements.queue.col.submitter": "SUBMITTER",
+  "payments.reimbursements.queue.col.submitted": "SUBMITTED",
+  "payments.reimbursements.queue.col.updated": "UPDATED",
+  "payments.reimbursements.status.draft": "draft",
+  "payments.reimbursements.status.pendingApproval": "pending_approval",
+  "payments.reimbursements.status.approved": "approved",
+  "payments.reimbursements.status.exported": "exported",
+  "payments.reimbursements.status.paid": "paid",
+  "payments.reimbursements.status.reconciled": "reconciled",
+  "payments.reimbursements.detail.fallbackWarning":
+    "API reimbursement detail is unavailable, so the page is rendering route-local fallback data aligned to the canvas artboard.",
+  "payments.reimbursements.detail.loading": "Loading...",
+  "payments.reimbursements.detail.pageTitle": "Reimbursement batch",
+  "payments.reimbursements.detail.backToPayments": "Back to payments",
+  "payments.reimbursements.detail.batchUnavailable": "Batch unavailable",
+  "payments.reimbursements.detail.batchUnavailableBody":
+    "The reimbursement batch route resolves, but the batch was not found.",
+  "payments.reimbursements.detail.lineItemsFallbackNote": "Line item {index}",
+  "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr":
+    "Sponsor reimbursement Q2-Apr",
+  "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment":
+    "Variance adjustment TWD 1,820 × 99 entries",
+  "payments.reimbursements.detail.approvalReasonRequired":
+    "Approval reason is required for this high-risk action.",
+  "payments.reimbursements.detail.approvalRecorded":
+    "Approval recorded with reason: {reason}",
+  "payments.reimbursements.detail.markedPaid":
+    "Batch marked paid and remittance proof captured.",
+  "payments.reimbursements.detail.queueLink": "Queue",
+  "payments.reimbursements.detail.copyBatchId": "Copy batch ID",
+  "payments.reimbursements.detail.refreshFailed": "Refresh failed",
+  "payments.reimbursements.detail.fallbackTitle":
+    "Fallback reimbursement detail",
+  "payments.reimbursements.detail.auditViewTitle":
+    "Audit-derived workflow view",
+  "payments.reimbursements.detail.auditViewBody":
+    "The six-state stepper matches the canvas while underlying contract data is derived from batch approval, remittance, and payment timestamps.",
+  "payments.reimbursements.detail.auditReceipt": "Audit receipt",
+  "payments.reimbursements.detail.stateMachineTitle": "State machine · Q-ADM12",
+  "payments.reimbursements.detail.stateMachineSubtitle":
+    "draft → pending approval → approved → exported → paid → reconciled",
+  "payments.reimbursements.detail.headerCardTitle": "Header",
+  "payments.reimbursements.detail.summary.batchId": "BATCH ID",
+  "payments.reimbursements.detail.summary.driver": "DRIVER",
+  "payments.reimbursements.detail.summary.statement": "STATEMENT",
+  "payments.reimbursements.detail.summary.period": "PERIOD",
+  "payments.reimbursements.detail.summary.totalAmount": "TOTAL AMOUNT",
+  "payments.reimbursements.detail.summary.state": "STATE",
+  "payments.reimbursements.detail.summary.approvedAt": "APPROVED AT",
+  "payments.reimbursements.detail.summary.paidAt": "PAID AT",
+  "payments.reimbursements.detail.summary.remittanceProof": "REMITTANCE PROOF",
+  "payments.reimbursements.detail.summary.lineItems": "LINE ITEMS",
+  "payments.reimbursements.detail.approveFlowTitle": "Approve reason flow",
+  "payments.reimbursements.detail.approveFlowSubtitle":
+    "High-risk action requires a reason before approval.",
+  "payments.reimbursements.detail.approvalReason": "Approval reason",
+  "payments.reimbursements.detail.approvalReasonPlaceholder":
+    "Explain sponsor exposure, evidence, or audit context.",
+  "payments.reimbursements.detail.remittanceProof": "Remittance proof",
+  "payments.reimbursements.detail.actionFailed": "Action failed",
+  "payments.reimbursements.detail.markPaid": "Mark paid",
+  "payments.reimbursements.detail.timelineTitle":
+    "State timeline · audit-derived",
+  "payments.reimbursements.detail.batchSummaryTitle": "Batch summary",
+  "payments.reimbursements.detail.batchSummarySubtitle.fallback":
+    "Canvas body density rendered from route-local fallback finance context.",
+  "payments.reimbursements.detail.batchSummarySubtitle.live":
+    "Canvas body density with route-local finance context.",
+  "payments.reimbursements.detail.approvalGate": "Approval gate:",
+  "payments.reimbursements.detail.approvalGateCompleted": "Completed",
+  "payments.reimbursements.detail.approvalGatePending":
+    "Pending super-admin signoff",
+  "payments.reimbursements.detail.exportPosture": "Export posture:",
+  "payments.reimbursements.detail.exportPostureAttached": "Proof attached",
+  "payments.reimbursements.detail.exportPosturePending": "Not exported yet",
+  "payments.reimbursements.detail.settlementTarget": "Settlement target:",
+  "payments.reimbursements.detail.evidenceScope": "Evidence scope:",
+  "payments.reimbursements.detail.evidenceScopeCount": "{count} line items",
+  "payments.reimbursements.detail.lineItemsTitle": "Line items",
+  "payments.reimbursements.detail.lineItemsSubtitle":
+    "{count} sources contributing to the batch total.",
+  "payments.reimbursements.detail.lineItemsEmpty":
+    "No reimbursement line items were returned for this batch.",
+  "payments.reimbursements.detail.lineItems.col.recipient": "RECIPIENT",
+  "payments.reimbursements.detail.lineItems.col.amount": "AMOUNT",
+  "payments.reimbursements.detail.lineItems.col.sourceReference":
+    "SOURCE REFERENCE",
+  "payments.reimbursements.detail.lineItems.col.note": "NOTE",
+  "payments.reimbursements.timeline.batchCreated": "Batch created",
+  "payments.reimbursements.timeline.batchCreatedBody":
+    "Generated for statement {statementId} and driver {driverId}.",
+  "payments.reimbursements.timeline.submittedForApproval":
+    "Submitted for approval",
+  "payments.reimbursements.timeline.submittedForApprovalBody":
+    "{count} reimbursement line items queued for finance review.",
+  "payments.reimbursements.timeline.approved": "Approved",
+  "payments.reimbursements.timeline.approvedBody":
+    "Batch approved and ready for export/remittance handling.",
+  "payments.reimbursements.timeline.remittanceProofAttached":
+    "Remittance proof attached",
+  "payments.reimbursements.timeline.remittanceProofAttachedBody":
+    "Proof ID {proofId} recorded on the batch.",
+  "payments.reimbursements.timeline.markedPaid": "Marked paid",
+  "payments.reimbursements.timeline.markedPaidBody":
+    "Driver reimbursement has been marked paid in the finance console.",
+  "payments.reimbursements.timeline.waitingApproval": "Waiting approval",
+  "payments.reimbursements.timeline.waitingApprovalBody":
+    "High-risk approval still requires reason capture before state can advance.",
 
   // ── Pricing (additional) ──
   "pricing.platformFunded": "Platform funded",
@@ -1118,6 +1864,76 @@ const en = {
   "notices.maintActiveBanner": "MAINTENANCE ACTIVE",
   "notices.currentStatus": "Current Status",
   "notices.lastUpdated": "Last Updated",
+  "notices.subtitle.detail":
+    "critical / maintenance severity pushes a cross-app banner to ops, tenant, and driver surfaces (Q-ADM15).",
+  "notices.tab.history": "Broadcast History",
+  "notices.createNotice": "Create notice",
+  "notices.enterMaintenance": "Enter maintenance",
+  "notices.refreshing": "Refreshing",
+  "notices.emptyDetailed": "No platform notices have been published yet.",
+  "notices.emptyHistory": "No broadcasts have been delivered yet.",
+  "notices.composer.title": "Create notice",
+  "notices.composer.subtitle":
+    "Publish a cross-app banner for platform operators, tenants, or drivers.",
+  "notices.guardrail.title":
+    "Maintenance notices should precede dispatch changes",
+  "notices.guardrail.body":
+    "Publish a maintenance-severity notice before enabling platform-wide maintenance mode.",
+  "notices.maintenance.currentTitle": "Maintenance mode · current state",
+  "notices.maintenance.currentSubtitle":
+    "Platform-wide dispatch and ingress control.",
+  "notices.maintenance.internalReason": "Reason · internal record",
+  "notices.maintenance.scheduledStart": "Scheduled start",
+  "notices.maintenance.scheduledEnd": "Scheduled end",
+  "notices.maintenance.save": "Save maintenance settings",
+  "notices.maintenance.previewTitle": "Current maintenance notice (preview)",
+  "notices.maintenance.previewFallback":
+    "Enable maintenance mode to push a cross-app interruption banner.",
+  "notices.maintenance.previewTargets":
+    "Target surfaces: ops · tenant · driver",
+  "notices.maintenance.reasonRequired":
+    "A high-risk maintenance action requires a reason before saving.",
+  "notices.maintenance.confirmTitle": "Confirm maintenance mode update",
+  "notices.maintenance.confirmBody":
+    "This is a high-risk action. Saving will change platform-wide dispatch and webhook behavior.",
+  "notices.maintenance.confirmReasonLabel": "Audit reason",
+  "notices.maintenance.confirmApply": "Apply maintenance update",
+  "notices.maintenance.summary":
+    "Once enabled, dispatch, webhook delivery, and partner ingress are paused.",
+  "notices.maintenance.reasonPlaceholder":
+    "Planned maintenance, partner outage mitigation, or compliance hold",
+  "notices.maintenance.startPlaceholder": "YYYY-MM-DD HH:MM",
+  "notices.maintenance.endPlaceholder": "YYYY-MM-DD HH:MM",
+  "notices.col.updated": "Updated",
+  "notices.col.targets": "Targets",
+  "notices.col.delivery": "Delivery",
+  "notices.col.broadcastAt": "Broadcast at",
+  "notices.col.updatedBy": "Updated by",
+  "notices.col.window": "Window",
+  "notices.col.action": "Action",
+  "notices.col.notice": "Notice",
+  "notices.col.id": "ID",
+  "notices.col.severityShort": "SEV",
+  "notices.history.subtitle": "Broadcast history · cross-app delivery outcomes",
+  "notices.history.delivery.archived": "resolved delivery archived",
+  "notices.history.delivery.all": "delivered 3 / 3",
+  "notices.history.delivery.single": "delivered 1 / 1",
+  "notices.noticeTitleRequired": "Notice title is required.",
+  "notices.noticeBodyRequired": "Notice body is required.",
+  "notices.warning.operationError":
+    "Notice or maintenance operation error: {error}",
+  "notices.warning.maintenanceEnabled":
+    "Platform maintenance mode is currently enabled.",
+  "notices.status.active": "active",
+  "notices.status.scheduled": "scheduled",
+  "notices.status.resolved": "resolved",
+  "notices.status.archived": "archived",
+  "notices.severity.info": "low",
+  "notices.severity.warning": "medium",
+  "notices.severity.critical": "high",
+  "notices.window.notScheduled": "Not scheduled",
+  "notices.risk.high": "high risk",
+  "notices.systemUser": "system",
 
   // ── Audit (additional) ──
   "audit.showingOf": "Showing {shown} of {total} record(s)",
@@ -1152,6 +1968,124 @@ const en = {
   "audit.exceptions.subject": "Subject",
   "audit.exceptions.reason": "Reason",
   "audit.exceptions.expiresAt": "Expires At",
+
+  // ── Adapter Registry ──
+  "adapterRegistry.meta.title": "Platform Adapter Registry",
+  "adapterRegistry.title": "Platform Adapter Registry",
+  "adapterRegistry.subtitle":
+    "Configuration and credential governance stay in Platform Admin, while operational pause and retry remain in Ops.",
+  "adapterRegistry.loading": "Loading adapter registry...",
+  "adapterRegistry.empty":
+    "No adapters are registered yet. Register the first governed adapter to open this registry.",
+  "adapterRegistry.unavailable":
+    "Adapter registry data is temporarily unavailable. Check the Platform Admin adapter API and retry this page.",
+  "adapterRegistry.errors.fetchFailed": "Failed to load adapter registry.",
+  "adapterRegistry.errors.updateFailed": "Failed to update adapter state.",
+  "adapterRegistry.registerAction": "Register adapter",
+  "adapterRegistry.registerInfo":
+    "Adapter registration remains a governed high-risk flow and is not opened inline on this route.",
+  "adapterRegistry.banner.fallbackTitle": "mof-bgmt token expires in 6 days",
+  "adapterRegistry.banner.fallbackBody":
+    "BGMT dispatch reporting token must rotate before 2026-05-31 or today's completed trips cannot be reported.",
+  "adapterRegistry.banner.title": "{platformCode} token expiry review required",
+  "adapterRegistry.banner.body":
+    "{name} is {credentialStatus} with {healthStatus} health. Review token rotation before production traffic is impacted.",
+  "adapterRegistry.rotateNow": "Rotate now",
+  "adapterRegistry.status.healthy": "healthy",
+  "adapterRegistry.status.degraded": "degraded",
+  "adapterRegistry.status.unhealthy": "down",
+  "adapterRegistry.metric.latency": "LATENCY",
+  "adapterRegistry.metric.lastEvent": "LAST EVENT",
+  "adapterRegistry.metric.orders24h": "ORDERS 24H",
+  "adapterRegistry.metric.ordersPending": "telemetry pending",
+  "adapterRegistry.webhook": "Webhook",
+  "adapterRegistry.financeMode": "Finance mode",
+  "adapterRegistry.serviceBuckets": "Service buckets",
+  "adapterRegistry.featureFlags": "Feature flags",
+  "adapterRegistry.supportedActions": "Supported actions",
+  "adapterRegistry.operationalPause": "Operational pause",
+  "adapterRegistry.noPause": "Not paused",
+  "adapterRegistry.pauseUnknown": "Pause state not reported by adapter API.",
+  "adapterRegistry.authority.platformAdmin": "Platform Admin authority",
+  "adapterRegistry.authority.ops": "Ops authority",
+  "adapterRegistry.governedActionInfo":
+    "Create config, edit credentials, rotate secrets, and enable or disable adapters remain governed actions here.",
+  "adapterRegistry.opsActionInfo":
+    "Operational pause TTL and retry of failed callbacks stay in the Ops console and are intentionally separated.",
+  "adapterRegistry.editConfig": "Edit config",
+  "adapterRegistry.editCredential": "Edit credential",
+  "adapterRegistry.rotateCredential": "Rotate credential",
+  "adapterRegistry.enableAdapter": "Enable",
+  "adapterRegistry.disableAdapter": "Disable",
+  "adapterRegistry.pauseTraffic": "Ops pause (TTL)",
+  "adapterRegistry.retryCallback": "Retry callback",
+  "adapterRegistry.queueGoverned":
+    "{label} for {name} stays in the governed Platform Admin flow.{reasonClause} Plaintext-once secret material is not shown again here.",
+  "adapterRegistry.queueGoverned.reasonClause": " Reason captured: {reason}.",
+  "adapterRegistry.queueOps":
+    "{label} for {name} remains an Ops-authority action on the Ops console.",
+  "adapterRegistry.toggleSuccess":
+    "{auditPrefix}{name} {status} successfully.{reasonClause}",
+  "adapterRegistry.toggleSuccess.enabled": "enabled",
+  "adapterRegistry.toggleSuccess.disabled": "disabled",
+  "adapterRegistry.toggleSuccess.reasonClause": " Reason: {reason}.",
+  "adapterRegistry.toggleError": "Failed to update adapter state.",
+  "adapterRegistry.unsupportedOpsAction":
+    "This adapter does not expose Ops pause or retry capabilities.",
+  "adapterRegistry.notConfigured": "not configured",
+  "adapterRegistry.lastCheck": "Last check",
+  "adapterRegistry.reasonRequired":
+    "A reason is required before disabling a production adapter.",
+  "adapterRegistry.disableConfirm":
+    "Confirm disable for {name}? This impacts governed adapter readiness.",
+  "adapterRegistry.enableConfirm": "Confirm enable for {name}?",
+  "adapterRegistry.disableReasonPrompt":
+    "Enter the governance reason for disabling {name}.",
+  "adapterRegistry.auditReceiptPrefix": "Audit receipt",
+  "adapterRegistry.forwarderPill": "Forwarder",
+  "adapterRegistry.featureFlag.on": "on",
+  "adapterRegistry.featureFlag.off": "off",
+  "adapterRegistry.serviceBuckets.meta":
+    "{maxCandidates} max candidates · {manualFallbackSeconds}s manual fallback",
+  "adapterRegistry.list.subtitle":
+    "Shared data-view baseline for adapter readiness, rollout posture, and finance authority ownership.",
+  "adapterRegistry.list.summary":
+    "Compact rows, pill filters, status chips, and owned or forwarded authority badges all come from shared ui-web primitives.",
+  "adapterRegistry.list.footer": "Showing {shown} / {total}",
+  "adapterRegistry.list.filter.forwarded": "Forwarded",
+  "adapterRegistry.list.filter.enabled": "Enabled",
+  "adapterRegistry.list.filter.attention": "Attention",
+  "adapterRegistry.list.badge.owned": "owned",
+  "adapterRegistry.list.badge.forwarded": "forwarded",
+  "adapterRegistry.list.metric.health": "Health",
+  "adapterRegistry.list.metric.enabled": "Enabled",
+  "adapterRegistry.list.metric.webhook": "Webhook",
+  "adapterRegistry.list.metric.authority": "Authority",
+  "adapterRegistry.list.metric.rollout": "Rollout",
+  "adapterRegistry.list.metric.credential": "Credential",
+  "adapterRegistry.col.name": "Adapter",
+  "adapterRegistry.col.environment": "Environment",
+  "adapterRegistry.col.version": "Version",
+  "adapterRegistry.col.rolloutStatus": "Rollout",
+  "adapterRegistry.modal.title": "Edit adapter: {name}",
+  "adapterRegistry.modal.name": "Name",
+  "adapterRegistry.modal.version": "Version",
+  "adapterRegistry.modal.enabled": "Enabled",
+  "adapterRegistry.modal.rolloutStatus": "Rollout status",
+  "adapterRegistry.modal.credentialStatus": "Credential status",
+  "adapterRegistry.modal.webhookSettings": "Webhook settings",
+  "adapterRegistry.modal.webhookEnabled": "Webhook enabled",
+  "adapterRegistry.modal.webhookUrl": "Webhook URL",
+  "adapterRegistry.modal.webhookPlaceholder": "https://example.com/webhook",
+  "adapterRegistry.modal.policySettings": "Policy settings",
+  "adapterRegistry.modal.serviceBuckets": "Service buckets (comma-separated)",
+  "adapterRegistry.modal.maxCandidates": "Max candidates",
+  "adapterRegistry.modal.acceptTimeoutSeconds": "Accept timeout (seconds)",
+  "adapterRegistry.modal.manualFallbackThresholdSeconds":
+    "Manual fallback threshold (seconds)",
+  "adapterRegistry.modal.supportedActions": "Supported actions",
+  "adapterRegistry.modal.noSupportedActions":
+    "No adapter actions are enabled for this platform.",
 
   // ── Common (more) ──
   "common.noValues": "No values",
@@ -1197,8 +2131,10 @@ const zh: typeof en = {
   "common.hide": "隱藏",
   "common.close": "關閉",
   "common.approve": "核准",
+  "common.edit": "編輯",
   "common.error": "錯誤",
   "common.all": "全部",
+  "common.na": "無",
   "common.immutableHistory": "不可變歷史",
   "common.global": "全域",
   "common.actions": "操作",
@@ -1246,6 +2182,174 @@ const zh: typeof en = {
   "home.audit.desc": "平台稽核日誌，可篩選與查看記錄",
   "home.featureFlags.title": "功能旗標",
   "home.featureFlags.desc": "功能旗標管理，支援租戶層級覆寫",
+  "home.banner.tokenExpiry.title": "BGMT 派遣回報 token 將於 6 天內到期",
+  "home.banner.tokenExpiry.desc":
+    "{observedAt} 量測值 {value}。需先輪替 client credential，否則今日完成單將無法回報。",
+  "home.banner.tokenExpiry.action": "前往 adapter-registry",
+  "home.banner.syncFailed.title": "GoCab forwarded · 24h sync_failed 4.2%",
+  "home.banner.syncFailed.desc":
+    "超過 3% 警戒值。建議檢查 adapter 健康並啟動 manual fallback 觀察。",
+  "home.banner.syncFailed.action": "查看 adapter",
+  "home.banner.rollback.title": "{tenantCode} 處於 rollback_hold",
+  "home.banner.rollback.desc":
+    "客訴 cmp_0894 升級為 inc_0212 後，rollout 已暫停。需平台與營運共識下一步。",
+  "home.banner.rollback.action": "查看租戶",
+  "home.audit.actorType": "ACTOR TYPE",
+  "home.audit.systemActor": "system",
+  "home.kpi.tenantsSub": "{pilot} pilot · {sandbox} sandbox",
+  "home.kpi.tenantsDelta": "{count} rollback_hold",
+  "home.kpi.partnersSub": "{bank} 銀行 · {hotelEnterprise} 飯店 / 企業",
+  "home.kpi.driversStable": "穩定",
+  "home.kpi.reconHintEmpty": "目前無待處理 issue",
+  "home.shortcut.tenants": "租戶 · Tenants",
+  "home.shortcut.partners": "合作夥伴 · Partners",
+  "home.shortcut.pricing": "費率 · Pricing",
+  "home.shortcut.payments": "結算 · Payments",
+  "home.shortcut.fleet": "車隊 · Fleet",
+  "home.shortcut.audit": "稽核 · Audit",
+  "home.page.title": "平台治理工作首頁",
+  "home.page.subtitle": "DRTS 平台控制平面 · 您今日有 {count} 件需治理事項",
+  "home.page.openAll": "展開所有",
+  "home.page.openAudit": "前往稽核",
+  "home.page.loading": "載入治理快照中...",
+  "home.page.noSnapshot": "目前沒有可用的治理快照。",
+  "home.page.loadErrorTitle": "無法載入治理快照",
+  "home.page.quickLinksTitle": "模組捷徑",
+  "home.page.todayTitle": "今日治理待辦",
+  "home.page.todaySubtitle": "跨模組需要平台治理人介入",
+  "home.page.recentTitle": "近期高敏感操作 · 平台層審計足跡 (24h)",
+  "home.page.noAudit": "目前沒有稽核紀錄。",
+  "home.page.noTodos": "目前沒有路由到平台端的治理阻塞。",
+  "home.kpi.partnerReadiness": "{count} 待 readiness",
+  "home.kpi.driverDelta": "{count} 筆 stale",
+  "home.kpi.driverSub": "{eligible} 可派 · {total} 總數",
+  "home.kpi.reconDelta": "{partner} partner · {forwarded} forwarded",
+  "home.kpi.reconSub": "{count} 筆重大平台告警",
+  "home.audit.time": "時間",
+  "home.audit.module": "模組",
+  "home.audit.action": "動作",
+  "home.audit.actor": "操作者",
+  "home.audit.request": "Request",
+
+  // ── Platform Admin Shell ──
+  "adminShell.section.workspace": "工作面",
+  "adminShell.section.tenant": "租戶治理",
+  "adminShell.section.partner": "合作夥伴治理",
+  "adminShell.section.people": "人員與車隊",
+  "adminShell.section.fleet": "車隊資格與夥伴",
+  "adminShell.section.commerce": "平台與商務",
+  "adminShell.section.ops": "平台維運",
+  "adminShell.route.home": "工作首頁",
+  "adminShell.route.tenants": "租戶",
+  "adminShell.route.tenantGovernance": "跨租戶治理",
+  "adminShell.route.partners": "合作夥伴",
+  "adminShell.route.users": "平台人員",
+  "adminShell.route.fleet": "車隊與法遵",
+  "adminShell.route.serviceProducts": "服務產品",
+  "adminShell.route.vehicleEligibility": "車輛資格矩陣",
+  "adminShell.route.fleetPartners": "車隊夥伴",
+  "adminShell.route.switchboard": "公開資訊",
+  "adminShell.route.pricing": "費率治理",
+  "adminShell.route.payments": "結算與帳務",
+  "adminShell.route.reimbursements": "代墊批次",
+  "adminShell.route.adapterRegistry": "平台 Adapter",
+  "adminShell.route.health": "平台健康",
+  "adminShell.route.notices": "公告與維護",
+  "adminShell.route.audit": "稽核與證據",
+  "adminShell.route.featureFlags": "功能旗標",
+  "adminShell.refresh.manual": "manual · audit evidence",
+  "adminShell.refresh.governance": "medium_slow · governance",
+  "adminShell.health.notChecked": "尚未檢查",
+  "adminShell.health.checking": "API 檢查中",
+  "adminShell.health.healthy": "API 健康",
+  "adminShell.health.degraded": "API 降級",
+  "adminShell.health.down": "API 失聯",
+  "adminShell.health.lastChecked": "最後檢查",
+  "adminShell.brand.sub": "平台管理",
+  "adminShell.nav.aria": "Platform Admin navigation",
+  "adminShell.search.aria": "搜尋",
+  "adminShell.search.placeholder": "搜尋租戶、合作夥伴、稽核事件…",
+  "adminShell.identity.actor": "平台管理員",
+  "adminShell.breadcrumb.detail": "詳情",
+  "adminShell.notifications": "通知",
+  "adminShell.realm": "PLATFORM",
+  "adminShell.environment": "production",
+  "adminShell.language.zh": "中文",
+  "adminShell.language.en": "English",
+
+  // ── Platform Assistant ──
+  "assistant.overlay.prompt.summary": "幫我整理這頁現在要檢查什麼。",
+  "assistant.overlay.prompt.checklist": "替目前路由起草一份操作檢查清單。",
+  "assistant.overlay.prompt.risks": "變更平台狀態前，我應該先看哪些風險？",
+  "assistant.overlay.citations": "來源：",
+  "assistant.overlay.suggestedPrompts": "建議下一步提問：",
+  "assistant.overlay.receiptTitle": "操作收據",
+  "assistant.overlay.launcher": "開啟平台助理",
+  "assistant.overlay.badge": "Beta",
+  "assistant.overlay.label": "平台助理",
+  "assistant.overlay.subtitle": "治理操作輔助",
+  "assistant.overlay.heading": "Platform Admin Assistant",
+  "assistant.overlay.status":
+    "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
+  "assistant.overlay.inputLabel": "輸入平台助理問題",
+  "assistant.overlay.inputPlaceholder":
+    "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
+  "assistant.overlay.send": "送出",
+  "assistant.overlay.sending": "分析中",
+  "assistant.overlay.newSession": "新對話",
+  "assistant.overlay.minimize": "最小化",
+  "assistant.overlay.close": "關閉",
+  "assistant.overlay.reset": "重設位置",
+  "assistant.overlay.emptyTitle": "平台助理已就緒",
+  "assistant.overlay.emptyBody":
+    "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
+  "assistant.overlay.thinking":
+    "我正在讀取目前 Platform Admin route context 並整理回答...",
+  "assistant.overlay.sessionTitle": "Platform Admin assistant",
+  "assistant.overlay.requestFailedBody": "助理暫時無法完成這次請求。",
+  "assistant.overlay.requestFailedTitle": "助理請求失敗",
+  "assistant.overlay.requestFailedHint":
+    "請檢查 dev API assistant flag、control-plane proxy 與 Cloud Run logs。",
+  "assistant.overlay.actionFailedTitle": "操作執行失敗",
+  "assistant.overlay.actionFailedHint":
+    "請檢查 governed action payload、確認原因與後端 audit logs。",
+  "assistant.overlay.promptRail": "助理建議提問",
+  "assistant.warning.highRiskActions":
+    "本頁含高風險操作，需 modal 確認、填寫原因並產生稽核紀錄。",
+  "assistant.warning.writeAuthority":
+    "本頁具平台寫入權限（唯一可寫旗標的 App），變更會即時影響其他 App。",
+  "assistant.warning.plaintextSecret":
+    "憑證/密鑰僅在發行或輪替當下以明文顯示一次，之後不可再檢視。",
+  "assistant.warning.maintenanceMode":
+    "維護模式為高風險操作，啟用會跨 App 推送橫幅到 ops/tenant/driver。",
+  "assistant.warning.legalHold":
+    "稽核證據治理：法律保留與刪除例外為高風險操作，需原因並記錄擁有者。",
+  "assistant.warning.bodyParityPending":
+    "此路由的頁面實作由 body-parity 工作項負責，可能尚未上線；metadata 已就緒。",
+  "assistant.warning.unknownRoute":
+    "未在 Platform Admin 路由註冊表中找到此路徑，已退回首頁 context。",
+  "assistant.route.home.title": "工作首頁",
+  "assistant.route.tenants.title": "租戶",
+  "assistant.route.tenantDetail.title": "租戶詳情",
+  "assistant.route.tenantGovernance.title": "跨租戶治理",
+  "assistant.route.partners.title": "合作夥伴",
+  "assistant.route.partnerDetail.title": "合作夥伴詳情",
+  "assistant.route.users.title": "平台人員",
+  "assistant.route.fleet.title": "車隊與法遵",
+  "assistant.route.serviceProducts.title": "服務產品",
+  "assistant.route.vehicleEligibility.title": "車輛資格矩陣",
+  "assistant.route.fleetPartners.title": "車隊夥伴",
+  "assistant.route.fleetPartnerDetail.title": "車隊夥伴詳情",
+  "assistant.route.switchboard.title": "公開資訊",
+  "assistant.route.pricing.title": "費率治理",
+  "assistant.route.payments.title": "結算與帳務",
+  "assistant.route.reimbursements.title": "代墊批次",
+  "assistant.route.reimbursementBatchDetail.title": "代墊批次詳情",
+  "assistant.route.adapterRegistry.title": "平台 Adapter",
+  "assistant.route.health.title": "平台健康",
+  "assistant.route.notices.title": "公告與維護",
+  "assistant.route.audit.title": "稽核與證據",
+  "assistant.route.featureFlags.title": "功能旗標",
 
   // ── Tenants ──
   "tenants.title": "租戶管理",
@@ -1347,6 +2451,121 @@ const zh: typeof en = {
   "partners.credentialMeta.createdAt": "建立時間",
   "partners.credentialMeta.lastUsedAt": "最後使用",
   "partners.credentialMeta.source": "來源",
+
+  // ── Adapter Registry ──
+  "adapterRegistry.meta.title": "平台轉接器登錄",
+  "adapterRegistry.title": "平台轉接器登錄",
+  "adapterRegistry.subtitle":
+    "設定與憑證治理留在 Platform Admin，營運暫停與重試則維持由 Ops 處理。",
+  "adapterRegistry.loading": "載入轉接器登錄中...",
+  "adapterRegistry.empty":
+    "目前尚未註冊任何轉接器。請先建立第一筆受治理的轉接器登錄。",
+  "adapterRegistry.unavailable":
+    "轉接器登錄資料暫時不可用，請檢查 Platform Admin 轉接器 API 後再重試。",
+  "adapterRegistry.errors.fetchFailed": "載入轉接器登錄失敗。",
+  "adapterRegistry.errors.updateFailed": "更新轉接器狀態失敗。",
+  "adapterRegistry.registerAction": "註冊轉接器",
+  "adapterRegistry.registerInfo":
+    "註冊轉接器仍屬高風險治理流程，此路由不直接展開內嵌建立。",
+  "adapterRegistry.banner.fallbackTitle": "mof-bgmt token 將於 6 天後到期",
+  "adapterRegistry.banner.fallbackBody":
+    "BGMT 派遣回報 token 必須在 2026-05-31 前完成輪替，否則今日完成單將無法回報。",
+  "adapterRegistry.banner.title": "{platformCode} token 到期治理檢查",
+  "adapterRegistry.banner.body":
+    "{name} 目前憑證狀態為 {credentialStatus}，健康狀態為 {healthStatus}。請在 production 流量受影響前完成 token 輪替檢查。",
+  "adapterRegistry.rotateNow": "立即輪替憑證",
+  "adapterRegistry.status.healthy": "健康",
+  "adapterRegistry.status.degraded": "降級",
+  "adapterRegistry.status.unhealthy": "異常",
+  "adapterRegistry.metric.latency": "延遲",
+  "adapterRegistry.metric.lastEvent": "最後事件",
+  "adapterRegistry.metric.orders24h": "24H 訂單",
+  "adapterRegistry.metric.ordersPending": "監測資料待回報",
+  "adapterRegistry.webhook": "Webhook",
+  "adapterRegistry.financeMode": "財務模式",
+  "adapterRegistry.serviceBuckets": "服務分桶",
+  "adapterRegistry.featureFlags": "功能旗標",
+  "adapterRegistry.supportedActions": "支援動作",
+  "adapterRegistry.operationalPause": "營運暫停",
+  "adapterRegistry.noPause": "未暫停",
+  "adapterRegistry.pauseUnknown": "轉接器 API 尚未回報暫停狀態。",
+  "adapterRegistry.authority.platformAdmin": "Platform Admin 權限",
+  "adapterRegistry.authority.ops": "Ops 權限",
+  "adapterRegistry.governedActionInfo":
+    "建立設定、編輯憑證、輪替秘密值，以及啟停轉接器等動作，仍屬此處治理權限。",
+  "adapterRegistry.opsActionInfo":
+    "營運暫停 TTL 與失敗回呼重試仍留在 Ops console，刻意與 Platform Admin 分權。",
+  "adapterRegistry.editConfig": "編輯設定",
+  "adapterRegistry.editCredential": "編輯憑證",
+  "adapterRegistry.rotateCredential": "輪替憑證",
+  "adapterRegistry.enableAdapter": "啟用",
+  "adapterRegistry.disableAdapter": "停用",
+  "adapterRegistry.pauseTraffic": "Ops 暫停 (TTL)",
+  "adapterRegistry.retryCallback": "重試回呼",
+  "adapterRegistry.queueGoverned":
+    "{name} 的「{label}」仍需走 Platform Admin 治理流程。{reasonClause}一次性明文 secret 不會在這裡再次顯示。",
+  "adapterRegistry.queueGoverned.reasonClause": "已記錄原因：{reason}。",
+  "adapterRegistry.queueOps":
+    "{name} 的「{label}」仍屬 Ops 權限，請至 Ops console 執行。",
+  "adapterRegistry.toggleSuccess":
+    "{auditPrefix}{name} 已成功{status}。{reasonClause}",
+  "adapterRegistry.toggleSuccess.enabled": "啟用",
+  "adapterRegistry.toggleSuccess.disabled": "停用",
+  "adapterRegistry.toggleSuccess.reasonClause": "原因：{reason}。",
+  "adapterRegistry.toggleError": "更新轉接器狀態失敗。",
+  "adapterRegistry.unsupportedOpsAction": "此轉接器未提供 Ops 暫停或重試能力。",
+  "adapterRegistry.notConfigured": "未設定",
+  "adapterRegistry.lastCheck": "最後檢查",
+  "adapterRegistry.reasonRequired": "停用 production 轉接器前必須填寫原因。",
+  "adapterRegistry.disableConfirm":
+    "確認停用 {name} 嗎？這會影響受治理的轉接器 readiness。",
+  "adapterRegistry.enableConfirm": "確認啟用 {name} 嗎？",
+  "adapterRegistry.disableReasonPrompt": "請輸入停用 {name} 的治理原因。",
+  "adapterRegistry.auditReceiptPrefix": "稽核收據",
+  "adapterRegistry.forwarderPill": "轉派",
+  "adapterRegistry.featureFlag.on": "開",
+  "adapterRegistry.featureFlag.off": "關",
+  "adapterRegistry.serviceBuckets.meta":
+    "{maxCandidates} 個最大候選數 · {manualFallbackSeconds} 秒人工回退",
+  "adapterRegistry.list.subtitle":
+    "以共享 data-view 基線呈現轉接器 readiness、部署姿態與財務權限歸屬。",
+  "adapterRegistry.list.summary":
+    "這裡的緊湊列、篩選 pills、狀態 chips 與 owned 或 forwarded 權限徽章都來自共用 ui-web primitive。",
+  "adapterRegistry.list.footer": "目前顯示 {shown} / {total}",
+  "adapterRegistry.list.filter.forwarded": "轉派",
+  "adapterRegistry.list.filter.enabled": "已啟用",
+  "adapterRegistry.list.filter.attention": "需關注",
+  "adapterRegistry.list.badge.owned": "自管",
+  "adapterRegistry.list.badge.forwarded": "轉派",
+  "adapterRegistry.list.metric.health": "健康",
+  "adapterRegistry.list.metric.enabled": "啟用",
+  "adapterRegistry.list.metric.webhook": "Webhook",
+  "adapterRegistry.list.metric.authority": "權限",
+  "adapterRegistry.list.metric.rollout": "部署",
+  "adapterRegistry.list.metric.credential": "憑證",
+  "adapterRegistry.col.name": "轉接器",
+  "adapterRegistry.col.environment": "環境",
+  "adapterRegistry.col.version": "版本",
+  "adapterRegistry.col.rolloutStatus": "部署",
+  "adapterRegistry.modal.title": "編輯轉接器：{name}",
+  "adapterRegistry.modal.name": "名稱",
+  "adapterRegistry.modal.version": "版本",
+  "adapterRegistry.modal.enabled": "已啟用",
+  "adapterRegistry.modal.rolloutStatus": "部署狀態",
+  "adapterRegistry.modal.credentialStatus": "憑證狀態",
+  "adapterRegistry.modal.webhookSettings": "Webhook 設定",
+  "adapterRegistry.modal.webhookEnabled": "Webhook 已啟用",
+  "adapterRegistry.modal.webhookUrl": "Webhook 網址",
+  "adapterRegistry.modal.webhookPlaceholder": "https://example.com/webhook",
+  "adapterRegistry.modal.policySettings": "政策設定",
+  "adapterRegistry.modal.serviceBuckets": "服務分桶（以逗號分隔）",
+  "adapterRegistry.modal.maxCandidates": "最大候選數",
+  "adapterRegistry.modal.acceptTimeoutSeconds": "接受逾時（秒）",
+  "adapterRegistry.modal.manualFallbackThresholdSeconds":
+    "人工 fallback 門檻（秒）",
+  "adapterRegistry.modal.supportedActions": "支援動作",
+  "adapterRegistry.modal.noSupportedActions":
+    "此平台目前沒有啟用任何轉接器動作。",
   // ── Users ──
   "users.title": "使用者與角色",
   "users.subtitle": "共 {count} 位人員",
@@ -1616,6 +2835,167 @@ const zh: typeof en = {
   "pricing.form.effectiveTo": "失效時間",
   "pricing.noRules": "無定價規則。",
   "pricing.noPlans": "無司機費用方案。",
+  "pricing.pageTitle": "定價",
+  "pricing.pageSubtitle":
+    "draft -> published -> retired · 發布採 atomic replace（Q-ADM10）",
+  "pricing.loadingWorkspace": "載入定價工作區中...",
+  "pricing.tab.passenger": "乘客定價",
+  "pricing.tab.driver": "司機費用方案",
+  "pricing.tab.subsidy": "補助／報銷規則",
+  "pricing.tab.history": "已發布版本",
+  "pricing.action.createPassengerDraft": "建立乘客定價草稿",
+  "pricing.action.createDriverDraft": "建立司機方案草稿",
+  "pricing.action.createSubsidyDraft": "建立補助草稿",
+  "pricing.action.viewHistory": "檢視版本歷史",
+  "pricing.action.publishDriverPlan": "發布司機費用方案",
+  "pricing.action.publishSubsidyRule": "發布補助規則",
+  "pricing.banner.authority.title": "報價權威來源",
+  "pricing.banner.authority.body":
+    "後端定價是唯一真值。任何 manual override 都必須遵循治理流程，並保留 actor type 與必填欄位。",
+  "pricing.banner.loadFailure.title": "定價工作區載入失敗",
+  "pricing.banner.receipt.title": "稽核收據",
+  "pricing.banner.publishUnsupported.title": "{action} 尚未接上 mutation",
+  "pricing.banner.publishUnsupported.body":
+    "目前高風險發布 modal 與 atomic replace 流程只接在乘客定價；司機與補助分頁先保留 parity 結構與治理提示。",
+  "pricing.bucket.title": "服務 bucket 費率拆解",
+  "pricing.bucket.fallback.base": "以後端 canonical rule 為準",
+  "pricing.bucket.fallback.continuation": "請參考定價規則",
+  "pricing.bucket.fallback.fee": "{feeBps} bps",
+  "pricing.bucket.standard.label": "standard",
+  "pricing.bucket.standard.base": "NT$ 85 / 起跳",
+  "pricing.bucket.standard.continuation": "NT$ 5 / 250m",
+  "pricing.bucket.standard.fee": "1800 bps",
+  "pricing.bucket.business.label": "business",
+  "pricing.bucket.business.base": "NT$ 120 / 起跳",
+  "pricing.bucket.business.continuation": "NT$ 6 / 200m",
+  "pricing.bucket.business.fee": "2200 bps",
+  "pricing.bucket.airport.label": "airport",
+  "pricing.bucket.airport.base": "NT$ 180 / 起跳",
+  "pricing.bucket.airport.continuation": "依區域固定費率",
+  "pricing.bucket.airport.fee": "2500 bps",
+  "pricing.bucket.wheelchair.label": "wheelchair",
+  "pricing.bucket.wheelchair.base": "NT$ 95 / 起跳",
+  "pricing.bucket.wheelchair.continuation": "NT$ 5 / 250m",
+  "pricing.bucket.wheelchair.fee": "900 bps · 補助",
+  "pricing.card.activeDraft.title": "生效／草稿比對",
+  "pricing.card.activeDraft.subtitle":
+    "版本模型 · 發布前比對 canonical 生效版與候選草稿",
+  "pricing.card.publishStepper.title": "發布步驟",
+  "pricing.card.publishStepper.subtitle":
+    "選擇草稿 -> 比對 -> 填寫原因 -> atomic replace",
+  "pricing.card.publishStepper.conflictTitle": "衝突檢查",
+  "pricing.card.override.title": "覆寫治理",
+  "pricing.card.override.subtitle":
+    "manual override 只能作為記錄式治理，不得覆蓋 canonical quoted fare authority",
+  "pricing.card.driverComparison.title": "生效／草稿比對",
+  "pricing.card.driverComparison.subtitle": "司機結算方案一旦發布即保持不可變",
+  "pricing.card.driverComparison.draftQueue": "草稿佇列",
+  "pricing.card.tripFee.title": "每趟費率結構",
+  "pricing.card.tripFee.subtitle": "必顯費率結構與補助連動",
+  "pricing.card.subsidyLinkage.title": "補助／報銷連動",
+  "pricing.card.subsidyLinkage.subtitle":
+    "補助規則與報銷佇列採獨立治理，但共用 quoted fare authority",
+  "pricing.card.subsidyOverride.subtitle": "manual override actor 與證據義務",
+  "pricing.card.historyFilters.title": "已發布版本篩選",
+  "pricing.card.historyFilters.subtitle":
+    "跨分頁歷史可依 type、scope、period 篩選",
+  "pricing.card.historyTable.title": "所有已發布版本 · 跨分頁歷史",
+  "pricing.col.name": "名稱",
+  "pricing.col.nameUpper": "名稱",
+  "pricing.col.versionUpper": "版本",
+  "pricing.col.statusUpper": "狀態",
+  "pricing.col.serviceFeeUpper": "服務費",
+  "pricing.col.serviceFeeBpsUpper": "服務費 bps",
+  "pricing.col.reimburseUpper": "報銷",
+  "pricing.col.scopeUpper": "範圍",
+  "pricing.col.effectiveUpper": "生效區間",
+  "pricing.col.triggerUpper": "觸發條件",
+  "pricing.col.amountUpper": "金額／比例",
+  "pricing.col.typeUpper": "類型",
+  "pricing.col.publishedAtUpper": "發布時間",
+  "pricing.col.publishedByUpper": "發布者",
+  "pricing.col.canonicalUpper": "權威來源",
+  "pricing.col.actorTypesUpper": "Actor 類型",
+  "pricing.col.requiredFieldsUpper": "必填欄位",
+  "pricing.col.planUpper": "方案",
+  "pricing.col.publishedUpper": "發布時間",
+  "pricing.col.reimbursementModeUpper": "報銷模式",
+  "pricing.col.subsidyLinkageUpper": "補助連動",
+  "pricing.col.queueUpper": "佇列",
+  "pricing.col.triggerCountUpper": "觸發數",
+  "pricing.col.canonicalVersionUpper": "權威版本",
+  "pricing.col.manualOverrideUpper": "人工覆寫",
+  "pricing.col.tenantCanSetQuotedFareUpper": "租戶可設定 quoted fare",
+  "pricing.col.partnerCanSetQuotedFareUpper": "合作方可設定 quoted fare",
+  "pricing.modal.title": "發布版本",
+  "pricing.modal.body":
+    "高風險操作必須填寫原因，並在稽核收據中保留 actor、reason 與 trace evidence。",
+  "pricing.modal.conflictTitle": "範圍衝突檢查",
+  "pricing.modal.errorTitle": "無法發布草稿",
+  "pricing.form.publishEffectiveFrom": "生效開始",
+  "pricing.form.publishEffectiveTo": "生效結束",
+  "pricing.form.publishReason": "高風險原因",
+  "pricing.form.publishReasonPlaceholder":
+    "請描述這次定價發布的治理原因、影響範圍與核准依據。",
+  "pricing.state.active": "生效版",
+  "pricing.state.current": "目前",
+  "pricing.state.draft": "草稿",
+  "pricing.state.empty": "空白",
+  "pricing.state.publishCandidate": "發布候選",
+  "pricing.state.published": "已發布",
+  "pricing.status.draft": "草稿",
+  "pricing.status.published": "已發布",
+  "pricing.status.retired": "已退役",
+  "pricing.step.selectDraft.title": "1. 選擇草稿",
+  "pricing.step.selectDraft.ready": "{version} 已進入發布佇列",
+  "pricing.step.selectDraft.empty": "目前沒有可發布的草稿",
+  "pricing.step.compare.title": "2. 比對生效版與草稿",
+  "pricing.step.compare.ready": "{activeVersion} -> {draftVersion}",
+  "pricing.step.compare.empty": "需要同時有生效版與草稿才能比對",
+  "pricing.step.reason.title": "3. 高風險原因",
+  "pricing.step.reason.empty": "開啟 modal 並填寫必填原因",
+  "pricing.step.receipt.title": "4. 稽核收據",
+  "pricing.step.receipt.empty": "發布後會在此留下收據摘要",
+  "pricing.empty.passenger": "目前沒有乘客定價版本。",
+  "pricing.empty.activeRule": "目前沒有生效中的定價規則。",
+  "pricing.empty.publishDraft": "目前沒有待發布的定價草稿。",
+  "pricing.empty.driver": "目前沒有司機費用方案版本。",
+  "pricing.empty.publishedPlans": "目前沒有已發布的司機費用方案。",
+  "pricing.empty.driverDraft":
+    "目前後端僅回傳已發布 fee plan；草稿比對區暫時保留作為治理對位。",
+  "pricing.empty.tripFee": "目前沒有可顯示的費率結構。",
+  "pricing.empty.history": "目前篩選條件下沒有可顯示的版本歷史。",
+  "pricing.error.noDraft": "目前沒有可發布的 draft pricing rule。",
+  "pricing.error.reasonTooShort": "高風險原因至少需要 12 個字元。",
+  "pricing.publishConflict.multipleDrafts":
+    "{count} 個草稿共用範圍 {scope}；發布前應先確認 atomic replace 的勝出版本。",
+  "pricing.publishConflict.activeRetire":
+    "{draftVersion} 發布後，{activeVersion} 將自範圍 {scope} 退役。",
+  "pricing.publishReceipt": "{version} 已於 {timestamp} 因「{reason}」完成發布",
+  "pricing.reimbursement.mixed": "人工 + 平台",
+  "pricing.reimbursement.platformOnly": "僅平台",
+  "pricing.scope.business": "business",
+  "pricing.scope.standard": "standard",
+  "pricing.filter.type": "類型",
+  "pricing.filter.scope": "範圍",
+  "pricing.filter.period": "期間",
+  "pricing.filter.option.passenger": "乘客",
+  "pricing.filter.option.driver": "司機",
+  "pricing.filter.option.subsidy": "補助",
+  "pricing.filter.option.last90d": "最近 90 天",
+  "pricing.filter.option.last30d": "最近 30 天",
+  "pricing.tripFee.mixedSubsidyLinkage": "混合報銷需要補助對帳",
+  "pricing.tripFee.platformFundedOnly": "僅 platform_funded",
+  "pricing.subsidy.name.wheelchair": "輪椅服務補助",
+  "pricing.subsidy.name.airportNight": "夜間機場接送補助",
+  "pricing.subsidy.amount.wheelchair": "NT$ 180 / 趟",
+  "pricing.subsidy.amount.airportNight": "票價加成 12%",
+  "pricing.actor.system": "system",
+  "pricing.actor.platformAdmin": "platform_admin",
+  "pricing.actor.samplePublisher": "張薇",
+  "pricing.value.empty": "—",
+  "pricing.value.open": "open",
+  "pricing.value.rangeArrow": "->",
 
   // ── Vehicle Eligibility ──
   "vehicleEligibility.title": "車輛資格矩陣",
@@ -1818,12 +3198,55 @@ const zh: typeof en = {
   "payments.reconciliation.resolveSummaryRequired": "必須填寫結案摘要。",
   "payments.reconciliation.reopenReasonRequired": "必須填寫重開原因。",
   "payments.reconciliation.col.issue": "問題",
+  "payments.reconciliation.col.source": "來源",
+  "payments.reconciliation.col.type": "類型",
+  "payments.reconciliation.col.tenant": "租戶",
+  "payments.reconciliation.col.externalOrder": "外部訂單",
   "payments.reconciliation.col.summary": "摘要",
   "payments.reconciliation.col.owner": "負責人",
+  "payments.reconciliation.col.status": "狀態",
+  "payments.reconciliation.col.updated": "更新時間",
   "payments.reconciliation.col.context": "關聯內容",
   "payments.reconciliation.col.notes": "留言 / 證據",
   "payments.reconciliation.col.actions": "操作",
   "payments.reconciliation.empty": "目前沒有對帳問題。",
+  "payments.page.title": "結算治理",
+  "payments.page.subtitle":
+    "發票 · 司機結算單 · 報銷批次 · 結算矩陣 · 對帳問題",
+  "payments.page.export": "匯出",
+  "payments.page.queueSubtitle":
+    "先在總表追蹤財務例外，再往下處理明細證據與狀態。",
+  "payments.page.createIssueTitle": "開立對帳問題",
+  "payments.page.createIssueSubtitle":
+    "一次補齊操作人、情境資訊與第一筆證據留言。",
+  "payments.page.outstandingLabel": "目前待處理",
+  "payments.page.exposureLabel": "累計差額",
+  "payments.page.linkedExposure": "關聯金額",
+  "payments.page.noLinkedDocs": "無關聯單據",
+  "payments.page.handlingLabel": "平均處理時間",
+  "payments.page.handlingResolvedWindow": "已結案問題視窗",
+  "payments.page.handlingActiveFallback": "以進行中問題時長補位",
+  "payments.page.reopenRateLabel": "重開率",
+  "payments.page.reopenDeltaWarn": "警戒值 {threshold}%",
+  "payments.page.reopenDeltaOk": "低於 {threshold}%",
+  "payments.page.reopenBannerTitle": "重開率超過警戒值",
+  "payments.page.reopenBannerBody":
+    "最近 30 天的問題視窗中已有 {rate} 項目曾被重開。至少 {count} 筆需要更嚴格的問題治理，避免再次循環。",
+  "payments.warning.dataLoadError": "付款資料載入異常：{error}",
+  "payments.warning.reopenRate": "重開率 {rate}% 超過警戒值。",
+  "payments.page.queueWindow": "近 30 天問題視窗",
+  "payments.page.externalOrder": "外部訂單",
+  "payments.page.financeActorIdRequired": "財務操作人 ID 為必填。",
+  "payments.page.issueSummaryRequired": "問題摘要為必填。",
+  "payments.page.resolutionCodeRequired": "結案代碼為必填。",
+  "payments.page.issueLabel": "問題",
+  "payments.page.statusLabel": "狀態",
+  "payments.page.ownerLabel": "負責人",
+  "payments.page.summaryLabel": "摘要",
+  "payments.page.resolutionLabel": "結案摘要",
+  "payments.page.emptyMatrix": "目前範圍沒有結算矩陣資料。",
+  "payments.page.emptyInvoices": "沒有符合篩選條件的租戶發票。",
+  "payments.page.emptyStatements": "尚未產生司機結算單。",
   "payments.generateInvoice": "產生發票",
   "payments.generating": "產生中...",
   "payments.generateStatements": "產生結算單",
@@ -1887,6 +3310,61 @@ const zh: typeof en = {
   "health.metric.reporting.note": "{count} 筆排隊中或執行中的工作仍未關閉",
   "health.metric.adapters.title": "降級中的轉發器面",
   "health.metric.adapters.note": "共監控 {count} 個轉發器",
+  "health.alertsTitle": "目前流程警示",
+  "health.alertsEmpty": "目前沒有需處理的警示。",
+  "health.adaptersTitle": "轉發器盤點",
+  "health.adaptersEmpty": "目前沒有回報中的轉發器盤點資料。",
+  "health.dispatchTitle": "派車營運",
+  "health.webhookTitle": "Webhook 傳遞",
+  "health.filingTitle": "歸檔與審查佇列",
+  "health.dispatchEmpty": "佇列深度、重派負載與派車失敗情況",
+  "health.webhookEmpty": "端點可用性、排隊傳遞與傳遞延遲",
+  "health.filingEmpty": "報表工作、錄音回補與資格追蹤積壓",
+  "health.loadingAlerts": "載入警示中...",
+  "health.loadingAdapters": "載入轉發器中...",
+  "health.openAlert": "查看",
+  "health.metricsNote": "健康狀態、轉接模式與最新營運訊號",
+  "health.refreshError": "無法更新平台健康資料",
+  "health.alert.measurement": "目前 {measured} · 重大門檻為 {threshold}",
+  "health.metric.minutes": "{value} 分鐘",
+  "health.tab.alertsWithCount": "警示{suffix}",
+  "health.tab.dispatch": "派車",
+  "health.tab.webhook": "Webhook",
+  "health.tab.filing": "歸檔",
+  "health.tab.adaptersInventory": "轉接器",
+  "health.adapter.entries": "{count} 筆",
+  "health.adapter.sourceSuffix": "{source} 通道",
+  "health.routeLabel.platform": "平台",
+  "health.routeLabel.ops": "維運",
+  "health.status.healthy": "正常",
+  "health.status.degraded": "降級",
+  "health.status.down": "中斷",
+  "health.status.unknown": "未知",
+  "health.status.active": "啟用",
+  "health.status.expiring": "即將到期",
+  "health.status.missing": "缺失",
+  "health.alert.recording_backlog.title": "錄音回補佇列待處理",
+  "health.alert.driver_state_lag.title": "司機狀態更新延遲",
+  "health.alert.adapter_degradation.title": "Adapter 健康降級",
+  "health.summary.dispatch.queueDepth": "Ready 佇列深度",
+  "health.summary.dispatch.redispatchOrders": "重新派車訂單",
+  "health.summary.dispatch.exceptionHolds": "例外保留",
+  "health.summary.dispatch.failedOrders": "派車失敗訂單",
+  "health.summary.webhook.activeEndpoints": "啟用中的端點",
+  "health.summary.webhook.disabledEndpoints": "停用中的端點",
+  "health.summary.webhook.queuedDeliveries": "排隊中的傳遞",
+  "health.summary.webhook.oldestQueuedLag": "最久排隊延遲",
+  "health.summary.filing.reportingQueuedJobs": "排隊中的報表工作",
+  "health.summary.filing.recordingBacklog": "錄音回補積壓",
+  "health.summary.filing.manualReviewQueue": "人工審查佇列",
+  "health.summary.filing.eligibilityFailures24h": "24 小時資格失敗數",
+  "health.adapterColumns.adapter": "轉接器",
+  "health.adapterColumns.source": "來源",
+  "health.adapterColumns.kind": "類型",
+  "health.adapterColumns.status": "狀態",
+  "health.adapterColumns.latency": "延遲",
+  "health.adapterColumns.lastEvent": "最後事件",
+  "health.adapterColumns.orders24h": "24h 訂單",
 
   // ── Notices ──
   "notices.title": "公告與維護",
@@ -1952,6 +3430,100 @@ const zh: typeof en = {
   "flags.enable": "啟用",
   "flags.disable": "停用",
   "flags.empty": "無功能旗標。",
+  "featureFlagsAdmin.pageTitle": "功能旗標 · 寫入權限",
+  "featureFlagsAdmin.pageSubtitle":
+    "只有這個頁面可寫入變更；營運、租戶與司機端頁面都維持功能旗標唯讀檢視。",
+  "featureFlagsAdmin.metaPill": "僅此處可寫入",
+  "featureFlagsAdmin.refreshing": "重新整理中...",
+  "featureFlagsAdmin.addOverride": "新增租戶覆寫",
+  "featureFlagsAdmin.addOverrideHint": "先切到租戶範圍，才能建立覆寫。",
+  "featureFlagsAdmin.riskTitle": "高風險操作必須填寫原因。",
+  "featureFlagsAdmin.riskBody":
+    "切換與租戶覆寫都走這條寫入流程，確認後會留下本地稽核收據。",
+  "featureFlagsAdmin.errorBody":
+    "請先確認錯誤內容，必要時再從此頁重試寫入流程。",
+  "featureFlagsAdmin.scopeField": "檢視範圍",
+  "featureFlagsAdmin.searchField": "搜尋 key",
+  "featureFlagsAdmin.searchPlaceholder": "依旗標 key 搜尋",
+  "featureFlagsAdmin.scopeHint":
+    "切到租戶可檢視該租戶的有效覆寫列；預設仍以平台資料為主。",
+  "featureFlagsAdmin.scopePlatformDefault": "平台預設",
+  "featureFlagsAdmin.scopeTenantOverride": "租戶覆寫 · {tenantId}",
+  "featureFlagsAdmin.tenantOptionLabel": "{name} ({code})",
+  "featureFlagsAdmin.scopeLoading": "載入租戶清單中...",
+  "featureFlagsAdmin.summaryPlatformDefault": "平台預設",
+  "featureFlagsAdmin.summaryTenantOverride": "租戶覆寫",
+  "featureFlagsAdmin.tableTitle": "功能旗標登錄表",
+  "featureFlagsAdmin.tableSubtitle":
+    "欄位依序呈現 key、範圍、狀態切換、更新者、時間與操作，維持表格優先主體。",
+  "featureFlagsAdmin.filterLabel": "推行狀態",
+  "featureFlagsAdmin.filterPill": "表格優先版面",
+  "featureFlagsAdmin.rolloutMid": "推行中",
+  "featureFlagsAdmin.rolloutFull": "已完成推行",
+  "featureFlagsAdmin.rolloutDeprecated": "已淘汰",
+  "featureFlagsAdmin.keyHeader": "Key",
+  "featureFlagsAdmin.scopeHeader": "範圍",
+  "featureFlagsAdmin.stateHeader": "狀態",
+  "featureFlagsAdmin.updatedByHeader": "更新者",
+  "featureFlagsAdmin.updatedAtHeader": "時間",
+  "featureFlagsAdmin.actionsHeader": "操作",
+  "featureFlagsAdmin.noDescription": "尚未提供描述",
+  "featureFlagsAdmin.updatedByValue": "目前契約未提供",
+  "featureFlagsAdmin.toggle": "切換",
+  "featureFlagsAdmin.toggleAriaLabel": "切換 {key}",
+  "featureFlagsAdmin.removeOverride": "移除覆寫",
+  "featureFlagsAdmin.history": "歷史",
+  "featureFlagsAdmin.confirmToggleTitle": "確認切換功能旗標",
+  "featureFlagsAdmin.confirmToggleBody": "這會變更目前檢視範圍中的有效功能旗標狀態。",
+  "featureFlagsAdmin.confirmOverrideTitle": "建立租戶覆寫",
+  "featureFlagsAdmin.confirmOverrideBody":
+    "這會為所選 key 建立租戶專屬覆寫，不影響其他範圍。",
+  "featureFlagsAdmin.confirmRemoveOverrideTitle": "移除租戶覆寫",
+  "featureFlagsAdmin.confirmRemoveOverrideBody":
+    "這會移除租戶專屬覆寫，讓該租戶回到平台預設。",
+  "featureFlagsAdmin.reasonLabel": "高風險原因",
+  "featureFlagsAdmin.reasonPlaceholder":
+    "說明推行原因、預期影響範圍與驗證計畫。",
+  "featureFlagsAdmin.reasonRequired": "執行這個高風險操作前必須填寫原因。",
+  "featureFlagsAdmin.overrideTenantField": "租戶",
+  "featureFlagsAdmin.overrideTenantRequired": "建立覆寫前必須先選擇租戶。",
+  "featureFlagsAdmin.overrideKeyField": "旗標 key",
+  "featureFlagsAdmin.overrideStateField": "覆寫狀態",
+  "featureFlagsAdmin.overrideDescriptionField": "覆寫描述",
+  "featureFlagsAdmin.overrideDescriptionHint": "可留白，沿用既有旗標描述。",
+  "featureFlagsAdmin.confirmEnable": "啟用",
+  "featureFlagsAdmin.confirmDisable": "停用",
+  "featureFlagsAdmin.confirmCreate": "建立覆寫",
+  "featureFlagsAdmin.confirmRemove": "移除覆寫",
+  "featureFlagsAdmin.receiptToggleSummary": "{action} {key}",
+  "featureFlagsAdmin.receiptCreateSummary": "建立覆寫 {key}",
+  "featureFlagsAdmin.pendingToggleSummary": "{key} · {scope} · {action}",
+  "featureFlagsAdmin.scopeMeta": "目前範圍",
+  "featureFlagsAdmin.resultMeta": "可見 {count} 列",
+  "featureFlagsAdmin.enabledMeta": "啟用 {count} 列",
+  "featureFlagsAdmin.disabledMeta": "停用 {count} 列",
+  "featureFlagsAdmin.overrideMeta": "租戶覆寫 {count} 列",
+  "featureFlagsAdmin.notesTitle": "延伸備註",
+  "featureFlagsAdmin.notesEmpty": "目前範圍沒有額外契約備註。",
+  "featureFlagsAdmin.historyTitle": "本地稽核收據",
+  "featureFlagsAdmin.historyEmpty": "這個瀏覽工作階段尚未記錄任何收據。",
+  "featureFlagsAdmin.historyHint": "可用歷史列操作聚焦特定 key 的收據。",
+  "featureFlagsAdmin.historyFocusAll": "目前顯示此瀏覽工作階段的所有收據。",
+  "featureFlagsAdmin.historyFocusKey": "目前聚焦 {key}",
+  "featureFlagsAdmin.secondaryPanelTitle": "變更控制與延伸細節",
+  "featureFlagsAdmin.secondaryPanelSubtitle":
+    "高風險原因、延伸備註與本地歷史都收在表格主體下方的次要區塊。",
+  "featureFlagsAdmin.actionComposerTitle": "待確認的高風險變更",
+  "featureFlagsAdmin.actionComposerIdle":
+    "切換與覆寫變更都必須先填寫原因再確認。",
+  "featureFlagsAdmin.actionApplied": "已記錄稽核收據",
+  "featureFlagsAdmin.receiptBannerBody": "{summary} · {scope} · {requestedAt}",
+  "featureFlagsAdmin.noFlagsInFilter":
+    "目前推行篩選與搜尋條件沒有符合的功能旗標。",
+  "featureFlagsAdmin.laneMeta": "僅此處可寫入",
+  "featureFlagsAdmin.notesMeta": "延伸備註收在預設主體之外。",
+  "featureFlagsAdmin.receiptsMeta": "本地收據 {count} 筆",
+  "featureFlagsAdmin.showAllReceipts": "顯示全部收據",
 
   // ── Tenants (additional) ──
   "tenants.configure": "設定",
@@ -2053,6 +3625,122 @@ const zh: typeof en = {
   "payments.reimbursementsTitle": "司機報銷",
   "payments.generateInvoiceTitle": "產生租戶發票",
   "payments.generateStatementsTitle": "產生司機結算單",
+  "payments.reimbursements.queue.filter.all": "全部",
+  "payments.reimbursements.queue.filter.pendingApproval": "待核准",
+  "payments.reimbursements.queue.filter.exported": "已匯出",
+  "payments.reimbursements.queue.filter.done": "已完成",
+  "payments.reimbursements.queue.submitter.platformFinance": "平台財務",
+  "payments.reimbursements.queue.headerTitle": "代墊批次",
+  "payments.reimbursements.queue.headerSubtitle":
+    "draft → pending_approval → approved → exported → paid → reconciled（Q-ADM12 六狀態 state machine）",
+  "payments.reimbursements.queue.empty": "目前沒有符合此狀態的代墊批次。",
+  "payments.reimbursements.queue.loadError": "無法載入代墊批次",
+  "payments.reimbursements.queue.loading": "正在載入代墊批次…",
+  "payments.reimbursements.queue.col.batch": "批次",
+  "payments.reimbursements.queue.col.scope": "範圍",
+  "payments.reimbursements.queue.col.amount": "金額",
+  "payments.reimbursements.queue.col.state": "狀態",
+  "payments.reimbursements.queue.col.submitter": "提交者",
+  "payments.reimbursements.queue.col.submitted": "提交時間",
+  "payments.reimbursements.queue.col.updated": "更新時間",
+  "payments.reimbursements.status.draft": "draft",
+  "payments.reimbursements.status.pendingApproval": "pending_approval",
+  "payments.reimbursements.status.approved": "approved",
+  "payments.reimbursements.status.exported": "exported",
+  "payments.reimbursements.status.paid": "paid",
+  "payments.reimbursements.status.reconciled": "reconciled",
+  "payments.reimbursements.detail.fallbackWarning":
+    "目前代墊詳情 API 無法使用，頁面改以 route-local fallback 資料渲染 canvas 對齊內容。",
+  "payments.reimbursements.detail.loading": "載入中…",
+  "payments.reimbursements.detail.pageTitle": "代墊批次",
+  "payments.reimbursements.detail.backToPayments": "返回結算治理",
+  "payments.reimbursements.detail.batchUnavailable": "找不到批次",
+  "payments.reimbursements.detail.batchUnavailableBody":
+    "Route 已建立，但找不到對應的代墊批次資料。",
+  "payments.reimbursements.detail.lineItemsFallbackNote": "項目 {index}",
+  "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr":
+    "贊助代墊 Q2-Apr",
+  "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment":
+    "差額調整 TWD 1,820 × 99 筆",
+  "payments.reimbursements.detail.approvalReasonRequired":
+    "高風險核准操作必須填寫原因。",
+  "payments.reimbursements.detail.approvalRecorded": "已記錄核准原因：{reason}",
+  "payments.reimbursements.detail.markedPaid":
+    "批次已標記為已付款，且已記錄匯款憑證。",
+  "payments.reimbursements.detail.queueLink": "批次佇列",
+  "payments.reimbursements.detail.copyBatchId": "複製批次 ID",
+  "payments.reimbursements.detail.refreshFailed": "重新整理失敗",
+  "payments.reimbursements.detail.fallbackTitle": "Fallback 代墊批次詳情",
+  "payments.reimbursements.detail.auditViewTitle":
+    "Audit-derived workflow 視圖",
+  "payments.reimbursements.detail.auditViewBody":
+    "六狀態 stepper 對齊 canvas；目前狀態由 batch 的核准、匯款憑證與付款時間推導呈現。",
+  "payments.reimbursements.detail.auditReceipt": "稽核收據",
+  "payments.reimbursements.detail.stateMachineTitle": "狀態機 · Q-ADM12",
+  "payments.reimbursements.detail.stateMachineSubtitle":
+    "draft → pending approval → approved → exported → paid → reconciled",
+  "payments.reimbursements.detail.headerCardTitle": "摘要",
+  "payments.reimbursements.detail.summary.batchId": "批次 ID",
+  "payments.reimbursements.detail.summary.driver": "司機",
+  "payments.reimbursements.detail.summary.statement": "結算單",
+  "payments.reimbursements.detail.summary.period": "期間",
+  "payments.reimbursements.detail.summary.totalAmount": "總金額",
+  "payments.reimbursements.detail.summary.state": "狀態",
+  "payments.reimbursements.detail.summary.approvedAt": "核准時間",
+  "payments.reimbursements.detail.summary.paidAt": "付款時間",
+  "payments.reimbursements.detail.summary.remittanceProof": "匯款憑證",
+  "payments.reimbursements.detail.summary.lineItems": "項目數",
+  "payments.reimbursements.detail.approveFlowTitle": "核准原因流程",
+  "payments.reimbursements.detail.approveFlowSubtitle":
+    "高風險操作在核准前必須填寫原因。",
+  "payments.reimbursements.detail.approvalReason": "核准原因",
+  "payments.reimbursements.detail.approvalReasonPlaceholder":
+    "說明 sponsor exposure、佐證或 audit context。",
+  "payments.reimbursements.detail.remittanceProof": "匯款憑證",
+  "payments.reimbursements.detail.actionFailed": "操作失敗",
+  "payments.reimbursements.detail.markPaid": "標記已付款",
+  "payments.reimbursements.detail.timelineTitle": "狀態時間軸 · audit-derived",
+  "payments.reimbursements.detail.batchSummaryTitle": "批次摘要",
+  "payments.reimbursements.detail.batchSummarySubtitle.fallback":
+    "以 route-local fallback finance context 補齊 canvas body 密度。",
+  "payments.reimbursements.detail.batchSummarySubtitle.live":
+    "以 route-local finance context 補齊 canvas body 密度。",
+  "payments.reimbursements.detail.approvalGate": "核准關卡：",
+  "payments.reimbursements.detail.approvalGateCompleted": "已完成",
+  "payments.reimbursements.detail.approvalGatePending": "待 super-admin 簽核",
+  "payments.reimbursements.detail.exportPosture": "匯出姿態：",
+  "payments.reimbursements.detail.exportPostureAttached": "已附憑證",
+  "payments.reimbursements.detail.exportPosturePending": "尚未匯出",
+  "payments.reimbursements.detail.settlementTarget": "結算對象：",
+  "payments.reimbursements.detail.evidenceScope": "佐證範圍：",
+  "payments.reimbursements.detail.evidenceScopeCount": "{count} 筆項目",
+  "payments.reimbursements.detail.lineItemsTitle": "項目明細",
+  "payments.reimbursements.detail.lineItemsSubtitle":
+    "{count} 筆來源構成此批次總額。",
+  "payments.reimbursements.detail.lineItemsEmpty":
+    "此批次目前沒有可顯示的代墊項目。",
+  "payments.reimbursements.detail.lineItems.col.recipient": "收款對象",
+  "payments.reimbursements.detail.lineItems.col.amount": "金額",
+  "payments.reimbursements.detail.lineItems.col.sourceReference": "來源參考",
+  "payments.reimbursements.detail.lineItems.col.note": "備註",
+  "payments.reimbursements.timeline.batchCreated": "批次建立",
+  "payments.reimbursements.timeline.batchCreatedBody":
+    "此批次依結算單 {statementId} 與司機 {driverId} 產生。",
+  "payments.reimbursements.timeline.submittedForApproval": "送交核准",
+  "payments.reimbursements.timeline.submittedForApprovalBody":
+    "{count} 筆代墊項目已排入財務審核。",
+  "payments.reimbursements.timeline.approved": "已核准",
+  "payments.reimbursements.timeline.approvedBody":
+    "批次已核准，可進入匯出與匯款處理。",
+  "payments.reimbursements.timeline.remittanceProofAttached": "已附匯款憑證",
+  "payments.reimbursements.timeline.remittanceProofAttachedBody":
+    "批次已記錄憑證 ID {proofId}。",
+  "payments.reimbursements.timeline.markedPaid": "已標記付款",
+  "payments.reimbursements.timeline.markedPaidBody":
+    "司機代墊已於財務主控台標記為已付款。",
+  "payments.reimbursements.timeline.waitingApproval": "等待核准",
+  "payments.reimbursements.timeline.waitingApprovalBody":
+    "高風險核准仍需補上原因，狀態才能繼續推進。",
 
   // ── Tenant Governance (20260606 UI presentation) ──
   "tenantGovernance.title": "跨租戶治理",
@@ -2223,6 +3911,69 @@ const zh: typeof en = {
   "notices.maintActiveBanner": "維護中",
   "notices.currentStatus": "目前狀態",
   "notices.lastUpdated": "最後更新",
+  "notices.subtitle.detail":
+    "critical / maintenance 等級會推送跨應用 banner 到營運、租戶與司機端（Q-ADM15）。",
+  "notices.tab.history": "廣播歷史",
+  "notices.createNotice": "建立公告",
+  "notices.enterMaintenance": "進入維護",
+  "notices.refreshing": "重新整理中",
+  "notices.emptyDetailed": "目前沒有平台公告。",
+  "notices.emptyHistory": "目前沒有跨應用廣播紀錄。",
+  "notices.composer.title": "建立公告",
+  "notices.composer.subtitle": "發佈給平台營運、租戶或司機端的跨應用 banner。",
+  "notices.guardrail.title": "進入維護前應先發送維護公告",
+  "notices.guardrail.body": "先發佈維護等級公告，再啟用全平台維護模式。",
+  "notices.maintenance.currentTitle": "維護模式 · 目前狀態",
+  "notices.maintenance.currentSubtitle": "全平台 dispatch 與入站流量控管。",
+  "notices.maintenance.internalReason": "原因 · 內部紀錄",
+  "notices.maintenance.scheduledStart": "預定起始",
+  "notices.maintenance.scheduledEnd": "預定結束",
+  "notices.maintenance.save": "保存維護設定",
+  "notices.maintenance.previewTitle": "目前維護公告（預覽）",
+  "notices.maintenance.previewFallback":
+    "啟用維護模式後，將推送跨應用中斷公告。",
+  "notices.maintenance.previewTargets": "目標對象：ops · tenant · driver",
+  "notices.maintenance.reasonRequired":
+    "高風險 maintenance 動作必須填寫原因後才能保存。",
+  "notices.maintenance.confirmTitle": "確認更新維護模式",
+  "notices.maintenance.confirmBody":
+    "這是高風險動作。保存後會改變全平台 dispatch 與 webhook 行為。",
+  "notices.maintenance.confirmReasonLabel": "稽核原因",
+  "notices.maintenance.confirmApply": "套用維護更新",
+  "notices.maintenance.summary":
+    "啟用後將停止 dispatch、webhook 投遞與 partner 入站。",
+  "notices.maintenance.reasonPlaceholder":
+    "例如：計畫性維護、合作方故障緩解、合規保留",
+  "notices.maintenance.startPlaceholder": "YYYY-MM-DD HH:MM",
+  "notices.maintenance.endPlaceholder": "YYYY-MM-DD HH:MM",
+  "notices.col.updated": "更新",
+  "notices.col.targets": "對象",
+  "notices.col.delivery": "投遞",
+  "notices.col.broadcastAt": "廣播時間",
+  "notices.col.updatedBy": "更新者",
+  "notices.col.window": "時段",
+  "notices.col.action": "操作",
+  "notices.col.notice": "公告",
+  "notices.col.id": "ID",
+  "notices.col.severityShort": "SEV",
+  "notices.history.subtitle": "廣播歷史 · 跨應用投遞結果",
+  "notices.history.delivery.archived": "已封存的已解決投遞",
+  "notices.history.delivery.all": "已投遞 3 / 3",
+  "notices.history.delivery.single": "已投遞 1 / 1",
+  "notices.noticeTitleRequired": "公告標題為必填。",
+  "notices.noticeBodyRequired": "公告內容為必填。",
+  "notices.warning.operationError": "公告/維護模式操作異常：{error}",
+  "notices.warning.maintenanceEnabled": "目前平台維護模式為啟用狀態。",
+  "notices.status.active": "啟用中",
+  "notices.status.scheduled": "已排程",
+  "notices.status.resolved": "已解決",
+  "notices.status.archived": "已封存",
+  "notices.severity.info": "低",
+  "notices.severity.warning": "中",
+  "notices.severity.critical": "高",
+  "notices.window.notScheduled": "未排定",
+  "notices.risk.high": "高風險",
+  "notices.systemUser": "system",
 
   // ── Audit (additional) ──
   "audit.showingOf": "顯示 {shown} / {total} 筆記錄",
@@ -2231,22 +3982,21 @@ const zh: typeof en = {
   "audit.actorLabel": "操作者類型：",
   "audit.metrics.policyFamilies": "證據政策家族數",
   "audit.metrics.signedDownload": "需簽名下載的家族數",
-  "audit.metrics.activeHolds": "有效 legal hold",
+  "audit.metrics.activeHolds": "有效法定保留",
   "audit.metrics.activeExceptions": "有效刪除例外",
   "audit.policies.title": "證據治理",
-  "audit.policies.subtitle":
-    "依證據家族查看 retention、下載控制與 legal hold 預設。",
+  "audit.policies.subtitle": "依證據家族查看保留期限、下載控制與法定保留預設。",
   "audit.policies.family": "家族",
   "audit.policies.authority": "權威模組",
   "audit.policies.retention": "保存期",
   "audit.policies.download": "下載",
-  "audit.policies.legalHold": "Legal Hold",
+  "audit.policies.legalHold": "法定保留",
   "audit.policies.signedDownloadTtl": "簽名網址（{minutes} 分鐘）",
   "audit.policies.noDownload": "不提供直接下載",
   "audit.policies.holdEnabled": "支援",
   "audit.policies.holdDisabled": "不支援",
-  "audit.holds.title": "有效 Legal Hold",
-  "audit.holds.empty": "目前沒有有效 legal hold。",
+  "audit.holds.title": "有效法定保留",
+  "audit.holds.empty": "目前沒有有效法定保留。",
   "audit.holds.family": "家族",
   "audit.holds.subject": "主體",
   "audit.holds.case": "案件",
@@ -2257,12 +4007,436 @@ const zh: typeof en = {
   "audit.exceptions.subject": "主體",
   "audit.exceptions.reason": "原因",
   "audit.exceptions.expiresAt": "到期時間",
+  "audit.page.title": "稽核與證據治理",
+  "audit.page.subtitle":
+    "Append-only · 法定保留與刪除例外以 badge 顯示 (Q-ADM16)",
+  "audit.page.refresh": "重新整理 (T6 手動)",
+  "audit.page.refreshing": "重新整理中…",
+  "audit.page.exportCsv": "匯出 CSV",
+  "audit.page.tabLog": "稽核紀錄",
+  "audit.page.tabPolicy": "保留政策",
+  "audit.page.tabHold": "有效法定保留",
+  "audit.page.tabExcept": "刪除例外",
+  "audit.page.all": "全部",
+  "audit.page.legalHoldTip": "法定保留",
+  "audit.page.deletionExceptionTip": "刪除例外",
+  "audit.page.holdBadge": "保留",
+  "audit.page.exemptBadge": "例外",
+  "audit.page.expires": "到期",
+  "audit.page.case": "案號",
+  "audit.page.owner": "負責人",
+  "audit.page.reason": "原因",
+  "audit.page.loading": "載入稽核紀錄中…",
+  "audit.page.emptyLog": "沒有符合目前篩選條件的稽核紀錄。",
+  "audit.page.emptyPolicy": "尚未設定保留政策。",
+  "audit.page.emptyHold": "目前沒有有效法定保留。",
+  "audit.page.emptyExcept": "目前沒有有效刪除例外。",
+  "audit.page.holdsTitle": "有效法定保留",
+  "audit.page.exceptTitle": "刪除例外",
+  "audit.page.colWhen": "時間",
+  "audit.page.colActorType": "操作者類型",
+  "audit.page.colActor": "操作者",
+  "audit.page.colModule": "模組",
+  "audit.page.colAction": "動作",
+  "audit.page.colResource": "資源",
+  "audit.page.colRequest": "請求",
+  "audit.page.polFamily": "家族",
+  "audit.page.polAuthority": "權威模組",
+  "audit.page.polRetention": "保存期",
+  "audit.page.polDownload": "下載",
+  "audit.page.polHold": "法定保留",
+  "audit.page.holdResource": "資源",
+  "audit.page.holdCase": "案號",
+  "audit.page.holdReason": "原因",
+  "audit.page.holdPlacedBy": "建立者",
+  "audit.page.holdPlacedAt": "建立時間",
+  "audit.page.exReason": "原因",
+  "audit.page.exExpires": "到期",
+  "audit.page.reasonCode": "原因代碼",
+  "audit.page.signedTtl": "簽名網址 · {minutes} 分鐘 TTL",
+  "audit.page.noDownload": "不提供下載",
+  "audit.page.holdEnabled": "支援",
+  "audit.page.holdDisabled": "不支援",
+  "audit.page.holdSupported": "支援法定保留",
 
   // ── Common (more) ──
   "common.noValues": "無資料",
 };
 
 export const translations: Record<Locale, typeof en> = { en, zh };
+
+type TranslationParams = Record<string, string | number>;
+export type TranslateFn = (key: string, params?: TranslationParams) => string;
+
+function translateKey(
+  locale: Locale,
+  key: string,
+  params?: TranslationParams,
+): string {
+  return t(key, locale, params);
+}
+
+export function getBilingualText(
+  key: string,
+  params?: TranslationParams,
+): Record<Locale, string> {
+  return {
+    zh: translateKey("zh", key, params),
+    en: translateKey("en", key, params),
+  };
+}
+
+export function getHealthStatusLabel(locale: Locale, status: string): string {
+  const key = `health.status.${status}`;
+  const value = translateKey(locale, key);
+  return value === key ? status.replace(/_/g, " ") : value;
+}
+
+export function getHealthAlertTitle(
+  locale: Locale,
+  key: OperationalAlertRecord["key"],
+): string {
+  const entry = translateKey(locale, `health.alert.${key}.title`);
+  return entry === `health.alert.${key}.title` ? key : entry;
+}
+
+export function getHealthAlertRouteLabel(
+  locale: Locale,
+  route: OperationalAlertRecord["routes"][number],
+): string {
+  return translateKey(
+    locale,
+    route === "platform"
+      ? "health.routeLabel.platform"
+      : "health.routeLabel.ops",
+  );
+}
+
+export function getHealthAdapterSourceLabel(
+  locale: Locale,
+  source: string,
+): string {
+  return translateKey(locale, "health.adapter.sourceSuffix", { source });
+}
+
+export function formatLocaleNumber(locale: Locale, value: number): string {
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
+export function formatHealthMetricValue(
+  locale: Locale,
+  value: number | null,
+  unit: "count" | "minutes" | "percent",
+): string {
+  if (value == null) {
+    return "—";
+  }
+
+  if (unit === "minutes") {
+    return translateKey(locale, "health.metric.minutes", {
+      value: formatLocaleNumber(locale, value),
+    });
+  }
+
+  if (unit === "percent") {
+    return `${value}%`;
+  }
+
+  return formatLocaleNumber(locale, value);
+}
+
+export function formatHealthAdapterSource(
+  locale: Locale,
+  platformCode: string,
+): string {
+  const normalized = platformCode.replace(/[_-]+/g, " ").trim();
+  const title = normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return getHealthAdapterSourceLabel(locale, title);
+}
+
+export function getHealthPageCopy(locale: Locale) {
+  return {
+    title: translateKey(locale, "health.title"),
+    subtitle: translateKey(locale, "health.subtitle"),
+    refresh: translateKey(locale, "common.refresh"),
+    alertsTitle: translateKey(locale, "health.alertsTitle"),
+    alertsEmpty: translateKey(locale, "health.alertsEmpty"),
+    adaptersTitle: translateKey(locale, "health.adaptersTitle"),
+    adaptersEmpty: translateKey(locale, "health.adaptersEmpty"),
+    dispatchTitle: translateKey(locale, "health.dispatchTitle"),
+    webhookTitle: translateKey(locale, "health.webhookTitle"),
+    filingTitle: translateKey(locale, "health.filingTitle"),
+    dispatchEmpty: translateKey(locale, "health.dispatchEmpty"),
+    webhookEmpty: translateKey(locale, "health.webhookEmpty"),
+    filingEmpty: translateKey(locale, "health.filingEmpty"),
+    loadingAlerts: translateKey(locale, "health.loadingAlerts"),
+    loadingAdapters: translateKey(locale, "health.loadingAdapters"),
+    openAlert: translateKey(locale, "health.openAlert"),
+    metricsNote: translateKey(locale, "health.metricsNote"),
+    refreshError: translateKey(locale, "health.refreshError"),
+    alertMeasurement: (params: TranslationParams) =>
+      translateKey(locale, "health.alert.measurement", params),
+    adapterEntries: (count: number) =>
+      translateKey(locale, "health.adapter.entries", { count }),
+    tab: {
+      alertsWithCount: (suffix: string) =>
+        translateKey(locale, "health.tab.alertsWithCount", { suffix }),
+      dispatch: translateKey(locale, "health.tab.dispatch"),
+      webhook: translateKey(locale, "health.tab.webhook"),
+      filing: translateKey(locale, "health.tab.filing"),
+      adapters: translateKey(locale, "health.tab.adaptersInventory"),
+    },
+    kpis: {
+      dispatch: {
+        label: translateKey(locale, "health.metric.dispatch.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.dispatch.note", { count }),
+      },
+      webhook: {
+        label: translateKey(locale, "health.metric.webhook.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.webhook.note", { count }),
+      },
+      eligibility: {
+        label: translateKey(locale, "health.metric.eligibility.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.eligibility.note", { count }),
+      },
+      reporting: {
+        label: translateKey(locale, "health.metric.reporting.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.reporting.note", { count }),
+      },
+    },
+    summary: {
+      dispatch: {
+        queueDepth: translateKey(locale, "health.summary.dispatch.queueDepth"),
+        redispatchOrders: translateKey(
+          locale,
+          "health.summary.dispatch.redispatchOrders",
+        ),
+        exceptionHolds: translateKey(
+          locale,
+          "health.summary.dispatch.exceptionHolds",
+        ),
+        failedOrders: translateKey(
+          locale,
+          "health.summary.dispatch.failedOrders",
+        ),
+      },
+      webhook: {
+        activeEndpoints: translateKey(
+          locale,
+          "health.summary.webhook.activeEndpoints",
+        ),
+        disabledEndpoints: translateKey(
+          locale,
+          "health.summary.webhook.disabledEndpoints",
+        ),
+        queuedDeliveries: translateKey(
+          locale,
+          "health.summary.webhook.queuedDeliveries",
+        ),
+        oldestQueuedLag: translateKey(
+          locale,
+          "health.summary.webhook.oldestQueuedLag",
+        ),
+      },
+      filing: {
+        reportingQueuedJobs: translateKey(
+          locale,
+          "health.summary.filing.reportingQueuedJobs",
+        ),
+        recordingBacklog: translateKey(
+          locale,
+          "health.summary.filing.recordingBacklog",
+        ),
+        manualReviewQueue: translateKey(
+          locale,
+          "health.summary.filing.manualReviewQueue",
+        ),
+        eligibilityFailures24h: translateKey(
+          locale,
+          "health.summary.filing.eligibilityFailures24h",
+        ),
+      },
+    },
+    adapterColumns: {
+      adapter: translateKey(locale, "health.adapterColumns.adapter"),
+      source: translateKey(locale, "health.adapterColumns.source"),
+      kind: translateKey(locale, "health.adapterColumns.kind"),
+      status: translateKey(locale, "health.adapterColumns.status"),
+      latency: translateKey(locale, "health.adapterColumns.latency"),
+      lastEvent: translateKey(locale, "health.adapterColumns.lastEvent"),
+      orders24h: translateKey(locale, "health.adapterColumns.orders24h"),
+    },
+  };
+}
+
+export function getNoticesAudienceLabel(
+  locale: Locale,
+  audience: PlatformNoticeRecord["targetAudience"],
+): string {
+  switch (audience) {
+    case "all":
+      return translateKey(locale, "notices.maintenance.previewTargets")
+        .replace(/^Target surfaces:\s*/u, "")
+        .replace(/^目標對象：/u, "");
+    case "tenants":
+      return translateKey(locale, "notices.audience.tenants");
+    case "ops":
+      return translateKey(locale, "notices.audience.ops");
+    case "drivers":
+      return translateKey(locale, "notices.audience.drivers");
+    default:
+      return audience;
+  }
+}
+
+export function getNoticeSeverityLabel(
+  locale: Locale,
+  severity: PlatformNoticeSeverity,
+): string {
+  return translateKey(locale, `notices.severity.${severity}`);
+}
+
+export function getNoticeStatusLabel(
+  locale: Locale,
+  status: PlatformNoticeStatus,
+): string {
+  return translateKey(locale, `notices.status.${status}`);
+}
+
+export function getNoticeWindowNotScheduled(locale: Locale): string {
+  return translateKey(locale, "notices.window.notScheduled");
+}
+
+export function formatNoticeWindow(
+  start: string | null,
+  end: string | null,
+  t: TranslateFn,
+): string {
+  if (!start && !end) {
+    return t("notices.window.notScheduled");
+  }
+  if (start && end) {
+    return `${start} - ${end}`;
+  }
+  return start ?? end ?? "";
+}
+
+export function getNoticeHistoryDeliveryLabel(
+  locale: Locale,
+  status: PlatformNoticeStatus,
+  audience: PlatformNoticeRecord["targetAudience"],
+): string {
+  if (status === "resolved") {
+    return translateKey(locale, "notices.history.delivery.archived");
+  }
+  return audience === "all"
+    ? translateKey(locale, "notices.history.delivery.all")
+    : translateKey(locale, "notices.history.delivery.single");
+}
+
+export function getNoticesPageCopy(locale: Locale) {
+  return {
+    title: translateKey(locale, "notices.title"),
+    subtitle: translateKey(locale, "notices.subtitle.detail"),
+    notices: translateKey(locale, "notices.tab.notices"),
+    maintenance: translateKey(locale, "notices.tab.maintenance"),
+    history: translateKey(locale, "notices.tab.history"),
+    createNotice: translateKey(locale, "notices.createNotice"),
+    enterMaintenance: translateKey(locale, "notices.enterMaintenance"),
+    refresh: translateKey(locale, "common.refresh"),
+    refreshing: translateKey(locale, "notices.refreshing"),
+    emptyNotices: translateKey(locale, "notices.emptyDetailed"),
+    emptyHistory: translateKey(locale, "notices.emptyHistory"),
+    noticeComposerTitle: translateKey(locale, "notices.composer.title"),
+    noticeComposerSubtitle: translateKey(locale, "notices.composer.subtitle"),
+    noticeTitle: translateKey(locale, "notices.col.title"),
+    noticeBody: translateKey(locale, "notices.form.body"),
+    noticeAudience: translateKey(locale, "notices.col.audience"),
+    noticeSeverity: translateKey(locale, "notices.col.severity"),
+    publishNotice: translateKey(locale, "notices.publishNotice"),
+    publishing: translateKey(locale, "notices.publishing"),
+    activeNoticeGuardrailTitle: translateKey(locale, "notices.guardrail.title"),
+    activeNoticeGuardrailBody: translateKey(locale, "notices.guardrail.body"),
+    currentMaintenance: translateKey(
+      locale,
+      "notices.maintenance.currentTitle",
+    ),
+    currentMaintenanceSubtitle: translateKey(
+      locale,
+      "notices.maintenance.currentSubtitle",
+    ),
+    internalReason: translateKey(locale, "notices.maintenance.internalReason"),
+    scheduledStart: translateKey(locale, "notices.maintenance.scheduledStart"),
+    scheduledEnd: translateKey(locale, "notices.maintenance.scheduledEnd"),
+    saveMaintenance: translateKey(locale, "notices.maintenance.save"),
+    previewTitle: translateKey(locale, "notices.maintenance.previewTitle"),
+    previewFallback: translateKey(
+      locale,
+      "notices.maintenance.previewFallback",
+    ),
+    previewTargets: translateKey(locale, "notices.maintenance.previewTargets"),
+    reasonRequired: translateKey(locale, "notices.maintenance.reasonRequired"),
+    confirmTitle: translateKey(locale, "notices.maintenance.confirmTitle"),
+    confirmBody: translateKey(locale, "notices.maintenance.confirmBody"),
+    confirmReasonLabel: translateKey(
+      locale,
+      "notices.maintenance.confirmReasonLabel",
+    ),
+    confirmCancel: translateKey(locale, "common.cancel"),
+    confirmApply: translateKey(locale, "notices.maintenance.confirmApply"),
+    resolving: translateKey(locale, "notices.updating"),
+    resolve: translateKey(locale, "notices.resolve"),
+    maintenanceEnabled: translateKey(locale, "notices.maintEnabled"),
+    maintenanceDisabled: translateKey(locale, "notices.maintDisabled"),
+    maintenanceSummary: translateKey(locale, "notices.maintenance.summary"),
+    reasonPlaceholder: translateKey(
+      locale,
+      "notices.maintenance.reasonPlaceholder",
+    ),
+    startPlaceholder: translateKey(
+      locale,
+      "notices.maintenance.startPlaceholder",
+    ),
+    endPlaceholder: translateKey(locale, "notices.maintenance.endPlaceholder"),
+    createdAt: translateKey(locale, "notices.col.updated"),
+    audience: translateKey(locale, "notices.col.targets"),
+    status: translateKey(locale, "common.status"),
+    severity: translateKey(locale, "notices.col.severityShort"),
+    delivery: translateKey(locale, "notices.col.delivery"),
+    broadcastAt: translateKey(locale, "notices.col.broadcastAt"),
+    updatedBy: translateKey(locale, "notices.col.updatedBy"),
+    window: translateKey(locale, "notices.col.window"),
+    action: translateKey(locale, "notices.col.action"),
+    notice: translateKey(locale, "notices.col.notice"),
+    id: translateKey(locale, "notices.col.id"),
+    historySubtitle: translateKey(locale, "notices.history.subtitle"),
+    archived: translateKey(locale, "notices.status.archived"),
+    noticeTitleRequired: translateKey(locale, "notices.noticeTitleRequired"),
+    noticeBodyRequired: translateKey(locale, "notices.noticeBodyRequired"),
+    maintenanceRisk: translateKey(locale, "notices.risk.high"),
+    systemUser: translateKey(locale, "notices.systemUser"),
+    severityOptions: {
+      info: translateKey(locale, "notices.severity.info"),
+      warning: translateKey(locale, "notices.severity.warning"),
+      critical: translateKey(locale, "notices.severity.critical"),
+    },
+    audienceOptions: {
+      ops: translateKey(locale, "notices.audience.ops"),
+      tenants: translateKey(locale, "notices.audience.tenants"),
+      drivers: translateKey(locale, "notices.audience.drivers"),
+    },
+    warning: {
+      operationError: (error: string) =>
+        getBilingualText("notices.warning.operationError", { error }),
+      maintenanceEnabled: () =>
+        getBilingualText("notices.warning.maintenanceEnabled"),
+    },
+  };
+}
 
 export function t(
   key: string,

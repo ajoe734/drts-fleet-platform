@@ -48,6 +48,22 @@ describe("resolveLlmGatewayConfig", () => {
     });
   });
 
+  it("keeps openclaw enabled without requiring an llm gateway api key", () => {
+    expect(
+      resolveLlmGatewayConfig({
+        PLATFORM_ADMIN_ASSISTANT_ENABLED: "true",
+        LLM_GATEWAY_PROVIDER: "openclaw",
+        NODE_ENV: "production",
+      }),
+    ).toMatchObject({
+      enabled: true,
+      provider: "openclaw",
+      requestedProvider: "openclaw",
+      chatModel: "openai/gpt-5.5",
+      summarizerModel: "openai/gpt-5.4-mini",
+    });
+  });
+
   it("keeps the requested real provider when an api key is present", () => {
     expect(
       resolveLlmGatewayConfig({
@@ -98,7 +114,7 @@ describe("resolveLlmGatewayConfig", () => {
         LLM_GATEWAY_PROVIDER: "bedrock",
       }),
     ).toThrow(
-      "LLM_GATEWAY_PROVIDER must be one of: mock, openai, anthropic, openrouter, ollama",
+      "LLM_GATEWAY_PROVIDER must be one of: mock, openclaw, openai, anthropic, openrouter, ollama",
     );
   });
 });

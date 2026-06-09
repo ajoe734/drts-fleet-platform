@@ -15,6 +15,7 @@ import {
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -78,12 +79,6 @@ type AssistantApiMessageResponse = {
   suggestedPrompts: string[];
   actionPlan: AssistantApiActionPlan | null;
 };
-
-const DEFAULT_SUGGESTED_PROMPTS = [
-  "Summarize what I should check on this page.",
-  "Draft an operator checklist for the current route.",
-  "What risks should I review before changing platform state?",
-];
 
 function nextMessageId(prefix = "paas-ui") {
   if (
@@ -192,20 +187,25 @@ function formatCitation(citation: AssistantApiCitation) {
   return [citation.title, citation.section].filter(Boolean).join(" ");
 }
 
-function formatAssistantContent(response: AssistantApiMessageResponse) {
+function formatAssistantContent(
+  response: AssistantApiMessageResponse,
+  translate: (key: string) => string,
+) {
   const citations = response.citations.map(formatCitation);
   const suggestedPrompts = response.suggestedPrompts.slice(0, 3);
   const sections = [response.answer.trim()];
 
   if (citations.length > 0) {
     sections.push(
-      `Sources:\n${citations.map((item) => `- ${item}`).join("\n")}`,
+      `${translate("assistant.overlay.citations")}\n${citations
+        .map((item) => `- ${item}`)
+        .join("\n")}`,
     );
   }
 
   if (suggestedPrompts.length > 0) {
     sections.push(
-      `Suggested next prompts:\n${suggestedPrompts
+      `${translate("assistant.overlay.suggestedPrompts")}\n${suggestedPrompts
         .map((item) => `- ${item}`)
         .join("\n")}`,
     );
@@ -255,7 +255,7 @@ export function PlatformAssistantOverlay() {
   const enabled = isPlatformAdminAssistantEnabled();
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const titleId = useId();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [isMounted, setIsMounted] = useState(false);
@@ -269,8 +269,16 @@ export function PlatformAssistantOverlay() {
   const [messages, setMessages] = useState<AssistantMessageRecord[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const defaultSuggestedPrompts = useMemo(
+    () => [
+      t("assistant.overlay.prompt.summary"),
+      t("assistant.overlay.prompt.checklist"),
+      t("assistant.overlay.prompt.risks"),
+    ],
+    [t],
+  );
   const [suggestedPrompts, setSuggestedPrompts] = useState(
-    DEFAULT_SUGGESTED_PROMPTS,
+    defaultSuggestedPrompts,
   );
   const dragRef = useRef<{
     pointerId: number;
@@ -322,57 +330,37 @@ export function PlatformAssistantOverlay() {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [isOpen, messages]);
 
+  useEffect(() => {
+    setSuggestedPrompts(defaultSuggestedPrompts);
+  }, [defaultSuggestedPrompts]);
+
   if (!enabled || !isMounted) {
     return null;
   }
 
-  const copy =
-    locale === "zh"
-      ? {
-          launcher: "開啟平台助理",
-          badge: "Beta",
-          label: "平台助理",
-          subtitle: "治理操作輔助",
-          heading: "Platform Admin Assistant",
-          status: "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
-          inputLabel: "輸入平台助理問題",
-          inputPlaceholder: "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
-          send: "送出",
-          sending: "分析中",
-          newSession: "新對話",
-          minimize: "最小化",
-          close: "關閉",
-          reset: "重設位置",
-          emptyTitle: "平台助理已就緒",
-          emptyBody:
-            "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
-          thinking: "我正在讀取目前 Platform Admin route context 並整理回答...",
-          sessionTitle: "Platform Admin assistant",
-        }
-      : {
-          launcher: "Open platform assistant",
-          badge: "Beta",
-          label: "Assistant",
-          subtitle: "governance copilot",
-          heading: "Platform Admin Assistant",
-          status:
-            "Connected to the dev mock gateway for operation Q&A and action planning.",
-          inputLabel: "Ask the platform assistant",
-          inputPlaceholder:
-            "Ask how to operate this page, what risks matter, or what to do next...",
-          send: "Send",
-          sending: "Thinking",
-          newSession: "New chat",
-          minimize: "Minimize",
-          close: "Close",
-          reset: "Reset position",
-          emptyTitle: "Platform Admin assistant is ready",
-          emptyBody:
-            "Ask about the current page, governance risks, or request an operator checklist.",
-          thinking:
-            "Reading the current Platform Admin route context and preparing an answer...",
-          sessionTitle: "Platform Admin assistant",
-        };
+  const copy = {
+    launcher: t("assistant.overlay.launcher"),
+    badge: t("assistant.overlay.badge"),
+    label: t("assistant.overlay.label"),
+    subtitle: t("assistant.overlay.subtitle"),
+    heading: t("assistant.overlay.heading"),
+    status: t("assistant.overlay.status"),
+    inputLabel: t("assistant.overlay.inputLabel"),
+    inputPlaceholder: t("assistant.overlay.inputPlaceholder"),
+    send: t("assistant.overlay.send"),
+    sending: t("assistant.overlay.sending"),
+    newSession: t("assistant.overlay.newSession"),
+    minimize: t("assistant.overlay.minimize"),
+    close: t("assistant.overlay.close"),
+    reset: t("assistant.overlay.reset"),
+    emptyTitle: t("assistant.overlay.emptyTitle"),
+    emptyBody: t("assistant.overlay.emptyBody"),
+    thinking: t("assistant.overlay.thinking"),
+    sessionTitle: t("assistant.overlay.sessionTitle"),
+    requestFailedBody: t("assistant.overlay.requestFailedBody"),
+    requestFailedTitle: t("assistant.overlay.requestFailedTitle"),
+    requestFailedHint: t("assistant.overlay.requestFailedHint"),
+  };
 
   const panelStyle: CSSProperties = isMobile
     ? {
@@ -458,7 +446,7 @@ export function PlatformAssistantOverlay() {
       const assistantMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-assistant"),
         role: "assistant",
-        content: formatAssistantContent(response),
+        content: formatAssistantContent(response, t),
         createdAt: new Date().toISOString(),
         state: plan ? "planning" : "idle",
         plan,
@@ -467,7 +455,7 @@ export function PlatformAssistantOverlay() {
       setSuggestedPrompts(
         response.suggestedPrompts.length > 0
           ? response.suggestedPrompts.slice(0, 3)
-          : DEFAULT_SUGGESTED_PROMPTS,
+          : defaultSuggestedPrompts,
       );
       setMessages((current) =>
         current.map((message) =>
@@ -478,13 +466,13 @@ export function PlatformAssistantOverlay() {
       const failedMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-error"),
         role: "assistant",
-        content: "The assistant could not complete this request.",
+        content: copy.requestFailedBody,
         createdAt: new Date().toISOString(),
         state: "error",
         error: {
-          title: "Assistant request failed",
+          title: copy.requestFailedTitle,
           message: errorMessage(error),
-          hint: "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
+          hint: copy.requestFailedHint,
         },
       };
       setMessages((current) =>
@@ -512,7 +500,7 @@ export function PlatformAssistantOverlay() {
     setSession(null);
     setMessages([]);
     setDraft("");
-    setSuggestedPrompts(DEFAULT_SUGGESTED_PROMPTS);
+    setSuggestedPrompts(defaultSuggestedPrompts);
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
