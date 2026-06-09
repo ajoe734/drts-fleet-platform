@@ -27,7 +27,7 @@ DEFAULT_CLI = "agy"
 DEFAULT_APP_DATA_DIR = Path.home() / ".gemini" / "antigravity-cli"
 # Candidate token filenames written after sign-in (file-based token storage). The
 # exact name is locked in after the first real sign-in; `token_path` overrides.
-TOKEN_CANDIDATES = ("auth.json", "credentials.json", "token.json", "tokens.json", "auth_tokens.json")
+TOKEN_CANDIDATES = ("antigravity-oauth-token", "auth.json", "credentials.json", "token.json", "oauth_creds.json")
 
 
 def _string_list(value: object) -> list[str]:
