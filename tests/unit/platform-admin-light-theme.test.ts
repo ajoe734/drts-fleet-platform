@@ -55,4 +55,23 @@ describe("Platform Admin product routes", () => {
     );
     expect(workflow).not.toContain('source_ref="dev"');
   });
+
+  it("keeps platform assistant overlay hooks before the mounted early return", () => {
+    const source = readFileSync(
+      join(
+        process.cwd(),
+        "apps/platform-admin-web/components/assistant/platform-assistant-overlay.tsx",
+      ),
+      "utf8",
+    );
+    const earlyReturnIndex = source.indexOf("if (!enabled || !isMounted)");
+
+    expect(earlyReturnIndex).toBeGreaterThan(-1);
+    expect(source.slice(0, earlyReturnIndex)).toContain(
+      "setSuggestedPrompts(defaultSuggestedPrompts)",
+    );
+    expect(source.slice(earlyReturnIndex)).not.toMatch(
+      /\buse(?:Effect|Id|Memo|Reducer|Ref|State)\s*\(/,
+    );
+  });
 });
