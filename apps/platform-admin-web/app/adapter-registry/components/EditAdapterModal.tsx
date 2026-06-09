@@ -5,6 +5,8 @@ import {
   Policy,
   UpdatePlatformAdapterCommand,
 } from "@drts/contracts";
+import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 
 interface EditAdapterModalProps {
   adapter: PlatformAdapter | null;
@@ -19,9 +21,13 @@ export function EditAdapterModal({
   onClose,
   onSave,
 }: EditAdapterModalProps) {
+  const { t, locale } = useTranslation();
   const [editedAdapter, setEditedAdapter] = useState<PlatformAdapter | null>(
     null,
   );
+  const rolloutOptions = Object.values(
+    RolloutStatus,
+  ) as PlatformAdapter["rolloutStatus"][];
 
   useEffect(() => {
     if (adapter) {
@@ -34,15 +40,16 @@ export function EditAdapterModal({
     return null;
   }
 
-  const handleInputChange = (field: string, value: any) => {
-    setEditedAdapter((prev) => {
+  const handleInputChange = (field: string, value: unknown) => {
+    setEditedAdapter((prev: PlatformAdapter | null) => {
       if (!prev) return null;
       if (field === "policies.serviceBuckets") {
+        const serviceBucketsInput = String(value);
         return {
           ...prev,
           policies: {
             ...(prev.policies as Policy),
-            serviceBuckets: value
+            serviceBuckets: serviceBucketsInput
               .split(",")
               .map((s: string) => s.trim())
               .filter((s: string) => s !== ""),
@@ -99,11 +106,12 @@ export function EditAdapterModal({
       <div className="bg-white rounded-lg p-6 shadow-xl max-w-3xl w-full">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">
-            Edit Adapter: {editedAdapter.name}
+            {t("adapterRegistry.modal.title", { name: editedAdapter.name })}
           </h2>
           <button
             onClick={onClose}
             className="text-gray-500 hover:text-gray-700"
+            aria-label={t("common.close")}
           >
             &times;
           </button>
@@ -113,13 +121,13 @@ export function EditAdapterModal({
           {/* Name and Version (display only) */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Name
+              {t("adapterRegistry.modal.name")}
             </label>
             <p className="text-gray-900">{editedAdapter.name}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Version
+              {t("adapterRegistry.modal.version")}
             </label>
             <p className="text-gray-900">{editedAdapter.version}</p>
           </div>
@@ -130,7 +138,7 @@ export function EditAdapterModal({
               htmlFor="isEnabled"
               className="block text-sm font-medium text-gray-700"
             >
-              Enabled
+              {t("adapterRegistry.modal.enabled")}
             </label>
             <div className="flex items-center">
               <input
@@ -151,7 +159,7 @@ export function EditAdapterModal({
               htmlFor="rolloutStatus"
               className="block text-sm font-medium text-gray-700"
             >
-              Rollout Status
+              {t("adapterRegistry.modal.rolloutStatus")}
             </label>
             <select
               id="rolloutStatus"
@@ -161,9 +169,9 @@ export function EditAdapterModal({
               }
               className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
             >
-              {Object.values(RolloutStatus).map((status) => (
+              {rolloutOptions.map((status) => (
                 <option key={status} value={status}>
-                  {status.replace("_", " ")}
+                  {formatPlatformCodeLabel(locale, status)}
                 </option>
               ))}
             </select>
@@ -172,15 +180,17 @@ export function EditAdapterModal({
           {/* Credential Status (display only for now) */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Credential Status
+              {t("adapterRegistry.modal.credentialStatus")}
             </label>
-            <p className="text-gray-900">{editedAdapter.credentialStatus}</p>
+            <p className="text-gray-900">
+              {formatPlatformCodeLabel(locale, editedAdapter.credentialStatus)}
+            </p>
           </div>
 
           {/* Webhook Settings */}
           <div className="col-span-2 grid grid-cols-2 gap-4">
             <h3 className="col-span-2 text-lg font-medium text-gray-900">
-              Webhook Settings
+              {t("adapterRegistry.modal.webhookSettings")}
             </h3>
             {/* Webhook Enabled Toggle */}
             <div className="flex items-center justify-between col-span-2">
@@ -188,7 +198,7 @@ export function EditAdapterModal({
                 htmlFor="webhookEnabled"
                 className="block text-sm font-medium text-gray-700"
               >
-                Webhook Enabled
+                {t("adapterRegistry.modal.webhookEnabled")}
               </label>
               <div className="flex items-center">
                 <input
@@ -211,7 +221,7 @@ export function EditAdapterModal({
                 htmlFor="webhookUrl"
                 className="block text-sm font-medium text-gray-700"
               >
-                Webhook URL
+                {t("adapterRegistry.modal.webhookUrl")}
               </label>
               <input
                 type="url"
@@ -221,7 +231,7 @@ export function EditAdapterModal({
                   handleInputChange("webhookStatus.url", e.target.value)
                 }
                 className="mt-1 block w-full pl-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                placeholder="https://example.com/webhook"
+                placeholder={t("adapterRegistry.modal.webhookPlaceholder")}
               />
             </div>
           </div>
@@ -229,7 +239,7 @@ export function EditAdapterModal({
           {/* Policy Settings */}
           <div className="col-span-2 grid grid-cols-2 gap-4">
             <h3 className="col-span-2 text-lg font-medium text-gray-900">
-              Policy Settings
+              {t("adapterRegistry.modal.policySettings")}
             </h3>
             {/* Service Buckets Input */}
             <div>
@@ -237,7 +247,7 @@ export function EditAdapterModal({
                 htmlFor="policies.serviceBuckets"
                 className="block text-sm font-medium text-gray-700"
               >
-                Service Buckets (comma-separated)
+                {t("adapterRegistry.modal.serviceBuckets")}
               </label>
               <input
                 type="text"
@@ -255,7 +265,7 @@ export function EditAdapterModal({
                 htmlFor="policies.maxCandidates"
                 className="block text-sm font-medium text-gray-700"
               >
-                Max Candidates
+                {t("adapterRegistry.modal.maxCandidates")}
               </label>
               <input
                 type="number"
@@ -276,7 +286,7 @@ export function EditAdapterModal({
                 htmlFor="policies.acceptTimeoutSeconds"
                 className="block text-sm font-medium text-gray-700"
               >
-                Accept Timeout (seconds)
+                {t("adapterRegistry.modal.acceptTimeoutSeconds")}
               </label>
               <input
                 type="number"
@@ -297,7 +307,7 @@ export function EditAdapterModal({
                 htmlFor="policies.manualFallbackThresholdSeconds"
                 className="block text-sm font-medium text-gray-700"
               >
-                Manual Fallback Threshold (seconds)
+                {t("adapterRegistry.modal.manualFallbackThresholdSeconds")}
               </label>
               <input
                 type="number"
@@ -316,26 +326,28 @@ export function EditAdapterModal({
 
           <div className="col-span-2">
             <h3 className="text-lg font-medium text-gray-900 mb-2">
-              Supported Actions
+              {t("adapterRegistry.modal.supportedActions")}
             </h3>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {editedAdapter.supportedActions.length > 0 ? (
-                editedAdapter.supportedActions.map((action) => (
-                  <div
-                    key={action.name}
-                    className="rounded-md border border-gray-200 bg-gray-50 p-3"
-                  >
-                    <p className="text-sm font-medium text-gray-900">
-                      {action.name}
-                    </p>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {action.description}
-                    </p>
-                  </div>
-                ))
+                editedAdapter.supportedActions.map(
+                  (action: PlatformAdapter["supportedActions"][number]) => (
+                    <div
+                      key={action.name}
+                      className="rounded-md border border-gray-200 bg-gray-50 p-3"
+                    >
+                      <p className="text-sm font-medium text-gray-900">
+                        {action.name}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {action.description}
+                      </p>
+                    </div>
+                  ),
+                )
               ) : (
                 <p className="text-sm text-gray-500">
-                  No adapter actions are enabled for this platform.
+                  {t("adapterRegistry.modal.noSupportedActions")}
                 </p>
               )}
             </div>
@@ -347,13 +359,13 @@ export function EditAdapterModal({
             onClick={onClose}
             className="mr-4 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             onClick={handleSave}
             className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
           >
-            Save
+            {t("common.save")}
           </button>
         </div>
       </div>

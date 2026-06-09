@@ -46,10 +46,16 @@ export function LanguageProvider({
 
   const setLocale = useCallback(
     (next: Locale) => {
-      setLocaleState(next);
-      localStorage.setItem(STORAGE_KEY, next);
-      document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
-      router.refresh();
+      setLocaleState((current) => {
+        if (current === next) {
+          return current;
+        }
+
+        localStorage.setItem(STORAGE_KEY, next);
+        document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
+        router.refresh();
+        return next;
+      });
     },
     [router],
   );

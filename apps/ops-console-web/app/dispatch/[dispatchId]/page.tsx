@@ -20,7 +20,7 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
-import { t as translate, type Locale } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
@@ -72,11 +72,12 @@ const theme = buildCanvasTheme({
 });
 
 // Refresh tier T2 (Dispatch): 5s cadence per packet §3.2 / §5.3.
+const REFRESH_TIER_LABEL = "T2 · 5s";
 const REFRESH_STALE_AFTER_MS = 5_000;
 const SMOKE_DISPATCH_ID = "OPS-SMOKE-DISPATCH";
 
 const WORKFLOW_STEPS = [
-  "建立",
+  "created",
   "queued",
   "broadcasting",
   "assigned",
@@ -123,12 +124,23 @@ async function resolveOrFallback<T>(
   }
 }
 
-function detailT(
+function tr(
   locale: Locale,
   key: string,
   params?: Record<string, string | number>,
 ) {
-  return translate(key, locale, params);
+  return t(key, locale, params);
+}
+
+function formatWorkflowStep(
+  locale: Locale,
+  step: (typeof WORKFLOW_STEPS)[number],
+) {
+  if (step === "created") {
+    return tr(locale, "dispatch.detail.sequence.created");
+  }
+
+  return formatOpsCodeLabel(locale, step);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -199,7 +211,7 @@ function readForwardedValue(
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return detailT(locale, "common.dash");
+    return "—";
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -216,7 +228,7 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
 
 function formatLongDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return detailT(locale, "dispatch.detail.unknown");
+    return tr(locale, "common.unknown");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -234,7 +246,7 @@ function formatLongDateTime(locale: Locale, value: string | null | undefined) {
 
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   if (!order.reservationWindowStart || !order.reservationWindowEnd) {
-    return detailT(locale, "dispatch.detail.realtime");
+    return formatOpsCodeLabel(locale, "realtime");
   }
 
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
@@ -260,7 +272,7 @@ function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
     return formatDateTime(locale, start);
   }
 
-  return detailT(locale, "dispatch.detail.realtime");
+  return formatOpsCodeLabel(locale, "realtime");
 }
 
 function getAddressLabel(
@@ -405,7 +417,7 @@ function getCandidateGate(
 
   if (driver && !driver.licensesValid) {
     return {
-      label: "license_invalid",
+      label: formatOpsCodeLabel(locale, "licenses_invalid"),
       tone: "danger" as const,
     };
   }
@@ -415,34 +427,34 @@ function getCandidateGate(
       label:
         driver.eligibilityBlockedReasons[0] !== undefined
           ? formatOpsCodeLabel(locale, driver.eligibilityBlockedReasons[0])
-          : detailT(locale, "dispatch.detail.candidateGate.manualReview"),
+          : tr(locale, "dispatch.detail.manualReview"),
       tone: "warn" as const,
     };
   }
 
   if (!candidate.serviceBuckets.includes(order.serviceBucket)) {
     return {
-      label: detailT(locale, "dispatch.detail.candidateGate.serviceBucketGap"),
+      label: tr(locale, "dispatch.detail.gate.serviceBucketGap"),
       tone: "warn" as const,
     };
   }
 
   if (locationState === "no_location") {
     return {
-      label: detailT(locale, "dispatch.detail.candidateGate.noLocation"),
+      label: tr(locale, "dispatch.workflow.candidateLocation.no_location"),
       tone: "warn" as const,
     };
   }
 
   if (locationState === "stale") {
     return {
-      label: detailT(locale, "dispatch.detail.candidateGate.locationStale"),
+      label: tr(locale, "dispatch.detail.gate.locationStale"),
       tone: "warn" as const,
     };
   }
 
   return {
-    label: detailT(locale, "dispatch.detail.candidateGate.ok"),
+    label: formatOpsCodeLabel(locale, "ok"),
     tone: "success" as const,
   };
 }
@@ -604,8 +616,8 @@ function buildFallbackActivity(
   const entries: ActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
-      title: detailT(locale, "dispatch.detail.activity.enteredQueue.title"),
-      body: detailT(locale, "dispatch.detail.activity.enteredQueue.body", {
+      title: tr(locale, "dispatch.detail.activity.enteredQueue.title"),
+      body: tr(locale, "dispatch.detail.activity.enteredQueue.body", {
         tenant: formatOpsCodeLabel(locale, getTenantLabel(order)),
         source: formatOpsCodeLabel(locale, order.orderSource),
       }),
@@ -618,10 +630,11 @@ function buildFallbackActivity(
   if (order.quotedFare) {
     entries.push({
       id: `${order.orderId}:fare`,
-      title: detailT(locale, "dispatch.detail.activity.pricing.title"),
-      body: detailT(locale, "dispatch.detail.activity.pricing.body", {
-        rule: order.quotedFareRuleVersion ?? "manual",
-        fare: formatMinorCurrency(
+      title: tr(locale, "dispatch.detail.activity.pricing.title"),
+      body: tr(locale, "dispatch.detail.activity.pricing.body", {
+        rule:
+          order.quotedFareRuleVersion ?? formatOpsCodeLabel(locale, "manual"),
+        amount: formatMinorCurrency(
           order.quotedFare.amountMinor,
           order.quotedFare.currency,
         ),
@@ -635,18 +648,11 @@ function buildFallbackActivity(
   if (job) {
     entries.push({
       id: `${job.dispatchJobId}:job`,
-      title: detailT(
-        locale,
-        "dispatch.detail.activity.dispatchEvaluation.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.detail.activity.dispatchEvaluation.body",
-        {
-          jobId: job.dispatchJobId,
-          status: formatOpsCodeLabel(locale, job.status),
-        },
-      ),
+      title: tr(locale, "dispatch.detail.activity.dispatchEvaluation.title"),
+      body: tr(locale, "dispatch.detail.activity.dispatchEvaluation.body", {
+        jobId: job.dispatchJobId,
+        status: formatOpsCodeLabel(locale, job.status),
+      }),
       at: job.updatedAt,
       tone: getActivityTone(job.status),
       actor: "dispatch.scorer",
@@ -656,21 +662,14 @@ function buildFallbackActivity(
   if (order.noSupplyEscalation) {
     entries.push({
       id: `${order.orderId}:no-supply`,
-      title: detailT(
-        locale,
-        "dispatch.workflow.activity.noSupplyEscalation.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.workflow.activity.noSupplyEscalation.body",
-        {
-          count: order.noSupplyEscalation.attemptCount,
-          action: formatOpsCodeLabel(
-            locale,
-            order.noSupplyEscalation.escalationAction,
-          ),
-        },
-      ),
+      title: tr(locale, "dispatch.detail.activity.noSupplyEscalation.title"),
+      body: tr(locale, "dispatch.detail.activity.noSupplyEscalation.body", {
+        count: order.noSupplyEscalation.attemptCount,
+        action: formatOpsCodeLabel(
+          locale,
+          order.noSupplyEscalation.escalationAction,
+        ),
+      }),
       at: order.noSupplyEscalation.escalatedAt,
       tone: "warn",
       actor: "dispatch.recovery",
@@ -680,17 +679,10 @@ function buildFallbackActivity(
   if (order.exceptionHold) {
     entries.push({
       id: `${order.orderId}:hold`,
-      title: detailT(
-        locale,
-        "dispatch.workflow.activity.exceptionHoldRaised.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.workflow.activity.exceptionHoldRaised.body",
-        {
-          reason: formatOpsCodeLabel(locale, order.exceptionHold.reasonCode),
-        },
-      ),
+      title: tr(locale, "dispatch.detail.activity.exceptionHoldRaised.title"),
+      body: tr(locale, "dispatch.detail.activity.exceptionHoldRaised.body", {
+        reason: formatOpsCodeLabel(locale, order.exceptionHold.reasonCode),
+      }),
       at: order.exceptionHold.raisedAt,
       tone: "danger",
       actor: "compliance",
@@ -700,11 +692,8 @@ function buildFallbackActivity(
   if (order.exceptionHold?.overrideRequest) {
     entries.push({
       id: order.exceptionHold.overrideRequest.overrideRequestId,
-      title: detailT(
-        locale,
-        "dispatch.workflow.activity.overrideRequest.title",
-      ),
-      body: detailT(locale, "dispatch.workflow.activity.overrideRequest.body", {
+      title: tr(locale, "dispatch.detail.activity.overrideRequest.title"),
+      body: tr(locale, "dispatch.detail.activity.overrideRequest.body", {
         status: formatOpsCodeLabel(
           locale,
           order.exceptionHold.overrideRequest.status,
@@ -720,21 +709,14 @@ function buildFallbackActivity(
   if (order.exceptionHold?.resolution) {
     entries.push({
       id: `${order.orderId}:resolution`,
-      title: detailT(
-        locale,
-        "dispatch.workflow.activity.exceptionResolved.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.workflow.activity.exceptionResolved.body",
-        {
-          actor: order.exceptionHold.resolution.actorId,
-          resolution: formatOpsCodeLabel(
-            locale,
-            order.exceptionHold.resolution.resolution,
-          ),
-        },
-      ),
+      title: tr(locale, "dispatch.detail.activity.exceptionResolved.title"),
+      body: tr(locale, "dispatch.detail.activity.exceptionResolved.body", {
+        actor: order.exceptionHold.resolution.actorId,
+        resolution: formatOpsCodeLabel(
+          locale,
+          order.exceptionHold.resolution.resolution,
+        ),
+      }),
       at: order.exceptionHold.resolution.resolvedAt,
       tone: "info",
       actor: order.exceptionHold.resolution.actorId,
@@ -744,18 +726,11 @@ function buildFallbackActivity(
   if (order.manualFareOverride) {
     entries.push({
       id: `${order.orderId}:fare-override`,
-      title: detailT(
-        locale,
-        "dispatch.workflow.activity.manualFareOverride.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.detail.activity.manualFareOverride.bodyWithReason",
-        {
-          actor: order.manualFareOverride.actorId,
-          reason: order.manualFareOverride.reason,
-        },
-      ),
+      title: tr(locale, "dispatch.detail.activity.manualFareOverride.title"),
+      body: tr(locale, "dispatch.detail.activity.manualFareOverride.body", {
+        actor: order.manualFareOverride.actorId,
+        reason: order.manualFareOverride.reason,
+      }),
       at: order.manualFareOverride.overriddenAt,
       tone: "warn",
       actor: order.manualFareOverride.actorId,
@@ -765,8 +740,8 @@ function buildFallbackActivity(
   if (task?.acceptedAt) {
     entries.push({
       id: `${task.taskId}:accepted`,
-      title: detailT(locale, "dispatch.detail.activity.driverAccepted.title"),
-      body: detailT(locale, "dispatch.detail.activity.driverAccepted.body", {
+      title: tr(locale, "dispatch.detail.activity.driverAccepted.title"),
+      body: tr(locale, "dispatch.detail.activity.driverAccepted.body", {
         driverId: task.driverId,
         vehicleId: task.vehicleId,
       }),
@@ -779,8 +754,8 @@ function buildFallbackActivity(
   if (task?.departedAt) {
     entries.push({
       id: `${task.taskId}:departed`,
-      title: detailT(locale, "dispatch.detail.activity.departedToPickup.title"),
-      body: detailT(locale, "dispatch.detail.activity.departedToPickup.body", {
+      title: tr(locale, "dispatch.detail.activity.departedToPickup.title"),
+      body: tr(locale, "dispatch.detail.activity.departedToPickup.body", {
         vehicleId: task.vehicleId,
       }),
       at: task.departedAt,
@@ -792,8 +767,8 @@ function buildFallbackActivity(
   if (task?.arrivedPickupAt) {
     entries.push({
       id: `${task.taskId}:arrived`,
-      title: detailT(locale, "dispatch.detail.activity.arrivedAtPickup.title"),
-      body: detailT(locale, "dispatch.detail.activity.arrivedAtPickup.body", {
+      title: tr(locale, "dispatch.detail.activity.arrivedAtPickup.title"),
+      body: tr(locale, "dispatch.detail.activity.arrivedAtPickup.body", {
         vehicleId: task.vehicleId,
       }),
       at: task.arrivedPickupAt,
@@ -805,8 +780,8 @@ function buildFallbackActivity(
   if (task?.startedAt) {
     entries.push({
       id: `${task.taskId}:started`,
-      title: detailT(locale, "dispatch.detail.activity.tripStarted.title"),
-      body: detailT(locale, "dispatch.detail.activity.tripStarted.body", {
+      title: tr(locale, "dispatch.detail.activity.tripStarted.title"),
+      body: tr(locale, "dispatch.detail.activity.tripStarted.body", {
         driverId: task.driverId,
       }),
       at: task.startedAt,
@@ -818,8 +793,8 @@ function buildFallbackActivity(
   if (task?.completedAt) {
     entries.push({
       id: `${task.taskId}:completed`,
-      title: detailT(locale, "dispatch.detail.activity.taskCompleted.title"),
-      body: detailT(locale, "dispatch.detail.activity.taskCompleted.body", {
+      title: tr(locale, "dispatch.detail.activity.taskCompleted.title"),
+      body: tr(locale, "dispatch.detail.activity.taskCompleted.body", {
         vehicleId: task.vehicleId,
       }),
       at: task.completedAt,
@@ -868,39 +843,24 @@ function buildForwardedActivity(
   const entries: ActivityEntry[] = [
     {
       id: `${order.mirrorOrderId}:received`,
-      title: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.mirrorReceived.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.mirrorReceived.body",
-        {
-          mirrorOrderId: order.mirrorOrderId,
-          platform: formatOpsCodeLabel(locale, order.platformCode),
-          externalOrderId: order.externalOrderId,
-        },
-      ),
+      title: tr(locale, "dispatch.forwarded.activity.mirrorReceived.title"),
+      body: tr(locale, "dispatch.forwarded.activity.mirrorReceived.body", {
+        mirrorOrderId: order.mirrorOrderId,
+        platform: formatOpsCodeLabel(locale, order.platformCode),
+        externalOrderId: order.externalOrderId,
+      }),
       at: order.createdAt,
       tone: "accent",
       actor: order.platformCode,
     },
     {
       id: `${order.mirrorOrderId}:status`,
-      title: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.statusSync.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.statusSync.body",
-        {
-          status: formatOpsCodeLabel(locale, order.status),
-          nativeStatus:
-            order.lastNativeStatus ??
-            detailT(locale, "dispatch.detail.unknown"),
-        },
-      ),
+      title: tr(locale, "dispatch.forwarded.activity.statusSync.title"),
+      body: tr(locale, "dispatch.forwarded.activity.statusSync.body", {
+        status: formatOpsCodeLabel(locale, order.status),
+        nativeStatus:
+          order.lastNativeStatus ?? tr(locale, "common.unknown").toLowerCase(),
+      }),
       at: order.updatedAt,
       tone: getActivityTone(order.status),
       actor: "forwarder.sync",
@@ -910,10 +870,7 @@ function buildForwardedActivity(
   if (order.lastSyncError) {
     entries.push({
       id: `${order.mirrorOrderId}:sync-error`,
-      title: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.syncFailure.title",
-      ),
+      title: tr(locale, "dispatch.forwarded.activity.syncFailure.title"),
       body: `${formatOpsCodeLabel(locale, order.lastSyncError.code)} · ${order.lastSyncError.message}`,
       at: order.lastSyncError.failedAt,
       tone: "danger",
@@ -924,16 +881,10 @@ function buildForwardedActivity(
   if (order.manualFallback.required) {
     entries.push({
       id: `${order.mirrorOrderId}:fallback`,
-      title: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.manualFallback.title",
-      ),
+      title: tr(locale, "dispatch.forwarded.activity.manualFallback.title"),
       body:
         order.manualFallback.reason ??
-        detailT(
-          locale,
-          "dispatch.detail.forwardedActivity.manualFallback.body",
-        ),
+        tr(locale, "dispatch.forwarded.activity.manualFallback.defaultBody"),
       at: order.manualFallback.requestedAt ?? order.updatedAt,
       tone: "warn",
       actor: order.manualFallback.requestedBy ?? "ops",
@@ -943,19 +894,12 @@ function buildForwardedActivity(
   if (order.reconciliationJob) {
     entries.push({
       id: order.reconciliationJob.reconciliationJobId,
-      title: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.reconciliation.title",
-      ),
-      body: detailT(
-        locale,
-        "dispatch.detail.forwardedActivity.reconciliation.body",
-        {
-          status: formatOpsCodeLabel(locale, order.reconciliationJob.status),
-          mismatchCount: order.reconciliationJob.mismatchCount,
-          reason: formatOpsCodeLabel(locale, order.reconciliationJob.reason),
-        },
-      ),
+      title: tr(locale, "dispatch.forwarded.activity.reconciliation.title"),
+      body: tr(locale, "dispatch.forwarded.activity.reconciliation.body", {
+        status: formatOpsCodeLabel(locale, order.reconciliationJob.status),
+        mismatchCount: order.reconciliationJob.mismatchCount,
+        reason: formatOpsCodeLabel(locale, order.reconciliationJob.reason),
+      }),
       at:
         order.reconciliationJob.completedAt ??
         order.reconciliationJob.createdAt,
@@ -992,43 +936,37 @@ function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
       note: formatOpsCodeLabel(locale, order.exceptionHold?.reasonCode ?? null),
       nextAction:
         order.exceptionHold?.overrideAllowed === true
-          ? detailT(
-              locale,
-              "dispatch.detail.override.nextAction.reviewerCanRelease",
-            )
-          : detailT(
-              locale,
-              "dispatch.detail.override.nextAction.keepManualReview",
-            ),
+          ? tr(locale, "dispatch.detail.overrideSummary.reviewerCanRelease")
+          : tr(locale, "dispatch.detail.overrideSummary.keepManualReview"),
     };
   }
 
   if (order.manualFareOverride) {
     return {
-      type: detailT(locale, "dispatch.detail.override.type.fareOverride"),
-      status: detailT(locale, "dispatch.detail.override.status.applied"),
+      type: tr(locale, "dispatch.detail.overrideSummary.fareOverrideType"),
+      status: tr(locale, "dispatch.detail.overrideSummary.applied"),
       actor: order.manualFareOverride.actorId,
       note: order.manualFareOverride.reason,
-      nextAction: detailT(
+      nextAction: tr(
         locale,
-        "dispatch.detail.override.nextAction.returnNormalDispatch",
+        "dispatch.detail.overrideSummary.returnToNormalDispatch",
       ),
     };
   }
 
   return {
-    type: detailT(locale, "common.dash"),
-    status: detailT(locale, "dispatch.detail.override.status.notRequested"),
-    actor: detailT(locale, "common.dash"),
+    type: "—",
+    status: tr(locale, "dispatch.detail.overrideSummary.notRequested"),
+    actor: "—",
     note:
       order.noSupplyEscalation !== null
         ? formatOpsCodeLabel(locale, order.noSupplyEscalation.escalationAction)
         : order.dispatchTimeout !== null
           ? formatOpsCodeLabel(locale, order.dispatchTimeout.escalationAction)
-          : detailT(locale, "dispatch.detail.override.noManualOverride"),
-    nextAction: detailT(
+          : tr(locale, "dispatch.detail.overrideSummary.noManualOverride"),
+    nextAction: tr(
       locale,
-      "dispatch.detail.override.nextAction.candidateCanBeAssigned",
+      "dispatch.detail.overrideSummary.candidateCanBeAssigned",
     ),
   };
 }
@@ -1107,7 +1045,7 @@ function renderSequenceRail(
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {step}
+                  {formatWorkflowStep(locale, step)}
                 </strong>
                 <span
                   style={{
@@ -1118,8 +1056,8 @@ function renderSequenceRail(
                   {timestampByStep[index]
                     ? formatDateTime(locale, timestampByStep[index])
                     : idle
-                      ? detailT(locale, "dispatch.detail.sequence.waiting")
-                      : detailT(locale, "dispatch.detail.sequence.active")}
+                      ? tr(locale, "dispatch.detail.sequence.waiting")
+                      : tr(locale, "dispatch.detail.sequence.active")}
                 </span>
               </div>
             </div>
@@ -1130,11 +1068,17 @@ function renderSequenceRail(
   );
 }
 
+function getSequenceTitle(locale: Locale) {
+  return locale === "zh"
+    ? tr(locale, "dispatch.detail.sequence.timelineTitle")
+    : tr(locale, "dispatch.detail.sequence.title");
+}
+
 function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   if (entries.length === 0) {
     return (
       <div style={{ color: theme.textMuted, fontSize: "12.5px" }}>
-        {detailT(locale, "dispatch.detail.activity.empty")}
+        {tr(locale, "dispatch.detail.activity.empty")}
       </div>
     );
   }
@@ -1290,91 +1234,91 @@ function actionVisual(
     case "contact_passenger":
       return {
         icon: "phone",
-        label: detailT(locale, "dispatch.detail.action.contactRider"),
+        label: tr(locale, "dispatch.detail.headerAction.contactRider"),
         variant: "secondary",
         danger: false,
       };
     case "assign_candidate":
       return {
         icon: "check",
-        label: detailT(locale, "dispatch.action.assignCandidate"),
+        label: tr(locale, "dispatch.detail.headerAction.assignTopCandidate"),
         variant: "primary",
         danger: false,
       };
     case "release_driver":
       return {
         icon: "switchboard",
-        label: detailT(locale, "dispatch.action.releaseReassignDriver"),
+        label: tr(locale, "dispatch.detail.headerAction.releaseDriver"),
         variant,
         danger,
       };
     case "cancel_order":
       return {
         icon: "x",
-        label: detailT(locale, "dispatch.action.cancelOrder"),
+        label: tr(locale, "dispatch.workflow.cancelOrder"),
         variant,
         danger,
       };
     case "fare_override":
       return {
         icon: "warn",
-        label: detailT(locale, "dispatch.action.requestFareOverride"),
+        label: tr(locale, "dispatch.detail.headerAction.fareOverride"),
         variant,
         danger: true,
       };
     case "redispatch":
       return {
         icon: "dispatch",
-        label: detailT(locale, "dispatch.action.redispatch"),
+        label: tr(locale, "dispatch.workflow.redispatch"),
         variant,
         danger,
       };
     case "resolve_no_supply":
       return {
         icon: "health",
-        label: detailT(locale, "dispatch.action.resolveNoSupply"),
+        label: tr(locale, "dispatch.workflow.resolveNoSupply"),
         variant,
         danger,
       };
     case "escalate_incident":
       return {
         icon: "incidents",
-        label: detailT(locale, "dispatch.action.escalateIncident"),
+        label: tr(locale, "dispatch.workflow.escalateIncident"),
         variant,
         danger: true,
       };
     case "complete_reconciliation":
       return {
         icon: "check",
-        label: detailT(locale, "dispatch.action.completeReconciliation"),
+        label: tr(locale, "dispatch.forwarded.action.completeReconciliation"),
         variant: "primary",
         danger: false,
       };
     case "engage_manual_fallback":
       return {
         icon: "switchboard",
-        label: detailT(locale, "dispatch.action.engageManualFallback"),
+        label: formatOpsCodeLabel(locale, "manual_fallback"),
         variant,
         danger,
       };
     case "force_refresh":
       return {
         icon: "clock",
-        label: detailT(locale, "dispatch.action.forceRefresh"),
+        label: tr(locale, "dispatch.detail.headerAction.forceRefresh"),
         variant: "secondary",
         danger: false,
       };
     case "broadcast_eligible":
       return {
         icon: "dispatch",
-        label: detailT(locale, "dispatch.detail.action.broadcastCandidates"),
+        label: tr(locale, "dispatch.detail.headerAction.broadcast"),
         variant,
         danger,
       };
     case "report_sync_failure":
       return {
         icon: "warn",
-        label: detailT(locale, "dispatch.detail.action.reportSyncFailure"),
+        label: tr(locale, "dispatch.detail.headerAction.reportSyncFailure"),
         variant,
         danger: true,
       };
@@ -1392,14 +1336,14 @@ function actionHint(action: ResourceActionDescriptor, locale: Locale) {
   if (!action.enabled) {
     return action.disabledReasonCode
       ? formatOpsCodeLabel(locale, action.disabledReasonCode)
-      : detailT(locale, "dispatch.action.unavailable");
+      : tr(locale, "dispatch.detail.action.unavailable");
   }
 
-  const risk = detailT(locale, "dispatch.detail.action.risk", {
-    level: action.riskLevel,
+  const risk = tr(locale, "dispatch.detail.action.risk", {
+    level: formatOpsCodeLabel(locale, action.riskLevel),
   });
   return action.requiresReason
-    ? `${risk} · ${detailT(locale, "dispatch.detail.action.reasonRequired")}`
+    ? `${risk} · ${tr(locale, "dispatch.detail.action.reasonRequired")}`
     : risk;
 }
 
@@ -1410,7 +1354,7 @@ function renderHeaderActions(
   if (actions.length === 0) {
     return (
       <Pill theme={theme} tone="neutral">
-        {detailT(locale, "dispatch.detail.readOnlyTerminal")}
+        {tr(locale, "dispatch.detail.action.readOnlyTerminal")}
       </Pill>
     );
   }
@@ -1624,12 +1568,9 @@ function buildCandidateEmptyState(
       return {
         tone: "info",
         icon: "dispatch",
-        title: detailT(locale, "dispatch.empty.notProvisioned.title"),
-        description: detailT(
-          locale,
-          "dispatch.detail.empty.notProvisioned.description",
-        ),
-        actionLabel: detailT(locale, "dispatch.detail.empty.openDispatchBoard"),
+        title: tr(locale, "dispatch.detail.emptyState.noJob.title"),
+        description: tr(locale, "dispatch.detail.emptyState.noJob.body"),
+        actionLabel: tr(locale, "dispatch.detail.emptyState.openDispatchBoard"),
         actionHref: "/dispatch?board=ready",
         actionNewTab: false,
       };
@@ -1637,12 +1578,9 @@ function buildCandidateEmptyState(
       return {
         tone: "danger",
         icon: "warn",
-        title: detailT(locale, "dispatch.detail.empty.fetchFailed.title"),
-        description: detailT(
-          locale,
-          "dispatch.detail.empty.fetchFailed.description",
-        ),
-        actionLabel: detailT(locale, "common.refresh"),
+        title: tr(locale, "dispatch.detail.emptyState.fetchFailed.title"),
+        description: tr(locale, "dispatch.detail.emptyState.fetchFailed.body"),
+        actionLabel: tr(locale, "common.refresh"),
         actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
         actionNewTab: false,
       };
@@ -1650,12 +1588,12 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "users",
-        title: detailT(locale, "dispatch.detail.empty.permissionDenied.title"),
-        description: detailT(
+        title: tr(locale, "dispatch.detail.emptyState.permissionDenied.title"),
+        description: tr(
           locale,
-          "dispatch.detail.empty.permissionDenied.description",
+          "dispatch.detail.emptyState.permissionDenied.body",
         ),
-        actionLabel: detailT(locale, "common.backToDashboard"),
+        actionLabel: tr(locale, "common.backToDashboard"),
         actionHref: "/dashboard",
         actionNewTab: false,
       };
@@ -1663,12 +1601,9 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "health",
-        title: detailT(locale, "dispatch.empty.externalUnavailable.title"),
-        description: detailT(
-          locale,
-          "dispatch.detail.empty.externalUnavailable.description",
-        ),
-        actionLabel: detailT(locale, "dispatch.detail.empty.noSupplyBoard"),
+        title: tr(locale, "dispatch.detail.emptyState.noSupply.title"),
+        description: tr(locale, "dispatch.detail.emptyState.noSupply.body"),
+        actionLabel: tr(locale, "dispatch.detail.emptyState.noSupplyBoard"),
         actionHref: "/dispatch?board=no_supply",
         actionNewTab: false,
       };
@@ -1676,12 +1611,12 @@ function buildCandidateEmptyState(
       return {
         tone: "accent",
         icon: "filter",
-        title: detailT(locale, "dispatch.empty.filteredEmpty.title"),
-        description: detailT(
+        title: tr(locale, "dispatch.detail.emptyState.filteredEmpty.title"),
+        description: tr(
           locale,
-          "dispatch.detail.empty.filteredEmpty.description",
+          "dispatch.detail.emptyState.filteredEmpty.body",
         ),
-        actionLabel: detailT(locale, "dispatch.detail.empty.clearGateFilter"),
+        actionLabel: tr(locale, "dispatch.detail.emptyState.clearGateFilter"),
         actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
         actionNewTab: false,
       };
@@ -1689,14 +1624,11 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "users",
-        title: detailT(locale, "dispatch.empty.driverNotEligible.title"),
-        description: detailT(
+        title: tr(locale, "dispatch.detail.emptyState.ineligible.title"),
+        description: tr(locale, "dispatch.detail.emptyState.ineligible.body"),
+        actionLabel: tr(
           locale,
-          "dispatch.detail.empty.driverNotEligible.description",
-        ),
-        actionLabel: detailT(
-          locale,
-          "dispatch.detail.empty.openFleetGovernance",
+          "dispatch.detail.emptyState.openFleetGovernance",
         ),
         actionHref: platformAdminFleet,
         actionNewTab: true,
@@ -1706,12 +1638,9 @@ function buildCandidateEmptyState(
       return {
         tone: "neutral",
         icon: "dispatch",
-        title: detailT(locale, "dispatch.detail.empty.noData.title"),
-        description: detailT(
-          locale,
-          "dispatch.detail.empty.noData.description",
-        ),
-        actionLabel: detailT(locale, "dispatch.detail.empty.openDispatchBoard"),
+        title: tr(locale, "dispatch.detail.emptyState.noCandidates.title"),
+        description: tr(locale, "dispatch.detail.emptyState.noCandidates.body"),
+        actionLabel: tr(locale, "dispatch.detail.emptyState.openDispatchBoard"),
         actionHref: "/dispatch?board=ready",
         actionNewTab: false,
       };
@@ -1760,7 +1689,7 @@ function renderCandidateEmptyState(
         {view.actionNewTab ? <CanvasIcon name="ext" size={11} /> : null}
       </Link>
       <span style={tinyMetaStyle(view.tone)}>
-        {detailT(locale, "dispatch.detail.empty.reason")} ·{" "}
+        {tr(locale, "dispatch.detail.emptyState.label")} ·{" "}
         {CANDIDATE_EMPTY_REASON_CODES[reason]}
       </span>
     </div>
@@ -1842,7 +1771,7 @@ function synthesizeRefreshMetadata(
 }
 
 function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
-  return detailT(locale, "dispatch.detail.refresh.snapshot", {
+  return tr(locale, "dispatch.detail.refresh.snapshot", {
     generatedAt: formatLongDateTime(locale, refresh.generatedAt),
     source: formatOpsCodeLabel(locale, refresh.source),
   });
@@ -1853,7 +1782,10 @@ function renderRefreshRow(
   locale: Locale,
   extra?: string,
 ) {
-  const freshnessLabel = formatOpsCodeLabel(locale, refresh.dataFreshness);
+  const freshnessLabel =
+    locale === "en"
+      ? refresh.dataFreshness.toUpperCase()
+      : formatOpsCodeLabel(locale, refresh.dataFreshness);
   return (
     <div style={helperRowStyle}>
       <Pill
@@ -1861,14 +1793,14 @@ function renderRefreshRow(
         tone={refresh.dataFreshness === "fresh" ? "success" : "warn"}
         dot
       >
-        {freshnessLabel} · {detailT(locale, "dispatch.detail.refresh.tier")}
+        {freshnessLabel} · {REFRESH_TIER_LABEL}
       </Pill>
       <span style={{ ...helperTextStyle, ...monoTextStyle }}>
-        {detailT(locale, "dispatch.detail.refresh.generated")} ·{" "}
+        {tr(locale, "dispatch.detail.refresh.generatedAt")} ·{" "}
         {formatLongDateTime(locale, refresh.generatedAt)} UTC
       </span>
       <span style={helperTextStyle}>
-        {detailT(locale, "dispatch.detail.refresh.availableActionsHint")}
+        {tr(locale, "dispatch.detail.refresh.ctaSource")}
       </span>
       {extra ? <span style={helperTextStyle}>{extra}</span> : null}
     </div>
@@ -1886,11 +1818,11 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
           >
             <span>{dispatchId}</span>
             <Pill theme={theme} tone="accent" dot>
-              {detailT(locale, "dispatch.detail.broadcasting")}
+              {formatOpsCodeLabel(locale, "broadcasting")}
             </Pill>
           </span>
         }
-        subtitle={detailT(locale, "dispatch.detail.smoke.subtitle")}
+        subtitle={tr(locale, "dispatch.detail.smoke.subtitle")}
       />
       <div
         style={{
@@ -1901,53 +1833,50 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
       >
         <Card
           theme={theme}
-          title={detailT(locale, "dispatch.detail.candidateBoard")}
+          title={tr(locale, "dispatch.detail.smoke.candidateBoard")}
         >
           <DL
             theme={theme}
             cols={2}
             items={[
               {
-                k: detailT(locale, "dispatch.detail.smoke.dispatchId"),
+                k: tr(locale, "dispatch.detail.smoke.dispatchId"),
                 v: dispatchId,
                 mono: true,
               },
               {
-                k: detailT(locale, "common.status"),
-                v: detailT(locale, "dispatch.detail.broadcasting"),
+                k: tr(locale, "dispatch.detail.smoke.state"),
+                v: formatOpsCodeLabel(locale, "broadcasting"),
                 mono: true,
               },
               {
-                k: detailT(locale, "dispatch.workflow.col.eta"),
+                k: tr(locale, "dispatch.detail.smoke.eta"),
                 v: "6m",
                 mono: true,
               },
               {
-                k: detailT(locale, "dispatch.detail.overrideLabel"),
-                v: detailT(locale, "dispatch.action.requestOverride"),
+                k: tr(locale, "dispatch.detail.smoke.override"),
+                v: tr(locale, "dispatch.workflow.override.request"),
               },
             ]}
           />
         </Card>
         <div style={{ display: "grid", gap: 16 }}>
-          <Card
-            theme={theme}
-            title={detailT(locale, "dispatch.detail.deliverySequence")}
-          >
-            <div>{detailT(locale, "dispatch.detail.smoke.sequence")}</div>
+          <Card theme={theme} title={getSequenceTitle(locale)}>
+            <div>{tr(locale, "dispatch.detail.smoke.sequence")}</div>
           </Card>
           <Card
             theme={theme}
-            title={detailT(locale, "dispatch.detail.recentActivity")}
+            title={tr(locale, "dispatch.detail.activity.title")}
           >
-            <div>{detailT(locale, "dispatch.detail.smoke.activityLog")}</div>
+            <div>{tr(locale, "dispatch.detail.smoke.activity")}</div>
           </Card>
           <Banner
             theme={theme}
             tone="warn"
             icon="warn"
-            title={detailT(locale, "dispatch.detail.highRiskCtaPresent")}
-            body={detailT(locale, "dispatch.detail.highRiskCtaBody")}
+            title={tr(locale, "dispatch.detail.smoke.highRiskCtaTitle")}
+            body={tr(locale, "dispatch.detail.smoke.highRiskCtaBody")}
           />
         </div>
       </div>
@@ -2275,17 +2204,12 @@ async function renderOwnedWorkspace({
   const terminal = isOwnedTerminal(order, currentTask);
 
   const candidateColumns: CanvasTableColumn<CandidateRow>[] = [
-    { h: detailT(locale, "dispatch.detail.col.rank"), k: "rankCell", w: 52 },
-    { h: detailT(locale, "common.driver"), k: "driverCell", w: 180 },
-    { h: detailT(locale, "common.vehicle"), k: "vehicle", w: 132, mono: true },
-    { h: detailT(locale, "dispatch.workflow.col.eta"), k: "etaCell", w: 84 },
-    { h: detailT(locale, "dispatch.detail.col.gate"), k: "gateCell", w: 164 },
-    {
-      h: detailT(locale, "dispatch.detail.col.score"),
-      k: "score",
-      w: 68,
-      mono: true,
-    },
+    { h: "RANK", k: "rankCell", w: 52 },
+    { h: tr(locale, "common.driver"), k: "driverCell", w: 180 },
+    { h: tr(locale, "common.vehicle"), k: "vehicle", w: 132, mono: true },
+    { h: tr(locale, "dispatch.detail.eta"), k: "etaCell", w: 84 },
+    { h: tr(locale, "dispatch.detail.gate"), k: "gateCell", w: 164 },
+    { h: tr(locale, "dispatch.detail.score"), k: "score", w: 68, mono: true },
   ];
 
   const stepperTimestamps: (string | null)[] = [
@@ -2307,7 +2231,7 @@ async function renderOwnedWorkspace({
           >
             <span>{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
             <Pill theme={theme} tone="accent">
-              {detailT(locale, "dispatch.detail.domain.owned")}
+              OWNED
             </Pill>
           </span>
         }
@@ -2318,7 +2242,7 @@ async function renderOwnedWorkspace({
       {renderRefreshRow(
         refresh,
         locale,
-        detailT(locale, "dispatch.detail.candidateCount", {
+        tr(locale, "dispatch.detail.candidateCount", {
           count: candidateRows.length,
         }),
       )}
@@ -2329,7 +2253,7 @@ async function renderOwnedWorkspace({
             theme={theme}
             tone="warn"
             icon="warn"
-            title={detailT(locale, "dispatch.detail.banner.degraded.title")}
+            title={tr(locale, "dispatch.detail.banner.degraded")}
             body={refreshBody(refresh, locale)}
           />
         ) : null}
@@ -2338,8 +2262,8 @@ async function renderOwnedWorkspace({
             theme={theme}
             tone="info"
             icon="check"
-            title={detailT(locale, "dispatch.detail.banner.terminal.title")}
-            body={detailT(locale, "dispatch.detail.banner.terminal.body")}
+            title={tr(locale, "dispatch.detail.banner.terminal.title")}
+            body={tr(locale, "dispatch.detail.banner.terminal.body")}
           />
         ) : null}
       </div>
@@ -2356,7 +2280,7 @@ async function renderOwnedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={`${detailT(locale, "dispatch.detail.candidatesRanked")} (${candidateRows.length})`}
+            title={`${tr(locale, "dispatch.detail.candidatesRanked")} (${candidateRows.length})`}
             {...(candidateRows.length > 0 ? { padding: 0 } : {})}
           >
             {candidateRows.length > 0 ? (
@@ -2376,29 +2300,22 @@ async function renderOwnedWorkspace({
 
           <Card
             theme={theme}
-            title={detailT(locale, "dispatch.detail.complianceGates")}
+            title={tr(locale, "dispatch.workflow.detail.compliance")}
           >
             <DL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: detailT(locale, "dispatch.detail.compliance.licenseValid"),
-                  v: detailT(
+                  k: tr(locale, "dispatch.detail.compliance.licenseValid"),
+                  v: `${licenseClearCount}/${candidateRows.length || 0} ${tr(
                     locale,
                     "dispatch.detail.compliance.candidatesClear",
-                    {
-                      clear: licenseClearCount,
-                      total: candidateRows.length || 0,
-                    },
-                  ),
+                  )}`,
                   mono: true,
                 },
                 {
-                  k: detailT(
-                    locale,
-                    "dispatch.detail.compliance.serviceBucket",
-                  ),
+                  k: tr(locale, "dispatch.detail.compliance.serviceBucket"),
                   v: `${formatOpsCodeLabel(locale, order.serviceBucket)} · ${
                     candidateRows.length > 0 &&
                     candidateRows.every((row) =>
@@ -2406,25 +2323,19 @@ async function renderOwnedWorkspace({
                         order.serviceBucket,
                       ),
                     )
-                      ? detailT(locale, "dispatch.detail.candidateGate.ok")
-                      : detailT(locale, "dispatch.detail.compliance.review")
+                      ? formatOpsCodeLabel(locale, "ok")
+                      : tr(locale, "dispatch.detail.manualReview")
                   }`,
                   mono: true,
                 },
                 {
-                  k: detailT(
-                    locale,
-                    "dispatch.detail.compliance.dispatchState",
-                  ),
-                  v: `${formatOpsCodeLabel(locale, currentState)} · ${dispatchJob?.dispatchJobId ?? detailT(locale, "common.dash")}`,
+                  k: tr(locale, "dispatch.detail.compliance.dispatchState"),
+                  v: `${formatOpsCodeLabel(locale, currentState)} · ${dispatchJob?.dispatchJobId ?? "—"}`,
                   mono: true,
                 },
                 {
-                  k: detailT(
-                    locale,
-                    "dispatch.detail.compliance.deviceBinding",
-                  ),
-                  v: detailT(
+                  k: tr(locale, "dispatch.detail.compliance.deviceBinding"),
+                  v: tr(
                     locale,
                     "dispatch.detail.compliance.deviceBindingValue",
                     {
@@ -2436,23 +2347,23 @@ async function renderOwnedWorkspace({
                   mono: true,
                 },
                 {
-                  k: detailT(locale, "dispatch.detail.compliance.fareQuoted"),
+                  k: tr(locale, "dispatch.detail.compliance.fareQuoted"),
                   v: order.quotedFare
                     ? `${formatMinorCurrency(
                         order.quotedFare.amountMinor,
                         order.quotedFare.currency,
-                      )} · ${order.quotedFareRuleVersion ?? "manual"}`
-                    : detailT(locale, "common.dash"),
+                      )} · ${
+                        order.quotedFareRuleVersion ??
+                        formatOpsCodeLabel(locale, "manual")
+                      }`
+                    : "—",
                   mono: true,
                 },
                 {
-                  k: detailT(
-                    locale,
-                    "dispatch.detail.compliance.overrideAllowed",
-                  ),
+                  k: tr(locale, "dispatch.detail.compliance.overrideAllowed"),
                   v: order.exceptionHold
                     ? `${overrideSummary.status} · ${overrideSummary.nextAction}`
-                    : detailT(locale, "dispatch.detail.override.notNeeded"),
+                    : tr(locale, "dispatch.detail.compliance.notNeeded"),
                   mono: true,
                 },
               ]}
@@ -2461,10 +2372,7 @@ async function renderOwnedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card
-            theme={theme}
-            title={detailT(locale, "dispatch.detail.deliverySequence")}
-          >
+          <Card theme={theme} title={getSequenceTitle(locale)}>
             {renderSequenceRail(
               locale,
               getWorkflowStepIndex(order, dispatchJob, currentTask),
@@ -2474,7 +2382,7 @@ async function renderOwnedWorkspace({
 
           <Card
             theme={theme}
-            title={detailT(locale, "dispatch.detail.recentActivity")}
+            title={tr(locale, "dispatch.detail.activity.title")}
           >
             {renderActivityFeed(locale, activityEntries)}
           </Card>
@@ -2544,7 +2452,7 @@ function renderForwardedWorkspace({
     resourceType: "adapter",
     resourceId: order.platformCode,
     openMode: "new_tab",
-    label: detailT(locale, "dispatch.action.inspectAdapter"),
+    label: tr(locale, "dispatch.detail.link.inspectAdapter"),
   };
   const reconciliationLink: CrossAppResourceLink | null = reconciliationIssue
     ? {
@@ -2553,7 +2461,7 @@ function renderForwardedWorkspace({
         resourceType: "reconciliation",
         resourceId: reconciliationIssue.reconciliationJob.reconciliationJobId,
         openMode: "new_tab",
-        label: detailT(locale, "dispatch.detail.action.openReconciliation"),
+        label: tr(locale, "dispatch.detail.link.openReconciliation"),
       }
     : null;
 
@@ -2587,11 +2495,11 @@ function renderForwardedWorkspace({
       stateCell:
         order.acceptedDriverId === driverId ? (
           <Pill theme={theme} tone="success" dot>
-            {detailT(locale, "dispatch.detail.accepted")}
+            {formatOpsCodeLabel(locale, "accepted")}
           </Pill>
         ) : (
           <Pill theme={theme} tone="info">
-            {detailT(locale, "dispatch.detail.broadcast")}
+            {formatOpsCodeLabel(locale, "broadcasting")}
           </Pill>
         ),
     }),
@@ -2601,16 +2509,8 @@ function renderForwardedWorkspace({
     (typeof candidateDriverRows)[number]
   >[] = [
     { h: "#", k: "rankCell", w: 44 },
-    {
-      h: detailT(locale, "dispatch.detail.col.driver"),
-      k: "driverCell",
-      w: 200,
-    },
-    {
-      h: detailT(locale, "dispatch.detail.col.platformState"),
-      k: "stateCell",
-      w: 160,
-    },
+    { h: tr(locale, "common.driver"), k: "driverCell", w: 200 },
+    { h: tr(locale, "dispatch.detail.platformState"), k: "stateCell", w: 160 },
   ];
 
   return (
@@ -2623,7 +2523,7 @@ function renderForwardedWorkspace({
           >
             <span>{order.mirrorOrderId}</span>
             <Pill theme={theme} tone="info">
-              {detailT(locale, "dispatch.detail.domain.forwarded")}
+              {tr(locale, "dispatch.forwarded.badge")}
             </Pill>
             <Pill theme={theme} tone={stateTone} dot>
               {formatOpsCodeLabel(locale, order.status)}
@@ -2638,7 +2538,7 @@ function renderForwardedWorkspace({
         refresh,
         locale,
         adapterHealth
-          ? `${detailT(locale, "dispatch.detail.adapter")} ${formatOpsCodeLabel(locale, adapterHealth.status)}`
+          ? `${tr(locale, "dispatch.detail.adapter")} ${formatOpsCodeLabel(locale, adapterHealth.status)}`
           : undefined,
       )}
 
@@ -2647,8 +2547,8 @@ function renderForwardedWorkspace({
           theme={theme}
           tone="info"
           icon="adapters"
-          title={detailT(locale, "dispatch.detail.forwarded.banner.title")}
-          body={detailT(locale, "dispatch.detail.forwarded.banner.body")}
+          title={tr(locale, "dispatch.forwarded.banner.notOwned.title")}
+          body={tr(locale, "dispatch.forwarded.banner.notOwned.body")}
           actions={
             <>
               {renderCrossAppLink(adapterLink)}
@@ -2663,21 +2563,17 @@ function renderForwardedWorkspace({
             theme={theme}
             tone={adapterHealth?.status === "down" ? "danger" : "warn"}
             icon="health"
-            title={detailT(
+            title={tr(
               locale,
-              "dispatch.detail.forwarded.adapterDegraded.title",
+              "dispatch.forwarded.banner.adapterDegraded.title",
             )}
-            body={detailT(
-              locale,
-              "dispatch.detail.forwarded.adapterDegraded.body",
-              {
-                platform: order.platformCode,
-                status: adapterHealth?.status ?? "degraded",
-                lastError: adapterHealth?.lastError
-                  ? ` · ${adapterHealth.lastError}`
-                  : "",
-              },
-            )}
+            body={tr(locale, "dispatch.forwarded.banner.adapterDegraded.body", {
+              platform: order.platformCode,
+              status: adapterHealth?.status ?? "degraded",
+              lastError: adapterHealth?.lastError
+                ? ` · ${adapterHealth.lastError}`
+                : "",
+            })}
           />
         ) : null}
         {terminal ? (
@@ -2685,8 +2581,8 @@ function renderForwardedWorkspace({
             theme={theme}
             tone="info"
             icon="check"
-            title={detailT(locale, "dispatch.detail.forwarded.terminal.title")}
-            body={detailT(locale, "dispatch.detail.forwarded.terminal.body")}
+            title={tr(locale, "dispatch.forwarded.banner.terminal.title")}
+            body={tr(locale, "dispatch.forwarded.banner.terminal.body")}
           />
         ) : null}
       </div>
@@ -2703,7 +2599,7 @@ function renderForwardedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={`${detailT(locale, "dispatch.detail.broadcastCandidates")} (${candidateDriverRows.length})`}
+            title={`${tr(locale, "dispatch.detail.broadcastCandidates")} (${candidateDriverRows.length})`}
             {...(candidateDriverRows.length > 0 ? { padding: 0 } : {})}
           >
             {candidateDriverRows.length > 0 ? (
@@ -2723,32 +2619,34 @@ function renderForwardedWorkspace({
 
           <Card
             theme={theme}
-            title={detailT(locale, "dispatch.detail.forwarded.authorityChain")}
+            title={tr(locale, "dispatch.forwarded.authority.title")}
           >
             <DL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: detailT(locale, "dispatch.detail.forwarded.domain"),
-                  v: `forwarded · ${order.dispatchSemantics}`,
+                  k: tr(locale, "dispatch.forwarded.authority.domain"),
+                  v: tr(locale, "dispatch.forwarded.authority.domainValue", {
+                    semantics: formatOpsCodeLabel(
+                      locale,
+                      order.dispatchSemantics,
+                    ),
+                  }),
                   mono: true,
                 },
                 {
-                  k: detailT(
-                    locale,
-                    "dispatch.detail.forwarded.sourcePlatform",
-                  ),
+                  k: tr(locale, "dispatch.forwarded.authority.sourcePlatform"),
                   v: `${formatOpsCodeLabel(locale, order.platformCode)} · ${order.externalOrderId}`,
                   mono: true,
                 },
                 {
-                  k: detailT(locale, "dispatch.detail.forwarded.routeLocked"),
-                  v: `${detailT(locale, "common.yes")} · ${waypointCount} ${detailT(locale, "dispatch.detail.waypoints")}`,
+                  k: tr(locale, "dispatch.forwarded.authority.routeLocked"),
+                  v: `${tr(locale, "common.yes")} · ${waypointCount} ${tr(locale, "dispatch.detail.waypoints")}`,
                   mono: true,
                 },
                 {
-                  k: detailT(locale, "dispatch.detail.forwarded.fareAuthority"),
+                  k: tr(locale, "dispatch.forwarded.authority.fareAuthority"),
                   v: formatOpsCodeLabel(
                     locale,
                     order.financeContext.fareAuthority,
@@ -2756,19 +2654,19 @@ function renderForwardedWorkspace({
                   mono: true,
                 },
                 {
-                  k: detailT(locale, "dispatch.detail.forwarded.settlement"),
+                  k: tr(locale, "dispatch.forwarded.authority.settlement"),
                   v: `${formatOpsCodeLabel(locale, order.financeContext.settlementAuthority)} · ${formatOpsCodeLabel(locale, order.financeContext.localLedgerMode)}`,
                   mono: true,
                 },
                 {
-                  k: detailT(locale, "dispatch.detail.forwarded.syncState"),
+                  k: tr(locale, "dispatch.forwarded.authority.syncState"),
                   v: order.lastSyncError
                     ? `${formatOpsCodeLabel(locale, order.lastSyncError.code)}`
                     : `${order.lastNativeStatus ?? formatOpsCodeLabel(locale, order.status)}`,
                   mono: true,
                 },
                 {
-                  k: detailT(locale, "dispatch.detail.forwarded.lastCallback"),
+                  k: tr(locale, "dispatch.forwarded.authority.lastCallback"),
                   v: formatDateTime(
                     locale,
                     order.lastSyncError?.failedAt ?? order.updatedAt,
@@ -2776,14 +2674,11 @@ function renderForwardedWorkspace({
                   mono: true,
                 },
                 {
-                  k: detailT(
-                    locale,
-                    "dispatch.detail.forwarded.reconciliation",
-                  ),
+                  k: tr(locale, "dispatch.forwarded.authority.reconciliation"),
                   v: order.reconciliationJob
-                    ? detailT(
+                    ? tr(
                         locale,
-                        "dispatch.detail.forwarded.reconciliationValue",
+                        "dispatch.forwarded.authority.reconciliationValue",
                         {
                           status: formatOpsCodeLabel(
                             locale,
@@ -2793,8 +2688,8 @@ function renderForwardedWorkspace({
                         },
                       )
                     : order.manualFallback.required
-                      ? detailT(locale, "dispatch.action.engageManualFallback")
-                      : detailT(locale, "common.dash"),
+                      ? formatOpsCodeLabel(locale, "manual_fallback")
+                      : "—",
                   mono: true,
                 },
               ]}
@@ -2803,10 +2698,7 @@ function renderForwardedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card
-            theme={theme}
-            title={detailT(locale, "dispatch.detail.deliverySequence")}
-          >
+          <Card theme={theme} title={getSequenceTitle(locale)}>
             {renderSequenceRail(locale, getForwardedStepIndex(order), [
               order.createdAt,
               order.createdAt,
@@ -2823,7 +2715,7 @@ function renderForwardedWorkspace({
 
           <Card
             theme={theme}
-            title={detailT(locale, "dispatch.detail.recentActivity")}
+            title={tr(locale, "dispatch.detail.activity.title")}
           >
             {renderActivityFeed(locale, activityEntries)}
           </Card>

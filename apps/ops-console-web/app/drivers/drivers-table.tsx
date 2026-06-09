@@ -116,12 +116,8 @@ function presenceLabel(
 ): string {
   const name = PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName;
   const binding = presence.accountId
-    ? locale === "zh"
-      ? "已綁定"
-      : "bound"
-    : locale === "zh"
-      ? "未綁定"
-      : "unbound";
+    ? t("drivers.list.bindingBound", locale)
+    : t("drivers.list.bindingUnbound", locale);
   const status = presence.reauthRequired
     ? "reauth"
     : formatOpsCodeLabel(locale, presence.status);
@@ -410,7 +406,9 @@ function buildColumns(
                     .join("、")}
             </Pill>
             <span style={signalDetailStyle}>
-              {row.driver.supportedServiceBuckets.join(" · ")}
+              {row.driver.supportedServiceBuckets
+                .map((bucket) => formatOpsCodeLabel(locale, bucket))
+                .join(" · ")}
             </span>
           </div>
         );
