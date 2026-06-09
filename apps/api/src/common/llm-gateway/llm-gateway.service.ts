@@ -131,6 +131,10 @@ export class LlmGatewayService {
     return this.config.provider === "mock";
   }
 
+  isOpenClawProvider(): boolean {
+    return this.config.provider === "openclaw";
+  }
+
   async completeChat(
     request: LlmGatewayChatRequest,
   ): Promise<LlmGatewayChatResponse> {
@@ -138,6 +142,13 @@ export class LlmGatewayService {
       throw new LlmGatewayError(
         "provider_not_supported",
         "Mock mode does not support live provider completions.",
+      );
+    }
+
+    if (this.config.provider === "openclaw") {
+      throw new LlmGatewayError(
+        "provider_not_supported",
+        "OpenClaw uses the assistant runtime path instead of completeChat().",
       );
     }
 

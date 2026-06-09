@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { CanvasShell, type CanvasShellNavItem } from "@drts/ui-web";
+import { FleetPortalHealthFooter } from "@/components/fleet-portal-health-footer";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 
 export function FleetPortalShell({
@@ -34,6 +35,8 @@ export function FleetPortalShell({
       searchPlaceholder={searchPlaceholder}
       env="production"
       avatarLabel="CH"
+      sidebarFooter={<FleetPortalHealthFooter />}
+      style={{ minHeight: "100vh", height: "100vh" }}
     >
       {children}
     </CanvasShell>

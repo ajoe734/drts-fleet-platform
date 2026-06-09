@@ -142,7 +142,7 @@ function actorTone(actorType: AuditLogRecord["actorType"]): CanvasTone {
 }
 
 export default function AuditPage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
@@ -201,7 +201,8 @@ export default function AuditPage() {
     [legalHolds],
   );
   const activeDeletionExceptions = useMemo(
-    () => deletionExceptions.filter((exception) => exception.status === "active"),
+    () =>
+      deletionExceptions.filter((exception) => exception.status === "active"),
     [deletionExceptions],
   );
 
@@ -235,8 +236,7 @@ export default function AuditPage() {
   }, [records]);
 
   const filtered = useMemo(
-    () =>
-      records.filter((r) => !filterModule || r.moduleName === filterModule),
+    () => records.filter((r) => !filterModule || r.moduleName === filterModule),
     [records, filterModule],
   );
 
@@ -254,116 +254,19 @@ export default function AuditPage() {
     [filtered, holdByResource, exemptByResource],
   );
 
-  const copy =
-    locale === "en"
-      ? {
-          title: "Audit & Evidence Governance",
-          subtitle:
-            "Append-only · legal hold + deletion exception shown via badge (Q-ADM16)",
-          refresh: "Refresh (T6 manual)",
-          refreshing: "Refreshing…",
-          exportCsv: "Export CSV",
-          tabLog: "Audit log",
-          tabPolicy: "Retention policies",
-          tabHold: "Active legal holds",
-          tabExcept: "Deletion exceptions",
-          all: "All",
-          showing: "Showing",
-          legalHoldTip: "legal hold",
-          deletionExceptionTip: "deletion exception",
-          expires: "expires",
-          case: "case",
-          owner: "owner",
-          reason: "reason",
-          loading: "Loading audit log…",
-          emptyLog: "No audit records match the current filter.",
-          emptyPolicy: "No retention policies configured.",
-          emptyHold: "No active legal holds.",
-          emptyExcept: "No active deletion exceptions.",
-          holdsTitle: "Active legal holds",
-          exceptTitle: "Deletion exceptions",
-          colWhen: "WHEN",
-          colActorType: "ACTOR TYPE",
-          colActor: "ACTOR",
-          colModule: "MODULE",
-          colAction: "ACTION",
-          colResource: "RESOURCE",
-          colRequest: "REQUEST",
-          polFamily: "FAMILY",
-          polAuthority: "AUTHORITY",
-          polRetention: "RETENTION",
-          polDownload: "DOWNLOAD",
-          polHold: "LEGAL HOLD",
-          holdResource: "RESOURCE",
-          holdCase: "CASE",
-          holdReason: "REASON",
-          holdPlacedBy: "PLACED BY",
-          holdPlacedAt: "PLACED AT",
-          exReason: "REASON",
-          exExpires: "EXPIRES",
-          signedTtl: (m: number) => `signed url · ${m}m ttl`,
-          noDownload: "no download",
-          holdEnabled: "supported",
-          holdDisabled: "not supported",
-          holdSupported: "Legal hold supported",
-        }
-      : {
-          title: "Audit & Evidence Governance",
-          subtitle:
-            "append-only · legal hold + deletion exception 透過 badge 顯示 (Q-ADM16)",
-          refresh: "重新整理 (T6 手動)",
-          refreshing: "重新整理中…",
-          exportCsv: "匯出 csv",
-          tabLog: "Audit log",
-          tabPolicy: "Retention policies",
-          tabHold: "Active legal holds",
-          tabExcept: "Deletion exceptions",
-          all: "全部",
-          showing: "顯示",
-          legalHoldTip: "legal hold",
-          deletionExceptionTip: "deletion exception",
-          expires: "到期",
-          case: "案號",
-          owner: "負責人",
-          reason: "原因",
-          loading: "載入稽核紀錄中…",
-          emptyLog: "沒有符合目前篩選的稽核紀錄。",
-          emptyPolicy: "尚未設定保留政策。",
-          emptyHold: "目前沒有作用中的法定保留。",
-          emptyExcept: "目前沒有作用中的刪除例外。",
-          holdsTitle: "Active legal holds",
-          exceptTitle: "Deletion exceptions",
-          colWhen: "WHEN",
-          colActorType: "ACTOR TYPE",
-          colActor: "ACTOR",
-          colModule: "MODULE",
-          colAction: "ACTION",
-          colResource: "RESOURCE",
-          colRequest: "REQUEST",
-          polFamily: "FAMILY",
-          polAuthority: "AUTHORITY",
-          polRetention: "RETENTION",
-          polDownload: "DOWNLOAD",
-          polHold: "LEGAL HOLD",
-          holdResource: "RESOURCE",
-          holdCase: "CASE",
-          holdReason: "REASON",
-          holdPlacedBy: "PLACED BY",
-          holdPlacedAt: "PLACED AT",
-          exReason: "REASON",
-          exExpires: "EXPIRES",
-          signedTtl: (m: number) => `signed url · ${m}m ttl`,
-          noDownload: "no download",
-          holdEnabled: "supported",
-          holdDisabled: "not supported",
-          holdSupported: "支援法定保留",
-        };
-
   const tabDefs: { id: AuditTabId; label: string; badge?: number }[] = [
-    { id: "log", label: copy.tabLog },
-    { id: "policy", label: copy.tabPolicy },
-    { id: "hold", label: copy.tabHold, badge: activeLegalHolds.length },
-    { id: "except", label: copy.tabExcept, badge: activeDeletionExceptions.length },
+    { id: "log", label: t("audit.page.tabLog") },
+    { id: "policy", label: t("audit.page.tabPolicy") },
+    {
+      id: "hold",
+      label: t("audit.page.tabHold"),
+      badge: activeLegalHolds.length,
+    },
+    {
+      id: "except",
+      label: t("audit.page.tabExcept"),
+      badge: activeDeletionExceptions.length,
+    },
   ];
 
   const tabNodes = tabDefs.map((def) => (
@@ -386,13 +289,13 @@ export default function AuditPage() {
 
   const auditColumns: CanvasTableColumn<AuditTableRow>[] = [
     {
-      h: copy.colWhen,
+      h: t("audit.page.colWhen"),
       w: 170,
       mono: true,
       r: (row) => formatDateTime(row.createdAt),
     },
     {
-      h: copy.colActorType,
+      h: t("audit.page.colActorType"),
       w: 140,
       r: (row) => (
         <CanvasPill theme={theme} tone={actorTone(row.actorType)} dot>
@@ -401,16 +304,13 @@ export default function AuditPage() {
       ),
     },
     {
-      h: copy.colActor,
+      h: t("audit.page.colActor"),
       w: 220,
       r: (row) =>
-        truncate(
-          row.actorId || formatPlatformCodeLabel(locale, "system"),
-          28,
-        ),
+        truncate(row.actorId || formatPlatformCodeLabel(locale, "system"), 28),
     },
     {
-      h: copy.colModule,
+      h: t("audit.page.colModule"),
       w: 140,
       r: (row) => (
         <span style={monoCellStyle}>
@@ -419,12 +319,12 @@ export default function AuditPage() {
       ),
     },
     {
-      h: copy.colAction,
+      h: t("audit.page.colAction"),
       w: 200,
       r: (row) => <span style={actionCellStyle}>{row.actionName}</span>,
     },
     {
-      h: copy.colResource,
+      h: t("audit.page.colResource"),
       w: 240,
       r: (row) => (
         <div style={resourceCellStyle}>
@@ -434,22 +334,22 @@ export default function AuditPage() {
           </span>
           {row.hold ? (
             <span
-              title={`${copy.legalHoldTip} · ${copy.case} ${row.hold.caseNumber} · ${copy.owner} ${row.hold.placedByActorId}`}
+              title={`${t("audit.page.legalHoldTip")} · ${t("audit.page.case")} ${row.hold.caseNumber} · ${t("audit.page.owner")} ${row.hold.placedByActorId}`}
             >
               <CanvasPill theme={theme} tone="danger">
-                HOLD
+                {t("audit.page.holdBadge")}
               </CanvasPill>
             </span>
           ) : null}
           {row.exempt ? (
             <span
-              title={`${copy.deletionExceptionTip} · ${formatPlatformCodeLabel(
+              title={`${t("audit.page.deletionExceptionTip")} · ${formatPlatformCodeLabel(
                 locale,
                 row.exempt.reasonCode,
-              )} · ${copy.expires} ${formatDateTime(row.exempt.expiresAt)}`}
+              )} · ${t("audit.page.expires")} ${formatDateTime(row.exempt.expiresAt)}`}
             >
               <CanvasPill theme={theme} tone="warn">
-                EXEMPT
+                {t("audit.page.exemptBadge")}
               </CanvasPill>
             </span>
           ) : null}
@@ -457,7 +357,7 @@ export default function AuditPage() {
       ),
     },
     {
-      h: copy.colRequest,
+      h: t("audit.page.colRequest"),
       mono: true,
       r: (row) => row.requestId || "—",
     },
@@ -467,7 +367,7 @@ export default function AuditPage() {
     EvidenceRetentionPolicyRecord & Record<string, unknown>
   >[] = [
     {
-      h: copy.polFamily,
+      h: t("audit.page.polFamily"),
       w: 240,
       r: (policy) => (
         <div style={{ display: "grid", gap: 3 }}>
@@ -481,12 +381,12 @@ export default function AuditPage() {
       ),
     },
     {
-      h: copy.polAuthority,
+      h: t("audit.page.polAuthority"),
       w: 160,
       r: (policy) => formatPlatformCodeLabel(locale, policy.authorityModule),
     },
     {
-      h: copy.polRetention,
+      h: t("audit.page.polRetention"),
       w: 140,
       mono: true,
       r: (policy) =>
@@ -495,22 +395,26 @@ export default function AuditPage() {
         }`,
     },
     {
-      h: copy.polDownload,
+      h: t("audit.page.polDownload"),
       w: 170,
       r: (policy) =>
         policy.downloadControl?.mode === "signed_url"
-          ? copy.signedTtl(policy.downloadControl.ttlMinutes ?? 0)
-          : copy.noDownload,
+          ? t("audit.page.signedTtl", {
+              minutes: policy.downloadControl.ttlMinutes ?? 0,
+            })
+          : t("audit.page.noDownload"),
     },
     {
-      h: copy.polHold,
+      h: t("audit.page.polHold"),
       r: (policy) => (
         <CanvasPill
           theme={theme}
           tone={policy.legalHold.supported ? "success" : "neutral"}
           dot
         >
-          {policy.legalHold.supported ? copy.holdEnabled : copy.holdDisabled}
+          {policy.legalHold.supported
+            ? t("audit.page.holdEnabled")
+            : t("audit.page.holdDisabled")}
         </CanvasPill>
       ),
     },
@@ -520,14 +424,14 @@ export default function AuditPage() {
     <>
       <CanvasPageHeader
         theme={theme}
-        title={copy.title}
-        subtitle={copy.subtitle}
+        title={t("audit.page.title")}
+        subtitle={t("audit.page.subtitle")}
         tabs={tabNodes}
         activeTab={activeTabNode}
         actions={
           <>
             <CanvasBtn theme={theme} variant="secondary" icon="filter">
-              {copy.exportCsv}
+              {t("audit.page.exportCsv")}
             </CanvasBtn>
             <CanvasBtn
               theme={theme}
@@ -535,7 +439,9 @@ export default function AuditPage() {
               icon="arrow"
               onClick={() => void loadRecords()}
             >
-              {loading && records.length > 0 ? copy.refreshing : copy.refresh}
+              {loading && records.length > 0
+                ? t("audit.page.refreshing")
+                : t("audit.page.refresh")}
             </CanvasBtn>
           </>
         }
@@ -551,8 +457,12 @@ export default function AuditPage() {
         ) : null}
 
         {loading && records.length === 0 ? (
-          <CanvasCard theme={theme} title={copy.title} subtitle={copy.loading}>
-            <div style={stateStyle}>{copy.loading}</div>
+          <CanvasCard
+            theme={theme}
+            title={t("audit.page.title")}
+            subtitle={t("audit.page.loading")}
+          >
+            <div style={stateStyle}>{t("audit.page.loading")}</div>
           </CanvasCard>
         ) : activeTab === "log" ? (
           <>
@@ -567,7 +477,7 @@ export default function AuditPage() {
                   tone={filterModule ? "neutral" : "accent"}
                   dot
                 >
-                  {copy.all} {records.length.toLocaleString()}
+                  {t("audit.page.all")} {records.length.toLocaleString()}
                 </CanvasPill>
               </button>
               {moduleCounts.map(([moduleName, count]) => (
@@ -592,9 +502,13 @@ export default function AuditPage() {
               ))}
             </div>
 
-            <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
+            <CanvasCard
+              theme={theme}
+              padding={0}
+              style={{ overflow: "hidden" }}
+            >
               {rows.length === 0 ? (
-                <div style={stateStyle}>{copy.emptyLog}</div>
+                <div style={stateStyle}>{t("audit.page.emptyLog")}</div>
               ) : (
                 <CanvasTable<AuditTableRow>
                   theme={theme}
@@ -607,10 +521,10 @@ export default function AuditPage() {
             <div style={summaryGridStyle}>
               <CanvasCard
                 theme={theme}
-                title={`${copy.holdsTitle} · ${activeLegalHolds.length}`}
+                title={`${t("audit.page.holdsTitle")} · ${activeLegalHolds.length}`}
               >
                 {activeLegalHolds.length === 0 ? (
-                  <div style={stateStyle}>{copy.emptyHold}</div>
+                  <div style={stateStyle}>{t("audit.page.emptyHold")}</div>
                 ) : (
                   <CanvasDL
                     theme={theme}
@@ -619,22 +533,26 @@ export default function AuditPage() {
                       const hold = activeLegalHolds[0]!;
                       return [
                         {
-                          k: copy.holdResource,
+                          k: t("audit.page.holdResource"),
                           v: `${formatPlatformCodeLabel(locale, hold.family)} · ${hold.subjectId}`,
                           mono: true,
                         },
-                        { k: copy.holdCase, v: hold.caseNumber, mono: true },
                         {
-                          k: copy.holdPlacedBy,
+                          k: t("audit.page.holdCase"),
+                          v: hold.caseNumber,
+                          mono: true,
+                        },
+                        {
+                          k: t("audit.page.holdPlacedBy"),
                           v: hold.placedByActorId,
                         },
                         {
-                          k: copy.holdPlacedAt,
+                          k: t("audit.page.holdPlacedAt"),
                           v: formatDateTime(hold.placedAt),
                           mono: true,
                         },
                         {
-                          k: copy.holdReason,
+                          k: t("audit.page.holdReason"),
                           v:
                             hold.reasonNote ||
                             formatPlatformCodeLabel(locale, hold.reasonCode),
@@ -647,10 +565,10 @@ export default function AuditPage() {
 
               <CanvasCard
                 theme={theme}
-                title={`${copy.exceptTitle} · ${activeDeletionExceptions.length}`}
+                title={`${t("audit.page.exceptTitle")} · ${activeDeletionExceptions.length}`}
               >
                 {activeDeletionExceptions.length === 0 ? (
-                  <div style={stateStyle}>{copy.emptyExcept}</div>
+                  <div style={stateStyle}>{t("audit.page.emptyExcept")}</div>
                 ) : (
                   <CanvasDL
                     theme={theme}
@@ -659,17 +577,17 @@ export default function AuditPage() {
                       const exception = activeDeletionExceptions[0]!;
                       return [
                         {
-                          k: copy.holdResource,
+                          k: t("audit.page.holdResource"),
                           v: `${exception.sourceResourceType} · ${exception.sourceResourceId}`,
                           mono: true,
                         },
                         {
-                          k: copy.exExpires,
+                          k: t("audit.page.exExpires"),
                           v: formatDateTime(exception.expiresAt),
                           mono: true,
                         },
                         {
-                          k: copy.exReason,
+                          k: t("audit.page.exReason"),
                           v:
                             exception.reasonNote ||
                             formatPlatformCodeLabel(
@@ -678,7 +596,7 @@ export default function AuditPage() {
                             ),
                         },
                         {
-                          k: "REASON CODE",
+                          k: t("audit.page.reasonCode"),
                           v: exception.reasonCode,
                           mono: true,
                         },
@@ -692,7 +610,7 @@ export default function AuditPage() {
         ) : activeTab === "policy" ? (
           <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
             {policies.length === 0 ? (
-              <div style={stateStyle}>{copy.emptyPolicy}</div>
+              <div style={stateStyle}>{t("audit.page.emptyPolicy")}</div>
             ) : (
               <CanvasTable
                 theme={theme}
@@ -707,8 +625,8 @@ export default function AuditPage() {
         ) : activeTab === "hold" ? (
           <div style={summaryGridStyle}>
             {activeLegalHolds.length === 0 ? (
-              <CanvasCard theme={theme} title={copy.holdsTitle}>
-                <div style={stateStyle}>{copy.emptyHold}</div>
+              <CanvasCard theme={theme} title={t("audit.page.holdsTitle")}>
+                <div style={stateStyle}>{t("audit.page.emptyHold")}</div>
               </CanvasCard>
             ) : (
               activeLegalHolds.map((hold) => (
@@ -722,15 +640,22 @@ export default function AuditPage() {
                     theme={theme}
                     cols={1}
                     items={[
-                      { k: copy.holdResource, v: hold.subjectId, mono: true },
-                      { k: copy.holdPlacedBy, v: hold.placedByActorId },
                       {
-                        k: copy.holdPlacedAt,
+                        k: t("audit.page.holdResource"),
+                        v: hold.subjectId,
+                        mono: true,
+                      },
+                      {
+                        k: t("audit.page.holdPlacedBy"),
+                        v: hold.placedByActorId,
+                      },
+                      {
+                        k: t("audit.page.holdPlacedAt"),
                         v: formatDateTime(hold.placedAt),
                         mono: true,
                       },
                       {
-                        k: copy.holdReason,
+                        k: t("audit.page.holdReason"),
                         v:
                           hold.reasonNote ||
                           formatPlatformCodeLabel(locale, hold.reasonCode),
@@ -744,8 +669,8 @@ export default function AuditPage() {
         ) : (
           <div style={summaryGridStyle}>
             {activeDeletionExceptions.length === 0 ? (
-              <CanvasCard theme={theme} title={copy.exceptTitle}>
-                <div style={stateStyle}>{copy.emptyExcept}</div>
+              <CanvasCard theme={theme} title={t("audit.page.exceptTitle")}>
+                <div style={stateStyle}>{t("audit.page.emptyExcept")}</div>
               </CanvasCard>
             ) : (
               activeDeletionExceptions.map((exception) => (
@@ -760,18 +685,18 @@ export default function AuditPage() {
                     cols={1}
                     items={[
                       {
-                        k: copy.exExpires,
+                        k: t("audit.page.exExpires"),
                         v: formatDateTime(exception.expiresAt),
                         mono: true,
                       },
                       {
-                        k: copy.exReason,
+                        k: t("audit.page.exReason"),
                         v:
                           exception.reasonNote ||
                           formatPlatformCodeLabel(locale, exception.reasonCode),
                       },
                       {
-                        k: "REASON CODE",
+                        k: t("audit.page.reasonCode"),
                         v: exception.reasonCode,
                         mono: true,
                       },

@@ -30,7 +30,7 @@ describe("Platform Admin product routes", () => {
     ).toEqual([]);
   });
 
-  it("manual dev deploys require an explicit non-main source ref", () => {
+  it("manual dev deploys require an explicit immutable source ref", () => {
     const workflow = readFileSync(
       join(process.cwd(), ".github/workflows/deploy-dev.yml"),
       "utf8",
@@ -40,10 +40,38 @@ describe("Platform Admin product routes", () => {
     expect(workflow).toContain('GITHUB_EVENT_NAME:-}" == "workflow_dispatch');
     expect(workflow).toContain("source_ref is required for manual dev deploy");
     expect(workflow).toContain("Do not dispatch deploy-dev from main");
-    expect(workflow).toContain("main is not a valid dev deploy source_ref");
+    expect(workflow).toContain("publish/v*");
+    expect(workflow).toContain("release/v*");
+    expect(workflow).toContain("full commit SHA");
+    expect(workflow).toContain(
+      "mutable branches such as dev/main/design are blocked",
+    );
+    expect(workflow).toContain("[0-9a-fA-F]{40}");
     expect(workflow).not.toContain(
       'source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"',
     );
+    expect(workflow).not.toContain(
+      "use publish/v*, release/v*, dev, or an explicit commit SHA",
+    );
     expect(workflow).not.toContain('source_ref="dev"');
+  });
+
+  it("keeps platform assistant overlay hooks before the mounted early return", () => {
+    const source = readFileSync(
+      join(
+        process.cwd(),
+        "apps/platform-admin-web/components/assistant/platform-assistant-overlay.tsx",
+      ),
+      "utf8",
+    );
+    const earlyReturnIndex = source.indexOf("if (!enabled || !isMounted)");
+
+    expect(earlyReturnIndex).toBeGreaterThan(-1);
+    expect(source.slice(0, earlyReturnIndex)).toContain(
+      "setSuggestedPrompts(defaultSuggestedPrompts)",
+    );
+    expect(source.slice(earlyReturnIndex)).not.toMatch(
+      /\buse(?:Effect|Id|Memo|Reducer|Ref|State)\s*\(/,
+    );
   });
 });

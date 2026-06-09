@@ -35,7 +35,7 @@ export default async function FleetQualityPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
             gap: 12,
           }}
         >
@@ -43,7 +43,7 @@ export default async function FleetQualityPage() {
             <CanvasKPI
               key={q.en}
               theme={theme}
-              label={q.zh}
+              label={t(`quality.metric.${q.en}`, locale)}
               value={q.v}
               delta={q.delta}
               deltaTone={
@@ -66,12 +66,10 @@ export default async function FleetQualityPage() {
               lineHeight: 1.7,
             }}
           >
-            <li>車行整體品質分數影響每月績效獎金與合作評等。</li>
-            <li>
-              司機行為類申訴若責任歸屬車行，計入車行品質指標並可能觸發罰則。
-            </li>
-            <li>準點率與完成率以後端計算為準，車行端為唯讀檢視。</li>
-            <li>品質指標連續低於門檻將進入合作檢討流程。</li>
+            <li>{t("quality.note.1", locale)}</li>
+            <li>{t("quality.note.2", locale)}</li>
+            <li>{t("quality.note.3", locale)}</li>
+            <li>{t("quality.note.4", locale)}</li>
           </ol>
         </CanvasCard>
       </div>

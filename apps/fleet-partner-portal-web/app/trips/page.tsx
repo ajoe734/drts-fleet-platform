@@ -20,14 +20,14 @@ export default async function FleetTripsPage() {
         title={t("trips.title", locale)}
         subtitle={t("trips.subtitle", locale)}
         tabs={[
-          "全部",
-          "即時叫車",
-          "商務派車",
-          "機場接送",
-          "保險代步",
-          "旅行社接送",
+          t("trips.tabAll", locale),
+          t("service.realtime", locale),
+          t("service.business", locale),
+          t("service.airport", locale),
+          t("service.insurance", locale),
+          t("service.travel", locale),
         ]}
-        activeTab="全部"
+        activeTab={t("trips.tabAll", locale)}
         actions={
           <CanvasBtn theme={theme}>{t("common.export", locale)}</CanvasBtn>
         }

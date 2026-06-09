@@ -70,12 +70,10 @@ type FlagTableRow = {
   description: string;
   enabled: boolean;
   tenantId: string | null;
-  scopeLabel: string;
   scopeTone: "accent" | "neutral";
   rolloutLabel: "mid_rollout" | "rolled_out" | "deprecated";
   rolloutTone: "warn" | "success" | "danger";
   updatedAt: string;
-  updatedBy: string;
 } & Record<string, unknown>;
 
 type RolloutFilter =
@@ -364,9 +362,6 @@ function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
     description: flag.description || "—",
     enabled: flag.enabled,
     tenantId: flag.tenantId ?? null,
-    scopeLabel: isTenantOverride
-      ? `Tenant override · ${flag.tenantId}`
-      : "Platform default",
     scopeTone: isTenantOverride ? "accent" : "neutral",
     rolloutLabel,
     rolloutTone:
@@ -376,7 +371,6 @@ function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
           ? "success"
           : "warn",
     updatedAt: flag.updatedAt,
-    updatedBy: "Contract not exposed",
   };
 }
 
@@ -399,7 +393,7 @@ function isDeprecatedFlag(flag: FeatureFlag) {
 }
 
 export default function FeatureFlagsPage() {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
@@ -552,234 +546,136 @@ export default function FeatureFlagsPage() {
         : auditReceipts,
     [auditReceipts, historyKey],
   );
+  const currentScopeLabel = selectedTenant
+    ? t("featureFlagsAdmin.tenantOptionLabel", {
+        name: selectedTenant.name,
+        code: selectedTenant.code,
+      })
+    : t("featureFlagsAdmin.scopePlatformDefault");
+
+  const formatScopeLabel = (row: FlagTableRow) =>
+    row.tenantId
+      ? t("featureFlagsAdmin.scopeTenantOverride", {
+          tenantId: row.tenantId,
+        })
+      : t("featureFlagsAdmin.scopePlatformDefault");
+
   const filterOptions: RolloutFilterOption[] = [
     {
       value: "all",
-      label: locale === "en" ? "All" : "全部",
+      label: t("common.all"),
       count: rows.length,
     },
     {
       value: "mid_rollout",
-      label: locale === "en" ? "Mid-rollout" : "進行中 rollout",
+      label: t("featureFlagsAdmin.rolloutMid"),
       count: midRolloutCount,
     },
     {
       value: "rolled_out",
-      label: locale === "en" ? "Rolled out" : "已全面 rollout",
+      label: t("featureFlagsAdmin.rolloutFull"),
       count: rolledOutCount,
     },
     {
       value: "deprecated",
-      label: locale === "en" ? "Deprecated" : "Deprecated",
+      label: t("featureFlagsAdmin.rolloutDeprecated"),
       count: deprecatedCount,
     },
     {
       value: "tenant_overrides",
-      label: locale === "en" ? "Tenant overrides" : "Tenant overrides",
+      label: t("featureFlagsAdmin.summaryTenantOverride"),
       count: overrideCount,
     },
   ];
 
-  const copy =
-    locale === "en"
-      ? {
-          pageTitle: "Feature Flags · WRITE authority",
-          pageSubtitle:
-            "Writable only here. Ops, tenant, and driver surfaces stay on read-only GET feature flag views.",
-          metaPill: "writable only here",
-          refresh: t("common.refresh"),
-          refreshing: "Refreshing...",
-          addOverride: "Add tenant override",
-          addOverrideHint: "Select a tenant scope first to create an override.",
-          riskTitle: "High-risk actions require an explicit reason.",
-          riskBody:
-            "Toggle and tenant override changes stay in this write lane and record a local audit receipt after confirmation.",
-          scopeField: "Inspect scope",
-          searchField: "Search key",
-          searchPlaceholder: "Search by flag key",
-          scopeHint:
-            "Switch to a tenant to inspect its effective override rows. Default view stays on platform records.",
-          scopeDefault: "Platform defaults",
-          scopeLoading: "Loading tenant list...",
-          currentScope: selectedTenant
-            ? `${selectedTenant.name} (${selectedTenant.code})`
-            : "Platform defaults",
-          summaryPlatformDefault: "Platform defaults",
-          summaryTenantOverride: "Tenant overrides",
-          tableTitle: "Feature flag registry",
-          tableSubtitle:
-            "KEY, SCOPE, STATE TOGGLE, UPDATED BY, AT, and ACTIONS stay in the assigned table-first body.",
-          filterLabel: "Rollout state",
-          filterPill: "table-first layout",
-          rolloutMid: "Mid-rollout",
-          rolloutFull: "Rolled out",
-          rolloutDeprecated: "Deprecated",
-          keyHeader: "Key",
-          scopeHeader: "Scope",
-          stateHeader: "State",
-          updatedByHeader: "Updated by",
-          updatedAtHeader: "At",
-          actionsHeader: "Actions",
-          noDescription: "No description provided",
-          updatedByValue: "Contract not exposed",
-          toggle: "Toggle",
-          removeOverride: "Remove override",
-          history: "History",
-          confirmToggleTitle: "Confirm feature flag toggle",
-          confirmToggleBody:
-            "This will change the effective feature flag state shown in the current scope.",
-          confirmOverrideTitle: "Create tenant override",
-          confirmOverrideBody:
-            "This writes a tenant-specific override for the selected key and leaves other scopes unchanged.",
-          confirmRemoveOverrideTitle: "Remove tenant override",
-          confirmRemoveOverrideBody:
-            "This removes the tenant-specific override and reverts the tenant back to the platform default.",
-          reasonLabel: "High-risk reason",
-          reasonPlaceholder:
-            "Describe the rollout reason, expected blast radius, and validation plan.",
-          reasonRequired:
-            "A high-risk reason is required before this action can run.",
-          overrideTenantField: "Tenant",
-          overrideKeyField: "Flag key",
-          overrideStateField: "Override state",
-          overrideDescriptionField: "Override description",
-          overrideDescriptionHint:
-            "Optional. Leave blank to keep the existing flag description.",
-          enabled: t("common.enabled"),
-          disabled: t("common.disabled"),
-          cancel: t("common.cancel"),
-          confirming: t("common.updating"),
-          confirmEnable: "Enable",
-          confirmDisable: "Disable",
-          confirmCreate: "Create override",
-          confirmRemove: "Remove override",
-          noFlags: t("flags.empty"),
-          loading: t("flags.loading"),
-          scopeMeta: "Inspect scope",
-          resultMeta: `${filteredRows.length} visible row(s)`,
-          enabledMeta: `${enabledCount} enabled`,
-          disabledMeta: `${disabledCount} disabled`,
-          overrideMeta: `${overrideCount} tenant override row(s)`,
-          notesTitle: "Extended notes",
-          notesEmpty:
-            "No additional contract notes are exposed for the current scope.",
-          historyTitle: "Local audit receipts",
-          historyEmpty:
-            "No local receipts have been recorded in this session yet.",
-          historyHint:
-            "Use the History row action to focus receipts for a specific key.",
-          historyFocusAll:
-            "Showing all receipts recorded in this browser session.",
-          historyFocusKey: `Focused on ${historyKey ?? "all keys"}`,
-          secondaryPanelTitle: "Change control & extended details",
-          secondaryPanelSubtitle:
-            "High-risk reason capture, notes, and local history stay below the default table-first body.",
-          actionComposerTitle: "Pending high-risk change",
-          actionComposerIdle:
-            "Toggle and override mutations require an explicit reason before confirmation.",
-          actionApplied: "Audit receipt recorded",
-          noFlagsInFilter:
-            "No feature flags match the current rollout filter and search query.",
-          laneMeta: "Writable only here",
-          notesMeta: "Extended notes stay outside the default body.",
-          receiptsMeta: `${auditReceipts.length} local receipt(s)`,
-          showAllReceipts: "Show all receipts",
-        }
-      : {
-          pageTitle: "Feature Flags · WRITE authority",
-          pageSubtitle:
-            "只有這裡可寫入。ops、tenant、driver 其他頁面維持 GET feature flag 唯讀檢視。",
-          metaPill: "writable only here",
-          refresh: t("common.refresh"),
-          refreshing: "重新整理中...",
-          addOverride: "新增 tenant override",
-          addOverrideHint: "先切到 tenant 範圍，才能建立 override。",
-          riskTitle: "高風險操作必須填寫原因。",
-          riskBody:
-            "toggle 與 tenant override 都維持在這條 write lane，確認後會留下本地 audit receipt。",
-          scopeField: "檢視範圍",
-          searchField: "搜尋 key",
-          searchPlaceholder: "依 flag key 搜尋",
-          scopeHint:
-            "切到 tenant 可檢視該 tenant 的有效 override 列；預設仍以平台資料為主。",
-          scopeDefault: "平台預設",
-          scopeLoading: "載入 tenant 清單中...",
-          currentScope: selectedTenant
-            ? `${selectedTenant.name} (${selectedTenant.code})`
-            : "平台預設",
-          summaryPlatformDefault: "平台預設",
-          summaryTenantOverride: "Tenant overrides",
-          tableTitle: "Feature flag registry",
-          tableSubtitle:
-            "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS 的 table-first 主體。",
-          filterLabel: "Rollout 狀態",
-          filterPill: "table-first layout",
-          rolloutMid: "進行中 rollout",
-          rolloutFull: "已全面 rollout",
-          rolloutDeprecated: "Deprecated",
-          keyHeader: "Key",
-          scopeHeader: "Scope",
-          stateHeader: "State",
-          updatedByHeader: "Updated by",
-          updatedAtHeader: "At",
-          actionsHeader: "Actions",
-          noDescription: "尚未提供描述",
-          updatedByValue: "目前 contract 未提供",
-          toggle: "切換",
-          removeOverride: "移除 override",
-          history: "歷史",
-          confirmToggleTitle: "確認切換 feature flag",
-          confirmToggleBody: "這會變更目前檢視範圍中的有效 feature flag 狀態。",
-          confirmOverrideTitle: "建立 tenant override",
-          confirmOverrideBody:
-            "這會為所選 key 建立 tenant 專屬 override，不影響其他範圍。",
-          confirmRemoveOverrideTitle: "移除 tenant override",
-          confirmRemoveOverrideBody:
-            "這會移除 tenant 專屬 override，讓該 tenant 回到平台預設。",
-          reasonLabel: "高風險原因",
-          reasonPlaceholder:
-            "說明 rollout 原因、預期 blast radius 與驗證計畫。",
-          reasonRequired: "執行這個高風險操作前必須填寫原因。",
-          overrideTenantField: "Tenant",
-          overrideKeyField: "Flag key",
-          overrideStateField: "Override 狀態",
-          overrideDescriptionField: "Override 描述",
-          overrideDescriptionHint: "可留白，沿用既有 flag 描述。",
-          enabled: t("common.enabled"),
-          disabled: t("common.disabled"),
-          cancel: t("common.cancel"),
-          confirming: t("common.updating"),
-          confirmEnable: "啟用",
-          confirmDisable: "停用",
-          confirmCreate: "建立 override",
-          confirmRemove: "移除 override",
-          noFlags: t("flags.empty"),
-          loading: t("flags.loading"),
-          scopeMeta: "目前 scope",
-          resultMeta: `可見 ${filteredRows.length} 列`,
-          enabledMeta: `啟用 ${enabledCount} 列`,
-          disabledMeta: `停用 ${disabledCount} 列`,
-          overrideMeta: `tenant override ${overrideCount} 列`,
-          notesTitle: "延伸備註",
-          notesEmpty: "目前範圍沒有額外 contract 備註。",
-          historyTitle: "本地 audit receipts",
-          historyEmpty: "這個瀏覽 session 尚未記錄任何 receipt。",
-          historyHint: "可用 History 列操作聚焦特定 key 的 receipt。",
-          historyFocusAll: "目前顯示此瀏覽 session 的所有 receipts。",
-          historyFocusKey: `目前聚焦 ${historyKey ?? "全部 key"}`,
-          secondaryPanelTitle: "變更控制與延伸細節",
-          secondaryPanelSubtitle:
-            "高風險原因、延伸備註與本地歷史都收在表格主體下方的次要區塊。",
-          actionComposerTitle: "待確認的高風險變更",
-          actionComposerIdle: "toggle 與 override 變更都必須先填寫原因再確認。",
-          actionApplied: "已記錄 audit receipt",
-          noFlagsInFilter:
-            "目前 rollout 篩選與搜尋條件沒有符合的 feature flags。",
-          laneMeta: "僅此處可寫入",
-          notesMeta: "延伸備註收在預設主體之外。",
-          receiptsMeta: `本地 receipt ${auditReceipts.length} 筆`,
-          showAllReceipts: "顯示全部 receipts",
-        };
+  const copy = {
+    pageTitle: t("featureFlagsAdmin.pageTitle"),
+    pageSubtitle: t("featureFlagsAdmin.pageSubtitle"),
+    metaPill: t("featureFlagsAdmin.metaPill"),
+    refresh: t("common.refresh"),
+    refreshing: t("featureFlagsAdmin.refreshing"),
+    addOverride: t("featureFlagsAdmin.addOverride"),
+    addOverrideHint: t("featureFlagsAdmin.addOverrideHint"),
+    riskTitle: t("featureFlagsAdmin.riskTitle"),
+    riskBody: t("featureFlagsAdmin.riskBody"),
+    scopeField: t("featureFlagsAdmin.scopeField"),
+    searchField: t("featureFlagsAdmin.searchField"),
+    searchPlaceholder: t("featureFlagsAdmin.searchPlaceholder"),
+    scopeHint: t("featureFlagsAdmin.scopeHint"),
+    scopeDefault: t("featureFlagsAdmin.scopePlatformDefault"),
+    scopeLoading: t("featureFlagsAdmin.scopeLoading"),
+    currentScope: currentScopeLabel,
+    summaryPlatformDefault: t("featureFlagsAdmin.summaryPlatformDefault"),
+    summaryTenantOverride: t("featureFlagsAdmin.summaryTenantOverride"),
+    tableTitle: t("featureFlagsAdmin.tableTitle"),
+    tableSubtitle: t("featureFlagsAdmin.tableSubtitle"),
+    filterLabel: t("featureFlagsAdmin.filterLabel"),
+    filterPill: t("featureFlagsAdmin.filterPill"),
+    rolloutMid: t("featureFlagsAdmin.rolloutMid"),
+    rolloutFull: t("featureFlagsAdmin.rolloutFull"),
+    rolloutDeprecated: t("featureFlagsAdmin.rolloutDeprecated"),
+    keyHeader: t("featureFlagsAdmin.keyHeader"),
+    scopeHeader: t("featureFlagsAdmin.scopeHeader"),
+    stateHeader: t("featureFlagsAdmin.stateHeader"),
+    updatedByHeader: t("featureFlagsAdmin.updatedByHeader"),
+    updatedAtHeader: t("featureFlagsAdmin.updatedAtHeader"),
+    actionsHeader: t("featureFlagsAdmin.actionsHeader"),
+    noDescription: t("featureFlagsAdmin.noDescription"),
+    updatedByValue: t("featureFlagsAdmin.updatedByValue"),
+    toggle: t("featureFlagsAdmin.toggle"),
+    removeOverride: t("featureFlagsAdmin.removeOverride"),
+    history: t("featureFlagsAdmin.history"),
+    confirmToggleTitle: t("featureFlagsAdmin.confirmToggleTitle"),
+    confirmToggleBody: t("featureFlagsAdmin.confirmToggleBody"),
+    confirmOverrideTitle: t("featureFlagsAdmin.confirmOverrideTitle"),
+    confirmOverrideBody: t("featureFlagsAdmin.confirmOverrideBody"),
+    confirmRemoveOverrideTitle: t("featureFlagsAdmin.confirmRemoveOverrideTitle"),
+    confirmRemoveOverrideBody: t("featureFlagsAdmin.confirmRemoveOverrideBody"),
+    reasonLabel: t("featureFlagsAdmin.reasonLabel"),
+    reasonPlaceholder: t("featureFlagsAdmin.reasonPlaceholder"),
+    reasonRequired: t("featureFlagsAdmin.reasonRequired"),
+    overrideTenantField: t("featureFlagsAdmin.overrideTenantField"),
+    overrideKeyField: t("featureFlagsAdmin.overrideKeyField"),
+    overrideStateField: t("featureFlagsAdmin.overrideStateField"),
+    overrideDescriptionField: t("featureFlagsAdmin.overrideDescriptionField"),
+    overrideDescriptionHint: t("featureFlagsAdmin.overrideDescriptionHint"),
+    enabled: t("common.enabled"),
+    disabled: t("common.disabled"),
+    cancel: t("common.cancel"),
+    confirming: t("common.updating"),
+    confirmEnable: t("featureFlagsAdmin.confirmEnable"),
+    confirmDisable: t("featureFlagsAdmin.confirmDisable"),
+    confirmCreate: t("featureFlagsAdmin.confirmCreate"),
+    confirmRemove: t("featureFlagsAdmin.confirmRemove"),
+    noFlags: t("flags.empty"),
+    loading: t("flags.loading"),
+    scopeMeta: t("featureFlagsAdmin.scopeMeta"),
+    resultMeta: t("featureFlagsAdmin.resultMeta", { count: filteredRows.length }),
+    enabledMeta: t("featureFlagsAdmin.enabledMeta", { count: enabledCount }),
+    disabledMeta: t("featureFlagsAdmin.disabledMeta", { count: disabledCount }),
+    overrideMeta: t("featureFlagsAdmin.overrideMeta", { count: overrideCount }),
+    notesTitle: t("featureFlagsAdmin.notesTitle"),
+    notesEmpty: t("featureFlagsAdmin.notesEmpty"),
+    historyTitle: t("featureFlagsAdmin.historyTitle"),
+    historyEmpty: t("featureFlagsAdmin.historyEmpty"),
+    historyHint: t("featureFlagsAdmin.historyHint"),
+    historyFocusAll: t("featureFlagsAdmin.historyFocusAll"),
+    historyFocusKey: historyKey
+      ? t("featureFlagsAdmin.historyFocusKey", { key: historyKey })
+      : t("featureFlagsAdmin.historyFocusAll"),
+    secondaryPanelTitle: t("featureFlagsAdmin.secondaryPanelTitle"),
+    secondaryPanelSubtitle: t("featureFlagsAdmin.secondaryPanelSubtitle"),
+    actionComposerTitle: t("featureFlagsAdmin.actionComposerTitle"),
+    actionComposerIdle: t("featureFlagsAdmin.actionComposerIdle"),
+    actionApplied: t("featureFlagsAdmin.actionApplied"),
+    noFlagsInFilter: t("featureFlagsAdmin.noFlagsInFilter"),
+    laneMeta: t("featureFlagsAdmin.laneMeta"),
+    notesMeta: t("featureFlagsAdmin.notesMeta"),
+    receiptsMeta: t("featureFlagsAdmin.receiptsMeta", {
+      count: auditReceipts.length,
+    }),
+    showAllReceipts: t("featureFlagsAdmin.showAllReceipts"),
+  };
 
   const columns: CanvasTableColumn<FlagTableRow>[] = [
     {
@@ -810,7 +706,7 @@ export default function FeatureFlagsPage() {
         <div style={keyCellStyle}>
           <div style={inlinePillRowStyle}>
             <CanvasPill theme={theme} tone={row.scopeTone}>
-              {row.scopeLabel}
+              {formatScopeLabel(row)}
             </CanvasPill>
           </div>
           <div style={secondaryTextStyle}>
@@ -844,7 +740,7 @@ export default function FeatureFlagsPage() {
                 description: row.description === "—" ? "" : row.description,
                 currentEnabled: row.enabled,
                 nextEnabled: !row.enabled,
-                scopeLabel: row.scopeLabel,
+                scopeLabel: formatScopeLabel(row),
               });
             }}
             disabled={updating === row.key}
@@ -885,7 +781,7 @@ export default function FeatureFlagsPage() {
                 description: row.description === "—" ? "" : row.description,
                 currentEnabled: row.enabled,
                 nextEnabled: !row.enabled,
-                scopeLabel: row.scopeLabel,
+                scopeLabel: formatScopeLabel(row),
               });
             }}
             disabled={updating === row.key}
@@ -968,7 +864,9 @@ export default function FeatureFlagsPage() {
       const scopeLabel =
         pendingAction.intent === "toggle"
           ? pendingAction.scopeLabel
-          : `Tenant override · ${pendingAction.tenantId}`;
+          : t("featureFlagsAdmin.scopeTenantOverride", {
+              tenantId: pendingAction.tenantId,
+            });
       const summary =
         pendingAction.intent === "toggle"
           ? `${pendingAction.nextEnabled ? copy.confirmEnable : copy.confirmDisable} ${pendingAction.key}`

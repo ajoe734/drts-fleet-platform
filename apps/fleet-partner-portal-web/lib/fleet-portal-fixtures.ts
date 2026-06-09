@@ -11,6 +11,11 @@
 
 import type { CanvasTone } from "@drts/ui-web";
 
+export type LocalizedText = {
+  zh: string;
+  en: string;
+};
+
 export type ServiceKey =
   | "realtime"
   | "business"
@@ -18,14 +23,16 @@ export type ServiceKey =
   | "insurance"
   | "travel";
 
-export const SVC_LABELS: Record<ServiceKey, { zh: string; tone: CanvasTone }> =
-  {
-    realtime: { zh: "即時叫車", tone: "success" },
-    business: { zh: "商務派車", tone: "accent" },
-    airport: { zh: "機場接送", tone: "info" },
-    insurance: { zh: "保險代步", tone: "warn" },
-    travel: { zh: "旅行社接送", tone: "accent" },
-  };
+export const SVC_LABELS: Record<
+  ServiceKey,
+  { zh: string; en: string; tone: CanvasTone }
+> = {
+  realtime: { zh: "即時叫車", en: "Realtime", tone: "success" },
+  business: { zh: "商務派車", en: "Business dispatch", tone: "accent" },
+  airport: { zh: "機場接送", en: "Airport transfer", tone: "info" },
+  insurance: { zh: "保險代步", en: "Insurance replacement", tone: "warn" },
+  travel: { zh: "旅行社接送", en: "Travel partner", tone: "accent" },
+};
 
 export const FLEET_SELF = {
   id: "flp_002",
@@ -509,7 +516,7 @@ export const FX_FLEET_QUALITY: FleetQuality[] = [
     delta: "↓ 0.2pp",
   },
   {
-    zh: "no-show 率",
+    zh: "未出現率",
     en: "no_show_rate",
     v: "0.8%",
     tone: "neutral",
@@ -548,40 +555,54 @@ export const FX_DASHBOARD_SUPPLY: {
 // rather than hardcoded in the dashboard page.
 export type FleetDashboardSupplemental = {
   missingDocsDrivers: string;
-  missingDocsDelta: string;
   openCases: string;
-  openCasesDelta: string;
   trainingCompletion: string;
 };
 
 export const FX_DASHBOARD_SUPPLEMENTAL: FleetDashboardSupplemental = {
   missingDocsDrivers: "7",
-  missingDocsDelta: "證照 / 保險",
   openCases: "3",
-  openCasesDelta: "需處理 1",
   trainingCompletion: "92%",
 };
 
 export type FleetAttentionBanner = {
   tone: "warn" | "danger";
-  title: string;
-  body: string;
+  title: LocalizedText;
+  body: LocalizedText;
 };
 
 export const FX_DASHBOARD_ATTENTION: FleetAttentionBanner[] = [
   {
     tone: "warn",
-    title: "吳鎮宇 缺機場接送資格證 · airport_permit missing",
-    body: "缺件期間無法接機場接送任務。請協助補件。",
+    title: {
+      zh: "吳鎮宇缺機場接送資格證",
+      en: "Wu Zhen-Yu is missing the airport transfer permit",
+    },
+    body: {
+      zh: "缺件期間無法接機場接送任務。請協助補件。",
+      en: "The driver cannot take airport-transfer work until the permit is restored.",
+    },
   },
   {
     tone: "danger",
-    title: "cmp_0908 · 司機行為申訴 · 車行責任 · SLA breached",
-    body: "黃文豪 言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。",
+    title: {
+      zh: "cmp_0908 司機行為申訴已逾 SLA",
+      en: "cmp_0908 driver-conduct complaint has breached SLA",
+    },
+    body: {
+      zh: "黃文豪言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。",
+      en: "A conduct complaint against Huang Wen-Hao escalated to fleet ownership. Respond within 24 hours.",
+    },
   },
   {
     tone: "warn",
-    title: "保險代步流程訓練完成率 55%",
-    body: "22 / 40 司機完成。未完成者無法接保險代步任務。",
+    title: {
+      zh: "保險代步流程訓練完成率 55%",
+      en: "Insurance replacement training completion is 55%",
+    },
+    body: {
+      zh: "22 / 40 司機完成。未完成者無法接保險代步任務。",
+      en: "22 of 40 drivers have completed the flow. Incomplete drivers cannot take insurance-replacement work.",
+    },
   },
 ];

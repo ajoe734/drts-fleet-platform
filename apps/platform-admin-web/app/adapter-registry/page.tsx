@@ -350,7 +350,7 @@ function normalizeRegistryError(message: string, unavailable: string) {
 
 export default function AdapterRegistryPage() {
   const client = usePlatformAdminClient();
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const [adapters, setAdapters] = useState<PlatformAdapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -359,149 +359,108 @@ export default function AdapterRegistryPage() {
 
   const copy: Copy = useMemo(
     () =>
-      locale === "en"
-        ? {
-            title: "External Platform Adapter Registry",
-            subtitle:
-              "config / credential governance stays in platform-admin while operational pause / retry stays in ops (Q-ADM17 split authority).",
-            registerAction: "Register adapter",
-            registerInfo:
-              "Adapter registration remains a governed high-risk flow and is not opened inline on this route.",
-            loading: "Loading adapter registry...",
-            empty:
-              "No adapters are registered yet. Register the first governed adapter to open this registry.",
-            unavailable:
-              "Adapter registry data is temporarily unavailable. Check the Platform Admin adapter API and retry this page.",
-            bannerFallbackTitle: "mof-bgmt token expires in 6 days",
-            bannerFallbackBody:
-              "BGMT dispatch reporting token must rotate before 2026-05-31 or today's completed trips cannot be reported.",
-            bannerTitle: (adapter) =>
-              `${adapter.platformCode.toLowerCase()} token expiry review required`,
-            bannerBody: (adapter) =>
-              `${adapter.name} is ${formatPlatformCodeLabel(locale, adapter.credentialStatus).toLowerCase()} with ${adapter.healthStatus.status.toLowerCase()} health. Review token rotation before production traffic is impacted.`,
-            rotateNow: "Rotate now",
-            statusHealthy: "healthy",
-            statusDegraded: "degraded",
-            statusUnhealthy: "down",
-            metricLatency: "LATENCY",
-            metricLastEvent: "LAST EVENT",
-            metricOrders: "ORDERS 24H",
-            metricOrdersPending: "telemetry pending",
-            adapterTitle: (adapter) => adapter.name,
-            sourceValue: (adapter) => adapter.id,
-            webhookTitle: "Webhook",
-            financeMode: "Finance mode",
-            serviceBuckets: "Service buckets",
-            featureFlags: "Feature flags",
-            supportedActions: "Supported actions",
-            operationalPause: "Operational pause",
-            noPause: "Not paused",
-            pauseUnknown: "Pause state not reported by adapter API.",
-            authorityPa: "Platform Admin authority",
-            authorityOps: "Ops authority",
-            governedActionInfo:
-              "Create config, edit credentials, rotate secrets, and enable or disable adapters remain governed actions here.",
-            opsActionInfo:
-              "Operational pause TTL and retry of failed callbacks stay in the ops console and are intentionally separated.",
-            editConfig: "Edit config",
-            editCredential: "Edit credential",
-            rotateCredential: "Rotate",
-            enableAdapter: "Enable",
-            disableAdapter: "Disable",
-            pauseTraffic: "ops pause (TTL)",
-            retryCallback: "Retry callback",
-            queueGoverned: (label, adapter, reason) =>
-              `${label} for ${adapter.name} stays in the governed Platform Admin flow.${reason ? ` Reason captured: ${reason}.` : ""} Plaintext-once secret material is not shown again here.`,
-            queueOps: (label, adapter) =>
-              `${label} for ${adapter.name} remains an ops-authority action on the ops console.`,
-            toggleSuccess: (adapter, enabled, reason) =>
-              `${copyAuditPrefix("Audit receipt")}${adapter.name} ${enabled ? "enabled" : "disabled"} successfully.${reason ? ` Reason: ${reason}.` : ""}`,
-            toggleError: "Failed to update adapter state.",
-            showUnsupportedOpsAction:
-              "This adapter does not expose ops pause or retry capabilities.",
-            webhookNotConfigured: "not configured",
-            lastCheck: "Last check",
-            reasonRequired:
-              "A reason is required before disabling a production adapter.",
-            disableConfirm: (adapter) =>
-              `Confirm disable for ${adapter.name}? This impacts governed adapter readiness.`,
-            enableConfirm: (adapter) => `Confirm enable for ${adapter.name}?`,
-            disableReasonPrompt: (adapter) =>
-              `Enter the governance reason for disabling ${adapter.name}.`,
-            auditReceiptPrefix: "Audit receipt",
-            notConfigured: "not configured",
-          }
-        : {
-            title: "External Platform Adapter Registry",
-            subtitle:
-              "config / credential 治理在 platform-admin，operational pause / retry 在 ops（Q-ADM17 split authority）。",
-            registerAction: "註冊 adapter",
-            registerInfo:
-              "註冊 adapter 仍屬高風險治理流程，這個 route 不直接展開 inline 建立。",
-            loading: "載入 adapter registry 中...",
-            empty:
-              "目前尚未註冊任何 adapter。請先建立第一筆受治理的 adapter 登錄。",
-            unavailable:
-              "Adapter registry 資料暫時不可用，請檢查 Platform Admin adapter API 後再重新整理。",
-            bannerFallbackTitle: "mof-bgmt · token 距到期 6 天",
-            bannerFallbackBody:
-              "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
-            bannerTitle: (adapter) =>
-              `${adapter.platformCode.toLowerCase()} · token 距到期治理檢查`,
-            bannerBody: (adapter) =>
-              `${adapter.name} 目前 credential 為 ${formatPlatformCodeLabel(locale, adapter.credentialStatus)}，健康狀態為 ${adapter.healthStatus.status.toLowerCase()}。請在 production 受影響前完成 token 治理檢查與輪替。`,
-            rotateNow: "立即輪替",
-            statusHealthy: "healthy",
-            statusDegraded: "degraded",
-            statusUnhealthy: "down",
-            metricLatency: "LATENCY",
-            metricLastEvent: "LAST EVENT",
-            metricOrders: "ORDERS 24H",
-            metricOrdersPending: "telemetry pending",
-            adapterTitle: (adapter) => adapter.name,
-            sourceValue: (adapter) => adapter.id,
-            webhookTitle: "Webhook",
-            financeMode: "Finance mode",
-            serviceBuckets: "Service buckets",
-            featureFlags: "Feature flags",
-            supportedActions: "Supported actions",
-            operationalPause: "Operational pause",
-            noPause: "未暫停",
-            pauseUnknown: "adapter API 尚未回報 pause 狀態。",
-            authorityPa: "Platform Admin authority",
-            authorityOps: "Ops authority",
-            governedActionInfo:
-              "建立 config、編輯 credential、輪替 secret、啟停 adapter 仍屬這裡的治理權限。",
-            opsActionInfo:
-              "operational pause TTL 與 failed callback retry 仍屬 ops console，刻意與 Platform Admin 分權。",
-            editConfig: "編輯 config",
-            editCredential: "編輯 credential",
-            rotateCredential: "輪替",
-            enableAdapter: "啟用",
-            disableAdapter: "停用",
-            pauseTraffic: "ops pause (TTL)",
-            retryCallback: "retry callback",
-            queueGoverned: (label, adapter, reason) =>
-              `${adapter.name} 的「${label}」仍需走 Platform Admin 治理流程。${reason ? ` 已記錄原因：${reason}。` : ""} plaintext-once secret 不會在這裡再次顯示。`,
-            queueOps: (label, adapter) =>
-              `${adapter.name} 的「${label}」仍屬 ops authority，請在 ops console 執行。`,
-            toggleSuccess: (adapter, enabled, reason) =>
-              `${copyAuditPrefix("稽核收據")}${adapter.name} 已${enabled ? "啟用" : "停用"}。${reason ? ` 原因：${reason}。` : ""}`,
-            toggleError: "更新 adapter 狀態失敗。",
-            showUnsupportedOpsAction:
-              "這個 adapter 沒有回報 ops pause 或 retry 能力。",
-            webhookNotConfigured: "未設定",
-            lastCheck: "Last check",
-            reasonRequired: "停用 production adapter 前必須填寫原因。",
-            disableConfirm: (adapter) =>
-              `確認要停用 ${adapter.name} 嗎？這會影響受治理的 adapter readiness。`,
-            enableConfirm: (adapter) => `確認要啟用 ${adapter.name} 嗎？`,
-            disableReasonPrompt: (adapter) =>
-              `請輸入停用 ${adapter.name} 的治理原因。`,
-            auditReceiptPrefix: "稽核收據",
-            notConfigured: "未設定",
-          },
-    [locale],
+      ({
+        title: t("adapterRegistry.title"),
+        subtitle: t("adapterRegistry.subtitle"),
+        registerAction: t("adapterRegistry.registerAction"),
+        registerInfo: t("adapterRegistry.registerInfo"),
+        loading: t("adapterRegistry.loading"),
+        empty: t("adapterRegistry.empty"),
+        unavailable: t("adapterRegistry.unavailable"),
+        bannerFallbackTitle: t("adapterRegistry.banner.fallbackTitle"),
+        bannerFallbackBody: t("adapterRegistry.banner.fallbackBody"),
+        bannerTitle: (adapter) =>
+          t("adapterRegistry.banner.title", {
+            platformCode: adapter.platformCode.toLowerCase(),
+          }),
+        bannerBody: (adapter) =>
+          t("adapterRegistry.banner.body", {
+            name: adapter.name,
+            credentialStatus: formatPlatformCodeLabel(
+              locale,
+              adapter.credentialStatus,
+            ).toLowerCase(),
+            healthStatus: healthStatusText(
+              t,
+              adapter.healthStatus.status,
+            ).toLowerCase(),
+          }),
+        rotateNow: t("adapterRegistry.rotateNow"),
+        statusHealthy: t("adapterRegistry.status.healthy"),
+        statusDegraded: t("adapterRegistry.status.degraded"),
+        statusUnhealthy: t("adapterRegistry.status.unhealthy"),
+        metricLatency: t("adapterRegistry.metric.latency"),
+        metricLastEvent: t("adapterRegistry.metric.lastEvent"),
+        metricOrders: t("adapterRegistry.metric.orders24h"),
+        metricOrdersPending: t("adapterRegistry.metric.ordersPending"),
+        adapterTitle: (adapter) => adapter.name,
+        sourceValue: (adapter) => adapter.id,
+        webhookTitle: t("adapterRegistry.webhook"),
+        financeMode: t("adapterRegistry.financeMode"),
+        serviceBuckets: t("adapterRegistry.serviceBuckets"),
+        featureFlags: t("adapterRegistry.featureFlags"),
+        supportedActions: t("adapterRegistry.supportedActions"),
+        operationalPause: t("adapterRegistry.operationalPause"),
+        noPause: t("adapterRegistry.noPause"),
+        pauseUnknown: t("adapterRegistry.pauseUnknown"),
+        authorityPa: t("adapterRegistry.authority.platformAdmin"),
+        authorityOps: t("adapterRegistry.authority.ops"),
+        governedActionInfo: t("adapterRegistry.governedActionInfo"),
+        opsActionInfo: t("adapterRegistry.opsActionInfo"),
+        editConfig: t("adapterRegistry.editConfig"),
+        editCredential: t("adapterRegistry.editCredential"),
+        rotateCredential: t("adapterRegistry.rotateCredential"),
+        enableAdapter: t("adapterRegistry.enableAdapter"),
+        disableAdapter: t("adapterRegistry.disableAdapter"),
+        pauseTraffic: t("adapterRegistry.pauseTraffic"),
+        retryCallback: t("adapterRegistry.retryCallback"),
+        queueGoverned: (label, adapter, reason) =>
+          t("adapterRegistry.queueGoverned", {
+            label,
+            name: adapter.name,
+            reasonClause: reason
+              ? ` ${t("adapterRegistry.queueGoverned.reasonClause", { reason })}`
+              : "",
+          }),
+        queueOps: (label, adapter) =>
+          t("adapterRegistry.queueOps", {
+            label,
+            name: adapter.name,
+          }),
+        toggleSuccess: (adapter, enabled, reason) =>
+          t("adapterRegistry.toggleSuccess", {
+            auditPrefix: copyAuditPrefix(
+              t("adapterRegistry.auditReceiptPrefix"),
+            ),
+            name: adapter.name,
+            status: enabled
+              ? t("adapterRegistry.toggleSuccess.enabled")
+              : t("adapterRegistry.toggleSuccess.disabled"),
+            reasonClause: reason
+              ? ` ${t("adapterRegistry.toggleSuccess.reasonClause", { reason })}`
+              : "",
+          }),
+        toggleError: t("adapterRegistry.toggleError"),
+        showUnsupportedOpsAction: t("adapterRegistry.unsupportedOpsAction"),
+        webhookNotConfigured: t("adapterRegistry.notConfigured"),
+        lastCheck: t("adapterRegistry.lastCheck"),
+        reasonRequired: t("adapterRegistry.reasonRequired"),
+        disableConfirm: (adapter) =>
+          t("adapterRegistry.disableConfirm", {
+            name: adapter.name,
+          }),
+        enableConfirm: (adapter) =>
+          t("adapterRegistry.enableConfirm", {
+            name: adapter.name,
+          }),
+        disableReasonPrompt: (adapter) =>
+          t("adapterRegistry.disableReasonPrompt", {
+            name: adapter.name,
+          }),
+        auditReceiptPrefix: t("adapterRegistry.auditReceiptPrefix"),
+        notConfigured: t("adapterRegistry.notConfigured"),
+      }) satisfies Copy,
+    [locale, t],
   );
 
   useEffect(() => {
@@ -714,7 +673,7 @@ export default function AdapterRegistryPage() {
                       {copy.adapterTitle(adapter)}
                       <Pill theme={theme} tone={adapterKindTone(adapter)}>
                         {adapter.isForwarded
-                          ? "forwarder"
+                          ? t("adapterRegistry.forwarderPill")
                           : formatPlatformCodeLabel(
                               locale as LabelLocale,
                               adapter.adapterType,
@@ -789,9 +748,11 @@ export default function AdapterRegistryPage() {
                         {formatServiceBuckets(copy, adapter)}
                       </p>
                       <p style={metadataSubValueStyle}>
-                        {adapter.policies.maxCandidates} max candidates ·{" "}
-                        {adapter.policies.manualFallbackThresholdSeconds}s
-                        manual fallback
+                        {t("adapterRegistry.serviceBuckets.meta", {
+                          maxCandidates: adapter.policies.maxCandidates,
+                          manualFallbackSeconds:
+                            adapter.policies.manualFallbackThresholdSeconds,
+                        })}
                       </p>
                     </div>
                     <div style={metadataBlockStyle}>
@@ -887,7 +848,10 @@ export default function AdapterRegistryPage() {
                               theme={theme}
                               tone={value ? "success" : "neutral"}
                             >
-                              {key}:{value ? "on" : "off"}
+                              {key}:
+                              {value
+                                ? t("adapterRegistry.featureFlag.on")
+                                : t("adapterRegistry.featureFlag.off")}
                             </Pill>
                           ))
                         ) : (
@@ -986,4 +950,18 @@ export default function AdapterRegistryPage() {
 
 function copyAuditPrefix(label: string) {
   return `${label} · `;
+}
+
+function healthStatusText(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  status: PlatformAdapter["healthStatus"]["status"],
+) {
+  switch (status) {
+    case "HEALTHY":
+      return t("adapterRegistry.status.healthy");
+    case "DEGRADED":
+      return t("adapterRegistry.status.degraded");
+    default:
+      return t("adapterRegistry.status.unhealthy");
+  }
 }

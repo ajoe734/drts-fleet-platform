@@ -1,8 +1,18 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import type { AssistantEntityRef } from "@/components/assistant/assistant-types";
+import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatNoticeWindow,
+  getNoticeHistoryDeliveryLabel,
+  getNoticeSeverityLabel,
+  getNoticeStatusLabel,
+  getNoticesAudienceLabel,
+  getNoticesPageCopy,
+} from "@/lib/translations";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -141,66 +151,25 @@ function statusTone(status: PlatformNoticeStatus): CanvasTone {
   return statusToneMap[status] ?? "neutral";
 }
 
-function audienceTargets(audience: PlatformNoticeRecord["targetAudience"]) {
-  switch (audience) {
-    case "all":
-      return "ops · tenant · driver";
-    case "tenants":
-      return "tenant";
-    case "ops":
-      return "ops";
-    case "drivers":
-      return "driver";
-    default:
-      return audience;
-  }
+function audienceTargets(
+  audience: PlatformNoticeRecord["targetAudience"],
+  locale: "en" | "zh",
+) {
+  return getNoticesAudienceLabel(locale, audience);
 }
 
 function toSeverityLabel(
   severity: PlatformNoticeSeverity,
-  locale: string,
+  locale: "en" | "zh",
 ): string {
-  const en: Record<PlatformNoticeSeverity, string> = {
-    info: "low",
-    warning: "medium",
-    critical: "high",
-  };
-  const zh: Record<PlatformNoticeSeverity, string> = {
-    info: "low",
-    warning: "medium",
-    critical: "high",
-  };
-  const labels = locale === "en" ? en : zh;
-  return labels[severity] ?? severity;
+  return getNoticeSeverityLabel(locale, severity);
 }
 
-function toStatusLabel(status: PlatformNoticeStatus, locale: string): string {
-  const en: Record<PlatformNoticeStatus, string> = {
-    active: "active",
-    scheduled: "scheduled",
-    resolved: "resolved",
-  };
-  const zh: Record<PlatformNoticeStatus, string> = {
-    active: "active",
-    scheduled: "scheduled",
-    resolved: "resolved",
-  };
-  const labels = locale === "en" ? en : zh;
-  return labels[status] ?? status;
-}
-
-function formatWindow(
-  start: string | null,
-  end: string | null,
-  locale: string,
-) {
-  if (!start && !end) {
-    return locale === "en" ? "Not scheduled" : "未排定";
-  }
-  if (start && end) {
-    return `${formatDateTime(start)} - ${formatDateTime(end)}`;
-  }
-  return formatDateTime(start ?? end ?? "");
+function toStatusLabel(
+  status: PlatformNoticeStatus,
+  locale: "en" | "zh",
+): string {
+  return getNoticeStatusLabel(locale, status);
 }
 
 function toDatetimeLocalValue(value: string | null) {
@@ -219,135 +188,10 @@ function fromDatetimeLocalValue(value: string) {
 }
 
 export default function NoticesPage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
 
-  const copy =
-    locale === "en"
-      ? {
-          title: "Notices & Maintenance",
-          subtitle:
-            "critical / maintenance severity pushes a cross-app banner to ops, tenant, and driver surfaces (Q-ADM15).",
-          notices: "Notices",
-          maintenance: "Maintenance Mode",
-          history: "Broadcast History",
-          createNotice: "Create notice",
-          enterMaintenance: "Enter maintenance",
-          refresh: "Refresh",
-          refreshing: "Refreshing",
-          emptyNotices: "No platform notices have been published yet.",
-          emptyHistory: "No broadcasts have been delivered yet.",
-          noticeComposerTitle: "Create notice",
-          noticeComposerSubtitle:
-            "Publish a cross-app banner for platform operators, tenants, or drivers.",
-          noticeTitle: "Title",
-          noticeBody: "Body",
-          noticeAudience: "Audience",
-          noticeSeverity: "Severity",
-          publishNotice: "Publish notice",
-          publishing: "Publishing",
-          activeNoticeGuardrailTitle:
-            "Maintenance notices should precede dispatch changes",
-          activeNoticeGuardrailBody:
-            "Publish a maintenance-severity notice before enabling platform-wide maintenance mode.",
-          currentMaintenance: "Maintenance mode · current state",
-          currentMaintenanceSubtitle:
-            "Platform-wide dispatch and ingress control.",
-          internalReason: "Reason · internal record",
-          scheduledStart: "Scheduled start",
-          scheduledEnd: "Scheduled end",
-          saveMaintenance: "Save maintenance settings",
-          previewTitle: "Current maintenance notice (preview)",
-          previewFallback:
-            "Enable maintenance mode to push a cross-app interruption banner.",
-          previewTargets: "Target surfaces: ops · tenant · driver",
-          reasonRequired:
-            "A high-risk maintenance action requires a reason before saving.",
-          confirmTitle: "Confirm maintenance mode update",
-          confirmBody:
-            "This is a high-risk action. Saving will change platform-wide dispatch and webhook behavior.",
-          confirmReasonLabel: "Audit reason",
-          confirmCancel: "Cancel",
-          confirmApply: "Apply maintenance update",
-          resolving: "Resolving",
-          resolve: "Resolve",
-          maintenanceEnabled: "enabled",
-          maintenanceDisabled: "disabled",
-          maintenanceSummary:
-            "Once enabled, dispatch, webhook delivery, and partner ingress are paused.",
-          reasonPlaceholder:
-            "Planned maintenance, partner outage mitigation, or compliance hold",
-          startPlaceholder: "YYYY-MM-DD HH:MM",
-          endPlaceholder: "YYYY-MM-DD HH:MM",
-          createdAt: "Updated",
-          audience: "Targets",
-          status: "Status",
-          severity: "SEV",
-          delivery: "Delivery",
-          broadcastAt: "Broadcast at",
-          updatedBy: "Updated by",
-          window: "Window",
-        }
-      : {
-          title: "Notices & Maintenance",
-          subtitle:
-            "critical / maintenance severity 會推 cross-app banner 到 ops / tenant / driver (Q-ADM15)。",
-          notices: "Notices",
-          maintenance: "Maintenance Mode",
-          history: "Broadcast History",
-          createNotice: "建立公告",
-          enterMaintenance: "進入維護",
-          refresh: "重新整理",
-          refreshing: "重新整理中",
-          emptyNotices: "目前沒有平台公告。",
-          emptyHistory: "目前沒有跨應用廣播紀錄。",
-          noticeComposerTitle: "建立公告",
-          noticeComposerSubtitle:
-            "發佈給平台營運、租戶或司機端的 cross-app banner。",
-          noticeTitle: "標題",
-          noticeBody: "內容",
-          noticeAudience: "對象",
-          noticeSeverity: "Severity",
-          publishNotice: "發佈公告",
-          publishing: "發佈中",
-          activeNoticeGuardrailTitle: "進入維護前應先發 maintenance notice",
-          activeNoticeGuardrailBody:
-            "先發佈 maintenance severity notice，再啟用全平台 maintenance mode。",
-          currentMaintenance: "Maintenance mode · 目前狀態",
-          currentMaintenanceSubtitle: "全平台 dispatch 與入站流量控管。",
-          internalReason: "原因 · 內部紀錄",
-          scheduledStart: "預定起始",
-          scheduledEnd: "預定結束",
-          saveMaintenance: "保存維護設定",
-          previewTitle: "當前 maintenance notice (preview)",
-          previewFallback: "啟用維護模式後，將推送跨應用中斷公告。",
-          previewTargets: "目標對象：ops · tenant · driver",
-          reasonRequired: "高風險 maintenance 動作必須填寫原因後才能保存。",
-          confirmTitle: "確認更新 maintenance mode",
-          confirmBody:
-            "這是高風險動作。保存後會改變全平台 dispatch 與 webhook 行為。",
-          confirmReasonLabel: "稽核原因",
-          confirmCancel: "取消",
-          confirmApply: "套用維護更新",
-          resolving: "處理中",
-          resolve: "Resolve",
-          maintenanceEnabled: "enabled",
-          maintenanceDisabled: "disabled",
-          maintenanceSummary:
-            "啟用後將停止 dispatch、webhook 投遞與 partner 入站。",
-          reasonPlaceholder:
-            "例如：計畫性維護、partner outage mitigation、compliance hold",
-          startPlaceholder: "YYYY-MM-DD HH:MM",
-          endPlaceholder: "YYYY-MM-DD HH:MM",
-          createdAt: "更新",
-          audience: "對象",
-          status: "Status",
-          severity: "SEV",
-          delivery: "Delivery",
-          broadcastAt: "Broadcast at",
-          updatedBy: "Updated by",
-          window: "Window",
-        };
+  const copy = useMemo(() => getNoticesPageCopy(locale), [locale]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -427,10 +271,12 @@ export default function NoticesPage() {
   );
 
   const maintenancePreview = useMemo(() => {
-    const windowLabel = formatWindow(
-      fromDatetimeLocalValue(maintStart),
-      fromDatetimeLocalValue(maintEnd),
-      locale,
+    const scheduledStart = fromDatetimeLocalValue(maintStart);
+    const scheduledEnd = fromDatetimeLocalValue(maintEnd);
+    const windowLabel = formatNoticeWindow(
+      scheduledStart ? formatDateTime(scheduledStart) : null,
+      scheduledEnd ? formatDateTime(scheduledEnd) : null,
+      t,
     );
     if (!maintEnabled && !maintReason.trim()) {
       return copy.previewFallback;
@@ -439,11 +285,11 @@ export default function NoticesPage() {
   }, [
     copy.maintenanceSummary,
     copy.previewFallback,
-    locale,
     maintEnabled,
     maintEnd,
     maintReason,
     maintStart,
+    t,
   ]);
 
   const noticeRows = useMemo<NoticeRow[]>(
@@ -453,11 +299,11 @@ export default function NoticesPage() {
         title: notice.title,
         severity: notice.severity,
         status: notice.status,
-        audience: audienceTargets(notice.targetAudience),
+        audience: audienceTargets(notice.targetAudience, locale),
         updated: formatDateTime(notice.updatedAt),
         source: notice,
       })),
-    [sortedNotices],
+    [locale, sortedNotices],
   );
 
   const historyRows = useMemo<BroadcastRow[]>(
@@ -466,23 +312,22 @@ export default function NoticesPage() {
         id: notice.noticeId.slice(0, 12),
         title: notice.title,
         severity: notice.severity,
-        targets: audienceTargets(notice.targetAudience),
-        delivery:
-          notice.status === "resolved"
-            ? "resolved delivery archived"
-            : notice.targetAudience === "all"
-              ? "delivered 3 / 3"
-              : "delivered 1 / 1",
+        targets: audienceTargets(notice.targetAudience, locale),
+        delivery: getNoticeHistoryDeliveryLabel(
+          locale,
+          notice.status,
+          notice.targetAudience,
+        ),
         broadcastAt: formatDateTime(
           notice.scheduledAt ?? notice.updatedAt ?? notice.createdAt,
         ),
       })),
-    [sortedNotices],
+    [locale, sortedNotices],
   );
 
   const noticeColumns = useMemo<CanvasTableColumn<NoticeRow>[]>(
     () => [
-      { h: "ID", k: "id", w: 100, mono: true },
+      { h: copy.id, k: "id", w: 100, mono: true },
       {
         h: copy.noticeTitle,
         w: 320,
@@ -523,12 +368,12 @@ export default function NoticesPage() {
       },
       { h: copy.createdAt, k: "updated", w: 180, mono: true },
       {
-        h: "Action",
+        h: copy.action,
         w: 110,
         r: (row: NoticeRow) =>
           row.status === "resolved" ? (
             <CanvasPill theme={theme} tone="neutral">
-              archived
+              {copy.archived}
             </CanvasPill>
           ) : (
             <CanvasBtn
@@ -545,8 +390,11 @@ export default function NoticesPage() {
       },
     ],
     [
+      copy.action,
+      copy.archived,
       copy.audience,
       copy.createdAt,
+      copy.id,
       copy.noticeTitle,
       copy.resolve,
       copy.resolving,
@@ -559,7 +407,7 @@ export default function NoticesPage() {
 
   const historyColumns = useMemo<CanvasTableColumn<BroadcastRow>[]>(
     () => [
-      { h: "Notice", k: "id", w: 110, mono: true },
+      { h: copy.notice, k: "id", w: 110, mono: true },
       { h: copy.noticeTitle, k: "title", w: 280 },
       {
         h: copy.severity,
@@ -570,7 +418,7 @@ export default function NoticesPage() {
           </CanvasPill>
         ),
       },
-      { h: "Targets", k: "targets", w: 180, mono: true },
+      { h: copy.audience, k: "targets", w: 180, mono: true },
       {
         h: copy.delivery,
         w: 180,
@@ -582,7 +430,15 @@ export default function NoticesPage() {
       },
       { h: copy.broadcastAt, k: "broadcastAt", w: 180, mono: true },
     ],
-    [copy.broadcastAt, copy.delivery, copy.noticeTitle, copy.severity, locale],
+    [
+      copy.audience,
+      copy.broadcastAt,
+      copy.delivery,
+      copy.notice,
+      copy.noticeTitle,
+      copy.severity,
+      locale,
+    ],
   );
 
   const pageTabs = useMemo(() => {
@@ -710,6 +566,256 @@ export default function NoticesPage() {
     setShowComposer((current) => !current);
   }
 
+  const assistantBridge = useMemo(() => {
+    const selectedRecords: AssistantEntityRef[] =
+      resolvingNoticeId && activeTab === "notices"
+        ? [
+            {
+              kind: "notice",
+              id: resolvingNoticeId,
+              source: "page-selection",
+            },
+          ]
+        : [];
+    const forms = [
+      ...(showComposer
+        ? [
+            {
+              formId: "platform-notice-composer",
+              title: activeTab === "notices" ? copy.createNotice : copy.title,
+              dirty:
+                noticeTitle.trim().length > 0 ||
+                noticeBody.trim().length > 0 ||
+                noticeSeverity !== "info" ||
+                noticeAudience !== "all",
+              fields: [
+                {
+                  fieldId: "noticeTitle",
+                  label: copy.noticeTitle,
+                  valueSummary: noticeTitle,
+                  required: true,
+                  dirty: noticeTitle.trim().length > 0,
+                },
+                {
+                  fieldId: "noticeBody",
+                  label: copy.noticeBody,
+                  valueSummary: noticeBody,
+                  required: true,
+                  dirty: noticeBody.trim().length > 0,
+                },
+                {
+                  fieldId: "noticeSeverity",
+                  label: copy.noticeSeverity,
+                  valueSummary: noticeSeverity,
+                },
+                {
+                  fieldId: "noticeAudience",
+                  label: copy.noticeAudience,
+                  valueSummary: noticeAudience,
+                },
+              ],
+              validationErrors: [
+                ...(noticeTitle.trim()
+                  ? []
+                  : [
+                      {
+                        fieldId: "noticeTitle",
+                        code: "required",
+                        message: copy.noticeTitleRequired,
+                      },
+                    ]),
+                ...(noticeBody.trim()
+                  ? []
+                  : [
+                      {
+                        fieldId: "noticeBody",
+                        code: "required",
+                        message: copy.noticeBodyRequired,
+                      },
+                    ]),
+              ],
+              availableActions: [
+                {
+                  actionId: "submit_notice",
+                  label: copy.createNotice,
+                  riskLevel: "medium" as const,
+                },
+              ],
+            },
+          ]
+        : []),
+      ...(activeTab === "maint"
+        ? [
+            {
+              formId: "maintenance-mode-form",
+              title: copy.maintenance,
+              dirty:
+                maintEnabled !== Boolean(maintenance?.enabled) ||
+                maintReason !== (maintenance?.reason ?? "") ||
+                maintStart !==
+                  toDatetimeLocalValue(maintenance?.scheduledStart ?? null) ||
+                maintEnd !==
+                  toDatetimeLocalValue(maintenance?.scheduledEnd ?? null),
+              fields: [
+                {
+                  fieldId: "enabled",
+                  label: copy.currentMaintenance,
+                  valueSummary: maintEnabled
+                    ? copy.maintenanceEnabled
+                    : copy.maintenanceDisabled,
+                },
+                {
+                  fieldId: "reason",
+                  label: copy.internalReason,
+                  valueSummary: maintReason,
+                  required: true,
+                  dirty: maintReason.trim().length > 0,
+                },
+                {
+                  fieldId: "scheduledStart",
+                  label: copy.scheduledStart,
+                  valueSummary: maintStart,
+                  dirty: maintStart.trim().length > 0,
+                },
+                {
+                  fieldId: "scheduledEnd",
+                  label: copy.scheduledEnd,
+                  valueSummary: maintEnd,
+                  dirty: maintEnd.trim().length > 0,
+                },
+              ],
+              validationErrors: maintReason.trim()
+                ? []
+                : [
+                    {
+                      fieldId: "reason",
+                      code: "required",
+                      message: copy.reasonRequired,
+                    },
+                  ],
+              availableActions: [
+                {
+                  actionId: "confirm_maintenance_mode",
+                  label: copy.enterMaintenance,
+                  riskLevel: "high" as const,
+                },
+              ],
+            },
+          ]
+        : []),
+    ];
+
+    return {
+      pageId: "notices",
+      contextSnapshot: {
+        activeTab,
+        selection: selectedRecords,
+        selectedRecords,
+        warnings: [
+          ...(error
+            ? [
+                {
+                  code: "notices_error",
+                  severity: "warning" as const,
+                  message: copy.warning.operationError(error),
+                },
+              ]
+            : []),
+          ...(maintenance?.enabled
+            ? [
+                {
+                  code: "maintenance_mode_enabled",
+                  severity: "critical" as const,
+                  message: copy.warning.maintenanceEnabled(),
+                },
+              ]
+            : []),
+        ],
+        visibleTables:
+          activeTab === "notices"
+            ? [
+                {
+                  tableId: "platform-notices",
+                  title: copy.notices,
+                  visibleRowCount: noticeRows.length,
+                  visibleRowIds: noticeRows.slice(0, 5).map((row) => row.id),
+                  selectedRowIds: resolvingNoticeId ? [resolvingNoticeId] : [],
+                  availableActions: [
+                    {
+                      actionId: "create_notice",
+                      label: copy.createNotice,
+                      riskLevel: "medium" as const,
+                    },
+                    {
+                      actionId: "resolve_notice",
+                      label: copy.resolve,
+                      riskLevel: "medium" as const,
+                    },
+                  ],
+                },
+              ]
+            : activeTab === "history"
+              ? [
+                  {
+                    tableId: "notice-history",
+                    title: copy.history,
+                    visibleRowCount: historyRows.length,
+                    visibleRowIds: historyRows.slice(0, 5).map((row) => row.id),
+                  },
+                ]
+              : [],
+        availableActions: [
+          {
+            actionId:
+              activeTab === "maint" ? "enter_maintenance" : "create_notice",
+            label:
+              activeTab === "maint" ? copy.enterMaintenance : copy.createNotice,
+            riskLevel:
+              activeTab === "maint" ? ("high" as const) : ("medium" as const),
+          },
+          { actionId: "refresh_notices", label: copy.refresh },
+        ],
+        forms,
+      },
+    };
+  }, [
+    activeTab,
+    copy.createNotice,
+    copy.currentMaintenance,
+    copy.enterMaintenance,
+    copy.history,
+    copy.internalReason,
+    copy.maintenance,
+    copy.noticeAudience,
+    copy.noticeBody,
+    copy.noticeSeverity,
+    copy.noticeTitle,
+    copy.notices,
+    copy.reasonRequired,
+    copy.refresh,
+    copy.resolve,
+    copy.scheduledEnd,
+    copy.scheduledStart,
+    copy.title,
+    error,
+    historyRows,
+    maintEnabled,
+    maintEnd,
+    maintReason,
+    maintStart,
+    maintenance,
+    noticeAudience,
+    noticeBody,
+    noticeRows,
+    noticeSeverity,
+    noticeTitle,
+    resolvingNoticeId,
+    showComposer,
+    showMaintenanceConfirm,
+  ]);
+
+  usePlatformAdminAssistantPage(assistantBridge);
+
   if (loading && notices.length === 0 && !maintenance) {
     return (
       <div style={bodyStyle}>
@@ -802,9 +908,15 @@ export default function NoticesPage() {
                         }
                         style={selectStyle}
                       >
-                        <option value="info">low</option>
-                        <option value="warning">medium</option>
-                        <option value="critical">high</option>
+                        <option value="info">
+                          {copy.severityOptions.info}
+                        </option>
+                        <option value="warning">
+                          {copy.severityOptions.warning}
+                        </option>
+                        <option value="critical">
+                          {copy.severityOptions.critical}
+                        </option>
                       </select>
                     </CanvasField>
                     <CanvasField
@@ -822,10 +934,16 @@ export default function NoticesPage() {
                         }
                         style={selectStyle}
                       >
-                        <option value="all">ops · tenant · driver</option>
-                        <option value="ops">ops</option>
-                        <option value="tenants">tenant</option>
-                        <option value="drivers">driver</option>
+                        <option value="all">
+                          {audienceTargets("all", locale)}
+                        </option>
+                        <option value="ops">{copy.audienceOptions.ops}</option>
+                        <option value="tenants">
+                          {copy.audienceOptions.tenants}
+                        </option>
+                        <option value="drivers">
+                          {copy.audienceOptions.drivers}
+                        </option>
                       </select>
                     </CanvasField>
                   </div>
@@ -1066,17 +1184,21 @@ export default function NoticesPage() {
                     <CanvasInput
                       theme={theme}
                       mono
-                      value={formatWindow(
-                        maintenance?.scheduledStart ?? null,
-                        maintenance?.scheduledEnd ?? null,
-                        locale,
+                      value={formatNoticeWindow(
+                        maintenance?.scheduledStart
+                          ? formatDateTime(maintenance.scheduledStart)
+                          : null,
+                        maintenance?.scheduledEnd
+                          ? formatDateTime(maintenance.scheduledEnd)
+                          : null,
+                        t,
                       )}
                     />
                   </CanvasField>
                   <CanvasField theme={theme} label={copy.updatedBy}>
                     <CanvasInput
                       theme={theme}
-                      value={maintenance?.updatedBy ?? "system"}
+                      value={maintenance?.updatedBy ?? copy.systemUser}
                     />
                   </CanvasField>
                   <CanvasField theme={theme} label={copy.createdAt}>
@@ -1096,7 +1218,7 @@ export default function NoticesPage() {
           <CanvasCard
             theme={theme}
             title={copy.history}
-            subtitle="Broadcast history · 跨 app 投遞結果"
+            subtitle={copy.historySubtitle}
             padding={0}
           >
             {historyRows.length > 0 ? (
@@ -1121,7 +1243,7 @@ export default function NoticesPage() {
             style={modalCardStyle}
             actions={
               <CanvasPill theme={theme} tone="danger" dot>
-                high risk
+                {copy.maintenanceRisk}
               </CanvasPill>
             }
           >

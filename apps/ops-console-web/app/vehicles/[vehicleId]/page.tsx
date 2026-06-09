@@ -20,7 +20,7 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { isMaintenanceOverdue } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
-import type { Locale } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasCard as Card,
@@ -169,8 +169,12 @@ const monoStyle: CSSProperties = {
   fontFamily: theme.monoFamily,
 };
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
+function detailT(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(`vehicles.detail.${key}`, locale, params);
 }
 
 function normalizeOrigin(value: string | null | undefined) {
@@ -264,7 +268,7 @@ function summarizeBlockedReasons(
 ): string {
   const reasons = vehicle.supplyLifecycle.dispatch.blockedReasons;
   if (reasons.length === 0) {
-    return copy(locale, "No active dispatch blockers", "目前沒有派遣阻塞");
+    return detailT(locale, "label.noBlockers");
   }
 
   return reasons
@@ -352,70 +356,38 @@ function emptyIcon(reason: EmptyReason) {
 function emptyTitle(locale: Locale, reason: EmptyReason) {
   switch (reason) {
     case "no_data":
-      return copy(locale, "No records yet", "目前沒有資料");
+      return detailT(locale, "empty.noRecords");
     case "not_provisioned":
-      return copy(locale, "Not provisioned", "尚未 provision");
+      return detailT(locale, "empty.notProvisioned");
     case "fetch_failed":
-      return copy(locale, "Snapshot unavailable", "快照暫不可用");
+      return detailT(locale, "empty.snapshotUnavailable");
     case "permission_denied":
-      return copy(locale, "Permission required", "權限不足");
+      return detailT(locale, "empty.permissionRequired");
     case "external_unavailable":
-      return copy(
-        locale,
-        "External dependency unavailable",
-        "外部相依暫不可用",
-      );
+      return detailT(locale, "empty.externalUnavailable");
     case "filtered_empty":
-      return copy(locale, "No matches after filtering", "套用篩選後沒有結果");
+      return detailT(locale, "empty.filteredEmpty");
     default:
-      return copy(locale, "No records yet", "目前沒有資料");
+      return detailT(locale, "empty.noRecords");
   }
 }
 
 function defaultEmptyDescription(locale: Locale, reason: EmptyReason) {
   switch (reason) {
     case "no_data":
-      return copy(
-        locale,
-        "This section is healthy, but there is nothing to show for the current vehicle.",
-        "這個區塊健康可用，但目前這輛車沒有對應資料。",
-      );
+      return detailT(locale, "empty.body.noData");
     case "not_provisioned":
-      return copy(
-        locale,
-        "The required upstream record has not been provisioned for this vehicle yet.",
-        "這輛車所需的上游資料尚未 provision。",
-      );
+      return detailT(locale, "empty.body.notProvisioned");
     case "fetch_failed":
-      return copy(
-        locale,
-        "The service responded with an error before a usable snapshot could be rendered.",
-        "服務在回傳可用快照前發生錯誤。",
-      );
+      return detailT(locale, "empty.body.fetchFailed");
     case "permission_denied":
-      return copy(
-        locale,
-        "Your current authority can open this page, but this subsection needs a higher-scope read grant.",
-        "你可以進入此頁，但此子區塊需要更高權限才能讀取。",
-      );
+      return detailT(locale, "empty.body.permissionDenied");
     case "external_unavailable":
-      return copy(
-        locale,
-        "The section depends on an external or degraded upstream system that is temporarily unavailable.",
-        "此區塊依賴的外部或降級上游系統目前暫不可用。",
-      );
+      return detailT(locale, "empty.body.externalUnavailable");
     case "filtered_empty":
-      return copy(
-        locale,
-        "The upstream dataset exists, but the current filter left no matching rows.",
-        "上游資料存在，但目前篩選條件沒有留下任何符合的列。",
-      );
+      return detailT(locale, "empty.body.filteredEmpty");
     default:
-      return copy(
-        locale,
-        "No records are currently available.",
-        "目前沒有可顯示的資料。",
-      );
+      return detailT(locale, "empty.body.default");
   }
 }
 
@@ -612,7 +584,7 @@ async function resolveWithFallback<T>(
       error:
         error instanceof Error
           ? error.message
-          : copy(locale, "Unknown error", "未知錯誤"),
+          : detailT(locale, "label.unknownError"),
     };
   }
 }
@@ -644,7 +616,7 @@ async function resolveListWithFallback<T>(
       error:
         error instanceof Error
           ? error.message
-          : copy(locale, "Unknown error", "未知錯誤"),
+          : detailT(locale, "label.unknownError"),
       refresh: null,
       emptyState: null,
     };
@@ -798,34 +770,24 @@ function buildRefreshBannerBody(
   const freshnessLabel = formatOpsCodeLabel(locale, metadata.dataFreshness);
   const sectionSummary =
     degradedSections.length > 0
-      ? copy(
-          locale,
-          `Degraded sections: ${degradedSections.join(", ")}`,
-          `降級區塊：${degradedSections.join("、")}`,
-        )
-      : copy(
-          locale,
-          "All vehicle detail surfaces loaded.",
-          "車輛詳情區塊已完整載入。",
-        );
+      ? detailT(locale, "refresh.sectionSummary", {
+          sections:
+            locale === "en"
+              ? degradedSections.join(", ")
+              : degradedSections.join("、"),
+        })
+      : detailT(locale, "refresh.sectionLoaded");
   const snapshotSummary = metadata.generatedAt
-    ? copy(
-        locale,
-        `Generated ${formatDateTime(locale, metadata.generatedAt)}`,
-        `生成時間 ${formatDateTime(locale, metadata.generatedAt)}`,
-      )
-    : copy(
-        locale,
-        "Backend refresh metadata unavailable; showing the latest server-rendered snapshot.",
-        "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
-      );
+    ? detailT(locale, "refresh.generated", {
+        value: formatDateTime(locale, metadata.generatedAt),
+      })
+    : detailT(locale, "refresh.metadataUnavailable");
 
   return [
-    copy(
-      locale,
-      `T3 cadence · ${metadata.source} snapshot · ${freshnessLabel}`,
-      `T3 節奏 · ${metadata.source} 快照 · ${freshnessLabel}`,
-    ),
+    detailT(locale, "refresh.cadence", {
+      source: metadata.source,
+      freshness: freshnessLabel,
+    }),
     snapshotSummary,
     sectionSummary,
   ].join(" · ");
@@ -848,7 +810,7 @@ function buildVehicleActionFromDescriptor(
   if (actionCode === "refresh") {
     return {
       descriptor,
-      label: copy(locale, "Refresh", "重新整理"),
+      label: detailT(locale, "action.refresh"),
       icon: "arrow",
       href: `/vehicles/${encodeURIComponent(context.vehicleId)}`,
       variant: "secondary",
@@ -858,7 +820,7 @@ function buildVehicleActionFromDescriptor(
   if (actionCode.includes("maintenance")) {
     return {
       descriptor,
-      label: copy(locale, "Open maintenance", "查看保修"),
+      label: detailT(locale, "action.openMaintenance"),
       icon: "ext",
       href: `/maintenance?vehicleId=${encodeURIComponent(context.vehicleId)}`,
       variant: "secondary",
@@ -868,7 +830,7 @@ function buildVehicleActionFromDescriptor(
   if (actionCode.includes("driver")) {
     return {
       descriptor,
-      label: copy(locale, "Open current driver", "開啟目前司機"),
+      label: detailT(locale, "action.openCurrentDriver"),
       icon: "users",
       ...(context.currentBinding?.driver?.driverId
         ? {
@@ -882,7 +844,7 @@ function buildVehicleActionFromDescriptor(
   if (actionCode.includes("contract")) {
     return {
       descriptor,
-      label: copy(locale, "Open contract", "開啟合約"),
+      label: detailT(locale, "action.openContract"),
       icon: "ext",
       ...(context.primaryContractId
         ? {
@@ -896,7 +858,7 @@ function buildVehicleActionFromDescriptor(
   if (actionCode.includes("incident")) {
     return {
       descriptor,
-      label: copy(locale, "Open incident", "開啟事故"),
+      label: detailT(locale, "action.openIncident"),
       icon: "warn",
       ...(context.primaryIncidentId
         ? {
@@ -914,7 +876,7 @@ function buildVehicleActionFromDescriptor(
   ) {
     return {
       descriptor,
-      label: copy(locale, "Platform Admin /fleet", "Platform Admin /fleet"),
+      label: detailT(locale, "action.platformAdminFleet"),
       icon: "ext",
       ...(context.platformAdminHref ? { href: context.platformAdminHref } : {}),
       openInNewTab: true,
@@ -925,7 +887,7 @@ function buildVehicleActionFromDescriptor(
   if (actionCode.includes("registry")) {
     return {
       descriptor,
-      label: copy(locale, "Back to registry", "回到車輛名冊"),
+      label: detailT(locale, "action.backToRegistry"),
       icon: "arrow",
       href: "/vehicles",
       variant: "ghost",
@@ -935,7 +897,7 @@ function buildVehicleActionFromDescriptor(
   if (actionCode.includes("note")) {
     return {
       descriptor,
-      label: copy(locale, "Add ops note", "新增營運備註"),
+      label: detailT(locale, "action.addOpsNote"),
       icon: "plus",
       variant: "secondary",
     };
@@ -1020,15 +982,15 @@ function collectVehicleAuditEntries(
 function sectionErrorLabel(locale: Locale, key: string) {
   switch (key) {
     case "drivers":
-      return copy(locale, "driver binding", "司機綁定");
+      return detailT(locale, "section.driverBinding");
     case "maintenance":
-      return copy(locale, "maintenance", "保修");
+      return detailT(locale, "section.maintenance");
     case "contracts":
-      return copy(locale, "contracts", "合約");
+      return detailT(locale, "section.contracts");
     case "incidents":
-      return copy(locale, "incidents", "事故");
+      return detailT(locale, "section.incidents");
     case "audit":
-      return copy(locale, "audit", "稽核");
+      return detailT(locale, "section.audit");
     default:
       return key;
   }
@@ -1115,7 +1077,7 @@ export default async function VehicleDetailPage({
     const reason = classifyErrorReason(vehiclesResult.error);
     const refreshAction: VehicleAction = {
       descriptor: { action: "refresh", enabled: true, riskLevel: "low" },
-      label: copy(locale, "Retry vehicle snapshot", "重試車輛快照"),
+      label: detailT(locale, "action.retryVehicleSnapshot"),
       icon: "arrow",
       href: `/vehicles/${encodeURIComponent(vehicleId)}`,
     };
@@ -1124,12 +1086,8 @@ export default async function VehicleDetailPage({
       <>
         <PageHeader
           theme={theme}
-          title={copy(locale, "Vehicle detail", "車輛詳情")}
-          subtitle={`${vehicleId} · ${copy(
-            locale,
-            "registry fetch failed",
-            "名冊載入失敗",
-          )}`}
+          title={detailT(locale, "title")}
+          subtitle={`${vehicleId} · ${detailT(locale, "subtitle.registryFetchFailed")}`}
           actions={renderVehicleAction(refreshAction)}
         />
         <div style={pageBodyStyle}>
@@ -1151,7 +1109,7 @@ export default async function VehicleDetailPage({
   if (!vehicle) {
     const backAction: VehicleAction = {
       descriptor: { action: "open_registry", enabled: true, riskLevel: "low" },
-      label: copy(locale, "Back to registry", "回到車輛名冊"),
+      label: detailT(locale, "action.backToRegistry"),
       href: "/vehicles",
     };
 
@@ -1159,7 +1117,7 @@ export default async function VehicleDetailPage({
       <>
         <PageHeader
           theme={theme}
-          title={copy(locale, "Vehicle not found", "找不到車輛")}
+          title={detailT(locale, "title.notFound")}
           subtitle={vehicleId}
           actions={renderVehicleAction(backAction)}
         />
@@ -1170,11 +1128,7 @@ export default async function VehicleDetailPage({
             getEmptyStateMessage(
               locale,
               vehiclesResult.emptyState,
-              copy(
-                locale,
-                "No vehicle record matches this id in the current ops registry snapshot.",
-                "目前 ops 名冊快照中沒有符合此編號的車輛。",
-              ),
+              detailT(locale, "body.notFound"),
             ),
             backAction,
           )}
@@ -1235,11 +1189,7 @@ export default async function VehicleDetailPage({
     resourceType: "vehicle",
     resourceId: vehicle.vehicleId,
     openMode: "new_tab",
-    label: copy(
-      locale,
-      "Open offboarding in Platform Admin",
-      "在 Platform Admin 開啟退場流程",
-    ),
+    label: detailT(locale, "link.openOffboarding"),
   };
   const platformAdminHref = platformAdminOrigin
     ? buildCrossAppHref(platformAdminOrigin, platformAdminLink)
@@ -1247,7 +1197,7 @@ export default async function VehicleDetailPage({
 
   const refreshPageAction: VehicleAction = {
     descriptor: { action: "refresh", enabled: true, riskLevel: "low" },
-    label: copy(locale, "Refresh", "重新整理"),
+    label: detailT(locale, "action.refresh"),
     icon: "arrow",
     href: `/vehicles/${encodeURIComponent(vehicle.vehicleId)}`,
     variant: "secondary",
@@ -1258,7 +1208,7 @@ export default async function VehicleDetailPage({
       enabled: true,
       riskLevel: "low",
     },
-    label: copy(locale, "Open maintenance", "查看保修"),
+    label: detailT(locale, "action.openMaintenance"),
     icon: "ext",
     href: `/maintenance?vehicleId=${encodeURIComponent(vehicle.vehicleId)}`,
     variant: "secondary",
@@ -1272,7 +1222,7 @@ export default async function VehicleDetailPage({
         : "driver_binding_missing",
       riskLevel: "low",
     },
-    label: copy(locale, "Open current driver", "開啟目前司機"),
+    label: detailT(locale, "action.openCurrentDriver"),
     icon: "users",
     ...(currentBinding?.driver?.driverId
       ? {
@@ -1294,7 +1244,7 @@ export default async function VehicleDetailPage({
           : "offboarding_inactive",
       riskLevel: "medium",
     },
-    label: copy(locale, "Platform Admin /fleet", "Platform Admin /fleet"),
+    label: detailT(locale, "action.platformAdminFleet"),
     icon: "ext",
     ...(platformAdminHref ? { href: platformAdminHref } : {}),
     openInNewTab: true,
@@ -1311,7 +1261,7 @@ export default async function VehicleDetailPage({
         disabledReasonCode: "ops_note_endpoint_pending",
         riskLevel: "medium",
       },
-      label: copy(locale, "Add ops note", "新增營運備註"),
+      label: detailT(locale, "action.addOpsNote"),
       icon: "plus",
       variant: "secondary",
     },
@@ -1429,19 +1379,19 @@ export default async function VehicleDetailPage({
     });
 
   const maintenanceColumns: CanvasTableColumn<MaintenanceRow>[] = [
-    { h: "WO", k: "id", w: 120, mono: true },
+    { h: detailT(locale, "col.workOrder"), k: "id", w: 120, mono: true },
     {
-      h: copy(locale, "Type", "類別"),
+      h: detailT(locale, "col.typeShort"),
       k: "kind",
       w: 200,
     },
     {
-      h: "STATUS",
+      h: detailT(locale, "col.status"),
       k: "status",
       w: 140,
     },
     {
-      h: copy(locale, "Scheduled", "排定"),
+      h: detailT(locale, "col.scheduled"),
       k: "scheduled",
       mono: true,
     },
@@ -1479,12 +1429,12 @@ export default async function VehicleDetailPage({
   });
 
   const contractColumns: CanvasTableColumn<ContractRow>[] = [
-    { h: "CONTRACT", k: "id", w: 130, mono: true },
-    { h: copy(locale, "Counterparty", "對象"), k: "partner", w: 220 },
-    { h: copy(locale, "Type", "類型"), k: "type", w: 180 },
-    { h: copy(locale, "Term", "期間"), k: "term", mono: true, w: 200 },
+    { h: detailT(locale, "col.contract"), k: "id", w: 130, mono: true },
+    { h: detailT(locale, "col.counterparty"), k: "partner", w: 220 },
+    { h: detailT(locale, "col.type"), k: "type", w: 180 },
+    { h: detailT(locale, "col.term"), k: "term", mono: true, w: 200 },
     {
-      h: "STATUS",
+      h: detailT(locale, "col.status"),
       k: "status",
       w: 130,
     },
@@ -1539,19 +1489,19 @@ export default async function VehicleDetailPage({
     });
 
   const incidentColumns: CanvasTableColumn<IncidentRow>[] = [
-    { h: "INCIDENT", k: "id", w: 120, mono: true },
-    { h: copy(locale, "Title", "標題"), k: "title", w: 240 },
+    { h: detailT(locale, "col.incident"), k: "id", w: 120, mono: true },
+    { h: detailT(locale, "col.title"), k: "title", w: 240 },
     {
-      h: copy(locale, "Severity", "嚴重度"),
+      h: detailT(locale, "col.severity"),
       k: "severity",
       w: 120,
     },
     {
-      h: copy(locale, "Status", "狀態"),
+      h: detailT(locale, "col.status"),
       k: "status",
       w: 120,
     },
-    { h: copy(locale, "Updated", "更新"), k: "updated", mono: true, w: 180 },
+    { h: detailT(locale, "col.updated"), k: "updated", mono: true, w: 180 },
   ];
 
   const auditEntries = collectVehicleAuditEntries(
@@ -1565,60 +1515,56 @@ export default async function VehicleDetailPage({
 
   const regulatoryItems = [
     {
-      k: copy(locale, "Vehicle ID", "車輛編號"),
+      k: detailT(locale, "field.vehicleId"),
       v: vehicle.vehicleId,
       mono: true,
     },
     {
-      k: copy(locale, "Plate", "車牌"),
+      k: detailT(locale, "field.plate"),
       v: vehicle.plateNo,
       mono: true,
     },
     {
-      k: copy(locale, "Type", "類型"),
+      k: detailT(locale, "field.type"),
       v: getVehicleTypeLabel(locale, vehicle),
     },
     {
-      k: copy(locale, "Operating area", "營運區域"),
+      k: detailT(locale, "field.operatingArea"),
       v: vehicle.operatingArea,
       mono: true,
     },
     {
-      k: copy(locale, "Dispatchable", "可派遣"),
+      k: detailT(locale, "field.dispatchable"),
       v: vehicle.dispatchableFlag
-        ? copy(locale, "yes", "是")
-        : copy(locale, "no", "否"),
+        ? detailT(locale, "value.yes")
+        : detailT(locale, "value.no"),
       mono: true,
     },
     {
-      k: copy(locale, "Primary status", "主狀態"),
+      k: detailT(locale, "field.primaryStatus"),
       v: formatOpsCodeLabel(locale, getPrimaryVehicleStatusCode(vehicle)),
       mono: true,
     },
     {
-      k: copy(locale, "Dispatch blockers", "派遣阻塞"),
+      k: detailT(locale, "field.dispatchBlockers"),
       v: summarizeBlockedReasons(locale, vehicle),
     },
     {
-      k: copy(locale, "Insurance expiry", "保險到期"),
+      k: detailT(locale, "field.insuranceExpiry"),
       v: formatDateOnly(locale, vehicle.supplyLifecycle.insurance.endAt),
       mono: true,
     },
     {
-      k: copy(locale, "Vehicle license", "車輛牌照"),
-      v: copy(
-        locale,
-        "No dedicated field in current read model",
-        "目前 read model 沒有獨立欄位",
-      ),
+      k: detailT(locale, "field.vehicleLicense"),
+      v: detailT(locale, "value.missingLicenseField"),
     },
     {
-      k: copy(locale, "Contract", "合約"),
+      k: detailT(locale, "field.contract"),
       v: vehicle.supplyLifecycle.contract.contractId ?? "—",
       mono: true,
     },
     {
-      k: copy(locale, "Exclusivity", "排他委託"),
+      k: detailT(locale, "field.exclusivity"),
       v: formatOpsCodeLabel(
         locale,
         vehicle.supplyLifecycle.exclusivity.lifecycleStatus,
@@ -1626,12 +1572,12 @@ export default async function VehicleDetailPage({
       mono: true,
     },
     {
-      k: copy(locale, "Offboarding state", "退場狀態"),
+      k: detailT(locale, "field.offboardingState"),
       v: formatOpsCodeLabel(locale, vehicle.supplyLifecycle.offboarding.status),
       mono: true,
     },
     {
-      k: copy(locale, "Debrand due", "除標識期限"),
+      k: detailT(locale, "field.debrandDue"),
       v: formatDateOnly(
         locale,
         vehicle.supplyLifecycle.offboarding.debrandingDueAt,
@@ -1639,7 +1585,7 @@ export default async function VehicleDetailPage({
       mono: true,
     },
     {
-      k: copy(locale, "Last lifecycle trace", "最近 lifecycle 追蹤"),
+      k: detailT(locale, "field.lastLifecycleTrace"),
       v: vehicle.supplyLifecycle.lastTrace?.message ?? "—",
     },
   ];
@@ -1675,16 +1621,14 @@ export default async function VehicleDetailPage({
               tone={vehicle.dispatchableFlag ? "success" : "danger"}
             >
               {vehicle.dispatchableFlag
-                ? copy(locale, "dispatchable", "可派遣")
-                : copy(locale, "not_dispatchable", "不可派遣")}
+                ? detailT(locale, "value.dispatchable")
+                : detailT(locale, "value.notDispatchable")}
             </Pill>
             {overdueMaintenanceCount > 0 ? (
               <Pill theme={theme} tone="danger">
-                {copy(
-                  locale,
-                  `${overdueMaintenanceCount} overdue maintenance`,
-                  `${overdueMaintenanceCount} 筆逾期保修`,
-                )}
+                {detailT(locale, "badge.overdueMaintenance", {
+                  count: overdueMaintenanceCount,
+                })}
               </Pill>
             ) : null}
           </span>
@@ -1712,11 +1656,9 @@ export default async function VehicleDetailPage({
               ? "warn"
               : "info"
           }
-          title={copy(
-            locale,
-            `Refresh tier T3 · ${REFRESH_TIER}`,
-            `刷新層級 T3 · ${REFRESH_TIER}`,
-          )}
+          title={detailT(locale, "banner.refreshTier", {
+            tier: REFRESH_TIER,
+          })}
           body={buildRefreshBannerBody(
             locale,
             refreshMetadata,
@@ -1730,25 +1672,22 @@ export default async function VehicleDetailPage({
             theme={theme}
             tone="warn"
             icon="warn"
-            title={copy(
-              locale,
-              "This vehicle is inside the offboarding state machine",
-              "此車輛已進入 offboarding state machine",
-            )}
+            title={detailT(locale, "banner.offboarding.title")}
             body={[
               formatOpsCodeLabel(
                 locale,
                 vehicle.supplyLifecycle.offboarding.status,
               ),
               vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
-                ? copy(locale, "debranding pending", "除標識待完成")
+                ? detailT(locale, "value.debrandingPending")
                 : null,
               vehicle.supplyLifecycle.offboarding.debrandingDueAt
-                ? copy(
-                    locale,
-                    `debrand due ${formatDateOnly(locale, vehicle.supplyLifecycle.offboarding.debrandingDueAt)}`,
-                    `除標識期限 ${formatDateOnly(locale, vehicle.supplyLifecycle.offboarding.debrandingDueAt)}`,
-                  )
+                ? detailT(locale, "banner.offboarding.debrandDue", {
+                    date: formatDateOnly(
+                      locale,
+                      vehicle.supplyLifecycle.offboarding.debrandingDueAt,
+                    ),
+                  })
                 : null,
             ]
               .filter(Boolean)
@@ -1760,35 +1699,22 @@ export default async function VehicleDetailPage({
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copy(
-              locale,
-              "Overdue maintenance is impacting dispatchability",
-              "逾期保修已影響派遣判斷",
-            )}
-            body={copy(
-              locale,
-              `${overdueMaintenanceCount} work order(s) remain overdue for this vehicle.`,
-              `此車目前有 ${overdueMaintenanceCount} 筆逾期工單未結案。`,
-            )}
+            title={detailT(locale, "banner.maintenance.title")}
+            body={detailT(locale, "banner.maintenance.body", {
+              count: overdueMaintenanceCount,
+            })}
           />
         ) : null}
 
         <div style={detailGridStyle}>
           <div style={columnStyle}>
-            <Card
-              theme={theme}
-              title={copy(locale, "Regulatory profile", "監管檔案")}
-            >
+            <Card theme={theme} title={detailT(locale, "card.regulatory")}>
               <DL theme={theme} cols={2} items={regulatoryItems} />
             </Card>
 
             <Card
               theme={theme}
-              title={copy(
-                locale,
-                "Maintenance records · latest 5",
-                "保修紀錄 · 最近 5 筆",
-              )}
+              title={detailT(locale, "card.maintenance")}
               padding={0}
             >
               {maintenanceResult.error ? (
@@ -1815,11 +1741,7 @@ export default async function VehicleDetailPage({
                   getEmptyStateMessage(
                     locale,
                     maintenanceResult.emptyState,
-                    copy(
-                      locale,
-                      "No maintenance records are currently attached to this vehicle.",
-                      "目前這輛車沒有任何保修紀錄。",
-                    ),
+                    detailT(locale, "body.noMaintenance"),
                   ),
                   maintenanceEmptyAction,
                 )
@@ -1828,7 +1750,7 @@ export default async function VehicleDetailPage({
 
             <Card
               theme={theme}
-              title={copy(locale, "Contract references", "合約參照")}
+              title={detailT(locale, "card.contracts")}
               padding={0}
             >
               {contractsResult.error ? (
@@ -1855,11 +1777,7 @@ export default async function VehicleDetailPage({
                   getEmptyStateMessage(
                     locale,
                     contractsResult.emptyState,
-                    copy(
-                      locale,
-                      "No active or historical contract references were found for this vehicle.",
-                      "這輛車目前找不到任何有效或歷史合約參照。",
-                    ),
+                    detailT(locale, "body.noContracts"),
                   ),
                   contractEmptyAction,
                 )
@@ -1868,10 +1786,7 @@ export default async function VehicleDetailPage({
           </div>
 
           <div style={columnStyle}>
-            <Card
-              theme={theme}
-              title={copy(locale, "Current driver binding", "目前司機綁定")}
-            >
+            <Card theme={theme} title={detailT(locale, "card.driverBinding")}>
               {driversResult.error ||
               tasksResult.error ||
               shiftsResult.error ? (
@@ -1895,7 +1810,7 @@ export default async function VehicleDetailPage({
                   cols={1}
                   items={[
                     {
-                      k: copy(locale, "Driver", "司機"),
+                      k: detailT(locale, "field.driver"),
                       v: currentBinding.driver?.driverId ? (
                         <Link
                           href={`/drivers/${encodeURIComponent(currentBinding.driver.driverId)}`}
@@ -1912,28 +1827,24 @@ export default async function VehicleDetailPage({
                       ),
                     },
                     {
-                      k: copy(locale, "Source", "來源"),
+                      k: detailT(locale, "field.source"),
                       v:
                         currentBinding.source === "task"
-                          ? copy(
-                              locale,
-                              "active driver task",
-                              "進行中 driver task",
-                            )
-                          : copy(locale, "active shift", "進行中班次"),
+                          ? detailT(locale, "value.activeDriverTask")
+                          : detailT(locale, "value.activeShift"),
                     },
                     {
-                      k: copy(locale, "Binding state", "綁定狀態"),
+                      k: detailT(locale, "field.bindingState"),
                       v: formatOpsCodeLabel(locale, currentBinding.statusCode),
                       mono: true,
                     },
                     {
-                      k: copy(locale, "Binding id", "綁定編號"),
+                      k: detailT(locale, "field.bindingId"),
                       v: currentBinding.bindingId,
                       mono: true,
                     },
                     {
-                      k: copy(locale, "Bound at", "綁定時間"),
+                      k: detailT(locale, "field.boundAt"),
                       v: formatDateTime(locale, currentBinding.boundAt),
                       mono: true,
                     },
@@ -1947,16 +1858,8 @@ export default async function VehicleDetailPage({
                     ? "not_provisioned"
                     : "no_data",
                   vehicle.supplyLifecycle.offboarding.status !== "none"
-                    ? copy(
-                        locale,
-                        "This vehicle is dispatch-disabled while offboarding, so no active driver binding is expected.",
-                        "此車正在退場且已停派，因此目前不預期會有 active driver binding。",
-                      )
-                    : copy(
-                        locale,
-                        "No active task or shift currently binds a driver to this vehicle.",
-                        "目前沒有 active task 或 shift 將司機綁定到此車。",
-                      ),
+                    ? detailT(locale, "body.noCurrentBindingOffboarding")
+                    : detailT(locale, "body.noCurrentBinding"),
                   driverBindingAction,
                 )
               )}
@@ -1964,11 +1867,9 @@ export default async function VehicleDetailPage({
 
             <Card
               theme={theme}
-              title={copy(
-                locale,
-                `Linked incidents · ${relatedIncidents.length} (90d)`,
-                `關聯事故 · ${relatedIncidents.length} 筆（90 天）`,
-              )}
+              title={detailT(locale, "card.incidents", {
+                count: relatedIncidents.length,
+              })}
               padding={0}
             >
               {incidentsResult.error ? (
@@ -1995,11 +1896,7 @@ export default async function VehicleDetailPage({
                   getEmptyStateMessage(
                     locale,
                     incidentsResult.emptyState,
-                    copy(
-                      locale,
-                      "No incidents in the current incident snapshot reference this vehicle.",
-                      "目前事故快照中沒有任何事件關聯到這輛車。",
-                    ),
+                    detailT(locale, "body.noIncidents"),
                   ),
                   incidentEmptyAction,
                 )
@@ -2008,11 +1905,7 @@ export default async function VehicleDetailPage({
 
             <Card
               theme={theme}
-              title={copy(
-                locale,
-                "Audit subset · vehicle scope",
-                "稽核子集 · 車輛範圍",
-              )}
+              title={detailT(locale, "card.audit")}
               padding={0}
             >
               {auditsResult.error ? (
@@ -2030,11 +1923,7 @@ export default async function VehicleDetailPage({
                 <CanvasActivityFeed
                   theme={theme}
                   items={auditActivity}
-                  emptyState={copy(
-                    locale,
-                    "No audit events recorded for this vehicle yet.",
-                    "目前這輛車還沒有任何稽核事件。",
-                  )}
+                  emptyState={detailT(locale, "body.noAuditFeed")}
                 />
               ) : (
                 renderEmptyState(
@@ -2043,11 +1932,7 @@ export default async function VehicleDetailPage({
                   getEmptyStateMessage(
                     locale,
                     auditsResult.emptyState,
-                    copy(
-                      locale,
-                      "No audit entries for this vehicle or its linked maintenance / contract resources were found.",
-                      "目前找不到這輛車或其關聯 maintenance / contract resource 的稽核紀錄。",
-                    ),
+                    detailT(locale, "body.noAudit"),
                   ),
                   auditEmptyAction,
                 )

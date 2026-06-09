@@ -463,6 +463,11 @@
     "worker_worktrees": {
       "enabled": true,
       "root": ".artifacts/worktrees/auto"
+    },
+    "integration_gate": {
+      "enabled": true,
+      "log_only": false,
+      "exempt_task_patterns": []
     }
   },
   "ready_dispatcher": {
