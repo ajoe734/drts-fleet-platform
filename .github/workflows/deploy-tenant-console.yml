@@ -1,0 +1,242 @@
+name: Deploy — Tenant Console
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branch, tag, or commit SHA to build"
+        required: true
+        default: "dev"
+        type: string
+      target_service:
+        description: "Cloud Run service to update"
+        required: true
+        default: "drts-dev-tenant-console-web"
+        type: string
+      allow_unauthenticated:
+        description: "Expose the Cloud Run service publicly"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-tenant-console-${{ inputs.target_service }}
+  cancel-in-progress: false
+
+env:
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  DEV_GCP_RUNTIME_SERVICE_ACCOUNT_VAR: ${{ vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  DEV_GCP_RUNTIME_SERVICE_ACCOUNT_SECRET: ${{ secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
+  DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+  DEV_ARTIFACT_PROJECT_ID: ${{ vars.DEV_ARTIFACT_PROJECT_ID }}
+  DEV_ARTIFACT_REGION: ${{ vars.DEV_ARTIFACT_REGION }}
+  DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
+  DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
+  DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
+  DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
+  DEV_IAP_CLIENT_ID: ${{ vars.DEV_IAP_CLIENT_ID }}
+  WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+  WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+jobs:
+  deploy:
+    name: Build and deploy tenant console
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Resolve deploy config
+        id: config
+        run: |
+          set -euo pipefail
+
+          pick() {
+            local first="${1:-}"
+            local second="${2:-}"
+            local fallback="${3:-}"
+
+            if [[ -n "$first" ]]; then
+              printf '%s' "$first"
+            elif [[ -n "$second" ]]; then
+              printf '%s' "$second"
+            else
+              printf '%s' "$fallback"
+            fi
+          }
+
+          exposure_flag() {
+            local raw="${1:-true}"
+            local normalized
+            normalized="$(echo "$raw" | tr '[:upper:]' '[:lower:]')"
+            case "$normalized" in
+              true|1|yes|y) echo "--allow-unauthenticated" ;;
+              false|0|no|n) echo "--no-allow-unauthenticated" ;;
+              *)
+                echo "::error::Invalid allow_unauthenticated value: ${raw}."
+                exit 1
+                ;;
+            esac
+          }
+
+          emit() {
+            printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+          }
+
+          project_id="${DEV_GCP_PROJECT_ID:-}"
+          region="${DEV_GCP_REGION:-}"
+          runtime_sa="$(pick "${DEV_GCP_RUNTIME_SERVICE_ACCOUNT_VAR:-}" "${DEV_GCP_RUNTIME_SERVICE_ACCOUNT_SECRET:-}" "")"
+          deployer_sa="$(pick "${DEV_WIF_SERVICE_ACCOUNT:-}" "${WIF_SERVICE_ACCOUNT:-}" "")"
+          wif_provider="$(pick "${DEV_WIF_PROVIDER:-}" "${WIF_PROVIDER:-}" "")"
+          artifact_project_id="$(pick "${DEV_ARTIFACT_PROJECT_ID:-}" "" "$project_id")"
+          artifact_region="$(pick "${DEV_ARTIFACT_REGION:-}" "" "$region")"
+          artifact_repository="$(pick "${DEV_ARTIFACT_REPOSITORY:-}" "" "drts")"
+          secret_prefix="$(pick "${DEV_SECRET_PREFIX:-}" "" "drts-dev")"
+          api_service="$(pick "${DEV_GCP_API_SERVICE:-}" "" "drts-api")"
+          registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
+          target_service="${{ inputs.target_service }}"
+          exposure="$(exposure_flag "${{ inputs.allow_unauthenticated }}")"
+
+          missing=()
+          [[ -n "$project_id" ]] || missing+=("vars.DEV_GCP_PROJECT_ID")
+          [[ -n "$region" ]] || missing+=("vars.DEV_GCP_REGION")
+          [[ -n "$runtime_sa" ]] || missing+=("vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT")
+          [[ -n "$deployer_sa" ]] || missing+=("secrets.DEV_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
+          [[ -n "$wif_provider" ]] || missing+=("secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "$target_service" ]] || missing+=("inputs.target_service")
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing tenant console deploy configuration: ${missing[*]}."
+            exit 1
+          fi
+
+          if [[ "$runtime_sa" == "$deployer_sa" ]]; then
+            echo "::error::Cloud Run runtime identity resolves to the GitHub deployer identity. Configure a separate runtime service account."
+            exit 1
+          fi
+
+          tag="$(git rev-parse --short=12 HEAD)"
+          image="${registry}/tenant-console-web:${tag}"
+
+          emit project_id "$project_id"
+          emit region "$region"
+          emit runtime_sa "$runtime_sa"
+          emit registry "$registry"
+          emit secret_prefix "$secret_prefix"
+          emit api_service "$api_service"
+          emit target_service "$target_service"
+          emit exposure "$exposure"
+          emit tag "$tag"
+          emit image "$image"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ steps.config.outputs.project_id }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          host="$(echo "${{ steps.config.outputs.registry }}" | cut -d/ -f1)"
+          gcloud auth configure-docker "$host" --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push — tenant-console-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/tenant-console-web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.config.outputs.image }}
+            ${{ steps.config.outputs.registry }}/tenant-console-web:latest
+          cache-from: type=registry,ref=${{ steps.config.outputs.registry }}/tenant-console-web:cache
+          cache-to: type=registry,ref=${{ steps.config.outputs.registry }}/tenant-console-web:cache,mode=max
+
+      - name: Resolve web runtime env
+        id: web_env
+        run: |
+          set -euo pipefail
+
+          api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
+          if [[ -z "$api_origin" ]]; then
+            api_origin="$(gcloud run services describe "${{ steps.config.outputs.api_service }}" \
+              --region "${{ steps.config.outputs.region }}" \
+              --project "${{ steps.config.outputs.project_id }}" \
+              --format='value(status.url)')"
+          fi
+
+          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy"
+
+          if [[ -n "${DEV_IAP_CLIENT_ID:-}" ]]; then
+            env_vars="${env_vars},DRTS_API_AUTH_AUDIENCE=${DEV_IAP_CLIENT_ID}"
+          fi
+
+          echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy — tenant-console-web
+        run: |
+          gcloud run deploy "${{ steps.config.outputs.target_service }}" \
+            --region "${{ steps.config.outputs.region }}" \
+            --image "${{ steps.config.outputs.image }}" \
+            --port 3004 \
+            --ingress all \
+            --service-account "${{ steps.config.outputs.runtime_sa }}" \
+            --set-secrets "JWT_SECRET=${{ steps.config.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            ${{ steps.config.outputs.exposure }} \
+            --min-instances 0 \
+            --max-instances 2 \
+            --project "${{ steps.config.outputs.project_id }}"
+
+      - name: Verify target service
+        id: verify
+        run: |
+          set -euo pipefail
+
+          for i in $(seq 1 24); do
+            ready="$(gcloud run services describe "${{ steps.config.outputs.target_service }}" \
+              --region "${{ steps.config.outputs.region }}" \
+              --project "${{ steps.config.outputs.project_id }}" \
+              --format='value(status.conditions[0].status)' 2>/dev/null || true)"
+            echo "attempt ${i}: Ready=${ready}"
+            if [[ "$ready" == "True" ]]; then
+              break
+            fi
+            sleep 10
+          done
+
+          url="$(gcloud run services describe "${{ steps.config.outputs.target_service }}" \
+            --region "${{ steps.config.outputs.region }}" \
+            --project "${{ steps.config.outputs.project_id }}" \
+            --format='value(status.url)')"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+          curl --fail --silent --show-error "${url}" >/dev/null
+
+      - name: Print tenant console URL
+        run: |
+          echo "=== Tenant Console deployment complete ==="
+          echo "  service: ${{ steps.config.outputs.target_service }}"
+          echo "  image: ${{ steps.config.outputs.image }}"
+          echo "  url: ${{ steps.verify.outputs.url }}"
