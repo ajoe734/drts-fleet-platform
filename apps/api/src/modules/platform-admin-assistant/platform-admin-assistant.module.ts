@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 
 import { LlmGatewayModule } from "../../common/llm-gateway";
+import { OpenClawRuntimeService } from "../../common/openclaw-runtime";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { FeatureFlagsModule } from "../feature-flags/feature-flags.module";
 import { ForwarderModule } from "../forwarder/forwarder.module";
@@ -28,6 +29,7 @@ import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.ty
   controllers: [PlatformAdminAssistantController],
   providers: [
     LlmGatewayPlatformAdminAssistantProvider,
+    OpenClawRuntimeService,
     PlatformAdminAssistantAuditRecorder,
     {
       provide: PLATFORM_ADMIN_ASSISTANT_PROVIDER,
@@ -38,7 +40,6 @@ import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.ty
       provide: PlatformAdminAssistantOrchestratorBridgeService,
       useFactory: () => new PlatformAdminAssistantOrchestratorBridgeService(),
     },
-    PlatformAdminAssistantReadToolService,
     PlatformAdminAssistantService,
   ],
 })

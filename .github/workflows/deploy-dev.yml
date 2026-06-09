@@ -59,6 +59,11 @@ env:
   DEV_PLATFORM_ADMIN_ORIGIN: ${{ vars.DEV_PLATFORM_ADMIN_ORIGIN }}
   DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
   DEV_FLEET_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ORIGIN }}
+  DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME: ${{ vars.DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME }}
+  DEV_OPENCLAW_AGENT_MODEL: ${{ vars.DEV_OPENCLAW_AGENT_MODEL }}
+  DEV_OPENCLAW_SUMMARIZER_MODEL: ${{ vars.DEV_OPENCLAW_SUMMARIZER_MODEL }}
+  DEV_OPENCLAW_AUTH_PROVIDER: ${{ vars.DEV_OPENCLAW_AUTH_PROVIDER }}
+  DEV_OPENCLAW_HOME: ${{ vars.DEV_OPENCLAW_HOME }}
   WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
   WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
@@ -419,10 +424,13 @@ jobs:
           secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
           llm_provider="mock"
           llm_chat_model="mock-chat-v1"
           llm_summarizer_model="mock-summary-v1"
           llm_base_url=""
+          openclaw_auth_provider=""
+          openclaw_home=""
 
           controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
           if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
@@ -438,10 +446,18 @@ jobs:
           llm_secret="${secret_prefix}-llm-gateway-api-key"
           if gcloud secrets describe "$llm_secret" --project "$project_id" >/dev/null 2>&1; then
             secret_args="${secret_args},LLM_GATEWAY_API_KEY=${llm_secret}:latest"
-            llm_provider="${DEV_LLM_GATEWAY_PROVIDER:-openai}"
-            llm_chat_model="${DEV_LLM_GATEWAY_CHAT_MODEL:-gpt-4.1-mini}"
-            llm_summarizer_model="${DEV_LLM_GATEWAY_SUMMARIZER_MODEL:-gpt-4.1-mini}"
-            llm_base_url="${DEV_LLM_GATEWAY_BASE_URL:-}"
+            if [[ "$assistant_runtime" == "openclaw" ]]; then
+              llm_provider="openclaw"
+              llm_chat_model="${DEV_OPENCLAW_AGENT_MODEL:-openai/gpt-5.5}"
+              llm_summarizer_model="${DEV_OPENCLAW_SUMMARIZER_MODEL:-openai/gpt-5.4-mini}"
+              openclaw_auth_provider="${DEV_OPENCLAW_AUTH_PROVIDER:-}"
+              openclaw_home="${DEV_OPENCLAW_HOME:-/tmp/platform-admin-assistant-openclaw}"
+            else
+              llm_provider="${DEV_LLM_GATEWAY_PROVIDER:-openai}"
+              llm_chat_model="${DEV_LLM_GATEWAY_CHAT_MODEL:-gpt-4.1-mini}"
+              llm_summarizer_model="${DEV_LLM_GATEWAY_SUMMARIZER_MODEL:-gpt-4.1-mini}"
+              llm_base_url="${DEV_LLM_GATEWAY_BASE_URL:-}"
+            fi
           fi
 
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
@@ -449,6 +465,8 @@ jobs:
           echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
           echo "llm_summarizer_model=${llm_summarizer_model}" >> "$GITHUB_OUTPUT"
           echo "llm_base_url=${llm_base_url}" >> "$GITHUB_OUTPUT"
+          echo "openclaw_auth_provider=${openclaw_auth_provider}" >> "$GITHUB_OUTPUT"
+          echo "openclaw_home=${openclaw_home}" >> "$GITHUB_OUTPUT"
 
       - name: Build API env vars
         id: api_env
@@ -458,6 +476,15 @@ jobs:
           env_vars="NODE_ENV=production,API_PORT=3001,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}"
           if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
             env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
+          fi
+          if [[ "${{ steps.api_secrets.outputs.llm_provider }}" == "openclaw" ]]; then
+            env_vars="${env_vars},OPENCLAW_AGENT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}"
+            if [[ -n "${{ steps.api_secrets.outputs.openclaw_auth_provider }}" ]]; then
+              env_vars="${env_vars},OPENCLAW_AUTH_PROVIDER=${{ steps.api_secrets.outputs.openclaw_auth_provider }}"
+            fi
+            if [[ -n "${{ steps.api_secrets.outputs.openclaw_home }}" ]]; then
+              env_vars="${env_vars},OPENCLAW_HOME=${{ steps.api_secrets.outputs.openclaw_home }}"
+            fi
           fi
 
           echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
