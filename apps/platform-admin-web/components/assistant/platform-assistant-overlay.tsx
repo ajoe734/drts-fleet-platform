@@ -330,6 +330,10 @@ export function PlatformAssistantOverlay() {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [isOpen, messages]);
 
+  useEffect(() => {
+    setSuggestedPrompts(defaultSuggestedPrompts);
+  }, [defaultSuggestedPrompts]);
+
   if (!enabled || !isMounted) {
     return null;
   }
@@ -357,10 +361,6 @@ export function PlatformAssistantOverlay() {
     requestFailedTitle: t("assistant.overlay.requestFailedTitle"),
     requestFailedHint: t("assistant.overlay.requestFailedHint"),
   };
-
-  useEffect(() => {
-    setSuggestedPrompts(defaultSuggestedPrompts);
-  }, [defaultSuggestedPrompts]);
 
   const panelStyle: CSSProperties = isMobile
     ? {
