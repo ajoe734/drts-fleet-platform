@@ -92,3 +92,8 @@ LLM gateway runtime notes:
 - `LLM_GATEWAY_PROVIDER=openclaw` switches the Platform Admin assistant onto the embedded OpenClaw agent runtime.
 - `OPENCLAW_AGENT_MODEL` defaults to `openai/gpt-5.5`; if only `LLM_GATEWAY_API_KEY` is mounted, the API maps it into the matching provider env for OpenClaw child runs.
 - Real provider keys belong only in API runtime env / Secret Manager, never frontend runtime config.
+- Secret Manager names are project-relative. For deployed dev, resolve the active
+  GCP project from GitHub repo variables (`DEV_GCP_PROJECT_ID`,
+  `DEV_SECRET_PREFIX`, `DEV_GCP_RUNTIME_SERVICE_ACCOUNT`) and the latest
+  `deploy-dev.yml` log before checking or creating `drts-dev-llm-gateway-api-key`.
+  Do not infer the deploy target from the local `gcloud` account or project.

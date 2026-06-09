@@ -96,6 +96,25 @@ LLM_GATEWAY_SUMMARIZER_MODEL=<approved cheaper model>
 NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true
 ```
 
+The Secret Manager reference above is project-relative. The active dev project
+is the project in GitHub repo variables for the dev rail, not the local
+operator's `gcloud` account or a human owner name. Before provisioning
+`drts-dev-llm-gateway-api-key` or concluding that OpenClaw is misconfigured,
+resolve and verify:
+
+```bash
+gh variable get DEV_GCP_PROJECT_ID
+gh variable get DEV_GCP_RUNTIME_SERVICE_ACCOUNT
+gh variable get DEV_GCP_CLOUDSQL_INSTANCE
+gh variable get DEV_SECRET_PREFIX
+gh run view <latest-deploy-dev-run-id> --log | rg 'DEV_GCP_PROJECT_ID|--project|LLM_GATEWAY_PROVIDER'
+```
+
+If dev moves from one GCP project/account to another, update every relevant
+GitHub `DEV_*` variable and secret before creating provider credentials. The
+current migration checklist lives in
+[`docs/03-runbooks/dev-gcp-project-migration-runbook-20260609.md`](../03-runbooks/dev-gcp-project-migration-runbook-20260609.md).
+
 ## 5. Target Architecture
 
 ```text

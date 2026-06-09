@@ -51,6 +51,12 @@ These were verified by reading the branch code directly (`git show <branch>:<pat
 
 ### 2.2 No provider secret in frontend runtime config — VERIFIED
 
+> 2026-06-09 note: this section is historical staging evidence. It proves the
+> frontend boundary and API-only Secret Manager pattern, but it is not the
+> source of truth for the active dev GCP project. Resolve the current dev
+> project from GitHub repo variables and the latest `deploy-dev.yml` log before
+> provisioning any `drts-dev-*` secret.
+
 - `infra/gcp/staging/platform-admin-web-service.yaml` (CONFIG-001) injects **only**
   `NODE_ENV`, `PORT`, `NEXT_PUBLIC_API_URL`, and `NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED="false"`.
   No `LLM_GATEWAY_API_KEY`, no provider slug, no model names.

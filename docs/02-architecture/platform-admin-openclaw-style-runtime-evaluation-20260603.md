@@ -99,7 +99,10 @@ Direct adoption is allowed only with all of these outer controls:
 
 ### 6.1 Credentials
 
-- Platform Admin provider keys stay in Secret Manager.
+- Platform Admin provider keys stay in Secret Manager for the active deploy
+  project. For dev, "active" means the project in GitHub `DEV_GCP_PROJECT_ID`
+  and the latest `deploy-dev.yml` log; do not infer it from the operator's
+  `gcloud` account or from a historical `drts-dev-*` name.
 - Worker credentials are injected per run through the orchestrator bridge.
 - OpenClaw runtime homes must be scrubbed of durable DRTS secrets after run
   completion.

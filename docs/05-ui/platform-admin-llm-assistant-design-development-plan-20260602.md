@@ -1,7 +1,16 @@
 # Platform Admin LLM Assistant Design & Development Plan
 
 Status: implementation-aligned backend configuration baseline
-Last updated: 2026-06-02
+Last updated: 2026-06-09
+
+> 2026-06-09 correction: secret names such as
+> `drts-dev-llm-gateway-api-key` describe the expected naming convention inside
+> whichever GCP project the dev deploy rail currently targets. They do not, by
+> themselves, identify the active dev project. Always resolve the active dev
+> project from GitHub repo variables (`DEV_GCP_PROJECT_ID`,
+> `DEV_GCP_RUNTIME_SERVICE_ACCOUNT`, `DEV_GCP_CLOUDSQL_INSTANCE`, and
+> `DEV_SECRET_PREFIX`) and verify the latest `deploy-dev.yml` log before
+> provisioning or debugging Secret Manager entries.
 
 ## 1. Scope
 
@@ -81,6 +90,27 @@ Use environment-specific secrets:
 | prod        | `drts-prod-llm-gateway-api-key`    |
 
 Only the API Cloud Run service account should receive `roles/secretmanager.secretAccessor` on these secrets. The `platform-admin-web` service account must not receive access.
+
+These names are intentionally project-relative. For example,
+`drts-dev-llm-gateway-api-key` must exist in the project referenced by the
+current `DEV_GCP_PROJECT_ID`; it is not enough for the same name to exist in an
+older or personal dev project. Do not infer the active project from the logged-in
+`gcloud` account, a person's email address, a local `gcloud config get-value
+project`, or historical docs.
+
+Before adding or rotating a dev LLM secret, run:
+
+```bash
+gh variable get DEV_GCP_PROJECT_ID
+gh variable get DEV_SECRET_PREFIX
+gh run view <latest-deploy-dev-run-id> --log | rg 'DEV_GCP_PROJECT_ID|--project|LLM_GATEWAY_PROVIDER'
+```
+
+If dev is migrating to a different GCP project, update the GitHub `DEV_*`
+variables first, then provision the matching Secret Manager entries in that new
+project. Use
+[`docs/03-runbooks/dev-gcp-project-migration-runbook-20260609.md`](../03-runbooks/dev-gcp-project-migration-runbook-20260609.md)
+as the migration checklist.
 
 ## 8. Runtime / Secret Rollout Plan
 

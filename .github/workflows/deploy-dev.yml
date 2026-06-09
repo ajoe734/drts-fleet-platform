@@ -221,6 +221,11 @@ jobs:
             exit 1
           fi
 
+          echo "::notice::Dev deploy target project_id=${project_id}."
+          echo "::notice::Dev deploy runtime_service_account=${runtime_sa}."
+          echo "::notice::Dev deploy cloudsql=${cloudsql}."
+          echo "::notice::Dev deploy secret_prefix=${secret_prefix}."
+
           emit source_ref "$source_ref"
           emit project_id "$project_id"
           emit region "$region"
