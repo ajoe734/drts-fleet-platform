@@ -34,7 +34,6 @@ const tenantChipTheme = buildCanvasTheme({
   density: "compact",
 });
 
-type Locale = "en" | "zh";
 
 type TabStatus = "pending" | "approved" | "rejected";
 
