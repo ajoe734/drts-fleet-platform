@@ -223,56 +223,6 @@ class GeminiAdapterTests(unittest.TestCase):
             self.assertTrue(Path(result.payload_path or "").exists())
             spawn.assert_not_called()
 
-    def test_gemini_cli_fallbacks_prefer_then_fall_back(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp = Path(tmpdir)
-            status_file = tmp / "drts-fleet-platform" / "ai-status.json"
-            status_file.parent.mkdir()
-            status_file.write_text('{"tasks":[]}', encoding="utf-8")
-            config = {
-                "paths": {"status_file": str(status_file)},
-                "agents": {
-                    "gemini2": {
-                        "id": "gemini2",
-                        "display_name": "Antigravity2",
-                        "provider": "gemini2",
-                        "adapter": "gemini",
-                    }
-                },
-                "providers": {
-                    "gemini2": {
-                        "delivery_mode": "gemini",
-                        "gemini": {"cli": "antigravity", "cli_fallbacks": ["gemini"]},
-                    }
-                },
-            }
-            request = DeliveryRequest(
-                agent_id="gemini2",
-                provider="gemini2",
-                delivery_mode="gemini",
-                message="wake up",
-                task_id="XREPO-001",
-            )
-            process = mock.Mock()
-            process.pid = 43210
-
-            # antigravity binary is absent on this host; gemini is present.
-            def fake_command_exists(name, search_roots=None):
-                return "/usr/bin/gemini" if name == "gemini" else None
-
-            with (
-                mock.patch("adapters.gemini.command_exists", side_effect=fake_command_exists),
-                mock.patch("adapters.gemini._gemini_auth_ready", return_value=True),
-                mock.patch("adapters.gemini.spawn_background_process", return_value=(process, Path("/tmp/gemini.log"))) as spawn,
-                mock.patch("adapters.gemini.runtime_log_path", return_value=Path("/tmp/gemini.log")),
-                mock.patch("adapters.gemini.new_runtime_id", return_value="gemini2-test"),
-            ):
-                result = GeminiAdapter(config=config, provider_capabilities={}).deliver(request)
-
-            self.assertTrue(result.ok)
-            self.assertEqual(result.mode, "gemini")
-            self.assertEqual(spawn.call_args.args[0][0], "/usr/bin/gemini")
-
 
 if __name__ == "__main__":
     unittest.main()

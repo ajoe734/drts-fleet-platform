@@ -210,7 +210,7 @@
     "gemini": {
       "display_name": "Antigravity",
       "provider": "gemini",
-      "adapter": "gemini",
+      "adapter": "antigravity",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/gemini.md"
     },
@@ -224,7 +224,7 @@
     "gemini2": {
       "display_name": "Antigravity2",
       "provider": "gemini2",
-      "adapter": "gemini",
+      "adapter": "antigravity",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/gemini2.md"
     },
@@ -330,15 +330,18 @@
         "open_in_vscode": false
       },
       "gemini": {
-        "cli": "antigravity",
-        "cli_fallbacks": ["gemini"],
-        "model": "gemini-3-pro-preview",
+        "cli": "gemini",
         "env": {
           "GEMINI_CLI_TRUST_WORKSPACE": "true"
         },
         "include_directories": true,
         "skip_trust": true,
         "allowed_tools": ["run_shell_command"]
+      },
+      "antigravity": {
+        "cli": "agy",
+        "skip_permissions": true,
+        "include_directories": true
       },
       "approval": {
         "default_approval_mode": "auto_edit",
@@ -356,8 +359,7 @@
         "open_in_vscode": false
       },
       "gemini": {
-        "cli": "antigravity",
-        "cli_fallbacks": ["gemini"],
+        "cli": "gemini",
         "config_home": "~/.gemini2-home",
         "env": {
           "GEMINI_CLI_TRUST_WORKSPACE": "true",
@@ -366,16 +368,22 @@
           "GOOGLE_CLOUD_PROJECT_ID": "autotaxi-492811",
           "GOOGLE_CLOUD_LOCATION": "us-central1"
         },
-        "model": "gemini-3-pro-preview",
+        "model": "gemini-2.5-flash-lite",
         "include_directories": true,
         "skip_trust": true,
         "allowed_tools": ["run_shell_command"],
         "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]
       },
+      "antigravity": {
+        "cli": "agy",
+        "skip_permissions": true,
+        "include_directories": true,
+        "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]
+      },
       "model_preference": {
-        "default": "gemini-3-pro-preview",
-        "gemini2": "gemini-3-pro-preview",
-        "supported": ["gemini-3-pro-preview", "gemini-2.5-flash-lite", "gemini-2.5-flash"]
+        "default": "gemini-2.5-flash-lite",
+        "gemini2": "gemini-2.5-flash-lite",
+        "supported": ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
       },
       "approval": {
         "default_approval_mode": "yolo",
