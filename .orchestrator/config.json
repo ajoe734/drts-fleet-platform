@@ -340,6 +340,7 @@
       },
       "antigravity": {
         "cli": "agy",
+        "config_home": "~/.antigravity-home",
         "skip_permissions": true,
         "include_directories": true
       },
@@ -376,6 +377,7 @@
       },
       "antigravity": {
         "cli": "agy",
+        "config_home": "~/.antigravity2-home",
         "skip_permissions": true,
         "include_directories": true,
         "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]

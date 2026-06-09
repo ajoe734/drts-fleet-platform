@@ -82,7 +82,8 @@ def _app_data_dir(settings: dict) -> Path:
         return Path(str(explicit)).expanduser()
     config_home = settings.get("config_home")
     if config_home:
-        return Path(str(config_home)).expanduser() / "antigravity-cli"
+        # agy stores app data under $HOME/.gemini/antigravity-cli; config_home maps to HOME.
+        return Path(str(config_home)).expanduser() / ".gemini" / "antigravity-cli"
     return DEFAULT_APP_DATA_DIR
 
 
