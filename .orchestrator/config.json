@@ -208,7 +208,7 @@
       "file_inbox_path": ".llm-inbox/claude.md"
     },
     "gemini": {
-      "display_name": "Gemini",
+      "display_name": "Antigravity",
       "provider": "gemini",
       "adapter": "gemini",
       "wake_template": ".orchestrator/templates/wakeup.txt",
@@ -222,7 +222,7 @@
       "file_inbox_path": ".llm-inbox/claude2.md"
     },
     "gemini2": {
-      "display_name": "Gemini2",
+      "display_name": "Antigravity2",
       "provider": "gemini2",
       "adapter": "gemini",
       "wake_template": ".orchestrator/templates/wakeup.txt",
@@ -330,7 +330,8 @@
         "open_in_vscode": false
       },
       "gemini": {
-        "cli": "gemini",
+        "cli": "antigravity",
+        "cli_fallbacks": ["gemini"],
         "env": {
           "GEMINI_CLI_TRUST_WORKSPACE": "true"
         },
@@ -354,7 +355,8 @@
         "open_in_vscode": false
       },
       "gemini": {
-        "cli": "gemini",
+        "cli": "antigravity",
+        "cli_fallbacks": ["gemini"],
         "config_home": "~/.gemini2-home",
         "env": {
           "GEMINI_CLI_TRUST_WORKSPACE": "true",

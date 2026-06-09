@@ -135,7 +135,21 @@ def _gemini_policy_paths(config: dict, gemini_settings: dict) -> list[str]:
 
 def _gemini_cli_path(config: dict, gemini_settings: dict) -> str | None:
     workspace_root = config_path(config, "status_file").parents[0]
-    return command_exists(gemini_settings.get("cli") or "gemini", search_roots=[workspace_root])
+    # Resolve the preferred CLI first (e.g. "antigravity"), then fall back through
+    # cli_fallbacks (e.g. ["gemini"]) so a lane stays live even when its preferred
+    # binary is not yet installed on this host.
+    candidates = [gemini_settings.get("cli") or "gemini"]
+    candidates.extend(_string_list(gemini_settings.get("cli_fallbacks") or gemini_settings.get("cliFallbacks")))
+    seen: set[str] = set()
+    for candidate in candidates:
+        name = str(candidate).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        resolved = command_exists(name, search_roots=[workspace_root])
+        if resolved:
+            return resolved
+    return None
 
 
 def _gemini_selected_auth_type(runtime: dict | None = None, env: dict[str, str] | None = None) -> str | None:
