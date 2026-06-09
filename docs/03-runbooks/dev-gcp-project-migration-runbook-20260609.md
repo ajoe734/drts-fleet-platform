@@ -1,7 +1,7 @@
 # Dev GCP Project Migration Runbook
 
-**Status:** active guardrail  
-**Last updated:** 2026-06-09  
+**Status:** active guardrail
+**Last updated:** 2026-06-09
 **Scope:** dev Cloud Run deploy target, Secret Manager, WIF, Cloud SQL, and
 assistant provider credentials.
 
