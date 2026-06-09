@@ -576,15 +576,7 @@ export default function NoticesPage() {
               source: "page-selection",
             },
           ]
-        : showMaintenanceConfirm
-          ? [
-              {
-                kind: "maintenance-mode",
-                id: "platform-maintenance",
-                source: "page-selection",
-              },
-            ]
-          : [];
+        : [];
     const forms = [
       ...(showComposer
         ? [

@@ -1217,6 +1217,9 @@ const en = {
   "payments.page.reopenBannerTitle": "Reopen rate exceeded threshold",
   "payments.page.reopenBannerBody":
     "{rate} of the current 30-day issue window has already been reopened. {count} row(s) need closer issue hygiene before they recycle again.",
+  "payments.warning.dataLoadError": "Payments data load error: {error}",
+  "payments.warning.reopenRate":
+    "Reopen rate {rate}% exceeds the warning threshold.",
   "payments.page.queueWindow": "Recent issue window",
   "payments.page.externalOrder": "External order",
   "payments.page.financeActorIdRequired": "Finance actor ID is required.",
@@ -3229,6 +3232,8 @@ const zh: typeof en = {
   "payments.page.reopenBannerTitle": "重開率超過警戒值",
   "payments.page.reopenBannerBody":
     "最近 30 天的問題視窗中已有 {rate} 項目曾被重開。至少 {count} 筆需要更嚴格的問題治理，避免再次循環。",
+  "payments.warning.dataLoadError": "付款資料載入異常：{error}",
+  "payments.warning.reopenRate": "重開率 {rate}% 超過警戒值。",
   "payments.page.queueWindow": "近 30 天問題視窗",
   "payments.page.externalOrder": "外部訂單",
   "payments.page.financeActorIdRequired": "財務操作人 ID 為必填。",
