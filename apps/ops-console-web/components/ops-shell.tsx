@@ -64,8 +64,8 @@ export function OpsShell({
       brandLabel={brandLabel}
       brandSubLabel={brandSubLabel}
       breadcrumb={breadcrumb}
-      footer={<OpsHealthFooter />}
-      style={{ minHeight: "100vh", height: "100vh" }}
+      sidebarFooter={<OpsHealthFooter />}
+      style={{ minHeight: "100dvh", height: "100dvh" }}
       {...(env !== undefined ? { env } : {})}
       {...(versionLabel !== undefined ? { versionLabel } : {})}
       {...(avatarLabel !== undefined ? { avatarLabel } : {})}

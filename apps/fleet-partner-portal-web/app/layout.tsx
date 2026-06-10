@@ -29,7 +29,7 @@ export default async function RootLayout({
 
   return (
     <html lang={locale}>
-      <body style={{ margin: 0, minHeight: "100vh", overflow: "hidden" }}>
+      <body style={{ margin: 0, minHeight: "100dvh", overflow: "hidden" }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
           <FleetPortalShell
