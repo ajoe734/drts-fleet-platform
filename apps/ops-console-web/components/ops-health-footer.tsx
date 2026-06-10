@@ -106,7 +106,11 @@ export function OpsHealthFooter() {
         display: "flex",
         flexDirection: "column",
         gap: 7,
-        padding: "2px 0 0",
+        padding: 8,
+        borderRadius: 12,
+        border: `1px solid ${theme.border}`,
+        background: `linear-gradient(180deg, ${theme.surfaceHi}, ${theme.surfaceLo})`,
+        boxShadow: theme.shadowSm,
       }}
     >
       <div
@@ -115,8 +119,8 @@ export function OpsHealthFooter() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 8,
-          padding: "7px 8px",
-          borderRadius: 8,
+          padding: "8px 9px",
+          borderRadius: 10,
           background: c.bg,
           border: `1px solid ${c.border}`,
         }}
@@ -160,10 +164,10 @@ export function OpsHealthFooter() {
           justifyContent: "center",
           gap: 7,
           padding: "7px 10px",
-          borderRadius: 8,
-          background: theme.surfaceLo,
-          border: `1px solid ${theme.border}`,
-          color: theme.text,
+          borderRadius: 10,
+          background: theme.accentBg,
+          border: `1px solid ${theme.accentBorder}`,
+          color: theme.accent,
           fontSize: 12.5,
           fontWeight: 600,
           cursor: "pointer",
