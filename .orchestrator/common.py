@@ -701,6 +701,30 @@ def build_task_brief(
             raw_ref = str(pause.get("raw_ref") or "").strip()
             suffix = f" (`{raw_ref}`)" if raw_ref else ""
             lines.append(f"- {summary}{suffix}")
+    brief_blob = " ".join([task_id, title, *display_artifacts]).lower()
+    is_ui_task = ("-ui-" in f"-{task_id.lower()}-") or any(
+        signal in brief_blob
+        for signal in ("-web", ".tsx", ".css", "design-canvas", "ui-web", "screens.jsx")
+    )
+    if is_ui_task:
+        lines.extend(
+            [
+                "",
+                "## UI Design Contract (canonical — applies to EVERY lane)",
+                "",
+                "This task touches a UI surface. The visual design is NOT yours to invent.",
+                "- The ONLY source of visual truth is `packages/ui-tokens` (realm colors) plus the",
+                "  design canvas `docs/05-ui/drts-design-canvas/<App>.html` / `<app>-screens*.jsx`.",
+                "  Read them BEFORE writing any UI.",
+                "- Colors/typography MUST come from `@drts/ui-tokens` realm tokens (e.g. the `tenant`",
+                "  realm is teal `#0F766E` / `#5EEAD4`). A raw hex palette hardcoded in `globals.css`",
+                "  or components is a DEFECT, not a style choice — do not introduce one.",
+                "- Do NOT redesign or \"improve\" the look. Match the canvas. If the canvas lacks a",
+                "  screen, write a screen-requirements note and STOP — never substitute your own design.",
+                "- Reskinning with Canvas/shadcn defaults instead of the realm tokens (套皮) fails the",
+                "  task even if it \"looks fine\". Self-check the diff against the realm token + canvas.",
+            ]
+        )
     lines.extend(
         [
             "",
