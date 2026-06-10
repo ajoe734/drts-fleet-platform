@@ -637,7 +637,7 @@ export function AdminShell({ children }: AdminShellProps) {
 
 const shellStyle: CSSProperties = {
   width: "100%",
-  height: "100vh",
+  height: "100dvh",
   display: "grid",
   gridTemplateColumns: "224px minmax(0, 1fr)",
   gridTemplateRows: "46px minmax(0, 1fr)",

@@ -23,5 +23,5 @@ body {
   font-family: var(--font-sans);
   background-color: #f8fafc;
   color: #0f172a;
-  min-height: 100vh;
+  min-height: 100dvh;
 }

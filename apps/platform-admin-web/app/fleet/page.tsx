@@ -294,17 +294,17 @@ function actionLabel(locale: string, action: string) {
     create_driver: "新增司機",
     create_contract: "建立合約",
     update_vehicle_compliance: "更新合規",
-    open_ops_vehicle: "ops 操作面",
+    open_ops_vehicle: "營運主控台",
     activate_driver: "啟用",
     suspend_driver: "暫停",
     retire_driver: "退役",
     revoke_device_binding: "撤銷綁定",
     approve_exclusivity: "核准",
     reject_exclusivity: "退回",
-    initiate_offboarding: "啟動 offboarding",
+    initiate_offboarding: "啟動退場",
     advance_offboarding_step: "推進",
     complete_debranding: "完成除標識",
-    open_ops_driver: "ops 操作面",
+    open_ops_driver: "營運主控台",
   };
   return (locale === "en" ? en : zh)[action] ?? action;
 }
@@ -414,32 +414,32 @@ function emptyStateConfig(locale: string, reason: EmptyReason): EmptyConfig {
     case "not_provisioned":
       return {
         tone: "warn",
-        title: "治理資料線尚未 provision",
-        description: "sitemap 已保留此 tab，但背後資料線目前尚未配置完成。",
+        title: "治理資料線尚未配置",
+        description: "網站地圖已保留此分頁，但背後資料線目前尚未配置完成。",
       };
     case "fetch_failed":
       return {
         tone: "danger",
-        title: "此 tab 載入失敗",
+        title: "此分頁載入失敗",
         description: "讀取失敗，請重新整理或先檢查上游依賴。",
       };
     case "permission_denied":
       return {
         tone: "danger",
         title: "目前身分沒有權限",
-        description: "可看頁殼，但沒有這個 tab 的資料讀取權限。",
+        description: "可看頁殼，但沒有這個分頁的資料讀取權限。",
       };
     case "external_unavailable":
       return {
         tone: "warn",
         title: "外部依賴暫時不可用",
-        description: "這個 tab 依賴 companion service 或外部系統，目前不可用。",
+        description: "這個分頁依賴協作服務或外部系統，目前不可用。",
       };
     case "filtered_empty":
       return {
         tone: "info",
         title: "目前焦點下沒有符合資料",
-        description: "底層資料存在，但目前 tab 或篩選條件將結果收斂成 0 筆。",
+        description: "底層資料存在，但目前分頁或篩選條件將結果收斂成 0 筆。",
       };
     case "no_data":
     default:
@@ -473,12 +473,12 @@ function deriveOffboardingWorkflowState(vehicle: VehicleRegistryRecord) {
 
 function workflowLabel(locale: string, state: string) {
   const en: Record<string, string> = {
-    initiated: "initiated",
-    dispatch_disabled: "dispatch_disabled",
-    debranding_pending: "debranding_pending",
-    debranding_verified: "debranding_verified",
-    completed: "completed",
-    none: "none",
+    initiated: "Initiated",
+    dispatch_disabled: "Dispatch disabled",
+    debranding_pending: "Debranding pending",
+    debranding_verified: "Debranding verified",
+    completed: "Completed",
+    none: "Not started",
   };
   const zh: Record<string, string> = {
     initiated: "已啟動",
@@ -844,7 +844,7 @@ export default function FleetPage() {
             window.alert(
               locale === "en"
                 ? "This action is not wired to a mutation endpoint yet."
-                : "此操作尚未接到 mutation endpoint。",
+                : "此操作尚未接到變更端點。",
             );
         }
       } catch (nextError) {
@@ -869,12 +869,12 @@ export default function FleetPage() {
           offboarding: "Offboarding",
         }
       : {
-          vehicles: "Vehicles",
-          drivers: "Drivers",
-          contracts: "Contracts",
-          device_binding: "Device Binding",
-          exclusivity: "Exclusivity Reviews",
-          offboarding: "Offboarding",
+          vehicles: "車輛",
+          drivers: "司機",
+          contracts: "合約",
+          device_binding: "裝置綁定",
+          exclusivity: "排他審核",
+          offboarding: "退場流程",
         };
 
   const activeBindings = useMemo<DeviceBindingRow[]>(
@@ -1614,7 +1614,7 @@ export default function FleetPage() {
         subtitle={
           locale === "en"
             ? "vehicles · drivers · contracts · device binding · exclusivity reviews · offboarding state machine"
-            : "vehicles · drivers · contracts · device binding · exclusivity reviews · offboarding state machine"
+            : "車輛 · 司機 · 合約 · 裝置綁定 · 排他審核 · 退場狀態機"
         }
         tabs={tabs}
         activeTab={tabs[TAB_ORDER.indexOf(activeTab)]}
@@ -1627,7 +1627,7 @@ export default function FleetPage() {
                 window.alert(
                   locale === "en"
                     ? "Canvas-aligned filter surface is reserved for the next iteration."
-                    : "符合 canvas 的篩選面保留到下一輪整合。",
+                    : "符合設計畫布的篩選面保留到下一輪整合。",
                 )
               }
             >
@@ -1696,8 +1696,8 @@ export default function FleetPage() {
             }
             body={
               locale === "en"
-                ? "dispatch.compliance.license_warn_30d remains enforced in ops-console until these blockers are cleared."
-                : "在阻擋原因解除前，ops 端仍持續套用 dispatch.compliance.license_warn_30d。"
+                ? "Ops Console keeps the 30-day license-warning compliance block enforced until these blockers are cleared."
+                : "在阻擋原因解除前，營運主控台會持續套用 30 日證照預警的合規阻擋。"
             }
             actions={
               <CanvasBtn theme={theme} variant="secondary">
@@ -1712,11 +1712,15 @@ export default function FleetPage() {
             theme={theme}
             tone="info"
             icon="info"
-            title="Exclusivity governance · Q-ADM08"
+            title={
+              locale === "en"
+                ? "Exclusivity governance · Q-ADM08"
+                : "排他治理 · Q-ADM08"
+            }
             body={
               locale === "en"
-                ? "Vehicle or driver dispatchable cannot become true until exclusivity is approved."
-                : "vehicle / driver 的 dispatchable 不可能在 exclusivity 通過前變為 true。"
+                ? "Vehicle or driver dispatch eligibility cannot be enabled until exclusivity is approved."
+                : "排他審核通過前，車輛或司機的派遣資格不得啟用。"
             }
           />
         ) : null}
@@ -1724,11 +1728,15 @@ export default function FleetPage() {
         {activeTab === "offboarding" ? (
           <CanvasCard
             theme={theme}
-            title="Offboarding state machine · Q-ADM09"
+            title={
+              locale === "en"
+                ? "Offboarding state machine · Q-ADM09"
+                : "退場狀態機 · Q-ADM09"
+            }
             subtitle={
               locale === "en"
                 ? "Every transition needs timestamp · actor · evidence · audit"
-                : "每一步轉換需 timestamp · actor · evidence · audit"
+                : "每一步狀態轉換都需要時間戳、操作人、證據與稽核紀錄"
             }
           >
             <div style={stepperRowStyle}>
@@ -1771,7 +1779,7 @@ export default function FleetPage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {index + 1}. {step}
+                    {index + 1}. {workflowLabel(locale, step)}
                   </div>
                   {index < all.length - 1 ? (
                     <div
@@ -1795,7 +1803,7 @@ export default function FleetPage() {
           subtitle={
             locale === "en"
               ? `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
-              : `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
+              : `更新層級 ${REFRESH_TIER} / 30 秒 · ${activeFreshnessLabel}`
           }
         >
           {activeEmptyReason && emptyConfig ? (
