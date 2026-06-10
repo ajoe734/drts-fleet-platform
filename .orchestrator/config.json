@@ -208,9 +208,9 @@
       "file_inbox_path": ".llm-inbox/claude.md"
     },
     "gemini": {
-      "display_name": "Gemini",
+      "display_name": "Antigravity",
       "provider": "gemini",
-      "adapter": "gemini",
+      "adapter": "antigravity",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/gemini.md"
     },
@@ -222,9 +222,9 @@
       "file_inbox_path": ".llm-inbox/claude2.md"
     },
     "gemini2": {
-      "display_name": "Gemini2",
+      "display_name": "Antigravity2",
       "provider": "gemini2",
-      "adapter": "gemini",
+      "adapter": "antigravity",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/gemini2.md"
     },
@@ -338,6 +338,12 @@
         "skip_trust": true,
         "allowed_tools": ["run_shell_command"]
       },
+      "antigravity": {
+        "cli": "agy",
+        "config_home": "~/.antigravity-home",
+        "skip_permissions": true,
+        "include_directories": true
+      },
       "approval": {
         "default_approval_mode": "auto_edit",
         "workspace_agent_yolo_mode": false,
@@ -367,6 +373,13 @@
         "include_directories": true,
         "skip_trust": true,
         "allowed_tools": ["run_shell_command"],
+        "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]
+      },
+      "antigravity": {
+        "cli": "agy",
+        "config_home": "~/.antigravity2-home",
+        "skip_permissions": true,
+        "include_directories": true,
         "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]
       },
       "model_preference": {

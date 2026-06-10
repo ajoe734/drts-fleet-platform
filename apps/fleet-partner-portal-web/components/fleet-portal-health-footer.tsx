@@ -2,17 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { Languages } from "lucide-react";
-import { buildCanvasTheme } from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
+import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 
 type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
 
-const theme = buildCanvasTheme({
-  surface: "tenant",
-  dark: false,
-  density: "compact",
-});
+const theme = buildFleetTheme();
 
 function normalizeHealthStatus(value: unknown, ok: boolean): ApiHealthStatus {
   if (!ok) return "down";
@@ -113,11 +109,8 @@ export function FleetPortalHealthFooter() {
         display: "flex",
         flexDirection: "column",
         alignItems: "stretch",
-        gap: 8,
-        padding: "8px",
-        borderRadius: 10,
-        background: theme.surface,
-        border: `1px solid ${theme.border}`,
+        gap: 7,
+        padding: "2px 0 0",
       }}
     >
       <div
@@ -125,6 +118,10 @@ export function FleetPortalHealthFooter() {
           display: "inline-flex",
           alignItems: "center",
           gap: 8,
+          padding: "7px 8px",
+          borderRadius: 8,
+          background: current.bg,
+          border: `1px solid ${current.border}`,
           minWidth: 0,
           color: current.fg,
           fontSize: 12,
@@ -170,7 +167,7 @@ export function FleetPortalHealthFooter() {
           padding: "7px 10px",
           borderRadius: 8,
           border: `1px solid ${theme.border}`,
-          background: "transparent",
+          background: theme.surfaceLo,
           color: theme.text,
           cursor: "pointer",
           fontSize: 12.5,

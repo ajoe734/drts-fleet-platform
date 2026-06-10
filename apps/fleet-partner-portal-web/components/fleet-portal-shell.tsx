@@ -36,7 +36,7 @@ export function FleetPortalShell({
       env="production"
       avatarLabel="CH"
       sidebarFooter={<FleetPortalHealthFooter />}
-      style={{ minHeight: "100vh", height: "100vh" }}
+      style={{ minHeight: "100dvh", height: "100dvh" }}
     >
       {children}
     </CanvasShell>
