@@ -30,11 +30,16 @@ Phase-1 keeps independent deployments and plane separation (per `cross-app-navig
                                          │ /api/tenant/*  (issuer-tenant scoped)
                                          ▼
                             ┌── tenant business plane ──┐
-                            │ S3 tenant-console-web      │  (bank back-office; issuer tenant)
+                            │ S3 bank-console-web (NEW)  │  (issuer/benefit back-office; bank = issuer tenant in data only)
                             └────────────────────────────┘
 ```
 
-**Decision D1 — bank-as-issuer-tenant.** The bank back-office (S3) is modelled as an **issuer tenant** in `tenant-console-web`, extended with a program-aware view layer, rather than a brand-new app. Rationale: the tenant plane, auth scope, BFF, and `tenant/*` endpoints already exist; only the issuer/program dimension and a contract surface are missing. (Resolves OPQ-1.)
+**Decision D1 (REVISED 2026-06-10) — separate `bank-console-web` app; bank is an issuer tenant only at the data/billing layer.** The bank back-office (S3) is a **new, dedicated app** (`apps/bank-console-web`), NOT a reuse of `tenant-console-web`. Two layers, kept distinct:
+
+- **Data / billing layer:** the bank IS an *issuer tenant* — settlement, statements, audit, users ride the existing `tenant/*` plane and BFF. ✓
+- **UI / back-office layer:** the bank does NOT wear the corporate-commute skin (YAMATO / 成本中心 / 員工乘客). It gets its own card/卡友/機場/quota surface.
+
+Rationale (corrected): `tenant-console-web`'s program model is hard-typed to `programType: "enterprise_dispatch"`, and **`SD-DP-20260508-004` explicitly forbids non-corporate flows from reusing the full tenant console** ("must live as a constrained sub-surface with a separate route group and auth scope, not an accidental reuse"). The card-benefit business diverges from corporate commute on subject (cardholder vs employee), money (issuer-sponsored vs corporate-paid), identity (card eligibility vs roster), and persona — enough to warrant a separate app, which also generalises to future issuers/programs (insurance, travel). Shared logic stays in `packages/*` (api-client, contracts, ui-web, ui-tokens), not a shared app shell. (Supersedes the earlier "reuse tenant-console" draft; resolves OPQ-1.)
 
 ## 2. Surface design
 
@@ -44,8 +49,8 @@ Phase-1 keeps independent deployments and plane separation (per `cross-app-navig
 ### S2 Online-banking app embed — **[new]**
 Reuse S1 as a host-resolved entry rendered in the bank app webview. Identity via issuer **reference token** (`reference-token-eligibility`), not inline card capture (NFR-2, R4). Strip the standalone bootstrap/login; accept a signed issuer session → `VerifyPartnerEligibilityCommand`. No new screens beyond an embed wrapper + entry resolution.
 
-### S3 Bank back-office console — **[extend]**
-`apps/tenant-console-web` for the issuer tenant. Reuse: `bookings`(+detail), `invoices`(對帳單), `reports`, `rules`(審批與配額/quota), `audit`, `users`. **Add a program-aware layer** (see §3, §4). Visual changes require a design-team canvas first (R5).
+### S3 Bank / issuer back-office console — **[new app: `apps/bank-console-web`]**
+A dedicated issuer/benefit back-office, NOT `tenant-console-web`. It consumes the same issuer-tenant-scoped `tenant/*` plane (settlement, statements, audit, users) via the shared `@drts/api-client`, but presents a card-benefit IA (卡友 / 機場 / 趟次配額 / 合約 / 對帳), never the corporate-commute IA. Screens per the design-team canvas (R5). Scaffolding mirrors the FLP/tenant-console app (Dockerfile + deploy workflow + `@drts/ui-web`/`@drts/ui-tokens` `tenant` realm chrome + issuer brand).
 
 ### S4 Dispatch & settlement — **[built]**
 `ops-console-web` dispatch + `billing-settlement` settlement engine. Add airport context surfacing to dispatch detail if absent (flight/terminal/direction) — **[extend]**.
@@ -110,13 +115,38 @@ cardholder → S1/S2: open issuer entry
 |---|---|---|---|
 | Deploy `partner-booking-web` to dev | infra | S1 | Dockerfile + deploy workflow (mirror tenant-console PR #602) |
 | Online-banking embed wrapper + entry | new | S2 | reference-token eligibility; OPQ-2 |
-| Order list program filters + projection | extend | S3/API | §3.2 |
+| Scaffold `apps/bank-console-web` (app + Dockerfile + deploy) | new | S3 | mirror FLP/tenant-console PR #602 |
+| Order list + program dimension (bookings) | new (in bank-console) | S3/API | §3.2 |
 | `GET /api/tenant/contracts` + UI | new | S3/API | fulfilment model; **design canvas (R5)** |
 | `GET /api/tenant/settlement-statements` + UI | new | S3/API | billing-settlement; **design canvas (R5)** |
 | `GET /api/tenant/program-usage` + dashboard | new | S3/API | quota model; **design canvas (R5)** |
 | Airport context on dispatch detail | extend | S4 | order fields (likely present) |
+| Cross-app impact (see §6.5) | extend | Platform Admin / Ops / Fleet Partner / contracts / deploy | — |
 
-**Sequencing.** API-first for the three new `tenant/*` endpoints (they have backing models), then UI once the **design-team canvas** lands for the contract page, settlement-statement page, and program/quota dashboard. The program filters on the existing bookings list can ship ahead (additive columns within the existing canvas).
+**Sequencing.** API-first for the three new `tenant/*` endpoints (they have backing models). In parallel, scaffold `bank-console-web` (app shell + deploy) and the cross-app wiring (§6.5). UI screens wait on the **design-team canvas** (contract, settlement-statement, program/quota, bookings). The S3 UI is a *new app*, so even the bookings list needs canvas — there is no existing tenant-console canvas to extend.
+
+## 6.5 Cross-app impact (the other three live apps must adjust)
+
+Adding `bank-console-web` is not isolated. The existing apps need corresponding changes:
+
+### Contracts / shared (do first)
+- **`CrossAppSurface` enum + deep-link registry** ([extend], `packages/contracts`): add a `bank_console` (issuer) surface so other apps can produce access-gated deep links to it (today the enum is `platform_admin | ops_console | tenant_console | driver_app | partner_booking`). NB the `bank_card_inline` / `issuer_*` values already in contracts are **eligibility decision-sources**, not UI surfaces — distinct.
+- **`programType`** ([extend]): add a card-benefit value (e.g. `card_benefit_airport`) alongside `enterprise_dispatch`; the tenant program model is currently single-valued.
+
+### Platform Admin (`platform-admin-web`) — issuer onboarding & settlement oversight
+- Onboard the **bank as an issuer tenant** + register the **card-benefit program** (reuse `partners`/`service-products`); wire the **eligibility integration** (`adapter-registry`: bank-card-inline / reference-token); oversee **sponsor reimbursement batches** (`payments/reimbursements`). Mostly existing surfaces, extended for `programType: card_benefit_airport`.
+- Add a cross-app link to the issuer's `bank-console-web`.
+
+### Ops Console (`ops-console-web`) — dispatch & contract
+- Surface **airport context** (flight / terminal / direction) + the `credit_card_airport_transfer` subtype on the dispatch board/detail. (Partly present — `dispatch/[dispatchId]`, `dispatch-workflow`, `forwarded-order-board` already reference airport.)
+- The issuer **service-contract/SLA** in ops `/contracts/[contractId]` is the authority that the bank-console contract view reads from.
+- Provide the access-gated cross-link target so `bank_ops_viewer` deep-links resolve (read-only).
+
+### Fleet Partner Portal (`fleet-partner-portal-web`) — sponsor-funded attribution
+- The fulfilling fleet's **trips / revenue / statements must attribute sponsor-funded (card-benefit) trips** and the reimbursement-batch portion correctly. Currently weak (~2 `subsid` references) — **[gap]**: ensure driver/fleet payout stays whole while sponsor settlement closes later (per the settlement-matrix card-benefit channel).
+
+### Deploy / infra (`deploy-dev.yml` + repo vars)
+- New app needs: a standalone deploy workflow (like `deploy-tenant-console.yml`), repo vars `DEV_GCP_BANK_CONSOLE_SERVICE` + `DEV_BANK_CONSOLE_ORIGIN`, a build/deploy job, and registration in the **cross-app origin maps** of platform-admin / ops / fleet-partner / tenant-console so deep-links resolve. (The canonical `deploy-dev.yml` wires each app via `DEV_GCP_<APP>_SERVICE` + `DEV_<APP>_ORIGIN` — mirror that pattern.)
 
 ## 7. Non-functional design
 

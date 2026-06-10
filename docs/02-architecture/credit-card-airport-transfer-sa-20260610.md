@@ -17,7 +17,7 @@
 | Actor | Realm | Surface | Notes |
 |---|---|---|---|
 | `cardholder` 卡友 | external consumer | S1 booking web / S2 banking-app embed | identity from issuer session or reference token |
-| `bank_program_admin` | tenant business plane (issuer tenant) | S3 tenant-console | owns program config & policy view |
+| `bank_program_admin` | tenant business plane (issuer tenant) | S3 bank-console-web (new app) | owns program config & policy view |
 | `bank_ops_viewer` | tenant business plane | S3 | read-only booking + dispatch + contract lookup |
 | `bank_finance` | tenant business plane | S3 | settlement statement + reconciliation |
 | `drts_dispatcher` | control plane | S4 ops-console | assigns / redispatches |

@@ -13,7 +13,7 @@
 
 ## 1. Why this packet exists
 
-The existing **`drts-design-canvas/Tenant Console.html`** was drawn for a **corporate-commute tenant** (fixture: YAMATO 大和商務集團; concepts: 成本中心, 員工乘客, cost-centre approval rules). The bank back-office for card-benefit airport transfer reuses the same skeleton but needs a **program-aware (issuer / 卡友 / 機場)** dimension and **two screens the current canvas does not contain at all** (contract status, settlement statement detail). This packet specifies those gaps for design.
+The bank / issuer back-office is a **brand-new app — `apps/bank-console-web`** (decision revised 2026-06-10, SD §1 D1). It is **NOT** `tenant-console-web`: that app's `drts-design-canvas/Tenant Console.html` was drawn for a **corporate-commute tenant** (YAMATO 大和商務集團; 成本中心, 員工乘客, cost-centre approval rules), and `SD-DP-20260508-004` forbids non-corporate flows from reusing it. So the bank console needs a **full, fresh canvas** in its own card-benefit IA (issuer / 卡友 / 機場 / 趟次配額 / 合約 / 對帳) — not an extension of the corporate canvas. The corporate `Tenant Console.html` may inform shell/chrome conventions only (it uses the `tenant` realm tokens), never the data IA. This packet specifies every screen the new app needs.
 
 The **customer-facing** surfaces (S1 cardholder web, S2 banking-app embed) already have a canvas (`Partner Booking Web.html` / `pb-screens.jsx`, `card` program theme = CTBC blue/gold) — they need **no new design**, only deployment/embed. They are listed in §4 for completeness, not for design work.
 
@@ -35,31 +35,35 @@ The **customer-facing** surfaces (S1 cardholder web, S2 banking-app embed) alrea
 
 ## 4. Sitemap
 
-### 4.1 New design needed (S3 — bank back-office) — **design these**
-| Screen | Route (proposed) | New? |
+### 4.1 New design needed — **the whole `bank-console-web` app** (design all of these)
+This is a new app, so **every screen needs a canvas** — there is no corporate tenant-console canvas to extend.
+| Screen | Route (proposed) | Note |
 |---|---|---|
-| Contract & SLA status | `/contracts` (+ `/[contractId]`) | **NEW screen — not in current canvas** |
-| Settlement statement detail (對帳單明細) | `/statements/[period]` (or `/invoices/[period]` detail) | **NEW detail — list exists as 對帳單/invoices** |
-| Program & quota usage dashboard | `/programs` or home widget | **NEW** |
-| Bookings list — program dimension | `/bookings` (extend) | **EXTEND existing canvas** |
-| Booking detail — airport/benefit panel | `/bookings/[bookingId]` (extend) | **EXTEND** |
+| Home / overview | `/` | issuer dashboard: today's bookings, quota burn, SLA posture |
+| Bookings list — card/airport dimension | `/bookings` | cardholder/program/flight/direction/state — NOT corporate cost-centre columns |
+| Booking detail — airport + benefit + dispatch | `/bookings/[bookingId]` | read-only fulfilment view |
+| Contract & SLA status | `/contracts` (+ `/[contractId]`) | no precedent in tenant canvas |
+| Settlement statement (period + per-trip detail) | `/statements` (+ `/[period]`) | per-trip benefit/subsidy reconciliation |
+| Program & quota usage dashboard | `/programs` | 趟次 consumed vs quota, by program/period |
+| Users & roles | `/users` | bank back-office roles (program-admin / ops-viewer / finance) |
+| Audit | `/audit` | eligibility/dispatch/settlement trail |
 
 ### 4.2 No new design (reference only)
 | Screen | Where | Status |
 |---|---|---|
 | Cardholder booking funnel (entry→eligibility→review→success→tracking→error→manual-review) | `partner-booking-web` `card` program | has canvas (`pb-screens.jsx`) |
-| 對帳單 list, 報表, 審批與配額(quota rules), 稽核, 人員與角色 | `tenant-console` | has canvas (`Tenant Console.html`) |
+| Shell/chrome conventions (realm tokens, density) | `tenant-console` `Tenant Console.html` | **reference for chrome only**, never for the card-benefit data IA |
 
 ## 5. Per-screen functional briefs (design these)
 
-### 5.1 Bookings list — program dimension (EXTEND)
+### 5.1 Bookings list — card/airport dimension
 - **Purpose:** `bank_ops_viewer` sees which cardholder booked, at a glance, as **card-airport** rides (not generic corporate bookings).
 - **Must surface (data):** order id, **cardholder ref (masked)**, **program (中信機場 / programCode)**, **direction (去程/回程)**, **flight no. + terminal**, pickup→drop, time window, **dispatch state** (assigned / en route / completed / cancelled), benefit-reference (masked).
 - **Filters:** by program, by direction, by state, by period, by cardholder ref.
 - **Replaces (semantics):** the corporate `成本中心 (CC)` column has no meaning here — design the issuer/program columns in its place.
 - **Actions:** open detail; export (masked). Read-only — no dispatch mutation from the bank side.
 
-### 5.2 Booking detail — airport & benefit panel (EXTEND)
+### 5.2 Booking detail — airport & benefit panel
 - **Purpose:** read-only fulfilment view of one ride.
 - **Must surface:** the dispatch lifecycle timeline (created → assigned → en route → completed/cancelled), **airport block** (flight, terminal, direction), **benefit block** (program, benefitReference masked, issuer authorisation ref masked, quota impact), and a **read-only cross-link to ops detail** (access-gated; show disabled if forbidden).
 - **No mutation** of dispatch from this surface.

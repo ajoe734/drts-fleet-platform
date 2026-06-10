@@ -27,8 +27,10 @@ A bank (card issuer, e.g. 中信銀行 / CTBC) offers its cardholders a benefit:
 |---|---|---|---|---|
 | S1 | Cardholder booking website | 卡友 (external consumer) | `apps/partner-booking-web` `card` program | **[built]** flow, **[gap]** not deployed |
 | S2 | Online-banking app embedded booking | 卡友 inside the bank's app (webview/SDK) | new embed of S1 / host-resolved entry | **[gap]** |
-| S3 | Bank back-office console | 銀行內部人員 | `apps/tenant-console-web` (bank as tenant) | **[gap]** bank/program dimension |
+| S3 | Bank / issuer back-office console | 銀行內部人員 | **`apps/bank-console-web` (NEW app)** — bank is an issuer *tenant* in data only | **[new]** |
 | S4 | Dispatch / fulfilment / settlement | DRTS ops + platform | `apps/ops-console-web`, `billing-settlement` | **[built]** mostly |
+
+> **S3 is a SEPARATE new app, not `tenant-console-web`** (decision revised 2026-06-10 — see SD §1 D1). `tenant-console-web` is the *corporate-commute* tenant back-office (programType `enterprise_dispatch`); `SD-DP-20260508-004` forbids non-corporate flows from reusing it. The bank rides the same issuer-tenant data/billing plane but gets its own card-benefit UI. Adding this app requires cross-app adjustments in Platform Admin / Ops / Fleet Partner / contracts / deploy — see SD §6.5.
 
 ### 1.2 Out of scope
 
@@ -106,7 +108,7 @@ A bank (card issuer, e.g. 中信銀行 / CTBC) offers its cardholders a benefit:
 
 ## 6. Open product questions
 
-- OPQ-1: Is the bank back-office a **dedicated issuer tenant** in `tenant-console-web`, or a **distinct bank-console surface**? (SA/SD recommend: issuer-as-tenant with program-aware extensions — see SD §3.)
+- OPQ-1 **[RESOLVED 2026-06-10]**: The bank back-office is a **separate new app `apps/bank-console-web`** (bank = issuer tenant in the data/billing layer only), NOT a reuse of `tenant-console-web`. See SD §1 D1 and `SD-DP-20260508-004`.
 - OPQ-2: For S2 (online-banking app), is identity passed via issuer reference token (preferred, `reference-token-eligibility`) or inline card verification (`bank-card-inline-eligibility`)?
 - OPQ-3: Statement cadence and money direction confirmation (monthly issuer-pays-DRTS assumed).
 - OPQ-4: Quota refund policy on cancellation (does a cancelled 趟次 return to quota, and within what window?).
