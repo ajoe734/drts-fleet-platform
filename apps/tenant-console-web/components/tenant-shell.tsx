@@ -1,13 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   CanvasShell,
   CanvasWindowChrome,
   ManagementThemeProvider,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { REALM_COLORS } from "@drts/ui-tokens";
 import {
   TENANT_CONSOLE_BRAND,
   TENANT_CONSOLE_BRAND_SUB,
@@ -20,11 +21,44 @@ import {
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
 
+type ShellCssVars = CSSProperties & Record<`--${string}`, string>;
+
 const tenantCanvasTheme = buildCanvasTheme({
   surface: "tenant",
   dark: true,
   density: "compact",
 });
+
+const tenantSurfaceTheme = buildCanvasTheme({
+  surface: "tenant",
+  dark: false,
+  density: "compact",
+});
+
+const tenantCssVars = {
+  "--app-bg": tenantSurfaceTheme.rowSelect,
+  "--app-shell": REALM_COLORS.tenant.dark.bg,
+  "--app-shell-border": REALM_COLORS.tenant.dark.border,
+  "--app-panel": "rgb(255 255 255 / 0.88)",
+  "--app-panel-strong": tenantSurfaceTheme.surface,
+  "--app-panel-border": tenantSurfaceTheme.border,
+  "--app-text": tenantSurfaceTheme.text,
+  "--app-muted": tenantSurfaceTheme.textMuted,
+  "--app-accent": tenantSurfaceTheme.accent,
+  "--app-accent-soft": tenantSurfaceTheme.accentBg,
+  "--app-success": tenantSurfaceTheme.success,
+  "--app-warning": tenantSurfaceTheme.warn,
+  "--app-danger": tenantSurfaceTheme.danger,
+  "--app-shadow": tenantSurfaceTheme.shadow,
+  "--app-accent-rgb": "15 118 110",
+  "--app-shell-rgb": "15 42 40",
+  "--app-text-rgb": "11 18 32",
+  "--app-muted-rgb": "71 85 105",
+  "--app-success-rgb": "15 123 90",
+  "--app-warning-rgb": "168 89 11",
+  "--app-danger-rgb": "180 35 24",
+  "--app-invert": tenantSurfaceTheme.invert,
+} satisfies ShellCssVars;
 
 export function TenantShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -41,7 +75,8 @@ export function TenantShell({ children }: { children: ReactNode }) {
         style={{
           minHeight: "100vh",
           background:
-            "radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 22%), #060b13",
+            "radial-gradient(circle at top left, rgb(15 118 110 / 0.18), transparent 22%), #060b13",
+          ...tenantCssVars,
         }}
       >
         <CanvasWindowChrome

@@ -59,7 +59,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "plus",
     label: t("nav.newBooking"),
   },
-  { divider: "資料維護" },
+  { divider: "通訊錄與規則" },
   {
     key: "passengers",
     href: "/passengers",
@@ -91,7 +91,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "users",
     label: t("nav.users"),
   },
-  { divider: "通知與 SLA" },
+  { divider: "整合與通知" },
   {
     key: "notifications",
     href: "/notifications",
@@ -104,7 +104,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "sla",
     label: t("nav.sla"),
   },
-  { divider: "帳務與治理" },
+  { divider: "帳務與報表" },
   {
     key: "billing",
     href: "/billing",
@@ -142,7 +142,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "integrationGov",
     label: t("nav.integrationGovernance"),
   },
-  { divider: "系統" },
+  { divider: "系統與稽核" },
   {
     key: "featureflags",
     href: "/feature-flags",

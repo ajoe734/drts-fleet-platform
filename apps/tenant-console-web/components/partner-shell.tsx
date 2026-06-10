@@ -3,10 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
+import type { CSSProperties } from "react";
 import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityMode,
 } from "@drts/contracts";
+import { SURFACE_ACCENTS } from "@drts/ui-tokens";
+
+type PartnerCssVars = CSSProperties & Record<`--${string}`, string>;
 
 export type PartnerNavItem = {
   href: string;
@@ -33,6 +37,15 @@ const ELIGIBILITY_NOTE: Record<PartnerEligibilityMode, string> = {
   bank_card_inline: "Inline card verification required before booking.",
   reference_required: "Reference token verification required before booking.",
 };
+
+const partnerCssVars = {
+  "--partner-accent": SURFACE_ACCENTS.partner.light.fg,
+  "--partner-accent-soft": SURFACE_ACCENTS.partner.light.bg,
+  "--partner-accent-border": SURFACE_ACCENTS.partner.light.border,
+  "--partner-shell-bg": SURFACE_ACCENTS.partner.dark.bg,
+  "--partner-shell-fg": "#FFFBEB",
+  "--partner-shell-muted": "rgb(255 251 235 / 0.78)",
+} satisfies PartnerCssVars;
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -67,9 +80,12 @@ export function PartnerAuthenticatedShell({
     <div
       className="partner-shell"
       style={
-        session.themeAccent
-          ? ({ "--partner-accent": session.themeAccent } as React.CSSProperties)
-          : undefined
+        {
+          ...partnerCssVars,
+          ...(session.themeAccent
+            ? { "--partner-accent": session.themeAccent }
+            : {}),
+        } as CSSProperties
       }
     >
       <aside className="partner-sidebar" aria-label="Partner navigation">

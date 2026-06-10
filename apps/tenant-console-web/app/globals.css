@@ -1,18 +1,19 @@
 :root {
   color-scheme: light;
-  --bg: #f3efe6;
-  --shell: #10233a;
-  --shell-border: rgba(255, 255, 255, 0.08);
-  --panel: rgba(255, 255, 255, 0.88);
-  --panel-strong: #ffffff;
-  --panel-border: rgba(16, 35, 58, 0.09);
-  --text: #10233a;
-  --muted: #5f6f82;
-  --accent: #b85c38;
-  --accent-soft: rgba(184, 92, 56, 0.14);
-  --success: #1d6b57;
-  --warning: #8b5e14;
-  --shadow: 0 24px 60px rgba(16, 35, 58, 0.12);
+  --bg: var(--app-bg);
+  --shell: var(--app-shell);
+  --shell-border: var(--app-shell-border);
+  --panel: var(--app-panel);
+  --panel-strong: var(--app-panel-strong);
+  --panel-border: var(--app-panel-border);
+  --text: var(--app-text);
+  --muted: var(--app-muted);
+  --accent: var(--app-accent);
+  --accent-soft: var(--app-accent-soft);
+  --success: var(--app-success);
+  --warning: var(--app-warning);
+  --danger: var(--app-danger);
+  --shadow: var(--app-shadow);
 }
 
 * {
@@ -29,11 +30,11 @@ body {
   background:
     radial-gradient(
       circle at top left,
-      rgba(184, 92, 56, 0.16),
+      rgb(var(--app-accent-rgb, 15 118 110) / 0.16),
       transparent 28%
     ),
-    linear-gradient(180deg, #fbf8f2 0%, #edf1f6 100%);
-  color: var(--text);
+    linear-gradient(180deg, rgb(255 255 255 / 1) 0%, var(--bg, #ffffff) 100%);
+  color: var(--text, #000000);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
@@ -64,9 +65,9 @@ textarea {
   gap: 1.5rem;
   padding: 2rem 1.35rem;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 28%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.02), transparent 28%),
     var(--shell);
-  color: #f3f6fb;
+  color: var(--app-invert, #ffffff);
 }
 
 .tenant-brand {
@@ -81,8 +82,8 @@ textarea {
   gap: 0.45rem;
   border-radius: 999px;
   padding: 0.35rem 0.7rem;
-  background: rgba(255, 255, 255, 0.1);
-  color: #f6d8cb;
+  background: rgb(255 255 255 / 0.1);
+  color: rgb(var(--app-accent-rgb, 15 118 110) / 0.92);
   font-size: 0.78rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -98,7 +99,7 @@ textarea {
 .tenant-sidebar-note,
 .tenant-sidebar-footnote {
   margin: 0;
-  color: rgba(243, 246, 251, 0.72);
+  color: rgb(255 255 255 / 0.72);
   line-height: 1.5;
 }
 
@@ -113,7 +114,7 @@ textarea {
 }
 
 .tenant-nav-label {
-  color: rgba(243, 246, 251, 0.56);
+  color: rgb(255 255 255 / 0.56);
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -137,20 +138,20 @@ textarea {
 }
 
 .tenant-nav-link span {
-  color: rgba(243, 246, 251, 0.68);
+  color: rgb(255 255 255 / 0.68);
   font-size: 0.84rem;
   line-height: 1.35;
 }
 
 .tenant-nav-link:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(255 255 255 / 0.06);
   border-color: var(--shell-border);
   transform: translateX(2px);
 }
 
 .tenant-nav-link.is-active {
-  background: rgba(184, 92, 56, 0.16);
-  border-color: rgba(246, 216, 203, 0.18);
+  background: rgb(var(--app-accent-rgb, 15 118 110) / 0.18);
+  border-color: rgb(var(--app-accent-rgb, 15 118 110) / 0.28);
 }
 
 .tenant-sidebar-note {
@@ -159,12 +160,12 @@ textarea {
   margin-top: auto;
   border-radius: 20px;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(255 255 255 / 0.06);
   border: 1px solid var(--shell-border);
 }
 
 .tenant-sidebar-note strong {
-  color: #ffffff;
+  color: var(--app-invert, #ffffff);
 }
 
 .tenant-sidebar-footnote {
@@ -188,9 +189,9 @@ textarea {
   justify-content: space-between;
   gap: 1rem;
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgb(255 255 255 / 0.74);
   padding: 1.1rem 1.25rem;
-  box-shadow: 0 12px 30px rgba(16, 35, 58, 0.06);
+  box-shadow: 0 12px 30px rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   backdrop-filter: blur(14px);
 }
 
@@ -246,9 +247,9 @@ textarea {
   border-radius: 32px;
   padding: 2rem;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(255, 250, 244, 0.94)),
+    linear-gradient(145deg, rgb(255 255 255 / 0.94), rgb(var(--app-accent-rgb, 15 118 110) / 0.08)),
     var(--panel-strong);
-  border: 1px solid rgba(184, 92, 56, 0.12);
+  border: 1px solid rgb(var(--app-accent-rgb, 15 118 110) / 0.16);
   box-shadow: var(--shadow);
 }
 
@@ -279,7 +280,7 @@ textarea {
   border: 1px solid var(--panel-border);
   border-radius: 24px;
   background: var(--panel);
-  box-shadow: 0 10px 24px rgba(16, 35, 58, 0.05);
+  box-shadow: 0 10px 24px rgb(var(--app-shell-rgb, 15 42 40) / 0.06);
 }
 
 .surface-card,
@@ -330,8 +331,8 @@ textarea {
 }
 
 .callout-panel.is-warning {
-  background: rgba(255, 247, 238, 0.96);
-  border-color: rgba(184, 92, 56, 0.18);
+  background: rgb(var(--app-warning-rgb, 168 89 11) / 0.12);
+  border-color: rgb(var(--app-warning-rgb, 168 89 11) / 0.24);
 }
 
 .link-row {
@@ -356,9 +357,9 @@ textarea {
   gap: 0.5rem;
   border-radius: 24px;
   border: 1px solid var(--panel-border);
-  background: rgba(255, 255, 255, 0.92);
+  background: rgb(255 255 255 / 0.92);
   padding: 1.2rem;
-  box-shadow: 0 14px 34px rgba(16, 35, 58, 0.06);
+  box-shadow: 0 14px 34px rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
 }
 
 .metric-card strong {
@@ -389,7 +390,7 @@ textarea {
 }
 
 .metric-label {
-  background: rgba(16, 35, 58, 0.06);
+  background: rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   color: var(--shell);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -434,13 +435,13 @@ textarea {
 }
 
 .status-chip {
-  background: rgba(16, 35, 58, 0.08);
+  background: rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   color: var(--shell);
 }
 
 .status-chip.is-active {
   background: var(--shell);
-  color: #ffffff;
+  color: var(--app-invert, #ffffff);
 }
 
 .status-chip span,
@@ -449,17 +450,17 @@ textarea {
 }
 
 .status-badge {
-  background: rgba(184, 92, 56, 0.14);
+  background: rgb(var(--app-accent-rgb, 15 118 110) / 0.14);
   color: var(--accent);
 }
 
 .source-pill {
-  background: rgba(29, 107, 87, 0.12);
+  background: rgb(var(--app-success-rgb, 15 123 90) / 0.12);
   color: var(--success);
 }
 
 .source-pill-external {
-  background: rgba(139, 94, 20, 0.12);
+  background: rgb(var(--app-warning-rgb, 168 89 11) / 0.12);
   color: var(--warning);
 }
 
@@ -496,10 +497,10 @@ textarea {
 .field-stack select,
 .field-stack textarea {
   width: 100%;
-  border: 1px solid rgba(16, 35, 58, 0.12);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.12);
   border-radius: 16px;
   padding: 0.8rem 0.9rem;
-  background: rgba(255, 255, 255, 0.88);
+  background: rgb(255 255 255 / 0.88);
   color: var(--text);
 }
 
@@ -546,17 +547,17 @@ textarea {
 }
 
 .booking-pill-accent {
-  background: rgba(184, 92, 56, 0.14);
+  background: rgb(var(--app-accent-rgb, 15 118 110) / 0.14);
   color: var(--accent);
 }
 
 .booking-pill-success {
-  background: rgba(29, 107, 87, 0.12);
+  background: rgb(var(--app-success-rgb, 15 123 90) / 0.12);
   color: var(--success);
 }
 
 .booking-pill-warning {
-  background: rgba(139, 94, 20, 0.12);
+  background: rgb(var(--app-warning-rgb, 168 89 11) / 0.12);
   color: var(--warning);
 }
 
@@ -572,8 +573,8 @@ textarea {
   gap: 0.45rem;
   border-radius: 18px;
   padding: 0.8rem 0.6rem;
-  border: 1px solid rgba(16, 35, 58, 0.08);
-  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
+  background: rgb(255 255 255 / 0.68);
   color: var(--muted);
   font-size: 0.8rem;
   font-weight: 700;
@@ -589,8 +590,8 @@ textarea {
 }
 
 .booking-step.is-active {
-  border-color: rgba(184, 92, 56, 0.18);
-  background: rgba(255, 248, 242, 0.96);
+  border-color: rgb(var(--app-accent-rgb, 15 118 110) / 0.18);
+  background: rgb(var(--app-accent-rgb, 15 118 110) / 0.1);
   color: var(--accent);
 }
 
@@ -600,8 +601,8 @@ textarea {
 }
 
 .booking-step.is-complete {
-  border-color: rgba(29, 107, 87, 0.16);
-  background: rgba(241, 252, 248, 0.92);
+  border-color: rgb(var(--app-success-rgb, 15 123 90) / 0.16);
+  background: rgb(var(--app-success-rgb, 15 123 90) / 0.1);
   color: var(--success);
 }
 
@@ -612,11 +613,11 @@ textarea {
 .booking-step.is-cancelled {
   border-color: rgba(185, 28, 28, 0.16);
   background: rgba(254, 242, 242, 0.94);
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .booking-step.is-cancelled .booking-step-dot {
-  background: #b91c1c;
+  background: var(--danger);
 }
 
 .booking-event-list {
@@ -631,19 +632,19 @@ textarea {
   display: grid;
   gap: 0.5rem;
   border-radius: 20px;
-  border: 1px solid rgba(16, 35, 58, 0.08);
-  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
+  background: rgb(255 255 255 / 0.78);
   padding: 1rem;
 }
 
 .booking-event-warning {
-  border-color: rgba(184, 92, 56, 0.18);
-  background: rgba(255, 247, 238, 0.92);
+  border-color: rgb(var(--app-warning-rgb, 168 89 11) / 0.22);
+  background: rgb(var(--app-warning-rgb, 168 89 11) / 0.12);
 }
 
 .booking-event-success {
-  border-color: rgba(29, 107, 87, 0.14);
-  background: rgba(241, 252, 248, 0.94);
+  border-color: rgb(var(--app-success-rgb, 15 123 90) / 0.14);
+  background: rgb(var(--app-success-rgb, 15 123 90) / 0.1);
 }
 
 .booking-event-head {
@@ -660,17 +661,17 @@ textarea {
 }
 
 .booking-realm-tenant {
-  background: rgba(16, 35, 58, 0.08);
+  background: rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   color: var(--shell);
 }
 
 .booking-realm-ops {
-  background: rgba(184, 92, 56, 0.14);
+  background: rgb(var(--app-warning-rgb, 168 89 11) / 0.14);
   color: var(--accent);
 }
 
 .booking-realm-platform {
-  background: rgba(29, 107, 87, 0.12);
+  background: rgb(var(--app-success-rgb, 15 123 90) / 0.12);
   color: var(--success);
 }
 
@@ -680,9 +681,9 @@ textarea {
 }
 
 .booking-receipt {
-  border: 1px solid rgba(29, 107, 87, 0.16);
+  border: 1px solid rgb(var(--app-success-rgb, 15 123 90) / 0.16);
   border-radius: 18px;
-  background: rgba(241, 252, 248, 0.92);
+  background: rgb(var(--app-success-rgb, 15 123 90) / 0.1);
   padding: 0.85rem 0.95rem;
   color: var(--success);
   line-height: 1.5;
@@ -718,7 +719,7 @@ textarea {
   border-radius: 999px;
   padding: 0 1.1rem;
   background: var(--shell);
-  color: #ffffff;
+  color: var(--app-invert, #ffffff);
   font-weight: 700;
   cursor: pointer;
 }
@@ -729,7 +730,7 @@ textarea {
 }
 
 .booking-button-secondary {
-  background: rgba(16, 35, 58, 0.08);
+  background: rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   color: var(--shell);
 }
 
@@ -765,22 +766,22 @@ textarea {
 }
 
 .action-button-secondary {
-  border-color: rgba(16, 35, 58, 0.18);
-  background: rgba(255, 255, 255, 0.88);
+  border-color: rgb(var(--app-shell-rgb, 15 42 40) / 0.18);
+  background: rgb(255 255 255 / 0.88);
   color: var(--shell);
 }
 
 .action-button-danger {
   border-color: rgba(184, 28, 28, 0.18);
   background: rgba(254, 242, 242, 0.96);
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .table-wrap {
   overflow-x: auto;
   border-radius: 20px;
-  border: 1px solid rgba(16, 35, 58, 0.08);
-  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
+  background: rgb(255 255 255 / 0.82);
 }
 
 .data-grid {
@@ -796,7 +797,7 @@ textarea {
 }
 
 .data-grid thead th {
-  border-bottom: 1px solid rgba(16, 35, 58, 0.08);
+  border-bottom: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   color: var(--muted);
   font-size: 0.78rem;
   letter-spacing: 0.08em;
@@ -804,7 +805,7 @@ textarea {
 }
 
 .data-grid tbody tr + tr td {
-  border-top: 1px solid rgba(16, 35, 58, 0.06);
+  border-top: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.06);
 }
 
 .table-primary {
@@ -813,10 +814,10 @@ textarea {
 }
 
 .empty-panel {
-  border: 1px dashed rgba(16, 35, 58, 0.16);
+  border: 1px dashed rgb(var(--app-shell-rgb, 15 42 40) / 0.16);
   border-radius: 18px;
   padding: 1rem 1.1rem;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgb(255 255 255 / 0.6);
 }
 
 .timeline-list {
@@ -840,7 +841,7 @@ textarea {
 .timeline-item {
   display: grid;
   gap: 0.2rem;
-  border-left: 3px solid rgba(184, 92, 56, 0.24);
+  border-left: 3px solid rgb(var(--app-accent-rgb, 15 118 110) / 0.24);
   padding-left: 1rem;
 }
 
@@ -858,8 +859,8 @@ textarea {
   display: block;
   overflow-x: auto;
   border-radius: 18px;
-  border: 1px dashed rgba(16, 35, 58, 0.18);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px dashed rgb(var(--app-shell-rgb, 15 42 40) / 0.18);
+  background: rgb(255 255 255 / 0.72);
   padding: 0.95rem 1rem;
   color: var(--shell);
   font-size: 0.95rem;
@@ -875,9 +876,9 @@ textarea {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  border: 1px solid rgba(16, 35, 58, 0.1);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.1);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgb(255 255 255 / 0.72);
   padding: 0.8rem 0.9rem;
 }
 
@@ -897,17 +898,17 @@ textarea {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: rgba(16, 35, 58, 0.38);
+  background: rgb(var(--app-shell-rgb, 15 42 40) / 0.38);
   z-index: 40;
 }
 
 .modal-panel {
   width: min(680px, 100%);
   border-radius: 28px;
-  border: 1px solid rgba(16, 35, 58, 0.08);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   background: #ffffff;
   padding: 1.25rem;
-  box-shadow: 0 24px 64px rgba(16, 35, 58, 0.2);
+  box-shadow: 0 24px 64px rgb(var(--app-shell-rgb, 15 42 40) / 0.2);
 }
 
 .modal-header {
@@ -937,18 +938,17 @@ textarea {
   padding: 0.8rem 0.9rem;
   margin-bottom: 1rem;
   background: rgba(254, 242, 242, 0.92);
-  color: #991b1b;
+  color: var(--danger);
 }
 
 .partner-shell {
-  --partner-accent: #b85c38;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   min-height: 100vh;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.7) 0%,
-    rgba(243, 239, 230, 0.95) 100%
+    rgb(255 255 255 / 0.7) 0%,
+    rgb(255 251 235 / 0.95) 100%
   );
 }
 
@@ -961,9 +961,9 @@ textarea {
   gap: 1.5rem;
   padding: 2rem 1.35rem;
   background:
-    linear-gradient(180deg, rgba(0, 0, 0, 0.04), transparent 28%),
-    var(--partner-accent);
-  color: #fdf3eb;
+    linear-gradient(180deg, rgb(0 0 0 / 0.04), transparent 28%),
+    var(--partner-shell-bg, var(--partner-accent));
+  color: var(--partner-shell-fg, #ffffff);
 }
 
 .partner-brand {
@@ -980,7 +980,7 @@ textarea {
 
 .partner-brand-note {
   margin: 0;
-  color: rgba(253, 243, 235, 0.78);
+  color: var(--partner-shell-muted, rgb(255 255 255 / 0.78));
   line-height: 1.5;
 }
 
@@ -1022,7 +1022,7 @@ textarea {
 }
 
 .partner-nav-link span {
-  color: rgba(253, 243, 235, 0.74);
+  color: var(--partner-shell-muted, rgb(255 255 255 / 0.74));
   font-size: 0.84rem;
   line-height: 1.35;
 }
@@ -1083,7 +1083,7 @@ textarea {
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.7);
   padding: 1.1rem 1.25rem;
-  box-shadow: 0 12px 30px rgba(16, 35, 58, 0.06);
+  box-shadow: 0 12px 30px rgb(var(--app-shell-rgb, 15 42 40) / 0.06);
   backdrop-filter: blur(14px);
 }
 
@@ -1129,7 +1129,7 @@ textarea {
   padding: 1.5rem 1.6rem;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(184, 92, 56, 0.18);
+  border: 1px solid var(--partner-accent-border, rgb(253 230 138 / 1));
   box-shadow: var(--shadow);
 }
 
@@ -1172,7 +1172,7 @@ textarea {
   padding: 1.4rem 1.5rem;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(16, 35, 58, 0.08);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.08);
   box-shadow: var(--shadow);
 }
 
@@ -1181,13 +1181,13 @@ textarea {
   gap: 0.75rem;
   border-radius: 20px;
   padding: 1.15rem 1.25rem;
-  border: 1px solid rgba(16, 35, 58, 0.1);
+  border: 1px solid rgb(var(--app-shell-rgb, 15 42 40) / 0.1);
   background: rgba(255, 255, 255, 0.92);
 }
 
 .partner-verification-result.is-success {
-  border-color: rgba(29, 107, 87, 0.4);
-  background: rgba(232, 247, 240, 0.96);
+  border-color: rgb(var(--app-success-rgb, 15 123 90) / 0.4);
+  background: rgb(var(--app-success-rgb, 15 123 90) / 0.12);
 }
 
 .partner-verification-result.is-error {
@@ -1196,8 +1196,8 @@ textarea {
 }
 
 .partner-verification-result.is-warning {
-  border-color: rgba(184, 92, 56, 0.32);
-  background: rgba(255, 247, 238, 0.96);
+  border-color: rgb(var(--app-warning-rgb, 168 89 11) / 0.32);
+  background: rgb(var(--app-warning-rgb, 168 89 11) / 0.12);
 }
 
 .partner-verification-result strong {
@@ -1206,7 +1206,7 @@ textarea {
 
 .status-badge.is-warning,
 .status-chip.is-warning {
-  background: rgba(184, 92, 56, 0.18);
+  background: rgb(var(--app-warning-rgb, 168 89 11) / 0.18);
   color: var(--accent);
 }
 
