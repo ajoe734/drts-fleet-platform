@@ -110,7 +110,11 @@ export function FleetPortalHealthFooter() {
         flexDirection: "column",
         alignItems: "stretch",
         gap: 7,
-        padding: "2px 0 0",
+        padding: 8,
+        borderRadius: 12,
+        border: `1px solid ${theme.border}`,
+        background: `linear-gradient(180deg, ${theme.surfaceHi}, ${theme.surfaceLo})`,
+        boxShadow: theme.shadowSm,
       }}
     >
       <div
@@ -118,8 +122,8 @@ export function FleetPortalHealthFooter() {
           display: "inline-flex",
           alignItems: "center",
           gap: 8,
-          padding: "7px 8px",
-          borderRadius: 8,
+          padding: "8px 9px",
+          borderRadius: 10,
           background: current.bg,
           border: `1px solid ${current.border}`,
           minWidth: 0,
@@ -149,7 +153,7 @@ export function FleetPortalHealthFooter() {
             whiteSpace: "nowrap",
           }}
         >
-          {checkedLabel}
+          {t("shell.api.lastChecked")} {checkedLabel}
         </span>
       </div>
       <button
@@ -165,10 +169,10 @@ export function FleetPortalHealthFooter() {
           gap: 8,
           width: "100%",
           padding: "7px 10px",
-          borderRadius: 8,
-          border: `1px solid ${theme.border}`,
-          background: theme.surfaceLo,
-          color: theme.text,
+          borderRadius: 10,
+          border: `1px solid ${theme.accentBorder}`,
+          background: theme.accentBg,
+          color: theme.accent,
           cursor: "pointer",
           fontSize: 12.5,
           fontWeight: 700,
