@@ -63,7 +63,7 @@ function useApiHealth() {
 }
 
 export function OpsHealthFooter() {
-  const { locale, setLocale } = useTranslation();
+  const { locale, setLocale, t } = useTranslation();
   const { status, lastCheckedAt } = useApiHealth();
 
   const copy: Record<
@@ -71,25 +71,25 @@ export function OpsHealthFooter() {
     { label: string; fg: string; bg: string; border: string }
   > = {
     checking: {
-      label: locale === "zh" ? "API 檢查中" : "API checking",
+      label: t("opsShell.health.checking"),
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,
     },
     healthy: {
-      label: locale === "zh" ? "API 健康" : "API healthy",
+      label: t("opsShell.health.healthy"),
       fg: theme.success,
       bg: theme.successBg,
       border: theme.successBorder,
     },
     degraded: {
-      label: locale === "zh" ? "API 降級" : "API degraded",
+      label: t("opsShell.health.degraded"),
       fg: theme.warn,
       bg: theme.warnBg,
       border: theme.warnBorder,
     },
     down: {
-      label: locale === "zh" ? "API 失聯" : "API down",
+      label: t("opsShell.health.down"),
       fg: theme.danger,
       bg: theme.dangerBg,
       border: theme.dangerBorder,
@@ -98,15 +98,15 @@ export function OpsHealthFooter() {
   const c = copy[status];
   const checkedLabel = lastCheckedAt
     ? lastCheckedAt.toLocaleTimeString(locale === "zh" ? "zh-TW" : "en-US")
-    : "—";
+    : t("opsShell.health.notChecked");
 
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 8,
-        padding: "4px 2px",
+        gap: 7,
+        padding: "2px 0 0",
       }}
     >
       <div
@@ -114,7 +114,8 @@ export function OpsHealthFooter() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "8px 10px",
+          gap: 8,
+          padding: "7px 8px",
           borderRadius: 8,
           background: c.bg,
           border: `1px solid ${c.border}`,
@@ -142,13 +143,17 @@ export function OpsHealthFooter() {
           {c.label}
         </span>
         <span style={{ fontSize: 11, color: theme.textMuted }}>
-          {locale === "zh" ? "最後檢查" : "checked"} {checkedLabel}
+          {t("opsShell.health.lastChecked")} {checkedLabel}
         </span>
       </div>
       <button
         type="button"
         onClick={() => setLocale(locale === "en" ? "zh" : "en")}
-        aria-label={locale === "en" ? "切換為中文" : "Switch to English"}
+        aria-label={
+          locale === "en"
+            ? t("opsShell.locale.ariaZh")
+            : t("opsShell.locale.ariaEn")
+        }
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -156,7 +161,7 @@ export function OpsHealthFooter() {
           gap: 7,
           padding: "7px 10px",
           borderRadius: 8,
-          background: "transparent",
+          background: theme.surfaceLo,
           border: `1px solid ${theme.border}`,
           color: theme.text,
           fontSize: 12.5,
@@ -165,7 +170,9 @@ export function OpsHealthFooter() {
         }}
       >
         <Languages size={13} />
-        <span>{locale === "en" ? "中文" : "English"}</span>
+        <span>
+          {locale === "en" ? t("opsShell.locale.zh") : t("opsShell.locale.en")}
+        </span>
       </button>
     </div>
   );
