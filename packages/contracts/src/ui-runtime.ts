@@ -213,6 +213,39 @@ export interface ActionReceipt {
 // Q-X03 — CrossAppResourceLink
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const CROSS_APP_SURFACES = [
+  "platform_admin",
+  "ops_console",
+  "tenant_console",
+  "driver_app",
+  "partner_booking",
+  "bank_console",
+] as const;
+export type CrossAppSurface = (typeof CROSS_APP_SURFACES)[number];
+
+export const CROSS_APP_TARGET_APPS = [
+  "ops-console",
+  "platform-admin",
+  "tenant-console",
+  "fleet-partner-portal",
+  "bank-console",
+] as const;
+export type CrossAppTargetApp = (typeof CROSS_APP_TARGET_APPS)[number];
+
+export const CROSS_APP_DEEP_LINK_PATTERNS = {
+  platform_admin: ["/tenants/{tenantId}", "/partners/{entrySlug}"],
+  ops_console: ["/dispatch/orders/{orderId}", "/complaints/{caseNo}"],
+  tenant_console: ["/bookings/{bookingId}", "/approval-requests/{approvalRequestId}"],
+  driver_app: ["drtsdriver://tasks/{taskId}"],
+  partner_booking: ["/{entrySlug}"],
+  bank_console: [
+    "/bookings/{bookingId}",
+    "/contracts/{contractId}",
+    "/settlement-statements/{period}",
+    "/program-usage",
+  ],
+} as const satisfies Record<CrossAppSurface, readonly string[]>;
+
 /**
  * Cross-app deep link target. Phase 1 keeps the 4 apps as separate
  * deployments; cross-app navigation is deep-link to a different
@@ -223,11 +256,7 @@ export interface ActionReceipt {
  * (e.g. ops-console revenue mismatch → platform-admin reconciliation).
  */
 export interface CrossAppResourceLink {
-  targetApp:
-    | "ops-console"
-    | "platform-admin"
-    | "tenant-console"
-    | "fleet-partner-portal";
+  targetApp: CrossAppTargetApp;
   route: string;
   resourceType: string;
   resourceId: string;
