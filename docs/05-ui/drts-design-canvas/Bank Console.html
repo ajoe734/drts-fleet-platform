@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Bank Console · CTBC · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#0F1E3C"/>
+  <rect x="14" y="22" width="72" height="56" rx="6" fill="#FFFFFF" stroke="#13478F" stroke-width="2"/>
+  <rect x="20" y="30" width="14" height="40" rx="2" fill="#EDF2FB"/>
+  <rect x="40" y="32" width="38" height="3" rx="1.5" fill="#13478F"/>
+  <rect x="40" y="40" width="26" height="2.5" rx="1" fill="#A8771B"/>
+  <rect x="40" y="48" width="38" height="20" rx="2" fill="#EDF2FB"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="mgmt-primitives.jsx"></script>
+<script type="text/babel" src="mgmt-shell.jsx"></script>
+<script type="text/babel" src="mgmt-auth.jsx"></script>
+<script type="text/babel" src="bank-data.jsx"></script>
+<script type="text/babel" src="bank-screens-1.jsx"></script>
+<script type="text/babel" src="bank-screens-2.jsx"></script>
+<script type="text/babel" src="bank-screens-3.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "density": "compact"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const th = buildMgmtTheme({ console: 'bank', dark: tw.dark, density: tw.density });
+  const W = 1440, H = 900;
+  const Frame = ({ children, chrome, url }) => chrome
+    ? <MacWindow title="Bank Console · CTBC" url={'https://console.ride.ctbc.com.tw' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
+    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
+  const Bare = ({ children }) => <Frame>{children}</Frame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Bank Console" subtitle="發卡行方案監管台 · 中國信託 CTBC · bank-console-web · 8 screens · 唯讀 · 參照遮罩 · zh-TW / en">
+        <DCSection id="overview" title="01 · 首頁總覽" subtitle="role-cut：管理員全部 · 營運→訂單+例外 · 財務→結算卡">
+          <DCArtboard id="home-admin" label="首頁 · 方案管理員 (全部)" width={W} height={H}><Hero url="/"><BK_Home theme={th} role="admin" /></Hero></DCArtboard>
+          <DCArtboard id="home-ops" label="首頁 · 營運檢視 (訂單+例外)" width={W} height={H}><Bare><BK_Home theme={th} role="ops" /></Bare></DCArtboard>
+          <DCArtboard id="home-finance" label="首頁 · 財務 (結算卡)" width={W} height={H}><Bare><BK_Home theme={th} role="finance" /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="bookings" title="02 · 訂單" subtitle="唯讀 · 不可從銀行端動派遣 (DRTS 權威) · 卡友/權益參照遮罩">
+          <DCArtboard id="bookings" label="訂單列表 · /bookings" width={W} height={H}><Hero url="/bookings"><BK_Bookings theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="booking-detail" label="訂單詳情 · /bookings/[id]" width={W} height={H}><Bare><BK_BookingDetail theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="contracts" title="03 · 合約與 SLA" subtitle="對銀行唯讀 · DRTS 經 Ops /contracts 持有權威">
+          <DCArtboard id="contracts" label="合約列表 · /contracts" width={W} height={H}><Hero url="/contracts"><BK_Contracts theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="contract-detail" label="合約詳情 · 警示 + 例外清單" width={W} height={H}><Bare><BK_ContractDetail theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="statements" title="04 · 對帳單" subtitle="逐趟對帳 · 金流＝發卡行付 DRTS · 有別於企業發票">
+          <DCArtboard id="statements" label="對帳單列表 · /statements" width={W} height={H}><Hero url="/statements"><BK_Statements theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="statement-detail" label="逐趟明細 · /statements/[period]" width={W} height={H}><Bare><BK_StatementDetail theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="programs" title="05 · 方案與配額" subtitle="配額為發卡行頭號指標 · 清楚無歧義">
+          <DCArtboard id="programs" label="方案與配額 · /programs" width={W} height={H}><Hero url="/programs"><BK_Programs theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="access" title="06 · 人員與稽核" subtitle="scoped to issuer tenant · 全程稽核 · cross-actor">
+          <DCArtboard id="users" label="人員與角色 · /users" width={W} height={H}><Hero url="/users"><BK_Users theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="audit" label="稽核 · /audit · cross-actor 遮罩" width={W} height={H}><Hero url="/audit"><BK_Audit theme={th} /></Hero></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfy' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
