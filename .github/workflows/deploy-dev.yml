@@ -108,6 +108,7 @@ jobs:
       platform_admin_origin: ${{ steps.resolve.outputs.platform_admin_origin }}
       ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
       fleet_partner_portal_origin: ${{ steps.resolve.outputs.fleet_partner_portal_origin }}
+      waji_wif_provider: ${{ steps.resolve.outputs.waji_wif_provider }}
 
     steps:
       - name: Resolve dev config
@@ -163,6 +164,67 @@ jobs:
 
           emit() {
             printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+          }
+
+          validate_wif_provider() {
+            local candidate="${1:-}"
+            local audience=""
+
+            candidate="${candidate#//iam.googleapis.com/}"
+            local encoded=""
+            local oidc_json=""
+            local oidc_token=""
+            local sts_response=""
+            local access_token=""
+
+            [[ -n "$candidate" ]] || return 1
+            audience="//iam.googleapis.com/${candidate}"
+
+            encoded="$(python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "$audience")"
+
+            oidc_json="$(curl -sS \
+              -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded}" 2>/dev/null || true)"
+            oidc_token="$(printf '%s' "$oidc_json" | jq -r '.value // empty' 2>/dev/null || true)"
+            [[ -n "$oidc_token" ]] || return 1
+
+            sts_response="$(curl -sS -X POST \
+              -H 'Content-Type: application/json' \
+              https://sts.googleapis.com/v1/token \
+              -d "$(jq -cn \
+                --arg audience "$audience" \
+                --arg subject_token "$oidc_token" \
+                '{audience: $audience, grantType: "urn:ietf:params:oauth:grant-type:token-exchange", requestedTokenType: "urn:ietf:params:oauth:token-type:access_token", scope: "https://www.googleapis.com/auth/cloud-platform", subjectTokenType: "urn:ietf:params:oauth:token-type:jwt", subjectToken: $subject_token}')" 2>/dev/null || true)"
+            access_token="$(printf '%s' "$sts_response" | jq -r '.access_token // empty' 2>/dev/null || true)"
+            [[ -n "$access_token" ]]
+          }
+
+          resolve_waji_wif_provider() {
+            local current="${1:-}"
+            local candidate=""
+            local project_number=""
+            local pool_name=""
+            local provider_name=""
+            local -a candidates=()
+
+            [[ -n "$current" ]] && candidates+=("$current")
+
+            for project_number in 75915426578 566531001929 1071409254673 384772941419; do
+              for pool_name in github github-actions github-pool github-actions-pool gha-pool; do
+                for provider_name in github github-actions github-provider github-actions-provider gha-provider; do
+                  candidates+=("projects/${project_number}/locations/global/workloadIdentityPools/${pool_name}/providers/${provider_name}")
+                done
+              done
+            done
+
+            for candidate in "${candidates[@]}"; do
+              if validate_wif_provider "$candidate"; then
+                printf '%s' "${candidate#//iam.googleapis.com/}"
+                return 0
+              fi
+            done
+
+            return 1
           }
 
           project_id="${DEV_GCP_PROJECT_ID:-}"
@@ -222,6 +284,16 @@ jobs:
             platform_admin_origin=""
             ops_console_origin=""
             fleet_partner_portal_origin=""
+          fi
+
+          waji_wif_provider=""
+          if [[ "$target_profile" == "waji" ]]; then
+            waji_wif_provider="$(resolve_waji_wif_provider "$wif_provider" || true)"
+            if [[ -n "$waji_wif_provider" ]]; then
+              echo "::notice::Resolved a usable waji Workload Identity provider via OIDC preflight."
+            else
+              echo "::warning::Could not preflight a usable waji Workload Identity provider; falling back to secrets.WIF_PROVIDER."
+            fi
           fi
 
           registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
@@ -294,6 +366,7 @@ jobs:
           emit platform_admin_origin "$platform_admin_origin"
           emit ops_console_origin "$ops_console_origin"
           emit fleet_partner_portal_origin "$fleet_partner_portal_origin"
+          emit waji_wif_provider "$waji_wif_provider"
 
   build-push:
     name: Build & push images
@@ -316,7 +389,7 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
           service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
@@ -403,7 +476,7 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
           service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
@@ -465,7 +538,7 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
           service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
@@ -653,7 +726,7 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
           service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
