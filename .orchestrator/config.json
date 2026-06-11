@@ -324,7 +324,7 @@
       }
     },
     "gemini": {
-      "delivery_mode": "gemini",
+      "delivery_mode": "antigravity",
       "file_inbox": {
         "path": ".llm-inbox/gemini.md",
         "open_in_vscode": false
@@ -354,7 +354,7 @@
       }
     },
     "gemini2": {
-      "delivery_mode": "gemini",
+      "delivery_mode": "antigravity",
       "file_inbox": {
         "path": ".llm-inbox/gemini2.md",
         "open_in_vscode": false
