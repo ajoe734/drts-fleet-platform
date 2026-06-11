@@ -150,6 +150,190 @@ body {
   border-color: rgba(251, 191, 36, 0.4);
 }
 
+.contracts-inline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.issuer-brand-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px 5px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.issuer-brand-pill__mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.issuer-brand-pill__text {
+  white-space: nowrap;
+}
+
+.contracts-table-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 12px;
+  background: #0f2a28;
+  border: 1px solid rgba(94, 234, 212, 0.18);
+}
+
+.contracts-table-card h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.contracts-table-scroll {
+  overflow-x: auto;
+}
+
+.contracts-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 880px;
+}
+
+.contracts-table th,
+.contracts-table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid rgba(94, 234, 212, 0.14);
+  vertical-align: top;
+  text-align: left;
+  font-size: 12.5px;
+}
+
+.contracts-table th {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #99f6e4;
+}
+
+.contracts-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.contracts-cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.contracts-cell-stack strong {
+  color: #ffffff;
+}
+
+.contracts-cell-stack span,
+.contracts-summary-cell,
+.contracts-empty-note,
+.contracts-detail-item span,
+.booking-timeline-body p,
+.booking-timeline-body span {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.contracts-summary-cell {
+  min-width: 240px;
+  line-height: 1.6;
+}
+
+.inline-link-button,
+.text-link {
+  color: #5eead4;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.inline-link-button:hover,
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.contracts-delta-positive {
+  font-weight: 700;
+}
+
+.contracts-delta-negative {
+  font-weight: 700;
+}
+
+.contracts-empty-note {
+  margin: 0;
+  font-size: 13px;
+}
+
+.contracts-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.contracts-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contracts-detail-item strong,
+.booking-timeline-body strong {
+  color: #ffffff;
+}
+
+.booking-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.booking-timeline-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.booking-timeline-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: #5eead4;
+  box-shadow: 0 0 0 4px rgba(94, 234, 212, 0.12);
+}
+
+.booking-timeline-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(94, 234, 212, 0.14);
+}
+
+.booking-timeline-item:last-child .booking-timeline-body {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.booking-timeline-body p {
+  margin: 0;
+  line-height: 1.6;
+  font-size: 12.5px;
+}
+
 .bank-users-title {
   display: inline-flex;
   align-items: center;
@@ -1139,6 +1323,16 @@ body {
 
   .programs-section-head {
     padding: 18px 16px 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .page-shell {
+    padding: 18px;
+  }
+
+  .contracts-table {
+    min-width: 760px;
   }
 }
 
