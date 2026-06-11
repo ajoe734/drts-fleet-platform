@@ -80,6 +80,13 @@ function formatMoney(amount: MoneyAmount | null | undefined): string {
     : `${amount.currency} ${grouped}`;
 }
 
+function formatOptionalMoney(amount: MoneyAmount | null | undefined) {
+  if (!amount || amount.amountMinor <= 0) {
+    return null;
+  }
+  return formatMoney(amount);
+}
+
 // completedAt is an ISO timestamp; the trip table shows "MM-DD HH:mm".
 function formatTripTimestamp(iso: string): string {
   const match = iso.match(/^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2})/);
@@ -219,11 +226,17 @@ function mapTrip(record: FleetPartnerPortalTripRecord): FleetTrip {
     id: record.orderId,
     svc: mapTripService(record),
     driver: record.driverName ?? "—",
-    tenant: record.partnerId ?? record.tenantServiceProgramId ?? "—",
+    tenant:
+      record.partnerProgramId ??
+      record.partnerId ??
+      record.tenantServiceProgramId ??
+      "—",
+    sponsorFunded: record.sponsorFunded,
+    benefitReference: record.benefitReference,
     pickup: record.pickupAddress ?? "—",
     fare: formatMoney(record.grossEarning),
-    // Per-trip fleet share is not carried on the trip record yet.
-    commission: "—",
+    commission: formatMoney(record.fleetShareAmount),
+    reimbursement: formatOptionalMoney(record.reimbursementAmount),
     status: mapTripStatus(record.status),
     date: formatTripTimestamp(record.completedAt),
   };
@@ -329,7 +342,9 @@ function mapStatement(record: FleetPartnerStatementRecord): FleetStatement {
     id: record.statementId,
     period: record.periodMonth,
     trips: tripLineCount,
+    sponsorFundedTrips: record.sponsorFundedTripCount,
     payable: formatMoney(record.shareAmount),
+    reimbursement: formatOptionalMoney(record.reimbursementAmount),
     status: record.payoutStatus === "paid" ? "paid" : "pending_confirm",
     issued: record.createdAt.slice(0, 10),
   };
@@ -353,6 +368,10 @@ const REVENUE_FORMULA_LABELS: Record<string, { zh: string; en: string }> = {
   fixed_per_trip: { zh: "逐趟固定", en: "per_trip_fixed" },
   monthly_fixed: { zh: "管理費", en: "mgmt_fee" },
   tiered_bonus: { zh: "績效獎金", en: "performance" },
+  sponsor_funded_airport: {
+    zh: "卡友機場趟次分潤",
+    en: "sponsor_airport",
+  },
 };
 
 export interface RevenueView {
@@ -366,13 +385,16 @@ export interface RevenueView {
 function mapStatementLines(
   record: FleetPartnerStatementRecord,
 ): StatementLine[] {
-  // Aggregate the per-rule statement lines into the design's summary buckets,
-  // keyed by revenue-share formula. Negative share amounts (clawbacks) carry a
-  // "−" sign.
+  // Aggregate statement lines into the canvas breakdown buckets. Sponsor-funded
+  // airport trips are called out separately so fleet finance can reconcile the
+  // later reimbursement batch without changing the card layout.
   const buckets = new Map<string, number>();
   for (const line of record.lines) {
-    const current = buckets.get(line.formula) ?? 0;
-    buckets.set(line.formula, current + line.shareAmount.amountMinor);
+    const bucketKey = line.metadata.sponsorFunded
+      ? "sponsor_funded_airport"
+      : line.formula;
+    const current = buckets.get(bucketKey) ?? 0;
+    buckets.set(bucketKey, current + line.shareAmount.amountMinor);
   }
   const currency = record.shareAmount.currency;
   return [...buckets.entries()].map(([formula, amountMinor]) => {
@@ -385,6 +407,11 @@ function mapStatementLines(
       en: label.en,
       v: formatMoney({ currency, amountMinor: Math.abs(amountMinor) }),
       sign: amountMinor < 0 ? "−" : "+",
+      reimbursement:
+        formula === "sponsor_funded_airport" &&
+        record.reimbursementAmount.amountMinor > 0
+          ? formatOptionalMoney(record.reimbursementAmount)
+          : null,
     };
   });
 }

@@ -29,6 +29,7 @@ import {
   BillingSettlementService,
   type BillingSettlementTripRecord,
 } from "../billing-settlement/billing-settlement.service";
+import { settlementChannelKeyForTrip } from "../billing-settlement/settlement-matrix";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
@@ -584,6 +585,23 @@ export class FleetPartnerService implements OnModuleInit {
   ): Promise<FleetPartnerPortalTripRecord[]> {
     this.requireFleetPartner(fleetPartnerId);
     const normalizedPeriodMonth = await this.resolvePeriodMonth(periodMonth);
+    const statements = await this.listFleetPartnerStatements(
+      fleetPartnerId,
+      normalizedPeriodMonth,
+    );
+    const shareAmountByOrderId = new Map<string, number>();
+    for (const statement of statements) {
+      for (const line of statement.lines) {
+        if (!line.orderId) {
+          continue;
+        }
+        shareAmountByOrderId.set(
+          line.orderId,
+          (shareAmountByOrderId.get(line.orderId) ?? 0) +
+            line.shareAmount.amountMinor,
+        );
+      }
+    }
     const trips =
       await this.billingSettlementService.listSettlementTripsForPeriodMonth(
         normalizedPeriodMonth,
@@ -617,6 +635,7 @@ export class FleetPartnerService implements OnModuleInit {
           ordersById.get(trip.orderId) ?? null,
           driversById.get(trip.driverId) ?? null,
           vehicleByDriverId.get(trip.driverId)?.vehicle ?? null,
+          shareAmountByOrderId.get(trip.orderId) ?? null,
         ),
       );
   }
@@ -838,6 +857,10 @@ export class FleetPartnerService implements OnModuleInit {
       grossEarningBasis: this.money(0),
       driverNetAmountBasis: this.money(0),
       shareAmount: this.money(0),
+      sponsorFundedTripCount: 0,
+      sponsorFundedGrossEarningBasis: this.money(0),
+      sponsorFundedShareAmount: this.money(0),
+      reimbursementAmount: this.money(0),
       lines: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -860,6 +883,13 @@ export class FleetPartnerService implements OnModuleInit {
       shareAmountMinor: number;
     },
   ) {
+    const settlementChannelKey = settlementChannelKeyForTrip({
+      orderSource: trip.orderSource,
+      businessDispatchSubtype: trip.businessDispatchSubtype,
+      partnerId: trip.partnerId,
+    });
+    const sponsorFunded =
+      input.orderId !== null && settlementChannelKey === "partner_airport";
     const statement = this.ensureStatement(
       bucket,
       affiliation.fleetPartnerId,
@@ -885,6 +915,18 @@ export class FleetPartnerService implements OnModuleInit {
         sourcePlatform: trip.sourcePlatform ?? trip.orderSource,
         driverGroupId: affiliation.driverGroupId ?? null,
         orderSource: trip.orderSource,
+        settlementChannelKey,
+        sponsorFunded,
+        partnerId: trip.partnerId ?? null,
+        partnerProgramId: trip.partnerProgramId ?? null,
+        benefitReference: sponsorFunded ? trip.benefitReference : null,
+        issuerAuthorizationRef: sponsorFunded
+          ? trip.issuerAuthorizationRef
+          : null,
+        reimbursementAmount:
+          sponsorFunded && trip.platformFundedDiscount.amountMinor > 0
+            ? { ...trip.platformFundedDiscount }
+            : null,
       },
     };
     statement.lines.push(line);
@@ -1173,21 +1215,49 @@ export class FleetPartnerService implements OnModuleInit {
   private cloneStatement(
     statement: FleetPartnerStatementRecord,
   ): FleetPartnerStatementRecord {
-    return {
+    const lines = statement.lines.map((line) => ({
+      ...line,
+      grossEarning: line.grossEarning ? { ...line.grossEarning } : null,
+      driverNetAmount: line.driverNetAmount
+        ? { ...line.driverNetAmount }
+        : null,
+      shareAmount: { ...line.shareAmount },
+      metadata: {
+        ...line.metadata,
+        settlementChannelKey:
+          line.metadata.settlementChannelKey ??
+          settlementChannelKeyForTrip({
+            orderSource: line.metadata.orderSource,
+            businessDispatchSubtype: line.metadata.serviceProduct,
+            partnerId: line.metadata.partnerId ?? null,
+          }),
+        sponsorFunded: line.metadata.sponsorFunded ?? false,
+        partnerId: line.metadata.partnerId ?? null,
+        partnerProgramId: line.metadata.partnerProgramId ?? null,
+        benefitReference: line.metadata.benefitReference ?? null,
+        issuerAuthorizationRef: line.metadata.issuerAuthorizationRef ?? null,
+        reimbursementAmount: line.metadata.reimbursementAmount
+          ? { ...line.metadata.reimbursementAmount }
+          : null,
+      },
+    }));
+    return this.withStatementAttributionSummary({
       ...statement,
       grossEarningBasis: { ...statement.grossEarningBasis },
       driverNetAmountBasis: { ...statement.driverNetAmountBasis },
       shareAmount: { ...statement.shareAmount },
-      lines: statement.lines.map((line) => ({
-        ...line,
-        grossEarning: line.grossEarning ? { ...line.grossEarning } : null,
-        driverNetAmount: line.driverNetAmount
-          ? { ...line.driverNetAmount }
-          : null,
-        shareAmount: { ...line.shareAmount },
-        metadata: { ...line.metadata },
-      })),
-    };
+      sponsorFundedTripCount: statement.sponsorFundedTripCount ?? 0,
+      sponsorFundedGrossEarningBasis: statement.sponsorFundedGrossEarningBasis
+        ? { ...statement.sponsorFundedGrossEarningBasis }
+        : this.money(0),
+      sponsorFundedShareAmount: statement.sponsorFundedShareAmount
+        ? { ...statement.sponsorFundedShareAmount }
+        : this.money(0),
+      reimbursementAmount: statement.reimbursementAmount
+        ? { ...statement.reimbursementAmount }
+        : this.money(0),
+      lines,
+    });
   }
 
   private money(amountMinor: number) {
@@ -1254,7 +1324,14 @@ export class FleetPartnerService implements OnModuleInit {
     order: OwnedOrderRecord | null,
     driver: DriverRegistryRecord | null,
     vehicle: VehicleRegistryRecord | null,
+    fleetShareAmountMinor: number | null,
   ): FleetPartnerPortalTripRecord {
+    const settlementChannelKey = settlementChannelKeyForTrip({
+      orderSource: trip.orderSource,
+      businessDispatchSubtype: trip.businessDispatchSubtype,
+      partnerId: trip.partnerId,
+    });
+    const sponsorFunded = settlementChannelKey === "partner_airport";
     return {
       orderId: trip.orderId,
       fleetPartnerId,
@@ -1271,8 +1348,22 @@ export class FleetPartnerService implements OnModuleInit {
       serviceProduct: trip.serviceProduct ?? null,
       tenantServiceProgramId: trip.tenantServiceProgramId ?? null,
       sourcePlatform: trip.sourcePlatform ?? null,
+      fleetShareAmount:
+        fleetShareAmountMinor === null
+          ? null
+          : this.money(fleetShareAmountMinor),
+      settlementChannelKey,
+      sponsorFunded,
       partnerId: trip.partnerId ?? null,
       partnerProgramId: trip.partnerProgramId ?? null,
+      benefitReference: sponsorFunded ? trip.benefitReference : null,
+      issuerAuthorizationRef: sponsorFunded
+        ? trip.issuerAuthorizationRef
+        : null,
+      reimbursementAmount:
+        sponsorFunded && trip.platformFundedDiscount.amountMinor > 0
+          ? { ...trip.platformFundedDiscount }
+          : null,
       passengerName: order?.passenger.name ?? null,
       pickupAddress: order?.pickup.address ?? null,
       dropoffAddress: order?.dropoff.address ?? null,
@@ -1318,6 +1409,44 @@ export class FleetPartnerService implements OnModuleInit {
       driverIds.has(orderDriverMap.get(order.orderId) ?? "") &&
       order.status === "cancelled"
     );
+  }
+
+  private withStatementAttributionSummary(
+    statement: FleetPartnerStatementRecord,
+  ): FleetPartnerStatementRecord {
+    const tripOrderIds = new Set<string>();
+    let sponsorFundedTripCount = 0;
+    let sponsorFundedGrossEarningMinor = 0;
+    let reimbursementAmountMinor = 0;
+    let sponsorFundedShareAmountMinor = 0;
+
+    for (const line of statement.lines) {
+      if (line.metadata.sponsorFunded) {
+        sponsorFundedShareAmountMinor += line.shareAmount.amountMinor;
+      }
+      if (
+        !line.orderId ||
+        !line.metadata.sponsorFunded ||
+        tripOrderIds.has(line.orderId)
+      ) {
+        continue;
+      }
+      tripOrderIds.add(line.orderId);
+      sponsorFundedTripCount += 1;
+      sponsorFundedGrossEarningMinor += line.grossEarning?.amountMinor ?? 0;
+      reimbursementAmountMinor +=
+        line.metadata.reimbursementAmount?.amountMinor ?? 0;
+    }
+
+    return {
+      ...statement,
+      sponsorFundedTripCount,
+      sponsorFundedGrossEarningBasis: this.money(
+        sponsorFundedGrossEarningMinor,
+      ),
+      sponsorFundedShareAmount: this.money(sponsorFundedShareAmountMinor),
+      reimbursementAmount: this.money(reimbursementAmountMinor),
+    };
   }
 
   private async buildOrderDriverMap(periodMonth: string) {

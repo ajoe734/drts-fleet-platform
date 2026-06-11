@@ -65,18 +65,33 @@ export default async function FleetRevenuePage() {
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   padding: "11px 0",
                   borderBottom: `1px solid ${theme.border}`,
                   fontSize: 13,
                 }}
               >
-                <BiLabel
-                  theme={theme}
-                  locale={locale}
-                  zh={t(`revenue.line.${l.en}`, "zh")}
-                  en={t(`revenue.line.${l.en}`, "en")}
-                />
+                <div>
+                  <BiLabel
+                    theme={theme}
+                    locale={locale}
+                    zh={t(`revenue.line.${l.en}`, "zh")}
+                    en={t(`revenue.line.${l.en}`, "en")}
+                  />
+                  {l.reimbursement && (
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 11,
+                        color: theme.textDim,
+                      }}
+                    >
+                      {t("revenue.lineNote.reimbursement", locale, {
+                        amount: l.reimbursement,
+                      })}
+                    </div>
+                  )}
+                </div>
                 <span
                   style={{
                     fontFamily: theme.monoFamily,

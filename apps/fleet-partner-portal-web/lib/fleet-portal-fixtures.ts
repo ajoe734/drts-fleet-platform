@@ -200,9 +200,12 @@ export type FleetTrip = {
   svc: ServiceKey;
   driver: string;
   tenant: string;
+  sponsorFunded?: boolean;
+  benefitReference?: string | null;
   pickup: string;
   fare: string;
   commission: string;
+  reimbursement?: string | null;
   status: "completed" | "in_progress" | "cancelled";
   date: string;
 };
@@ -281,6 +284,7 @@ export type StatementLine = {
   en: string;
   v: string;
   sign: "+" | "−";
+  reimbursement?: string | null;
 };
 
 export const FX_FLEET_STATEMENT: {
@@ -305,7 +309,9 @@ export type FleetStatement = {
   id: string;
   period: string;
   trips: number;
+  sponsorFundedTrips?: number;
   payable: string;
+  reimbursement?: string | null;
   status: "pending_confirm" | "paid";
   issued: string;
 };
