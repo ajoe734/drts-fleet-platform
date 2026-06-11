@@ -104,10 +104,16 @@ describe("partner-booking per-program theming", () => {
 
   it("keeps the travel palette aligned with the canvas theme", () => {
     const theme = getProgramTheme("travel");
+    const brand = BRAND_TEMPLATES.LION;
     expect(theme.primary).toBe("#B0420E");
     expect(theme.primaryDark).toBe("#6E2806");
     expect(theme.accent).toBe("#E07B3A");
     expect(theme.surface.bg).toBe("#FCEEE2");
+    expect(theme.primary).toBe(brand.primary);
+    expect(theme.primaryDark).toBe(brand.primaryDark);
+    expect(theme.accent).toBe(brand.accent);
+    expect(theme.surface).toEqual(brand.surface);
+    expect(theme.chrome.pageBackground).toBe(brand.theme.pageBackground);
   });
 
   it("validates program kind strings", () => {
