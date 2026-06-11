@@ -3618,6 +3618,63 @@ export interface TenantServiceProgramRecord {
   allowedServiceProducts: ServiceProductType[];
 }
 
+export type IssuerContractSlaMetric = "pickup_punctuality" | "completion_rate";
+
+export interface IssuerContractTerm {
+  startsAt: string;
+  endsAt: string | null;
+  billingCycle: "monthly";
+  serviceProduct: ServiceProductType;
+  issuerTenantId: string;
+}
+
+export interface IssuerContractSlaTarget {
+  metric: IssuerContractSlaMetric;
+  thresholdPercent: number;
+  comparator: "gte";
+  window: "current_period";
+}
+
+export interface IssuerContractPeriodAttainment {
+  period: string;
+  evaluatedAt: string;
+  completedTrips: number;
+  totalTrips: number;
+  pickupPunctualityPercent: number | null;
+  completionRatePercent: number | null;
+  breachedTargets: IssuerContractSlaMetric[];
+}
+
+export interface IssuerContractExceptionRecord {
+  exceptionId: string;
+  orderId: string;
+  occurredAt: string;
+  reasonCode: string;
+  summary: string;
+  status: "open" | "resolved";
+  benefitReferenceMasked: string | null;
+  issuerAuthorizationRefMasked: string | null;
+}
+
+export type IssuerContractStatus =
+  | "active"
+  | "at_risk"
+  | "breached"
+  | "inactive";
+
+export interface IssuerContractStatusRecord {
+  contractId: string;
+  tenantId: string;
+  programId: string;
+  programCode: string;
+  displayName: string;
+  term: IssuerContractTerm;
+  slaTargets: IssuerContractSlaTarget[];
+  periodAttainment: IssuerContractPeriodAttainment;
+  exceptions: IssuerContractExceptionRecord[];
+  status: IssuerContractStatus;
+}
+
 export interface IssuePassengerReceiptCommand {
   orderId: string;
 }

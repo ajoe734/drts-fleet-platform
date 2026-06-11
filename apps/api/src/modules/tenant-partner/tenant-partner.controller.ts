@@ -28,6 +28,7 @@ import type {
   TenantBookingQuotaImpactQuery,
   TenantCostCenterCoverageReport,
   IssueTenantApiKeyCommand,
+  IssuerContractStatusRecord,
   ListTenantBookingApprovalRequestsQuery,
   ListTenantApprovalRulesQuery,
   ListTenantCostCentersQuery,
@@ -228,6 +229,35 @@ export class TenantPartnerController {
       this.tenantPartnerService.getTenantServiceProgram(
         this.requireTenantId(tenantId),
         programId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/contracts")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantContracts(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: IssuerContractStatusRecord[] =
+      this.tenantPartnerService.listTenantContracts(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/contracts/:contractId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantContract(
+    @Param("contractId") contractId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getTenantContract(
+        this.requireTenantId(tenantId),
+        contractId,
       ),
       requestId,
     );

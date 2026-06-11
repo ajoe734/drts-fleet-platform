@@ -31,6 +31,12 @@ import type {
   EmptyStateEnvelope,
   IssueTenantApiKeyCommand,
   IssuePartnerIngressCredentialCommand,
+  IssuerContractExceptionRecord,
+  IssuerContractPeriodAttainment,
+  IssuerContractSlaMetric,
+  IssuerContractSlaTarget,
+  IssuerContractStatus,
+  IssuerContractStatusRecord,
   PartnerEligibilityAdapterAttemptRecord,
   PartnerChannelEntryRecord,
   PartnerEntryStatus,
@@ -127,6 +133,7 @@ import {
   buildEvidenceAccessAuditSummary,
 } from "../../common/evidence-governance";
 import {
+  maskOpaqueToken,
   maskAddress,
   maskEmail,
   maskName,
@@ -1214,6 +1221,36 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...program,
       allowedServiceProducts: [...program.allowedServiceProducts],
     };
+  }
+
+  listTenantContracts(tenantId: string): IssuerContractStatusRecord[] {
+    return this.partnerEntries
+      .filter(
+        (entry) =>
+          entry.tenantId === tenantId &&
+          entry.businessDispatchSubtype === "credit_card_airport_transfer",
+      )
+      .map((entry) => this.buildIssuerContractStatusRecord(tenantId, entry))
+      .sort((left, right) => left.displayName.localeCompare(right.displayName));
+  }
+
+  getTenantContract(tenantId: string, contractId: string) {
+    const contract = this.listTenantContracts(tenantId).find(
+      (candidate) => candidate.contractId === contractId,
+    );
+    if (!contract) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Tenant contract not found.",
+        {
+          tenantId,
+          contractId,
+        },
+      );
+    }
+
+    return this.cloneIssuerContractStatusRecord(contract);
   }
 
   onModuleDestroy() {
@@ -2972,6 +3009,246 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       dropoffAddress: order.dropoff.address,
       costCenterCode: order.costCenter,
       tenantServiceProgramId: this.resolveTenantServiceProgramId(order),
+    };
+  }
+
+  private buildIssuerContractStatusRecord(
+    tenantId: string,
+    entry: PartnerChannelEntryRecord,
+  ): IssuerContractStatusRecord {
+    const orders = this.listTenantScopedOrders(tenantId).filter(
+      (order) =>
+        order.partnerProgramId === entry.programId &&
+        order.businessDispatchSubtype === entry.businessDispatchSubtype,
+    );
+    const period = this.resolveIssuerContractPeriod(orders);
+    const periodOrders = orders.filter((order) =>
+      this.isOrderInBusinessPeriod(order, period),
+    );
+    const slaTargets = this.buildIssuerContractSlaTargets(tenantId);
+    const periodAttainment = this.buildIssuerContractPeriodAttainment(
+      period,
+      periodOrders,
+      slaTargets,
+    );
+    const exceptions = periodOrders
+      .filter(
+        (order) =>
+          order.exceptionHold !== null || order.dispatchTimeout !== null,
+      )
+      .map((order, index) =>
+        this.buildIssuerContractExceptionRecord(order, index),
+      );
+    const status = this.deriveIssuerContractStatus(entry, periodAttainment);
+
+    return {
+      contractId: this.buildIssuerContractId(entry.programId),
+      tenantId,
+      programId: entry.programId,
+      programCode: entry.programCode ?? entry.programId,
+      displayName: entry.displayName,
+      term: {
+        startsAt: entry.createdAt,
+        endsAt: entry.revokedAt,
+        billingCycle: "monthly",
+        serviceProduct: entry.businessDispatchSubtype,
+        issuerTenantId: tenantId,
+      },
+      slaTargets,
+      periodAttainment,
+      exceptions,
+      status,
+    };
+  }
+
+  private buildIssuerContractSlaTargets(
+    tenantId: string,
+  ): IssuerContractSlaTarget[] {
+    const profile = this.getOrCreateSlaProfile(tenantId);
+    return [
+      {
+        metric: "pickup_punctuality",
+        thresholdPercent: this.toSlaPercent(profile.waitThresholdMin, 20, 92),
+        comparator: "gte",
+        window: "current_period",
+      },
+      {
+        metric: "completion_rate",
+        thresholdPercent: this.toSlaPercent(
+          profile.completionThresholdMin,
+          60,
+          98,
+        ),
+        comparator: "gte",
+        window: "current_period",
+      },
+    ];
+  }
+
+  private buildIssuerContractPeriodAttainment(
+    period: string,
+    orders: OwnedOrderRecord[],
+    slaTargets: IssuerContractSlaTarget[],
+  ): IssuerContractPeriodAttainment {
+    const totalTrips = orders.length;
+    const completedTrips = orders.filter(
+      (order) => order.status === "completed",
+    ).length;
+    const pickupPunctualityNumerator = orders.filter(
+      (order) => !this.orderHasSlaPickupException(order),
+    ).length;
+    const pickupPunctualityPercent =
+      totalTrips === 0
+        ? null
+        : this.toWholePercent(pickupPunctualityNumerator, totalTrips);
+    const completionRatePercent =
+      totalTrips === 0 ? null : this.toWholePercent(completedTrips, totalTrips);
+    const metrics = {
+      pickup_punctuality: pickupPunctualityPercent,
+      completion_rate: completionRatePercent,
+    } satisfies Record<IssuerContractSlaMetric, number | null>;
+
+    return {
+      period,
+      evaluatedAt: new Date().toISOString(),
+      completedTrips,
+      totalTrips,
+      pickupPunctualityPercent,
+      completionRatePercent,
+      breachedTargets: slaTargets.flatMap((target) => {
+        const value = metrics[target.metric];
+        if (value === null || value >= target.thresholdPercent) {
+          return [];
+        }
+        return [target.metric];
+      }),
+    };
+  }
+
+  private buildIssuerContractExceptionRecord(
+    order: OwnedOrderRecord,
+    index: number,
+  ): IssuerContractExceptionRecord {
+    const reasonCode =
+      order.exceptionHold?.reasonCode ??
+      order.dispatchTimeout?.timeoutReasonCode ??
+      "sla_exception";
+    return {
+      exceptionId: `${order.orderId}:exception:${index + 1}`,
+      orderId: order.orderId,
+      occurredAt:
+        order.dispatchTimeout?.timeoutAt ??
+        order.exceptionHold?.raisedAt ??
+        order.updatedAt,
+      reasonCode,
+      summary: this.describeIssuerContractException(order, reasonCode),
+      status:
+        order.exceptionHold?.resolution || order.status === "completed"
+          ? "resolved"
+          : "open",
+      benefitReferenceMasked: maskOpaqueToken(order.benefitReference, 8, 4),
+      issuerAuthorizationRefMasked: maskOpaqueToken(
+        order.issuerAuthorizationRef,
+        8,
+        4,
+      ),
+    };
+  }
+
+  private deriveIssuerContractStatus(
+    entry: PartnerChannelEntryRecord,
+    periodAttainment: IssuerContractPeriodAttainment,
+  ): IssuerContractStatus {
+    if (!entry.activeFlag || entry.status !== "active" || entry.revokedAt) {
+      return "inactive";
+    }
+    if (periodAttainment.breachedTargets.length > 0) {
+      return "breached";
+    }
+    if (periodAttainment.totalTrips === 0) {
+      return "at_risk";
+    }
+    return "active";
+  }
+
+  private buildIssuerContractId(programId: string) {
+    return `issuer-contract:${programId}`;
+  }
+
+  private resolveIssuerContractPeriod(orders: OwnedOrderRecord[]) {
+    const latestTimestamp =
+      orders
+        .map(
+          (order) =>
+            order.reservationWindowStart ?? order.updatedAt ?? order.createdAt,
+        )
+        .sort()
+        .at(-1) ?? new Date().toISOString();
+    return latestTimestamp.slice(0, 7);
+  }
+
+  private isOrderInBusinessPeriod(order: OwnedOrderRecord, period: string) {
+    const timestamp =
+      order.reservationWindowStart ?? order.updatedAt ?? order.createdAt;
+    return timestamp.slice(0, 7) === period;
+  }
+
+  private orderHasSlaPickupException(order: OwnedOrderRecord) {
+    return (
+      order.dispatchTimeout !== null ||
+      order.exceptionHold?.reasonCode === "confirmation_window_expired" ||
+      order.exceptionHold?.reasonCode === "driver_rejected_in_window" ||
+      order.exceptionHold?.reasonCode === "no_eligible_supply"
+    );
+  }
+
+  private describeIssuerContractException(
+    order: OwnedOrderRecord,
+    reasonCode: string,
+  ) {
+    switch (reasonCode) {
+      case "confirmation_window_expired":
+        return `Order ${order.orderNo} missed the confirmation window.`;
+      case "driver_rejected_in_window":
+        return `Order ${order.orderNo} was rejected within the confirmation window.`;
+      case "no_eligible_supply":
+        return `Order ${order.orderNo} could not find eligible supply in time.`;
+      case "acceptance_timeout":
+      case "matching_timeout":
+        return `Order ${order.orderNo} exceeded dispatch timeout thresholds.`;
+      default:
+        return `Order ${order.orderNo} requires manual SLA review.`;
+    }
+  }
+
+  private toSlaPercent(value: number, divisor: number, fallback: number) {
+    if (value <= 0) {
+      return fallback;
+    }
+
+    return Math.max(1, Math.min(100, 100 - Math.round(value / divisor)));
+  }
+
+  private toWholePercent(numerator: number, denominator: number) {
+    if (denominator <= 0) {
+      return 0;
+    }
+
+    return Math.round((numerator / denominator) * 100);
+  }
+
+  private cloneIssuerContractStatusRecord(
+    record: IssuerContractStatusRecord,
+  ): IssuerContractStatusRecord {
+    return {
+      ...record,
+      term: { ...record.term },
+      slaTargets: record.slaTargets.map((target) => ({ ...target })),
+      periodAttainment: {
+        ...record.periodAttainment,
+        breachedTargets: [...record.periodAttainment.breachedTargets],
+      },
+      exceptions: record.exceptions.map((exception) => ({ ...exception })),
     };
   }
 
