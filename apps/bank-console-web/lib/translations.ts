@@ -183,6 +183,42 @@ const en = {
   "users.title": "People & roles",
   "users.purpose":
     "Bank back-office roles: program-admin, ops-viewer, and finance.",
+  "users.eyebrow": "Issuer governance",
+  "users.lead":
+    "Three bank personas (+ admin), scoped to the issuer tenant, with every invite, role change, suspension, and reactivation recorded in the audit trail.",
+  "users.invite": "Invite member",
+  "users.filterNav": "User status filters",
+  "users.filter.all": "All",
+  "users.filter.active": "Active",
+  "users.filter.invited": "Invited",
+  "users.filter.suspended": "Suspended",
+  "users.table.user": "User",
+  "users.table.email": "Email",
+  "users.table.role": "Role",
+  "users.table.status": "Status",
+  "users.table.lastActivity": "Last activity",
+  "users.table.actions": "Actions",
+  "users.role.bank_program_admin": "Program admin",
+  "users.role.bank_ops_viewer": "Ops viewer",
+  "users.role.bank_finance": "Finance",
+  "users.roleCode.bank_program_admin": "program_admin",
+  "users.roleCode.bank_ops_viewer": "ops_viewer",
+  "users.roleCode.bank_finance": "finance",
+  "users.roleCard.bank_program_admin":
+    "View programs, quota, contracts, users, and audit. Can edit eligibility policy and manage members.",
+  "users.roleCard.bank_ops_viewer":
+    "Read bookings, booking detail, and exceptions. Read-only, with no settlement amount or dispatch mutation access.",
+  "users.roleCard.bank_finance":
+    "Read settlement statements, trip-level detail, and signed artifact downloads for bank-side reconciliation.",
+  "users.status.active": "Active",
+  "users.status.invited": "Invited",
+  "users.status.suspended": "Suspended",
+  "users.action.changeRole": "Change role",
+  "users.action.suspend": "Suspend",
+  "users.action.reactivate": "Reactivate",
+  "users.action.locked": "Admin only",
+  "users.auditFootnote":
+    "Current actor: {actor} · {role}. Invite, role-change, suspend, and reactivate actions stay issuer-tenant scoped and are fully audit-recorded.",
 
   "audit.title": "Audit",
   "audit.purpose":
@@ -426,8 +462,44 @@ const zh: Record<keyof typeof en, string> = {
   "programs.unit.person": "戶",
   "programs.unit.case": "件",
 
-  "users.title": "使用者與角色",
+  "users.title": "人員與角色",
   "users.purpose": "銀行後台角色：方案管理員、客服／營運、財務。",
+  "users.eyebrow": "發卡行治理",
+  "users.lead":
+    "三種銀行人物（+ 管理員），scoped to issuer tenant；邀請、改角色、停用與復用全程寫入稽核。",
+  "users.invite": "邀請成員",
+  "users.filterNav": "使用者狀態篩選",
+  "users.filter.all": "全部",
+  "users.filter.active": "啟用",
+  "users.filter.invited": "已邀請",
+  "users.filter.suspended": "停用",
+  "users.table.user": "使用者",
+  "users.table.email": "Email",
+  "users.table.role": "角色",
+  "users.table.status": "狀態",
+  "users.table.lastActivity": "最後活動",
+  "users.table.actions": "操作",
+  "users.role.bank_program_admin": "方案管理員",
+  "users.role.bank_ops_viewer": "營運檢視",
+  "users.role.bank_finance": "財務",
+  "users.roleCode.bank_program_admin": "program_admin",
+  "users.roleCode.bank_ops_viewer": "ops_viewer",
+  "users.roleCode.bank_finance": "finance",
+  "users.roleCard.bank_program_admin":
+    "方案、配額、合約、人員、稽核全可見；可編資格政策與管理成員。",
+  "users.roleCard.bank_ops_viewer":
+    "訂單清單與詳情、例外；唯讀，無結算金額、不可動派遣。",
+  "users.roleCard.bank_finance":
+    "對帳單與逐趟明細、簽名檔下載；可對銀行自有帳。",
+  "users.status.active": "啟用中",
+  "users.status.invited": "已邀請",
+  "users.status.suspended": "已停用",
+  "users.action.changeRole": "改角色",
+  "users.action.suspend": "停用",
+  "users.action.reactivate": "復用",
+  "users.action.locked": "限管理員",
+  "users.auditFootnote":
+    "目前操作者：{actor} · {role}。邀請、改角色、停用與復用皆限發卡行租戶範圍，且全程稽核。",
 
   "audit.title": "稽核",
   "audit.purpose": "範圍限發卡行租戶的資格、派遣與結算軌跡。",

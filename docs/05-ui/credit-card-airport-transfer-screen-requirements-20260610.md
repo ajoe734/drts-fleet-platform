@@ -19,11 +19,11 @@ The **customer-facing** surfaces (S1 cardholder web, S2 banking-app embed) alrea
 
 ## 2. Personas (design-relevant)
 
-| Code | Persona | Reads | Acts |
-|---|---|---|---|
-| `bank_program_admin` | 銀行方案管理員 | program config, quota usage | configure/view policy |
-| `bank_ops_viewer` | 銀行客服/營運 | booking + dispatch + contract (read-only) | look up, no mutation |
-| `bank_finance` | 銀行財務 | settlement statement | reconcile, download |
+| Code                 | Persona        | Reads                                     | Acts                  |
+| -------------------- | -------------- | ----------------------------------------- | --------------------- |
+| `bank_program_admin` | 銀行方案管理員 | program config, quota usage               | configure/view policy |
+| `bank_ops_viewer`    | 銀行客服/營運  | booking + dispatch + contract (read-only) | look up, no mutation  |
+| `bank_finance`       | 銀行財務       | settlement statement                      | reconcile, download   |
 
 (Cardholder personas for S1/S2 are covered by the existing partner-booking canvas.)
 
@@ -36,6 +36,7 @@ The **customer-facing** surfaces (S1 cardholder web, S2 banking-app embed) alrea
 ## 4. Sitemap
 
 ### 4.1 New design needed — **the whole `bank-console-web` app** (design all of these)
+
 This is a new app, so **every screen needs a canvas** — there is no corporate tenant-console canvas to extend.
 | Screen | Route (proposed) | Note |
 |---|---|---|
@@ -49,16 +50,18 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 | Audit | `/audit` | eligibility/dispatch/settlement trail |
 
 ### 4.2 No new design (reference only)
-| Screen | Where | Status |
-|---|---|---|
-| Cardholder booking funnel (entry→eligibility→review→success→tracking→error→manual-review) | `partner-booking-web` `card` program | has canvas (`pb-screens.jsx`) |
-| Shell/chrome conventions (realm tokens, density) | `tenant-console` `Tenant Console.html` | **reference for chrome only**, never for the card-benefit data IA |
+
+| Screen                                                                                    | Where                                  | Status                                                            |
+| ----------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| Cardholder booking funnel (entry→eligibility→review→success→tracking→error→manual-review) | `partner-booking-web` `card` program   | has canvas (`pb-screens.jsx`)                                     |
+| Shell/chrome conventions (realm tokens, density)                                          | `tenant-console` `Tenant Console.html` | **reference for chrome only**, never for the card-benefit data IA |
 
 ## 5. Per-screen functional briefs (design these — all 8 screens of `bank-console-web`)
 
 > Each brief is design-ready: **purpose · persona · data to surface · states · actions · cross-links · constraints · API**. No visual decisions. All cardholder/card references are **masked** (e.g. `**** 4821`). zh-TW primary / en secondary. Chrome uses `@drts/ui-tokens` `tenant` realm + issuer brand.
 
 ### 5.1 Home / Overview — route `/`
+
 - **Purpose:** landing for bank staff; at-a-glance posture of the card-benefit airport program(s).
 - **Persona:** all three (content gated by role).
 - **Data to surface:** period summary (bookings by state 預約/進行中/已完成/取消; next N airport pickups with flight/terminal/time); **quota posture** (禮遇趟次 consumed vs total, per program); **SLA posture** (pickup punctuality % + completion rate % vs target, healthy/at-risk/breached); **settlement posture** (current period statement status + amount); recent exceptions (manual-review / no-supply / missed-SLA).
@@ -69,6 +72,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 - **API:** aggregates `tenant/orders`, `tenant/program-usage`, `tenant/contracts`, `tenant/settlement-statements`.
 
 ### 5.2 Bookings list — card/airport dimension — route `/bookings`
+
 - **Purpose:** `bank_ops_viewer` sees which cardholder booked, as card-airport rides.
 - **Persona:** `bank_ops_viewer` (primary), `bank_program_admin`.
 - **Data (columns):** order id; **cardholder ref (masked)**; **program (中信機場 / programCode)**; **direction (去程/回程)**; **flight no. + terminal**; pickup→drop (short); time window; **dispatch state** (預約/已指派/進行中/已完成/取消); benefit reference (masked).
@@ -80,6 +84,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 - **API:** `GET /api/tenant/orders?programCode&direction&state&period&cardholderRef`.
 
 ### 5.3 Booking detail — airport + benefit + dispatch — route `/bookings/[bookingId]`
+
 - **Purpose:** read-only fulfilment view of one airport ride.
 - **Persona:** `bank_ops_viewer`.
 - **Data (blocks):** header (order id, program, cardholder ref masked, state); **dispatch timeline** (created → [approval] → driver assigned → en route → completed/cancelled, with timestamps, current step highlighted); **airport block** (flight no., terminal, direction 去程/回程, pickup/drop, scheduled window, flight-delay tolerance if modelled); **benefit block** (program, benefit reference masked, issuer authorisation ref masked, **quota impact** — this ride consumed/refunded N 趟次); driver/vehicle (masked per policy).
@@ -89,6 +94,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 - **API:** `GET /api/tenant/orders/:orderId`.
 
 ### 5.4 Contracts & SLA — routes `/contracts` (+ `/[contractId]`)
+
 - **Purpose:** the bank sees the service-contract posture between the program and DRTS.
 - **Persona:** `bank_program_admin`, `bank_ops_viewer`.
 - **List data:** contract id, program, term (start–end), status (healthy/at-risk/breached), current-period attainment summary.
@@ -99,6 +105,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 - **API:** `GET /api/tenant/contracts`, `/:contractId`.
 
 ### 5.5 Statements — routes `/statements` (+ `/[period]`)
+
 - **Purpose:** `bank_finance` reconciles and settles with DRTS for a period.
 - **Persona:** `bank_finance`.
 - **List data (periods):** period, total amount, status (published/paid/due), issued date, due date, download (signed artifact).
@@ -109,6 +116,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 - **API:** `GET /api/tenant/settlement-statements`, `/:period`.
 
 ### 5.6 Programs & quota usage — route `/programs`
+
 - **Purpose:** `bank_program_admin` sees benefit consumption and program config.
 - **Persona:** `bank_program_admin`.
 - **Data:** per program/period — program name/code, issuer, coverage, benefit terms; **cardholders served**; **禮遇趟次 consumed vs quota (remaining)**; trend over periods; top exceptions; eligibility policy summary.
@@ -118,6 +126,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 - **API:** `GET /api/tenant/program-usage`, `tenant/service-programs`.
 
 ### 5.7 Users & roles — route `/users`
+
 - **Purpose:** manage bank back-office staff access.
 - **Persona:** `bank_program_admin` (admin capability).
 - **Data:** user name, role (`bank_program_admin` / `bank_ops_viewer` / `bank_finance`), status (active/invited/suspended), last activity.
@@ -127,6 +136,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 - **API:** tenant users endpoint (issuer-scoped).
 
 ### 5.8 Audit — route `/audit`
+
 - **Purpose:** trace eligibility, dispatch, and settlement events for accountability.
 - **Persona:** `bank_program_admin` (+ compliance).
 - **Data:** event time, actor, event type (eligibility decision / dispatch action / settlement close / access), subject (masked refs), outcome/reason code, linked entity (→ booking / statement).
@@ -138,13 +148,13 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 
 ## 6. API mapping (behaviour authority = SD §3)
 
-| Screen | Endpoint(s) |
-|---|---|
-| Bookings list (program) | `GET /api/tenant/orders?programCode&direction&state&period&cardholderRef` (extended projection) |
-| Booking detail | `GET /api/tenant/orders/:orderId` (+ airport/benefit fields) |
-| Contract & SLA | `GET /api/tenant/contracts` (+ `/:contractId`) — **new** |
-| Settlement statement detail | `GET /api/tenant/settlement-statements/:period` — **new** |
-| Program & quota usage | `GET /api/tenant/program-usage` — **new** |
+| Screen                      | Endpoint(s)                                                                                     |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| Bookings list (program)     | `GET /api/tenant/orders?programCode&direction&state&period&cardholderRef` (extended projection) |
+| Booking detail              | `GET /api/tenant/orders/:orderId` (+ airport/benefit fields)                                    |
+| Contract & SLA              | `GET /api/tenant/contracts` (+ `/:contractId`) — **new**                                        |
+| Settlement statement detail | `GET /api/tenant/settlement-statements/:period` — **new**                                       |
+| Program & quota usage       | `GET /api/tenant/program-usage` — **new**                                                       |
 
 (Customer S1/S2: `POST /api/partner/eligibility`, `POST /api/partner/bookings` — existing.)
 

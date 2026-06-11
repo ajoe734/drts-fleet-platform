@@ -150,6 +150,274 @@ body {
   border-color: rgba(251, 191, 36, 0.4);
 }
 
+.bank-users-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.issuer-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--issuer-accent);
+  background: color-mix(in srgb, var(--issuer-primary) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--issuer-border) 74%, transparent);
+}
+
+.users-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.users-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.users-hero h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 650;
+  color: #ffffff;
+}
+
+.users-hero p,
+.role-card p,
+.users-footnote {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.users-filter-tabs,
+.users-role-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.users-filter-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.users-filter-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(159, 192, 242, 0.18);
+  background: rgba(15, 26, 44, 0.56);
+  color: rgba(244, 247, 252, 0.76);
+  text-decoration: none;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.users-filter-tab:hover {
+  border-color: color-mix(in srgb, var(--issuer-border) 84%, transparent);
+  color: #ffffff;
+}
+
+.users-filter-tab.is-active {
+  border-color: color-mix(in srgb, var(--issuer-accent) 48%, transparent);
+  background: color-mix(in srgb, var(--issuer-primary-dark) 62%, transparent);
+  color: #ffffff;
+}
+
+.users-filter-badge,
+.role-pill,
+.table-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.users-filter-badge {
+  min-width: 28px;
+  color: var(--issuer-ink);
+  background: color-mix(in srgb, var(--issuer-accent) 22%, transparent);
+}
+
+.users-role-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(159, 192, 242, 0.18);
+  background: rgba(15, 26, 44, 0.48);
+}
+
+.role-card strong {
+  font-size: 14px;
+  color: #ffffff;
+}
+
+.users-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.users-table-scroll {
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.users-table th,
+.users-table td {
+  padding: 14px 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  text-align: left;
+  vertical-align: top;
+}
+
+.users-table thead th {
+  border-top: 0;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 140px;
+}
+
+.user-cell strong {
+  color: #ffffff;
+}
+
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--issuer-primary) 24%, transparent);
+  border: 1px solid color-mix(in srgb, var(--issuer-border) 70%, transparent);
+  color: var(--issuer-accent);
+  font-weight: 700;
+}
+
+.mono-cell {
+  font-family:
+    "SFMono-Regular", "SFMono-Regular", ui-monospace, "Cascadia Mono",
+    "Segoe UI Mono", monospace;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.role-pill {
+  color: var(--issuer-accent);
+  background: color-mix(in srgb, var(--issuer-primary-dark) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--issuer-border) 72%, transparent);
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.role-bank_finance {
+  background: color-mix(in srgb, var(--issuer-accent) 18%, transparent);
+}
+
+.role-pill-code {
+  opacity: 0.72;
+  font-family:
+    "SFMono-Regular", "SFMono-Regular", ui-monospace, "Cascadia Mono",
+    "Segoe UI Mono", monospace;
+  font-size: 10px;
+}
+
+.table-status {
+  border: 1px solid transparent;
+}
+
+.status-active {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.14);
+  border-color: rgba(52, 211, 153, 0.26);
+}
+
+.status-invited {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.26);
+}
+
+.status-suspended {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.26);
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  background: rgba(15, 42, 40, 0.82);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.table-action-button.is-primary {
+  border-color: color-mix(in srgb, var(--issuer-border) 80%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--issuer-primary-dark) 88%, black),
+    color-mix(in srgb, var(--issuer-primary) 72%, transparent)
+  );
+}
+
+.table-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.users-footnote {
+  display: flex;
+  align-items: center;
+}
+
 .bank-bookings-page {
   gap: 18px;
 }
@@ -821,6 +1089,12 @@ body {
     border: 1px solid rgba(94, 234, 212, 0.12);
   }
 }
+@media (max-width: 1100px) {
+  .users-filter-tabs,
+  .users-role-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 @media (max-width: 1080px) {
   .filters-form {
@@ -837,6 +1111,15 @@ body {
 @media (max-width: 720px) {
   .page-shell {
     padding: 16px;
+  }
+
+  .users-hero {
+    flex-direction: column;
+  }
+
+  .users-filter-tabs,
+  .users-role-grid {
+    grid-template-columns: 1fr;
   }
 
   .issuer-strip,
