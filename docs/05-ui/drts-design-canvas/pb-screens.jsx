@@ -8,7 +8,7 @@ const PB_MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
 
 // Per-program theme
 const PROGRAMS = {
-  card:      { key: 'card', host: 'ride.ctbc.com.tw', brand: '中信銀行', program: 'World Elite 信用卡機場接送', primary: '#1B4FA0', primaryDark: '#0A2A6E', accent: '#C9A356', accentBg: '#FAF3DF', svc: '機場接送', tagEn: 'credit_card_airport_transfer' },
+  card:      { key: 'card', host: 'ride.ctbc.com.tw', brand: '中信銀行', program: 'World Elite 信用卡機場接送', primary: '#13478F', primaryDark: '#0B2D5C', accent: '#A8771B', accentBg: '#FAF3DF', svc: '機場接送', tagEn: 'credit_card_airport_transfer' },
   insurance: { key: 'insurance', host: 'claim.fubon-ins.tw', brand: '富邦產險', program: '保險理賠代步', primary: '#0E6E50', primaryDark: '#063D2C', accent: '#2FA37A', accentBg: '#E6F5EE', svc: '保險代步', tagEn: 'insurance_replacement' },
   travel:    { key: 'travel', host: 'booking.lion-travel.tw', brand: '雄獅旅遊', program: '團體接送', primary: '#B0420E', primaryDark: '#6E2806', accent: '#E07B3A', accentBg: '#FCEEE2', svc: '旅行社接送', tagEn: 'travel_agency_transfer' },
 };

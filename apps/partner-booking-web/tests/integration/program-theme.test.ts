@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import {
   DEFAULT_PARTNER_PROGRAM_KIND,
   PARTNER_PROGRAM_KINDS,
@@ -59,6 +60,20 @@ describe("partner-booking per-program theming", () => {
     expect(getProgramThemeForSlug("claim-fubon-ins").kind).toBe("insurance");
     expect(getProgramThemeForSlug("ride-ctbc").kind).toBe("card");
     expect(getProgramThemeForSlug("booking-lion-travel").kind).toBe("travel");
+  });
+
+  it("reuses the canonical CTBC brand tokens for the card program", () => {
+    const theme = getProgramTheme("card");
+    const brand = BRAND_TEMPLATES.CTBC;
+
+    expect(theme.primary).toBe("#13478F");
+    expect(theme.accent).toBe("#A8771B");
+    expect(theme.primary).toBe(brand.primary);
+    expect(theme.primaryDark).toBe(brand.primaryDark);
+    expect(theme.accent).toBe(brand.accent);
+    expect(theme.surface).toEqual(brand.surface);
+    expect(theme.chrome.pageBackground).toBe(brand.theme.pageBackground);
+    expect(theme.chrome.accentText).toBe(brand.theme.accentText);
   });
 
   it("resolves a theme from a partner entry, preferring specific identifiers", () => {
