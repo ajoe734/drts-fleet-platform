@@ -72,6 +72,21 @@ env:
   DEV_OPENCLAW_SUMMARIZER_MODEL: ${{ vars.DEV_OPENCLAW_SUMMARIZER_MODEL }}
   DEV_OPENCLAW_AUTH_PROVIDER: ${{ vars.DEV_OPENCLAW_AUTH_PROVIDER }}
   DEV_OPENCLAW_HOME: ${{ vars.DEV_OPENCLAW_HOME }}
+  WAJI_GCP_PROJECT_ID: ${{ vars.WAJI_GCP_PROJECT_ID }}
+  WAJI_GCP_REGION: ${{ vars.WAJI_GCP_REGION }}
+  WAJI_GCP_CLOUDSQL_INSTANCE: ${{ vars.WAJI_GCP_CLOUDSQL_INSTANCE }}
+  WAJI_GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.WAJI_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  WAJI_WIF_PROVIDER: ${{ secrets.WAJI_WIF_PROVIDER }}
+  WAJI_WIF_SERVICE_ACCOUNT: ${{ secrets.WAJI_WIF_SERVICE_ACCOUNT }}
+  WAJI_ARTIFACT_PROJECT_ID: ${{ vars.WAJI_ARTIFACT_PROJECT_ID }}
+  WAJI_ARTIFACT_REGION: ${{ vars.WAJI_ARTIFACT_REGION }}
+  WAJI_ARTIFACT_REPOSITORY: ${{ vars.WAJI_ARTIFACT_REPOSITORY }}
+  WAJI_SECRET_PREFIX: ${{ vars.WAJI_SECRET_PREFIX }}
+  WAJI_GCP_API_SERVICE: ${{ vars.WAJI_GCP_API_SERVICE }}
+  WAJI_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.WAJI_GCP_PLATFORM_ADMIN_SERVICE }}
+  WAJI_GCP_OPS_CONSOLE_SERVICE: ${{ vars.WAJI_GCP_OPS_CONSOLE_SERVICE }}
+  WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
+  WAJI_GCP_MIGRATION_JOB: ${{ vars.WAJI_GCP_MIGRATION_JOB }}
   LEGACY_GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   LEGACY_GCP_REGION: ${{ vars.GCP_REGION }}
   LEGACY_GCP_CLOUDSQL_INSTANCE: ${{ vars.GCP_CLOUDSQL_INSTANCE }}
@@ -200,14 +215,15 @@ jobs:
           }
 
           resolve_waji_wif_provider() {
-            local current="${1:-}"
             local candidate=""
             local project_number=""
             local pool_name=""
             local provider_name=""
             local -a candidates=()
 
-            [[ -n "$current" ]] && candidates+=("$current")
+            [[ -n "${WAJI_WIF_PROVIDER:-}" ]] && candidates+=("$WAJI_WIF_PROVIDER")
+            [[ -n "${DEV_WIF_PROVIDER:-}" ]] && candidates+=("$DEV_WIF_PROVIDER")
+            [[ -n "${WIF_PROVIDER:-}" ]] && candidates+=("$WIF_PROVIDER")
 
             for project_number in 75915426578 566531001929 1071409254673 384772941419; do
               for pool_name in github github-actions github-pool github-actions-pool gha-pool; do
@@ -219,7 +235,7 @@ jobs:
 
             for candidate in "${candidates[@]}"; do
               if validate_wif_provider "$candidate"; then
-                printf '%s' "${candidate#//iam.googleapis.com/}"
+                printf "%s" "${candidate#//iam.googleapis.com/}"
                 return 0
               fi
             done
@@ -261,21 +277,21 @@ jobs:
           esac
 
           if [[ "$target_profile" == "waji" ]]; then
-            project_id="${LEGACY_GCP_PROJECT_ID:-}"
-            region="${LEGACY_GCP_REGION:-}"
-            cloudsql="${LEGACY_GCP_CLOUDSQL_INSTANCE:-}"
-            runtime_sa="${LEGACY_GCP_RUNTIME_SERVICE_ACCOUNT:-}"
-            deployer_sa="${WIF_SERVICE_ACCOUNT:-}"
-            wif_provider="${WIF_PROVIDER:-}"
-            artifact_project_id="${LEGACY_GCP_PROJECT_ID:-}"
-            artifact_region="${LEGACY_GCP_REGION:-}"
-            artifact_repository="drts"
-            secret_prefix="drts-dev"
-            api_service="drts-dev-api"
-            platform_admin_service="drts-dev-platform-admin-web"
-            ops_console_service="drts-dev-ops-console-web"
-            fleet_partner_portal_service="drts-dev-fleet-partner-portal-web"
-            migration_job="drts-dev-migrate"
+            project_id="$(pick "${WAJI_GCP_PROJECT_ID:-}" "" "drts-dev-bobo-20260503")"
+            region="$(pick "${WAJI_GCP_REGION:-}" "" "us-central1")"
+            cloudsql="$(pick "${WAJI_GCP_CLOUDSQL_INSTANCE:-}" "" "drts-dev-bobo-20260503:us-central1:drts-dev-db")"
+            runtime_sa="$(pick "${WAJI_GCP_RUNTIME_SERVICE_ACCOUNT:-}" "" "drts-dev-runtime@drts-dev-bobo-20260503.iam.gserviceaccount.com")"
+            deployer_sa="$(pick "${WAJI_WIF_SERVICE_ACCOUNT:-}" "${DEV_WIF_SERVICE_ACCOUNT:-}" "${WIF_SERVICE_ACCOUNT:-}")"
+            wif_provider="$(pick "${WAJI_WIF_PROVIDER:-}" "${DEV_WIF_PROVIDER:-}" "${WIF_PROVIDER:-}")"
+            artifact_project_id="$(pick "${WAJI_ARTIFACT_PROJECT_ID:-}" "" "drts-staging-bobo-20260502")"
+            artifact_region="$(pick "${WAJI_ARTIFACT_REGION:-}" "" "$region")"
+            artifact_repository="$(pick "${WAJI_ARTIFACT_REPOSITORY:-}" "" "drts")"
+            secret_prefix="$(pick "${WAJI_SECRET_PREFIX:-}" "" "drts-dev")"
+            api_service="$(pick "${WAJI_GCP_API_SERVICE:-}" "" "drts-dev-api")"
+            platform_admin_service="$(pick "${WAJI_GCP_PLATFORM_ADMIN_SERVICE:-}" "" "drts-dev-platform-admin-web")"
+            ops_console_service="$(pick "${WAJI_GCP_OPS_CONSOLE_SERVICE:-}" "" "drts-dev-ops-console-web")"
+            fleet_partner_portal_service="$(pick "${WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-dev-fleet-partner-portal-web")"
+            migration_job="$(pick "${WAJI_GCP_MIGRATION_JOB:-}" "" "drts-dev-migrate")"
             api_exposure_flag="--allow-unauthenticated"
             platform_admin_exposure_flag="--allow-unauthenticated"
             ops_console_exposure_flag="--allow-unauthenticated"
@@ -288,11 +304,11 @@ jobs:
 
           waji_wif_provider=""
           if [[ "$target_profile" == "waji" ]]; then
-            waji_wif_provider="$(resolve_waji_wif_provider "$wif_provider" || true)"
+            waji_wif_provider="$(resolve_waji_wif_provider || true)"
             if [[ -n "$waji_wif_provider" ]]; then
               echo "::notice::Resolved a usable waji Workload Identity provider via OIDC preflight."
             else
-              echo "::warning::Could not preflight a usable waji Workload Identity provider; falling back to secrets.WIF_PROVIDER."
+              echo "::warning::Could not preflight a usable waji Workload Identity provider; falling back to configured waji/current secrets."
             fi
           fi
 
@@ -337,8 +353,8 @@ jobs:
           [[ -n "$region" ]] || missing+=("vars.DEV_GCP_REGION")
           [[ -n "$cloudsql" ]] || missing+=("vars.DEV_GCP_CLOUDSQL_INSTANCE")
           [[ -n "$runtime_sa" ]] || missing+=("vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT")
-          [[ -n "$deployer_sa" ]] || missing+=("secrets.DEV_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
-          [[ -n "$wif_provider" ]] || missing+=("secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "$deployer_sa" ]] || missing+=("secrets.WAJI_WIF_SERVICE_ACCOUNT, secrets.DEV_WIF_SERVICE_ACCOUNT, or secrets.WIF_SERVICE_ACCOUNT")
+          [[ -n "$wif_provider" ]] || missing+=("secrets.WAJI_WIF_PROVIDER, secrets.DEV_WIF_PROVIDER, or secrets.WIF_PROVIDER")
 
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing GitHub Actions dev configuration: ${missing[*]}."
@@ -389,8 +405,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -476,8 +492,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -489,7 +505,7 @@ jobs:
           set -euo pipefail
 
           if [[ "${{ needs.prepare.outputs.target_profile }}" == "waji" ]]; then
-            deployer_sa="${WIF_SERVICE_ACCOUNT:-}"
+            deployer_sa="${WAJI_WIF_SERVICE_ACCOUNT:-${DEV_WIF_SERVICE_ACCOUNT:-${WIF_SERVICE_ACCOUNT:-}}}"
           else
             deployer_sa="${DEV_WIF_SERVICE_ACCOUNT:-${WIF_SERVICE_ACCOUNT:-}}"
           fi
@@ -538,8 +554,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -726,8 +742,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_PROVIDER || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && env.WAJI_WIF_SERVICE_ACCOUNT || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
