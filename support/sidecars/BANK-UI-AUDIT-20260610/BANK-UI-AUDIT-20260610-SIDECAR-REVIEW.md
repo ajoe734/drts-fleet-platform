@@ -42,7 +42,7 @@ This packet exists because the current tree does not support that closeout summa
 
 There is no audit list, no filters, no event rows, no masked-subject column, and no booking/statement link surface.
 
-`[apps/bank-console-web/components/pending-screen.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/components/pending-screen.tsx:8)` explicitly documents that the route is an "Honest placeholder" whose "screen body is explicitly pending design". The rendered content is a hero, a warning callout, and two informational cards only.
+`[apps/bank-console-web/components/pending-screen.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/components/pending-screen.tsx:8)` explicitly documents that the route is an "Honest placeholder" whose "screen body is explicitly pending design". The rendered content at lines 20-49 is a hero, a warning callout, and two informational cards only.
 
 `[apps/bank-console-web/lib/translations.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/lib/translations.ts:3)` also states that the bank console is a shell scaffold and that "every route renders a pending-design placeholder rather than an invented screen." The `audit` copy at lines 67-69 and 129-130 defines title/purpose text only.
 
@@ -57,7 +57,7 @@ The dispatch script records the expected artifact set as:
 
 See `[scripts/dispatch-bank-console-screens-20260610.sh](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/scripts/dispatch-bank-console-screens-20260610.sh:25)` and lines 92-97 for the specific `BANK-UI-AUDIT-20260610` assignment.
 
-In this worktree, `grep -RIn "bank-screens-1.jsx\\|bank-screens-2.jsx\\|bank-screens-3.jsx" .` only finds that dispatch script reference. The actual canvas files do not exist under `docs/05-ui/drts-design-canvas/`.
+In this worktree, `find docs/05-ui/drts-design-canvas -maxdepth 1 -type f \\( -name 'bank-screens-1.jsx' -o -name 'bank-screens-2.jsx' -o -name 'bank-screens-3.jsx' \\) -print` returns no files. The actual canvas files do not exist under `docs/05-ui/drts-design-canvas/`.
 
 This matters because the parent acceptance says the screen must match its `BK_*` canvas function, but there is no `bank-screens-*.jsx` artifact available here to review against.
 
@@ -65,7 +65,7 @@ This matters because the parent acceptance says the screen must match its `BK_*`
 
 `[docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md:38)` says the whole `bank-console-web` app needs new design and that every screen needs a canvas.
 
-The same file lists `/audit` in the sitemap at line 49 as "eligibility/dispatch/settlement trail", but §5 contains functional briefs only for:
+The same file lists `/audit` in the sitemap at line 49 as "eligibility/dispatch/settlement trail", but §5 spans lines 57-85 and contains functional briefs only for:
 
 - bookings list
 - booking detail
@@ -82,10 +82,10 @@ There is no dedicated §5 audit brief in the current handoff packet. So the repo
 
 ### 3.4 Validation could not be reproduced
 
-Running `pnpm --filter @drts/bank-console-web typecheck` in this worktree fails immediately:
+Running `pnpm --filter @drts/bank-console-web typecheck` in this worktree on 2026-06-11 fails immediately:
 
-- `tsc: not found`
-- `node_modules missing`
+- `sh: 1: tsc: not found`
+- `WARN Local package.json exists, but node_modules missing, did you mean to install?`
 
 So this session cannot confirm the parent acceptance item `typecheck and build pass`. There is also no evidence in this worktree that the claimed validation was rerun here.
 
@@ -101,7 +101,7 @@ Recommended checks:
 
 - Re-run `AI_NAME=Codex scripts/ai-status.sh show BANK-UI-AUDIT-20260610` and confirm the parent is still `review` with the same acceptance.
 - Inspect `[apps/bank-console-web/app/audit/page.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/app/audit/page.tsx:1)` and `[apps/bank-console-web/components/pending-screen.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/components/pending-screen.tsx:8)`.
-- Confirm that `docs/05-ui/drts-design-canvas/bank-screens-*.jsx` are absent in this tree.
+- Confirm that `find docs/05-ui/drts-design-canvas -maxdepth 1 -type f \\( -name 'bank-screens-1.jsx' -o -name 'bank-screens-2.jsx' -o -name 'bank-screens-3.jsx' \\) -print` returns nothing in this tree.
 - Confirm that the requirements doc does not currently contain a dedicated audit screen brief.
 - Treat the failed `pnpm --filter @drts/bank-console-web typecheck` result as "verification unavailable in this worktree", not as a passing validation record.
 
