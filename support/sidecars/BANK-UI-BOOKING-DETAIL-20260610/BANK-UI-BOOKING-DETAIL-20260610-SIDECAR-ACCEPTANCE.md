@@ -1,6 +1,6 @@
 # BANK-UI-BOOKING-DETAIL-20260610 Sidecar Acceptance Packet
 
-This document is the parallel support packet for `BANK-UI-BOOKING-DETAIL-20260610` ("BANK-UI-BOOKING-DETAIL: bank-console booking detail (BK_BookingDetail)"). It does not change canonical truth. It consolidates the current repo facts, dependency constraints, and reviewer-facing acceptance gates that the assigned reviewer (`Codex2`) and parent-task owner (`Claude2`) need before the parent task can be reviewed.
+This document is the parallel support packet for `BANK-UI-BOOKING-DETAIL-20260610` ("BANK-UI-BOOKING-DETAIL: bank-console booking detail (BK_BookingDetail)"). It does not change canonical truth. It consolidates the current repo facts, dependency constraints, and reviewer-facing acceptance gates that the sidecar reviewer (`Claude2`) and parent-task lane need before the parent task can be reviewed.
 
 Anchors used here come from:
 
@@ -100,16 +100,17 @@ This means the sidecar packet should be read as a review-prep artifact, not as p
 
 ### Design-authority caveat
 
-The dispatch script and parent acceptance text both cite `docs/05-ui/drts-design-canvas/bank-screens-*.jsx` as the visual authority. In the current repo snapshot, those files are absent:
+The dispatch script and parent acceptance text correctly cite `docs/05-ui/drts-design-canvas/bank-screens-*.jsx` as the visual authority. The important nuance is that this worktree is based on `dev`, while the authoritative bank canvas was ingested on a separate branch and is verifiable from commit `4dad0cfa`:
 
-- `docs/05-ui/drts-design-canvas/` contains the established canvases for ops / platform / tenant / partner / driver, but no `bank-screens-1.jsx`, `bank-screens-2.jsx`, or `bank-screens-3.jsx`.
-- `docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md` §4.1 simultaneously says the entire `bank-console-web` app needs a new design canvas because there is no existing corporate tenant canvas to extend.
+- `git show 4dad0cfa:docs/05-ui/drts-design-canvas/bank-screens-1.jsx | grep -n BK_BookingDetail` returns `234:function BK_BookingDetail({ theme: th }) {`.
+- The same artifact exports `BK_BookingDetail` from line `308`, confirming it is part of the ingested bank canvas set.
+- `docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md` §4.1 says the bank console needed a full new canvas because no corporate tenant canvas could be extended. That is a pre-ingest design handoff statement, not proof that the bank canvas still does not exist after `4dad0cfa`.
 
 Therefore the current design-authority state is:
 
-1. behavioural scope is anchored and reviewable from the screen-requirements doc
+1. behavioural scope is anchored and reviewable from the screen-requirements doc, especially §5.2
 2. realm-token/chrome constraints are anchored in the scaffold and `@drts/ui-tokens`
-3. the specific `bank-screens-*.jsx` acceptance anchor named in machine truth is not yet present in this repo snapshot and should be treated as an open dependency/risk during review
+3. the specific `BK_BookingDetail` visual authority does exist, but reviewers working from `dev` must check out the canvas-ingest branch or use `git show 4dad0cfa:.../bank-screens-1.jsx` when validating parity
 
 ## §4 Parent-Task Acceptance Checklist (`BANK-UI-BOOKING-DETAIL-20260610`)
 
@@ -130,29 +131,26 @@ These are the reviewer-facing gates for the parent task, derived from the parent
 - [ ] zh-TW remains primary through the shared `t()` translation path; no inline locale ternaries.
 - [ ] App chrome continues to use the `tenant` realm token surface from `@drts/ui-tokens`; issuer identity may appear as data/branding, not as a hardcoded replacement palette.
 - [ ] Any issuer navy/gold accent introduced inside the page is sourced from the shared token/brand layer rather than raw hex values.
-- [ ] Reviewer confirms the visual implementation matches the intended `BK_BookingDetail` canvas once the missing `bank-screens-*.jsx` source is available, or records the absence explicitly if review happens before that canvas lands.
+- [ ] Reviewer confirms the visual implementation matches `BK_BookingDetail` from `docs/05-ui/drts-design-canvas/bank-screens-1.jsx:234` at commit `4dad0cfa`, using the ingest branch or `git show` if the local `dev` worktree does not yet contain that canvas file.
 
 ### C. Verification gates
 
 - [ ] `pnpm --filter @drts/bank-console-web typecheck`
 - [ ] `pnpm --filter @drts/bank-console-web build`
 - [ ] `scripts/check_ui_realm_tokens.py`
-- [ ] Manual or Storybook parity check against the final bank booking-detail canvas anchor once the `bank-screens-*.jsx` files exist.
+- [ ] Manual or Storybook parity check against `BK_BookingDetail` from the ingested bank canvas (`bank-screens-1.jsx:234` at `4dad0cfa`), even if validation must be done via `git show` rather than the local `dev` tree.
 
 ### D. Guardrails
 
 - [ ] No canonical truth files are edited as part of this sidecar packet.
-- [ ] Parent review should reject any implementation that silently falls back to invented styling because the named bank canvas files are missing.
+- [ ] Parent review should reject any implementation that silently falls back to invented styling because the reviewer failed to consult the ingested `BK_BookingDetail` canvas authority.
 - [ ] Parent review should reject any implementation that adds dispatch mutation controls, unmasks cardholder/card references, or bypasses the shared translation path.
 
 ## §5 Reviewer Risk Notes
 
-### Risk 1: visual authority path mismatch
+### Risk 1: visual authority is on the ingest branch, not this `dev` worktree
 
-The named `docs/05-ui/drts-design-canvas/bank-screens-*.jsx` files are absent in this repo snapshot, even though they are referenced by machine truth and the dispatch script. Review cannot honestly mark visual parity complete unless:
-
-- those files land before parent review, or
-- the reviewer records that visual parity is blocked on the missing canvas artifact
+The review risk is not "canvas missing"; it is "reviewer checks only the `dev` worktree and misses the already-ingested authority." Review cannot honestly mark visual parity complete unless the reviewer validates against `BK_BookingDetail` at `docs/05-ui/drts-design-canvas/bank-screens-1.jsx:234` from commit `4dad0cfa`, either by checking out the ingest branch or by using `git show` directly.
 
 ### Risk 2: scaffold dependency is implied, not independently resolved here
 
@@ -169,7 +167,7 @@ The current route family shows `/bookings` but not `/bookings/[bookingId]`. If t
 - [x] The packet records the actual scaffold baseline under `apps/bank-console-web/`.
 - [x] The packet explicitly records that `/bookings/[bookingId]` is not present in the current worktree baseline.
 - [x] The packet ties functional scope to `docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md` §5.2.
-- [x] The packet records the design-authority mismatch around the absent `bank-screens-*.jsx` files.
+- [x] The packet records that `BK_BookingDetail` exists in the ingested bank canvas (`bank-screens-1.jsx:234` at `4dad0cfa`) and that review on `dev` must consult that authority explicitly.
 - [x] The only support artifact content for this task is this file under `support/sidecars/BANK-UI-BOOKING-DETAIL-20260610/`.
 
 ## §7 Reviewer Handoff Notes (for `Claude2`)
@@ -177,5 +175,5 @@ The current route family shows `/bookings` but not `/bookings/[bookingId]`. If t
 1. Reconfirm the parent task still targets `BK_BookingDetail` under `apps/bank-console-web/app/bookings/[bookingId]/page.tsx` and remains owned by `Claude2` with reviewer `Codex2`.
 2. Reconfirm whether `CCAT-APP-SCAFFOLD-20260610` has a canonical task record elsewhere or has already been absorbed/closed out, because this session could only verify scaffold presence from the repo tree.
 3. Before approving the parent task, verify the detail route is real and not replaced by `PendingScreen`.
-4. Treat the missing `bank-screens-*.jsx` files as a concrete review caveat. If the parent task reaches review before those canvas files land, record the visual-parity limitation explicitly instead of silently waiving it.
+4. Treat `BK_BookingDetail` at `bank-screens-1.jsx:234` / `4dad0cfa` as the design authority even if the local `dev` worktree does not yet contain the bank canvas files. Do not waive parity review just because a plain filesystem scan on `dev` comes up empty.
 5. Approval for this sidecar should verify that the only task-scoped content edit is `support/sidecars/BANK-UI-BOOKING-DETAIL-20260610/BANK-UI-BOOKING-DETAIL-20260610-SIDECAR-ACCEPTANCE.md`, plus machine-truth state transitions recorded through `scripts/ai-status.sh`.
