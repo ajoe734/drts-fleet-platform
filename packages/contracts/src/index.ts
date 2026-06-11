@@ -1599,6 +1599,16 @@ export interface TenantQuotaSummary {
   refreshedAt: string;
 }
 
+export interface TenantProgramUsageRecord {
+  programId: string;
+  programCode: string;
+  period: string;
+  cardholdersServed: number;
+  tripsConsumed: number;
+  quotaTotal: number | null;
+  quotaRemaining: number | null;
+}
+
 export interface TenantCostCenterQuotaSummary {
   tenantId: string;
   costCenterCode: string;

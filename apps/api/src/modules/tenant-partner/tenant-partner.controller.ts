@@ -54,6 +54,7 @@ import type {
   TenantServiceProgramRecord,
   TenantIntegrationGovernancePackage,
   TenantPartnerSummary,
+  TenantProgramUsageRecord,
   TenantQuotaLedgerEntry,
   TenantQuotaSummary,
   TenantApprovalEvaluationResult,
@@ -724,6 +725,19 @@ export class TenantPartnerController {
         this.requireTenantId(tenantId),
       );
     return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/program-usage")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantProgramUsage(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantProgramUsageRecord[] =
+      this.tenantPartnerService.listTenantProgramUsage(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/cost-centers/:code/quota")
