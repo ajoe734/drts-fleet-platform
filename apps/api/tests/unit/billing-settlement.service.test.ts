@@ -347,4 +347,93 @@ describe("BillingSettlementService settlement matrix", () => {
       ]),
     );
   });
+
+  it("reconciles live card-benefit settlement statements and discovers live-only periods", async () => {
+    const liveTenantId = "tenant-issuer-live-001";
+    const liveCardBenefitTrip = {
+      tenantId: liveTenantId,
+      driverId: "drv-live-001",
+      orderId: "order-live-501",
+      completedAt: "2026-05-12T09:30:00Z",
+      grossEarning: { currency: "NTD", amountMinor: 120000 },
+      orderSource: "api",
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      costCenterCode: null,
+      riderId: "rider-live-501",
+      partnerId: "partner-bank-live-001",
+      partnerProgramId: "program-airport-live",
+      partnerEntrySlug: "bank-live-airport",
+      eligibilityVerificationId: "elig-live-501",
+      issuerAuthorizationRef: "issuer-auth-live-501",
+      benefitReference: "benefit-live-501",
+      serviceProduct: "credit_card_airport_transfer",
+      tenantServiceProgramId: null,
+      sourcePlatform: "api",
+    };
+    // A non-card-benefit live trip must stay subsidy-free and out of the statement.
+    const liveEnterpriseTrip = {
+      ...liveCardBenefitTrip,
+      orderId: "order-live-502",
+      businessDispatchSubtype: "enterprise_dispatch",
+      partnerId: null,
+      issuerAuthorizationRef: null,
+      benefitReference: null,
+      serviceProduct: "enterprise_dispatch",
+    };
+
+    const repository = {
+      isEnabled: () => true,
+      reportPersistenceFailure: () => {},
+      listLiveCardBenefitSettlementPeriods: async (tenantId: string) =>
+        tenantId === liveTenantId ? ["2026-05"] : [],
+      listLiveCompletedTenantTrips: async (
+        tenantId: string,
+        periodStart: string,
+      ) =>
+        tenantId === liveTenantId && periodStart.startsWith("2026-05")
+          ? [liveCardBenefitTrip, liveEnterpriseTrip]
+          : [],
+    };
+
+    const service = new BillingSettlementService(
+      new AuditNotificationService(),
+      repository as any,
+      { listReconciliationIssues: () => [] } as any,
+    );
+
+    // Finding #2: a period present only in live data is discovered, not omitted.
+    const statements =
+      await service.listTenantSettlementStatements(liveTenantId);
+    expect(statements.map((statement) => statement.period)).toContain(
+      "2026-05",
+    );
+
+    // Finding #1: the issuer-funded portion is reconciled, not collapsed to 0.
+    const statement = await service.getTenantSettlementStatement(
+      liveTenantId,
+      "2026-05",
+    );
+    const line = statement.lines.find(
+      (entry) => entry.tripId === "order-live-501",
+    );
+    expect(line).toBeDefined();
+    expect(line?.fare.amountMinor).toBe(120000);
+    expect(line?.subsidisedAmount.amountMinor).toBe(120000);
+    expect(line?.paidAmount.amountMinor).toBe(0);
+    expect(line?.benefitReference).toBe("benefit-live-501");
+    expect(line?.issuerAuthorizationRef).toBe("issuer-auth-live-501");
+
+    // The non-card-benefit live trip is excluded from the settlement statement.
+    expect(
+      statement.lines.some((entry) => entry.tripId === "order-live-502"),
+    ).toBe(false);
+
+    expect(statement.totals.tripCount).toBe(1);
+    expect(statement.totals.fareTotal.amountMinor).toBe(120000);
+    expect(statement.totals.subsidisedTotal.amountMinor).toBe(120000);
+    expect(statement.totals.paidTotal.amountMinor).toBe(0);
+    expect(statement.totals.issuerPayable.amountMinor).toBe(120000);
+    expect(statement.direction).toBe("issuer_pays_drts");
+  });
 });
