@@ -1780,17 +1780,26 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const snapshotByPeriod = new Map(
-      Array.from(this.quotaMonthlySnapshots.values())
-        .filter(
-          (snapshot) =>
-            snapshot.tenantId === tenantId && snapshot.costCenterCode === null,
-        )
-        .map((snapshot) => [snapshot.periodKey, snapshot]),
-    );
     const periods = new Set<string>([currentPeriodKey]);
     for (const usage of usageByProgramPeriod.values()) {
       periods.add(usage.period);
+    }
+
+    const tenantPolicy = this.resolveQuotaPolicy(tenantId, null);
+    const snapshotByPeriod = new Map<
+      string,
+      ReturnType<TenantPartnerService["getOrCreateQuotaSnapshot"]>
+    >();
+    for (const period of periods) {
+      snapshotByPeriod.set(
+        period,
+        this.getOrCreateQuotaSnapshot(
+          tenantId,
+          null,
+          period,
+          tenantPolicy.limit,
+        ),
+      );
     }
 
     const items: TenantProgramUsageRecord[] = [];
@@ -1803,9 +1812,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        const quotaLimit =
-          snapshotByPeriod.get(period)?.limit.bookingCountLimit ??
-          this.resolveQuotaPolicy(tenantId, null).limit.bookingCountLimit;
+        const periodSnapshot = snapshotByPeriod.get(period);
+        const quotaLimit = periodSnapshot?.limit.bookingCountLimit ?? null;
         const tripsConsumed = usage?.activeBookingIds.size ?? 0;
         const programCode = program.programCode ?? program.programId;
         const cardholdersServed =
@@ -1826,10 +1834,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           cardholdersServed,
           tripsConsumed,
           quotaTotal: quotaLimit,
-          quotaRemaining:
-            quotaLimit === null
-              ? null
-              : Math.max(quotaLimit - tripsConsumed, 0),
+          quotaRemaining: periodSnapshot?.usage.bookingCountRemaining ?? null,
         });
       }
     }

@@ -2404,7 +2404,7 @@ describe("TenantPartnerService approval rules", () => {
           cardholdersServed: 1,
           tripsConsumed: 2,
           quotaTotal: 5,
-          quotaRemaining: 3,
+          quotaRemaining: 2,
         },
         {
           programId: "program-airport-beta",
@@ -2413,7 +2413,7 @@ describe("TenantPartnerService approval rules", () => {
           cardholdersServed: 1,
           tripsConsumed: 1,
           quotaTotal: 5,
-          quotaRemaining: 4,
+          quotaRemaining: 2,
         },
       ]),
     );
