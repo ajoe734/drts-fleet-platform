@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getProgramThemeForSlug } from "@/lib/program-theme";
 import {
+  listProgramScreensForTheme,
   ProgramBookingFlow,
   resolveProgramScreenSegment,
 } from "@/lib/program-screens";
@@ -19,6 +20,9 @@ export default async function ProgramScreenPage({ params }: PageProps) {
   }
 
   const theme = getProgramThemeForSlug(tenantSlug);
+  if (!listProgramScreensForTheme(theme).some((meta) => meta.id === screenId)) {
+    notFound();
+  }
   return (
     <ProgramBookingFlow
       theme={theme}

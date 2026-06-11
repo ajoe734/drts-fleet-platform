@@ -15,7 +15,7 @@ const en = {
     "This airport-transfer program requires a verified eligibility record before booking can proceed.",
   "book.eligibility.airport.action": "Open eligibility check",
   "book.eligibility.insurance.message":
-    "Insurance intake stays blocked until claim and policy references are complete.",
+    "Insurance intake stays blocked until claim, policy, and replacement-vehicle eligibility references are complete.",
   "book.eligibility.travel.message":
     "Agency transfer intake needs a group or order reference before booking can be prepared.",
   "book.eligibility.referenceId": "Eligibility verification ID",
@@ -40,7 +40,7 @@ const en = {
   "book.coverage.credit_card_airport_transfer":
     "Card tier, flight context, terminal, direction",
   "book.coverage.insurance_replacement_vehicle":
-    "Claim, policy, rental period, medical facility",
+    "Claim, policy, claimant, replacement-vehicle class, coverage window",
   "book.coverage.travel_agency_transfer":
     "Group/order reference, group seats, itinerary, roster",
   "book.coverage.enterprise_dispatch":
@@ -58,8 +58,12 @@ const en = {
   "field.direction": "Pickup / drop-off",
   "field.claimNumber": "Claim number",
   "field.policyNumber": "Policy number",
+  "field.claimReference": "Claim reference",
+  "field.claimantName": "Claimant",
   "field.replacementStart": "Replacement period start",
   "field.replacementEnd": "Replacement period end",
+  "field.replacementVehicleClass": "Replacement-vehicle class",
+  "field.caseHandler": "Case handler",
   "field.medicalFacility": "Medical facility",
   "field.groupCode": "Group / order reference",
   "field.groupSize": "Group seats",
@@ -73,7 +77,7 @@ const en = {
   "hint.policyWindow":
     "The reservation end must be after the start. Program-specific periods can be narrower.",
   "hint.replacementPeriod":
-    "Capture the insurer-approved replacement period for downstream case tracking.",
+    "Capture the insurer-approved replacement-vehicle coverage window for downstream case tracking.",
   "hint.groupSize":
     "Use the allocated group seats so dispatch can match vehicle capacity and batching.",
   "hint.itineraryLink":
@@ -104,7 +108,7 @@ const zh = {
     "此機場接送方案必須先取得有效的 eligibility verification，才能進入下單。",
   "book.eligibility.airport.action": "前往資格驗證",
   "book.eligibility.insurance.message":
-    "保險代步方案在理賠案號與保單號完整前，不可送出下單。",
+    "保險代步方案在理賠、保單與代步車資格資料完整前，不可送出下單。",
   "book.eligibility.travel.message":
     "旅行社接送方案需先具備團體或訂單參照，才能完成下單準備。",
   "book.eligibility.referenceId": "Eligibility 驗證編號",
@@ -127,7 +131,7 @@ const zh = {
   "book.program.enterprise_dispatch": "企業派車",
   "book.coverage.credit_card_airport_transfer": "卡別、航班、航廈、接送方向",
   "book.coverage.insurance_replacement_vehicle":
-    "理賠案號、保單、代步期間、醫療院所",
+    "理賠案號、保單、理賠參照、申請人、代步車型、代步期間",
   "book.coverage.travel_agency_transfer":
     "團體/訂單參照、團體席次、行程連結、roster",
   "book.coverage.enterprise_dispatch": "共用行程欄位，無 partner 專屬閘門",
@@ -144,8 +148,12 @@ const zh = {
   "field.direction": "接送方向",
   "field.claimNumber": "理賠案號",
   "field.policyNumber": "保單號碼",
+  "field.claimReference": "理賠參照",
+  "field.claimantName": "理賠申請人",
   "field.replacementStart": "代步開始",
   "field.replacementEnd": "代步結束",
+  "field.replacementVehicleClass": "代步車輛資格",
+  "field.caseHandler": "承辦人",
   "field.medicalFacility": "醫療院所",
   "field.groupCode": "團體 / 訂單參照",
   "field.groupSize": "團體席次",
@@ -158,7 +166,8 @@ const zh = {
   "hint.flightNo": "機場方案需帶入航班資訊，尤其接機必填。",
   "hint.policyWindow":
     "預約結束時間必須晚於開始時間；各方案可再套更細的期間規則。",
-  "hint.replacementPeriod": "請輸入保險核准的代步期間，供後續案件追蹤使用。",
+  "hint.replacementPeriod":
+    "請輸入保險核准的代步車資格期間，供後續案件追蹤使用。",
   "hint.groupSize":
     "填寫本團分配的團體席次，讓 dispatch 可對齊車型容量與分批。",
   "hint.itineraryLink": "貼上旅行社行程連結，供 roster 與接送段次比對。",

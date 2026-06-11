@@ -18,9 +18,12 @@ export interface PartnerBookingDraftValues {
   direction: "" | "pickup" | "dropoff";
   claimNumber: string;
   policyNumber: string;
+  claimReference: string;
+  claimantName: string;
   replacementStart: string;
   replacementEnd: string;
-  medicalFacility: string;
+  replacementVehicleClass: string;
+  caseHandler: string;
   groupCode: string;
   groupSize: string;
   itineraryLink: string;
@@ -106,9 +109,12 @@ export function createDefaultPartnerBookingDraft(): PartnerBookingDraftValues {
     direction: "",
     claimNumber: "",
     policyNumber: "",
+    claimReference: "",
+    claimantName: "",
     replacementStart: formatDateTimeLocalInputValue(start),
     replacementEnd: formatDateTimeLocalInputValue(end),
-    medicalFacility: "",
+    replacementVehicleClass: "",
+    caseHandler: "",
     groupCode: "",
     groupSize: "",
     itineraryLink: "",
@@ -153,7 +159,11 @@ export function getPartnerProgramGate(params: {
   }
 
   if (entry.businessDispatchSubtype === "insurance_replacement_vehicle") {
-    if (!hasText(draft.claimNumber) || !hasText(draft.policyNumber)) {
+    if (
+      !hasText(draft.claimNumber) ||
+      !hasText(draft.policyNumber) ||
+      !hasText(draft.replacementVehicleClass)
+    ) {
       return {
         state: "inline_required",
         message: t("book.eligibility.insurance.message"),
@@ -264,8 +274,18 @@ export function getPartnerBookingFieldErrors(params: {
     if (!hasText(draft.policyNumber)) {
       setRequiredError(errors, "policyNumber", "field.policyNumber");
     }
-    if (!hasText(draft.medicalFacility)) {
-      setRequiredError(errors, "medicalFacility", "field.medicalFacility");
+    if (!hasText(draft.claimReference)) {
+      setRequiredError(errors, "claimReference", "field.claimReference");
+    }
+    if (!hasText(draft.claimantName)) {
+      setRequiredError(errors, "claimantName", "field.claimantName");
+    }
+    if (!hasText(draft.replacementVehicleClass)) {
+      setRequiredError(
+        errors,
+        "replacementVehicleClass",
+        "field.replacementVehicleClass",
+      );
     }
     if (!hasText(draft.replacementStart)) {
       setRequiredError(errors, "replacementStart", "field.replacementStart");
