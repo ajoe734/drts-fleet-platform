@@ -142,24 +142,6 @@ const en = {
   "contracts.detail.maskedRefs": "Masked refs",
   "contracts.detail.emptyExceptions": "No exceptions in the current period.",
 
-  "booking.detail.eyebrow": "Booking detail",
-  "booking.detail.back": "Back to contract",
-  "booking.detail.readOnly": "Issuer read-only view",
-  "booking.detail.title": "Booking detail",
-  "booking.detail.summary":
-    "Masked cardholder and benefit references plus the dispatch timeline are visible here for contract exception review.",
-  "booking.detail.cardholder": "Cardholder ref",
-  "booking.detail.card": "Card",
-  "booking.detail.program": "Program",
-  "booking.detail.flight": "Flight / terminal",
-  "booking.detail.direction": "Direction",
-  "booking.detail.route": "Route",
-  "booking.detail.scheduledAt": "Scheduled at",
-  "booking.detail.dispatchState": "Dispatch state",
-  "booking.detail.benefitRef": "Benefit ref",
-  "booking.detail.issuerAuthRef": "Issuer auth ref",
-  "booking.detail.timeline": "Dispatch timeline",
-
   "statements.title": "Settlement statements",
   "statements.purpose":
     "Period and per-trip settlement reconciliation (issuer-pays-DRTS), with masked references and signed downloadable artifacts.",
@@ -493,24 +475,6 @@ const zh: Record<keyof typeof en, string> = {
   "contracts.detail.reason": "原因",
   "contracts.detail.maskedRefs": "遮罩參考",
   "contracts.detail.emptyExceptions": "本期沒有例外。",
-
-  "booking.detail.eyebrow": "訂單詳情",
-  "booking.detail.back": "返回合約詳情",
-  "booking.detail.readOnly": "發卡行唯讀視角",
-  "booking.detail.title": "訂單詳情",
-  "booking.detail.summary":
-    "此處提供卡友、權益與派遣時間軸的遮罩資訊，供合約例外追蹤使用。",
-  "booking.detail.cardholder": "卡友參考",
-  "booking.detail.card": "卡號",
-  "booking.detail.program": "方案",
-  "booking.detail.flight": "航班 / 航廈",
-  "booking.detail.direction": "去回程",
-  "booking.detail.route": "路線",
-  "booking.detail.scheduledAt": "預約時間",
-  "booking.detail.dispatchState": "派遣狀態",
-  "booking.detail.benefitRef": "權益參考",
-  "booking.detail.issuerAuthRef": "發卡授權參考",
-  "booking.detail.timeline": "派遣時間軸",
 
   "statements.title": "結算對帳單",
   "statements.purpose":
