@@ -30,7 +30,7 @@ Anchors used here come from:
 - **Parent Task:** `BANK-UI-HOME-20260610`
 - **Helper Kind:** `acceptance_packet`
 - **Sidecar Owner:** `Codex`
-- **Sidecar Reviewer:** `Codex2`
+- **Sidecar Reviewer:** `Claude2`
 - **Parent Owner:** `Claude`
 - **Parent Reviewer:** `Codex`
 - **Mutates Canonical:** `false`
@@ -57,8 +57,8 @@ At packet refresh time, `scripts/ai-status.sh show BANK-UI-HOME-20260610-SIDECAR
 reports:
 
 - owner=`Codex`
-- reviewer=`Codex2`
-- status=`in_progress`
+- reviewer=`Claude2`
+- status=`review_approved`
 - task_class=`sidecar`
 - helper_parent=`BANK-UI-HOME-20260610`
 - helper_kind=`acceptance_packet`
@@ -283,7 +283,7 @@ The intended composition is already visible in the current app:
 - [ ] reviewer cross-checks that any data constants or mock data used on the
       home page remain consistent with the sibling detail surfaces
 
-## 6. Reviewer Handoff Notes (`Codex2`)
+## 6. Reviewer Handoff Notes (`Claude2`)
 
 1. Reconfirm the sidecar file is still the only support artifact changed for
    this task.
