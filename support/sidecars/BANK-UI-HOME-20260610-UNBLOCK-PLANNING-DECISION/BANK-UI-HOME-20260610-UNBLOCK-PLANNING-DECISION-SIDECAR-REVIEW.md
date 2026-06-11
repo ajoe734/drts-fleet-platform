@@ -4,7 +4,7 @@
 
 - Sidecar task: `BANK-UI-HOME-20260610-UNBLOCK-PLANNING-DECISION-SIDECAR-REVIEW`
 - Sidecar owner / reviewer: `Codex` / `Claude2`
-- Sidecar status at packet refresh: `in_progress` (`last_update: 2026-06-11T13:26:03Z`)
+- Sidecar status at packet refresh: `review_approved` (`last_update: 2026-06-11T13:31:12Z`)
 - Parent unblock task: `BANK-UI-HOME-20260610-UNBLOCK-PLANNING-DECISION`
 - Parent unblock owner / reviewer in machine truth: `Codex` / `Claude2`
 - Parent unblock status at packet refresh: `done` (`last_update: 2026-06-11T13:20:28Z`)
@@ -145,3 +145,15 @@ console design files" would contradict the parent helper's own corrected record.
       test files were changed by this sidecar.
 - [x] Reviewer handoff ready: packet summarizes corrected evidence for
       `Claude2` to approve or reopen.
+
+## 9. Owner Closeout Evidence
+
+- owner closeout branch:
+  `codex/bank-ui-home-20260610-unblock-planning-decision-sidecar-review`
+- review-approved tip before closeout:
+  `31651e88ee737aafc01baa252bcd577e9cd8201e`
+- closeout requirement:
+  refresh the packet snapshot to match machine truth, then create a task-scoped
+  commit with explicit verification metadata before marking the sidecar `done`
+- integration status target after push:
+  `branch_pushed`
