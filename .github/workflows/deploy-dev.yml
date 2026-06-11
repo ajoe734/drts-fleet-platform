@@ -612,10 +612,60 @@ jobs:
 
       - name: Execute migration job and wait for completion
         run: |
-          gcloud run jobs execute "${{ needs.prepare.outputs.migration_job }}" \
-            --region "${{ needs.prepare.outputs.region }}" \
+          set -euo pipefail
+
+          job="${{ needs.prepare.outputs.migration_job }}"
+          region="${{ needs.prepare.outputs.region }}"
+          project="${{ needs.prepare.outputs.project_id }}"
+          execution_log="$(mktemp)"
+
+          if gcloud run jobs execute "$job" \
+            --region "$region" \
             --wait \
-            --project "${{ needs.prepare.outputs.project_id }}"
+            --project "$project" 2>&1 | tee "$execution_log"; then
+            exit 0
+          fi
+
+          status=$?
+          execution="$(grep -Eo "${job}-[a-z0-9-]+" "$execution_log" | tail -n 1 || true)"
+          if [[ -z "$execution" ]]; then
+            execution="$(gcloud run jobs executions list \
+              --job "$job" \
+              --region "$region" \
+              --project "$project" \
+              --sort-by "~metadata.creationTimestamp" \
+              --limit 1 \
+              --format "value(metadata.name)" 2>/dev/null || true)"
+          fi
+
+          if [[ -n "$execution" ]]; then
+            echo "::group::Cloud Run migration execution describe (${execution})"
+            gcloud run jobs executions describe "$execution" \
+              --region "$region" \
+              --project "$project" \
+              --format yaml || true
+            echo "::endgroup::"
+
+            echo "::group::Cloud Run migration execution logs (${execution})"
+            gcloud run jobs executions logs read "$execution" \
+              --region "$region" \
+              --project "$project" \
+              --limit 200 || true
+            echo "::endgroup::"
+          else
+            echo "::warning::Could not resolve the Cloud Run migration execution name."
+          fi
+
+          echo "::group::Recent Cloud Logging entries for ${job}"
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${job}\"" \
+            --project "$project" \
+            --freshness 1h \
+            --limit 100 \
+            --format "value(timestamp,severity,textPayload,jsonPayload.message,protoPayload.status.message)" || true
+          echo "::endgroup::"
+
+          exit "$status"
 
   deploy:
     name: Deploy services
