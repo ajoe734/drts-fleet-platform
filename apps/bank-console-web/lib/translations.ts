@@ -1,10 +1,8 @@
 export type Locale = "en" | "zh";
 
-// Bank / issuer back-office console (S3). This is a SHELL scaffold: the
-// card-benefit data IA (卡友 / 機場 / 趟次配額 / 合約 / 對帳) has no design canvas
-// yet (design hand-off pending — see
-// docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md), so
-// every route renders a pending-design placeholder rather than an invented screen.
+// Bank / issuer back-office console (S3). Routes are filled in task-by-task from
+// the bank screen-requirements hand-off and shared token system; remaining routes
+// can stay scaffolded until their respective surfaces land.
 const en = {
   "app.title": "Bank Console",
   "app.description":
@@ -47,6 +45,51 @@ const en = {
   "bookings.title": "Card bookings",
   "bookings.purpose":
     "Cardholder / program / flight / direction / dispatch-state list (card-airport dimension, not corporate cost-centre). Cardholder references stay PII-masked.",
+  "bookings.eyebrow": "Issuer bookings workspace",
+  "bookings.scopeLabel": "Scope",
+  "bookings.scopeValue": "Issuer tenant · airport transfer only",
+  "bookings.periodLabel": "Business period",
+  "bookings.maskingLabel": "Masking",
+  "bookings.maskingValue": "Cardholder and benefit references exported masked",
+  "bookings.readonlyTitle": "Read-only fulfilment view",
+  "bookings.readonlyBody":
+    "This list is issuer-facing only. It filters by program, direction, dispatch state, period, and masked cardholder reference without exposing cost-centre data or dispatch mutation controls.",
+  "bookings.filters.kicker": "List filters",
+  "bookings.filters.title": "Card-airport filters",
+  "bookings.filters.description":
+    "Filter the issuer tenant view by program, direction, dispatch state, business period, and masked cardholder reference.",
+  "bookings.filters.program": "Program",
+  "bookings.filters.direction": "Direction",
+  "bookings.filters.state": "Dispatch state",
+  "bookings.filters.period": "Period",
+  "bookings.filters.cardholder": "Cardholder ref",
+  "bookings.filters.cardholderPlaceholder": "e.g. CH••••98",
+  "bookings.filters.apply": "Apply filters",
+  "bookings.filters.reset": "Clear",
+  "bookings.metrics.kicker": "Posture",
+  "bookings.metrics.total": "Bookings in current result set",
+  "bookings.metrics.active": "Assigned or en route",
+  "bookings.metrics.completed": "Completed trips",
+  "bookings.table.kicker": "Bookings list",
+  "bookings.table.title": "Airport-transfer fulfilment",
+  "bookings.table.description":
+    "Columns stay on the card-benefit dimension only: order, cardholder ref, program, direction, flight / terminal, route, booking window, state, and masked benefit reference.",
+  "bookings.columns.order": "Order",
+  "bookings.columns.cardholder": "Cardholder",
+  "bookings.columns.program": "Program",
+  "bookings.columns.direction": "Direction",
+  "bookings.columns.flight": "Flight / terminal",
+  "bookings.columns.route": "Pickup / dropoff",
+  "bookings.columns.window": "Time window",
+  "bookings.columns.state": "State",
+  "bookings.columns.benefit": "Benefit",
+  "bookings.direction.outbound": "Outbound",
+  "bookings.direction.inbound": "Inbound",
+  "bookings.state.assigned": "Assigned",
+  "bookings.state.en_route": "En route",
+  "bookings.state.completed": "Completed",
+  "bookings.state.cancelled": "Cancelled",
+  "bookings.empty": "No bookings match the current filters.",
 
   "contracts.title": "Contracts & SLA",
   "contracts.purpose":
@@ -67,6 +110,8 @@ const en = {
   "audit.title": "Audit",
   "audit.purpose":
     "Eligibility, dispatch, and settlement trail scoped to the issuer tenant.",
+
+  "common.all": "All",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -110,6 +155,51 @@ const zh: Record<keyof typeof en, string> = {
   "bookings.title": "卡友訂單",
   "bookings.purpose":
     "卡友／方案／航班／去回程／派遣狀態清單（卡友—機場維度，非企業成本中心）。卡友參考一律 PII 遮罩。",
+  "bookings.eyebrow": "發卡行訂單工作面",
+  "bookings.scopeLabel": "範圍",
+  "bookings.scopeValue": "發卡行租戶 · 僅機場接送",
+  "bookings.periodLabel": "期別",
+  "bookings.maskingLabel": "遮罩",
+  "bookings.maskingValue": "卡友與權益參考一律遮罩輸出",
+  "bookings.readonlyTitle": "唯讀履約視圖",
+  "bookings.readonlyBody":
+    "此清單僅供發卡行檢視，支援方案、方向、派遣狀態、期別與遮罩卡友參考篩選；不顯示成本中心，也不提供派遣異動操作。",
+  "bookings.filters.kicker": "清單篩選",
+  "bookings.filters.title": "卡友—機場維度篩選",
+  "bookings.filters.description":
+    "依方案、去回程、派遣狀態、業務期別與遮罩卡友參考縮小發卡行租戶視圖。",
+  "bookings.filters.program": "方案",
+  "bookings.filters.direction": "方向",
+  "bookings.filters.state": "派遣狀態",
+  "bookings.filters.period": "期別",
+  "bookings.filters.cardholder": "卡友參考",
+  "bookings.filters.cardholderPlaceholder": "例如 CH••••98",
+  "bookings.filters.apply": "套用篩選",
+  "bookings.filters.reset": "清除",
+  "bookings.metrics.kicker": "清單態勢",
+  "bookings.metrics.total": "目前結果集訂單數",
+  "bookings.metrics.active": "已指派或途中",
+  "bookings.metrics.completed": "已完成趟次",
+  "bookings.table.kicker": "訂單清單",
+  "bookings.table.title": "機場接送履約列表",
+  "bookings.table.description":
+    "欄位只保留卡權益維度：訂單、卡友參考、方案、方向、航班／航廈、上下車、時段、狀態與遮罩權益參考。",
+  "bookings.columns.order": "訂單",
+  "bookings.columns.cardholder": "卡友",
+  "bookings.columns.program": "方案",
+  "bookings.columns.direction": "方向",
+  "bookings.columns.flight": "航班／航廈",
+  "bookings.columns.route": "上下車",
+  "bookings.columns.window": "時段",
+  "bookings.columns.state": "狀態",
+  "bookings.columns.benefit": "Benefit",
+  "bookings.direction.outbound": "去程",
+  "bookings.direction.inbound": "回程",
+  "bookings.state.assigned": "已指派",
+  "bookings.state.en_route": "途中",
+  "bookings.state.completed": "已完成",
+  "bookings.state.cancelled": "已取消",
+  "bookings.empty": "目前篩選沒有符合的訂單。",
 
   "contracts.title": "合約與 SLA",
   "contracts.purpose":
@@ -128,6 +218,8 @@ const zh: Record<keyof typeof en, string> = {
 
   "audit.title": "稽核",
   "audit.purpose": "範圍限發卡行租戶的資格、派遣與結算軌跡。",
+
+  "common.all": "全部",
 };
 
 export const translations = { en, zh } as const;
