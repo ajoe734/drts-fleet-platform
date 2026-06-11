@@ -23,10 +23,11 @@ export default async function ProgramScreenPage({ params }: PageProps) {
   if (!listProgramScreensForTheme(theme).some((meta) => meta.id === screenId)) {
     notFound();
   }
+  const resolvedScreen = screenId;
   return (
     <ProgramBookingFlow
       theme={theme}
-      screen={screenId}
+      screen={resolvedScreen}
       basePath={`/${tenantSlug}/program`}
     />
   );
