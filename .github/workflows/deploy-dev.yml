@@ -691,6 +691,7 @@ jobs:
           secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          web_secret_args="JWT_SECRET=${secret_prefix}-jwt-secret:latest"
           assistant_runtime="${DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME:-openclaw}"
           llm_provider="mock"
           llm_chat_model="mock-chat-v1"
@@ -708,6 +709,7 @@ jobs:
 
           if gcloud secrets describe "${secret_prefix}-internal-key" --project "$project_id" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
+            web_secret_args="${web_secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
           fi
 
           llm_secret="${secret_prefix}-llm-gateway-api-key"
@@ -728,6 +730,7 @@ jobs:
           fi
 
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
+          echo "web=${web_secret_args}" >> "$GITHUB_OUTPUT"
           echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
           echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
           echo "llm_summarizer_model=${llm_summarizer_model}" >> "$GITHUB_OUTPUT"
@@ -879,7 +882,7 @@ jobs:
             --port 3007 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.partner_booking_exposure_flag }} \
             --min-instances 0 \

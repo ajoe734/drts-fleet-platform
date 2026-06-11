@@ -1,8 +1,4 @@
-import {
-  createBearerClient,
-  createPublicClient,
-  type ApiClient,
-} from "@drts/api-client";
+import { createBearerClient, type ApiClient } from "@drts/api-client";
 import type {
   ApiSuccessEnvelope,
   BookingRecord,
@@ -34,6 +30,17 @@ type ApiErrorEnvelope = {
     retryable?: boolean;
   };
 };
+
+function getServerAuthorityHeaders(): Record<string, string> {
+  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
+  if (!internalKey) {
+    return {};
+  }
+
+  return {
+    "x-drts-internal-key": internalKey,
+  };
+}
 
 export class PartnerAuthorityError extends Error {
   readonly status: number;
@@ -92,6 +99,7 @@ async function requestAuthority<T>(
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...getServerAuthorityHeaders(),
       ...(init?.headers ?? {}),
     },
   });
@@ -123,6 +131,7 @@ async function requestAuthority<T>(
 
 function getAuthorityClient(session: PartnerSessionRecord): ApiClient {
   return createBearerClient(API_URL, session.accessToken, {
+    ...getServerAuthorityHeaders(),
     "x-realm": "partner",
     ...(session.identity.tenantId
       ? { "x-tenant-id": session.identity.tenantId }
@@ -270,7 +279,13 @@ export async function getPartnerRouteContext(
 export async function createPartnerBootstrapSession(
   command: CreatePartnerBootstrapSessionCommand,
 ): Promise<PartnerBootstrapSession> {
-  return createPublicClient(API_URL).createPartnerBootstrapSession(command);
+  return requestAuthority<PartnerBootstrapSession>(
+    "/api/auth/partner/bootstrap-session",
+    {
+      method: "POST",
+      body: JSON.stringify(command),
+    },
+  );
 }
 
 export async function verifyPartnerEligibility(

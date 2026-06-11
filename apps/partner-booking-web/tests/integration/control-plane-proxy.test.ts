@@ -30,9 +30,11 @@ describe("partner-booking control-plane proxy", () => {
     vi.restoreAllMocks();
     delete process.env.DRTS_API_URL;
     delete process.env.DRTS_API_AUTH_AUDIENCE;
+    delete process.env.DRTS_INTERNAL_KEY;
   });
 
   it("forwards only partner booking calls with partner realm headers", async () => {
+    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ data: { bookingId: "booking-001" } }), {
         status: 200,
@@ -45,6 +47,7 @@ describe("partner-booking control-plane proxy", () => {
       requestFor("GET", ["tenant", "bookings", "booking-001"], {
         headers: {
           Authorization: "Bearer partner-session-token",
+          "x-drts-internal-key": "spoofed-browser-key",
           "x-realm": "platform",
           "x-roles": "platform_admin",
           "x-tenant-id": "tenant-001",
@@ -63,6 +66,7 @@ describe("partner-booking control-plane proxy", () => {
       "http://localhost:3001/api/tenant/bookings/booking-001",
     );
     expect(headers.get("authorization")).toBe("Bearer partner-session-token");
+    expect(headers.get("x-drts-internal-key")).toBe("dev-internal-key");
     expect(headers.get("x-realm")).toBe("partner");
     expect(headers.get("x-roles")).toBeNull();
     expect(headers.get("x-tenant-id")).toBe("tenant-001");

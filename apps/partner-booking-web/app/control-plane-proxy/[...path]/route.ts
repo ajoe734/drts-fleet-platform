@@ -10,6 +10,7 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "cookie",
   "host",
   "transfer-encoding",
+  "x-drts-internal-key",
   "x-actor-id",
   "x-actor-type",
   "x-auth-mode",
@@ -182,6 +183,11 @@ async function mintMetadataIdentityToken(
 }
 
 async function applyUpstreamAuth(headers: Headers, targetUrl: URL) {
+  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
+  if (internalKey) {
+    headers.set("x-drts-internal-key", internalKey);
+  }
+
   const protectedAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   if (protectedAudience) {
     const metadataToken = await mintMetadataIdentityToken(protectedAudience);
