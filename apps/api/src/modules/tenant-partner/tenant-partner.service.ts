@@ -88,6 +88,7 @@ import type {
   TenantPassengerRecord,
   TenantIntegrationGovernancePackage,
   TenantOrderListQuery,
+  TenantProgramUsageRecord,
   TenantQuotaLedgerEntry,
   TenantQuotaLimit,
   TenantQuotaPolicyRecord,
@@ -1703,6 +1704,142 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       usage: { ...snapshot.usage },
       refreshedAt: snapshot.refreshedAt,
     };
+  }
+
+  listTenantProgramUsage(tenantId: string): TenantProgramUsageRecord[] {
+    const programEntries = this.partnerEntries
+      .filter(
+        (entry) =>
+          entry.tenantId === tenantId &&
+          entry.businessDispatchSubtype === "credit_card_airport_transfer",
+      )
+      .sort((left, right) =>
+        (left.programCode ?? left.programId).localeCompare(
+          right.programCode ?? right.programId,
+        ),
+      );
+
+    if (programEntries.length === 0) {
+      return [];
+    }
+
+    const currentPeriodKey = this.getTenantQuotaSummary(tenantId).periodKey;
+    const programById = new Map(
+      programEntries.map((entry) => [entry.programId, entry]),
+    );
+    const orderByBookingId = new Map(
+      this.listTenantScopedOrders(tenantId)
+        .filter((order) => order.bookingId !== null)
+        .map((order) => [order.bookingId as string, order]),
+    );
+    const usageByProgramPeriod = new Map<
+      string,
+      {
+        programId: string;
+        period: string;
+        activeBookingIds: Set<string>;
+      }
+    >();
+
+    for (const entry of this.quotaLedger) {
+      if (
+        entry.tenantId !== tenantId ||
+        entry.costCenterCode !== null ||
+        entry.dimension !== "booking_count"
+      ) {
+        continue;
+      }
+
+      const order = orderByBookingId.get(entry.bookingId);
+      if (!order?.partnerProgramId) {
+        continue;
+      }
+
+      const program = programById.get(order.partnerProgramId);
+      if (!program) {
+        continue;
+      }
+
+      const key = `${program.programId}:${entry.periodKey}`;
+      const bucket =
+        usageByProgramPeriod.get(key) ??
+        (() => {
+          const created = {
+            programId: program.programId,
+            period: entry.periodKey,
+            activeBookingIds: new Set<string>(),
+          };
+          usageByProgramPeriod.set(key, created);
+          return created;
+        })();
+
+      if (entry.entryType === "reserve" || entry.entryType === "adjust") {
+        bucket.activeBookingIds.add(entry.bookingId);
+      } else if (entry.entryType === "release") {
+        bucket.activeBookingIds.delete(entry.bookingId);
+      }
+    }
+
+    const snapshotByPeriod = new Map(
+      Array.from(this.quotaMonthlySnapshots.values())
+        .filter(
+          (snapshot) =>
+            snapshot.tenantId === tenantId && snapshot.costCenterCode === null,
+        )
+        .map((snapshot) => [snapshot.periodKey, snapshot]),
+    );
+    const periods = new Set<string>([currentPeriodKey]);
+    for (const usage of usageByProgramPeriod.values()) {
+      periods.add(usage.period);
+    }
+
+    const items: TenantProgramUsageRecord[] = [];
+    for (const program of programEntries) {
+      for (const period of periods) {
+        const usage = usageByProgramPeriod.get(
+          `${program.programId}:${period}`,
+        );
+        if (!usage && period !== currentPeriodKey) {
+          continue;
+        }
+
+        const quotaLimit =
+          snapshotByPeriod.get(period)?.limit.bookingCountLimit ??
+          this.resolveQuotaPolicy(tenantId, null).limit.bookingCountLimit;
+        const tripsConsumed = usage?.activeBookingIds.size ?? 0;
+        const programCode = program.programCode ?? program.programId;
+        const cardholdersServed =
+          usage === undefined
+            ? 0
+            : new Set(
+                [...usage.activeBookingIds]
+                  .map((bookingId) => orderByBookingId.get(bookingId))
+                  .filter(
+                    (order): order is OwnedOrderRecord => order !== undefined,
+                  )
+                  .map((order) => order.passenger.passengerId),
+              ).size;
+        items.push({
+          programId: program.programId,
+          programCode,
+          period,
+          cardholdersServed,
+          tripsConsumed,
+          quotaTotal: quotaLimit,
+          quotaRemaining:
+            quotaLimit === null
+              ? null
+              : Math.max(quotaLimit - tripsConsumed, 0),
+        });
+      }
+    }
+
+    return items.sort((left, right) => {
+      if (left.programCode !== right.programCode) {
+        return left.programCode.localeCompare(right.programCode);
+      }
+      return left.period.localeCompare(right.period);
+    });
   }
 
   getCostCenterQuotaSummary(

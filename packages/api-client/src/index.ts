@@ -214,6 +214,7 @@ import type {
   TenantPassengerRecord,
   TenantPayableLineItem,
   TenantPayableSummary,
+  TenantProgramUsageRecord,
   TenantQuotaLedgerEntry,
   TenantQuotaPolicyRecord,
   TenantQuotaSummary,
@@ -1722,6 +1723,10 @@ export class ApiClient {
 
   async getTenantQuotaSummary(): Promise<TenantQuotaSummary> {
     return this.get<TenantQuotaSummary>("/api/tenant/quotas");
+  }
+
+  async listTenantProgramUsage(): Promise<TenantProgramUsageRecord[]> {
+    return this.getList<TenantProgramUsageRecord>("/api/tenant/program-usage");
   }
 
   async getCostCenterQuotaSummary(

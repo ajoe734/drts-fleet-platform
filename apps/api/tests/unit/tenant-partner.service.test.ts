@@ -2313,6 +2313,111 @@ describe("TenantPartnerService approval rules", () => {
     );
   });
 
+  it("lists tenant program usage by program and period from the quota ledger", async () => {
+    const repository = createInMemoryTenantPartnerRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+    service.registerOrderFeedProvider(() => [
+      createTenantOrder({
+        orderId: "order-program-1",
+        bookingId: "booking-program-1",
+        partnerProgramId: "program-airport-alpha",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        passenger: {
+          passengerId: "cardholder-001",
+          name: "Cardholder One",
+          phone: "0912000000",
+          roles: ["cardholder"],
+        },
+        reservationWindowStart: "2026-05-10T10:00:00.000Z",
+      }),
+      createTenantOrder({
+        orderId: "order-program-2",
+        bookingId: "booking-program-2",
+        partnerProgramId: "program-airport-alpha",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        passenger: {
+          passengerId: "cardholder-001",
+          name: "Cardholder One",
+          phone: "0912000000",
+          roles: ["cardholder"],
+        },
+        reservationWindowStart: "2026-05-12T10:00:00.000Z",
+      }),
+      createTenantOrder({
+        orderId: "order-program-3",
+        bookingId: "booking-program-3",
+        partnerProgramId: "program-airport-beta",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        passenger: {
+          passengerId: "cardholder-002",
+          name: "Cardholder Two",
+          phone: "0922000000",
+          roles: ["cardholder"],
+        },
+        reservationWindowStart: "2026-05-15T10:00:00.000Z",
+      }),
+    ]);
+
+    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+      period: "monthly",
+      limit: {
+        bookingCountLimit: 5,
+        amountMinorLimit: null,
+        currency: "TWD",
+        enforcementMode: "warn_only",
+      },
+    });
+
+    await service.reserveTenantQuota(null, {
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-program-1",
+      evaluationId: "eval-program-1",
+      reservationWindowStart: "2026-05-10T10:00:00.000Z",
+    });
+    await service.reserveTenantQuota(null, {
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-program-2",
+      evaluationId: "eval-program-2",
+      reservationWindowStart: "2026-05-12T10:00:00.000Z",
+    });
+    await service.reserveTenantQuota(null, {
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-program-3",
+      evaluationId: "eval-program-3",
+      reservationWindowStart: "2026-05-15T10:00:00.000Z",
+    });
+
+    const usage = service.listTenantProgramUsage("tenant-demo-001");
+
+    expect(usage).toEqual(
+      expect.arrayContaining([
+        {
+          programId: "program-airport-alpha",
+          programCode: "AIRPORT_ALPHA",
+          period: "2026-05",
+          cardholdersServed: 1,
+          tripsConsumed: 2,
+          quotaTotal: 5,
+          quotaRemaining: 3,
+        },
+        {
+          programId: "program-airport-beta",
+          programCode: "AIRPORT_BETA",
+          period: "2026-05",
+          cardholdersServed: 1,
+          tripsConsumed: 1,
+          quotaTotal: 5,
+          quotaRemaining: 4,
+        },
+      ]),
+    );
+  });
+
   it("throws QUOTA_INSUFFICIENT_AT_COMMIT when a hard-block reserve exceeds the limit", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
