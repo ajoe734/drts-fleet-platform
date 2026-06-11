@@ -1730,7 +1730,7 @@ export class BillingSettlementService implements OnModuleInit {
   async listTenantSettlementStatements(
     tenantId: string,
   ): Promise<SettlementStatementRecord[]> {
-    const periodMonths = this.listTenantSettlementPeriodMonths(tenantId);
+    const periodMonths = await this.listTenantSettlementPeriodMonths(tenantId);
     const statements: SettlementStatementRecord[] = [];
     for (const periodMonth of periodMonths) {
       statements.push(
@@ -1759,7 +1759,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.buildTenantSettlementStatement(tenantId, normalizedPeriod);
   }
 
-  private listTenantSettlementPeriodMonths(tenantId: string) {
+  private async listTenantSettlementPeriodMonths(tenantId: string) {
     const months = new Set<string>();
     for (const trip of this.settlementTrips) {
       if (
@@ -1769,7 +1769,34 @@ export class BillingSettlementService implements OnModuleInit {
         months.add(this.toPeriodMonth(trip.completedAt));
       }
     }
+    // Live repository periods can exist without any matching seed trip; union
+    // them in so GET /settlement-statements is not limited to seed memory.
+    for (const periodMonth of await this.listLiveCardBenefitSettlementPeriods(
+      tenantId,
+    )) {
+      months.add(periodMonth);
+    }
     return [...months].sort((left, right) => right.localeCompare(left));
+  }
+
+  private async listLiveCardBenefitSettlementPeriods(
+    tenantId: string,
+  ): Promise<string[]> {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return [];
+    }
+
+    try {
+      return await this.billingSettlementRepository.listLiveCardBenefitSettlementPeriods(
+        tenantId,
+      );
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "list_live_card_benefit_settlement_periods",
+      );
+      return [];
+    }
   }
 
   private isCardBenefitSettlementTrip(trip: BillingSettlementTripRecord) {
@@ -2133,6 +2160,20 @@ export class BillingSettlementService implements OnModuleInit {
   private mapLiveTripToSettlementSnapshot(
     trip: LiveSettlementTripRecord,
   ): BillingSettlementTripRecord {
+    // Card-benefit airport-transfer trips settle issuer_pays_drts: the driver/
+    // fleet payout stays whole and the issuer (card-benefit sponsor) reimburses
+    // the sponsored portion. Live orders do not persist a copay/cap breakdown,
+    // so the full delivered fare is the platform-funded (sponsor-reimbursed)
+    // portion. Without this, statements collapse subsidisedAmount to 0 and
+    // understate issuerPayable. Non-card-benefit live trips carry no subsidy.
+    const isCardBenefitTrip =
+      settlementChannelKeyForTrip(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
+      Boolean(trip.benefitReference) &&
+      Boolean(trip.issuerAuthorizationRef);
+    const platformFundedDiscount = isCardBenefitTrip
+      ? { ...trip.grossEarning }
+      : this.money(0);
+
     return {
       settlementId: `settlement-live-${trip.orderId}`,
       tenantId: trip.tenantId,
@@ -2142,7 +2183,7 @@ export class BillingSettlementService implements OnModuleInit {
       orderSource: trip.orderSource,
       grossEarning: { ...trip.grossEarning },
       subsidy: this.money(0),
-      platformFundedDiscount: this.money(0),
+      platformFundedDiscount,
       pricingVersionSnapshot: LIVE_SETTLEMENT_PRICING_VERSION,
       eligibleForTenantInvoice: true,
       eligibleForDriverStatement: true,
