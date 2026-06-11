@@ -45,6 +45,89 @@ const en = {
     "Group/order reference, group seats, itinerary, roster",
   "book.coverage.enterprise_dispatch":
     "Shared trip intake without partner-specific gating",
+  "program.screen.embed_handoff.label": "Embed hand-off",
+  "program.screen.embed_handoff.summary":
+    "Signed-in hand-off from the banking app with a resolved reference token.",
+  "program.screen.embed_reauth.label": "Embed re-auth",
+  "program.screen.embed_reauth.summary":
+    "Banking-app session expired and requires the user to return for re-authentication.",
+  "program.screen.embed_unsupported.label": "Embed blocked",
+  "program.screen.embed_unsupported.summary":
+    "The embedded surface is blocked because the host or issuer signature is not trusted.",
+  "program.screen.embed_consent.label": "Embed consent",
+  "program.screen.embed_consent.summary":
+    "First-time embedded consent for identity, trip sharing, and billing scope.",
+  "program.screen.embed_fallback.label": "Embed fallback",
+  "program.screen.embed_fallback.summary":
+    "No banking-app identity was detected, so the flow falls back to the standalone site.",
+  "program.embed.chrome.title": "Airport transfer",
+  "program.embed.chrome.subtitle": "{issuer} · mobile banking",
+  "program.embed.chrome.webview": "webview",
+  "program.embed.chrome.embeddedIn": "embedded in {issuer} app",
+  "program.embed.handoff.title": "Signed in via the banking app",
+  "program.embed.handoff.badge": "session_resolved · auto-filled",
+  "program.embed.handoff.cardTitle":
+    "Identity provided by the banking app · reference token",
+  "program.embed.handoff.signature": "Issuer signature valid",
+  "program.embed.handoff.identity": "Cardholder identity resolved",
+  "program.embed.handoff.token": "Reference token",
+  "program.embed.handoff.benefit": "Benefit program",
+  "program.embed.handoff.benefitValue": "World Elite airport transfer",
+  "program.embed.handoff.note":
+    "No separate login needed. Skip account activation and move straight to eligibility and booking.",
+  "program.embed.handoff.cta": "Start booking",
+  "program.embed.reauth.title": "Sign-in state expired",
+  "program.embed.reauth.badge": "token_expired · re-auth required",
+  "program.embed.reauth.cardTitle": "Connection status",
+  "program.embed.reauth.session": "Issuer session expired",
+  "program.embed.reauth.token": "Reference token expired",
+  "program.embed.reauth.message":
+    "For account security, return to {issuer} to re-authenticate before opening airport transfer again. This page will not ask for your card number or password.",
+  "program.embed.reauth.primary": "Return to banking app to re-authenticate",
+  "program.embed.reauth.secondary": "Try again later",
+  "program.embed.unsupported.title": "Cannot open in this environment",
+  "program.embed.unsupported.badge": "unsupported_host · blocked",
+  "program.embed.unsupported.reasonTitle": "Reason",
+  "program.embed.unsupported.reason":
+    "This airport-transfer service can only be opened inside an authorized banking app. The current source is not an approved issuer environment, so loading has been blocked for security reasons.",
+  "program.embed.unsupported.detectTitle": "Detection result",
+  "program.embed.unsupported.host": "Origin host not authorized",
+  "program.embed.unsupported.signature": "Issuer signature",
+  "program.embed.unsupported.note":
+    "Open airport transfer from the {issuer} mobile banking app, or continue on the official site.",
+  "program.embed.unsupported.primary": "Open official site",
+  "program.embed.consent.title": "Authorize airport transfer service",
+  "program.embed.consent.subtitle":
+    "First-time use · confirm the following access scopes",
+  "program.embed.consent.scope.identity.title":
+    "Read cardholder identity and benefits",
+  "program.embed.consent.scope.identity.body":
+    "Resolve the reference token to confirm airport-transfer eligibility.",
+  "program.embed.consent.scope.trip.title": "Share trip booking details",
+  "program.embed.consent.scope.trip.body":
+    "Share only the information required for dispatch with DRTS.",
+  "program.embed.consent.scope.billing.title":
+    "Link extra fees to the issuer bill",
+  "program.embed.consent.scope.billing.body":
+    "Any amount beyond the included benefit will be charged to this card account.",
+  "program.embed.consent.note":
+    "No card number or password will be read. Identity is securely provided by {issuer}, and consent can be revoked in banking-app settings.",
+  "program.embed.consent.primary": "Agree and continue",
+  "program.embed.consent.secondary": "Not now",
+  "program.embed.fallback.title": "No banking sign-in detected",
+  "program.embed.fallback.badge": "no_embed_session · use official site",
+  "program.embed.fallback.nextTitle": "Next step",
+  "program.embed.fallback.nextBody":
+    "This page did not receive a valid embedded banking identity. Continue on the official airport-transfer site and verify eligibility with the last four card digits or your online-banking account.",
+  "program.embed.fallback.site": "Official site",
+  "program.embed.fallback.method": "Verification method",
+  "program.embed.fallback.methodValue":
+    "Last four digits / online-banking account",
+  "program.embed.fallback.security": "Security",
+  "program.embed.fallback.securityValue":
+    "Do not enter raw card data on this page",
+  "program.embed.fallback.primary": "Open official site to book",
+  "program.embed.fallback.secondary": "Return to banking app sign-in",
   "field.pickupAddress": "Pickup address",
   "field.dropoffAddress": "Drop-off address",
   "field.reservationWindowStart": "Reservation window start",
@@ -135,6 +218,80 @@ const zh = {
   "book.coverage.travel_agency_transfer":
     "團體/訂單參照、團體席次、行程連結、roster",
   "book.coverage.enterprise_dispatch": "共用行程欄位，無 partner 專屬閘門",
+  "program.screen.embed_handoff.label": "內嵌帶入",
+  "program.screen.embed_handoff.summary":
+    "行動銀行已完成登入交接，並帶入可解析的 reference token。",
+  "program.screen.embed_reauth.label": "內嵌重驗",
+  "program.screen.embed_reauth.summary":
+    "銀行 App session 已逾時，需回到發卡行 App 重新驗證。",
+  "program.screen.embed_unsupported.label": "內嵌封鎖",
+  "program.screen.embed_unsupported.summary":
+    "來源 host 或 issuer signature 不受信任，因此封鎖載入。",
+  "program.screen.embed_consent.label": "內嵌授權",
+  "program.screen.embed_consent.summary":
+    "首次使用需確認身分、行程共享與帳務 scope 授權。",
+  "program.screen.embed_fallback.label": "內嵌回退",
+  "program.screen.embed_fallback.summary":
+    "未取得有效網銀身分，改導向 standalone 官方站點。",
+  "program.embed.chrome.title": "機場接送",
+  "program.embed.chrome.subtitle": "{issuer} · 行動銀行",
+  "program.embed.chrome.webview": "webview",
+  "program.embed.chrome.embeddedIn": "· embedded in {issuer} app",
+  "program.embed.handoff.title": "已透過行動銀行登入",
+  "program.embed.handoff.badge": "session_resolved · 自動帶入",
+  "program.embed.handoff.cardTitle": "身分由銀行 App 帶入 · reference token",
+  "program.embed.handoff.signature": "發卡行簽章有效",
+  "program.embed.handoff.identity": "卡友身分已解析",
+  "program.embed.handoff.token": "參照權杖 · reference token",
+  "program.embed.handoff.benefit": "權益方案",
+  "program.embed.handoff.benefitValue": "World Elite 機場接送",
+  "program.embed.handoff.note":
+    "免再登入，略過獨立啟用，直接進入資格確認與預約。",
+  "program.embed.handoff.cta": "開始預約接送",
+  "program.embed.reauth.title": "登入狀態已逾時",
+  "program.embed.reauth.badge": "token_expired · 需重新驗證",
+  "program.embed.reauth.cardTitle": "連線狀態",
+  "program.embed.reauth.session": "發卡行 session 已過期",
+  "program.embed.reauth.token": "參照權杖逾時",
+  "program.embed.reauth.message":
+    "為保護您的帳戶安全，請回到 {issuer} App 重新驗證身分後再進入接送服務。此頁不會要求您輸入卡號或密碼。",
+  "program.embed.reauth.primary": "回行動銀行重新驗證",
+  "program.embed.reauth.secondary": "稍後再試",
+  "program.embed.unsupported.title": "無法在此環境開啟",
+  "program.embed.unsupported.badge": "unsupported_host · 已封鎖",
+  "program.embed.unsupported.reasonTitle": "原因",
+  "program.embed.unsupported.reason":
+    "此接送服務僅能於授權的銀行 App 內開啟。目前來源並非已授權的發卡行環境，基於安全考量已封鎖載入。",
+  "program.embed.unsupported.detectTitle": "偵測結果",
+  "program.embed.unsupported.host": "來源主機未授權",
+  "program.embed.unsupported.signature": "發卡行簽章",
+  "program.embed.unsupported.note":
+    "請改由 {issuer} 行動銀行 App 內的「機場接送」入口開啟，或前往官方網站。",
+  "program.embed.unsupported.primary": "前往官方網站",
+  "program.embed.consent.title": "授權使用接送服務",
+  "program.embed.consent.subtitle": "首次使用 · 請確認以下授權範圍",
+  "program.embed.consent.scope.identity.title": "讀取卡友身分與權益",
+  "program.embed.consent.scope.identity.body": "解析參照權杖以確認接送資格。",
+  "program.embed.consent.scope.trip.title": "共享接送行程資訊",
+  "program.embed.consent.scope.trip.body": "與智慧運輸科技共享派車必要資訊。",
+  "program.embed.consent.scope.billing.title": "費用合併入帳",
+  "program.embed.consent.scope.billing.body": "超出權益之費用合併至本卡帳單。",
+  "program.embed.consent.note":
+    "不會讀取卡號或密碼，身分由 {issuer} 安全帶入；可於行動銀行設定隨時撤回授權。",
+  "program.embed.consent.primary": "同意並繼續",
+  "program.embed.consent.secondary": "暫不使用",
+  "program.embed.fallback.title": "未偵測到銀行登入",
+  "program.embed.fallback.badge": "no_embed_session · 改用官網",
+  "program.embed.fallback.nextTitle": "接下來",
+  "program.embed.fallback.nextBody":
+    "此頁未取得有效的銀行內嵌身分。您可改用官方機場接送網站，以卡號末四碼或網銀帳號自行驗證資格。",
+  "program.embed.fallback.site": "官方網站",
+  "program.embed.fallback.method": "驗證方式",
+  "program.embed.fallback.methodValue": "末四碼 / 網銀帳號",
+  "program.embed.fallback.security": "安全性",
+  "program.embed.fallback.securityValue": "不在此頁輸入原始卡資料",
+  "program.embed.fallback.primary": "前往官方網站預約",
+  "program.embed.fallback.secondary": "回行動銀行登入",
   "field.pickupAddress": "上車地點",
   "field.dropoffAddress": "下車地點",
   "field.reservationWindowStart": "預約開始時間",

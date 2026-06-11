@@ -3,6 +3,7 @@ import {
   getProgramChromeVars,
   type PartnerProgramTheme,
 } from "@/lib/program-theme";
+import { t } from "@/lib/translations";
 
 /**
  * Shared partner-booking screens that render themed per program.
@@ -111,6 +112,41 @@ export const PARTNER_PROGRAM_SCREENS = [
     eyebrow: "PB_ManualReview",
     summary: "資格送人工審查的等待狀態。",
   },
+  {
+    id: "embed_handoff",
+    segment: "embed-handoff",
+    label: t("program.screen.embed_handoff.label"),
+    eyebrow: "PB_EmbedHandoff",
+    summary: t("program.screen.embed_handoff.summary"),
+  },
+  {
+    id: "embed_reauth",
+    segment: "embed-reauth",
+    label: t("program.screen.embed_reauth.label"),
+    eyebrow: "PB_EmbedReauth",
+    summary: t("program.screen.embed_reauth.summary"),
+  },
+  {
+    id: "embed_unsupported",
+    segment: "embed-unsupported",
+    label: t("program.screen.embed_unsupported.label"),
+    eyebrow: "PB_EmbedUnsupported",
+    summary: t("program.screen.embed_unsupported.summary"),
+  },
+  {
+    id: "embed_consent",
+    segment: "embed-consent",
+    label: t("program.screen.embed_consent.label"),
+    eyebrow: "PB_EmbedConsent",
+    summary: t("program.screen.embed_consent.summary"),
+  },
+  {
+    id: "embed_fallback",
+    segment: "embed-fallback",
+    label: t("program.screen.embed_fallback.label"),
+    eyebrow: "PB_EmbedFallback",
+    summary: t("program.screen.embed_fallback.summary"),
+  },
 ] as const;
 
 export type PartnerProgramScreenId =
@@ -140,14 +176,31 @@ const INSURANCE_ONLY_SCREEN_IDS = new Set<PartnerProgramScreenId>([
   "insurance_cancelled",
 ]);
 
+const CARD_ONLY_SCREEN_IDS = new Set<PartnerProgramScreenId>([
+  "embed_handoff",
+  "embed_reauth",
+  "embed_unsupported",
+  "embed_consent",
+  "embed_fallback",
+]);
+
 export function listProgramScreensForTheme(
   theme: PartnerProgramTheme,
 ): ReadonlyArray<ProgramScreenMeta> {
   if (theme.kind === "insurance") {
-    return PARTNER_PROGRAM_SCREENS;
+    return PARTNER_PROGRAM_SCREENS.filter(
+      (screen) => !CARD_ONLY_SCREEN_IDS.has(screen.id),
+    );
+  }
+  if (theme.kind === "card") {
+    return PARTNER_PROGRAM_SCREENS.filter(
+      (screen) => !INSURANCE_ONLY_SCREEN_IDS.has(screen.id),
+    );
   }
   return PARTNER_PROGRAM_SCREENS.filter(
-    (screen) => !INSURANCE_ONLY_SCREEN_IDS.has(screen.id),
+    (screen) =>
+      !INSURANCE_ONLY_SCREEN_IDS.has(screen.id) &&
+      !CARD_ONLY_SCREEN_IDS.has(screen.id),
   );
 }
 
@@ -187,6 +240,15 @@ type InsuranceStateId = Extract<
   | "insurance_missing"
   | "insurance_expired"
   | "insurance_cancelled"
+>;
+
+type CardEmbedScreenId = Extract<
+  PartnerProgramScreenId,
+  | "embed_handoff"
+  | "embed_reauth"
+  | "embed_unsupported"
+  | "embed_consent"
+  | "embed_fallback"
 >;
 
 function programDemo(theme: PartnerProgramTheme) {
@@ -670,6 +732,304 @@ function InsuranceStateIcon({
       <path d="M12 3l10 18H2z" />
       <path d="M12 10v5M12 17v.01" />
     </svg>
+  );
+}
+
+function EmbedStateIcon({
+  kind,
+  theme,
+}: {
+  kind: "shield" | "clock" | "blocked" | "link";
+  theme: PartnerProgramTheme;
+}) {
+  if (kind === "shield") {
+    return (
+      <svg
+        width="28"
+        height="28"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={theme.primary}
+        strokeWidth="2"
+      >
+        <path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z" />
+        <path d="M9 12l2 2 4-4" />
+      </svg>
+    );
+  }
+  if (kind === "clock") {
+    return (
+      <svg
+        width="28"
+        height="28"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#b45309"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+    );
+  }
+  if (kind === "blocked") {
+    return (
+      <svg
+        width="28"
+        height="28"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#b42318"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M6 6l12 12" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      width="28"
+      height="28"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#56657f"
+      strokeWidth="2"
+    >
+      <path d="M10 14L21 3M21 3h-6M21 3v6" />
+      <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+    </svg>
+  );
+}
+
+function EmbedChrome({
+  theme,
+  host,
+  state,
+  children,
+  footer,
+}: {
+  theme: PartnerProgramTheme;
+  host?: string;
+  state: "live" | "warn" | "err" | "neutral";
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const dot =
+    state === "live"
+      ? "#16a34a"
+      : state === "warn"
+        ? "#d97706"
+        : state === "err"
+          ? "#dc2626"
+          : "#94a3b8";
+
+  return (
+    <div
+      style={{
+        borderRadius: "18px",
+        overflow: "hidden",
+        border: "1px solid #d8dee8",
+        background: "#eef1f7",
+      }}
+    >
+      <div
+        style={{
+          background: theme.primaryDark,
+          color: "#ffffff",
+          padding: "10px 14px 11px",
+          display: "flex",
+          alignItems: "center",
+          gap: "9px",
+        }}
+      >
+        <div
+          style={{
+            width: "28px",
+            height: "28px",
+            borderRadius: "999px",
+            background: "rgba(255,255,255,.14)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+          >
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+        </div>
+        <div style={{ flex: 1, lineHeight: 1.2 }}>
+          <div style={{ fontSize: "13.5px", fontWeight: 700 }}>
+            {t("program.embed.chrome.title")}
+          </div>
+          <div style={{ fontSize: "10px", opacity: 0.72 }}>
+            {t("program.embed.chrome.subtitle", { issuer: theme.issuerName })}
+          </div>
+        </div>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            fontSize: "9.5px",
+            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+            opacity: 0.72,
+            background: "rgba(255,255,255,.1)",
+            padding: "4px 8px",
+            borderRadius: "999px",
+          }}
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+          >
+            <rect x="4" y="11" width="16" height="9" rx="2" />
+            <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+          </svg>
+          {host ?? theme.host}
+        </div>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "6px 14px",
+          background: "#ffffff",
+          borderBottom: "1px solid #e8ecf3",
+          fontSize: "10.5px",
+          color: "#56657f",
+        }}
+      >
+        <span
+          style={{
+            width: "6px",
+            height: "6px",
+            borderRadius: "999px",
+            background: dot,
+          }}
+        />
+        <span
+          style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace' }}
+        >
+          {t("program.embed.chrome.webview")}
+        </span>
+        <span style={{ color: "#9ca3af" }}>
+          {t("program.embed.chrome.embeddedIn", { issuer: theme.issuerLabel })}
+        </span>
+      </div>
+      <div style={{ display: "grid", gap: "12px", padding: "16px" }}>
+        {children}
+      </div>
+      {footer ? (
+        <div
+          style={{
+            display: "grid",
+            gap: "10px",
+            padding: "0 16px 16px",
+            background: "#eef1f7",
+          }}
+        >
+          {footer}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TokenRow({
+  label,
+  code,
+  value,
+  ok,
+}: {
+  label: string;
+  code: string;
+  value: string;
+  ok: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        padding: "9px 0",
+        borderBottom: "1px dashed #f1f3f8",
+      }}
+    >
+      <div
+        style={{
+          width: "18px",
+          height: "18px",
+          borderRadius: "999px",
+          background: ok ? "#f0fdf4" : "#fef2f2",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        {ok ? (
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#15803d"
+            strokeWidth="3"
+          >
+            <path d="M5 12l5 5L20 7" />
+          </svg>
+        ) : (
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#dc2626"
+            strokeWidth="3"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        )}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: "12.5px", color: "#0e1424", fontWeight: 500 }}>
+          {label}
+        </div>
+        <div
+          style={{
+            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+            fontSize: "9.5px",
+            color: "#9ca3af",
+          }}
+        >
+          {code}
+        </div>
+      </div>
+      <span
+        style={{
+          fontSize: "12px",
+          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+          color: ok ? "#0e1424" : "#dc2626",
+        }}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -1222,6 +1582,462 @@ function renderScreen(
         />
         <Button theme={theme} label="返回入口" href={landingHref} />
       </>
+    );
+  }
+
+  if (CARD_ONLY_SCREEN_IDS.has(screen) && theme.kind === "card") {
+    const embedScreen = screen as CardEmbedScreenId;
+    const officialSite = `https://${theme.host}`;
+
+    if (embedScreen === "embed_handoff") {
+      return (
+        <EmbedChrome
+          theme={theme}
+          state="live"
+          footer={
+            <Button
+              theme={theme}
+              label={t("program.embed.handoff.cta")}
+              href={reviewHref}
+              primary
+            />
+          }
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 0 2px",
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "999px",
+                background: `${theme.primary}14`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <EmbedStateIcon kind="shield" theme={theme} />
+            </div>
+            <div style={{ fontSize: "16px", fontWeight: 700 }}>
+              {t("program.embed.handoff.title")}
+            </div>
+            <Chip
+              theme={theme}
+              tone="success"
+              label={t("program.embed.handoff.badge")}
+            />
+          </div>
+          <Card title={t("program.embed.handoff.cardTitle")}>
+            <TokenRow
+              label={t("program.embed.handoff.signature")}
+              code="issuer_signature"
+              value="valid"
+              ok
+            />
+            <TokenRow
+              label={t("program.embed.handoff.identity")}
+              code="cardholder_resolved"
+              value={demo.riderName}
+              ok
+            />
+            <TokenRow
+              label={t("program.embed.handoff.token")}
+              code="ref_token"
+              value="tok_••••_9F2"
+              ok
+            />
+            <div style={{ marginTop: "4px" }}>
+              <Row
+                label={t("program.embed.handoff.benefit")}
+                value={t("program.embed.handoff.benefitValue")}
+              />
+            </div>
+          </Card>
+          <Card
+            style={{
+              borderColor: theme.surface.border,
+              background: theme.surface.bg,
+            }}
+          >
+            <div
+              style={{ fontSize: "11.5px", color: "#0e1424", lineHeight: 1.5 }}
+            >
+              {t("program.embed.handoff.note")}
+            </div>
+          </Card>
+        </EmbedChrome>
+      );
+    }
+
+    if (embedScreen === "embed_reauth") {
+      return (
+        <EmbedChrome
+          theme={theme}
+          state="warn"
+          footer={
+            <>
+              <Button
+                theme={theme}
+                label={t("program.embed.reauth.primary")}
+                href={landingHref}
+                primary
+              />
+              <Button
+                theme={theme}
+                label={t("program.embed.reauth.secondary")}
+                href={landingHref}
+              />
+            </>
+          }
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 0 2px",
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "999px",
+                background: "#fffbeb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <EmbedStateIcon kind="clock" theme={theme} />
+            </div>
+            <div style={{ fontSize: "16px", fontWeight: 700 }}>
+              {t("program.embed.reauth.title")}
+            </div>
+            <Chip
+              theme={theme}
+              tone="accent"
+              label={t("program.embed.reauth.badge")}
+            />
+          </div>
+          <Card title={t("program.embed.reauth.cardTitle")}>
+            <TokenRow
+              label={t("program.embed.reauth.session")}
+              code="issuer_session"
+              value="expired"
+              ok={false}
+            />
+            <TokenRow
+              label={t("program.embed.reauth.token")}
+              code="ref_token"
+              value="stale"
+              ok={false}
+            />
+          </Card>
+          <Card style={{ borderColor: theme.surface.border }}>
+            <div
+              style={{ fontSize: "12.5px", color: "#0e1424", lineHeight: 1.6 }}
+            >
+              {t("program.embed.reauth.message", { issuer: theme.issuerName })}
+            </div>
+          </Card>
+        </EmbedChrome>
+      );
+    }
+
+    if (embedScreen === "embed_unsupported") {
+      return (
+        <EmbedChrome
+          theme={theme}
+          host="unknown-host.example"
+          state="err"
+          footer={
+            <Button
+              theme={theme}
+              label={t("program.embed.unsupported.primary")}
+              href={officialSite}
+              primary
+            />
+          }
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 0 2px",
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "999px",
+                background: "#fee4e2",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <EmbedStateIcon kind="blocked" theme={theme} />
+            </div>
+            <div style={{ fontSize: "16px", fontWeight: 700 }}>
+              {t("program.embed.unsupported.title")}
+            </div>
+            <Chip
+              theme={theme}
+              tone="danger"
+              label={t("program.embed.unsupported.badge")}
+            />
+          </div>
+          <Card title={t("program.embed.unsupported.reasonTitle")}>
+            <div
+              style={{ fontSize: "13px", color: "#0e1424", lineHeight: 1.6 }}
+            >
+              {t("program.embed.unsupported.reason")}
+            </div>
+          </Card>
+          <Card title={t("program.embed.unsupported.detectTitle")}>
+            <TokenRow
+              label={t("program.embed.unsupported.host")}
+              code="origin_host"
+              value="未授權"
+              ok={false}
+            />
+            <TokenRow
+              label={t("program.embed.unsupported.signature")}
+              code="issuer_signature"
+              value="缺少"
+              ok={false}
+            />
+          </Card>
+          <div
+            style={{ fontSize: "11.5px", color: "#56657f", lineHeight: 1.55 }}
+          >
+            {t("program.embed.unsupported.note", { issuer: theme.issuerName })}
+          </div>
+        </EmbedChrome>
+      );
+    }
+
+    if (embedScreen === "embed_consent") {
+      const scopes = [
+        {
+          title: t("program.embed.consent.scope.identity.title"),
+          body: t("program.embed.consent.scope.identity.body"),
+          code: "identity.read",
+        },
+        {
+          title: t("program.embed.consent.scope.trip.title"),
+          body: t("program.embed.consent.scope.trip.body"),
+          code: "trip.share",
+        },
+        {
+          title: t("program.embed.consent.scope.billing.title"),
+          body: t("program.embed.consent.scope.billing.body"),
+          code: "billing.link",
+        },
+      ] as const;
+
+      return (
+        <EmbedChrome
+          theme={theme}
+          state="live"
+          footer={
+            <>
+              <Button
+                theme={theme}
+                label={t("program.embed.consent.primary")}
+                href={reviewHref}
+                primary
+              />
+              <Button
+                theme={theme}
+                label={t("program.embed.consent.secondary")}
+                href={landingHref}
+              />
+            </>
+          }
+        >
+          <div style={{ padding: "6px 0 2px" }}>
+            <div style={{ fontSize: "17px", fontWeight: 700 }}>
+              {t("program.embed.consent.title")}
+            </div>
+            <div
+              style={{ fontSize: "12.5px", color: "#56657f", marginTop: "4px" }}
+            >
+              {t("program.embed.consent.subtitle")}
+            </div>
+          </div>
+          <Card>
+            {scopes.map((scope, index) => (
+              <div
+                key={scope.code}
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  padding: "11px 0",
+                  borderBottom:
+                    index < scopes.length - 1
+                      ? "1px dashed #f1f3f8"
+                      : "1px solid transparent",
+                }}
+              >
+                <div
+                  style={{
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "5px",
+                    background: theme.primary,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    marginTop: "1px",
+                  }}
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#ffffff"
+                    strokeWidth="3"
+                  >
+                    <path d="M5 12l5 5L20 7" />
+                  </svg>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "7px",
+                    }}
+                  >
+                    <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                      {scope.title}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                        fontSize: "9.5px",
+                        color: "#9ca3af",
+                      }}
+                    >
+                      {scope.code}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "11.5px",
+                      color: "#56657f",
+                      marginTop: "2px",
+                    }}
+                  >
+                    {scope.body}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </Card>
+          <Card
+            style={{
+              borderColor: theme.surface.border,
+              background: theme.surface.bg,
+            }}
+          >
+            <div
+              style={{ fontSize: "11.5px", color: "#0e1424", lineHeight: 1.5 }}
+            >
+              {t("program.embed.consent.note", { issuer: theme.issuerName })}
+            </div>
+          </Card>
+        </EmbedChrome>
+      );
+    }
+
+    return (
+      <EmbedChrome
+        theme={theme}
+        state="neutral"
+        footer={
+          <>
+            <Button
+              theme={theme}
+              label={t("program.embed.fallback.primary")}
+              href={officialSite}
+              primary
+            />
+            <Button
+              theme={theme}
+              label={t("program.embed.fallback.secondary")}
+              href={landingHref}
+            />
+          </>
+        }
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "10px",
+            padding: "10px 0 2px",
+          }}
+        >
+          <div
+            style={{
+              width: "56px",
+              height: "56px",
+              borderRadius: "999px",
+              background: "#f1f3f8",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <EmbedStateIcon kind="link" theme={theme} />
+          </div>
+          <div style={{ fontSize: "16px", fontWeight: 700 }}>
+            {t("program.embed.fallback.title")}
+          </div>
+          <Chip
+            theme={theme}
+            tone="neutral"
+            label={t("program.embed.fallback.badge")}
+          />
+        </div>
+        <Card title={t("program.embed.fallback.nextTitle")}>
+          <div style={{ fontSize: "13px", color: "#0e1424", lineHeight: 1.6 }}>
+            {t("program.embed.fallback.nextBody")}
+          </div>
+        </Card>
+        <Card>
+          <Row
+            label={t("program.embed.fallback.site")}
+            value={theme.host}
+            mono
+          />
+          <Row
+            label={t("program.embed.fallback.method")}
+            value={t("program.embed.fallback.methodValue")}
+          />
+          <Row
+            label={t("program.embed.fallback.security")}
+            value={t("program.embed.fallback.securityValue")}
+          />
+        </Card>
+      </EmbedChrome>
     );
   }
 
