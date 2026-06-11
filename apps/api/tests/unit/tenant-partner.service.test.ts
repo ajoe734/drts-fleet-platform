@@ -2086,6 +2086,104 @@ describe("TenantPartnerService tenant business ops views", () => {
       ]),
     );
   });
+
+  it("projects issuer contract SLA posture with masked exception references", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    service.registerOrderFeedProvider(() => [
+      createTenantOrder({
+        orderId: "order-contract-completed-001",
+        orderNo: "ORD-CONTRACT-001",
+        bookingId: "booking-contract-completed-001",
+        status: "completed",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        issuerAuthorizationRef: "issuer-auth-sensitive-0001",
+        benefitReference: "benefit-sensitive-0001",
+        reservationWindowStart: "2026-03-02T09:00:00.000Z",
+        reservationWindowEnd: "2026-03-02T10:00:00.000Z",
+        createdAt: "2026-03-01T08:00:00.000Z",
+        updatedAt: "2026-03-02T10:00:00.000Z",
+      }),
+      createTenantOrder({
+        orderId: "order-contract-exception-001",
+        orderNo: "ORD-CONTRACT-002",
+        bookingId: "booking-contract-exception-001",
+        status: "cancelled",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        issuerAuthorizationRef: "issuer-auth-sensitive-9999",
+        benefitReference: "benefit-sensitive-9999",
+        reservationWindowStart: "2026-03-04T09:00:00.000Z",
+        reservationWindowEnd: "2026-03-04T10:00:00.000Z",
+        exceptionHold: {
+          reasonCode: "no_eligible_supply",
+          dispatchJobId: "dispatch-job-001",
+          raisedAt: "2026-03-04T09:20:00.000Z",
+          criteria: {
+            isReservation: true,
+            isWithinConfirmationWindow: false,
+            hasEligibleSupply: false,
+            reasonCode: "no_eligible_supply",
+          },
+          overrideAllowed: true,
+          overrideActors: ["ops_user"],
+          resolution: null,
+          overrideRequest: null,
+        },
+        dispatchTimeout: {
+          orderId: "order-contract-exception-001",
+          dispatchJobId: "dispatch-job-001",
+          timeoutAt: "2026-03-04T09:25:00.000Z",
+          timeoutReasonCode: "matching_timeout",
+          previousAssignmentId: null,
+          escalationAction: "escalate_to_ops",
+        },
+        createdAt: "2026-03-04T08:00:00.000Z",
+        updatedAt: "2026-03-04T09:25:00.000Z",
+      }),
+    ]);
+
+    const contracts = service.listTenantContracts("tenant-demo-001");
+    expect(contracts).toHaveLength(2);
+
+    const airportAlpha = contracts.find(
+      (contract) => contract.programId === "program-airport-alpha",
+    );
+    expect(airportAlpha).toMatchObject({
+      contractId: "issuer-contract:program-airport-alpha",
+      tenantId: "tenant-demo-001",
+      programCode: "AIRPORT_ALPHA",
+      status: "breached",
+      periodAttainment: {
+        period: "2026-03",
+        completedTrips: 1,
+        totalTrips: 2,
+        completionRatePercent: 50,
+      },
+    });
+    expect(airportAlpha?.exceptions).toEqual([
+      expect.objectContaining({
+        orderId: "order-contract-exception-001",
+        benefitReferenceMasked: "benefit-...9999",
+        issuerAuthorizationRefMasked: "issuer-a...9999",
+        status: "open",
+      }),
+    ]);
+
+    const single = service.getTenantContract(
+      "tenant-demo-001",
+      "issuer-contract:program-airport-alpha",
+    );
+    expect(single.programId).toBe("program-airport-alpha");
+
+    expect(() =>
+      service.getTenantContract("tenant-other-001", single.contractId),
+    ).toThrow(ApiRequestError);
+  });
 });
 
 describe("TenantPartnerService approval rules", () => {
