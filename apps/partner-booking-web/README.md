@@ -6,15 +6,17 @@ single deployable can serve any number of partner brands.
 
 ## Status
 
-This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
-`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`:
+This app now carries the PBK-UI-003 CTBC reference funnel baseline and the
+2026-06 credit-card airport transfer release extension:
 
-- **Wave 5 — not deployed.** CI must build / lint / typecheck cleanly, but no
-  live deploy in this wave.
+- **Dev deployed.** `deploy-dev.yml` builds and deploys this app alongside the
+  shared dev stack so bank cardholder booking can be verified on Cloud Run.
 - Brand layering now resolves through
   `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / GRAND demo
   templates.
 - The CTBC reference funnel (7 screens) now lands in **PBK-UI-003**.
+- The program-specific `card` / `insurance` / `travel` flows and banking-app
+  embed identity states live under `/[tenantSlug]/program`.
 - Authority-safe negative paths are implemented as direct gate routes in
   **PBK-UI-004**.
 - The cutover policy between this app and the legacy

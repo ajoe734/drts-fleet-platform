@@ -22,7 +22,9 @@ import {
 } from "@drts/ui-tokens";
 
 export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+  process.env.DRTS_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:3001";
 
 type ApiErrorEnvelope = {
   error?: {
