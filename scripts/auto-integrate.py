@@ -77,8 +77,22 @@ def task_landed_on_dev(tid):
     return bool(r.stdout.strip())
 
 
+def exempt_patterns():
+    """Task-id regexes to skip — shared with the integration gate config so one
+    list exempts both (e.g. superseded originals replaced by a -R re-dispatch)."""
+    try:
+        with open(os.path.join(ROOT, ".orchestrator", "config.json")) as f:
+            cfg = json.load(f)
+        pats = cfg.get("branch_strategy", {}).get("integration_gate", {}).get("exempt_task_patterns", [])
+        import re
+        return [re.compile(p) for p in pats if p]
+    except Exception:
+        return []
+
+
 def candidates(match, explicit):
     out = []
+    exempt = exempt_patterns()
     for t in load_tasks():
         if not isinstance(t, dict):
             continue
@@ -97,6 +111,8 @@ def candidates(match, explicit):
             continue  # already on dev; reconcile will flip it
         if task_landed_on_dev(tid):
             continue  # a Task-ID-trailered commit is on dev (squash/rebase-safe)
+        if any(p.search(tid) for p in exempt):
+            continue  # explicitly exempted (e.g. superseded by a re-dispatch)
         out.append(t)
     return out
 
