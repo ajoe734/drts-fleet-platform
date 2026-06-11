@@ -98,7 +98,8 @@ because those artifacts are already in machine truth on `dev`.
 ## 7. Review And Verification Evidence
 
 - stale-base correction commit:
-  `TBD`
+  `f9a0942ee1288ea503e983b4e46e0dca7613af6b`
+  (`BANK-UI-HOME-20260610-UNBLOCK-PLANNING-DECISION: correct stale-base routing`)
 - pushed branch:
   `origin/codex/bank-ui-home-20260610-unblock-planning-decision`
 - owner PR:
