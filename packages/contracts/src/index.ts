@@ -3781,6 +3781,13 @@ export interface FleetPartnerStatementLineRecord {
     sourcePlatform: string | null;
     driverGroupId: string | null;
     orderSource: OwnedOrderSource | null;
+    settlementChannelKey: SettlementMatrixRecord["channelKey"];
+    sponsorFunded: boolean;
+    partnerId: string | null;
+    partnerProgramId: string | null;
+    benefitReference: string | null;
+    issuerAuthorizationRef: string | null;
+    reimbursementAmount: MoneyAmount | null;
   };
 }
 
@@ -3792,6 +3799,10 @@ export interface FleetPartnerStatementRecord {
   grossEarningBasis: MoneyAmount;
   driverNetAmountBasis: MoneyAmount;
   shareAmount: MoneyAmount;
+  sponsorFundedTripCount: number;
+  sponsorFundedGrossEarningBasis: MoneyAmount;
+  sponsorFundedShareAmount: MoneyAmount;
+  reimbursementAmount: MoneyAmount;
   lines: FleetPartnerStatementLineRecord[];
   createdAt: string;
   updatedAt: string;
@@ -3866,8 +3877,14 @@ export interface FleetPartnerPortalTripRecord {
   serviceProduct: string | null;
   tenantServiceProgramId: string | null;
   sourcePlatform: string | null;
+  fleetShareAmount: MoneyAmount | null;
+  settlementChannelKey: SettlementMatrixRecord["channelKey"];
+  sponsorFunded: boolean;
   partnerId: string | null;
   partnerProgramId: string | null;
+  benefitReference: string | null;
+  issuerAuthorizationRef: string | null;
+  reimbursementAmount: MoneyAmount | null;
   passengerName: string | null;
   pickupAddress: string | null;
   dropoffAddress: string | null;

@@ -80,6 +80,11 @@ describe("FleetPartnerController portal routes", () => {
       "2026-03",
       "req-fleet-trips",
     );
+    const statements = await controller.listPortalFleetPartnerStatements(
+      "fleet-demo-001",
+      "2026-03",
+      "req-fleet-statements",
+    );
     const qualityMetrics = await controller.getPortalQualityMetrics(
       "fleet-demo-001",
       "2026-03",
@@ -122,6 +127,30 @@ describe("FleetPartnerController portal routes", () => {
         ["drv-demo-001", "drv-demo-002"].includes(item.driverId),
       ),
     ).toBe(true);
+    const sponsorTrip = trips.data.items.find(
+      (item) => item.orderId === "order-demo-032",
+    );
+    expect(sponsorTrip).toMatchObject({
+      settlementChannelKey: "partner_airport",
+      sponsorFunded: true,
+      benefitReference: "benefit-bank-demo-032",
+      reimbursementAmount: {
+        currency: "NTD",
+        amountMinor: 20000,
+      },
+    });
+    expect(sponsorTrip?.fleetShareAmount?.amountMinor).toBeGreaterThan(0);
+    expect(statements.data.items[0]).toMatchObject({
+      periodMonth: "2026-03",
+      sponsorFundedTripCount: 1,
+      reimbursementAmount: {
+        currency: "NTD",
+        amountMinor: 20000,
+      },
+      sponsorFundedShareAmount: {
+        currency: "NTD",
+      },
+    });
     expect(qualityMetrics.data).toMatchObject({
       fleetPartnerId: "fleet-demo-001",
       periodMonth: "2026-03",

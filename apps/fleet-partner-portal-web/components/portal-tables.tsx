@@ -212,15 +212,37 @@ function tripColumns(
       r: (r) => <SvcChip theme={theme} locale={locale} svc={r.svc} />,
     },
     { h: t("table.driver"), k: "driver", w: 100 },
-    { h: t("table.tenant"), k: "tenant", w: 130, mono: true },
+    {
+      h: t("table.tenant"),
+      w: 160,
+      r: (r) => (
+        <div>
+          <div style={{ fontFamily: theme.monoFamily }}>{r.tenant}</div>
+          {r.sponsorFunded && (
+            <div style={{ fontSize: 11, color: theme.textDim }}>
+              {t("table.sponsorFundedTrip")}
+              {r.benefitReference ? ` · ${r.benefitReference}` : ""}
+            </div>
+          )}
+        </div>
+      ),
+    },
     { h: t("table.pickup"), k: "pickup", w: 220 },
     { h: t("table.fare"), k: "fare", w: 110, mono: true, align: "right" },
     {
       h: t("table.commission"),
-      k: "commission",
-      w: 110,
-      mono: true,
+      w: 140,
       align: "right",
+      r: (r) => (
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: theme.monoFamily }}>{r.commission}</div>
+          {r.reimbursement && (
+            <div style={{ fontSize: 11, color: theme.textDim }}>
+              {t("table.reimbursementShort", { amount: r.reimbursement })}
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       h: t("table.status"),
@@ -270,14 +292,30 @@ export function RecentTripsTable({ rows }: { rows: FleetTrip[] }) {
       r: (r) => <SvcChip theme={theme} locale={locale} svc={r.svc} />,
     },
     { h: t("table.driver"), k: "driver", w: 100 },
-    { h: t("table.tenant"), k: "tenant", w: 130, mono: true },
+    {
+      h: t("table.tenant"),
+      w: 160,
+      r: (r) => (
+        <div>
+          <div style={{ fontFamily: theme.monoFamily }}>{r.tenant}</div>
+          {r.sponsorFunded && (
+            <div style={{ fontSize: 11, color: theme.textDim }}>
+              {t("table.sponsorFundedTrip")}
+            </div>
+          )}
+        </div>
+      ),
+    },
     { h: t("table.fare"), k: "fare", w: 110, mono: true, align: "right" },
     {
       h: t("table.commission"),
-      k: "commission",
-      w: 110,
-      mono: true,
+      w: 140,
       align: "right",
+      r: (r) => (
+        <div style={{ textAlign: "right", fontFamily: theme.monoFamily }}>
+          {r.commission}
+        </div>
+      ),
     },
     {
       h: t("table.status"),
@@ -308,11 +346,27 @@ export function StatementsTable({ rows }: { rows: FleetStatement[] }) {
   const columns: CanvasTableColumn<FleetStatement>[] = [
     {
       h: t("table.statement"),
-      k: "id",
-      w: 180,
-      mono: true,
+      w: 220,
       r: (r) => (
-        <span style={{ color: theme.accent, fontWeight: 600 }}>{r.id}</span>
+        <div>
+          <div
+            style={{
+              color: theme.accent,
+              fontWeight: 600,
+              fontFamily: theme.monoFamily,
+            }}
+          >
+            {r.id}
+          </div>
+          {(r.sponsorFundedTrips || r.reimbursement) && (
+              <div style={{ fontSize: 11, color: theme.textDim }}>
+                {t("table.statementSponsorSummary", {
+                  trips: String(r.sponsorFundedTrips ?? 0),
+                  amount: r.reimbursement ?? "—",
+                })}
+              </div>
+            )}
+        </div>
       ),
     },
     { h: t("table.period"), k: "period", w: 120, mono: true },
