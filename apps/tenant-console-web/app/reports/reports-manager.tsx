@@ -118,12 +118,12 @@ const STATUS_FILTER_OPTIONS: readonly {
   value: ReportStatusFilter;
   label: string;
 }[] = [
-  { value: "all", label: "All statuses" },
-  { value: "queued", label: "Queued" },
-  { value: "running", label: "Running" },
-  { value: "completed", label: "Done" },
-  { value: "failed", label: "Failed" },
-  { value: "expired", label: "Expired" },
+  { value: "all", label: "所有狀態" },
+  { value: "queued", label: "排隊中" },
+  { value: "running", label: "執行中" },
+  { value: "completed", label: "完成" },
+  { value: "failed", label: "失敗" },
+  { value: "expired", label: "已過期" },
 ] as const;
 
 const pageBodyStyle = {
@@ -572,11 +572,11 @@ export function ReportsManager({
   const emptyStateCopy = getEmptyStateCopy(effectiveEmptyReason);
 
   const opsReportingLink: CrossAppLink = {
-    label: "Open ops-console reporting for filing / revenue trace",
+    label: "開啟 ops-console 報表以追溯申報／營收",
     href: buildCrossAppHref("ops-console", "/reports"),
   };
   const platformAuditLink: CrossAppLink = {
-    label: "Open platform-admin audit for artifact governance",
+    label: "開啟 platform-admin audit 以治理產出檔案",
     href: buildCrossAppHref("platform-admin", "/audit?module=reporting-filing"),
   };
   const crossAppLinks: CrossAppLink[] = [opsReportingLink, platformAuditLink];
@@ -695,11 +695,11 @@ export function ReportsManager({
   }
 
   const columns: CanvasTableColumn<ReportRow>[] = [
-    { h: "JOB", k: "id", w: 180, mono: true },
-    { h: "TYPE", k: "type", w: 170, mono: true },
-    { h: "PARAMETERS", k: "parameters", w: 220, mono: true },
+    { h: "工作", k: "id", w: 180, mono: true },
+    { h: "類型", k: "type", w: 170, mono: true },
+    { h: "參數", k: "parameters", w: 220, mono: true },
     {
-      h: "STATUS",
+      h: "狀態",
       w: 118,
       r: (row) => (
         <CanvasPill theme={th} tone={getStatusTone(row.status)} dot>
@@ -707,12 +707,12 @@ export function ReportsManager({
         </CanvasPill>
       ),
     },
-    { h: "CREATED", k: "createdAt", w: 150, mono: true },
-    { h: "COMPLETED", k: "completedAt", w: 150, mono: true },
-    { h: "FORMAT", k: "format", w: 82, mono: true },
-    { h: "EXPIRES", k: "expiresAt", w: 150, mono: true },
+    { h: "建立", k: "createdAt", w: 150, mono: true },
+    { h: "完成", k: "completedAt", w: 150, mono: true },
+    { h: "格式", k: "format", w: 82, mono: true },
+    { h: "到期", k: "expiresAt", w: 150, mono: true },
     {
-      h: "ARTIFACT",
+      h: "檔案",
       w: 150,
       r: (row) => (
         <div style={{ display: "grid", gap: 4 }}>
@@ -728,20 +728,20 @@ export function ReportsManager({
       ),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 180,
       r: (row) => (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <ActionButton
             descriptor={row.downloadDescriptor}
-            label="Download"
+            label="下載"
             icon="ext"
             size="xs"
             onClick={() => handleDownload(row.artifactUrl)}
           />
           <ActionButton
             descriptor={row.rerunDescriptor}
-            label="Re-run"
+            label="重跑"
             icon="arrow"
             size="xs"
             onClick={() => handleRerun(row.id)}
@@ -761,13 +761,13 @@ export function ReportsManager({
           <div style={actionRowStyle}>
             <ActionButton
               descriptor={refreshAction}
-              label="Refresh"
+              label="重新整理"
               icon="arrow"
               onClick={handleRefresh}
             />
             <ActionButton
               descriptor={createAction}
-              label="Create job"
+              label="建立工作"
               icon="plus"
               variant="primary"
               onClick={handleCreateJob}
@@ -796,7 +796,7 @@ export function ReportsManager({
           <CanvasBanner
             theme={th}
             tone="warn"
-            title="Report data could not be fully loaded"
+            title="報表資料無法完整載入"
             body="The route stays available, but one or more reporting reads failed."
             actions={
               <div style={{ color: th.text, fontSize: 11.5 }}>
@@ -809,14 +809,14 @@ export function ReportsManager({
         <CanvasBanner
           theme={th}
           tone="info"
-          title="Refresh tier T6: manual"
+          title="更新層級 T6：手動"
           body={`This route does not auto-poll. Snapshot loaded ${formatDateTime(generatedAt)} and refresh tier remains ${refreshTier}.`}
         />
 
         <CanvasBanner
           theme={th}
           tone="accent"
-          title="Cross-app reporting trace stays explicit"
+          title="跨應用報表追溯保持明確"
           body="Tenant reports can escalate into ops reporting or platform governance. Deep links open in a new tab per Q-X03."
           actions={
             <>
@@ -850,25 +850,25 @@ export function ReportsManager({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Jobs"
+            label="工作"
             value={String(totalJobs)}
             sub="Report job history"
           />
           <CanvasKPI
             theme={th}
-            label="Queued / Running"
+            label="排隊／執行中"
             value={String(activeJobs)}
             sub="Backend still producing artifacts"
           />
           <CanvasKPI
             theme={th}
-            label="Ready"
+            label="就緒"
             value={String(readyJobs)}
             sub="Signed downloads currently valid"
           />
           <CanvasKPI
             theme={th}
-            label="Failed / Expired"
+            label="失敗／過期"
             value={`${failedJobs} / ${expiredJobs}`}
             sub="Needs re-run or fresh artifact"
           />
@@ -877,12 +877,12 @@ export function ReportsManager({
         <div style={cardGridStyle}>
           <CanvasCard
             theme={th}
-            title="Report queue"
-            subtitle="Type, status, period, artifact TTL, and manual retry all stay contract-backed."
+            title="報表佇列"
+            subtitle="類型、狀態、期別、檔案 TTL 與手動重試都以契約為依據。"
             padding={16}
           >
             <div style={filterGridStyle}>
-              <CanvasField theme={th} label="Type filter">
+              <CanvasField theme={th} label="類型篩選">
                 <select
                   value={typeFilter}
                   onChange={(event) => setTypeFilter(event.target.value)}
@@ -899,7 +899,7 @@ export function ReportsManager({
                 </select>
               </CanvasField>
 
-              <CanvasField theme={th} label="Status filter">
+              <CanvasField theme={th} label="狀態篩選">
                 <select
                   value={statusFilter}
                   onChange={(event) =>
@@ -917,8 +917,8 @@ export function ReportsManager({
 
               <CanvasField
                 theme={th}
-                label="Period filter"
-                hint="Match the period embedded in job parameters."
+                label="期別篩選"
+                hint="對應工作參數中內嵌的期別。"
               >
                 <input
                   value={periodFilter}
@@ -978,7 +978,7 @@ export function ReportsManager({
                   ) : (
                     <ActionButton
                       descriptor={createAction}
-                      label="Create job"
+                      label="建立工作"
                       icon="plus"
                       variant="primary"
                       onClick={handleCreateJob}
@@ -986,7 +986,7 @@ export function ReportsManager({
                   )}
                   <ActionButton
                     descriptor={refreshAction}
-                    label="Refresh"
+                    label="重新整理"
                     icon="arrow"
                     onClick={handleRefresh}
                   />
@@ -1004,11 +1004,11 @@ export function ReportsManager({
           <div style={{ display: "grid", gap: 16 }}>
             <CanvasCard
               theme={th}
-              title="Create report job"
-              subtitle="Type, period, and scope parameters feed the backend queue directly."
+              title="建立報表工作"
+              subtitle="類型、期別與範圍參數直接送入後端佇列。"
               padding={16}
             >
-              <CanvasField theme={th} label="Job type" required>
+              <CanvasField theme={th} label="工作類型" required>
                 <select
                   value={draft.jobType}
                   onChange={(event) =>
@@ -1029,7 +1029,7 @@ export function ReportsManager({
                 </select>
               </CanvasField>
 
-              <CanvasField theme={th} label="Format" required>
+              <CanvasField theme={th} label="格式" required>
                 <select
                   value={draft.format}
                   onChange={(event) =>
@@ -1050,8 +1050,8 @@ export function ReportsManager({
 
               <CanvasField
                 theme={th}
-                label="Period"
-                hint="Monthly reporting normally uses YYYY-MM."
+                label="期別"
+                hint="月報通常使用 YYYY-MM。"
               >
                 <input
                   value={draft.period}
@@ -1065,8 +1065,8 @@ export function ReportsManager({
 
               <CanvasField
                 theme={th}
-                label="Cost center"
-                hint="Optional scope refinement, for example CC-FIN-001."
+                label="成本中心"
+                hint="選填的範圍細化，例如 CC-FIN-001。"
               >
                 <input
                   value={draft.costCenterCode}
@@ -1080,8 +1080,8 @@ export function ReportsManager({
 
               <CanvasField
                 theme={th}
-                label="Passenger"
-                hint="Optional passenger drill-down for a scoped export."
+                label="乘客"
+                hint="選填的乘客下鑽，用於範圍匯出。"
               >
                 <input
                   value={draft.passengerUserId}
@@ -1103,7 +1103,7 @@ export function ReportsManager({
                 />
                 <ActionButton
                   descriptor={refreshAction}
-                  label="Refresh list"
+                  label="重新整理清單"
                   icon="arrow"
                   onClick={handleRefresh}
                 />
@@ -1112,8 +1112,8 @@ export function ReportsManager({
 
             <CanvasCard
               theme={th}
-              title="State coverage"
-              subtitle="Manual QA shortcuts for the six shared EmptyReason variants."
+              title="狀態覆蓋"
+              subtitle="六種共用 EmptyReason 變體的手動 QA 捷徑。"
               padding={16}
             >
               <div style={emptyReasonRowStyle}>
@@ -1134,8 +1134,8 @@ export function ReportsManager({
 
             <CanvasCard
               theme={th}
-              title="Cross-app deep links"
-              subtitle="Reports can exit to artifact download, tenant audit, or external operational follow-up."
+              title="跨應用深層連結"
+              subtitle="報表可導向檔案下載、租戶 audit 或外部營運後續。"
               padding={16}
             >
               <div style={linkListStyle}>

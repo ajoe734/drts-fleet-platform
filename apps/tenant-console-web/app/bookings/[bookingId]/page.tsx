@@ -265,7 +265,7 @@ function buildBookingActions(
 function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
   const events: BookingEvent[] = [
     {
-      label: "Booking created",
+      label: "訂單已建立",
       at: booking.createdAt,
       actor: booking.bookedBy?.name ?? "Tenant intake",
       realm: "tenant",
@@ -276,7 +276,7 @@ function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
 
   if (booking.approvalState !== "not_required") {
     events.push({
-      label: "Approval workflow",
+      label: "審批流程",
       at: booking.updatedAt,
       actor: "tenant.approval",
       realm: "system",
@@ -287,7 +287,7 @@ function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
 
   if (ACTIVE_ORDER_STATUSES.has(booking.orderStatus)) {
     events.push({
-      label: "Driver assignment active",
+      label: "司機指派中",
       at: booking.updatedAt,
       actor: "dispatch.engine",
       realm: "ops",
@@ -299,7 +299,7 @@ function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
 
   if (booking.orderStatus === "cancelled") {
     events.push({
-      label: "Booking cancelled",
+      label: "訂單已取消",
       at: booking.updatedAt,
       actor: "tenant command",
       realm: "tenant",
@@ -309,7 +309,7 @@ function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
     });
   } else if (booking.orderStatus === "completed") {
     events.push({
-      label: "Trip completed",
+      label: "行程已完成",
       at: booking.updatedAt,
       actor: "driver workflow",
       realm: "system",
@@ -319,7 +319,7 @@ function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
     });
   } else {
     events.push({
-      label: "Workflow snapshot updated",
+      label: "工作流程快照已更新",
       at: booking.updatedAt,
       actor: "booking.readmodel",
       realm: "system",
@@ -445,21 +445,21 @@ function deriveBookingView(
       href: commandReceipt?.auditId
         ? `${auditBase}?auditId=${encodeURIComponent(commandReceipt.auditId)}`
         : `${auditBase}?bookingId=${encodeURIComponent(booking.bookingId)}`,
-      label: "View audit subset",
+      label: "檢視 audit 子集",
       note: commandReceipt?.auditId
         ? "Open the action receipt audit trail directly when a command has already been accepted."
         : "Tenant audit includes actor realm chips for tenant, ops, platform, and system actions.",
     },
     {
       href: `/rules?bookingId=${encodeURIComponent(booking.bookingId)}`,
-      label: "Open approval rules",
+      label: "開啟審批規則",
       note: "Use the tenant rules lane to inspect the approval logic that currently applies to this booking.",
     },
     ...(source.domain === "forwarded_authority"
       ? [
           {
             href: `${opsConsoleBase}/dispatch?orderId=${encodeURIComponent(booking.orderId)}`,
-            label: "Open ops console detail",
+            label: "開啟 ops console 明細",
             note: "Forwarded-authority bookings escalate to the ops app in a new tab when dispatch recovery is needed.",
             external: true,
           },
@@ -487,15 +487,15 @@ function deriveBookingView(
 function describeReadOnlyReason(reasonCode: string | null) {
   switch (reasonCode) {
     case "past_editable_until":
-      return "The tenant edit window has passed, so the detail is now read-only for update commands.";
+      return "租戶編輯時窗已過，因此此明細對更新命令現為唯讀。";
     case "booking_terminal":
-      return "The trip is already closed. Tenant users can review context and audit, but no longer mutate the booking.";
+      return "行程已結束。租戶使用者可檢視內容與 audit，但無法再變更訂單。";
     case "on_trip_locked":
-      return "The driver workflow is already in progress. Follow-up should happen through cancellation policy or ops escalation, not inline edits.";
+      return "司機工作流程已在進行中。後續應透過取消政策或 ops 升級處理，而非即時編輯。";
     case "approval_pending":
-      return "The booking is waiting on approval resolution before another update command can be accepted.";
+      return "此訂單需待審批結果，才能接受下一個更新命令。";
     default:
-      return "This booking currently exposes no tenant update command.";
+      return "此訂單目前沒有可用的租戶更新命令。";
   }
 }
 
@@ -518,13 +518,13 @@ function describeEditableWindow(
 function describeApprovalState(state: BookingRecord["approvalState"]) {
   switch (state) {
     case "not_required":
-      return "No approval gate is active for this booking.";
+      return "此訂單目前沒有啟用的審批關卡。";
     case "pending":
-      return "Approval is required before dispatch can continue.";
+      return "派遣繼續前需要審批。";
     case "approved":
-      return "The approval gate cleared and the booking can continue.";
+      return "審批關卡已通過，訂單可繼續。";
     case "rejected":
-      return "Approval was rejected. Review the rule lane before resubmitting.";
+      return "審批已被拒絕。重新提交前請檢視規則。";
     case "blocked":
       return "A policy block currently prevents the booking from proceeding.";
     case "cancelled_by_re_evaluation":
@@ -562,9 +562,9 @@ function renderEmptyState(reason: EmptyReason, bookingId: string) {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Booking detail"
+        eyebrow="訂單明細"
         title={`${bookingId} unavailable`}
-        description="The tenant detail route implements all six shared EmptyReason treatments so the UI does not collapse every empty/not-ready case into the same message."
+        description="租戶明細路由實作了全部六種共用 EmptyReason 處理，讓 UI 不會把每種空／未就緒情況都收斂成同一則訊息。"
       />
       <SurfaceCard
         kicker="EmptyReason"
@@ -699,7 +699,7 @@ export default async function BookingDetailPage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Booking detail"
+        eyebrow="訂單明細"
         title={
           <span className="booking-hero-title">
             <span>{`${booking.bookingId} · ${booking.businessDispatchSubtype}`}</span>
@@ -718,7 +718,7 @@ export default async function BookingDetailPage({
             </span>
           </span>
         }
-        description="Booking detail now follows the Tenant Console canvas: editable-until visibility, approval context, driver-assignment state, audit subset, refresh tier, and action descriptors all sit on one tenant-owned screen."
+        description="訂單明細現在遵循 Tenant Console canvas：可編輯截止可見性、審批內容、司機指派狀態、audit 子集、更新層級與動作描述子，全部集中在同一個租戶擁有的畫面上。"
       />
 
       <div className="chip-row">
@@ -759,8 +759,8 @@ export default async function BookingDetailPage({
       <section className="surface-grid surface-grid-wide" id="overview">
         <SurfaceCard
           kicker="Refresh tier"
-          title="Tenant booking detail refreshes on T5"
-          description="This screen is a tenant slow-lane detail surface: auto refresh is slow, manual review remains available, and stale states must be explicit."
+          title="租戶訂單明細以 T5 更新"
+          description="此畫面是租戶慢速明細介面：自動更新較慢，仍可手動檢視，過期狀態必須明確標示。"
         >
           <div className="booking-refresh-card">
             <div className="chip-row">
@@ -769,19 +769,19 @@ export default async function BookingDetailPage({
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>Generated</dt>
+                <dt>產生時間</dt>
                 <dd>{formatDateTime(bookingView.generatedAt)}</dd>
               </div>
               <div>
-                <dt>Last booking update</dt>
+                <dt>最後訂單更新</dt>
                 <dd>{formatDateTime(booking.updatedAt)}</dd>
               </div>
               <div>
-                <dt>Source</dt>
+                <dt>來源</dt>
                 <dd>live tenant API</dd>
               </div>
               <div>
-                <dt>Manual refresh</dt>
+                <dt>手動更新</dt>
                 <dd>
                   Browser refresh, notification reopen, or command receipt
                   refresh
@@ -793,8 +793,8 @@ export default async function BookingDetailPage({
 
         <SurfaceCard
           kicker="Status"
-          title="Editability and approval posture"
-          description="Per Q-TEN05, editability is driven by action descriptors plus editableUntil, not by guessing from the status label alone."
+          title="可編輯性與審批狀態"
+          description="依 Q-TEN05，可編輯性由動作描述子加上 editableUntil 決定，而非僅憑狀態標籤推測。"
         >
           <div className="detail-stack">
             <div className="chip-row">
@@ -819,11 +819,11 @@ export default async function BookingDetailPage({
                 <dd>{bookingView.readOnlyReasonCode ?? "None"}</dd>
               </div>
               <div>
-                <dt>Approval state</dt>
+                <dt>審批狀態</dt>
                 <dd>{booking.approvalState}</dd>
               </div>
               <div>
-                <dt>Approval requests</dt>
+                <dt>審批請求</dt>
                 <dd>{booking.approvalRequestIds.length}</dd>
               </div>
             </dl>
@@ -832,7 +832,7 @@ export default async function BookingDetailPage({
             </div>
             {booking.approvalState === "pending" ? (
               <CalloutPanel
-                title="Approval-required state"
+                title="需審批狀態"
                 description={describeApprovalState(booking.approvalState)}
                 tone="warning"
               >
@@ -858,10 +858,7 @@ export default async function BookingDetailPage({
             title={t("bookingDetail.section.trip")}
             description={t("bookingDetail.section.tripSub")}
           >
-            <div
-              className="booking-stepper"
-              aria-label="Booking workflow state"
-            >
+            <div className="booking-stepper" aria-label="訂單工作流程狀態">
               {BOOKING_TIMELINE_STEPS.map((step, index) => {
                 const isActive = index === bookingView.timelineStep;
                 const isComplete = index < bookingView.timelineStep;
@@ -887,15 +884,15 @@ export default async function BookingDetailPage({
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>Booking ID</dt>
+                <dt>訂單 ID</dt>
                 <dd>{booking.bookingId}</dd>
               </div>
               <div>
-                <dt>Order ID</dt>
+                <dt>單號 ID</dt>
                 <dd>{booking.orderId}</dd>
               </div>
               <div>
-                <dt>Passenger</dt>
+                <dt>乘客</dt>
                 <dd>
                   <Link className="text-link" href={passengerHref}>
                     {booking.passenger.name}
@@ -903,11 +900,11 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Phone</dt>
+                <dt>電話</dt>
                 <dd>{booking.passenger.phone}</dd>
               </div>
               <div>
-                <dt>Pickup</dt>
+                <dt>上車</dt>
                 <dd>
                   <Link className="text-link" href={pickupAddressHref}>
                     {booking.pickup.address}
@@ -915,7 +912,7 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Dropoff</dt>
+                <dt>下車</dt>
                 <dd>
                   <Link className="text-link" href={dropoffAddressHref}>
                     {booking.dropoff.address}
@@ -923,23 +920,23 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Window start</dt>
+                <dt>時窗開始</dt>
                 <dd>{formatDateTime(booking.reservationWindowStart)}</dd>
               </div>
               <div>
-                <dt>Window end</dt>
+                <dt>時窗結束</dt>
                 <dd>{formatDateTime(booking.reservationWindowEnd)}</dd>
               </div>
               <div>
-                <dt>Booked by</dt>
+                <dt>預約人</dt>
                 <dd>{booking.bookedBy?.name ?? "Tenant intake"}</dd>
               </div>
               <div>
-                <dt>Onsite contact</dt>
+                <dt>現場聯絡人</dt>
                 <dd>{booking.onsiteContact?.name ?? "Not published"}</dd>
               </div>
               <div>
-                <dt>Cost center</dt>
+                <dt>成本中心</dt>
                 <dd>
                   {booking.costCenter ? (
                     <Link className="text-link" href={costCenterHref}>
@@ -951,18 +948,18 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Vehicle preference</dt>
+                <dt>車輛偏好</dt>
                 <dd>{booking.vehiclePreference ?? "Not published"}</dd>
               </div>
               <div>
-                <dt>Flight / terminal</dt>
+                <dt>航班／航廈</dt>
                 <dd>
                   {booking.flightNo ?? "No flight"} /{" "}
                   {booking.terminal ?? "No terminal"}
                 </dd>
               </div>
               <div>
-                <dt>Notes</dt>
+                <dt>備註</dt>
                 <dd>{booking.notes ?? "No notes"}</dd>
               </div>
             </dl>
@@ -1030,19 +1027,19 @@ export default async function BookingDetailPage({
             <div id="billing" />
             <dl className="definition-grid">
               <div>
-                <dt>Quoted fare</dt>
+                <dt>報價車資</dt>
                 <dd>{formatMoney(booking.quotedFare)}</dd>
               </div>
               <div>
-                <dt>Fare source</dt>
+                <dt>車資來源</dt>
                 <dd>{booking.quotedFareSource ?? "Not published"}</dd>
               </div>
               <div>
-                <dt>Pricing version</dt>
+                <dt>定價版本</dt>
                 <dd>{booking.quotedFareRuleVersion ?? "Not published"}</dd>
               </div>
               <div>
-                <dt>Manual override</dt>
+                <dt>手動覆寫</dt>
                 <dd>
                   {booking.manualFareOverride
                     ? `${booking.manualFareOverride.actorType} · ${booking.manualFareOverride.reason}`
@@ -1050,11 +1047,11 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Approval</dt>
+                <dt>審批</dt>
                 <dd>{describeApprovalState(booking.approvalState)}</dd>
               </div>
               <div>
-                <dt>Benefit ref</dt>
+                <dt>福利參照</dt>
                 <dd>{booking.benefitReference ?? "Not published"}</dd>
               </div>
             </dl>
@@ -1098,12 +1095,12 @@ export default async function BookingDetailPage({
         <div className="booking-detail-side">
           <SurfaceCard
             kicker="Assignment"
-            title="Driver / vehicle assignment"
-            description="If dispatch has already attached a fulfillment leg, tenant users can see the assignment state without gaining dispatch control."
+            title="司機／車輛指派"
+            description="若派遣已附上履約段，租戶使用者可看到指派狀態，但不會取得派遣控制權。"
           >
             <dl className="definition-grid">
               <div>
-                <dt>Assignment state</dt>
+                <dt>指派狀態</dt>
                 <dd>
                   {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
                     ? "Active driver assignment"
@@ -1119,11 +1116,11 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Order status</dt>
+                <dt>訂單狀態</dt>
                 <dd>{booking.orderStatus}</dd>
               </div>
               <div>
-                <dt>Escalation</dt>
+                <dt>升級</dt>
                 <dd>
                   {source.domain === "forwarded_authority"
                     ? "Ops console deep link available"
@@ -1131,7 +1128,7 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Command receipt</dt>
+                <dt>命令回執</dt>
                 <dd>
                   {bookingView.commandReceipt
                     ? `${bookingView.commandReceipt.status} · ${bookingView.commandReceipt.actionId}`
@@ -1143,8 +1140,8 @@ export default async function BookingDetailPage({
 
           <SurfaceCard
             kicker="Actions"
-            title="Available actions"
-            description="The command panel renders enabled, disabled, and hidden states from the action descriptor set for this booking."
+            title="可用操作"
+            description="命令面板依此訂單的動作描述子集合，呈現啟用、停用與隱藏狀態。"
           >
             <BookingCommandPanel
               actions={bookingView.actions}
@@ -1185,7 +1182,7 @@ export default async function BookingDetailPage({
       </section>
 
       <CalloutPanel
-        title="Authority boundary"
+        title="權限邊界"
         description={source.detail}
         tone={source.domain === "forwarded_authority" ? "warning" : "default"}
       >
