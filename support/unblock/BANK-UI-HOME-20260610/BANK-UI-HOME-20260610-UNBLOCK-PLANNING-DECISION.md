@@ -104,14 +104,17 @@ Its remaining blocker is a missing canonical visual-source artifact.
 | Record the decision | Recorded here: no new product/contract decision is required. |
 | scope cut | Not needed. Parent scope remains valid once the bank canvas files exist. |
 | or explicit follow-up needed by the parent task | Recorded in §4: restore/recommit the accepted bank canvas bundle or reopen design intake to materialize the missing canonical files. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | Recorded in §7: commit `f5bd435af8184dae23d4cfa4fc5d14ad84b4932e`, pushed branch `origin/codex/bank-ui-home-20260610-unblock-planning-decision`, PR [#646](https://github.com/ajoe734/drts-fleet-platform/pull/646). |
+| Produce task-scoped commit/push/PR evidence for any canonical change | Recorded in §7: canonical decision commit `f5bd435af8184dae23d4cfa4fc5d14ad84b4932e`, closeout-evidence commit `29738727eaab09fc3cfb61d482b20dfa272ee020`, pushed branch `origin/codex/bank-ui-home-20260610-unblock-planning-decision`, PR [#646](https://github.com/ajoe734/drts-fleet-platform/pull/646). |
 | Update the parent task with the concrete unblocked next step | Parent should remain blocked on bank canvas restoration, then resume validation against `BK_Home`. |
 
 ## 7. Review And Verification Evidence
 
-- task-scoped commit:
+- canonical decision commit:
   `f5bd435af8184dae23d4cfa4fc5d14ad84b4932e`
   (`BANK-UI-HOME-20260610-UNBLOCK-PLANNING-DECISION: route blocker to bank canvas recovery`)
+- closeout-evidence commit:
+  `29738727eaab09fc3cfb61d482b20dfa272ee020`
+  (`BANK-UI-HOME-20260610-UNBLOCK-PLANNING-DECISION: record push and PR evidence`)
 - pushed branch:
   `origin/codex/bank-ui-home-20260610-unblock-planning-decision`
 - owner PR:
