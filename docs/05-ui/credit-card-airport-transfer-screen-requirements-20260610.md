@@ -19,11 +19,11 @@ The **customer-facing** surfaces (S1 cardholder web, S2 banking-app embed) alrea
 
 ## 2. Personas (design-relevant)
 
-| Code | Persona | Reads | Acts |
-|---|---|---|---|
-| `bank_program_admin` | 銀行方案管理員 | program config, quota usage | configure/view policy |
-| `bank_ops_viewer` | 銀行客服/營運 | booking + dispatch + contract (read-only) | look up, no mutation |
-| `bank_finance` | 銀行財務 | settlement statement | reconcile, download |
+| Code                 | Persona        | Reads                                     | Acts                  |
+| -------------------- | -------------- | ----------------------------------------- | --------------------- |
+| `bank_program_admin` | 銀行方案管理員 | program config, quota usage               | configure/view policy |
+| `bank_ops_viewer`    | 銀行客服/營運  | booking + dispatch + contract (read-only) | look up, no mutation  |
+| `bank_finance`       | 銀行財務       | settlement statement                      | reconcile, download   |
 
 (Cardholder personas for S1/S2 are covered by the existing partner-booking canvas.)
 
@@ -36,6 +36,7 @@ The **customer-facing** surfaces (S1 cardholder web, S2 banking-app embed) alrea
 ## 4. Sitemap
 
 ### 4.1 New design needed — **the whole `bank-console-web` app** (design all of these)
+
 This is a new app, so **every screen needs a canvas** — there is no corporate tenant-console canvas to extend.
 | Screen | Route (proposed) | Note |
 |---|---|---|
@@ -49,50 +50,111 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 | Audit | `/audit` | eligibility/dispatch/settlement trail |
 
 ### 4.2 No new design (reference only)
-| Screen | Where | Status |
-|---|---|---|
-| Cardholder booking funnel (entry→eligibility→review→success→tracking→error→manual-review) | `partner-booking-web` `card` program | has canvas (`pb-screens.jsx`) |
-| Shell/chrome conventions (realm tokens, density) | `tenant-console` `Tenant Console.html` | **reference for chrome only**, never for the card-benefit data IA |
 
-## 5. Per-screen functional briefs (design these)
+| Screen                                                                                    | Where                                  | Status                                                            |
+| ----------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| Cardholder booking funnel (entry→eligibility→review→success→tracking→error→manual-review) | `partner-booking-web` `card` program   | has canvas (`pb-screens.jsx`)                                     |
+| Shell/chrome conventions (realm tokens, density)                                          | `tenant-console` `Tenant Console.html` | **reference for chrome only**, never for the card-benefit data IA |
 
-### 5.1 Bookings list — card/airport dimension
-- **Purpose:** `bank_ops_viewer` sees which cardholder booked, at a glance, as **card-airport** rides (not generic corporate bookings).
-- **Must surface (data):** order id, **cardholder ref (masked)**, **program (中信機場 / programCode)**, **direction (去程/回程)**, **flight no. + terminal**, pickup→drop, time window, **dispatch state** (assigned / en route / completed / cancelled), benefit-reference (masked).
-- **Filters:** by program, by direction, by state, by period, by cardholder ref.
-- **Replaces (semantics):** the corporate `成本中心 (CC)` column has no meaning here — design the issuer/program columns in its place.
-- **Actions:** open detail; export (masked). Read-only — no dispatch mutation from the bank side.
+## 5. Per-screen functional briefs (design these — all 8 screens of `bank-console-web`)
 
-### 5.2 Booking detail — airport & benefit panel
-- **Purpose:** read-only fulfilment view of one ride.
-- **Must surface:** the dispatch lifecycle timeline (created → assigned → en route → completed/cancelled), **airport block** (flight, terminal, direction), **benefit block** (program, benefitReference masked, issuer authorisation ref masked, quota impact), and a **read-only cross-link to ops detail** (access-gated; show disabled if forbidden).
-- **No mutation** of dispatch from this surface.
+> Each brief is design-ready: **purpose · persona · data to surface · states · actions · cross-links · constraints · API**. No visual decisions. All cardholder/card references are **masked** (e.g. `**** 4821`). zh-TW primary / en secondary. Chrome uses `@drts/ui-tokens` `tenant` realm + issuer brand.
 
-### 5.3 Contract & SLA status (NEW)
-- **Purpose:** `bank_ops_viewer` / `bank_program_admin` see the service-contract posture between the program and DRTS.
-- **Must surface:** contract/programme term, **SLA targets** (e.g. pickup punctuality %, completion rate %), **current-period attainment** vs each target, exception list (missed SLA, disputed trips), contract status.
-- **States:** healthy / at-risk / breached per SLA; empty/not-provisioned; permission-denied; downstream-unavailable.
-- **Note for design:** this screen has **no precedent** in the current tenant canvas; ops-console has a `/contracts` screen whose IA may inform (but must not be copied as-is — different persona/plane).
+### 5.1 Home / Overview — route `/`
 
-### 5.4 Settlement statement detail (NEW detail of an existing list)
+- **Purpose:** landing for bank staff; at-a-glance posture of the card-benefit airport program(s).
+- **Persona:** all three (content gated by role).
+- **Data to surface:** period summary (bookings by state 預約/進行中/已完成/取消; next N airport pickups with flight/terminal/time); **quota posture** (禮遇趟次 consumed vs total, per program); **SLA posture** (pickup punctuality % + completion rate % vs target, healthy/at-risk/breached); **settlement posture** (current period statement status + amount); recent exceptions (manual-review / no-supply / missed-SLA).
+- **States:** loading; not-provisioned (program not set up); role-scoped (finance→settlement card, ops→bookings+exceptions, admin→all); downstream-unavailable (degraded read).
+- **Actions:** navigate to each section; open an exception → booking detail.
+- **Cross-links:** booking detail, statement (read-only).
+- **Constraints:** read-only; masked refs; figures must reconcile with the detail pages.
+- **API:** aggregates `tenant/orders`, `tenant/program-usage`, `tenant/contracts`, `tenant/settlement-statements`.
+
+### 5.2 Bookings list — card/airport dimension — route `/bookings`
+
+- **Purpose:** `bank_ops_viewer` sees which cardholder booked, as card-airport rides.
+- **Persona:** `bank_ops_viewer` (primary), `bank_program_admin`.
+- **Data (columns):** order id; **cardholder ref (masked)**; **program (中信機場 / programCode)**; **direction (去程/回程)**; **flight no. + terminal**; pickup→drop (short); time window; **dispatch state** (預約/已指派/進行中/已完成/取消); benefit reference (masked).
+- **Filters:** program, direction, dispatch state, period, cardholder-ref search.
+- **States:** loading; empty (no match / none yet); permission-denied; data-unavailable; load-failed; deep-link-stale.
+- **Actions:** open detail; export (masked). **Read-only — no dispatch mutation from the bank side.**
+- **Cross-links:** row → booking detail.
+- **Constraints:** the corporate `成本中心 (CC)` column has **no meaning** here — design issuer/program columns in its place; dense list; masked PII.
+- **API:** `GET /api/tenant/orders?programCode&direction&state&period&cardholderRef`.
+
+### 5.3 Booking detail — airport + benefit + dispatch — route `/bookings/[bookingId]`
+
+- **Purpose:** read-only fulfilment view of one airport ride.
+- **Persona:** `bank_ops_viewer`.
+- **Data (blocks):** header (order id, program, cardholder ref masked, state); **dispatch timeline** (created → [approval] → driver assigned → en route → completed/cancelled, with timestamps, current step highlighted); **airport block** (flight no., terminal, direction 去程/回程, pickup/drop, scheduled window, flight-delay tolerance if modelled); **benefit block** (program, benefit reference masked, issuer authorisation ref masked, **quota impact** — this ride consumed/refunded N 趟次); driver/vehicle (masked per policy).
+- **States:** loading; no-data; not-provisioned; load-failed; permission-denied; linked-ops-unavailable; deep-link-stale; driver-no-longer-eligible (informational).
+- **Actions:** **read-only cross-link to ops dispatch detail** (access-gated; disabled/hidden if forbidden); export (masked).
+- **Constraints:** **no dispatch mutation** from this surface; all refs masked.
+- **API:** `GET /api/tenant/orders/:orderId`.
+
+### 5.4 Contracts & SLA — routes `/contracts` (+ `/[contractId]`)
+
+- **Purpose:** the bank sees the service-contract posture between the program and DRTS.
+- **Persona:** `bank_program_admin`, `bank_ops_viewer`.
+- **List data:** contract id, program, term (start–end), status (healthy/at-risk/breached), current-period attainment summary.
+- **Detail data:** contract/programme term; **SLA targets** (pickup punctuality %, completion rate %, response time); **current-period attainment vs each target** (value + delta); **exception list** (missed SLA, disputed trips, each linked to booking detail); contract status; provenance/notes.
+- **States:** loading; empty/not-provisioned; permission-denied; downstream-unavailable; per-SLA healthy/at-risk/breached.
+- **Actions:** open detail; open an exception → booking detail; export.
+- **Constraints:** **no precedent in the tenant canvas — fresh design.** Read-only for the bank (DRTS owns the contract authority via ops `/contracts`); attainment numbers reconcile with statements/bookings.
+- **API:** `GET /api/tenant/contracts`, `/:contractId`.
+
+### 5.5 Statements — routes `/statements` (+ `/[period]`)
+
 - **Purpose:** `bank_finance` reconciles and settles with DRTS for a period.
-- **Must surface (line-item):** per trip — trip id, date, **fare**, **subsidised vs paid split**, **benefit reference (masked)**, **cardholder ref (masked)**; period **totals**; **status** (published / paid / due); **money direction = issuer-pays-DRTS**; **download signed artifact**.
-- **Distinct from** the existing 對帳單/invoices *list* (which shows period-level invoices) — this is the **per-trip reconciliation detail** behind a period.
-- **States:** pending (period not published), ready, artifact-expired (re-issue), line-item-disputed (flag to DRTS).
+- **Persona:** `bank_finance`.
+- **List data (periods):** period, total amount, status (published/paid/due), issued date, due date, download (signed artifact).
+- **Detail data (per-trip lines):** trip id, date, **fare**, **subsidised vs paid split**, **benefit reference (masked)**, **cardholder ref (masked)**; period **totals**; **money direction = issuer-pays-DRTS**; status; **signed-artifact download**.
+- **States:** pending (period not published); ready; paid; due; artifact-expired (re-issue path); line-item-disputed (flag to DRTS); permission-denied; empty.
+- **Actions:** select period; download signed artifact; flag a disputed line → to DRTS settlement; export.
+- **Constraints:** **distinct from corporate invoices** — this is per-trip reconciliation; masked refs; direction issuer-pays-DRTS; lines reconcilable against the bank's own records.
+- **API:** `GET /api/tenant/settlement-statements`, `/:period`.
 
-### 5.5 Program & quota usage dashboard (NEW)
-- **Purpose:** `bank_program_admin` sees benefit consumption.
-- **Must surface:** per program/period — cardholders served, **趟次 consumed vs quota** (禮遇趟次 remaining), trend, top exceptions. Read; edit policy only if permitted.
+### 5.6 Programs & quota usage — route `/programs`
+
+- **Purpose:** `bank_program_admin` sees benefit consumption and program config.
+- **Persona:** `bank_program_admin`.
+- **Data:** per program/period — program name/code, issuer, coverage, benefit terms; **cardholders served**; **禮遇趟次 consumed vs quota (remaining)**; trend over periods; top exceptions; eligibility policy summary.
+- **States:** loading; empty/not-provisioned; permission-denied; quota healthy/low/exhausted indicator.
+- **Actions:** drill into a program; edit policy **only if permitted**; export.
+- **Constraints:** quota is the bank's headline metric — must be unambiguous; read unless policy allows edit.
+- **API:** `GET /api/tenant/program-usage`, `tenant/service-programs`.
+
+### 5.7 Users & roles — route `/users`
+
+- **Purpose:** manage bank back-office staff access.
+- **Persona:** `bank_program_admin` (admin capability).
+- **Data:** user name, role (`bank_program_admin` / `bank_ops_viewer` / `bank_finance`), status (active/invited/suspended), last activity.
+- **States:** loading; empty; permission-denied.
+- **Actions:** invite; change role; suspend/reactivate (per admin permission).
+- **Constraints:** role set = the three bank personas (+admin); scoped to the issuer tenant; every change audited.
+- **API:** tenant users endpoint (issuer-scoped).
+
+### 5.8 Audit — route `/audit`
+
+- **Purpose:** trace eligibility, dispatch, and settlement events for accountability.
+- **Persona:** `bank_program_admin` (+ compliance).
+- **Data:** event time, actor, event type (eligibility decision / dispatch action / settlement close / access), subject (masked refs), outcome/reason code, linked entity (→ booking / statement).
+- **Filters:** type, actor, period, subject ref.
+- **States:** loading; empty; permission-denied; external-unavailable.
+- **Actions:** filter; open linked entity; export (masked).
+- **Constraints:** issuer/benefit references intact but masked; read-only; **self-audit-aware** (listing audit logs is itself an audited event — never assume row ordering, use find/some).
+- **API:** tenant audit endpoint (issuer-scoped).
 
 ## 6. API mapping (behaviour authority = SD §3)
 
-| Screen | Endpoint(s) |
-|---|---|
-| Bookings list (program) | `GET /api/tenant/orders?programCode&direction&state&period&cardholderRef` (extended projection) |
-| Booking detail | `GET /api/tenant/orders/:orderId` (+ airport/benefit fields) |
-| Contract & SLA | `GET /api/tenant/contracts` (+ `/:contractId`) — **new** |
-| Settlement statement detail | `GET /api/tenant/settlement-statements/:period` — **new** |
-| Program & quota usage | `GET /api/tenant/program-usage` — **new** |
+| Screen                      | Endpoint(s)                                                                                     |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| Bookings list (program)     | `GET /api/tenant/orders?programCode&direction&state&period&cardholderRef` (extended projection) |
+| Booking detail              | `GET /api/tenant/orders/:orderId` (+ airport/benefit fields)                                    |
+| Contract & SLA              | `GET /api/tenant/contracts` (+ `/:contractId`) — **new**                                        |
+| Settlement statement detail | `GET /api/tenant/settlement-statements/:period` — **new**                                       |
+| Program & quota usage       | `GET /api/tenant/program-usage` — **new**                                                       |
 
 (Customer S1/S2: `POST /api/partner/eligibility`, `POST /api/partner/bookings` — existing.)
 
