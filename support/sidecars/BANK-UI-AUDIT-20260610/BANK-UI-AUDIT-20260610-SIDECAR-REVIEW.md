@@ -1,6 +1,6 @@
 # BANK-UI-AUDIT-20260610 Sidecar Review Packet
 
-This packet is a support artifact for `BANK-UI-AUDIT-20260610`. It does not change canonical truth. Its purpose is to hand `Claude2` a reviewer-facing evidence summary for the parent task currently recorded as `review`, using the repo state that actually exists in this worktree on 2026-06-11.
+This packet supersedes the earlier stale review packet for `BANK-UI-AUDIT-20260610`. It is a support artifact only and does not change canonical truth.
 
 ## 1. Scope
 
@@ -10,107 +10,101 @@ This packet is a support artifact for `BANK-UI-AUDIT-20260610`. It does not chan
 - Owner: `Codex`
 - Reviewer: `Claude2`
 - Mutates canonical: `false`
-- Allowed output: support artifact only
 
-## 2. Machine-truth snapshot
+## 2. Correct machine-truth snapshot
 
-`AI_NAME=Codex scripts/ai-status.sh show BANK-UI-AUDIT-20260610` currently reports:
+`AI_NAME=Codex scripts/ai-status.sh show BANK-UI-AUDIT-20260610` on 2026-06-11 reports:
 
-- Status: `review`
-- Owner: `Codex`
-- Reviewer: `Claude`
-- Summary: `/audit (BK_Audit)` should deliver a read-only audit list with event time, actor, masked subject, reason code, booking/statement link, and filters for type / actor / period / subject.
-- Acceptance includes:
-  - `audit list shows event type actor masked-subject reason-code and a link to the related booking/statement;filterable;read-only`
-  - `screen matches its BK_* function in docs/05-ui/drts-design-canvas/bank-screens-*.jsx`
-  - `all cardholder and card references masked`
-  - `zh-TW primary via central t() no inline locale ternaries`
-  - `issuer brand (navy+gold) sourced from a @drts/ui-tokens token set not raw hex so scripts/check_ui_realm_tokens.py passes`
-  - `pnpm --filter @drts/bank-console-web typecheck and build pass`
-- `next` text claims the parent was implemented and validated.
+- Status: `done`
+- Reviewer: `Claude2`
+- Last update: `2026-06-11T11:36:50Z`
+- Integration status: `merged_to_dev`
+- Merge commit: `51f73e2c44ce97b7e18203770c60ac8dfd69ccaa`
 
-This packet exists because the current tree does not support that closeout summary.
+The parent task was already closed before this corrective sidecar packet was prepared. The prior sidecar packet was materially wrong because it treated a stale worker branch snapshot as current machine truth and recommended reopening a task that had already been reviewed, closed, and merged.
 
-## 3. Evidence from the tree
+## 3. What went wrong in the stale packet
 
-### 3.1 `/audit` is still a placeholder
+### 3.1 The sidecar worktree is not current `dev`
 
-`[apps/bank-console-web/app/audit/page.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/app/audit/page.tsx:1)` contains only:
+At the time of this repair, this worker branch is divergent from `origin/dev`:
 
-- import of `PendingScreen`
-- `AuditPage()` returning `<PendingScreen title={t("audit.title")} purpose={t("audit.purpose")} />`
+- `HEAD`: `0a32bf58a927ae9d61369386e49295c6dc42fc42`
+- `merge-base HEAD origin/dev`: `ada56beac2cd0082dac4efc83ec63bba21459bf5`
+- `git rev-list --left-right --count HEAD...origin/dev`: `3 5`
 
-There is no audit list, no filters, no event rows, no masked-subject column, and no booking/statement link surface.
+So the local tree used by the stale packet is not the same source of truth as the merged parent task.
 
-`[apps/bank-console-web/components/pending-screen.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/components/pending-screen.tsx:8)` explicitly documents that the route is an "Honest placeholder" whose "screen body is explicitly pending design". The rendered content at lines 20-49 is a hero, a warning callout, and two informational cards only.
+### 3.2 The placeholder `/audit` page is only evidence of the stale branch
 
-`[apps/bank-console-web/lib/translations.ts](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/lib/translations.ts:3)` also states that the bank console is a shell scaffold and that "every route renders a pending-design placeholder rather than an invented screen." The `audit` copy at lines 67-69 and 129-130 defines title/purpose text only.
+This worktree's `[apps/bank-console-web/app/audit/page.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/app/audit/page.tsx:1)` is still the old placeholder:
 
-### 3.2 The expected bank canvas files are missing
+- imports `PendingScreen`
+- returns only `PendingScreen title={t("audit.title")} purpose={t("audit.purpose")}`
 
-The dispatch script records the expected artifact set as:
+That is not evidence against the parent task. It is evidence that this sidecar branch was not rebased to the merged parent result.
 
-- `docs/05-ui/drts-design-canvas/bank-screens-1.jsx`
-- `docs/05-ui/drts-design-canvas/bank-screens-2.jsx`
-- `docs/05-ui/drts-design-canvas/bank-screens-3.jsx`
-- `docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md`
+### 3.3 `origin/dev` contains the implemented audit screen
 
-See `[scripts/dispatch-bank-console-screens-20260610.sh](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/scripts/dispatch-bank-console-screens-20260610.sh:25)` and lines 92-97 for the specific `BANK-UI-AUDIT-20260610` assignment.
+`git show origin/dev:apps/bank-console-web/app/audit/page.tsx` shows the merged implementation rather than a placeholder. The file includes:
 
-In this worktree, `find docs/05-ui/drts-design-canvas -maxdepth 1 -type f \\( -name 'bank-screens-1.jsx' -o -name 'bank-screens-2.jsx' -o -name 'bank-screens-3.jsx' \\) -print` returns no files. The actual canvas files do not exist under `docs/05-ui/drts-design-canvas/`.
+- `Link` plus `PARTNER_BRAND_TOKENS`
+- explicit `AuditEventType`, `AuditActorCode`, and `AuditReasonCode` unions
+- sample audit rows with masked subjects such as `CH-****-4821`
+- filter parsing for `type`, `actor`, `period`, and `subject`
+- read-only related-entity links to bookings and statements
+- masking checks implemented via `.some` / `.find` style logic rather than `[0]`
 
-This matters because the parent acceptance says the screen must match its `BK_*` canvas function, but there is no `bank-screens-*.jsx` artifact available here to review against.
+This matches the parent task summary and reviewer notes in machine truth.
 
-### 3.3 The requirements doc does not provide a delivered audit screen
+## 4. Authoritative design evidence
 
-`[docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/docs/05-ui/credit-card-airport-transfer-screen-requirements-20260610.md:38)` says the whole `bank-console-web` app needs new design and that every screen needs a canvas.
+The stale packet also incorrectly claimed the bank audit canvas did not exist. The authoritative `BK_Audit` canvas is commit-scoped evidence at:
 
-The same file lists `/audit` in the sitemap at line 49 as "eligibility/dispatch/settlement trail", but §5 spans lines 57-85 and contains functional briefs only for:
+- commit `4dad0cfa`
+- path `docs/05-ui/drts-design-canvas/bank-screens-3.jsx`
+- section starting at line `129`
 
-- bookings list
-- booking detail
-- contracts
-- statement detail
-- programs
+`git show 4dad0cfa:docs/05-ui/drts-design-canvas/bank-screens-3.jsx` contains `function BK_Audit({ theme: th })` with the expected audit table columns:
 
-There is no dedicated §5 audit brief in the current handoff packet. So the repo currently has:
+- 時間
+- 操作者
+- 事件類型
+- 主體 (遮罩)
+- 結果
+- 原因碼
+- 連結實體
 
-- a parent task requiring a concrete `BK_Audit` implementation
-- no `bank-screens-*.jsx` canvas files in tree
-- no per-screen audit brief beyond the sitemap label
-- a runtime route that intentionally stays in placeholder mode
+This is the source the parent task acceptance and review notes were referring to. Even if the file is not present in the stale sidecar branch snapshot, it is incorrect to report that no such canvas existed.
 
-### 3.4 Validation could not be reproduced
+## 5. Parent task evidence already recorded in machine truth
 
-Running `pnpm --filter @drts/bank-console-web typecheck` in this worktree on 2026-06-11 fails immediately:
+The parent `done` record already includes the decisive closeout data:
 
-- `sh: 1: tsc: not found`
-- `WARN Local package.json exists, but node_modules missing, did you mean to install?`
+- review passed by `Claude2`
+- merged commit `51f73e2c44ce97b7e18203770c60ac8dfd69ccaa`
+- `integration_status: merged_to_dev`
+- validation recorded as:
+  - `pnpm --filter @drts/bank-console-web build`
+  - `pnpm --filter @drts/bank-console-web typecheck`
+  - `python3 scripts/check_ui_realm_tokens.py`
 
-So this session cannot confirm the parent acceptance item `typecheck and build pass`. There is also no evidence in this worktree that the claimed validation was rerun here.
+This sidecar does not re-run those validations. Its purpose is narrower: correct the reviewer packet so it aligns with the already-recorded parent truth instead of contradicting it with stale-branch observations.
 
-## 4. Review conclusion from current evidence
+## 6. Reviewer handoff
 
-The parent task summary in `ai-status.json` says `/audit` was implemented as a read-only, filterable audit list and validated. The checked-in tree instead shows a scaffold placeholder. On the evidence available in this worktree, the parent task does not currently satisfy its own acceptance.
+For `Claude2`, the correct disposition of this sidecar is:
 
-The most defensible reviewer action is to treat the parent `review` state as not yet approvable unless separate branch/commit evidence is produced that is not present in this worktree.
+- treat it as a corrective packet that supersedes the earlier stale review artifact
+- do not reopen `BANK-UI-AUDIT-20260610` based on the placeholder file in this stale branch
+- use parent machine truth plus the cited merged-file / historical-canvas evidence as the review basis
 
-## 5. Reviewer handoff for `Claude2`
+Expected conclusion:
 
-Recommended checks:
+- the sidecar packet is now aligned with current machine truth
+- the parent task remains correctly closed as `done` with `merged_to_dev`
 
-- Re-run `AI_NAME=Codex scripts/ai-status.sh show BANK-UI-AUDIT-20260610` and confirm the parent is still `review` with the same acceptance.
-- Inspect `[apps/bank-console-web/app/audit/page.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/app/audit/page.tsx:1)` and `[apps/bank-console-web/components/pending-screen.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-bank-ui-audit-20260610-sidecar-review/apps/bank-console-web/components/pending-screen.tsx:8)`.
-- Confirm that `find docs/05-ui/drts-design-canvas -maxdepth 1 -type f \\( -name 'bank-screens-1.jsx' -o -name 'bank-screens-2.jsx' -o -name 'bank-screens-3.jsx' \\) -print` returns nothing in this tree.
-- Confirm that the requirements doc does not currently contain a dedicated audit screen brief.
-- Treat the failed `pnpm --filter @drts/bank-console-web typecheck` result as "verification unavailable in this worktree", not as a passing validation record.
-
-Recommended disposition:
-
-- Approve this sidecar packet if it accurately captures the mismatch.
-- If reviewing the parent task from this same tree, reopen or block the parent rather than approving it, unless the owner can point to a concrete commit/branch where the real `BK_Audit` implementation and passing verification live.
-
-## 6. Sidecar hygiene
+## 7. Sidecar hygiene
 
 - Task-owned file: `support/sidecars/BANK-UI-AUDIT-20260610/BANK-UI-AUDIT-20260610-SIDECAR-REVIEW.md`
-- No runtime files, machine-truth files, or canonical truth docs were edited by this sidecar packet.
+- No canonical truth, runtime code, or machine-truth files were edited by this support packet
