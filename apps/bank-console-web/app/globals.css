@@ -149,3 +149,529 @@ body {
   background: rgba(20, 184, 166, 0.12);
   border-color: rgba(251, 191, 36, 0.4);
 }
+
+/* ── Home / overview (BK_Home) ───────────────────────────────────────────────
+ * Body styling for the role-cut posture dashboard. Window chrome stays tenant
+ * realm (teal, from BankShell); the issuer (CTBC navy + gold) only accents the
+ * card-benefit data and is consumed via the `--issuer-*` custom properties set
+ * inline on `.bank-home` from BRAND_TEMPLATES.CTBC.tokens.dark — never a raw
+ * brand hex here, so scripts/check_ui_realm_tokens.py stays green. Status colors
+ * (success/danger/warn/info) are UI feedback semantics, not brand identity. */
+.page-shell.bank-home {
+  gap: 16px;
+}
+
+.bank-home-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bank-home-greeting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 650;
+  color: #ffffff;
+}
+
+.issuer-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--issuer-ink);
+  background: var(--issuer-surface);
+  border: 1px solid var(--issuer-border);
+  border-bottom: 2px solid var(--issuer-accent);
+}
+
+.bank-home-subtitle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.bank-home-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.bank-home-readonly {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* KPI strip */
+.bank-home-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.bank-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #0f2a28;
+  border: 1px solid rgba(94, 234, 212, 0.18);
+}
+
+.bank-kpi-label {
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.bank-kpi-value {
+  font-family: "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  color: #ffffff;
+}
+
+.bank-kpi-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.bank-kpi-delta {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--issuer-primary);
+}
+
+/* Two-column grid */
+.bank-home-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+}
+
+.bank-home-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Cards */
+.bank-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: #0f2a28;
+  border: 1px solid rgba(94, 234, 212, 0.18);
+  overflow: hidden;
+}
+
+.bank-card.is-accent {
+  border-top: 2px solid var(--issuer-accent);
+}
+
+.bank-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+}
+
+.bank-card-head h3 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 620;
+  color: #ffffff;
+}
+
+.bank-card-head p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.bank-card-actions {
+  flex-shrink: 0;
+}
+
+.bank-card-body {
+  padding: 4px 16px 16px;
+}
+
+.card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--issuer-primary);
+  text-decoration: none;
+}
+
+.card-link:hover {
+  color: var(--issuer-primary-dark);
+}
+
+/* Pills */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.pill.dot::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.pill.tone-issuer {
+  color: var(--issuer-primary-dark);
+  background: var(--issuer-surface);
+  border: 1px solid var(--issuer-border);
+}
+
+.pill.tone-accent {
+  color: var(--issuer-accent);
+  background: var(--issuer-accent-soft, rgba(168, 119, 27, 0.18));
+  border: 1px solid rgba(210, 161, 75, 0.4);
+}
+
+.pill.tone-info {
+  color: #99f6e4;
+  background: rgba(20, 184, 166, 0.16);
+  border: 1px solid rgba(94, 234, 212, 0.36);
+}
+
+.pill.tone-neutral {
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.pill.tone-success {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.15);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+
+.pill.tone-danger {
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 113, 113, 0.42);
+}
+
+.pill.tone-warning {
+  color: #fcd34d;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.42);
+}
+
+/* Table */
+.bank-table-scroll {
+  overflow-x: auto;
+}
+
+.bank-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.bank-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(94, 234, 212, 0.18);
+}
+
+.bank-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+  vertical-align: middle;
+}
+
+.bank-table tbody tr:last-child td,
+.bank-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.bank-id {
+  font-family: "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 600;
+  color: var(--issuer-primary);
+}
+
+.mono-cell {
+  font-family: "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+}
+
+.muted {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Exceptions */
+.exception-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exception {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left-width: 3px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.exception.is-warning {
+  border-left-color: #fbbf24;
+}
+
+.exception.is-danger {
+  border-left-color: #f87171;
+}
+
+.exception-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.exception-head strong {
+  font-size: 12.5px;
+  color: #ffffff;
+}
+
+.exception-code {
+  font-family: "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.exception p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+/* Quota bars */
+.quota-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  column-gap: 8px;
+  margin-bottom: 14px;
+}
+
+.quota-row:last-child {
+  margin-bottom: 0;
+}
+
+.quota-label {
+  grid-column: 1 / 2;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.quota-figures {
+  grid-column: 1 / 3;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.quota-used {
+  font-family: "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: #ffffff;
+}
+
+.quota-total {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.quota-pct {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--issuer-accent);
+}
+
+.quota-track {
+  grid-column: 1 / 3;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.quota-fill {
+  height: 100%;
+  background: var(--issuer-accent);
+}
+
+.quota-remaining {
+  grid-column: 1 / 3;
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* SLA rows */
+.sla-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.sla-row:last-of-type {
+  border-bottom: none;
+}
+
+.sla-label {
+  width: 110px;
+  min-width: 110px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.sla-values {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sla-value {
+  font-family: "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.sla-value.is-breach {
+  color: #fca5a5;
+}
+
+.sla-target {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.sla-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Definition list (settlement) */
+.bank-dl {
+  display: grid;
+  gap: 10px 16px;
+}
+
+.bank-dl.cols-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.dl-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dl-key {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.dl-val {
+  font-size: 13px;
+  color: #ffffff;
+}
+
+.dl-val.mono-cell {
+  font-size: 12.5px;
+}
+
+/* Empty / permission-denied state */
+.empty-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.empty-state .lock-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Responsive: collapse the two-column layouts on narrow viewports */
+@media (max-width: 900px) {
+  .bank-home-kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .bank-home-grid {
+    grid-template-columns: 1fr;
+  }
+}
