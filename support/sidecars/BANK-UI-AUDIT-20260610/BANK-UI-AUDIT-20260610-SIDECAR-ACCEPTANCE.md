@@ -1,6 +1,6 @@
 # BANK-UI-AUDIT-20260610 Acceptance Packet & Dependency Map
 
-This packet is a support-only sidecar for `BANK-UI-AUDIT-20260610`. It does not edit canonical truth, runtime behavior, or the parent task record. Its job is to give the assigned sidecar reviewer (`Codex2`) a stable acceptance checklist, dependency map, and evidence index before the parent owner finishes closeout.
+This packet is a support-only sidecar for `BANK-UI-AUDIT-20260610`. It does not edit canonical truth, runtime behavior, or the parent task record. Its job is to give the assigned sidecar reviewer (`Claude2`) a stable acceptance checklist, dependency map, and evidence index, plus a corrected record of what changed between original drafting and owner closeout.
 
 Anchors used here come from:
 
@@ -19,7 +19,7 @@ Anchors used here come from:
 - **Parent Task:** `BANK-UI-AUDIT-20260610`
 - **Helper Kind:** `acceptance_packet`
 - **Sidecar Owner:** `Codex`
-- **Sidecar Reviewer:** `Codex2`
+- **Sidecar Reviewer:** `Claude2`
 - **Mutates Canonical:** `false`
 - **Artifact:** `support/sidecars/BANK-UI-AUDIT-20260610/BANK-UI-AUDIT-20260610-SIDECAR-ACCEPTANCE.md`
 
@@ -36,9 +36,9 @@ Guardrails:
 
 | Field | Value |
 | --- | --- |
-| Status | `in_progress` |
+| Status | `review_approved` |
 | Owner | `Codex` |
-| Reviewer | `Codex2` |
+| Reviewer | `Claude2` |
 | Depends on | `CCAT-APP-SCAFFOLD-20260610` |
 | Task class | `sidecar` |
 | Helper parent | `BANK-UI-AUDIT-20260610` |
@@ -51,20 +51,16 @@ Guardrails:
 | Field | Value |
 | --- | --- |
 | Title | `BANK-UI-AUDIT: bank-console audit (BK_Audit)` |
-| Status | `review` |
+| Status | `done` |
 | Owner | `Codex` |
 | Reviewer | `Claude2` |
 | Depends on | `CCAT-APP-SCAFFOLD-20260610` |
-| Branch closeout target | `INTEGRATION_STATUS=branch_pushed` |
-| Remote branch in `next` note | `origin/codex/bank-ui-audit-20260610` |
+| Integration status | `merged_to_dev` |
+| Merged ref | `origin/dev` |
+| Merge / closeout hash | `51f73e2c44ce97b7e18203770c60ac8dfd69ccaa` |
 | Review evidence hash | `cd2115b535dfc81e2304b42cab88c1b859900056` |
-| Owner closeout metadata hash | `10fb7403a0628dcbea6f2ab4aaba5aff29c8af26` |
 
-The parent task's `next` field is important:
-
-- the implementation was already approved once
-- a later owner progress update regressed machine truth away from `review_approved`
-- reviewer re-approval is needed before owner can mark the parent task `done`
+The parent task is already closed out in machine truth. That matters because the original version of this packet was drafted while the parent still appeared to need re-approval. Reviewer notes later confirmed that premise was superseded by supervisor timing drift rather than by a defect in the parent implementation.
 
 ## 3. Dependency Map
 
@@ -157,7 +153,7 @@ These are the reviewer-facing gates for `BANK-UI-AUDIT-20260610`, normalized fro
 - [ ] `pnpm --filter @drts/bank-console-web typecheck`
 - [ ] `pnpm --filter @drts/bank-console-web build`
 - [ ] `python3 scripts/check_ui_realm_tokens.py` shows no `bank-console-web` findings
-- [ ] reviewer re-approval is recorded so the parent owner can safely transition from `review` to `done`
+- [x] reviewer approval and owner closeout are already recorded in machine truth at `51f73e2c` with `INTEGRATION_STATUS=merged_to_dev`
 
 ## 6. Evidence Gaps And Review Risks
 
@@ -185,25 +181,26 @@ Therefore:
 
 ### C. Reviewer/owner metadata drift already happened once
 
-The parent task `next` field explicitly says a closeout attempt regressed machine truth from `review_approved` back to a non-final state. Reviewer should confirm any new approval is followed by owner closeout with:
+The sidecar and parent moved through different supervisor moments. Reviewer notes confirmed two timing drifts that should stay visible in this packet:
 
-- pushed branch reference
-- commit hash / subject
-- `INTEGRATION_STATUS=branch_pushed`
+- the sidecar draft still named `Codex2` after the reviewer had been reassigned to `Claude2`
+- the packet still described the parent as awaiting re-approval even though owner closeout later landed at `51f73e2c` on `origin/dev`
+
+These are packet-maintenance corrections, not reasons to reopen the parent task.
 
 ## 7. Packet Completeness Check
 
 - [x] The packet stays inside `support/sidecars/BANK-UI-AUDIT-20260610/`
 - [x] The packet records the sidecar task's machine-truth envelope
-- [x] The packet records the parent task's current `review` state and re-approval requirement
+- [x] The packet records that the parent task is already `done` / `merged_to_dev` and preserves the earlier timing drift as review context
 - [x] The direct dependency `CCAT-APP-SCAFFOLD-20260610` is anchored to repo evidence and commit `91423a69`
 - [x] The packet distinguishes current worktree placeholder state from approved parent-branch evidence
 - [x] The packet names the missing bank-screen canvas files as an evidence gap instead of silently inventing replacements
 
-## 8. Reviewer Handoff Notes For `Codex2`
+## 8. Reviewer Handoff Notes For `Claude2`
 
-1. Reconfirm the sidecar task is still support-only and still owned by `Codex` with reviewer `Codex2`.
-2. Reconfirm the parent task still shows `status=review` and the `next` field still requests re-approval before owner closeout.
+1. Reconfirm the sidecar task is still support-only and still owned by `Codex` with reviewer `Claude2`.
+2. Reconfirm the parent task is already closed out as `done` with `INTEGRATION_STATUS=merged_to_dev` at `51f73e2c`, and treat any older re-approval wording as historical context only.
 3. Use `origin/codex/bank-ui-audit-20260610` plus commits `cd2115b5` and `10fb7403` as the parent evidence spine; do not treat this sidecar worktree's placeholder `/audit` page as parent implementation truth.
 4. Keep the dependency story narrow: the only formal prerequisite is the scaffold task, evidenced by commit `91423a69` and the current `apps/bank-console-web` shell.
-5. Approval of this sidecar should verify that the only task-scoped file addition is this packet plus the status transitions recorded through `scripts/ai-status.sh`.
+5. Owner closeout of this sidecar should verify that the only task-scoped file change is this packet plus the status transitions recorded through `scripts/ai-status.sh`.
