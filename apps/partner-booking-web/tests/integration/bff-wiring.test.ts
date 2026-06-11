@@ -85,6 +85,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("partner-booking-web BFF wiring", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete process.env.DRTS_INTERNAL_KEY;
   });
 
   it("resolves public partner entries from backend authority", async () => {
@@ -191,6 +192,31 @@ describe("partner-booking-web BFF wiring", () => {
       code: "ELIGIBILITY_VERIFICATION_REQUIRED",
       status: 422,
     });
+  });
+
+  it("adds the server-only internal key to authority requests when configured", async () => {
+    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: activeEntry,
+        meta: {
+          requestId: "req-125",
+          timestamp: "2026-05-19T00:00:02.000Z",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPublicPartnerEntry("ctbc")).resolves.toEqual(activeEntry);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_URL}/api/partner/entries/ctbc`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-drts-internal-key": "dev-internal-key",
+        }),
+      }),
+    );
   });
 
   it("overlays backend branding metadata on top of the local template", () => {
