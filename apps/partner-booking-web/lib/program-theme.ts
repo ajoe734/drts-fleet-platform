@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
+import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
 
 /**
  * Per-program theming for the partner-booking white-label flows.
@@ -84,119 +84,104 @@ export interface PartnerProgramTheme {
 }
 
 const CTBC_BRAND = BRAND_TEMPLATES.CTBC;
+const FUBON_BRAND = BRAND_TEMPLATES.FUBON;
+const LION_BRAND = BRAND_TEMPLATES.LION;
+
+function createProgramThemeFromBrand(params: {
+  kind: PartnerProgramKind;
+  slug: string;
+  issuerName: string;
+  issuerLabel: string;
+  programLabel: string;
+  programName: string;
+  benefitNoun: string;
+  ctaLabel: string;
+  brand: PartnerBrandTemplate;
+}): PartnerProgramTheme {
+  const {
+    kind,
+    slug,
+    issuerName,
+    issuerLabel,
+    programLabel,
+    programName,
+    benefitNoun,
+    ctaLabel,
+    brand,
+  } = params;
+  return {
+    kind,
+    slug,
+    host: brand.host,
+    issuerName,
+    issuerLabel,
+    programLabel,
+    programName,
+    tagline: brand.tagline,
+    benefitNoun,
+    ctaLabel,
+    badgeText: brand.cardArt.badgeText,
+    primary: brand.primary,
+    primaryDark: brand.primaryDark,
+    accent: brand.accent,
+    ink: brand.ink,
+    surface: {
+      fg: brand.surface.fg,
+      hi: brand.surface.hi,
+      bg: brand.surface.bg,
+      border: brand.surface.border,
+    },
+    chrome: {
+      pageBackground: brand.theme.pageBackground,
+      pageForeground: brand.theme.pageForeground,
+      pageMuted: brand.theme.pageMuted,
+      panel: brand.theme.panel,
+      panelBorder: brand.theme.panelBorder,
+      accentText: brand.theme.accentText,
+      accentSoft: brand.theme.accentSoft,
+    },
+    hotline: {
+      label: brand.hotline.label,
+      phone: brand.hotline.phone,
+      note: brand.hotline.note,
+    },
+  };
+}
 
 export const PARTNER_PROGRAM_THEMES = {
-  card: {
+  card: createProgramThemeFromBrand({
     kind: "card",
     slug: "card",
-    host: "ride.ctbc.com.tw",
     issuerName: "中信銀行",
     issuerLabel: "CTBC",
     programLabel: "信用卡機場接送",
     programName: "卡友禮賓接送",
-    tagline: "卡友專屬機場接送 · 全年免費趟次",
     benefitNoun: "禮遇趟次",
     ctaLabel: "立即叫車",
-    badgeText: "C",
-    primary: CTBC_BRAND.primary,
-    primaryDark: CTBC_BRAND.primaryDark,
-    accent: CTBC_BRAND.accent,
-    ink: CTBC_BRAND.ink,
-    surface: {
-      fg: CTBC_BRAND.surface.fg,
-      hi: CTBC_BRAND.surface.hi,
-      bg: CTBC_BRAND.surface.bg,
-      border: CTBC_BRAND.surface.border,
-    },
-    chrome: {
-      pageBackground: CTBC_BRAND.theme.pageBackground,
-      pageForeground: CTBC_BRAND.theme.pageForeground,
-      pageMuted: CTBC_BRAND.theme.pageMuted,
-      panel: CTBC_BRAND.theme.panel,
-      panelBorder: CTBC_BRAND.theme.panelBorder,
-      accentText: CTBC_BRAND.theme.accentText,
-      accentSoft: CTBC_BRAND.theme.accentSoft,
-    },
-    hotline: {
-      label: "24 小時禮賓專線",
-      phone: "0800-024-365",
-      note: "您將被轉接至中信銀行卡友禮賓客服專員。",
-    },
-  },
-  insurance: {
+    brand: CTBC_BRAND,
+  }),
+  insurance: createProgramThemeFromBrand({
     kind: "insurance",
     slug: "insurance",
-    host: "claim.fubon-ins.com.tw",
     issuerName: "富邦產險",
     issuerLabel: "Fubon",
     programLabel: "保險理賠代步",
     programName: "理賠代步接送",
-    tagline: "事故理賠期間代步接送 · 額度內免費",
     benefitNoun: "理賠額度",
     ctaLabel: "申請代步接送",
-    badgeText: "F",
-    primary: "#0E6E50",
-    primaryDark: "#063D2C",
-    accent: "#2FA37A",
-    ink: "#0C1A14",
-    surface: {
-      fg: "#0E6E50",
-      hi: "#2FA37A",
-      bg: "#E6F5EE",
-      border: "#B9E2D0",
-    },
-    chrome: {
-      pageBackground: "#F3F8F5",
-      pageForeground: "#14241C",
-      pageMuted: "#566860",
-      panel: "#FFFFFF",
-      panelBorder: "rgba(20, 36, 28, 0.12)",
-      accentText: "#063D2C",
-      accentSoft: "rgba(14, 110, 80, 0.10)",
-    },
-    hotline: {
-      label: "理賠代步服務專線",
-      phone: "0800-073-588",
-      note: "您將被轉接至富邦產險理賠代步服務專員。",
-    },
-  },
-  travel: {
+    brand: FUBON_BRAND,
+  }),
+  travel: createProgramThemeFromBrand({
     kind: "travel",
     slug: "travel",
-    host: "booking.lion-travel.com.tw",
     issuerName: "雄獅旅遊",
     issuerLabel: "Lion",
     programLabel: "旅行社團體接送",
     programName: "團體接送",
-    tagline: "團體行程接送 · roster + batching",
     benefitNoun: "團體席次",
     ctaLabel: "確認席次並前往預約",
-    badgeText: "L",
-    primary: "#B0420E",
-    primaryDark: "#6E2806",
-    accent: "#E07B3A",
-    ink: "#2C170D",
-    surface: {
-      fg: "#B0420E",
-      hi: "#E07B3A",
-      bg: "#FCEEE2",
-      border: "#F0CFB9",
-    },
-    chrome: {
-      pageBackground: "#F8F1EB",
-      pageForeground: "#2C170D",
-      pageMuted: "#73594D",
-      panel: "#FFFFFF",
-      panelBorder: "rgba(44, 23, 13, 0.12)",
-      accentText: "#6E2806",
-      accentSoft: "rgba(176, 66, 14, 0.10)",
-    },
-    hotline: {
-      label: "雄獅團體服務專線",
-      phone: "0800-090-068",
-      note: "您將被轉接至雄獅旅遊團體接送服務專員。",
-    },
-  },
+    brand: LION_BRAND,
+  }),
 } as const satisfies Record<PartnerProgramKind, PartnerProgramTheme>;
 
 /** Keyword → program kind, evaluated in order (insurance / travel before card). */
