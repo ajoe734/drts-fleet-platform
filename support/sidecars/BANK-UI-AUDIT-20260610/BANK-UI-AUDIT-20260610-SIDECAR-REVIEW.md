@@ -1,6 +1,6 @@
 # BANK-UI-AUDIT-20260610 Sidecar Review Packet
 
-This packet is a support artifact for `BANK-UI-AUDIT-20260610`. It does not change canonical truth. Its purpose is to hand `Codex2` a reviewer-facing evidence summary for the parent task currently recorded as `review`, using the repo state that actually exists in this worktree on 2026-06-11.
+This packet is a support artifact for `BANK-UI-AUDIT-20260610`. It does not change canonical truth. Its purpose is to hand `Claude2` a reviewer-facing evidence summary for the parent task currently recorded as `review`, using the repo state that actually exists in this worktree on 2026-06-11.
 
 ## 1. Scope
 
@@ -8,7 +8,7 @@ This packet is a support artifact for `BANK-UI-AUDIT-20260610`. It does not chan
 - Parent task: `BANK-UI-AUDIT-20260610`
 - Helper kind: `review_packet`
 - Owner: `Codex`
-- Reviewer: `Codex2`
+- Reviewer: `Claude2`
 - Mutates canonical: `false`
 - Allowed output: support artifact only
 
@@ -95,7 +95,7 @@ The parent task summary in `ai-status.json` says `/audit` was implemented as a r
 
 The most defensible reviewer action is to treat the parent `review` state as not yet approvable unless separate branch/commit evidence is produced that is not present in this worktree.
 
-## 5. Reviewer handoff for `Codex2`
+## 5. Reviewer handoff for `Claude2`
 
 Recommended checks:
 
