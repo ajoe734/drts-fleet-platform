@@ -3595,6 +3595,7 @@ export interface TenantPayableLineItem {
 
 export type TenantServiceProgramType =
   | "enterprise_dispatch"
+  | "card_benefit_airport"
   | "credit_card_airport_transfer"
   | "insurance_replacement_vehicle"
   | "travel_agency_transfer"
