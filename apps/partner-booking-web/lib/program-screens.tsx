@@ -110,6 +110,25 @@ export function getProgramScreenHref(
 type ScreenTone = "neutral" | "primary" | "accent" | "success" | "danger";
 
 function programDemo(theme: PartnerProgramTheme) {
+  if (theme.kind === "travel") {
+    const remaining = 12;
+    const total = 12;
+    return {
+      remaining,
+      total,
+      used: total - remaining,
+      riderName: "林〇雄",
+      pickup: "桃園機場 第一航廈",
+      pickupDetail: "入境大廳北側遊覽車上車處",
+      dropoff: "台北車站 → 西門商旅",
+      dropoffDetail: "第 1 批團體接駁",
+      departureTime: "2026-06-28 14:20",
+      bookingRef: "LION-TPE-0628",
+      driverName: "黃建宏",
+      vehicle: "中型巴士 · ARJ-9920",
+    };
+  }
+
   const remaining = 9;
   const total = 12;
   return {
@@ -128,12 +147,23 @@ function programDemo(theme: PartnerProgramTheme) {
   };
 }
 
-function toneStyle(theme: PartnerProgramTheme, tone: ScreenTone): CSSProperties {
+function toneStyle(
+  theme: PartnerProgramTheme,
+  tone: ScreenTone,
+): CSSProperties {
   switch (tone) {
     case "success":
-      return { color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0" };
+      return {
+        color: "#166534",
+        background: "#f0fdf4",
+        border: "1px solid #bbf7d0",
+      };
     case "danger":
-      return { color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca" };
+      return {
+        color: "#b91c1c",
+        background: "#fef2f2",
+        border: "1px solid #fecaca",
+      };
     case "accent":
       return {
         color: theme.primaryDark,
@@ -147,7 +177,11 @@ function toneStyle(theme: PartnerProgramTheme, tone: ScreenTone): CSSProperties 
         border: `1px solid ${theme.surface.border}`,
       };
     default:
-      return { color: "#56657f", background: "#f1f3f8", border: "1px solid #dde3ec" };
+      return {
+        color: "#56657f",
+        background: "#f1f3f8",
+        border: "1px solid #dde3ec",
+      };
   }
 }
 
@@ -303,7 +337,9 @@ function Row({
       <span
         style={{
           color: "#0e1424",
-          fontFamily: mono ? '"JetBrains Mono", ui-monospace, monospace' : "inherit",
+          fontFamily: mono
+            ? '"JetBrains Mono", ui-monospace, monospace'
+            : "inherit",
           fontWeight: mono ? 600 : 500,
           textAlign: "right",
         }}
@@ -442,6 +478,135 @@ function renderScreen(
   const eligibilityHref = getProgramScreenHref(basePath, "eligibility");
 
   if (screen === "landing") {
+    if (theme.kind === "travel") {
+      const roster = [
+        ["林〇雄", "領隊 · guide", "舉牌聯絡"],
+        ["陳〇如", "旅客", "輪椅"],
+        ["吳〇翰 +2", "家庭 3 人", "兒童座椅 ×1"],
+        ["其餘 6 名旅客", "roster", ""],
+      ] as const;
+      const batches = [
+        ["第 1 批 · 入境接機", "06-28 14:20", "中型巴士 ×1 · 12 / 12 席"],
+        ["第 2 批 · 飯店接駁", "06-28 16:00", "商務車 ×2 · 8 席"],
+      ] as const;
+
+      return (
+        <>
+          <Band
+            theme={theme}
+            title="團體席次與分批"
+            subtitle="旅行社接送 · roster + batching"
+            trailing="GROUP"
+          />
+          <Card
+            title="本團席次"
+            style={{
+              borderColor: theme.surface.border,
+              background: theme.surface.bg,
+            }}
+          >
+            <Row label="團體 / 訂單參照" value={demo.bookingRef} mono />
+            <Row label="行程連結" value="LION 日本關西 5 日 → 查看" />
+            <Row label="接送段數" value="4 段 · 第 1 段" mono />
+            <div style={{ marginTop: "12px" }}>
+              <BenefitMeter
+                theme={theme}
+                remaining={demo.remaining}
+                total={demo.total}
+              />
+            </div>
+          </Card>
+          <Card title="乘客名單 · roster (12)">
+            {roster.map(([name, role, tag], index) => (
+              <div
+                key={name}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: "10px 0",
+                  borderBottom:
+                    index < roster.length - 1
+                      ? "1px dashed #f1f3f8"
+                      : "1px solid transparent",
+                }}
+              >
+                <div
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "9px",
+                    background: theme.surface.bg,
+                    color: theme.primary,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "12px",
+                    fontWeight: 800,
+                  }}
+                >
+                  {name.slice(0, 1)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700 }}>
+                    {name}
+                  </div>
+                  <div
+                    style={{ fontSize: "11px", color: theme.chrome.pageMuted }}
+                  >
+                    {role}
+                  </div>
+                </div>
+                {tag ? <Chip theme={theme} tone="neutral" label={tag} /> : null}
+              </div>
+            ))}
+          </Card>
+          <Card title="分批接送 · pickup batching">
+            {batches.map(([title, time, detail], index) => (
+              <div
+                key={title}
+                style={{
+                  display: "grid",
+                  gap: "4px",
+                  padding: "10px 0",
+                  borderBottom:
+                    index < batches.length - 1
+                      ? "1px dashed #f1f3f8"
+                      : "1px solid transparent",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px",
+                  }}
+                >
+                  <strong style={{ fontSize: "13px", color: "#0e1424" }}>
+                    {title}
+                  </strong>
+                  <Chip theme={theme} tone="accent" label={time} />
+                </div>
+                <div
+                  style={{ fontSize: "12px", color: theme.chrome.pageMuted }}
+                >
+                  {detail}
+                </div>
+              </div>
+            ))}
+          </Card>
+          <Button
+            theme={theme}
+            label="確認席次並前往預約"
+            href={reviewHref}
+            primary
+          />
+          <Button theme={theme} label="查看資格確認" href={eligibilityHref} />
+        </>
+      );
+    }
+
     const services: ReadonlyArray<readonly [string, string, string]> = [
       ["機場接送", "桃園 / 松山 · 商務車", "AIRPORT"],
       ["優先派車", "都會區 · 8 分鐘內到車", "PRIORITY"],
@@ -512,7 +677,9 @@ function renderScreen(
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "13px", fontWeight: 700 }}>{title}</div>
-                <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
+                <div
+                  style={{ fontSize: "11px", color: theme.chrome.pageMuted }}
+                >
                   {detail}
                 </div>
               </div>
@@ -543,7 +710,11 @@ function renderScreen(
         <Card title="您的權益">
           <Row label="方案" value={theme.programLabel} />
           <Row label="提供單位" value={theme.issuerName} />
-          <Row label={`本年度${theme.benefitNoun}`} value={`${demo.total} 趟`} mono />
+          <Row
+            label={`本年度${theme.benefitNoun}`}
+            value={`${demo.total} 趟`}
+            mono
+          />
           <Row label="服務範圍" value="台北 · 桃園 · 新竹" />
         </Card>
         <Card title="授權同意">
@@ -586,6 +757,60 @@ function renderScreen(
   }
 
   if (screen === "review") {
+    if (theme.kind === "travel") {
+      return (
+        <>
+          <Band
+            theme={theme}
+            title="下單前確認"
+            subtitle="團體接送 · 第 1 段"
+          />
+          <Card>
+            <Row label="上車" value={demo.pickup} />
+            <Row label="" value={demo.pickupDetail} />
+            <Row label="下車" value={demo.dropoff} />
+            <Row label="" value={demo.dropoffDetail} />
+          </Card>
+          <Card title="團體與 roster">
+            <Row label="團體 / 訂單參照" value={demo.bookingRef} mono />
+            <Row label="團體席次" value="12 / 12 席" mono />
+            <Row label="行李" value="18 件" />
+            <Row label="集合點" value="入境大廳北側遊覽車上車處" />
+            <Row label="時間" value={demo.departureTime} mono />
+          </Card>
+          <Card
+            title="車輛配置與費用"
+            style={{
+              borderColor: theme.surface.border,
+              background: theme.surface.bg,
+            }}
+          >
+            <Row label="車輛配置" value="中型巴士 ×1" />
+            <Row label="接送段數" value="第 1 / 4 段" mono />
+            <Row label="費用" value="已含團費" />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                marginTop: "10px",
+                borderRadius: "10px",
+                background: "#ffffff",
+                padding: "10px",
+              }}
+            >
+              <Chip theme={theme} tone="accent" label="roster verified" />
+              <span style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
+                roster 與團體席次已對齊，可直接送出派車。
+              </span>
+            </div>
+          </Card>
+          <Button theme={theme} label="確認預約" href={successHref} primary />
+          <Button theme={theme} label="返回修改" href={landingHref} />
+        </>
+      );
+    }
+
     return (
       <>
         <Band theme={theme} title="下單前確認" subtitle={theme.programName} />
@@ -603,7 +828,10 @@ function renderScreen(
         </Card>
         <Card
           title={`費用與${theme.benefitNoun}`}
-          style={{ borderColor: theme.surface.border, background: theme.surface.bg }}
+          style={{
+            borderColor: theme.surface.border,
+            background: theme.surface.bg,
+          }}
         >
           <Row label="基本費用" value="NT$ 1,580" mono />
           <Row label={`${theme.programName}折抵`} value="-NT$ 1,580" mono />
@@ -671,7 +899,9 @@ function renderScreen(
               ✓
             </div>
             <div>
-              <div style={{ fontSize: "14px", fontWeight: 800 }}>預約已成立</div>
+              <div style={{ fontSize: "14px", fontWeight: 800 }}>
+                預約已成立
+              </div>
               <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
                 {theme.programName}
               </div>
@@ -714,13 +944,20 @@ function renderScreen(
               >
                 {index + 1}
               </div>
-              <div style={{ fontSize: "12px", lineHeight: 1.6, color: "#0e1424" }}>
+              <div
+                style={{ fontSize: "12px", lineHeight: 1.6, color: "#0e1424" }}
+              >
                 {step}
               </div>
             </div>
           ))}
         </Card>
-        <Button theme={theme} label="查看行程追蹤" href={trackingHref} primary />
+        <Button
+          theme={theme}
+          label="查看行程追蹤"
+          href={trackingHref}
+          primary
+        />
         <Button theme={theme} label="返回入口" href={landingHref} />
       </>
     );
@@ -811,7 +1048,11 @@ function renderScreen(
           <Row label="方案" value={theme.programLabel} />
           <Row label="您將支付" value="免費" />
         </Card>
-        <Button theme={theme} label="聯絡客服" href={getProgramScreenHref(basePath, "error")} />
+        <Button
+          theme={theme}
+          label="聯絡客服"
+          href={getProgramScreenHref(basePath, "error")}
+        />
       </>
     );
   }
@@ -821,16 +1062,24 @@ function renderScreen(
       <>
         <Band theme={theme} title="發生錯誤" subtitle="請稍後再試或聯絡客服" />
         <Card>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+          >
             <Chip theme={theme} tone="danger" label="SERVICE_ERROR" />
-            <div style={{ fontSize: "13px", lineHeight: 1.7, color: "#0e1424" }}>
-              系統暫時無法處理您的請求。您的{theme.benefitNoun}並未被扣除，請稍後再試。
+            <div
+              style={{ fontSize: "13px", lineHeight: 1.7, color: "#0e1424" }}
+            >
+              系統暫時無法處理您的請求。您的{theme.benefitNoun}
+              並未被扣除，請稍後再試。
             </div>
           </div>
         </Card>
         <Card
           title={theme.hotline.label}
-          style={{ borderColor: theme.surface.border, background: theme.surface.bg }}
+          style={{
+            borderColor: theme.surface.border,
+            background: theme.surface.bg,
+          }}
         >
           <div
             style={{
@@ -842,7 +1091,13 @@ function renderScreen(
           >
             {theme.hotline.phone}
           </div>
-          <div style={{ marginTop: "6px", fontSize: "11px", color: theme.chrome.pageMuted }}>
+          <div
+            style={{
+              marginTop: "6px",
+              fontSize: "11px",
+              color: theme.chrome.pageMuted,
+            }}
+          >
             {theme.hotline.note}
           </div>
         </Card>
@@ -892,13 +1147,19 @@ function renderScreen(
                 flexShrink: 0,
               }}
             />
-            <div style={{ fontSize: "13px", lineHeight: 1.65, color: "#0e1424" }}>
+            <div
+              style={{ fontSize: "13px", lineHeight: 1.65, color: "#0e1424" }}
+            >
               {item}
             </div>
           </div>
         ))}
       </Card>
-      <Button theme={theme} label="聯絡客服" href={getProgramScreenHref(basePath, "error")} />
+      <Button
+        theme={theme}
+        label="聯絡客服"
+        href={getProgramScreenHref(basePath, "error")}
+      />
       <Button theme={theme} label="返回入口" href={landingHref} />
     </>
   );
@@ -995,7 +1256,13 @@ export function ProgramBookingFlow({
         })}
       </nav>
 
-      <div style={{ fontSize: "13px", lineHeight: 1.6, color: theme.chrome.pageMuted }}>
+      <div
+        style={{
+          fontSize: "13px",
+          lineHeight: 1.6,
+          color: theme.chrome.pageMuted,
+        }}
+      >
         {activeMeta.summary}
       </div>
 

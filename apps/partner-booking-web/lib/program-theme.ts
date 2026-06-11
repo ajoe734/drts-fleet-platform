@@ -164,45 +164,46 @@ export const PARTNER_PROGRAM_THEMES = {
     issuerName: "雄獅旅遊",
     issuerLabel: "Lion",
     programLabel: "旅行社團體接送",
-    programName: "團體機場接送",
-    tagline: "團體行程機場接送 · 依訂單席次派車",
+    programName: "團體接送",
+    tagline: "團體行程接送 · roster + batching",
     benefitNoun: "團體席次",
-    ctaLabel: "預約團體接送",
+    ctaLabel: "確認席次並前往預約",
     badgeText: "L",
-    primary: "#E2231A",
-    primaryDark: "#A4160F",
-    accent: "#F5A623",
-    ink: "#241010",
+    primary: "#B0420E",
+    primaryDark: "#6E2806",
+    accent: "#E07B3A",
+    ink: "#2C170D",
     surface: {
-      fg: "#E2231A",
-      hi: "#F5A623",
-      bg: "#FDECEA",
-      border: "#F6C7C2",
+      fg: "#B0420E",
+      hi: "#E07B3A",
+      bg: "#FCEEE2",
+      border: "#F0CFB9",
     },
     chrome: {
-      pageBackground: "#FCF4F2",
-      pageForeground: "#2A1512",
-      pageMuted: "#6E5651",
+      pageBackground: "#F8F1EB",
+      pageForeground: "#2C170D",
+      pageMuted: "#73594D",
       panel: "#FFFFFF",
-      panelBorder: "rgba(42, 21, 18, 0.12)",
-      accentText: "#A4160F",
-      accentSoft: "rgba(226, 35, 26, 0.10)",
+      panelBorder: "rgba(44, 23, 13, 0.12)",
+      accentText: "#6E2806",
+      accentSoft: "rgba(176, 66, 14, 0.10)",
     },
     hotline: {
-      label: "團體服務專線",
+      label: "雄獅團體服務專線",
       phone: "0800-090-068",
-      note: "您將被轉接至雄獅旅遊團體出團服務專員。",
+      note: "您將被轉接至雄獅旅遊團體接送服務專員。",
     },
   },
 } as const satisfies Record<PartnerProgramKind, PartnerProgramTheme>;
 
 /** Keyword → program kind, evaluated in order (insurance / travel before card). */
-const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<readonly [RegExp, PartnerProgramKind]> =
-  [
-    [/insur|claim|fubon|理賠|代步/i, "insurance"],
-    [/travel|tour|group|lion|雄獅|團體|旅行/i, "travel"],
-    [/card|credit|ride|ctbc|信用卡|機場|禮賓/i, "card"],
-  ];
+const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<
+  readonly [RegExp, PartnerProgramKind]
+> = [
+  [/insur|claim|fubon|理賠|代步/i, "insurance"],
+  [/travel|tour|group|lion|雄獅|團體|旅行/i, "travel"],
+  [/card|credit|ride|ctbc|信用卡|機場|禮賓/i, "card"],
+];
 
 export const DEFAULT_PARTNER_PROGRAM_KIND: PartnerProgramKind = "card";
 

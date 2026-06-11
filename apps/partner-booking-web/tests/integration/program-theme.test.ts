@@ -75,9 +75,7 @@ describe("partner-booking per-program theming", () => {
       }).kind,
     ).toBe("travel");
 
-    expect(getProgramThemeForEntry({}).kind).toBe(
-      DEFAULT_PARTNER_PROGRAM_KIND,
-    );
+    expect(getProgramThemeForEntry({}).kind).toBe(DEFAULT_PARTNER_PROGRAM_KIND);
   });
 
   it("emits shared and program-scoped CSS variables", () => {
@@ -87,6 +85,14 @@ describe("partner-booking per-program theming", () => {
     expect(vars["--pbk-primary"]).toBe(theme.primary);
     expect(vars["--pbk-primary-dark"]).toBe(theme.primaryDark);
     expect(vars["--pbk-accent-strong"]).toBe(theme.accent);
+  });
+
+  it("keeps the travel palette aligned with the canvas theme", () => {
+    const theme = getProgramTheme("travel");
+    expect(theme.primary).toBe("#B0420E");
+    expect(theme.primaryDark).toBe("#6E2806");
+    expect(theme.accent).toBe("#E07B3A");
+    expect(theme.surface.bg).toBe("#FCEEE2");
   });
 
   it("validates program kind strings", () => {

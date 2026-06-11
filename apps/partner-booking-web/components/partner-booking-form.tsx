@@ -242,6 +242,11 @@ export function PartnerBookingForm({
 
   const programLabel = getPartnerProgramLabel(entry.businessDispatchSubtype);
   const coverage = getPartnerProgramCoverage(entry.businessDispatchSubtype);
+  const travelRosterPreview = draft.rosterPassengers
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4);
 
   return (
     <form style={pageStyle} onSubmit={handleSubmit}>
@@ -326,6 +331,75 @@ export function PartnerBookingForm({
           ) : null
         }
       />
+
+      {entry.businessDispatchSubtype === "travel_agency_transfer" ? (
+        <CanvasCard theme={theme} title="團體席次與 roster">
+          <div style={{ display: "grid", gap: 12 }}>
+            <div
+              style={{
+                display: "grid",
+                gap: 10,
+                padding: 14,
+                borderRadius: 16,
+                background: theme.accentBg,
+                border: `1px solid ${theme.accentBorder}`,
+              }}
+            >
+              <div style={actionRowStyle}>
+                <CanvasPill theme={theme} tone="accent">
+                  團體席次
+                </CanvasPill>
+                <strong style={{ color: theme.text }}>
+                  {draft.groupSize || "—"} 席
+                </strong>
+              </div>
+              <div style={fieldStyle}>
+                <span style={{ ...labelStyle, color: theme.textMuted }}>
+                  團體 / 訂單參照
+                </span>
+                <strong style={{ color: theme.text }}>
+                  {draft.groupCode || "—"}
+                </strong>
+              </div>
+              <div style={fieldStyle}>
+                <span style={{ ...labelStyle, color: theme.textMuted }}>
+                  行程連結
+                </span>
+                <strong style={{ color: theme.text }}>
+                  {draft.itineraryLink || "—"}
+                </strong>
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {travelRosterPreview.length > 0 ? (
+                travelRosterPreview.map((item) => (
+                  <div
+                    key={item}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: "10px 12px",
+                      borderRadius: 14,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surface,
+                    }}
+                  >
+                    <span style={{ color: theme.text }}>{item}</span>
+                    <CanvasPill theme={theme} tone="neutral">
+                      roster
+                    </CanvasPill>
+                  </div>
+                ))
+              ) : (
+                <span style={{ color: theme.textMuted }}>
+                  逐行填寫旅客與席次備註後，這裡會顯示 roster 摘要。
+                </span>
+              )}
+            </div>
+          </div>
+        </CanvasCard>
+      ) : null}
 
       <CanvasCard theme={theme} title={t("book.section.trip")}>
         <div style={gridStyle}>
@@ -446,6 +520,12 @@ export function PartnerBookingForm({
                 hint: t("hint.groupSize"),
               })}
               {renderField({
+                name: "itineraryLink",
+                label: t("field.itineraryLink"),
+                type: "url",
+                hint: t("hint.itineraryLink"),
+              })}
+              {renderField({
                 name: "luggageCount",
                 label: t("field.luggageCount"),
                 type: "number",
@@ -453,6 +533,13 @@ export function PartnerBookingForm({
               {renderField({
                 name: "meetingPoint",
                 label: t("field.meetingPoint"),
+                fullSpan: true,
+              })}
+              {renderField({
+                name: "rosterPassengers",
+                label: t("field.rosterPassengers"),
+                hint: t("hint.rosterPassengers"),
+                textarea: true,
                 fullSpan: true,
               })}
             </>

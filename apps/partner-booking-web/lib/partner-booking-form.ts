@@ -23,6 +23,8 @@ export interface PartnerBookingDraftValues {
   medicalFacility: string;
   groupCode: string;
   groupSize: string;
+  itineraryLink: string;
+  rosterPassengers: string;
   luggageCount: string;
   meetingPoint: string;
 }
@@ -61,6 +63,19 @@ function isValidDateTime(value: string) {
   return Number.isFinite(new Date(value).getTime());
 }
 
+function isValidUrl(value: string) {
+  if (!hasText(value)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function parseInteger(value: string) {
   if (!hasText(value)) {
     return null;
@@ -96,6 +111,8 @@ export function createDefaultPartnerBookingDraft(): PartnerBookingDraftValues {
     medicalFacility: "",
     groupCode: "",
     groupSize: "",
+    itineraryLink: "",
+    rosterPassengers: "",
     luggageCount: "",
     meetingPoint: "",
   };
@@ -278,8 +295,18 @@ export function getPartnerBookingFieldErrors(params: {
     if (!hasText(draft.groupCode)) {
       setRequiredError(errors, "groupCode", "field.groupCode");
     }
+    if (!hasText(draft.itineraryLink)) {
+      setRequiredError(errors, "itineraryLink", "field.itineraryLink");
+    } else if (!isValidUrl(draft.itineraryLink)) {
+      errors.itineraryLink = t("error.url", {
+        label: t("field.itineraryLink"),
+      });
+    }
     if (!hasText(draft.meetingPoint)) {
       setRequiredError(errors, "meetingPoint", "field.meetingPoint");
+    }
+    if (!hasText(draft.rosterPassengers)) {
+      setRequiredError(errors, "rosterPassengers", "field.rosterPassengers");
     }
 
     const groupSize = parseInteger(draft.groupSize);

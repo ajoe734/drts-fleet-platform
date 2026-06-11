@@ -17,7 +17,7 @@ const en = {
   "book.eligibility.insurance.message":
     "Insurance intake stays blocked until claim and policy references are complete.",
   "book.eligibility.travel.message":
-    "Agency transfer intake needs a group reference before booking can be prepared.",
+    "Agency transfer intake needs a group or order reference before booking can be prepared.",
   "book.eligibility.referenceId": "Eligibility verification ID",
   "book.section.trip": "Trip details",
   "book.section.passenger": "Passenger",
@@ -42,7 +42,7 @@ const en = {
   "book.coverage.insurance_replacement_vehicle":
     "Claim, policy, rental period, medical facility",
   "book.coverage.travel_agency_transfer":
-    "Group, headcount, luggage, meeting point",
+    "Group/order reference, group seats, itinerary, roster",
   "book.coverage.enterprise_dispatch":
     "Shared trip intake without partner-specific gating",
   "field.pickupAddress": "Pickup address",
@@ -61,8 +61,10 @@ const en = {
   "field.replacementStart": "Replacement period start",
   "field.replacementEnd": "Replacement period end",
   "field.medicalFacility": "Medical facility",
-  "field.groupCode": "Group code",
-  "field.groupSize": "Passenger count",
+  "field.groupCode": "Group / order reference",
+  "field.groupSize": "Group seats",
+  "field.itineraryLink": "Itinerary link",
+  "field.rosterPassengers": "Passenger roster",
   "field.luggageCount": "Luggage count",
   "field.meetingPoint": "Meeting point",
   "field.direction.pickup": "Pickup",
@@ -73,7 +75,11 @@ const en = {
   "hint.replacementPeriod":
     "Capture the insurer-approved replacement period for downstream case tracking.",
   "hint.groupSize":
-    "Use the expected travelling headcount so dispatch can match vehicle capacity.",
+    "Use the allocated group seats so dispatch can match vehicle capacity and batching.",
+  "hint.itineraryLink":
+    "Paste the operator itinerary URL so roster and pickup batching can be cross-checked.",
+  "hint.rosterPassengers":
+    "List travellers or seat notes line by line, for example guide, wheelchair, child seat, or batch tags.",
   "error.required": "{label} is required.",
   "error.datetime": "{label} must be a valid date-time.",
   "error.windowOrder":
@@ -82,6 +88,7 @@ const en = {
     "Replacement period end must be after replacement period start.",
   "error.nonNegativeInteger": "{label} must be a whole number of 0 or more.",
   "error.positiveInteger": "{label} must be a whole number greater than 0.",
+  "error.url": "{label} must be a valid http(s) URL.",
 } as const;
 
 const zh = {
@@ -99,7 +106,7 @@ const zh = {
   "book.eligibility.insurance.message":
     "保險代步方案在理賠案號與保單號完整前，不可送出下單。",
   "book.eligibility.travel.message":
-    "旅行社接送方案需先具備團號，才能完成下單準備。",
+    "旅行社接送方案需先具備團體或訂單參照，才能完成下單準備。",
   "book.eligibility.referenceId": "Eligibility 驗證編號",
   "book.section.trip": "行程資料",
   "book.section.passenger": "乘客資料",
@@ -121,7 +128,8 @@ const zh = {
   "book.coverage.credit_card_airport_transfer": "卡別、航班、航廈、接送方向",
   "book.coverage.insurance_replacement_vehicle":
     "理賠案號、保單、代步期間、醫療院所",
-  "book.coverage.travel_agency_transfer": "團號、人數、行李、集合點",
+  "book.coverage.travel_agency_transfer":
+    "團體/訂單參照、團體席次、行程連結、roster",
   "book.coverage.enterprise_dispatch": "共用行程欄位，無 partner 專屬閘門",
   "field.pickupAddress": "上車地點",
   "field.dropoffAddress": "下車地點",
@@ -139,8 +147,10 @@ const zh = {
   "field.replacementStart": "代步開始",
   "field.replacementEnd": "代步結束",
   "field.medicalFacility": "醫療院所",
-  "field.groupCode": "團號",
-  "field.groupSize": "人數",
+  "field.groupCode": "團體 / 訂單參照",
+  "field.groupSize": "團體席次",
+  "field.itineraryLink": "行程連結",
+  "field.rosterPassengers": "乘客名單 / roster",
   "field.luggageCount": "行李件數",
   "field.meetingPoint": "集合點",
   "field.direction.pickup": "接機",
@@ -149,13 +159,18 @@ const zh = {
   "hint.policyWindow":
     "預約結束時間必須晚於開始時間；各方案可再套更細的期間規則。",
   "hint.replacementPeriod": "請輸入保險核准的代步期間，供後續案件追蹤使用。",
-  "hint.groupSize": "填寫實際團體人數，讓 dispatch 可對齊車型容量。",
+  "hint.groupSize":
+    "填寫本團分配的團體席次，讓 dispatch 可對齊車型容量與分批。",
+  "hint.itineraryLink": "貼上旅行社行程連結，供 roster 與接送段次比對。",
+  "hint.rosterPassengers":
+    "請逐行填寫旅客或席次備註，例如領隊、輪椅、兒童座椅、分批標記。",
   "error.required": "{label}為必填。",
   "error.datetime": "{label}必須是有效日期時間。",
   "error.windowOrder": "預約結束時間必須晚於預約開始時間。",
   "error.periodOrder": "代步結束時間必須晚於代步開始時間。",
   "error.nonNegativeInteger": "{label}必須是 0 以上整數。",
   "error.positiveInteger": "{label}必須是大於 0 的整數。",
+  "error.url": "{label}必須是有效的 http(s) 網址。",
 } as const;
 
 export const translations = { en, zh } as const;
