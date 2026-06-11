@@ -100,8 +100,85 @@ const en = {
     "Period and per-trip settlement reconciliation (issuer-pays-DRTS), with masked references and signed downloadable artifacts.",
 
   "programs.title": "Programs & quota",
+  "programs.eyebrow": "Program usage",
+  "programs.lead":
+    "Per program / period issuer view of cardholders served, 趟次 consumed vs quota, remaining entitlement, trend, top exceptions, and eligibility policy posture.",
   "programs.purpose":
     "Benefit consumption per program / period: cardholders served and 趟次 consumed vs quota (禮遇趟次 remaining).",
+  "programs.banner.label": "Issuer identity",
+  "programs.banner.title": "CTBC issuer programs",
+  "programs.banner.body":
+    "The tenant chrome stays on the shared tenant realm; issuer branding appears only inside the working surface for program ownership and benefit context.",
+  "programs.banner.issuer": "Issuer",
+  "programs.banner.scope": "Coverage",
+  "programs.banner.scopeValue":
+    "Airport transfer benefit programs · read scope",
+  "programs.kpi.primaryKicker": "Priority KPI",
+  "programs.kpi.secondaryKicker": "Current period",
+  "programs.kpi.quotaTitle": "Consumed vs total quota",
+  "programs.kpi.quotaBody":
+    "Quota is the primary signal: show used trips against the period total, with remaining entitlement visible at a glance.",
+  "programs.kpi.servedTitle": "Cardholders served",
+  "programs.kpi.servedBody":
+    "Unique masked cardholder households with at least one completed benefit trip in the active period.",
+  "programs.kpi.exceptionTitle": "Top exceptions",
+  "programs.kpi.exceptionBody":
+    "Programs requiring review, quota backfill, or eligibility remediation.",
+  "programs.kpi.ofTotal": "of {total}",
+  "programs.kpi.remaining": "Remaining",
+  "programs.kpi.periodValue": "active programs",
+  "programs.kpi.exceptionValue": "open exception cases",
+  "programs.table.kicker": "Program-period detail",
+  "programs.table.title": "Programs and quota usage",
+  "programs.table.description":
+    "Each row is one issuer program and period. Cardholder and benefit references stay masked.",
+  "programs.table.headers.program": "Program / period",
+  "programs.table.headers.coverage": "Coverage / benefits",
+  "programs.table.headers.served": "Cardholders served",
+  "programs.table.headers.quota": "Consumed vs total quota",
+  "programs.table.headers.trend": "Trend",
+  "programs.table.headers.exceptions": "Top exceptions",
+  "programs.table.headers.policy": "Eligibility policy",
+  "programs.table.servedLabel": "served households",
+  "programs.table.remainingValue": "{remaining} remaining",
+  "programs.table.policySummary": "Policy summary",
+  "programs.exceptions.kicker": "Exception posture",
+  "programs.exceptions.title": "Main exception clusters",
+  "programs.exceptions.description":
+    "Operational follow-up grouped by exception reason, so program admins can see what is burning quota or blocking replenishment.",
+  "programs.policy.kicker": "Eligibility controls",
+  "programs.policy.title": "Qualification policy summary",
+  "programs.policy.description":
+    "Rule posture shared across issuer programs; edits remain permission-gated.",
+  "programs.policy.rule1Title": "Spend threshold before entitlement opens",
+  "programs.policy.rule1Body":
+    "World Elite and business tiers require current-cycle spend attainment before a booking can consume quota.",
+  "programs.policy.rule2Title":
+    "Outbound and inbound share the same quota bucket",
+  "programs.policy.rule2Body":
+    "One completed trip deducts one entitlement regardless of direction; cancelled trips release quota after settlement reversal.",
+  "programs.policy.rule3Title":
+    "Manual review for cross-region surcharge or flight changes",
+  "programs.policy.rule3Body":
+    "Bookings with surcharge exceptions or post-approval flight changes stay pending until issuer ops confirms quota impact.",
+  "programs.policy.worldElite":
+    "Quarterly 2-trip household cap; same-day flight changes keep original approval but require quota reconciliation.",
+  "programs.policy.business":
+    "Annual spend gate plus domestic-airport coverage matrix; cross-region surcharge triggers manual review.",
+  "programs.policy.newCard":
+    "New-cardholder offer valid for 90 days after activation; unused entitlement expires at half-year close.",
+  "programs.trend.rising": "Approaching quota threshold",
+  "programs.trend.watch": "Watchlist this month",
+  "programs.trend.steady": "Within expected run-rate",
+  "programs.exception.flightChange": "Flight change reprice",
+  "programs.exception.outOfWindow": "Eligibility window exceeded",
+  "programs.exception.manualReview": "Manual fare review",
+  "programs.exception.duplicateUsage": "Potential duplicate usage",
+  "programs.exception.expiredEligibility": "Expired eligibility window",
+  "programs.exception.missingReceipt": "Missing settlement artifact",
+  "programs.unit.trip": "trips",
+  "programs.unit.person": "cardholders",
+  "programs.unit.case": "cases",
 
   "users.title": "People & roles",
   "users.purpose":
@@ -274,8 +351,80 @@ const zh: Record<keyof typeof en, string> = {
     "期別與逐趟結算對帳（發卡行付款給 DRTS），含遮罩參考與可下載的簽名 artifact。",
 
   "programs.title": "方案與配額",
+  "programs.eyebrow": "方案用量",
+  "programs.lead":
+    "以發卡行視角檢視各方案／期別的服務卡友數、趟次消耗 vs 配額、剩餘禮遇、趨勢、主要例外與資格政策狀態。",
   "programs.purpose":
     "各方案／期別的權益消耗：服務卡友數、趟次消耗 vs 配額（禮遇趟次剩餘）。",
+  "programs.banner.label": "發卡行識別",
+  "programs.banner.title": "中信發卡方案",
+  "programs.banner.body":
+    "tenant chrome 維持共用 tenant realm；發卡行品牌只出現在工作面內，用於標示方案歸屬與卡權益情境。",
+  "programs.banner.issuer": "發卡行",
+  "programs.banner.scope": "涵蓋範圍",
+  "programs.banner.scopeValue": "機場接送卡權益方案 · 唯讀視角",
+  "programs.kpi.primaryKicker": "頭號指標",
+  "programs.kpi.secondaryKicker": "當期概況",
+  "programs.kpi.quotaTitle": "已用 vs 總配額",
+  "programs.kpi.quotaBody":
+    "配額是首要訊號：清楚呈現期別已用趟次對比總配額，並一眼看到剩餘禮遇。",
+  "programs.kpi.servedTitle": "服務卡友數",
+  "programs.kpi.servedBody": "當期至少完成 1 趟權益接送的去識別卡友戶數。",
+  "programs.kpi.exceptionTitle": "主要例外",
+  "programs.kpi.exceptionBody": "需要覆核、回補配額或補資格證據的方案事件。",
+  "programs.kpi.ofTotal": "共 {total}",
+  "programs.kpi.remaining": "剩餘",
+  "programs.kpi.periodValue": "有效方案",
+  "programs.kpi.exceptionValue": "待處理例外案件",
+  "programs.table.kicker": "方案期別明細",
+  "programs.table.title": "方案與配額使用情況",
+  "programs.table.description":
+    "每列代表一個發卡方案與期別；卡友與權益參考均維持遮罩。",
+  "programs.table.headers.program": "方案／期別",
+  "programs.table.headers.coverage": "覆蓋／權益",
+  "programs.table.headers.served": "服務卡友數",
+  "programs.table.headers.quota": "已用 vs 總配額",
+  "programs.table.headers.trend": "趨勢",
+  "programs.table.headers.exceptions": "主要例外",
+  "programs.table.headers.policy": "資格政策",
+  "programs.table.servedLabel": "卡友戶數",
+  "programs.table.remainingValue": "剩餘 {remaining}",
+  "programs.table.policySummary": "政策摘要",
+  "programs.exceptions.kicker": "例外狀態",
+  "programs.exceptions.title": "主要例外群組",
+  "programs.exceptions.description":
+    "依例外原因整理營運追蹤，讓方案管理員快速看出哪些案件正在消耗配額或阻塞回補。",
+  "programs.policy.kicker": "資格控管",
+  "programs.policy.title": "資格政策摘要",
+  "programs.policy.description":
+    "發卡方案共用的規則狀態；實際編輯仍受權限控管。",
+  "programs.policy.rule1Title": "達消費門檻後才開啟禮遇",
+  "programs.policy.rule1Body":
+    "鼎極卡與商旅卡需先達當期刷卡門檻，訂單才能正式消耗配額。",
+  "programs.policy.rule2Title": "接機與送機共用同一配額池",
+  "programs.policy.rule2Body":
+    "每完成 1 趟即扣 1 次禮遇，不分去回程；取消單於結算沖回後釋放配額。",
+  "programs.policy.rule3Title": "跨區加價與改票後航班須人工覆核",
+  "programs.policy.rule3Body":
+    "遇到加價例外或核准後改票，案件會停留待確認狀態，直到發卡行營運確認 quota 影響。",
+  "programs.policy.worldElite":
+    "每戶每季上限 2 趟；同日改票沿用原核准，但需補做 quota 對帳。",
+  "programs.policy.business":
+    "需達年度刷卡門檻並符合國內機場覆蓋矩陣；跨區加價自動轉人工覆核。",
+  "programs.policy.newCard":
+    "新戶權益自開卡啟用起 90 日內有效；未用禮遇於半年度結束失效。",
+  "programs.trend.rising": "接近配額警戒",
+  "programs.trend.watch": "本月需關注",
+  "programs.trend.steady": "符合預期 run-rate",
+  "programs.exception.flightChange": "改票重計價",
+  "programs.exception.outOfWindow": "超過資格視窗",
+  "programs.exception.manualReview": "人工覆核車資",
+  "programs.exception.duplicateUsage": "疑似重複使用",
+  "programs.exception.expiredEligibility": "資格時效已過",
+  "programs.exception.missingReceipt": "缺結算憑證",
+  "programs.unit.trip": "趟",
+  "programs.unit.person": "戶",
+  "programs.unit.case": "件",
 
   "users.title": "使用者與角色",
   "users.purpose": "銀行後台角色：方案管理員、客服／營運、財務。",
