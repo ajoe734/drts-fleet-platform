@@ -10,6 +10,15 @@
 
 ## 0. Acknowledgement (what landed — accepted)
 
+> 2026-06-11 repository-ingestion note: this request records the design team's
+> accepted deliverable shape, but the claimed canonical files
+> `docs/05-ui/drts-design-canvas/bank-screens-{1,2,3}.jsx` and
+> `docs/05-ui/drts-design-canvas/Bank Console.html` are not present in current
+> repo machine truth. Until those files are restored or recommitted at the
+> canonical paths, bank-console UI execution tasks remain blocked on missing
+> visual-source artifacts. This note changes no visual decision; it only fixes
+> the execution gate.
+
 The 2026-06-10 bundle is **accepted and ingested** to `docs/05-ui/drts-design-canvas/` (PR #619):
 - **Bank Console** — all 8 screens (`bank-screens-{1,2,3}.jsx`): home / bookings / booking-detail / contracts(+detail) / statements(+detail) / programs / users / audit. Verified against the screen-requirements: masked PII, 去/回程 + flight/terminal, quota/禮遇趟次, benefit/issuer refs, SLA attainment + exceptions, subsidised-vs-paid, issuer-pays-DRTS, read-only ops cross-link, **no cost-centre**. Excellent.
 - **機場接送 white-label site** (`bank-sites/`) — cardholder airport-transfer booking (S1) + embed mockup (S2).
