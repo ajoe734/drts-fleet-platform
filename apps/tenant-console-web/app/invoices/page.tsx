@@ -963,17 +963,26 @@ export default async function InvoicesPage({
   const selectedInvoiceDetailHref = selectedInvoice
     ? buildInvoiceDetailHref(selectedInvoice.invoiceId, filters)
     : null;
-  const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
-    ...invoice,
-  }));
-  const invoiceSummary = summarizeInvoices(filteredInvoices);
-
+  // Pre-render each cell server-side into the row data and reference it by key.
+  // CanvasTable is a "use client" component, so columns must NOT carry `r:`
+  // render functions (functions cannot cross the server→client boundary);
+  // React elements stored as data serialize fine.
   const columns: CanvasTableColumn<InvoiceRow>[] = [
-    {
-      h: "發票",
-      w: 220,
-      mono: true,
-      r: (row) => (
+    { h: "發票", w: 220, mono: true, k: "c_invoice" },
+    { h: "期別", w: 110, mono: true, k: "c_period" },
+    { h: "金額", w: 170, mono: true, align: "right", k: "c_amount" },
+    { h: "狀態", w: 110, k: "c_status" },
+    { h: "到期", w: 120, mono: true, k: "c_due" },
+    { h: "開立", w: 120, mono: true, k: "c_issued" },
+    { h: "檔案", w: 220, k: "c_artifact" },
+    { h: "操作", w: 210, k: "c_actions" },
+  ];
+  const rows: InvoiceRow[] = filteredInvoices.map((invoice) => {
+    const row: InvoiceRow = { ...invoice };
+    const artifactState = getArtifactState(row);
+    return {
+      ...row,
+      c_invoice: (
         <div>
           <Link
             href={buildInvoiceDetailHref(row.invoiceId, filters)}
@@ -986,88 +995,53 @@ export default async function InvoicesPage({
           </div>
         </div>
       ),
-    },
-    {
-      h: "期別",
-      w: 110,
-      mono: true,
-      r: (row) => toPeriodKey(row.periodStart),
-    },
-    {
-      h: "金額",
-      w: 170,
-      mono: true,
-      align: "right",
-      r: (row) => formatCanvasMoney(row.amount),
-    },
-    {
-      h: "狀態",
-      w: 110,
-      r: (row) => (
+      c_period: toPeriodKey(row.periodStart),
+      c_amount: formatCanvasMoney(row.amount),
+      c_status: (
         <CanvasPill theme={th} tone={getStatusTone(row.statusView)} dot>
           {formatStatusLabel(row.statusView)}
         </CanvasPill>
       ),
-    },
-    {
-      h: "到期",
-      w: 120,
-      mono: true,
-      r: (row) => formatDateInput(row.dueDate) || "—",
-    },
-    {
-      h: "開立",
-      w: 120,
-      mono: true,
-      r: (row) => formatDateInput(row.createdAt) || "—",
-    },
-    {
-      h: "檔案",
-      w: 220,
-      r: (row) => {
-        const artifactState = getArtifactState(row);
-        return (
-          <div style={artifactCellStyle}>
-            <CanvasPill theme={th} tone={artifactState.tone}>
-              {artifactState.label}
-            </CanvasPill>
-            {row.artifactUrl ? (
-              <Link
-                href={row.artifactUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={artifactLinkStyle}
-              >
-                {formatArtifactUrl(row.artifactUrl)}
-              </Link>
-            ) : (
-              <span style={monoHintStyle}>no artifact URL</span>
-            )}
-            <span style={monoHintStyle}>
-              expiresAt {formatDateInput(row.expiresAt) || "—"}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      h: "操作",
-      w: 210,
-      r: (row) => (
+      c_due: formatDateInput(row.dueDate) || "—",
+      c_issued: formatDateInput(row.createdAt) || "—",
+      c_artifact: (
+        <div style={artifactCellStyle}>
+          <CanvasPill theme={th} tone={artifactState.tone}>
+            {artifactState.label}
+          </CanvasPill>
+          {row.artifactUrl ? (
+            <Link
+              href={row.artifactUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={artifactLinkStyle}
+            >
+              {formatArtifactUrl(row.artifactUrl)}
+            </Link>
+          ) : (
+            <span style={monoHintStyle}>無檔案 URL</span>
+          )}
+          <span style={monoHintStyle}>
+            expiresAt {formatDateInput(row.expiresAt) || "—"}
+          </span>
+        </div>
+      ),
+      c_actions: (
         <div style={actionRowStyle}>
           {row.availableActions.map((action) =>
             renderActionLink(action, row, filters),
           )}
         </div>
       ),
-    },
-  ];
+    };
+  });
+  const invoiceSummary = summarizeInvoices(filteredInvoices);
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="發票 · Invoices"
+        title="發票"
         subtitle="發票歷史 · 狀態 / 期別 / id 篩選 · 由 availableActions 驅動的 CTA"
         actions={
           <>
