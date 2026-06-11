@@ -247,6 +247,33 @@ export function PartnerBookingForm({
     .map((line) => line.trim())
     .filter(Boolean)
     .slice(0, 4);
+  const travelSeatCount = draft.groupSize || "—";
+  const travelBatchPreview =
+    entry.businessDispatchSubtype === "travel_agency_transfer"
+      ? [
+          {
+            title: t("book.travel.batch.primary"),
+            time: draft.reservationWindowStart || "—",
+            vehicle:
+              Number.parseInt(draft.groupSize, 10) > 8
+                ? "中型巴士 ×1"
+                : "商務車 ×2",
+            seats: `${travelSeatCount} / ${travelSeatCount} 席`,
+            stop: `${draft.meetingPoint || draft.pickupAddress || "集合點待補"} → ${
+              draft.dropoffAddress || "下車點待補"
+            }`,
+          },
+          {
+            title: t("book.travel.batch.secondary"),
+            time: draft.reservationWindowEnd || "—",
+            vehicle: draft.luggageCount
+              ? `商務車 ×${draft.luggageCount}`
+              : "商務車 ×2",
+            seats: `${travelSeatCount} 席`,
+            stop: `${draft.dropoffAddress || "飯店待補"} → ${draft.notes || "後續行程接駁"}`,
+          },
+        ]
+      : [];
 
   return (
     <form style={pageStyle} onSubmit={handleSubmit}>
@@ -333,7 +360,7 @@ export function PartnerBookingForm({
       />
 
       {entry.businessDispatchSubtype === "travel_agency_transfer" ? (
-        <CanvasCard theme={theme} title="團體席次與 roster">
+        <CanvasCard theme={theme} title={t("book.travel.cardTitle")}>
           <div style={{ display: "grid", gap: 12 }}>
             <div
               style={{
@@ -347,15 +374,15 @@ export function PartnerBookingForm({
             >
               <div style={actionRowStyle}>
                 <CanvasPill theme={theme} tone="accent">
-                  團體席次
+                  {t("book.travel.badge")}
                 </CanvasPill>
                 <strong style={{ color: theme.text }}>
-                  {draft.groupSize || "—"} 席
+                  {travelSeatCount} 席
                 </strong>
               </div>
               <div style={fieldStyle}>
                 <span style={{ ...labelStyle, color: theme.textMuted }}>
-                  團體 / 訂單參照
+                  {t("book.travel.summary.groupCode")}
                 </span>
                 <strong style={{ color: theme.text }}>
                   {draft.groupCode || "—"}
@@ -363,20 +390,32 @@ export function PartnerBookingForm({
               </div>
               <div style={fieldStyle}>
                 <span style={{ ...labelStyle, color: theme.textMuted }}>
-                  行程連結
+                  {t("book.travel.summary.itinerary")}
                 </span>
                 <strong style={{ color: theme.text }}>
                   {draft.itineraryLink || "—"}
                 </strong>
               </div>
+              <div style={fieldStyle}>
+                <span style={{ ...labelStyle, color: theme.textMuted }}>
+                  {t("book.travel.summary.transferLegs")}
+                </span>
+                <strong style={{ color: theme.text }}>
+                  {t("book.travel.summary.transferLegsValue")}
+                </strong>
+              </div>
             </div>
             <div style={{ display: "grid", gap: 8 }}>
+              <strong style={{ color: theme.text }}>
+                {t("book.travel.roster.title")}
+              </strong>
               {travelRosterPreview.length > 0 ? (
                 travelRosterPreview.map((item) => (
                   <div
                     key={item}
                     style={{
                       display: "flex",
+                      alignItems: "center",
                       justifyContent: "space-between",
                       gap: 12,
                       padding: "10px 12px",
@@ -385,17 +424,68 @@ export function PartnerBookingForm({
                       background: theme.surface,
                     }}
                   >
-                    <span style={{ color: theme.text }}>{item}</span>
+                    <div
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        background: theme.accentBg,
+                        color: theme.accentHi,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {item.slice(0, 1)}
+                    </div>
+                    <span style={{ color: theme.text, flex: 1 }}>{item}</span>
                     <CanvasPill theme={theme} tone="neutral">
-                      roster
+                      {t("book.travel.roster.tag")}
                     </CanvasPill>
                   </div>
                 ))
               ) : (
                 <span style={{ color: theme.textMuted }}>
-                  逐行填寫旅客與席次備註後，這裡會顯示 roster 摘要。
+                  {t("book.travel.roster.empty")}
                 </span>
               )}
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <strong style={{ color: theme.text }}>
+                {t("book.travel.batch.title")}
+              </strong>
+              {travelBatchPreview.map((batch) => (
+                <div
+                  key={batch.title}
+                  style={{
+                    display: "grid",
+                    gap: 6,
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    border: `1px solid ${theme.border}`,
+                    background: theme.surface,
+                  }}
+                >
+                  <div style={actionRowStyle}>
+                    <strong style={{ color: theme.text, flex: 1 }}>
+                      {batch.title}
+                    </strong>
+                    <CanvasPill theme={theme} tone="accent">
+                      {batch.time}
+                    </CanvasPill>
+                  </div>
+                  <span style={{ color: theme.textMuted }}>
+                    {t("book.travel.batch.vehicle")} · {batch.vehicle}
+                  </span>
+                  <span style={{ color: theme.textMuted }}>
+                    {t("book.travel.batch.seats")} · {batch.seats}
+                  </span>
+                  <span style={{ color: theme.text }}>{batch.stop}</span>
+                </div>
+              ))}
             </div>
           </div>
         </CanvasCard>
