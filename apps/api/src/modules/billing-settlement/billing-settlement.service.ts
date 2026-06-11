@@ -58,7 +58,15 @@ import {
   buildSettlementMatrix,
   settlementChannelKeyForTrip,
 } from "./settlement-matrix";
+import {
+  SETTLEMENT_STATEMENT_CHANNEL_KEY,
+  SETTLEMENT_STATEMENT_DIRECTION,
+  type SettlementStatementLine,
+  type SettlementStatementRecord,
+  type SettlementStatementStatus,
+} from "./settlement-statement.types";
 import { ForwarderService } from "../forwarder/forwarder.service";
+import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
@@ -1711,6 +1719,162 @@ export class BillingSettlementService implements OnModuleInit {
   getReimbursementBatch(batchId: string) {
     const batch = this.requireReimbursementBatch(batchId);
     return this.cloneReimbursementBatch(batch);
+  }
+
+  /**
+   * Card-benefit (CCAT) settlement statements for the issuer tenant, one
+   * per period that has card-benefit airport-transfer trips. Each statement
+   * itemises the per-trip subsidised-vs-paid reconciliation in the
+   * `issuer_pays_drts` direction.
+   */
+  async listTenantSettlementStatements(
+    tenantId: string,
+  ): Promise<SettlementStatementRecord[]> {
+    const periodMonths = this.listTenantSettlementPeriodMonths(tenantId);
+    const statements: SettlementStatementRecord[] = [];
+    for (const periodMonth of periodMonths) {
+      statements.push(
+        await this.buildTenantSettlementStatement(tenantId, periodMonth),
+      );
+    }
+    return statements;
+  }
+
+  /** Card-benefit settlement statement for a single `YYYY-MM` period. */
+  async getTenantSettlementStatement(
+    tenantId: string,
+    periodMonth: string,
+  ): Promise<SettlementStatementRecord> {
+    const normalizedPeriod = periodMonth?.trim();
+    if (!normalizedPeriod) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "period must be in YYYY-MM format.",
+        { period: periodMonth },
+      );
+    }
+    // Validates the YYYY-MM shape (throws VALIDATION_ERROR otherwise).
+    this.getPeriodMonthRange(normalizedPeriod);
+    return this.buildTenantSettlementStatement(tenantId, normalizedPeriod);
+  }
+
+  private listTenantSettlementPeriodMonths(tenantId: string) {
+    const months = new Set<string>();
+    for (const trip of this.settlementTrips) {
+      if (
+        trip.tenantId === tenantId &&
+        this.isCardBenefitSettlementTrip(trip)
+      ) {
+        months.add(this.toPeriodMonth(trip.completedAt));
+      }
+    }
+    return [...months].sort((left, right) => right.localeCompare(left));
+  }
+
+  private isCardBenefitSettlementTrip(trip: BillingSettlementTripRecord) {
+    return (
+      this.getSettlementChannelKey(trip) === SETTLEMENT_STATEMENT_CHANNEL_KEY &&
+      Boolean(trip.benefitReference) &&
+      Boolean(trip.issuerAuthorizationRef)
+    );
+  }
+
+  private async buildTenantSettlementStatement(
+    tenantId: string,
+    periodMonth: string,
+  ): Promise<SettlementStatementRecord> {
+    const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
+    const trips = (
+      await this.listTenantInvoiceTripsInPeriod(
+        tenantId,
+        periodStart,
+        periodEnd,
+      )
+    ).filter((trip) => this.isCardBenefitSettlementTrip(trip));
+
+    const lines = trips.map((trip) => this.createSettlementStatementLine(trip));
+    const fareTotal = this.sumMoney(lines.map((line) => line.fare));
+    const subsidisedTotal = this.sumMoney(
+      lines.map((line) => line.subsidisedAmount),
+    );
+    const paidTotal = this.sumMoney(lines.map((line) => line.paidAmount));
+    const manifestHash = this.computeHash({
+      tenantId,
+      period: periodMonth,
+      direction: SETTLEMENT_STATEMENT_DIRECTION,
+      lines,
+    });
+
+    return {
+      statementId: `settlement-statement-${tenantId}-${periodMonth}`,
+      tenantId,
+      period: periodMonth,
+      periodStart,
+      periodEnd,
+      channelKey: SETTLEMENT_STATEMENT_CHANNEL_KEY,
+      direction: SETTLEMENT_STATEMENT_DIRECTION,
+      currency: DEFAULT_CURRENCY,
+      status: this.resolveSettlementStatementStatus(tenantId, periodMonth),
+      lines,
+      totals: {
+        tripCount: lines.length,
+        fareTotal,
+        subsidisedTotal,
+        paidTotal,
+        // issuer_pays_drts: the issuer reimburses the subsidised portion.
+        issuerPayable: { ...subsidisedTotal },
+      },
+      artifactRef: {
+        artifactId: `settlement-statement-${tenantId}-${periodMonth}`,
+        kind: "settlement_statement",
+        manifestHash,
+      },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private createSettlementStatementLine(
+    trip: BillingSettlementTripRecord,
+  ): SettlementStatementLine {
+    const fare = { ...trip.grossEarning };
+    const subsidisedMinor =
+      trip.platformFundedDiscount.amountMinor + trip.subsidy.amountMinor;
+    const paidMinor = Math.max(0, fare.amountMinor - subsidisedMinor);
+
+    return {
+      tripId: trip.orderId,
+      settlementId: trip.settlementId,
+      completedAt: trip.completedAt,
+      driverId: trip.driverId,
+      partnerEntrySlug: trip.partnerEntrySlug,
+      fare,
+      subsidisedAmount: this.money(subsidisedMinor),
+      paidAmount: this.money(paidMinor),
+      // Guaranteed present by isCardBenefitSettlementTrip filter.
+      benefitReference: trip.benefitReference as string,
+      issuerAuthorizationRef: trip.issuerAuthorizationRef as string,
+      cardholderRefMasked: maskOpaqueToken(trip.riderId, 4, 2) ?? "***",
+      eligibilityVerificationId: trip.eligibilityVerificationId,
+    };
+  }
+
+  private resolveSettlementStatementStatus(
+    tenantId: string,
+    periodMonth: string,
+  ): SettlementStatementStatus {
+    const invoiceStatus = this.resolveTenantInvoiceStatusForPeriod(
+      tenantId,
+      periodMonth,
+    );
+    if (invoiceStatus === "paid") {
+      return "paid";
+    }
+    if (invoiceStatus === "issued") {
+      return "published";
+    }
+    // draft / overdue → issuer reimbursement still due.
+    return "due";
   }
 
   private createStatementLine(
