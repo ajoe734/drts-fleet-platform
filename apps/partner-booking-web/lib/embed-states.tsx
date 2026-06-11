@@ -3,6 +3,7 @@ import {
   getProgramChromeVars,
   type PartnerProgramTheme,
 } from "@/lib/program-theme";
+import { getProgramScreenHref } from "@/lib/program-screens";
 import { t } from "@/lib/translations";
 
 /**
@@ -533,8 +534,16 @@ function renderEmbedState(
   basePath: string,
   originHost?: string,
 ): ReactNode {
-  // Fallback / unsupported route the rider back to the standalone funnel.
+  // Fallback / unsupported route the rider back to the standalone funnel
+  // entry (the `landing` bootstrap), where they self-verify eligibility.
   const standaloneHref = `${basePath}/program`;
+  // Hand-off (B1) and consent (B4) already carry a resolved issuer identity,
+  // so their primary CTA continues *inside* the embed: it skips the standalone
+  // `landing` bootstrap and enters the funnel at eligibility/booking directly.
+  const embedContinueHref = getProgramScreenHref(
+    `${basePath}/program`,
+    "eligibility",
+  );
 
   if (state === "handoff") {
     return (
@@ -627,7 +636,7 @@ function renderEmbedState(
           <EmbedButton
             theme={theme}
             label={t("embed.handoff.cta")}
-            href={standaloneHref}
+            href={embedContinueHref}
             primary
           />
         </EmbedFooter>
@@ -917,7 +926,7 @@ function renderEmbedState(
           <EmbedButton
             theme={theme}
             label={t("embed.consent.cta")}
-            href={standaloneHref}
+            href={embedContinueHref}
             primary
           />
           <EmbedButton
