@@ -1441,7 +1441,7 @@ export default async function SettingsPage() {
   );
   const runtimeChips: RuntimeChip[] = [
     {
-      label: "refresh tier",
+      label: "更新層級",
       value: SETTINGS_PAGE_TIER.label,
       mono: true,
     },
@@ -1691,7 +1691,7 @@ export default async function SettingsPage() {
         <div style={runtimeStripStyle}>
           {!hasRefreshAction ? (
             <SettingsRefreshButton
-              label="Refresh snapshot"
+              label="更新快照"
               title="重新抓取目前 settings snapshot。"
               style={{
                 display: "inline-flex",
@@ -2004,7 +2004,7 @@ export default async function SettingsPage() {
 
             <CanvasCard
               theme={th}
-              title="Cross-app deep links"
+              title="跨應用深層連結"
               subtitle="platform-owned / ops-owned trace 一律 new tab；settings 保留 owner app 指向。"
             >
               <div style={linkStackStyle}>
@@ -2088,7 +2088,7 @@ export default async function SettingsPage() {
                 </div>
 
                 <div>
-                  <div style={sectionLabelStyle}>Tenant posture</div>
+                  <div style={sectionLabelStyle}>租戶狀態</div>
                   {capabilityChips.length > 0 ? (
                     <div style={chipRowStyle}>
                       {capabilityChips.map((chip) => (
@@ -2151,7 +2151,7 @@ export default async function SettingsPage() {
 
             <CanvasCard
               theme={th}
-              title="Runtime empty states"
+              title="執行期空狀態"
               subtitle="各 module 回傳的 `emptyState` 直接映射到畫面，不再用 query param 或本地假資料示範。"
             >
               {emptyStateSurfaces.length > 0 ? (

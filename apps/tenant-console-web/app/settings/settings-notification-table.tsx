@@ -50,14 +50,14 @@ export type SettingsNotificationRow = {
 
 const columns: CanvasTableColumn<SettingsNotificationRow>[] = [
   {
-    h: "EVENT",
+    h: "事件",
     k: "eventType",
     w: 310,
     mono: true,
     r: (row) => <span style={accentCodeStyle}>{row.eventType}</span>,
   },
   {
-    h: "CHANNEL",
+    h: "通道",
     w: 120,
     mono: true,
     r: (row) => (
@@ -67,7 +67,7 @@ const columns: CanvasTableColumn<SettingsNotificationRow>[] = [
     ),
   },
   {
-    h: "STATE",
+    h: "狀態",
     w: 100,
     r: (row) => (
       <CanvasPill
@@ -80,7 +80,7 @@ const columns: CanvasTableColumn<SettingsNotificationRow>[] = [
     ),
   },
   {
-    h: "UPDATED",
+    h: "更新",
     w: 150,
     mono: true,
     r: (row) => formatUpdated(row.updatedAt),

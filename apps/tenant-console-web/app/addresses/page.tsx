@@ -898,7 +898,7 @@ export default async function AddressesPage({
 
   const columns: CanvasTableColumn<AddressRow>[] = [
     {
-      h: "NAME",
+      h: "名稱",
       k: "addressLabel",
       w: 180,
       r: (row) => (
@@ -915,7 +915,7 @@ export default async function AddressesPage({
       ),
     },
     {
-      h: "ADDRESS",
+      h: "地址",
       k: "addressLine",
       r: (row) => (
         <div
@@ -936,7 +936,7 @@ export default async function AddressesPage({
       ),
     },
     {
-      h: "TAGS",
+      h: "標籤",
       w: 190,
       r: (row) =>
         row.tags.length > 0 ? (
@@ -959,18 +959,18 @@ export default async function AddressesPage({
         ),
     },
     {
-      h: "OWNER",
+      h: "負責人",
       w: 140,
       r: (row) => row.ownerLabel,
     },
     {
-      h: "LAT / LNG",
+      h: "緯度／經度",
       w: 150,
       mono: true,
       r: (row) => row.coordinatesLabel,
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
@@ -979,7 +979,7 @@ export default async function AddressesPage({
       ),
     },
     {
-      h: "QUALITY",
+      h: "品質",
       w: 120,
       r: (row) => (
         <CanvasPill theme={th} tone={row.qualityTone}>
@@ -988,7 +988,7 @@ export default async function AddressesPage({
       ),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 200,
       r: (row) => (
         <div style={rowActionsStyle}>
@@ -1157,15 +1157,15 @@ export default async function AddressesPage({
 
         <CanvasCard theme={th} style={{ padding: 16 }}>
           <form action="/addresses" style={filterGridStyle}>
-            <CanvasField theme={th} label="Search">
+            <CanvasField theme={th} label="搜尋">
               <input
                 name="q"
-                placeholder="name / address / tag"
+                placeholder="名稱／地址／標籤"
                 defaultValue={resolvedSearchParams.q ?? ""}
                 style={inputStyle}
               />
             </CanvasField>
-            <CanvasField theme={th} label="Tag">
+            <CanvasField theme={th} label="標籤">
               <select name="tag" defaultValue={tagFilter} style={selectStyle}>
                 <option value="">all tags</option>
                 {uniqueTags.map((tag) => (
@@ -1175,7 +1175,7 @@ export default async function AddressesPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="Owner">
+            <CanvasField theme={th} label="負責人">
               <select
                 name="owner"
                 defaultValue={ownerFilter}
@@ -1189,7 +1189,7 @@ export default async function AddressesPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="State">
+            <CanvasField theme={th} label="狀態">
               <select
                 name="state"
                 defaultValue={stateFilter}
@@ -1255,7 +1255,7 @@ export default async function AddressesPage({
                 }}
               >
                 <div>
-                  <h2 style={sectionTitleStyle}>Contract coverage</h2>
+                  <h2 style={sectionTitleStyle}>契約涵蓋</h2>
                   <p style={sectionSubtitleStyle}>
                     This route wires `availableActions`, `UiRefreshMetadata`,
                     `CrossAppResourceLink`, and all shared `EmptyReason`
@@ -1297,7 +1297,7 @@ export default async function AddressesPage({
                         : ""
                     }
                   />
-                  <CanvasField theme={th} label="Address name">
+                  <CanvasField theme={th} label="地址名稱">
                     <input
                       name="addressName"
                       defaultValue={
@@ -1310,7 +1310,7 @@ export default async function AddressesPage({
                       style={inputStyle}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Address text">
+                  <CanvasField theme={th} label="地址內容">
                     <textarea
                       name="addressText"
                       defaultValue={
@@ -1324,7 +1324,7 @@ export default async function AddressesPage({
                     />
                   </CanvasField>
                   <div style={detailGridStyle}>
-                    <CanvasField theme={th} label="Latitude">
+                    <CanvasField theme={th} label="緯度">
                       <input
                         name="lat"
                         defaultValue={
@@ -1337,7 +1337,7 @@ export default async function AddressesPage({
                         style={inputStyle}
                       />
                     </CanvasField>
-                    <CanvasField theme={th} label="Longitude">
+                    <CanvasField theme={th} label="經度">
                       <input
                         name="lng"
                         defaultValue={
@@ -1352,7 +1352,7 @@ export default async function AddressesPage({
                     </CanvasField>
                   </div>
                   <div style={detailGridStyle}>
-                    <CanvasField theme={th} label="Tags">
+                    <CanvasField theme={th} label="標籤">
                       <input
                         name="tags"
                         defaultValue={
@@ -1364,7 +1364,7 @@ export default async function AddressesPage({
                         style={inputStyle}
                       />
                     </CanvasField>
-                    <CanvasField theme={th} label="Owner passenger">
+                    <CanvasField theme={th} label="負責乘客">
                       <select
                         name="ownerPassengerId"
                         defaultValue={
@@ -1450,7 +1450,7 @@ export default async function AddressesPage({
                 style={{ display: "flex", flexDirection: "column", gap: 12 }}
               >
                 <div>
-                  <h2 style={sectionTitleStyle}>Selected address</h2>
+                  <h2 style={sectionTitleStyle}>已選地址</h2>
                   <p style={sectionSubtitleStyle}>
                     側欄顯示 cross-app links、匯出遮罩視圖與 lifecycle action
                     context。
@@ -1461,26 +1461,26 @@ export default async function AddressesPage({
                   <>
                     <div style={detailGridStyle}>
                       <div>
-                        <div style={detailLabelStyle}>Address</div>
+                        <div style={detailLabelStyle}>地址</div>
                         <div style={detailValueStyle}>
                           {selectedAddress.addressName}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>Owner</div>
+                        <div style={detailLabelStyle}>負責人</div>
                         <div style={detailValueStyle}>
                           {getOwnerLabel(selectedAddress, passengerMap)}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>Coordinates</div>
+                        <div style={detailLabelStyle}>座標</div>
                         <div style={detailValueStyle}>
                           {formatCoordinates(selectedAddress.lat)} /{" "}
                           {formatCoordinates(selectedAddress.lng)}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>Updated</div>
+                        <div style={detailLabelStyle}>更新時間</div>
                         <div style={detailValueStyle}>
                           {formatDateTime(selectedAddress.updatedAt)}
                         </div>
@@ -1576,13 +1576,13 @@ export default async function AddressesPage({
                         {selectedAddress.activeFlag ? (
                           <CanvasField
                             theme={th}
-                            label="Reason"
-                            hint="UI collects a reason per Q-TEN06 even though the current API only exposes `upsertAddress(activeFlag)`."
+                            label="原因"
+                            hint="即使目前 API 僅提供 `upsertAddress(activeFlag)`，UI 仍依 Q-TEN06 收集原因。"
                           >
                             <textarea
                               name="reason"
                               required
-                              placeholder="Explain why this address should be deactivated."
+                              placeholder="說明此地址為何應停用。"
                               style={textAreaStyle}
                             />
                           </CanvasField>

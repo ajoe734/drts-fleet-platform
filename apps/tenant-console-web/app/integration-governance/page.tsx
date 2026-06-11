@@ -129,44 +129,44 @@ const subSystemMeta: Record<
   }
 > = {
   api_keys: {
-    label: "API keys",
+    label: "API 金鑰",
     code: "api_keys",
     href: "/api-keys",
     fallbackDetail: "Active keys, expiring keys, and missing scope coverage.",
   },
   webhooks: {
-    label: "Webhooks",
+    label: "Webhook",
     code: "webhooks",
     href: "/webhooks",
     fallbackDetail:
       "Endpoint count, delivery failure rate, and engine availability.",
   },
   notifications: {
-    label: "Notifications routing",
+    label: "通知路由",
     code: "notifications",
     href: "/settings#notifications",
     fallbackDetail: "Configured channels across inbox, email, and webhook.",
   },
   sla: {
-    label: "SLA profile",
+    label: "SLA 設定檔",
     code: "sla_profile",
     href: "/settings#sla",
     fallbackDetail: "Wait, arrival, and completion thresholds are evaluated.",
   },
   reports: {
-    label: "Reports availability",
+    label: "報表可用性",
     code: "reports",
     href: "/reports",
     fallbackDetail: "Runnable jobs and report artifact availability.",
   },
   modules: {
-    label: "Module enablement",
+    label: "模組啟用",
     code: "modules",
     href: "/settings",
     fallbackDetail: "Tenant-facing module posture and visibility state.",
   },
   partner_entries: {
-    label: "Partner entries",
+    label: "合作夥伴 entries",
     code: "partner_entries",
     href: "/partner",
     fallbackDetail: "Partner-linked ingress posture when entries exist.",
@@ -337,15 +337,15 @@ function getActionHref(action: string, fallbackHref: string) {
 function getActionLabel(action: string) {
   switch (action) {
     case "issue_api_key":
-      return "Issue API key";
+      return "核發 API 金鑰";
     case "create_webhook_endpoint":
-      return "Set up webhook";
+      return "設定 Webhook";
     case "update_notifications":
-      return "Configure notifications";
+      return "設定通知";
     case "update_sla_profile":
-      return "Configure SLA";
+      return "設定 SLA";
     case "create_report_job":
-      return "Create report job";
+      return "建立報表工作";
     default:
       return action.replaceAll("_", " ");
   }
@@ -384,7 +384,7 @@ function getActionAssistiveCopy(action: ResourceActionDescriptor) {
     return `Unavailable: ${action.disabledReasonCode}`;
   }
   if (!action.enabled) {
-    return "Unavailable";
+    return "無資料";
   }
   return undefined;
 }
@@ -493,7 +493,7 @@ function dedupeActions(items: TenantIntegrationReadinessItem[]) {
 function getStateVariant(items: TenantIntegrationReadinessItem[]) {
   if (items.every((item) => item.status === "ready")) {
     return {
-      label: "Fully ready",
+      label: "完全就緒",
       tone: "success" as CanvasTone,
       body: "All seven integration lanes report green from the aggregated snapshot.",
     };
@@ -501,14 +501,14 @@ function getStateVariant(items: TenantIntegrationReadinessItem[]) {
 
   if (items.every((item) => item.status === "not_provisioned")) {
     return {
-      label: "First-time setup",
+      label: "首次設定",
       tone: "warn" as CanvasTone,
       body: "The tenant exists, but every tracked lane still requires first-time setup.",
     };
   }
 
   return {
-    label: "Partial readiness",
+    label: "部分就緒",
     tone: "info" as CanvasTone,
     body: "Some subsystem lanes remain yellow or red, so follow-up actions stay visible.",
   };
@@ -746,7 +746,7 @@ export default async function IntegrationGovernancePage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Integration Governance"
+        title="整合就緒度"
         subtitle="aggregated readiness · 來自 GET /api/tenant/integration-governance/readiness (Q-TEN10 · 單一聚合 endpoint，非 6+ 個查詢)"
         actions={
           <>

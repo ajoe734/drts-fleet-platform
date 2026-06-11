@@ -447,9 +447,9 @@ function getActionTone(action: ApiKeyActionKind): CanvasTone {
 }
 
 function getRiskLabel(action: ResourceActionDescriptor["riskLevel"]) {
-  if (action === "high") return "High";
-  if (action === "medium") return "Medium";
-  return "Low";
+  if (action === "high") return "高";
+  if (action === "medium") return "中";
+  return "低";
 }
 
 function getActionLabel(action: ApiKeyActionKind) {
@@ -914,7 +914,7 @@ export function ApiKeyManager({
 
   const columns: CanvasTableColumn<ApiKeyRow>[] = [
     {
-      h: "NAME",
+      h: "名稱",
       w: 290,
       r: (row) => {
         const state = resolveApiKeyState(row);
@@ -924,7 +924,7 @@ export function ApiKeyManager({
             <div style={nameMetaRowStyle}>
               <span>{row.apiKeyId}</span>
               {state === "revoked" ? (
-                <span>revoked {formatDateTime(row.revokedAt)}</span>
+                <span>已撤銷 {formatDateTime(row.revokedAt)}</span>
               ) : (
                 <>
                   <button
@@ -970,19 +970,19 @@ export function ApiKeyManager({
       },
     },
     {
-      h: "PREFIX",
+      h: "前綴",
       k: "keyPrefix",
       w: 110,
       mono: true,
     },
     {
-      h: "MASK",
+      h: "遮罩",
       w: 120,
       mono: true,
       r: (row) => `••••${row.maskedSuffix}`,
     },
     {
-      h: "SCOPE",
+      h: "範圍",
       w: 270,
       mono: true,
       r: (row) => (
@@ -992,25 +992,25 @@ export function ApiKeyManager({
       ),
     },
     {
-      h: "LAST",
+      h: "最近",
       w: 142,
       mono: true,
       r: (row) => formatDateTime(row.lastUsedAt),
     },
     {
-      h: "EXPIRES",
+      h: "到期",
       w: 142,
       mono: true,
       r: (row) => formatDateTime(row.expiresAt),
     },
     {
-      h: "REVOKED",
+      h: "撤銷",
       w: 142,
       mono: true,
       r: (row) => formatDateTime(row.revokedAt),
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 108,
       r: (row) => {
         const state = resolveApiKeyState(row);
@@ -1093,28 +1093,23 @@ export function ApiKeyManager({
         <section style={overviewGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Active"
+            label="啟用"
             value={String(kpis.active)}
             sub="usable"
           />
           <CanvasKPI
             theme={th}
-            label="Expiring"
+            label="即將到期"
             value={String(kpis.expiring)}
             sub="<= 7 days"
           />
           <CanvasKPI
             theme={th}
-            label="Revoked"
+            label="已撤銷"
             value={String(kpis.revoked)}
             sub="audit visible"
           />
-          <CanvasKPI
-            theme={th}
-            label="Refresh tier"
-            value="T5"
-            sub="30s target"
-          />
+          <CanvasKPI theme={th} label="更新層級" value="T5" sub="30s target" />
         </section>
 
         <section style={actionLaneStyle}>
@@ -1160,7 +1155,7 @@ export function ApiKeyManager({
                     <input
                       value={draftName}
                       onChange={(event) => setDraftName(event.target.value)}
-                      placeholder="Operations reporting integration"
+                      placeholder="營運報表整合"
                       style={nativeInputStyle}
                     />
                   </CanvasField>
@@ -1186,7 +1181,7 @@ export function ApiKeyManager({
 
                 <CanvasField
                   theme={th}
-                  label="Scopes"
+                  label="範圍"
                   required
                   hint="至少選擇一個 published scope。Rotate 預設沿用原 scope，但可在送出前微調。"
                 >
@@ -1286,7 +1281,7 @@ export function ApiKeyManager({
         <section style={secondaryCardGridStyle}>
           <CanvasCard
             theme={th}
-            title="Inventory"
+            title="清單"
             subtitle="搜尋 key name、ID、scope；並保留 revoked / expired 視圖供稽核追蹤。"
           >
             <div style={compactFieldGridStyle}>
@@ -1318,8 +1313,8 @@ export function ApiKeyManager({
 
           <CanvasCard
             theme={th}
-            title="Governance package"
-            subtitle="Published policy snapshot for this tenant integration surface."
+            title="治理套件"
+            subtitle="此租戶整合介面的已發布政策快照。"
           >
             {governance ? (
               <>
@@ -1367,7 +1362,7 @@ export function ApiKeyManager({
                   ]}
                 />
 
-                <div style={sectionLabelStyle}>Allowed scopes</div>
+                <div style={sectionLabelStyle}>允許範圍</div>
                 <div style={scopeGridStyle}>
                   {allowedScopes.map((scope: string) => (
                     <CanvasPill key={scope} theme={th} tone="info">
@@ -1419,13 +1414,13 @@ export function ApiKeyManager({
 
           <CanvasCard
             theme={th}
-            title="Deep links"
+            title="深層連結"
             subtitle="依 packet 從 API key surface 連到治理、通知、SLA、報表與稽核模組。"
           >
             <div style={deepLinkListStyle}>
               <div style={deepLinkItemStyle}>
                 <div style={deepLinkMetaStyle}>
-                  <strong>Integration governance</strong>
+                  <strong>整合就緒度</strong>
                   <div style={formNoteStyle}>
                     對照 aggregated readiness、published scope 與 onboarding
                     checklist。
@@ -1495,7 +1490,7 @@ export function ApiKeyManager({
           </CanvasCard>
         </section>
 
-        <CanvasCard theme={th} title="API key inventory" padding={0}>
+        <CanvasCard theme={th} title="API 金鑰清單" padding={0}>
           {filteredKeys.length > 0 ? (
             <CanvasTable<ApiKeyRow>
               theme={th}

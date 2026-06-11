@@ -529,7 +529,7 @@ export default async function NotificationsPage() {
 
   const matrixColumns: CanvasTableColumn<MatrixRow>[] = [
     {
-      h: "EVENT TYPE",
+      h: "事件類型",
       w: 240,
       r: (row) => (
         <div style={matrixEventCellStyle}>
@@ -612,13 +612,13 @@ export default async function NotificationsPage() {
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Events"
+            label="事件"
             value={formatCount(matrixRows.length)}
             sub="事件類型"
           />
           <CanvasKPI
             theme={th}
-            label="Subscriptions"
+            label="訂閱"
             value={`${formatCount(enabledCount)} / ${formatCount(totalCells)}`}
             sub={
               hasCustomConfiguration
@@ -638,7 +638,7 @@ export default async function NotificationsPage() {
           />
           <CanvasKPI
             theme={th}
-            label="Last update"
+            label="最後更新"
             value={formatUpdated(data.preferences?.updatedAt)}
             sub={
               hasCustomConfiguration ? "Custom configuration" : "All defaults"
