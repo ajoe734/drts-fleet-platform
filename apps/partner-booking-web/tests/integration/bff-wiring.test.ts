@@ -196,6 +196,52 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
+  it("lets public shells fallback on missing entries without swallowing inactive entries", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: "PARTNER_ENTRY_NOT_FOUND",
+              message: "The partner entry could not be found.",
+              details: { entrySlug: "ctbc" },
+              retryable: false,
+            },
+          },
+          404,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: "PARTNER_ENTRY_INACTIVE",
+              message: "The partner entry is inactive and cannot be used.",
+              details: { entrySlug: "ctbc", status: "inactive" },
+              retryable: false,
+            },
+          },
+          404,
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({ slug: "ctbc" }),
+    });
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).rejects.toMatchObject({
+      code: "PARTNER_ENTRY_INACTIVE",
+      status: 404,
+    });
+  });
+
   it("preserves backend canonical eligibility error codes", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(
