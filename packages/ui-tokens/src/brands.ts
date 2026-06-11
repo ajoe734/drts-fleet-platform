@@ -1,4 +1,4 @@
-import type { AccentRamp } from "./colors";
+import type { AccentRamp, TokenMode } from "./colors";
 
 export type PartnerBrandCode = "CTBC" | "CATHAY" | "GRAND";
 
@@ -30,6 +30,22 @@ export interface PartnerBrandTheme {
   readonly accentSoft: string;
 }
 
+export interface PartnerBrandTextTokens {
+  readonly strong: string;
+  readonly muted: string;
+  readonly invert: string;
+}
+
+export interface PartnerBrandModeTokens {
+  readonly primary: string;
+  readonly primaryDark: string;
+  readonly accent: string;
+  readonly ink: string;
+  readonly surface: AccentRamp;
+  readonly theme: PartnerBrandTheme;
+  readonly text: PartnerBrandTextTokens;
+}
+
 export interface PartnerBrandTemplate {
   readonly code: PartnerBrandCode;
   readonly slug: string;
@@ -45,6 +61,7 @@ export interface PartnerBrandTemplate {
   readonly ink: string;
   readonly surface: AccentRamp;
   readonly theme: PartnerBrandTheme;
+  readonly tokens: Record<TokenMode, PartnerBrandModeTokens>;
   readonly hotline: PartnerBrandHotline;
   readonly cardArt: PartnerBrandCardArt;
 }
@@ -88,8 +105,186 @@ function createTheme(
   };
 }
 
-export const BRAND_TEMPLATES = {
+function createMode(
+  primary: string,
+  primaryDark: string,
+  accent: string,
+  ink: string,
+  surface: AccentRamp,
+  theme: PartnerBrandTheme,
+  text: PartnerBrandTextTokens,
+): PartnerBrandModeTokens {
+  return {
+    primary,
+    primaryDark,
+    accent,
+    ink,
+    surface,
+    theme,
+    text,
+  };
+}
+
+function createPartnerBrandTemplate(
+  base: Omit<
+    PartnerBrandTemplate,
+    "primary" | "primaryDark" | "accent" | "ink" | "surface" | "theme"
+  > & {
+    readonly tokens: Record<TokenMode, PartnerBrandModeTokens>;
+  },
+): PartnerBrandTemplate {
+  const light = base.tokens.light;
+  return {
+    ...base,
+    primary: light.primary,
+    primaryDark: light.primaryDark,
+    accent: light.accent,
+    ink: light.ink,
+    surface: light.surface,
+    theme: light.theme,
+  };
+}
+
+export const PARTNER_BRAND_TOKENS = {
   CTBC: {
+    light: createMode(
+      "#13478F",
+      "#0B2D5C",
+      "#A8771B",
+      "#14202C",
+      createSurface("#13478F", "#A8771B", "#EBF2FB", "#C6D4E8"),
+      createTheme(
+        "#F4F7FC",
+        "#14202C",
+        "#5C6778",
+        "#FFFFFF",
+        "rgba(20, 32, 44, 0.12)",
+        "#0B2D5C",
+        "rgba(19, 71, 143, 0.10)",
+      ),
+      {
+        strong: "#14202C",
+        muted: "#5C6778",
+        invert: "#FFFFFF",
+      },
+    ),
+    dark: createMode(
+      "#6E9DE0",
+      "#9FC0F2",
+      "#D2A14B",
+      "#F4F7FC",
+      createSurface("#9FC0F2", "#D2A14B", "#0F1A2C", "#2A3B57"),
+      createTheme(
+        "#0A1220",
+        "#F4F7FC",
+        "#AEB9CD",
+        "#111A2D",
+        "rgba(159, 192, 242, 0.22)",
+        "#D2A14B",
+        "rgba(168, 119, 27, 0.18)",
+      ),
+      {
+        strong: "#F4F7FC",
+        muted: "#AEB9CD",
+        invert: "#0A1220",
+      },
+    ),
+  },
+  CATHAY: {
+    light: createMode(
+      "#0F5132",
+      "#0A3621",
+      "#B7C98B",
+      "#122018",
+      createSurface("#0F5132", "#B7C98B", "#EAF5EE", "#C7E3D1"),
+      createTheme(
+        "#F2F7F3",
+        "#15231A",
+        "#57665C",
+        "#FFFFFF",
+        "rgba(18, 32, 24, 0.12)",
+        "#0A3621",
+        "rgba(15, 81, 50, 0.10)",
+      ),
+      {
+        strong: "#15231A",
+        muted: "#57665C",
+        invert: "#FFFFFF",
+      },
+    ),
+    dark: createMode(
+      "#53A27D",
+      "#86C3A6",
+      "#C7D9A0",
+      "#F2F7F3",
+      createSurface("#86C3A6", "#C7D9A0", "#0D1711", "#24382B"),
+      createTheme(
+        "#09130D",
+        "#F2F7F3",
+        "#AFC1B5",
+        "#111D15",
+        "rgba(134, 195, 166, 0.20)",
+        "#C7D9A0",
+        "rgba(183, 201, 139, 0.16)",
+      ),
+      {
+        strong: "#F2F7F3",
+        muted: "#AFC1B5",
+        invert: "#09130D",
+      },
+    ),
+  },
+  GRAND: {
+    light: createMode(
+      "#7C2D12",
+      "#4A1908",
+      "#D7B48A",
+      "#20130E",
+      createSurface("#7C2D12", "#D7B48A", "#F8EFEA", "#E7CFC1"),
+      createTheme(
+        "#FBF5F1",
+        "#241611",
+        "#6C5A53",
+        "#FFFDFC",
+        "rgba(32, 19, 14, 0.12)",
+        "#4A1908",
+        "rgba(124, 45, 18, 0.10)",
+      ),
+      {
+        strong: "#241611",
+        muted: "#6C5A53",
+        invert: "#FFFDFC",
+      },
+    ),
+    dark: createMode(
+      "#B46D55",
+      "#D29B84",
+      "#E2C49D",
+      "#FBF5F1",
+      createSurface("#D29B84", "#E2C49D", "#1A100D", "#3B281F"),
+      createTheme(
+        "#110B09",
+        "#FBF5F1",
+        "#C4B1A9",
+        "#1E1411",
+        "rgba(210, 155, 132, 0.18)",
+        "#E2C49D",
+        "rgba(215, 180, 138, 0.16)",
+      ),
+      {
+        strong: "#FBF5F1",
+        muted: "#C4B1A9",
+        invert: "#110B09",
+      },
+    ),
+  },
+} as const satisfies Record<
+  PartnerBrandCode,
+  Record<TokenMode, PartnerBrandModeTokens>
+>;
+
+export const BRAND_TEMPLATES = {
+  CTBC: createPartnerBrandTemplate({
     code: "CTBC",
     slug: "ctbc",
     displayName: "CTBC World Elite",
@@ -98,20 +293,7 @@ export const BRAND_TEMPLATES = {
     tenantCode: "CTBC_BIZ",
     host: "ride.ctbc.com.tw",
     tagline: "卡友禮賓接送 · in-app webview · 7 步驟漏斗",
-    primary: "#1B4FA0",
-    primaryDark: "#0A2A6E",
-    accent: "#C9A356",
-    ink: "#0E1424",
-    surface: createSurface("#1B4FA0", "#C9A356", "#EBF1FB", "#C7D7F0"),
-    theme: createTheme(
-      "#F4F7FC",
-      "#14202C",
-      "#5C6778",
-      "#FFFFFF",
-      "rgba(20, 32, 44, 0.12)",
-      "#0A2A6E",
-      "rgba(27, 79, 160, 0.10)",
-    ),
+    tokens: PARTNER_BRAND_TOKENS.CTBC,
     hotline: {
       label: "24 小時禮賓專線",
       phone: "0800-024-365",
@@ -123,13 +305,13 @@ export const BRAND_TEMPLATES = {
       networkLabel: "VISA",
       lastFour: "8842",
       badgeText: "C",
-      badgeBackground: "#C9A356",
-      badgeForeground: "#0A2A6E",
-      gradientFrom: "#0A2A6E",
-      gradientTo: "#1B4FA0",
+      badgeBackground: "#A8771B",
+      badgeForeground: "#0B2D5C",
+      gradientFrom: "#0B2D5C",
+      gradientTo: "#13478F",
     },
-  },
-  CATHAY: {
+  }),
+  CATHAY: createPartnerBrandTemplate({
     code: "CATHAY",
     slug: "cathay",
     displayName: "Cathay Privileged Travel",
@@ -138,20 +320,7 @@ export const BRAND_TEMPLATES = {
     tenantCode: "CATHAY_LIFE",
     host: "taxi.cathaybk.com.tw",
     tagline: "旅遊禮遇接送 · roster / magic-link demo",
-    primary: "#0F5132",
-    primaryDark: "#0A3621",
-    accent: "#B7C98B",
-    ink: "#122018",
-    surface: createSurface("#0F5132", "#B7C98B", "#EAF5EE", "#C7E3D1"),
-    theme: createTheme(
-      "#F2F7F3",
-      "#15231A",
-      "#57665C",
-      "#FFFFFF",
-      "rgba(18, 32, 24, 0.12)",
-      "#0A3621",
-      "rgba(15, 81, 50, 0.10)",
-    ),
+    tokens: PARTNER_BRAND_TOKENS.CATHAY,
     hotline: {
       label: "旅遊服務專線",
       phone: "0800-700-188",
@@ -168,8 +337,8 @@ export const BRAND_TEMPLATES = {
       gradientFrom: "#0A3621",
       gradientTo: "#0F5132",
     },
-  },
-  GRAND: {
+  }),
+  GRAND: createPartnerBrandTemplate({
     code: "GRAND",
     slug: "grand",
     displayName: "Grand Concierge",
@@ -178,20 +347,7 @@ export const BRAND_TEMPLATES = {
     tenantCode: "TPE_HOTEL_GRP",
     host: "ride.grand-hotels.tw",
     tagline: "飯店禮賓接送 · concierge token demo",
-    primary: "#7C2D12",
-    primaryDark: "#4A1908",
-    accent: "#D7B48A",
-    ink: "#20130E",
-    surface: createSurface("#7C2D12", "#D7B48A", "#F8EFEA", "#E7CFC1"),
-    theme: createTheme(
-      "#FBF5F1",
-      "#241611",
-      "#6C5A53",
-      "#FFFDFC",
-      "rgba(32, 19, 14, 0.12)",
-      "#4A1908",
-      "rgba(124, 45, 18, 0.10)",
-    ),
+    tokens: PARTNER_BRAND_TOKENS.GRAND,
     hotline: {
       label: "Concierge Desk",
       phone: "02-7701-9000",
@@ -208,7 +364,7 @@ export const BRAND_TEMPLATES = {
       gradientFrom: "#4A1908",
       gradientTo: "#7C2D12",
     },
-  },
+  }),
 } as const satisfies Record<PartnerBrandCode, PartnerBrandTemplate>;
 
 export const PARTNER_BRAND_CODES = [
@@ -225,4 +381,11 @@ export function getPartnerBrandTemplateBySlug(
   slug: string,
 ): PartnerBrandTemplate | undefined {
   return listPartnerBrandTemplates().find((brand) => brand.slug === slug);
+}
+
+export function getPartnerBrandTokens(
+  code: PartnerBrandCode,
+  mode: TokenMode = "light",
+): PartnerBrandModeTokens {
+  return PARTNER_BRAND_TOKENS[code][mode];
 }
