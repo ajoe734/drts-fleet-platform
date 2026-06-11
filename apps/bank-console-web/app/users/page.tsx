@@ -1,20 +1,15 @@
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { BRAND_TEMPLATES } from "@drts/ui-tokens";
-import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
 import { t } from "@/lib/translations";
 
 type BankRole = "bank_program_admin" | "bank_ops_viewer" | "bank_finance";
 type UserStatus = "active" | "invited" | "suspended";
-type AuditEvent = "invite" | "roleChange" | "suspend" | "reactivate";
+type UserFilter = "all" | UserStatus;
 
 const CURRENT_ACTOR = {
-  name: "林宜君",
+  display: "周敬文",
   role: "bank_program_admin" as BankRole,
-  lastActivity: "2026-06-11 10:32",
 };
 
 const USERS: Array<{
@@ -25,85 +20,49 @@ const USERS: Array<{
   lastActivity: string;
 }> = [
   {
-    name: "林宜君",
-    email: "yl.lin@ctbc-bank.tw",
+    name: "周敬文",
+    email: "cw.chou@ctbcbank.com",
     role: "bank_program_admin",
     status: "active",
-    lastActivity: "2026-06-11 10:32",
+    lastActivity: "2 分鐘前",
   },
   {
-    name: "王若涵",
-    email: "jo.han@ctbc-bank.tw",
-    role: "bank_program_admin",
-    status: "active",
-    lastActivity: "2026-06-11 09:44",
-  },
-  {
-    name: "陳思穎",
-    email: "sy.chen@ctbc-bank.tw",
+    name: "黃怡安",
+    email: "hy.huang@ctbcbank.com",
     role: "bank_ops_viewer",
     status: "active",
-    lastActivity: "2026-06-11 09:18",
+    lastActivity: "14 分鐘前",
   },
   {
-    name: "張維真",
-    email: "wj.chang@ctbc-bank.tw",
+    name: "湯立群",
+    email: "tl.tang@ctbcbank.com",
     role: "bank_finance",
     status: "active",
-    lastActivity: "2026-06-11 08:52",
+    lastActivity: "1 小時前",
   },
   {
-    name: "李紹安",
-    email: "sa.li@ctbc-bank.tw",
+    name: "郭旻潔",
+    email: "mj.kuo@ctbcbank.com",
     role: "bank_ops_viewer",
     status: "invited",
-    lastActivity: "2026-06-10 18:24",
+    lastActivity: "— 待接受邀請",
   },
   {
-    name: "黃佳恩",
-    email: "je.huang@ctbc-bank.tw",
+    name: "葉承勳",
+    email: "cs.yeh@ctbcbank.com",
     role: "bank_finance",
     status: "suspended",
-    lastActivity: "2026-06-08 16:12",
+    lastActivity: "2026-05-20",
   },
 ];
 
-const AUDIT_ROWS: Array<{
-  at: string;
-  event: AuditEvent;
-  actor: string;
-  target: string;
-  requestId: string;
-}> = [
-  {
-    at: "2026-06-11 09:44",
-    event: "roleChange",
-    actor: "林宜君",
-    target: "張維真",
-    requestId: "req_usr_10321",
-  },
-  {
-    at: "2026-06-11 08:15",
-    event: "invite",
-    actor: "王若涵",
-    target: "李紹安",
-    requestId: "req_usr_10308",
-  },
-  {
-    at: "2026-06-10 17:52",
-    event: "reactivate",
-    actor: "林宜君",
-    target: "黃佳恩",
-    requestId: "req_usr_10284",
-  },
-  {
-    at: "2026-06-10 15:26",
-    event: "suspend",
-    actor: "王若涵",
-    target: "黃佳恩",
-    requestId: "req_usr_10275",
-  },
+const ROLE_CARDS: BankRole[] = [
+  "bank_program_admin",
+  "bank_ops_viewer",
+  "bank_finance",
 ];
+
+const FILTERS: UserFilter[] = ["all", "active", "invited", "suspended"];
 
 const ctbcDarkTokens = BRAND_TEMPLATES.CTBC.tokens.dark;
 
@@ -111,34 +70,50 @@ function roleLabel(role: BankRole) {
   return t(`users.role.${role}`);
 }
 
-function roleDescription(role: BankRole) {
-  return t(`users.roleDescription.${role}`);
+function roleCode(role: BankRole) {
+  return t(`users.roleCode.${role}`);
 }
 
 function statusLabel(status: UserStatus) {
   return t(`users.status.${status}`);
 }
 
-function auditLabel(event: AuditEvent) {
-  return t(`users.audit.event.${event}`);
+function filterLabel(filter: UserFilter) {
+  return t(`users.filter.${filter}`);
 }
 
-function actionLabel(status: UserStatus) {
+function getCount(filter: UserFilter) {
+  if (filter === "all") {
+    return USERS.length;
+  }
+
+  return USERS.filter((user) => user.status === filter).length;
+}
+
+function getActionLabel(status: UserStatus) {
   return status === "suspended"
     ? t("users.action.reactivate")
     : t("users.action.suspend");
 }
 
-export default function UsersPage() {
+function getActionHref(filter: UserFilter) {
+  return filter === "all" ? "/users" : `/users?status=${filter}`;
+}
+
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ status?: string }>;
+}) {
+  const params = await searchParams;
+  const activeFilter = FILTERS.includes(params?.status as UserFilter)
+    ? (params?.status as UserFilter)
+    : "all";
   const canManageUsers = CURRENT_ACTOR.role === "bank_program_admin";
-  const activeCount = USERS.filter((user) => user.status === "active").length;
-  const invitedCount = USERS.filter((user) => user.status === "invited").length;
-  const suspendedCount = USERS.filter(
-    (user) => user.status === "suspended",
-  ).length;
-  const adminCount = USERS.filter(
-    (user) => user.role === "bank_program_admin",
-  ).length;
+  const visibleUsers =
+    activeFilter === "all"
+      ? USERS
+      : USERS.filter((user) => user.status === activeFilter);
 
   const issuerVars = {
     "--issuer-primary": ctbcDarkTokens.primary,
@@ -151,104 +126,50 @@ export default function UsersPage() {
 
   return (
     <div className="page-shell bank-users-page" style={issuerVars}>
-      <PageHero
-        eyebrow={t("users.eyebrow")}
-        title={
-          <span className="bank-users-title">
-            {t("users.title")}
-            <span className="issuer-badge">CTBC</span>
-          </span>
-        }
-        description={t("users.lead")}
-      />
-
-      <section className="users-summary-grid">
-        <SurfaceCard
-          kicker={t("users.summary.active")}
-          title={String(activeCount)}
-          description={t("users.scopeValue")}
-        />
-        <SurfaceCard
-          kicker={t("users.summary.invited")}
-          title={String(invitedCount)}
-          description={t("users.action.invite")}
-        />
-        <SurfaceCard
-          kicker={t("users.summary.suspended")}
-          title={String(suspendedCount)}
-          description={t("users.action.reactivate")}
-        />
-        <SurfaceCard
-          kicker={t("users.summary.admin")}
-          title={String(adminCount)}
-          description={roleLabel("bank_program_admin")}
-        />
-      </section>
-
-      <section className="users-top-grid">
-        <CalloutPanel
-          title={t("users.accessTitle")}
-          description={t("users.accessBody")}
+      <section className="users-hero">
+        <div className="users-hero-copy">
+          <span className="eyebrow">{t("users.eyebrow")}</span>
+          <h1>{t("users.title")}</h1>
+          <p>{t("users.lead")}</p>
+        </div>
+        <button
+          className="table-action-button is-primary"
+          disabled={!canManageUsers}
+          type="button"
         >
-          <div className="users-meta-grid">
-            <div className="meta-pill">
-              <span>{t("users.scopeLabel")}</span>
-              <strong>{t("users.scopeValue")}</strong>
-            </div>
-            <div className="meta-pill">
-              <span>{t("users.actorLabel")}</span>
-              <strong>
-                {CURRENT_ACTOR.name} · {roleLabel(CURRENT_ACTOR.role)}
-              </strong>
-            </div>
-            <div className="meta-pill">
-              <span>{t("users.lastActivityLabel")}</span>
-              <strong>{CURRENT_ACTOR.lastActivity}</strong>
-            </div>
-          </div>
-        </CalloutPanel>
-
-        <CalloutPanel
-          title={t("users.auditTitle")}
-          description={t("users.auditBody")}
-          tone="warning"
-        />
+          {canManageUsers ? t("users.invite") : t("users.action.locked")}
+        </button>
       </section>
+
+      <nav aria-label={t("users.filterNav")} className="users-filter-tabs">
+        {FILTERS.map((filter) => {
+          const isActive = filter === activeFilter;
+
+          return (
+            <Link
+              aria-current={isActive ? "page" : undefined}
+              className={`users-filter-tab${isActive ? " is-active" : ""}`}
+              href={getActionHref(filter)}
+              key={filter}
+            >
+              <span>{filterLabel(filter)}</span>
+              <span className="users-filter-badge">{getCount(filter)}</span>
+            </Link>
+          );
+        })}
+      </nav>
 
       <section className="users-role-grid">
-        {(
-          ["bank_program_admin", "bank_ops_viewer", "bank_finance"] as const
-        ).map((role) => (
+        {ROLE_CARDS.map((role) => (
           <article className="role-card" key={role}>
-            <div className="role-card-head">
-              <span className="role-dot" />
-              <strong>{roleLabel(role)}</strong>
-              <span className="role-permission">
-                {role === "bank_program_admin"
-                  ? t("users.permission.allowed")
-                  : t("users.permission.readOnly")}
-              </span>
-            </div>
-            <p>{roleDescription(role)}</p>
+            <span className="surface-kicker">{roleCode(role)}</span>
+            <strong>{roleLabel(role)}</strong>
+            <p>{t(`users.roleCard.${role}`)}</p>
           </article>
         ))}
       </section>
 
       <section className="surface-card users-table-card">
-        <div className="users-table-header">
-          <div>
-            <span className="surface-kicker">{t("users.purpose")}</span>
-            <h3>{t("users.title")}</h3>
-          </div>
-          <button
-            className="table-action-button is-primary"
-            disabled={!canManageUsers}
-            type="button"
-          >
-            {canManageUsers ? t("users.invite") : t("users.action.locked")}
-          </button>
-        </div>
-
         <div className="users-table-scroll">
           <table className="users-table">
             <thead>
@@ -262,93 +183,73 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {USERS.map((user) => (
-                <tr key={user.email}>
-                  <td>
-                    <div className="user-cell">
-                      <span className="user-avatar">
-                        {user.name.slice(0, 2)}
-                      </span>
-                      <div>
+              {visibleUsers.map((user) => {
+                const disableRoleChange =
+                  !canManageUsers || user.status === "suspended";
+                const disableLifecycleAction =
+                  !canManageUsers || user.status === "invited";
+
+                return (
+                  <tr key={user.email}>
+                    <td>
+                      <div className="user-cell">
+                        <span className="user-avatar">
+                          {user.name.slice(0, 1)}
+                        </span>
                         <strong>{user.name}</strong>
-                        <span>{roleDescription(user.role)}</span>
                       </div>
-                    </div>
-                  </td>
-                  <td className="mono-cell">{user.email}</td>
-                  <td>
-                    <span className="role-pill">{roleLabel(user.role)}</span>
-                  </td>
-                  <td>
-                    <span className={`table-status status-${user.status}`}>
-                      {statusLabel(user.status)}
-                    </span>
-                  </td>
-                  <td className="mono-cell">{user.lastActivity}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button
-                        className="table-action-button"
-                        disabled={!canManageUsers}
-                        type="button"
-                      >
-                        {canManageUsers
-                          ? t("users.action.changeRole")
-                          : t("users.action.locked")}
-                      </button>
-                      <button
-                        className="table-action-button"
-                        disabled={!canManageUsers || user.status === "invited"}
-                        type="button"
-                      >
-                        {canManageUsers
-                          ? actionLabel(user.status)
-                          : t("users.action.locked")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="mono-cell">{user.email}</td>
+                    <td>
+                      <span className={`role-pill role-${user.role}`}>
+                        {roleLabel(user.role)}
+                        <span className="role-pill-code">
+                          {roleCode(user.role)}
+                        </span>
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`table-status status-${user.status}`}>
+                        {statusLabel(user.status)}
+                      </span>
+                    </td>
+                    <td>{user.lastActivity}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          className="table-action-button"
+                          disabled={disableRoleChange}
+                          type="button"
+                        >
+                          {canManageUsers
+                            ? t("users.action.changeRole")
+                            : t("users.action.locked")}
+                        </button>
+                        <button
+                          className="table-action-button"
+                          disabled={disableLifecycleAction}
+                          type="button"
+                        >
+                          {canManageUsers
+                            ? getActionLabel(user.status)
+                            : t("users.action.locked")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </section>
 
-      <section className="surface-card users-audit-card">
-        <div className="users-table-header">
-          <div>
-            <span className="surface-kicker">{t("audit.title")}</span>
-            <h3>{t("users.auditTitle")}</h3>
-          </div>
-        </div>
-
-        <div className="users-table-scroll">
-          <table className="users-table users-audit-table">
-            <thead>
-              <tr>
-                <th>{t("users.table.lastActivity")}</th>
-                <th>{t("users.table.actions")}</th>
-                <th>{t("users.audit.actor")}</th>
-                <th>{t("users.audit.target")}</th>
-                <th>{t("users.audit.request")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {AUDIT_ROWS.map((row) => (
-                <tr key={row.requestId}>
-                  <td className="mono-cell">{row.at}</td>
-                  <td>
-                    <span className="role-pill">{auditLabel(row.event)}</span>
-                  </td>
-                  <td>{row.actor}</td>
-                  <td>{row.target}</td>
-                  <td className="mono-cell">{row.requestId}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <p className="users-footnote">
+        {t("users.auditFootnote", "zh", {
+          actor: CURRENT_ACTOR.display,
+          role: roleLabel(CURRENT_ACTOR.role),
+        })}
+      </p>
     </div>
   );
 }
