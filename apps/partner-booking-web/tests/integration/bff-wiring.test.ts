@@ -167,6 +167,35 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
+  it("uses the local shell fallback for program routes before a dev entry is seeded", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(
+        {
+          error: {
+            code: "PARTNER_ENTRY_NOT_FOUND",
+            message: "The partner entry could not be found.",
+            details: { entrySlug: "ctbc" },
+            retryable: false,
+          },
+        },
+        404,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowInactive: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({ slug: "ctbc" }),
+    });
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "PARTNER_ENTRY_NOT_FOUND",
+      status: 404,
+    });
+  });
+
   it("preserves backend canonical eligibility error codes", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(

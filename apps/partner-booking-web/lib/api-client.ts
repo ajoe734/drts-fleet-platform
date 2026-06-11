@@ -261,11 +261,14 @@ export async function getPartnerRouteContext(
       inactive: false,
     };
   } catch (error) {
-    if (
+    const canUseFallbackShell =
       error instanceof PartnerAuthorityError &&
-      error.code === "PARTNER_ENTRY_INACTIVE" &&
-      options?.allowInactive
-    ) {
+      options?.allowInactive &&
+      ["PARTNER_ENTRY_INACTIVE", "PARTNER_ENTRY_NOT_FOUND"].includes(
+        error.code,
+      );
+
+    if (canUseFallbackShell) {
       return {
         brand: fallbackBrandTemplate(tenantSlug),
         entry: null,
