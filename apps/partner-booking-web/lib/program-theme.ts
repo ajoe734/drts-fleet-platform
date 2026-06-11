@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 
 /**
  * Per-program theming for the partner-booking white-label flows.
@@ -82,6 +83,8 @@ export interface PartnerProgramTheme {
   readonly hotline: PartnerProgramHotline;
 }
 
+const CTBC_BRAND = BRAND_TEMPLATES.CTBC;
+
 export const PARTNER_PROGRAM_THEMES = {
   card: {
     kind: "card",
@@ -95,24 +98,24 @@ export const PARTNER_PROGRAM_THEMES = {
     benefitNoun: "禮遇趟次",
     ctaLabel: "立即叫車",
     badgeText: "C",
-    primary: "#1B4FA0",
-    primaryDark: "#0A2A6E",
-    accent: "#C9A356",
-    ink: "#0E1424",
+    primary: CTBC_BRAND.primary,
+    primaryDark: CTBC_BRAND.primaryDark,
+    accent: CTBC_BRAND.accent,
+    ink: CTBC_BRAND.ink,
     surface: {
-      fg: "#1B4FA0",
-      hi: "#C9A356",
-      bg: "#EBF1FB",
-      border: "#C7D7F0",
+      fg: CTBC_BRAND.surface.fg,
+      hi: CTBC_BRAND.surface.hi,
+      bg: CTBC_BRAND.surface.bg,
+      border: CTBC_BRAND.surface.border,
     },
     chrome: {
-      pageBackground: "#F4F7FC",
-      pageForeground: "#14202C",
-      pageMuted: "#5C6778",
-      panel: "#FFFFFF",
-      panelBorder: "rgba(20, 32, 44, 0.12)",
-      accentText: "#0A2A6E",
-      accentSoft: "rgba(27, 79, 160, 0.10)",
+      pageBackground: CTBC_BRAND.theme.pageBackground,
+      pageForeground: CTBC_BRAND.theme.pageForeground,
+      pageMuted: CTBC_BRAND.theme.pageMuted,
+      panel: CTBC_BRAND.theme.panel,
+      panelBorder: CTBC_BRAND.theme.panelBorder,
+      accentText: CTBC_BRAND.theme.accentText,
+      accentSoft: CTBC_BRAND.theme.accentSoft,
     },
     hotline: {
       label: "24 小時禮賓專線",
