@@ -2,7 +2,7 @@
 
 This document is the support-only acceptance packet for `BANK-UI-STATEMENTS-20260610`.
 It does not change canonical truth, runtime code, design sources, or parent-task
-ownership. It consolidates the repo facts the assigned sidecar reviewer (`Codex2`) can
+ownership. It consolidates the repo facts the assigned sidecar reviewer (`Claude2`) can
 use when auditing the parent statements slice and this support task.
 
 Anchors used here come from:
@@ -21,7 +21,7 @@ Anchors used here come from:
 - **Parent Task:** `BANK-UI-STATEMENTS-20260610`
 - **Helper Kind:** `acceptance_packet`
 - **Owner:** `Codex`
-- **Reviewer:** `Codex2`
+- **Reviewer:** `Claude2`
 - **Mutates Canonical:** `false`
 - **Objective:** hand off a reviewer-facing acceptance checklist, dependency map, and
   current baseline for the bank-console statements slice without editing L1/L2 truth or
@@ -66,7 +66,7 @@ review artifact.
 | Field | Value |
 | --- | --- |
 | Owner | `Codex` |
-| Reviewer | `Codex2` |
+| Reviewer | `Claude2` |
 | Status at dispatch | `backlog` |
 | `task_class` | `sidecar` |
 | `helper_kind` | `acceptance_packet` |
@@ -176,10 +176,10 @@ reviewer-facing checklist.
 - [x] The packet records that the parent's declared dependency IDs were not resolvable by
   `scripts/ai-status.sh show` during this session.
 
-## 7. Reviewer Handoff Notes For `Codex2`
+## 7. Reviewer Handoff Notes For `Claude2`
 
 1. Reconfirm the sidecar row still points at this file and still belongs to `Codex` →
-   `Codex2`.
+   `Claude2`.
 2. Reconfirm whether the dependency IDs were renamed elsewhere in machine truth. If they
    were, refresh Section 4 before approving.
 3. Use the parent task's recorded `review_notes_zh` as the primary evidence anchor for
