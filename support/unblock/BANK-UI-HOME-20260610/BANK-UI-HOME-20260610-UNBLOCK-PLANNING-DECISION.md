@@ -100,6 +100,9 @@ because those artifacts are already in machine truth on `dev`.
 - stale-base correction commit:
   `f9a0942ee1288ea503e983b4e46e0dca7613af6b`
   (`BANK-UI-HOME-20260610-UNBLOCK-PLANNING-DECISION: correct stale-base routing`)
+- evidence refresh commit:
+  `e311c0970dbdb1160cd3c2bc050815e2ca7231d6`
+  (`BANK-UI-HOME-20260610-UNBLOCK-PLANNING-DECISION: record stale-base correction evidence`)
 - pushed branch:
   `origin/codex/bank-ui-home-20260610-unblock-planning-decision`
 - owner PR:
