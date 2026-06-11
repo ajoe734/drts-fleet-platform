@@ -153,6 +153,7 @@ function createInMemoryTenantPartnerRepository(
   let state = cloneState(initialState);
 
   return {
+    isEnabled: vi.fn(() => false),
     loadState: vi.fn(async () => cloneState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       state = {
