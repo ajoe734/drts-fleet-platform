@@ -16,6 +16,11 @@ changes, and the acceptance audit anchors already reflected in the parent
 task's review handoff. It does not replace `ai-status.json`, and it does not
 perform parent closeout.
 
+This revision also corrects the earlier sidecar delivery failure: the assigned
+reviewer branch/worktree previously pointed at unrelated HEAD `6a9d4299`,
+which did not contain this artifact or sidecar commit `c4b41f99`. Reviewer
+handoff must therefore use this branch tip, not the stale reviewer branch.
+
 ---
 
 ## 1. Scope Boundary
@@ -231,6 +236,16 @@ the full diff:
 ---
 
 ## 6. Reviewer Handoff Notes For `Codex2`
+
+Review from this sidecar branch and commit:
+
+- branch=`codex/pb-insurance-20260611-sidecar-review`
+- head commit=`c4b41f99`
+- artifact=`support/sidecars/PB-INSURANCE-20260611/PB-INSURANCE-20260611-SIDECAR-REVIEW.md`
+
+If the reviewer local branch still points at `6a9d4299`, refresh from origin
+and inspect the sidecar owner branch instead of the stale local reviewer
+branch.
 
 Suggested review focus:
 
