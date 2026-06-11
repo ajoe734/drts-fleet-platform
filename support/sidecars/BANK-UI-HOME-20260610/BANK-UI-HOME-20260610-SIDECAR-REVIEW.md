@@ -15,7 +15,7 @@ This packet is a support artifact only. It does not modify L1 canonical truth, r
 
 **Parent task ID:** `BANK-UI-HOME-20260610`
 
-**Current machine-truth status:** `in_progress`
+**Current machine-truth status:** `review`
 
 **Owner / reviewer:** `Claude2` / `Codex`
 
@@ -142,6 +142,8 @@ The current `BANK-UI-HOME-20260610.next` field is not aligned with the submitted
 ### F-2 Sidecar worktree is intentionally not the parent implementation branch
 
 This sidecar branch `codex/bank-ui-home-20260610-sidecar-review` tracks `origin/dev`, so local file reads for `apps/bank-console-web/app/page.tsx` show the placeholder shell rather than the parent implementation.
+
+This is a branch/worktree separation issue caused by the parallel parent lane living on `claude2/bank-ui-home-20260610`, not a pre-rename or pre-rebase artifact inside the submitted parent commit.
 
 **Severity:** info
 
