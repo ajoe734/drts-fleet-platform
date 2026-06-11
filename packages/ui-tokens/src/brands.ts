@@ -1,6 +1,6 @@
 import type { AccentRamp, TokenMode } from "./colors";
 
-export type PartnerBrandCode = "CTBC" | "CATHAY" | "GRAND";
+export type PartnerBrandCode = "CTBC" | "CATHAY" | "GRAND" | "LION";
 
 export interface PartnerBrandHotline {
   readonly label: string;
@@ -278,6 +278,50 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
+  LION: {
+    light: createMode(
+      "#B0420E",
+      "#6E2806",
+      "#E07B3A",
+      "#2C170D",
+      createSurface("#B0420E", "#E07B3A", "#FCEEE2", "#F0CFB9"),
+      createTheme(
+        "#F8F1EB",
+        "#2C170D",
+        "#73594D",
+        "#FFFFFF",
+        "rgba(44, 23, 13, 0.12)",
+        "#6E2806",
+        "rgba(176, 66, 14, 0.10)",
+      ),
+      {
+        strong: "#2C170D",
+        muted: "#73594D",
+        invert: "#FFFFFF",
+      },
+    ),
+    dark: createMode(
+      "#D97B4A",
+      "#F0AE83",
+      "#F3B96E",
+      "#FDF7F2",
+      createSurface("#F0AE83", "#F3B96E", "#24130C", "#573224"),
+      createTheme(
+        "#1A0E09",
+        "#FDF7F2",
+        "#D5B6A7",
+        "#261610",
+        "rgba(240, 174, 131, 0.18)",
+        "#F3B96E",
+        "rgba(224, 123, 58, 0.16)",
+      ),
+      {
+        strong: "#FDF7F2",
+        muted: "#D5B6A7",
+        invert: "#1A0E09",
+      },
+    ),
+  },
 } as const satisfies Record<
   PartnerBrandCode,
   Record<TokenMode, PartnerBrandModeTokens>
@@ -365,12 +409,40 @@ export const BRAND_TEMPLATES = {
       gradientTo: "#7C2D12",
     },
   }),
+  LION: createPartnerBrandTemplate({
+    code: "LION",
+    slug: "lion",
+    displayName: "Lion Travel Group Transfer",
+    bankName: "雄獅旅遊",
+    programName: "團體接送",
+    tenantCode: "LION_TRAVEL",
+    host: "booking.lion-travel.com.tw",
+    tagline: "團體行程接送 · roster + batching",
+    tokens: PARTNER_BRAND_TOKENS.LION,
+    hotline: {
+      label: "雄獅團體服務專線",
+      phone: "0800-090-068",
+      note: "您將被轉接至雄獅旅遊團體接送服務專員。",
+    },
+    cardArt: {
+      issuerLabel: "Lion Travel · 雄獅旅遊",
+      programLabel: "團體接送",
+      networkLabel: "Group Transfer",
+      lastFour: "0628",
+      badgeText: "L",
+      badgeBackground: "#E07B3A",
+      badgeForeground: "#6E2806",
+      gradientFrom: "#6E2806",
+      gradientTo: "#B0420E",
+    },
+  }),
 } as const satisfies Record<PartnerBrandCode, PartnerBrandTemplate>;
 
 export const PARTNER_BRAND_CODES = [
   "CTBC",
   "CATHAY",
   "GRAND",
+  "LION",
 ] as const satisfies readonly PartnerBrandCode[];
 
 export function listPartnerBrandTemplates(): ReadonlyArray<PartnerBrandTemplate> {
