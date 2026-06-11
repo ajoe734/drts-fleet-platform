@@ -85,7 +85,8 @@ export function SvcChips({
   );
 }
 
-// Chinese keeps the original bilingual cue; English renders cleanly localized.
+// Render only the active locale. The portal shell already exposes a language
+// switcher, so duplicated bilingual labels read like untranslated copy.
 export function BiLabel({
   theme,
   locale,
@@ -98,22 +99,10 @@ export function BiLabel({
   en: string;
 }) {
   const primary = locale === "en" ? en : zh;
-  const secondary = locale === "en" ? null : en;
 
   return (
     <span style={{ display: "inline-flex", flexDirection: "column" }}>
       <span style={{ fontSize: 13, color: theme.text }}>{primary}</span>
-      {secondary ? (
-        <span
-          style={{
-            fontSize: 11,
-            color: theme.textDim,
-            fontFamily: theme.monoFamily,
-          }}
-        >
-          {secondary}
-        </span>
-      ) : null}
     </span>
   );
 }

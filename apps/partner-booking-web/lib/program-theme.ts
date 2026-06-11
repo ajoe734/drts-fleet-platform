@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
 
 /**
  * Per-program theming for the partner-booking white-label flows.
@@ -65,8 +66,10 @@ export interface PartnerProgramTheme {
   readonly programLabel: string;
   /** Short program name reused inside copy. */
   readonly programName: string;
-  /** One-line program tagline. */
+  /** One-line program tagline used for page metadata. */
   readonly tagline: string;
+  /** Customer-facing landing subtitle shown in the card funnel band. */
+  readonly landingSubtitle: string;
   /** Domain noun for the sponsored entitlement (禮遇 / 理賠額度 / 團體席次). */
   readonly benefitNoun: string;
   /** Primary call-to-action label for the landing / review screens. */
@@ -82,127 +85,121 @@ export interface PartnerProgramTheme {
   readonly hotline: PartnerProgramHotline;
 }
 
+const CTBC_BRAND = BRAND_TEMPLATES.CTBC;
+const FUBON_BRAND = BRAND_TEMPLATES.FUBON;
+const LION_BRAND = BRAND_TEMPLATES.LION;
+
+function createProgramThemeFromBrand(params: {
+  kind: PartnerProgramKind;
+  slug: string;
+  issuerName: string;
+  issuerLabel: string;
+  programLabel: string;
+  programName: string;
+  landingSubtitle: string;
+  benefitNoun: string;
+  ctaLabel: string;
+  brand: PartnerBrandTemplate;
+}): PartnerProgramTheme {
+  const {
+    kind,
+    slug,
+    issuerName,
+    issuerLabel,
+    programLabel,
+    programName,
+    landingSubtitle,
+    benefitNoun,
+    ctaLabel,
+    brand,
+  } = params;
+  return {
+    kind,
+    slug,
+    host: brand.host,
+    issuerName,
+    issuerLabel,
+    programLabel,
+    programName,
+    tagline: brand.tagline,
+    landingSubtitle,
+    benefitNoun,
+    ctaLabel,
+    badgeText: brand.cardArt.badgeText,
+    primary: brand.primary,
+    primaryDark: brand.primaryDark,
+    accent: brand.accent,
+    ink: brand.ink,
+    surface: {
+      fg: brand.surface.fg,
+      hi: brand.surface.hi,
+      bg: brand.surface.bg,
+      border: brand.surface.border,
+    },
+    chrome: {
+      pageBackground: brand.theme.pageBackground,
+      pageForeground: brand.theme.pageForeground,
+      pageMuted: brand.theme.pageMuted,
+      panel: brand.theme.panel,
+      panelBorder: brand.theme.panelBorder,
+      accentText: brand.theme.accentText,
+      accentSoft: brand.theme.accentSoft,
+    },
+    hotline: {
+      label: brand.hotline.label,
+      phone: brand.hotline.phone,
+      note: brand.hotline.note,
+    },
+  };
+}
+
 export const PARTNER_PROGRAM_THEMES = {
-  card: {
+  card: createProgramThemeFromBrand({
     kind: "card",
     slug: "card",
-    host: "ride.ctbc.com.tw",
     issuerName: "中信銀行",
     issuerLabel: "CTBC",
     programLabel: "信用卡機場接送",
     programName: "卡友禮賓接送",
-    tagline: "卡友專屬機場接送 · 全年免費趟次",
+    landingSubtitle: "World Elite 卡友專屬 · 全年 12 趟",
     benefitNoun: "禮遇趟次",
     ctaLabel: "立即叫車",
-    badgeText: "C",
-    primary: "#1B4FA0",
-    primaryDark: "#0A2A6E",
-    accent: "#C9A356",
-    ink: "#0E1424",
-    surface: {
-      fg: "#1B4FA0",
-      hi: "#C9A356",
-      bg: "#EBF1FB",
-      border: "#C7D7F0",
-    },
-    chrome: {
-      pageBackground: "#F4F7FC",
-      pageForeground: "#14202C",
-      pageMuted: "#5C6778",
-      panel: "#FFFFFF",
-      panelBorder: "rgba(20, 32, 44, 0.12)",
-      accentText: "#0A2A6E",
-      accentSoft: "rgba(27, 79, 160, 0.10)",
-    },
-    hotline: {
-      label: "24 小時禮賓專線",
-      phone: "0800-024-365",
-      note: "您將被轉接至中信銀行卡友禮賓客服專員。",
-    },
-  },
-  insurance: {
+    brand: CTBC_BRAND,
+  }),
+  insurance: createProgramThemeFromBrand({
     kind: "insurance",
     slug: "insurance",
-    host: "claim.fubon-ins.com.tw",
     issuerName: "富邦產險",
     issuerLabel: "Fubon",
     programLabel: "保險理賠代步",
     programName: "理賠代步接送",
-    tagline: "事故理賠期間代步接送 · 額度內免費",
+    landingSubtitle: "車禍理賠期間代步服務",
     benefitNoun: "理賠額度",
     ctaLabel: "申請代步接送",
-    badgeText: "F",
-    primary: "#007A53",
-    primaryDark: "#00432F",
-    accent: "#7FB800",
-    ink: "#0C1A14",
-    surface: {
-      fg: "#007A53",
-      hi: "#7FB800",
-      bg: "#E8F5EE",
-      border: "#BFE3CF",
-    },
-    chrome: {
-      pageBackground: "#F1F8F4",
-      pageForeground: "#14241C",
-      pageMuted: "#566860",
-      panel: "#FFFFFF",
-      panelBorder: "rgba(20, 36, 28, 0.12)",
-      accentText: "#00432F",
-      accentSoft: "rgba(0, 122, 83, 0.10)",
-    },
-    hotline: {
-      label: "理賠代步服務專線",
-      phone: "0800-073-588",
-      note: "您將被轉接至富邦產險理賠代步服務專員。",
-    },
-  },
-  travel: {
+    brand: FUBON_BRAND,
+  }),
+  travel: createProgramThemeFromBrand({
     kind: "travel",
     slug: "travel",
-    host: "booking.lion-travel.com.tw",
     issuerName: "雄獅旅遊",
     issuerLabel: "Lion",
     programLabel: "旅行社團體接送",
-    programName: "團體機場接送",
-    tagline: "團體行程機場接送 · 依訂單席次派車",
+    programName: "團體接送",
+    landingSubtitle: "旅行團機場 / 飯店接送",
     benefitNoun: "團體席次",
-    ctaLabel: "預約團體接送",
-    badgeText: "L",
-    primary: "#E2231A",
-    primaryDark: "#A4160F",
-    accent: "#F5A623",
-    ink: "#241010",
-    surface: {
-      fg: "#E2231A",
-      hi: "#F5A623",
-      bg: "#FDECEA",
-      border: "#F6C7C2",
-    },
-    chrome: {
-      pageBackground: "#FCF4F2",
-      pageForeground: "#2A1512",
-      pageMuted: "#6E5651",
-      panel: "#FFFFFF",
-      panelBorder: "rgba(42, 21, 18, 0.12)",
-      accentText: "#A4160F",
-      accentSoft: "rgba(226, 35, 26, 0.10)",
-    },
-    hotline: {
-      label: "團體服務專線",
-      phone: "0800-090-068",
-      note: "您將被轉接至雄獅旅遊團體出團服務專員。",
-    },
-  },
+    ctaLabel: "確認席次並前往預約",
+    brand: LION_BRAND,
+  }),
 } as const satisfies Record<PartnerProgramKind, PartnerProgramTheme>;
 
 /** Keyword → program kind, evaluated in order (insurance / travel before card). */
-const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<readonly [RegExp, PartnerProgramKind]> =
-  [
-    [/insur|claim|fubon|理賠|代步/i, "insurance"],
-    [/travel|tour|group|lion|雄獅|團體|旅行/i, "travel"],
-    [/card|credit|ride|ctbc|信用卡|機場|禮賓/i, "card"],
-  ];
+const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<
+  readonly [RegExp, PartnerProgramKind]
+> = [
+  [/insur|claim|fubon|理賠|代步/i, "insurance"],
+  [/travel|tour|group|lion|雄獅|團體|旅行/i, "travel"],
+  [/card|credit|ride|ctbc|信用卡|機場|禮賓/i, "card"],
+];
 
 export const DEFAULT_PARTNER_PROGRAM_KIND: PartnerProgramKind = "card";
 

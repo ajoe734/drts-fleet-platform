@@ -239,4 +239,24 @@ test.describe("fleet partner portal parity smoke", () => {
       );
     }
   });
+
+  test("zh revenue labels do not leak bilingual English sublabels", async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== FLEET_PROJECT);
+
+    const baseUrl = getBaseUrl(testInfo);
+    await page.context().clearCookies();
+    await page.addInitScript(() => {
+      localStorage.setItem("drts-locale-v2", "zh");
+    });
+
+    await page.goto(`${baseUrl}/revenue`, { waitUntil: "domcontentloaded" });
+    await assertSingleShell(page);
+    await expect(page.locator("main")).toContainText(/逐趟分潤/);
+    await expect(page.locator("main")).not.toContainText(/Per-trip share/);
+    await expect(page.locator("main")).not.toContainText(/Recruitment bonus/);
+    await expect(page.locator("main")).not.toContainText(/Management fee/);
+    await expect(page.locator("main")).not.toContainText(/Penalty \/ clawback/);
+  });
 });

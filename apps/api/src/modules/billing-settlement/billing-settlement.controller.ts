@@ -141,6 +141,36 @@ export class BillingSettlementController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  // Card-benefit (CCAT) settlement statements — issuer-tenant scoped,
+  // per-trip reconciliation in the issuer_pays_drts direction. Distinct
+  // from the generic tenant `/invoices` surface.
+  @Get("tenant/settlement-statements")
+  async listTenantSettlementStatements(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items =
+      await this.billingSettlementService.listTenantSettlementStatements(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/settlement-statements/:period")
+  async getTenantSettlementStatement(
+    @Param("period") period: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.billingSettlementService.getTenantSettlementStatement(
+        this.requireTenantId(tenantId),
+        period,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/invoices")
   listTenantInvoices(
     @Headers("x-tenant-id") tenantId?: string,

@@ -18,11 +18,16 @@ export interface PartnerBookingDraftValues {
   direction: "" | "pickup" | "dropoff";
   claimNumber: string;
   policyNumber: string;
+  claimReference: string;
+  claimantName: string;
   replacementStart: string;
   replacementEnd: string;
-  medicalFacility: string;
+  replacementVehicleClass: string;
+  caseHandler: string;
   groupCode: string;
   groupSize: string;
+  itineraryLink: string;
+  rosterPassengers: string;
   luggageCount: string;
   meetingPoint: string;
 }
@@ -61,6 +66,19 @@ function isValidDateTime(value: string) {
   return Number.isFinite(new Date(value).getTime());
 }
 
+function isValidUrl(value: string) {
+  if (!hasText(value)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function parseInteger(value: string) {
   if (!hasText(value)) {
     return null;
@@ -91,11 +109,16 @@ export function createDefaultPartnerBookingDraft(): PartnerBookingDraftValues {
     direction: "",
     claimNumber: "",
     policyNumber: "",
+    claimReference: "",
+    claimantName: "",
     replacementStart: formatDateTimeLocalInputValue(start),
     replacementEnd: formatDateTimeLocalInputValue(end),
-    medicalFacility: "",
+    replacementVehicleClass: "",
+    caseHandler: "",
     groupCode: "",
     groupSize: "",
+    itineraryLink: "",
+    rosterPassengers: "",
     luggageCount: "",
     meetingPoint: "",
   };
@@ -136,7 +159,11 @@ export function getPartnerProgramGate(params: {
   }
 
   if (entry.businessDispatchSubtype === "insurance_replacement_vehicle") {
-    if (!hasText(draft.claimNumber) || !hasText(draft.policyNumber)) {
+    if (
+      !hasText(draft.claimNumber) ||
+      !hasText(draft.policyNumber) ||
+      !hasText(draft.replacementVehicleClass)
+    ) {
       return {
         state: "inline_required",
         message: t("book.eligibility.insurance.message"),
@@ -247,8 +274,18 @@ export function getPartnerBookingFieldErrors(params: {
     if (!hasText(draft.policyNumber)) {
       setRequiredError(errors, "policyNumber", "field.policyNumber");
     }
-    if (!hasText(draft.medicalFacility)) {
-      setRequiredError(errors, "medicalFacility", "field.medicalFacility");
+    if (!hasText(draft.claimReference)) {
+      setRequiredError(errors, "claimReference", "field.claimReference");
+    }
+    if (!hasText(draft.claimantName)) {
+      setRequiredError(errors, "claimantName", "field.claimantName");
+    }
+    if (!hasText(draft.replacementVehicleClass)) {
+      setRequiredError(
+        errors,
+        "replacementVehicleClass",
+        "field.replacementVehicleClass",
+      );
     }
     if (!hasText(draft.replacementStart)) {
       setRequiredError(errors, "replacementStart", "field.replacementStart");
@@ -278,8 +315,18 @@ export function getPartnerBookingFieldErrors(params: {
     if (!hasText(draft.groupCode)) {
       setRequiredError(errors, "groupCode", "field.groupCode");
     }
+    if (!hasText(draft.itineraryLink)) {
+      setRequiredError(errors, "itineraryLink", "field.itineraryLink");
+    } else if (!isValidUrl(draft.itineraryLink)) {
+      errors.itineraryLink = t("error.url", {
+        label: t("field.itineraryLink"),
+      });
+    }
     if (!hasText(draft.meetingPoint)) {
       setRequiredError(errors, "meetingPoint", "field.meetingPoint");
+    }
+    if (!hasText(draft.rosterPassengers)) {
+      setRequiredError(errors, "rosterPassengers", "field.rosterPassengers");
     }
 
     const groupSize = parseInteger(draft.groupSize);

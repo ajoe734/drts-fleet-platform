@@ -14,6 +14,16 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+type FleetPartnerStatementRow = JsonRecordRow & {
+  sponsor_funded_trip_count?: number | null;
+  sponsor_funded_gross_earning_basis_amount_minor?: number | string | null;
+  sponsor_funded_gross_earning_basis_currency?: string | null;
+  sponsor_funded_share_amount_amount_minor?: number | string | null;
+  sponsor_funded_share_amount_currency?: string | null;
+  reimbursement_amount_amount_minor?: number | string | null;
+  reimbursement_amount_currency?: string | null;
+};
+
 export type FleetPartnerState = {
   fleetPartners: FleetPartnerRecord[];
   driverAffiliations: DriverFleetAffiliationRecord[];
@@ -78,9 +88,17 @@ export class FleetPartnerRepository {
             ORDER BY updated_at DESC
           `,
         ),
-        this.databaseService!.query<JsonRecordRow>(
+        this.databaseService!.query<FleetPartnerStatementRow>(
           `
-            SELECT record
+            SELECT
+              sponsor_funded_trip_count,
+              sponsor_funded_gross_earning_basis_amount_minor,
+              sponsor_funded_gross_earning_basis_currency,
+              sponsor_funded_share_amount_amount_minor,
+              sponsor_funded_share_amount_currency,
+              reimbursement_amount_amount_minor,
+              reimbursement_amount_currency,
+              record
             FROM billing.phase1_fleet_partner_statements
             ORDER BY updated_at DESC, created_at DESC
           `,
@@ -107,10 +125,7 @@ export class FleetPartnerRepository {
         ),
       ),
       statements: statementsResult.rows.map((row) =>
-        this.parseRecord<FleetPartnerStatementRecord>(
-          row.record,
-          "billing.phase1_fleet_partner_statements",
-        ),
+        this.parseStatementRecord(row),
       ),
     };
   }
@@ -336,16 +351,30 @@ export class FleetPartnerRepository {
           fleet_partner_id,
           period_month,
           payout_status,
+          sponsor_funded_trip_count,
+          sponsor_funded_gross_earning_basis_amount_minor,
+          sponsor_funded_gross_earning_basis_currency,
+          sponsor_funded_share_amount_amount_minor,
+          sponsor_funded_share_amount_currency,
+          reimbursement_amount_amount_minor,
+          reimbursement_amount_currency,
           created_at,
           updated_at,
           record
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7::jsonb
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb
         )
         ON CONFLICT (statement_id) DO UPDATE SET
           fleet_partner_id = EXCLUDED.fleet_partner_id,
           period_month = EXCLUDED.period_month,
           payout_status = EXCLUDED.payout_status,
+          sponsor_funded_trip_count = EXCLUDED.sponsor_funded_trip_count,
+          sponsor_funded_gross_earning_basis_amount_minor = EXCLUDED.sponsor_funded_gross_earning_basis_amount_minor,
+          sponsor_funded_gross_earning_basis_currency = EXCLUDED.sponsor_funded_gross_earning_basis_currency,
+          sponsor_funded_share_amount_amount_minor = EXCLUDED.sponsor_funded_share_amount_amount_minor,
+          sponsor_funded_share_amount_currency = EXCLUDED.sponsor_funded_share_amount_currency,
+          reimbursement_amount_amount_minor = EXCLUDED.reimbursement_amount_amount_minor,
+          reimbursement_amount_currency = EXCLUDED.reimbursement_amount_currency,
           created_at = EXCLUDED.created_at,
           updated_at = EXCLUDED.updated_at,
           record = EXCLUDED.record
@@ -355,10 +384,61 @@ export class FleetPartnerRepository {
         statement.fleetPartnerId,
         statement.periodMonth,
         statement.payoutStatus,
+        statement.sponsorFundedTripCount,
+        statement.sponsorFundedGrossEarningBasis.amountMinor,
+        statement.sponsorFundedGrossEarningBasis.currency,
+        statement.sponsorFundedShareAmount.amountMinor,
+        statement.sponsorFundedShareAmount.currency,
+        statement.reimbursementAmount.amountMinor,
+        statement.reimbursementAmount.currency,
         statement.createdAt,
         statement.updatedAt,
         JSON.stringify(statement),
       ],
     );
+  }
+
+  private parseStatementRecord(
+    row: FleetPartnerStatementRow,
+  ): FleetPartnerStatementRecord {
+    const statement = this.parseRecord<FleetPartnerStatementRecord>(
+      row.record,
+      "billing.phase1_fleet_partner_statements",
+    );
+
+    return {
+      ...statement,
+      sponsorFundedTripCount:
+        row.sponsor_funded_trip_count ?? statement.sponsorFundedTripCount ?? 0,
+      sponsorFundedGrossEarningBasis: this.resolveMoney(
+        row.sponsor_funded_gross_earning_basis_amount_minor,
+        row.sponsor_funded_gross_earning_basis_currency,
+        statement.sponsorFundedGrossEarningBasis,
+      ),
+      sponsorFundedShareAmount: this.resolveMoney(
+        row.sponsor_funded_share_amount_amount_minor,
+        row.sponsor_funded_share_amount_currency,
+        statement.sponsorFundedShareAmount,
+      ),
+      reimbursementAmount: this.resolveMoney(
+        row.reimbursement_amount_amount_minor,
+        row.reimbursement_amount_currency,
+        statement.reimbursementAmount,
+      ),
+    };
+  }
+
+  private resolveMoney(
+    amountMinor: number | string | null | undefined,
+    currency: string | null | undefined,
+    fallback: FleetPartnerStatementRecord["shareAmount"] | undefined,
+  ) {
+    if (amountMinor !== null && amountMinor !== undefined && currency) {
+      return {
+        amountMinor: Number(amountMinor),
+        currency,
+      };
+    }
+    return fallback ?? { amountMinor: 0, currency: "NTD" };
   }
 }

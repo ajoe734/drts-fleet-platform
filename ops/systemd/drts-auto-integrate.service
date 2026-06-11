@@ -1,0 +1,11 @@
+[Unit]
+Description=DRTS auto-integrator (rebase review-approved task branches onto dev, CI-gate, merge)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/edna/workspace/drts-fleet-platform
+# Conservative: only merges branches that rebase cleanly onto dev AND go green on
+# required CI; conflicts / cross-task CI ripples are opened as *-INTEGRATE-UNBLOCK
+# tasks instead of being force-resolved. Serialized; idempotent.
+ExecStart=/usr/bin/env python3 /home/edna/workspace/drts-fleet-platform/scripts/auto-integrate.py --all --max 5 --open-unblock
