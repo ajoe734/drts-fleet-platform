@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import {
   DEFAULT_PARTNER_PROGRAM_KIND,
   PARTNER_PROGRAM_KINDS,
@@ -61,6 +62,34 @@ describe("partner-booking per-program theming", () => {
     expect(getProgramThemeForSlug("booking-lion-travel").kind).toBe("travel");
   });
 
+  it("reuses the canonical CTBC brand tokens for the card program", () => {
+    const theme = getProgramTheme("card");
+    const brand = BRAND_TEMPLATES.CTBC;
+
+    expect(theme.primary).toBe("#13478F");
+    expect(theme.accent).toBe("#A8771B");
+    expect(theme.primary).toBe(brand.primary);
+    expect(theme.primaryDark).toBe(brand.primaryDark);
+    expect(theme.accent).toBe(brand.accent);
+    expect(theme.surface).toEqual(brand.surface);
+    expect(theme.chrome.pageBackground).toBe(brand.theme.pageBackground);
+    expect(theme.chrome.accentText).toBe(brand.theme.accentText);
+  });
+
+  it("reuses the canonical Fubon brand tokens for the insurance program", () => {
+    const theme = getProgramTheme("insurance");
+    const brand = BRAND_TEMPLATES.FUBON;
+
+    expect(theme.primary).toBe("#0E6E50");
+    expect(theme.accent).toBe("#2FA37A");
+    expect(theme.primary).toBe(brand.primary);
+    expect(theme.primaryDark).toBe(brand.primaryDark);
+    expect(theme.accent).toBe(brand.accent);
+    expect(theme.surface).toEqual(brand.surface);
+    expect(theme.chrome.pageBackground).toBe(brand.theme.pageBackground);
+    expect(theme.chrome.accentText).toBe(brand.theme.accentText);
+  });
+
   it("resolves a theme from a partner entry, preferring specific identifiers", () => {
     expect(
       getProgramThemeForEntry({
@@ -75,9 +104,7 @@ describe("partner-booking per-program theming", () => {
       }).kind,
     ).toBe("travel");
 
-    expect(getProgramThemeForEntry({}).kind).toBe(
-      DEFAULT_PARTNER_PROGRAM_KIND,
-    );
+    expect(getProgramThemeForEntry({}).kind).toBe(DEFAULT_PARTNER_PROGRAM_KIND);
   });
 
   it("emits shared and program-scoped CSS variables", () => {
@@ -87,6 +114,20 @@ describe("partner-booking per-program theming", () => {
     expect(vars["--pbk-primary"]).toBe(theme.primary);
     expect(vars["--pbk-primary-dark"]).toBe(theme.primaryDark);
     expect(vars["--pbk-accent-strong"]).toBe(theme.accent);
+  });
+
+  it("keeps the travel palette aligned with the canvas theme", () => {
+    const theme = getProgramTheme("travel");
+    const brand = BRAND_TEMPLATES.LION;
+    expect(theme.primary).toBe("#B0420E");
+    expect(theme.primaryDark).toBe("#6E2806");
+    expect(theme.accent).toBe("#E07B3A");
+    expect(theme.surface.bg).toBe("#FCEEE2");
+    expect(theme.primary).toBe(brand.primary);
+    expect(theme.surface).toEqual(brand.surface);
+    expect(theme.primaryDark).toBe(brand.primaryDark);
+    expect(theme.accent).toBe(brand.accent);
+    expect(theme.chrome.pageBackground).toBe(brand.theme.pageBackground);
   });
 
   it("validates program kind strings", () => {

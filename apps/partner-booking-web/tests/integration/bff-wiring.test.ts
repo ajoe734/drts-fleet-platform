@@ -201,6 +201,29 @@ describe("partner-booking-web BFF wiring", () => {
     expect(brand.primary).toBe("#0047AB");
   });
 
+  it("matches lion travel branding from host and subtype hints", () => {
+    const brand = resolvePartnerBrand({
+      ...activeEntry,
+      entrySlug: "lion-group-landing",
+      displayName: "雄獅團體接送",
+      programCode: "GROUP_TRANSFER",
+      bankCode: "LION",
+      businessDispatchSubtype: "travel_agency_transfer",
+      entryHost: "booking.lion-travel.com.tw",
+      themeAccent: "#B0420E",
+      brandingMetadata: {
+        displayName: "雄獅團體接送",
+        themeAccent: "#B0420E",
+        supportEmail: "group@liontravel.example",
+        supportPhone: "0800-090-068",
+      },
+    });
+
+    expect(brand.code).toBe("LION");
+    expect(brand.host).toBe("booking.lion-travel.com.tw");
+    expect(brand.hotline.label).toBe("雄獅團體服務專線");
+  });
+
   it("uses backend authority clients for booking confirmation, trip, and receipt", async () => {
     const booking = {
       bookingId: "booking-001",

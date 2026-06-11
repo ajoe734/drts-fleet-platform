@@ -184,7 +184,7 @@ async function auditRoute(page, route) {
 
   const platformNavCount = await countVisible(
     page,
-    'nav[aria-label="Platform Admin navigation"]',
+    'nav[aria-label="Platform Admin navigation"], nav[aria-label="平台管理導覽"]',
   );
   const visibleAsides = await countVisible(page, "aside");
 
@@ -236,13 +236,25 @@ async function auditRoute(page, route) {
 }
 
 async function clickTabByText(page, label) {
-  const tab = page
-    .getByRole("tab", { name: label })
-    .or(page.getByRole("button", { name: label }))
-    .or(page.getByText(label))
-    .first();
-  await expect(tab).toBeVisible();
-  await tab.click();
+  const roleTab = page.getByRole("tab", { name: label }).first();
+  if (await roleTab.count()) {
+    await expect(roleTab).toBeVisible();
+    await roleTab.click();
+    await page.waitForTimeout(800);
+    return;
+  }
+
+  const button = page.getByRole("button", { name: label }).first();
+  if (await button.count()) {
+    await expect(button).toBeVisible();
+    await button.click();
+    await page.waitForTimeout(800);
+    return;
+  }
+
+  const text = page.getByText(label).first();
+  await expect(text).toBeVisible();
+  await text.click();
   await page.waitForTimeout(800);
 }
 
@@ -364,19 +376,19 @@ test.describe("live dev gap audit", () => {
         waitUntil: "domcontentloaded",
       });
       await page.waitForTimeout(1500);
-      await clickTabByText(page, "Driver Fee Plans");
+      await clickTabByText(page, /Driver Fee Plans|司機費用方案/);
       await assertUrlEndsWith(page, "/pricing?tab=driver");
       await page.screenshot({
         path: path.join(ARTIFACT_DIR, "pricing-tab-driver.png"),
         fullPage: true,
       });
-      await clickTabByText(page, "Published Versions");
+      await clickTabByText(page, /Published Versions|已發布版本/);
       await assertUrlEndsWith(page, "/pricing?tab=history");
       await page.screenshot({
         path: path.join(ARTIFACT_DIR, "pricing-tab-history.png"),
         fullPage: true,
       });
-      await clickTabByText(page, "Passenger Pricing");
+      await clickTabByText(page, /Passenger Pricing|乘客定價/);
       await assertUrlEndsWith(page, "/pricing?tab=passenger");
       checks.pricingTabs = { status: "pass", message: "tab query sync works" };
     } catch (error) {
@@ -393,11 +405,10 @@ test.describe("live dev gap audit", () => {
         waitUntil: "domcontentloaded",
       });
       await page.waitForTimeout(1500);
-      await clickTabByText(page, "發票");
-      await expect(page.getByRole("tab", { name: "發票" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      await clickTabByText(page, /Invoices|租戶發票/);
+      await expect(
+        page.getByRole("tab", { name: /Invoices|租戶發票/ }),
+      ).toHaveAttribute("aria-selected", "true");
       await clickTabByText(page, "司機結算單");
       await expect(
         page.getByRole("tab", { name: "司機結算單" }),

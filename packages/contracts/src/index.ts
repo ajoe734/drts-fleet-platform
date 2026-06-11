@@ -1599,6 +1599,16 @@ export interface TenantQuotaSummary {
   refreshedAt: string;
 }
 
+export interface TenantProgramUsageRecord {
+  programId: string;
+  programCode: string;
+  period: string;
+  cardholdersServed: number;
+  tripsConsumed: number;
+  quotaTotal: number | null;
+  quotaRemaining: number | null;
+}
+
 export interface TenantCostCenterQuotaSummary {
   tenantId: string;
   costCenterCode: string;
@@ -3595,6 +3605,7 @@ export interface TenantPayableLineItem {
 
 export type TenantServiceProgramType =
   | "enterprise_dispatch"
+  | "card_benefit_airport"
   | "credit_card_airport_transfer"
   | "insurance_replacement_vehicle"
   | "travel_agency_transfer"
@@ -3616,6 +3627,63 @@ export interface TenantServiceProgramRecord {
   eligibilityRuleId: string | null;
   serviceRuleSetId: string;
   allowedServiceProducts: ServiceProductType[];
+}
+
+export type IssuerContractSlaMetric = "pickup_punctuality" | "completion_rate";
+
+export interface IssuerContractTerm {
+  startsAt: string;
+  endsAt: string | null;
+  billingCycle: "monthly";
+  serviceProduct: ServiceProductType;
+  issuerTenantId: string;
+}
+
+export interface IssuerContractSlaTarget {
+  metric: IssuerContractSlaMetric;
+  thresholdPercent: number;
+  comparator: "gte";
+  window: "current_period";
+}
+
+export interface IssuerContractPeriodAttainment {
+  period: string;
+  evaluatedAt: string;
+  completedTrips: number;
+  totalTrips: number;
+  pickupPunctualityPercent: number | null;
+  completionRatePercent: number | null;
+  breachedTargets: IssuerContractSlaMetric[];
+}
+
+export interface IssuerContractExceptionRecord {
+  exceptionId: string;
+  orderId: string;
+  occurredAt: string;
+  reasonCode: string;
+  summary: string;
+  status: "open" | "resolved";
+  benefitReferenceMasked: string | null;
+  issuerAuthorizationRefMasked: string | null;
+}
+
+export type IssuerContractStatus =
+  | "active"
+  | "at_risk"
+  | "breached"
+  | "inactive";
+
+export interface IssuerContractStatusRecord {
+  contractId: string;
+  tenantId: string;
+  programId: string;
+  programCode: string;
+  displayName: string;
+  term: IssuerContractTerm;
+  slaTargets: IssuerContractSlaTarget[];
+  periodAttainment: IssuerContractPeriodAttainment;
+  exceptions: IssuerContractExceptionRecord[];
+  status: IssuerContractStatus;
 }
 
 export interface IssuePassengerReceiptCommand {
@@ -3781,6 +3849,13 @@ export interface FleetPartnerStatementLineRecord {
     sourcePlatform: string | null;
     driverGroupId: string | null;
     orderSource: OwnedOrderSource | null;
+    settlementChannelKey: SettlementMatrixRecord["channelKey"];
+    sponsorFunded: boolean;
+    partnerId: string | null;
+    partnerProgramId: string | null;
+    benefitReference: string | null;
+    issuerAuthorizationRef: string | null;
+    reimbursementAmount: MoneyAmount | null;
   };
 }
 
@@ -3792,6 +3867,10 @@ export interface FleetPartnerStatementRecord {
   grossEarningBasis: MoneyAmount;
   driverNetAmountBasis: MoneyAmount;
   shareAmount: MoneyAmount;
+  sponsorFundedTripCount: number;
+  sponsorFundedGrossEarningBasis: MoneyAmount;
+  sponsorFundedShareAmount: MoneyAmount;
+  reimbursementAmount: MoneyAmount;
   lines: FleetPartnerStatementLineRecord[];
   createdAt: string;
   updatedAt: string;
@@ -3866,8 +3945,14 @@ export interface FleetPartnerPortalTripRecord {
   serviceProduct: string | null;
   tenantServiceProgramId: string | null;
   sourcePlatform: string | null;
+  fleetShareAmount: MoneyAmount | null;
+  settlementChannelKey: SettlementMatrixRecord["channelKey"];
+  sponsorFunded: boolean;
   partnerId: string | null;
   partnerProgramId: string | null;
+  benefitReference: string | null;
+  issuerAuthorizationRef: string | null;
+  reimbursementAmount: MoneyAmount | null;
   passengerName: string | null;
   pickupAddress: string | null;
   dropoffAddress: string | null;

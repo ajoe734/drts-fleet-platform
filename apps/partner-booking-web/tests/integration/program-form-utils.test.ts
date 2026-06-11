@@ -39,7 +39,7 @@ describe("partner booking program form utilities", () => {
     expect(gate.actionHref).toBe("/ctbc/eligibility");
   });
 
-  it("requires claim, policy, period, and medical facility for insurance replacement", () => {
+  it("requires claim, policy, claimant, and replacement-vehicle coverage fields for insurance replacement", () => {
     const draft = createDefaultPartnerBookingDraft();
     const errors = getPartnerBookingFieldErrors({
       draft,
@@ -48,12 +48,14 @@ describe("partner booking program form utilities", () => {
 
     expect(errors.claimNumber).toBeTruthy();
     expect(errors.policyNumber).toBeTruthy();
+    expect(errors.claimReference).toBeTruthy();
+    expect(errors.claimantName).toBeTruthy();
     expect(errors.replacementStart).toBeUndefined();
     expect(errors.replacementEnd).toBeUndefined();
-    expect(errors.medicalFacility).toBeTruthy();
+    expect(errors.replacementVehicleClass).toBeTruthy();
   });
 
-  it("requires group code, group size, and meeting point for travel agency transfers", () => {
+  it("requires roster-oriented travel fields for travel agency transfers", () => {
     const draft = createDefaultPartnerBookingDraft();
     const errors = getPartnerBookingFieldErrors({
       draft,
@@ -62,7 +64,9 @@ describe("partner booking program form utilities", () => {
 
     expect(errors.groupCode).toBeTruthy();
     expect(errors.groupSize).toBeTruthy();
+    expect(errors.itineraryLink).toBeTruthy();
     expect(errors.meetingPoint).toBeTruthy();
+    expect(errors.rosterPassengers).toBeTruthy();
   });
 
   it("marks a completed travel-agency draft ready when eligibility mode is none", () => {
@@ -73,8 +77,11 @@ describe("partner booking program form utilities", () => {
     draft.passengerPhone = "0912000000";
     draft.groupCode = "GRP-101";
     draft.groupSize = "18";
+    draft.itineraryLink =
+      "https://booking.lion-travel.com.tw/itinerary/GRP-101";
     draft.luggageCount = "12";
     draft.meetingPoint = "North Gate coach bay";
+    draft.rosterPassengers = "Tour Leader\\nPassenger A\\nPassenger B";
 
     expect(
       isPartnerBookingDraftReady({
@@ -87,5 +94,25 @@ describe("partner booking program form utilities", () => {
         eligibilityVerificationId: null,
       }),
     ).toBe(true);
+  });
+
+  it("rejects invalid itinerary links for travel agency transfers", () => {
+    const draft = createDefaultPartnerBookingDraft();
+    draft.pickupAddress = "Taipei Main Station";
+    draft.dropoffAddress = "Taoyuan Airport T1";
+    draft.passengerName = "Tour Leader";
+    draft.passengerPhone = "0912000000";
+    draft.groupCode = "GRP-101";
+    draft.groupSize = "18";
+    draft.itineraryLink = "lion-itinerary";
+    draft.meetingPoint = "North Gate coach bay";
+    draft.rosterPassengers = "Tour Leader";
+
+    const errors = getPartnerBookingFieldErrors({
+      draft,
+      subtype: "travel_agency_transfer",
+    });
+
+    expect(errors.itineraryLink).toBeTruthy();
   });
 });

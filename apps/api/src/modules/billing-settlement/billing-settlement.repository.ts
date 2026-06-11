@@ -254,6 +254,52 @@ export class BillingSettlementRepository {
     });
   }
 
+  /**
+   * Distinct `YYYY-MM` period months that have at least one live card-benefit
+   * airport-transfer settlement trip for the issuer tenant. Mirrors the
+   * `partner_airport` channel predicate (`settlementChannelKeyForTrip`) plus the
+   * benefit/issuer reference requirement so statement period discovery does not
+   * miss periods that exist only in live repository data (not seed memory).
+   */
+  async listLiveCardBenefitSettlementPeriods(
+    tenantId: string,
+  ): Promise<string[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = await this.databaseService!.query<{
+      period_month: string | null;
+    }>(
+      `
+        SELECT DISTINCT
+          substring(${LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL} FROM 1 FOR 7)
+            AS period_month
+        FROM ops.phase1_driver_tasks AS tasks
+        INNER JOIN ops.phase1_owned_orders AS orders
+          ON orders.order_id = tasks.order_id
+        WHERE tasks.status = 'completed'
+          AND ${LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL}
+          AND COALESCE(orders.record->>'tenantId', '') = $1
+          AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'
+          AND COALESCE(orders.record->>'orderSource', '')
+            NOT IN ('external_platform', 'phone')
+          AND (
+            COALESCE(orders.record->>'businessDispatchSubtype', '')
+              = 'credit_card_airport_transfer'
+            OR COALESCE(orders.record->>'partnerId', '') <> ''
+          )
+          AND COALESCE(orders.record->>'benefitReference', '') <> ''
+          AND COALESCE(orders.record->>'issuerAuthorizationRef', '') <> ''
+      `,
+      [tenantId],
+    );
+
+    return result.rows
+      .map((row) => row.period_month)
+      .filter((value): value is string => Boolean(value));
+  }
+
   async listLiveDriverTripsInPeriod(
     periodStart: string,
     periodEnd: string,

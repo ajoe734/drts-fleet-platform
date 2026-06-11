@@ -112,6 +112,8 @@ const en: Dict = {
   "revenue.line.mgmt_fee": "Management fee",
   "revenue.line.performance": "Performance bonus",
   "revenue.line.clawback": "Penalty / clawback",
+  "revenue.line.sponsor_airport": "Sponsor-funded airport share",
+  "revenue.lineNote.reimbursement": "Reimbursement trace: {amount}",
 
   "statements.title": "Statements",
   "statements.subtitle":
@@ -207,6 +209,10 @@ const en: Dict = {
   "table.payable": "Payable",
   "table.issued": "Issued",
   "table.actions": "Actions",
+  "table.sponsorFundedTrip": "Sponsor-funded",
+  "table.reimbursementShort": "Reimb. {amount}",
+  "table.statementSponsorSummary":
+    "{trips} sponsor-funded trips · reimbursement {amount}",
   "table.document": "Document",
   "table.due": "Due",
   "table.owner": "Owner",
@@ -367,6 +373,8 @@ const zh: Dict = {
   "revenue.line.mgmt_fee": "管理費",
   "revenue.line.performance": "績效獎金",
   "revenue.line.clawback": "罰則 / 追回",
+  "revenue.line.sponsor_airport": "卡友機場趟次分潤",
+  "revenue.lineNote.reimbursement": "補款批次追蹤：{amount}",
   "statements.title": "對帳單",
   "statements.subtitle": "月結分潤對帳單 · 可下載簽名憑證",
   "documents.title": "文件",
@@ -451,6 +459,9 @@ const zh: Dict = {
   "table.payable": "應付",
   "table.issued": "開立日期",
   "table.actions": "動作",
+  "table.sponsorFundedTrip": "卡友贊助",
+  "table.reimbursementShort": "補款 {amount}",
+  "table.statementSponsorSummary": "卡友贊助 {trips} 趟 · 補款 {amount}",
   "table.document": "文件",
   "table.due": "到期",
   "table.owner": "責任方",

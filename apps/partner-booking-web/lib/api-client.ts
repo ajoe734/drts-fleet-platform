@@ -144,6 +144,43 @@ function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
   };
 }
 
+function matchBrandTemplate(
+  entry: Pick<
+    PartnerChannelEntryRecord,
+    | "entrySlug"
+    | "displayName"
+    | "programCode"
+    | "bankCode"
+    | "entryHost"
+    | "businessDispatchSubtype"
+  >,
+): PartnerBrandTemplate | undefined {
+  const candidates = [
+    entry.entrySlug,
+    entry.entryHost,
+    entry.programCode,
+    entry.bankCode,
+    entry.displayName,
+    entry.businessDispatchSubtype,
+  ]
+    .filter((candidate): candidate is string => Boolean(candidate?.trim()))
+    .map((candidate) => candidate.toLowerCase());
+
+  return Object.values(BRAND_TEMPLATES).find((brand) =>
+    candidates.some((candidate) => {
+      return (
+        candidate === brand.slug.toLowerCase() ||
+        candidate === brand.code.toLowerCase() ||
+        candidate === brand.host.toLowerCase() ||
+        candidate.includes(brand.slug.toLowerCase()) ||
+        candidate.includes(brand.code.toLowerCase()) ||
+        candidate.includes(brand.bankName.toLowerCase()) ||
+        candidate.includes(brand.programName.toLowerCase())
+      );
+    }),
+  );
+}
+
 export function resolvePartnerBrand(
   entry: Pick<
     PartnerChannelEntryRecord,
@@ -153,13 +190,12 @@ export function resolvePartnerBrand(
     | "bankCode"
     | "themeAccent"
     | "entryHost"
+    | "businessDispatchSubtype"
     | "brandingMetadata"
   >,
 ): PartnerBrandTemplate {
   const base =
-    Object.values(BRAND_TEMPLATES).find(
-      (candidate) => candidate.slug === entry.entrySlug,
-    ) ?? fallbackBrandTemplate(entry.entrySlug);
+    matchBrandTemplate(entry) ?? fallbackBrandTemplate(entry.entrySlug);
   const displayName =
     entry.brandingMetadata?.displayName?.trim() || entry.displayName;
   const accent = entry.themeAccent?.trim() || base.primary;

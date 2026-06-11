@@ -54,6 +54,8 @@ const CROSS_APP_BASE_URLS = {
     process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004",
   "fleet-partner-portal":
     process.env.NEXT_PUBLIC_FLEET_PARTNER_PORTAL_URL ?? "http://localhost:3007",
+  "bank-console":
+    process.env.NEXT_PUBLIC_BANK_CONSOLE_URL ?? "http://localhost:3009",
 } as const;
 
 const pageBodyStyle: CSSProperties = {
