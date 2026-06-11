@@ -28,6 +28,55 @@ export const PARTNER_PROGRAM_SCREENS = [
     summary: "首次使用的權益確認與授權同意。",
   },
   {
+    id: "insurance_policy",
+    segment: "insurance_policy",
+    label: "保單驗證",
+    eyebrow: "PB_InsBlocked",
+    summary: "保單未通過核驗，理賠代步仍維持封鎖。",
+  },
+  {
+    id: "insurance_replacement_vehicle",
+    segment: "insurance_replacement_vehicle",
+    label: "代步車權益",
+    eyebrow: "PB_InsBlocked",
+    summary: "代步車型或保障窗未核定，無法建立代步行程。",
+  },
+  {
+    id: "insurance_roster",
+    segment: "insurance_roster",
+    label: "乘客名單",
+    eyebrow: "PB_InsBlocked",
+    summary: "理賠案件乘客名單未對齊，需先修正保險名單資料。",
+  },
+  {
+    id: "insurance_pending",
+    segment: "insurance_pending",
+    label: "理賠審核中",
+    eyebrow: "PB_InsBlocked",
+    summary: "理賠案件尚在審核流程，代步權益未開通。",
+  },
+  {
+    id: "insurance_missing",
+    segment: "insurance_missing",
+    label: "查無案件",
+    eyebrow: "PB_InsBlocked",
+    summary: "保單或理賠參照查無對應案件，需重新確認資料。",
+  },
+  {
+    id: "insurance_expired",
+    segment: "insurance_expired",
+    label: "保障已逾期",
+    eyebrow: "PB_InsBlocked",
+    summary: "代步保障期間已結束，本案無法再建立新行程。",
+  },
+  {
+    id: "insurance_cancelled",
+    segment: "insurance_cancelled",
+    label: "案件已結案",
+    eyebrow: "PB_InsBlocked",
+    summary: "理賠案件已取消或結清，代步權益同步關閉。",
+  },
+  {
     id: "review",
     segment: "review",
     label: "下單前確認",
@@ -81,6 +130,27 @@ export function listProgramScreens(): ReadonlyArray<ProgramScreenMeta> {
   return PARTNER_PROGRAM_SCREENS;
 }
 
+const INSURANCE_ONLY_SCREEN_IDS = new Set<PartnerProgramScreenId>([
+  "insurance_policy",
+  "insurance_replacement_vehicle",
+  "insurance_roster",
+  "insurance_pending",
+  "insurance_missing",
+  "insurance_expired",
+  "insurance_cancelled",
+]);
+
+export function listProgramScreensForTheme(
+  theme: PartnerProgramTheme,
+): ReadonlyArray<ProgramScreenMeta> {
+  if (theme.kind === "insurance") {
+    return PARTNER_PROGRAM_SCREENS;
+  }
+  return PARTNER_PROGRAM_SCREENS.filter(
+    (screen) => !INSURANCE_ONLY_SCREEN_IDS.has(screen.id),
+  );
+}
+
 export function isPartnerProgramScreenId(
   value: string,
 ): value is PartnerProgramScreenId {
@@ -108,6 +178,16 @@ export function getProgramScreenHref(
 }
 
 type ScreenTone = "neutral" | "primary" | "accent" | "success" | "danger";
+type InsuranceStateId = Extract<
+  PartnerProgramScreenId,
+  | "insurance_policy"
+  | "insurance_replacement_vehicle"
+  | "insurance_roster"
+  | "insurance_pending"
+  | "insurance_missing"
+  | "insurance_expired"
+  | "insurance_cancelled"
+>;
 
 function programDemo(theme: PartnerProgramTheme) {
   const remaining = 9;
@@ -128,12 +208,23 @@ function programDemo(theme: PartnerProgramTheme) {
   };
 }
 
-function toneStyle(theme: PartnerProgramTheme, tone: ScreenTone): CSSProperties {
+function toneStyle(
+  theme: PartnerProgramTheme,
+  tone: ScreenTone,
+): CSSProperties {
   switch (tone) {
     case "success":
-      return { color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0" };
+      return {
+        color: "#166534",
+        background: "#f0fdf4",
+        border: "1px solid #bbf7d0",
+      };
     case "danger":
-      return { color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca" };
+      return {
+        color: "#b91c1c",
+        background: "#fef2f2",
+        border: "1px solid #fecaca",
+      };
     case "accent":
       return {
         color: theme.primaryDark,
@@ -147,7 +238,11 @@ function toneStyle(theme: PartnerProgramTheme, tone: ScreenTone): CSSProperties 
         border: `1px solid ${theme.surface.border}`,
       };
     default:
-      return { color: "#56657f", background: "#f1f3f8", border: "1px solid #dde3ec" };
+      return {
+        color: "#56657f",
+        background: "#f1f3f8",
+        border: "1px solid #dde3ec",
+      };
   }
 }
 
@@ -303,7 +398,9 @@ function Row({
       <span
         style={{
           color: "#0e1424",
-          fontFamily: mono ? '"JetBrains Mono", ui-monospace, monospace' : "inherit",
+          fontFamily: mono
+            ? '"JetBrains Mono", ui-monospace, monospace'
+            : "inherit",
           fontWeight: mono ? 600 : 500,
           textAlign: "right",
         }}
@@ -429,6 +526,134 @@ function BenefitMeter({
   );
 }
 
+function CheckMark() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#15803d"
+      strokeWidth="3"
+    >
+      <path d="M5 12l5 5L20 7" />
+    </svg>
+  );
+}
+
+function InsuranceStateIcon({
+  tone,
+  glyph,
+}: {
+  tone: "warn" | "danger";
+  glyph: "clock" | "search" | "ban" | "alert" | "roster" | "policy" | "car";
+}) {
+  const stroke = tone === "warn" ? "#b45309" : "#b42318";
+  if (glyph === "clock") {
+    return (
+      <svg
+        width="30"
+        height="30"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+    );
+  }
+  if (glyph === "search") {
+    return (
+      <svg
+        width="30"
+        height="30"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+      >
+        <circle cx="11" cy="11" r="7" />
+        <path d="M20 20l-3.5-3.5" />
+      </svg>
+    );
+  }
+  if (glyph === "ban") {
+    return (
+      <svg
+        width="30"
+        height="30"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M6 6l12 12" />
+      </svg>
+    );
+  }
+  if (glyph === "policy") {
+    return (
+      <svg
+        width="30"
+        height="30"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+      >
+        <path d="M7 4h8l4 4v12H7z" />
+        <path d="M15 4v4h4M10 12h6M10 16h4" />
+      </svg>
+    );
+  }
+  if (glyph === "car") {
+    return (
+      <svg
+        width="30"
+        height="30"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+      >
+        <path d="M3 13l2-5h14l2 5M5 13h14v4H5zM7 17v2M17 17v2" />
+      </svg>
+    );
+  }
+  if (glyph === "roster") {
+    return (
+      <svg
+        width="30"
+        height="30"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+      >
+        <circle cx="9" cy="8" r="2.5" />
+        <circle cx="16.5" cy="9.5" r="2" />
+        <path d="M4.5 18c0-2.5 2.5-4 4.5-4s4.5 1.5 4.5 4M14 18c.2-1.8 1.8-3 3.6-3 1.1 0 2.2.4 2.9 1.2" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      width="30"
+      height="30"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={stroke}
+      strokeWidth="2"
+    >
+      <path d="M12 3l10 18H2z" />
+      <path d="M12 10v5M12 17v.01" />
+    </svg>
+  );
+}
+
 function renderScreen(
   theme: PartnerProgramTheme,
   screen: PartnerProgramScreenId,
@@ -442,37 +667,109 @@ function renderScreen(
   const eligibilityHref = getProgramScreenHref(basePath, "eligibility");
 
   if (screen === "landing") {
-    const services: ReadonlyArray<readonly [string, string, string]> = [
-      ["機場接送", "桃園 / 松山 · 商務車", "AIRPORT"],
-      ["優先派車", "都會區 · 8 分鐘內到車", "PRIORITY"],
-      ["指定時段", "平日 07:00-22:00", "SCHEDULE"],
-    ];
+    const services: ReadonlyArray<readonly [string, string, string]> =
+      theme.kind === "insurance"
+        ? [
+            ["理賠代步", "一般 / 商務車型 · 額度內派車", "CLAIM"],
+            ["醫院往返", "回診、返家或維修代步", "MEDICAL"],
+            ["保障視窗", "依核定期間與車型額度", "WINDOW"],
+          ]
+        : [
+            ["機場接送", "桃園 / 松山 · 商務車", "AIRPORT"],
+            ["優先派車", "都會區 · 8 分鐘內到車", "PRIORITY"],
+            ["指定時段", "平日 07:00-22:00", "SCHEDULE"],
+          ];
     return (
       <>
         <Band
           theme={theme}
           title={theme.programLabel}
           subtitle={theme.tagline}
-          trailing="EXCLUSIVE"
+          trailing={theme.kind === "insurance" ? "理賠額度" : "EXCLUSIVE"}
         />
         <Card>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: "13px", fontWeight: 700 }}>
-                {demo.riderName} · {theme.programName}
+                {theme.kind === "insurance"
+                  ? "王〇華 · 富邦產險"
+                  : `${demo.riderName} · ${theme.programName}`}
               </div>
               <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
-                {theme.issuerName}
+                {theme.kind === "insurance"
+                  ? "理賠號 CLM-2026-88142"
+                  : theme.issuerName}
               </div>
             </div>
             <Chip theme={theme} tone="success" label="eligible" />
           </div>
           <div style={{ marginTop: "12px" }}>
-            <BenefitMeter
-              theme={theme}
-              remaining={demo.remaining}
-              total={demo.total}
-            />
+            {theme.kind === "insurance" ? (
+              <Card
+                style={{
+                  borderColor: theme.surface.border,
+                  background: theme.surface.bg,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                  }}
+                >
+                  <span
+                    style={{ fontSize: "11px", color: theme.chrome.pageMuted }}
+                  >
+                    本案{theme.benefitNoun}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "13px",
+                      fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                      color: theme.primaryDark,
+                    }}
+                  >
+                    <b style={{ fontSize: "18px" }}>NT$ 12,800</b> / 22,400
+                  </span>
+                </div>
+                <div
+                  style={{
+                    height: "5px",
+                    marginTop: "8px",
+                    borderRadius: "999px",
+                    background: "#ffffff",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "57%",
+                      height: "100%",
+                      background: theme.accent,
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginTop: "8px",
+                    fontSize: "11px",
+                    color: theme.chrome.pageMuted,
+                  }}
+                >
+                  <span>已用 NT$ 9,600 · 8 趟代步</span>
+                  <span>代步期間剩 14 天</span>
+                </div>
+              </Card>
+            ) : (
+              <BenefitMeter
+                theme={theme}
+                remaining={demo.remaining}
+                total={demo.total}
+              />
+            )}
           </div>
         </Card>
         <Card title="可使用的服務">
@@ -512,7 +809,9 @@ function renderScreen(
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "13px", fontWeight: 700 }}>{title}</div>
-                <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
+                <div
+                  style={{ fontSize: "11px", color: theme.chrome.pageMuted }}
+                >
                   {detail}
                 </div>
               </div>
@@ -532,6 +831,195 @@ function renderScreen(
   }
 
   if (screen === "eligibility") {
+    if (theme.kind === "insurance") {
+      const checks = [
+        {
+          title: "保單有效",
+          code: "insurance_policy",
+          detail: "POL-558-22019 · 富邦產險",
+          note: "保單於保障期間內 · 含代步附約",
+        },
+        {
+          title: "代步車輛權益",
+          code: "insurance_replacement_vehicle",
+          detail: "一般 / 商務車型 · 每日上限 NT$ 1,600",
+          note: "代步期間 2026-06-01 ~ 06-30（剩 14 天）",
+        },
+        {
+          title: "乘客名單",
+          code: "insurance_roster",
+          detail: "理賠申請人 王〇華 +1 名陪同",
+          note: "名單須與理賠案件一致",
+        },
+      ] as const;
+      return (
+        <>
+          <Band
+            theme={theme}
+            title="資格驗證"
+            subtitle="保險理賠代步 · 依理賠案件核定"
+            trailing="理賠額度"
+          />
+          <Card
+            style={{
+              borderColor: theme.surface.border,
+              background: theme.surface.bg,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+              }}
+            >
+              <span style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
+                本案理賠額度 · claim allowance
+              </span>
+              <span
+                style={{
+                  fontSize: "13px",
+                  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                }}
+              >
+                <b style={{ fontSize: "19px", color: theme.primary }}>
+                  NT$ 12,800
+                </b>{" "}
+                / 22,400
+              </span>
+            </div>
+            <div
+              style={{
+                height: "5px",
+                marginTop: "8px",
+                borderRadius: "999px",
+                background: "#dde3ec",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width: "57%",
+                  height: "100%",
+                  background: theme.accent,
+                }}
+              />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginTop: "8px",
+                fontSize: "11px",
+                color: theme.chrome.pageMuted,
+              }}
+            >
+              <span>已用 NT$ 9,600 · 8 趟代步</span>
+              <span>代步期間剩 14 天</span>
+            </div>
+          </Card>
+          <Card title="核定項目 · eligibility checks">
+            {checks.map((item, index) => (
+              <div
+                key={item.code}
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  padding: "11px 0",
+                  borderBottom:
+                    index < checks.length - 1
+                      ? "1px dashed #f1f3f8"
+                      : "1px solid transparent",
+                }}
+              >
+                <div
+                  style={{
+                    width: "22px",
+                    height: "22px",
+                    borderRadius: "999px",
+                    background: "#f0fdf4",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    marginTop: "1px",
+                  }}
+                >
+                  <CheckMark />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "7px",
+                    }}
+                  >
+                    <span style={{ fontSize: "13.5px", fontWeight: 700 }}>
+                      {item.title}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        color: "#9ca3af",
+                        fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                      }}
+                    >
+                      {item.code}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "#0e1424",
+                      marginTop: "2px",
+                    }}
+                  >
+                    {item.detail}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: theme.chrome.pageMuted,
+                      marginTop: "2px",
+                    }}
+                  >
+                    {item.note}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </Card>
+          <Card
+            style={{
+              borderColor: "#bbf7d0",
+              background: "#f0fdf4",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <CheckMark />
+              <span
+                style={{
+                  fontSize: "12.5px",
+                  color: "#15803d",
+                  fontWeight: 700,
+                }}
+              >
+                三項核定通過 · eligibility_verified
+              </span>
+            </div>
+          </Card>
+          <Button
+            theme={theme}
+            label="確認並建立代步行程"
+            href={getProgramScreenHref(basePath, "review")}
+            primary
+          />
+          <Button theme={theme} label="返回入口" href={landingHref} />
+        </>
+      );
+    }
+
     const consents = [
       `使用 ${theme.issuerName} 身份識別建立 DRTS 帳號`,
       "與 DRTS 共享行程必要資訊",
@@ -543,7 +1031,11 @@ function renderScreen(
         <Card title="您的權益">
           <Row label="方案" value={theme.programLabel} />
           <Row label="提供單位" value={theme.issuerName} />
-          <Row label={`本年度${theme.benefitNoun}`} value={`${demo.total} 趟`} mono />
+          <Row
+            label={`本年度${theme.benefitNoun}`}
+            value={`${demo.total} 趟`}
+            mono
+          />
           <Row label="服務範圍" value="台北 · 桃園 · 新竹" />
         </Card>
         <Card title="授權同意">
@@ -585,6 +1077,234 @@ function renderScreen(
     );
   }
 
+  if (INSURANCE_ONLY_SCREEN_IDS.has(screen)) {
+    const insuranceState = {
+      insurance_policy: {
+        title: "保單資格不符",
+        subtitle: "保單或附約未通過驗證",
+        badge: "insurance_policy · 保單封鎖",
+        tone: "danger" as const,
+        glyph: "policy" as const,
+        reason:
+          "保單 POL-558-22019 未包含有效的代步附約，或保障期間已不涵蓋本次理賠代步需求。",
+        rows: [
+          ["保單號", "POL-558-22019"],
+          ["保單狀態", "附約不符 / 需人工覆核"],
+          ["保障期間", "2026-01-01 ~ 2026-12-31"],
+          ["下一步", "請聯絡富邦產險承辦人"],
+        ],
+        primaryLabel: "聯絡富邦產險",
+        primaryHref: landingHref,
+        secondaryLabel: "返回入口",
+        secondaryHref: landingHref,
+      },
+      insurance_replacement_vehicle: {
+        title: "代步車權益未核定",
+        subtitle: "車型或代步期間尚未核准",
+        badge: "insurance_replacement_vehicle · 權益未核定",
+        tone: "warn" as const,
+        glyph: "car" as const,
+        reason:
+          "理賠案件尚未核定可使用的代步車型或額度上限。需等待承辦人確認一般 / 商務車型與可用天數。",
+        rows: [
+          ["理賠號", "CLM-2026-88142"],
+          ["目前車型", "待核定"],
+          ["代步期間", "待富邦產險確認"],
+          ["建議", "查看理賠進度"],
+        ],
+        primaryLabel: "查看理賠進度",
+        primaryHref: eligibilityHref,
+        secondaryLabel: "聯絡承辦人",
+        secondaryHref: landingHref,
+      },
+      insurance_roster: {
+        title: "乘客名單不一致",
+        subtitle: "申請人與搭乘名單未對齊",
+        badge: "insurance_roster · 名單待修正",
+        tone: "danger" as const,
+        glyph: "roster" as const,
+        reason:
+          "目前輸入的乘客資料與理賠案件名單不一致。代步服務僅能提供給已核定的申請人與陪同名單。",
+        rows: [
+          ["理賠申請人", "王〇華"],
+          ["目前搭乘名單", "2 人 · 含未授權乘客"],
+          ["名單狀態", "需重新比對"],
+          ["建議", "請修正乘客名單"],
+        ],
+        primaryLabel: "重新輸入名單",
+        primaryHref: eligibilityHref,
+        secondaryLabel: "聯絡承辦人",
+        secondaryHref: landingHref,
+      },
+      insurance_pending: {
+        title: "理賠審核中",
+        subtitle: "代步權益尚未核定",
+        badge: "insurance_pending · 審核中",
+        tone: "warn" as const,
+        glyph: "clock" as const,
+        reason:
+          "理賠案件 CLM-2026-88142 仍在富邦產險審核流程中，代步權益需理賠核定後才能啟用。",
+        rows: [
+          ["理賠號", "CLM-2026-88142"],
+          ["目前狀態", "理賠審核中"],
+          ["預計核定", "1-2 個工作日"],
+          ["通知方式", "簡訊 + Email"],
+        ],
+        primaryLabel: "查看理賠進度",
+        primaryHref: eligibilityHref,
+        secondaryLabel: "聯絡承辦人",
+        secondaryHref: landingHref,
+      },
+      insurance_missing: {
+        title: "查無理賠案件",
+        subtitle: "保單或理賠編號有誤",
+        badge: "insurance_missing · 查無資料",
+        tone: "danger" as const,
+        glyph: "search" as const,
+        reason:
+          "依您提供的保單號 / 理賠參照查無對應案件。請確認號碼是否正確，或聯絡富邦產險確認案件已建立。",
+        rows: [
+          ["輸入保單號", "POL-558-2201X"],
+          ["輸入理賠號", "CLM-2026-8814X"],
+          ["比對結果", "查無對應案件"],
+          ["建議", "重新輸入或洽承辦"],
+        ],
+        primaryLabel: "重新輸入",
+        primaryHref: eligibilityHref,
+        secondaryLabel: "聯絡富邦產險",
+        secondaryHref: landingHref,
+      },
+      insurance_expired: {
+        title: "代步期間已結束",
+        subtitle: "保障窗口已逾期",
+        badge: "insurance_expired · 已逾期",
+        tone: "danger" as const,
+        glyph: "alert" as const,
+        reason:
+          "本理賠案件的代步期間（2026-05-01 ~ 05-31）已結束，無法再建立代步行程。如有特殊情形請洽承辦人申請延長。",
+        rows: [
+          ["理賠號", "CLM-2026-77013"],
+          ["代步期間", "2026-05-01 ~ 2026-05-31"],
+          ["到期日", "已逾期 10 天"],
+          ["剩餘額度", "已關閉"],
+        ],
+        primaryLabel: "申請延長代步",
+        primaryHref: landingHref,
+        secondaryLabel: "返回入口",
+        secondaryHref: landingHref,
+      },
+      insurance_cancelled: {
+        title: "理賠案件已結案",
+        subtitle: "案件取消 / 已結清",
+        badge: "insurance_cancelled · 已結案",
+        tone: "danger" as const,
+        glyph: "ban" as const,
+        reason:
+          "理賠案件 CLM-2026-66200 已結案或取消，代步權益隨之關閉。若為誤判，請聯絡富邦產險重啟案件。",
+        rows: [
+          ["理賠號", "CLM-2026-66200"],
+          ["案件狀態", "已結案 / 取消"],
+          ["關閉日", "2026-06-02"],
+          ["代步權益", "已停用"],
+        ],
+        primaryLabel: "聯絡富邦產險",
+        primaryHref: landingHref,
+        secondaryLabel: "返回入口",
+        secondaryHref: landingHref,
+      },
+    } as const satisfies Record<
+      InsuranceStateId,
+      {
+        title: string;
+        subtitle: string;
+        badge: string;
+        tone: "warn" | "danger";
+        glyph:
+          | "clock"
+          | "search"
+          | "ban"
+          | "alert"
+          | "roster"
+          | "policy"
+          | "car";
+        reason: string;
+        rows: ReadonlyArray<readonly [string, string]>;
+        primaryLabel: string;
+        primaryHref: string;
+        secondaryLabel: string;
+        secondaryHref: string;
+      }
+    >;
+    const state = insuranceState[screen as InsuranceStateId];
+    const tone = state.tone === "warn" ? "accent" : "danger";
+    return (
+      <>
+        <Band theme={theme} title={state.title} subtitle={state.subtitle} />
+        <Card>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "10px",
+              padding: "8px 0 2px",
+            }}
+          >
+            <div
+              style={{
+                width: "60px",
+                height: "60px",
+                borderRadius: "999px",
+                background: state.tone === "warn" ? "#fffbeb" : "#fee4e2",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <InsuranceStateIcon tone={state.tone} glyph={state.glyph} />
+            </div>
+            <Chip theme={theme} tone={tone} label={state.badge} />
+          </div>
+        </Card>
+        <Card title="原因">
+          <div style={{ fontSize: "13px", color: "#0e1424", lineHeight: 1.65 }}>
+            {state.reason}
+          </div>
+        </Card>
+        <Card title="案件資訊">
+          {state.rows.map(([label, value]) => (
+            <Row
+              key={label}
+              label={label}
+              value={value}
+              mono={label.includes("號")}
+            />
+          ))}
+        </Card>
+        <div
+          style={{
+            fontSize: "11.5px",
+            color: theme.chrome.pageMuted,
+            lineHeight: 1.55,
+          }}
+        >
+          此狀態由理賠系統判定，接送無法在此狀態下派車。本頁不會擷取任何卡片或付款資料。
+        </div>
+        <Button
+          theme={theme}
+          label={state.primaryLabel}
+          href={state.primaryHref}
+          primary
+        />
+        <Button
+          theme={theme}
+          label={state.secondaryLabel}
+          href={state.secondaryHref}
+        />
+      </>
+    );
+  }
+
   if (screen === "review") {
     return (
       <>
@@ -603,7 +1323,10 @@ function renderScreen(
         </Card>
         <Card
           title={`費用與${theme.benefitNoun}`}
-          style={{ borderColor: theme.surface.border, background: theme.surface.bg }}
+          style={{
+            borderColor: theme.surface.border,
+            background: theme.surface.bg,
+          }}
         >
           <Row label="基本費用" value="NT$ 1,580" mono />
           <Row label={`${theme.programName}折抵`} value="-NT$ 1,580" mono />
@@ -671,7 +1394,9 @@ function renderScreen(
               ✓
             </div>
             <div>
-              <div style={{ fontSize: "14px", fontWeight: 800 }}>預約已成立</div>
+              <div style={{ fontSize: "14px", fontWeight: 800 }}>
+                預約已成立
+              </div>
               <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
                 {theme.programName}
               </div>
@@ -714,13 +1439,20 @@ function renderScreen(
               >
                 {index + 1}
               </div>
-              <div style={{ fontSize: "12px", lineHeight: 1.6, color: "#0e1424" }}>
+              <div
+                style={{ fontSize: "12px", lineHeight: 1.6, color: "#0e1424" }}
+              >
                 {step}
               </div>
             </div>
           ))}
         </Card>
-        <Button theme={theme} label="查看行程追蹤" href={trackingHref} primary />
+        <Button
+          theme={theme}
+          label="查看行程追蹤"
+          href={trackingHref}
+          primary
+        />
         <Button theme={theme} label="返回入口" href={landingHref} />
       </>
     );
@@ -811,7 +1543,11 @@ function renderScreen(
           <Row label="方案" value={theme.programLabel} />
           <Row label="您將支付" value="免費" />
         </Card>
-        <Button theme={theme} label="聯絡客服" href={getProgramScreenHref(basePath, "error")} />
+        <Button
+          theme={theme}
+          label="聯絡客服"
+          href={getProgramScreenHref(basePath, "error")}
+        />
       </>
     );
   }
@@ -821,16 +1557,24 @@ function renderScreen(
       <>
         <Band theme={theme} title="發生錯誤" subtitle="請稍後再試或聯絡客服" />
         <Card>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+          >
             <Chip theme={theme} tone="danger" label="SERVICE_ERROR" />
-            <div style={{ fontSize: "13px", lineHeight: 1.7, color: "#0e1424" }}>
-              系統暫時無法處理您的請求。您的{theme.benefitNoun}並未被扣除，請稍後再試。
+            <div
+              style={{ fontSize: "13px", lineHeight: 1.7, color: "#0e1424" }}
+            >
+              系統暫時無法處理您的請求。您的{theme.benefitNoun}
+              並未被扣除，請稍後再試。
             </div>
           </div>
         </Card>
         <Card
           title={theme.hotline.label}
-          style={{ borderColor: theme.surface.border, background: theme.surface.bg }}
+          style={{
+            borderColor: theme.surface.border,
+            background: theme.surface.bg,
+          }}
         >
           <div
             style={{
@@ -842,7 +1586,13 @@ function renderScreen(
           >
             {theme.hotline.phone}
           </div>
-          <div style={{ marginTop: "6px", fontSize: "11px", color: theme.chrome.pageMuted }}>
+          <div
+            style={{
+              marginTop: "6px",
+              fontSize: "11px",
+              color: theme.chrome.pageMuted,
+            }}
+          >
             {theme.hotline.note}
           </div>
         </Card>
@@ -892,13 +1642,19 @@ function renderScreen(
                 flexShrink: 0,
               }}
             />
-            <div style={{ fontSize: "13px", lineHeight: 1.65, color: "#0e1424" }}>
+            <div
+              style={{ fontSize: "13px", lineHeight: 1.65, color: "#0e1424" }}
+            >
               {item}
             </div>
           </div>
         ))}
       </Card>
-      <Button theme={theme} label="聯絡客服" href={getProgramScreenHref(basePath, "error")} />
+      <Button
+        theme={theme}
+        label="聯絡客服"
+        href={getProgramScreenHref(basePath, "error")}
+      />
       <Button theme={theme} label="返回入口" href={landingHref} />
     </>
   );
@@ -917,6 +1673,7 @@ export function ProgramBookingFlow({
   screen: PartnerProgramScreenId;
   basePath: string;
 }) {
+  const visibleScreens = listProgramScreensForTheme(theme);
   const activeMeta = getProgramScreenMeta(screen);
 
   return (
@@ -957,7 +1714,7 @@ export function ProgramBookingFlow({
       </div>
 
       <nav style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-        {PARTNER_PROGRAM_SCREENS.map((meta) => {
+        {visibleScreens.map((meta) => {
           const isActive = meta.id === screen;
           return (
             <a
@@ -995,7 +1752,13 @@ export function ProgramBookingFlow({
         })}
       </nav>
 
-      <div style={{ fontSize: "13px", lineHeight: 1.6, color: theme.chrome.pageMuted }}>
+      <div
+        style={{
+          fontSize: "13px",
+          lineHeight: 1.6,
+          color: theme.chrome.pageMuted,
+        }}
+      >
         {activeMeta.summary}
       </div>
 

@@ -132,24 +132,24 @@ export const PARTNER_PROGRAM_THEMES = {
     benefitNoun: "理賠額度",
     ctaLabel: "申請代步接送",
     badgeText: "F",
-    primary: "#007A53",
-    primaryDark: "#00432F",
-    accent: "#7FB800",
+    primary: "#0E6E50",
+    primaryDark: "#063D2C",
+    accent: "#2FA37A",
     ink: "#0C1A14",
     surface: {
-      fg: "#007A53",
-      hi: "#7FB800",
-      bg: "#E8F5EE",
-      border: "#BFE3CF",
+      fg: "#0E6E50",
+      hi: "#2FA37A",
+      bg: "#E6F5EE",
+      border: "#B9E2D0",
     },
     chrome: {
-      pageBackground: "#F1F8F4",
+      pageBackground: "#F3F8F5",
       pageForeground: "#14241C",
       pageMuted: "#566860",
       panel: "#FFFFFF",
       panelBorder: "rgba(20, 36, 28, 0.12)",
-      accentText: "#00432F",
-      accentSoft: "rgba(0, 122, 83, 0.10)",
+      accentText: "#063D2C",
+      accentSoft: "rgba(14, 110, 80, 0.10)",
     },
     hotline: {
       label: "理賠代步服務專線",
@@ -197,12 +197,13 @@ export const PARTNER_PROGRAM_THEMES = {
 } as const satisfies Record<PartnerProgramKind, PartnerProgramTheme>;
 
 /** Keyword → program kind, evaluated in order (insurance / travel before card). */
-const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<readonly [RegExp, PartnerProgramKind]> =
-  [
-    [/insur|claim|fubon|理賠|代步/i, "insurance"],
-    [/travel|tour|group|lion|雄獅|團體|旅行/i, "travel"],
-    [/card|credit|ride|ctbc|信用卡|機場|禮賓/i, "card"],
-  ];
+const PROGRAM_KIND_BY_TOKEN: ReadonlyArray<
+  readonly [RegExp, PartnerProgramKind]
+> = [
+  [/insur|claim|fubon|理賠|代步/i, "insurance"],
+  [/travel|tour|group|lion|雄獅|團體|旅行/i, "travel"],
+  [/card|credit|ride|ctbc|信用卡|機場|禮賓/i, "card"],
+];
 
 export const DEFAULT_PARTNER_PROGRAM_KIND: PartnerProgramKind = "card";
 

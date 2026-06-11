@@ -39,7 +39,7 @@ describe("partner booking program form utilities", () => {
     expect(gate.actionHref).toBe("/ctbc/eligibility");
   });
 
-  it("requires claim, policy, period, and medical facility for insurance replacement", () => {
+  it("requires claim, policy, claimant, and replacement-vehicle coverage fields for insurance replacement", () => {
     const draft = createDefaultPartnerBookingDraft();
     const errors = getPartnerBookingFieldErrors({
       draft,
@@ -48,9 +48,11 @@ describe("partner booking program form utilities", () => {
 
     expect(errors.claimNumber).toBeTruthy();
     expect(errors.policyNumber).toBeTruthy();
+    expect(errors.claimReference).toBeTruthy();
+    expect(errors.claimantName).toBeTruthy();
     expect(errors.replacementStart).toBeUndefined();
     expect(errors.replacementEnd).toBeUndefined();
-    expect(errors.medicalFacility).toBeTruthy();
+    expect(errors.replacementVehicleClass).toBeTruthy();
   });
 
   it("requires group code, group size, and meeting point for travel agency transfers", () => {

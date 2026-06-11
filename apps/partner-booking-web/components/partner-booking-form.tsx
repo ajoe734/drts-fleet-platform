@@ -415,6 +415,14 @@ export function PartnerBookingForm({
                 label: t("field.policyNumber"),
               })}
               {renderField({
+                name: "claimReference",
+                label: t("field.claimReference"),
+              })}
+              {renderField({
+                name: "claimantName",
+                label: t("field.claimantName"),
+              })}
+              {renderField({
                 name: "replacementStart",
                 label: t("field.replacementStart"),
                 type: "datetime-local",
@@ -426,8 +434,13 @@ export function PartnerBookingForm({
                 type: "datetime-local",
               })}
               {renderField({
-                name: "medicalFacility",
-                label: t("field.medicalFacility"),
+                name: "replacementVehicleClass",
+                label: t("field.replacementVehicleClass"),
+                fullSpan: true,
+              })}
+              {renderField({
+                name: "caseHandler",
+                label: t("field.caseHandler"),
                 fullSpan: true,
               })}
             </>
