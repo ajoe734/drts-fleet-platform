@@ -832,7 +832,7 @@ function renderScreen(
         <Band
           theme={theme}
           title={theme.programLabel}
-          subtitle={theme.tagline}
+          subtitle={theme.landingSubtitle}
           trailing={theme.kind === "insurance" ? "理賠額度" : "EXCLUSIVE"}
         />
         <Card>

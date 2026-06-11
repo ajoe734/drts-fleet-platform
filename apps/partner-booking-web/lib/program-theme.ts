@@ -66,8 +66,10 @@ export interface PartnerProgramTheme {
   readonly programLabel: string;
   /** Short program name reused inside copy. */
   readonly programName: string;
-  /** One-line program tagline. */
+  /** One-line program tagline used for page metadata. */
   readonly tagline: string;
+  /** Customer-facing landing subtitle shown in the card funnel band. */
+  readonly landingSubtitle: string;
   /** Domain noun for the sponsored entitlement (禮遇 / 理賠額度 / 團體席次). */
   readonly benefitNoun: string;
   /** Primary call-to-action label for the landing / review screens. */
@@ -94,6 +96,7 @@ function createProgramThemeFromBrand(params: {
   issuerLabel: string;
   programLabel: string;
   programName: string;
+  landingSubtitle: string;
   benefitNoun: string;
   ctaLabel: string;
   brand: PartnerBrandTemplate;
@@ -105,6 +108,7 @@ function createProgramThemeFromBrand(params: {
     issuerLabel,
     programLabel,
     programName,
+    landingSubtitle,
     benefitNoun,
     ctaLabel,
     brand,
@@ -118,6 +122,7 @@ function createProgramThemeFromBrand(params: {
     programLabel,
     programName,
     tagline: brand.tagline,
+    landingSubtitle,
     benefitNoun,
     ctaLabel,
     badgeText: brand.cardArt.badgeText,
@@ -156,6 +161,7 @@ export const PARTNER_PROGRAM_THEMES = {
     issuerLabel: "CTBC",
     programLabel: "信用卡機場接送",
     programName: "卡友禮賓接送",
+    landingSubtitle: "World Elite 卡友專屬 · 全年 12 趟",
     benefitNoun: "禮遇趟次",
     ctaLabel: "立即叫車",
     brand: CTBC_BRAND,
@@ -167,6 +173,7 @@ export const PARTNER_PROGRAM_THEMES = {
     issuerLabel: "Fubon",
     programLabel: "保險理賠代步",
     programName: "理賠代步接送",
+    landingSubtitle: "車禍理賠期間代步服務",
     benefitNoun: "理賠額度",
     ctaLabel: "申請代步接送",
     brand: FUBON_BRAND,
@@ -178,6 +185,7 @@ export const PARTNER_PROGRAM_THEMES = {
     issuerLabel: "Lion",
     programLabel: "旅行社團體接送",
     programName: "團體接送",
+    landingSubtitle: "旅行團機場 / 飯店接送",
     benefitNoun: "團體席次",
     ctaLabel: "確認席次並前往預約",
     brand: LION_BRAND,
