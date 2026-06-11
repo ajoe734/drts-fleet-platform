@@ -84,6 +84,7 @@ export interface PartnerProgramTheme {
 }
 
 const CTBC_BRAND = BRAND_TEMPLATES.CTBC;
+const LION_BRAND = BRAND_TEMPLATES.LION;
 
 export const PARTNER_PROGRAM_THEMES = {
   card: {
@@ -163,7 +164,7 @@ export const PARTNER_PROGRAM_THEMES = {
   travel: {
     kind: "travel",
     slug: "travel",
-    host: "booking.lion-travel.com.tw",
+    host: LION_BRAND.host,
     issuerName: "雄獅旅遊",
     issuerLabel: "Lion",
     programLabel: "旅行社團體接送",
@@ -172,29 +173,29 @@ export const PARTNER_PROGRAM_THEMES = {
     benefitNoun: "團體席次",
     ctaLabel: "確認席次並前往預約",
     badgeText: "L",
-    primary: "#B0420E",
-    primaryDark: "#6E2806",
-    accent: "#E07B3A",
-    ink: "#2C170D",
+    primary: LION_BRAND.primary,
+    primaryDark: LION_BRAND.primaryDark,
+    accent: LION_BRAND.accent,
+    ink: LION_BRAND.ink,
     surface: {
-      fg: "#B0420E",
-      hi: "#E07B3A",
-      bg: "#FCEEE2",
-      border: "#F0CFB9",
+      fg: LION_BRAND.surface.fg,
+      hi: LION_BRAND.surface.hi,
+      bg: LION_BRAND.surface.bg,
+      border: LION_BRAND.surface.border,
     },
     chrome: {
-      pageBackground: "#F8F1EB",
-      pageForeground: "#2C170D",
-      pageMuted: "#73594D",
-      panel: "#FFFFFF",
-      panelBorder: "rgba(44, 23, 13, 0.12)",
-      accentText: "#6E2806",
-      accentSoft: "rgba(176, 66, 14, 0.10)",
+      pageBackground: LION_BRAND.theme.pageBackground,
+      pageForeground: LION_BRAND.theme.pageForeground,
+      pageMuted: LION_BRAND.theme.pageMuted,
+      panel: LION_BRAND.theme.panel,
+      panelBorder: LION_BRAND.theme.panelBorder,
+      accentText: LION_BRAND.theme.accentText,
+      accentSoft: LION_BRAND.theme.accentSoft,
     },
     hotline: {
-      label: "雄獅團體服務專線",
-      phone: "0800-090-068",
-      note: "您將被轉接至雄獅旅遊團體接送服務專員。",
+      label: LION_BRAND.hotline.label,
+      phone: LION_BRAND.hotline.phone,
+      note: LION_BRAND.hotline.note,
     },
   },
 } as const satisfies Record<PartnerProgramKind, PartnerProgramTheme>;
