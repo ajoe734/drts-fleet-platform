@@ -1,6 +1,7 @@
 import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { DataTable, Td, Tr, CanvasPill } from "@drts/ui-web";
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import {
   CalloutPanel,
   PageHero,
@@ -262,7 +263,12 @@ export default async function BookingsPage({
             <Tr key={item.orderId}>
               <Td mono>
                 <div className="cell-stack">
-                  <strong>{item.orderNo}</strong>
+                  <Link
+                    className="text-link"
+                    href={`/bookings/${item.orderId}`}
+                  >
+                    {item.orderNo}
+                  </Link>
                   <span>{item.orderId}</span>
                 </div>
               </Td>
