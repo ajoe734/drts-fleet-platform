@@ -10,17 +10,17 @@ export const dynamic = "force-dynamic";
 const NAV_ITEMS: PartnerNavItem[] = [
   {
     href: "/partner/start",
-    label: "Start",
+    label: "開始",
     note: "Entry summary, allowed actions, and partner-safe boundaries.",
   },
   {
     href: "/partner/eligibility",
-    label: "Eligibility",
+    label: "資格",
     note: "Verify rider eligibility for this entry before booking creation.",
   },
   {
     href: "/partner/booking/new",
-    label: "New booking",
+    label: "新增訂單",
     note: "Create a partner-tagged booking using verified eligibility.",
   },
 ];

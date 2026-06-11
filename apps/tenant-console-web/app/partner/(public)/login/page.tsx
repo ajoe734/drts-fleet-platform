@@ -10,8 +10,8 @@ export default function PartnerLoginPage() {
       <PartnerLoginForm />
 
       <CalloutPanel
-        title="Partner credentials are issued by platform admin"
-        description="Each entry has a slug and one or more API keys. Treat the API key as a shared secret — rotate it through platform-admin if it is exposed."
+        title="合作夥伴憑證由平台管理員核發"
+        description="每個 entry 都有一個 slug 與一個以上的 API 金鑰。請將 API 金鑰視為共用密鑰 —— 若外洩請透過 platform-admin 輪替。"
       >
         <ul className="panel-list">
           <li>

@@ -43,37 +43,37 @@ export default async function PartnerBookingConfirmationPage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Booking confirmed"
+        eyebrow="訂單已確認"
         title={`Booking ${booking.bookingId} created.`}
-        description="The partner caller can use this confirmation as proof of intake. Mutations from this surface go through tenant-allowed commands only."
+        description="合作夥伴來電者可用此確認作為受理證明。此介面的變更僅透過租戶允許的命令執行。"
       />
 
       <SurfaceCard
         kicker="Identity"
-        title="Partner provenance recorded"
-        description="The booking now carries partner provenance. Downstream audit, billing, and reporting will keep the entry slug attached."
+        title="已記錄合作夥伴來源"
+        description="此訂單現已帶有合作夥伴來源。下游 audit、billing 與報表都會保留 entry slug。"
       >
         <dl className="definition-grid">
           <div>
-            <dt>Booking id</dt>
+            <dt>訂單 id</dt>
             <dd>
               <code>{booking.bookingId}</code>
             </dd>
           </div>
           <div>
-            <dt>Order id</dt>
+            <dt>單號 id</dt>
             <dd>
               <code>{booking.orderId}</code>
             </dd>
           </div>
           <div>
-            <dt>Order status</dt>
+            <dt>訂單狀態</dt>
             <dd>
               <span className="status-badge">{booking.orderStatus}</span>
             </dd>
           </div>
           <div>
-            <dt>Service subtype</dt>
+            <dt>服務子類型</dt>
             <dd>
               <code>{booking.businessDispatchSubtype}</code>
               {!isPartnerBooking ? (
@@ -82,22 +82,22 @@ export default async function PartnerBookingConfirmationPage({
             </dd>
           </div>
           <div>
-            <dt>Reservation window</dt>
+            <dt>預約時窗</dt>
             <dd>
               {formatDateTime(booking.reservationWindowStart)} →{" "}
               {formatDateTime(booking.reservationWindowEnd)}
             </dd>
           </div>
           <div>
-            <dt>Pickup</dt>
+            <dt>上車</dt>
             <dd>{booking.pickup.address}</dd>
           </div>
           <div>
-            <dt>Dropoff</dt>
+            <dt>下車</dt>
             <dd>{booking.dropoff.address}</dd>
           </div>
           <div>
-            <dt>Passenger</dt>
+            <dt>乘客</dt>
             <dd>
               {booking.passenger.name}
               <span className="table-secondary">
@@ -110,16 +110,13 @@ export default async function PartnerBookingConfirmationPage({
       </SurfaceCard>
 
       <CalloutPanel
-        title="What partner mode can and cannot do next"
-        description="The partner surface stops at booking creation. Update / cancel commands belong to tenant-admin or ops authority."
+        title="合作夥伴模式接下來能與不能做什麼"
+        description="合作夥伴介面止於建立訂單。更新／取消命令屬於租戶管理或 ops 權限。"
       >
         <ul className="panel-list">
-          <li>Partner can present this confirmation to the rider.</li>
-          <li>
-            Partner cannot edit, cancel, or override the booking from this
-            surface.
-          </li>
-          <li>For changes, contact tenant admin or ops with the booking id.</li>
+          <li>合作夥伴可向乘客出示此確認。</li>
+          <li>合作夥伴無法從此介面編輯、取消或覆寫訂單。</li>
+          <li>如需變更，請持訂單 id 聯絡租戶管理員或 ops。</li>
         </ul>
         <div className="link-row">
           <Link className="text-link" href="/partner/booking/new">

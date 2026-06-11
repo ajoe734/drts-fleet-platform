@@ -15,15 +15,15 @@ export default async function PartnerEligibilityPage() {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Eligibility"
-        title="Verify rider eligibility for this partner entry."
-        description="The verification record returned here is the authoritative gate for partner booking creation. Only an `eligible` decision unlocks the booking surface."
+        eyebrow="資格"
+        title="驗證此合作夥伴 entry 的乘客資格。"
+        description="這裡回傳的驗證紀錄是合作夥伴建立訂單的權威關卡。只有 `eligible` 判定才會解鎖訂單介面。"
       />
 
       {mode === "none" ? (
         <CalloutPanel
-          title="Eligibility check not required"
-          description="This entry is configured with `eligibility_mode = none`. Booking creation accepts the partner caller without verification."
+          title="不需資格檢查"
+          description="此 entry 設定為 `eligibility_mode = none`。建立訂單時會直接接受合作夥伴來電者，無需驗證。"
         />
       ) : (
         <SurfaceCard
@@ -44,8 +44,8 @@ export default async function PartnerEligibilityPage() {
       )}
 
       <CalloutPanel
-        title="Negative paths are explicit"
-        description="The verification record may resolve as `eligible`, `ineligible`, or `manual_review`. The two negative outcomes never silently fall through into booking creation."
+        title="負向路徑是明確的"
+        description="驗證紀錄可能判定為 `eligible`、`ineligible` 或 `manual_review`。兩種負向結果都不會默默進入建立訂單。"
       >
         <ul className="panel-list">
           <li>

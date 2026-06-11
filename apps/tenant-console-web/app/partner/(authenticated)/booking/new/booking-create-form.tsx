@@ -105,7 +105,7 @@ export function PartnerBookingCreateForm({
 
   return (
     <form
-      aria-label="Partner booking create"
+      aria-label="合作夥伴建立訂單"
       className="form-stack"
       onSubmit={handleSubmit}
     >
@@ -118,7 +118,7 @@ export function PartnerBookingCreateForm({
       <fieldset className="form-stack">
         <legend className="surface-kicker">Pickup</legend>
         <label className="field-stack">
-          <span>Pickup address</span>
+          <span>上車地址</span>
           <input
             onChange={(event) => setPickupAddress(event.target.value)}
             required
@@ -128,7 +128,7 @@ export function PartnerBookingCreateForm({
         </label>
         <div className="form-grid">
           <label className="field-stack">
-            <span>Pickup lat</span>
+            <span>上車緯度</span>
             <input
               inputMode="decimal"
               onChange={(event) => setPickupLat(event.target.value)}
@@ -138,7 +138,7 @@ export function PartnerBookingCreateForm({
             />
           </label>
           <label className="field-stack">
-            <span>Pickup lng</span>
+            <span>上車經度</span>
             <input
               inputMode="decimal"
               onChange={(event) => setPickupLng(event.target.value)}
@@ -153,7 +153,7 @@ export function PartnerBookingCreateForm({
       <fieldset className="form-stack">
         <legend className="surface-kicker">Dropoff</legend>
         <label className="field-stack">
-          <span>Dropoff address</span>
+          <span>下車地址</span>
           <input
             onChange={(event) => setDropoffAddress(event.target.value)}
             required
@@ -163,7 +163,7 @@ export function PartnerBookingCreateForm({
         </label>
         <div className="form-grid">
           <label className="field-stack">
-            <span>Dropoff lat</span>
+            <span>下車緯度</span>
             <input
               inputMode="decimal"
               onChange={(event) => setDropoffLat(event.target.value)}
@@ -173,7 +173,7 @@ export function PartnerBookingCreateForm({
             />
           </label>
           <label className="field-stack">
-            <span>Dropoff lng</span>
+            <span>下車經度</span>
             <input
               inputMode="decimal"
               onChange={(event) => setDropoffLng(event.target.value)}
@@ -189,7 +189,7 @@ export function PartnerBookingCreateForm({
         <legend className="surface-kicker">Reservation window</legend>
         <div className="form-grid">
           <label className="field-stack">
-            <span>Window start</span>
+            <span>時窗開始</span>
             <input
               onChange={(event) => setReservationStart(event.target.value)}
               required
@@ -198,7 +198,7 @@ export function PartnerBookingCreateForm({
             />
           </label>
           <label className="field-stack">
-            <span>Window end</span>
+            <span>時窗結束</span>
             <input
               onChange={(event) => setReservationEnd(event.target.value)}
               required
@@ -213,7 +213,7 @@ export function PartnerBookingCreateForm({
         <legend className="surface-kicker">Passenger</legend>
         <div className="form-grid">
           <label className="field-stack">
-            <span>Passenger name</span>
+            <span>乘客姓名</span>
             <input
               onChange={(event) => setPassengerName(event.target.value)}
               required
@@ -222,7 +222,7 @@ export function PartnerBookingCreateForm({
             />
           </label>
           <label className="field-stack">
-            <span>Passenger phone</span>
+            <span>乘客電話</span>
             <input
               onChange={(event) => setPassengerPhone(event.target.value)}
               required
@@ -237,7 +237,7 @@ export function PartnerBookingCreateForm({
         <legend className="surface-kicker">Optional context</legend>
         <div className="form-grid">
           <label className="field-stack">
-            <span>Benefit reference</span>
+            <span>福利參照</span>
             <input
               onChange={(event) => setBenefitReference(event.target.value)}
               type="text"
@@ -245,7 +245,7 @@ export function PartnerBookingCreateForm({
             />
           </label>
           <label className="field-stack">
-            <span>Flight no.</span>
+            <span>航班編號</span>
             <input
               onChange={(event) => setFlightNo(event.target.value)}
               type="text"
@@ -253,7 +253,7 @@ export function PartnerBookingCreateForm({
             />
           </label>
           <label className="field-stack">
-            <span>Terminal</span>
+            <span>航廈</span>
             <input
               onChange={(event) => setTerminal(event.target.value)}
               type="text"
@@ -262,7 +262,7 @@ export function PartnerBookingCreateForm({
           </label>
         </div>
         <label className="field-stack">
-          <span>Notes</span>
+          <span>備註</span>
           <textarea
             onChange={(event) => setNotes(event.target.value)}
             rows={3}

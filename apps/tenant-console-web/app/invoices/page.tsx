@@ -363,9 +363,7 @@ type InvoicesPageData = {
 };
 
 function toErrorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : "Unknown tenant invoice error.";
+  return error instanceof Error ? error.message : "未知的租戶發票錯誤。";
 }
 
 function toPeriodKey(value: string | null | undefined) {
@@ -610,20 +608,20 @@ function describeEmptyState(reason: EmptyReason) {
 function getArtifactState(invoice: InvoiceViewRecord) {
   if (!invoice.artifactUrl) {
     return {
-      label: "artifact missing",
+      label: "檔案缺失",
       tone: "neutral" as const,
     };
   }
 
   if (invoice.expiresAt && isIsoPast(invoice.expiresAt)) {
     return {
-      label: "artifact expired",
+      label: "檔案已過期",
       tone: "warn" as const,
     };
   }
 
   return {
-    label: "artifact ready",
+    label: "檔案就緒",
     tone: "success" as const,
   };
 }
@@ -972,7 +970,7 @@ export default async function InvoicesPage({
 
   const columns: CanvasTableColumn<InvoiceRow>[] = [
     {
-      h: "INVOICE",
+      h: "發票",
       w: 220,
       mono: true,
       r: (row) => (
@@ -990,20 +988,20 @@ export default async function InvoicesPage({
       ),
     },
     {
-      h: "PERIOD",
+      h: "期別",
       w: 110,
       mono: true,
       r: (row) => toPeriodKey(row.periodStart),
     },
     {
-      h: "AMOUNT",
+      h: "金額",
       w: 170,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.amount),
     },
     {
-      h: "STATUS",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={getStatusTone(row.statusView)} dot>
@@ -1012,19 +1010,19 @@ export default async function InvoicesPage({
       ),
     },
     {
-      h: "DUE",
+      h: "到期",
       w: 120,
       mono: true,
       r: (row) => formatDateInput(row.dueDate) || "—",
     },
     {
-      h: "ISSUED",
+      h: "開立",
       w: 120,
       mono: true,
       r: (row) => formatDateInput(row.createdAt) || "—",
     },
     {
-      h: "ARTIFACT",
+      h: "檔案",
       w: 220,
       r: (row) => {
         const artifactState = getArtifactState(row);
@@ -1053,7 +1051,7 @@ export default async function InvoicesPage({
       },
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 210,
       r: (row) => (
         <div style={actionRowStyle}>
@@ -1070,7 +1068,7 @@ export default async function InvoicesPage({
       <CanvasPageHeader
         theme={th}
         title="發票 · Invoices"
-        subtitle="invoice history · status / period / id filters · availableActions-driven CTAs"
+        subtitle="發票歷史 · 狀態 / 期別 / id 篩選 · 由 availableActions 驅動的 CTA"
         actions={
           <>
             <CanvasPill theme={th} tone="info">
@@ -1131,21 +1129,21 @@ export default async function InvoicesPage({
 
         <div style={summaryGridStyle}>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Visible invoices</div>
+            <div style={summaryLabelStyle}>可見發票</div>
             <div style={summaryValueStyle}>{filteredInvoices.length}</div>
             <div style={summaryCaptionStyle}>
               current register slice after status, period, and id filters
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Overdue</div>
+            <div style={summaryLabelStyle}>逾期</div>
             <div style={summaryValueStyle}>{invoiceSummary.overdueCount}</div>
             <div style={summaryCaptionStyle}>
-              urgency state stays distinct from regular `issued`
+              緊急狀態與一般 `issued` 維持區隔
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Expired artifacts</div>
+            <div style={summaryLabelStyle}>已過期檔案</div>
             <div style={summaryValueStyle}>
               {invoiceSummary.expiredArtifacts}
             </div>
@@ -1154,7 +1152,7 @@ export default async function InvoicesPage({
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Visible amount</div>
+            <div style={summaryLabelStyle}>可見金額</div>
             <div style={summaryValueStyle}>{invoiceSummary.totalAmount}</div>
             <div style={summaryCaptionStyle}>
               finance users can validate the current slice before opening detail
@@ -1167,7 +1165,7 @@ export default async function InvoicesPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Invoice read model degraded"
+            title="發票讀取模型降級"
             body={data.errors.join(" / ")}
           />
         ) : null}
@@ -1177,7 +1175,7 @@ export default async function InvoicesPage({
             theme={th}
             tone={data.refresh.dataFreshness === "degraded" ? "danger" : "warn"}
             icon="warn"
-            title="Snapshot freshness warning"
+            title="快照鮮度警告"
             body={`目前內容產生於 ${formatDateInput(
               data.refresh.generatedAt,
             )}，refresh tier 為 ${INVOICES_REFRESH_POLICY.packetTier} / ${
@@ -1191,8 +1189,8 @@ export default async function InvoicesPage({
         <div style={pageGridStyle}>
           <CanvasCard
             theme={th}
-            title="Invoice register"
-            subtitle="status / period / invoice id filters · overdue and artifact expiry stay visible"
+            title="發票清單"
+            subtitle="狀態 / 期別 / 發票 id 篩選 · 逾期與檔案過期狀態保持可見"
             style={tableCardStyle}
           >
             <div style={registerCardBodyStyle}>
@@ -1312,7 +1310,7 @@ export default async function InvoicesPage({
               <>
                 <CanvasCard
                   theme={th}
-                  title="Selected invoice"
+                  title="已選發票"
                   subtitle="drawer/new route 未拆前，右側保留 packet 必備 detail"
                 >
                   <div style={sideStackStyle}>
@@ -1347,7 +1345,7 @@ export default async function InvoicesPage({
                         theme={th}
                         tone="warn"
                         icon="warn"
-                        title="Overdue invoice"
+                        title="逾期發票"
                         body="已逾預設付款期，必須與一般 issued 狀態分開提示。"
                       />
                     ) : null}
@@ -1358,35 +1356,35 @@ export default async function InvoicesPage({
                         theme={th}
                         tone="danger"
                         icon="warn"
-                        title="Artifact expired"
+                        title="檔案已過期"
                         body="簽名下載連結已過期，仍需保留 invoice metadata 與治理去向。"
                       />
                     ) : null}
 
                     <dl style={dlStyle}>
-                      <dt style={fieldLabelStyle}>Billing title</dt>
+                      <dt style={fieldLabelStyle}>帳務標題</dt>
                       <dd style={{ margin: 0 }}>
                         {data.billingProfile?.invoiceTitle || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>Amount</dt>
+                      <dt style={fieldLabelStyle}>金額</dt>
                       <dd style={{ margin: 0 }}>
                         {formatCanvasMoney(selectedInvoice.amount)}
                       </dd>
-                      <dt style={fieldLabelStyle}>Period</dt>
+                      <dt style={fieldLabelStyle}>期別</dt>
                       <dd style={{ margin: 0 }}>
                         {`${formatDateInput(selectedInvoice.periodStart) || "—"} → ${
                           formatDateInput(selectedInvoice.periodEnd) || "—"
                         }`}
                       </dd>
-                      <dt style={fieldLabelStyle}>Issued</dt>
+                      <dt style={fieldLabelStyle}>開立日</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.createdAt) || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>Due</dt>
+                      <dt style={fieldLabelStyle}>到期日</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.dueDate) || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>Artifact URL</dt>
+                      <dt style={fieldLabelStyle}>檔案 URL</dt>
                       <dd style={{ margin: 0, overflowWrap: "anywhere" }}>
                         {selectedInvoice.artifactUrl ? (
                           <Link
@@ -1408,7 +1406,7 @@ export default async function InvoicesPage({
                     </dl>
 
                     <div>
-                      <div style={fieldLabelStyle}>Available actions</div>
+                      <div style={fieldLabelStyle}>可用操作</div>
                       <div style={actionRowStyle}>
                         {selectedInvoice.availableActions.map((action) =>
                           renderActionLink(action, selectedInvoice, filters),
@@ -1417,7 +1415,7 @@ export default async function InvoicesPage({
                     </div>
 
                     <div>
-                      <div style={fieldLabelStyle}>Invoice picker</div>
+                      <div style={fieldLabelStyle}>發票選擇器</div>
                       <div style={actionRowStyle}>
                         {selectedInvoiceDetailHref &&
                         selectedInvoice.availableActions.some(
@@ -1458,19 +1456,19 @@ export default async function InvoicesPage({
 
                 <CanvasCard
                   theme={th}
-                  title="Cross-app context"
-                  subtitle="deep links and line-item attribution"
+                  title="跨應用上下文"
+                  subtitle="深層連結與明細歸屬"
                 >
                   <div style={sideStackStyle}>
                     <div>
-                      <div style={fieldLabelStyle}>Deep links</div>
+                      <div style={fieldLabelStyle}>深層連結</div>
                       <div style={lineListStyle}>
                         {selectedInvoice.deepLinks.map(renderDeepLink)}
                       </div>
                     </div>
 
                     <div>
-                      <div style={fieldLabelStyle}>Line items</div>
+                      <div style={fieldLabelStyle}>明細項目</div>
                       <div style={lineListStyle}>
                         {selectedInvoice.lines.map((line) => (
                           <div key={line.lineId} style={lineItemStyle}>
@@ -1510,8 +1508,8 @@ export default async function InvoicesPage({
             ) : (
               <CanvasCard
                 theme={th}
-                title="Invoice context"
-                subtitle="select an invoice to inspect detail, artifact state, and deep links"
+                title="發票上下文"
+                subtitle="選擇一筆發票以檢視明細、檔案狀態與深層連結"
               >
                 <div style={helperTextStyle}>
                   發票詳情會在右側呈現。若目前是 empty

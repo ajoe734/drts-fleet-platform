@@ -55,7 +55,7 @@ export function PartnerLoginForm() {
 
   return (
     <form
-      aria-label="Partner sign-in"
+      aria-label="合作夥伴登入"
       className="partner-login-form"
       onSubmit={handleSubmit}
     >
@@ -70,19 +70,19 @@ export function PartnerLoginForm() {
           autoComplete="username"
           name="entrySlug"
           onChange={(event) => setEntrySlug(event.target.value)}
-          placeholder="e.g. acme-airport-vip"
+          placeholder="例如 acme-airport-vip"
           required
           type="text"
           value={entrySlug}
         />
       </label>
       <label className="field-stack">
-        <span>Partner API key</span>
+        <span>合作夥伴 API 金鑰</span>
         <input
           autoComplete="current-password"
           name="apiKey"
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder="Provided by platform admin"
+          placeholder="由平台管理員提供"
           required
           type="password"
           value={apiKey}

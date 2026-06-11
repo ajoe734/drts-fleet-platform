@@ -112,7 +112,7 @@ export function PartnerAuthenticatedShell({
 
         <div className="partner-sidebar-footer">
           <div className="partner-identity">
-            <strong>Identity</strong>
+            <strong>身分</strong>
             <p>
               Actor <code>{session.identityActorType}</code>
               {session.identityActorId ? (
@@ -174,7 +174,7 @@ export function PartnerPublicShell({
     <div className="partner-public-shell">
       <header className="partner-public-header">
         <span className="partner-badge">Partner mode</span>
-        <h1>Partner sign-in</h1>
+        <h1>合作夥伴登入</h1>
         <p>
           Repo-local partner booking entry. Submit your entry slug and partner
           API key to start a backend-issued bootstrap session.
