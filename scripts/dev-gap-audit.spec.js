@@ -236,13 +236,25 @@ async function auditRoute(page, route) {
 }
 
 async function clickTabByText(page, label) {
-  const tab = page
-    .getByRole("tab", { name: label })
-    .or(page.getByRole("button", { name: label }))
-    .or(page.getByText(label))
-    .first();
-  await expect(tab).toBeVisible();
-  await tab.click();
+  const roleTab = page.getByRole("tab", { name: label }).first();
+  if (await roleTab.count()) {
+    await expect(roleTab).toBeVisible();
+    await roleTab.click();
+    await page.waitForTimeout(800);
+    return;
+  }
+
+  const button = page.getByRole("button", { name: label }).first();
+  if (await button.count()) {
+    await expect(button).toBeVisible();
+    await button.click();
+    await page.waitForTimeout(800);
+    return;
+  }
+
+  const text = page.getByText(label).first();
+  await expect(text).toBeVisible();
+  await text.click();
   await page.waitForTimeout(800);
 }
 
