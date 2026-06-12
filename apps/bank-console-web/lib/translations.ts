@@ -10,6 +10,26 @@ const en = {
 
   "shell.breadcrumb.home": "Overview",
   "shell.search": "Search bookings, contracts, statements...",
+  "shell.demoControls": "Demo controls",
+  "shell.demoBank": "Demo bank",
+  "shell.demoBankHint":
+    "Switch the issuer tenant shown in this demo environment.",
+  "shell.locale": "Language",
+  "shell.locale.zh": "繁",
+  "shell.locale.en": "EN",
+  "shell.guestAvatar": "Guest",
+  "shell.account": "Account",
+  "shell.signedOut": "Signed out",
+  "shell.loginRequired": "Login required",
+  "shell.signedOutHint":
+    "This is a demo sign-out state. Sign in to restore the issuer operator persona.",
+  "shell.login": "Sign in",
+  "shell.signedInAs": "Signed in as {email}",
+  "shell.role": "Role",
+  "shell.tenant": "Tenant",
+  "shell.accountManagement": "Account management",
+  "shell.switchAccount": "Switch account",
+  "shell.logout": "Sign out",
 
   "nav.section.workspace": "Workspace",
   "nav.section.finance": "Contracts & settlement",
@@ -382,7 +402,7 @@ const en = {
   "programs.purpose":
     "Benefit consumption per program / period: cardholders served and 趟次 consumed vs quota (禮遇趟次 remaining).",
   "programs.banner.label": "Issuer identity",
-  "programs.banner.title": "CTBC issuer programs",
+  "programs.banner.title": "{bank} issuer programs",
   "programs.banner.body":
     "The tenant chrome stays on the shared tenant realm; issuer branding appears only inside the working surface for program ownership and benefit context.",
   "programs.banner.issuer": "Issuer",
@@ -565,6 +585,22 @@ const en = {
   "audit.reason.ACCESS_DENIED": "Access denied",
 
   "common.all": "All",
+
+  "login.eyebrow": "Demo identity",
+  "login.title": "Bank console sign-in",
+  "login.lead":
+    "Choose an issuer tenant and operator persona for the dev demo. Production identity is expected to come from the issuer SSO / bank session.",
+  "login.signedOutNotice":
+    "You are viewing the demo signed-out state. Pick an account below to continue.",
+  "login.chooseBank": "Issuer tenant",
+  "login.chooseAccount": "Operator account",
+  "login.programAdmin": "Program admin",
+  "login.opsViewer": "Ops viewer",
+  "login.finance": "Finance",
+  "login.signIn": "Sign in as demo user",
+  "login.securityNoteTitle": "Runtime boundary",
+  "login.securityNoteBody":
+    "This screen is a dev-only demo identity surface. It does not capture passwords or card data, and management authority still belongs to the backend session model.",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -574,6 +610,24 @@ const zh: Record<keyof typeof en, string> = {
 
   "shell.breadcrumb.home": "總覽",
   "shell.search": "搜尋訂單、合約、對帳單…",
+  "shell.demoControls": "Demo 控制項",
+  "shell.demoBank": "Demo 銀行",
+  "shell.demoBankHint": "切換此 dev demo 顯示的發卡行租戶。",
+  "shell.locale": "語系",
+  "shell.locale.zh": "繁",
+  "shell.locale.en": "EN",
+  "shell.guestAvatar": "訪客",
+  "shell.account": "帳號",
+  "shell.signedOut": "已登出",
+  "shell.loginRequired": "需登入",
+  "shell.signedOutHint": "這是 demo 的登出狀態；登入後會恢復發卡行操作員身分。",
+  "shell.login": "登入",
+  "shell.signedInAs": "目前登入：{email}",
+  "shell.role": "角色",
+  "shell.tenant": "租戶",
+  "shell.accountManagement": "帳號管理",
+  "shell.switchAccount": "切換帳號",
+  "shell.logout": "登出",
 
   "nav.section.workspace": "工作面",
   "nav.section.finance": "合約與帳務",
@@ -942,7 +996,7 @@ const zh: Record<keyof typeof en, string> = {
   "programs.purpose":
     "各方案／期別的權益消耗：服務卡友數、趟次消耗 vs 配額（禮遇趟次剩餘）。",
   "programs.banner.label": "發卡行識別",
-  "programs.banner.title": "中信發卡方案",
+  "programs.banner.title": "{bank}發卡方案",
   "programs.banner.body":
     "tenant chrome 維持共用 tenant realm；發卡行品牌只出現在工作面內，用於標示方案歸屬與卡權益情境。",
   "programs.banner.issuer": "發卡行",
@@ -1116,6 +1170,22 @@ const zh: Record<keyof typeof en, string> = {
   "audit.reason.ACCESS_DENIED": "拒絕存取",
 
   "common.all": "全部",
+
+  "login.eyebrow": "Demo 身分",
+  "login.title": "銀行後台登入",
+  "login.lead":
+    "在 dev demo 選擇發卡行租戶與操作員 persona。正式環境身分應由發卡行 SSO／銀行 session 交付。",
+  "login.signedOutNotice":
+    "你目前正在看 demo 的登出狀態；選擇一個帳號即可回到後台。",
+  "login.chooseBank": "發卡行租戶",
+  "login.chooseAccount": "操作員帳號",
+  "login.programAdmin": "方案管理員",
+  "login.opsViewer": "營運查看",
+  "login.finance": "財務",
+  "login.signIn": "以 demo 使用者登入",
+  "login.securityNoteTitle": "Runtime 邊界",
+  "login.securityNoteBody":
+    "此頁是 dev-only 的 demo 身分入口，不收密碼、不收卡號；真正管理權限仍以後端 session model 為準。",
 };
 
 export const translations = { en, zh } as const;

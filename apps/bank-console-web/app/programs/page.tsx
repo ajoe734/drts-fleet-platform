@@ -1,19 +1,47 @@
 import type { CSSProperties } from "react";
 import { PageHero } from "@/components/page-primitives";
-import { t } from "@/lib/translations";
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
+import {
+  resolveBankDemoTenant,
+  resolveLocale,
+  type BankDemoTenant,
+} from "@/lib/demo-tenants";
+import { t, type Locale, type TranslationKey } from "@/lib/translations";
 
-const issuerBrand = BRAND_TEMPLATES.CTBC.tokens.dark;
+type DemoProgram = {
+  id: string;
+  name: string;
+  code: string;
+  period: string;
+  issuer: string;
+  coverage: string;
+  benefits: string;
+  served: number;
+  used: number;
+  total: number;
+  trend: readonly number[];
+  trendLabelKey: TranslationKey;
+  exceptionCount: number;
+  policyKey: TranslationKey;
+  exceptions: Array<{
+    typeKey: TranslationKey;
+    reference: string;
+  }>;
+};
 
-const PROGRAMS = [
+const PROGRAM_BASE = [
   {
-    id: "WE-Q2",
-    name: "鼎極卡機場接送",
-    code: "CTBC-WE",
+    id: "premium-q2",
+    seed: "premium",
+    codeSuffix: "WE",
     period: "2026 Q2",
-    issuer: "CTBC · 中信銀行",
-    coverage: "全球機場接或送 2 趟 / 季",
-    benefits: "VISA Infinite / 正附卡合併歸戶",
+    coverage: {
+      zh: "全球機場接或送 2 趟 / 季",
+      en: "Global airport pickup or drop-off · 2 trips / quarter",
+    },
+    benefits: {
+      zh: "VISA Infinite / 正附卡合併歸戶",
+      en: "VISA Infinite / household-level entitlement",
+    },
     served: 1240,
     used: 1820,
     total: 2400,
@@ -21,25 +49,21 @@ const PROGRAMS = [
     trendLabelKey: "programs.trend.rising",
     exceptionCount: 12,
     policyKey: "programs.policy.worldElite",
-    exceptions: [
-      {
-        typeKey: "programs.exception.flightChange",
-        reference: "卡友 CTBC-CH***204 · 權益 BR***771",
-      },
-      {
-        typeKey: "programs.exception.outOfWindow",
-        reference: "卡友 CTBC-CH***992 · 權益 BR***118",
-      },
-    ],
+    exceptions: ["flightChange", "outOfWindow"],
   },
   {
-    id: "PRIV-Q2",
-    name: "商旅御璽卡禮遇",
-    code: "CTBC-BIZ",
+    id: "business-q2",
+    seed: "business",
+    codeSuffix: "BIZ",
     period: "2026 Q2",
-    issuer: "CTBC · 中信銀行",
-    coverage: "桃園 / 松山 / 高雄 接送",
-    benefits: "Mastercard World Elite / 年消費門檻",
+    coverage: {
+      zh: "桃園 / 松山 / 高雄 接送",
+      en: "Taoyuan / Songshan / Kaohsiung transfer",
+    },
+    benefits: {
+      zh: "Mastercard World Elite / 年消費門檻",
+      en: "Mastercard World Elite / annual spend gate",
+    },
     served: 860,
     used: 990,
     total: 1200,
@@ -47,25 +71,21 @@ const PROGRAMS = [
     trendLabelKey: "programs.trend.watch",
     exceptionCount: 7,
     policyKey: "programs.policy.business",
-    exceptions: [
-      {
-        typeKey: "programs.exception.manualReview",
-        reference: "卡友 CTBC-CH***451 · 權益 BR***553",
-      },
-      {
-        typeKey: "programs.exception.duplicateUsage",
-        reference: "卡友 CTBC-CH***320 · 權益 BR***402",
-      },
-    ],
+    exceptions: ["manualReview", "duplicateUsage"],
   },
   {
-    id: "PREM-H1",
-    name: "晶緻卡新戶禮遇",
-    code: "CTBC-NEW",
+    id: "starter-h1",
+    seed: "starter",
+    codeSuffix: "NEW",
     period: "2026 H1",
-    issuer: "CTBC · 中信銀行",
-    coverage: "國內指定機場送機 1 趟 / 半年",
-    benefits: "新戶核卡 90 日內啟用",
+    coverage: {
+      zh: "國內指定機場送機 1 趟 / 半年",
+      en: "Domestic airport drop-off · 1 trip / half-year",
+    },
+    benefits: {
+      zh: "新戶核卡 90 日內啟用",
+      en: "New card activated within 90 days",
+    },
     served: 430,
     used: 286,
     total: 900,
@@ -73,49 +93,105 @@ const PROGRAMS = [
     trendLabelKey: "programs.trend.steady",
     exceptionCount: 3,
     policyKey: "programs.policy.newCard",
-    exceptions: [
-      {
-        typeKey: "programs.exception.expiredEligibility",
-        reference: "卡友 CTBC-CH***087 · 權益 BR***090",
-      },
-      {
-        typeKey: "programs.exception.missingReceipt",
-        reference: "卡友 CTBC-CH***611 · 權益 BR***264",
-      },
-    ],
+    exceptions: ["expiredEligibility", "missingReceipt"],
   },
 ] as const;
 
-const PERIOD_SUMMARY = {
-  served: PROGRAMS.reduce((sum, program) => sum + program.served, 0),
-  used: PROGRAMS.reduce((sum, program) => sum + program.used, 0),
-  total: PROGRAMS.reduce((sum, program) => sum + program.total, 0),
-};
+const EXCEPTION_KEYS = {
+  duplicateUsage: "programs.exception.duplicateUsage",
+  expiredEligibility: "programs.exception.expiredEligibility",
+  flightChange: "programs.exception.flightChange",
+  manualReview: "programs.exception.manualReview",
+  missingReceipt: "programs.exception.missingReceipt",
+  outOfWindow: "programs.exception.outOfWindow",
+} as const satisfies Record<string, TranslationKey>;
 
-const TOP_EXCEPTIONS = [
-  {
-    key: "programs.exception.outOfWindow",
-    count: 9,
-    detail: "多發於凌晨航班改票後逾 24 小時重提",
-  },
-  {
-    key: "programs.exception.manualReview",
-    count: 7,
-    detail: "高單價接送與跨區加價需人工覆核",
-  },
-  {
-    key: "programs.exception.flightChange",
-    count: 6,
-    detail: "航班異動後重派車產生 quota 回補延遲",
-  },
-] as const;
+const EXCEPTION_REFERENCE_SUFFIXES = {
+  duplicateUsage: ["320", "402"],
+  expiredEligibility: ["087", "090"],
+  flightChange: ["204", "771"],
+  manualReview: ["451", "553"],
+  missingReceipt: ["611", "264"],
+  outOfWindow: ["992", "118"],
+} as const;
 
-function formatTrips(value: number) {
-  return `${value.toLocaleString("zh-TW")} ${t("programs.unit.trip")}`;
+function buildPrograms(tenant: BankDemoTenant, locale: Locale): DemoProgram[] {
+  return PROGRAM_BASE.map((program) => {
+    const programName = tenant.programSeed[program.seed][locale];
+    const code = `${tenant.issuerCode}-${program.codeSuffix}`;
+
+    return {
+      id: `${tenant.code}-${program.id}`,
+      name: programName,
+      code,
+      period: program.period,
+      issuer: `${tenant.issuerCode} · ${tenant.name[locale]}`,
+      coverage: program.coverage[locale],
+      benefits: program.benefits[locale],
+      served: program.served,
+      used: program.used,
+      total: program.total,
+      trend: program.trend,
+      trendLabelKey: program.trendLabelKey,
+      exceptionCount: program.exceptionCount,
+      policyKey: program.policyKey,
+      exceptions: program.exceptions.map((exception) => {
+        const [cardholder, benefit] = EXCEPTION_REFERENCE_SUFFIXES[exception];
+        return {
+          typeKey: EXCEPTION_KEYS[exception],
+          reference:
+            locale === "zh"
+              ? `卡友 ${tenant.issuerCode}-CH***${cardholder} · 權益 BR***${benefit}`
+              : `Cardholder ${tenant.issuerCode}-CH***${cardholder} · benefit BR***${benefit}`,
+        };
+      }),
+    };
+  });
 }
 
-function formatPeople(value: number) {
-  return `${value.toLocaleString("zh-TW")} ${t("programs.unit.person")}`;
+function buildTopExceptions(locale: Locale) {
+  return [
+    {
+      key: "programs.exception.outOfWindow",
+      count: 9,
+      detail:
+        locale === "zh"
+          ? "多發於凌晨航班改票後逾 24 小時重提"
+          : "Often caused by re-submission more than 24h after red-eye flight changes.",
+    },
+    {
+      key: "programs.exception.manualReview",
+      count: 7,
+      detail:
+        locale === "zh"
+          ? "高單價接送與跨區加價需人工覆核"
+          : "High-value rides and cross-region surcharges require manual review.",
+    },
+    {
+      key: "programs.exception.flightChange",
+      count: 6,
+      detail:
+        locale === "zh"
+          ? "航班異動後重派車產生 quota 回補延遲"
+          : "Flight-change redispatch can delay quota backfill.",
+    },
+  ] as const satisfies ReadonlyArray<{
+    key: TranslationKey;
+    count: number;
+    detail: string;
+  }>;
+}
+
+function formatNumber(value: number, locale: Locale) {
+  return value.toLocaleString(locale === "zh" ? "zh-TW" : "en-US");
+}
+
+function formatTrips(value: number, locale: Locale) {
+  return `${formatNumber(value, locale)} ${t("programs.unit.trip", locale)}`;
+}
+
+function formatPeople(value: number, locale: Locale) {
+  return `${formatNumber(value, locale)} ${t("programs.unit.person", locale)}`;
 }
 
 function formatPercent(value: number) {
@@ -159,9 +235,27 @@ function hexToRgbChannels(value: string) {
   return `${red}, ${green}, ${blue}`;
 }
 
-export default function ProgramsPage() {
-  const remaining = PERIOD_SUMMARY.total - PERIOD_SUMMARY.used;
-  const usageRate = getUsageRate(PERIOD_SUMMARY.used, PERIOD_SUMMARY.total);
+export default async function ProgramsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{
+    bank?: string | string[];
+    locale?: string | string[];
+  }>;
+}) {
+  const params = await searchParams;
+  const locale = resolveLocale(params?.locale);
+  const tenant = resolveBankDemoTenant(params?.bank);
+  const issuerBrand = tenant.template.tokens.dark;
+  const programs = buildPrograms(tenant, locale);
+  const topExceptions = buildTopExceptions(locale);
+  const periodSummary = {
+    served: programs.reduce((sum, program) => sum + program.served, 0),
+    used: programs.reduce((sum, program) => sum + program.used, 0),
+    total: programs.reduce((sum, program) => sum + program.total, 0),
+  };
+  const remaining = periodSummary.total - periodSummary.used;
+  const usageRate = getUsageRate(periodSummary.used, periodSummary.total);
 
   return (
     <div
@@ -179,25 +273,33 @@ export default function ProgramsPage() {
       }
     >
       <PageHero
-        eyebrow={t("programs.eyebrow")}
-        title={t("programs.title")}
-        description={t("programs.lead")}
+        eyebrow={t("programs.eyebrow", locale)}
+        title={t("programs.title", locale)}
+        description={t("programs.lead", locale)}
       />
 
       <section className="programs-banner">
         <div>
-          <p className="programs-banner-label">{t("programs.banner.label")}</p>
-          <h2>{t("programs.banner.title")}</h2>
-          <p>{t("programs.banner.body")}</p>
+          <p className="programs-banner-label">
+            {t("programs.banner.label", locale)}
+          </p>
+          <h2>
+            {t("programs.banner.title", locale, {
+              bank: tenant.shortName[locale],
+            })}
+          </h2>
+          <p>{t("programs.banner.body", locale)}</p>
         </div>
         <dl className="programs-banner-meta">
           <div>
-            <dt>{t("programs.banner.issuer")}</dt>
-            <dd>CTBC · 中信銀行</dd>
+            <dt>{t("programs.banner.issuer", locale)}</dt>
+            <dd>
+              {tenant.issuerCode} · {tenant.name[locale]}
+            </dd>
           </div>
           <div>
-            <dt>{t("programs.banner.scope")}</dt>
-            <dd>{t("programs.banner.scopeValue")}</dd>
+            <dt>{t("programs.banner.scope", locale)}</dt>
+            <dd>{t("programs.banner.scopeValue", locale)}</dd>
           </div>
         </dl>
       </section>
@@ -205,15 +307,15 @@ export default function ProgramsPage() {
       <section className="surface-grid programs-kpi-grid">
         <article className="surface-card programs-kpi programs-kpi-primary">
           <span className="surface-kicker">
-            {t("programs.kpi.primaryKicker")}
+            {t("programs.kpi.primaryKicker", locale)}
           </span>
-          <h3>{t("programs.kpi.quotaTitle")}</h3>
-          <p>{t("programs.kpi.quotaBody")}</p>
+          <h3>{t("programs.kpi.quotaTitle", locale)}</h3>
+          <p>{t("programs.kpi.quotaBody", locale)}</p>
           <div className="programs-kpi-value-row">
-            <strong>{formatTrips(PERIOD_SUMMARY.used)}</strong>
+            <strong>{formatTrips(periodSummary.used, locale)}</strong>
             <span>
-              {t("programs.kpi.ofTotal", undefined, {
-                total: formatTrips(PERIOD_SUMMARY.total),
+              {t("programs.kpi.ofTotal", locale, {
+                total: formatTrips(periodSummary.total, locale),
               })}
             </span>
           </div>
@@ -224,34 +326,34 @@ export default function ProgramsPage() {
             />
           </div>
           <div className="programs-kpi-split">
-            <span>{t("programs.kpi.remaining")}</span>
-            <strong>{formatTrips(remaining)}</strong>
+            <span>{t("programs.kpi.remaining", locale)}</span>
+            <strong>{formatTrips(remaining, locale)}</strong>
           </div>
         </article>
 
         <article className="surface-card programs-kpi">
           <span className="surface-kicker">
-            {t("programs.kpi.secondaryKicker")}
+            {t("programs.kpi.secondaryKicker", locale)}
           </span>
-          <h3>{t("programs.kpi.servedTitle")}</h3>
-          <p>{t("programs.kpi.servedBody")}</p>
+          <h3>{t("programs.kpi.servedTitle", locale)}</h3>
+          <p>{t("programs.kpi.servedBody", locale)}</p>
           <div className="programs-kpi-value-row">
-            <strong>{formatPeople(PERIOD_SUMMARY.served)}</strong>
-            <span>{t("programs.kpi.periodValue")}</span>
+            <strong>{formatPeople(periodSummary.served, locale)}</strong>
+            <span>{t("programs.kpi.periodValue", locale)}</span>
           </div>
         </article>
 
         <article className="surface-card programs-kpi">
           <span className="surface-kicker">
-            {t("programs.kpi.secondaryKicker")}
+            {t("programs.kpi.secondaryKicker", locale)}
           </span>
-          <h3>{t("programs.kpi.exceptionTitle")}</h3>
-          <p>{t("programs.kpi.exceptionBody")}</p>
+          <h3>{t("programs.kpi.exceptionTitle", locale)}</h3>
+          <p>{t("programs.kpi.exceptionBody", locale)}</p>
           <div className="programs-kpi-value-row">
             <strong>
-              {TOP_EXCEPTIONS.reduce((sum, item) => sum + item.count, 0)}
+              {topExceptions.reduce((sum, item) => sum + item.count, 0)}
             </strong>
-            <span>{t("programs.kpi.exceptionValue")}</span>
+            <span>{t("programs.kpi.exceptionValue", locale)}</span>
           </div>
         </article>
       </section>
@@ -259,24 +361,26 @@ export default function ProgramsPage() {
       <section className="surface-card programs-table-card">
         <div className="programs-section-head">
           <div>
-            <span className="surface-kicker">{t("programs.table.kicker")}</span>
-            <h3>{t("programs.table.title")}</h3>
+            <span className="surface-kicker">
+              {t("programs.table.kicker", locale)}
+            </span>
+            <h3>{t("programs.table.title", locale)}</h3>
           </div>
-          <p>{t("programs.table.description")}</p>
+          <p>{t("programs.table.description", locale)}</p>
         </div>
 
         <div className="programs-table">
           <div className="programs-table-header">
-            <span>{t("programs.table.headers.program")}</span>
-            <span>{t("programs.table.headers.coverage")}</span>
-            <span>{t("programs.table.headers.served")}</span>
-            <span>{t("programs.table.headers.quota")}</span>
-            <span>{t("programs.table.headers.trend")}</span>
-            <span>{t("programs.table.headers.exceptions")}</span>
-            <span>{t("programs.table.headers.policy")}</span>
+            <span>{t("programs.table.headers.program", locale)}</span>
+            <span>{t("programs.table.headers.coverage", locale)}</span>
+            <span>{t("programs.table.headers.served", locale)}</span>
+            <span>{t("programs.table.headers.quota", locale)}</span>
+            <span>{t("programs.table.headers.trend", locale)}</span>
+            <span>{t("programs.table.headers.exceptions", locale)}</span>
+            <span>{t("programs.table.headers.policy", locale)}</span>
           </div>
 
-          {PROGRAMS.map((program) => {
+          {programs.map((program) => {
             const rate = getUsageRate(program.used, program.total);
             const remainingTrips = program.total - program.used;
 
@@ -296,16 +400,16 @@ export default function ProgramsPage() {
                 </div>
 
                 <div className="programs-served">
-                  <strong>{formatPeople(program.served)}</strong>
-                  <span>{t("programs.table.servedLabel")}</span>
+                  <strong>{formatPeople(program.served, locale)}</strong>
+                  <span>{t("programs.table.servedLabel", locale)}</span>
                 </div>
 
                 <div className="programs-quota">
                   <div className="programs-quota-stats">
-                    <strong>{formatTrips(program.used)}</strong>
+                    <strong>{formatTrips(program.used, locale)}</strong>
                     <span>
-                      {t("programs.kpi.ofTotal", undefined, {
-                        total: formatTrips(program.total),
+                      {t("programs.kpi.ofTotal", locale, {
+                        total: formatTrips(program.total, locale),
                       })}
                     </span>
                   </div>
@@ -316,8 +420,8 @@ export default function ProgramsPage() {
                     />
                   </div>
                   <span className="programs-remaining">
-                    {t("programs.table.remainingValue", undefined, {
-                      remaining: formatTrips(remainingTrips),
+                    {t("programs.table.remainingValue", locale, {
+                      remaining: formatTrips(remainingTrips, locale),
                     })}
                   </span>
                 </div>
@@ -326,22 +430,22 @@ export default function ProgramsPage() {
                   <svg
                     viewBox="0 0 132 34"
                     role="img"
-                    aria-label={t(program.trendLabelKey)}
+                    aria-label={t(program.trendLabelKey, locale)}
                   >
                     <path d={getTrendPath(program.trend)} />
                   </svg>
                   <strong>{formatPercent(rate)}</strong>
-                  <span>{t(program.trendLabelKey)}</span>
+                  <span>{t(program.trendLabelKey, locale)}</span>
                 </div>
 
                 <div className="programs-exceptions">
                   <strong>
-                    {program.exceptionCount} {t("programs.unit.case")}
+                    {program.exceptionCount} {t("programs.unit.case", locale)}
                   </strong>
                   <ul>
                     {program.exceptions.map((exception) => (
                       <li key={`${program.id}-${exception.reference}`}>
-                        <span>{t(exception.typeKey)}</span>
+                        <span>{t(exception.typeKey, locale)}</span>
                         <code>{exception.reference}</code>
                       </li>
                     ))}
@@ -349,8 +453,8 @@ export default function ProgramsPage() {
                 </div>
 
                 <div className="programs-policy">
-                  <strong>{t("programs.table.policySummary")}</strong>
-                  <p>{t(program.policyKey)}</p>
+                  <strong>{t("programs.table.policySummary", locale)}</strong>
+                  <p>{t(program.policyKey, locale)}</p>
                 </div>
               </article>
             );
@@ -361,15 +465,16 @@ export default function ProgramsPage() {
       <section className="surface-grid surface-grid-wide">
         <article className="surface-card">
           <span className="surface-kicker">
-            {t("programs.exceptions.kicker")}
+            {t("programs.exceptions.kicker", locale)}
           </span>
-          <h3>{t("programs.exceptions.title")}</h3>
-          <p>{t("programs.exceptions.description")}</p>
+          <h3>{t("programs.exceptions.title", locale)}</h3>
+          <p>{t("programs.exceptions.description", locale)}</p>
           <ul className="programs-summary-list">
-            {TOP_EXCEPTIONS.map((item) => (
+            {topExceptions.map((item) => (
               <li key={item.key}>
                 <strong>
-                  {t(item.key)} · {item.count} {t("programs.unit.case")}
+                  {t(item.key, locale)} · {item.count}{" "}
+                  {t("programs.unit.case", locale)}
                 </strong>
                 <span>{item.detail}</span>
               </li>
@@ -378,21 +483,23 @@ export default function ProgramsPage() {
         </article>
 
         <article className="surface-card">
-          <span className="surface-kicker">{t("programs.policy.kicker")}</span>
-          <h3>{t("programs.policy.title")}</h3>
-          <p>{t("programs.policy.description")}</p>
+          <span className="surface-kicker">
+            {t("programs.policy.kicker", locale)}
+          </span>
+          <h3>{t("programs.policy.title", locale)}</h3>
+          <p>{t("programs.policy.description", locale)}</p>
           <ul className="programs-summary-list">
             <li>
-              <strong>{t("programs.policy.rule1Title")}</strong>
-              <span>{t("programs.policy.rule1Body")}</span>
+              <strong>{t("programs.policy.rule1Title", locale)}</strong>
+              <span>{t("programs.policy.rule1Body", locale)}</span>
             </li>
             <li>
-              <strong>{t("programs.policy.rule2Title")}</strong>
-              <span>{t("programs.policy.rule2Body")}</span>
+              <strong>{t("programs.policy.rule2Title", locale)}</strong>
+              <span>{t("programs.policy.rule2Body", locale)}</span>
             </li>
             <li>
-              <strong>{t("programs.policy.rule3Title")}</strong>
-              <span>{t("programs.policy.rule3Body")}</span>
+              <strong>{t("programs.policy.rule3Title", locale)}</strong>
+              <span>{t("programs.policy.rule3Body", locale)}</span>
             </li>
           </ul>
         </article>
