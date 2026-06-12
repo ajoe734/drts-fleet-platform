@@ -76,6 +76,28 @@ export type PartnerRouteContext = {
   inactive: boolean;
 };
 
+function canUseLocalPartnerShellFallback(
+  error: PartnerAuthorityError,
+  options?: {
+    allowInactive?: boolean;
+    allowMissing?: boolean;
+  },
+) {
+  if (error.code === "PARTNER_ENTRY_INACTIVE") {
+    return options?.allowInactive;
+  }
+
+  if (error.code === "PARTNER_ENTRY_NOT_FOUND") {
+    return options?.allowInactive || options?.allowMissing;
+  }
+
+  return (
+    error.code === "INTERNAL_KEY_REQUIRED" &&
+    !process.env.DRTS_INTERNAL_KEY?.trim() &&
+    (options?.allowInactive || options?.allowMissing)
+  );
+}
+
 function buildPartnerHeaders(
   session: PartnerSessionRecord,
 ): Record<string, string> {
@@ -263,13 +285,10 @@ export async function getPartnerRouteContext(
       inactive: false,
     };
   } catch (error) {
-    const canUseFallbackShell =
+    if (
       error instanceof PartnerAuthorityError &&
-      ((error.code === "PARTNER_ENTRY_INACTIVE" && options?.allowInactive) ||
-        (error.code === "PARTNER_ENTRY_NOT_FOUND" &&
-          (options?.allowInactive || options?.allowMissing)));
-
-    if (canUseFallbackShell) {
+      canUseLocalPartnerShellFallback(error, options)
+    ) {
       return {
         brand: fallbackBrandTemplate(tenantSlug),
         entry: null,

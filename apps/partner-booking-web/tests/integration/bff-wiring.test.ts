@@ -206,6 +206,42 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
+  it("lets public shells fallback when the dev authority requires an internal key that is not mounted", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(
+        {
+          error: {
+            code: "INTERNAL_KEY_REQUIRED",
+            message:
+              "x-drts-internal-key header is required for this environment.",
+            details: {
+              route: "/api/partner/entries/ctbc",
+              method: "GET",
+            },
+            retryable: false,
+          },
+        },
+        401,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+      }),
+    });
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "INTERNAL_KEY_REQUIRED",
+      status: 401,
+    });
+  });
+
   it("lets public shells fallback on missing entries without swallowing inactive entries", async () => {
     const fetchMock = vi
       .fn()

@@ -26,7 +26,13 @@ const TENANT_CONSOLE_ROUTES = [
   "/webhooks",
 ] as const;
 
-const PARTNER_BOOKING_ROUTES = ["/"] as const;
+const PARTNER_BOOKING_ROUTES = [
+  "/",
+  "/bank-demo-alpha-airport",
+  "/bank-demo-alpha-airport/eligibility",
+  "/bank-demo-alpha-airport/help",
+  "/bank-demo-alpha-airport/program",
+] as const;
 
 async function primeLocale(page: Page, locale: "en" | "zh", baseURL: string) {
   await page.context().addCookies([
