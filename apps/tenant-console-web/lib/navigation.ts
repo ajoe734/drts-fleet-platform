@@ -1,12 +1,10 @@
 import type { CanvasTone } from "@drts/ui-web";
-import { t } from "@/lib/translations";
+import { t as defaultTranslate } from "@/lib/translations";
 
 export const TENANT_CONSOLE_BRAND = "DRTS";
-export const TENANT_CONSOLE_BRAND_SUB = "TENANT CONSOLE";
-export const TENANT_CONSOLE_CONTEXT = "YAMATO 大和商務集團";
-export const TENANT_CONSOLE_ENV = "production";
 export const TENANT_CONSOLE_VERSION = "v0.1.0";
-export const TENANT_CONSOLE_SEARCH_PLACEHOLDER = t("shell.search");
+
+type Translate = (key: string) => string;
 
 type TenantNavIcon =
   | "home"
@@ -41,8 +39,9 @@ export type TenantNavItem = {
 
 export type TenantNavEntry = TenantNavDivider | TenantNavItem;
 
-export const tenantNavEntries: TenantNavEntry[] = [
-  { divider: "工作面" },
+export function createTenantNavEntries(t: Translate): TenantNavEntry[] {
+  return [
+  { divider: t("shell.nav.workspace") },
   { key: "home", href: "/", icon: "home", label: t("nav.home") },
   {
     key: "bookings",
@@ -59,7 +58,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "plus",
     label: t("nav.newBooking"),
   },
-  { divider: "資料維護" },
+  { divider: t("shell.nav.directory") },
   {
     key: "passengers",
     href: "/passengers",
@@ -84,14 +83,14 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "flags",
     label: t("nav.rules"),
   },
-  { divider: "帳號與權限" },
+  { divider: t("shell.nav.access") },
   {
     key: "users",
     href: "/users",
     icon: "users",
     label: t("nav.users"),
   },
-  { divider: "通知與 SLA" },
+  { divider: t("shell.nav.notifications") },
   {
     key: "notifications",
     href: "/notifications",
@@ -104,7 +103,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "sla",
     label: t("nav.sla"),
   },
-  { divider: "帳務與治理" },
+  { divider: t("shell.nav.finance") },
   {
     key: "billing",
     href: "/billing",
@@ -123,7 +122,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "reports",
     label: t("nav.reports"),
   },
-  { divider: "整合" },
+  { divider: t("shell.nav.integration") },
   {
     key: "apikeys",
     href: "/api-keys",
@@ -142,7 +141,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "integrationGov",
     label: t("nav.integrationGovernance"),
   },
-  { divider: "系統" },
+  { divider: t("shell.nav.system") },
   {
     key: "featureflags",
     href: "/feature-flags",
@@ -162,14 +161,13 @@ export const tenantNavEntries: TenantNavEntry[] = [
     label: t("nav.audit"),
   },
 ];
+}
+
+export const tenantNavEntries = createTenantNavEntries(defaultTranslate);
 
 export const tenantNavItems = tenantNavEntries.filter(
   (entry): entry is TenantNavItem => "href" in entry,
 );
-
-const tenantNavItemsBySpecificity = [...tenantNavItems].sort((left, right) => {
-  return right.href.length - left.href.length;
-});
 
 export function isNavItemActive(pathname: string, item: TenantNavItem) {
   const matches = [item.href, ...(item.matchPaths ?? [])];
@@ -178,12 +176,20 @@ export function isNavItemActive(pathname: string, item: TenantNavItem) {
   );
 }
 
-export function findNavItem(pathname: string) {
-  for (const item of tenantNavItemsBySpecificity) {
+export function findNavItem(
+  pathname: string,
+  entries: TenantNavEntry[] = tenantNavEntries,
+) {
+  const items = entries.filter((entry): entry is TenantNavItem => "href" in entry);
+  const itemsBySpecificity = [...items].sort((left, right) => {
+    return right.href.length - left.href.length;
+  });
+
+  for (const item of itemsBySpecificity) {
     if (isNavItemActive(pathname, item)) {
       return item;
     }
   }
 
-  return tenantNavItems[0] ?? null;
+  return items[0] ?? null;
 }

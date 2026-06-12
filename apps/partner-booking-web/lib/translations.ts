@@ -3,6 +3,25 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "app.title": "Partner Booking",
+  "app.description":
+    "White-label partner booking surface. Tenant identity is selected via the tenant slug route segment.",
+  "root.eyebrow": "Partner Booking · White Label",
+  "root.title": "Pick a tenant slug to enter the partner booking funnel.",
+  "root.description":
+    "This app is white-label by construction. Every functional surface lives under /[tenantSlug]/...; the root path only exists to direct internal traffic to a tenant entry point during bring-up.",
+  "root.knownTenants": "Known reference tenants",
+  "root.openTenant": "Open /{slug}",
+  "shell.brand": "Partner Booking",
+  "shell.hotline": "Hotline",
+  "shell.language.en": "English",
+  "shell.language.zh": "繁體中文",
+  "shell.language.switch": "Switch language",
+  "shell.health.checking": "API checking",
+  "shell.health.healthy": "API healthy",
+  "shell.health.degraded": "API degraded",
+  "shell.health.down": "API down",
+  "shell.health.lastChecked": "last checked",
   "book.title": "Program booking form",
   "book.subtitle":
     "Shared trip details stay consistent while each partner program enforces its own intake rules.",
@@ -194,6 +213,24 @@ const en = {
 } as const;
 
 const zh = {
+  "app.title": "合作入口叫車",
+  "app.description": "白牌合作叫車入口。租戶身分由 tenant slug 路由決定。",
+  "root.eyebrow": "合作入口叫車 · White Label",
+  "root.title": "選擇租戶 slug 進入合作叫車流程。",
+  "root.description":
+    "此 app 以白牌架構建立。所有功能頁都位於 /[tenantSlug]/...；根路徑只用於 bring-up 期間導向內部驗收入口。",
+  "root.knownTenants": "已知參考租戶",
+  "root.openTenant": "開啟 /{slug}",
+  "shell.brand": "合作入口叫車",
+  "shell.hotline": "客服專線",
+  "shell.language.en": "English",
+  "shell.language.zh": "繁體中文",
+  "shell.language.switch": "切換語系",
+  "shell.health.checking": "API 檢查中",
+  "shell.health.healthy": "API 正常",
+  "shell.health.degraded": "API 降級",
+  "shell.health.down": "API 中斷",
+  "shell.health.lastChecked": "最近檢查",
   "book.title": "專案下單表單",
   "book.subtitle":
     "共用行程欄位保持一致，但每個 partner program 仍套用自己的收單規則。",
@@ -374,11 +411,13 @@ export const translations = { en, zh } as const;
 export type TranslationKey = keyof typeof en;
 
 export function t(
-  key: TranslationKey,
+  key: TranslationKey | string,
   params?: Params,
   locale: Locale = "zh",
 ): string {
-  const template = String(translations[locale][key] ?? translations.zh[key]);
+  const scoped = translations[locale] as Record<string, string>;
+  const fallback = translations.zh as Record<string, string>;
+  const template = String(scoped[key] ?? fallback[key] ?? key);
   if (!params) {
     return template;
   }

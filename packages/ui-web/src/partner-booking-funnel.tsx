@@ -24,6 +24,8 @@ export const partnerBookingStateScreens = [
 export type PartnerBookingStateScreenId =
   (typeof partnerBookingStateScreens)[number];
 
+export type PartnerBookingLocale = "en" | "zh";
+
 type ScreenMeta = {
   id: PartnerBookingScreenId;
   label: string;
@@ -106,11 +108,21 @@ const screenMeta: ReadonlyArray<ScreenMeta> = [
   },
 ] as const;
 
-const serviceItems = [
-  ["機場接送", "桃園 / 松山 · 商務車", "AIRPORT"],
-  ["優先派車", "都會區 · 8 分鐘內到車", "PRIORITY"],
-  ["商務時段", "平日 07:00-22:00 · 含車型升級", "BUSINESS"],
-] as const;
+function serviceItemsForLocale(locale: PartnerBookingLocale) {
+  if (locale === "en") {
+    return [
+      ["Airport transfer", "Taoyuan / Songshan · business car", "AIRPORT"],
+      ["Priority dispatch", "Metro areas · car in 8 minutes", "PRIORITY"],
+      ["Business hours", "Weekdays 07:00-22:00 · upgrade included", "BUSINESS"],
+    ] as const;
+  }
+
+  return [
+    ["機場接送", "桃園 / 松山 · 商務車", "AIRPORT"],
+    ["優先派車", "都會區 · 8 分鐘內到車", "PRIORITY"],
+    ["商務時段", "平日 07:00-22:00 · 含車型升級", "BUSINESS"],
+  ] as const;
+}
 
 const screenMetaById = Object.fromEntries(
   screenMeta.map((item) => [item.id, item]),
@@ -311,42 +323,48 @@ function screenToneStyle(
   };
 }
 
-function metaForBrand(brand: PartnerBrandTemplate) {
+function metaForBrand(
+  brand: PartnerBrandTemplate,
+  locale: PartnerBookingLocale = "zh",
+) {
   const remainingBenefits = 9;
   const totalBenefits = 12;
   const usedBenefits = totalBenefits - remainingBenefits;
+  const en = locale === "en";
   const trips: TripItem[] = [
     {
-      when: "今天 14:30",
-      route: "台北信義 -> 桃園 T2",
-      state: "已派車",
+      when: en ? "Today 14:30" : "今天 14:30",
+      route: en ? "Taipei Xinyi -> Taoyuan T2" : "台北信義 -> 桃園 T2",
+      state: en ? "Assigned" : "已派車",
       tone: "success",
-      amount: "免費",
+      amount: en ? "Included" : "免費",
       benefit: `${brand.programName} #4`,
     },
     {
-      when: "昨天 09:12",
-      route: "台北車站 -> 內湖科技園區",
-      state: "已完成",
+      when: en ? "Yesterday 09:12" : "昨天 09:12",
+      route: en
+        ? "Taipei Main Station -> Neihu Tech Park"
+        : "台北車站 -> 內湖科技園區",
+      state: en ? "Completed" : "已完成",
       tone: "neutral",
       amount: "NT$ 0",
       benefit: `${brand.programName} #3`,
     },
     {
       when: "5/2 18:45",
-      route: "台北 101 -> 松山機場",
-      state: "已完成",
+      route: en ? "Taipei 101 -> Songshan Airport" : "台北 101 -> 松山機場",
+      state: en ? "Completed" : "已完成",
       tone: "neutral",
       amount: "NT$ 0",
       benefit: `${brand.programName} #2`,
     },
     {
       when: "4/28 07:30",
-      route: "陽明山 -> 桃園 T1",
-      state: "已完成",
+      route: en ? "Yangmingshan -> Taoyuan T1" : "陽明山 -> 桃園 T1",
+      state: en ? "Completed" : "已完成",
       tone: "accent",
       amount: "NT$ 240",
-      benefit: "額度後 8 折",
+      benefit: en ? "20% off after quota" : "額度後 8 折",
     },
   ];
 
@@ -354,17 +372,246 @@ function metaForBrand(brand: PartnerBrandTemplate) {
     remainingBenefits,
     totalBenefits,
     usedBenefits,
-    personName: "陳俊宏",
-    riderName: "陳〇明",
-    pickup: "台北市信義區松仁路 100 號",
-    pickupDetail: "大和商務集團 · HQ 大廳",
-    dropoff: "桃園機場 第二航廈",
-    dropoffDetail: "出境大廳 7 號門",
+    personName: en ? "Jason Chen" : "陳俊宏",
+    riderName: en ? "Ming C." : "陳〇明",
+    pickup: en
+      ? "No. 100, Songren Rd., Xinyi District, Taipei"
+      : "台北市信義區松仁路 100 號",
+    pickupDetail: en ? "YAMATO Business Group · HQ lobby" : "大和商務集團 · HQ 大廳",
+    dropoff: en ? "Taoyuan Airport Terminal 2" : "桃園機場 第二航廈",
+    dropoffDetail: en ? "Departure Hall Gate 7" : "出境大廳 7 號門",
     departureTime: "2026-05-08 17:30",
     benefitId: `${brand.code}-2026-0004`,
     receiptId: "rcp_8821a912",
     bookingId: "bk_5512",
     trips,
+  };
+}
+
+function copyForLocale(locale: PartnerBookingLocale) {
+  if (locale === "en") {
+    return {
+      landingTitle: "Concierge transfer",
+      landingSubtitle: (programName: string, total: number) =>
+        `${programName} cardholder exclusive · ${total} included rides per year`,
+      remainingTrips: "Annual rides remaining",
+      servicesTitle: "Available services",
+      benefitTermsTitle: "Benefit terms",
+      benefitTermsBody:
+        "After included rides are used, each ride still receives a 20% discount. Charges are consolidated into the card statement with no on-site payment.",
+      bookNow: "Book now",
+      viewTrips: "View trip history",
+      linkCardTitle: "Link card",
+      firstUseSubtitle: "First use · one-time confirmation",
+      benefitsTitle: "Your benefits",
+      cardIdentity: "Cardholder identity",
+      lastFour: "Last four digits",
+      annualIncludedTrips: "Annual included rides",
+      discount: "Discount after quota",
+      discountValue: "20% off after quota",
+      serviceArea: "Service area",
+      serviceAreaValue: "Taipei · Taoyuan · Hsinchu",
+      consentTitle: "Authorization consent",
+      consentItems: (bankName: string) => [
+        "Use this card identity to create a DRTS account",
+        "Share trip details required for dispatch with DRTS",
+        `Agree to ${bankName} x DRTS Concierge Transfer Terms v3`,
+      ],
+      consentNote:
+        "Full card number and security code are never sent. Only fields required for partner eligibility are retained.",
+      confirmLink: "Confirm link and continue",
+      later: "Later",
+      bookTitle: "Create trip",
+      airportSubtitle: "Airport transfer · Taoyuan T2",
+      pickup: "PICKUP",
+      drop: "DROP",
+      departureTimeTitle: "Departure time",
+      timeOptions: ["Now", "+30 min", "+1 hour"],
+      estimatedDeparture: (time: string) => `Estimated departure: ${time}`,
+      serviceDetailsTitle: "Service details",
+      passengers: "Passengers",
+      passengerCount: "1 passenger",
+      luggage: "Luggage",
+      luggageCount: "2 pieces",
+      specialRequests: "Special requests",
+      vehicleClass: "Vehicle class",
+      vehicleValue: "Business car (upgrade)",
+      benefitFareTitle: "Benefit and fare",
+      baseFare: "Base fare",
+      programBenefit: (programName: string) => `${programName} benefit`,
+      amountDue: "You pay",
+      free: "Included",
+      annualBenefitRemaining: "Annual benefit rides remaining",
+      confirmBooking: "Confirm reservation",
+      confirmedTitle: "Driver assigned",
+      confirmedSubtitle: "Driver arriving in 8 minutes",
+      driverInitial: "C",
+      driverStats: "1,243 trips · 4.86 ★",
+      eta: "ETA",
+      distance: "Distance",
+      tripInfo: "Trip information",
+      bookingNo: "Booking No.",
+      benefit: "Benefit",
+      rideNumber: "ride #4",
+      cancelTrip: "Cancel trip",
+      support: "Support",
+      tripsTitle: "My trips",
+      tripsSubtitle: (used: number) => `This year · ${used} rides used`,
+      yearLabel: "2026",
+      remainingSuffix: "remaining",
+      receiptTitle: "Receipt",
+      receiptSubtitle: (bookingId: string) => `${bookingId} · completed`,
+      departure: "Departed",
+      arrived: "Arrived",
+      rideTime: "Ride time",
+      rideDuration: "1 hr 12 min",
+      distanceValue: "38.4 km",
+      fareBase: "Fare (base)",
+      airportSurcharge: "Airport surcharge",
+      highwayToll: "Highway toll",
+      subtotal: "Subtotal",
+      paid: "Paid",
+      paymentTitle: "Payment",
+      paymentMethod: "Payment method",
+      statementPeriod: "Statement period",
+      statementPeriodValue: "2026-06 statement",
+      benefitSerial: "Benefit serial",
+      receiptNo: "Receipt No.",
+      downloadReceipt: "Download receipt PDF",
+      contactSupport: "Contact support",
+      helpTitle: "Help",
+      helpSubtitle: (programName: string) => `${programName} cardholder hotline`,
+      hotline24h: "24-hour hotline",
+      faqTitle: "FAQ",
+      faq: [
+        ["How are benefit rides counted?", "They reset to 12 rides every New Year. Unused rides do not roll over."],
+        ["Can I book for someone else?", "Yes. Enter the passenger's mobile number on the order."],
+        ["Cancellation policy", "Free cancellation is available until 5 minutes before departure. Late cancellation consumes one benefit ride."],
+        ["Can I book after quota is used?", "Yes. A 20% discount applies and charges are consolidated into the card statement."],
+      ],
+      disputeTitle: "Disputes or complaints",
+      disputeBody:
+        "Disputes can be raised within 30 days after trip completion. The partner concierge center and DRTS support will both be notified.",
+      openDispute: "Open dispute",
+      pageTitle: "CTBC reference funnel · 7 screens",
+      pageDescription:
+        "White-label booking flow demo for partner entry. The content below uses PBK-UI-002 brand tokens and mock data while mirroring the CTBC Partner Booking artboards.",
+      activeScreen: "Active screen",
+      screenSummary: "Screen summary",
+      benefitFooter: (remaining: number, total: number, phone: string) =>
+        `Remaining benefit ${remaining}/${total} · Hotline ${phone}`,
+    };
+  }
+
+  return {
+    landingTitle: "禮賓接送 Concierge",
+    landingSubtitle: (programName: string, total: number) =>
+      `${programName} 卡友專屬 · 全年免費 ${total} 趟`,
+    remainingTrips: "本年度剩餘趟次",
+    servicesTitle: "可使用的服務",
+    benefitTermsTitle: "禮遇條款",
+    benefitTermsBody:
+      "當免費額度用完後，每趟仍享 8 折優惠。費用將與本卡帳單合併，不需現場付款。",
+    bookNow: "立即叫車",
+    viewTrips: "查看歷史趟次",
+    linkCardTitle: "連結卡片",
+    firstUseSubtitle: "第一次使用 · 一次性確認",
+    benefitsTitle: "您的權益",
+    cardIdentity: "持卡身份",
+    lastFour: "卡號末四碼",
+    annualIncludedTrips: "本年度免費趟次",
+    discount: "優惠折扣",
+    discountValue: "額度後 8 折",
+    serviceArea: "服務範圍",
+    serviceAreaValue: "台北 · 桃園 · 新竹",
+    consentTitle: "授權同意",
+    consentItems: (bankName: string) => [
+      "使用本卡身份識別建立 DRTS 帳號",
+      "與 DRTS 共享行程必要資訊",
+      `同意《${bankName} x DRTS 禮賓接送服務條款 v3》`,
+    ],
+    consentNote: "不會傳送完整卡號或安全碼，只保留 partner eligibility 所需欄位。",
+    confirmLink: "確認連結並繼續",
+    later: "稍後",
+    bookTitle: "建立行程",
+    airportSubtitle: "機場接送 · 桃園 T2",
+    pickup: "PICKUP",
+    drop: "DROP",
+    departureTimeTitle: "出發時間",
+    timeOptions: ["即時", "+30 分", "+1 小時"],
+    estimatedDeparture: (time: string) => `預計出發：${time}`,
+    serviceDetailsTitle: "服務細節",
+    passengers: "人數",
+    passengerCount: "1 位",
+    luggage: "行李",
+    luggageCount: "2 件",
+    specialRequests: "特殊需求",
+    vehicleClass: "車型",
+    vehicleValue: "商務車 (升級)",
+    benefitFareTitle: "禮遇與費用",
+    baseFare: "基本費用",
+    programBenefit: (programName: string) => `${programName} 禮遇`,
+    amountDue: "您將支付",
+    free: "免費",
+    annualBenefitRemaining: "本年度剩餘禮遇趟次",
+    confirmBooking: "確認預約",
+    confirmedTitle: "已派車",
+    confirmedSubtitle: "駕駛將於 8 分鐘後抵達",
+    driverInitial: "陳",
+    driverStats: "1,243 趟 · 4.86 ★",
+    eta: "預計抵達",
+    distance: "距離",
+    tripInfo: "行程資訊",
+    bookingNo: "預約編號",
+    benefit: "禮遇",
+    rideNumber: "趟次 #4",
+    cancelTrip: "取消行程",
+    support: "客服協助",
+    tripsTitle: "我的行程",
+    tripsSubtitle: (used: number) => `本年度 · 已使用 ${used} 趟`,
+    yearLabel: "2026 年度",
+    remainingSuffix: "剩餘",
+    receiptTitle: "行程明細",
+    receiptSubtitle: (bookingId: string) => `${bookingId} · 已完成`,
+    departure: "出發",
+    arrived: "抵達",
+    rideTime: "行車",
+    rideDuration: "1 小時 12 分",
+    distanceValue: "38.4 km",
+    fareBase: "車資 (基本)",
+    airportSurcharge: "機場附加",
+    highwayToll: "高速公路費",
+    subtotal: "小計",
+    paid: "您支付",
+    paymentTitle: "款項",
+    paymentMethod: "付款方式",
+    statementPeriod: "入帳期別",
+    statementPeriodValue: "2026-06 帳單",
+    benefitSerial: "禮遇序號",
+    receiptNo: "收據編號",
+    downloadReceipt: "下載收據 PDF",
+    contactSupport: "聯絡客服",
+    helpTitle: "協助",
+    helpSubtitle: (programName: string) => `${programName} 卡友專線`,
+    hotline24h: "24 小時專線",
+    faqTitle: "常見問題",
+    faq: [
+      ["禮遇趟次如何計算？", "每年元旦重置 12 趟，未使用不累計。"],
+      ["可以代為叫車嗎？", "可，但乘客手機需填入訂單。"],
+      ["取消政策", "出發 5 分鐘前可免費取消，逾時將扣除一次禮遇。"],
+      ["額度後仍可叫車嗎？", "可，享 8 折優惠並合併至本卡帳單。"],
+    ],
+    disputeTitle: "爭議或客訴",
+    disputeBody:
+      "行程結束後 30 天內可提出爭議，將同時通知 partner 禮賓中心與 DRTS 平台客服。",
+    openDispute: "提出爭議",
+    pageTitle: "CTBC reference funnel · 7 screens",
+    pageDescription:
+      "White-label booking flow demo for partner entry. The content below uses PBK-UI-002 brand tokens and mock data while mirroring the CTBC `Partner Booking.html` artboards.",
+    activeScreen: "目前畫面",
+    screenSummary: "畫面摘要",
+    benefitFooter: (remaining: number, total: number, phone: string) =>
+      `剩餘禮遇 ${remaining}/${total} · Hotline ${phone}`,
   };
 }
 
@@ -629,11 +876,15 @@ function appendQueryString(href: string, persistentQuery?: string) {
 export function PartnerBookingPhoneScreen({
   brand,
   screen,
+  locale = "zh",
 }: {
   brand: PartnerBrandTemplate;
   screen: PartnerBookingScreenId;
+  locale?: PartnerBookingLocale;
 }) {
-  const demo = metaForBrand(brand);
+  const demo = metaForBrand(brand, locale);
+  const copy = copyForLocale(locale);
+  const serviceItems = serviceItemsForLocale(locale);
   const benefitWidth = `${
     (demo.remainingBenefits / demo.totalBenefits) * 100
   }%`;
@@ -645,8 +896,11 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="禮賓接送 Concierge"
-          subtitle={`${brand.programName} 卡友專屬 · 全年免費 ${demo.totalBenefits} 趟`}
+          title={copy.landingTitle}
+          subtitle={copy.landingSubtitle(
+            brand.programName,
+            demo.totalBenefits,
+          )}
           trailing="EXCLUSIVE"
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
@@ -699,7 +953,7 @@ export function PartnerBookingPhoneScreen({
                 }}
               >
                 <span style={{ fontSize: "11px", color: "#56657f" }}>
-                  本年度剩餘趟次
+                  {copy.remainingTrips}
                 </span>
                 <span
                   style={{
@@ -731,7 +985,7 @@ export function PartnerBookingPhoneScreen({
             </div>
           </PhoneCard>
 
-          <PhoneCard title="可使用的服務">
+          <PhoneCard title={copy.servicesTitle}>
             {serviceItems.map(([title, detail, tag], index) => (
               <div
                 key={title}
@@ -800,7 +1054,7 @@ export function PartnerBookingPhoneScreen({
                     color: brand.primaryDark,
                   }}
                 >
-                  禮遇條款
+                  {copy.benefitTermsTitle}
                 </div>
                 <div
                   style={{
@@ -810,15 +1064,14 @@ export function PartnerBookingPhoneScreen({
                     color: "#56657f",
                   }}
                 >
-                  當免費額度用完後，每趟仍享 8 折優惠。費用將與本卡帳單合併，
-                  不需現場付款。
+                  {copy.benefitTermsBody}
                 </div>
               </div>
             </div>
           </PhoneCard>
 
-          <ActionButton brand={brand} label="立即叫車" primary />
-          <ActionButton brand={brand} label="查看歷史趟次" />
+          <ActionButton brand={brand} label={copy.bookNow} primary />
+          <ActionButton brand={brand} label={copy.viewTrips} />
         </div>
       </>
     );
@@ -827,27 +1080,23 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="連結卡片"
-          subtitle="第一次使用 · 一次性確認"
+          title={copy.linkCardTitle}
+          subtitle={copy.firstUseSubtitle}
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
-          <PhoneCard title="您的權益">
-            <DetailRow label="持卡身份" value={brand.programName} />
-            <DetailRow label="卡號末四碼" value={brand.cardArt.lastFour} mono />
+          <PhoneCard title={copy.benefitsTitle}>
+            <DetailRow label={copy.cardIdentity} value={brand.programName} />
+            <DetailRow label={copy.lastFour} value={brand.cardArt.lastFour} mono />
             <DetailRow
-              label="本年度免費趟次"
-              value={`${demo.totalBenefits} 趟`}
+              label={copy.annualIncludedTrips}
+              value={`${demo.totalBenefits} ${locale === "en" ? "rides" : "趟"}`}
               mono
             />
-            <DetailRow label="優惠折扣" value="額度後 8 折" />
-            <DetailRow label="服務範圍" value="台北 · 桃園 · 新竹" />
+            <DetailRow label={copy.discount} value={copy.discountValue} />
+            <DetailRow label={copy.serviceArea} value={copy.serviceAreaValue} />
           </PhoneCard>
-          <PhoneCard title="授權同意">
-            {[
-              "使用本卡身份識別建立 DRTS 帳號",
-              "與 DRTS 共享行程必要資訊",
-              `同意《${brand.bankName} x DRTS 禮賓接送服務條款 v3》`,
-            ].map((item, index) => (
+          <PhoneCard title={copy.consentTitle}>
+            {copy.consentItems(brand.bankName).map((item, index) => (
               <div
                 key={item}
                 style={{
@@ -880,16 +1129,15 @@ export function PartnerBookingPhoneScreen({
                       marginTop: "2px",
                     }}
                   >
-                    不會傳送完整卡號或安全碼，只保留 partner eligibility
-                    所需欄位。
+                    {copy.consentNote}
                   </div>
                 </div>
               </div>
             ))}
           </PhoneCard>
           <div style={{ display: "grid", gap: "8px" }}>
-            <ActionButton brand={brand} label="確認連結並繼續" primary />
-            <ActionButton brand={brand} label="稍後" />
+            <ActionButton brand={brand} label={copy.confirmLink} primary />
+            <ActionButton brand={brand} label={copy.later} />
           </div>
         </div>
       </>
@@ -899,8 +1147,8 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="建立行程"
-          subtitle="機場接送 · 桃園 T2"
+          title={copy.bookTitle}
+          subtitle={copy.airportSubtitle}
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
           <PhoneCard>
@@ -934,7 +1182,7 @@ export function PartnerBookingPhoneScreen({
                     color: "#56657f",
                   }}
                 >
-                  PICKUP
+                  {copy.pickup}
                 </span>
               </div>
               <div style={{ fontSize: "14px", fontWeight: 700 }}>
@@ -971,7 +1219,7 @@ export function PartnerBookingPhoneScreen({
                     color: "#56657f",
                   }}
                 >
-                  DROP
+                  {copy.drop}
                 </span>
               </div>
               <div style={{ fontSize: "14px", fontWeight: 700 }}>
@@ -984,7 +1232,7 @@ export function PartnerBookingPhoneScreen({
               </div>
             </div>
           </PhoneCard>
-          <PhoneCard title="出發時間">
+          <PhoneCard title={copy.departureTimeTitle}>
             <div
               style={{
                 display: "grid",
@@ -992,7 +1240,7 @@ export function PartnerBookingPhoneScreen({
                 gap: "6px",
               }}
             >
-              {["即時", "+30 分", "+1 小時"].map((option, index) => (
+              {copy.timeOptions.map((option, index) => (
                 <div
                   key={option}
                   style={{
@@ -1023,29 +1271,29 @@ export function PartnerBookingPhoneScreen({
                 fontFamily: '"JetBrains Mono", ui-monospace, monospace',
               }}
             >
-              預計出發：{demo.departureTime}
+              {copy.estimatedDeparture(demo.departureTime)}
             </div>
           </PhoneCard>
-          <PhoneCard title="服務細節">
-            <DetailRow label="人數" value="1 位" />
-            <DetailRow label="行李" value="2 件" />
-            <DetailRow label="特殊需求" value="-" />
-            <DetailRow label="車型" value="商務車 (升級)" />
+          <PhoneCard title={copy.serviceDetailsTitle}>
+            <DetailRow label={copy.passengers} value={copy.passengerCount} />
+            <DetailRow label={copy.luggage} value={copy.luggageCount} />
+            <DetailRow label={copy.specialRequests} value="-" />
+            <DetailRow label={copy.vehicleClass} value={copy.vehicleValue} />
           </PhoneCard>
           <PhoneCard
-            title="禮遇與費用"
+            title={copy.benefitFareTitle}
             style={{
               background: "linear-gradient(180deg, #faf3df 0%, #fffdf5 100%)",
               borderColor: "#e5d58a",
             }}
           >
-            <DetailRow label="基本費用" value="NT$ 1,580" mono />
+            <DetailRow label={copy.baseFare} value="NT$ 1,580" mono />
             <DetailRow
-              label={`${brand.programName} 禮遇`}
+              label={copy.programBenefit(brand.programName)}
               value="-NT$ 1,580"
               mono
             />
-            <DetailRow label="您將支付" value="免費" />
+            <DetailRow label={copy.amountDue} value={copy.free} />
             <div
               style={{
                 display: "flex",
@@ -1060,14 +1308,14 @@ export function PartnerBookingPhoneScreen({
               <Chip
                 brand={brand}
                 tone="accent"
-                label={`${demo.remainingBenefits} / ${demo.totalBenefits} 趟`}
+                label={`${demo.remainingBenefits} / ${demo.totalBenefits} ${locale === "en" ? "rides" : "趟"}`}
               />
               <span style={{ fontSize: "11px", color: "#56657f" }}>
-                本年度剩餘禮遇趟次
+                {copy.annualBenefitRemaining}
               </span>
             </div>
           </PhoneCard>
-          <ActionButton brand={brand} label="確認預約" primary />
+          <ActionButton brand={brand} label={copy.confirmBooking} primary />
         </div>
       </>
     );
@@ -1076,8 +1324,8 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="已派車"
-          subtitle="駕駛將於 8 分鐘後抵達"
+          title={copy.confirmedTitle}
+          subtitle={copy.confirmedSubtitle}
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
           <PhoneCard>
@@ -1096,14 +1344,14 @@ export function PartnerBookingPhoneScreen({
                   fontWeight: 800,
                 }}
               >
-                陳
+                {copy.driverInitial}
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "14px", fontWeight: 800 }}>
                   {demo.personName}
                 </div>
                 <div style={{ fontSize: "11px", color: "#56657f" }}>
-                  1,243 趟 · 4.86 ★
+                  {copy.driverStats}
                 </div>
                 <div
                   style={{
@@ -1183,7 +1431,7 @@ export function PartnerBookingPhoneScreen({
             >
               <div>
                 <div style={{ fontSize: "11px", color: "#56657f" }}>
-                  預計抵達
+                  {copy.eta}
                 </div>
                 <div
                   style={{
@@ -1199,7 +1447,9 @@ export function PartnerBookingPhoneScreen({
                 </div>
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: "11px", color: "#56657f" }}>距離</div>
+                <div style={{ fontSize: "11px", color: "#56657f" }}>
+                  {copy.distance}
+                </div>
                 <div
                   style={{
                     fontSize: "14px",
@@ -1210,14 +1460,17 @@ export function PartnerBookingPhoneScreen({
                   2.4 km
                 </div>
               </div>
-              <Chip brand={brand} tone="success" label="已派車" />
+              <Chip brand={brand} tone="success" label={copy.confirmedTitle} />
             </div>
           </PhoneCard>
-          <PhoneCard title="行程資訊">
-            <DetailRow label="預約編號" value={demo.bookingId} mono />
-            <DetailRow label="禮遇" value={`${brand.programName} · 趟次 #4`} />
-            <DetailRow label="車型" value="商務車 (升級)" />
-            <DetailRow label="您將支付" value="免費" />
+          <PhoneCard title={copy.tripInfo}>
+            <DetailRow label={copy.bookingNo} value={demo.bookingId} mono />
+            <DetailRow
+              label={copy.benefit}
+              value={`${brand.programName} · ${copy.rideNumber}`}
+            />
+            <DetailRow label={copy.vehicleClass} value={copy.vehicleValue} />
+            <DetailRow label={copy.amountDue} value={copy.free} />
           </PhoneCard>
           <div
             style={{
@@ -1226,8 +1479,8 @@ export function PartnerBookingPhoneScreen({
               gap: "8px",
             }}
           >
-            <ActionButton brand={brand} label="取消行程" />
-            <ActionButton brand={brand} label="客服協助" />
+            <ActionButton brand={brand} label={copy.cancelTrip} />
+            <ActionButton brand={brand} label={copy.support} />
           </div>
         </div>
       </>
@@ -1237,8 +1490,8 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="我的行程"
-          subtitle={`本年度 · 已使用 ${demo.usedBenefits} 趟`}
+          title={copy.tripsTitle}
+          subtitle={copy.tripsSubtitle(demo.usedBenefits)}
         />
         <div style={{ padding: "16px" }}>
           <PhoneCard>
@@ -1265,7 +1518,7 @@ export function PartnerBookingPhoneScreen({
                     letterSpacing: "0.08em",
                   }}
                 >
-                  2026 年度
+                  {copy.yearLabel}
                 </span>
                 <span
                   style={{
@@ -1274,7 +1527,7 @@ export function PartnerBookingPhoneScreen({
                   }}
                 >
                   <b style={{ fontSize: "22px" }}>{demo.remainingBenefits}</b> /{" "}
-                  {demo.totalBenefits} 剩餘
+                  {demo.totalBenefits} {copy.remainingSuffix}
                 </span>
               </div>
               <div
@@ -1346,8 +1599,8 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="行程明細"
-          subtitle={`${demo.bookingId} · 已完成`}
+          title={copy.receiptTitle}
+          subtitle={copy.receiptSubtitle(demo.bookingId)}
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
           <PhoneCard>
@@ -1357,41 +1610,41 @@ export function PartnerBookingPhoneScreen({
                 borderBottom: "1px dashed #e5e7eb",
               }}
             >
-              <DetailRow label="出發" value="14:30:11" mono />
-              <DetailRow label="抵達" value="15:42:27" mono />
-              <DetailRow label="行車" value="1 小時 12 分" />
-              <DetailRow label="距離" value="38.4 km" mono />
+              <DetailRow label={copy.departure} value="14:30:11" mono />
+              <DetailRow label={copy.arrived} value="15:42:27" mono />
+              <DetailRow label={copy.rideTime} value={copy.rideDuration} />
+              <DetailRow label={copy.distance} value={copy.distanceValue} mono />
             </div>
             <div style={{ paddingTop: "12px" }}>
-              <DetailRow label="車資 (基本)" value="NT$ 1,420" mono />
-              <DetailRow label="機場附加" value="NT$ 100" mono />
-              <DetailRow label="高速公路費" value="NT$ 60" mono />
-              <DetailRow label="小計" value="NT$ 1,580" mono />
+              <DetailRow label={copy.fareBase} value="NT$ 1,420" mono />
+              <DetailRow label={copy.airportSurcharge} value="NT$ 100" mono />
+              <DetailRow label={copy.highwayToll} value="NT$ 60" mono />
+              <DetailRow label={copy.subtotal} value="NT$ 1,580" mono />
               <div style={{ marginTop: "8px" }}>
                 <DetailRow
-                  label={`${brand.programName} 禮遇`}
+                  label={copy.programBenefit(brand.programName)}
                   value="-NT$ 1,580"
                   mono
                 />
-                <DetailRow label="您支付" value="NT$ 0" mono />
+                <DetailRow label={copy.paid} value="NT$ 0" mono />
               </div>
             </div>
           </PhoneCard>
           <PhoneCard
-            title="款項"
+            title={copy.paymentTitle}
             style={{
               background: "linear-gradient(180deg, #faf3df, #fffdf5)",
               borderColor: "#e5d58a",
             }}
           >
             <DetailRow
-              label="付款方式"
+              label={copy.paymentMethod}
               value={`${brand.programName} ••${brand.cardArt.lastFour}`}
               mono
             />
-            <DetailRow label="入帳期別" value="2026-06 帳單" />
-            <DetailRow label="禮遇序號" value={demo.benefitId} mono />
-            <DetailRow label="收據編號" value={demo.receiptId} mono />
+            <DetailRow label={copy.statementPeriod} value={copy.statementPeriodValue} />
+            <DetailRow label={copy.benefitSerial} value={demo.benefitId} mono />
+            <DetailRow label={copy.receiptNo} value={demo.receiptId} mono />
           </PhoneCard>
           <div
             style={{
@@ -1400,8 +1653,8 @@ export function PartnerBookingPhoneScreen({
               gap: "8px",
             }}
           >
-            <ActionButton brand={brand} label="下載收據 PDF" />
-            <ActionButton brand={brand} label="聯絡客服" />
+            <ActionButton brand={brand} label={copy.downloadReceipt} />
+            <ActionButton brand={brand} label={copy.contactSupport} />
           </div>
         </div>
       </>
@@ -1411,8 +1664,8 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="協助"
-          subtitle={`${brand.programName} 卡友專線`}
+          title={copy.helpTitle}
+          subtitle={copy.helpSubtitle(brand.programName)}
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
           <PhoneCard
@@ -1429,7 +1682,7 @@ export function PartnerBookingPhoneScreen({
                 letterSpacing: "0.1em",
               }}
             >
-              24 小時專線
+              {copy.hotline24h}
             </div>
             <div
               style={{
@@ -1445,13 +1698,8 @@ export function PartnerBookingPhoneScreen({
               {brand.hotline.note}
             </div>
           </PhoneCard>
-          <PhoneCard title="常見問題">
-            {[
-              ["禮遇趟次如何計算？", "每年元旦重置 12 趟，未使用不累計。"],
-              ["可以代為叫車嗎？", "可，但乘客手機需填入訂單。"],
-              ["取消政策", "出發 5 分鐘前可免費取消，逾時將扣除一次禮遇。"],
-              ["額度後仍可叫車嗎？", "可，享 8 折優惠並合併至本卡帳單。"],
-            ].map(([question, answer], index) => (
+          <PhoneCard title={copy.faqTitle}>
+            {copy.faq.map(([question, answer], index) => (
               <div
                 key={question}
                 style={{
@@ -1476,7 +1724,7 @@ export function PartnerBookingPhoneScreen({
               </div>
             ))}
           </PhoneCard>
-          <PhoneCard title="爭議或客訴">
+          <PhoneCard title={copy.disputeTitle}>
             <div
               style={{
                 marginBottom: "10px",
@@ -1485,10 +1733,9 @@ export function PartnerBookingPhoneScreen({
                 color: "#56657f",
               }}
             >
-              行程結束後 30 天內可提出爭議，將同時通知 partner 禮賓中心與 DRTS
-              平台客服。
+              {copy.disputeBody}
             </div>
-            <ActionButton brand={brand} label="提出爭議" />
+            <ActionButton brand={brand} label={copy.openDispute} />
           </PhoneCard>
         </div>
       </>
