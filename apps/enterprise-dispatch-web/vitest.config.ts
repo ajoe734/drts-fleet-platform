@@ -5,6 +5,18 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname),
+      "@drts/api-client": path.resolve(
+        __dirname,
+        "../../packages/api-client/src/index.ts",
+      ),
+      "@drts/contracts": path.resolve(
+        __dirname,
+        "../../packages/contracts/src/index.ts",
+      ),
+      "@drts/ui-tokens": path.resolve(
+        __dirname,
+        "../../packages/ui-tokens/src/index.ts",
+      ),
       "@drts/ui-web": path.resolve(
         __dirname,
         "../../packages/ui-web/src/index.tsx",
