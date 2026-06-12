@@ -1,202 +1,173 @@
-# ENT-DISP-FE-20260612-B Review Packet & Evidence Summary
+# ENT-DISP-FE-20260612-B Sidecar Review Packet
 
-**Sidecar Kind:** `review_packet`  
-**Parent Task:** `ENT-DISP-FE-20260612-B` - Enterprise Dispatch shell and primitives  
-**Parent Owner:** `Codex`  
-**Parent Reviewer:** `Claude2`  
-**Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Codex2`  
-**Generated:** `2026-06-12` (UTC)  
+**Sidecar Kind:** `review_packet`
+**Parent Task:** `ENT-DISP-FE-20260612-B`
+**Parent Owner:** `Codex`
+**Parent Reviewer:** `Claude2`
+**Sidecar Owner:** `Codex`
+**Sidecar Reviewer:** `Claude2`
+**Generated:** `2026-06-12` (UTC)
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
-This packet is a reviewer-facing handoff companion for parent task
-`ENT-DISP-FE-20260612-B`. The parent slice adds the enterprise dispatch web
-shell, an embedded shell preview, app-local enterprise primitive wrappers, and
-the shared `CanvasShell` extension needed to inject custom topbar controls. This
-sidecar does not modify canonical truth or the parent implementation. It exists
-to pin the parent status snapshot, the file-level evidence map, and the concrete
-review checklist for the assigned reviewer.
+This support artifact corrects the earlier review packet commit
+`7d182a8d`, which preserved useful mechanical evidence but framed the parent
+implementation as acceptable even though the parent reviewer had already
+reopened it. This packet does not modify canonical truth or the parent
+implementation. It exists to hand the reopened review context to `Claude2`
+without endorsing the canvas-absent false premise.
 
-At packet generation time, the parent task is in `review` in machine truth. The
-implementation anchor visible from this worktree is commit
-`97297e1c9bdd0a1454a7efc3f3e319a7de781514`
-(`wip(ENT-DISP-FE-20260612-B): anchor shell primitives`) on branch
-`codex/ent-disp-fe-20260612-b`.
-
-## 1. Scope Boundary
-
-In scope:
-
-- snapshot the parent task's current machine-truth status and reviewer target
-- map the parent branch diff against `origin/dev`
-- list the shell, embed, primitive, and shared-library evidence anchors
-- restate the parent verification note and current verification gaps
-- hand off a reviewer checklist without changing parent runtime files
-
-Out of scope:
-
-- editing canonical implementation files under `apps/enterprise-dispatch-web/**`
-  or `packages/ui-web/src/canvas-primitives/index.tsx`
-- changing L1/L2 product truth, runtime contracts, registry/governance, or
-  parent task ownership records
-- absorbing, approving, or closing out the parent task
-
-## 2. Machine Truth Anchors
+## 1. Machine Truth Snapshot
 
 ### Sidecar - `ENT-DISP-FE-20260612-B-SIDECAR-REVIEW`
 
 - owner=`Codex`
-- reviewer=`Codex2`
-- status=`in_progress` at packet drafting time
-- task_class=`sidecar`
+- reviewer=`Claude2`
+- status=`in_progress`
 - helper_parent=`ENT-DISP-FE-20260612-B`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
 - artifact=`support/sidecars/ENT-DISP-FE-20260612-B/ENT-DISP-FE-20260612-B-SIDECAR-REVIEW.md`
 
-### Parent - `ENT-DISP-FE-20260612-B` snapshot
+### Parent - `ENT-DISP-FE-20260612-B`
 
 - owner=`Codex`
 - reviewer=`Claude2`
-- status=`review`
-- depends_on=`ENT-DISP-FE-20260612-A`
-- artifacts:
-  - `apps/enterprise-dispatch-web`
-  - `docs/05-ui/drts-design-canvas/ent-kit.jsx`
-  - `docs/05-ui/drts-design-canvas/ent-shell.jsx`
-- `next` snapshot from machine truth:
-  `Implemented enterprise dispatch web shell, embedded shell preview, and theme-bound base primitives in apps/enterprise-dispatch-web; added CanvasShell headerControls override to support shared shell topbar composition. Verification: git diff --check passed. Unable to run app lint/typecheck in this worktree because eslint/tsc are unavailable and pnpm reported missing node_modules.`
-- latest visible implementation anchor from git:
-  `97297e1c9bdd0a1454a7efc3f3e319a7de781514`
+- status=`in_progress`
+- acceptance=`web shell/embedded shell 對齊設計稿; 無 admin nav; 基礎 primitives 可供後續頁面使用`
+- machine-truth next:
+  `Reworking enterprise dispatch shell to match employee self-service canvas: replace admin/ops nav and landing, align embed shell, remove out-of-scope ops pages, then rerun app gates.`
 
-## 3. Parent Diff Shape
+## 2. Review Correction Summary
 
-Diff target: `origin/dev...codex/ent-disp-fe-20260612-b`
+The earlier sidecar packet should not be used as approval framing for the parent
+task.
 
-- 10 files changed
-- 973 insertions / 215 deletions
-- new files:
-  - `apps/enterprise-dispatch-web/app/embedded-preview/page.tsx`
-  - `apps/enterprise-dispatch-web/components/enterprise-primitives.tsx`
-  - `apps/enterprise-dispatch-web/components/enterprise-shell.tsx`
-  - `apps/enterprise-dispatch-web/lib/enterprise-theme.ts`
-- modified files:
-  - `apps/enterprise-dispatch-web/app/globals.css`
-  - `apps/enterprise-dispatch-web/app/layout.tsx`
-  - `apps/enterprise-dispatch-web/app/page.tsx`
-  - `apps/enterprise-dispatch-web/app/reassignments/page.tsx`
-  - `apps/enterprise-dispatch-web/app/supply/page.tsx`
-  - `packages/ui-web/src/canvas-primitives/index.tsx`
+- It treated dispatch-ops navigation (`overview`, `reassignments`, `supply`) as
+  positive evidence.
+- It instructed the reviewer to confirm that the shell stayed dispatch-scoped,
+  which would have approved the wrong information architecture.
+- It told the reviewer to confirm copy claiming the Enterprise Dispatch canvas
+  was missing, even though the canonical root already contains that canvas.
 
-## 4. Evidence Map
+The correct review posture is:
 
-### Shared library extension
+- the parent implementation was reopened because the shell must align to the
+  employee self-service Enterprise Dispatch canvas
+- the branch-local absence of enterprise canvas files is not product truth
+- any route copy or checklist that treats the missing-canvas premise as valid is
+  itself part of the defect
 
-- `packages/ui-web/src/canvas-primitives/index.tsx:125-146` adds
-  `headerControls` to `ShellProps`, making topbar injection explicit.
-- `packages/ui-web/src/canvas-primitives/index.tsx:286-308` threads the new
-  prop through the `Shell` signature.
-- `packages/ui-web/src/canvas-primitives/index.tsx:549-594` renders
-  `headerControls ?? <default controls>` so app-specific chrome can replace the
-  stock search / keyboard hint / bell / avatar cluster without forking the rest
-  of `CanvasShell`.
+## 3. Authoritative Defect Evidence
 
-### Enterprise shell and embed chrome
+### Canonical root evidence: employee self-service nav exists
 
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx:21-46` defines
-  dispatch-only navigation (`overview`, `reassignments`, `supply`) with no admin
-  IA carry-over.
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx:63-131`
-  implements refresh metadata chips with freshness/degraded states.
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx:134-247`
-  implements the operator identity chip used in the custom topbar.
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx:251-325`
-  implements the sidebar health footer envelope.
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx:328-390`
-  mounts `CanvasShell` with ops theme, custom `headerControls`, and
-  `sidebarFooter`.
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx:393-513`
-  adds `EnterpriseEmbedShell` on top of `CanvasWindowChrome` for embedded host
-  preview flows.
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx:515-526`
-  exports compact top-level actions used by the overview route.
+Canonical machine-truth root:
+`/home/edna/workspace/drts-fleet-platform`
 
-### Enterprise primitive wrappers
+- `/home/edna/workspace/drts-fleet-platform/docs/05-ui/drts-design-canvas/ent-shell.jsx:48-51`
+  defines the top navigation as:
+  `首頁` / `我的預約` / `行程` / `說明`
+- `/home/edna/workspace/drts-fleet-platform/docs/05-ui/drts-design-canvas/ent-screens-1.jsx:46-60`
+  shows the home workspace as employee self-service booking flow, not an ops
+  dispatch console
 
-- `apps/enterprise-dispatch-web/components/enterprise-primitives.tsx:30-76`
-  wraps shared canvas primitives with `enterpriseTheme`.
-- `apps/enterprise-dispatch-web/components/enterprise-primitives.tsx:78-110`
-  adds app-local layout helpers (`EnterpriseKpiGrid`, `EnterpriseSection`) so
-  later pages can stay on the theme-bound wrapper layer.
-- `apps/enterprise-dispatch-web/lib/enterprise-theme.ts:3-20` pins the app to
-  the ops realm via `buildCanvasTheme({ surface: "ops", density: "compact" })`
-  and exports shared page/card layout styles.
+### Canonical root evidence: Enterprise Dispatch canvas files are present
 
-### App wiring
+These files exist in the canonical root and were timestamped `2026-06-12 14:40`
+UTC during this review:
 
-- `apps/enterprise-dispatch-web/app/layout.tsx:6-22` makes `EnterpriseShell`
-  the root layout shell for the app.
-- `apps/enterprise-dispatch-web/app/page.tsx:23-120` turns the landing page
-  into a shell/primitives overview with explicit scope guardrails and an embed
-  preview entry point.
-- `apps/enterprise-dispatch-web/app/reassignments/page.tsx:12-45` converts the
-  reassignment route into queue-shell scaffolding rather than placeholder admin
-  chrome.
-- `apps/enterprise-dispatch-web/app/supply/page.tsx:12-47` converts the supply
-  route into monitoring-shell scaffolding using the new KPI and card wrappers.
-- `apps/enterprise-dispatch-web/app/embedded-preview/page.tsx:17-67` provides a
-  concrete embedded-shell preview with host context, quick action tray, and
-  compact controls.
+- `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html`
+- `docs/05-ui/drts-design-canvas/ent-shell.jsx`
+- `docs/05-ui/drts-design-canvas/ent-screens-1.jsx`
+- `docs/05-ui/drts-design-canvas/ent-screens-2.jsx`
+
+### Current parent implementation evidence: false premise is encoded in app copy
+
+- `apps/enterprise-dispatch-web/app/page.tsx:47` says the route stops until a
+  dedicated Enterprise Dispatch canvas is supplied
+- `apps/enterprise-dispatch-web/app/page.tsx:83-88` says no
+  `Enterprise Dispatch.html` canvas exists under
+  `docs/05-ui/drts-design-canvas`
+- `apps/enterprise-dispatch-web/app/page.tsx:99-100` says the dispatch
+  dashboard is pending design handoff
+
+Those statements are false relative to canonical root. They are review defects,
+not checklist items to confirm.
+
+### Branch-local evidence: why the false premise looked plausible
+
+This isolated worktree does not currently contain the Enterprise Dispatch canvas
+files under `docs/05-ui/drts-design-canvas`; `HEAD` only resolves the directory
+entry there. That explains the local perception, but it does not override the
+canonical root files above.
+
+## 4. Reusable Mechanical Evidence From The Earlier Parent Branch
+
+The earlier packet contained mechanical evidence that is still useful, provided
+it is not mistaken for approval framing.
+
+### Prior parent branch anchor
+
+- branch=`codex/ent-disp-fe-20260612-b`
+- anchor commit=`97297e1c9bdd0a1454a7efc3f3e319a7de781514`
+- diff target=`origin/dev...codex/ent-disp-fe-20260612-b`
+- diff shape=`10 files changed, 973 insertions, 215 deletions`
+
+### Shared `CanvasShell` seam remained additive
+
+From `codex/ent-disp-fe-20260612-b:packages/ui-web/src/canvas-primitives/index.tsx`:
+
+- `:125-146` adds `headerControls` to `ShellProps`
+- `:286-308` threads `headerControls` through the `Shell` signature
+- `:549-594` renders `headerControls ?? <default controls>`, preserving default
+  behavior when the prop is absent
+
+### Defective IA from the earlier implementation is explicit
+
+From `codex/ent-disp-fe-20260612-b:apps/enterprise-dispatch-web/components/enterprise-shell.tsx:21-45`:
+
+- nav keys were `overview`, `reassignments`, and `supply`
+- this was the concrete implementation reopened by the parent reviewer because
+  it does not match the employee self-service canvas
 
 ## 5. Reviewer Checklist
 
-- Confirm the shared `CanvasShell` change is additive and backward compatible:
-  `headerControls` must only override the topbar control cluster, not alter nav,
-  footer, or body layout behavior when absent.
-- Confirm the enterprise app now uses ops-themed wrapper primitives rather than
-  ad hoc tenant/admin chrome imports.
-- Confirm root layout wiring places all enterprise routes inside
-  `EnterpriseShell`.
-- Confirm the shell nav stays dispatch-scoped and does not introduce admin nav.
-- Confirm the embedded preview is support-only and does not claim more product
-  scope than the parent task acceptance allows.
-- Confirm the parent route copy explicitly records the missing dedicated
-  Enterprise Dispatch artboard instead of fabricating runtime detail.
-- Confirm the shared-library change is the minimal seam required for the app
-  topbar composition (`headerControls` on `CanvasShell`).
+- Confirm the packet no longer endorses the missing-canvas premise.
+- Confirm the packet clearly distinguishes canonical-root truth from branch-local
+  absence.
+- Confirm the parent defect is described as wrong IA and wrong copy, not as a
+  lack of design source material.
+- Confirm the reusable mechanical evidence is limited to diff shape and the
+  additive `headerControls` seam.
+- Confirm reviewer identity is `Claude2` throughout this packet.
+- Confirm the local-only push state is recorded for closeout follow-up.
 
 ## 6. Verification Snapshot
 
-Recorded by the parent owner in machine truth:
+Reviewed for this packet:
 
-- `git diff --check` passed
-- app lint/typecheck could not run in this worktree because `eslint` and `tsc`
-  were unavailable
-- `pnpm` could not complete app checks because `node_modules` were missing
+- `AI_NAME=Codex scripts/ai-status.sh show ENT-DISP-FE-20260612-B`
+- `AI_NAME=Codex scripts/ai-status.sh show ENT-DISP-FE-20260612-B-SIDECAR-REVIEW`
+- canonical-root file presence and timestamps for:
+  `Enterprise Dispatch.html`, `ent-shell.jsx`, `ent-screens-1.jsx`,
+  `ent-screens-2.jsx`
+- canonical-root line anchors in `ent-shell.jsx` and `ent-screens-1.jsx`
+- current worktree line anchors in `apps/enterprise-dispatch-web/app/page.tsx`
+- prior parent branch anchors via `git show codex/ent-disp-fe-20260612-b:...`
 
-Sidecar preparation verification performed here:
+Push-state note:
 
-- reviewed parent task status via `AI_NAME=Codex scripts/ai-status.sh show ENT-DISP-FE-20260612-B`
-- reviewed sidecar task status via `AI_NAME=Codex scripts/ai-status.sh show ENT-DISP-FE-20260612-B-SIDECAR-REVIEW`
-- inspected parent branch diff/stat and anchor commit metadata from
-  `codex/ent-disp-fe-20260612-b`
+- `git ls-remote --heads origin codex/ent-disp-fe-20260612-b-sidecar-review`
+  returned no remote branch
+- corrected packet therefore remains local until the owner performs commit/push
+  during closeout
 
-## 7. Reviewer Handoff Notes
+## 7. Reviewer Handoff
 
-For `Codex2` reviewing this sidecar packet:
+For `Claude2`:
 
-- this packet is support-only and should be judged on whether it accurately
-  captures the parent review surface and evidence anchors
-- parent approval remains `Claude2`'s responsibility; this sidecar reviewer is
-  only approving the packet/handoff quality
-- if the packet looks accurate, approve the sidecar task after checking the
-  artifact path and machine-truth references
-
-For `Claude2` reviewing the parent task:
-
-- the implementation branch visible from this worktree is
-  `codex/ent-disp-fe-20260612-b`
-- the current anchor commit is
-  `97297e1c9bdd0a1454a7efc3f3e319a7de781514`
-- the highest-risk seam is the shared `CanvasShell` extension in
-  `packages/ui-web/src/canvas-primitives/index.tsx`
+- treat this as a support-only packet for the reopened parent review
+- use Section 3 as the authoritative reason the earlier packet framing was wrong
+- use Section 4 only as reusable mechanical evidence, not as approval guidance
+- after sidecar review, the parent owner still needs to rework the actual
+  implementation branch to match the employee self-service canvas
