@@ -14,6 +14,7 @@ import {
   enterpriseBookingDraft,
   bookingStateMeta,
   enterpriseBookings,
+  gateStateFixtures,
   enterpriseTenant,
   enterpriseUser,
   policyNotes,
@@ -208,6 +209,84 @@ export default function HomePage() {
             >
               查看 pending submitted
             </Link>
+          </div>
+        </EnterpriseCard>
+
+        <EnterpriseCard
+          title="Support-safe gate states"
+          actions={<EnterprisePill tone="info">6 states</EnterprisePill>}
+        >
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            }}
+          >
+            {Object.values(gateStateFixtures).map((gate) => (
+              <div
+                key={gate.code}
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  padding: 16,
+                  borderRadius: 16,
+                  border: `1px solid ${enterpriseTheme.border}`,
+                  background: enterpriseTheme.surface,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>
+                      {gate.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: enterpriseTheme.textMuted,
+                        fontFamily: enterpriseTheme.monoFamily,
+                      }}
+                    >
+                      {gate.code}
+                    </div>
+                  </div>
+                  <EnterprisePill tone={gate.tone}>{gate.code}</EnterprisePill>
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                    {gate.summary}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      color: enterpriseTheme.textMuted,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {gate.body}
+                  </div>
+                </div>
+                <EnterpriseDl cols={1} items={Array.from(gate.facts)} />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {gate.actions.map((action, index) => (
+                    <Link
+                      key={action}
+                      href={index === 0 ? "/help" : "/bookings"}
+                      style={index === 0 ? secondaryLinkStyle : ghostLinkStyle}
+                    >
+                      {action}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </EnterpriseCard>
 
