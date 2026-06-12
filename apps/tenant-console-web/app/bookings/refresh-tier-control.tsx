@@ -24,14 +24,14 @@ const REFRESH_INTERVAL_MS: Record<RefreshTier, number | null> = {
 function getFreshnessLabel(metadata: UiRefreshMetadata) {
   switch (metadata.dataFreshness) {
     case "stale":
-      return "Stale snapshot";
+      return "過期快照";
     case "degraded":
-      return "Degraded data";
+      return "降級資料";
     case "unknown":
-      return "Freshness unknown";
+      return "鮮度未知";
     case "fresh":
     default:
-      return "Fresh snapshot";
+      return "最新快照";
   }
 }
 

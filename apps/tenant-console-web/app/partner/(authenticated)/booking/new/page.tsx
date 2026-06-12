@@ -25,14 +25,14 @@ export default async function PartnerBookingCreatePage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="New booking"
-        title="Create a partner-tagged booking."
-        description="Pickup, dropoff, reservation window, passenger contact, and optional notes are required. The backend stamps `partnerEntrySlug` and (when verified) `eligibilityVerificationId` automatically."
+        eyebrow="新增訂單"
+        title="建立合作夥伴標記訂單。"
+        description="需要填寫上車、下車、預約時窗、乘客聯絡方式與選填備註。後端會自動標記 `partnerEntrySlug`，並在通過驗證時標記 `eligibilityVerificationId`。"
       />
 
       {!isActive ? (
         <CalloutPanel
-          title="Booking creation blocked"
+          title="建立訂單已封鎖"
           description={`Entry status is "${session.partnerEntry.status}". Contact platform admin before creating partner bookings.`}
           tone="warning"
         />
@@ -40,8 +40,8 @@ export default async function PartnerBookingCreatePage({
 
       {requiresEligibility && !eligibilityVerificationId ? (
         <CalloutPanel
-          title="Eligibility verification required"
-          description="This entry requires an eligibility verification id before booking creation. Run the eligibility step and continue from there."
+          title="需要資格驗證"
+          description="此 entry 在建立訂單前需要 eligibility verification id。請先執行資格驗證步驟再繼續。"
           tone="warning"
         />
       ) : null}
@@ -49,7 +49,7 @@ export default async function PartnerBookingCreatePage({
       <SurfaceCard
         kicker="Service"
         title={`Subtype fixed by entry: ${session.partnerEntry.businessDispatchSubtype}`}
-        description="Service subtype is owned by the partner entry registration and is not editable from this surface. Quoted fare authority remains backend-only."
+        description="服務子類型由合作夥伴 entry 註冊擁有，無法從此介面編輯。報價權限僅由後端管理。"
       >
         <PartnerBookingCreateForm
           canSubmit={
@@ -63,8 +63,8 @@ export default async function PartnerBookingCreatePage({
       </SurfaceCard>
 
       <CalloutPanel
-        title="Negative paths stop short of create"
-        description="If the backend rejects the booking with `partner_entry_inactive`, `eligibility_required`, `eligibility_ineligible`, or `eligibility_manual_review`, the surface returns the rejection reason and never silently falls back to a tenant-admin path."
+        title="負向路徑不會進入建立"
+        description="若後端以 `partner_entry_inactive`、`eligibility_required`、`eligibility_ineligible` 或 `eligibility_manual_review` 拒絕訂單，介面會回傳拒絕原因，且不會默默回退到租戶管理路徑。"
       />
     </div>
   );

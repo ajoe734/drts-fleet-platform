@@ -25,20 +25,20 @@ export default async function PartnerStartPage() {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Partner workspace"
+        eyebrow="合作夥伴工作區"
         title={`${session.partnerEntry.displayName} is signed in.`}
-        description="Partner mode only exposes eligibility verification and partner-tagged booking creation. Tenant-admin governance is intentionally absent from this surface."
+        description="合作夥伴模式僅開放資格驗證與合作夥伴標記訂單建立。租戶管理治理刻意不出現在此介面。"
       />
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
           kicker="Entry"
           title="Entry registration snapshot"
-          description="Backend-issued entry record. Partner mode reads it; it does not edit it."
+          description="後端核發的 entry 紀錄。合作夥伴模式只讀取，不會編輯。"
         >
           <dl className="definition-grid">
             <div>
-              <dt>Display name</dt>
+              <dt>顯示名稱</dt>
               <dd>{session.partnerEntry.displayName}</dd>
             </div>
             <div>
@@ -48,13 +48,13 @@ export default async function PartnerStartPage() {
               </dd>
             </div>
             <div>
-              <dt>Partner code</dt>
+              <dt>合作夥伴代碼</dt>
               <dd>
                 <code>{session.partnerEntry.partnerCode}</code>
               </dd>
             </div>
             <div>
-              <dt>Program</dt>
+              <dt>方案</dt>
               <dd>
                 {session.partnerEntry.programCode ? (
                   <code>{session.partnerEntry.programCode}</code>
@@ -64,7 +64,7 @@ export default async function PartnerStartPage() {
               </dd>
             </div>
             <div>
-              <dt>Bank</dt>
+              <dt>銀行</dt>
               <dd>
                 {session.partnerEntry.bankCode ? (
                   <code>{session.partnerEntry.bankCode}</code>
@@ -74,19 +74,19 @@ export default async function PartnerStartPage() {
               </dd>
             </div>
             <div>
-              <dt>Service subtype</dt>
+              <dt>服務子類型</dt>
               <dd>
                 <code>{subtype}</code>
               </dd>
             </div>
             <div>
-              <dt>Auth mode</dt>
+              <dt>授權模式</dt>
               <dd>
                 <code>{session.partnerEntry.authMode}</code>
               </dd>
             </div>
             <div>
-              <dt>Status</dt>
+              <dt>狀態</dt>
               <dd>
                 <span
                   className={`status-badge${isActive ? "" : " is-warning"}`}
@@ -129,15 +129,12 @@ export default async function PartnerStartPage() {
 
         <SurfaceCard
           kicker="Booking"
-          title="Partner-tagged booking creation"
-          description="Bookings created from this surface stamp `partnerEntrySlug` and (when verified) `eligibilityVerificationId` so downstream audit and billing keep partner provenance."
+          title="合作夥伴標記訂單建立"
+          description="從此介面建立的訂單會標記 `partnerEntrySlug`，並在通過驗證時標記 `eligibilityVerificationId`，讓下游 audit 與 billing 保留合作夥伴來源。"
         >
           <ul className="panel-list">
-            <li>Service subtype is fixed by the entry record.</li>
-            <li>
-              Quoted fare authority remains backend-owned; partner mode does not
-              set fare.
-            </li>
+            <li>服務子類型由 entry 紀錄固定。</li>
+            <li>報價權限由後端擁有；合作夥伴模式不設定車資。</li>
             <li>
               Negative paths (denied / ineligible / degraded) stop short of
               create.
@@ -152,14 +149,14 @@ export default async function PartnerStartPage() {
 
         <SurfaceCard
           kicker="Boundary"
-          title="What partner mode does not get"
-          description="The shell has no nav entry for these surfaces; the routes are not guarded but the navigation makes the boundary explicit."
+          title="合作夥伴模式得不到什麼"
+          description="介面外殼沒有這些頁面的導覽項目；路由本身未設防護，但導覽讓邊界清楚呈現。"
         >
           <ul className="panel-list">
-            <li>No tenant users / role assignment.</li>
-            <li>No API keys, webhooks, audit logs, or settings.</li>
-            <li>No tenant billing or integration governance.</li>
-            <li>No fulfilment overrides or dispatch authority.</li>
+            <li>無租戶使用者／角色指派。</li>
+            <li>無 API 金鑰、Webhook、audit log 或設定。</li>
+            <li>無租戶 billing 或整合就緒度。</li>
+            <li>無履約覆寫或派遣權限。</li>
           </ul>
         </SurfaceCard>
       </section>

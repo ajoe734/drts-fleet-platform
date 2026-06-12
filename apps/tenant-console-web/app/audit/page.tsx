@@ -782,17 +782,17 @@ function getActionVisualSpec(action: string): ActionVisualSpec {
   switch (action) {
     case "filter":
       return {
-        label: "Filter",
+        label: "篩選",
         helper: "依 actor、module、action、時間範圍收斂結果。",
       };
     case "refresh":
       return {
-        label: "Refresh",
+        label: "重新整理",
         helper: "T6 manual tier，不做自動輪詢。",
       };
     case "export":
       return {
-        label: "Export",
+        label: "匯出",
         helper: "匯出目前篩選結果，對應 signed artifact workflow。",
       };
     default:
@@ -1050,13 +1050,13 @@ export default async function AuditPage({
   const emptyCopy = emptyReason ? getEmptyCopy(emptyReason) : null;
 
   const columns: CanvasTableColumn<AuditRow>[] = [
-    { h: "WHEN", k: "at", w: 170, mono: true },
-    { h: "ACTOR", k: "actor", w: 280 },
-    { h: "MODULE", k: "module", w: 140, mono: true },
-    { h: "ACTION", k: "action", w: 190 },
-    { h: "RESOURCE", k: "resource", w: 220 },
-    { h: "REQUEST", k: "request", w: 160, mono: true },
-    { h: "DETAIL", k: "detail", w: 260 },
+    { h: "時間", k: "at", w: 170, mono: true },
+    { h: "操作者", k: "actor", w: 280 },
+    { h: "模組", k: "module", w: 140, mono: true },
+    { h: "動作", k: "action", w: 190 },
+    { h: "資源", k: "resource", w: 220 },
+    { h: "請求", k: "request", w: 160, mono: true },
+    { h: "明細", k: "detail", w: 260 },
   ];
 
   return (
@@ -1159,7 +1159,7 @@ export default async function AuditPage({
           }
         >
           <form action="/audit" method="get" style={filterGridStyle}>
-            <CanvasField theme={th} label="Actor realm">
+            <CanvasField theme={th} label="操作者 realm">
               <select
                 defaultValue={query.actor}
                 name="actor"
@@ -1173,7 +1173,7 @@ export default async function AuditPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="Module">
+            <CanvasField theme={th} label="模組">
               <select
                 defaultValue={query.module}
                 name="module"
@@ -1187,7 +1187,7 @@ export default async function AuditPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="Action">
+            <CanvasField theme={th} label="動作">
               <select
                 defaultValue={query.action}
                 name="action"
@@ -1201,7 +1201,7 @@ export default async function AuditPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="From">
+            <CanvasField theme={th} label="起">
               <input
                 defaultValue={query.from}
                 name="from"
@@ -1209,7 +1209,7 @@ export default async function AuditPage({
                 type="date"
               />
             </CanvasField>
-            <CanvasField theme={th} label="To">
+            <CanvasField theme={th} label="迄">
               <input
                 defaultValue={query.to}
                 name="to"
@@ -1219,7 +1219,7 @@ export default async function AuditPage({
             </CanvasField>
             <CanvasField
               theme={th}
-              label="Audit receipt"
+              label="稽核回執"
               hint="支援 action receipt deep link。"
             >
               <input
@@ -1232,7 +1232,7 @@ export default async function AuditPage({
             </CanvasField>
             <CanvasField
               theme={th}
-              label="Empty state demo"
+              label="空狀態示範"
               hint="驗證 6 種 distinct states。"
             >
               <select
@@ -1287,7 +1287,7 @@ export default async function AuditPage({
 
         <CanvasCard
           theme={th}
-          title="Append-only ledger"
+          title="僅可附加帳冊"
           subtitle="時間優先、request-first correlation，並保留 per-record expand 與跨 app deep links。"
           padding={0}
         >

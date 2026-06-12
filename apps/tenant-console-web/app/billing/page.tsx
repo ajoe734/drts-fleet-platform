@@ -533,7 +533,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
 
   const invoiceColumns: CanvasTableColumn<InvoiceRow>[] = [
     {
-      h: "INVOICE",
+      h: "發票",
       w: 200,
       mono: true,
       r: (row) =>
@@ -552,20 +552,20 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
         ),
     },
     {
-      h: "PERIOD",
+      h: "期別",
       w: 110,
       mono: true,
       r: (row) => toPeriodKey(row.periodStart),
     },
     {
-      h: "AMOUNT",
+      h: "金額",
       w: 160,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.amount),
     },
     {
-      h: "STATUS",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={getInvoiceStatusTone(row.status)} dot>
@@ -574,7 +574,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
       ),
     },
     {
-      h: "DUE",
+      h: "到期",
       w: 130,
       mono: true,
       r: (row) => formatDateInput(row.periodEnd) || "—",
@@ -750,7 +750,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
         </div>
 
         <div style={splitGridStyle}>
-          <CanvasCard theme={th} title="Billing profile">
+          <CanvasCard theme={th} title="帳務設定檔">
             {data.profile ? (
               <CanvasDL theme={th} cols={1} items={profileItems} />
             ) : (

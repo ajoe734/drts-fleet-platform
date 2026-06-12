@@ -1034,7 +1034,7 @@ export function CostCentersManager({
 
   const columns: CanvasTableColumn<CostCenterRow>[] = [
     {
-      h: "CODE",
+      h: "代碼",
       k: "code",
       w: 124,
       mono: true,
@@ -1051,7 +1051,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "NAME",
+      h: "名稱",
       w: 214,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1063,7 +1063,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 150,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1077,7 +1077,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "OWNER",
+      h: "負責人",
       w: 144,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1167,7 +1167,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 160,
       r: (row) => (
         <div style={actionColumnStyle}>
@@ -1265,17 +1265,17 @@ export function CostCentersManager({
             <span style={kpiMetaStyle}>目前租戶目錄總數</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>Active</span>
+            <span style={kpiLabelStyle}>啟用</span>
             <span style={kpiValueStyle}>{formatCount(activeCount)}</span>
             <span style={kpiMetaStyle}>disabled 可用獨立 filter 顯示</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>Over quota</span>
+            <span style={kpiLabelStyle}>超過配額</span>
             <span style={kpiValueStyle}>{formatCount(overQuotaCount)}</span>
             <span style={kpiMetaStyle}>超額列以 danger 標記</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>Attributed reports</span>
+            <span style={kpiLabelStyle}>歸屬報表</span>
             <span style={kpiValueStyle}>
               {formatCount(attributedReportCount)}
             </span>
@@ -1288,7 +1288,7 @@ export function CostCentersManager({
         <CanvasCard theme={th}>
           <div style={filterGridStyle}>
             <label>
-              <span style={fieldLabelStyle}>Search</span>
+              <span style={fieldLabelStyle}>搜尋</span>
               <input
                 style={nativeInputStyle}
                 value={query}
@@ -1297,7 +1297,7 @@ export function CostCentersManager({
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>Owner</span>
+              <span style={fieldLabelStyle}>負責人</span>
               <select
                 style={nativeInputStyle}
                 value={ownerFilter}
@@ -1320,7 +1320,7 @@ export function CostCentersManager({
               顯示 disabled 成本中心
             </label>
             <div style={checkboxRowStyle}>
-              <span style={{ color: th.textMuted }}>Empty reason preview:</span>
+              <span style={{ color: th.textMuted }}>空狀態原因預覽：</span>
               <code style={monoStyle}>{initialEmptyReason ?? "auto"}</code>
             </div>
           </div>
@@ -1430,7 +1430,7 @@ export function CostCentersManager({
               ) : (
                 <div style={formGridStyle}>
                   <input type="hidden" value={draft.code} />
-                  <CanvasField theme={th} label="Code">
+                  <CanvasField theme={th} label="代碼">
                     <input
                       style={nativeInputStyle}
                       value={draft.code}
@@ -1441,7 +1441,7 @@ export function CostCentersManager({
                       disabled={mode !== "create"}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Name">
+                  <CanvasField theme={th} label="名稱">
                     <input
                       style={nativeInputStyle}
                       value={draft.name}
@@ -1451,7 +1451,7 @@ export function CostCentersManager({
                       placeholder="財務處"
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Description">
+                  <CanvasField theme={th} label="說明">
                     <textarea
                       style={nativeTextAreaStyle}
                       value={draft.description}
@@ -1461,7 +1461,7 @@ export function CostCentersManager({
                       placeholder="描述此成本中心主要歸屬的差旅與使用情境"
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Owner tenant user">
+                  <CanvasField theme={th} label="負責租戶使用者">
                     <select
                       style={nativeInputStyle}
                       value={draft.ownerUserId}
@@ -1528,7 +1528,7 @@ export function CostCentersManager({
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>Cross-app deep links</div>
+              <div style={sectionLabelStyle}>跨應用深層連結</div>
               <ul style={listStyle}>
                 <li>
                   <Link href="/users" style={linkStyle}>
@@ -1558,7 +1558,7 @@ export function CostCentersManager({
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>Coverage follow-up</div>
+              <div style={sectionLabelStyle}>涵蓋後續</div>
               <div style={titleStackStyle}>
                 <span style={titlePrimaryStyle}>
                   {coverageReport
@@ -1573,7 +1573,7 @@ export function CostCentersManager({
               </div>
               {unresolvedSamples.length > 0 ? (
                 <>
-                  <div style={sectionLabelStyle}>Unresolved samples</div>
+                  <div style={sectionLabelStyle}>未解決樣本</div>
                   <ul style={listStyle}>
                     {unresolvedSamples.slice(0, 4).map((sample) => (
                       <li key={sample.rawCostCenter}>
@@ -1590,7 +1590,7 @@ export function CostCentersManager({
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>Disabled visibility</div>
+              <div style={sectionLabelStyle}>停用可見性</div>
               <div style={titleStackStyle}>
                 <span style={titlePrimaryStyle}>
                   {formatCount(disabledCount)} disabled rows

@@ -481,7 +481,7 @@ function formatRuleSummary(rule: TenantApprovalRuleRecord) {
 
 function formatRuleApprovers(rule: TenantApprovalRuleRecord) {
   if (rule.action !== "require_approval" || rule.approvers.length === 0) {
-    return "No approver chain";
+    return "無審批鏈";
   }
 
   return rule.approvers.map(describeApprover).join(" + ");
@@ -549,38 +549,38 @@ function getEmptyStateCopy(reason: EmptyReason | null) {
       return {
         title: "Approval governance is not provisioned yet",
         description:
-          "Quota reads, approval backlog, and rule state are all empty for this tenant. Start by defining the first approval rule and linking the relevant cost center owners.",
+          "此租戶的配額讀取、審批待辦與規則狀態都是空的。請先定義第一條審批規則，並連結相關的成本中心負責人。",
       };
     case "fetch_failed":
       return {
         title: "Approval rules could not be loaded",
         description:
-          "The tenant-governance route stayed reachable, but the rule list failed to load. Retry once the backend dependency recovers.",
+          "租戶治理路由仍可連線，但規則清單載入失敗。請待後端依賴恢復後重試。",
       };
     case "permission_denied":
       return {
         title: "This actor cannot administer approval rules",
         description:
-          "The route is visible, but the current actor does not have authority to read or mutate tenant approval governance.",
+          "頁面可見，但目前的 actor 沒有讀取或變更租戶審批治理的權限。",
       };
     case "external_unavailable":
       return {
         title: "A dependent governance service is unavailable",
         description:
-          "Rule editing is degraded because one or more upstream tenant-governance services are down or returning stale data.",
+          "規則編輯功能降級，因為一個以上的上游租戶治理服務停擺或回傳過期資料。",
       };
     case "filtered_empty":
       return {
         title: "No rules match the current filter",
         description:
-          "The tenant has approval rules, but the active filter produced an empty register. Clear filters or select a different action type.",
+          "此租戶有審批規則，但目前篩選條件產生了空清單。請清除篩選或選擇其他 action 類型。",
       };
     case "no_data":
     default:
       return {
         title: "No approval rules published yet",
         description:
-          "Create the first tenant governance rule below instead of inventing unpublished client defaults.",
+          "請在下方建立第一條租戶治理規則，而非自行假設未發布的預設值。",
       };
   }
 }
@@ -739,22 +739,22 @@ export function RulesManager({
   return (
     <div style={pageStackStyle}>
       <PageHeader
-        eyebrow="Governance"
-        title="Rules"
-        subtitle="Approval rules, quota posture, pending approvals, and dry-run evaluation now live on one tenant-governance surface backed by the published tenant contract."
+        eyebrow="治理"
+        title="審批與配額"
+        subtitle="審批規則、配額狀態、待審項目與 dry-run 評估，現在都集中在同一個由已發布租戶契約支撐的租戶治理介面。"
         meta={[
           {
-            label: "Rules",
+            label: "規則",
             value: formatCount(sortedRules.length),
             tone: "tenant",
           },
           {
-            label: "Active",
+            label: "啟用",
             value: formatCount(activeRules.length),
             tone: "success",
           },
           {
-            label: "Pending approvals",
+            label: "待審批",
             value: formatCount(pendingApprovals.length),
             tone: "warning",
           },
@@ -798,8 +798,8 @@ export function RulesManager({
 
       {errors.length > 0 ? (
         <CalloutBanner
-          title="Rule data could not be fully loaded"
-          description="The route stays available, but one or more governance reads failed."
+          title="規則資料無法完整載入"
+          description="頁面仍可使用，但一個以上的治理讀取失敗。"
           tone="warning"
           density="compact"
         >
@@ -812,7 +812,7 @@ export function RulesManager({
       ) : null}
 
       <CalloutBanner
-        title="Refresh tier T5: tenant slow"
+        title="更新層級 T5：租戶慢速"
         description={`This route refreshes on the 30-second tenant-slow cadence (${refreshTier}). Snapshot loaded ${formatDateTime(generatedAt)}.`}
         tone="info"
         density="compact"
@@ -820,13 +820,13 @@ export function RulesManager({
 
       <KpiRow minWidth="180px">
         <KpiCard
-          label="Rules"
+          label="規則"
           value={formatCount(sortedRules.length)}
           detail="Priority-ordered tenant governance rules"
           tone="tenant"
         />
         <KpiCard
-          label="Remaining quota"
+          label="剩餘配額"
           value={formatPercentage(remainingQuotaPercent)}
           detail="Tenant-wide monthly remaining percentage"
           tone={
@@ -836,13 +836,13 @@ export function RulesManager({
           }
         />
         <KpiCard
-          label="Approval backlog"
+          label="審批待辦"
           value={formatCount(pendingApprovals.length)}
           detail="Tenant approval requests still unresolved"
           tone="warning"
         />
         <KpiCard
-          label="Ledger rows"
+          label="帳冊筆數"
           value={formatCount(ledgerEntries.length)}
           detail="Recent quota ledger evidence loaded on this page"
           tone="info"
@@ -850,14 +850,14 @@ export function RulesManager({
       </KpiRow>
 
       <CalloutBanner
-        title="All governance mutations stay contract-backed"
-        description="This page uses the tenant approval-rule, quota-policy, approval-request, and quota-ledger APIs directly. It does not invent client-side approval state or fake quota math."
+        title="所有治理變更都以契約為依據"
+        description="本頁直接使用租戶的 approval-rule、quota-policy、approval-request 與 quota-ledger API，不會自行假造前端審批狀態或配額計算。"
         tone="tenant"
         density="compact"
       />
 
       <CalloutBanner
-        title="Approval links stay adjacent to the owning tenant resources"
+        title="審批連結與其所屬租戶資源緊鄰呈現"
         description={`Entry comes from /cost-centers, approver maintenance stays on /users, and live approval backlog can jump straight into /bookings/[id]. Available actions stay routed through published descriptors for create, update, disable, reorder, and dry-run.`}
         tone="tenant"
         density="compact"
@@ -867,8 +867,8 @@ export function RulesManager({
         main={
           <>
             <DataViewCard
-              title="Rule register"
-              subtitle="The primary table keeps priority, condition summary, action, approver path, and state visible in the same scan, matching the TN_Rules parity target."
+              title="規則清單"
+              subtitle="主表格在同一視野內保留優先序、條件摘要、action、審批路徑與狀態，符合 TN_Rules 對齊目標。"
               tone="tenant"
               density="compact"
               summary={`${sortedRules.length} rule(s) currently loaded from /api/tenant/approval-rules. Entry: /cost-centers. Approver maintenance: /users.`}
@@ -879,14 +879,14 @@ export function RulesManager({
                     density="compact"
                     tone="tenant"
                     columns={[
-                      { label: "PRI", width: "70px" },
-                      { label: "Rule", width: "220px" },
-                      { label: "Conditions", width: "360px" },
-                      { label: "Action", width: "140px" },
-                      { label: "Approvers", width: "220px" },
-                      { label: "State", width: "110px" },
-                      { label: "Updated", width: "150px" },
-                      { label: "Focus", width: "110px" },
+                      { label: "優先序", width: "70px" },
+                      { label: "規則", width: "220px" },
+                      { label: "條件", width: "360px" },
+                      { label: "動作", width: "140px" },
+                      { label: "審批人", width: "220px" },
+                      { label: "狀態", width: "110px" },
+                      { label: "更新時間", width: "150px" },
+                      { label: "焦點", width: "110px" },
                     ]}
                   >
                     {sortedRules.map((rule) => (
@@ -973,8 +973,8 @@ export function RulesManager({
 
             <div id="rule-editor">
               <DataViewCard
-                title="Create or edit rule"
-                subtitle="The editor writes directly to the approval-rule command surface and keeps condition / approver structure explicit instead of hiding it in text blobs."
+                title="建立或編輯規則"
+                subtitle="編輯器直接寫入 approval-rule 命令介面，明確保留條件／審批人結構，而非藏在文字區塊中。"
                 tone="tenant"
                 density="compact"
                 summary={
@@ -1024,7 +1024,7 @@ export function RulesManager({
 
                   <div style={columnGridStyle}>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Rule name</span>
+                      <span style={fieldLabelStyle}>規則名稱</span>
                       <input
                         name="ruleName"
                         onChange={(event) =>
@@ -1033,13 +1033,13 @@ export function RulesManager({
                             ruleName: event.target.value,
                           }))
                         }
-                        placeholder="High-value finance approval"
+                        placeholder="高額財務審批"
                         style={inputStyle}
                         value={ruleDraft.ruleName}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Priority</span>
+                      <span style={fieldLabelStyle}>優先序</span>
                       <input
                         name="priority"
                         onChange={(event) =>
@@ -1058,7 +1058,7 @@ export function RulesManager({
                       </span>
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Action</span>
+                      <span style={fieldLabelStyle}>動作</span>
                       <select
                         name="action"
                         onChange={(event) =>
@@ -1079,7 +1079,7 @@ export function RulesManager({
                       </select>
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Active</span>
+                      <span style={fieldLabelStyle}>啟用</span>
                       <label
                         style={{
                           ...inputStyle,
@@ -1109,7 +1109,7 @@ export function RulesManager({
                   </div>
 
                   <label style={fieldGridStyle}>
-                    <span style={fieldLabelStyle}>Description</span>
+                    <span style={fieldLabelStyle}>說明</span>
                     <textarea
                       name="description"
                       onChange={(event) =>
@@ -1118,7 +1118,7 @@ export function RulesManager({
                           description: event.target.value,
                         }))
                       }
-                      placeholder="Explain the governance reason or operational policy for this rule."
+                      placeholder="說明此規則的治理原因或營運政策。"
                       style={textareaStyle}
                       value={ruleDraft.description}
                     />
@@ -1126,7 +1126,7 @@ export function RulesManager({
 
                   <div style={columnGridStyle}>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Effective from</span>
+                      <span style={fieldLabelStyle}>生效起</span>
                       <input
                         name="effectiveFrom"
                         onChange={(event) =>
@@ -1141,7 +1141,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Effective until</span>
+                      <span style={fieldLabelStyle}>生效迄</span>
                       <input
                         name="effectiveUntil"
                         onChange={(event) =>
@@ -1156,7 +1156,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Disabled reason</span>
+                      <span style={fieldLabelStyle}>停用原因</span>
                       <input
                         name="disabledReason"
                         onChange={(event) =>
@@ -1165,7 +1165,7 @@ export function RulesManager({
                             disabledReason: event.target.value,
                           }))
                         }
-                        placeholder="Seasonal campaign ended"
+                        placeholder="季節性活動已結束"
                         style={inputStyle}
                         value={ruleDraft.disabledReason}
                       />
@@ -1192,7 +1192,7 @@ export function RulesManager({
 
                   <section style={sectionDividerStyle}>
                     <div style={fieldGridStyle}>
-                      <strong>Conditions</strong>
+                      <strong>條件</strong>
                       <span style={hintStyle}>
                         Each rule can compose multiple structured conditions;
                         the backend evaluates all of them in priority order.
@@ -1210,7 +1210,7 @@ export function RulesManager({
                         }}
                       >
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>Field {index + 1}</span>
+                          <span style={fieldLabelStyle}>欄位 {index + 1}</span>
                           <select
                             onChange={(event) =>
                               updateCondition(
@@ -1232,7 +1232,7 @@ export function RulesManager({
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>Operator</span>
+                          <span style={fieldLabelStyle}>運算子</span>
                           <select
                             onChange={(event) =>
                               updateCondition(
@@ -1254,7 +1254,7 @@ export function RulesManager({
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>Value type</span>
+                          <span style={fieldLabelStyle}>值類型</span>
                           <select
                             onChange={(event) =>
                               updateCondition(
@@ -1273,7 +1273,7 @@ export function RulesManager({
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>Value</span>
+                          <span style={fieldLabelStyle}>值</span>
                           <input
                             onChange={(event) =>
                               updateCondition(
@@ -1334,7 +1334,7 @@ export function RulesManager({
                   {ruleDraft.action === "require_approval" ? (
                     <section style={sectionDividerStyle}>
                       <div style={fieldGridStyle}>
-                        <strong>Approval plan</strong>
+                        <strong>審批計畫</strong>
                         <span style={hintStyle}>
                           Approvers stay structured as tenant principals so
                           dry-run output and live approval requests resolve
@@ -1344,7 +1344,7 @@ export function RulesManager({
 
                       <div style={columnGridStyle}>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>Approval mode</span>
+                          <span style={fieldLabelStyle}>審批模式</span>
                           <select
                             name="approvalMode"
                             onChange={(event) =>
@@ -1365,7 +1365,7 @@ export function RulesManager({
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>Fallback policy</span>
+                          <span style={fieldLabelStyle}>後備策略</span>
                           <select
                             name="fallbackPolicy"
                             onChange={(event) =>
@@ -1421,7 +1421,7 @@ export function RulesManager({
                             </select>
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>User ID</span>
+                            <span style={fieldLabelStyle}>使用者 ID</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1436,7 +1436,7 @@ export function RulesManager({
                             />
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>Role code</span>
+                            <span style={fieldLabelStyle}>角色代碼</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1451,7 +1451,7 @@ export function RulesManager({
                             />
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>Cost center</span>
+                            <span style={fieldLabelStyle}>成本中心</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1466,7 +1466,7 @@ export function RulesManager({
                             />
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>Display name</span>
+                            <span style={fieldLabelStyle}>顯示名稱</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1475,7 +1475,7 @@ export function RulesManager({
                                   event.target.value,
                                 )
                               }
-                              placeholder="Finance admin"
+                              placeholder="財務管理員"
                               style={inputStyle}
                               value={approver.displayName}
                             />
@@ -1650,11 +1650,11 @@ export function RulesManager({
 
             <div id="rule-dry-run">
               <DataViewCard
-                title="Dry-run evaluation"
-                subtitle="The evaluator previews quota impact first, then feeds the impact snapshot into rule evaluation so quota-aware rules and approval decisions stay aligned."
+                title="Dry-run 評估"
+                subtitle="評估器會先預覽配額影響，再把影響快照送入規則評估，讓配額相關規則與審批決策保持一致。"
                 tone="tenant"
                 density="compact"
-                summary="Use a representative booking snapshot to see matched rules, quota triggers, and approval plan output before production traffic hits the backend."
+                summary="用一筆具代表性的訂單快照，在正式流量進入後端前，先看看符合的規則、配額觸發與審批計畫輸出。"
               >
                 <form
                   action="#"
@@ -1697,7 +1697,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Amount minor</span>
+                      <span style={fieldLabelStyle}>金額（minor）</span>
                       <input
                         defaultValue="180000"
                         name="amountMinor"
@@ -1707,7 +1707,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Currency</span>
+                      <span style={fieldLabelStyle}>幣別</span>
                       <input
                         defaultValue={quotaDraft.currency}
                         name="currency"
@@ -1716,7 +1716,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Cost center</span>
+                      <span style={fieldLabelStyle}>成本中心</span>
                       <input
                         defaultValue=""
                         name="costCenterCode"
@@ -1725,7 +1725,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Passenger role</span>
+                      <span style={fieldLabelStyle}>乘客角色</span>
                       <input
                         defaultValue="employee"
                         name="passengerRole"
@@ -1734,7 +1734,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Passenger ID</span>
+                      <span style={fieldLabelStyle}>乘客 ID</span>
                       <input
                         defaultValue="passenger-demo-001"
                         name="passengerId"
@@ -1743,7 +1743,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Dispatch subtype</span>
+                      <span style={fieldLabelStyle}>派遣子類型</span>
                       <input
                         defaultValue="enterprise_dispatch"
                         name="businessDispatchSubtype"
@@ -1752,7 +1752,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Vehicle preference</span>
+                      <span style={fieldLabelStyle}>車輛偏好</span>
                       <input
                         defaultValue="standard_taxi"
                         name="vehiclePreference"
@@ -1761,7 +1761,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Direction</span>
+                      <span style={fieldLabelStyle}>方向</span>
                       <input
                         defaultValue="pickup"
                         name="direction"
@@ -1770,7 +1770,7 @@ export function RulesManager({
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Flight no present</span>
+                      <span style={fieldLabelStyle}>有航班編號</span>
                       <select
                         defaultValue="false"
                         name="flightNoPresent"
@@ -1782,7 +1782,7 @@ export function RulesManager({
                       </select>
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>Flight no</span>
+                      <span style={fieldLabelStyle}>航班編號</span>
                       <input
                         defaultValue=""
                         name="flightNo"
@@ -1814,7 +1814,7 @@ export function RulesManager({
                       items={[
                         {
                           id: "decision",
-                          label: "Decision",
+                          label: "判定",
                           value: (
                             <StatusChip
                               label={evaluation.outcome?.decision ?? "unknown"}
@@ -1826,29 +1826,29 @@ export function RulesManager({
                         },
                         {
                           id: "matched",
-                          label: "Matched rules",
+                          label: "符合規則",
                           value: formatCount(evaluation.matchedRules.length),
                         },
                         {
                           id: "approval-required",
-                          label: "Approval required",
+                          label: "需審批",
                           value: evaluation.outcome?.approvalRequired
                             ? "Yes"
                             : "No",
                         },
                         {
                           id: "blocked",
-                          label: "Blocked",
+                          label: "已封鎖",
                           value: evaluation.outcome?.blocked ? "Yes" : "No",
                         },
                         {
                           id: "warnings",
-                          label: "Warnings",
+                          label: "警告",
                           value: formatCount(maybeCountWarnings(evaluation)),
                         },
                         {
                           id: "evaluated-at",
-                          label: "Evaluated at",
+                          label: "評估時間",
                           value: formatDateTime(evaluation.evaluatedAt),
                         },
                       ]}
@@ -1856,8 +1856,8 @@ export function RulesManager({
 
                     <div style={columnGridStyle}>
                       <DataViewCard
-                        title="Matched rules"
-                        subtitle="All-match semantics remain visible in the dry-run output."
+                        title="符合的規則"
+                        subtitle="dry-run 輸出中保留 all-match 語意。"
                         tone="tenant"
                         density="compact"
                       >
@@ -1896,8 +1896,8 @@ export function RulesManager({
                           </div>
                         ) : (
                           <WorkflowEmptyState
-                            title="No rules matched this sample"
-                            description="The quota preview still ran, but the rule evaluator did not select any active tenant rules for this input snapshot."
+                            title="沒有規則符合此樣本"
+                            description="配額預覽仍有執行，但規則評估器未對此輸入快照選出任何啟用中的租戶規則。"
                             tone="neutral"
                             density="compact"
                           />
@@ -1905,8 +1905,8 @@ export function RulesManager({
                       </DataViewCard>
 
                       <DataViewCard
-                        title="Quota impacts and approval plan"
-                        subtitle="Quota preview output is attached to the same evaluation packet."
+                        title="配額影響與審批計畫"
+                        subtitle="配額預覽輸出附在同一個評估封包中。"
                         tone="tenant"
                         density="compact"
                       >
@@ -1929,22 +1929,22 @@ export function RulesManager({
                               items={[
                                 {
                                   id: "plan-mode",
-                                  label: "Approval mode",
+                                  label: "審批模式",
                                   value: evaluation.approvalPlan.approvalMode,
                                 },
                                 {
                                   id: "plan-timeout",
-                                  label: "Timeout",
+                                  label: "逾時",
                                   value: `${evaluation.approvalPlan.timeoutHours}h`,
                                 },
                                 {
                                   id: "plan-fallback",
-                                  label: "Fallback",
+                                  label: "後備",
                                   value: evaluation.approvalPlan.fallbackPolicy,
                                 },
                                 {
                                   id: "plan-approvers",
-                                  label: "Approvers",
+                                  label: "審批人",
                                   value:
                                     evaluation.approvalPlan.approvers.length > 0
                                       ? evaluation.approvalPlan.approvers
@@ -1971,8 +1971,8 @@ export function RulesManager({
         side={
           <>
             <DataViewCard
-              title="State variants"
-              subtitle="Q-X15 empty reasons remain individually previewable on this route while backend envelopes catch up."
+              title="狀態變體"
+              subtitle="在後端 envelope 補齊前，Q-X15 的各種空狀態原因仍可在此路由個別預覽。"
               tone="tenant"
               density="compact"
             >
@@ -2001,8 +2001,8 @@ export function RulesManager({
             </DataViewCard>
 
             <DataViewCard
-              title="Quota posture"
-              subtitle="Tenant quota summary and policy editing stay adjacent because quota-aware rules depend on the same backend-owned enforcement state."
+              title="配額狀態"
+              subtitle="租戶配額摘要與政策編輯相鄰呈現，因為配額相關規則依賴同一份後端擁有的強制狀態。"
               tone="tenant"
               density="compact"
             >
@@ -2014,52 +2014,52 @@ export function RulesManager({
                     items={[
                       {
                         id: "period",
-                        label: "Period",
+                        label: "期別",
                         value: `${quotaSummary.period}:${quotaSummary.periodKey}`,
                       },
                       {
                         id: "count-limit",
-                        label: "Booking limit",
+                        label: "訂單上限",
                         value: formatQuotaValue(
                           quotaSummary.limit.bookingCountLimit,
                         ),
                       },
                       {
                         id: "amount-limit",
-                        label: "Amount limit",
+                        label: "金額上限",
                         value: formatQuotaValue(
                           quotaSummary.limit.amountMinorLimit,
                         ),
                       },
                       {
                         id: "enforce",
-                        label: "Enforcement",
+                        label: "強制方式",
                         value: quotaSummary.limit.enforcementMode,
                       },
                       {
                         id: "remaining-count",
-                        label: "Count remaining",
+                        label: "剩餘次數",
                         value: formatQuotaValue(
                           quotaSummary.usage.bookingCountRemaining,
                         ),
                       },
                       {
                         id: "remaining-amount",
-                        label: "Amount remaining",
+                        label: "剩餘金額",
                         value: formatQuotaValue(
                           quotaSummary.usage.amountMinorRemaining,
                         ),
                       },
                       {
                         id: "remaining-percent",
-                        label: "Remaining %",
+                        label: "剩餘百分比",
                         value: formatPercentage(
                           quotaSummary.usage.remainingPercent,
                         ),
                       },
                       {
                         id: "refreshed",
-                        label: "Refreshed",
+                        label: "更新時間",
                         value: formatDateTime(quotaSummary.refreshedAt),
                       },
                     ]}
@@ -2079,7 +2079,7 @@ export function RulesManager({
                   >
                     <div style={columnGridStyle}>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>Booking count limit</span>
+                        <span style={fieldLabelStyle}>訂單次數上限</span>
                         <input
                           name="bookingCountLimit"
                           onChange={(event) =>
@@ -2095,7 +2095,7 @@ export function RulesManager({
                         />
                       </label>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>Amount minor limit</span>
+                        <span style={fieldLabelStyle}>金額上限（minor）</span>
                         <input
                           name="amountMinorLimit"
                           onChange={(event) =>
@@ -2111,7 +2111,7 @@ export function RulesManager({
                         />
                       </label>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>Currency</span>
+                        <span style={fieldLabelStyle}>幣別</span>
                         <input
                           name="currency"
                           onChange={(event) =>
@@ -2126,7 +2126,7 @@ export function RulesManager({
                         />
                       </label>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>Enforcement</span>
+                        <span style={fieldLabelStyle}>強制方式</span>
                         <select
                           name="enforcementMode"
                           onChange={(event) =>
@@ -2159,8 +2159,8 @@ export function RulesManager({
                 </div>
               ) : (
                 <WorkflowEmptyState
-                  title="Quota summary unavailable"
-                  description="The route can still edit rules, but tenant quota reads failed for this request."
+                  title="配額摘要無法取得"
+                  description="頁面仍可編輯規則，但此請求的租戶配額讀取失敗。"
                   tone="warning"
                   density="compact"
                 />
@@ -2168,8 +2168,8 @@ export function RulesManager({
             </DataViewCard>
 
             <DataViewCard
-              title="Pending approval queue"
-              subtitle="Approval requests remain visible here so rule changes can be judged against live backlog."
+              title="待審批佇列"
+              subtitle="審批請求保留在此，讓規則變更可對照即時待辦來判斷。"
               tone="tenant"
               density="compact"
             >
@@ -2216,8 +2216,8 @@ export function RulesManager({
                 </div>
               ) : (
                 <WorkflowEmptyState
-                  title="No pending approval requests"
-                  description="Current tenant backlog is clear, so rule changes are not competing with an active approval queue."
+                  title="沒有待審批的請求"
+                  description="目前租戶沒有待辦，因此規則變更不會與進行中的審批佇列競爭。"
                   tone="success"
                   density="compact"
                 />
@@ -2225,8 +2225,8 @@ export function RulesManager({
             </DataViewCard>
 
             <DataViewCard
-              title="Recent quota ledger"
-              subtitle="Quota reserve / release / consume events remain inspectable beside the rule surface."
+              title="近期配額帳冊"
+              subtitle="配額 reserve／release／consume 事件可在規則介面旁檢視。"
               tone="tenant"
               density="compact"
             >
@@ -2236,11 +2236,11 @@ export function RulesManager({
                     density="compact"
                     tone="tenant"
                     columns={[
-                      { label: "Booking", width: "120px" },
-                      { label: "Dim", width: "95px" },
-                      { label: "Type", width: "90px" },
-                      { label: "Amount", width: "95px" },
-                      { label: "Created", width: "130px" },
+                      { label: "訂單", width: "120px" },
+                      { label: "維度", width: "95px" },
+                      { label: "類型", width: "90px" },
+                      { label: "金額", width: "95px" },
+                      { label: "建立時間", width: "130px" },
                     ]}
                   >
                     {ledgerEntries.slice(0, 8).map((entry) => (
@@ -2262,8 +2262,8 @@ export function RulesManager({
                 </div>
               ) : (
                 <WorkflowEmptyState
-                  title="No quota ledger rows loaded"
-                  description="Tenant quota has no recent reserve/release/consume entries in the loaded snapshot."
+                  title="未載入配額帳冊資料"
+                  description="已載入的快照中，租戶配額沒有近期的 reserve/release/consume 紀錄。"
                   tone="neutral"
                   density="compact"
                 />

@@ -35,17 +35,17 @@ function getActionDescriptor(
 function describeReason(reasonCode: string | null | undefined) {
   switch (reasonCode) {
     case "past_editable_until":
-      return "The tenant edit window has already closed.";
+      return "租戶編輯時窗已關閉。";
     case "past_cancelable_until":
-      return "The tenant cancellation window has already closed.";
+      return "租戶取消時窗已關閉。";
     case "booking_terminal":
-      return "Completed or cancelled bookings are read-only.";
+      return "已完成或已取消的訂單為唯讀。";
     case "on_trip_locked":
-      return "On-trip bookings cannot be changed from tenant control.";
+      return "行程中的訂單無法從租戶端變更。";
     case "approval_pending":
-      return "The booking is waiting on approval resolution before it can change again.";
+      return "此訂單需待審批結果才能再次變更。";
     case "approval_not_retryable":
-      return "There is no approval workflow step that can be retried from this detail page.";
+      return "此明細頁沒有可重試的審批流程步驟。";
     default:
       return reasonCode ? `Backend reason: ${reasonCode}` : null;
   }
@@ -284,7 +284,7 @@ export function BookingCommandPanel({
     <div className="action-panel">
       <div className="action-stack">
         <div className="action-copy">
-          <strong>Allowed tenant actions</strong>
+          <strong>允許的租戶操作</strong>
           <p>
             Every CTA on this panel is driven by the booking action descriptors.
             Disabled actions stay visible with a reason instead of disappearing.
@@ -398,7 +398,7 @@ export function BookingCommandPanel({
             {mode === "update" ? (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>Pickup address</span>
+                  <span>上車地址</span>
                   <input
                     value={pickupAddress}
                     onChange={(event) => setPickupAddress(event.target.value)}
@@ -406,7 +406,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="field-stack">
-                  <span>Dropoff address</span>
+                  <span>下車地址</span>
                   <input
                     value={dropoffAddress}
                     onChange={(event) => setDropoffAddress(event.target.value)}
@@ -414,7 +414,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="field-stack">
-                  <span>Notes</span>
+                  <span>備註</span>
                   <textarea
                     rows={3}
                     value={notes}
@@ -423,7 +423,7 @@ export function BookingCommandPanel({
                 </label>
                 <div className="form-grid">
                   <label className="field-stack">
-                    <span>Cost center</span>
+                    <span>成本中心</span>
                     <input
                       value={costCenter}
                       onChange={(event) => setCostCenter(event.target.value)}
@@ -431,7 +431,7 @@ export function BookingCommandPanel({
                     />
                   </label>
                   <label className="field-stack">
-                    <span>Vehicle preference</span>
+                    <span>車輛偏好</span>
                     <input
                       value={vehiclePreference}
                       onChange={(event) =>
@@ -455,7 +455,7 @@ export function BookingCommandPanel({
             ) : (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>Cancellation reason</span>
+                  <span>取消原因</span>
                   <textarea
                     rows={4}
                     value={cancelReason}

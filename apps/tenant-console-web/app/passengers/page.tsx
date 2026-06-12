@@ -1111,7 +1111,7 @@ export default async function PassengersPage({
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
-      h: "NAME",
+      h: "姓名",
       w: 190,
       r: (row) => (
         <div style={{ display: "grid", gap: 5 }}>
@@ -1140,29 +1140,29 @@ export default async function PassengersPage({
       ),
     },
     {
-      h: "EMP ID",
+      h: "員工編號",
       w: 110,
       mono: true,
       r: (row) => row.employeeNo ?? "—",
     },
     {
-      h: "DEPT",
+      h: "部門",
       w: 150,
       r: (row) => row.departmentName ?? "—",
     },
     {
-      h: "MOBILE",
+      h: "手機",
       w: 140,
       mono: true,
       r: (row) => row.mobile ?? "—",
     },
     {
-      h: "EMAIL",
+      h: "電子郵件",
       mono: true,
       r: (row) => row.email ?? "—",
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
@@ -1171,13 +1171,13 @@ export default async function PassengersPage({
       ),
     },
     {
-      h: "UPDATED",
+      h: "更新",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.updatedAt),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 220,
       r: (row) => (
         <div style={tableActionCellStyle}>
@@ -1267,25 +1267,25 @@ export default async function PassengersPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Passengers"
+            label="乘客"
             value={String(passengers.length)}
             sub={`${activeCount} active / ${inactiveCount} inactive`}
           />
           <CanvasKPI
             theme={th}
-            label="Employee"
+            label="員工"
             value={String(employeeCount)}
             sub={`${passengers.length - employeeCount} visitor`}
           />
           <CanvasKPI
             theme={th}
-            label="Refresh"
+            label="重新整理"
             value="T5"
             sub={`${refreshTierLabel} · ${refreshSummary}`}
           />
           <CanvasKPI
             theme={th}
-            label="Selected"
+            label="已選"
             value={selectedPassenger ? "ready" : "none"}
             sub={selectedPassenger ? selectedPassenger.fullName : "pick a row"}
           />
@@ -1293,8 +1293,8 @@ export default async function PassengersPage({
 
         <CanvasCard
           theme={th}
-          title="Directory filters"
-          subtitle="Filter by active state, department, and search by name / employee no / mobile."
+          title="目錄篩選"
+          subtitle="依啟用狀態、部門篩選，並以姓名／員工編號／手機搜尋。"
         >
           <form action="/passengers" method="get" style={filterBarStyle}>
             {selectedTab !== "all" ? (
@@ -1308,7 +1308,7 @@ export default async function PassengersPage({
               />
             ) : null}
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Search</span>
+              <span style={fieldLabelStyle}>搜尋</span>
               <input
                 defaultValue={filters.q}
                 name="q"
@@ -1317,7 +1317,7 @@ export default async function PassengersPage({
               />
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Department</span>
+              <span style={fieldLabelStyle}>部門</span>
               <select
                 defaultValue={filters.department}
                 name="department"
@@ -1332,7 +1332,7 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>State</span>
+              <span style={fieldLabelStyle}>狀態</span>
               <select
                 defaultValue={filters.activeState}
                 name="state"
@@ -1344,7 +1344,7 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Refresh tier</span>
+              <span style={fieldLabelStyle}>更新層級</span>
               <div
                 style={{
                   ...fieldStyle,
@@ -1375,7 +1375,7 @@ export default async function PassengersPage({
             theme={th}
             padding={0}
             style={cardStyle}
-            title="Passenger roster"
+            title="乘客名冊"
             subtitle={`${rows.length} visible row(s) · state ${filters.activeState}`}
           >
             {emptyReason ? (
@@ -1391,7 +1391,7 @@ export default async function PassengersPage({
 
           <CanvasCard
             theme={th}
-            title="Passenger detail"
+            title="乘客明細"
             subtitle={
               selectedPassenger
                 ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "active" : "deactivated"}`

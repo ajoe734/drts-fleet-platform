@@ -89,7 +89,7 @@ export function PartnerEligibilityForm({
   return (
     <div className="form-stack">
       <form
-        aria-label="Partner eligibility verification"
+        aria-label="合作夥伴資格驗證"
         className="form-stack"
         onSubmit={handleSubmit}
       >
@@ -103,7 +103,7 @@ export function PartnerEligibilityForm({
           {mode === "bank_card_inline" ? (
             <>
               <label className="field-stack">
-                <span>Card last 4</span>
+                <span>卡號末四碼</span>
                 <input
                   inputMode="numeric"
                   maxLength={4}
@@ -116,7 +116,7 @@ export function PartnerEligibilityForm({
                 />
               </label>
               <label className="field-stack">
-                <span>Cardholder name</span>
+                <span>持卡人姓名</span>
                 <input
                   onChange={(event) => setCardholderName(event.target.value)}
                   required
@@ -130,7 +130,7 @@ export function PartnerEligibilityForm({
           {mode === "reference_required" ? (
             <>
               <label className="field-stack">
-                <span>Reference token</span>
+                <span>參照 token</span>
                 <input
                   onChange={(event) => setReferenceToken(event.target.value)}
                   required
@@ -139,7 +139,7 @@ export function PartnerEligibilityForm({
                 />
               </label>
               <label className="field-stack">
-                <span>Benefit reference</span>
+                <span>福利參照</span>
                 <input
                   onChange={(event) => setBenefitReference(event.target.value)}
                   required
@@ -148,7 +148,7 @@ export function PartnerEligibilityForm({
                 />
               </label>
               <label className="field-stack">
-                <span>Flight no. (optional)</span>
+                <span>航班編號（選填）</span>
                 <input
                   onChange={(event) => setFlightNo(event.target.value)}
                   type="text"
@@ -181,19 +181,19 @@ export function PartnerEligibilityForm({
           <p>{STATUS_GUIDANCE[verification.verificationStatus]}</p>
           <dl className="definition-grid">
             <div>
-              <dt>Verification id</dt>
+              <dt>驗證 id</dt>
               <dd>
                 <code>{verification.eligibilityVerificationId}</code>
               </dd>
             </div>
             <div>
-              <dt>Decision source</dt>
+              <dt>判定來源</dt>
               <dd>
                 <code>{verification.decisionSource}</code>
               </dd>
             </div>
             <div>
-              <dt>Reason code</dt>
+              <dt>原因代碼</dt>
               <dd>
                 <code>{verification.verificationReasonCode}</code>
               </dd>
@@ -209,11 +209,11 @@ export function PartnerEligibilityForm({
               </dd>
             </div>
             <div>
-              <dt>Attempts</dt>
+              <dt>嘗試次數</dt>
               <dd>{verification.attempts.length}</dd>
             </div>
             <div>
-              <dt>Verified at</dt>
+              <dt>驗證時間</dt>
               <dd>
                 <time dateTime={verification.verifiedAt}>
                   {new Date(verification.verifiedAt).toLocaleString()}
