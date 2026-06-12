@@ -32,10 +32,12 @@ import {
 } from "@/lib/booking-list";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/formatters";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { t as translate, type Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -155,7 +157,12 @@ const inlineMetaStyle: CSSProperties = {
 };
 
 type SearchParamValue = string | string[] | undefined;
+type TranslationParams = Record<string, string | number>;
 type BookingEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+
+function t(key: string, params: TranslationParams | undefined, locale: Locale) {
+  return translate(key, locale, params);
+}
 
 type BookingSlaStatus = {
   label: string;
@@ -215,32 +222,54 @@ function parseDate(value: string | null | undefined) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function formatMinutes(minutes: number) {
-  return `${new Intl.NumberFormat("en").format(minutes)}m`;
+function formatMinutes(minutes: number, locale: Locale) {
+  return t(
+    "bookingList.format.minutes",
+    {
+      count: new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en").format(
+        minutes,
+      ),
+    },
+    locale,
+  );
 }
 
-function formatRelativeDuration(value: string | null | undefined) {
+function formatRelativeDuration(
+  value: string | null | undefined,
+  locale: Locale,
+) {
   const parsed = parseDate(value);
   if (!parsed) {
-    return "未知";
+    return t("bookingList.format.unknown", undefined, locale);
   }
 
   const diffMs = Date.now() - parsed.getTime();
   const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
 
   if (diffMinutes < 60) {
-    return `${formatMinutes(diffMinutes)} 前`;
+    return t(
+      "bookingList.format.minutesAgo",
+      { value: formatMinutes(diffMinutes, locale) },
+      locale,
+    );
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h 前`;
+    return t("bookingList.format.hoursAgo", { count: diffHours }, locale);
   }
 
-  return `${Math.floor(diffHours / 24)}d 前`;
+  return t(
+    "bookingList.format.daysAgo",
+    { count: Math.floor(diffHours / 24) },
+    locale,
+  );
 }
 
-function formatRemainingWindow(value: string | null | undefined) {
+function formatRemainingWindow(
+  value: string | null | undefined,
+  locale: Locale,
+) {
   const parsed = parseDate(value);
   if (!parsed) {
     return null;
@@ -250,16 +279,24 @@ function formatRemainingWindow(value: string | null | undefined) {
   const diffMinutes = Math.round(diffMs / 60000);
 
   if (diffMinutes <= 0) {
-    return "已截止";
+    return t("bookingList.format.ended", undefined, locale);
   }
 
   if (diffMinutes < 60) {
-    return `剩 ${formatMinutes(diffMinutes)}`;
+    return t(
+      "bookingList.format.remainingMinutes",
+      { value: formatMinutes(diffMinutes, locale) },
+      locale,
+    );
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   const remainderMinutes = diffMinutes % 60;
-  return `剩 ${diffHours}h ${remainderMinutes}m`;
+  return t(
+    "bookingList.format.remainingHoursMinutes",
+    { hours: diffHours, minutes: remainderMinutes },
+    locale,
+  );
 }
 
 function getStatusTone(status: BookingRecord["orderStatus"]): CanvasTone {
@@ -299,37 +336,52 @@ function isActionableStatus(status: BookingRecord["orderStatus"]) {
   return status !== "completed" && status !== "cancelled";
 }
 
-function getActionDisabledReason(reasonCode?: string) {
+function getActionDisabledReason(
+  reasonCode: string | undefined,
+  locale: Locale,
+) {
   switch (reasonCode) {
     case "editable_window_passed":
-      return "編輯時窗已截止";
+      return t(
+        "bookingList.actionDisabled.editWindowPassed",
+        undefined,
+        locale,
+      );
     case "cancel_window_passed":
-      return "取消時窗已截止";
+      return t(
+        "bookingList.actionDisabled.cancelWindowPassed",
+        undefined,
+        locale,
+      );
     case "workflow_locked":
-      return "工作流程不再接受租戶變更";
+      return t("bookingList.actionDisabled.workflowLocked", undefined, locale);
     default:
-      return "無法操作";
+      return t("bookingList.actionDisabled.default", undefined, locale);
   }
 }
 
-function getActionLabel(action: string) {
+function getActionLabel(action: string, locale: Locale) {
   switch (action) {
     case "open_detail":
-      return "開啟明細";
+      return t("bookingList.action.openDetail", undefined, locale);
     case "update_booking":
-      return "編輯";
+      return t("bookingList.action.update", undefined, locale);
     case "cancel_booking":
-      return "取消";
+      return t("bookingList.action.cancel", undefined, locale);
     case "create_booking":
-      return "新增";
+      return t("bookingList.action.create", undefined, locale);
     case "open_ops_approval":
-      return "營運審批";
+      return t("bookingList.action.openOpsApproval", undefined, locale);
     case "open_ops_dispatch":
-      return "營運派遣";
+      return t("bookingList.action.openOpsDispatch", undefined, locale);
     case "open_integration_governance":
-      return "整合就緒度";
+      return t(
+        "bookingList.action.openIntegrationGovernance",
+        undefined,
+        locale,
+      );
     case "reset_filters":
-      return "清除篩選";
+      return t("bookingList.action.resetFilters", undefined, locale);
     default:
       return action;
   }
@@ -342,6 +394,7 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
 
 function buildBookingCrossAppLinks(
   booking: BookingRecord,
+  locale: Locale,
 ): CrossAppResourceLink[] {
   const links: CrossAppResourceLink[] = [];
 
@@ -357,7 +410,7 @@ function buildBookingCrossAppLinks(
       resourceType: "tenant_booking_approval_request",
       resourceId: booking.bookingId,
       openMode: "new_tab",
-      label: "開啟營運審批佇列",
+      label: t("bookingList.crossApp.approval", undefined, locale),
     });
   }
 
@@ -373,7 +426,7 @@ function buildBookingCrossAppLinks(
       resourceType: "dispatch_queue_item",
       resourceId: booking.bookingId,
       openMode: "new_tab",
-      label: "開啟營運派遣佇列",
+      label: t("bookingList.crossApp.dispatch", undefined, locale),
     });
   }
 
@@ -382,6 +435,7 @@ function buildBookingCrossAppLinks(
 
 function buildBookingActions(
   booking: BookingRecord,
+  locale: Locale,
 ): ResourceActionDescriptor[] {
   const modifiableUntil = parseDate(booking.modifiableUntil);
   const cancelableUntil = parseDate(booking.cancelableUntil);
@@ -439,7 +493,7 @@ function buildBookingActions(
   }
 
   if (
-    buildBookingCrossAppLinks(booking).some(
+    buildBookingCrossAppLinks(booking, locale).some(
       (link) => link.resourceType === "dispatch_queue_item",
     )
   ) {
@@ -453,7 +507,10 @@ function buildBookingActions(
   return actions;
 }
 
-function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
+function deriveSlaStatus(
+  booking: BookingRecord,
+  locale: Locale,
+): BookingSlaStatus | null {
   if (
     booking.orderStatus === "dispatch_failed" ||
     booking.orderStatus === "dispatch_timeout" ||
@@ -461,9 +518,9 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
     booking.orderStatus === "exception_hold"
   ) {
     return {
-      label: "SLA 風險",
+      label: t("bookingList.sla.risk", undefined, locale),
       tone: "warn",
-      detail: "需要重新派遣以保護此預約時窗。",
+      detail: t("bookingList.sla.riskDetail", undefined, locale),
     };
   }
 
@@ -481,22 +538,29 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
     isActionableStatus(booking.orderStatus)
   ) {
     return {
-      label: "SLA 監控",
+      label: t("bookingList.sla.watch", undefined, locale),
       tone: "info",
-      detail: `Pickup window opens in ${formatMinutes(minutesUntilStart)}.`,
+      detail: t(
+        "bookingList.sla.watchDetail",
+        { value: formatMinutes(minutesUntilStart, locale) },
+        locale,
+      ),
     };
   }
 
   return null;
 }
 
-function toBookingListRecord(booking: BookingRecord): BookingListRecord {
+function toBookingListRecord(
+  booking: BookingRecord,
+  locale: Locale,
+): BookingListRecord {
   return {
     ...booking,
-    availableActions: buildBookingActions(booking),
+    availableActions: buildBookingActions(booking, locale),
     editableUntil: booking.modifiableUntil,
-    crossAppLinks: buildBookingCrossAppLinks(booking),
-    slaStatus: deriveSlaStatus(booking),
+    crossAppLinks: buildBookingCrossAppLinks(booking, locale),
+    slaStatus: deriveSlaStatus(booking, locale),
   };
 }
 
@@ -519,21 +583,24 @@ function getActionHref(action: string, booking: BookingListRecord) {
   }
 }
 
-function getSubtypeLabel(subtype: BookingRecord["businessDispatchSubtype"]) {
+function getSubtypeLabel(
+  subtype: BookingRecord["businessDispatchSubtype"],
+  locale: Locale,
+) {
   switch (subtype) {
     case "credit_card_airport_transfer":
-      return "機場接送";
+      return t("bookingList.subtype.creditCardAirport", undefined, locale);
     case "enterprise_dispatch":
-      return "企業派車";
+      return t("bookingList.subtype.enterprise", undefined, locale);
     default:
       return subtype;
   }
 }
 
-function getServiceBucketLabel(bucket: string) {
+function getServiceBucketLabel(bucket: string, locale: Locale) {
   switch (bucket) {
     case "business_dispatch":
-      return "商務派車";
+      return t("bookingList.serviceBucket.businessDispatch", undefined, locale);
     default:
       return bucket;
   }
@@ -565,6 +632,7 @@ function mapErrorToEmptyReason(
 function getEmptyStateContent(
   reason: BookingEmptyReason,
   queryString: string,
+  locale: Locale,
 ): {
   title: string;
   description: string;
@@ -577,9 +645,12 @@ function getEmptyStateContent(
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "租戶設定尚未完成 provision",
-        description:
-          "在租戶治理與下游整合完成此工作區設定前，訂單將維持無法存取。",
+        title: t("bookingList.empty.notProvisioned.title", undefined, locale),
+        description: t(
+          "bookingList.empty.notProvisioned.description",
+          undefined,
+          locale,
+        ),
         tone: "info",
         nextAction: {
           descriptor: {
@@ -592,30 +663,46 @@ function getEmptyStateContent(
       };
     case "permission_denied":
       return {
-        title: "你沒有檢視訂單的權限",
-        description:
-          "目前的租戶 actor 可進入介面，但此角色情境未獲授權存取訂單帳冊。",
+        title: t("bookingList.empty.permissionDenied.title", undefined, locale),
+        description: t(
+          "bookingList.empty.permissionDenied.description",
+          undefined,
+          locale,
+        ),
         tone: "warn",
       };
     case "external_unavailable":
       return {
-        title: "訂單資料暫時無法取得",
-        description:
-          "上游依賴未及時回應。請重新整理本頁，若延遲持續請透過 ops 升級處理。",
+        title: t(
+          "bookingList.empty.externalUnavailable.title",
+          undefined,
+          locale,
+        ),
+        description: t(
+          "bookingList.empty.externalUnavailable.description",
+          undefined,
+          locale,
+        ),
         tone: "warn",
       };
     case "fetch_failed":
       return {
-        title: "訂單清單載入失敗",
-        description:
-          "頁面無法取得有效的租戶訂單快照。請重新整理，若持續失敗請檢查服務健康狀態。",
+        title: t("bookingList.empty.fetchFailed.title", undefined, locale),
+        description: t(
+          "bookingList.empty.fetchFailed.description",
+          undefined,
+          locale,
+        ),
         tone: "warn",
       };
     case "filtered_empty":
       return {
-        title: "沒有符合篩選條件的訂單",
-        description:
-          "請嘗試放寬預約日期區間、清除狀態標籤，或回到所有服務類別。",
+        title: t("bookingList.empty.filteredEmpty.title", undefined, locale),
+        description: t(
+          "bookingList.empty.filteredEmpty.description",
+          undefined,
+          locale,
+        ),
         tone: "info",
         nextAction: {
           descriptor: {
@@ -629,9 +716,12 @@ function getEmptyStateContent(
     case "no_data":
     default:
       return {
-        title: "此租戶目前還沒有任何訂單",
-        description:
-          "這看起來是全新的租戶工作區。建立第一筆訂單，或等待上游訂單匯入填入此帳冊。",
+        title: t("bookingList.empty.noData.title", undefined, locale),
+        description: t(
+          "bookingList.empty.noData.description",
+          undefined,
+          locale,
+        ),
         tone: "info",
         nextAction: {
           descriptor: {
@@ -645,7 +735,9 @@ function getEmptyStateContent(
   }
 }
 
-async function loadBookingsPageData(): Promise<BookingListPageData> {
+async function loadBookingsPageData(
+  locale: Locale,
+): Promise<BookingListPageData> {
   const refresh: UiRefreshMetadata = {
     generatedAt: new Date().toISOString(),
     staleAfterMs: BOOKING_STALE_AFTER_MS,
@@ -685,7 +777,9 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
           response.status,
           errorEnvelope?.error.code,
         ),
-        errorMessage: errorEnvelope?.error.message ?? "未知的訂單錯誤。",
+        errorMessage:
+          errorEnvelope?.error.message ??
+          t("bookingList.error.unknown", undefined, locale),
       };
     }
 
@@ -694,7 +788,9 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
     >;
 
     return {
-      bookings: envelope.data.items.map(toBookingListRecord),
+      bookings: envelope.data.items.map((booking) =>
+        toBookingListRecord(booking, locale),
+      ),
       pageInfo: envelope.data.pageInfo,
       refresh: {
         generatedAt: envelope.meta.timestamp,
@@ -719,7 +815,10 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
         dataFreshness: "degraded",
       },
       emptyReason: "fetch_failed",
-      errorMessage: error instanceof Error ? error.message : "未知的訂單錯誤。",
+      errorMessage:
+        error instanceof Error
+          ? error.message
+          : t("bookingList.error.unknown", undefined, locale),
     };
   }
 }
@@ -747,18 +846,18 @@ function renderActionLink({
   );
 }
 
-function renderBookingActionLinks(booking: BookingListRecord) {
+function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
   return (
     <div style={compactActionRowStyle}>
       {booking.availableActions.map((action) => {
-        const label = getActionLabel(action.action);
+        const label = getActionLabel(action.action, locale);
 
         if (!action.enabled) {
           return (
             <span
               key={action.action}
               style={disabledActionStyle}
-              title={getActionDisabledReason(action.disabledReasonCode)}
+              title={getActionDisabledReason(action.disabledReasonCode, locale)}
             >
               {label}
             </span>
@@ -794,9 +893,25 @@ function renderBookingActionLinks(booking: BookingListRecord) {
   );
 }
 
-function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
+function getSourceBadge(booking: BookingListRecord, locale: Locale) {
+  const source = getBookingSourceVisibility(booking);
+  switch (source.domain) {
+    case "forwarded_authority":
+      return t("bookingList.source.forwarded", undefined, locale);
+    case "partner_external":
+      return t("bookingList.source.external", undefined, locale);
+    case "owned":
+    default:
+      return t("bookingList.source.owned", undefined, locale);
+  }
+}
+
+function buildBookingRows(
+  bookings: BookingListRecord[],
+  locale: Locale,
+): BookingRow[] {
   return bookings.map((booking) => {
-    const editWindow = formatRemainingWindow(booking.editableUntil);
+    const editWindow = formatRemainingWindow(booking.editableUntil, locale);
     const source = getBookingSourceVisibility(booking);
     const sourceToneClassName = getSourceToneClassName(source.tone);
 
@@ -807,18 +922,20 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
             <span style={primaryTextStyle}>{booking.bookingId}</span>
           </Link>
           <span style={secondaryTextStyle}>{booking.orderId}</span>
-          {renderBookingActionLinks(booking)}
+          {renderBookingActionLinks(booking, locale)}
         </div>
       ),
       typeCell: (
         <div style={{ display: "grid", gap: 4 }}>
           <span style={primaryTextStyle}>
-            {getSubtypeLabel(booking.businessDispatchSubtype)}
+            {getSubtypeLabel(booking.businessDispatchSubtype, locale)}
           </span>
           <span style={secondaryTextStyle}>
-            {getServiceBucketLabel(booking.serviceBucket)}
+            {getServiceBucketLabel(booking.serviceBucket, locale)}
           </span>
-          <span className={sourceToneClassName}>{source.badge}</span>
+          <span className={sourceToneClassName}>
+            {getSourceBadge(booking, locale)}
+          </span>
         </div>
       ),
       routeCell: (
@@ -830,24 +947,41 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
       windowCell: (
         <div style={{ display: "grid", gap: 6 }}>
           <span style={primaryTextStyle}>
-            {formatDateTime(booking.reservationWindowStart)}
+            {formatDateTime(booking.reservationWindowStart, locale)}
           </span>
           <span style={secondaryTextStyle}>
-            to {formatDateTime(booking.reservationWindowEnd)}
+            {t(
+              "bookingList.window.to",
+              { value: formatDateTime(booking.reservationWindowEnd, locale) },
+              locale,
+            )}
           </span>
           <div style={inlineMetaStyle}>
             <CanvasPill theme={theme} tone="neutral">
-              Age {formatRelativeDuration(booking.createdAt)}
+              {t(
+                "bookingList.pill.age",
+                { value: formatRelativeDuration(booking.createdAt, locale) },
+                locale,
+              )}
             </CanvasPill>
             <CanvasPill theme={theme} tone="info">
-              Updated {formatRelativeDuration(booking.updatedAt)}
+              {t(
+                "bookingList.pill.updated",
+                { value: formatRelativeDuration(booking.updatedAt, locale) },
+                locale,
+              )}
             </CanvasPill>
             {editWindow ? (
               <CanvasPill
                 theme={theme}
-                tone={editWindow === "已截止" ? "neutral" : "warn"}
+                tone={
+                  editWindow ===
+                  t("bookingList.format.ended", undefined, locale)
+                    ? "neutral"
+                    : "warn"
+                }
               >
-                可編輯 {editWindow}
+                {t("bookingList.pill.editable", { value: editWindow }, locale)}
               </CanvasPill>
             ) : null}
           </div>
@@ -858,7 +992,8 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           <span style={primaryTextStyle}>{booking.passenger.name}</span>
           <span style={secondaryTextStyle}>{booking.passenger.phone}</span>
           <span style={secondaryTextStyle}>
-            {booking.costCenter ?? "無成本中心"}
+            {booking.costCenter ??
+              t("bookingList.value.noCostCenter", undefined, locale)}
           </span>
         </div>
       ),
@@ -876,7 +1011,11 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
               theme={theme}
               tone={getApprovalTone(booking.approvalState)}
             >
-              approval {booking.approvalState}
+              {t(
+                "bookingList.pill.approval",
+                { state: booking.approvalState },
+                locale,
+              )}
             </CanvasPill>
             {booking.slaStatus ? (
               <CanvasPill theme={theme} tone={booking.slaStatus.tone}>
@@ -888,7 +1027,9 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           {booking.slaStatus ? (
             <span style={secondaryTextStyle}>{booking.slaStatus.detail}</span>
           ) : (
-            <span style={secondaryTextStyle}>目前沒有發布 SLA 警告。</span>
+            <span style={secondaryTextStyle}>
+              {t("bookingList.sla.none", undefined, locale)}
+            </span>
           )}
         </div>
       ),
@@ -915,7 +1056,7 @@ function getPageDeepLinks(bookings: BookingListRecord[]) {
   return [...links.values()];
 }
 
-function getHeaderTabs(bookings: BookingListRecord[]) {
+function getHeaderTabs(bookings: BookingListRecord[], locale: Locale) {
   const liveCount = bookings.filter((booking) =>
     isActionableStatus(booking.orderStatus),
   ).length;
@@ -934,12 +1075,36 @@ function getHeaderTabs(bookings: BookingListRecord[]) {
   ).length;
 
   const tabs = [
-    { id: "all", label: "全部", badge: String(bookings.length) },
-    { id: "live", label: "進行中", badge: String(liveCount) },
-    { id: "reserve", label: "預約", badge: String(reserveCount) },
-    { id: "approval", label: "待審批", badge: String(approvalCount) },
-    { id: "done", label: "已完成", badge: String(completedCount) },
-    { id: "cancel", label: "取消", badge: String(cancelledCount) },
+    {
+      id: "all",
+      label: t("bookingList.tab.all", undefined, locale),
+      badge: String(bookings.length),
+    },
+    {
+      id: "live",
+      label: t("bookingList.tab.live", undefined, locale),
+      badge: String(liveCount),
+    },
+    {
+      id: "reserve",
+      label: t("bookingList.tab.reserve", undefined, locale),
+      badge: String(reserveCount),
+    },
+    {
+      id: "approval",
+      label: t("bookingList.tab.approval", undefined, locale),
+      badge: String(approvalCount),
+    },
+    {
+      id: "done",
+      label: t("bookingList.tab.done", undefined, locale),
+      badge: String(completedCount),
+    },
+    {
+      id: "cancel",
+      label: t("bookingList.tab.cancel", undefined, locale),
+      badge: String(cancelledCount),
+    },
   ];
 
   return tabs.map((tab) => (
@@ -955,12 +1120,13 @@ export default async function BookingsPage({
 }: {
   searchParams: Promise<Record<string, SearchParamValue>>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
   const query = parseBookingListQuery(resolvedSearchParams);
   const forcedEmptyReason = parseEmptyReason(
     first(resolvedSearchParams.emptyReason),
   );
-  const data = await loadBookingsPageData();
+  const data = await loadBookingsPageData(locale);
   const result = applyBookingListQuery(data.bookings, query);
   const computedEmptyReason: BookingEmptyReason | null =
     forcedEmptyReason ??
@@ -973,44 +1139,71 @@ export default async function BookingsPage({
 
   const queryString = buildBookingListQueryString(query);
   const rows =
-    computedEmptyReason === null ? buildBookingRows(result.items) : [];
+    computedEmptyReason === null ? buildBookingRows(result.items, locale) : [];
   const emptyState =
     computedEmptyReason !== null
-      ? getEmptyStateContent(computedEmptyReason, queryString)
+      ? getEmptyStateContent(computedEmptyReason, queryString, locale)
       : null;
   const pageDeepLinks =
     computedEmptyReason === null ? getPageDeepLinks(result.items) : [];
-  const headerTabs = getHeaderTabs(data.bookings);
+  const headerTabs = getHeaderTabs(data.bookings, locale);
   const activeHeaderTab = headerTabs[0];
 
   const columns: CanvasTableColumn<BookingRow>[] = [
-    { h: "單號", k: "bookingCell", w: 180 },
-    { h: "類型", k: "typeCell", w: 150 },
-    { h: "PICKUP → DROP", k: "routeCell", w: 300 },
-    { h: "時窗", k: "windowCell", w: 240 },
-    { h: "乘客", k: "passengerCell", w: 140 },
-    { h: "狀態", k: "stateCell", w: 220 },
+    {
+      h: t("bookingList.column.booking", undefined, locale),
+      k: "bookingCell",
+      w: 180,
+    },
+    {
+      h: t("bookingList.column.type", undefined, locale),
+      k: "typeCell",
+      w: 150,
+    },
+    {
+      h: t("bookingList.column.route", undefined, locale),
+      k: "routeCell",
+      w: 300,
+    },
+    {
+      h: t("bookingList.column.window", undefined, locale),
+      k: "windowCell",
+      w: 240,
+    },
+    {
+      h: t("bookingList.column.passenger", undefined, locale),
+      k: "passengerCell",
+      w: 140,
+    },
+    {
+      h: t("bookingList.column.status", undefined, locale),
+      k: "stateCell",
+      w: 220,
+    },
   ];
 
   return (
     <div>
       <CanvasPageHeader
         theme={theme}
-        title="訂單"
-        subtitle="本月所有預約 · 含進行中與已完成"
+        title={t("bookingList.header.title", undefined, locale)}
+        subtitle={t("bookingList.header.subtitle", undefined, locale)}
         tabs={headerTabs}
         activeTab={activeHeaderTab}
         actions={
           <div style={actionRowStyle}>
             <Link href="#booking-filters" style={actionLinkStyle("secondary")}>
-              Filter
+              {t("bookingList.header.filter", undefined, locale)}
             </Link>
-            <span style={disabledActionStyle} title="匯出尚未開放">
-              Export
+            <span
+              style={disabledActionStyle}
+              title={t("bookingList.header.exportDisabled", undefined, locale)}
+            >
+              {t("bookingList.header.export", undefined, locale)}
             </span>
             {renderActionLink({
               href: "/bookings/new",
-              label: "新增",
+              label: t("bookingList.action.create", undefined, locale),
               variant: "primary",
             })}
             <RefreshTierControl
@@ -1027,46 +1220,52 @@ export default async function BookingsPage({
             theme={theme}
             tone="warn"
             icon="warn"
-            title="租戶訂單快照降級"
+            title={t("bookingList.banner.degraded", undefined, locale)}
             body={data.errorMessage}
           />
         ) : null}
 
         <CanvasCard
           theme={theme}
-          title="篩選"
-          subtitle="依訂單、單號或乘客搜尋，再以狀態、服務類別與預約日期區間縮小範圍。"
+          title={t("bookingList.filter.title", undefined, locale)}
+          subtitle={t("bookingList.filter.subtitle", undefined, locale)}
         >
           <form action="/bookings" id="booking-filters" style={filterFormStyle}>
             <input name="dateField" type="hidden" value={query.dateField} />
 
             <div style={filterGridStyle}>
               <label style={fieldLabelStyle}>
-                Search
+                {t("bookingList.filter.search", undefined, locale)}
                 <input
                   defaultValue={query.q}
                   name="q"
-                  placeholder="訂單、單號、乘客"
+                  placeholder={t(
+                    "bookingList.filter.searchPlaceholder",
+                    undefined,
+                    locale,
+                  )}
                   style={inputStyle}
                 />
               </label>
               <label style={fieldLabelStyle}>
-                Service bucket
+                {t("bookingList.filter.serviceBucket", undefined, locale)}
                 <select
                   defaultValue={query.serviceBucket}
                   name="serviceBucket"
                   style={inputStyle}
                 >
-                  <option value="all">所有類別</option>
+                  <option value="all">
+                    {t("bookingList.filter.allBuckets", undefined, locale)}
+                  </option>
                   {PHASE1_SERVICE_BUCKETS.map((bucket) => (
                     <option key={bucket} value={bucket}>
-                      {getServiceBucketLabel(bucket)}
+                      {getServiceBucketLabel(bucket, locale)}
                     </option>
                   ))}
                 </select>
               </label>
               <label style={fieldLabelStyle}>
-                From
+                {t("bookingList.filter.from", undefined, locale)}
                 <input
                   defaultValue={query.dateFrom}
                   name="dateFrom"
@@ -1075,7 +1274,7 @@ export default async function BookingsPage({
                 />
               </label>
               <label style={fieldLabelStyle}>
-                To
+                {t("bookingList.filter.to", undefined, locale)}
                 <input
                   defaultValue={query.dateTo}
                   name="dateTo"
@@ -1084,7 +1283,7 @@ export default async function BookingsPage({
                 />
               </label>
               <label style={fieldLabelStyle}>
-                Page size
+                {t("bookingList.filter.pageSize", undefined, locale)}
                 <select
                   defaultValue={String(query.pageSize)}
                   name="pageSize"
@@ -1139,10 +1338,10 @@ export default async function BookingsPage({
 
             <div style={actionRowStyle}>
               <button type="submit" style={actionLinkStyle("primary")}>
-                Apply filters
+                {t("bookingList.filter.apply", undefined, locale)}
               </button>
               <Link href="/bookings" style={actionLinkStyle("secondary")}>
-                Reset
+                {t("bookingList.filter.reset", undefined, locale)}
               </Link>
             </div>
           </form>
@@ -1150,10 +1349,20 @@ export default async function BookingsPage({
 
         <CanvasCard
           theme={theme}
-          title={`Bookings · ${result.items.length} shown / ${result.total} matched`}
-          subtitle={`Page ${result.page} of ${result.totalPages} · snapshot ${formatDateTime(
-            data.refresh.generatedAt,
-          )}`}
+          title={t(
+            "bookingList.table.title",
+            { shown: result.items.length, total: result.total },
+            locale,
+          )}
+          subtitle={t(
+            "bookingList.table.subtitle",
+            {
+              page: result.page,
+              totalPages: result.totalPages,
+              snapshot: formatDateTime(data.refresh.generatedAt, locale),
+            },
+            locale,
+          )}
           padding={0}
         >
           {computedEmptyReason === null ? (
@@ -1175,8 +1384,15 @@ export default async function BookingsPage({
                 }}
               >
                 <span style={secondaryTextStyle}>
-                  API page {data.pageInfo.page} · snapshot size{" "}
-                  {data.pageInfo.pageSize} · total {data.pageInfo.totalItems}
+                  {t(
+                    "bookingList.footer.apiPage",
+                    {
+                      page: data.pageInfo.page,
+                      pageSize: data.pageInfo.pageSize,
+                      total: data.pageInfo.totalItems,
+                    },
+                    locale,
+                  )}
                 </span>
                 <div style={actionRowStyle}>
                   {result.page > 1
@@ -1184,7 +1400,11 @@ export default async function BookingsPage({
                         href: `/bookings?${buildBookingListQueryString(query, {
                           page: result.page - 1,
                         })}`,
-                        label: "上一頁",
+                        label: t(
+                          "bookingList.pagination.previous",
+                          undefined,
+                          locale,
+                        ),
                       })
                     : null}
                   {result.page < result.totalPages
@@ -1192,7 +1412,11 @@ export default async function BookingsPage({
                         href: `/bookings?${buildBookingListQueryString(query, {
                           page: result.page + 1,
                         })}`,
-                        label: "下一頁",
+                        label: t(
+                          "bookingList.pagination.next",
+                          undefined,
+                          locale,
+                        ),
                       })
                     : null}
                 </div>
@@ -1212,6 +1436,7 @@ export default async function BookingsPage({
                     href: emptyState.nextAction.href,
                     label: getActionLabel(
                       emptyState.nextAction.descriptor.action,
+                      locale,
                     ),
                     variant:
                       emptyState.nextAction.descriptor.action ===

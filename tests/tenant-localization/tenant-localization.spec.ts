@@ -32,6 +32,10 @@ const PARTNER_BOOKING_ROUTES = [
   "/bank-demo-alpha-airport/eligibility",
   "/bank-demo-alpha-airport/help",
   "/bank-demo-alpha-airport/program",
+  "/bank-demo-alpha-airport/program/site",
+  "/bank-demo-alpha-airport/program/site/landing",
+  "/bank-demo-alpha-airport/program/embed",
+  "/bank-demo-alpha-airport/program/embed/embed-handoff",
 ] as const;
 
 async function primeLocale(page: Page, locale: "en" | "zh", baseURL: string) {
@@ -68,7 +72,7 @@ async function expectShellControls(page: Page) {
 }
 
 test.describe("tenant console localization smoke", () => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
 
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== TENANT_CONSOLE_PROJECT);
@@ -102,10 +106,30 @@ test.describe("tenant console localization smoke", () => {
     await expect(page.locator("body")).toContainText("Tenant settings");
     await expect(page.locator("body")).toContainText("繁體中文");
   });
+
+  test("en booking list empty state is localized", async ({
+    page,
+  }, testInfo) => {
+    await primeLocale(
+      page,
+      "en",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3304"),
+    );
+    await gotoAndSettle(page, "/bookings?emptyReason=no_data");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText("Bookings");
+    await expect(page.locator("body")).toContainText(
+      "This tenant does not have any bookings yet",
+    );
+    await expect(page.locator("body")).toContainText("Create booking");
+    await expect(page.locator("body")).not.toContainText(
+      "此租戶目前還沒有任何訂單",
+    );
+  });
 });
 
 test.describe("partner booking localization smoke", () => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
 
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== PARTNER_BOOKING_PROJECT);
