@@ -986,6 +986,7 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.ops_console }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.bank_console }}" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc/program" >/dev/null
 
       - name: Print dev URLs
