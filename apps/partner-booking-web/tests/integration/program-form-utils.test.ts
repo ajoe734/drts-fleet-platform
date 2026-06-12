@@ -3,7 +3,9 @@ import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import {
   createDefaultPartnerBookingDraft,
   getPartnerBookingFieldErrors,
+  getPartnerProgramCoverage,
   getPartnerProgramGate,
+  getPartnerProgramLabel,
   isPartnerBookingDraftReady,
 } from "@/lib/partner-booking-form";
 
@@ -37,6 +39,30 @@ describe("partner booking program form utilities", () => {
 
     expect(gate.state).toBe("blocked");
     expect(gate.actionHref).toBe("/ctbc/eligibility");
+  });
+
+  it("localizes program labels, coverage, gates, and validation errors", () => {
+    const draft = createDefaultPartnerBookingDraft();
+    const gate = getPartnerProgramGate({
+      entry: makeEntry(),
+      draft,
+      eligibilityVerificationId: null,
+      locale: "en",
+    });
+    const errors = getPartnerBookingFieldErrors({
+      draft,
+      subtype: "credit_card_airport_transfer",
+      locale: "en",
+    });
+
+    expect(getPartnerProgramLabel("credit_card_airport_transfer", "en")).toBe(
+      "Credit-card airport transfer",
+    );
+    expect(getPartnerProgramCoverage("travel_agency_transfer", "zh")).toContain(
+      "團體",
+    );
+    expect(gate.message).toContain("verified eligibility");
+    expect(errors.pickupAddress).toBe("Pickup address is required.");
   });
 
   it("requires claim, policy, claimant, and replacement-vehicle coverage fields for insurance replacement", () => {

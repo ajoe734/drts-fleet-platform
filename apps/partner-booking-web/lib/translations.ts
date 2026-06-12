@@ -3,6 +3,25 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "app.title": "Partner Booking",
+  "app.description":
+    "White-label partner booking surface. Tenant identity is selected via the tenant slug route segment.",
+  "root.eyebrow": "Partner Booking · White Label",
+  "root.title": "Pick a tenant slug to enter the partner booking funnel.",
+  "root.description":
+    "This app is white-label by construction. Every functional surface lives under /[tenantSlug]/...; the root path only exists to direct internal traffic to a tenant entry point during bring-up.",
+  "root.knownTenants": "Known reference tenants",
+  "root.openTenant": "Open /{slug}",
+  "shell.brand": "Partner Booking",
+  "shell.hotline": "Hotline",
+  "shell.language.en": "English",
+  "shell.language.zh": "繁體中文",
+  "shell.language.switch": "Switch language",
+  "shell.health.checking": "API checking",
+  "shell.health.healthy": "API healthy",
+  "shell.health.degraded": "API degraded",
+  "shell.health.down": "API down",
+  "shell.health.lastChecked": "last checked",
   "book.title": "Program booking form",
   "book.subtitle":
     "Shared trip details stay consistent while each partner program enforces its own intake rules.",
@@ -48,6 +67,18 @@ const en = {
   "book.travel.batch.secondary": "Leg 2 · hotel shuttle",
   "book.travel.batch.vehicle": "Vehicle plan",
   "book.travel.batch.seats": "Seat allocation",
+  "book.travel.vehicle.mediumBus": "Medium bus x{count}",
+  "book.travel.vehicle.businessCar": "Business car x{count}",
+  "book.travel.seats.fraction": "{used} / {total} seats",
+  "book.travel.seats.total": "{count} seats",
+  "book.travel.stop.meetingPending": "Meeting point pending",
+  "book.travel.stop.dropoffPending": "Drop-off pending",
+  "book.travel.stop.hotelPending": "Hotel pending",
+  "book.travel.stop.followupShuttle": "Follow-up shuttle",
+  "trips.title": "My trips",
+  "trips.subtitle": "This year · {count} included rides",
+  "trips.year": "{year}",
+  "trips.remaining": "{total} remaining",
   "book.program.credit_card_airport_transfer": "Credit-card airport transfer",
   "book.program.insurance_replacement_vehicle": "Insurance replacement vehicle",
   "book.program.travel_agency_transfer": "Travel agency transfer",
@@ -194,6 +225,24 @@ const en = {
 } as const;
 
 const zh = {
+  "app.title": "合作入口叫車",
+  "app.description": "白牌合作叫車入口。租戶身分由 tenant slug 路由決定。",
+  "root.eyebrow": "合作入口叫車 · White Label",
+  "root.title": "選擇租戶 slug 進入合作叫車流程。",
+  "root.description":
+    "此 app 以白牌架構建立。所有功能頁都位於 /[tenantSlug]/...；根路徑只用於 bring-up 期間導向內部驗收入口。",
+  "root.knownTenants": "已知參考租戶",
+  "root.openTenant": "開啟 /{slug}",
+  "shell.brand": "合作入口叫車",
+  "shell.hotline": "客服專線",
+  "shell.language.en": "English",
+  "shell.language.zh": "繁體中文",
+  "shell.language.switch": "切換語系",
+  "shell.health.checking": "API 檢查中",
+  "shell.health.healthy": "API 正常",
+  "shell.health.degraded": "API 降級",
+  "shell.health.down": "API 中斷",
+  "shell.health.lastChecked": "最近檢查",
   "book.title": "專案下單表單",
   "book.subtitle":
     "共用行程欄位保持一致，但每個 partner program 仍套用自己的收單規則。",
@@ -238,6 +287,18 @@ const zh = {
   "book.travel.batch.secondary": "第 2 批 · 飯店接駁",
   "book.travel.batch.vehicle": "車型規劃",
   "book.travel.batch.seats": "席次配置",
+  "book.travel.vehicle.mediumBus": "中型巴士 ×{count}",
+  "book.travel.vehicle.businessCar": "商務車 ×{count}",
+  "book.travel.seats.fraction": "{used} / {total} 席",
+  "book.travel.seats.total": "{count} 席",
+  "book.travel.stop.meetingPending": "集合點待補",
+  "book.travel.stop.dropoffPending": "下車點待補",
+  "book.travel.stop.hotelPending": "飯店待補",
+  "book.travel.stop.followupShuttle": "後續行程接駁",
+  "trips.title": "我的行程",
+  "trips.subtitle": "本年度 · 共 {count} 趟",
+  "trips.year": "{year} 年度",
+  "trips.remaining": "{total} 剩餘",
   "book.program.credit_card_airport_transfer": "信用卡機場接送",
   "book.program.insurance_replacement_vehicle": "保險理賠代步",
   "book.program.travel_agency_transfer": "旅行社團體接送",
@@ -374,11 +435,13 @@ export const translations = { en, zh } as const;
 export type TranslationKey = keyof typeof en;
 
 export function t(
-  key: TranslationKey,
+  key: TranslationKey | string,
   params?: Params,
   locale: Locale = "zh",
 ): string {
-  const template = String(translations[locale][key] ?? translations.zh[key]);
+  const scoped = translations[locale] as Record<string, string>;
+  const fallback = translations.zh as Record<string, string>;
+  const template = String(scoped[key] ?? fallback[key] ?? key);
   if (!params) {
     return template;
   }

@@ -13,6 +13,8 @@ import {
   PartnerAuthorityError,
   getPartnerRouteContext,
 } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 const baseTheme = buildCanvasTheme({
   surface: "partner",
@@ -37,6 +39,7 @@ type TripRow = {
   tone: Extract<CanvasTone, "neutral" | "success">;
   cost: string;
   benefit: string;
+  complimentary: boolean;
 };
 
 function buildPartnerTheme(brand: PartnerBrandTemplate): CanvasTheme {
@@ -63,7 +66,57 @@ function buildPartnerTheme(brand: PartnerBrandTemplate): CanvasTheme {
   };
 }
 
-function buildTrips(): readonly TripRow[] {
+function buildTrips(locale: Locale): readonly TripRow[] {
+  if (locale === "en") {
+    return [
+      {
+        when: "Today 14:30",
+        route: "Taipei Xinyi -> Taoyuan T2",
+        status: "Assigned",
+        tone: "success",
+        cost: "Included",
+        benefit: "Benefit #4",
+        complimentary: true,
+      },
+      {
+        when: "Yesterday 09:12",
+        route: "Taipei Main Station -> Neihu Tech Park",
+        status: "Completed",
+        tone: "neutral",
+        cost: "NT$ 0",
+        benefit: "Benefit #3",
+        complimentary: true,
+      },
+      {
+        when: "5/2 18:45",
+        route: "Taipei 101 -> Songshan Airport",
+        status: "Completed",
+        tone: "neutral",
+        cost: "NT$ 0",
+        benefit: "Benefit #2",
+        complimentary: true,
+      },
+      {
+        when: "4/28 07:30",
+        route: "Yangmingshan -> Taoyuan T1",
+        status: "Completed",
+        tone: "neutral",
+        cost: "NT$ 240",
+        benefit: "20% off after quota",
+        complimentary: false,
+      },
+      {
+        when: "4/14 22:10",
+        route: "Nangang Exhibition Center -> Neihu",
+        status: "Completed",
+        tone: "neutral",
+        cost: "NT$ 0",
+        benefit: "Benefit #1",
+        complimentary: true,
+      },
+    ] as const;
+  }
+
   return [
     {
       when: "今天 14:30",
@@ -72,6 +125,7 @@ function buildTrips(): readonly TripRow[] {
       tone: "success",
       cost: "免費",
       benefit: "禮遇 #4",
+      complimentary: true,
     },
     {
       when: "昨天 09:12",
@@ -80,6 +134,7 @@ function buildTrips(): readonly TripRow[] {
       tone: "neutral",
       cost: "NT$ 0",
       benefit: "禮遇 #3",
+      complimentary: true,
     },
     {
       when: "5/2 18:45",
@@ -88,6 +143,7 @@ function buildTrips(): readonly TripRow[] {
       tone: "neutral",
       cost: "NT$ 0",
       benefit: "禮遇 #2",
+      complimentary: true,
     },
     {
       when: "4/28 07:30",
@@ -96,6 +152,7 @@ function buildTrips(): readonly TripRow[] {
       tone: "neutral",
       cost: "NT$ 240",
       benefit: "額度後 8 折",
+      complimentary: false,
     },
     {
       when: "4/14 22:10",
@@ -104,6 +161,7 @@ function buildTrips(): readonly TripRow[] {
       tone: "neutral",
       cost: "NT$ 0",
       benefit: "禮遇 #1",
+      complimentary: true,
     },
   ] as const;
 }
@@ -114,23 +172,22 @@ type PageProps = {
 
 export default async function PartnerTripsPage({ params }: PageProps) {
   const { tenantSlug } = await params;
+  const locale = await getServerLocale();
   try {
     const { brand } = await getPartnerRouteContext(tenantSlug);
     const theme = buildPartnerTheme(brand);
-    const trips = buildTrips();
+    const trips = buildTrips(locale);
     const remainingBenefits = 9;
     const totalBenefits = 12;
     const benefitYear = new Date().getUTCFullYear();
-    const complimentaryTrips = trips.filter((trip) =>
-      trip.benefit.startsWith("禮遇"),
-    ).length;
+    const complimentaryTrips = trips.filter((trip) => trip.complimentary).length;
 
     return (
       <div>
         <CanvasPageHeader
           theme={theme}
-          title="我的行程"
-          subtitle={`本年度 · 共 ${complimentaryTrips} 趟`}
+          title={t("trips.title", undefined, locale)}
+          subtitle={t("trips.subtitle", { count: complimentaryTrips }, locale)}
           sticky={false}
           style={{
             padding: "0 0 18px",
@@ -163,7 +220,7 @@ export default async function PartnerTripsPage({ params }: PageProps) {
                     letterSpacing: "0.08em",
                   }}
                 >
-                  {benefitYear} 年度
+                  {t("trips.year", { year: benefitYear }, locale)}
                 </span>
                 <span
                   style={{
@@ -174,7 +231,7 @@ export default async function PartnerTripsPage({ params }: PageProps) {
                   }}
                 >
                   <b style={{ fontSize: 22 }}>{remainingBenefits}</b> /{" "}
-                  {totalBenefits} 剩餘
+                  {t("trips.remaining", { total: totalBenefits }, locale)}
                 </span>
               </div>
 

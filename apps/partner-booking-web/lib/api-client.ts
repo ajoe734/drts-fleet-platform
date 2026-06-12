@@ -16,11 +16,9 @@ import {
   type PartnerBrandTemplate,
   PARTNER_DEFAULT_THEME,
 } from "@drts/ui-tokens";
+import { getServerApiBaseUrl } from "./runtime-config";
 
-export const API_URL =
-  process.env.DRTS_API_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "http://localhost:3001";
+export const API_URL = getServerApiBaseUrl();
 
 type ApiErrorEnvelope = {
   error?: {
