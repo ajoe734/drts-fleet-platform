@@ -12,7 +12,9 @@ type PageProps = {
 export default async function PartnerLandingPage({ params }: PageProps) {
   const { tenantSlug } = await params;
   try {
-    const { brand } = await getPartnerRouteContext(tenantSlug);
+    const { brand } = await getPartnerRouteContext(tenantSlug, {
+      allowMissing: true,
+    });
     return (
       <PartnerBookingReferenceFunnel
         brand={brand}

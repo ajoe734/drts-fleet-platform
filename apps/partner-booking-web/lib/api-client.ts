@@ -251,6 +251,7 @@ export async function getPartnerRouteContext(
   tenantSlug: string,
   options?: {
     allowInactive?: boolean;
+    allowMissing?: boolean;
   },
 ): Promise<PartnerRouteContext> {
   try {
@@ -263,10 +264,9 @@ export async function getPartnerRouteContext(
   } catch (error) {
     const canUseFallbackShell =
       error instanceof PartnerAuthorityError &&
-      options?.allowInactive &&
-      ["PARTNER_ENTRY_INACTIVE", "PARTNER_ENTRY_NOT_FOUND"].includes(
-        error.code,
-      );
+      ((error.code === "PARTNER_ENTRY_INACTIVE" && options?.allowInactive) ||
+        (error.code === "PARTNER_ENTRY_NOT_FOUND" &&
+          (options?.allowInactive || options?.allowMissing)));
 
     if (canUseFallbackShell) {
       return {
