@@ -5,6 +5,27 @@ const en = {
   "app.description": "Tenant administration workspace for DRTS Phase 1.",
   "shell.breadcrumb.home": "Home",
   "shell.search": "Search bookings, passengers, statements, reports...",
+  "shell.brand.sub": "TENANT CONSOLE",
+  "shell.context": "YAMATO Business Group",
+  "shell.env": "production",
+  "shell.identity.actor": "Yamato",
+  "shell.language.en": "English",
+  "shell.language.zh": "繁體中文",
+  "shell.language.switch": "Switch language",
+  "shell.health.notChecked": "not checked",
+  "shell.health.checking": "API checking",
+  "shell.health.healthy": "API healthy",
+  "shell.health.degraded": "API degraded",
+  "shell.health.down": "API down",
+  "shell.health.lastChecked": "last checked",
+  "shell.nav.aria": "Tenant Console navigation",
+  "shell.nav.workspace": "Workspace",
+  "shell.nav.directory": "Directory",
+  "shell.nav.access": "Access",
+  "shell.nav.notifications": "Notifications & SLA",
+  "shell.nav.finance": "Finance & governance",
+  "shell.nav.integration": "Integration",
+  "shell.nav.system": "System",
 
   "nav.home": "Home",
   "nav.bookings": "Bookings",
@@ -131,6 +152,27 @@ const zh: Record<keyof typeof en, string> = {
   "app.description": "DRTS Phase 1 租戶管理工作台。",
   "shell.breadcrumb.home": "首頁",
   "shell.search": "搜尋叫車、乘客、對帳單、報表…",
+  "shell.brand.sub": "租戶後台",
+  "shell.context": "YAMATO 大和商務集團",
+  "shell.env": "production",
+  "shell.identity.actor": "大和",
+  "shell.language.en": "English",
+  "shell.language.zh": "繁體中文",
+  "shell.language.switch": "切換語系",
+  "shell.health.notChecked": "尚未檢查",
+  "shell.health.checking": "API 檢查中",
+  "shell.health.healthy": "API 正常",
+  "shell.health.degraded": "API 降級",
+  "shell.health.down": "API 中斷",
+  "shell.health.lastChecked": "最近檢查",
+  "shell.nav.aria": "租戶後台導覽",
+  "shell.nav.workspace": "工作面",
+  "shell.nav.directory": "資料維護",
+  "shell.nav.access": "帳號與權限",
+  "shell.nav.notifications": "通知與 SLA",
+  "shell.nav.finance": "帳務與治理",
+  "shell.nav.integration": "整合",
+  "shell.nav.system": "系統",
 
   "nav.home": "首頁",
   "nav.bookings": "訂單",
@@ -251,11 +293,13 @@ export const translations = { en, zh } as const;
 export type TranslationKey = keyof typeof en;
 
 export function t(
-  key: TranslationKey,
+  key: TranslationKey | string,
   locale: Locale = "zh",
   params?: Record<string, string | number>,
 ): string {
-  const template = translations[locale][key] ?? en[key];
+  const scoped = translations[locale] as Record<string, string>;
+  const fallback = en as Record<string, string>;
+  const template = scoped[key] ?? fallback[key] ?? key;
   if (!params) {
     return template;
   }

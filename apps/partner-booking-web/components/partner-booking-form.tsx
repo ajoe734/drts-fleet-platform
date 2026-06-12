@@ -20,7 +20,7 @@ import {
   getPartnerProgramLabel,
   isPartnerBookingDraftReady,
 } from "@/lib/partner-booking-form";
-import { t } from "@/lib/translations";
+import { useTranslation } from "@/lib/i18n";
 
 const baseTheme = buildCanvasTheme({
   surface: "partner",
@@ -152,6 +152,7 @@ export function PartnerBookingForm({
   >;
   eligibilityVerificationId: string | null;
 }) {
+  const { locale, t } = useTranslation();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(createDefaultPartnerBookingDraft);
   const [submitted, setSubmitted] = useState(false);
@@ -159,16 +160,19 @@ export function PartnerBookingForm({
   const errors = getPartnerBookingFieldErrors({
     draft,
     subtype: entry.businessDispatchSubtype,
+    locale,
   });
   const gate = getPartnerProgramGate({
     entry,
     draft,
     eligibilityVerificationId,
+    locale,
   });
   const ready = isPartnerBookingDraftReady({
     entry,
     draft,
     eligibilityVerificationId,
+    locale,
   });
 
   function updateField(name: string, value: string) {
@@ -240,8 +244,14 @@ export function PartnerBookingForm({
     setSubmitted(true);
   }
 
-  const programLabel = getPartnerProgramLabel(entry.businessDispatchSubtype);
-  const coverage = getPartnerProgramCoverage(entry.businessDispatchSubtype);
+  const programLabel = getPartnerProgramLabel(
+    entry.businessDispatchSubtype,
+    locale,
+  );
+  const coverage = getPartnerProgramCoverage(
+    entry.businessDispatchSubtype,
+    locale,
+  );
   const travelRosterPreview = draft.rosterPassengers
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -256,21 +266,30 @@ export function PartnerBookingForm({
             time: draft.reservationWindowStart || "—",
             vehicle:
               Number.parseInt(draft.groupSize, 10) > 8
-                ? "中型巴士 ×1"
-                : "商務車 ×2",
-            seats: `${travelSeatCount} / ${travelSeatCount} 席`,
-            stop: `${draft.meetingPoint || draft.pickupAddress || "集合點待補"} → ${
-              draft.dropoffAddress || "下車點待補"
-            }`,
+                ? t("book.travel.vehicle.mediumBus", { count: 1 })
+                : t("book.travel.vehicle.businessCar", { count: 2 }),
+            seats: t("book.travel.seats.fraction", {
+              used: travelSeatCount,
+              total: travelSeatCount,
+            }),
+            stop: `${
+              draft.meetingPoint ||
+              draft.pickupAddress ||
+              t("book.travel.stop.meetingPending")
+            } → ${draft.dropoffAddress || t("book.travel.stop.dropoffPending")}`,
           },
           {
             title: t("book.travel.batch.secondary"),
             time: draft.reservationWindowEnd || "—",
             vehicle: draft.luggageCount
-              ? `商務車 ×${draft.luggageCount}`
-              : "商務車 ×2",
-            seats: `${travelSeatCount} 席`,
-            stop: `${draft.dropoffAddress || "飯店待補"} → ${draft.notes || "後續行程接駁"}`,
+              ? t("book.travel.vehicle.businessCar", {
+                  count: draft.luggageCount,
+                })
+              : t("book.travel.vehicle.businessCar", { count: 2 }),
+            seats: t("book.travel.seats.total", { count: travelSeatCount }),
+            stop: `${draft.dropoffAddress || t("book.travel.stop.hotelPending")} → ${
+              draft.notes || t("book.travel.stop.followupShuttle")
+            }`,
           },
         ]
       : [];
@@ -377,7 +396,7 @@ export function PartnerBookingForm({
                   {t("book.travel.badge")}
                 </CanvasPill>
                 <strong style={{ color: theme.text }}>
-                  {travelSeatCount} 席
+                  {t("book.travel.seats.total", { count: travelSeatCount })}
                 </strong>
               </div>
               <div style={fieldStyle}>

@@ -4,6 +4,7 @@ import {
   PartnerAuthorityError,
   getPartnerRouteContext,
 } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
@@ -11,6 +12,7 @@ type PageProps = {
 
 export default async function PartnerHelpPage({ params }: PageProps) {
   const { tenantSlug } = await params;
+  const locale = await getServerLocale();
   try {
     const { brand } = await getPartnerRouteContext(tenantSlug, {
       allowMissing: true,
@@ -20,6 +22,7 @@ export default async function PartnerHelpPage({ params }: PageProps) {
         brand={brand}
         activeScreen="help"
         basePath={`/${tenantSlug}`}
+        locale={locale}
       />
     );
   } catch (error) {

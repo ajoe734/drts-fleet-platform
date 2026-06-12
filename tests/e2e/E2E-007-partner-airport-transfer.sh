@@ -74,8 +74,8 @@ save_evidence "$SCENARIO" "partner" "partnerId" "$ENTRY_PARTNER_ID"
 save_evidence "$SCENARIO" "partner" "partnerProgramId" "$ENTRY_PROGRAM_ID"
 log_ok "Partner entry resolved: tenantId=${ENTRY_TENANT_ID}, partnerId=${ENTRY_PARTNER_ID}, programId=${ENTRY_PROGRAM_ID}, eligibilityMode=${ENTRY_ELIGIBILITY_MODE}"
 
-set_partner_context "$ENTRY_PARTNER_ID" "$ENTRY_PROGRAM_ID" "$PARTNER_ENTRY_SLUG"
 switch_actor "partner_api_key" "e2e-partner-${PARTNER_ENTRY_SLUG}" "$ENTRY_TENANT_ID"
+set_partner_context "$ENTRY_PARTNER_ID" "$ENTRY_PROGRAM_ID" "$PARTNER_ENTRY_SLUG"
 
 VERIFY_FIXTURE=$(mktemp /tmp/drts-e2e-007-eligibility-XXXXXX.json)
 trap 'rm -f "$VERIFY_FIXTURE"' EXIT

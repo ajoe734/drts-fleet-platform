@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 import { getPartnerChromeVars, type PartnerBrand } from "@/lib/brand";
+import {
+  LocalizedText,
+  PartnerShellControls,
+} from "@/components/shell/partner-shell-controls";
 
 type TenantShellProps = {
   brand: PartnerBrand;
@@ -9,10 +13,10 @@ type TenantShellProps = {
 export function TenantShell({ brand, children }: TenantShellProps) {
   return (
     <div
-      className="min-h-screen bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
+      className="min-h-dvh bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
       style={getPartnerChromeVars(brand)}
     >
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12">
+      <div className="mx-auto box-border flex min-h-dvh max-w-3xl flex-col gap-8 px-6 py-12">
         <header
           className="flex flex-col gap-2 rounded-xl border px-5 py-4"
           style={{
@@ -21,9 +25,15 @@ export function TenantShell({ brand, children }: TenantShellProps) {
             color: brand.surface.fg,
           }}
         >
-          <span className="text-xs font-semibold uppercase tracking-[0.2em]">
-            合作預約
-          </span>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-[0.2em]">
+              <LocalizedText
+                labelKey="shell.brand"
+                fallback="Partner Booking"
+              />
+            </span>
+            <PartnerShellControls />
+          </div>
           <strong className="text-lg">{brand.displayName}</strong>
           <div className="mt-3 flex flex-wrap items-start gap-3 text-xs text-[color:inherit]">
             <div
@@ -55,7 +65,11 @@ export function TenantShell({ brand, children }: TenantShellProps) {
             </div>
 
             <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-xl border border-current/10 bg-white/55 px-3 py-3">
-              <span className="font-semibold">{brand.hotline.label}</span>
+              <span className="font-semibold">
+                {brand.hotline.label || (
+                  <LocalizedText labelKey="shell.hotline" fallback="Hotline" />
+                )}
+              </span>
               <span className="font-mono text-sm">{brand.hotline.phone}</span>
               <span className="text-[11px] opacity-80">
                 {brand.hotline.note}

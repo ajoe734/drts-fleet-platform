@@ -1,12 +1,12 @@
 import type { CanvasTone } from "@drts/ui-web";
-import { t } from "@/lib/translations";
+import { t as defaultTranslate } from "@/lib/translations";
 
 export const TENANT_CONSOLE_BRAND = "DRTS";
-export const TENANT_CONSOLE_BRAND_SUB = "TENANT CONSOLE";
-export const TENANT_CONSOLE_CONTEXT = "YAMATO 大和商務集團";
-export const TENANT_CONSOLE_ENV = "production";
+export const TENANT_CONSOLE_ENV =
+  process.env.NEXT_PUBLIC_TENANT_CONSOLE_ENV ?? "production";
 export const TENANT_CONSOLE_VERSION = "v0.1.0";
-export const TENANT_CONSOLE_SEARCH_PLACEHOLDER = t("shell.search");
+
+type Translate = (key: string) => string;
 
 type TenantNavIcon =
   | "home"
@@ -41,135 +41,135 @@ export type TenantNavItem = {
 
 export type TenantNavEntry = TenantNavDivider | TenantNavItem;
 
-export const tenantNavEntries: TenantNavEntry[] = [
-  { divider: "工作面" },
-  { key: "home", href: "/", icon: "home", label: t("nav.home") },
-  {
-    key: "bookings",
-    href: "/bookings",
-    icon: "bookings",
-    label: t("nav.bookings"),
-    badge: "5",
-    badgeTone: "accent",
-    matchPaths: ["/bookings"],
-  },
-  {
-    key: "newbooking",
-    href: "/bookings/new",
-    icon: "plus",
-    label: t("nav.newBooking"),
-  },
-  { divider: "資料維護" },
-  {
-    key: "passengers",
-    href: "/passengers",
-    icon: "passengers",
-    label: t("nav.passengers"),
-  },
-  {
-    key: "addresses",
-    href: "/addresses",
-    icon: "addresses",
-    label: t("nav.addresses"),
-  },
-  {
-    key: "costcenter",
-    href: "/cost-centers",
-    icon: "billing",
-    label: t("nav.costCenters"),
-  },
-  {
-    key: "rules",
-    href: "/rules",
-    icon: "flags",
-    label: t("nav.rules"),
-  },
-  { divider: "帳號與權限" },
-  {
-    key: "users",
-    href: "/users",
-    icon: "users",
-    label: t("nav.users"),
-  },
-  { divider: "通知與 SLA" },
-  {
-    key: "notifications",
-    href: "/notifications",
-    icon: "bell",
-    label: t("nav.notifications"),
-  },
-  {
-    key: "sla",
-    href: "/sla",
-    icon: "sla",
-    label: t("nav.sla"),
-  },
-  { divider: "帳務與治理" },
-  {
-    key: "billing",
-    href: "/billing",
-    icon: "billing",
-    label: t("nav.billing"),
-  },
-  {
-    key: "invoices",
-    href: "/invoices",
-    icon: "billing",
-    label: t("nav.invoices"),
-  },
-  {
-    key: "reports",
-    href: "/reports",
-    icon: "reports",
-    label: t("nav.reports"),
-  },
-  { divider: "整合" },
-  {
-    key: "apikeys",
-    href: "/api-keys",
-    icon: "apiKeys",
-    label: t("nav.apiKeys"),
-  },
-  {
-    key: "webhooks",
-    href: "/webhooks",
-    icon: "webhooks",
-    label: t("nav.webhooks"),
-  },
-  {
-    key: "integration-governance",
-    href: "/integration-governance",
-    icon: "integrationGov",
-    label: t("nav.integrationGovernance"),
-  },
-  { divider: "系統" },
-  {
-    key: "featureflags",
-    href: "/feature-flags",
-    icon: "flags",
-    label: t("nav.featureFlags"),
-  },
-  {
-    key: "settings",
-    href: "/settings",
-    icon: "flags",
-    label: t("nav.settings"),
-  },
-  {
-    key: "audit",
-    href: "/audit",
-    icon: "audit",
-    label: t("nav.audit"),
-  },
-];
+export function createTenantNavEntries(t: Translate): TenantNavEntry[] {
+  return [
+    { divider: t("shell.nav.workspace") },
+    { key: "home", href: "/", icon: "home", label: t("nav.home") },
+    {
+      key: "bookings",
+      href: "/bookings",
+      icon: "bookings",
+      label: t("nav.bookings"),
+      badge: "5",
+      badgeTone: "accent",
+      matchPaths: ["/bookings"],
+    },
+    {
+      key: "newbooking",
+      href: "/bookings/new",
+      icon: "plus",
+      label: t("nav.newBooking"),
+    },
+    { divider: t("shell.nav.directory") },
+    {
+      key: "passengers",
+      href: "/passengers",
+      icon: "passengers",
+      label: t("nav.passengers"),
+    },
+    {
+      key: "addresses",
+      href: "/addresses",
+      icon: "addresses",
+      label: t("nav.addresses"),
+    },
+    {
+      key: "costcenter",
+      href: "/cost-centers",
+      icon: "billing",
+      label: t("nav.costCenters"),
+    },
+    {
+      key: "rules",
+      href: "/rules",
+      icon: "flags",
+      label: t("nav.rules"),
+    },
+    { divider: t("shell.nav.access") },
+    {
+      key: "users",
+      href: "/users",
+      icon: "users",
+      label: t("nav.users"),
+    },
+    { divider: t("shell.nav.notifications") },
+    {
+      key: "notifications",
+      href: "/notifications",
+      icon: "bell",
+      label: t("nav.notifications"),
+    },
+    {
+      key: "sla",
+      href: "/sla",
+      icon: "sla",
+      label: t("nav.sla"),
+    },
+    { divider: t("shell.nav.finance") },
+    {
+      key: "billing",
+      href: "/billing",
+      icon: "billing",
+      label: t("nav.billing"),
+    },
+    {
+      key: "invoices",
+      href: "/invoices",
+      icon: "billing",
+      label: t("nav.invoices"),
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: t("nav.reports"),
+    },
+    { divider: t("shell.nav.integration") },
+    {
+      key: "apikeys",
+      href: "/api-keys",
+      icon: "apiKeys",
+      label: t("nav.apiKeys"),
+    },
+    {
+      key: "webhooks",
+      href: "/webhooks",
+      icon: "webhooks",
+      label: t("nav.webhooks"),
+    },
+    {
+      key: "integration-governance",
+      href: "/integration-governance",
+      icon: "integrationGov",
+      label: t("nav.integrationGovernance"),
+    },
+    { divider: t("shell.nav.system") },
+    {
+      key: "featureflags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: t("nav.featureFlags"),
+    },
+    {
+      key: "settings",
+      href: "/settings",
+      icon: "flags",
+      label: t("nav.settings"),
+    },
+    {
+      key: "audit",
+      href: "/audit",
+      icon: "audit",
+      label: t("nav.audit"),
+    },
+  ];
+}
+
+export const tenantNavEntries = createTenantNavEntries(defaultTranslate);
 
 export const tenantNavItems = tenantNavEntries.filter(
   (entry): entry is TenantNavItem => "href" in entry,
 );
-
-const tenantNavItemsBySpecificity = [...tenantNavItems].sort((left, right) => {
-  return right.href.length - left.href.length;
-});
 
 export function isNavItemActive(pathname: string, item: TenantNavItem) {
   const matches = [item.href, ...(item.matchPaths ?? [])];
@@ -178,12 +178,22 @@ export function isNavItemActive(pathname: string, item: TenantNavItem) {
   );
 }
 
-export function findNavItem(pathname: string) {
-  for (const item of tenantNavItemsBySpecificity) {
+export function findNavItem(
+  pathname: string,
+  entries: TenantNavEntry[] = tenantNavEntries,
+) {
+  const items = entries.filter(
+    (entry): entry is TenantNavItem => "href" in entry,
+  );
+  const itemsBySpecificity = [...items].sort((left, right) => {
+    return right.href.length - left.href.length;
+  });
+
+  for (const item of itemsBySpecificity) {
     if (isNavItemActive(pathname, item)) {
       return item;
     }
   }
 
-  return tenantNavItems[0] ?? null;
+  return items[0] ?? null;
 }

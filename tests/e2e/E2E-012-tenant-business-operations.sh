@@ -176,17 +176,84 @@ record_optional_report_field() {
   fi
 }
 
+discover_tenant_user_ids() {
+  TENANT_ADMIN_USER_ID=$(echo "$RESP_BODY" | jq -r \
+    '.data.items[] | select(.roleCode == "tenant_admin" and .status == "active") | .userId' \
+    2>/dev/null | head -1 || true)
+  TENANT_FINANCE_USER_ID=$(echo "$RESP_BODY" | jq -r \
+    '.data.items[] | select(.roleCode == "tenant_finance_admin" and .status == "active") | .userId' \
+    2>/dev/null | head -1 || true)
+}
+
+ensure_active_tenant_user() {
+  local role_code="$1"
+  local email="$2"
+  local display_name="$3"
+  local fixture="${TMP_DIR}/tenant-user-${role_code}.json"
+  local role_fixture="${TMP_DIR}/tenant-user-role-${role_code}.json"
+  local user_id
+
+  user_id=$(echo "$RESP_BODY" | jq -r \
+    --arg email "$email" \
+    '.data.items[] | select((.email | ascii_downcase) == ($email | ascii_downcase)) | .userId' \
+    2>/dev/null | head -1 || true)
+
+  if [[ -z "$user_id" ]]; then
+    jq -n \
+      --arg email "$email" \
+      --arg displayName "$display_name" \
+      --arg roleCode "$role_code" \
+      '{email: $email, displayName: $displayName, roleCode: $roleCode}' > "$fixture"
+    http_call POST "/tenant/users" "$fixture"
+    if [[ "$RESP_STATUS" =~ ^(200|201)$ ]]; then
+      user_id=$(json_get_first '.data.userId' '.data.user_id')
+    elif [[ "$RESP_STATUS" == "409" ]]; then
+      http_call GET "/tenant/users"
+      assert_status "200"
+      user_id=$(echo "$RESP_BODY" | jq -r \
+        --arg email "$email" \
+        '.data.items[] | select((.email | ascii_downcase) == ($email | ascii_downcase)) | .userId' \
+        2>/dev/null | head -1 || true)
+    else
+      log_fail "Unable to create tenant user ${email}: HTTP ${RESP_STATUS}"
+      log_fail "Body: ${RESP_BODY}"
+      exit 1
+    fi
+  fi
+
+  if [[ -z "$user_id" ]]; then
+    log_fail "Unable to resolve tenant user ${email} after create/check"
+    exit 1
+  fi
+
+  jq -n \
+    --arg roleCode "$role_code" \
+    '{roleCode: $roleCode, status: "active"}' > "$role_fixture"
+  http_call POST "/tenant/users/${user_id}/role" "$role_fixture"
+  assert_status "200|201"
+  log_ok "tenant user ready: ${email} (${role_code})"
+}
+
 log_surface "Tenant login / actor discovery"
 switch_actor "tenant_admin" "e2e-bootstrap-tenant-admin" "$E2E_SEED_TENANT_ID"
 http_call GET "/tenant/users"
 assert_status "200"
 
-TENANT_ADMIN_USER_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.roleCode == "tenant_admin" and .status == "active") | .userId' \
-  2>/dev/null | head -1 || true)
-TENANT_FINANCE_USER_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.roleCode == "tenant_finance_admin" and .status == "active") | .userId' \
-  2>/dev/null | head -1 || true)
+discover_tenant_user_ids
+if [[ -z "$TENANT_ADMIN_USER_ID" ]]; then
+  log_warn "No active tenant_admin user found; bootstrapping an idempotent E2E tenant admin."
+  ensure_active_tenant_user "tenant_admin" "e2e-012-admin@acme.example" "E2E 012 Tenant Admin"
+  http_call GET "/tenant/users"
+  assert_status "200"
+  discover_tenant_user_ids
+fi
+if [[ -z "$TENANT_FINANCE_USER_ID" ]]; then
+  log_warn "No active tenant_finance_admin user found; bootstrapping an idempotent E2E finance admin."
+  ensure_active_tenant_user "tenant_finance_admin" "e2e-012-finance@acme.example" "E2E 012 Tenant Finance"
+  http_call GET "/tenant/users"
+  assert_status "200"
+  discover_tenant_user_ids
+fi
 
 [[ -n "$TENANT_ADMIN_USER_ID" ]] || { log_fail "No active tenant_admin user found"; exit 1; }
 if [[ -z "$TENANT_FINANCE_USER_ID" ]]; then
