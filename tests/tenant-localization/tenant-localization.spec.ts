@@ -162,7 +162,15 @@ test.describe("partner booking localization smoke", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.locator("body")).toContainText("Pick a tenant slug");
     await expect(page.locator("body")).toContainText("繁體中文");
+    await expect(page.locator("body")).toContainText("Cathay United Bank");
+    await expect(page.locator("body")).toContainText("Taishin Bank");
+    await expect(page.locator("body")).toContainText("DBS Bank");
+    await expect(page.locator("body")).toContainText("Grand Hotel");
     await expect(page.locator("body")).not.toContainText("中信銀行");
+    await expect(page.locator("body")).not.toContainText("國泰世華銀行");
+    await expect(page.locator("body")).not.toContainText("台新銀行");
+    await expect(page.locator("body")).not.toContainText("星展銀行");
+    await expect(page.locator("body")).not.toContainText("凱撒飯店");
     await expect(page.locator("body")).not.toContainText("信用卡機場接送");
   });
 

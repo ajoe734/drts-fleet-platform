@@ -12,6 +12,22 @@ type TenantShellProps = {
   locale?: Locale;
 };
 
+const ENGLISH_BRAND_NAMES = {
+  CTBC: { displayName: "CTBC World Elite", issuerLabel: "CTBC Bank" },
+  CATHAY: {
+    displayName: "Cathay CUBE World",
+    issuerLabel: "Cathay United Bank",
+  },
+  TAISHIN: { displayName: "Taishin Infinite", issuerLabel: "Taishin Bank" },
+  DBS: { displayName: "DBS Insignia", issuerLabel: "DBS Bank" },
+  GRAND: { displayName: "Grand Concierge", issuerLabel: "Grand Hotel" },
+  FUBON: {
+    displayName: "Fubon Claim Mobility",
+    issuerLabel: "Fubon Insurance",
+  },
+  LION: { displayName: "Lion Group Transfer", issuerLabel: "Lion Travel" },
+} as const;
+
 function getBrandDisplay(brand: PartnerBrand, locale: Locale) {
   if (locale === "zh") {
     return {
@@ -24,24 +40,19 @@ function getBrandDisplay(brand: PartnerBrand, locale: Locale) {
     };
   }
 
-  const issuerLabel =
-    brand.code === "CTBC"
-      ? "CTBC Bank"
-      : brand.code === "FUBON"
-        ? "Fubon Insurance"
-        : brand.code === "LION"
-          ? "Lion Travel"
-          : brand.cardArt.issuerLabel;
+  const names = ENGLISH_BRAND_NAMES[brand.code];
   const programLabel =
     brand.code === "FUBON"
       ? "Insurance replacement mobility"
       : brand.code === "LION"
         ? "Travel agency group transfer"
-        : "Credit-card airport transfer";
+        : brand.code === "GRAND"
+          ? "Concierge booking"
+          : "Credit-card airport transfer";
 
   return {
-    displayName: brand.displayName.replace("中信銀行", "CTBC Bank"),
-    issuerLabel,
+    displayName: names.displayName,
+    issuerLabel: names.issuerLabel,
     programLabel,
     networkLabel: brand.cardArt.networkLabel,
     hotlineLabel: "24-hour concierge hotline",

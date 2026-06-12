@@ -8,6 +8,16 @@ import {
 import { getServerLocale } from "@/lib/server-locale";
 import { type Locale, t } from "@/lib/translations";
 
+const ENGLISH_BRAND_NAMES = {
+  CTBC: { bankName: "CTBC Bank", displayName: "CTBC World Elite" },
+  CATHAY: { bankName: "Cathay United Bank", displayName: "Cathay CUBE World" },
+  TAISHIN: { bankName: "Taishin Bank", displayName: "Taishin Infinite" },
+  DBS: { bankName: "DBS Bank", displayName: "DBS Insignia" },
+  GRAND: { bankName: "Grand Hotel", displayName: "Grand Concierge" },
+  FUBON: { bankName: "Fubon Insurance", displayName: "Fubon Claim Mobility" },
+  LION: { bankName: "Lion Travel", displayName: "Lion Group Transfer" },
+} as const;
+
 function getRootBrandDisplay(
   brand: ReturnType<typeof listKnownBrands>[number],
   locale: Locale,
@@ -20,24 +30,19 @@ function getRootBrandDisplay(
     };
   }
 
-  const bankName =
-    brand.code === "CTBC"
-      ? "CTBC Bank"
-      : brand.code === "FUBON"
-        ? "Fubon Insurance"
-        : brand.code === "LION"
-          ? "Lion Travel"
-          : brand.bankName;
+  const names = ENGLISH_BRAND_NAMES[brand.code];
   const programName =
     brand.code === "FUBON"
       ? "Insurance replacement mobility"
       : brand.code === "LION"
         ? "Travel agency group transfer"
-        : "Credit-card airport transfer";
+        : brand.code === "GRAND"
+          ? "Concierge booking"
+          : "Credit-card airport transfer";
 
   return {
-    displayName: brand.displayName.replace("中信銀行", "CTBC Bank"),
-    bankName,
+    displayName: names.displayName,
+    bankName: names.bankName,
     programName,
   };
 }
