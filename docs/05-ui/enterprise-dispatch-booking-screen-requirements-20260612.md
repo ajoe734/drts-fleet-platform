@@ -3,50 +3,55 @@
 **Date:** 2026-06-12
 **Feature:** 企業派車前台重做 umbrella
 **Status:** Design-gap note. **No visual decisions in this document.**
-**Authority for visual design:** `packages/ui-tokens` tenant realm + `docs/05-ui/drts-design-canvas/Tenant Console.html` / `tenant-screens*.jsx`
+**Authority for visual design:** `packages/ui-tokens` + the dedicated Enterprise Dispatch canvas set
+when those artifacts are landed into the shared branch history.
 
 ## 1. Why this note exists
 
-This umbrella requires two enterprise-dispatch surfaces:
+This umbrella requires two Enterprise Dispatch surfaces:
 
 1. an internal enterprise website surface
 2. an enterprise App embedded surface
 
-The internal website already has a canonical visual source: the tenant-console booking flow in
-`docs/05-ui/drts-design-canvas/Tenant Console.html` and `tenant-screens-1.jsx` (`/bookings/new`).
+The dedicated Enterprise Dispatch canvas set is the intended canonical source for both surfaces,
+but those files are not landed in the current shared branch history used by this worktree.
 
-The enterprise App embedded surface does **not** currently have a dedicated canonical canvas in
-`docs/05-ui/drts-design-canvas/`. Under the UI design contract for `ENT-DISP-FE-20260612`, that
-means implementation must **not invent** an embedded layout, chrome, or screen sequence.
+Under the UI design contract for `ENT-DISP-FE-20260612`, that means implementation must **not**
+invent website or embedded layouts, chrome, route structure, or screen sequences beyond the
+already-accepted minimal scaffold.
 
 ## 2. Current canonical coverage
 
-### Covered by existing canvas
+### Intended canonical canvas set
 
-- Enterprise internal website booking create flow
-  - Source: `docs/05-ui/drts-design-canvas/Tenant Console.html`
-  - Source: `docs/05-ui/drts-design-canvas/tenant-screens-1.jsx`
-  - Relevant artboard: `/bookings/new`
+- `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html`
+- `docs/05-ui/drts-design-canvas/ent-kit.jsx`
+- `docs/05-ui/drts-design-canvas/ent-shell.jsx`
+- `docs/05-ui/drts-design-canvas/ent-screens-1.jsx`
+- `docs/05-ui/drts-design-canvas/ent-screens-2.jsx`
+- `docs/05-ui/drts-design-canvas/ent-states.jsx`
+- `docs/05-ui/drts-design-canvas/ent-data.jsx`
 
-### Missing canonical canvas
+### Current landed state in this worktree
 
-- Enterprise App embedded booking entry
-- Enterprise App embedded booking create flow
-- Enterprise App embedded success / handoff / blocked states
+- `apps/enterprise-dispatch-web` exists as a standalone scaffold.
+- The dedicated Enterprise Dispatch canvas files above are not present on this branch baseline.
+- No landed canvas in `docs/05-ui/drts-design-canvas/` should be treated as a substitute visual
+  source for Enterprise Dispatch production screens.
 
 ## 3. Implementation consequence
 
-- `apps/tenant-console-web` may align the internal enterprise website flow to the tenant-console
-  canvas.
-- No repo UI should claim to implement the enterprise App embedded surface until a dedicated design
-  canvas exists.
-- The enterprise embedded lane needs a follow-up design handoff packet or canvas artifact before UI
-  implementation resumes.
+- `apps/enterprise-dispatch-web` may keep only the already-accepted minimal shell/scaffold state
+  until the dedicated Enterprise Dispatch canvas set lands.
+- No repo UI should claim production implementation of the Enterprise Dispatch website or embedded
+  surface until those dedicated design artifacts are reachable from the shared branch history.
+- The embedded lane remains blocked pending the dedicated design handoff/canvas artifacts.
 
 ## 4. Required future design inputs
 
-The missing embedded design should define, at minimum:
+The missing landed design baseline should define, at minimum:
 
+- website navigation model and dispatcher queue composition
 - host app chrome responsibilities vs embedded web chrome
 - identity handoff and session state
 - allowed navigation depth inside the embed
@@ -56,4 +61,5 @@ The missing embedded design should define, at minimum:
 ## 5. Boundary reminder
 
 - Do not reuse `partner-booking-web` bank embed screens for enterprise dispatch.
+- Do not reuse `tenant-console-web` booking screens as the Enterprise Dispatch visual baseline.
 - Do not reuse credit-card airport-transfer fields or issuer identity states in enterprise dispatch.
