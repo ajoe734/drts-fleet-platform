@@ -12,8 +12,8 @@ import {
   type CanvasPillTone,
   type CanvasTheme,
   Pill,
-  Table,
 } from "./canvas-primitives";
+import { Table } from "./canvas-primitives/table";
 
 // Visual verification for DH-DS-TOKEN-SYNC: the Part H badge set, status
 // colors, and table capabilities synced from the design canvas mgmt-tokens.jsx.
@@ -125,9 +125,6 @@ function SelectableTable({ theme }: { theme: CanvasTheme }) {
       <Table
         theme={theme}
         rows={rows}
-        onRowSelect={(row) => {
-          window.alert(`Selected ${row.id}`);
-        }}
         columns={[
           { h: "Event", k: "id", mono: true },
           { h: "Actor", k: "actor" },
