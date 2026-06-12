@@ -22,7 +22,7 @@ export function TenantShell({ brand, children }: TenantShellProps) {
           }}
         >
           <span className="text-xs font-semibold uppercase tracking-[0.2em]">
-            Partner Booking
+            合作預約
           </span>
           <strong className="text-lg">{brand.displayName}</strong>
           <div className="mt-3 flex flex-wrap items-start gap-3 text-xs text-[color:inherit]">
