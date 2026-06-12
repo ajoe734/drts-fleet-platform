@@ -55,6 +55,44 @@ const activeEntry = {
   },
 } as unknown as PartnerChannelEntryRecord;
 
+const snakeCaseEntry = {
+  partner_id: "partner-bank-demo-001",
+  partner_code: "bank_demo_alpha",
+  partner_type: "bank_partner",
+  program_id: "program-airport-alpha",
+  program_code: "AIRPORT_ALPHA",
+  tenant_id: "tenant-demo-001",
+  bank_code: "BANK_DEMO_ALPHA",
+  entry_slug: "bank-demo-alpha-airport",
+  display_name: "Bank Demo Alpha Airport Transfer",
+  business_dispatch_subtype: "credit_card_airport_transfer",
+  auth_mode: "partner_api_key",
+  eligibility_mode: "bank_card_inline",
+  entry_host: null,
+  entry_path: "/partner/bank-demo-alpha-airport",
+  theme_accent: "#0b7285",
+  branding_metadata: {
+    display_name: "Bank Demo Alpha Airport Transfer",
+    theme_accent: "#0b7285",
+    support_email: "alpha-airport@bank-demo.example",
+    support_phone: "0800-000-111",
+  },
+  eligibility_contract: null,
+  status: "active",
+  active_flag: true,
+  revoked_at: null,
+  revoked_by: null,
+  revoke_reason: null,
+  created_at: "2026-04-10T00:00:00.000Z",
+  updated_at: "2026-04-10T00:00:00.000Z",
+  audit_metadata: {
+    source: "seed_bootstrap",
+    request_id: null,
+    created_by: "system:seed",
+    updated_by: "system:seed",
+  },
+};
+
 const session = {
   accessToken: "partner-token",
   expiresIn: "1h",
@@ -120,6 +158,55 @@ describe("partner-booking-web BFF wiring", () => {
       `${API_URL}/api/partner/entries/ctbc`,
       expect.objectContaining({ cache: "no-store" }),
     );
+  });
+
+  it("normalizes snake_case public partner entries from the dev API envelope", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: snakeCaseEntry,
+          meta: {
+            request_id: "req-126",
+            timestamp: "2026-06-12T00:00:00.000Z",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: snakeCaseEntry,
+          meta: {
+            request_id: "req-127",
+            timestamp: "2026-06-12T00:00:01.000Z",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPublicPartnerEntry("bank-demo-alpha-airport"),
+    ).resolves.toMatchObject({
+      entrySlug: "bank-demo-alpha-airport",
+      displayName: "Bank Demo Alpha Airport Transfer",
+      activeFlag: true,
+      brandingMetadata: {
+        displayName: "Bank Demo Alpha Airport Transfer",
+        supportEmail: "alpha-airport@bank-demo.example",
+      },
+      auditMetadata: {
+        createdBy: "system:seed",
+      },
+    });
+
+    await expect(
+      getPartnerRouteContext("bank-demo-alpha-airport"),
+    ).resolves.toMatchObject({
+      inactive: false,
+      brand: expect.objectContaining({
+        slug: "bank-demo-alpha-airport",
+        displayName: "Bank Demo Alpha Airport Transfer",
+      }),
+    });
   });
 
   it("distinguishes inactive partner entries from unknown slugs", async () => {

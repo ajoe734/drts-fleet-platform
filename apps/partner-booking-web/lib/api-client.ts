@@ -6,6 +6,8 @@ import type {
   CreateTenantBookingCommand,
   IdentityContext,
   OwnedOrderRecord,
+  PartnerEntryBrandingMetadata,
+  PartnerRecordAuditMetadata,
   PartnerBootstrapSession,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
@@ -75,6 +77,112 @@ export type PartnerRouteContext = {
   entry: PartnerChannelEntryRecord | null;
   inactive: boolean;
 };
+
+type PartnerEntryWireRecord = Partial<PartnerChannelEntryRecord> & {
+  [key: string]: unknown;
+  active_flag?: boolean;
+  audit_metadata?: PartnerAuditMetadataWireRecord | null;
+  auth_mode?: PartnerChannelEntryRecord["authMode"];
+  bank_code?: string | null;
+  branding_metadata?: PartnerBrandingMetadataWireRecord | null;
+  business_dispatch_subtype?: PartnerChannelEntryRecord["businessDispatchSubtype"];
+  created_at?: string;
+  eligibility_contract?: PartnerChannelEntryRecord["eligibilityContract"];
+  eligibility_mode?: PartnerChannelEntryRecord["eligibilityMode"];
+  entry_host?: string | null;
+  entry_path?: string | null;
+  entry_slug?: string;
+  partner_code?: string;
+  partner_id?: string;
+  partner_type?: string;
+  program_code?: string | null;
+  program_id?: string;
+  revoked_at?: string | null;
+  revoked_by?: string | null;
+  revoke_reason?: string | null;
+  tenant_id?: string;
+  theme_accent?: string | null;
+  updated_at?: string;
+};
+
+type PartnerBrandingMetadataWireRecord =
+  Partial<PartnerEntryBrandingMetadata> & {
+    display_name?: string;
+    support_email?: string | null;
+    support_phone?: string | null;
+    theme_accent?: string | null;
+  };
+
+type PartnerAuditMetadataWireRecord = Partial<PartnerRecordAuditMetadata> & {
+  created_by?: string | null;
+  request_id?: string | null;
+  updated_by?: string | null;
+};
+
+function normalizeBrandingMetadata(
+  metadata: PartnerBrandingMetadataWireRecord | null | undefined,
+): PartnerEntryBrandingMetadata | null {
+  if (!metadata) {
+    return null;
+  }
+
+  return {
+    displayName: metadata.displayName ?? metadata.display_name ?? "",
+    themeAccent: metadata.themeAccent ?? metadata.theme_accent ?? null,
+    supportEmail: metadata.supportEmail ?? metadata.support_email ?? null,
+    supportPhone: metadata.supportPhone ?? metadata.support_phone ?? null,
+  };
+}
+
+function normalizeAuditMetadata(
+  metadata: PartnerAuditMetadataWireRecord | null | undefined,
+): PartnerRecordAuditMetadata {
+  return {
+    source: metadata?.source ?? null,
+    requestId: metadata?.requestId ?? metadata?.request_id ?? null,
+    createdBy: metadata?.createdBy ?? metadata?.created_by ?? null,
+    updatedBy: metadata?.updatedBy ?? metadata?.updated_by ?? null,
+  };
+}
+
+function normalizePartnerEntry(
+  entry: PartnerChannelEntryRecord | PartnerEntryWireRecord,
+): PartnerChannelEntryRecord {
+  const wire = entry as PartnerEntryWireRecord;
+  return {
+    partnerId: wire.partnerId ?? wire.partner_id ?? "",
+    partnerCode: wire.partnerCode ?? wire.partner_code ?? "",
+    partnerType: wire.partnerType ?? wire.partner_type ?? "",
+    programId: wire.programId ?? wire.program_id ?? "",
+    programCode: wire.programCode ?? wire.program_code ?? null,
+    tenantId: wire.tenantId ?? wire.tenant_id ?? "",
+    bankCode: wire.bankCode ?? wire.bank_code ?? null,
+    entrySlug: wire.entrySlug ?? wire.entry_slug ?? "",
+    displayName: wire.displayName ?? wire.display_name ?? "",
+    businessDispatchSubtype:
+      wire.businessDispatchSubtype ?? wire.business_dispatch_subtype,
+    authMode: wire.authMode ?? wire.auth_mode,
+    eligibilityMode: wire.eligibilityMode ?? wire.eligibility_mode,
+    entryHost: wire.entryHost ?? wire.entry_host ?? null,
+    entryPath: wire.entryPath ?? wire.entry_path ?? null,
+    themeAccent: wire.themeAccent ?? wire.theme_accent ?? null,
+    brandingMetadata: normalizeBrandingMetadata(
+      wire.brandingMetadata ?? wire.branding_metadata,
+    ),
+    eligibilityContract:
+      wire.eligibilityContract ?? wire.eligibility_contract ?? null,
+    status: wire.status ?? "inactive",
+    activeFlag: wire.activeFlag ?? wire.active_flag ?? false,
+    revokedAt: wire.revokedAt ?? wire.revoked_at ?? null,
+    revokedBy: wire.revokedBy ?? wire.revoked_by ?? null,
+    revokeReason: wire.revokeReason ?? wire.revoke_reason ?? null,
+    createdAt: wire.createdAt ?? wire.created_at ?? "",
+    updatedAt: wire.updatedAt ?? wire.updated_at ?? "",
+    auditMetadata: normalizeAuditMetadata(
+      wire.auditMetadata ?? wire.audit_metadata,
+    ),
+  } as PartnerChannelEntryRecord;
+}
 
 function canUseLocalPartnerShellFallback(
   error: PartnerAuthorityError,
@@ -265,9 +373,10 @@ export function resolvePartnerBrand(
 export async function getPublicPartnerEntry(
   entrySlug: string,
 ): Promise<PartnerChannelEntryRecord> {
-  return requestAuthority<PartnerChannelEntryRecord>(
+  const entry = await requestAuthority<PartnerChannelEntryRecord>(
     `/api/partner/entries/${encodeURIComponent(entrySlug)}`,
   );
+  return normalizePartnerEntry(entry);
 }
 
 export async function getPartnerRouteContext(
