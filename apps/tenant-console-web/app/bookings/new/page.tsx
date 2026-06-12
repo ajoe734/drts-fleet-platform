@@ -10,6 +10,7 @@ import type {
   UiHealthEnvelope,
   UiRefreshMetadata,
 } from "@drts/contracts";
+import { BUSINESS_DISPATCH_SUBTYPES } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
 import {
   TenantBookingCreateForm,
@@ -21,7 +22,6 @@ import { t } from "@/lib/translations";
 export const dynamic = "force-dynamic";
 
 const BOOKING_CREATE_REFRESH_TIER: RefreshTier = "manual";
-const ENTERPRISE_SUBTYPE: BusinessDispatchSubtype = "enterprise_dispatch";
 const EMPTY_REASON_VALUES: EmptyReason[] = [
   "no_data",
   "not_provisioned",
@@ -51,8 +51,10 @@ function parseEmptyReason(
     : null;
 }
 
-function parseSubtype(_value: string | undefined): BusinessDispatchSubtype {
-  return ENTERPRISE_SUBTYPE;
+function parseSubtype(value: string | undefined): BusinessDispatchSubtype {
+  return BUSINESS_DISPATCH_SUBTYPES.includes(value as BusinessDispatchSubtype)
+    ? (value as BusinessDispatchSubtype)
+    : "credit_card_airport_transfer";
 }
 
 function buildAction(

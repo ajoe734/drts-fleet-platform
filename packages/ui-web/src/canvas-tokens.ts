@@ -1,4 +1,9 @@
-export type CanvasSurface = "platform" | "ops" | "tenant" | "partner";
+export type CanvasSurface =
+  | "platform"
+  | "ops"
+  | "tenant"
+  | "partner"
+  | "enterprise";
 export type CanvasMode = "light" | "dark";
 export type CanvasDensity = "compact" | "comfy";
 
@@ -146,6 +151,18 @@ export const CANVAS_SURFACE_ACCENTS: Record<CanvasSurface, CanvasAccentScale> =
       darkBorder: "#5C4218",
       name: "Partner Booking",
       tagline: "合作夥伴叫車入口",
+    },
+    enterprise: {
+      light: "#2457D6",
+      lightHi: "#1A45AD",
+      lightBg: "#EBF1FE",
+      lightBorder: "#C7D9FB",
+      dark: "#5B86E8",
+      darkHi: "#7A9DF0",
+      darkBg: "#16213C",
+      darkBorder: "#27375C",
+      name: "Enterprise Dispatch",
+      tagline: "企業員工自助派車入口",
     },
   };
 
