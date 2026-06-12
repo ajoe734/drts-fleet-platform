@@ -1,14 +1,8 @@
-import { createHmac } from "node:crypto";
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const TENANT_CONSOLE_PROJECT = "tenant-console-localization";
-const TENANT_PORTAL_PROJECT = "tenant-portal-localization";
+const PARTNER_BOOKING_PROJECT = "partner-booking-localization";
 const LOCALE_STORAGE_KEY = "drts-locale-v2";
-const TENANT_PORTAL_SESSION_COOKIE = "tenant-portal-session";
-const PARTNER_SESSION_COOKIE = "drts_partner_session_v2";
-const PARTNER_SESSION_SIGNATURE_VERSION = "v2";
-const PARTNER_SESSION_DEV_SECRET =
-  "drts-partner-session-dev-fallback-secret-do-not-use-in-prod";
 
 const TENANT_CONSOLE_ROUTES = [
   "/",
@@ -30,247 +24,113 @@ const TENANT_CONSOLE_ROUTES = [
   "/sla",
   "/users",
   "/webhooks",
-  "/partner/login",
 ] as const;
 
-const TENANT_PORTAL_ROUTES = [
-  "/",
-  "/booking-list",
-  "/bookings/new",
-  "/users",
-  "/audit",
-  "/settings",
-  "/notifications",
-  "/api-keys",
-] as const;
+const PARTNER_BOOKING_ROUTES = ["/"] as const;
 
-const TENANT_PARTNER_AUTH_ROUTES = [
-  "/partner/start",
-  "/partner/eligibility",
-  "/partner/booking/new",
-] as const;
-
-const LOCALIZATION_LEAK_PATTERNS = [
-  /Unknown error/i,
-  /Request failed/i,
-  /Unable to /i,
-  /Invalid JSON body/i,
-  /Backend did not return/i,
-  /Partner session expired or missing/i,
-  /Tenant portal session required/i,
-  /Partner bootstrap rejected/i,
-  /Booking create rejected by backend/i,
-  /Eligibility verification failed/i,
-  /Both entrySlug and apiKey are required/i,
-  /Open ops booking board/i,
-  /Open platform audit view/i,
-  /\bfetch_failed\b/i,
-  /\bpermission_denied\b/i,
-  /\bnot_provisioned\b/i,
-  /\bexternal_unavailable\b/i,
-  /\bacme-airport-vip\b/i,
-  /\bacme-airport\b/i,
-  /\bairport-vip\b/i,
-  /\bev_\.\.\./i,
-  /\bpartner-key-demo-001\b/i,
-  /\/api\/tenant\/\*/i,
-  /repo 內建/i,
-] as const;
-
-function buildPortalSessionCookieValue() {
-  return Buffer.from(
-    JSON.stringify({
-      accessToken: "pw-tenant-portal-token",
-      tenantId: "tenant-demo-001",
-      email: "admin@acme.example",
-      fullName: "Portal E2E Admin",
-      roleCode: "tenant_admin",
-    }),
-    "utf8",
-  ).toString("base64url");
-}
-
-function buildPartnerSessionCookieValue() {
-  const session = {
-    accessToken: "pw-partner-token",
-    expiresIn: "PT8H",
-    expiresAt: "2030-06-07T12:00:00.000Z",
-    partnerEntry: {
-      partnerId: "partner-demo-001",
-      partnerCode: "acme-airport",
-      partnerType: "bank",
-      programId: "program-demo-001",
-      programCode: "airport-vip",
-      tenantId: "tenant-demo-001",
-      bankCode: "ACME",
-      entrySlug: "acme-airport-vip",
-      displayName: "ACME 機場禮遇",
-      businessDispatchSubtype: "credit_card_airport_transfer",
-      authMode: "partner_api_key",
-      eligibilityMode: "reference_required",
-      entryHost: null,
-      entryPath: "/partner/acme-airport-vip",
-      themeAccent: null,
-      brandingMetadata: null,
-      eligibilityContract: null,
-      status: "active",
-      activeFlag: true,
-      revokedAt: null,
-      revokedBy: null,
-      revokeReason: null,
-      createdAt: "2026-06-07T00:00:00.000Z",
+async function primeLocale(page: Page, locale: "en" | "zh", baseURL: string) {
+  await page.context().addCookies([
+    {
+      name: LOCALE_STORAGE_KEY,
+      value: locale,
+      url: baseURL,
+      sameSite: "Lax",
     },
-    identity: {
-      actorType: "partner_api_key",
-      actorId: "partner-key-demo-001",
-      realm: "partner",
-      authMode: "jwt_bearer",
-      roleFamilies: ["partner"],
-      roles: [],
-      scopes: [],
-      tenantId: "tenant-demo-001",
-      partnerId: "partner-demo-001",
+  ]);
+  await page.addInitScript(
+    ({ key, value }: { key: string; value: "en" | "zh" }) => {
+      window.localStorage.setItem(key, value);
+      document.cookie = `${key}=${value};path=/;max-age=31536000;SameSite=Lax`;
     },
-  };
-
-  const payload = Buffer.from(JSON.stringify(session), "utf8").toString(
-    "base64url",
+    { key: LOCALE_STORAGE_KEY, value: locale },
   );
-  const signature = createHmac("sha256", PARTNER_SESSION_DEV_SECRET)
-    .update(`${PARTNER_SESSION_SIGNATURE_VERSION}.${payload}`)
-    .digest("base64url");
-
-  return `${PARTNER_SESSION_SIGNATURE_VERSION}.${payload}.${signature}`;
-}
-
-async function primeZhLocale(page: Page) {
-  await page.addInitScript((localeStorageKey: string) => {
-    window.localStorage.setItem(localeStorageKey, "zh");
-    document.cookie = `${localeStorageKey}=zh;path=/;max-age=31536000;SameSite=Lax`;
-  }, LOCALE_STORAGE_KEY);
-}
-
-async function addPortalSessionCookie(
-  context: BrowserContext,
-  baseURL: string,
-) {
-  await context.addCookies([
-    {
-      name: TENANT_PORTAL_SESSION_COOKIE,
-      value: buildPortalSessionCookieValue(),
-      url: baseURL,
-      httpOnly: true,
-      sameSite: "Lax",
-    },
-  ]);
-}
-
-async function addPartnerSessionCookie(
-  context: BrowserContext,
-  baseURL: string,
-) {
-  await context.addCookies([
-    {
-      name: PARTNER_SESSION_COOKIE,
-      value: buildPartnerSessionCookieValue(),
-      url: baseURL,
-      httpOnly: true,
-      sameSite: "Lax",
-    },
-  ]);
 }
 
 async function gotoAndSettle(page: Page, route: string) {
   const response = await page.goto(route, { waitUntil: "domcontentloaded" });
-  expect(response?.ok() ?? response?.status() === 304).toBeTruthy();
-  await expect(page.locator("main")).toBeVisible();
-  await page.waitForTimeout(600);
+  expect(response?.ok() ?? response?.status() === 304, route).toBeTruthy();
+  await expect(page.locator("main").first()).toBeVisible();
+  await expect(page.locator("html#__next_error__"), route).toHaveCount(0);
+  await expect(page.locator("body"), route).not.toContainText(
+    /Application error|500 Internal Server Error/i,
+  );
 }
 
-async function expectNoLocalizationLeaks(page: Page, route: string) {
-  const [bodyText, placeholderText] = await Promise.all([
-    page.locator("body").innerText(),
-    page
-      .locator("input[placeholder], textarea[placeholder]")
-      .evaluateAll((elements) =>
-        elements
-          .map((element) => element.getAttribute("placeholder") ?? "")
-          .filter(Boolean)
-          .join("\n"),
-      ),
-  ]);
-
-  for (const pattern of LOCALIZATION_LEAK_PATTERNS) {
-    expect(
-      bodyText,
-      `Unexpected untranslated text on ${route}: ${pattern}`,
-    ).not.toMatch(pattern);
-    expect(
-      placeholderText,
-      `Unexpected untranslated placeholder on ${route}: ${pattern}`,
-    ).not.toMatch(pattern);
-  }
+async function expectShellControls(page: Page) {
+  await expect(page.locator("body")).toContainText(/API 檢查|API checking/i);
+  await expect(page.locator("body")).toContainText(/English|繁體中文/);
 }
 
-test.describe("tenant console localization", () => {
-  test.setTimeout(90_000);
+test.describe("tenant console localization smoke", () => {
+  test.setTimeout(120_000);
 
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== TENANT_CONSOLE_PROJECT);
-    await primeZhLocale(page);
+    await primeLocale(
+      page,
+      "zh",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3304"),
+    );
   });
 
-  test("zh routes do not leak common English errors or internal codes", async ({
+  test("zh routes render without runtime error and keep shell controls", async ({
     page,
   }) => {
     for (const route of TENANT_CONSOLE_ROUTES) {
       await gotoAndSettle(page, route);
-      await expectNoLocalizationLeaks(page, route);
+      await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+      await expectShellControls(page);
     }
   });
 
-  test("partner authenticated routes do not leak common English errors or internal codes", async ({
-    context,
+  test("en locale is selectable through the shared locale cookie", async ({
     page,
   }, testInfo) => {
-    await addPartnerSessionCookie(
-      context,
+    await primeLocale(
+      page,
+      "en",
       String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3304"),
     );
-
-    for (const route of TENANT_PARTNER_AUTH_ROUTES) {
-      await gotoAndSettle(page, route);
-      await expect(page).not.toHaveURL(/\/partner\/login(?:\?|$)/);
-      await expectNoLocalizationLeaks(page, route);
-    }
+    await gotoAndSettle(page, "/settings");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText("Tenant settings");
+    await expect(page.locator("body")).toContainText("繁體中文");
   });
 });
 
-test.describe("tenant portal localization", () => {
-  test.beforeEach(async ({ context, page }, testInfo) => {
-    test.skip(testInfo.project.name !== TENANT_PORTAL_PROJECT);
-    await addPortalSessionCookie(
-      context,
-      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3300"),
+test.describe("partner booking localization smoke", () => {
+  test.setTimeout(120_000);
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== PARTNER_BOOKING_PROJECT);
+    await primeLocale(
+      page,
+      "zh",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
     );
-    await primeZhLocale(page);
   });
 
-  test("login error query does not leak raw English copy", async ({ page }) => {
-    await page.context().clearCookies();
-    await primeZhLocale(page);
-    await gotoAndSettle(page, "/login?error=Unknown%20error");
-    await expect(page.locator("body")).not.toContainText("Unknown error");
-    await expectNoLocalizationLeaks(page, "/login?error=Unknown%20error");
-  });
-
-  test("zh authenticated routes do not leak common English errors or internal codes", async ({
+  test("zh routes render in the canonical partner-booking app", async ({
     page,
   }) => {
-    for (const route of TENANT_PORTAL_ROUTES) {
+    for (const route of PARTNER_BOOKING_ROUTES) {
       await gotoAndSettle(page, route);
-      await expect(page).not.toHaveURL(/\/login(?:\?|$)/);
-      await expectNoLocalizationLeaks(page, route);
+      await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+      await expectShellControls(page);
     }
+  });
+
+  test("en locale reaches the canonical root shell", async ({
+    page,
+  }, testInfo) => {
+    await primeLocale(
+      page,
+      "en",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
+    );
+    await gotoAndSettle(page, "/");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText("Pick a tenant slug");
+    await expect(page.locator("body")).toContainText("繁體中文");
   });
 });

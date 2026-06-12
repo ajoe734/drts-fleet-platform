@@ -1253,11 +1253,9 @@ export default async function AuditPage({
             </CanvasField>
 
             <div style={{ ...formActionStyle, gridColumn: "1 / -1" }}>
-              <button type="submit" style={{ all: "unset" }}>
-                <CanvasBtn theme={th} variant="primary" size="sm">
-                  套用篩選
-                </CanvasBtn>
-              </button>
+              <CanvasBtn theme={th} variant="primary" size="sm" type="submit">
+                套用篩選
+              </CanvasBtn>
               {renderActionButton({
                 action: actionLookup.get("refresh"),
                 href: `/audit${buildQueryString(query)}`,

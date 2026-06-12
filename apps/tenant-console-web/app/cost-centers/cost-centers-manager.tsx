@@ -361,7 +361,7 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return dateTimeFormatter.format(parsed);
+  return dateTimeFormatter.format(parsed).replace(/[\u00a0\u202f\u2009]/g, " ");
 }
 
 function formatCount(value: number) {
@@ -727,9 +727,9 @@ function buildLinkedUserHref(userId: string) {
 
 function buildStateMeta(row: CostCenterRow) {
   if (row.activeFlag) {
-    return "可用於新建立與 quota attribution。";
+    return "可用於新建立與額度歸因。";
   }
-  return row.disabledReason?.trim() || "停用後保留歷史 attribution。";
+  return row.disabledReason?.trim() || "停用後保留歷史歸因。";
 }
 
 function buildStateTone(row: CostCenterRow): CanvasTone {
@@ -737,7 +737,7 @@ function buildStateTone(row: CostCenterRow): CanvasTone {
 }
 
 function buildStateLabel(row: CostCenterRow) {
-  return row.activeFlag ? "Active" : "Disabled";
+  return row.activeFlag ? "啟用" : "停用";
 }
 
 function getActionHelpText(action: CostCenterAction) {
@@ -745,7 +745,7 @@ function getActionHelpText(action: CostCenterAction) {
     if (action.intent === "disable" && action.requiresReason) {
       return "需要填寫停用原因";
     }
-    return `${action.riskLevel} risk action`;
+    return `${action.riskLevel} 風險操作`;
   }
   return action.disabledReasonCode ?? "目前無法執行";
 }
@@ -867,15 +867,19 @@ export function CostCentersManager({
     buildDraft("create"),
   );
   const [disableReason, setDisableReason] = useState("");
+  const safeUsers = Array.isArray(users) ? users : [];
+  const safeCostCenters = Array.isArray(costCenters) ? costCenters : [];
+  const safeApprovalRules = Array.isArray(approvalRules) ? approvalRules : [];
+  const safeReportJobs = Array.isArray(reportJobs) ? reportJobs : [];
 
   const topLevelAction = buildTopLevelAction();
-  const activeUsers = users
+  const activeUsers = safeUsers
     .filter((user) => user.status === "active")
     .sort((left, right) =>
       left.displayName.localeCompare(right.displayName, "zh-Hant"),
     );
 
-  const rows: CostCenterRow[] = [...costCenters]
+  const rows: CostCenterRow[] = [...safeCostCenters]
     .sort((left, right) => {
       if (left.activeFlag !== right.activeFlag) {
         return left.activeFlag ? -1 : 1;
@@ -884,8 +888,8 @@ export function CostCentersManager({
     })
     .map((costCenter) => {
       const quotaSummary = quotaSummariesByCode[costCenter.code];
-      const approval = describeApproval(costCenter.code, approvalRules);
-      const reports = describeReports(costCenter.code, reportJobs);
+      const approval = describeApproval(costCenter.code, safeApprovalRules);
+      const reports = describeReports(costCenter.code, safeReportJobs);
       return {
         code: costCenter.code,
         name: costCenter.name,
@@ -927,7 +931,7 @@ export function CostCentersManager({
 
   const emptyReason = resolveEmptyReason(
     initialEmptyReason,
-    costCenters,
+    safeCostCenters,
     filteredRows,
     errors,
   );
@@ -959,10 +963,11 @@ export function CostCentersManager({
     const target =
       mode === "create"
         ? undefined
-        : (costCenters.find((item) => item.code === selectedCode) ?? undefined);
+        : (safeCostCenters.find((item) => item.code === selectedCode) ??
+          undefined);
     setDraft(buildDraft(mode, target));
     setDisableReason(target?.disabledReason ?? "");
-  }, [mode, selectedCode, costCenters]);
+  }, [mode, selectedCode, safeCostCenters]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1057,7 +1062,7 @@ export function CostCentersManager({
         <div style={titleStackStyle}>
           <span style={titlePrimaryStyle}>{row.name}</span>
           <span style={titleMetaStyle}>
-            {row.description ?? (row.activeFlag ? "未填描述" : "disabled")}
+            {row.description ?? (row.activeFlag ? "未填描述" : "已停用")}
           </span>
         </div>
       ),
@@ -1092,7 +1097,7 @@ export function CostCentersManager({
             <span style={titlePrimaryStyle}>{row.ownerName ?? "未指定"}</span>
           )}
           <span style={titleMetaStyle}>
-            {row.ownerUserId ?? "可改派 tenant user"}
+            {row.ownerUserId ?? "可改派租戶使用者"}
           </span>
         </div>
       ),
@@ -1200,7 +1205,7 @@ export function CostCentersManager({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="成本中心 · Cost Centers"
+        title="成本中心"
         subtitle="部門 · 月配額 · 預設審批規則 (Q-TEN11)"
         actions={
           <>
@@ -1254,8 +1259,8 @@ export function CostCentersManager({
           theme={th}
           tone="info"
           icon="warn"
-          title="T5 refresh tier：成本中心目錄、quota、rules、reports 每 30 秒輪詢"
-          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新 quota refresh ${formatDateTime(freshestQuotaAt)} · owner 連到 /users，approval linkage 連到 /rules，report attribution 連到 /reports。`}
+          title="T5 更新層級：成本中心目錄、額度、規則、報表每 30 秒輪詢"
+          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新額度更新 ${formatDateTime(freshestQuotaAt)} · 負責人連到 /users，簽核規則連到 /rules，報表歸因連到 /reports。`}
         />
 
         <div style={topGridStyle}>
@@ -1267,21 +1272,19 @@ export function CostCentersManager({
           <div style={kpiStyle}>
             <span style={kpiLabelStyle}>啟用</span>
             <span style={kpiValueStyle}>{formatCount(activeCount)}</span>
-            <span style={kpiMetaStyle}>disabled 可用獨立 filter 顯示</span>
+            <span style={kpiMetaStyle}>停用列可用獨立篩選顯示</span>
           </div>
           <div style={kpiStyle}>
             <span style={kpiLabelStyle}>超過配額</span>
             <span style={kpiValueStyle}>{formatCount(overQuotaCount)}</span>
-            <span style={kpiMetaStyle}>超額列以 danger 標記</span>
+            <span style={kpiMetaStyle}>超額列以危險狀態標記</span>
           </div>
           <div style={kpiStyle}>
             <span style={kpiLabelStyle}>歸屬報表</span>
             <span style={kpiValueStyle}>
               {formatCount(attributedReportCount)}
             </span>
-            <span style={kpiMetaStyle}>
-              已命中 cost-center filter 的報表作業
-            </span>
+            <span style={kpiMetaStyle}>已命中成本中心篩選的報表作業</span>
           </div>
         </div>
 
@@ -1293,7 +1296,7 @@ export function CostCentersManager({
                 style={nativeInputStyle}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜尋 code、名稱、owner"
+                placeholder="搜尋代碼、名稱、負責人"
               />
             </label>
             <label>

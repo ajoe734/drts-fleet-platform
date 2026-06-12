@@ -185,17 +185,20 @@ export function TenantShell({ children }: { children: ReactNode }) {
     <ManagementThemeProvider defaultDark defaultDensity="compact">
       <div
         style={{
-          minHeight: "100vh",
+          minHeight: "100dvh",
           background:
             "radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 22%), #060b13",
         }}
       >
         <CanvasWindowChrome
           width="100%"
-          height="100dvh"
+          height="auto"
           outerPadding={12}
-          style={{ height: "100dvh", minHeight: "100dvh" }}
-          contentStyle={{ background: tenantCanvasTheme.bg }}
+          style={{ minHeight: "100dvh" }}
+          contentStyle={{
+            minHeight: "calc(100dvh - 24px)",
+            background: tenantCanvasTheme.bg,
+          }}
         >
           <CanvasShell
             theme={tenantCanvasTheme}
@@ -211,7 +214,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
             searchPlaceholder={t("shell.search")}
             searchWidth={280}
             avatarLabel={locale === "en" ? "YA" : t("shell.identity.actor")}
-            style={{ height: "100%" }}
+            style={{ minHeight: "calc(100dvh - 24px)" }}
             topRight={
               <TenantShellControls
                 locale={locale}

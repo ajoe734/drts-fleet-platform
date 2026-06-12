@@ -269,7 +269,7 @@ function formatCurrency(amountMinor: number | null | undefined) {
 
 function formatPercent(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) {
-    return "n/a";
+    return "不適用";
   }
 
   return `${value}%`;
@@ -284,25 +284,27 @@ function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-Hant", {
     dateStyle: "short",
     timeStyle: "short",
-  }).format(parsed);
+  })
+    .format(parsed)
+    .replace(/[\u00a0\u202f\u2009]/g, " ");
 }
 
 function formatAge(generatedAt: string, nowMs: number) {
   const generatedAtMs = new Date(generatedAt).getTime();
   if (!Number.isFinite(generatedAtMs)) {
-    return "unknown";
+    return "時間未知";
   }
 
   const deltaSeconds = Math.max(0, Math.floor((nowMs - generatedAtMs) / 1000));
   if (deltaSeconds < 60) {
-    return `${deltaSeconds}s ago`;
+    return deltaSeconds === 0 ? "剛剛" : `${deltaSeconds} 秒前`;
   }
   const deltaMinutes = Math.floor(deltaSeconds / 60);
   if (deltaMinutes < 60) {
-    return `${deltaMinutes}m ago`;
+    return `${deltaMinutes} 分鐘前`;
   }
   const deltaHours = Math.floor(deltaMinutes / 60);
-  return `${deltaHours}h ago`;
+  return `${deltaHours} 小時前`;
 }
 
 function describeSubtype(value: BusinessDispatchSubtype) {
@@ -342,7 +344,7 @@ function describeImpactLabel(
   code: string | null,
 ) {
   if (scope === "cost_center") {
-    return code ? `Cost center ${code}` : "Cost center";
+    return code ? `成本中心 ${code}` : "成本中心";
   }
   return "租戶";
 }
@@ -499,7 +501,7 @@ function ActionLink({
     return (
       <span
         style={actionSurfaceStyle(descriptor)}
-        title={descriptor.disabledReasonCode ?? "Action unavailable"}
+        title={descriptor.disabledReasonCode ?? "目前無法操作"}
       >
         {label}
       </span>
@@ -569,16 +571,15 @@ function EmptyStatePanel({
     no_data: {
       title: "目前沒有可用的建立捷徑",
       description:
-        "乘客與地址目錄都還沒有可用資料。先補齊 tenant directory，再回來建立訂單。",
+        "乘客與地址目錄都還沒有可用資料。先補齊租戶目錄，再回來建立訂單。",
       tone: {
         borderColor: "rgba(148, 163, 184, 0.28)",
         background: "rgba(15, 23, 42, 0.72)",
       },
     },
     not_provisioned: {
-      title: "Cost center 尚未佈建",
-      description:
-        "這個路由需要 canonical cost-center 目錄，否則 booking command 不能送出。",
+      title: "成本中心尚未佈建",
+      description: "這個路由需要標準成本中心目錄，否則叫車建立命令不能送出。",
       tone: {
         borderColor: "rgba(34, 211, 238, 0.38)",
         background: "rgba(8, 47, 73, 0.5)",
@@ -587,7 +588,7 @@ function EmptyStatePanel({
     fetch_failed: {
       title: "建立訂單所需資料載入失敗",
       description:
-        "至少一個必要目錄來源讀取失敗。請先 refresh，確認資料恢復後再送出。",
+        "至少一個必要目錄來源讀取失敗。請先刷新，確認資料恢復後再送出。",
       tone: {
         borderColor: "rgba(253, 164, 175, 0.45)",
         background: "rgba(69, 10, 10, 0.48)",
@@ -595,8 +596,7 @@ function EmptyStatePanel({
     },
     permission_denied: {
       title: "目前身分沒有建立訂單權限",
-      description:
-        "後端拒絕目前 actor 的 booking-create authority。請與 tenant admin 確認權限。",
+      description: "後端拒絕目前身分的叫車建立權限。請與租戶管理員確認權限。",
       tone: {
         borderColor: "rgba(253, 224, 71, 0.45)",
         background: "rgba(113, 63, 18, 0.48)",
@@ -604,8 +604,7 @@ function EmptyStatePanel({
     },
     external_unavailable: {
       title: "外部依賴暫時不可用",
-      description:
-        "booking command 依賴的上游服務暫時異常。等依賴恢復後 refresh 再重試。",
+      description: "叫車命令依賴的上游服務暫時異常。等依賴恢復後刷新再重試。",
       tone: {
         borderColor: "rgba(251, 146, 60, 0.45)",
         background: "rgba(67, 20, 7, 0.48)",
@@ -614,16 +613,15 @@ function EmptyStatePanel({
     filtered_empty: {
       title: "預填捷徑已失效",
       description:
-        "乘客或地址的預填連結已經過期。清除 shortcut context 後，從乾淨表單重新開始。",
+        "乘客或地址的預填連結已經過期。清除捷徑脈絡後，從乾淨表單重新開始。",
       tone: {
         borderColor: "rgba(45, 212, 191, 0.34)",
         background: "rgba(17, 94, 89, 0.34)",
       },
     },
     driver_not_eligible: {
-      title: "Driver eligibility 不適用這個頁面",
-      description:
-        "Tenant booking create route 不使用 driver eligibility 狀態。",
+      title: "駕駛資格狀態不適用這個頁面",
+      description: "租戶叫車建立路由不使用駕駛資格狀態。",
       tone: {
         borderColor: "rgba(148, 163, 184, 0.28)",
         background: "rgba(15, 23, 42, 0.72)",
@@ -712,7 +710,10 @@ export function TenantBookingCreateForm({
 }) {
   const router = useRouter();
   const [navigationPending, startTransition] = useTransition();
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => {
+    const generatedAtMs = new Date(pageModel.refresh.generatedAt).getTime();
+    return Number.isFinite(generatedAtMs) ? generatedAtMs : 0;
+  });
   const [timingMode, setTimingMode] = useState<"scheduled" | "immediate">(
     "scheduled",
   );
@@ -971,7 +972,7 @@ export function TenantBookingCreateForm({
 
         if (!response.ok) {
           throw new Error(
-            result.error ?? `Policy preview failed (HTTP ${response.status}).`,
+            result.error ?? `政策預覽失敗 (HTTP ${response.status})。`,
           );
         }
 
@@ -979,9 +980,7 @@ export function TenantBookingCreateForm({
         setApprovalEvaluation(result.approvalEvaluation ?? null);
       } catch (error) {
         setPolicyError(
-          error instanceof Error
-            ? error.message
-            : "Unknown policy preview failure.",
+          error instanceof Error ? error.message : "未知政策預覽錯誤。",
         );
       } finally {
         setPolicyRefreshing(false);
@@ -1045,9 +1044,7 @@ export function TenantBookingCreateForm({
     }
 
     if (approvalEvaluation?.outcome?.blocked) {
-      setSubmitError(
-        "This booking is currently blocked by tenant approval or quota policy.",
-      );
+      setSubmitError("此叫車目前被租戶審批或額度政策阻擋。");
       return;
     }
 
@@ -1067,7 +1064,7 @@ export function TenantBookingCreateForm({
 
       if (!response.ok || !result.booking?.bookingId) {
         throw new Error(
-          result.error ?? `Create booking failed (HTTP ${response.status}).`,
+          result.error ?? `建立叫車失敗 (HTTP ${response.status})。`,
         );
       }
 
@@ -1088,7 +1085,7 @@ export function TenantBookingCreateForm({
       setRedirectTarget(nextHref);
     } catch (error) {
       setSubmitError(
-        error instanceof Error ? error.message : "Unknown booking failure.",
+        error instanceof Error ? error.message : "未知叫車建立錯誤。",
       );
     } finally {
       setSubmitting(false);
@@ -1110,7 +1107,7 @@ export function TenantBookingCreateForm({
             />
             <ActionButton
               descriptor={pageModel.actions.refresh}
-              label={navigationPending ? "重新載入中..." : "Refresh"}
+              label={navigationPending ? "重新載入中..." : "刷新"}
               onClick={refreshPage}
             />
           </>
@@ -1144,19 +1141,19 @@ export function TenantBookingCreateForm({
                 theme={th}
                 tone={passengers.length > 0 ? "success" : "warn"}
               >
-                passenger {passengers.length}
+                乘客 {passengers.length}
               </CanvasPill>
               <CanvasPill
                 theme={th}
                 tone={addresses.length > 0 ? "success" : "warn"}
               >
-                address {addresses.length}
+                地址 {addresses.length}
               </CanvasPill>
               <CanvasPill
                 theme={th}
                 tone={costCenters.length > 0 ? "success" : "warn"}
               >
-                cost center {costCenters.length}
+                成本中心 {costCenters.length}
               </CanvasPill>
             </div>
           </div>
@@ -1167,16 +1164,16 @@ export function TenantBookingCreateForm({
                 theme={th}
                 tone={pageModel.actions.submit.enabled ? "info" : "neutral"}
               >
-                submit_command
+                送出命令
               </CanvasPill>
               <CanvasPill
                 theme={th}
                 tone={pageModel.actions.cancel.enabled ? "neutral" : "warn"}
               >
-                cancel
+                取消
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
-                draft unsupported
+                暫不支援草稿
               </CanvasPill>
             </div>
           </div>
@@ -1189,7 +1186,7 @@ export function TenantBookingCreateForm({
             theme={th}
             tone="info"
             icon="link"
-            title="已套用 directory shortcut 預填"
+            title="已套用目錄捷徑預填"
             body={pageModel.prefill.sourceLabel}
           />
           <div style={chipRowStyle}>
@@ -1207,7 +1204,7 @@ export function TenantBookingCreateForm({
           theme={th}
           tone="warn"
           icon="warn"
-          title="部分建立訂單依賴目前 degraded"
+          title="部分建立訂單依賴目前降級"
           body={pageModel.health.degradedServices
             .map((item) => item.impact)
             .join(" · ")}
@@ -1219,18 +1216,18 @@ export function TenantBookingCreateForm({
           <CanvasBanner
             theme={th}
             icon={pageFreshness === "degraded" ? "warn" : "clock"}
-            body={`Generated ${formatAge(pageModel.refresh.generatedAt, nowMs)} · ${formatDateTime(pageModel.refresh.generatedAt)} · refresh tier ${labelForRefreshTier(pageModel.refreshTier)}`}
+            body={`快照建立於 ${formatAge(pageModel.refresh.generatedAt, nowMs)} · ${formatDateTime(pageModel.refresh.generatedAt)} · 更新層級 ${labelForRefreshTier(pageModel.refreshTier)}`}
             title={
               pageFreshness === "degraded"
-                ? "Directory snapshot is degraded"
-                : "Directory snapshot is stale"
+                ? "目錄快照目前降級"
+                : "目錄快照需要更新"
             }
             tone={pageFreshness === "degraded" ? "warn" : "info"}
           />
           <div style={actionRowStyle}>
             <ActionButton
               descriptor={pageModel.actions.refresh}
-              label="立即 refresh"
+              label="立即刷新"
               onClick={refreshPage}
               primary
             />
@@ -1251,8 +1248,8 @@ export function TenantBookingCreateForm({
             theme={th}
             tone="warn"
             icon="spark"
-            title="estimate 只用於 preview"
-            body="費用、quota impact 與 approval posture 可先 preview，但 canonical quoted fare 仍由後端擁有。"
+            title="估算只用於預覽"
+            body="費用、額度影響與審批姿態可先預覽，但標準報價仍由後端擁有。"
           />
 
           <div style={twoColumnLayoutStyle}>
@@ -1291,8 +1288,8 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={timingMode}
                     >
-                      <option value="scheduled">Scheduled</option>
-                      <option value="immediate">Immediate</option>
+                      <option value="scheduled">預約</option>
+                      <option value="immediate">即時</option>
                     </select>
                   </FieldShell>
 
@@ -1345,7 +1342,7 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={selectedPassengerId}
                     >
-                      <option value="">Manual passenger entry</option>
+                      <option value="">手動輸入乘客</option>
                       {passengers.map((passenger) => (
                         <option
                           key={passenger.passengerId}
@@ -1383,9 +1380,9 @@ export function TenantBookingCreateForm({
                     hint={
                       activePassenger
                         ? passengerPhoneLocked
-                          ? "Passenger phone comes from the selected directory record."
-                          : "This passenger has no phone on file; provide one here."
-                        : "Manual passenger entry requires a direct contact number."
+                          ? "乘客電話來自選取的目錄紀錄。"
+                          : "這位乘客檔案沒有電話，請在此補上。"
+                        : "手動輸入乘客時需要直接聯絡電話。"
                     }
                     label="乘客電話"
                   >
@@ -1584,7 +1581,7 @@ export function TenantBookingCreateForm({
               <CanvasCard
                 theme={th}
                 title="關聯與審批"
-                subtitle="cost center、財務欄位與代訂 metadata 都隨 command 一起送出。"
+                subtitle="成本中心、財務欄位與代訂 metadata 都隨命令一起送出。"
               >
                 <CanvasBanner
                   theme={th}
@@ -1612,7 +1609,7 @@ export function TenantBookingCreateForm({
                       }}
                       value={costCenter}
                     >
-                      <option value="">Select a cost center</option>
+                      <option value="">選擇成本中心</option>
                       {costCenters.map((center) => (
                         <option key={center.code} value={center.code}>
                           {center.code} · {center.name}
@@ -1623,7 +1620,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.estimatedAmount}
-                    label={`Estimated spend (${CURRENCY})`}
+                    label={`預估支出 (${CURRENCY})`}
                   >
                     <input
                       inputMode="decimal"
@@ -1897,8 +1894,8 @@ export function TenantBookingCreateForm({
                     theme={th}
                     tone="warn"
                     icon="warn"
-                    title="Address book 為空"
-                    body="仍可手動輸入地址，但 `/addresses` 才是這個 route 的 canonical shortcut source。"
+                    title="地址簿為空"
+                    body="仍可手動輸入地址，但 `/addresses` 才是這個路由的標準捷徑來源。"
                   />
                 ) : null}
               </CanvasCard>
@@ -1906,7 +1903,7 @@ export function TenantBookingCreateForm({
               <CanvasCard
                 theme={th}
                 title="政策評估"
-                subtitle="approval posture 與 quota impact 都直接來自後端 preview。"
+                subtitle="審批姿態與額度影響都直接來自後端預覽。"
               >
                 <div style={chipRowStyle}>
                   <StatusChip
@@ -1914,7 +1911,7 @@ export function TenantBookingCreateForm({
                     tone={toneForDecision(approvalEvaluation)}
                   />
                   <StatusChip
-                    label={policyRefreshing ? "Refreshing" : "Auto preview"}
+                    label={policyRefreshing ? "刷新中" : "自動預覽"}
                     tone={policyRefreshing ? "warning" : "info"}
                   />
                 </div>
@@ -2001,13 +1998,13 @@ export function TenantBookingCreateForm({
               <CanvasCard
                 theme={th}
                 title="配額影響"
-                subtitle="沿用後端 preview vocabulary，不用本地預估字典取代。"
+                subtitle="沿用後端預覽語彙，不用本地預估字典取代。"
               >
                 {quotaPreview?.impacts?.length ? (
                   <>
                     <div style={chipRowStyle}>
                       <StatusChip
-                        label={`Period: ${quotaPreview.periodKey}`}
+                        label={`期別：${quotaPreview.periodKey}`}
                         tone="info"
                       />
                       <StatusChip

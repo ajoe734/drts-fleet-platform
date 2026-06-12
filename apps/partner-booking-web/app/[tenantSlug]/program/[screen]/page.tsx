@@ -5,6 +5,7 @@ import {
   ProgramBookingFlow,
   resolveProgramScreenSegment,
 } from "@/lib/program-screens";
+import { getServerLocale } from "@/lib/server-locale";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ type PageProps = {
 
 export default async function ProgramScreenPage({ params }: PageProps) {
   const { tenantSlug, screen } = await params;
+  const locale = await getServerLocale();
   const screenId = resolveProgramScreenSegment(screen);
   if (!screenId) {
     notFound();
@@ -29,6 +31,7 @@ export default async function ProgramScreenPage({ params }: PageProps) {
       theme={theme}
       screen={resolvedScreen}
       basePath={`/${tenantSlug}/program`}
+      locale={locale}
     />
   );
 }

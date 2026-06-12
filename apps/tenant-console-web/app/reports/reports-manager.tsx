@@ -103,14 +103,14 @@ const REPORT_TYPE_OPTIONS = OPERATIONAL_REPORT_JOB_TYPES.map(
     value: jobType,
     label:
       jobType === "trip_summary"
-        ? "Trip summary"
+        ? "行程摘要"
         : jobType === "monthly_trip_report"
-          ? "Monthly usage"
+          ? "月用量"
           : jobType === "revenue_summary"
-            ? "Cost-center split"
+            ? "成本中心拆分"
             : jobType === "incident_register"
-              ? "Incident register"
-              : "Maintenance overview",
+              ? "事件登錄"
+              : "維運總覽",
   }),
 );
 
@@ -240,7 +240,9 @@ function formatDateTime(value: string | null | undefined) {
   return new Intl.DateTimeFormat("zh-Hant", {
     dateStyle: "short",
     timeStyle: "short",
-  }).format(parsed);
+  })
+    .format(parsed)
+    .replace(/[\u00a0\u202f\u2009]/g, " ");
 }
 
 function normalizePeriod(value: string | undefined) {
@@ -282,15 +284,25 @@ function getStatusTone(status: DisplayReportStatus): CanvasTone {
 }
 
 function getStatusLabel(status: DisplayReportStatus) {
-  if (status === "completed") return "done";
-  return status;
+  switch (status) {
+    case "completed":
+      return "完成";
+    case "queued":
+      return "排隊中";
+    case "running":
+      return "執行中";
+    case "expired":
+      return "已過期";
+    case "failed":
+      return "失敗";
+  }
 }
 
 function toParameterSummary(job: ReportJobRecord) {
   const entries: string[] = [];
   const period = getReportJobPeriod(job);
   if (period !== "—") {
-    entries.push(`period ${period}`);
+    entries.push(`期別 ${period}`);
   }
 
   const costCenterCode =
@@ -298,7 +310,7 @@ function toParameterSummary(job: ReportJobRecord) {
       ? job.filters.costCenterCode
       : null;
   if (costCenterCode) {
-    entries.push(`cc ${costCenterCode}`);
+    entries.push(`成本中心 ${costCenterCode}`);
   }
 
   const passengerUserId =
@@ -306,16 +318,16 @@ function toParameterSummary(job: ReportJobRecord) {
       ? job.filters.passengerUserId
       : null;
   if (passengerUserId) {
-    entries.push(`pax ${passengerUserId}`);
+    entries.push(`乘客 ${passengerUserId}`);
   }
 
   const tenantId =
     typeof job.filters.tenantId === "string" ? job.filters.tenantId : null;
   if (tenantId) {
-    entries.push(`tenant ${tenantId}`);
+    entries.push(`租戶 ${tenantId}`);
   }
 
-  return entries.length > 0 ? entries.join(" · ") : "tenant scope default";
+  return entries.length > 0 ? entries.join(" · ") : "預設租戶範圍";
 }
 
 function findAction(
@@ -346,40 +358,40 @@ function getEmptyStateCopy(reason: EmptyReason | null) {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "Reporting is not provisioned for this tenant yet",
+        title: "此租戶尚未開通報表能力",
         description:
-          "The route is reachable, but no reporting capability has been provisioned. Use the cross-app governance links to confirm entitlement, artifact signing, and reporting readiness.",
+          "路由可以開啟，但後端尚未為此租戶開通報表能力。請透過跨應用治理連結確認權益、檔案簽章與報表就緒狀態。",
       };
     case "fetch_failed":
       return {
-        title: "Report jobs could not be loaded",
+        title: "無法載入報表工作",
         description:
-          "The page shell is healthy, but the report-job list failed to load. Retry the manual refresh once the dependency recovers.",
+          "頁面框架可用，但報表工作清單讀取失敗。待相依服務恢復後，請重新整理一次。",
       };
     case "permission_denied":
       return {
-        title: "This actor cannot operate tenant reports",
+        title: "目前身分無法操作租戶報表",
         description:
-          "Reports stay visible in the sitemap, but the current actor does not have authority to list or create report jobs for this tenant.",
+          "報表仍保留在導覽中，但目前身分沒有列出或建立此租戶報表工作的權限。",
       };
     case "external_unavailable":
       return {
-        title: "A reporting dependency is unavailable",
+        title: "報表相依服務暫時不可用",
         description:
-          "Backend reporting is currently degraded. Wait for the dependent service to recover, then refresh the job list manually.",
+          "後端報表服務目前降級。請等待相依服務恢復後，再手動刷新工作清單。",
       };
     case "filtered_empty":
       return {
-        title: "No jobs match the current filter",
+        title: "目前篩選沒有符合的工作",
         description:
-          "The tenant has report history, but the active type, status, or period filter produced an empty register. Clear the filters to inspect the full queue.",
+          "此租戶有報表歷史，但目前類型、狀態或期別篩選沒有命中。清除篩選即可查看完整佇列。",
       };
     case "no_data":
     default:
       return {
-        title: "No report jobs exist yet",
+        title: "尚未建立任何報表工作",
         description:
-          "Create the first tenant report job from this route. The backend will own the job lifecycle and signed download URL once the artifact is ready.",
+          "你可以從此頁建立第一個租戶報表工作。後端會負責工作生命週期，並在檔案完成後提供短效簽名下載網址。",
       };
   }
 }
@@ -514,10 +526,10 @@ export function ReportsManager({
       expiresAt: formatDateTime(job.artifact?.expiresAt),
       artifactLabel:
         displayStatus === "completed"
-          ? "signed artifact"
+          ? "已簽名檔案"
           : displayStatus === "expired"
-            ? "artifact expired"
-            : "not ready",
+            ? "檔案已過期"
+            : "尚未就緒",
       artifactUrl:
         displayStatus === "completed"
           ? (job.artifact?.downloadUrl ?? null)
@@ -541,9 +553,9 @@ export function ReportsManager({
       },
       statusReason:
         displayStatus === "failed"
-          ? "The backend recorded this job as failed. Re-run with the same parameters."
+          ? "後端紀錄此工作失敗，可用相同參數重新執行。"
           : displayStatus === "expired"
-            ? "The signed URL expired. Create a new job to issue a fresh artifact."
+            ? "簽名網址已過期，請建立新工作產生新的檔案。"
             : null,
     };
   });
@@ -605,9 +617,9 @@ export function ReportsManager({
         await work();
       } catch (error) {
         setFlash({
-          title: "Report action failed",
+          title: "報表操作失敗",
           description:
-            error instanceof Error ? error.message : "Unknown reporting error.",
+            error instanceof Error ? error.message : "未知報表錯誤。",
           tone: "warning",
         });
       }
@@ -618,9 +630,9 @@ export function ReportsManager({
     runTransition(async () => {
       router.refresh();
       setFlash({
-        title: "Report list refresh requested",
+        title: "已送出報表清單刷新",
         description:
-          "This route is tier T6 manual. The page has been asked to reload the latest report-job snapshot.",
+          "此路由屬於 T6 手動更新；頁面會重新載入最新的報表作業快照。",
         tone: "info",
       });
     });
@@ -648,8 +660,8 @@ export function ReportsManager({
       });
 
       setFlash({
-        title: "Report job queued",
-        description: `Job ${result.jobId} was accepted. Refresh or wait for the backend to produce the signed artifact.`,
+        title: "報表工作已排入佇列",
+        description: `工作 ${result.jobId} 已受理。請刷新或等待後端產生簽名檔案。`,
         tone: "success",
       });
       router.refresh();
@@ -662,11 +674,7 @@ export function ReportsManager({
       return;
     }
 
-    if (
-      !window.confirm(
-        `Re-run report job ${job.jobId} with the same parameters?`,
-      )
-    ) {
+    if (!window.confirm(`要用相同參數重跑報表工作 ${job.jobId} 嗎？`)) {
       return;
     }
 
@@ -678,8 +686,8 @@ export function ReportsManager({
       });
 
       setFlash({
-        title: "Failed report queued again",
-        description: `Replacement job ${result.jobId} was accepted with the original type and scope.`,
+        title: "失敗報表已重新排入佇列",
+        description: `替代工作 ${result.jobId} 已用原本類型與範圍受理。`,
         tone: "success",
       });
       router.refresh();
@@ -755,8 +763,8 @@ export function ReportsManager({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="報表 · Reports"
-        subtitle="月用量 · cost center 拆分 · SLA 摘要 · 簽名 artifact 短效"
+        title="報表"
+        subtitle="月用量 · 成本中心拆分 · SLA 摘要 · 短效簽名檔案"
         actions={
           <div style={actionRowStyle}>
             <ActionButton
@@ -797,10 +805,10 @@ export function ReportsManager({
             theme={th}
             tone="warn"
             title="報表資料無法完整載入"
-            body="The route stays available, but one or more reporting reads failed."
+            body="路由仍可使用，但一個或多個報表讀取來源失敗。"
             actions={
               <div style={{ color: th.text, fontSize: 11.5 }}>
-                {errors.length} issue{errors.length === 1 ? "" : "s"}
+                {errors.length} 個問題
               </div>
             }
           />
@@ -810,14 +818,14 @@ export function ReportsManager({
           theme={th}
           tone="info"
           title="更新層級 T6：手動"
-          body={`This route does not auto-poll. Snapshot loaded ${formatDateTime(generatedAt)} and refresh tier remains ${refreshTier}.`}
+          body={`此路由不自動輪詢。快照載入於 ${formatDateTime(generatedAt)}，更新層級維持 ${refreshTier}。`}
         />
 
         <CanvasBanner
           theme={th}
           tone="accent"
           title="跨應用報表追溯保持明確"
-          body="Tenant reports can escalate into ops reporting or platform governance. Deep links open in a new tab per Q-X03."
+          body="租戶報表可銜接營運報表或平台治理；依 Q-X03，跨應用深連結會在新分頁開啟。"
           actions={
             <>
               {opsReportingAction ? (
@@ -827,7 +835,7 @@ export function ReportsManager({
                   rel="noreferrer"
                   style={buttonAnchorStyle}
                 >
-                  Ops reporting
+                  開啟 Ops 報表
                 </a>
               ) : null}
               {platformAuditAction ? (
@@ -837,11 +845,11 @@ export function ReportsManager({
                   rel="noreferrer"
                   style={buttonAnchorStyle}
                 >
-                  Platform audit
+                  開啟平台 audit
                 </a>
               ) : null}
               <Link href="/audit" style={buttonAnchorStyle}>
-                Tenant audit
+                租戶 audit
               </Link>
             </>
           }
@@ -852,25 +860,25 @@ export function ReportsManager({
             theme={th}
             label="工作"
             value={String(totalJobs)}
-            sub="Report job history"
+            sub="報表工作歷史"
           />
           <CanvasKPI
             theme={th}
             label="排隊／執行中"
             value={String(activeJobs)}
-            sub="Backend still producing artifacts"
+            sub="後端正在產出檔案"
           />
           <CanvasKPI
             theme={th}
             label="就緒"
             value={String(readyJobs)}
-            sub="Signed downloads currently valid"
+            sub="簽名下載仍有效"
           />
           <CanvasKPI
             theme={th}
             label="失敗／過期"
             value={`${failedJobs} / ${expiredJobs}`}
-            sub="Needs re-run or fresh artifact"
+            sub="需要重跑或重新產檔"
           />
         </div>
 
@@ -888,7 +896,7 @@ export function ReportsManager({
                   onChange={(event) => setTypeFilter(event.target.value)}
                   style={filterInputStyle}
                 >
-                  <option value="all">All types</option>
+                  <option value="all">所有類型</option>
                   {REPORT_TYPE_OPTIONS.map(
                     (option: (typeof REPORT_TYPE_OPTIONS)[number]) => (
                       <option key={option.value} value={option.value}>
@@ -940,7 +948,7 @@ export function ReportsManager({
                   setPeriodFilter("");
                 }}
               >
-                Clear filters
+                清除篩選
               </CanvasBtn>
             </div>
 
@@ -973,7 +981,7 @@ export function ReportsManager({
                         setPeriodFilter("");
                       }}
                     >
-                      Clear filters
+                      清除篩選
                     </CanvasBtn>
                   ) : (
                     <ActionButton
@@ -1096,7 +1104,7 @@ export function ReportsManager({
               <div style={actionRowStyle}>
                 <ActionButton
                   descriptor={createAction}
-                  label={pending ? "Submitting…" : "Queue report"}
+                  label={pending ? "送出中..." : "排入報表佇列"}
                   icon="plus"
                   variant="primary"
                   onClick={handleCreateJob}
@@ -1118,7 +1126,7 @@ export function ReportsManager({
             >
               <div style={emptyReasonRowStyle}>
                 <Link href="/reports" style={emptyReasonLinkStyle}>
-                  live data
+                  即時資料
                 </Link>
                 {MANUAL_EMPTY_REASONS.map((reason) => (
                   <Link
@@ -1150,16 +1158,16 @@ export function ReportsManager({
                       rel="noreferrer"
                       style={buttonAnchorStyle}
                     >
-                      Open
+                      開啟
                     </a>
                   </div>
                 ))}
                 <div style={linkItemStyle}>
                   <span style={{ color: th.text, fontSize: 12.5 }}>
-                    Review tenant-side audit receipts for reporting actions
+                    查看租戶端報表操作的 audit 收據
                   </span>
                   <Link href="/audit" style={buttonAnchorStyle}>
-                    Open
+                    開啟
                   </Link>
                 </div>
               </div>

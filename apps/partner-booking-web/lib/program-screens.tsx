@@ -3,7 +3,7 @@ import {
   getProgramChromeVars,
   type PartnerProgramTheme,
 } from "@/lib/program-theme";
-import { t } from "@/lib/translations";
+import { t as translate, type Locale } from "@/lib/translations";
 
 /**
  * Shared partner-booking screens that render themed per program.
@@ -115,37 +115,37 @@ export const PARTNER_PROGRAM_SCREENS = [
   {
     id: "embed_handoff",
     segment: "embed-handoff",
-    label: t("program.screen.embed_handoff.label"),
+    label: translate("program.screen.embed_handoff.label"),
     eyebrow: "PB_EmbedHandoff",
-    summary: t("program.screen.embed_handoff.summary"),
+    summary: translate("program.screen.embed_handoff.summary"),
   },
   {
     id: "embed_reauth",
     segment: "embed-reauth",
-    label: t("program.screen.embed_reauth.label"),
+    label: translate("program.screen.embed_reauth.label"),
     eyebrow: "PB_EmbedReauth",
-    summary: t("program.screen.embed_reauth.summary"),
+    summary: translate("program.screen.embed_reauth.summary"),
   },
   {
     id: "embed_unsupported",
     segment: "embed-unsupported",
-    label: t("program.screen.embed_unsupported.label"),
+    label: translate("program.screen.embed_unsupported.label"),
     eyebrow: "PB_EmbedUnsupported",
-    summary: t("program.screen.embed_unsupported.summary"),
+    summary: translate("program.screen.embed_unsupported.summary"),
   },
   {
     id: "embed_consent",
     segment: "embed-consent",
-    label: t("program.screen.embed_consent.label"),
+    label: translate("program.screen.embed_consent.label"),
     eyebrow: "PB_EmbedConsent",
-    summary: t("program.screen.embed_consent.summary"),
+    summary: translate("program.screen.embed_consent.summary"),
   },
   {
     id: "embed_fallback",
     segment: "embed-fallback",
-    label: t("program.screen.embed_fallback.label"),
+    label: translate("program.screen.embed_fallback.label"),
     eyebrow: "PB_EmbedFallback",
-    summary: t("program.screen.embed_fallback.summary"),
+    summary: translate("program.screen.embed_fallback.summary"),
   },
 ] as const;
 
@@ -153,6 +153,236 @@ export type PartnerProgramScreenId =
   (typeof PARTNER_PROGRAM_SCREENS)[number]["id"];
 
 type ProgramScreenMeta = (typeof PARTNER_PROGRAM_SCREENS)[number];
+type ProgramScreenCopy = {
+  label: string;
+  summary: string;
+};
+
+const PROGRAM_SCREEN_COPY: Record<
+  PartnerProgramScreenId,
+  Record<Locale, ProgramScreenCopy>
+> = {
+  landing: {
+    zh: { label: "入口", summary: "品牌入口 hero、額度餘額與服務選單。" },
+    en: {
+      label: "Landing",
+      summary: "Branded entry hero, benefit balance, and service menu.",
+    },
+  },
+  eligibility: {
+    zh: { label: "資格確認", summary: "首次使用的權益確認與授權同意。" },
+    en: {
+      label: "Eligibility",
+      summary: "First-use benefit confirmation and consent.",
+    },
+  },
+  insurance_policy: {
+    zh: { label: "保單驗證", summary: "保單未通過核驗，理賠代步仍維持封鎖。" },
+    en: {
+      label: "Policy check",
+      summary:
+        "Replacement mobility remains blocked until policy verification passes.",
+    },
+  },
+  insurance_replacement_vehicle: {
+    zh: {
+      label: "代步車權益",
+      summary: "代步車型或保障窗未核定，無法建立代步行程。",
+    },
+    en: {
+      label: "Replacement benefit",
+      summary: "Vehicle class or coverage window is not approved yet.",
+    },
+  },
+  insurance_roster: {
+    zh: {
+      label: "乘客名單",
+      summary: "理賠案件乘客名單未對齊，需先修正保險名單資料。",
+    },
+    en: {
+      label: "Passenger roster",
+      summary: "Insurance passenger roster must be corrected before booking.",
+    },
+  },
+  insurance_pending: {
+    zh: {
+      label: "理賠審核中",
+      summary: "理賠案件尚在審核流程，代步權益未開通。",
+    },
+    en: {
+      label: "Claim pending",
+      summary:
+        "The claim is still under review, so mobility benefit is not open.",
+    },
+  },
+  insurance_missing: {
+    zh: {
+      label: "查無案件",
+      summary: "保單或理賠參照查無對應案件，需重新確認資料。",
+    },
+    en: {
+      label: "Claim not found",
+      summary: "No matching policy or claim reference was found.",
+    },
+  },
+  insurance_expired: {
+    zh: {
+      label: "保障已逾期",
+      summary: "代步保障期間已結束，本案無法再建立新行程。",
+    },
+    en: {
+      label: "Coverage expired",
+      summary: "The replacement-vehicle coverage window has ended.",
+    },
+  },
+  insurance_cancelled: {
+    zh: {
+      label: "案件已結案",
+      summary: "理賠案件已取消或結清，代步權益同步關閉。",
+    },
+    en: {
+      label: "Claim closed",
+      summary:
+        "The claim is cancelled or settled, so mobility benefit is closed.",
+    },
+  },
+  review: {
+    zh: {
+      label: "下單前確認",
+      summary: "上下車、時間、服務與費用 / 額度彙整。",
+    },
+    en: {
+      label: "Review",
+      summary: "Pickup, drop-off, time, service, fee, and benefit summary.",
+    },
+  },
+  success: {
+    zh: { label: "預約成功", summary: "預約成立、訂單編號與後續指引。" },
+    en: {
+      label: "Booked",
+      summary: "Booking confirmation, reference number, and next steps.",
+    },
+  },
+  tracking: {
+    zh: { label: "行程追蹤", summary: "駕駛資訊、即時位置與行程明細。" },
+    en: {
+      label: "Tracking",
+      summary: "Driver details, live location, and trip information.",
+    },
+  },
+  error: {
+    zh: { label: "發生錯誤", summary: "可重試的錯誤狀態與客服入口。" },
+    en: {
+      label: "Error",
+      summary: "Retryable error state and support entry point.",
+    },
+  },
+  manual_review: {
+    zh: { label: "人工審查", summary: "資格送人工審查的等待狀態。" },
+    en: {
+      label: "Manual review",
+      summary: "Waiting state while eligibility is under manual review.",
+    },
+  },
+  embed_handoff: {
+    zh: {
+      label: translate("program.screen.embed_handoff.label", undefined, "zh"),
+      summary: translate(
+        "program.screen.embed_handoff.summary",
+        undefined,
+        "zh",
+      ),
+    },
+    en: {
+      label: translate("program.screen.embed_handoff.label", undefined, "en"),
+      summary: translate(
+        "program.screen.embed_handoff.summary",
+        undefined,
+        "en",
+      ),
+    },
+  },
+  embed_reauth: {
+    zh: {
+      label: translate("program.screen.embed_reauth.label", undefined, "zh"),
+      summary: translate(
+        "program.screen.embed_reauth.summary",
+        undefined,
+        "zh",
+      ),
+    },
+    en: {
+      label: translate("program.screen.embed_reauth.label", undefined, "en"),
+      summary: translate(
+        "program.screen.embed_reauth.summary",
+        undefined,
+        "en",
+      ),
+    },
+  },
+  embed_unsupported: {
+    zh: {
+      label: translate(
+        "program.screen.embed_unsupported.label",
+        undefined,
+        "zh",
+      ),
+      summary: translate(
+        "program.screen.embed_unsupported.summary",
+        undefined,
+        "zh",
+      ),
+    },
+    en: {
+      label: translate(
+        "program.screen.embed_unsupported.label",
+        undefined,
+        "en",
+      ),
+      summary: translate(
+        "program.screen.embed_unsupported.summary",
+        undefined,
+        "en",
+      ),
+    },
+  },
+  embed_consent: {
+    zh: {
+      label: translate("program.screen.embed_consent.label", undefined, "zh"),
+      summary: translate(
+        "program.screen.embed_consent.summary",
+        undefined,
+        "zh",
+      ),
+    },
+    en: {
+      label: translate("program.screen.embed_consent.label", undefined, "en"),
+      summary: translate(
+        "program.screen.embed_consent.summary",
+        undefined,
+        "en",
+      ),
+    },
+  },
+  embed_fallback: {
+    zh: {
+      label: translate("program.screen.embed_fallback.label", undefined, "zh"),
+      summary: translate(
+        "program.screen.embed_fallback.summary",
+        undefined,
+        "zh",
+      ),
+    },
+    en: {
+      label: translate("program.screen.embed_fallback.label", undefined, "en"),
+      summary: translate(
+        "program.screen.embed_fallback.summary",
+        undefined,
+        "en",
+      ),
+    },
+  },
+};
 
 const screenById = Object.fromEntries(
   PARTNER_PROGRAM_SCREENS.map((screen) => [screen.id, screen]),
@@ -214,6 +444,13 @@ export function getProgramScreenMeta(
   screen: PartnerProgramScreenId,
 ): ProgramScreenMeta {
   return screenById[screen];
+}
+
+function getProgramScreenCopy(
+  screen: PartnerProgramScreenId,
+  locale: Locale,
+): ProgramScreenCopy {
+  return PROGRAM_SCREEN_COPY[screen][locale] ?? PROGRAM_SCREEN_COPY[screen].zh;
 }
 
 /** Resolve a URL segment (e.g. `manual-review`) to a screen id. */
@@ -804,12 +1041,14 @@ function EmbedStateIcon({
 
 function EmbedChrome({
   theme,
+  locale,
   host,
   state,
   children,
   footer,
 }: {
   theme: PartnerProgramTheme;
+  locale: Locale;
   host?: string;
   state: "live" | "warn" | "err" | "neutral";
   children: ReactNode;
@@ -868,10 +1107,14 @@ function EmbedChrome({
         </div>
         <div style={{ flex: 1, lineHeight: 1.2 }}>
           <div style={{ fontSize: "13.5px", fontWeight: 700 }}>
-            {t("program.embed.chrome.title")}
+            {translate("program.embed.chrome.title", undefined, locale)}
           </div>
           <div style={{ fontSize: "10px", opacity: 0.72 }}>
-            {t("program.embed.chrome.subtitle", { issuer: theme.issuerName })}
+            {translate(
+              "program.embed.chrome.subtitle",
+              { issuer: theme.issuerName },
+              locale,
+            )}
           </div>
         </div>
         <div
@@ -924,10 +1167,14 @@ function EmbedChrome({
         <span
           style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace' }}
         >
-          {t("program.embed.chrome.webview")}
+          {translate("program.embed.chrome.webview", undefined, locale)}
         </span>
         <span style={{ color: "#9ca3af" }}>
-          {t("program.embed.chrome.embeddedIn", { issuer: theme.issuerLabel })}
+          {translate(
+            "program.embed.chrome.embeddedIn",
+            { issuer: theme.issuerLabel },
+            locale,
+          )}
         </span>
       </div>
       <div style={{ display: "grid", gap: "12px", padding: "16px" }}>
@@ -1037,7 +1284,10 @@ function renderScreen(
   theme: PartnerProgramTheme,
   screen: PartnerProgramScreenId,
   basePath: string,
+  locale: Locale,
 ): ReactNode {
+  const t = (key: string, params?: Record<string, string | number>) =>
+    translate(key, params, locale);
   const demo = programDemo(theme);
   const reviewHref = getProgramScreenHref(basePath, "review");
   const successHref = getProgramScreenHref(basePath, "success");
@@ -1593,6 +1843,7 @@ function renderScreen(
       return (
         <EmbedChrome
           theme={theme}
+          locale={locale}
           state="live"
           footer={
             <Button
@@ -1680,6 +1931,7 @@ function renderScreen(
       return (
         <EmbedChrome
           theme={theme}
+          locale={locale}
           state="warn"
           footer={
             <>
@@ -1757,6 +2009,7 @@ function renderScreen(
       return (
         <EmbedChrome
           theme={theme}
+          locale={locale}
           host="unknown-host.example"
           state="err"
           footer={
@@ -1851,6 +2104,7 @@ function renderScreen(
       return (
         <EmbedChrome
           theme={theme}
+          locale={locale}
           state="live"
           footer={
             <>
@@ -1969,6 +2223,7 @@ function renderScreen(
     return (
       <EmbedChrome
         theme={theme}
+        locale={locale}
         state="neutral"
         footer={
           <>
@@ -2686,13 +2941,15 @@ export function ProgramBookingFlow({
   theme,
   screen,
   basePath,
+  locale,
 }: {
   theme: PartnerProgramTheme;
   screen: PartnerProgramScreenId;
   basePath: string;
+  locale: Locale;
 }) {
   const visibleScreens = listProgramScreensForTheme(theme);
-  const activeMeta = getProgramScreenMeta(screen);
+  const activeCopy = getProgramScreenCopy(screen, locale);
 
   return (
     <div
@@ -2734,6 +2991,7 @@ export function ProgramBookingFlow({
       <nav style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
         {visibleScreens.map((meta) => {
           const isActive = meta.id === screen;
+          const copy = getProgramScreenCopy(meta.id, locale);
           return (
             <a
               key={meta.id}
@@ -2763,7 +3021,7 @@ export function ProgramBookingFlow({
                 {meta.eyebrow}
               </span>
               <span style={{ fontSize: "13px", fontWeight: 800 }}>
-                {meta.label}
+                {copy.label}
               </span>
             </a>
           );
@@ -2777,7 +3035,7 @@ export function ProgramBookingFlow({
           color: theme.chrome.pageMuted,
         }}
       >
-        {activeMeta.summary}
+        {activeCopy.summary}
       </div>
 
       <div
@@ -2788,7 +3046,7 @@ export function ProgramBookingFlow({
           width: "100%",
         }}
       >
-        {renderScreen(theme, screen, basePath)}
+        {renderScreen(theme, screen, basePath, locale)}
       </div>
     </div>
   );

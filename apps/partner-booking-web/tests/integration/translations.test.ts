@@ -45,4 +45,29 @@ describe("partner-booking i18n dictionary", () => {
       }
     },
   );
+
+  it("passes the server locale through partner program screen routes", () => {
+    const programPage = readFileSync(
+      new URL("../../app/[tenantSlug]/program/page.tsx", import.meta.url),
+      "utf8",
+    );
+    const programScreenPage = readFileSync(
+      new URL(
+        "../../app/[tenantSlug]/program/[screen]/page.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const programScreens = readFileSync(
+      new URL("../../lib/program-screens.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(programPage).toContain("getServerLocale");
+    expect(programPage).toContain("locale={locale}");
+    expect(programScreenPage).toContain("getServerLocale");
+    expect(programScreenPage).toContain("locale={locale}");
+    expect(programScreens).toContain("getProgramScreenCopy(screen, locale)");
+    expect(programScreens).toContain("translate(key, params, locale)");
+  });
 });
