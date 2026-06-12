@@ -5,6 +5,8 @@ import {
 } from "@/components/page-primitives";
 import { PartnerBookingCreateForm } from "@/app/partner/(authenticated)/booking/new/booking-create-form";
 import { requirePartnerSession } from "@/lib/partner-session";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,7 @@ export default async function PartnerBookingCreatePage({
   searchParams: Promise<{ eligibilityVerificationId?: string }>;
 }) {
   const session = await requirePartnerSession();
+  const locale = await getServerLocale();
   const resolvedSearchParams = (await searchParams) ?? {};
   const eligibilityVerificationId =
     typeof resolvedSearchParams.eligibilityVerificationId === "string"
@@ -25,31 +28,38 @@ export default async function PartnerBookingCreatePage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="新增訂單"
-        title="建立合作夥伴標記訂單。"
-        description="需要填寫上車、下車、預約時窗、乘客聯絡方式與選填備註。後端會自動標記 `partnerEntrySlug`，並在通過驗證時標記 `eligibilityVerificationId`。"
+        eyebrow={t("partner.bookingNew.hero.eyebrow", locale)}
+        title={t("partner.bookingNew.hero.title", locale)}
+        description={t("partner.bookingNew.hero.description", locale)}
       />
 
       {!isActive ? (
         <CalloutPanel
-          title="建立訂單已封鎖"
-          description={`Entry status is "${session.partnerEntry.status}". Contact platform admin before creating partner bookings.`}
+          title={t("partner.bookingNew.blocked.title", locale)}
+          description={t("partner.bookingNew.blocked.description", locale, {
+            status: session.partnerEntry.status,
+          })}
           tone="warning"
         />
       ) : null}
 
       {requiresEligibility && !eligibilityVerificationId ? (
         <CalloutPanel
-          title="需要資格驗證"
-          description="此 entry 在建立訂單前需要 eligibility verification id。請先執行資格驗證步驟再繼續。"
+          title={t("partner.bookingNew.requiresEligibility.title", locale)}
+          description={t(
+            "partner.bookingNew.requiresEligibility.description",
+            locale,
+          )}
           tone="warning"
         />
       ) : null}
 
       <SurfaceCard
-        kicker="Service"
-        title={`Subtype fixed by entry: ${session.partnerEntry.businessDispatchSubtype}`}
-        description="服務子類型由合作夥伴 entry 註冊擁有，無法從此介面編輯。報價權限僅由後端管理。"
+        kicker={t("partner.bookingNew.service.kicker", locale)}
+        title={t("partner.bookingNew.service.title", locale, {
+          subtype: session.partnerEntry.businessDispatchSubtype,
+        })}
+        description={t("partner.bookingNew.service.description", locale)}
       >
         <PartnerBookingCreateForm
           canSubmit={
@@ -63,8 +73,8 @@ export default async function PartnerBookingCreatePage({
       </SurfaceCard>
 
       <CalloutPanel
-        title="負向路徑不會進入建立"
-        description="若後端以 `partner_entry_inactive`、`eligibility_required`、`eligibility_ineligible` 或 `eligibility_manual_review` 拒絕訂單，介面會回傳拒絕原因，且不會默默回退到租戶管理路徑。"
+        title={t("partner.bookingNew.negative.title", locale)}
+        description={t("partner.bookingNew.negative.description", locale)}
       />
     </div>
   );

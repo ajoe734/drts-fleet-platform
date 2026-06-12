@@ -4,26 +4,30 @@ import {
   type PartnerNavItem,
 } from "@/components/partner-shell";
 import { requirePartnerSession } from "@/lib/partner-session";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
-const NAV_ITEMS: PartnerNavItem[] = [
-  {
-    href: "/partner/start",
-    label: "開始",
-    note: "Entry summary, allowed actions, and partner-safe boundaries.",
-  },
-  {
-    href: "/partner/eligibility",
-    label: "資格",
-    note: "Verify rider eligibility for this entry before booking creation.",
-  },
-  {
-    href: "/partner/booking/new",
-    label: "新增訂單",
-    note: "Create a partner-tagged booking using verified eligibility.",
-  },
-];
+function buildNavItems(locale: Locale): PartnerNavItem[] {
+  return [
+    {
+      href: "/partner/start",
+      label: t("partner.nav.start.label", locale),
+      note: t("partner.nav.start.note", locale),
+    },
+    {
+      href: "/partner/eligibility",
+      label: t("partner.nav.eligibility.label", locale),
+      note: t("partner.nav.eligibility.note", locale),
+    },
+    {
+      href: "/partner/booking/new",
+      label: t("partner.nav.bookingNew.label", locale),
+      note: t("partner.nav.bookingNew.note", locale),
+    },
+  ];
+}
 
 export default async function PartnerAuthenticatedLayout({
   children,
@@ -31,10 +35,11 @@ export default async function PartnerAuthenticatedLayout({
   children: ReactNode;
 }) {
   const session = await requirePartnerSession();
+  const locale = await getServerLocale();
 
   return (
     <PartnerAuthenticatedShell
-      navItems={NAV_ITEMS}
+      navItems={buildNavItems(locale)}
       session={{
         partnerCode: session.partnerEntry.partnerCode,
         displayName: session.partnerEntry.displayName,

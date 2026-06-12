@@ -5,6 +5,8 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import { requirePartnerSession } from "@/lib/partner-session";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +18,7 @@ const ELIGIBILITY_REQUIRED: Record<string, boolean> = {
 
 export default async function PartnerStartPage() {
   const session = await requirePartnerSession();
+  const locale = await getServerLocale();
   const eligibilityRequired =
     ELIGIBILITY_REQUIRED[session.partnerEntry.eligibilityMode] ?? true;
   const subtype = session.partnerEntry.businessDispatchSubtype;
@@ -25,36 +28,38 @@ export default async function PartnerStartPage() {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="合作夥伴工作區"
-        title={`${session.partnerEntry.displayName} is signed in.`}
-        description="合作夥伴模式僅開放資格驗證與合作夥伴標記訂單建立。租戶管理治理刻意不出現在此介面。"
+        eyebrow={t("partner.start.hero.eyebrow", locale)}
+        title={t("partner.start.hero.title", locale, {
+          name: session.partnerEntry.displayName,
+        })}
+        description={t("partner.start.hero.description", locale)}
       />
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="Entry"
-          title="Entry registration snapshot"
-          description="後端核發的 entry 紀錄。合作夥伴模式只讀取，不會編輯。"
+          kicker={t("partner.start.entry.kicker", locale)}
+          title={t("partner.start.entry.title", locale)}
+          description={t("partner.start.entry.description", locale)}
         >
           <dl className="definition-grid">
             <div>
-              <dt>顯示名稱</dt>
+              <dt>{t("partner.start.field.displayName", locale)}</dt>
               <dd>{session.partnerEntry.displayName}</dd>
             </div>
             <div>
-              <dt>Slug</dt>
+              <dt>{t("partner.start.field.slug", locale)}</dt>
               <dd>
                 <code>{session.partnerEntry.entrySlug}</code>
               </dd>
             </div>
             <div>
-              <dt>合作夥伴代碼</dt>
+              <dt>{t("partner.start.field.partnerCode", locale)}</dt>
               <dd>
                 <code>{session.partnerEntry.partnerCode}</code>
               </dd>
             </div>
             <div>
-              <dt>方案</dt>
+              <dt>{t("partner.start.field.program", locale)}</dt>
               <dd>
                 {session.partnerEntry.programCode ? (
                   <code>{session.partnerEntry.programCode}</code>
@@ -64,7 +69,7 @@ export default async function PartnerStartPage() {
               </dd>
             </div>
             <div>
-              <dt>銀行</dt>
+              <dt>{t("partner.start.field.bank", locale)}</dt>
               <dd>
                 {session.partnerEntry.bankCode ? (
                   <code>{session.partnerEntry.bankCode}</code>
@@ -74,19 +79,19 @@ export default async function PartnerStartPage() {
               </dd>
             </div>
             <div>
-              <dt>服務子類型</dt>
+              <dt>{t("partner.start.field.subtype", locale)}</dt>
               <dd>
                 <code>{subtype}</code>
               </dd>
             </div>
             <div>
-              <dt>授權模式</dt>
+              <dt>{t("partner.start.field.authMode", locale)}</dt>
               <dd>
                 <code>{session.partnerEntry.authMode}</code>
               </dd>
             </div>
             <div>
-              <dt>狀態</dt>
+              <dt>{t("partner.start.field.status", locale)}</dt>
               <dd>
                 <span
                   className={`status-badge${isActive ? "" : " is-warning"}`}
@@ -99,72 +104,71 @@ export default async function PartnerStartPage() {
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Eligibility"
+          kicker={t("partner.start.eligibility.kicker", locale)}
           title={
             eligibilityRequired
-              ? "Eligibility verification required"
-              : "Eligibility check not required"
+              ? t("partner.start.eligibility.requiredTitle", locale)
+              : t("partner.start.eligibility.notRequiredTitle", locale)
           }
           description={
             eligibilityRequired
-              ? "Run the eligibility check first; only an `eligible` decision unlocks partner booking creation."
-              : "This entry is configured with `eligibility_mode = none`. Booking creation is allowed without an eligibility verification."
+              ? t("partner.start.eligibility.requiredDescription", locale)
+              : t("partner.start.eligibility.notRequiredDescription", locale)
           }
         >
           <p>
-            Eligibility mode:{" "}
+            {t("partner.start.eligibility.mode", locale)}:{" "}
             <code>{session.partnerEntry.eligibilityMode}</code>
           </p>
           <div className="link-row">
             <Link className="text-link" href="/partner/eligibility">
-              Open eligibility verification
+              {t("partner.start.eligibility.open", locale)}
             </Link>
             {!eligibilityRequired ? (
               <Link className="text-link" href="/partner/booking/new">
-                Skip to booking creation
+                {t("partner.start.eligibility.skip", locale)}
               </Link>
             ) : null}
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Booking"
-          title="合作夥伴標記訂單建立"
-          description="從此介面建立的訂單會標記 `partnerEntrySlug`，並在通過驗證時標記 `eligibilityVerificationId`，讓下游 audit 與 billing 保留合作夥伴來源。"
+          kicker={t("partner.start.booking.kicker", locale)}
+          title={t("partner.start.booking.title", locale)}
+          description={t("partner.start.booking.description", locale)}
         >
           <ul className="panel-list">
-            <li>服務子類型由 entry 紀錄固定。</li>
-            <li>報價權限由後端擁有；合作夥伴模式不設定車資。</li>
-            <li>
-              Negative paths (denied / ineligible / degraded) stop short of
-              create.
-            </li>
+            <li>{t("partner.start.booking.subtypeFixed", locale)}</li>
+            <li>{t("partner.start.booking.backendOwnsFare", locale)}</li>
+            <li>{t("partner.start.booking.negativeStops", locale)}</li>
           </ul>
           <div className="link-row">
             <Link className="text-link" href="/partner/booking/new">
-              Open booking create
+              {t("partner.start.booking.open", locale)}
             </Link>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Boundary"
-          title="合作夥伴模式得不到什麼"
-          description="介面外殼沒有這些頁面的導覽項目；路由本身未設防護，但導覽讓邊界清楚呈現。"
+          kicker={t("partner.start.boundary.kicker", locale)}
+          title={t("partner.start.boundary.title", locale)}
+          description={t("partner.start.boundary.description", locale)}
         >
           <ul className="panel-list">
-            <li>無租戶使用者／角色指派。</li>
-            <li>無 API 金鑰、Webhook、audit log 或設定。</li>
-            <li>無租戶 billing 或整合就緒度。</li>
-            <li>無履約覆寫或派遣權限。</li>
+            <li>{t("partner.start.boundary.users", locale)}</li>
+            <li>{t("partner.start.boundary.admin", locale)}</li>
+            <li>{t("partner.start.boundary.billing", locale)}</li>
+            <li>{t("partner.start.boundary.ops", locale)}</li>
           </ul>
         </SurfaceCard>
       </section>
 
       {!isActive ? (
         <CalloutPanel
-          title="Entry status flagged"
-          description={`Entry status is "${status}". Booking creation will fail until the entry is reactivated by platform admin.`}
+          title={t("partner.start.inactive.title", locale)}
+          description={t("partner.start.inactive.description", locale, {
+            status,
+          })}
           tone="warning"
         />
       ) : null}

@@ -6,6 +6,7 @@ import type {
   PartnerEligibilityMode,
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
+import { useTranslation } from "@/lib/i18n";
 
 type Verification = PartnerEligibilityVerificationRecord;
 
@@ -15,26 +16,29 @@ const STATUS_TONE: Record<Verification["verificationStatus"], string> = {
   manual_review: "is-warning",
 };
 
-const STATUS_HEADING: Record<Verification["verificationStatus"], string> = {
-  eligible: "Eligibility approved",
-  ineligible: "Eligibility denied",
-  manual_review: "Manual review required",
+const STATUS_HEADING_KEY: Record<Verification["verificationStatus"], string> = {
+  eligible: "partner.eligibility.status.eligible.heading",
+  ineligible: "partner.eligibility.status.ineligible.heading",
+  manual_review: "partner.eligibility.status.manualReview.heading",
 };
 
-const STATUS_GUIDANCE: Record<Verification["verificationStatus"], string> = {
-  eligible:
-    "Booking creation is unlocked. The verification id will be stamped on the booking automatically.",
-  ineligible:
-    "Booking creation stays blocked. Ask the rider to provide a valid reference or contact partner support.",
-  manual_review:
-    "Booking creation stays blocked until ops resolves the manual review queue item for this verification.",
-};
+const STATUS_GUIDANCE_KEY: Record<Verification["verificationStatus"], string> =
+  {
+    eligible: "partner.eligibility.status.eligible.guidance",
+    ineligible: "partner.eligibility.status.ineligible.guidance",
+    manual_review: "partner.eligibility.status.manualReview.guidance",
+  };
+
+function formatDateTime(value: string, locale: "en" | "zh") {
+  return new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en-US");
+}
 
 export function PartnerEligibilityForm({
   mode,
 }: {
   mode: PartnerEligibilityMode;
 }) {
+  const { locale, t } = useTranslation();
   const [referenceToken, setReferenceToken] = useState("");
   const [cardLast4, setCardLast4] = useState("");
   const [cardholderName, setCardholderName] = useState("");
@@ -69,7 +73,10 @@ export function PartnerEligibilityForm({
 
       if (!response.ok || !payload?.verification) {
         setError(
-          payload?.error ?? `Verification failed (HTTP ${response.status}).`,
+          payload?.error ??
+            t("partner.eligibility.form.errorFailed", {
+              status: response.status,
+            }),
         );
         return;
       }
@@ -79,7 +86,7 @@ export function PartnerEligibilityForm({
       setError(
         caught instanceof Error
           ? caught.message
-          : "Unknown verification failure.",
+          : t("partner.eligibility.form.errorUnknown"),
       );
     } finally {
       setSubmitting(false);
@@ -89,7 +96,7 @@ export function PartnerEligibilityForm({
   return (
     <div className="form-stack">
       <form
-        aria-label="合作夥伴資格驗證"
+        aria-label={t("partner.eligibility.formAria")}
         className="form-stack"
         onSubmit={handleSubmit}
       >
@@ -103,7 +110,7 @@ export function PartnerEligibilityForm({
           {mode === "bank_card_inline" ? (
             <>
               <label className="field-stack">
-                <span>卡號末四碼</span>
+                <span>{t("partner.eligibility.form.cardLast4")}</span>
                 <input
                   inputMode="numeric"
                   maxLength={4}
@@ -116,7 +123,7 @@ export function PartnerEligibilityForm({
                 />
               </label>
               <label className="field-stack">
-                <span>持卡人姓名</span>
+                <span>{t("partner.eligibility.form.cardholderName")}</span>
                 <input
                   onChange={(event) => setCardholderName(event.target.value)}
                   required
@@ -130,7 +137,7 @@ export function PartnerEligibilityForm({
           {mode === "reference_required" ? (
             <>
               <label className="field-stack">
-                <span>參照 token</span>
+                <span>{t("partner.eligibility.form.referenceToken")}</span>
                 <input
                   onChange={(event) => setReferenceToken(event.target.value)}
                   required
@@ -139,7 +146,7 @@ export function PartnerEligibilityForm({
                 />
               </label>
               <label className="field-stack">
-                <span>福利參照</span>
+                <span>{t("partner.eligibility.form.benefitReference")}</span>
                 <input
                   onChange={(event) => setBenefitReference(event.target.value)}
                   required
@@ -148,7 +155,7 @@ export function PartnerEligibilityForm({
                 />
               </label>
               <label className="field-stack">
-                <span>航班編號（選填）</span>
+                <span>{t("partner.eligibility.form.flightNoOptional")}</span>
                 <input
                   onChange={(event) => setFlightNo(event.target.value)}
                   type="text"
@@ -165,7 +172,9 @@ export function PartnerEligibilityForm({
             disabled={submitting}
             type="submit"
           >
-            {submitting ? "Verifying eligibility..." : "Verify eligibility"}
+            {submitting
+              ? t("partner.eligibility.form.submitting")
+              : t("partner.eligibility.form.submit")}
           </button>
         </div>
       </form>
@@ -177,29 +186,31 @@ export function PartnerEligibilityForm({
           }`}
           role="status"
         >
-          <strong>{STATUS_HEADING[verification.verificationStatus]}</strong>
-          <p>{STATUS_GUIDANCE[verification.verificationStatus]}</p>
+          <strong>
+            {t(STATUS_HEADING_KEY[verification.verificationStatus])}
+          </strong>
+          <p>{t(STATUS_GUIDANCE_KEY[verification.verificationStatus])}</p>
           <dl className="definition-grid">
             <div>
-              <dt>驗證 id</dt>
+              <dt>{t("partner.eligibility.result.verificationId")}</dt>
               <dd>
                 <code>{verification.eligibilityVerificationId}</code>
               </dd>
             </div>
             <div>
-              <dt>判定來源</dt>
+              <dt>{t("partner.eligibility.result.decisionSource")}</dt>
               <dd>
                 <code>{verification.decisionSource}</code>
               </dd>
             </div>
             <div>
-              <dt>原因代碼</dt>
+              <dt>{t("partner.eligibility.result.reasonCode")}</dt>
               <dd>
                 <code>{verification.verificationReasonCode}</code>
               </dd>
             </div>
             <div>
-              <dt>Adapter</dt>
+              <dt>{t("partner.eligibility.result.adapter")}</dt>
               <dd>
                 {verification.adapterCode ? (
                   <code>{verification.adapterCode}</code>
@@ -209,14 +220,14 @@ export function PartnerEligibilityForm({
               </dd>
             </div>
             <div>
-              <dt>嘗試次數</dt>
+              <dt>{t("partner.eligibility.result.attempts")}</dt>
               <dd>{verification.attempts.length}</dd>
             </div>
             <div>
-              <dt>驗證時間</dt>
+              <dt>{t("partner.eligibility.result.verifiedAt")}</dt>
               <dd>
                 <time dateTime={verification.verifiedAt}>
-                  {new Date(verification.verifiedAt).toLocaleString()}
+                  {formatDateTime(verification.verifiedAt, locale)}
                 </time>
               </dd>
             </div>
@@ -228,7 +239,7 @@ export function PartnerEligibilityForm({
                 verification.eligibilityVerificationId,
               )}`}
             >
-              Continue to booking create
+              {t("partner.eligibility.result.continue")}
             </Link>
           ) : null}
         </div>

@@ -2,10 +2,12 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
+import { useTranslation } from "@/lib/i18n";
 
 export function PartnerLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useTranslation();
   const [entrySlug, setEntrySlug] = useState(
     searchParams.get("entry_slug") ?? "",
   );
@@ -33,7 +35,8 @@ export function PartnerLoginForm() {
           error?: string;
         } | null;
         setError(
-          payload?.error ?? `Partner sign-in failed (HTTP ${response.status}).`,
+          payload?.error ??
+            t("partner.login.errorFailed", { status: response.status }),
         );
         return;
       }
@@ -44,7 +47,9 @@ export function PartnerLoginForm() {
       });
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "Unknown sign-in failure.",
+        caught instanceof Error
+          ? caught.message
+          : t("partner.login.errorUnknown"),
       );
     } finally {
       setSubmitting(false);
@@ -55,7 +60,7 @@ export function PartnerLoginForm() {
 
   return (
     <form
-      aria-label="合作夥伴登入"
+      aria-label={t("partner.login.formAria")}
       className="partner-login-form"
       onSubmit={handleSubmit}
     >
@@ -65,24 +70,24 @@ export function PartnerLoginForm() {
         </div>
       ) : null}
       <label className="field-stack">
-        <span>Entry slug</span>
+        <span>{t("partner.login.entrySlug")}</span>
         <input
           autoComplete="username"
           name="entrySlug"
           onChange={(event) => setEntrySlug(event.target.value)}
-          placeholder="例如 acme-airport-vip"
+          placeholder={t("partner.login.entrySlugPlaceholder")}
           required
           type="text"
           value={entrySlug}
         />
       </label>
       <label className="field-stack">
-        <span>合作夥伴 API 金鑰</span>
+        <span>{t("partner.login.apiKey")}</span>
         <input
           autoComplete="current-password"
           name="apiKey"
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder="由平台管理員提供"
+          placeholder={t("partner.login.apiKeyPlaceholder")}
           required
           type="password"
           value={apiKey}
@@ -93,7 +98,7 @@ export function PartnerLoginForm() {
         disabled={disabled}
         type="submit"
       >
-        {disabled ? "Starting partner session..." : "Start partner session"}
+        {disabled ? t("partner.login.submitting") : t("partner.login.submit")}
       </button>
     </form>
   );

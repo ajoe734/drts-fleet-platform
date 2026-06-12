@@ -7,6 +7,7 @@ import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityMode,
 } from "@drts/contracts";
+import { useTranslation } from "@/lib/i18n";
 
 export type PartnerNavItem = {
   href: string;
@@ -28,14 +29,18 @@ type PartnerSessionSummary = {
   expiresAt: string;
 };
 
-const ELIGIBILITY_NOTE: Record<PartnerEligibilityMode, string> = {
-  none: "No eligibility check required for this entry.",
-  bank_card_inline: "Inline card verification required before booking.",
-  reference_required: "Reference token verification required before booking.",
+const ELIGIBILITY_NOTE_KEY: Record<PartnerEligibilityMode, string> = {
+  none: "partner.shell.eligibility.none",
+  bank_card_inline: "partner.shell.eligibility.bankCard",
+  reference_required: "partner.shell.eligibility.reference",
 };
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function formatDateTime(value: string, locale: "en" | "zh") {
+  return new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en-US");
 }
 
 export function PartnerAuthenticatedShell({
@@ -49,6 +54,7 @@ export function PartnerAuthenticatedShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { locale, t } = useTranslation();
   const [pending, startTransition] = useTransition();
 
   async function handleLogout() {
@@ -72,25 +78,30 @@ export function PartnerAuthenticatedShell({
           : undefined
       }
     >
-      <aside className="partner-sidebar" aria-label="Partner navigation">
+      <aside
+        className="partner-sidebar"
+        aria-label={t("partner.shell.navAria")}
+      >
         <div className="partner-brand">
-          <span className="partner-badge">Partner mode</span>
+          <span className="partner-badge">{t("partner.shell.badge")}</span>
           <h1>{session.displayName}</h1>
           <p className="partner-brand-note">
-            Entry slug <code>{session.entrySlug}</code>
+            {t("partner.shell.entrySlug")} <code>{session.entrySlug}</code>
             {session.programCode ? (
               <>
-                {" · "}program <code>{session.programCode}</code>
+                {" · "}
+                {t("partner.shell.program")} <code>{session.programCode}</code>
               </>
             ) : null}
             {session.bankCode ? (
               <>
-                {" · "}bank <code>{session.bankCode}</code>
+                {" · "}
+                {t("partner.shell.bank")} <code>{session.bankCode}</code>
               </>
             ) : null}
           </p>
           <p className="partner-brand-note">
-            {ELIGIBILITY_NOTE[session.eligibilityMode]}
+            {t(ELIGIBILITY_NOTE_KEY[session.eligibilityMode])}
           </p>
         </div>
 
@@ -112,9 +123,10 @@ export function PartnerAuthenticatedShell({
 
         <div className="partner-sidebar-footer">
           <div className="partner-identity">
-            <strong>身分</strong>
+            <strong>{t("partner.shell.identity")}</strong>
             <p>
-              Actor <code>{session.identityActorType}</code>
+              {t("partner.shell.actor")}{" "}
+              <code>{session.identityActorType}</code>
               {session.identityActorId ? (
                 <>
                   {" · "}id <code>{session.identityActorId}</code>
@@ -122,12 +134,12 @@ export function PartnerAuthenticatedShell({
               ) : null}
             </p>
             <p>
-              Auth mode <code>{session.authMode}</code>
+              {t("partner.shell.authMode")} <code>{session.authMode}</code>
             </p>
             <p>
-              Session valid until{" "}
+              {t("partner.shell.sessionValidUntil")}{" "}
               <time dateTime={session.expiresAt}>
-                {new Date(session.expiresAt).toLocaleString()}
+                {formatDateTime(session.expiresAt, locale)}
               </time>
             </p>
           </div>
@@ -137,7 +149,9 @@ export function PartnerAuthenticatedShell({
             onClick={() => void handleLogout()}
             type="button"
           >
-            {pending ? "Signing out..." : "Sign out partner"}
+            {pending
+              ? t("partner.shell.signingOut")
+              : t("partner.shell.signOut")}
           </button>
         </div>
       </aside>
@@ -146,16 +160,19 @@ export function PartnerAuthenticatedShell({
         <div className="partner-frame">
           <header className="partner-topbar">
             <div className="partner-topbar-copy">
-              <span className="eyebrow">Constrained partner shell</span>
-              <h2>{activeItem?.label ?? "Partner workspace"}</h2>
+              <span className="eyebrow">
+                {t("partner.shell.topbarEyebrow")}
+              </span>
+              <h2>{activeItem?.label ?? t("partner.shell.workspaceTitle")}</h2>
               <p>
-                {activeItem?.note ??
-                  "Partner workspace exposes only entry-scoped eligibility and booking creation."}
+                {activeItem?.note ?? t("partner.shell.workspaceDescription")}
               </p>
             </div>
             <div className="partner-topbar-meta">
-              <span className="meta-pill">Authority: `/api/tenant/*`</span>
-              <span className="meta-pill">No tenant-admin nav exposed</span>
+              <span className="meta-pill">{t("partner.shell.authority")}</span>
+              <span className="meta-pill">
+                {t("partner.shell.noTenantAdminNav")}
+              </span>
             </div>
           </header>
           {children}
@@ -170,20 +187,18 @@ export function PartnerPublicShell({
 }: {
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="partner-public-shell">
       <header className="partner-public-header">
-        <span className="partner-badge">Partner mode</span>
-        <h1>合作夥伴登入</h1>
-        <p>
-          Repo-local partner booking entry. Submit your entry slug and partner
-          API key to start a backend-issued bootstrap session.
-        </p>
+        <span className="partner-badge">{t("partner.shell.badge")}</span>
+        <h1>{t("partner.public.title")}</h1>
+        <p>{t("partner.public.description")}</p>
       </header>
       <section className="partner-public-body">{children}</section>
       <footer className="partner-public-footer">
-        Partner mode is constrained: it never exposes tenant-admin governance,
-        users, audit, API keys, webhooks, or settings.
+        {t("partner.public.footer")}
       </footer>
     </div>
   );

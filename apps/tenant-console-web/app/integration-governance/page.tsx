@@ -16,6 +16,8 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -120,128 +122,127 @@ type QuickActionDisplay = ResourceActionDescriptor & {
 const subSystemMeta: Record<
   TenantIntegrationReadinessItem["subSystem"],
   {
-    label: string;
+    labelKey: string;
     code: string;
     href: string;
-    fallbackDetail: string;
+    fallbackDetailKey: string;
     emptyReason?: EmptyReason;
-    emptyBody?: string;
+    emptyBodyKey?: string;
   }
 > = {
   api_keys: {
-    label: "API 金鑰",
+    labelKey: "integrationGovernance.subsystem.apiKeys.label",
     code: "api_keys",
     href: "/api-keys",
-    fallbackDetail: "Active keys, expiring keys, and missing scope coverage.",
+    fallbackDetailKey: "integrationGovernance.subsystem.apiKeys.fallback",
   },
   webhooks: {
-    label: "Webhook",
+    labelKey: "integrationGovernance.subsystem.webhooks.label",
     code: "webhooks",
     href: "/webhooks",
-    fallbackDetail:
-      "Endpoint count, delivery failure rate, and engine availability.",
+    fallbackDetailKey: "integrationGovernance.subsystem.webhooks.fallback",
   },
   notifications: {
-    label: "通知路由",
+    labelKey: "integrationGovernance.subsystem.notifications.label",
     code: "notifications",
     href: "/settings#notifications",
-    fallbackDetail: "Configured channels across inbox, email, and webhook.",
+    fallbackDetailKey: "integrationGovernance.subsystem.notifications.fallback",
   },
   sla: {
-    label: "SLA 設定檔",
+    labelKey: "integrationGovernance.subsystem.sla.label",
     code: "sla_profile",
     href: "/settings#sla",
-    fallbackDetail: "Wait, arrival, and completion thresholds are evaluated.",
+    fallbackDetailKey: "integrationGovernance.subsystem.sla.fallback",
   },
   reports: {
-    label: "報表可用性",
+    labelKey: "integrationGovernance.subsystem.reports.label",
     code: "reports",
     href: "/reports",
-    fallbackDetail: "Runnable jobs and report artifact availability.",
+    fallbackDetailKey: "integrationGovernance.subsystem.reports.fallback",
   },
   modules: {
-    label: "模組啟用",
+    labelKey: "integrationGovernance.subsystem.modules.label",
     code: "modules",
     href: "/settings",
-    fallbackDetail: "Tenant-facing module posture and visibility state.",
+    fallbackDetailKey: "integrationGovernance.subsystem.modules.fallback",
   },
   partner_entries: {
-    label: "合作夥伴 entries",
+    labelKey: "integrationGovernance.subsystem.partnerEntries.label",
     code: "partner_entries",
     href: "/partner",
-    fallbackDetail: "Partner-linked ingress posture when entries exist.",
+    fallbackDetailKey:
+      "integrationGovernance.subsystem.partnerEntries.fallback",
     emptyReason: "not_provisioned",
-    emptyBody:
-      "This tenant has no partner entry yet, so the lane stays distinct.",
+    emptyBodyKey: "integrationGovernance.subsystem.partnerEntries.emptyBody",
   },
 };
 
 const emptyReasonMeta: Record<
   EmptyReason,
   {
-    title: string;
-    body: string;
+    titleKey: string;
+    bodyKey: string;
     glyph: string;
     tone: CanvasTone;
     href: string;
-    actionLabel: string;
+    actionLabelKey: string;
   }
 > = {
   no_data: {
-    title: "No readiness data yet",
-    body: "The tenant route is live, but no aggregated readiness snapshot has been published yet.",
+    titleKey: "integrationGovernance.empty.noData.title",
+    bodyKey: "integrationGovernance.empty.noData.body",
     glyph: "00",
     tone: "neutral",
     href: "/api-keys",
-    actionLabel: "Start with API keys",
+    actionLabelKey: "integrationGovernance.empty.noData.action",
   },
   not_provisioned: {
-    title: "First-time setup required",
-    body: "The tenant exists but one or more integration lanes still require first-time provisioning.",
+    titleKey: "integrationGovernance.empty.notProvisioned.title",
+    bodyKey: "integrationGovernance.empty.notProvisioned.body",
     glyph: "NP",
     tone: "warn",
     href: "/webhooks",
-    actionLabel: "Set up webhook",
+    actionLabelKey: "integrationGovernance.empty.notProvisioned.action",
   },
   fetch_failed: {
-    title: "Snapshot fetch failed",
-    body: "The aggregated readiness endpoint did not return a usable payload for this request.",
+    titleKey: "integrationGovernance.empty.fetchFailed.title",
+    bodyKey: "integrationGovernance.empty.fetchFailed.body",
     glyph: "FF",
     tone: "danger",
     href: "/integration-governance",
-    actionLabel: "Retry snapshot",
+    actionLabelKey: "integrationGovernance.empty.fetchFailed.action",
   },
   permission_denied: {
-    title: "Access is read-restricted",
-    body: "The current actor can land on the route shell but cannot read the readiness summary.",
+    titleKey: "integrationGovernance.empty.permissionDenied.title",
+    bodyKey: "integrationGovernance.empty.permissionDenied.body",
     glyph: "PD",
     tone: "danger",
     href: "/users",
-    actionLabel: "Review tenant roles",
+    actionLabelKey: "integrationGovernance.empty.permissionDenied.action",
   },
   external_unavailable: {
-    title: "External dependency unavailable",
-    body: "One or more upstream integrations that feed the aggregated view are degraded or offline.",
+    titleKey: "integrationGovernance.empty.externalUnavailable.title",
+    bodyKey: "integrationGovernance.empty.externalUnavailable.body",
     glyph: "EX",
     tone: "warn",
     href: "/webhooks",
-    actionLabel: "Inspect delivery posture",
+    actionLabelKey: "integrationGovernance.empty.externalUnavailable.action",
   },
   filtered_empty: {
-    title: "Current filter returns nothing",
-    body: "The route is healthy, but the current filter leaves no subsystem cards in the result set.",
+    titleKey: "integrationGovernance.empty.filteredEmpty.title",
+    bodyKey: "integrationGovernance.empty.filteredEmpty.body",
     glyph: "FX",
     tone: "info",
     href: "/integration-governance",
-    actionLabel: "Clear filters",
+    actionLabelKey: "integrationGovernance.empty.filteredEmpty.action",
   },
   driver_not_eligible: {
-    title: "Driver-only empty reason",
-    body: "This global empty reason should never be used to drive tenant integration governance.",
+    titleKey: "integrationGovernance.empty.driverNotEligible.title",
+    bodyKey: "integrationGovernance.empty.driverNotEligible.body",
     glyph: "DN",
     tone: "neutral",
     href: "/integration-governance",
-    actionLabel: "Back to readiness",
+    actionLabelKey: "integrationGovernance.empty.driverNotEligible.action",
   },
 };
 
@@ -260,13 +261,13 @@ function isEmptyReason(value: string | undefined): value is EmptyReason {
   );
 }
 
-function toErrorMessage(error: unknown) {
+function toErrorMessage(error: unknown, locale: Locale) {
   return error instanceof Error
     ? error.message
-    : "Unknown integration readiness error.";
+    : t("integrationGovernance.error.unknown", locale);
 }
 
-async function loadPageData(): Promise<PageData> {
+async function loadPageData(locale: Locale): Promise<PageData> {
   const client = getTenantClient();
 
   try {
@@ -278,7 +279,7 @@ async function loadPageData(): Promise<PageData> {
   } catch (error) {
     return {
       summary: null,
-      errors: [toErrorMessage(error)],
+      errors: [toErrorMessage(error, locale)],
     };
   }
 }
@@ -299,8 +300,22 @@ function getStatusTone(
   return pillToneByStatus[status] ?? "neutral";
 }
 
-function getStatusLabel(status: TenantIntegrationReadinessItem["status"]) {
-  return status.replaceAll("_", " ");
+function getStatusLabel(
+  status: TenantIntegrationReadinessItem["status"],
+  locale: Locale,
+) {
+  switch (status) {
+    case "ready":
+      return t("integrationGovernance.status.ready", locale);
+    case "partial":
+      return t("integrationGovernance.status.partial", locale);
+    case "blocked":
+      return t("integrationGovernance.status.blocked", locale);
+    case "not_provisioned":
+      return t("integrationGovernance.status.notProvisioned", locale);
+    default:
+      return String(status).replaceAll("_", " ");
+  }
 }
 
 function getStatusAccent(status: TenantIntegrationReadinessItem["status"]) {
@@ -334,18 +349,18 @@ function getActionHref(action: string, fallbackHref: string) {
   }
 }
 
-function getActionLabel(action: string) {
+function getActionLabel(action: string, locale: Locale) {
   switch (action) {
     case "issue_api_key":
-      return "核發 API 金鑰";
+      return t("integrationGovernance.action.issueApiKey", locale);
     case "create_webhook_endpoint":
-      return "設定 Webhook";
+      return t("integrationGovernance.action.createWebhook", locale);
     case "update_notifications":
-      return "設定通知";
+      return t("integrationGovernance.action.updateNotifications", locale);
     case "update_sla_profile":
-      return "設定 SLA";
+      return t("integrationGovernance.action.updateSla", locale);
     case "create_report_job":
-      return "建立報表工作";
+      return t("integrationGovernance.action.createReport", locale);
     default:
       return action.replaceAll("_", " ");
   }
@@ -379,9 +394,14 @@ function linkStyle(emphasis = false): CSSProperties {
   };
 }
 
-function getActionAssistiveCopy(action: ResourceActionDescriptor) {
+function getActionAssistiveCopy(
+  action: ResourceActionDescriptor,
+  locale: Locale,
+) {
   if (!action.enabled && action.disabledReasonCode) {
-    return `Unavailable: ${action.disabledReasonCode}`;
+    return t("integrationGovernance.action.unavailable", locale, {
+      reason: action.disabledReasonCode,
+    });
   }
   if (!action.enabled) {
     return "無資料";
@@ -392,10 +412,11 @@ function getActionAssistiveCopy(action: ResourceActionDescriptor) {
 function renderActionLink(
   action: ResourceActionDescriptor,
   href: string,
+  locale: Locale,
   children: ReactNode,
   emphasis = false,
 ) {
-  const assistiveCopy = getActionAssistiveCopy(action);
+  const assistiveCopy = getActionAssistiveCopy(action, locale);
 
   if (!action.enabled) {
     return (
@@ -438,7 +459,10 @@ function formatDateTime(value: string) {
     .replace(",", "");
 }
 
-function buildDisplayItems(items: TenantIntegrationReadinessItem[]) {
+function buildDisplayItems(
+  items: TenantIntegrationReadinessItem[],
+  locale: Locale,
+) {
   const itemMap = new Map(items.map((item) => [item.subSystem, item]));
 
   return subsystemOrder.map((subSystem) => {
@@ -454,14 +478,20 @@ function buildDisplayItems(items: TenantIntegrationReadinessItem[]) {
         meta.emptyReason === "not_provisioned" ? "not_provisioned" : "blocked",
       detail:
         meta.emptyReason === "not_provisioned"
-          ? (meta.emptyBody ??
-            "This subsystem has not been provisioned for the tenant yet.")
-          : "The aggregated payload did not return this subsystem. Verify upstream readiness evidence.",
+          ? t(
+              meta.emptyBodyKey ??
+                "integrationGovernance.missing.notProvisioned",
+              locale,
+            )
+          : t("integrationGovernance.missing.payload", locale),
     } satisfies TenantIntegrationReadinessItem;
   });
 }
 
-function dedupeActions(items: TenantIntegrationReadinessItem[]) {
+function dedupeActions(
+  items: TenantIntegrationReadinessItem[],
+  locale: Locale,
+) {
   const actions = new Map<string, QuickActionDisplay>();
 
   for (const item of items) {
@@ -473,7 +503,7 @@ function dedupeActions(items: TenantIntegrationReadinessItem[]) {
     const candidate = {
       ...item.nextAction,
       href: getActionHref(item.nextAction.action, meta.href),
-      source: meta.label,
+      source: t(meta.labelKey, locale),
     };
     const existing = actions.get(candidate.action);
 
@@ -490,27 +520,30 @@ function dedupeActions(items: TenantIntegrationReadinessItem[]) {
   });
 }
 
-function getStateVariant(items: TenantIntegrationReadinessItem[]) {
+function getStateVariant(
+  items: TenantIntegrationReadinessItem[],
+  locale: Locale,
+) {
   if (items.every((item) => item.status === "ready")) {
     return {
-      label: "完全就緒",
+      label: t("integrationGovernance.state.ready.label", locale),
       tone: "success" as CanvasTone,
-      body: "All seven integration lanes report green from the aggregated snapshot.",
+      body: t("integrationGovernance.state.ready.body", locale),
     };
   }
 
   if (items.every((item) => item.status === "not_provisioned")) {
     return {
-      label: "首次設定",
+      label: t("integrationGovernance.state.firstSetup.label", locale),
       tone: "warn" as CanvasTone,
-      body: "The tenant exists, but every tracked lane still requires first-time setup.",
+      body: t("integrationGovernance.state.firstSetup.body", locale),
     };
   }
 
   return {
-    label: "部分就緒",
+    label: t("integrationGovernance.state.partial.label", locale),
     tone: "info" as CanvasTone,
-    body: "Some subsystem lanes remain yellow or red, so follow-up actions stay visible.",
+    body: t("integrationGovernance.state.partial.body", locale),
   };
 }
 
@@ -526,6 +559,7 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
 function buildCrossAppLinks(
   tenantId: string,
   items: TenantIntegrationReadinessItem[],
+  locale: Locale,
 ) {
   const links: CrossAppResourceLink[] = [
     {
@@ -534,7 +568,7 @@ function buildCrossAppLinks(
       resourceType: "tenant",
       resourceId: tenantId,
       openMode: "new_tab",
-      label: "Open tenant governance in Platform Admin",
+      label: t("integrationGovernance.crossApp.tenantGovernance", locale),
     },
   ];
 
@@ -546,7 +580,7 @@ function buildCrossAppLinks(
       resourceType: "tenant_audit",
       resourceId: tenantId,
       openMode: "new_tab",
-      label: "Open webhook-linked audit lane in Ops Console",
+      label: t("integrationGovernance.crossApp.webhookAudit", locale),
     });
   }
 
@@ -560,7 +594,7 @@ function buildCrossAppLinks(
       resourceType: "tenant_partner_entry",
       resourceId: tenantId,
       openMode: "new_tab",
-      label: "Inspect partner entry ownership in Platform Admin",
+      label: t("integrationGovernance.crossApp.partnerOwnership", locale),
     });
   }
 
@@ -570,9 +604,11 @@ function buildCrossAppLinks(
 function EmptyReasonPreviewCard({
   reason,
   selected,
+  locale,
 }: {
   reason: EmptyReason;
   selected: boolean;
+  locale: Locale;
 }) {
   const meta = getEmptyReasonMeta(reason);
 
@@ -618,20 +654,30 @@ function EmptyReasonPreviewCard({
             {meta.glyph}
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{meta.title}</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>
+              {t(meta.titleKey, locale)}
+            </div>
             <div style={{ ...monoStyle, ...subtleCopyStyle }}>{reason}</div>
           </div>
         </div>
-        <p style={mutedCopyStyle}>{meta.body}</p>
+        <p style={mutedCopyStyle}>{t(meta.bodyKey, locale)}</p>
         <Link href={`?emptyReason=${reason}`} style={linkStyle(true)}>
-          {selected ? "Current variant" : "Preview this empty state"}
+          {selected
+            ? t("integrationGovernance.preview.current", locale)
+            : t("integrationGovernance.preview.preview", locale)}
         </Link>
       </div>
     </CanvasCard>
   );
 }
 
-function ReadinessTile({ item }: { item: TenantIntegrationReadinessItem }) {
+function ReadinessTile({
+  item,
+  locale,
+}: {
+  item: TenantIntegrationReadinessItem;
+  locale: Locale;
+}) {
   const meta = getSubSystemMeta(item.subSystem);
   const accent = getStatusAccent(item.status);
   const action = item.nextAction;
@@ -662,48 +708,55 @@ function ReadinessTile({ item }: { item: TenantIntegrationReadinessItem }) {
             {accent.glyph}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{meta.label}</div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>
+              {t(meta.labelKey, locale)}
+            </div>
             <div style={{ ...monoStyle, ...subtleCopyStyle }}>{meta.code}</div>
           </div>
           <CanvasPill theme={th} tone={getStatusTone(item.status)} dot>
-            {getStatusLabel(item.status)}
+            {getStatusLabel(item.status, locale)}
           </CanvasPill>
         </div>
 
-        <p style={mutedCopyStyle}>{item.detail ?? meta.fallbackDetail}</p>
+        <p style={mutedCopyStyle}>
+          {item.detail ?? t(meta.fallbackDetailKey, locale)}
+        </p>
 
         {!action && item.status === "not_provisioned" ? (
           <div style={subtleCopyStyle}>
-            Distinct from `no_data`: this lane is intentionally present but not
-            provisioned yet.
+            {t("integrationGovernance.tile.notProvisionedHint", locale)}
           </div>
         ) : null}
 
         {!action && item.subSystem === "partner_entries" ? (
           <div style={subtleCopyStyle}>
-            Partner-linked investigations remain cross-app and hand off to
-            Platform Admin.
+            {t("integrationGovernance.tile.partnerHint", locale)}
           </div>
         ) : null}
 
         <div style={tileFooterStyle}>
           <Link href={meta.href} style={linkStyle()}>
-            Open module
+            {t("integrationGovernance.tile.openModule", locale)}
           </Link>
           {action ? (
             renderActionLink(
               action,
               actionHref,
-              `${getActionLabel(action.action)} ->`,
+              locale,
+              `${getActionLabel(action.action, locale)} ->`,
               true,
             )
           ) : (
-            <span style={actionButtonStyle(true, false)}>{"Inspect ->"}</span>
+            <span style={actionButtonStyle(true, false)}>
+              {t("integrationGovernance.tile.inspect", locale)}
+            </span>
           )}
         </div>
 
         {action && !action.enabled ? (
-          <div style={subtleCopyStyle}>{getActionAssistiveCopy(action)}</div>
+          <div style={subtleCopyStyle}>
+            {getActionAssistiveCopy(action, locale)}
+          </div>
         ) : null}
       </div>
     </CanvasCard>
@@ -715,6 +768,7 @@ export default async function IntegrationGovernancePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
   const forcedEmptyReason = normalizeQueryValue(
     resolvedSearchParams.emptyReason,
@@ -724,17 +778,17 @@ export default async function IntegrationGovernancePage({
     : null;
   const data = previewEmptyReason
     ? { summary: null, errors: [] }
-    : await loadPageData();
+    : await loadPageData(locale);
 
   const summary = data.summary;
   const hasSnapshot = Boolean(summary && summary.items.length > 0);
-  const items = buildDisplayItems(summary?.items ?? []);
+  const items = buildDisplayItems(summary?.items ?? [], locale);
   const readyCount = items.filter((item) => item.status === "ready").length;
-  const quickActions = dedupeActions(items);
+  const quickActions = dedupeActions(items, locale);
   const crossAppLinks = summary
-    ? buildCrossAppLinks(summary.tenantId, items)
+    ? buildCrossAppLinks(summary.tenantId, items, locale)
     : [];
-  const stateVariant = getStateVariant(items);
+  const stateVariant = getStateVariant(items, locale);
   const selectedEmptyReason =
     previewEmptyReason ??
     (data.errors.length > 0 ? "fetch_failed" : hasSnapshot ? null : "no_data");
@@ -746,12 +800,12 @@ export default async function IntegrationGovernancePage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="整合就緒度"
-        subtitle="aggregated readiness · 來自 GET /api/tenant/integration-governance/readiness (Q-TEN10 · 單一聚合 endpoint，非 6+ 個查詢)"
+        title={t("integrationGovernance.header.title", locale)}
+        subtitle={t("integrationGovernance.header.subtitle", locale)}
         actions={
           <>
             <CanvasPill theme={th} tone="success" dot>
-              T5 slow
+              {t("integrationGovernance.header.t5", locale)}
             </CanvasPill>
             <CanvasPill
               theme={th}
@@ -759,8 +813,11 @@ export default async function IntegrationGovernancePage({
               dot={hasSnapshot}
             >
               {hasSnapshot
-                ? `${readyCount} of ${items.length} ready`
-                : "No snapshot"}
+                ? t("integrationGovernance.header.readyCount", locale, {
+                    ready: readyCount,
+                    total: items.length,
+                  })
+                : t("integrationGovernance.header.noSnapshot", locale)}
             </CanvasPill>
           </>
         }
@@ -770,8 +827,8 @@ export default async function IntegrationGovernancePage({
         <CanvasBanner
           theme={th}
           tone="info"
-          title="本頁透過 1 個 aggregated endpoint 拉資料 · 不是 6+ 個並行查詢"
-          body="UI 不應 orchestrate 多個無關 query。可操作 CTA 來自 backend 回傳的 action descriptor，refresh tier 固定為 tenant slow (T5)。"
+          title={t("integrationGovernance.banner.title", locale)}
+          body={t("integrationGovernance.banner.body", locale)}
         />
 
         {selectedEmptyReason && selectedEmptyMeta ? (
@@ -811,10 +868,10 @@ export default async function IntegrationGovernancePage({
                   </div>
                   <div>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-                      {selectedEmptyMeta.title}
+                      {t(selectedEmptyMeta.titleKey, locale)}
                     </h2>
                     <p style={{ margin: "6px 0 0", ...mutedCopyStyle }}>
-                      {selectedEmptyMeta.body}
+                      {t(selectedEmptyMeta.bodyKey, locale)}
                     </p>
                   </div>
                 </div>
@@ -824,10 +881,10 @@ export default async function IntegrationGovernancePage({
                     href={selectedEmptyMeta.href}
                     style={actionButtonStyle(true, true)}
                   >
-                    {selectedEmptyMeta.actionLabel}
+                    {t(selectedEmptyMeta.actionLabelKey, locale)}
                   </Link>
                   <Link href="/integration-governance" style={linkStyle()}>
-                    Return to live snapshot
+                    {t("integrationGovernance.empty.returnLive", locale)}
                   </Link>
                 </div>
 
@@ -859,16 +916,13 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    EmptyReason coverage
+                    {t("integrationGovernance.coverage.title", locale)}
                   </div>
                   <p style={mutedCopyStyle}>
-                    Reviewer can preview all six tenant-relevant empty states
-                    from this route with
-                    <span style={monoStyle}> ?emptyReason=&lt;reason&gt;</span>.
+                    {t("integrationGovernance.coverage.body", locale)}
                   </p>
                   <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    supported · no_data / not_provisioned / fetch_failed /
-                    permission_denied / external_unavailable / filtered_empty
+                    {t("integrationGovernance.coverage.supported", locale)}
                   </div>
                 </div>
               </CanvasCard>
@@ -876,14 +930,13 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    Refresh tier
+                    {t("integrationGovernance.refreshTier.title", locale)}
                   </div>
                   <p style={mutedCopyStyle}>
-                    This screen remains on T5 tenant-slow cadence even when the
-                    current route is rendering an empty variant.
+                    {t("integrationGovernance.refreshTier.emptyBody", locale)}
                   </p>
                   <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    cadence · T5 / tenant slow
+                    {t("integrationGovernance.refreshTier.cadence", locale)}
                   </div>
                 </div>
               </CanvasCard>
@@ -904,6 +957,7 @@ export default async function IntegrationGovernancePage({
                   key={reason}
                   reason={reason}
                   selected={reason === selectedEmptyReason}
+                  locale={locale}
                 />
               ))}
             </div>
@@ -923,12 +977,10 @@ export default async function IntegrationGovernancePage({
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>
-                      Aggregated readiness board
+                      {t("integrationGovernance.board.title", locale)}
                     </div>
                     <p style={{ marginTop: 6, ...mutedCopyStyle }}>
-                      Seven subsystem lanes render from one readiness payload.
-                      Drill targets stay module-specific, and quick CTAs only
-                      appear when the backend returns an action descriptor.
+                      {t("integrationGovernance.board.body", locale)}
                     </p>
                   </div>
                   <div style={actionStripStyle}>
@@ -936,10 +988,12 @@ export default async function IntegrationGovernancePage({
                       {stateVariant.label}
                     </CanvasPill>
                     <CanvasPill theme={th} tone="neutral">
-                      7 subsystem lanes
+                      {t("integrationGovernance.board.subsystemLanes", locale)}
                     </CanvasPill>
                     <CanvasPill theme={th} tone="neutral">
-                      snapshot {formatDateTime(summary!.computedAt)}
+                      {t("integrationGovernance.board.snapshot", locale, {
+                        value: formatDateTime(summary!.computedAt),
+                      })}
                     </CanvasPill>
                   </div>
                 </div>
@@ -954,7 +1008,8 @@ export default async function IntegrationGovernancePage({
                         {renderActionLink(
                           action,
                           action.href,
-                          getActionLabel(action.action),
+                          locale,
+                          getActionLabel(action.action, locale),
                           true,
                         )}
                         <span style={subtleCopyStyle}>{action.source}</span>
@@ -962,14 +1017,18 @@ export default async function IntegrationGovernancePage({
                     ))
                   ) : (
                     <CanvasPill theme={th} tone="success" dot>
-                      No follow-up action
+                      {t("integrationGovernance.board.noFollowup", locale)}
                     </CanvasPill>
                   )}
                 </div>
 
                 <div style={boardStyle}>
                   {items.map((item) => (
-                    <ReadinessTile key={item.subSystem} item={item} />
+                    <ReadinessTile
+                      key={item.subSystem}
+                      item={item}
+                      locale={locale}
+                    />
                   ))}
                 </div>
               </div>
@@ -979,18 +1038,21 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    Refresh tier
+                    {t("integrationGovernance.refreshTier.title", locale)}
                   </div>
                   <p style={mutedCopyStyle}>
-                    Packet §5.16 puts this route on T5. The page keeps that
-                    cadence explicit instead of pretending the summary is
-                    real-time.
+                    {t(
+                      "integrationGovernance.refreshTier.snapshotBody",
+                      locale,
+                    )}
                   </p>
                   <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    cadence · T5 / tenant slow
+                    {t("integrationGovernance.refreshTier.cadence", locale)}
                   </div>
                   <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    computedAt · {formatDateTime(summary!.computedAt)}
+                    {t("integrationGovernance.refreshTier.computedAt", locale, {
+                      value: formatDateTime(summary!.computedAt),
+                    })}
                   </div>
                 </div>
               </CanvasCard>
@@ -998,12 +1060,10 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    Cross-app drill targets
+                    {t("integrationGovernance.crossApp.title", locale)}
                   </div>
                   <p style={mutedCopyStyle}>
-                    When the next investigation step belongs to another app, the
-                    route deep-links out in a new tab instead of inventing a
-                    local mirror.
+                    {t("integrationGovernance.crossApp.body", locale)}
                   </p>
                   <div style={{ display: "grid", gap: 8 }}>
                     {crossAppLinks.map((link) => {
@@ -1025,16 +1085,17 @@ export default async function IntegrationGovernancePage({
                         >
                           <span style={linkStyle(true)}>{link.label}</span>
                           <span style={subtleCopyStyle}>
-                            Configure
-                            <span style={monoStyle}>
-                              {" "}
-                              NEXT_PUBLIC_
-                              {link.targetApp === "platform-admin"
-                                ? "PLATFORM_ADMIN"
-                                : "OPS_CONSOLE"}
-                              _URL
-                            </span>{" "}
-                            to activate this deep link.
+                            {t(
+                              "integrationGovernance.crossApp.configure",
+                              locale,
+                              {
+                                envVar: `NEXT_PUBLIC_${
+                                  link.targetApp === "platform-admin"
+                                    ? "PLATFORM_ADMIN"
+                                    : "OPS_CONSOLE"
+                                }_URL`,
+                              },
+                            )}
                           </span>
                         </div>
                       );
@@ -1046,11 +1107,10 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    QA variants
+                    {t("integrationGovernance.qa.title", locale)}
                   </div>
                   <p style={mutedCopyStyle}>
-                    This route still exposes the six tenant-relevant
-                    `EmptyReason` previews for review coverage.
+                    {t("integrationGovernance.qa.body", locale)}
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {(

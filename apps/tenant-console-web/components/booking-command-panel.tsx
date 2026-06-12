@@ -9,11 +9,9 @@ import type {
   ResourceActionDescriptor,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
-import {
-  formatDateTime,
-  formatRelativeTime,
-  isFutureIso,
-} from "@/lib/formatters";
+import { isFutureIso } from "@/lib/formatters";
+import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
 
 type Mode = "update" | "cancel" | null;
 
@@ -32,23 +30,69 @@ function getActionDescriptor(
   return actions.find((descriptor) => descriptor.action === action) ?? null;
 }
 
-function describeReason(reasonCode: string | null | undefined) {
+function describeReason(
+  reasonCode: string | null | undefined,
+  t: (key: string, params?: Record<string, string | number>) => string,
+) {
   switch (reasonCode) {
     case "past_editable_until":
-      return "租戶編輯時窗已關閉。";
+      return t("bookingCommand.reason.pastEditableUntil");
     case "past_cancelable_until":
-      return "租戶取消時窗已關閉。";
+      return t("bookingCommand.reason.pastCancelableUntil");
     case "booking_terminal":
-      return "已完成或已取消的訂單為唯讀。";
+      return t("bookingCommand.reason.bookingTerminal");
     case "on_trip_locked":
-      return "行程中的訂單無法從租戶端變更。";
+      return t("bookingCommand.reason.onTripLocked");
     case "approval_pending":
-      return "此訂單需待審批結果才能再次變更。";
+      return t("bookingCommand.reason.approvalPending");
     case "approval_not_retryable":
-      return "此明細頁沒有可重試的審批流程步驟。";
+      return t("bookingCommand.reason.approvalNotRetryable");
     default:
-      return reasonCode ? `Backend reason: ${reasonCode}` : null;
+      return reasonCode
+        ? t("bookingCommand.reason.backend", { code: reasonCode })
+        : null;
   }
+}
+
+function formatPanelDateTime(value: string | null | undefined, locale: Locale) {
+  if (!value) {
+    return "—";
+  }
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function formatPanelRelativeTime(
+  value: string | null | undefined,
+  locale: Locale,
+) {
+  if (!value) {
+    return null;
+  }
+
+  const diffMs = new Date(value).getTime() - Date.now();
+  if (Number.isNaN(diffMs)) {
+    return null;
+  }
+
+  const formatter = new Intl.RelativeTimeFormat(
+    locale === "zh" ? "zh-TW" : "en-US",
+    { numeric: "auto" },
+  );
+  const diffMinutes = Math.round(diffMs / 60000);
+  if (Math.abs(diffMinutes) < 60) {
+    return formatter.format(diffMinutes, "minute");
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 48) {
+    return formatter.format(diffHours, "hour");
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  return formatter.format(diffDays, "day");
 }
 
 function isActionReceipt(value: unknown): value is ActionReceipt {
@@ -77,6 +121,7 @@ export function BookingCommandPanel({
   approvalHref = "/rules",
 }: BookingCommandPanelProps) {
   const router = useRouter();
+  const { locale, t } = useTranslation();
   const [mode, setMode] = useState<Mode>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,12 +191,12 @@ export function BookingCommandPanel({
   );
   const notesList = [
     updateAction?.disabledReasonCode
-      ? describeReason(updateAction.disabledReasonCode)
+      ? describeReason(updateAction.disabledReasonCode, t)
       : null,
     cancelAction?.disabledReasonCode
-      ? describeReason(cancelAction.disabledReasonCode)
+      ? describeReason(cancelAction.disabledReasonCode, t)
       : null,
-    readOnlyReasonCode ? describeReason(readOnlyReasonCode) : null,
+    readOnlyReasonCode ? describeReason(readOnlyReasonCode, t) : null,
   ].filter(
     (value, index, list): value is string =>
       Boolean(value) && list.indexOf(value) === index,
@@ -198,7 +243,7 @@ export function BookingCommandPanel({
             "error" in payload &&
             typeof payload.error === "string"
             ? payload.error
-            : "Unknown update failure.",
+            : t("bookingCommand.error.unknownUpdate"),
         );
       }
 
@@ -213,7 +258,11 @@ export function BookingCommandPanel({
         }
       } else {
         setReceipt(
-          `Update completed at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+          t("bookingCommand.receipt.updateCompleted", {
+            time: new Date().toLocaleTimeString(
+              locale === "zh" ? "zh-TW" : "en-US",
+            ),
+          }),
         );
       }
       router.refresh();
@@ -221,7 +270,7 @@ export function BookingCommandPanel({
       setError(
         submissionError instanceof Error
           ? submissionError.message
-          : "Unknown update failure.",
+          : t("bookingCommand.error.unknownUpdate"),
       );
     } finally {
       setLoading(false);
@@ -250,7 +299,7 @@ export function BookingCommandPanel({
             "error" in payload &&
             typeof payload.error === "string"
             ? payload.error
-            : "Unknown cancel failure.",
+            : t("bookingCommand.error.unknownCancel"),
         );
       }
 
@@ -265,7 +314,11 @@ export function BookingCommandPanel({
         }
       } else {
         setReceipt(
-          `Cancellation completed at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+          t("bookingCommand.receipt.cancelCompleted", {
+            time: new Date().toLocaleTimeString(
+              locale === "zh" ? "zh-TW" : "en-US",
+            ),
+          }),
         );
       }
       router.refresh();
@@ -273,7 +326,7 @@ export function BookingCommandPanel({
       setError(
         submissionError instanceof Error
           ? submissionError.message
-          : "Unknown cancel failure.",
+          : t("bookingCommand.error.unknownCancel"),
       );
     } finally {
       setLoading(false);
@@ -284,11 +337,8 @@ export function BookingCommandPanel({
     <div className="action-panel">
       <div className="action-stack">
         <div className="action-copy">
-          <strong>允許的租戶操作</strong>
-          <p>
-            Every CTA on this panel is driven by the booking action descriptors.
-            Disabled actions stay visible with a reason instead of disappearing.
-          </p>
+          <strong>{t("bookingCommand.panel.title")}</strong>
+          <p>{t("bookingCommand.panel.description")}</p>
         </div>
         <div className="action-row">
           {updateAction ? (
@@ -302,7 +352,7 @@ export function BookingCommandPanel({
                 setMode("update");
               }}
             >
-              Update booking
+              {t("bookingCommand.action.update")}
             </button>
           ) : null}
           {cancelAction ? (
@@ -316,7 +366,7 @@ export function BookingCommandPanel({
                 setMode("cancel");
               }}
             >
-              Cancel booking
+              {t("bookingCommand.action.cancel")}
             </button>
           ) : null}
           {resubmitAction ? (
@@ -330,14 +380,14 @@ export function BookingCommandPanel({
                 }
               }}
             >
-              Resubmit approval
+              {t("bookingCommand.action.resubmitApproval")}
             </Link>
           ) : null}
           <Link
             className="action-button action-button-secondary"
             href={auditHref}
           >
-            View audit
+            {t("bookingCommand.action.viewAudit")}
           </Link>
         </div>
         {receipt ? <div className="booking-receipt">{receipt}</div> : null}
@@ -352,19 +402,28 @@ export function BookingCommandPanel({
         ) : null}
         {updateAction?.disabledReasonCode === "past_editable_until" ? (
           <p className="action-note">
-            Editable until{" "}
-            {formatDateTime(booking.editableUntil ?? booking.modifiableUntil)}
-            {formatRelativeTime(
-              booking.editableUntil ?? booking.modifiableUntil,
-            )
-              ? ` (${formatRelativeTime(booking.editableUntil ?? booking.modifiableUntil)})`
-              : ""}
-            .
+            {t("bookingCommand.note.editableUntil", {
+              value: formatPanelDateTime(
+                booking.editableUntil ?? booking.modifiableUntil,
+                locale,
+              ),
+              relative: formatPanelRelativeTime(
+                booking.editableUntil ?? booking.modifiableUntil,
+                locale,
+              )
+                ? ` (${formatPanelRelativeTime(
+                    booking.editableUntil ?? booking.modifiableUntil,
+                    locale,
+                  )})`
+                : "",
+            })}
           </p>
         ) : null}
         {cancelAction?.disabledReasonCode === "past_cancelable_until" ? (
           <p className="action-note">
-            Cancelable until {formatDateTime(booking.cancelableUntil)}.
+            {t("bookingCommand.note.cancelableUntil", {
+              value: formatPanelDateTime(booking.cancelableUntil, locale),
+            })}
           </p>
         ) : null}
       </div>
@@ -375,12 +434,18 @@ export function BookingCommandPanel({
             aria-modal="true"
             className="modal-panel"
             role="dialog"
-            aria-label={mode === "update" ? "Update booking" : "Cancel booking"}
+            aria-label={
+              mode === "update"
+                ? t("bookingCommand.action.update")
+                : t("bookingCommand.action.cancel")
+            }
           >
             <div className="modal-header">
               <div>
                 <strong>
-                  {mode === "update" ? "Update booking" : "Cancel booking"}
+                  {mode === "update"
+                    ? t("bookingCommand.action.update")
+                    : t("bookingCommand.action.cancel")}
                 </strong>
                 <p>{booking.bookingId}</p>
               </div>
@@ -389,7 +454,7 @@ export function BookingCommandPanel({
                 type="button"
                 onClick={() => setMode(null)}
               >
-                Close
+                {t("bookingCommand.modal.close")}
               </button>
             </div>
 
@@ -398,7 +463,7 @@ export function BookingCommandPanel({
             {mode === "update" ? (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>上車地址</span>
+                  <span>{t("bookingCommand.field.pickupAddress")}</span>
                   <input
                     value={pickupAddress}
                     onChange={(event) => setPickupAddress(event.target.value)}
@@ -406,7 +471,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="field-stack">
-                  <span>下車地址</span>
+                  <span>{t("bookingCommand.field.dropoffAddress")}</span>
                   <input
                     value={dropoffAddress}
                     onChange={(event) => setDropoffAddress(event.target.value)}
@@ -414,7 +479,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="field-stack">
-                  <span>備註</span>
+                  <span>{t("bookingCommand.field.notes")}</span>
                   <textarea
                     rows={3}
                     value={notes}
@@ -423,7 +488,7 @@ export function BookingCommandPanel({
                 </label>
                 <div className="form-grid">
                   <label className="field-stack">
-                    <span>成本中心</span>
+                    <span>{t("bookingCommand.field.costCenter")}</span>
                     <input
                       value={costCenter}
                       onChange={(event) => setCostCenter(event.target.value)}
@@ -431,7 +496,7 @@ export function BookingCommandPanel({
                     />
                   </label>
                   <label className="field-stack">
-                    <span>車輛偏好</span>
+                    <span>{t("bookingCommand.field.vehiclePreference")}</span>
                     <input
                       value={vehiclePreference}
                       onChange={(event) =>
@@ -448,14 +513,16 @@ export function BookingCommandPanel({
                     type="button"
                     onClick={() => void submitUpdate()}
                   >
-                    {loading ? "Saving..." : "Save changes"}
+                    {loading
+                      ? t("bookingCommand.submit.saving")
+                      : t("bookingCommand.submit.save")}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>取消原因</span>
+                  <span>{t("bookingCommand.field.cancelReason")}</span>
                   <textarea
                     rows={4}
                     value={cancelReason}
@@ -469,7 +536,9 @@ export function BookingCommandPanel({
                     type="button"
                     onClick={() => void submitCancel()}
                   >
-                    {loading ? "Cancelling..." : "Confirm cancel"}
+                    {loading
+                      ? t("bookingCommand.submit.cancelling")
+                      : t("bookingCommand.submit.confirmCancel")}
                   </button>
                 </div>
               </div>
