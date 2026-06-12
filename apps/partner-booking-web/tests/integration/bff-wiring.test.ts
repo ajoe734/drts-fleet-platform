@@ -329,6 +329,26 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
+  it("lets public shells fallback when the dev authority is offline", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+      }),
+    });
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "PARTNER_AUTHORITY_UNAVAILABLE",
+      status: 503,
+    });
+  });
+
   it("lets public shells fallback on missing entries without swallowing inactive entries", async () => {
     const fetchMock = vi
       .fn()

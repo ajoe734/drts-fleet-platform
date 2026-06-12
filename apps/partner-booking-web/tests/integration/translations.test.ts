@@ -51,9 +51,24 @@ describe("partner-booking i18n dictionary", () => {
       new URL("../../app/[tenantSlug]/program/page.tsx", import.meta.url),
       "utf8",
     );
-    const programScreenPage = readFileSync(
+    const programSitePage = readFileSync(
+      new URL("../../app/[tenantSlug]/program/site/page.tsx", import.meta.url),
+      "utf8",
+    );
+    const programSiteScreenPage = readFileSync(
       new URL(
-        "../../app/[tenantSlug]/program/[screen]/page.tsx",
+        "../../app/[tenantSlug]/program/site/[screen]/page.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const programEmbedPage = readFileSync(
+      new URL("../../app/[tenantSlug]/program/embed/page.tsx", import.meta.url),
+      "utf8",
+    );
+    const programEmbedScreenPage = readFileSync(
+      new URL(
+        "../../app/[tenantSlug]/program/embed/[screen]/page.tsx",
         import.meta.url,
       ),
       "utf8",
@@ -64,10 +79,49 @@ describe("partner-booking i18n dictionary", () => {
     );
 
     expect(programPage).toContain("getServerLocale");
-    expect(programPage).toContain("locale={locale}");
-    expect(programScreenPage).toContain("getServerLocale");
-    expect(programScreenPage).toContain("locale={locale}");
+    expect(programPage).toContain('data-program-surface="selector"');
+    expect(programSitePage).toContain("getServerLocale");
+    expect(programSitePage).toContain("locale={locale}");
+    expect(programSitePage).toContain('surface="site"');
+    expect(programSiteScreenPage).toContain("getServerLocale");
+    expect(programSiteScreenPage).toContain("locale={locale}");
+    expect(programSiteScreenPage).toContain('surface="site"');
+    expect(programEmbedPage).toContain("getServerLocale");
+    expect(programEmbedPage).toContain("locale={locale}");
+    expect(programEmbedPage).toContain('surface="embed"');
+    expect(programEmbedScreenPage).toContain("getServerLocale");
+    expect(programEmbedScreenPage).toContain("locale={locale}");
+    expect(programEmbedScreenPage).toContain('surface="embed"');
     expect(programScreens).toContain("getProgramScreenCopy(screen, locale)");
     expect(programScreens).toContain("translate(key, params, locale)");
+  });
+
+  it("keeps website funnel routes separate from banking-app embed routes", () => {
+    const programScreens = readFileSync(
+      new URL("../../lib/program-screens.tsx", import.meta.url),
+      "utf8",
+    );
+    const legacyProgramScreenPage = readFileSync(
+      new URL(
+        "../../app/[tenantSlug]/program/[screen]/page.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(programScreens).toContain(
+      'export type PartnerProgramSurfaceKind = "site" | "embed"',
+    );
+    expect(programScreens).toContain('if (surface === "embed")');
+    expect(programScreens).toContain("CARD_ONLY_SCREEN_IDS.has(screen.id)");
+    expect(programScreens).toContain("!CARD_ONLY_SCREEN_IDS.has(screen.id)");
+    expect(programScreens).toContain('basePath.endsWith("/embed")');
+    expect(programScreens).toContain("data-program-surface={surface}");
+    expect(legacyProgramScreenPage).toContain(
+      "`/${tenantSlug}/program/embed/${segment}`",
+    );
+    expect(legacyProgramScreenPage).toContain(
+      "`/${tenantSlug}/program/site/${segment}`",
+    );
   });
 });

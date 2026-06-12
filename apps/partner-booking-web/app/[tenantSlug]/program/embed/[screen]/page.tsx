@@ -1,10 +1,11 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { getTenantProgramTheme } from "@/lib/program-route-context";
 import {
-  getProgramScreenMeta,
   listProgramScreensForTheme,
+  ProgramBookingFlow,
   resolveProgramScreenSegment,
 } from "@/lib/program-screens";
+import { getServerLocale } from "@/lib/server-locale";
 
 export const dynamic = "force-dynamic";
 
@@ -12,30 +13,30 @@ type PageProps = {
   params: Promise<{ tenantSlug: string; screen: string }>;
 };
 
-export default async function ProgramScreenPage({ params }: PageProps) {
+export default async function ProgramEmbedScreenPage({ params }: PageProps) {
   const { tenantSlug, screen } = await params;
+  const locale = await getServerLocale();
   const screenId = resolveProgramScreenSegment(screen);
   if (!screenId) {
     notFound();
   }
 
   const theme = await getTenantProgramTheme(tenantSlug);
-  const segment = getProgramScreenMeta(screenId).segment;
   if (
-    listProgramScreensForTheme(theme, "embed").some(
+    !listProgramScreensForTheme(theme, "embed").some(
       (meta) => meta.id === screenId,
     )
   ) {
-    redirect(`/${tenantSlug}/program/embed/${segment}`);
+    notFound();
   }
 
-  if (
-    listProgramScreensForTheme(theme, "site").some(
-      (meta) => meta.id === screenId,
-    )
-  ) {
-    redirect(`/${tenantSlug}/program/site/${segment}`);
-  }
-
-  notFound();
+  return (
+    <ProgramBookingFlow
+      theme={theme}
+      screen={screenId}
+      basePath={`/${tenantSlug}/program/embed`}
+      locale={locale}
+      surface="embed"
+    />
+  );
 }

@@ -157,6 +157,7 @@ type ProgramScreenCopy = {
   label: string;
   summary: string;
 };
+export type PartnerProgramSurfaceKind = "site" | "embed";
 
 const PROGRAM_SCREEN_COPY: Record<
   PartnerProgramScreenId,
@@ -416,7 +417,17 @@ const CARD_ONLY_SCREEN_IDS = new Set<PartnerProgramScreenId>([
 
 export function listProgramScreensForTheme(
   theme: PartnerProgramTheme,
+  surface: PartnerProgramSurfaceKind = "site",
 ): ReadonlyArray<ProgramScreenMeta> {
+  if (surface === "embed") {
+    if (theme.kind !== "card") {
+      return [];
+    }
+    return PARTNER_PROGRAM_SCREENS.filter((screen) =>
+      CARD_ONLY_SCREEN_IDS.has(screen.id),
+    );
+  }
+
   if (theme.kind === "insurance") {
     return PARTNER_PROGRAM_SCREENS.filter(
       (screen) => !CARD_ONLY_SCREEN_IDS.has(screen.id),
@@ -424,7 +435,9 @@ export function listProgramScreensForTheme(
   }
   if (theme.kind === "card") {
     return PARTNER_PROGRAM_SCREENS.filter(
-      (screen) => !INSURANCE_ONLY_SCREEN_IDS.has(screen.id),
+      (screen) =>
+        !INSURANCE_ONLY_SCREEN_IDS.has(screen.id) &&
+        !CARD_ONLY_SCREEN_IDS.has(screen.id),
     );
   }
   return PARTNER_PROGRAM_SCREENS.filter(
@@ -1289,11 +1302,14 @@ function renderScreen(
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(key, params, locale);
   const demo = programDemo(theme);
-  const reviewHref = getProgramScreenHref(basePath, "review");
-  const successHref = getProgramScreenHref(basePath, "success");
-  const trackingHref = getProgramScreenHref(basePath, "tracking");
-  const landingHref = getProgramScreenHref(basePath, "landing");
-  const eligibilityHref = getProgramScreenHref(basePath, "eligibility");
+  const siteBasePath = basePath.endsWith("/embed")
+    ? `${basePath.slice(0, -"/embed".length)}/site`
+    : basePath;
+  const reviewHref = getProgramScreenHref(siteBasePath, "review");
+  const successHref = getProgramScreenHref(siteBasePath, "success");
+  const trackingHref = getProgramScreenHref(siteBasePath, "tracking");
+  const landingHref = getProgramScreenHref(siteBasePath, "landing");
+  const eligibilityHref = getProgramScreenHref(siteBasePath, "eligibility");
 
   if (screen === "landing") {
     if (theme.kind === "travel") {
@@ -2942,13 +2958,15 @@ export function ProgramBookingFlow({
   screen,
   basePath,
   locale,
+  surface = "site",
 }: {
   theme: PartnerProgramTheme;
   screen: PartnerProgramScreenId;
   basePath: string;
   locale: Locale;
+  surface?: PartnerProgramSurfaceKind;
 }) {
-  const visibleScreens = listProgramScreensForTheme(theme);
+  const visibleScreens = listProgramScreensForTheme(theme, surface);
   const activeCopy = getProgramScreenCopy(screen, locale);
 
   return (
@@ -2964,6 +2982,7 @@ export function ProgramBookingFlow({
         border: `1px solid ${theme.chrome.panelBorder}`,
       }}
       data-program-kind={theme.kind}
+      data-program-surface={surface}
     >
       <div
         style={{
@@ -2985,7 +3004,11 @@ export function ProgramBookingFlow({
         >
           {theme.programLabel}
         </div>
-        <Chip theme={theme} tone="primary" label={`program: ${theme.kind}`} />
+        <Chip
+          theme={theme}
+          tone="primary"
+          label={`program: ${theme.kind} · ${surface}`}
+        />
       </div>
 
       <nav style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>

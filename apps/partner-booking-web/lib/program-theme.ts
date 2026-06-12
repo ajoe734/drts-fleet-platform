@@ -1,5 +1,10 @@
 import type { CSSProperties } from "react";
-import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
+import {
+  BRAND_TEMPLATES,
+  getPartnerBrandTemplateBySlug,
+  type PartnerBrandCode,
+  type PartnerBrandTemplate,
+} from "@drts/ui-tokens";
 
 /**
  * Per-program theming for the partner-booking white-label flows.
@@ -89,6 +94,15 @@ const CTBC_BRAND = BRAND_TEMPLATES.CTBC;
 const FUBON_BRAND = BRAND_TEMPLATES.FUBON;
 const LION_BRAND = BRAND_TEMPLATES.LION;
 
+const CARD_AIRPORT_ISSUER_CODES = [
+  "CTBC",
+  "CATHAY",
+  "TAISHIN",
+  "DBS",
+] as const satisfies readonly PartnerBrandCode[];
+
+type CardAirportIssuerCode = (typeof CARD_AIRPORT_ISSUER_CODES)[number];
+
 function createProgramThemeFromBrand(params: {
   kind: PartnerProgramKind;
   slug: string;
@@ -153,19 +167,49 @@ function createProgramThemeFromBrand(params: {
   };
 }
 
-export const PARTNER_PROGRAM_THEMES = {
-  card: createProgramThemeFromBrand({
+function isCardAirportIssuerCode(
+  code: PartnerBrandCode,
+): code is CardAirportIssuerCode {
+  return (CARD_AIRPORT_ISSUER_CODES as readonly PartnerBrandCode[]).includes(
+    code,
+  );
+}
+
+export function isCardAirportIssuerBrand(
+  brand: Pick<PartnerBrandTemplate, "code">,
+): boolean {
+  return isCardAirportIssuerCode(brand.code);
+}
+
+export function isPartnerProgramSurfaceBrand(
+  brand: Pick<PartnerBrandTemplate, "code">,
+): boolean {
+  return (
+    isCardAirportIssuerBrand(brand) ||
+    brand.code === "FUBON" ||
+    brand.code === "LION"
+  );
+}
+
+export function getCardProgramThemeForBrand(
+  brand: PartnerBrandTemplate,
+): PartnerProgramTheme {
+  return createProgramThemeFromBrand({
     kind: "card",
     slug: "card",
-    issuerName: "中信銀行",
-    issuerLabel: "CTBC",
+    issuerName: brand.bankName,
+    issuerLabel: brand.code,
     programLabel: "信用卡機場接送",
     programName: "卡友禮賓接送",
-    landingSubtitle: "World Elite 卡友專屬 · 全年 12 趟",
+    landingSubtitle: `${brand.programName} 專屬 · ${brand.cardArt.networkLabel}`,
     benefitNoun: "禮遇趟次",
-    ctaLabel: "立即叫車",
-    brand: CTBC_BRAND,
-  }),
+    ctaLabel: "立即預約機場接送",
+    brand,
+  });
+}
+
+export const PARTNER_PROGRAM_THEMES = {
+  card: getCardProgramThemeForBrand(CTBC_BRAND),
   insurance: createProgramThemeFromBrand({
     kind: "insurance",
     slug: "insurance",
@@ -249,6 +293,29 @@ export function getProgramTheme(kind: PartnerProgramKind): PartnerProgramTheme {
 
 export function getProgramThemeForSlug(slug: string): PartnerProgramTheme {
   return getProgramTheme(resolveProgramKind(slug));
+}
+
+/**
+ * Resolve the runtime theme for a tenant route. This intentionally separates
+ * the program kind (`card` / `insurance` / `travel`) from the issuer brand:
+ * bank tenants such as CTBC/Cathay/Taishin/DBS all stay in the card airport
+ * transfer program, but render with their own white-label palette and copy.
+ */
+export function getProgramThemeForTenantSlug(
+  slug: string,
+  brand?: PartnerBrandTemplate,
+): PartnerProgramTheme {
+  const kind = resolveProgramKind(slug);
+  if (kind !== "card") {
+    return getProgramTheme(kind);
+  }
+
+  const tenantBrand = brand ?? getPartnerBrandTemplateBySlug(slug);
+  if (tenantBrand && isCardAirportIssuerBrand(tenantBrand)) {
+    return getCardProgramThemeForBrand(tenantBrand);
+  }
+
+  return getProgramTheme("card");
 }
 
 /** Loosely-typed partner entry shape used to resolve a program theme. */

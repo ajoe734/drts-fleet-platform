@@ -1,6 +1,13 @@
 import type { AccentRamp, TokenMode } from "./colors";
 
-export type PartnerBrandCode = "CTBC" | "CATHAY" | "GRAND" | "FUBON" | "LION";
+export type PartnerBrandCode =
+  | "CTBC"
+  | "CATHAY"
+  | "TAISHIN"
+  | "DBS"
+  | "GRAND"
+  | "FUBON"
+  | "LION";
 
 export interface PartnerBrandHotline {
   readonly label: string;
@@ -234,6 +241,94 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
+  TAISHIN: {
+    light: createMode(
+      "#B0335F",
+      "#7C2241",
+      "#C7A06A",
+      "#201018",
+      createSurface("#B0335F", "#C7A06A", "#F7EDF1", "#E8C9D5"),
+      createTheme(
+        "#FBF4F7",
+        "#26131B",
+        "#6B5360",
+        "#FFFFFF",
+        "rgba(38, 19, 27, 0.12)",
+        "#7C2241",
+        "rgba(176, 51, 95, 0.10)",
+      ),
+      {
+        strong: "#26131B",
+        muted: "#6B5360",
+        invert: "#FFFFFF",
+      },
+    ),
+    dark: createMode(
+      "#D77499",
+      "#E6A2BC",
+      "#E1C292",
+      "#FBF4F7",
+      createSurface("#E6A2BC", "#E1C292", "#1A0C12", "#452331"),
+      createTheme(
+        "#12080D",
+        "#FBF4F7",
+        "#CDB4BF",
+        "#1D0F15",
+        "rgba(230, 162, 188, 0.20)",
+        "#E1C292",
+        "rgba(199, 160, 106, 0.18)",
+      ),
+      {
+        strong: "#FBF4F7",
+        muted: "#CDB4BF",
+        invert: "#12080D",
+      },
+    ),
+  },
+  DBS: {
+    light: createMode(
+      "#D72631",
+      "#9B1B22",
+      "#1F2630",
+      "#1F2630",
+      createSurface("#D72631", "#1F2630", "#FBEDEE", "#F2C3C7"),
+      createTheme(
+        "#FFF6F6",
+        "#1F2630",
+        "#65707D",
+        "#FFFFFF",
+        "rgba(31, 38, 48, 0.12)",
+        "#9B1B22",
+        "rgba(215, 38, 49, 0.10)",
+      ),
+      {
+        strong: "#1F2630",
+        muted: "#65707D",
+        invert: "#FFFFFF",
+      },
+    ),
+    dark: createMode(
+      "#EF6F76",
+      "#F3A3A8",
+      "#D8DDE5",
+      "#FFF6F6",
+      createSurface("#F3A3A8", "#D8DDE5", "#1A090B", "#4A2024"),
+      createTheme(
+        "#120607",
+        "#FFF6F6",
+        "#C7B5B8",
+        "#1D0B0D",
+        "rgba(243, 163, 168, 0.20)",
+        "#D8DDE5",
+        "rgba(215, 38, 49, 0.18)",
+      ),
+      {
+        strong: "#FFF6F6",
+        muted: "#C7B5B8",
+        invert: "#120607",
+      },
+    ),
+  },
   GRAND: {
     light: createMode(
       "#7C2D12",
@@ -402,28 +497,82 @@ export const BRAND_TEMPLATES = {
   CATHAY: createPartnerBrandTemplate({
     code: "CATHAY",
     slug: "cathay",
-    displayName: "Cathay Privileged Travel",
-    bankName: "國泰世華",
-    programName: "尊榮旅遊",
-    tenantCode: "CATHAY_LIFE",
-    host: "taxi.cathaybk.com.tw",
-    tagline: "旅遊禮遇接送 · roster / magic-link demo",
+    displayName: "Cathay CUBE World",
+    bankName: "國泰世華銀行",
+    programName: "CUBE 世界卡",
+    tenantCode: "CATHAY_CARD",
+    host: "ride.cathaybk.com.tw",
+    tagline: "CUBE 世界卡機場接送 · white-label booking demo",
     tokens: PARTNER_BRAND_TOKENS.CATHAY,
     hotline: {
-      label: "旅遊服務專線",
-      phone: "0800-700-188",
-      note: "示範品牌 metadata；實際專線待後續 partner funnel 畫面接線。",
+      label: "信用卡服務專線",
+      phone: "0800-818-001",
+      note: "您將被轉接至國泰世華 CUBE 世界卡客服專員。",
     },
     cardArt: {
       issuerLabel: "Cathay · 國泰世華",
-      programLabel: "尊榮旅遊",
+      programLabel: "CUBE 世界卡",
       networkLabel: "World Card",
-      lastFour: "1024",
+      lastFour: "6071",
       badgeText: "C",
       badgeBackground: "#B7C98B",
       badgeForeground: "#0A3621",
       gradientFrom: "#0A3621",
       gradientTo: "#0F5132",
+    },
+  }),
+  TAISHIN: createPartnerBrandTemplate({
+    code: "TAISHIN",
+    slug: "taishin",
+    displayName: "Taishin Infinite",
+    bankName: "台新銀行",
+    programName: "太陽無限卡",
+    tenantCode: "TAISHIN_CARD",
+    host: "ride.taishinbank.com.tw",
+    tagline: "太陽無限卡機場接送 · white-label booking demo",
+    tokens: PARTNER_BRAND_TOKENS.TAISHIN,
+    hotline: {
+      label: "尊榮信用卡專線",
+      phone: "0800-023-123",
+      note: "您將被轉接至台新銀行太陽無限卡客服專員。",
+    },
+    cardArt: {
+      issuerLabel: "Taishin · 台新銀行",
+      programLabel: "太陽無限卡",
+      networkLabel: "Infinite",
+      lastFour: "3308",
+      badgeText: "新",
+      badgeBackground: "#C7A06A",
+      badgeForeground: "#7C2241",
+      gradientFrom: "#7C2241",
+      gradientTo: "#B0335F",
+    },
+  }),
+  DBS: createPartnerBrandTemplate({
+    code: "DBS",
+    slug: "dbs",
+    displayName: "DBS Insignia",
+    bankName: "星展銀行",
+    programName: "DBS Insignia 御璽卡",
+    tenantCode: "DBS_CARD",
+    host: "ride.dbs.com.tw",
+    tagline: "DBS Insignia 機場接送 · white-label booking demo",
+    tokens: PARTNER_BRAND_TOKENS.DBS,
+    hotline: {
+      label: "DBS 禮賓服務專線",
+      phone: "0800-808-889",
+      note: "您將被轉接至星展銀行 Insignia 禮賓客服專員。",
+    },
+    cardArt: {
+      issuerLabel: "DBS · 星展銀行",
+      programLabel: "DBS Insignia",
+      networkLabel: "Insignia",
+      lastFour: "1205",
+      badgeText: "DBS",
+      badgeBackground: "#D72631",
+      badgeForeground: "#FFFFFF",
+      gradientFrom: "#9B1B22",
+      gradientTo: "#D72631",
     },
   }),
   GRAND: createPartnerBrandTemplate({
@@ -512,6 +661,8 @@ export const BRAND_TEMPLATES = {
 export const PARTNER_BRAND_CODES = [
   "CTBC",
   "CATHAY",
+  "TAISHIN",
+  "DBS",
   "GRAND",
   "FUBON",
   "LION",
