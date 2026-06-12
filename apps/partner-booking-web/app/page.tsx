@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { PartnerShellControls } from "@/components/shell/partner-shell-controls";
 import { getPartnerChromeVars, listKnownBrands } from "@/lib/brand";
+import {
+  isCardAirportIssuerBrand,
+  isPartnerProgramSurfaceBrand,
+} from "@/lib/program-theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
 export default async function RootIndex() {
   const locale = await getServerLocale();
   const brands = listKnownBrands();
+  const isZh = locale === "zh";
   return (
     <main
       className="min-h-dvh bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
@@ -54,6 +59,38 @@ export default async function RootIndex() {
                   >
                     {t("root.openTenant", { slug: brand.slug }, locale)}
                   </Link>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Link
+                    href={`/${brand.slug}`}
+                    className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
+                  >
+                    {isZh ? "網站預約" : "Website booking"}
+                  </Link>
+                  {isPartnerProgramSurfaceBrand(brand) ? (
+                    <Link
+                      href={`/${brand.slug}/program/site`}
+                      className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
+                    >
+                      {isZh ? "七步 funnel 狀態" : "Seven-state funnel"}
+                    </Link>
+                  ) : null}
+                  {isCardAirportIssuerBrand(brand) ? (
+                    <Link
+                      href={`/${brand.slug}/program/embed`}
+                      className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
+                    >
+                      {isZh ? "網銀 App 內嵌" : "Banking-app embed"}
+                    </Link>
+                  ) : null}
+                  {isPartnerProgramSurfaceBrand(brand) ? (
+                    <Link
+                      href={`/${brand.slug}/program`}
+                      className="inline-flex items-center rounded-lg border border-[color:var(--pbk-panel-border)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-muted)]"
+                    >
+                      {isZh ? "surface 選單" : "Surface selector"}
+                    </Link>
+                  ) : null}
                 </div>
               </li>
             ))}

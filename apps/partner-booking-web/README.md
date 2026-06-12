@@ -12,11 +12,13 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline and the
 - **Dev deployed.** `deploy-dev.yml` builds and deploys this app alongside the
   shared dev stack so bank cardholder booking can be verified on Cloud Run.
 - Brand layering now resolves through
-  `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / GRAND demo
-  templates.
+  `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / TAISHIN /
+  DBS credit-card airport-transfer issuer templates plus FUBON insurance,
+  LION travel, and GRAND concierge reference templates.
 - The CTBC reference funnel (7 screens) now lands in **PBK-UI-003**.
-- The program-specific `card` / `insurance` / `travel` flows and banking-app
-  embed identity states live under `/[tenantSlug]/program`.
+- The program-specific `card` / `insurance` / `travel` website funnel states
+  live under `/[tenantSlug]/program/site`; banking-app embed identity states
+  live under `/[tenantSlug]/program/embed`.
 - Authority-safe negative paths are implemented as direct gate routes in
   **PBK-UI-004**.
 - The cutover policy between this app and the legacy
@@ -45,6 +47,14 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline and the
 - Brand records are sourced from `@drts/ui-tokens` `BRAND_TEMPLATES`, including
   display metadata, support hotline, card-art seed data, and per-brand surface
   ramps.
+- Credit-card airport-transfer website booking and banking-app embedded
+  hand-off are separate surfaces:
+  `http://localhost:3007/ctbc` is the standalone white-label website,
+  `http://localhost:3007/ctbc/program/site` is the seven-screen funnel state
+  QA surface, and `http://localhost:3007/ctbc/program/embed` is the bank-app
+  identity hand-off surface. The same pattern works for `cathay`, `taishin`,
+  and `dbs`; insurance (`fubon`) and travel (`lion`) expose the site funnel but
+  do not expose the banking-app embed surface.
 
 ## Dev / Build / Lint / Typecheck
 

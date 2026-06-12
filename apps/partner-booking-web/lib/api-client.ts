@@ -200,8 +200,9 @@ function canUseLocalPartnerShellFallback(
   }
 
   return (
-    error.code === "INTERNAL_KEY_REQUIRED" &&
-    !process.env.DRTS_INTERNAL_KEY?.trim() &&
+    ((error.code === "INTERNAL_KEY_REQUIRED" &&
+      !process.env.DRTS_INTERNAL_KEY?.trim()) ||
+      error.code === "PARTNER_AUTHORITY_UNAVAILABLE") &&
     (options?.allowInactive || options?.allowMissing)
   );
 }
@@ -222,15 +223,28 @@ async function requestAuthority<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    cache: "no-store",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...getServerAuthorityHeaders(),
-      ...(init?.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      cache: "no-store",
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...getServerAuthorityHeaders(),
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    throw new PartnerAuthorityError(
+      503,
+      "PARTNER_AUTHORITY_UNAVAILABLE",
+      error instanceof Error
+        ? error.message
+        : "Partner authority is unavailable.",
+      undefined,
+      true,
+    );
+  }
 
   if (!response.ok) {
     let envelope: ApiErrorEnvelope | null = null;
@@ -276,13 +290,16 @@ function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
         brand.code.toLowerCase() === normalizedSlug
       );
     }) ?? BRAND_TEMPLATES.CTBC;
+  const isKnownBrand =
+    base.slug.toLowerCase() === normalizedSlug ||
+    base.code.toLowerCase() === normalizedSlug;
   return {
     ...base,
     slug,
     displayName: base.displayName,
     host: `${slug}.partner.invalid`,
     tagline: `${base.tagline} · 等待後端合作入口啟用`,
-    theme: PARTNER_DEFAULT_THEME,
+    theme: isKnownBrand ? base.theme : PARTNER_DEFAULT_THEME,
   };
 }
 

@@ -4,9 +4,12 @@ import {
   DEFAULT_PARTNER_PROGRAM_KIND,
   PARTNER_PROGRAM_KINDS,
   getProgramChromeVars,
+  getProgramThemeForTenantSlug,
   getProgramTheme,
   getProgramThemeForEntry,
   getProgramThemeForSlug,
+  isCardAirportIssuerBrand,
+  isPartnerProgramSurfaceBrand,
   isPartnerProgramKind,
   listProgramThemes,
   resolveProgramKind,
@@ -60,6 +63,50 @@ describe("partner-booking per-program theming", () => {
     expect(getProgramThemeForSlug("claim-fubon-ins").kind).toBe("insurance");
     expect(getProgramThemeForSlug("ride-ctbc").kind).toBe("card");
     expect(getProgramThemeForSlug("booking-lion-travel").kind).toBe("travel");
+  });
+
+  it("keeps card airport-transfer tenant themes on the bank issuer brand", () => {
+    const cathay = getProgramThemeForTenantSlug(
+      "cathay",
+      BRAND_TEMPLATES.CATHAY,
+    );
+    const taishin = getProgramThemeForTenantSlug(
+      "taishin",
+      BRAND_TEMPLATES.TAISHIN,
+    );
+    const dbs = getProgramThemeForTenantSlug("dbs", BRAND_TEMPLATES.DBS);
+
+    expect(cathay.kind).toBe("card");
+    expect(cathay.issuerName).toBe("國泰世華銀行");
+    expect(cathay.primary).toBe(BRAND_TEMPLATES.CATHAY.primary);
+    expect(cathay.host).toBe("ride.cathaybk.com.tw");
+
+    expect(taishin.kind).toBe("card");
+    expect(taishin.issuerName).toBe("台新銀行");
+    expect(taishin.primary).toBe("#B0335F");
+
+    expect(dbs.kind).toBe("card");
+    expect(dbs.issuerName).toBe("星展銀行");
+    expect(dbs.primary).toBe("#D72631");
+  });
+
+  it("does not treat insurance and travel tenant brands as card issuers", () => {
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.CTBC)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.CATHAY)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.TAISHIN)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.DBS)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.FUBON)).toBe(false);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.LION)).toBe(false);
+    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.GRAND)).toBe(false);
+    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.FUBON)).toBe(true);
+    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.LION)).toBe(true);
+
+    expect(
+      getProgramThemeForTenantSlug("fubon", BRAND_TEMPLATES.FUBON).kind,
+    ).toBe("insurance");
+    expect(
+      getProgramThemeForTenantSlug("lion", BRAND_TEMPLATES.LION).kind,
+    ).toBe("travel");
   });
 
   it("reuses the canonical CTBC brand tokens for the card program", () => {
