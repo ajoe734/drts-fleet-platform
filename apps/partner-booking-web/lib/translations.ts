@@ -12,6 +12,25 @@ const en = {
     "This app is white-label by construction. Every functional surface lives under /[tenantSlug]/...; the root path only exists to direct internal traffic to a tenant entry point during bring-up.",
   "root.knownTenants": "Known reference tenants",
   "root.openTenant": "Open /{slug}",
+  "root.surface.website": "Website booking",
+  "root.surface.funnel": "Seven-state funnel",
+  "root.surface.embed": "Banking-app embed",
+  "root.surface.selector": "Surface selector",
+  "program.selector.title": "Choose a frontend surface",
+  "program.selector.body":
+    "Credit-card airport transfer has separate website and banking-app embedded entry points. Insurance and travel programs reuse the website funnel. This selector keeps the surfaces separate.",
+  "program.selector.website.eyebrow": "Standalone website",
+  "program.selector.website.title": "Website booking",
+  "program.selector.website.body":
+    "White-label booking website for cardholders, themed per issuer brand.",
+  "program.selector.funnel.eyebrow": "Program funnel QA",
+  "program.selector.funnel.title": "Website funnel states",
+  "program.selector.funnel.body":
+    "Fixed seven-screen funnel: entry, eligibility, review, success, tracking, error, manual review.",
+  "program.selector.embed.eyebrow": "Mobile banking webview",
+  "program.selector.embed.title": "Banking-app embed",
+  "program.selector.embed.body":
+    "B1-B5 embedded identity states: reference token, re-auth, host block, consent, site fallback.",
   "shell.brand": "Partner Booking",
   "shell.hotline": "Hotline",
   "shell.language.en": "English",
@@ -234,6 +253,25 @@ const zh = {
     "此服務以白標模式運作；所有功能入口都位於 /[tenantSlug]/...，根路徑僅供開發與驗收時導向指定合作夥伴。",
   "root.knownTenants": "已知參考租戶",
   "root.openTenant": "開啟 /{slug}",
+  "root.surface.website": "網站預約",
+  "root.surface.funnel": "七步 funnel 狀態",
+  "root.surface.embed": "網銀 App 內嵌",
+  "root.surface.selector": "surface 選單",
+  "program.selector.title": "選擇要檢視的前台 surface",
+  "program.selector.body":
+    "信用卡機場接送有網站預約與網銀 App 內嵌兩條入口；保險與旅行社 program 則沿用同一套網站 funnel。這頁只負責導覽，不混用畫面。",
+  "program.selector.website.eyebrow": "Standalone website",
+  "program.selector.website.title": "網站預約",
+  "program.selector.website.body":
+    "給信用卡客戶直接開啟的白牌預約網站，依銀行品牌套不同版型樣式。",
+  "program.selector.funnel.eyebrow": "Program funnel QA",
+  "program.selector.funnel.title": "網站預約狀態稿",
+  "program.selector.funnel.body":
+    "固定七步 funnel：入口、資格、確認、成功、追蹤、錯誤、人工審查。",
+  "program.selector.embed.eyebrow": "Mobile banking webview",
+  "program.selector.embed.title": "網銀 App 內嵌",
+  "program.selector.embed.body":
+    "只看銀行 App 身分交接 B1-B5：reference token、逾時重驗、host 封鎖、授權、回退官網。",
   "shell.brand": "合作預約",
   "shell.hotline": "客服專線",
   "shell.language.en": "English",

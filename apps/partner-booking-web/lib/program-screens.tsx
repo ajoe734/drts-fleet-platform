@@ -501,7 +501,64 @@ type CardEmbedScreenId = Extract<
   | "embed_fallback"
 >;
 
-function programDemo(theme: PartnerProgramTheme) {
+function getLocalizedProgramTheme(
+  theme: PartnerProgramTheme,
+  locale: Locale,
+): PartnerProgramTheme {
+  if (locale === "zh") {
+    return theme;
+  }
+
+  const copy: Record<
+    PartnerProgramTheme["kind"],
+    Pick<
+      PartnerProgramTheme,
+      | "issuerName"
+      | "programLabel"
+      | "programName"
+      | "landingSubtitle"
+      | "benefitNoun"
+      | "ctaLabel"
+    >
+  > = {
+    card: {
+      issuerName: theme.issuerLabel + " Bank",
+      programLabel: "Credit-card airport transfer",
+      programName: "Cardholder airport concierge",
+      landingSubtitle: "Exclusive airport transfer benefit",
+      benefitNoun: "included rides",
+      ctaLabel: "Book airport transfer",
+    },
+    insurance: {
+      issuerName: "Fubon Insurance",
+      programLabel: "Insurance replacement mobility",
+      programName: "Claim replacement ride",
+      landingSubtitle: "Replacement mobility during claim handling",
+      benefitNoun: "claim allowance",
+      ctaLabel: "Request replacement ride",
+    },
+    travel: {
+      issuerName: "Lion Travel",
+      programLabel: "Travel agency group transfer",
+      programName: "Group transfer",
+      landingSubtitle: "Airport and hotel transfer for tour groups",
+      benefitNoun: "group seats",
+      ctaLabel: "Confirm seats and book",
+    },
+  };
+
+  return {
+    ...theme,
+    ...copy[theme.kind],
+    hotline: {
+      ...theme.hotline,
+      label: "Hotline",
+      note: "Partner support desk",
+    },
+  };
+}
+
+function programDemo(theme: PartnerProgramTheme, locale: Locale = "zh") {
   if (theme.kind === "travel") {
     const remaining = 12;
     const total = 12;
@@ -509,15 +566,24 @@ function programDemo(theme: PartnerProgramTheme) {
       remaining,
       total,
       used: total - remaining,
-      riderName: "林〇雄",
-      pickup: "桃園機場 第一航廈",
-      pickupDetail: "入境大廳北側遊覽車上車處",
-      dropoff: "台北車站 → 西門商旅",
-      dropoffDetail: "第 1 批團體接駁",
+      riderName: locale === "zh" ? "林〇雄" : "Lin H.",
+      pickup:
+        locale === "zh" ? "桃園機場 第一航廈" : "Taoyuan Airport Terminal 1",
+      pickupDetail:
+        locale === "zh"
+          ? "入境大廳北側遊覽車上車處"
+          : "North coach pickup zone, arrivals hall",
+      dropoff:
+        locale === "zh"
+          ? "台北車站 -> 西門商旅"
+          : "Taipei Main Station -> Ximen hotel",
+      dropoffDetail:
+        locale === "zh" ? "第 1 批團體接駁" : "Batch 1 group shuttle",
       departureTime: "2026-06-28 14:20",
       bookingRef: "LION-TPE-0628",
-      driverName: "黃建宏",
-      vehicle: "中型巴士 · ARJ-9920",
+      driverName: locale === "zh" ? "黃建宏" : "Huang J.",
+      vehicle:
+        locale === "zh" ? "中型巴士 · ARJ-9920" : "Medium bus · ARJ-9920",
     };
   }
 
@@ -527,15 +593,30 @@ function programDemo(theme: PartnerProgramTheme) {
     remaining,
     total,
     used: total - remaining,
-    riderName: "陳〇明",
-    pickup: "台北市信義區松仁路 100 號",
-    pickupDetail: "1 樓大廳",
-    dropoff: "桃園機場 第二航廈",
-    dropoffDetail: "出境大廳 7 號門",
+    riderName:
+      locale === "zh"
+        ? theme.kind === "insurance"
+          ? "王〇華"
+          : "陳〇明"
+        : theme.kind === "insurance"
+          ? "Wang H."
+          : "Chen M.",
+    pickup:
+      locale === "zh"
+        ? "台北市信義區松仁路 100 號"
+        : "100 Songren Rd, Xinyi District, Taipei",
+    pickupDetail: locale === "zh" ? "1 樓大廳" : "Lobby, 1F",
+    dropoff:
+      locale === "zh" ? "桃園機場 第二航廈" : "Taoyuan Airport Terminal 2",
+    dropoffDetail:
+      locale === "zh" ? "出境大廳 7 號門" : "Departure Hall Gate 7",
     departureTime: "2026-05-08 17:30",
-    bookingRef: `${theme.issuerLabel.toUpperCase()}-2026-0004`,
-    driverName: "陳俊宏",
-    vehicle: "Toyota Prius α · ARJ-3120",
+    bookingRef: theme.issuerLabel.toUpperCase() + "-2026-0004",
+    driverName: locale === "zh" ? "陳俊宏" : "Chen J.",
+    vehicle:
+      locale === "zh"
+        ? "Toyota Prius alpha · ARJ-3120"
+        : "Toyota Prius alpha · ARJ-3120",
   };
 }
 
@@ -807,11 +888,14 @@ function BenefitMeter({
   theme,
   remaining,
   total,
+  locale = "zh",
 }: {
   theme: PartnerProgramTheme;
   remaining: number;
   total: number;
+  locale?: Locale;
 }) {
+  const s = (zh: string, en: string) => (locale === "zh" ? zh : en);
   const width = `${(remaining / total) * 100}%`;
   return (
     <div
@@ -830,7 +914,9 @@ function BenefitMeter({
         }}
       >
         <span style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
-          本年度剩餘{theme.benefitNoun}
+          {s("本年度剩餘", "Remaining ") +
+            theme.benefitNoun +
+            s("", " this year")}
         </span>
         <span
           style={{
@@ -1294,14 +1380,16 @@ function TokenRow({
 }
 
 function renderScreen(
-  theme: PartnerProgramTheme,
+  rawTheme: PartnerProgramTheme,
   screen: PartnerProgramScreenId,
   basePath: string,
   locale: Locale,
 ): ReactNode {
   const t = (key: string, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-  const demo = programDemo(theme);
+  const theme = getLocalizedProgramTheme(rawTheme, locale);
+  const demo = programDemo(theme, locale);
+  const s = (zh: string, en: string) => (locale === "zh" ? zh : en);
   const siteBasePath = basePath.endsWith("/embed")
     ? `${basePath.slice(0, -"/embed".length)}/site`
     : basePath;
@@ -1347,6 +1435,7 @@ function renderScreen(
                 theme={theme}
                 remaining={demo.remaining}
                 total={demo.total}
+                locale={locale}
               />
             </div>
           </Card>
@@ -1436,7 +1525,11 @@ function renderScreen(
             href={reviewHref}
             primary
           />
-          <Button theme={theme} label="查看資格確認" href={eligibilityHref} />
+          <Button
+            theme={theme}
+            label={s("查看資格確認", "View eligibility")}
+            href={eligibilityHref}
+          />
         </>
       );
     }
@@ -1444,14 +1537,50 @@ function renderScreen(
     const services: ReadonlyArray<readonly [string, string, string]> =
       theme.kind === "insurance"
         ? [
-            ["理賠代步", "一般 / 商務車型 · 額度內派車", "CLAIM"],
-            ["醫院往返", "回診、返家或維修代步", "MEDICAL"],
-            ["保障視窗", "依核定期間與車型額度", "WINDOW"],
+            [
+              s("理賠代步", "Claim replacement ride"),
+              s(
+                "一般 / 商務車型 · 額度內派車",
+                "Standard / business class within approved allowance",
+              ),
+              "CLAIM",
+            ],
+            [
+              s("醫院往返", "Hospital transfer"),
+              s(
+                "回診、返家或維修代步",
+                "Follow-up visits, return home, or repair mobility",
+              ),
+              "MEDICAL",
+            ],
+            [
+              s("保障視窗", "Coverage window"),
+              s(
+                "依核定期間與車型額度",
+                "Based on approved dates and vehicle allowance",
+              ),
+              "WINDOW",
+            ],
           ]
         : [
-            ["機場接送", "桃園 / 松山 · 商務車", "AIRPORT"],
-            ["優先派車", "都會區 · 8 分鐘內到車", "PRIORITY"],
-            ["指定時段", "平日 07:00-22:00", "SCHEDULE"],
+            [
+              s("機場接送", "Airport transfer"),
+              s("桃園 / 松山 · 商務車", "Taoyuan / Songshan · business car"),
+              "AIRPORT",
+            ],
+            [
+              s("優先派車", "Priority dispatch"),
+              s(
+                "都會區 · 8 分鐘內到車",
+                "Metro areas · car arrives within 8 minutes",
+              ),
+              "PRIORITY",
+            ],
+            [
+              s("指定時段", "Scheduled window"),
+              s("平日 07:00-22:00", "Weekdays 07:00-22:00"),
+              "SCHEDULE",
+            ],
           ];
     return (
       <>
@@ -1459,19 +1588,21 @@ function renderScreen(
           theme={theme}
           title={theme.programLabel}
           subtitle={theme.landingSubtitle}
-          trailing={theme.kind === "insurance" ? "理賠額度" : "EXCLUSIVE"}
+          trailing={
+            theme.kind === "insurance" ? s("理賠額度", "CLAIM") : "EXCLUSIVE"
+          }
         />
         <Card>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: "13px", fontWeight: 700 }}>
                 {theme.kind === "insurance"
-                  ? "王〇華 · 富邦產險"
+                  ? demo.riderName + " · " + theme.issuerName
                   : `${demo.riderName} · ${theme.programName}`}
               </div>
               <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
                 {theme.kind === "insurance"
-                  ? "理賠號 CLM-2026-88142"
+                  ? s("理賠號", "Claim") + " CLM-2026-88142"
                   : theme.issuerName}
               </div>
             </div>
@@ -1495,7 +1626,7 @@ function renderScreen(
                   <span
                     style={{ fontSize: "11px", color: theme.chrome.pageMuted }}
                   >
-                    本案{theme.benefitNoun}
+                    {s("本案", "This claim ") + theme.benefitNoun}
                   </span>
                   <span
                     style={{
@@ -1533,8 +1664,15 @@ function renderScreen(
                     color: theme.chrome.pageMuted,
                   }}
                 >
-                  <span>已用 NT$ 9,600 · 8 趟代步</span>
-                  <span>代步期間剩 14 天</span>
+                  <span>
+                    {s(
+                      "已用 NT$ 9,600 · 8 趟代步",
+                      "Used NT$ 9,600 · 8 replacement rides",
+                    )}
+                  </span>
+                  <span>
+                    {s("代步期間剩 14 天", "14 days left in coverage")}
+                  </span>
                 </div>
               </Card>
             ) : (
@@ -1542,11 +1680,12 @@ function renderScreen(
                 theme={theme}
                 remaining={demo.remaining}
                 total={demo.total}
+                locale={locale}
               />
             )}
           </div>
         </Card>
-        <Card title="可使用的服務">
+        <Card title={s("可使用的服務", "Available services")}>
           {services.map(([title, detail, tag], index) => (
             <div
               key={title}
@@ -1599,7 +1738,11 @@ function renderScreen(
           href={reviewHref}
           primary
         />
-        <Button theme={theme} label="查看資格確認" href={eligibilityHref} />
+        <Button
+          theme={theme}
+          label={s("查看資格確認", "View eligibility")}
+          href={eligibilityHref}
+        />
       </>
     );
   }
@@ -1688,8 +1831,13 @@ function renderScreen(
                 color: theme.chrome.pageMuted,
               }}
             >
-              <span>已用 NT$ 9,600 · 8 趟代步</span>
-              <span>代步期間剩 14 天</span>
+              <span>
+                {s(
+                  "已用 NT$ 9,600 · 8 趟代步",
+                  "Used NT$ 9,600 · 8 replacement rides",
+                )}
+              </span>
+              <span>{s("代步期間剩 14 天", "14 days left in coverage")}</span>
             </div>
           </Card>
           <Card title="核定項目 · eligibility checks">
@@ -1789,30 +1937,50 @@ function renderScreen(
             href={getProgramScreenHref(basePath, "review")}
             primary
           />
-          <Button theme={theme} label="返回入口" href={landingHref} />
+          <Button
+            theme={theme}
+            label={s("返回入口", "Back to entry")}
+            href={landingHref}
+          />
         </>
       );
     }
 
     const consents = [
-      `使用 ${theme.issuerName} 身份識別建立 DRTS 帳號`,
-      "與 DRTS 共享行程必要資訊",
-      `同意《${theme.issuerName} x DRTS ${theme.programName}服務條款 v3》`,
+      s("使用 ", "Use ") +
+        theme.issuerName +
+        s(" 身份識別建立 DRTS 帳號", " identity to create a DRTS account"),
+      s("與 DRTS 共享行程必要資訊", "Share required trip details with DRTS"),
+      s("同意《", "Agree to ") +
+        theme.issuerName +
+        " x DRTS " +
+        theme.programName +
+        s("服務條款 v3》", " terms v3"),
     ];
     return (
       <>
-        <Band theme={theme} title="資格確認" subtitle="首次使用 · 一次性確認" />
-        <Card title="您的權益">
-          <Row label="方案" value={theme.programLabel} />
-          <Row label="提供單位" value={theme.issuerName} />
+        <Band
+          theme={theme}
+          title={s("資格確認", "Eligibility check")}
+          subtitle={s(
+            "首次使用 · 一次性確認",
+            "First use · one-time confirmation",
+          )}
+        />
+        <Card title={s("您的權益", "Your benefits")}>
+          <Row label={s("方案", "Program")} value={theme.programLabel} />
+          <Row label={s("提供單位", "Provider")} value={theme.issuerName} />
           <Row
-            label={`本年度${theme.benefitNoun}`}
-            value={`${demo.total} 趟`}
+            label={s("本年度", "This year ") + theme.benefitNoun}
+            value={demo.total + s(" 趟", " rides")}
             mono
           />
-          <Row label="服務範圍" value="台北 · 桃園 · 新竹" />
+          <Row
+            label={s("服務範圍", "Service area")}
+            value={s("台北 · 桃園 · 新竹", "Taipei · Taoyuan · Hsinchu")}
+          />
         </Card>
-        <Card title="授權同意">
+        <Card title={s("授權同意", "Consent")}>
           {consents.map((item, index) => (
             <div
               key={item}
@@ -1842,11 +2010,15 @@ function renderScreen(
         </Card>
         <Button
           theme={theme}
-          label="確認並繼續"
+          label={s("確認並繼續", "Confirm and continue")}
           href={getProgramScreenHref(basePath, "review")}
           primary
         />
-        <Button theme={theme} label="返回入口" href={landingHref} />
+        <Button
+          theme={theme}
+          label={s("返回入口", "Back to entry")}
+          href={landingHref}
+        />
       </>
     );
   }
@@ -2550,9 +2722,9 @@ function renderScreen(
             subtitle="團體接送 · 第 1 段"
           />
           <Card>
-            <Row label="上車" value={demo.pickup} />
+            <Row label={s("上車", "Pickup")} value={demo.pickup} />
             <Row label="" value={demo.pickupDetail} />
-            <Row label="下車" value={demo.dropoff} />
+            <Row label={s("下車", "Drop-off")} value={demo.dropoff} />
             <Row label="" value={demo.dropoffDetail} />
           </Card>
           <Card title="團體與 roster">
@@ -2589,37 +2761,64 @@ function renderScreen(
               </span>
             </div>
           </Card>
-          <Button theme={theme} label="確認預約" href={successHref} primary />
-          <Button theme={theme} label="返回修改" href={landingHref} />
+          <Button
+            theme={theme}
+            label={s("確認預約", "Confirm booking")}
+            href={successHref}
+            primary
+          />
+          <Button
+            theme={theme}
+            label={s("返回修改", "Back to edit")}
+            href={landingHref}
+          />
         </>
       );
     }
 
     return (
       <>
-        <Band theme={theme} title="下單前確認" subtitle={theme.programName} />
+        <Band
+          theme={theme}
+          title={s("下單前確認", "Review before booking")}
+          subtitle={theme.programName}
+        />
         <Card>
-          <Row label="上車" value={demo.pickup} />
+          <Row label={s("上車", "Pickup")} value={demo.pickup} />
           <Row label="" value={demo.pickupDetail} />
-          <Row label="下車" value={demo.dropoff} />
+          <Row label={s("下車", "Drop-off")} value={demo.dropoff} />
           <Row label="" value={demo.dropoffDetail} />
         </Card>
-        <Card title="行程資訊">
-          <Row label="出發時間" value={demo.departureTime} mono />
-          <Row label="人數" value="1 位" />
-          <Row label="行李" value="2 件" />
-          <Row label="車型" value="商務車 (升級)" />
+        <Card title={s("行程資訊", "Trip details")}>
+          <Row
+            label={s("出發時間", "Departure time")}
+            value={demo.departureTime}
+            mono
+          />
+          <Row
+            label={s("人數", "Passengers")}
+            value={s("1 位", "1 passenger")}
+          />
+          <Row label={s("行李", "Luggage")} value={s("2 件", "2 bags")} />
+          <Row
+            label={s("車型", "Vehicle class")}
+            value={s("商務車 (升級)", "Business car (upgrade)")}
+          />
         </Card>
         <Card
-          title={`費用與${theme.benefitNoun}`}
+          title={s("費用與", "Fees and ") + theme.benefitNoun}
           style={{
             borderColor: theme.surface.border,
             background: theme.surface.bg,
           }}
         >
-          <Row label="基本費用" value="NT$ 1,580" mono />
-          <Row label={`${theme.programName}折抵`} value="-NT$ 1,580" mono />
-          <Row label="您將支付" value="免費" />
+          <Row label={s("基本費用", "Base fare")} value="NT$ 1,580" mono />
+          <Row
+            label={theme.programName + s("折抵", " offset")}
+            value="-NT$ 1,580"
+            mono
+          />
+          <Row label={s("您將支付", "You pay")} value={s("免費", "Free")} />
           <div
             style={{
               display: "flex",
@@ -2634,28 +2833,49 @@ function renderScreen(
             <Chip
               theme={theme}
               tone="accent"
-              label={`${demo.remaining} / ${demo.total} 趟`}
+              label={demo.remaining + " / " + demo.total + s(" 趟", " rides")}
             />
             <span style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
-              本年度剩餘{theme.benefitNoun}
+              {s("本年度剩餘", "Remaining ") +
+                theme.benefitNoun +
+                s("", " this year")}
             </span>
           </div>
         </Card>
-        <Button theme={theme} label="確認預約" href={successHref} primary />
-        <Button theme={theme} label="返回修改" href={landingHref} />
+        <Button
+          theme={theme}
+          label={s("確認預約", "Confirm booking")}
+          href={successHref}
+          primary
+        />
+        <Button
+          theme={theme}
+          label={s("返回修改", "Back to edit")}
+          href={landingHref}
+        />
       </>
     );
   }
 
   if (screen === "success") {
     const steps = [
-      "我們已將您的需求送至派車中心。",
-      "媒合駕駛後將以簡訊與 App 通知您。",
-      "可隨時於「行程追蹤」查看即時狀態。",
+      s("我們已將您的需求送至派車中心。", "We sent your request to dispatch."),
+      s(
+        "媒合駕駛後將以簡訊與 App 通知您。",
+        "You will be notified by SMS and app after driver matching.",
+      ),
+      s(
+        "可隨時於「行程追蹤」查看即時狀態。",
+        "Track live status from trip tracking at any time.",
+      ),
     ];
     return (
       <>
-        <Band theme={theme} title="預約成功" subtitle="我們已收到您的需求" />
+        <Band
+          theme={theme}
+          title={s("預約成功", "Booking confirmed")}
+          subtitle={s("我們已收到您的需求", "We have received your request")}
+        />
         <Card>
           <div
             style={{
@@ -2684,7 +2904,7 @@ function renderScreen(
             </div>
             <div>
               <div style={{ fontSize: "14px", fontWeight: 800 }}>
-                預約已成立
+                {s("預約已成立", "Booking created")}
               </div>
               <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
                 {theme.programName}
@@ -2692,12 +2912,20 @@ function renderScreen(
             </div>
           </div>
           <div style={{ paddingTop: "12px" }}>
-            <Row label="訂單編號" value={demo.bookingRef} mono />
-            <Row label="預估出發" value={demo.departureTime} mono />
-            <Row label="您將支付" value="免費" />
+            <Row
+              label={s("訂單編號", "Booking ref")}
+              value={demo.bookingRef}
+              mono
+            />
+            <Row
+              label={s("預估出發", "Estimated departure")}
+              value={demo.departureTime}
+              mono
+            />
+            <Row label={s("您將支付", "You pay")} value={s("免費", "Free")} />
           </div>
         </Card>
-        <Card title="接下來">
+        <Card title={s("接下來", "Next steps")}>
           {steps.map((step, index) => (
             <div
               key={step}
@@ -2738,11 +2966,15 @@ function renderScreen(
         </Card>
         <Button
           theme={theme}
-          label="查看行程追蹤"
+          label={s("查看行程追蹤", "View trip tracking")}
           href={trackingHref}
           primary
         />
-        <Button theme={theme} label="返回入口" href={landingHref} />
+        <Button
+          theme={theme}
+          label={s("返回入口", "Back to entry")}
+          href={landingHref}
+        />
       </>
     );
   }
@@ -2750,7 +2982,11 @@ function renderScreen(
   if (screen === "tracking") {
     return (
       <>
-        <Band theme={theme} title="行程追蹤" subtitle="駕駛將於 8 分鐘後抵達" />
+        <Band
+          theme={theme}
+          title={s("行程追蹤", "Trip tracking")}
+          subtitle={s("駕駛將於 8 分鐘後抵達", "Driver arrives in 8 minutes")}
+        />
         <Card>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <div
@@ -2767,14 +3003,14 @@ function renderScreen(
                 fontWeight: 800,
               }}
             >
-              陳
+              {s("陳", "C")}
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: "14px", fontWeight: 800 }}>
                 {demo.driverName}
               </div>
               <div style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
-                1,243 趟 · 4.86 ★
+                {s("1,243 趟 · 4.86 ★", "1,243 trips · 4.86 ★")}
               </div>
               <div
                 style={{
@@ -2787,7 +3023,11 @@ function renderScreen(
                 {demo.vehicle}
               </div>
             </div>
-            <Chip theme={theme} tone="success" label="已派車" />
+            <Chip
+              theme={theme}
+              tone="success"
+              label={s("已派車", "Dispatched")}
+            />
           </div>
         </Card>
         <Card style={{ padding: 0 }}>
@@ -2823,18 +3063,22 @@ function renderScreen(
             </svg>
           </div>
           <div style={{ padding: "16px" }}>
-            <Row label="預計抵達" value="8 min" mono />
-            <Row label="距離" value="2.4 km" mono />
+            <Row label={s("預計抵達", "ETA")} value="8 min" mono />
+            <Row label={s("距離", "Distance")} value="2.4 km" mono />
           </div>
         </Card>
-        <Card title="行程資訊">
-          <Row label="訂單編號" value={demo.bookingRef} mono />
-          <Row label="方案" value={theme.programLabel} />
-          <Row label="您將支付" value="免費" />
+        <Card title={s("行程資訊", "Trip details")}>
+          <Row
+            label={s("訂單編號", "Booking ref")}
+            value={demo.bookingRef}
+            mono
+          />
+          <Row label={s("方案", "Program")} value={theme.programLabel} />
+          <Row label={s("您將支付", "You pay")} value={s("免費", "Free")} />
         </Card>
         <Button
           theme={theme}
-          label="聯絡客服"
+          label={s("聯絡客服", "Contact support")}
           href={getProgramScreenHref(basePath, "error")}
         />
       </>
@@ -2844,7 +3088,14 @@ function renderScreen(
   if (screen === "error") {
     return (
       <>
-        <Band theme={theme} title="發生錯誤" subtitle="請稍後再試或聯絡客服" />
+        <Band
+          theme={theme}
+          title={s("發生錯誤", "Something went wrong")}
+          subtitle={s(
+            "請稍後再試或聯絡客服",
+            "Try again later or contact support",
+          )}
+        />
         <Card>
           <div
             style={{ display: "flex", flexDirection: "column", gap: "12px" }}
@@ -2853,8 +3104,15 @@ function renderScreen(
             <div
               style={{ fontSize: "13px", lineHeight: 1.7, color: "#0e1424" }}
             >
-              系統暫時無法處理您的請求。您的{theme.benefitNoun}
-              並未被扣除，請稍後再試。
+              {s(
+                "系統暫時無法處理您的請求。您的",
+                "We cannot process this request right now. Your ",
+              ) +
+                theme.benefitNoun +
+                s(
+                  "並未被扣除，請稍後再試。",
+                  " was not deducted. Please try again later.",
+                )}
             </div>
           </div>
         </Card>
@@ -2885,29 +3143,46 @@ function renderScreen(
             {theme.hotline.note}
           </div>
         </Card>
-        <Button theme={theme} label="重新嘗試" href={landingHref} primary />
+        <Button
+          theme={theme}
+          label={s("重新嘗試", "Try again")}
+          href={landingHref}
+          primary
+        />
       </>
     );
   }
 
   // manual_review
   const guidance = [
-    "您的資格已送交人工審查，暫時無法立即派車。",
-    `審查結果將由 ${theme.issuerName} 與 DRTS 平台客服通知您。`,
-    "此為暫停狀態，並非預約失敗。",
+    s(
+      "您的資格已送交人工審查，暫時無法立即派車。",
+      "Your eligibility was sent to manual review, so dispatch is temporarily paused.",
+    ),
+    s("審查結果將由 ", "Review results will be sent by ") +
+      theme.issuerName +
+      s(" 與 DRTS 平台客服通知您。", " and DRTS platform support."),
+    s(
+      "此為暫停狀態，並非預約失敗。",
+      "This is a paused state, not a booking failure.",
+    ),
   ];
   return (
     <>
-      <Band theme={theme} title="人工審查中" subtitle="您的申請正在審查" />
+      <Band
+        theme={theme}
+        title={s("人工審查中", "Manual review in progress")}
+        subtitle={s("您的申請正在審查", "Your request is under review")}
+      />
       <Card>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <Chip theme={theme} tone="primary" label="manual_review" />
           <span style={{ fontSize: "13px", color: theme.chrome.pageMuted }}>
-            預計 1 個工作天內回覆
+            {s("預計 1 個工作天內回覆", "Expected reply within 1 business day")}
           </span>
         </div>
       </Card>
-      <Card title="處理方式">
+      <Card title={s("處理方式", "What happens next")}>
         {guidance.map((item, index) => (
           <div
             key={item}
@@ -2941,10 +3216,14 @@ function renderScreen(
       </Card>
       <Button
         theme={theme}
-        label="聯絡客服"
+        label={s("聯絡客服", "Contact support")}
         href={getProgramScreenHref(basePath, "error")}
       />
-      <Button theme={theme} label="返回入口" href={landingHref} />
+      <Button
+        theme={theme}
+        label={s("返回入口", "Back to entry")}
+        href={landingHref}
+      />
     </>
   );
 }
@@ -2966,7 +3245,8 @@ export function ProgramBookingFlow({
   locale: Locale;
   surface?: PartnerProgramSurfaceKind;
 }) {
-  const visibleScreens = listProgramScreensForTheme(theme, surface);
+  const localizedTheme = getLocalizedProgramTheme(theme, locale);
+  const visibleScreens = listProgramScreensForTheme(localizedTheme, surface);
   const activeCopy = getProgramScreenCopy(screen, locale);
 
   return (
@@ -3002,7 +3282,7 @@ export function ProgramBookingFlow({
             fontWeight: 800,
           }}
         >
-          {theme.programLabel}
+          {localizedTheme.programLabel}
         </div>
         <Chip
           theme={theme}
@@ -3069,7 +3349,7 @@ export function ProgramBookingFlow({
           width: "100%",
         }}
       >
-        {renderScreen(theme, screen, basePath, locale)}
+        {renderScreen(localizedTheme, screen, basePath, locale)}
       </div>
     </div>
   );

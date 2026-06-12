@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { TenantShell } from "@/components/tenant-shell";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   PartnerAuthorityError,
   getPartnerRouteContext,
@@ -43,7 +44,12 @@ export default async function TenantLayout({ children, params }: LayoutProps) {
     const { brand } = await getPartnerRouteContext(tenantSlug, {
       allowInactive: true,
     });
-    return <TenantShell brand={brand}>{children}</TenantShell>;
+    const locale = await getServerLocale();
+    return (
+      <TenantShell brand={brand} locale={locale}>
+        {children}
+      </TenantShell>
+    );
   } catch (error) {
     if (
       error instanceof PartnerAuthorityError &&

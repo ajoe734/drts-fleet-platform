@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getProgramChromeVars } from "@/lib/program-theme";
 import { getTenantProgramTheme } from "@/lib/program-route-context";
 import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -13,33 +14,42 @@ export default async function ProgramFlowPage({ params }: PageProps) {
   const { tenantSlug } = await params;
   const locale = await getServerLocale();
   const theme = await getTenantProgramTheme(tenantSlug);
-  const isZh = locale === "zh";
+  const issuerName =
+    locale === "zh"
+      ? theme.issuerName
+      : theme.kind === "card"
+        ? theme.issuerLabel + " Bank"
+        : theme.kind === "insurance"
+          ? "Fubon Insurance"
+          : "Lion Travel";
+  const programLabel =
+    locale === "zh"
+      ? theme.programLabel
+      : theme.kind === "card"
+        ? "Credit-card airport transfer"
+        : theme.kind === "insurance"
+          ? "Insurance replacement mobility"
+          : "Travel agency group transfer";
   const cards = [
     {
       href: `/${tenantSlug}`,
-      eyebrow: isZh ? "Standalone website" : "Standalone website",
-      title: isZh ? "網站預約" : "Website booking",
-      body: isZh
-        ? "給信用卡客戶直接開啟的白牌預約網站，依銀行品牌套不同版型樣式。"
-        : "White-label booking website for cardholders, themed per issuer brand.",
+      eyebrow: t("program.selector.website.eyebrow", undefined, locale),
+      title: t("program.selector.website.title", undefined, locale),
+      body: t("program.selector.website.body", undefined, locale),
     },
     {
       href: `/${tenantSlug}/program/site`,
-      eyebrow: isZh ? "Program funnel QA" : "Program funnel QA",
-      title: isZh ? "網站預約狀態稿" : "Website funnel states",
-      body: isZh
-        ? "固定七步 funnel：入口、資格、確認、成功、追蹤、錯誤、人工審查。"
-        : "Fixed seven-screen funnel: entry, eligibility, review, success, tracking, error, manual review.",
+      eyebrow: t("program.selector.funnel.eyebrow", undefined, locale),
+      title: t("program.selector.funnel.title", undefined, locale),
+      body: t("program.selector.funnel.body", undefined, locale),
     },
     ...(theme.kind === "card"
       ? [
           {
             href: `/${tenantSlug}/program/embed`,
-            eyebrow: isZh ? "Mobile banking webview" : "Mobile banking webview",
-            title: isZh ? "網銀 App 內嵌" : "Banking-app embed",
-            body: isZh
-              ? "只看銀行 App 身分交接 B1-B5：reference token、逾時重驗、host 封鎖、授權、回退官網。"
-              : "B1-B5 embedded identity states: reference token, re-auth, host block, consent, site fallback.",
+            eyebrow: t("program.selector.embed.eyebrow", undefined, locale),
+            title: t("program.selector.embed.title", undefined, locale),
+            body: t("program.selector.embed.body", undefined, locale),
           },
         ]
       : []),
@@ -69,10 +79,10 @@ export default async function ProgramFlowPage({ params }: PageProps) {
             fontWeight: 800,
           }}
         >
-          {theme.issuerName} · {theme.programLabel}
+          {issuerName} · {programLabel}
         </div>
         <h1 style={{ margin: 0, fontSize: "28px", lineHeight: 1.15 }}>
-          {isZh ? "選擇要檢視的前台 surface" : "Choose a frontend surface"}
+          {t("program.selector.title", undefined, locale)}
         </h1>
         <p
           style={{
@@ -83,9 +93,7 @@ export default async function ProgramFlowPage({ params }: PageProps) {
             maxWidth: "720px",
           }}
         >
-          {isZh
-            ? "信用卡機場接送有網站預約與網銀 App 內嵌兩條入口；保險與旅行社 program 則沿用同一套網站 funnel。這頁只負責導覽，不混用畫面。"
-            : "Credit-card airport transfer has separate website and banking-app embedded entry points. Insurance and travel programs reuse the website funnel. This selector keeps the surfaces separate."}
+          {t("program.selector.body", undefined, locale)}
         </p>
       </header>
 

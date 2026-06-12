@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { getPartnerChromeVars, type PartnerBrand } from "@/lib/brand";
+import type { Locale } from "@/lib/translations";
 import {
   LocalizedText,
   PartnerShellControls,
@@ -8,9 +9,52 @@ import {
 type TenantShellProps = {
   brand: PartnerBrand;
   children: ReactNode;
+  locale?: Locale;
 };
 
-export function TenantShell({ brand, children }: TenantShellProps) {
+function getBrandDisplay(brand: PartnerBrand, locale: Locale) {
+  if (locale === "zh") {
+    return {
+      displayName: brand.displayName,
+      issuerLabel: brand.cardArt.issuerLabel,
+      programLabel: brand.cardArt.programLabel,
+      networkLabel: brand.cardArt.networkLabel,
+      hotlineLabel: brand.hotline.label,
+      hotlineNote: brand.hotline.note,
+    };
+  }
+
+  const issuerLabel =
+    brand.code === "CTBC"
+      ? "CTBC Bank"
+      : brand.code === "FUBON"
+        ? "Fubon Insurance"
+        : brand.code === "LION"
+          ? "Lion Travel"
+          : brand.cardArt.issuerLabel;
+  const programLabel =
+    brand.code === "FUBON"
+      ? "Insurance replacement mobility"
+      : brand.code === "LION"
+        ? "Travel agency group transfer"
+        : "Credit-card airport transfer";
+
+  return {
+    displayName: brand.displayName.replace("中信銀行", "CTBC Bank"),
+    issuerLabel,
+    programLabel,
+    networkLabel: brand.cardArt.networkLabel,
+    hotlineLabel: "24-hour concierge hotline",
+    hotlineNote: "You will be connected to the partner support desk.",
+  };
+}
+
+export function TenantShell({
+  brand,
+  children,
+  locale = "zh",
+}: TenantShellProps) {
+  const display = getBrandDisplay(brand, locale);
   return (
     <div
       className="min-h-dvh bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
@@ -34,7 +78,7 @@ export function TenantShell({ brand, children }: TenantShellProps) {
             </span>
             <PartnerShellControls />
           </div>
-          <strong className="text-lg">{brand.displayName}</strong>
+          <strong className="text-lg">{display.displayName}</strong>
           <div className="mt-3 flex flex-wrap items-start gap-3 text-xs text-[color:inherit]">
             <div
               className="min-w-44 rounded-xl px-3 py-3 text-white shadow-sm"
@@ -52,27 +96,25 @@ export function TenantShell({ brand, children }: TenantShellProps) {
                 >
                   {brand.cardArt.badgeText}
                 </span>
-                <span className="font-semibold">
-                  {brand.cardArt.issuerLabel}
-                </span>
+                <span className="font-semibold">{display.issuerLabel}</span>
               </div>
               <div className="mt-3 text-sm font-semibold">
-                {brand.cardArt.programLabel}
+                {display.programLabel}
               </div>
               <div className="mt-1 text-[11px] opacity-80">
-                {brand.cardArt.networkLabel} · •••• {brand.cardArt.lastFour}
+                {display.networkLabel} · •••• {brand.cardArt.lastFour}
               </div>
             </div>
 
             <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-xl border border-current/10 bg-white/55 px-3 py-3">
               <span className="font-semibold">
-                {brand.hotline.label || (
+                {display.hotlineLabel || (
                   <LocalizedText labelKey="shell.hotline" fallback="Hotline" />
                 )}
               </span>
               <span className="font-mono text-sm">{brand.hotline.phone}</span>
               <span className="text-[11px] opacity-80">
-                {brand.hotline.note}
+                {display.hotlineNote}
               </span>
             </div>
           </div>

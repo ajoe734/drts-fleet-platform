@@ -162,5 +162,25 @@ test.describe("partner booking localization smoke", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.locator("body")).toContainText("Pick a tenant slug");
     await expect(page.locator("body")).toContainText("繁體中文");
+    await expect(page.locator("body")).not.toContainText("中信銀行");
+    await expect(page.locator("body")).not.toContainText("信用卡機場接送");
+  });
+
+  test("en program site landing keeps card funnel localized", async ({
+    page,
+  }, testInfo) => {
+    await primeLocale(
+      page,
+      "en",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
+    );
+    await gotoAndSettle(page, "/bank-demo-alpha-airport/program/site/landing");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText(
+      "Credit-card airport transfer",
+    );
+    await expect(page.locator("body")).toContainText("View eligibility");
+    await expect(page.locator("body")).not.toContainText("信用卡機場接送");
+    await expect(page.locator("body")).not.toContainText("查看資格確認");
   });
 });
