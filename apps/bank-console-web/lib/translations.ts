@@ -30,6 +30,12 @@ const en = {
   "shell.accountManagement": "Account management",
   "shell.switchAccount": "Switch account",
   "shell.logout": "Sign out",
+  "authBoundary.eyebrow": "Signed-out boundary",
+  "authBoundary.title": "Sign in required",
+  "authBoundary.body":
+    "You have signed out of the demo console. Bank-console data is hidden until an issuer operator signs in again.",
+  "authBoundary.noData": "No management data is rendered in this state.",
+  "authBoundary.cta": "Go to sign-in",
 
   "nav.section.workspace": "Workspace",
   "nav.section.finance": "Contracts & settlement",
@@ -591,7 +597,7 @@ const en = {
   "login.lead":
     "Choose an issuer tenant and operator persona for the dev demo. Production identity is expected to come from the issuer SSO / bank session.",
   "login.signedOutNotice":
-    "You are viewing the demo signed-out state. Pick an account below to continue.",
+    "You are signed out. Bank-console data stays hidden until you pick an account below.",
   "login.chooseBank": "Issuer tenant",
   "login.chooseAccount": "Operator account",
   "login.programAdmin": "Program admin",
@@ -628,6 +634,12 @@ const zh: Record<keyof typeof en, string> = {
   "shell.accountManagement": "帳號管理",
   "shell.switchAccount": "切換帳號",
   "shell.logout": "登出",
+  "authBoundary.eyebrow": "登出邊界",
+  "authBoundary.title": "需要重新登入",
+  "authBoundary.body":
+    "你已登出 demo 後台。重新選擇發卡行操作員身分前，後台資料不會顯示。",
+  "authBoundary.noData": "此狀態不渲染任何管理資料。",
+  "authBoundary.cta": "前往登入",
 
   "nav.section.workspace": "工作面",
   "nav.section.finance": "合約與帳務",
@@ -1176,7 +1188,7 @@ const zh: Record<keyof typeof en, string> = {
   "login.lead":
     "在 dev demo 選擇發卡行租戶與操作員 persona。正式環境身分應由發卡行 SSO／銀行 session 交付。",
   "login.signedOutNotice":
-    "你目前正在看 demo 的登出狀態；選擇一個帳號即可回到後台。",
+    "你目前已登出；重新選擇帳號前，銀行後台資料會保持隱藏。",
   "login.chooseBank": "發卡行租戶",
   "login.chooseAccount": "操作員帳號",
   "login.programAdmin": "方案管理員",

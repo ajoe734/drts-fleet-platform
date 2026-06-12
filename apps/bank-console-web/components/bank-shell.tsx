@@ -10,9 +10,11 @@ import {
 import { BankDemoControls } from "@/components/bank-demo-controls";
 import {
   getLocaleTag,
+  type BankDemoTenant,
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
+import type { Locale } from "@/lib/translations";
 import {
   BANK_CONSOLE_BRAND,
   BANK_CONSOLE_BRAND_SUB,
@@ -34,9 +36,36 @@ const bankCanvasTheme = buildCanvasTheme({
 
 export function BankShell({ children }: { children: ReactNode }) {
   return (
-    <Suspense fallback={<div className="bank-runtime-shell">{children}</div>}>
+    <Suspense fallback={<div className="bank-runtime-shell" />}>
       <BankShellContent>{children}</BankShellContent>
     </Suspense>
+  );
+}
+
+function SignedOutBoundary({
+  bank,
+  locale,
+}: {
+  bank: BankDemoTenant;
+  locale: Locale;
+}) {
+  const loginHref = `/login?bank=${bank.code}&locale=${locale}&signedOut=1`;
+
+  return (
+    <div className="page-shell login-page bank-auth-boundary">
+      <section className="login-hero">
+        <span className="eyebrow">{t("authBoundary.eyebrow", locale)}</span>
+        <h1>{t("authBoundary.title", locale)}</h1>
+        <p>{t("authBoundary.body", locale)}</p>
+        <div className="callout-panel is-warning">
+          <strong>{bank.name[locale]}</strong>
+          <span>{t("authBoundary.noData", locale)}</span>
+        </div>
+        <a className="bank-auth-boundary-cta" href={loginHref}>
+          {t("authBoundary.cta", locale)}
+        </a>
+      </section>
+    </div>
   );
 }
 
@@ -84,7 +113,11 @@ function BankShellContent({ children }: { children: ReactNode }) {
           style={{ height: "100%" }}
           {...(activeKey ? { active: activeKey } : {})}
         >
-          {children}
+          {signedOut && pathname !== "/login" ? (
+            <SignedOutBoundary bank={bank} locale={locale} />
+          ) : (
+            children
+          )}
         </CanvasShell>
       </div>
     </ManagementThemeProvider>
