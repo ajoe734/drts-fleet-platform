@@ -58,6 +58,8 @@ ai-task-archive.jsonl
 .orchestrator/task-briefs/
 docs-site/approval-queue.json
 docs-site/ai-activity-log.jsonl
+docs-site/ai-status.json
+docs-site/current-work.md
 docs-site/orchestrator-state.json
 docs/03-runbooks/local-development.local.md
 .local/
