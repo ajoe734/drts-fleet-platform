@@ -1,10 +1,6 @@
 import type { ResourceActionDescriptor } from "@drts/contracts";
 
-export type BookingState =
-  | "assigned"
-  | "approval"
-  | "reserved"
-  | "completed";
+export type BookingState = "assigned" | "approval" | "reserved" | "completed";
 
 export type EnterpriseAction = ResourceActionDescriptor & {
   label: string;
@@ -133,7 +129,12 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     progress: [
       { key: "accepted", label: "預約成立", at: "14:58", status: "done" },
       { key: "assigned", label: "已派車", at: "15:05", status: "done" },
-      { key: "arriving", label: "司機前往上車點", at: "ETA 8 分鐘", status: "current" },
+      {
+        key: "arriving",
+        label: "司機前往上車點",
+        at: "ETA 8 分鐘",
+        status: "current",
+      },
       { key: "pickup", label: "乘客上車", status: "upcoming" },
       { key: "dropoff", label: "送達目的地", status: "upcoming" },
     ],
@@ -309,6 +310,6 @@ export const helpFaqs = [
   },
 ];
 
-export const activeTrip = enterpriseBookings[0];
-export const detailBooking = enterpriseBookings[1];
-export const receiptBooking = enterpriseBookings[3];
+export const activeTrip = enterpriseBookings[0]!;
+export const detailBooking = enterpriseBookings[1]!;
+export const receiptBooking = enterpriseBookings[3]!;

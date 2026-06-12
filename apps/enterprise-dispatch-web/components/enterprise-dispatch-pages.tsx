@@ -57,7 +57,8 @@ function EnterpriseActionLink({
 }) {
   const variant = actionVariant(action);
   const riskTone = actionTone(action);
-  const disabled = !action.enabled || !action.href;
+  const href = action.href;
+  const disabled = !action.enabled || !href;
   const content = (
     <span
       style={{
@@ -106,7 +107,7 @@ function EnterpriseActionLink({
 
   return (
     <Link
-      href={action.href}
+      href={href}
       style={{ textDecoration: "none", ...(width ? { width } : {}) }}
     >
       <EnterpriseBtn
@@ -456,7 +457,10 @@ export function DetailPageContent() {
         <EnterpriseCard title="處理提醒">
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
             {policyNotes.map((note) => (
-              <li key={note} style={{ fontSize: 12.5, color: enterpriseTheme.text }}>
+              <li
+                key={note}
+                style={{ fontSize: 12.5, color: enterpriseTheme.text }}
+              >
                 {note}
               </li>
             ))}
@@ -654,10 +658,22 @@ export function ReceiptPageContent() {
           <EnterpriseDl
             cols={2}
             items={[
-              { k: "出發", v: receiptBooking.receipt?.departedAt ?? "", mono: true },
-              { k: "抵達", v: receiptBooking.receipt?.arrivedAt ?? "", mono: true },
+              {
+                k: "出發",
+                v: receiptBooking.receipt?.departedAt ?? "",
+                mono: true,
+              },
+              {
+                k: "抵達",
+                v: receiptBooking.receipt?.arrivedAt ?? "",
+                mono: true,
+              },
               { k: "行車時間", v: receiptBooking.receipt?.duration ?? "" },
-              { k: "距離", v: receiptBooking.receipt?.distance ?? "", mono: true },
+              {
+                k: "距離",
+                v: receiptBooking.receipt?.distance ?? "",
+                mono: true,
+              },
             ]}
           />
         </EnterpriseCard>
@@ -686,7 +702,12 @@ export function ReceiptPageContent() {
               })) ?? []
             }
           />
-          <div style={{ marginTop: 12, ...actionGroupStyle("repeat(2, minmax(0, 1fr))") }}>
+          <div
+            style={{
+              marginTop: 12,
+              ...actionGroupStyle("repeat(2, minmax(0, 1fr))"),
+            }}
+          >
             {receiptBooking.availableActions.map((action) => (
               <EnterpriseActionLink key={action.action} action={action} />
             ))}
@@ -764,7 +785,10 @@ export function HelpPageContent() {
         <EnterpriseCard title="操作提醒">
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
             {policyNotes.map((note) => (
-              <li key={note} style={{ fontSize: 12.5, color: enterpriseTheme.text }}>
+              <li
+                key={note}
+                style={{ fontSize: 12.5, color: enterpriseTheme.text }}
+              >
                 {note}
               </li>
             ))}
