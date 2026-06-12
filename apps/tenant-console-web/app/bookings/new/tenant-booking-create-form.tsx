@@ -44,8 +44,9 @@ import {
   parseAmountMajor,
   type TenantBookingDraftValues,
   type TenantBookingFieldErrors,
+  type TenantBookingValidationMessages,
 } from "./tenant-booking-create-form-utils";
-import { t } from "@/lib/translations";
+import { useTranslation } from "@/lib/i18n";
 
 type BookingCreateActionMap = {
   submit: ResourceActionDescriptor;
@@ -99,16 +100,57 @@ type SubmitResponse = {
   crossAppLinks?: CrossAppResourceLink[];
 };
 
-const BUSINESS_SUBTYPE_OPTIONS: Array<{
+type Translator = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
+
+function getBusinessSubtypeOptions(t: Translator): Array<{
   value: BusinessDispatchSubtype;
   label: string;
-}> = [
-  {
-    value: "credit_card_airport_transfer",
-    label: t("newBooking.program.creditCard"),
-  },
-  { value: "enterprise_dispatch", label: t("newBooking.program.enterprise") },
-];
+}> {
+  return [
+    {
+      value: "credit_card_airport_transfer",
+      label: t("newBooking.program.creditCard"),
+    },
+    {
+      value: "enterprise_dispatch",
+      label: t("newBooking.program.enterprise"),
+    },
+  ];
+}
+
+function getValidationMessages(t: Translator): TenantBookingValidationMessages {
+  return {
+    reservationWindowStartRequired: t(
+      "newBooking.validation.reservationWindowStartRequired",
+    ),
+    reservationWindowEndRequired: t(
+      "newBooking.validation.reservationWindowEndRequired",
+    ),
+    passengerNameRequired: t("newBooking.validation.passengerNameRequired"),
+    passengerPhoneRequired: t("newBooking.validation.passengerPhoneRequired"),
+    pickupAddressRequired: t("newBooking.validation.pickupAddressRequired"),
+    dropoffAddressRequired: t("newBooking.validation.dropoffAddressRequired"),
+    costCenterRequired: t("newBooking.validation.costCenterRequired"),
+    reservationWindowInvalid: t(
+      "newBooking.validation.reservationWindowInvalid",
+    ),
+    reservationWindowOrder: t("newBooking.validation.reservationWindowOrder"),
+    flightNoRequired: t("newBooking.validation.flightNoRequired"),
+    bookedByPairRequired: t("newBooking.validation.bookedByPairRequired"),
+    onsiteContactPairRequired: t(
+      "newBooking.validation.onsiteContactPairRequired",
+    ),
+    estimatedAmountInvalid: t("newBooking.validation.estimatedAmountInvalid"),
+    luggageCountInvalid: t("newBooking.validation.luggageCountInvalid"),
+    pickupLatInvalid: t("newBooking.validation.pickupLatInvalid"),
+    pickupLngInvalid: t("newBooking.validation.pickupLngInvalid"),
+    dropoffLatInvalid: t("newBooking.validation.dropoffLatInvalid"),
+    dropoffLngInvalid: t("newBooking.validation.dropoffLngInvalid"),
+  };
+}
 
 const CURRENCY = "TWD";
 const th = buildCanvasTheme({
@@ -255,33 +297,41 @@ const metaItemStyle: CSSProperties = {
   background: "rgba(15, 23, 42, 0.48)",
 };
 
-function formatCurrency(amountMinor: number | null | undefined) {
+function toIntlLocale(locale: string) {
+  return locale === "zh" ? "zh-Hant" : "en-US";
+}
+
+function formatCurrency(
+  amountMinor: number | null | undefined,
+  locale: string,
+  t: Translator,
+) {
   if (amountMinor == null || Number.isNaN(amountMinor)) {
-    return "未提供";
+    return t("newBooking.format.currencyMissing");
   }
 
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(toIntlLocale(locale), {
     style: "currency",
     currency: CURRENCY,
     maximumFractionDigits: 0,
   }).format(amountMinor / 100);
 }
 
-function formatPercent(value: number | null | undefined) {
+function formatPercent(value: number | null | undefined, t: Translator) {
   if (value == null || Number.isNaN(value)) {
-    return "不適用";
+    return t("newBooking.format.percentMissing");
   }
 
   return `${value}%`;
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string, locale: string, t: Translator) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return "未知";
+    return t("newBooking.format.datetimeUnknown");
   }
 
-  return new Intl.DateTimeFormat("zh-Hant", {
+  return new Intl.DateTimeFormat(toIntlLocale(locale), {
     dateStyle: "short",
     timeStyle: "short",
   })
@@ -289,64 +339,72 @@ function formatDateTime(value: string) {
     .replace(/[\u00a0\u202f\u2009]/g, " ");
 }
 
-function formatAge(generatedAt: string, nowMs: number) {
+function formatAge(generatedAt: string, nowMs: number, t: Translator) {
   const generatedAtMs = new Date(generatedAt).getTime();
   if (!Number.isFinite(generatedAtMs)) {
-    return "時間未知";
+    return t("newBooking.format.ageUnknown");
   }
 
   const deltaSeconds = Math.max(0, Math.floor((nowMs - generatedAtMs) / 1000));
   if (deltaSeconds < 60) {
-    return deltaSeconds === 0 ? "剛剛" : `${deltaSeconds} 秒前`;
+    return deltaSeconds === 0
+      ? t("newBooking.format.justNow")
+      : t("newBooking.format.secondsAgo", { count: deltaSeconds });
   }
   const deltaMinutes = Math.floor(deltaSeconds / 60);
   if (deltaMinutes < 60) {
-    return `${deltaMinutes} 分鐘前`;
+    return t("newBooking.format.minutesAgo", { count: deltaMinutes });
   }
   const deltaHours = Math.floor(deltaMinutes / 60);
-  return `${deltaHours} 小時前`;
+  return t("newBooking.format.hoursAgo", { count: deltaHours });
 }
 
-function describeSubtype(value: BusinessDispatchSubtype) {
-  return BUSINESS_SUBTYPE_OPTIONS.find((option) => option.value === value)
+function describeSubtype(value: BusinessDispatchSubtype, t: Translator) {
+  return getBusinessSubtypeOptions(t).find((option) => option.value === value)
     ?.label;
 }
 
-function describeDirection(value: "" | "pickup" | "dropoff") {
+function describeDirection(value: "" | "pickup" | "dropoff", t: Translator) {
   switch (value) {
     case "pickup":
-      return "上車";
+      return t("newBooking.direction.pickup");
     case "dropoff":
-      return "下車";
+      return t("newBooking.direction.dropoff");
     default:
-      return "未設定";
+      return t("newBooking.direction.unset");
   }
 }
 
-function describeDecision(result: TenantApprovalEvaluationResult | null) {
+function describeDecision(
+  result: TenantApprovalEvaluationResult | null,
+  t: Translator,
+) {
   const decision = result?.outcome?.decision ?? "allow";
   switch (decision) {
     case "require_approval":
-      return "需審批";
+      return t("newBooking.decision.requireApproval");
     case "block":
-      return "已封鎖";
+      return t("newBooking.decision.block");
     case "warn":
-      return "警告";
+      return t("newBooking.decision.warn");
     case "manual_review":
-      return "人工複核";
+      return t("newBooking.decision.manualReview");
     default:
-      return "允許";
+      return t("newBooking.decision.allow");
   }
 }
 
 function describeImpactLabel(
   scope: "tenant" | "cost_center",
   code: string | null,
+  t: Translator,
 ) {
   if (scope === "cost_center") {
-    return code ? `成本中心 ${code}` : "成本中心";
+    return code
+      ? t("newBooking.impact.costCenterCode", { code })
+      : t("newBooking.impact.costCenter");
   }
-  return "租戶";
+  return t("newBooking.impact.tenant");
 }
 
 function firstError(errors: TenantBookingFieldErrors) {
@@ -383,22 +441,22 @@ function toneForRefreshTier(
   }
 }
 
-function labelForRefreshTier(tier: RefreshTier) {
+function labelForRefreshTier(tier: RefreshTier, t: Translator) {
   switch (tier) {
     case "manual":
-      return "手動";
+      return t("newBooking.refreshTier.manual");
     case "urgent":
-      return "緊急";
+      return t("newBooking.refreshTier.urgent");
     case "fast":
-      return "快速";
+      return t("newBooking.refreshTier.fast");
     case "dispatch":
-      return "派遣";
+      return t("newBooking.refreshTier.dispatch");
     case "medium":
-      return "中等";
+      return t("newBooking.refreshTier.medium");
     case "medium_slow":
-      return "中慢";
+      return t("newBooking.refreshTier.mediumSlow");
     case "slow":
-      return "慢速";
+      return t("newBooking.refreshTier.slow");
     default:
       return tier;
   }
@@ -488,11 +546,13 @@ function FieldShell({
 
 function ActionLink({
   descriptor,
+  disabledTitle,
   href,
   label,
   newTab = false,
 }: {
   descriptor: ResourceActionDescriptor;
+  disabledTitle?: string;
   href: string;
   label: string;
   newTab?: boolean;
@@ -501,7 +561,7 @@ function ActionLink({
     return (
       <span
         style={actionSurfaceStyle(descriptor)}
-        title={descriptor.disabledReasonCode ?? "目前無法操作"}
+        title={descriptor.disabledReasonCode ?? disabledTitle}
       >
         {label}
       </span>
@@ -564,64 +624,62 @@ function EmptyStatePanel({
   links: TenantBookingCreatePageModel["links"];
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const copy: Record<
     EmptyStateEnvelope["reason"],
     { title: string; description: string; tone: CSSProperties }
   > = {
     no_data: {
-      title: "目前沒有可用的建立捷徑",
-      description:
-        "乘客與地址目錄都還沒有可用資料。先補齊租戶目錄，再回來建立訂單。",
+      title: t("newBooking.empty.noData.title"),
+      description: t("newBooking.empty.noData.body"),
       tone: {
         borderColor: "rgba(148, 163, 184, 0.28)",
         background: "rgba(15, 23, 42, 0.72)",
       },
     },
     not_provisioned: {
-      title: "成本中心尚未佈建",
-      description: "這個路由需要標準成本中心目錄，否則叫車建立命令不能送出。",
+      title: t("newBooking.empty.notProvisioned.title"),
+      description: t("newBooking.empty.notProvisioned.body"),
       tone: {
         borderColor: "rgba(34, 211, 238, 0.38)",
         background: "rgba(8, 47, 73, 0.5)",
       },
     },
     fetch_failed: {
-      title: "建立訂單所需資料載入失敗",
-      description:
-        "至少一個必要目錄來源讀取失敗。請先刷新，確認資料恢復後再送出。",
+      title: t("newBooking.empty.fetchFailed.title"),
+      description: t("newBooking.empty.fetchFailed.body"),
       tone: {
         borderColor: "rgba(253, 164, 175, 0.45)",
         background: "rgba(69, 10, 10, 0.48)",
       },
     },
     permission_denied: {
-      title: "目前身分沒有建立訂單權限",
-      description: "後端拒絕目前身分的叫車建立權限。請與租戶管理員確認權限。",
+      title: t("newBooking.empty.permissionDenied.title"),
+      description: t("newBooking.empty.permissionDenied.body"),
       tone: {
         borderColor: "rgba(253, 224, 71, 0.45)",
         background: "rgba(113, 63, 18, 0.48)",
       },
     },
     external_unavailable: {
-      title: "外部依賴暫時不可用",
-      description: "叫車命令依賴的上游服務暫時異常。等依賴恢復後刷新再重試。",
+      title: t("newBooking.empty.externalUnavailable.title"),
+      description: t("newBooking.empty.externalUnavailable.body"),
       tone: {
         borderColor: "rgba(251, 146, 60, 0.45)",
         background: "rgba(67, 20, 7, 0.48)",
       },
     },
     filtered_empty: {
-      title: "預填捷徑已失效",
-      description:
-        "乘客或地址的預填連結已經過期。清除捷徑脈絡後，從乾淨表單重新開始。",
+      title: t("newBooking.empty.filteredEmpty.title"),
+      description: t("newBooking.empty.filteredEmpty.body"),
       tone: {
         borderColor: "rgba(45, 212, 191, 0.34)",
         background: "rgba(17, 94, 89, 0.34)",
       },
     },
     driver_not_eligible: {
-      title: "駕駛資格狀態不適用這個頁面",
-      description: "租戶叫車建立路由不使用駕駛資格狀態。",
+      title: t("newBooking.empty.driverNotEligible.title"),
+      description: t("newBooking.empty.driverNotEligible.body"),
       tone: {
         borderColor: "rgba(148, 163, 184, 0.28)",
         background: "rgba(15, 23, 42, 0.72)",
@@ -634,7 +692,7 @@ function EmptyStatePanel({
     <div style={{ ...emptyStatePanelStyle, ...content.tone }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         <CanvasPill theme={th} tone="info" dot>
-          EmptyReason
+          {t("newBooking.empty.reason")}
         </CanvasPill>
         <CanvasPill theme={th} tone="neutral">
           {emptyState.reason}
@@ -655,42 +713,48 @@ function EmptyStatePanel({
           {content.description}
         </p>
         <span style={{ fontSize: 12, color: th.textMuted }}>
-          messageCode: {emptyState.messageCode}
+          {t("newBooking.empty.messageCode", {
+            code: emptyState.messageCode,
+          })}
         </span>
       </div>
       <div style={actionRowStyle}>
         {emptyState.nextAction?.action === actions.refresh.action ? (
           <ActionButton
             descriptor={actions.refresh}
-            label="立即更新"
+            label={t("newBooking.action.refreshNow")}
             onClick={onRefresh}
             primary
           />
         ) : emptyState.nextAction?.action === actions.clearShortcuts.action ? (
           <ActionLink
             descriptor={actions.clearShortcuts}
+            disabledTitle={t("newBooking.action.unavailable")}
             href={links.clearShortcuts}
-            label="清除快捷內容"
+            label={t("newBooking.action.clearShortcuts")}
           />
         ) : emptyState.nextAction?.action ===
           actions.manageCostCenters.action ? (
           <ActionLink
             descriptor={actions.manageCostCenters}
+            disabledTitle={t("newBooking.action.unavailable")}
             href={links.costCenters}
-            label="開啟成本中心"
+            label={t("newBooking.action.openCostCenters")}
           />
         ) : emptyState.nextAction?.action ===
           actions.managePassengers.action ? (
           <ActionLink
             descriptor={actions.managePassengers}
+            disabledTitle={t("newBooking.action.unavailable")}
             href={links.passengers}
-            label="開啟乘客"
+            label={t("newBooking.action.openPassengers")}
           />
         ) : null}
         <ActionLink
           descriptor={actions.viewBookings}
+          disabledTitle={t("newBooking.action.unavailable")}
           href={links.bookings}
-          label="回到訂單清單"
+          label={t("newBooking.action.backBookings")}
         />
       </div>
     </div>
@@ -709,6 +773,7 @@ export function TenantBookingCreateForm({
   pageModel: TenantBookingCreatePageModel;
 }) {
   const router = useRouter();
+  const { locale, t } = useTranslation();
   const [navigationPending, startTransition] = useTransition();
   const [nowMs, setNowMs] = useState(() => {
     const generatedAtMs = new Date(pageModel.refresh.generatedAt).getTime();
@@ -821,11 +886,15 @@ export function TenantBookingCreateForm({
     Boolean(activePassenger) && Boolean(activePassenger?.mobile?.trim());
   const policyPreviewReady =
     isReadyForTenantBookingPolicyPreview(draft) && Boolean(costCenter.trim());
+  const businessSubtypeOptions = getBusinessSubtypeOptions(t);
+  const validationMessages = getValidationMessages(t);
   const formatErrors = getTenantBookingFieldErrors(draft, {
+    messages: validationMessages,
     requireCostCenter: costCenters.length > 0,
   });
   const visibleFieldErrors = getTenantBookingFieldErrors(draft, {
     includeRequired: submitAttempted,
+    messages: validationMessages,
     requireCostCenter: costCenters.length > 0,
   });
   const missingRequiredFields = isMissingRequiredBookingFields(
@@ -972,7 +1041,10 @@ export function TenantBookingCreateForm({
 
         if (!response.ok) {
           throw new Error(
-            result.error ?? `政策預覽失敗 (HTTP ${response.status})。`,
+            result.error ??
+              t("newBooking.error.policyPreviewHttp", {
+                status: response.status,
+              }),
           );
         }
 
@@ -980,7 +1052,9 @@ export function TenantBookingCreateForm({
         setApprovalEvaluation(result.approvalEvaluation ?? null);
       } catch (error) {
         setPolicyError(
-          error instanceof Error ? error.message : "未知政策預覽錯誤。",
+          error instanceof Error
+            ? error.message
+            : t("newBooking.error.policyPreviewUnknown"),
         );
       } finally {
         setPolicyRefreshing(false);
@@ -1003,6 +1077,7 @@ export function TenantBookingCreateForm({
     reservationWindowStart,
     selectedPassengerId,
     signoffRequired,
+    t,
     vehiclePreference,
   ]);
 
@@ -1035,6 +1110,7 @@ export function TenantBookingCreateForm({
 
     const blockingErrors = getTenantBookingFieldErrors(draft, {
       includeRequired: true,
+      messages: validationMessages,
       requireCostCenter: costCenters.length > 0,
     });
     const firstBlockingError = firstError(blockingErrors);
@@ -1044,7 +1120,7 @@ export function TenantBookingCreateForm({
     }
 
     if (approvalEvaluation?.outcome?.blocked) {
-      setSubmitError("此叫車目前被租戶審批或額度政策阻擋。");
+      setSubmitError(t("newBooking.error.submitBlocked"));
       return;
     }
 
@@ -1064,7 +1140,8 @@ export function TenantBookingCreateForm({
 
       if (!response.ok || !result.booking?.bookingId) {
         throw new Error(
-          result.error ?? `建立叫車失敗 (HTTP ${response.status})。`,
+          result.error ??
+            t("newBooking.error.createHttp", { status: response.status }),
         );
       }
 
@@ -1085,7 +1162,9 @@ export function TenantBookingCreateForm({
       setRedirectTarget(nextHref);
     } catch (error) {
       setSubmitError(
-        error instanceof Error ? error.message : "未知叫車建立錯誤。",
+        error instanceof Error
+          ? error.message
+          : t("newBooking.error.createUnknown"),
       );
     } finally {
       setSubmitting(false);
@@ -1096,18 +1175,23 @@ export function TenantBookingCreateForm({
     <div style={pageStyle}>
       <CanvasPageHeader
         theme={th}
-        title="建立叫車"
-        subtitle="代訂或本人 · 預約 / 即時 · 同步 command 模式 (Q-TEN04)"
+        title={t("newBooking.header.title")}
+        subtitle={t("newBooking.header.subtitle")}
         actions={
           <>
             <ActionLink
               descriptor={pageModel.actions.viewBookings}
+              disabledTitle={t("newBooking.action.unavailable")}
               href={pageModel.links.bookings}
-              label="返回訂單列表"
+              label={t("newBooking.action.backList")}
             />
             <ActionButton
               descriptor={pageModel.actions.refresh}
-              label={navigationPending ? "重新載入中..." : "刷新"}
+              label={
+                navigationPending
+                  ? t("newBooking.action.reloading")
+                  : t("newBooking.action.refresh")
+              }
               onClick={refreshPage}
             />
           </>
@@ -1117,63 +1201,71 @@ export function TenantBookingCreateForm({
       <div style={pageMetaCardStyle}>
         <div style={pageMetaGridStyle}>
           <div style={metaItemStyle}>
-            <span style={labelStyle}>命令</span>
+            <span style={labelStyle}>{t("newBooking.meta.command")}</span>
             <strong>POST /api/tenant/bookings/commands/create</strong>
           </div>
           <div style={metaItemStyle}>
-            <span style={labelStyle}>更新層級</span>
+            <span style={labelStyle}>{t("newBooking.meta.updateTier")}</span>
             <div style={chipRowStyle}>
               <CanvasPill
                 theme={th}
                 tone={toneForRefreshTier(pageModel.refreshTier)}
               >
-                {labelForRefreshTier(pageModel.refreshTier)}
+                {labelForRefreshTier(pageModel.refreshTier, t)}
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
-                {formatAge(pageModel.refresh.generatedAt, nowMs)}
+                {formatAge(pageModel.refresh.generatedAt, nowMs, t)}
               </CanvasPill>
             </div>
           </div>
           <div style={metaItemStyle}>
-            <span style={labelStyle}>目錄覆蓋</span>
+            <span style={labelStyle}>
+              {t("newBooking.meta.directoryCoverage")}
+            </span>
             <div style={chipRowStyle}>
               <CanvasPill
                 theme={th}
                 tone={passengers.length > 0 ? "success" : "warn"}
               >
-                乘客 {passengers.length}
+                {t("newBooking.meta.passengers", {
+                  count: passengers.length,
+                })}
               </CanvasPill>
               <CanvasPill
                 theme={th}
                 tone={addresses.length > 0 ? "success" : "warn"}
               >
-                地址 {addresses.length}
+                {t("newBooking.meta.addresses", { count: addresses.length })}
               </CanvasPill>
               <CanvasPill
                 theme={th}
                 tone={costCenters.length > 0 ? "success" : "warn"}
               >
-                成本中心 {costCenters.length}
+                {t("newBooking.meta.costCenters", {
+                  count: costCenters.length,
+                })}
               </CanvasPill>
             </div>
           </div>
           <div style={metaItemStyle}>
-            <span style={labelStyle}>必備操作</span>
+            <span style={labelStyle}>
+              {t("newBooking.meta.requiredActions")}
+            </span>
             <div style={chipRowStyle}>
               <CanvasPill
                 theme={th}
                 tone={pageModel.actions.submit.enabled ? "info" : "neutral"}
               >
-                送出命令
+                {t("newBooking.action.submitCommand")}
               </CanvasPill>
               <CanvasPill
                 theme={th}
                 tone={pageModel.actions.cancel.enabled ? "neutral" : "warn"}
               >
-                取消
+                {t("newBooking.action.cancel")}
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
-                暫不支援草稿
+                {t("newBooking.meta.noDraft")}
               </CanvasPill>
             </div>
           </div>
@@ -1186,7 +1278,7 @@ export function TenantBookingCreateForm({
             theme={th}
             tone="info"
             icon="link"
-            title="已套用目錄捷徑預填"
+            title={t("newBooking.prefill.appliedTitle")}
             body={pageModel.prefill.sourceLabel}
           />
           <div style={chipRowStyle}>
@@ -1204,7 +1296,7 @@ export function TenantBookingCreateForm({
           theme={th}
           tone="warn"
           icon="warn"
-          title="部分建立訂單依賴目前降級"
+          title={t("newBooking.health.degradedTitle")}
           body={pageModel.health.degradedServices
             .map((item) => item.impact)
             .join(" · ")}
@@ -1216,18 +1308,26 @@ export function TenantBookingCreateForm({
           <CanvasBanner
             theme={th}
             icon={pageFreshness === "degraded" ? "warn" : "clock"}
-            body={`快照建立於 ${formatAge(pageModel.refresh.generatedAt, nowMs)} · ${formatDateTime(pageModel.refresh.generatedAt)} · 更新層級 ${labelForRefreshTier(pageModel.refreshTier)}`}
+            body={t("newBooking.freshness.body", {
+              age: formatAge(pageModel.refresh.generatedAt, nowMs, t),
+              timestamp: formatDateTime(
+                pageModel.refresh.generatedAt,
+                locale,
+                t,
+              ),
+              tier: labelForRefreshTier(pageModel.refreshTier, t),
+            })}
             title={
               pageFreshness === "degraded"
-                ? "目錄快照目前降級"
-                : "目錄快照需要更新"
+                ? t("newBooking.freshness.degradedTitle")
+                : t("newBooking.freshness.staleTitle")
             }
             tone={pageFreshness === "degraded" ? "warn" : "info"}
           />
           <div style={actionRowStyle}>
             <ActionButton
               descriptor={pageModel.actions.refresh}
-              label="立即刷新"
+              label={t("newBooking.action.refreshNow")}
               onClick={refreshPage}
               primary
             />
@@ -1248,19 +1348,19 @@ export function TenantBookingCreateForm({
             theme={th}
             tone="warn"
             icon="spark"
-            title="估算只用於預覽"
-            body="費用、額度影響與審批姿態可先預覽，但標準報價仍由後端擁有。"
+            title={t("newBooking.info.estimateTitle")}
+            body={t("newBooking.info.estimateBody")}
           />
 
           <div style={twoColumnLayoutStyle}>
             <div style={cardStackStyle}>
               <CanvasCard
                 theme={th}
-                title="行程"
-                subtitle="服務類型、乘客、預約時間與地址簿捷徑都在同一張表單完成。"
+                title={t("newBooking.card.trip.title")}
+                subtitle={t("newBooking.card.trip.subtitle")}
               >
                 <div style={fieldGridStyle}>
-                  <FieldShell label="服務子類型">
+                  <FieldShell label={t("newBooking.field.serviceSubtype")}>
                     <select
                       onChange={(event) =>
                         setBusinessDispatchSubtype(
@@ -1270,7 +1370,7 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={businessDispatchSubtype}
                     >
-                      {BUSINESS_SUBTYPE_OPTIONS.map((option) => (
+                      {businessSubtypeOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -1278,7 +1378,7 @@ export function TenantBookingCreateForm({
                     </select>
                   </FieldShell>
 
-                  <FieldShell label="時間模式">
+                  <FieldShell label={t("newBooking.field.timingMode")}>
                     <select
                       onChange={(event) =>
                         applyTimingMode(
@@ -1288,14 +1388,18 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={timingMode}
                     >
-                      <option value="scheduled">預約</option>
-                      <option value="immediate">即時</option>
+                      <option value="scheduled">
+                        {t("newBooking.option.scheduled")}
+                      </option>
+                      <option value="immediate">
+                        {t("newBooking.option.immediate")}
+                      </option>
                     </select>
                   </FieldShell>
 
                   <FieldShell
                     error={visibleFieldErrors.reservationWindowStart}
-                    label="預約開始"
+                    label={t("newBooking.field.reservationStart")}
                   >
                     <input
                       onChange={(event) =>
@@ -1314,7 +1418,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.reservationWindowEnd}
-                    label="預約結束"
+                    label={t("newBooking.field.reservationEnd")}
                   >
                     <input
                       onChange={(event) =>
@@ -1332,8 +1436,8 @@ export function TenantBookingCreateForm({
                   </FieldShell>
 
                   <FieldShell
-                    hint="為代客叫車選擇目錄乘客，或維持手動輸入。"
-                    label="乘客"
+                    hint={t("newBooking.hint.passengerSelect")}
+                    label={t("newBooking.field.passenger")}
                   >
                     <select
                       onChange={(event) =>
@@ -1342,7 +1446,9 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={selectedPassengerId}
                     >
-                      <option value="">手動輸入乘客</option>
+                      <option value="">
+                        {t("newBooking.option.manualPassenger")}
+                      </option>
                       {passengers.map((passenger) => (
                         <option
                           key={passenger.passengerId}
@@ -1359,7 +1465,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.passengerName}
-                    label="乘客姓名"
+                    label={t("newBooking.field.passengerName")}
                   >
                     <input
                       disabled={Boolean(activePassenger)}
@@ -1380,11 +1486,11 @@ export function TenantBookingCreateForm({
                     hint={
                       activePassenger
                         ? passengerPhoneLocked
-                          ? "乘客電話來自選取的目錄紀錄。"
-                          : "這位乘客檔案沒有電話，請在此補上。"
-                        : "手動輸入乘客時需要直接聯絡電話。"
+                          ? t("newBooking.hint.phoneFromDirectory")
+                          : t("newBooking.hint.phoneMissing")
+                        : t("newBooking.hint.phoneManual")
                     }
-                    label="乘客電話"
+                    label={t("newBooking.field.passengerPhone")}
                   >
                     <input
                       disabled={passengerPhoneLocked}
@@ -1406,11 +1512,11 @@ export function TenantBookingCreateForm({
 
               <CanvasCard
                 theme={th}
-                title="上車／下車"
-                subtitle="先選地址簿，再視需要直接微調，不另外開 geocoding flow。"
+                title={t("newBooking.card.pickupDropoff.title")}
+                subtitle={t("newBooking.card.pickupDropoff.subtitle")}
               >
                 <div style={fieldGridStyle}>
-                  <FieldShell label="已存上車點">
+                  <FieldShell label={t("newBooking.field.savedPickup")}>
                     <select
                       onChange={(event) =>
                         setPickupAddressId(event.target.value)
@@ -1418,7 +1524,9 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={pickupAddressId}
                     >
-                      <option value="">Manual pickup</option>
+                      <option value="">
+                        {t("newBooking.option.manualPickup")}
+                      </option>
                       {addresses.map((address) => (
                         <option
                           key={address.addressId}
@@ -1430,7 +1538,7 @@ export function TenantBookingCreateForm({
                     </select>
                   </FieldShell>
 
-                  <FieldShell label="已存下車點">
+                  <FieldShell label={t("newBooking.field.savedDropoff")}>
                     <select
                       onChange={(event) =>
                         setDropoffAddressId(event.target.value)
@@ -1438,7 +1546,9 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={dropoffAddressId}
                     >
-                      <option value="">Manual drop-off</option>
+                      <option value="">
+                        {t("newBooking.option.manualDropoff")}
+                      </option>
                       {addresses.map((address) => (
                         <option
                           key={address.addressId}
@@ -1453,7 +1563,7 @@ export function TenantBookingCreateForm({
                   <FieldShell
                     error={visibleFieldErrors.pickupAddress}
                     fullSpan
-                    label="上車地址"
+                    label={t("newBooking.field.pickupAddress")}
                   >
                     <input
                       onChange={(event) => {
@@ -1474,7 +1584,7 @@ export function TenantBookingCreateForm({
                   <FieldShell
                     error={visibleFieldErrors.dropoffAddress}
                     fullSpan
-                    label="下車地址"
+                    label={t("newBooking.field.dropoffAddress")}
                   >
                     <input
                       onChange={(event) => {
@@ -1494,7 +1604,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.pickupLat}
-                    label="上車緯度"
+                    label={t("newBooking.field.pickupLat")}
                   >
                     <input
                       inputMode="decimal"
@@ -1515,7 +1625,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.pickupLng}
-                    label="上車經度"
+                    label={t("newBooking.field.pickupLng")}
                   >
                     <input
                       inputMode="decimal"
@@ -1536,7 +1646,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.dropoffLat}
-                    label="下車緯度"
+                    label={t("newBooking.field.dropoffLat")}
                   >
                     <input
                       inputMode="decimal"
@@ -1557,7 +1667,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.dropoffLng}
-                    label="下車經度"
+                    label={t("newBooking.field.dropoffLng")}
                   >
                     <input
                       inputMode="decimal"
@@ -1580,8 +1690,8 @@ export function TenantBookingCreateForm({
 
               <CanvasCard
                 theme={th}
-                title="關聯與審批"
-                subtitle="成本中心、財務欄位與代訂 metadata 都隨命令一起送出。"
+                title={t("newBooking.card.approval.title")}
+                subtitle={t("newBooking.card.approval.subtitle")}
               >
                 <CanvasBanner
                   theme={th}
@@ -1609,7 +1719,9 @@ export function TenantBookingCreateForm({
                       }}
                       value={costCenter}
                     >
-                      <option value="">選擇成本中心</option>
+                      <option value="">
+                        {t("newBooking.option.selectCostCenter")}
+                      </option>
                       {costCenters.map((center) => (
                         <option key={center.code} value={center.code}>
                           {center.code} · {center.name}
@@ -1620,7 +1732,9 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.estimatedAmount}
-                    label={`預估支出 (${CURRENCY})`}
+                    label={t("newBooking.field.estimatedSpend", {
+                      currency: CURRENCY,
+                    })}
                   >
                     <input
                       inputMode="decimal"
@@ -1675,9 +1789,13 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       value={direction}
                     >
-                      <option value="">Not set</option>
-                      <option value="pickup">Pickup</option>
-                      <option value="dropoff">Drop-off</option>
+                      <option value="">{t("newBooking.option.notSet")}</option>
+                      <option value="pickup">
+                        {t("newBooking.option.pickup")}
+                      </option>
+                      <option value="dropoff">
+                        {t("newBooking.option.dropoff")}
+                      </option>
                     </select>
                   </FieldShell>
 
@@ -1797,7 +1915,7 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell fullSpan label="備註">
+                  <FieldShell fullSpan label={t("newBooking.field.notes")}>
                     <textarea
                       onChange={(event) => setNotes(event.target.value)}
                       rows={4}
@@ -1816,7 +1934,7 @@ export function TenantBookingCreateForm({
                       }
                       type="checkbox"
                     />
-                    Signoff required
+                    {t("newBooking.check.signoffRequired")}
                   </label>
                   <label style={checkboxChipStyle}>
                     <input
@@ -1826,7 +1944,7 @@ export function TenantBookingCreateForm({
                       }
                       type="checkbox"
                     />
-                    Expense proof required
+                    {t("newBooking.check.expenseProofRequired")}
                   </label>
                 </div>
               </CanvasCard>
@@ -1835,25 +1953,25 @@ export function TenantBookingCreateForm({
             <div style={cardStackStyle}>
               <CanvasCard
                 theme={th}
-                title="目錄內容"
-                subtitle="這些是 handoff packet 指定的 in-app entry / exit points。"
+                title={t("newBooking.card.directory.title")}
+                subtitle={t("newBooking.card.directory.subtitle")}
               >
                 <KpiRow minWidth="150px">
                   <KpiCard
-                    detail="Directory-backed"
-                    label="乘客"
+                    detail={t("newBooking.kpi.directoryBacked")}
+                    label={t("newBooking.field.passenger")}
                     tone={passengers.length > 0 ? "success" : "warning"}
                     value={passengers.length}
                   />
                   <KpiCard
-                    detail="Saved pickup/drop-off"
-                    label="地址"
+                    detail={t("newBooking.kpi.savedPickupDropoff")}
+                    label={t("nav.addresses")}
                     tone={addresses.length > 0 ? "success" : "warning"}
                     value={addresses.length}
                   />
                   <KpiCard
-                    detail="Canonical selector"
-                    label="成本中心"
+                    detail={t("newBooking.kpi.canonicalSelector")}
+                    label={t("newBooking.programField.costCenter")}
                     tone={costCenters.length > 0 ? "success" : "warning"}
                     value={costCenters.length}
                   />
@@ -1861,23 +1979,27 @@ export function TenantBookingCreateForm({
                 <div style={actionRowStyle}>
                   <ActionLink
                     descriptor={pageModel.actions.managePassengers}
+                    disabledTitle={t("newBooking.action.unavailable")}
                     href={pageModel.links.passengers}
-                    label="乘客"
+                    label={t("newBooking.field.passenger")}
                   />
                   <ActionLink
                     descriptor={pageModel.actions.manageAddresses}
+                    disabledTitle={t("newBooking.action.unavailable")}
                     href={pageModel.links.addresses}
-                    label="地址"
+                    label={t("nav.addresses")}
                   />
                   <ActionLink
                     descriptor={pageModel.actions.manageCostCenters}
+                    disabledTitle={t("newBooking.action.unavailable")}
                     href={pageModel.links.costCenters}
-                    label="成本中心"
+                    label={t("newBooking.programField.costCenter")}
                   />
                   <ActionLink
                     descriptor={pageModel.actions.reviewRules}
+                    disabledTitle={t("newBooking.action.unavailable")}
                     href={pageModel.links.rules}
-                    label="審批規則"
+                    label={t("nav.rules")}
                   />
                 </div>
                 {passengers.length === 0 ? (
@@ -1885,8 +2007,8 @@ export function TenantBookingCreateForm({
                     theme={th}
                     tone="warn"
                     icon="warn"
-                    title="Passenger directory 為空"
-                    body="仍可手動輸入乘客，但 `/passengers` 才是 packet 指定的捷徑入口。"
+                    title={t("newBooking.banner.passengerEmptyTitle")}
+                    body={t("newBooking.banner.passengerEmptyBody")}
                   />
                 ) : null}
                 {addresses.length === 0 ? (
@@ -1894,24 +2016,28 @@ export function TenantBookingCreateForm({
                     theme={th}
                     tone="warn"
                     icon="warn"
-                    title="地址簿為空"
-                    body="仍可手動輸入地址，但 `/addresses` 才是這個路由的標準捷徑來源。"
+                    title={t("newBooking.banner.addressEmptyTitle")}
+                    body={t("newBooking.banner.addressEmptyBody")}
                   />
                 ) : null}
               </CanvasCard>
 
               <CanvasCard
                 theme={th}
-                title="政策評估"
-                subtitle="審批姿態與額度影響都直接來自後端預覽。"
+                title={t("newBooking.card.policy.title")}
+                subtitle={t("newBooking.card.policy.subtitle")}
               >
                 <div style={chipRowStyle}>
                   <StatusChip
-                    label={describeDecision(approvalEvaluation)}
+                    label={describeDecision(approvalEvaluation, t)}
                     tone={toneForDecision(approvalEvaluation)}
                   />
                   <StatusChip
-                    label={policyRefreshing ? "刷新中" : "自動預覽"}
+                    label={
+                      policyRefreshing
+                        ? t("newBooking.policy.refreshing")
+                        : t("newBooking.policy.autoPreview")
+                    }
                     tone={policyRefreshing ? "warning" : "info"}
                   />
                 </div>
@@ -1919,23 +2045,25 @@ export function TenantBookingCreateForm({
                   items={[
                     {
                       id: "service",
-                      label: "服務",
-                      value: describeSubtype(businessDispatchSubtype) ?? "—",
+                      label: t("newBooking.policy.service"),
+                      value: describeSubtype(businessDispatchSubtype, t) ?? "—",
                     },
                     {
                       id: "direction",
-                      label: "方向",
-                      value: describeDirection(direction),
+                      label: t("newBooking.policy.direction"),
+                      value: describeDirection(direction, t),
                     },
                     {
                       id: "passengerRole",
-                      label: "乘客角色",
-                      value: activePassenger?.roles?.[0] ?? "Not published",
+                      label: t("newBooking.policy.passengerRole"),
+                      value:
+                        activePassenger?.roles?.[0] ??
+                        t("newBooking.policy.notPublished"),
                     },
                     {
                       id: "estimate",
-                      label: "預估花費",
-                      value: formatCurrency(estimatedAmountMinor),
+                      label: t("newBooking.policy.estimatedSpend"),
+                      value: formatCurrency(estimatedAmountMinor, locale, t),
                     },
                   ]}
                 />
@@ -1944,7 +2072,7 @@ export function TenantBookingCreateForm({
                     theme={th}
                     tone="warn"
                     icon="warn"
-                    title="政策預覽失敗"
+                    title={t("newBooking.policy.failedTitle")}
                     body={policyError}
                   />
                 ) : null}
@@ -1952,15 +2080,21 @@ export function TenantBookingCreateForm({
                   <>
                     <div style={chipRowStyle}>
                       <StatusChip
-                        label={`Mode: ${approvalEvaluation.approvalPlan.approvalMode}`}
+                        label={t("newBooking.policy.mode", {
+                          value: approvalEvaluation.approvalPlan.approvalMode,
+                        })}
                         tone="info"
                       />
                       <StatusChip
-                        label={`Timeout: ${approvalEvaluation.approvalPlan.timeoutHours}h`}
+                        label={t("newBooking.policy.timeout", {
+                          value: approvalEvaluation.approvalPlan.timeoutHours,
+                        })}
                         tone="info"
                       />
                       <StatusChip
-                        label={`Fallback: ${approvalEvaluation.approvalPlan.fallbackPolicy}`}
+                        label={t("newBooking.policy.fallback", {
+                          value: approvalEvaluation.approvalPlan.fallbackPolicy,
+                        })}
                         tone="warning"
                       />
                     </div>
@@ -1968,7 +2102,9 @@ export function TenantBookingCreateForm({
                       items={approvalEvaluation.approvalPlan.approvers.map(
                         (approver, index) => ({
                           id: `approver-${index}`,
-                          label: `Approver ${index + 1}`,
+                          label: t("newBooking.policy.approver", {
+                            index: index + 1,
+                          }),
                           value:
                             approver.displayName ??
                             approver.userId ??
@@ -1997,18 +2133,22 @@ export function TenantBookingCreateForm({
 
               <CanvasCard
                 theme={th}
-                title="配額影響"
-                subtitle="沿用後端預覽語彙，不用本地預估字典取代。"
+                title={t("newBooking.card.quota.title")}
+                subtitle={t("newBooking.card.quota.subtitle")}
               >
                 {quotaPreview?.impacts?.length ? (
                   <>
                     <div style={chipRowStyle}>
                       <StatusChip
-                        label={`期別：${quotaPreview.periodKey}`}
+                        label={t("newBooking.quota.period", {
+                          value: quotaPreview.periodKey,
+                        })}
                         tone="info"
                       />
                       <StatusChip
-                        label={`Trigger: ${quotaPreview.combinedTriggered}`}
+                        label={t("newBooking.quota.trigger", {
+                          value: quotaPreview.combinedTriggered,
+                        })}
                         tone={
                           quotaPreview.combinedTriggered === "block"
                             ? "danger"
@@ -2025,11 +2165,21 @@ export function TenantBookingCreateForm({
                         label: describeImpactLabel(
                           impact.scope,
                           impact.costCenterCode,
+                          t,
                         ),
-                        value: `Before ${impact.remainingBefore ?? "n/a"} / ${impact.limitValue ?? "n/a"} · after ${impact.remainingAfter ?? "n/a"}`,
-                        hint: `${impact.dimension} · ${formatPercent(
-                          impact.remainingPercentAfter,
-                        )} remaining · ${impact.triggered}`,
+                        value: t("newBooking.quota.value", {
+                          before: impact.remainingBefore ?? "n/a",
+                          limit: impact.limitValue ?? "n/a",
+                          after: impact.remainingAfter ?? "n/a",
+                        }),
+                        hint: t("newBooking.quota.hint", {
+                          dimension: impact.dimension,
+                          percent: formatPercent(
+                            impact.remainingPercentAfter,
+                            t,
+                          ),
+                          triggered: impact.triggered,
+                        }),
                         tone:
                           impact.triggered === "block"
                             ? "danger"
@@ -2045,16 +2195,16 @@ export function TenantBookingCreateForm({
                     theme={th}
                     tone="info"
                     icon="spark"
-                    title="Preview 等待完整 booking context"
-                    body="先選 cost center 並補齊核心欄位，才能計算 quota impact。"
+                    title={t("newBooking.quota.waitingTitle")}
+                    body={t("newBooking.quota.waitingBody")}
                   />
                 )}
               </CanvasCard>
 
               <CanvasCard
                 theme={th}
-                title="送出 command"
-                subtitle="blocked outcome 在 client 端直接阻擋；approval-required 仍可送出，但 workflow 由後端擁有。"
+                title={t("newBooking.card.submit.title")}
+                subtitle={t("newBooking.card.submit.subtitle")}
               >
                 {submitReceipt ? (
                   <div style={receiptStyle}>
@@ -2070,19 +2220,24 @@ export function TenantBookingCreateForm({
                         }
                       />
                       {redirectTarget ? (
-                        <StatusChip label="開啟明細中…" tone="info" />
+                        <StatusChip
+                          label={t("newBooking.submit.openingDetail")}
+                          tone="info"
+                        />
                       ) : null}
                     </div>
                     <strong style={{ color: "#0f172a", fontSize: 15 }}>
                       {submitReceipt.message}
                     </strong>
                     <div style={{ color: "#475569", fontSize: 12.5 }}>
-                      Resource: {submitReceipt.resourceType} ·{" "}
-                      {submitReceipt.resourceId}
+                      {t("newBooking.submit.resource", {
+                        type: submitReceipt.resourceType,
+                        id: submitReceipt.resourceId,
+                      })}
                     </div>
                     {submitAuditHref ? (
                       <Link href={submitAuditHref} style={inlineLinkStyle}>
-                        View audit trail
+                        {t("newBooking.submit.viewAudit")}
                       </Link>
                     ) : null}
                     {resolvedCrossAppLinks.length > 0 ? (
@@ -2091,6 +2246,7 @@ export function TenantBookingCreateForm({
                           <ActionLink
                             key={`${entry.link.targetApp}-${entry.link.resourceId}`}
                             descriptor={pageModel.actions.viewBookings}
+                            disabledTitle={t("newBooking.action.unavailable")}
                             href={entry.href}
                             label={entry.link.label}
                             newTab={entry.link.openMode === "new_tab"}
@@ -2106,7 +2262,7 @@ export function TenantBookingCreateForm({
                     theme={th}
                     tone="warn"
                     icon="warn"
-                    title="建立訂單失敗"
+                    title={t("newBooking.submit.failedTitle")}
                     body={submitError}
                   />
                 ) : submitAttempted && firstError(visibleFieldErrors) ? (
@@ -2114,14 +2270,14 @@ export function TenantBookingCreateForm({
                     theme={th}
                     tone="warn"
                     icon="warn"
-                    title="請先處理高亮欄位"
+                    title={t("newBooking.submit.fixHighlightedTitle")}
                     body={firstError(visibleFieldErrors) ?? ""}
                   />
                 ) : null}
 
                 <div style={chipRowStyle}>
                   <StatusChip
-                    label={describeDecision(approvalEvaluation)}
+                    label={describeDecision(approvalEvaluation, t)}
                     tone={toneForDecision(approvalEvaluation)}
                   />
                   {costCenter ? (
@@ -2132,23 +2288,24 @@ export function TenantBookingCreateForm({
                 <div style={actionRowStyle}>
                   <ActionLink
                     descriptor={pageModel.actions.cancel}
+                    disabledTitle={t("newBooking.action.unavailable")}
                     href={pageModel.links.bookings}
-                    label="取消"
+                    label={t("newBooking.action.cancel")}
                   />
                   <div style={{ flex: 1 }} />
                   <span style={{ color: "#64748b", fontSize: 12.5 }}>
-                    No draft action
+                    {t("newBooking.action.noDraft")}
                   </span>
                   <ActionButton
                     descriptor={pageModel.actions.submit}
                     disabled={submitDisabled}
                     label={
                       submitting || navigationPending
-                        ? "Submitting..."
+                        ? t("newBooking.submit.submitting")
                         : approvalEvaluation?.outcome?.decision ===
                             "require_approval"
-                          ? "Submit for approval"
-                          : "Create booking"
+                          ? t("newBooking.submit.forApproval")
+                          : t("newBooking.submit.create")
                     }
                     primary
                     type="submit"

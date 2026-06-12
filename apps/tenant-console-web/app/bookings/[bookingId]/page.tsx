@@ -22,8 +22,10 @@ import {
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
+  type SourceVisibility,
 } from "@/lib/source-domain";
-import { t } from "@/lib/translations";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -105,57 +107,80 @@ const BOOKING_TIMELINE_STEPS = [
   "completed",
 ] as const;
 
-const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
+const EMPTY_REASON_META: Record<
+  EmptyReason,
+  {
+    bodyKey: string;
+    ctaHref: string;
+    ctaKey: string;
+    titleKey: string;
+    tone: "default" | "warning";
+  }
+> = {
   no_data: {
-    title: "No booking data exists yet",
-    body: "This tenant has booking access, but no booking record exists in the current workspace snapshot.",
-    ctaLabel: "Create a booking",
+    titleKey: "bookingDetail.empty.noData.title",
+    bodyKey: "bookingDetail.empty.noData.body",
+    ctaKey: "bookingDetail.empty.noData.cta",
     ctaHref: "/bookings/new",
     tone: "default",
   },
   not_provisioned: {
-    title: "Booking module is not provisioned",
-    body: "Tenant setup is incomplete, so booking detail cannot be hydrated until provisioning finishes.",
-    ctaLabel: "Open settings",
+    titleKey: "bookingDetail.empty.notProvisioned.title",
+    bodyKey: "bookingDetail.empty.notProvisioned.body",
+    ctaKey: "bookingDetail.empty.notProvisioned.cta",
     ctaHref: "/settings",
     tone: "warning",
   },
   fetch_failed: {
-    title: "The booking snapshot could not be loaded",
-    body: "The backend request failed before a usable read model was returned. Retry or inspect the audit lane for the last successful mutation.",
-    ctaLabel: "Back to bookings",
+    titleKey: "bookingDetail.empty.fetchFailed.title",
+    bodyKey: "bookingDetail.empty.fetchFailed.body",
+    ctaKey: "bookingDetail.empty.fetchFailed.cta",
     ctaHref: "/bookings",
     tone: "warning",
   },
   permission_denied: {
-    title: "This actor cannot read the booking detail",
-    body: "The booking exists, but the current tenant actor does not have read scope for this record.",
-    ctaLabel: "Back to bookings",
+    titleKey: "bookingDetail.empty.permissionDenied.title",
+    bodyKey: "bookingDetail.empty.permissionDenied.body",
+    ctaKey: "bookingDetail.empty.permissionDenied.cta",
     ctaHref: "/bookings",
     tone: "warning",
   },
   external_unavailable: {
-    title: "The linked external system is unavailable",
-    body: "Tenant truth is still readable, but one or more external dispatch details cannot be refreshed right now.",
-    ctaLabel: "Open audit",
+    titleKey: "bookingDetail.empty.externalUnavailable.title",
+    bodyKey: "bookingDetail.empty.externalUnavailable.body",
+    ctaKey: "bookingDetail.empty.externalUnavailable.cta",
     ctaHref: "/audit",
     tone: "warning",
   },
   filtered_empty: {
-    title: "This deep link no longer matches the current filters",
-    body: "The booking detail route is valid, but the surrounding filtered context no longer contains the record you expected.",
-    ctaLabel: "Reset booking filters",
+    titleKey: "bookingDetail.empty.filteredEmpty.title",
+    bodyKey: "bookingDetail.empty.filteredEmpty.body",
+    ctaKey: "bookingDetail.empty.filteredEmpty.cta",
     ctaHref: "/bookings",
     tone: "default",
   },
   driver_not_eligible: {
-    title: "The assigned driver is no longer eligible",
-    body: "The booking still exists, but the current driver eligibility state prevents showing a complete live assignment snapshot.",
-    ctaLabel: "Open audit",
+    titleKey: "bookingDetail.empty.driverNotEligible.title",
+    bodyKey: "bookingDetail.empty.driverNotEligible.body",
+    ctaKey: "bookingDetail.empty.driverNotEligible.cta",
     ctaHref: "/audit",
     tone: "warning",
   },
 };
+
+function getEmptyReasonCopy(
+  reason: EmptyReason,
+  locale: Locale,
+): EmptyStateCopy {
+  const meta = EMPTY_REASON_META[reason] ?? EMPTY_REASON_META.fetch_failed;
+  return {
+    body: t(meta.bodyKey, locale),
+    ctaHref: meta.ctaHref,
+    ctaLabel: t(meta.ctaKey, locale),
+    title: t(meta.titleKey, locale),
+    tone: meta.tone,
+  };
+}
 
 function PageHero({ eyebrow, title, description }: PageHeroProps) {
   return (
@@ -262,69 +287,78 @@ function buildBookingActions(
   return actions;
 }
 
-function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
+function buildBookingEvents(
+  booking: BookingRecord,
+  locale: Locale,
+): BookingEvent[] {
   const events: BookingEvent[] = [
     {
-      label: "訂單已建立",
+      label: t("bookingDetail.event.created", locale),
       at: booking.createdAt,
-      actor: booking.bookedBy?.name ?? "Tenant intake",
+      actor:
+        booking.bookedBy?.name ?? t("bookingDetail.value.tenantIntake", locale),
       realm: "tenant",
       tone: "default",
-      detail: `Reservation window ${formatDateTime(booking.reservationWindowStart)} to ${formatDateTime(booking.reservationWindowEnd)}.`,
+      detail: t("bookingDetail.event.createdDetail", locale, {
+        start: formatDateTime(booking.reservationWindowStart, locale),
+        end: formatDateTime(booking.reservationWindowEnd, locale),
+      }),
     },
   ];
 
   if (booking.approvalState !== "not_required") {
     events.push({
-      label: "審批流程",
+      label: t("bookingDetail.event.approval", locale),
       at: booking.updatedAt,
       actor: "tenant.approval",
       realm: "system",
       tone: booking.approvalState === "approved" ? "success" : "warning",
-      detail: `Approval state is ${booking.approvalState}. Related request count: ${booking.approvalRequestIds.length}.`,
+      detail: t("bookingDetail.event.approvalDetail", locale, {
+        state: booking.approvalState,
+        count: booking.approvalRequestIds.length,
+      }),
     });
   }
 
   if (ACTIVE_ORDER_STATUSES.has(booking.orderStatus)) {
     events.push({
-      label: "司機指派中",
+      label: t("bookingDetail.event.driverAssigned", locale),
       at: booking.updatedAt,
       actor: "dispatch.engine",
       realm: "ops",
       tone: "success",
-      detail:
-        "The booking is currently attached to an active fulfillment leg. Live ETA is not published by the current read model.",
+      detail: t("bookingDetail.event.driverAssignedDetail", locale),
     });
   }
 
   if (booking.orderStatus === "cancelled") {
     events.push({
-      label: "訂單已取消",
+      label: t("bookingDetail.event.cancelled", locale),
       at: booking.updatedAt,
       actor: "tenant command",
       realm: "tenant",
       tone: "warning",
-      detail:
-        "Tenant cancellation completed. Audit retains the reason and actor attribution.",
+      detail: t("bookingDetail.event.cancelledDetail", locale),
     });
   } else if (booking.orderStatus === "completed") {
     events.push({
-      label: "行程已完成",
+      label: t("bookingDetail.event.completed", locale),
       at: booking.updatedAt,
       actor: "driver workflow",
       realm: "system",
       tone: "success",
-      detail:
-        "Fulfillment completed. Billing and audit remain accessible from tenant-owned routes.",
+      detail: t("bookingDetail.event.completedDetail", locale),
     });
   } else {
     events.push({
-      label: "工作流程快照已更新",
+      label: t("bookingDetail.event.snapshotUpdated", locale),
       at: booking.updatedAt,
       actor: "booking.readmodel",
       realm: "system",
       tone: "default",
-      detail: `Current order status is ${booking.orderStatus}.`,
+      detail: t("bookingDetail.event.snapshotUpdatedDetail", locale, {
+        status: booking.orderStatus,
+      }),
     });
   }
 
@@ -428,6 +462,7 @@ function deriveTimelineStep(orderStatus: BookingRecord["orderStatus"]) {
 function deriveBookingView(
   booking: BookingDetailRecord,
   commandReceipt: ActionReceipt | null,
+  locale: Locale,
 ): DerivedBookingView {
   const source = getBookingSourceVisibility(booking);
   const actions =
@@ -445,22 +480,22 @@ function deriveBookingView(
       href: commandReceipt?.auditId
         ? `${auditBase}?auditId=${encodeURIComponent(commandReceipt.auditId)}`
         : `${auditBase}?bookingId=${encodeURIComponent(booking.bookingId)}`,
-      label: "檢視 audit 子集",
+      label: t("bookingDetail.deepLinks.auditSubsetLabel", locale),
       note: commandReceipt?.auditId
-        ? "Open the action receipt audit trail directly when a command has already been accepted."
-        : "Tenant audit includes actor realm chips for tenant, ops, platform, and system actions.",
+        ? t("bookingDetail.deepLinks.auditReceiptNote", locale)
+        : t("bookingDetail.deepLinks.auditRealmNote", locale),
     },
     {
       href: `/rules?bookingId=${encodeURIComponent(booking.bookingId)}`,
-      label: "開啟審批規則",
-      note: "Use the tenant rules lane to inspect the approval logic that currently applies to this booking.",
+      label: t("bookingDetail.deepLinks.rulesLabel", locale),
+      note: t("bookingDetail.deepLinks.rulesNote", locale),
     },
     ...(source.domain === "forwarded_authority"
       ? [
           {
             href: `${opsConsoleBase}/dispatch?orderId=${encodeURIComponent(booking.orderId)}`,
-            label: "開啟 ops console 明細",
-            note: "Forwarded-authority bookings escalate to the ops app in a new tab when dispatch recovery is needed.",
+            label: t("bookingDetail.deepLinks.opsLabel", locale),
+            note: t("bookingDetail.deepLinks.opsNote", locale),
             external: true,
           },
         ]
@@ -473,7 +508,7 @@ function deriveBookingView(
     commandReceipt,
     deepLinks,
     editableUntil: booking.editableUntil ?? booking.modifiableUntil,
-    events: buildBookingEvents(booking),
+    events: buildBookingEvents(booking, locale),
     generatedAt: new Date().toISOString(),
     readOnlyReasonCode:
       booking.readOnlyReasonCode ??
@@ -484,90 +519,107 @@ function deriveBookingView(
   };
 }
 
-function describeReadOnlyReason(reasonCode: string | null) {
+function describeReadOnlyReason(reasonCode: string | null, locale: Locale) {
   switch (reasonCode) {
     case "past_editable_until":
-      return "租戶編輯時窗已過，因此此明細對更新命令現為唯讀。";
+      return t("bookingDetail.readOnly.pastEditableUntil", locale);
     case "booking_terminal":
-      return "行程已結束。租戶使用者可檢視內容與 audit，但無法再變更訂單。";
+      return t("bookingDetail.readOnly.bookingTerminal", locale);
     case "on_trip_locked":
-      return "司機工作流程已在進行中。後續應透過取消政策或 ops 升級處理，而非即時編輯。";
+      return t("bookingDetail.readOnly.onTripLocked", locale);
     case "approval_pending":
-      return "此訂單需待審批結果，才能接受下一個更新命令。";
+      return t("bookingDetail.readOnly.approvalPending", locale);
     default:
-      return "此訂單目前沒有可用的租戶更新命令。";
+      return t("bookingDetail.readOnly.default", locale);
   }
 }
 
 function describeEditableWindow(
   editableUntil: string | null,
   editable: boolean,
+  locale: Locale,
 ) {
-  const relativeWindow = formatRelativeTime(editableUntil);
+  const relativeWindow = formatRelativeTime(editableUntil, locale);
   if (!editableUntil) {
     return editable
-      ? "The backend currently exposes no edit deadline for this booking."
-      : "The booking is read-only even though no edit deadline was published.";
+      ? t("bookingDetail.editWindow.noDeadlineEditable", locale)
+      : t("bookingDetail.editWindow.noDeadlineReadOnly", locale);
   }
+  const relative = relativeWindow ? ` (${relativeWindow})` : "";
 
   return editable
-    ? `The tenant edit window remains open until ${formatDateTime(editableUntil)}${relativeWindow ? ` (${relativeWindow})` : ""}.`
-    : `The tenant edit window closed at ${formatDateTime(editableUntil)}${relativeWindow ? ` (${relativeWindow})` : ""}.`;
+    ? t("bookingDetail.editWindow.open", locale, {
+        time: formatDateTime(editableUntil, locale),
+        relative,
+      })
+    : t("bookingDetail.editWindow.closed", locale, {
+        time: formatDateTime(editableUntil, locale),
+        relative,
+      });
 }
 
-function describeApprovalState(state: BookingRecord["approvalState"]) {
+function describeApprovalState(
+  state: BookingRecord["approvalState"],
+  locale: Locale,
+) {
   switch (state) {
     case "not_required":
-      return "此訂單目前沒有啟用的審批關卡。";
+      return t("bookingDetail.approval.notRequired", locale);
     case "pending":
-      return "派遣繼續前需要審批。";
+      return t("bookingDetail.approval.pending", locale);
     case "approved":
-      return "審批關卡已通過，訂單可繼續。";
+      return t("bookingDetail.approval.approved", locale);
     case "rejected":
-      return "審批已被拒絕。重新提交前請檢視規則。";
+      return t("bookingDetail.approval.rejected", locale);
     case "blocked":
-      return "A policy block currently prevents the booking from proceeding.";
+      return t("bookingDetail.approval.blocked", locale);
     case "cancelled_by_re_evaluation":
-      return "A prior approval request was invalidated by a later booking change.";
+      return t("bookingDetail.approval.cancelledByReevaluation", locale);
     default:
       return state;
   }
 }
 
-function renderEmptyState(reason: EmptyReason, bookingId: string) {
-  let copy: EmptyStateCopy;
-  switch (reason) {
-    case "no_data":
-      copy = EMPTY_REASON_COPY.no_data as EmptyStateCopy;
-      break;
-    case "not_provisioned":
-      copy = EMPTY_REASON_COPY.not_provisioned as EmptyStateCopy;
-      break;
-    case "fetch_failed":
-      copy = EMPTY_REASON_COPY.fetch_failed as EmptyStateCopy;
-      break;
-    case "permission_denied":
-      copy = EMPTY_REASON_COPY.permission_denied as EmptyStateCopy;
-      break;
-    case "external_unavailable":
-      copy = EMPTY_REASON_COPY.external_unavailable as EmptyStateCopy;
-      break;
-    case "filtered_empty":
-      copy = EMPTY_REASON_COPY.filtered_empty as EmptyStateCopy;
-      break;
+function getLocalizedSourceCopy(source: SourceVisibility, locale: Locale) {
+  switch (source.domain) {
+    case "forwarded_authority":
+      return {
+        badge: t("bookingDetail.source.forwarded.badge", locale),
+        detail: t("bookingDetail.source.forwarded.detail", locale),
+        statusBoundary: t("bookingDetail.source.forwarded.boundary", locale),
+      };
+    case "partner_external":
+      return {
+        badge: t("bookingDetail.source.external.badge", locale),
+        detail: t("bookingDetail.source.external.detail", locale),
+        statusBoundary: t("bookingDetail.source.external.boundary", locale),
+      };
     default:
-      copy = EMPTY_REASON_COPY.fetch_failed as EmptyStateCopy;
-      break;
+      return {
+        badge: t("bookingDetail.source.owned.badge", locale),
+        detail: t("bookingDetail.source.owned.detail", locale),
+        statusBoundary: t("bookingDetail.source.owned.boundary", locale),
+      };
   }
+}
+
+function renderEmptyState(
+  reason: EmptyReason,
+  bookingId: string,
+  locale: Locale,
+) {
+  const copy = getEmptyReasonCopy(reason, locale);
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="訂單明細"
-        title={`${bookingId} unavailable`}
-        description="租戶明細路由實作了全部六種共用 EmptyReason 處理，讓 UI 不會把每種空／未就緒情況都收斂成同一則訊息。"
+        eyebrow={t("bookingDetail.hero.eyebrow", locale)}
+        title={t("bookingDetail.hero.unavailableTitle", locale, {
+          bookingId,
+        })}
+        description={t("bookingDetail.hero.unavailableDescription", locale)}
       />
       <SurfaceCard
-        kicker="EmptyReason"
+        kicker={t("bookingDetail.empty.reason", locale)}
         title={copy.title}
         description={copy.body}
       >
@@ -588,7 +640,7 @@ function renderEmptyState(reason: EmptyReason, bookingId: string) {
               className="action-button action-button-secondary"
               href={`/bookings/${bookingId}`}
             >
-              Restore live detail
+              {t("bookingDetail.empty.restoreLive", locale)}
             </Link>
           </div>
         </div>
@@ -600,6 +652,7 @@ function renderEmptyState(reason: EmptyReason, bookingId: string) {
 function parseCommandReceipt(
   query: Record<string, string | string[] | undefined>,
   bookingId: string,
+  locale: Locale,
 ): ActionReceipt | null {
   const status =
     typeof query.commandStatus === "string" ? query.commandStatus : null;
@@ -622,7 +675,7 @@ function parseCommandReceipt(
     message:
       typeof query.commandMessage === "string"
         ? query.commandMessage
-        : "The tenant command was accepted and is waiting on external dispatch confirmation.",
+        : t("bookingDetail.command.defaultMessage", locale),
   };
 }
 
@@ -635,13 +688,14 @@ export default async function BookingDetailPage({
 }) {
   const { bookingId } = await params;
   const query = await searchParams;
+  const locale = await getServerLocale();
   const emptyReason =
     typeof query.emptyReason === "string"
       ? (query.emptyReason as EmptyReason)
       : null;
 
-  if (emptyReason && emptyReason in EMPTY_REASON_COPY) {
-    return renderEmptyState(emptyReason, bookingId);
+  if (emptyReason && emptyReason in EMPTY_REASON_META) {
+    return renderEmptyState(emptyReason, bookingId, locale);
   }
 
   const client = getTenantClient();
@@ -659,9 +713,10 @@ export default async function BookingDetailPage({
 
   const booking = bookingResult.value;
   const commandReceipt =
-    booking.lastActionReceipt ?? parseCommandReceipt(query, bookingId);
-  const bookingView = deriveBookingView(booking, commandReceipt);
+    booking.lastActionReceipt ?? parseCommandReceipt(query, bookingId, locale);
+  const bookingView = deriveBookingView(booking, commandReceipt, locale);
   const source = getBookingSourceVisibility(booking);
+  const sourceCopy = getLocalizedSourceCopy(source, locale);
   const relatedInvoices =
     invoicesResult.status === "fulfilled"
       ? findRelatedInvoices(invoicesResult.value, booking.orderId)
@@ -699,7 +754,7 @@ export default async function BookingDetailPage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="訂單明細"
+        eyebrow={t("bookingDetail.hero.eyebrow", locale)}
         title={
           <span className="booking-hero-title">
             <span>{`${booking.bookingId} · ${booking.businessDispatchSubtype}`}</span>
@@ -718,7 +773,7 @@ export default async function BookingDetailPage({
             </span>
           </span>
         }
-        description="訂單明細現在遵循 Tenant Console canvas：可編輯截止可見性、審批內容、司機指派狀態、audit 子集、更新層級與動作描述子，全部集中在同一個租戶擁有的畫面上。"
+        description={t("bookingDetail.hero.description", locale)}
       />
 
       <div className="chip-row">
@@ -726,125 +781,141 @@ export default async function BookingDetailPage({
           className="action-button action-button-secondary"
           href="#overview"
         >
-          {t("bookingDetail.tab.overview")}
+          {t("bookingDetail.tab.overview", locale)}
         </Link>
         <Link
           className="action-button action-button-secondary"
           href="#timeline"
         >
-          {t("bookingDetail.tab.timeline")}
+          {t("bookingDetail.tab.timeline", locale)}
         </Link>
         <Link className="action-button action-button-secondary" href="#billing">
-          {t("bookingDetail.tab.billing")}
+          {t("bookingDetail.tab.billing", locale)}
         </Link>
         <Link className="action-button action-button-secondary" href="#audit">
-          {t("bookingDetail.tab.audit")}
+          {t("bookingDetail.tab.audit", locale)}
         </Link>
       </div>
 
       {bookingView.acceptedPending && bookingView.commandReceipt ? (
         <CalloutPanel
-          title={`Command accepted · awaiting external confirmation · ${bookingView.commandReceipt.actionId}`}
+          title={t("bookingDetail.command.acceptedTitle", locale, {
+            actionId: bookingView.commandReceipt.actionId,
+          })}
           description={bookingView.commandReceipt.message}
           tone="warning"
         >
           <p>
-            Audit link {bookingView.commandReceipt.auditId} is already assigned.
-            Keep this detail open or refresh after the next T5 cycle if the
-            status has not advanced.
+            {t("bookingDetail.command.acceptedHelp", locale, {
+              auditId: bookingView.commandReceipt.auditId,
+            })}
           </p>
         </CalloutPanel>
       ) : null}
 
       <section className="surface-grid surface-grid-wide" id="overview">
         <SurfaceCard
-          kicker="Refresh tier"
-          title="租戶訂單明細以 T5 更新"
-          description="此畫面是租戶慢速明細介面：自動更新較慢，仍可手動檢視，過期狀態必須明確標示。"
+          kicker={t("bookingDetail.refresh.kicker", locale)}
+          title={t("bookingDetail.refresh.title", locale)}
+          description={t("bookingDetail.refresh.description", locale)}
         >
           <div className="booking-refresh-card">
             <div className="chip-row">
-              <span className="status-chip booking-pill-accent">T5 slow</span>
-              <span className="status-chip">fresh snapshot</span>
+              <span className="status-chip booking-pill-accent">
+                {t("bookingDetail.refresh.t5", locale)}
+              </span>
+              <span className="status-chip">
+                {t("bookingDetail.refresh.fresh", locale)}
+              </span>
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>產生時間</dt>
-                <dd>{formatDateTime(bookingView.generatedAt)}</dd>
+                <dt>{t("bookingDetail.refresh.generatedAt", locale)}</dt>
+                <dd>{formatDateTime(bookingView.generatedAt, locale)}</dd>
               </div>
               <div>
-                <dt>最後訂單更新</dt>
-                <dd>{formatDateTime(booking.updatedAt)}</dd>
+                <dt>{t("bookingDetail.refresh.lastBookingUpdate", locale)}</dt>
+                <dd>{formatDateTime(booking.updatedAt, locale)}</dd>
               </div>
               <div>
-                <dt>來源</dt>
-                <dd>live tenant API</dd>
+                <dt>{t("bookingDetail.refresh.source", locale)}</dt>
+                <dd>{t("bookingDetail.refresh.sourceLive", locale)}</dd>
               </div>
               <div>
-                <dt>手動更新</dt>
-                <dd>
-                  Browser refresh, notification reopen, or command receipt
-                  refresh
-                </dd>
+                <dt>{t("bookingDetail.refresh.manual", locale)}</dt>
+                <dd>{t("bookingDetail.refresh.manualHelp", locale)}</dd>
               </div>
             </dl>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Status"
-          title="可編輯性與審批狀態"
-          description="依 Q-TEN05，可編輯性由動作描述子加上 editableUntil 決定，而非僅憑狀態標籤推測。"
+          kicker={t("bookingDetail.status.kicker", locale)}
+          title={t("bookingDetail.status.title", locale)}
+          description={t("bookingDetail.status.description", locale)}
         >
           <div className="detail-stack">
             <div className="chip-row">
               <span className="status-badge">{booking.orderStatus}</span>
-              <span className="status-chip">Booking {booking.status}</span>
+              <span className="status-chip">
+                {t("bookingDetail.status.bookingStatus", locale, {
+                  status: booking.status,
+                })}
+              </span>
               <span
                 className={`status-chip${editable ? " booking-pill-success" : " booking-pill-warning"}`}
               >
-                {editable ? "Editable" : "Read only"}
+                {editable
+                  ? t("bookingDetail.status.editable", locale)
+                  : t("bookingDetail.status.readOnly", locale)}
               </span>
               <span className={getSourceToneClassName(source.tone)}>
-                {source.badge}
+                {sourceCopy.badge}
               </span>
             </div>
             <dl className="definition-grid">
               <div>
                 <dt>editableUntil</dt>
-                <dd>{formatDateTime(bookingView.editableUntil)}</dd>
+                <dd>{formatDateTime(bookingView.editableUntil, locale)}</dd>
               </div>
               <div>
                 <dt>readOnlyReasonCode</dt>
-                <dd>{bookingView.readOnlyReasonCode ?? "None"}</dd>
+                <dd>
+                  {bookingView.readOnlyReasonCode ??
+                    t("bookingDetail.value.none", locale)}
+                </dd>
               </div>
               <div>
-                <dt>審批狀態</dt>
+                <dt>{t("bookingDetail.field.approval", locale)}</dt>
                 <dd>{booking.approvalState}</dd>
               </div>
               <div>
-                <dt>審批請求</dt>
+                <dt>{t("bookingDetail.label.approval", locale)}</dt>
                 <dd>{booking.approvalRequestIds.length}</dd>
               </div>
             </dl>
             <div className="booking-inline-note">
-              {describeEditableWindow(bookingView.editableUntil, editable)}
+              {describeEditableWindow(
+                bookingView.editableUntil,
+                editable,
+                locale,
+              )}
             </div>
             {booking.approvalState === "pending" ? (
               <CalloutPanel
-                title="需審批狀態"
-                description={describeApprovalState(booking.approvalState)}
+                title={t("bookingDetail.status.approvalPendingTitle", locale)}
+                description={describeApprovalState(
+                  booking.approvalState,
+                  locale,
+                )}
                 tone="warning"
               >
-                <p>
-                  This booking should not be treated as editable just because it
-                  is not terminal. Wait for approval or use the rules lane.
-                </p>
+                <p>{t("bookingDetail.status.approvalPendingHelp", locale)}</p>
               </CalloutPanel>
             ) : null}
             {!editable ? (
               <p className="muted-copy">
-                {describeReadOnlyReason(bookingView.readOnlyReasonCode)}
+                {describeReadOnlyReason(bookingView.readOnlyReasonCode, locale)}
               </p>
             ) : null}
           </div>
@@ -854,11 +925,14 @@ export default async function BookingDetailPage({
       <section className="booking-detail-layout">
         <div className="booking-detail-main">
           <SurfaceCard
-            kicker="Trip context"
-            title={t("bookingDetail.section.trip")}
-            description={t("bookingDetail.section.tripSub")}
+            kicker={t("bookingDetail.trip.kicker", locale)}
+            title={t("bookingDetail.section.trip", locale)}
+            description={t("bookingDetail.section.tripSub", locale)}
           >
-            <div className="booking-stepper" aria-label="訂單工作流程狀態">
+            <div
+              className="booking-stepper"
+              aria-label={t("bookingDetail.trip.workflowAria", locale)}
+            >
               {BOOKING_TIMELINE_STEPS.map((step, index) => {
                 const isActive = index === bookingView.timelineStep;
                 const isComplete = index < bookingView.timelineStep;
@@ -884,15 +958,15 @@ export default async function BookingDetailPage({
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>訂單 ID</dt>
+                <dt>{t("bookingDetail.field.bookingId", locale)}</dt>
                 <dd>{booking.bookingId}</dd>
               </div>
               <div>
-                <dt>單號 ID</dt>
+                <dt>{t("bookingDetail.field.orderId", locale)}</dt>
                 <dd>{booking.orderId}</dd>
               </div>
               <div>
-                <dt>乘客</dt>
+                <dt>{t("bookingDetail.field.passenger", locale)}</dt>
                 <dd>
                   <Link className="text-link" href={passengerHref}>
                     {booking.passenger.name}
@@ -900,11 +974,11 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>電話</dt>
+                <dt>{t("bookingDetail.field.phone", locale)}</dt>
                 <dd>{booking.passenger.phone}</dd>
               </div>
               <div>
-                <dt>上車</dt>
+                <dt>{t("bookingDetail.field.pickup", locale)}</dt>
                 <dd>
                   <Link className="text-link" href={pickupAddressHref}>
                     {booking.pickup.address}
@@ -912,7 +986,7 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>下車</dt>
+                <dt>{t("bookingDetail.field.dropoff", locale)}</dt>
                 <dd>
                   <Link className="text-link" href={dropoffAddressHref}>
                     {booking.dropoff.address}
@@ -920,72 +994,88 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>時窗開始</dt>
-                <dd>{formatDateTime(booking.reservationWindowStart)}</dd>
+                <dt>{t("bookingDetail.field.windowStart", locale)}</dt>
+                <dd>
+                  {formatDateTime(booking.reservationWindowStart, locale)}
+                </dd>
               </div>
               <div>
-                <dt>時窗結束</dt>
-                <dd>{formatDateTime(booking.reservationWindowEnd)}</dd>
+                <dt>{t("bookingDetail.field.windowEnd", locale)}</dt>
+                <dd>{formatDateTime(booking.reservationWindowEnd, locale)}</dd>
               </div>
               <div>
-                <dt>預約人</dt>
-                <dd>{booking.bookedBy?.name ?? "Tenant intake"}</dd>
+                <dt>{t("bookingDetail.field.bookedBy", locale)}</dt>
+                <dd>
+                  {booking.bookedBy?.name ??
+                    t("bookingDetail.value.tenantIntake", locale)}
+                </dd>
               </div>
               <div>
-                <dt>現場聯絡人</dt>
-                <dd>{booking.onsiteContact?.name ?? "Not published"}</dd>
+                <dt>{t("bookingDetail.field.onsiteContact", locale)}</dt>
+                <dd>
+                  {booking.onsiteContact?.name ??
+                    t("bookingDetail.value.notPublished", locale)}
+                </dd>
               </div>
               <div>
-                <dt>成本中心</dt>
+                <dt>{t("bookingDetail.field.costCenter", locale)}</dt>
                 <dd>
                   {booking.costCenter ? (
                     <Link className="text-link" href={costCenterHref}>
                       {booking.costCenter}
                     </Link>
                   ) : (
-                    "Not published"
+                    t("bookingDetail.value.notPublished", locale)
                   )}
                 </dd>
               </div>
               <div>
-                <dt>車輛偏好</dt>
-                <dd>{booking.vehiclePreference ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>航班／航廈</dt>
+                <dt>{t("bookingDetail.field.vehiclePreference", locale)}</dt>
                 <dd>
-                  {booking.flightNo ?? "No flight"} /{" "}
-                  {booking.terminal ?? "No terminal"}
+                  {booking.vehiclePreference ??
+                    t("bookingDetail.value.notPublished", locale)}
                 </dd>
               </div>
               <div>
-                <dt>備註</dt>
-                <dd>{booking.notes ?? "No notes"}</dd>
+                <dt>{t("bookingDetail.field.flightTerminal", locale)}</dt>
+                <dd>
+                  {booking.flightNo ??
+                    t("bookingDetail.value.noFlight", locale)}{" "}
+                  /{" "}
+                  {booking.terminal ??
+                    t("bookingDetail.value.noTerminal", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingDetail.field.notes", locale)}</dt>
+                <dd>
+                  {booking.notes ?? t("bookingDetail.value.noNotes", locale)}
+                </dd>
               </div>
             </dl>
             <div className="booking-reference-links">
               <Link className="text-link" href={passengerHref}>
-                Open passenger directory reference
+                {t("bookingDetail.link.openPassenger", locale)}
               </Link>
               <Link className="text-link" href={pickupAddressHref}>
-                Open pickup address reference
+                {t("bookingDetail.link.openPickup", locale)}
               </Link>
               <Link className="text-link" href={dropoffAddressHref}>
-                Open dropoff address reference
+                {t("bookingDetail.link.openDropoff", locale)}
               </Link>
               <Link className="text-link" href={costCenterHref}>
-                Open cost center governance
+                {t("bookingDetail.link.openCostCenter", locale)}
               </Link>
               <Link className="text-link" href={bookingFiltersHref}>
-                Return to booking list context
+                {t("bookingDetail.link.returnContext", locale)}
               </Link>
             </div>
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Lifecycle"
-            title={t("bookingDetail.section.timeline")}
-            description={t("bookingDetail.section.timelineSub")}
+            kicker={t("bookingDetail.lifecycle.kicker", locale)}
+            title={t("bookingDetail.section.timeline", locale)}
+            description={t("bookingDetail.section.timelineSub", locale)}
           >
             <div id="timeline" />
             <ol className="booking-event-list">
@@ -1001,8 +1091,8 @@ export default async function BookingDetailPage({
                     <strong>{event.label}</strong>
                     <span>
                       {event.at
-                        ? formatDateTime(event.at)
-                        : "Pending timestamp"}
+                        ? formatDateTime(event.at, locale)
+                        : t("bookingDetail.value.pendingTimestamp", locale)}
                     </span>
                   </div>
                   <div className="chip-row">
@@ -1020,39 +1110,48 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Finance"
-            title={t("bookingDetail.section.billing")}
-            description={t("bookingDetail.section.billingSub")}
+            kicker={t("bookingDetail.finance.kicker", locale)}
+            title={t("bookingDetail.section.billing", locale)}
+            description={t("bookingDetail.section.billingSub", locale)}
           >
             <div id="billing" />
             <dl className="definition-grid">
               <div>
-                <dt>報價車資</dt>
-                <dd>{formatMoney(booking.quotedFare)}</dd>
+                <dt>{t("bookingDetail.field.quoteFare", locale)}</dt>
+                <dd>{formatMoney(booking.quotedFare, locale)}</dd>
               </div>
               <div>
-                <dt>車資來源</dt>
-                <dd>{booking.quotedFareSource ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>定價版本</dt>
-                <dd>{booking.quotedFareRuleVersion ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>手動覆寫</dt>
+                <dt>{t("bookingDetail.field.fareSource", locale)}</dt>
                 <dd>
-                  {booking.manualFareOverride
-                    ? `${booking.manualFareOverride.actorType} · ${booking.manualFareOverride.reason}`
-                    : "None"}
+                  {booking.quotedFareSource ??
+                    t("bookingDetail.value.notPublished", locale)}
                 </dd>
               </div>
               <div>
-                <dt>審批</dt>
-                <dd>{describeApprovalState(booking.approvalState)}</dd>
+                <dt>{t("bookingDetail.field.pricingVersion", locale)}</dt>
+                <dd>
+                  {booking.quotedFareRuleVersion ??
+                    t("bookingDetail.value.notPublished", locale)}
+                </dd>
               </div>
               <div>
-                <dt>福利參照</dt>
-                <dd>{booking.benefitReference ?? "Not published"}</dd>
+                <dt>{t("bookingDetail.field.manualOverride", locale)}</dt>
+                <dd>
+                  {booking.manualFareOverride
+                    ? `${booking.manualFareOverride.actorType} · ${booking.manualFareOverride.reason}`
+                    : t("bookingDetail.value.none", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingDetail.field.approval", locale)}</dt>
+                <dd>{describeApprovalState(booking.approvalState, locale)}</dd>
+              </div>
+              <div>
+                <dt>{t("bookingDetail.field.benefitReference", locale)}</dt>
+                <dd>
+                  {booking.benefitReference ??
+                    t("bookingDetail.value.notPublished", locale)}
+                </dd>
               </div>
             </dl>
             {relatedInvoices.length > 0 ? (
@@ -1061,17 +1160,17 @@ export default async function BookingDetailPage({
                   <li key={invoice.invoiceId}>
                     <strong>{invoice.invoiceId}</strong>
                     <span className="list-note">
-                      {invoice.status} · {formatMoney(invoice.amount)}
+                      {invoice.status} · {formatMoney(invoice.amount, locale)}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="muted-copy">
-                {t("bookingDetail.empty.relatedInvoices")}
+                {t("bookingDetail.empty.relatedInvoices", locale)}
               </p>
             )}
-            <h3>{t("bookingDetail.label.relatedStatements")}</h3>
+            <h3>{t("bookingDetail.label.relatedStatements", locale)}</h3>
             {relatedStatements.length > 0 ? (
               <ul className="panel-list">
                 {relatedStatements.map((statement) => (
@@ -1079,14 +1178,14 @@ export default async function BookingDetailPage({
                     <strong>{statement.statementId}</strong>
                     <span className="list-note">
                       {statement.driverId} · {statement.periodMonth} ·{" "}
-                      {formatMoney(statement.netAmount)}
+                      {formatMoney(statement.netAmount, locale)}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="muted-copy">
-                {t("bookingDetail.empty.relatedStatements")}
+                {t("bookingDetail.empty.relatedStatements", locale)}
               </p>
             )}
           </SurfaceCard>
@@ -1094,54 +1193,54 @@ export default async function BookingDetailPage({
 
         <div className="booking-detail-side">
           <SurfaceCard
-            kicker="Assignment"
-            title="司機／車輛指派"
-            description="若派遣已附上履約段，租戶使用者可看到指派狀態，但不會取得派遣控制權。"
+            kicker={t("bookingDetail.assignment.kicker", locale)}
+            title={t("bookingDetail.assignment.title", locale)}
+            description={t("bookingDetail.assignment.description", locale)}
           >
             <dl className="definition-grid">
               <div>
-                <dt>指派狀態</dt>
+                <dt>{t("bookingDetail.field.assignmentStatus", locale)}</dt>
                 <dd>
                   {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
-                    ? "Active driver assignment"
-                    : "No active assignment published"}
+                    ? t("bookingDetail.value.activeAssignment", locale)
+                    : t("bookingDetail.value.noActiveAssignment", locale)}
                 </dd>
               </div>
               <div>
-                <dt>ETA</dt>
+                <dt>{t("bookingDetail.field.eta", locale)}</dt>
                 <dd>
                   {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
-                    ? "Live ETA pending from dispatch read model"
-                    : "Not active"}
+                    ? t("bookingDetail.value.liveEtaPending", locale)
+                    : t("bookingDetail.value.notActive", locale)}
                 </dd>
               </div>
               <div>
-                <dt>訂單狀態</dt>
+                <dt>{t("bookingDetail.field.orderStatus", locale)}</dt>
                 <dd>{booking.orderStatus}</dd>
               </div>
               <div>
-                <dt>升級</dt>
+                <dt>{t("bookingDetail.field.escalation", locale)}</dt>
                 <dd>
                   {source.domain === "forwarded_authority"
-                    ? "Ops console deep link available"
-                    : "Tenant detail remains the primary owner view"}
+                    ? t("bookingDetail.value.opsDeepLinkAvailable", locale)
+                    : t("bookingDetail.value.tenantOwner", locale)}
                 </dd>
               </div>
               <div>
-                <dt>命令回執</dt>
+                <dt>{t("bookingDetail.field.commandReceipt", locale)}</dt>
                 <dd>
                   {bookingView.commandReceipt
                     ? `${bookingView.commandReceipt.status} · ${bookingView.commandReceipt.actionId}`
-                    : "No pending receipt"}
+                    : t("bookingDetail.value.noPendingReceipt", locale)}
                 </dd>
               </div>
             </dl>
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Actions"
-            title="可用操作"
-            description="命令面板依此訂單的動作描述子集合，呈現啟用、停用與隱藏狀態。"
+            kicker={t("bookingDetail.actions.kicker", locale)}
+            title={t("bookingDetail.actions.title", locale)}
+            description={t("bookingDetail.actions.description", locale)}
           >
             <BookingCommandPanel
               actions={bookingView.actions}
@@ -1153,9 +1252,9 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Deep links"
-            title={t("bookingDetail.section.audit")}
-            description={t("bookingDetail.section.auditSub")}
+            kicker={t("bookingDetail.deepLinks.kicker", locale)}
+            title={t("bookingDetail.section.audit", locale)}
+            description={t("bookingDetail.section.auditSub", locale)}
           >
             <div id="audit" />
             <ul className="panel-list">
@@ -1174,19 +1273,18 @@ export default async function BookingDetailPage({
               ))}
             </ul>
             <p className="muted-copy">
-              Cross-app routes open in a new tab when authority belongs to ops
-              or another deployment.
+              {t("bookingDetail.deepLinks.crossAppNote", locale)}
             </p>
           </SurfaceCard>
         </div>
       </section>
 
       <CalloutPanel
-        title="權限邊界"
-        description={source.detail}
+        title={t("bookingDetail.boundary.title", locale)}
+        description={sourceCopy.detail}
         tone={source.domain === "forwarded_authority" ? "warning" : "default"}
       >
-        <p>{source.statusBoundary}</p>
+        <p>{sourceCopy.statusBoundary}</p>
       </CalloutPanel>
     </div>
   );

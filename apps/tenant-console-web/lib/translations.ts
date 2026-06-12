@@ -106,6 +106,221 @@ const en = {
   "bookingDetail.label.readOnlyReason": "Read-only reason",
   "bookingDetail.label.editableUntil": "Editable until",
   "bookingDetail.label.approval": "Approval posture",
+  "bookingDetail.hero.eyebrow": "Booking detail",
+  "bookingDetail.hero.unavailableTitle": "{bookingId} unavailable",
+  "bookingDetail.hero.unavailableDescription":
+    "This tenant detail route implements the shared EmptyReason states so each empty, missing, or unavailable case stays explicit.",
+  "bookingDetail.hero.description":
+    "The booking detail follows the Tenant Console canvas: editability, approval state, driver assignment, audit subset, refresh tier, and action descriptors stay together on one tenant-owned screen.",
+  "bookingDetail.loading.title": "Loading tenant booking detail",
+  "bookingDetail.loading.description":
+    "The detail route is hydrating the T5 tenant snapshot, action descriptors, and audit content.",
+  "bookingDetail.loading.refreshTitle": "Preparing booking detail",
+  "bookingDetail.loading.refreshDescription":
+    "Loading the current booking snapshot and refresh metadata.",
+  "bookingDetail.loading.statusTitle": "Resolving editability",
+  "bookingDetail.loading.statusDescription":
+    "Fetching availableActions, editableUntil, and approval state before the screen becomes interactive.",
+  "bookingDetail.empty.noData.title": "No booking data exists yet",
+  "bookingDetail.empty.noData.body":
+    "This tenant has booking access, but no booking record exists in the current workspace snapshot.",
+  "bookingDetail.empty.noData.cta": "Create a booking",
+  "bookingDetail.empty.notProvisioned.title":
+    "Booking module is not provisioned",
+  "bookingDetail.empty.notProvisioned.body":
+    "Tenant setup is incomplete, so booking detail cannot be hydrated until provisioning finishes.",
+  "bookingDetail.empty.notProvisioned.cta": "Open settings",
+  "bookingDetail.empty.fetchFailed.title":
+    "The booking snapshot could not be loaded",
+  "bookingDetail.empty.fetchFailed.body":
+    "The backend request failed before a usable read model was returned. Retry or inspect the audit lane for the last successful mutation.",
+  "bookingDetail.empty.fetchFailed.cta": "Back to bookings",
+  "bookingDetail.empty.permissionDenied.title":
+    "This actor cannot read the booking detail",
+  "bookingDetail.empty.permissionDenied.body":
+    "The booking exists, but the current tenant actor does not have read scope for this record.",
+  "bookingDetail.empty.permissionDenied.cta": "Back to bookings",
+  "bookingDetail.empty.externalUnavailable.title":
+    "The linked external system is unavailable",
+  "bookingDetail.empty.externalUnavailable.body":
+    "Tenant truth is still readable, but one or more external dispatch details cannot be refreshed right now.",
+  "bookingDetail.empty.externalUnavailable.cta": "Open audit",
+  "bookingDetail.empty.filteredEmpty.title":
+    "This deep link no longer matches the current filters",
+  "bookingDetail.empty.filteredEmpty.body":
+    "The booking detail route is valid, but the surrounding filtered context no longer contains the record you expected.",
+  "bookingDetail.empty.filteredEmpty.cta": "Reset booking filters",
+  "bookingDetail.empty.driverNotEligible.title":
+    "The assigned driver is no longer eligible",
+  "bookingDetail.empty.driverNotEligible.body":
+    "The booking still exists, but the current driver eligibility state prevents showing a complete live assignment snapshot.",
+  "bookingDetail.empty.driverNotEligible.cta": "Open audit",
+  "bookingDetail.empty.restoreLive": "Restore live detail",
+  "bookingDetail.empty.reason": "EmptyReason",
+  "bookingDetail.command.acceptedTitle":
+    "Command accepted · awaiting external confirmation · {actionId}",
+  "bookingDetail.command.acceptedHelp":
+    "Audit link {auditId} is already assigned. Keep this detail open or refresh after the next T5 cycle if the status has not advanced.",
+  "bookingDetail.command.defaultMessage":
+    "The tenant command was accepted and is waiting on external dispatch confirmation.",
+  "bookingDetail.refresh.kicker": "Refresh tier",
+  "bookingDetail.refresh.title": "Tenant booking detail updates on T5",
+  "bookingDetail.refresh.description":
+    "This is a tenant-slow detail screen: automatic updates are intentionally slower, manual review remains available, and stale state must be explicit.",
+  "bookingDetail.refresh.t5": "T5 slow",
+  "bookingDetail.refresh.fresh": "fresh snapshot",
+  "bookingDetail.refresh.generatedAt": "Generated at",
+  "bookingDetail.refresh.lastBookingUpdate": "Last booking update",
+  "bookingDetail.refresh.source": "Source",
+  "bookingDetail.refresh.manual": "Manual refresh",
+  "bookingDetail.refresh.sourceLive": "live tenant API",
+  "bookingDetail.refresh.manualHelp":
+    "Browser refresh, notification reopen, or command receipt refresh",
+  "bookingDetail.status.kicker": "Status",
+  "bookingDetail.status.title": "Editability and approval posture",
+  "bookingDetail.status.description":
+    "Per Q-TEN05, editability is determined by action descriptors plus editableUntil, not guessed from the status label alone.",
+  "bookingDetail.status.editable": "Editable",
+  "bookingDetail.status.readOnly": "Read only",
+  "bookingDetail.status.bookingStatus": "Booking {status}",
+  "bookingDetail.status.approvalPendingTitle": "Approval required",
+  "bookingDetail.status.approvalPendingHelp":
+    "This booking should not be treated as editable just because it is not terminal. Wait for approval or use the rules lane.",
+  "bookingDetail.trip.workflowAria": "Booking workflow status",
+  "bookingDetail.trip.kicker": "Trip context",
+  "bookingDetail.field.bookingId": "Booking ID",
+  "bookingDetail.field.orderId": "Order ID",
+  "bookingDetail.field.passenger": "Passenger",
+  "bookingDetail.field.phone": "Phone",
+  "bookingDetail.field.pickup": "Pickup",
+  "bookingDetail.field.dropoff": "Drop-off",
+  "bookingDetail.field.windowStart": "Window start",
+  "bookingDetail.field.windowEnd": "Window end",
+  "bookingDetail.field.bookedBy": "Booked by",
+  "bookingDetail.field.onsiteContact": "Onsite contact",
+  "bookingDetail.field.costCenter": "Cost center",
+  "bookingDetail.field.vehiclePreference": "Vehicle preference",
+  "bookingDetail.field.flightTerminal": "Flight / terminal",
+  "bookingDetail.field.notes": "Notes",
+  "bookingDetail.field.quoteFare": "Quoted fare",
+  "bookingDetail.field.fareSource": "Fare source",
+  "bookingDetail.field.pricingVersion": "Pricing version",
+  "bookingDetail.field.manualOverride": "Manual override",
+  "bookingDetail.field.approval": "Approval",
+  "bookingDetail.field.benefitReference": "Benefit reference",
+  "bookingDetail.field.assignmentStatus": "Assignment status",
+  "bookingDetail.field.eta": "ETA",
+  "bookingDetail.field.orderStatus": "Order status",
+  "bookingDetail.field.escalation": "Escalation",
+  "bookingDetail.field.commandReceipt": "Command receipt",
+  "bookingDetail.value.tenantIntake": "Tenant intake",
+  "bookingDetail.value.notPublished": "Not published",
+  "bookingDetail.value.noFlight": "No flight",
+  "bookingDetail.value.noTerminal": "No terminal",
+  "bookingDetail.value.noNotes": "No notes",
+  "bookingDetail.value.none": "None",
+  "bookingDetail.value.pendingTimestamp": "Pending timestamp",
+  "bookingDetail.value.activeAssignment": "Active driver assignment",
+  "bookingDetail.value.noActiveAssignment": "No active assignment published",
+  "bookingDetail.value.liveEtaPending":
+    "Live ETA pending from dispatch read model",
+  "bookingDetail.value.notActive": "Not active",
+  "bookingDetail.value.opsDeepLinkAvailable": "Ops console deep link available",
+  "bookingDetail.value.tenantOwner":
+    "Tenant detail remains the primary owner view",
+  "bookingDetail.value.noPendingReceipt": "No pending receipt",
+  "bookingDetail.link.openPassenger": "Open passenger directory reference",
+  "bookingDetail.link.openPickup": "Open pickup address reference",
+  "bookingDetail.link.openDropoff": "Open drop-off address reference",
+  "bookingDetail.link.openCostCenter": "Open cost center governance",
+  "bookingDetail.link.returnContext": "Return to booking list context",
+  "bookingDetail.lifecycle.kicker": "Lifecycle",
+  "bookingDetail.finance.kicker": "Finance",
+  "bookingDetail.assignment.kicker": "Assignment",
+  "bookingDetail.assignment.title": "Driver / vehicle assignment",
+  "bookingDetail.assignment.description":
+    "When dispatch has attached a fulfillment leg, tenant users can see assignment posture without receiving dispatch control.",
+  "bookingDetail.actions.kicker": "Actions",
+  "bookingDetail.actions.title": "Available actions",
+  "bookingDetail.actions.description":
+    "The command panel renders enabled, disabled, and hidden states from this booking's action descriptors.",
+  "bookingDetail.deepLinks.kicker": "Deep links",
+  "bookingDetail.deepLinks.auditSubsetLabel": "View audit subset",
+  "bookingDetail.deepLinks.auditReceiptNote":
+    "Open the action receipt audit trail directly when a command has already been accepted.",
+  "bookingDetail.deepLinks.auditRealmNote":
+    "Tenant audit includes actor realm chips for tenant, ops, platform, and system actions.",
+  "bookingDetail.deepLinks.rulesLabel": "Open approval rules",
+  "bookingDetail.deepLinks.rulesNote":
+    "Use the tenant rules lane to inspect the approval logic that currently applies to this booking.",
+  "bookingDetail.deepLinks.opsLabel": "Open ops console detail",
+  "bookingDetail.deepLinks.opsNote":
+    "Forwarded-authority bookings escalate to the ops app in a new tab when dispatch recovery is needed.",
+  "bookingDetail.deepLinks.crossAppNote":
+    "Cross-app routes open in a new tab when authority belongs to ops or another deployment.",
+  "bookingDetail.boundary.title": "Permission boundary",
+  "bookingDetail.event.created": "Booking created",
+  "bookingDetail.event.createdDetail": "Reservation window {start} to {end}.",
+  "bookingDetail.event.approval": "Approval workflow",
+  "bookingDetail.event.approvalDetail":
+    "Approval state is {state}. Related request count: {count}.",
+  "bookingDetail.event.driverAssigned": "Driver assignment active",
+  "bookingDetail.event.driverAssignedDetail":
+    "The booking is currently attached to an active fulfillment leg. Live ETA is not published by the current read model.",
+  "bookingDetail.event.cancelled": "Booking cancelled",
+  "bookingDetail.event.cancelledDetail":
+    "Tenant cancellation completed. Audit retains the reason and actor attribution.",
+  "bookingDetail.event.completed": "Trip completed",
+  "bookingDetail.event.completedDetail":
+    "Fulfillment completed. Billing and audit remain accessible from tenant-owned routes.",
+  "bookingDetail.event.snapshotUpdated": "Workflow snapshot updated",
+  "bookingDetail.event.snapshotUpdatedDetail":
+    "Current order status is {status}.",
+  "bookingDetail.readOnly.pastEditableUntil":
+    "The tenant edit window has closed, so this detail is read-only for update commands.",
+  "bookingDetail.readOnly.bookingTerminal":
+    "The trip has ended. Tenant users can view content and audit, but cannot change the booking.",
+  "bookingDetail.readOnly.onTripLocked":
+    "The driver workflow is already active. Follow-up should use cancellation policy or ops escalation instead of live editing.",
+  "bookingDetail.readOnly.approvalPending":
+    "This booking must wait for approval before the next update command can be accepted.",
+  "bookingDetail.readOnly.default":
+    "This booking currently has no tenant update command available.",
+  "bookingDetail.editWindow.noDeadlineEditable":
+    "The backend currently exposes no edit deadline for this booking.",
+  "bookingDetail.editWindow.noDeadlineReadOnly":
+    "The booking is read-only even though no edit deadline was published.",
+  "bookingDetail.editWindow.open":
+    "The tenant edit window remains open until {time}{relative}.",
+  "bookingDetail.editWindow.closed":
+    "The tenant edit window closed at {time}{relative}.",
+  "bookingDetail.approval.notRequired":
+    "This booking currently has no active approval gate.",
+  "bookingDetail.approval.pending":
+    "Approval is required before dispatch continues.",
+  "bookingDetail.approval.approved":
+    "The approval gate passed and the booking can continue.",
+  "bookingDetail.approval.rejected":
+    "Approval was rejected. Review rules before resubmitting.",
+  "bookingDetail.approval.blocked":
+    "A policy block currently prevents the booking from proceeding.",
+  "bookingDetail.approval.cancelledByReevaluation":
+    "A prior approval request was invalidated by a later booking change.",
+  "bookingDetail.source.forwarded.badge": "Forwarded authority",
+  "bookingDetail.source.forwarded.detail":
+    "This booking is mirrored from an external-platform authority lane. Tenant-visible status remains readable here without exposing driver assignment or adapter internals.",
+  "bookingDetail.source.forwarded.boundary":
+    "Tenant routes show the canonical booking and order record only. Adapter-native states remain on the ops and driver authority lanes.",
+  "bookingDetail.source.external.badge": "Externally fulfilled",
+  "bookingDetail.source.external.detail":
+    "This booking uses a partner or external fulfillment path. Tenant-facing status stays visible here without exposing adapter internals.",
+  "bookingDetail.source.external.boundary":
+    "Tenant routes keep the canonical booking record visible, while partner-side routing, sponsorship, and dispatch coordination stay outside this surface.",
+  "bookingDetail.source.owned.badge": "DRTS operated",
+  "bookingDetail.source.owned.detail":
+    "This booking stays on the DRTS-operated dispatch path for routing, execution, and customer updates.",
+  "bookingDetail.source.owned.boundary":
+    "Tenant routes and DRTS operations share the same owned booking lifecycle, so published status changes can be acted on through tenant-safe commands when policy allows.",
 
   "bookingCommand.reason.pastEditableUntil":
     "The tenant edit window has closed.",
@@ -302,6 +517,238 @@ const en = {
     "Use this mode when the booking must retain issuer / sponsor references for downstream finance and audit.",
   "newBooking.programHint.enterprise":
     "Use this mode when the booking must carry tenant cost-center and approval metadata through billing and reporting.",
+  "newBooking.validation.reservationWindowStartRequired":
+    "Reservation window start is required.",
+  "newBooking.validation.reservationWindowEndRequired":
+    "Reservation window end is required.",
+  "newBooking.validation.passengerNameRequired": "Passenger name is required.",
+  "newBooking.validation.passengerPhoneRequired":
+    "Passenger phone is required.",
+  "newBooking.validation.pickupAddressRequired": "Pickup address is required.",
+  "newBooking.validation.dropoffAddressRequired":
+    "Drop-off address is required.",
+  "newBooking.validation.costCenterRequired": "Cost center is required.",
+  "newBooking.validation.reservationWindowInvalid":
+    "Reservation window start and end must be valid date-time values.",
+  "newBooking.validation.reservationWindowOrder":
+    "Reservation window end must be after the reservation window start.",
+  "newBooking.validation.flightNoRequired":
+    "Flight number is required for airport pickup bookings.",
+  "newBooking.validation.bookedByPairRequired":
+    "Provide both booked-by name and email, or leave both blank.",
+  "newBooking.validation.onsiteContactPairRequired":
+    "Provide both onsite contact name and phone, or leave both blank.",
+  "newBooking.validation.estimatedAmountInvalid":
+    "Estimated spend must be a valid non-negative amount.",
+  "newBooking.validation.luggageCountInvalid":
+    "Luggage count must be a whole number of 0 or more.",
+  "newBooking.validation.pickupLatInvalid":
+    "Pickup latitude must be a valid number when provided.",
+  "newBooking.validation.pickupLngInvalid":
+    "Pickup longitude must be a valid number when provided.",
+  "newBooking.validation.dropoffLatInvalid":
+    "Drop-off latitude must be a valid number when provided.",
+  "newBooking.validation.dropoffLngInvalid":
+    "Drop-off longitude must be a valid number when provided.",
+  "newBooking.action.unavailable": "Currently unavailable",
+  "newBooking.action.refreshNow": "Refresh now",
+  "newBooking.action.clearShortcuts": "Clear shortcut context",
+  "newBooking.action.openCostCenters": "Open cost centers",
+  "newBooking.action.openPassengers": "Open passengers",
+  "newBooking.action.backBookings": "Back to bookings",
+  "newBooking.action.backList": "Back to booking list",
+  "newBooking.action.refresh": "Refresh",
+  "newBooking.action.reloading": "Reloading...",
+  "newBooking.action.cancel": "Cancel",
+  "newBooking.action.submitCommand": "Submit command",
+  "newBooking.action.noDraft": "No draft action",
+  "newBooking.option.manualPassenger": "Manual passenger",
+  "newBooking.option.manualPickup": "Manual pickup",
+  "newBooking.option.manualDropoff": "Manual drop-off",
+  "newBooking.option.notSet": "Not set",
+  "newBooking.option.pickup": "Pickup",
+  "newBooking.option.dropoff": "Drop-off",
+  "newBooking.option.scheduled": "Scheduled",
+  "newBooking.option.immediate": "Immediate",
+  "newBooking.option.selectCostCenter": "Select cost center",
+  "newBooking.format.currencyMissing": "Not provided",
+  "newBooking.format.percentMissing": "N/A",
+  "newBooking.format.datetimeUnknown": "Unknown",
+  "newBooking.format.ageUnknown": "Time unknown",
+  "newBooking.format.justNow": "just now",
+  "newBooking.format.secondsAgo": "{count}s ago",
+  "newBooking.format.minutesAgo": "{count}m ago",
+  "newBooking.format.hoursAgo": "{count}h ago",
+  "newBooking.direction.pickup": "Pickup",
+  "newBooking.direction.dropoff": "Drop-off",
+  "newBooking.direction.unset": "Not set",
+  "newBooking.decision.allow": "Allowed",
+  "newBooking.decision.requireApproval": "Approval required",
+  "newBooking.decision.block": "Blocked",
+  "newBooking.decision.warn": "Warning",
+  "newBooking.decision.manualReview": "Manual review",
+  "newBooking.impact.tenant": "Tenant",
+  "newBooking.impact.costCenter": "Cost center",
+  "newBooking.impact.costCenterCode": "Cost center {code}",
+  "newBooking.refreshTier.manual": "Manual",
+  "newBooking.refreshTier.urgent": "Urgent",
+  "newBooking.refreshTier.fast": "Fast",
+  "newBooking.refreshTier.dispatch": "Dispatch",
+  "newBooking.refreshTier.medium": "Medium",
+  "newBooking.refreshTier.mediumSlow": "Medium-slow",
+  "newBooking.refreshTier.slow": "Slow",
+  "newBooking.error.policyPreviewUnknown": "Unknown policy preview error.",
+  "newBooking.error.policyPreviewHttp":
+    "Policy preview failed (HTTP {status}).",
+  "newBooking.error.submitBlocked":
+    "This booking is currently blocked by tenant approval or quota policy.",
+  "newBooking.error.createHttp": "Booking creation failed (HTTP {status}).",
+  "newBooking.error.createUnknown": "Unknown booking creation error.",
+  "newBooking.error.unknown": "Unknown error",
+  "newBooking.header.title": "Create booking",
+  "newBooking.header.subtitle":
+    "Booked by self or proxy · scheduled / immediate · synchronized command mode (Q-TEN04)",
+  "newBooking.meta.command": "Command",
+  "newBooking.meta.updateTier": "Refresh tier",
+  "newBooking.meta.directoryCoverage": "Directory coverage",
+  "newBooking.meta.requiredActions": "Required actions",
+  "newBooking.meta.passengers": "Passengers {count}",
+  "newBooking.meta.addresses": "Addresses {count}",
+  "newBooking.meta.costCenters": "Cost centers {count}",
+  "newBooking.meta.noDraft": "Drafts not supported yet",
+  "newBooking.prefill.source": "Shortcut prefill from tenant directory",
+  "newBooking.prefill.passenger": "Passenger · {name}",
+  "newBooking.prefill.pickup": "Pickup · {name}",
+  "newBooking.prefill.dropoff": "Drop-off · {name}",
+  "newBooking.prefill.appliedTitle": "Directory shortcut prefill applied",
+  "newBooking.health.degradedTitle":
+    "Some booking creation dependencies are degraded",
+  "newBooking.freshness.degradedTitle": "Directory snapshot is degraded",
+  "newBooking.freshness.staleTitle": "Directory snapshot needs refresh",
+  "newBooking.freshness.body":
+    "Snapshot created {age} · {timestamp} · refresh tier {tier}",
+  "newBooking.info.estimateTitle": "Estimate is preview-only",
+  "newBooking.info.estimateBody":
+    "Fare, quota impact, and approval posture can be previewed here, but standard pricing remains backend-owned.",
+  "newBooking.card.trip.title": "Trip",
+  "newBooking.card.trip.subtitle":
+    "Service type, passenger, reservation window, and address-book shortcuts stay in one form.",
+  "newBooking.card.pickupDropoff.title": "Pickup / drop-off",
+  "newBooking.card.pickupDropoff.subtitle":
+    "Start from the address book, then adjust directly when needed without opening another geocoding flow.",
+  "newBooking.card.approval.title": "References and approval",
+  "newBooking.card.approval.subtitle":
+    "Cost center, finance fields, and proxy metadata travel with the command.",
+  "newBooking.card.directory.title": "Directory content",
+  "newBooking.card.directory.subtitle":
+    "These are the in-app entry / exit points required by the handoff packet.",
+  "newBooking.card.policy.title": "Policy evaluation",
+  "newBooking.card.policy.subtitle":
+    "Approval posture and quota impact come directly from the backend preview.",
+  "newBooking.card.quota.title": "Quota impact",
+  "newBooking.card.quota.subtitle":
+    "Keep backend preview vocabulary instead of replacing it with local estimates.",
+  "newBooking.card.submit.title": "Submit command",
+  "newBooking.card.submit.subtitle":
+    "Blocked outcomes stop at the client; approval-required bookings can still submit, with workflow owned by the backend.",
+  "newBooking.field.serviceSubtype": "Service subtype",
+  "newBooking.field.timingMode": "Timing mode",
+  "newBooking.field.reservationStart": "Reservation start",
+  "newBooking.field.reservationEnd": "Reservation end",
+  "newBooking.field.passenger": "Passenger",
+  "newBooking.field.passengerName": "Passenger name",
+  "newBooking.field.passengerPhone": "Passenger phone",
+  "newBooking.field.savedPickup": "Saved pickup",
+  "newBooking.field.savedDropoff": "Saved drop-off",
+  "newBooking.field.pickupAddress": "Pickup address",
+  "newBooking.field.dropoffAddress": "Drop-off address",
+  "newBooking.field.pickupLat": "Pickup latitude",
+  "newBooking.field.pickupLng": "Pickup longitude",
+  "newBooking.field.dropoffLat": "Drop-off latitude",
+  "newBooking.field.dropoffLng": "Drop-off longitude",
+  "newBooking.field.estimatedSpend": "Estimated spend ({currency})",
+  "newBooking.field.notes": "Notes",
+  "newBooking.hint.passengerSelect":
+    "Choose a directory passenger for proxy booking, or keep manual entry.",
+  "newBooking.hint.phoneFromDirectory":
+    "Passenger phone comes from the selected directory record.",
+  "newBooking.hint.phoneMissing":
+    "This passenger record has no phone, so fill it in here.",
+  "newBooking.hint.phoneManual":
+    "Manual passenger entry needs a direct contact phone.",
+  "newBooking.check.signoffRequired": "Signoff required",
+  "newBooking.check.expenseProofRequired": "Expense proof required",
+  "newBooking.kpi.directoryBacked": "Directory-backed",
+  "newBooking.kpi.savedPickupDropoff": "Saved pickup/drop-off",
+  "newBooking.kpi.canonicalSelector": "Canonical selector",
+  "newBooking.empty.noData.title": "No creation shortcuts are available",
+  "newBooking.empty.noData.body":
+    "The passenger and address directories have no usable data yet. Complete the tenant directories first, then return to create a booking.",
+  "newBooking.empty.notProvisioned.title": "Cost centers are not provisioned",
+  "newBooking.empty.notProvisioned.body":
+    "This route requires the standard cost-center directory before booking creation commands can be submitted.",
+  "newBooking.empty.fetchFailed.title":
+    "Required booking creation data failed to load",
+  "newBooking.empty.fetchFailed.body":
+    "At least one required directory source failed. Refresh first, then submit once the data recovers.",
+  "newBooking.empty.permissionDenied.title":
+    "This actor cannot create bookings",
+  "newBooking.empty.permissionDenied.body":
+    "The backend denied booking creation for the current actor. Confirm permissions with the tenant administrator.",
+  "newBooking.empty.externalUnavailable.title":
+    "An external dependency is temporarily unavailable",
+  "newBooking.empty.externalUnavailable.body":
+    "A required upstream service for booking commands is unhealthy. Retry after the dependency recovers.",
+  "newBooking.empty.filteredEmpty.title": "The prefill shortcut is stale",
+  "newBooking.empty.filteredEmpty.body":
+    "The passenger or address prefill link has expired. Clear shortcut context and start again from a clean form.",
+  "newBooking.empty.driverNotEligible.title":
+    "Driver eligibility does not apply here",
+  "newBooking.empty.driverNotEligible.body":
+    "Tenant booking creation does not use driver eligibility state.",
+  "newBooking.empty.reason": "EmptyReason",
+  "newBooking.empty.messageCode": "messageCode: {code}",
+  "newBooking.banner.passengerEmptyTitle": "Passenger directory is empty",
+  "newBooking.banner.passengerEmptyBody":
+    "Manual passenger entry still works, but `/passengers` is the shortcut entry required by the packet.",
+  "newBooking.banner.addressEmptyTitle": "Address book is empty",
+  "newBooking.banner.addressEmptyBody":
+    "Manual address entry still works, but `/addresses` is the standard shortcut source for this route.",
+  "newBooking.policy.refreshing": "Refreshing",
+  "newBooking.policy.autoPreview": "Auto preview",
+  "newBooking.policy.service": "Service",
+  "newBooking.policy.direction": "Direction",
+  "newBooking.policy.passengerRole": "Passenger role",
+  "newBooking.policy.estimatedSpend": "Estimated spend",
+  "newBooking.policy.notPublished": "Not published",
+  "newBooking.policy.failedTitle": "Policy preview failed",
+  "newBooking.policy.mode": "Mode: {value}",
+  "newBooking.policy.timeout": "Timeout: {value}h",
+  "newBooking.policy.fallback": "Fallback: {value}",
+  "newBooking.policy.approver": "Approver {index}",
+  "newBooking.quota.period": "Period: {value}",
+  "newBooking.quota.trigger": "Trigger: {value}",
+  "newBooking.quota.value": "Before {before} / {limit} · after {after}",
+  "newBooking.quota.hint": "{dimension} · {percent} remaining · {triggered}",
+  "newBooking.quota.waitingTitle":
+    "Preview is waiting for complete booking context",
+  "newBooking.quota.waitingBody":
+    "Select a cost center and complete the core fields before quota impact can be calculated.",
+  "newBooking.submit.openingDetail": "Opening detail...",
+  "newBooking.submit.resource": "Resource: {type} · {id}",
+  "newBooking.submit.viewAudit": "View audit trail",
+  "newBooking.submit.failedTitle": "Booking creation failed",
+  "newBooking.submit.fixHighlightedTitle": "Fix the highlighted fields first",
+  "newBooking.submit.submitting": "Submitting...",
+  "newBooking.submit.forApproval": "Submit for approval",
+  "newBooking.submit.create": "Create booking",
+
+  "refreshControl.fresh": "Fresh snapshot",
+  "refreshControl.stale": "Stale snapshot",
+  "refreshControl.degraded": "Degraded data",
+  "refreshControl.unknown": "Unknown freshness",
+  "refreshControl.refreshing": "Refreshing",
+  "refreshControl.refresh": "Refresh",
 
   "partner.shell.navAria": "Partner navigation",
   "partner.shell.badge": "Partner mode",
@@ -658,6 +1105,204 @@ const zh: Record<keyof typeof en, string> = {
   "bookingDetail.label.readOnlyReason": "唯讀原因",
   "bookingDetail.label.editableUntil": "可編輯截止",
   "bookingDetail.label.approval": "審批狀態",
+  "bookingDetail.hero.eyebrow": "訂單明細",
+  "bookingDetail.hero.unavailableTitle": "{bookingId} unavailable",
+  "bookingDetail.hero.unavailableDescription":
+    "租戶明細路由實作共用 EmptyReason 狀態，讓每種空、未就緒或不可用情況都維持明確。",
+  "bookingDetail.hero.description":
+    "訂單明細遵循 Tenant Console canvas：可編輯截止、審批狀態、司機指派、audit 子集、更新層級與動作描述子，都集中在同一個租戶擁有的畫面。",
+  "bookingDetail.loading.title": "載入租戶訂單明細",
+  "bookingDetail.loading.description":
+    "明細路由正在水合 T5 租戶快照、動作描述子與 audit 內容。",
+  "bookingDetail.loading.refreshTitle": "準備訂單明細",
+  "bookingDetail.loading.refreshDescription":
+    "載入目前訂單快照與更新中繼資料。",
+  "bookingDetail.loading.statusTitle": "解析可編輯性",
+  "bookingDetail.loading.statusDescription":
+    "在畫面可互動前，取得 availableActions、editableUntil 與審批狀態。",
+  "bookingDetail.empty.noData.title": "尚無訂單資料",
+  "bookingDetail.empty.noData.body":
+    "此租戶具備叫車存取權，但目前 workspace snapshot 尚無訂單紀錄。",
+  "bookingDetail.empty.noData.cta": "建立叫車",
+  "bookingDetail.empty.notProvisioned.title": "叫車模組尚未佈建",
+  "bookingDetail.empty.notProvisioned.body":
+    "租戶設定尚未完成；佈建完成前無法載入訂單明細。",
+  "bookingDetail.empty.notProvisioned.cta": "開啟設定",
+  "bookingDetail.empty.fetchFailed.title": "訂單快照無法載入",
+  "bookingDetail.empty.fetchFailed.body":
+    "後端請求在回傳可用讀模型前失敗。請重試，或到 audit lane 檢查最後成功的 mutation。",
+  "bookingDetail.empty.fetchFailed.cta": "回到訂單",
+  "bookingDetail.empty.permissionDenied.title": "目前身分無法讀取訂單明細",
+  "bookingDetail.empty.permissionDenied.body":
+    "訂單存在，但目前租戶 actor 沒有此紀錄的讀取範圍。",
+  "bookingDetail.empty.permissionDenied.cta": "回到訂單",
+  "bookingDetail.empty.externalUnavailable.title": "連結的外部系統不可用",
+  "bookingDetail.empty.externalUnavailable.body":
+    "租戶事實仍可讀取，但一個或多個外部派遣細節暫時無法刷新。",
+  "bookingDetail.empty.externalUnavailable.cta": "開啟稽核",
+  "bookingDetail.empty.filteredEmpty.title": "此深連結不再符合目前篩選",
+  "bookingDetail.empty.filteredEmpty.body":
+    "訂單明細路由有效，但周邊篩選脈絡已不包含預期的紀錄。",
+  "bookingDetail.empty.filteredEmpty.cta": "重設訂單篩選",
+  "bookingDetail.empty.driverNotEligible.title": "已指派司機不再符合資格",
+  "bookingDetail.empty.driverNotEligible.body":
+    "訂單仍存在，但目前司機資格狀態使畫面無法顯示完整即時指派快照。",
+  "bookingDetail.empty.driverNotEligible.cta": "開啟稽核",
+  "bookingDetail.empty.restoreLive": "還原 live 明細",
+  "bookingDetail.empty.reason": "EmptyReason",
+  "bookingDetail.command.acceptedTitle":
+    "Command 已接受 · 等待外部確認 · {actionId}",
+  "bookingDetail.command.acceptedHelp":
+    "Audit link {auditId} 已指派。若狀態尚未推進，請保留此明細或在下一個 T5 cycle 後刷新。",
+  "bookingDetail.command.defaultMessage":
+    "租戶命令已接受，正在等待外部派遣確認。",
+  "bookingDetail.refresh.kicker": "更新層級",
+  "bookingDetail.refresh.title": "租戶訂單明細以 T5 更新",
+  "bookingDetail.refresh.description":
+    "此畫面是租戶慢速明細介面：自動更新較慢，仍可手動檢視，過期狀態必須明確標示。",
+  "bookingDetail.refresh.t5": "T5 slow",
+  "bookingDetail.refresh.fresh": "最新快照",
+  "bookingDetail.refresh.generatedAt": "產生時間",
+  "bookingDetail.refresh.lastBookingUpdate": "最後訂單更新",
+  "bookingDetail.refresh.source": "來源",
+  "bookingDetail.refresh.manual": "手動更新",
+  "bookingDetail.refresh.sourceLive": "live tenant API",
+  "bookingDetail.refresh.manualHelp":
+    "瀏覽器刷新、通知重新開啟，或 command receipt refresh",
+  "bookingDetail.status.kicker": "狀態",
+  "bookingDetail.status.title": "可編輯性與審批狀態",
+  "bookingDetail.status.description":
+    "依 Q-TEN05，可編輯性由動作描述子加上 editableUntil 決定，而非僅憑狀態標籤推測。",
+  "bookingDetail.status.editable": "可編輯",
+  "bookingDetail.status.readOnly": "唯讀",
+  "bookingDetail.status.bookingStatus": "Booking {status}",
+  "bookingDetail.status.approvalPendingTitle": "需審批狀態",
+  "bookingDetail.status.approvalPendingHelp":
+    "此訂單不能只因為尚未 terminal 就被視為可編輯。請等待審批，或使用 rules lane。",
+  "bookingDetail.trip.workflowAria": "訂單工作流程狀態",
+  "bookingDetail.trip.kicker": "行程脈絡",
+  "bookingDetail.field.bookingId": "訂單 ID",
+  "bookingDetail.field.orderId": "單號 ID",
+  "bookingDetail.field.passenger": "乘客",
+  "bookingDetail.field.phone": "電話",
+  "bookingDetail.field.pickup": "上車",
+  "bookingDetail.field.dropoff": "下車",
+  "bookingDetail.field.windowStart": "時窗開始",
+  "bookingDetail.field.windowEnd": "時窗結束",
+  "bookingDetail.field.bookedBy": "預約人",
+  "bookingDetail.field.onsiteContact": "現場聯絡人",
+  "bookingDetail.field.costCenter": "成本中心",
+  "bookingDetail.field.vehiclePreference": "車輛偏好",
+  "bookingDetail.field.flightTerminal": "航班／航廈",
+  "bookingDetail.field.notes": "備註",
+  "bookingDetail.field.quoteFare": "報價車資",
+  "bookingDetail.field.fareSource": "車資來源",
+  "bookingDetail.field.pricingVersion": "定價版本",
+  "bookingDetail.field.manualOverride": "手動覆寫",
+  "bookingDetail.field.approval": "審批",
+  "bookingDetail.field.benefitReference": "福利參照",
+  "bookingDetail.field.assignmentStatus": "指派狀態",
+  "bookingDetail.field.eta": "ETA",
+  "bookingDetail.field.orderStatus": "訂單狀態",
+  "bookingDetail.field.escalation": "升級",
+  "bookingDetail.field.commandReceipt": "命令回執",
+  "bookingDetail.value.tenantIntake": "租戶受理",
+  "bookingDetail.value.notPublished": "未發布",
+  "bookingDetail.value.noFlight": "無航班",
+  "bookingDetail.value.noTerminal": "無航廈",
+  "bookingDetail.value.noNotes": "無備註",
+  "bookingDetail.value.none": "無",
+  "bookingDetail.value.pendingTimestamp": "等待時間戳",
+  "bookingDetail.value.activeAssignment": "司機指派中",
+  "bookingDetail.value.noActiveAssignment": "尚未發布有效指派",
+  "bookingDetail.value.liveEtaPending": "等待派遣讀模型提供即時 ETA",
+  "bookingDetail.value.notActive": "未啟用",
+  "bookingDetail.value.opsDeepLinkAvailable": "可開啟 Ops console 深連結",
+  "bookingDetail.value.tenantOwner": "租戶明細仍是主要 owner view",
+  "bookingDetail.value.noPendingReceipt": "無待處理回執",
+  "bookingDetail.link.openPassenger": "開啟乘客目錄參照",
+  "bookingDetail.link.openPickup": "開啟上車地址參照",
+  "bookingDetail.link.openDropoff": "開啟下車地址參照",
+  "bookingDetail.link.openCostCenter": "開啟成本中心治理",
+  "bookingDetail.link.returnContext": "回到訂單清單脈絡",
+  "bookingDetail.lifecycle.kicker": "生命週期",
+  "bookingDetail.finance.kicker": "財務",
+  "bookingDetail.assignment.kicker": "指派",
+  "bookingDetail.assignment.title": "司機／車輛指派",
+  "bookingDetail.assignment.description":
+    "若派遣已附上履約段，租戶使用者可看到指派狀態，但不會取得派遣控制權。",
+  "bookingDetail.actions.kicker": "操作",
+  "bookingDetail.actions.title": "可用操作",
+  "bookingDetail.actions.description":
+    "命令面板依此訂單的動作描述子集合，呈現啟用、停用與隱藏狀態。",
+  "bookingDetail.deepLinks.kicker": "深連結",
+  "bookingDetail.deepLinks.auditSubsetLabel": "檢視 audit 子集",
+  "bookingDetail.deepLinks.auditReceiptNote":
+    "當 command 已接受時，可直接開啟 action receipt audit trail。",
+  "bookingDetail.deepLinks.auditRealmNote":
+    "Tenant audit 會保留 tenant、ops、platform 與 system 的 actor realm chips。",
+  "bookingDetail.deepLinks.rulesLabel": "開啟審批規則",
+  "bookingDetail.deepLinks.rulesNote":
+    "使用 tenant rules lane 檢查目前套用到此訂單的審批邏輯。",
+  "bookingDetail.deepLinks.opsLabel": "開啟 ops console 明細",
+  "bookingDetail.deepLinks.opsNote":
+    "Forwarded-authority 訂單需要派遣復原時，會在新分頁升級到 ops app。",
+  "bookingDetail.deepLinks.crossAppNote":
+    "當權限屬於 ops 或另一個部署時，跨 app 路由會在新分頁開啟。",
+  "bookingDetail.boundary.title": "權限邊界",
+  "bookingDetail.event.created": "訂單已建立",
+  "bookingDetail.event.createdDetail": "預約時窗 {start} 至 {end}。",
+  "bookingDetail.event.approval": "審批流程",
+  "bookingDetail.event.approvalDetail":
+    "審批狀態為 {state}。相關請求數：{count}。",
+  "bookingDetail.event.driverAssigned": "司機指派中",
+  "bookingDetail.event.driverAssignedDetail":
+    "此訂單目前已附上有效履約段。目前讀模型尚未發布即時 ETA。",
+  "bookingDetail.event.cancelled": "訂單已取消",
+  "bookingDetail.event.cancelledDetail":
+    "租戶取消已完成。Audit 會保留原因與 actor attribution。",
+  "bookingDetail.event.completed": "行程已完成",
+  "bookingDetail.event.completedDetail":
+    "履約已完成。帳務與 audit 仍可從租戶擁有的路由存取。",
+  "bookingDetail.event.snapshotUpdated": "工作流程快照已更新",
+  "bookingDetail.event.snapshotUpdatedDetail": "目前訂單狀態為 {status}。",
+  "bookingDetail.readOnly.pastEditableUntil":
+    "租戶編輯時窗已關閉，因此此明細對更新命令為唯讀。",
+  "bookingDetail.readOnly.bookingTerminal":
+    "行程已結束。租戶使用者可檢視內容與 audit，但無法再變更訂單。",
+  "bookingDetail.readOnly.onTripLocked":
+    "司機工作流程已在進行中。後續應透過取消政策或 ops 升級處理，而非即時編輯。",
+  "bookingDetail.readOnly.approvalPending":
+    "此訂單需待審批結果，才能接受下一個更新命令。",
+  "bookingDetail.readOnly.default": "此訂單目前沒有可用的租戶更新命令。",
+  "bookingDetail.editWindow.noDeadlineEditable":
+    "後端目前未提供此訂單的編輯截止時間。",
+  "bookingDetail.editWindow.noDeadlineReadOnly":
+    "即使後端未發布編輯截止時間，此訂單仍為唯讀。",
+  "bookingDetail.editWindow.open": "租戶編輯時窗開放至 {time}{relative}。",
+  "bookingDetail.editWindow.closed": "租戶編輯時窗已於 {time}{relative} 關閉。",
+  "bookingDetail.approval.notRequired": "此訂單目前沒有啟用的審批關卡。",
+  "bookingDetail.approval.pending": "派遣繼續前需要審批。",
+  "bookingDetail.approval.approved": "審批關卡已通過，訂單可繼續。",
+  "bookingDetail.approval.rejected": "審批已被拒絕。重新提交前請檢視規則。",
+  "bookingDetail.approval.blocked": "政策封鎖目前阻止此訂單繼續進行。",
+  "bookingDetail.approval.cancelledByReevaluation":
+    "先前審批請求已因後續訂單變更而失效。",
+  "bookingDetail.source.forwarded.badge": "Forwarded authority",
+  "bookingDetail.source.forwarded.detail":
+    "此訂單鏡像自外部平台權限 lane。租戶可見狀態仍可在此讀取，但不暴露司機指派或 adapter 內部狀態。",
+  "bookingDetail.source.forwarded.boundary":
+    "租戶路由只顯示 canonical booking 與 order record；adapter-native 狀態留在 ops 與 driver authority lanes。",
+  "bookingDetail.source.external.badge": "外部履約",
+  "bookingDetail.source.external.detail":
+    "此訂單使用合作夥伴或外部履約路徑。租戶端狀態在此可見，但不暴露 adapter internals。",
+  "bookingDetail.source.external.boundary":
+    "租戶路由保留 canonical booking record；partner-side routing、sponsorship 與派遣協調留在此 surface 之外。",
+  "bookingDetail.source.owned.badge": "DRTS 營運",
+  "bookingDetail.source.owned.detail":
+    "此訂單留在 DRTS-operated dispatch path，處理路由、履約與客戶更新。",
+  "bookingDetail.source.owned.boundary":
+    "租戶路由與 DRTS operations 共用同一個 owned booking lifecycle，因此政策允許時，可透過 tenant-safe commands 處理已發布狀態變更。",
 
   "bookingCommand.reason.pastEditableUntil": "租戶編輯時窗已關閉。",
   "bookingCommand.reason.pastCancelableUntil": "租戶取消時窗已關閉。",
@@ -843,6 +1488,220 @@ const zh: Record<keyof typeof en, string> = {
     "當訂單需要保留 issuer / sponsor 參考以供後續財務與 audit 追蹤時，請使用這個模式。",
   "newBooking.programHint.enterprise":
     "當訂單需要把成本中心與審批 metadata 帶入 billing / reporting 時，請使用這個模式。",
+  "newBooking.validation.reservationWindowStartRequired":
+    "請填寫預約時窗開始時間。",
+  "newBooking.validation.reservationWindowEndRequired":
+    "請填寫預約時窗結束時間。",
+  "newBooking.validation.passengerNameRequired": "請填寫乘客姓名。",
+  "newBooking.validation.passengerPhoneRequired": "請填寫乘客電話。",
+  "newBooking.validation.pickupAddressRequired": "請填寫上車地址。",
+  "newBooking.validation.dropoffAddressRequired": "請填寫下車地址。",
+  "newBooking.validation.costCenterRequired": "請選擇成本中心。",
+  "newBooking.validation.reservationWindowInvalid":
+    "預約時窗開始與結束必須是有效日期時間。",
+  "newBooking.validation.reservationWindowOrder":
+    "預約時窗結束必須晚於開始時間。",
+  "newBooking.validation.flightNoRequired": "機場接機訂單需要填寫航班號碼。",
+  "newBooking.validation.bookedByPairRequired":
+    "代訂人姓名與 Email 需同時填寫，或兩者都留空。",
+  "newBooking.validation.onsiteContactPairRequired":
+    "現場聯絡人與電話需同時填寫，或兩者都留空。",
+  "newBooking.validation.estimatedAmountInvalid":
+    "預估支出必須是有效且不小於 0 的金額。",
+  "newBooking.validation.luggageCountInvalid": "行李件數必須是 0 以上的整數。",
+  "newBooking.validation.pickupLatInvalid":
+    "上車緯度若有填寫，必須是有效數字。",
+  "newBooking.validation.pickupLngInvalid":
+    "上車經度若有填寫，必須是有效數字。",
+  "newBooking.validation.dropoffLatInvalid":
+    "下車緯度若有填寫，必須是有效數字。",
+  "newBooking.validation.dropoffLngInvalid":
+    "下車經度若有填寫，必須是有效數字。",
+  "newBooking.action.unavailable": "目前無法操作",
+  "newBooking.action.refreshNow": "立即更新",
+  "newBooking.action.clearShortcuts": "清除快捷內容",
+  "newBooking.action.openCostCenters": "開啟成本中心",
+  "newBooking.action.openPassengers": "開啟乘客",
+  "newBooking.action.backBookings": "回到訂單清單",
+  "newBooking.action.backList": "返回訂單列表",
+  "newBooking.action.refresh": "刷新",
+  "newBooking.action.reloading": "重新載入中...",
+  "newBooking.action.cancel": "取消",
+  "newBooking.action.submitCommand": "送出命令",
+  "newBooking.action.noDraft": "暫不支援草稿",
+  "newBooking.option.manualPassenger": "手動輸入乘客",
+  "newBooking.option.manualPickup": "手動上車點",
+  "newBooking.option.manualDropoff": "手動下車點",
+  "newBooking.option.notSet": "未設定",
+  "newBooking.option.pickup": "上車",
+  "newBooking.option.dropoff": "下車",
+  "newBooking.option.scheduled": "預約",
+  "newBooking.option.immediate": "即時",
+  "newBooking.option.selectCostCenter": "選擇成本中心",
+  "newBooking.format.currencyMissing": "未提供",
+  "newBooking.format.percentMissing": "不適用",
+  "newBooking.format.datetimeUnknown": "未知",
+  "newBooking.format.ageUnknown": "時間未知",
+  "newBooking.format.justNow": "剛剛",
+  "newBooking.format.secondsAgo": "{count} 秒前",
+  "newBooking.format.minutesAgo": "{count} 分鐘前",
+  "newBooking.format.hoursAgo": "{count} 小時前",
+  "newBooking.direction.pickup": "上車",
+  "newBooking.direction.dropoff": "下車",
+  "newBooking.direction.unset": "未設定",
+  "newBooking.decision.allow": "允許",
+  "newBooking.decision.requireApproval": "需審批",
+  "newBooking.decision.block": "已封鎖",
+  "newBooking.decision.warn": "警告",
+  "newBooking.decision.manualReview": "人工複核",
+  "newBooking.impact.tenant": "租戶",
+  "newBooking.impact.costCenter": "成本中心",
+  "newBooking.impact.costCenterCode": "成本中心 {code}",
+  "newBooking.refreshTier.manual": "手動",
+  "newBooking.refreshTier.urgent": "緊急",
+  "newBooking.refreshTier.fast": "快速",
+  "newBooking.refreshTier.dispatch": "派遣",
+  "newBooking.refreshTier.medium": "中等",
+  "newBooking.refreshTier.mediumSlow": "中慢",
+  "newBooking.refreshTier.slow": "慢速",
+  "newBooking.error.policyPreviewUnknown": "未知政策預覽錯誤。",
+  "newBooking.error.policyPreviewHttp": "政策預覽失敗 (HTTP {status})。",
+  "newBooking.error.submitBlocked": "此叫車目前被租戶審批或額度政策阻擋。",
+  "newBooking.error.createHttp": "建立叫車失敗 (HTTP {status})。",
+  "newBooking.error.createUnknown": "未知叫車建立錯誤。",
+  "newBooking.error.unknown": "未知錯誤",
+  "newBooking.header.title": "建立叫車",
+  "newBooking.header.subtitle":
+    "代訂或本人 · 預約 / 即時 · 同步 command 模式 (Q-TEN04)",
+  "newBooking.meta.command": "命令",
+  "newBooking.meta.updateTier": "更新層級",
+  "newBooking.meta.directoryCoverage": "目錄覆蓋",
+  "newBooking.meta.requiredActions": "必備操作",
+  "newBooking.meta.passengers": "乘客 {count}",
+  "newBooking.meta.addresses": "地址 {count}",
+  "newBooking.meta.costCenters": "成本中心 {count}",
+  "newBooking.meta.noDraft": "暫不支援草稿",
+  "newBooking.prefill.source": "來自租戶目錄的捷徑預填",
+  "newBooking.prefill.passenger": "乘客 · {name}",
+  "newBooking.prefill.pickup": "上車 · {name}",
+  "newBooking.prefill.dropoff": "下車 · {name}",
+  "newBooking.prefill.appliedTitle": "已套用目錄捷徑預填",
+  "newBooking.health.degradedTitle": "部分建立訂單依賴目前降級",
+  "newBooking.freshness.degradedTitle": "目錄快照目前降級",
+  "newBooking.freshness.staleTitle": "目錄快照需要更新",
+  "newBooking.freshness.body":
+    "快照建立於 {age} · {timestamp} · 更新層級 {tier}",
+  "newBooking.info.estimateTitle": "估算只用於預覽",
+  "newBooking.info.estimateBody":
+    "費用、額度影響與審批姿態可先預覽，但標準報價仍由後端擁有。",
+  "newBooking.card.trip.title": "行程",
+  "newBooking.card.trip.subtitle":
+    "服務類型、乘客、預約時間與地址簿捷徑都在同一張表單完成。",
+  "newBooking.card.pickupDropoff.title": "上車／下車",
+  "newBooking.card.pickupDropoff.subtitle":
+    "先選地址簿，再視需要直接微調，不另外開 geocoding flow。",
+  "newBooking.card.approval.title": "關聯與審批",
+  "newBooking.card.approval.subtitle":
+    "成本中心、財務欄位與代訂 metadata 都隨命令一起送出。",
+  "newBooking.card.directory.title": "目錄內容",
+  "newBooking.card.directory.subtitle":
+    "這些是 handoff packet 指定的 in-app entry / exit points。",
+  "newBooking.card.policy.title": "政策評估",
+  "newBooking.card.policy.subtitle": "審批姿態與額度影響都直接來自後端預覽。",
+  "newBooking.card.quota.title": "配額影響",
+  "newBooking.card.quota.subtitle": "沿用後端預覽語彙，不用本地預估字典取代。",
+  "newBooking.card.submit.title": "送出 command",
+  "newBooking.card.submit.subtitle":
+    "blocked outcome 在 client 端直接阻擋；approval-required 仍可送出，但 workflow 由後端擁有。",
+  "newBooking.field.serviceSubtype": "服務子類型",
+  "newBooking.field.timingMode": "時間模式",
+  "newBooking.field.reservationStart": "預約開始",
+  "newBooking.field.reservationEnd": "預約結束",
+  "newBooking.field.passenger": "乘客",
+  "newBooking.field.passengerName": "乘客姓名",
+  "newBooking.field.passengerPhone": "乘客電話",
+  "newBooking.field.savedPickup": "已存上車點",
+  "newBooking.field.savedDropoff": "已存下車點",
+  "newBooking.field.pickupAddress": "上車地址",
+  "newBooking.field.dropoffAddress": "下車地址",
+  "newBooking.field.pickupLat": "上車緯度",
+  "newBooking.field.pickupLng": "上車經度",
+  "newBooking.field.dropoffLat": "下車緯度",
+  "newBooking.field.dropoffLng": "下車經度",
+  "newBooking.field.estimatedSpend": "預估支出 ({currency})",
+  "newBooking.field.notes": "備註",
+  "newBooking.hint.passengerSelect": "為代客叫車選擇目錄乘客，或維持手動輸入。",
+  "newBooking.hint.phoneFromDirectory": "乘客電話來自選取的目錄紀錄。",
+  "newBooking.hint.phoneMissing": "這位乘客檔案沒有電話，請在此補上。",
+  "newBooking.hint.phoneManual": "手動輸入乘客時需要直接聯絡電話。",
+  "newBooking.check.signoffRequired": "需要簽核",
+  "newBooking.check.expenseProofRequired": "需要費用佐證",
+  "newBooking.kpi.directoryBacked": "目錄支援",
+  "newBooking.kpi.savedPickupDropoff": "已存上下車點",
+  "newBooking.kpi.canonicalSelector": "標準選擇器",
+  "newBooking.empty.noData.title": "目前沒有可用的建立捷徑",
+  "newBooking.empty.noData.body":
+    "乘客與地址目錄都還沒有可用資料。先補齊租戶目錄，再回來建立訂單。",
+  "newBooking.empty.notProvisioned.title": "成本中心尚未佈建",
+  "newBooking.empty.notProvisioned.body":
+    "這個路由需要標準成本中心目錄，否則叫車建立命令不能送出。",
+  "newBooking.empty.fetchFailed.title": "建立訂單所需資料載入失敗",
+  "newBooking.empty.fetchFailed.body":
+    "至少一個必要目錄來源讀取失敗。請先刷新，確認資料恢復後再送出。",
+  "newBooking.empty.permissionDenied.title": "目前身分沒有建立訂單權限",
+  "newBooking.empty.permissionDenied.body":
+    "後端拒絕目前身分的叫車建立權限。請與租戶管理員確認權限。",
+  "newBooking.empty.externalUnavailable.title": "外部依賴暫時不可用",
+  "newBooking.empty.externalUnavailable.body":
+    "叫車命令依賴的上游服務暫時異常。等依賴恢復後刷新再重試。",
+  "newBooking.empty.filteredEmpty.title": "預填捷徑已失效",
+  "newBooking.empty.filteredEmpty.body":
+    "乘客或地址的預填連結已經過期。清除捷徑脈絡後，從乾淨表單重新開始。",
+  "newBooking.empty.driverNotEligible.title": "駕駛資格狀態不適用這個頁面",
+  "newBooking.empty.driverNotEligible.body":
+    "租戶叫車建立路由不使用駕駛資格狀態。",
+  "newBooking.empty.reason": "EmptyReason",
+  "newBooking.empty.messageCode": "messageCode: {code}",
+  "newBooking.banner.passengerEmptyTitle": "乘客目錄為空",
+  "newBooking.banner.passengerEmptyBody":
+    "仍可手動輸入乘客，但 `/passengers` 才是 packet 指定的捷徑入口。",
+  "newBooking.banner.addressEmptyTitle": "地址簿為空",
+  "newBooking.banner.addressEmptyBody":
+    "仍可手動輸入地址，但 `/addresses` 才是這個路由的標準捷徑來源。",
+  "newBooking.policy.refreshing": "刷新中",
+  "newBooking.policy.autoPreview": "自動預覽",
+  "newBooking.policy.service": "服務",
+  "newBooking.policy.direction": "方向",
+  "newBooking.policy.passengerRole": "乘客角色",
+  "newBooking.policy.estimatedSpend": "預估花費",
+  "newBooking.policy.notPublished": "未發布",
+  "newBooking.policy.failedTitle": "政策預覽失敗",
+  "newBooking.policy.mode": "模式：{value}",
+  "newBooking.policy.timeout": "逾時：{value} 小時",
+  "newBooking.policy.fallback": "備援策略：{value}",
+  "newBooking.policy.approver": "審批人 {index}",
+  "newBooking.quota.period": "期別：{value}",
+  "newBooking.quota.trigger": "觸發：{value}",
+  "newBooking.quota.value": "使用前 {before} / {limit} · 使用後 {after}",
+  "newBooking.quota.hint": "{dimension} · 剩餘 {percent} · {triggered}",
+  "newBooking.quota.waitingTitle": "預覽等待完整叫車脈絡",
+  "newBooking.quota.waitingBody":
+    "先選成本中心並補齊核心欄位，才能計算配額影響。",
+  "newBooking.submit.openingDetail": "開啟明細中...",
+  "newBooking.submit.resource": "Resource: {type} · {id}",
+  "newBooking.submit.viewAudit": "查看稽核軌跡",
+  "newBooking.submit.failedTitle": "建立訂單失敗",
+  "newBooking.submit.fixHighlightedTitle": "請先處理高亮欄位",
+  "newBooking.submit.submitting": "送出中...",
+  "newBooking.submit.forApproval": "送出審批",
+  "newBooking.submit.create": "建立叫車",
+
+  "refreshControl.fresh": "最新快照",
+  "refreshControl.stale": "過期快照",
+  "refreshControl.degraded": "降級資料",
+  "refreshControl.unknown": "鮮度未知",
+  "refreshControl.refreshing": "刷新中",
+  "refreshControl.refresh": "刷新",
 
   "partner.shell.navAria": "合作夥伴導覽",
   "partner.shell.badge": "合作夥伴模式",

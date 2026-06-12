@@ -4,6 +4,7 @@ import { useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CanvasBtn, buildCanvasTheme } from "@drts/ui-web";
 import type { RefreshTier, UiRefreshMetadata } from "@drts/contracts";
+import { useTranslation } from "@/lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "tenant",
@@ -21,17 +22,20 @@ const REFRESH_INTERVAL_MS: Record<RefreshTier, number | null> = {
   manual: null,
 };
 
-function getFreshnessLabel(metadata: UiRefreshMetadata) {
+function getFreshnessLabel(
+  metadata: UiRefreshMetadata,
+  t: (key: string) => string,
+) {
   switch (metadata.dataFreshness) {
     case "stale":
-      return "過期快照";
+      return t("refreshControl.stale");
     case "degraded":
-      return "降級資料";
+      return t("refreshControl.degraded");
     case "unknown":
-      return "鮮度未知";
+      return t("refreshControl.unknown");
     case "fresh":
     default:
-      return "最新快照";
+      return t("refreshControl.fresh");
   }
 }
 
@@ -43,6 +47,7 @@ export function RefreshTierControl({
   tier: RefreshTier;
 }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [isPending, startTransition] = useTransition();
   const intervalMs = REFRESH_INTERVAL_MS[tier];
 
@@ -77,7 +82,7 @@ export function RefreshTierControl({
           whiteSpace: "nowrap",
         }}
       >
-        {`T5 / ${tier} · ${getFreshnessLabel(metadata)}`}
+        {`T5 / ${tier} · ${getFreshnessLabel(metadata, t)}`}
       </span>
       <CanvasBtn
         theme={theme}
@@ -91,7 +96,9 @@ export function RefreshTierControl({
           });
         }}
       >
-        {isPending ? "Refreshing" : "Refresh"}
+        {isPending
+          ? t("refreshControl.refreshing")
+          : t("refreshControl.refresh")}
       </CanvasBtn>
     </div>
   );

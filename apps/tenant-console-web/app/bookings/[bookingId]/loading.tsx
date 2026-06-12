@@ -1,24 +1,28 @@
 import { PageHero, SurfaceCard } from "@/components/page-primitives";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
-export default function BookingDetailLoading() {
+export default async function BookingDetailLoading() {
+  const locale = await getServerLocale();
+
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="訂單明細"
-        title="載入租戶訂單明細"
-        description="明細路由正在水合 T5 租戶快照、動作描述子與 audit 內容。"
+        eyebrow={t("bookingDetail.hero.eyebrow", locale)}
+        title={t("bookingDetail.loading.title", locale)}
+        description={t("bookingDetail.loading.description", locale)}
       />
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="Refresh tier"
-          title="準備訂單明細"
-          description="載入目前訂單快照與更新中繼資料。"
+          kicker={t("bookingDetail.refresh.kicker", locale)}
+          title={t("bookingDetail.loading.refreshTitle", locale)}
+          description={t("bookingDetail.loading.refreshDescription", locale)}
         />
         <SurfaceCard
-          kicker="Status"
-          title="解析可編輯性"
-          description="在畫面可互動前，取得 availableActions、editableUntil 與審批狀態。"
+          kicker={t("bookingDetail.status.kicker", locale)}
+          title={t("bookingDetail.loading.statusTitle", locale)}
+          description={t("bookingDetail.loading.statusDescription", locale)}
         />
       </section>
     </div>
