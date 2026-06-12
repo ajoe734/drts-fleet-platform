@@ -22,7 +22,7 @@ without endorsing the canvas-absent false premise.
 
 - owner=`Codex`
 - reviewer=`Claude2`
-- status=`in_progress`
+- status=`review_approved`
 - helper_parent=`ENT-DISP-FE-20260612-B`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
@@ -140,7 +140,8 @@ From `codex/ent-disp-fe-20260612-b:apps/enterprise-dispatch-web/components/enter
 - Confirm the reusable mechanical evidence is limited to diff shape and the
   additive `headerControls` seam.
 - Confirm reviewer identity is `Claude2` throughout this packet.
-- Confirm the local-only push state is recorded for closeout follow-up.
+- Confirm the pushed branch state is recorded accurately for owner closeout
+  evidence.
 
 ## 6. Verification Snapshot
 
@@ -158,9 +159,10 @@ Reviewed for this packet:
 Push-state note:
 
 - `git ls-remote --heads origin codex/ent-disp-fe-20260612-b-sidecar-review`
-  returned no remote branch
-- corrected packet therefore remains local until the owner performs commit/push
-  during closeout
+  resolves commit `61e6d848bf72d977e4c0f9fe84dd749c8d639514`
+- corrected packet is pushed on
+  `origin/codex/ent-disp-fe-20260612-b-sidecar-review` and can be closed out
+  from this branch state
 
 ## 7. Reviewer Handoff
 
