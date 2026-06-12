@@ -1,7 +1,11 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
-import { t } from "@/lib/translations";
+import {
+  resolveBankDemoTenant,
+  resolveLocale,
+  type BankDemoTenant,
+} from "@/lib/demo-tenants";
+import { t, type Locale } from "@/lib/translations";
 
 type BankRole = "bank_program_admin" | "bank_ops_viewer" | "bank_finance";
 type UserStatus = "active" | "invited" | "suspended";
@@ -64,22 +68,20 @@ const ROLE_CARDS: BankRole[] = [
 
 const FILTERS: UserFilter[] = ["all", "active", "invited", "suspended"];
 
-const ctbcDarkTokens = BRAND_TEMPLATES.CTBC.tokens.dark;
-
-function roleLabel(role: BankRole) {
-  return t(`users.role.${role}`);
+function roleLabel(role: BankRole, locale: Locale) {
+  return t(`users.role.${role}`, locale);
 }
 
-function roleCode(role: BankRole) {
-  return t(`users.roleCode.${role}`);
+function roleCode(role: BankRole, locale: Locale) {
+  return t(`users.roleCode.${role}`, locale);
 }
 
-function statusLabel(status: UserStatus) {
-  return t(`users.status.${status}`);
+function statusLabel(status: UserStatus, locale: Locale) {
+  return t(`users.status.${status}`, locale);
 }
 
-function filterLabel(filter: UserFilter) {
-  return t(`users.filter.${filter}`);
+function filterLabel(filter: UserFilter, locale: Locale) {
+  return t(`users.filter.${filter}`, locale);
 }
 
 function getCount(filter: UserFilter) {
@@ -90,22 +92,46 @@ function getCount(filter: UserFilter) {
   return USERS.filter((user) => user.status === filter).length;
 }
 
-function getActionLabel(status: UserStatus) {
+function getActionLabel(status: UserStatus, locale: Locale) {
   return status === "suspended"
-    ? t("users.action.reactivate")
-    : t("users.action.suspend");
+    ? t("users.action.reactivate", locale)
+    : t("users.action.suspend", locale);
 }
 
-function getActionHref(filter: UserFilter) {
-  return filter === "all" ? "/users" : `/users?status=${filter}`;
+function getActionHref(
+  filter: UserFilter,
+  bank: BankDemoTenant,
+  locale: Locale,
+) {
+  const params = new URLSearchParams({ bank: bank.code, locale });
+  if (filter !== "all") {
+    params.set("status", filter);
+  }
+  return `/users?${params.toString()}`;
+}
+
+function emailForTenant(email: string, tenant: BankDemoTenant) {
+  const [local] = email.split("@");
+  const domain =
+    tenant.code === "ctbc"
+      ? "ctbcbank.com"
+      : `${tenant.issuerCode.toLowerCase()}.demo`;
+  return `${local}@${domain}`;
 }
 
 export default async function UsersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ status?: string }>;
+  searchParams?: Promise<{
+    bank?: string | string[];
+    locale?: string | string[];
+    status?: string;
+  }>;
 }) {
   const params = await searchParams;
+  const locale = resolveLocale(params?.locale);
+  const tenant = resolveBankDemoTenant(params?.bank);
+  const issuerTokens = tenant.template.tokens.dark;
   const activeFilter = FILTERS.includes(params?.status as UserFilter)
     ? (params?.status as UserFilter)
     : "all";
@@ -116,32 +142,37 @@ export default async function UsersPage({
       : USERS.filter((user) => user.status === activeFilter);
 
   const issuerVars = {
-    "--issuer-primary": ctbcDarkTokens.primary,
-    "--issuer-primary-dark": ctbcDarkTokens.primaryDark,
-    "--issuer-accent": ctbcDarkTokens.accent,
-    "--issuer-ink": ctbcDarkTokens.ink,
-    "--issuer-surface": ctbcDarkTokens.surface.bg,
-    "--issuer-border": ctbcDarkTokens.surface.border,
+    "--issuer-primary": issuerTokens.primary,
+    "--issuer-primary-dark": issuerTokens.primaryDark,
+    "--issuer-accent": issuerTokens.accent,
+    "--issuer-ink": issuerTokens.ink,
+    "--issuer-surface": issuerTokens.surface.bg,
+    "--issuer-border": issuerTokens.surface.border,
   } as CSSProperties;
 
   return (
     <div className="page-shell bank-users-page" style={issuerVars}>
       <section className="users-hero">
         <div className="users-hero-copy">
-          <span className="eyebrow">{t("users.eyebrow")}</span>
-          <h1>{t("users.title")}</h1>
-          <p>{t("users.lead")}</p>
+          <span className="eyebrow">{t("users.eyebrow", locale)}</span>
+          <h1>{t("users.title", locale)}</h1>
+          <p>{t("users.lead", locale)}</p>
         </div>
         <button
           className="table-action-button is-primary"
           disabled={!canManageUsers}
           type="button"
         >
-          {canManageUsers ? t("users.invite") : t("users.action.locked")}
+          {canManageUsers
+            ? t("users.invite", locale)
+            : t("users.action.locked", locale)}
         </button>
       </section>
 
-      <nav aria-label={t("users.filterNav")} className="users-filter-tabs">
+      <nav
+        aria-label={t("users.filterNav", locale)}
+        className="users-filter-tabs"
+      >
         {FILTERS.map((filter) => {
           const isActive = filter === activeFilter;
 
@@ -149,10 +180,10 @@ export default async function UsersPage({
             <Link
               aria-current={isActive ? "page" : undefined}
               className={`users-filter-tab${isActive ? " is-active" : ""}`}
-              href={getActionHref(filter)}
+              href={getActionHref(filter, tenant, locale)}
               key={filter}
             >
-              <span>{filterLabel(filter)}</span>
+              <span>{filterLabel(filter, locale)}</span>
               <span className="users-filter-badge">{getCount(filter)}</span>
             </Link>
           );
@@ -162,9 +193,9 @@ export default async function UsersPage({
       <section className="users-role-grid">
         {ROLE_CARDS.map((role) => (
           <article className="role-card" key={role}>
-            <span className="surface-kicker">{roleCode(role)}</span>
-            <strong>{roleLabel(role)}</strong>
-            <p>{t(`users.roleCard.${role}`)}</p>
+            <span className="surface-kicker">{roleCode(role, locale)}</span>
+            <strong>{roleLabel(role, locale)}</strong>
+            <p>{t(`users.roleCard.${role}`, locale)}</p>
           </article>
         ))}
       </section>
@@ -174,12 +205,12 @@ export default async function UsersPage({
           <table className="users-table">
             <thead>
               <tr>
-                <th>{t("users.table.user")}</th>
-                <th>{t("users.table.email")}</th>
-                <th>{t("users.table.role")}</th>
-                <th>{t("users.table.status")}</th>
-                <th>{t("users.table.lastActivity")}</th>
-                <th>{t("users.table.actions")}</th>
+                <th>{t("users.table.user", locale)}</th>
+                <th>{t("users.table.email", locale)}</th>
+                <th>{t("users.table.role", locale)}</th>
+                <th>{t("users.table.status", locale)}</th>
+                <th>{t("users.table.lastActivity", locale)}</th>
+                <th>{t("users.table.actions", locale)}</th>
               </tr>
             </thead>
             <tbody>
@@ -199,18 +230,20 @@ export default async function UsersPage({
                         <strong>{user.name}</strong>
                       </div>
                     </td>
-                    <td className="mono-cell">{user.email}</td>
+                    <td className="mono-cell">
+                      {emailForTenant(user.email, tenant)}
+                    </td>
                     <td>
                       <span className={`role-pill role-${user.role}`}>
-                        {roleLabel(user.role)}
+                        {roleLabel(user.role, locale)}
                         <span className="role-pill-code">
-                          {roleCode(user.role)}
+                          {roleCode(user.role, locale)}
                         </span>
                       </span>
                     </td>
                     <td>
                       <span className={`table-status status-${user.status}`}>
-                        {statusLabel(user.status)}
+                        {statusLabel(user.status, locale)}
                       </span>
                     </td>
                     <td>{user.lastActivity}</td>
@@ -222,8 +255,8 @@ export default async function UsersPage({
                           type="button"
                         >
                           {canManageUsers
-                            ? t("users.action.changeRole")
-                            : t("users.action.locked")}
+                            ? t("users.action.changeRole", locale)
+                            : t("users.action.locked", locale)}
                         </button>
                         <button
                           className="table-action-button"
@@ -231,8 +264,8 @@ export default async function UsersPage({
                           type="button"
                         >
                           {canManageUsers
-                            ? getActionLabel(user.status)
-                            : t("users.action.locked")}
+                            ? getActionLabel(user.status, locale)
+                            : t("users.action.locked", locale)}
                         </button>
                       </div>
                     </td>
@@ -245,9 +278,9 @@ export default async function UsersPage({
       </section>
 
       <p className="users-footnote">
-        {t("users.auditFootnote", "zh", {
+        {t("users.auditFootnote", locale, {
           actor: CURRENT_ACTOR.display,
-          role: roleLabel(CURRENT_ACTOR.role),
+          role: roleLabel(CURRENT_ACTOR.role, locale),
         })}
       </p>
     </div>

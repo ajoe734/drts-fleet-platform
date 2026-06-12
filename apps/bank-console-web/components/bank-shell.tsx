@@ -1,21 +1,24 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, type ReactNode } from "react";
 import {
   CanvasShell,
-  CanvasWindowChrome,
   ManagementThemeProvider,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { BankDemoControls } from "@/components/bank-demo-controls";
+import {
+  getLocaleTag,
+  resolveBankDemoTenant,
+  resolveLocale,
+} from "@/lib/demo-tenants";
 import {
   BANK_CONSOLE_BRAND,
   BANK_CONSOLE_BRAND_SUB,
-  BANK_CONSOLE_CONTEXT,
   BANK_CONSOLE_ENV,
-  BANK_CONSOLE_SEARCH_PLACEHOLDER,
   BANK_CONSOLE_VERSION,
-  bankNavEntries,
+  buildBankNavEntries,
   findNavItem,
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
@@ -30,46 +33,59 @@ const bankCanvasTheme = buildCanvasTheme({
 });
 
 export function BankShell({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<div className="bank-runtime-shell">{children}</div>}>
+      <BankShellContent>{children}</BankShellContent>
+    </Suspense>
+  );
+}
+
+function BankShellContent({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const activeItem = findNavItem(pathname);
+  const searchParams = useSearchParams();
+  const locale = resolveLocale(searchParams.get("locale"));
+  const bank = resolveBankDemoTenant(searchParams.get("bank"));
+  const signedOut = searchParams.get("signedOut") === "1";
+  const navEntries = buildBankNavEntries(locale, searchParams.toString());
+  const activeItem = findNavItem(pathname, navEntries);
   const activeKey = activeItem?.key;
+
+  useEffect(() => {
+    document.documentElement.lang = getLocaleTag(locale);
+  }, [locale]);
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
-      <div
-        style={{
-          minHeight: "100vh",
-          background:
-            "radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 22%), #060b13",
-        }}
-      >
-        <CanvasWindowChrome
-          width="100%"
-          height="100vh"
-          outerPadding={12}
-          style={{ minHeight: "100vh" }}
-          contentStyle={{ background: bankCanvasTheme.bg }}
+      <div className="bank-runtime-shell">
+        <CanvasShell
+          theme={bankCanvasTheme}
+          nav={navEntries}
+          brandLabel={BANK_CONSOLE_BRAND}
+          brandSubLabel={BANK_CONSOLE_BRAND_SUB}
+          brandMark="B"
+          breadcrumb={[
+            bank.context[locale],
+            activeItem?.label ?? t("shell.breadcrumb.home", locale),
+          ]}
+          env={BANK_CONSOLE_ENV}
+          versionLabel={BANK_CONSOLE_VERSION}
+          searchPlaceholder={t("shell.search", locale)}
+          searchWidth={260}
+          avatarLabel={signedOut ? t("shell.guestAvatar", locale) : bank.avatar}
+          topRight={
+            <BankDemoControls
+              bank={bank}
+              locale={locale}
+              pathname={pathname}
+              searchParams={searchParams}
+              signedOut={signedOut}
+            />
+          }
+          style={{ height: "100%" }}
+          {...(activeKey ? { active: activeKey } : {})}
         >
-          <CanvasShell
-            theme={bankCanvasTheme}
-            nav={bankNavEntries}
-            brandLabel={BANK_CONSOLE_BRAND}
-            brandSubLabel={BANK_CONSOLE_BRAND_SUB}
-            breadcrumb={[
-              BANK_CONSOLE_CONTEXT,
-              activeItem?.label ?? t("shell.breadcrumb.home"),
-            ]}
-            env={BANK_CONSOLE_ENV}
-            versionLabel={BANK_CONSOLE_VERSION}
-            searchPlaceholder={BANK_CONSOLE_SEARCH_PLACEHOLDER}
-            searchWidth={280}
-            avatarLabel="中信"
-            style={{ height: "100%" }}
-            {...(activeKey ? { active: activeKey } : {})}
-          >
-            {children}
-          </CanvasShell>
-        </CanvasWindowChrome>
+          {children}
+        </CanvasShell>
       </div>
     </ManagementThemeProvider>
   );
