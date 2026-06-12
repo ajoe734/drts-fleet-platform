@@ -126,3 +126,21 @@ Net result:
 - a branch/evidence drift risk has been documented explicitly so the reviewer does not assume this isolated worktree is the parent truth
 
 _Reviewer disposition pending._
+
+---
+
+## 7. Owner Closeout Addendum
+
+Reviewer approval for this sidecar was **approve-with-correction** rather than a clean evidence confirmation.
+
+Closeout corrections preserved here:
+
+- the sidecar commit was originally local-only and still required a normal non-force push during owner closeout
+- the freeze-decision citation inherited from the acceptance packet could not be verified because `docs/01-decisions/SD-DP-20260612-007-enterprise-dispatch-frontend-and-lovable-freeze.md` is absent from `origin/dev` and from reachable history in this workspace
+- because this is a support-only artifact, the correct integration label at closeout is `INTEGRATION_STATUS=not_applicable`
+
+Final owner closeout should therefore describe this packet as:
+
+- approved for sidecar/support use
+- explicit about branch/evidence drift
+- not independent proof that the parent scaffold bytes are present in the current worktree
