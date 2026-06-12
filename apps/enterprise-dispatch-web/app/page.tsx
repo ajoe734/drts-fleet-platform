@@ -9,12 +9,11 @@ import {
   EnterprisePill,
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
-import { EnterpriseBookingFlowStepper } from "@/components/enterprise-booking-flow";
 import {
-  enterpriseBookingDraft,
   bookingStateMeta,
+  enterpriseBookingDraft,
   enterpriseBookings,
-  gateStateFixtures,
+  enterpriseQuotaSummary,
   enterpriseTenant,
   enterpriseUser,
   policyNotes,
@@ -71,7 +70,7 @@ const ghostLinkStyle = {
 } as const;
 
 export default function HomePage() {
-  const activeTrip = enterpriseBookings[0]!;
+  const activeTrip = enterpriseBookings[0] ?? null;
 
   return (
     <div style={enterprisePageStyle}>
@@ -85,13 +84,11 @@ export default function HomePage() {
         }
       />
 
-      <EnterpriseBookingFlowStepper current="home" />
-
       <EnterpriseKpiGrid>
         <EnterpriseKpi
           label="本月額度"
-          value="NT$ 31,000"
-          sub="可用 / NT$ 60,000"
+          value={enterpriseQuotaSummary.availableAmount}
+          sub={enterpriseQuotaSummary.amount}
           hint="quota"
         />
         <EnterpriseKpi
@@ -119,24 +116,28 @@ export default function HomePage() {
             </EnterprisePill>
           }
         >
-          <EnterpriseDl
-            cols={1}
-            items={[
-              { k: "乘客", v: activeTrip.passenger },
-              { k: "下單人", v: `${activeTrip.bookedBy} 代訂` },
-              { k: "行程", v: `${activeTrip.from} → ${activeTrip.to}` },
-              {
-                k: "ETA",
-                v: `${activeTrip.etaMinutes} 分鐘 · 估計`,
-                mono: true,
-              },
-            ]}
-          />
-          <div style={{ marginTop: 12 }}>
-            <Link href="/trip" style={secondaryLinkStyle}>
-              查看目前行程
-            </Link>
-          </div>
+          {activeTrip ? (
+            <>
+              <EnterpriseDl
+                cols={1}
+                items={[
+                  { k: "乘客", v: activeTrip.passenger },
+                  { k: "下單人", v: `${activeTrip.bookedBy} 代訂` },
+                  { k: "行程", v: `${activeTrip.from} → ${activeTrip.to}` },
+                  {
+                    k: "ETA",
+                    v: `${activeTrip.etaMinutes ?? "?"} 分鐘 · 估計`,
+                    mono: true,
+                  },
+                ]}
+              />
+              <div style={{ marginTop: 12 }}>
+                <Link href="/trip" style={secondaryLinkStyle}>
+                  查看目前行程
+                </Link>
+              </div>
+            </>
+          ) : null}
         </EnterpriseCard>
 
         <EnterpriseCard
@@ -164,132 +165,6 @@ export default function HomePage() {
       </div>
 
       <EnterpriseSection>
-        <EnterpriseCard
-          title="本次 dispatch fixture"
-          actions={
-            <EnterprisePill tone="info">
-              home → new → review → submitted
-            </EnterprisePill>
-          }
-        >
-          <EnterpriseDl
-            cols={2}
-            items={[
-              { k: "乘客", v: enterpriseBookingDraft.passenger },
-              { k: "代訂人", v: enterpriseBookingDraft.bookedBy },
-              {
-                k: "成本中心",
-                v: enterpriseBookingDraft.costCenter,
-                mono: true,
-              },
-              {
-                k: "預估費用",
-                v: enterpriseBookingDraft.estimatedFare,
-                mono: true,
-              },
-            ]}
-          />
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              marginTop: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <Link href="/bookings/new" style={primaryLinkStyle}>
-              從首頁開始走流程
-            </Link>
-            <Link href="/bookings/review" style={secondaryLinkStyle}>
-              直接看 review 核心
-            </Link>
-            <Link
-              href="/bookings/submitted?state=pending"
-              style={ghostLinkStyle}
-            >
-              查看 pending submitted
-            </Link>
-          </div>
-        </EnterpriseCard>
-
-        <EnterpriseCard
-          title="Support-safe gate states"
-          actions={<EnterprisePill tone="info">6 states</EnterprisePill>}
-        >
-          <div
-            style={{
-              display: "grid",
-              gap: 16,
-              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            }}
-          >
-            {Object.values(gateStateFixtures).map((gate) => (
-              <div
-                key={gate.code}
-                style={{
-                  display: "grid",
-                  gap: 12,
-                  padding: 16,
-                  borderRadius: 16,
-                  border: `1px solid ${enterpriseTheme.border}`,
-                  background: enterpriseTheme.surface,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <div style={{ display: "grid", gap: 4 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>
-                      {gate.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: enterpriseTheme.textMuted,
-                        fontFamily: enterpriseTheme.monoFamily,
-                      }}
-                    >
-                      {gate.code}
-                    </div>
-                  </div>
-                  <EnterprisePill tone={gate.tone}>{gate.code}</EnterprisePill>
-                </div>
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                    {gate.summary}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      color: enterpriseTheme.textMuted,
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    {gate.body}
-                  </div>
-                </div>
-                <EnterpriseDl cols={1} items={Array.from(gate.facts)} />
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {gate.actions.map((action, index) => (
-                    <Link
-                      key={action}
-                      href={index === 0 ? "/help" : "/bookings"}
-                      style={index === 0 ? secondaryLinkStyle : ghostLinkStyle}
-                    >
-                      {action}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </EnterpriseCard>
-
         <EnterpriseCard
           title="即將到來的預約"
           actions={
@@ -347,9 +222,42 @@ export default function HomePage() {
                       {bookingStateMeta[booking.state].label}
                     </EnterprisePill>
                   </div>
+                  <div style={{ marginTop: 8 }}>
+                    <Link
+                      href={`/bookings/${booking.id}`}
+                      style={{ ...ghostLinkStyle, paddingInline: 0 }}
+                    >
+                      查看詳情
+                    </Link>
+                  </div>
                 </div>
               </div>
             ))}
+          </div>
+        </EnterpriseCard>
+
+        <EnterpriseCard
+          title="下一筆預約草稿"
+          actions={<EnterprisePill tone="accent">review-first</EnterprisePill>}
+        >
+          <EnterpriseDl
+            cols={2}
+            items={[
+              { k: "乘客", v: enterpriseBookingDraft.passenger },
+              { k: "下單人", v: enterpriseBookingDraft.bookedBy },
+              { k: "上車 / 下車", v: `${enterpriseBookingDraft.pickup} → ${enterpriseBookingDraft.dropoff}` },
+              { k: "成本中心", v: enterpriseBookingDraft.costCenter, mono: true },
+            ]}
+          />
+          <div
+            style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}
+          >
+            <Link href="/bookings/review" style={primaryLinkStyle}>
+              進入確認頁
+            </Link>
+            <Link href="/bookings/new" style={secondaryLinkStyle}>
+              回到表單
+            </Link>
           </div>
         </EnterpriseCard>
 

@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "next build",
-    "dev": "next dev --hostname 0.0.0.0 --port 3007",
+    "dev": "next dev --hostname 0.0.0.0 --port 3010",
     "lint": "eslint . --max-warnings=0",
-    "start": "next start --port 3007",
-    "test": "vitest run --passWithNoTests",
+    "start": "next start --port 3010",
+    "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
