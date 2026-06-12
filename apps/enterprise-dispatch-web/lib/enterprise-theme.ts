@@ -1,7 +1,7 @@
 import { buildCanvasTheme } from "@drts/ui-web";
 
 export const enterpriseTheme = buildCanvasTheme({
-  surface: "ops",
+  surface: "enterprise",
   density: "compact",
 });
 
