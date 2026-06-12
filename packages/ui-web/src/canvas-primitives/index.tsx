@@ -142,6 +142,7 @@ export interface ShellProps {
   searchPlaceholder?: string;
   searchWidth?: number;
   avatarLabel?: ReactNode;
+  headerControls?: ReactNode;
   style?: CSSProperties;
 }
 
@@ -302,6 +303,7 @@ export function Shell({
   searchPlaceholder,
   searchWidth = 220,
   avatarLabel = "YL",
+  headerControls,
   style,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
@@ -545,46 +547,50 @@ export function Shell({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <SearchBox
-            theme={theme}
-            width={searchWidth}
-            placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
-          />
-          <Kbd theme={theme}>⌘K</Kbd>
-          <button
-            type="button"
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              background: "transparent",
-              border: "1px solid transparent",
-              color: theme.textMuted,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-            }}
-          >
-            <CanvasIcon name="bell" size={15} />
-          </button>
-          <div
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 13,
-              background: theme.accentBg,
-              color: theme.accent,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              fontWeight: 700,
-              border: `1px solid ${theme.accentBorder}`,
-            }}
-          >
-            {avatarLabel}
-          </div>
+          {headerControls ?? (
+            <>
+              <SearchBox
+                theme={theme}
+                width={searchWidth}
+                placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
+              />
+              <Kbd theme={theme}>⌘K</Kbd>
+              <button
+                type="button"
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 7,
+                  background: "transparent",
+                  border: "1px solid transparent",
+                  color: theme.textMuted,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+              >
+                <CanvasIcon name="bell" size={15} />
+              </button>
+              <div
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 13,
+                  background: theme.accentBg,
+                  color: theme.accent,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  border: `1px solid ${theme.accentBorder}`,
+                }}
+              >
+                {avatarLabel}
+              </div>
+            </>
+          )}
           {topRight}
         </div>
       </header>

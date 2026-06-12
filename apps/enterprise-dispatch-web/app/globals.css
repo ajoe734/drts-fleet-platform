@@ -10,4 +10,9 @@ body {
 
 body {
   min-height: 100vh;
+  background: #fbfaf8;
+}
+
+a {
+  color: inherit;
 }

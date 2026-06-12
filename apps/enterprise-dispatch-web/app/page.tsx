@@ -1,104 +1,123 @@
+import Link from "next/link";
 import {
-  CanvasCard,
-  CanvasEmptyState,
-  CanvasPageHeader,
-  CanvasPill,
-  CanvasBtn,
-  buildCanvasTheme,
-} from "@drts/ui-web";
-import { REALM_DISPLAY_STRINGS } from "@drts/ui-tokens";
-
-const theme = buildCanvasTheme({
-  surface: "ops",
-  density: "compact",
-});
-
-const pageStyle = {
-  display: "grid",
-  gap: 16,
-  padding: 24,
-  width: "100%",
-  maxWidth: 1200,
-  margin: "0 auto",
-} as const;
-
-const cardGridStyle = {
-  display: "grid",
-  gap: 16,
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-} as const;
-
-const listStyle = {
-  margin: 0,
-  paddingLeft: 18,
-  display: "grid",
-  gap: 8,
-  color: theme.text,
-  fontSize: 12.5,
-  lineHeight: 1.5,
-} as const;
+  EnterpriseBanner,
+  EnterpriseCard,
+  EnterpriseDl,
+  EnterpriseEmptyState,
+  EnterpriseKpi,
+  EnterpriseKpiGrid,
+  EnterprisePageHeader,
+  EnterprisePill,
+  EnterpriseSection,
+  EnterpriseStaleBanner,
+} from "@/components/enterprise-primitives";
+import { EnterpriseShellActions } from "@/components/enterprise-shell";
+import {
+  enterpriseCardGridStyle,
+  enterprisePageStyle,
+} from "@/lib/enterprise-theme";
 
 export default function HomePage() {
   return (
-    <div style={pageStyle}>
-      <CanvasPageHeader
-        theme={theme}
-        title="Enterprise Dispatch shell"
-        subtitle="This route intentionally stops at the shell boundary until a dedicated Enterprise Dispatch design canvas is supplied."
+    <div style={enterprisePageStyle}>
+      <EnterprisePageHeader
+        title="Dispatch Overview"
+        subtitle="Enterprise dispatch shell primitives aligned to the shared management canvas layer, without inheriting tenant admin or partner booking chrome."
         actions={
-          <CanvasPill theme={theme} tone="ops">
-            {REALM_DISPLAY_STRINGS.ops.en}
-          </CanvasPill>
+          <EnterpriseShellActions />
         }
       />
 
-      <div style={cardGridStyle}>
-        <CanvasCard
-          theme={theme}
-          title="Current scope"
-          actions={
-            <CanvasBtn theme={theme} variant="secondary" size="xs">
-              Scaffold only
-            </CanvasBtn>
-          }
-        >
-          <ul style={listStyle}>
-            <li>Workspace shell for enterprise dispatch operators.</li>
-            <li>Ops realm styling sourced from shared DRTS UI tokens.</li>
-            <li>No tenant-console, tenant-portal, or partner-booking reuse.</li>
-          </ul>
-        </CanvasCard>
+      <EnterpriseStaleBanner
+        freshness="degraded"
+        title="Screen scope remains canvas-bounded"
+        body="The repo still lacks a dedicated Enterprise Dispatch artboard, so this surface lands the shared shell, embed chrome, and primitives only."
+      />
 
-        <CanvasCard
-          theme={theme}
-          title="Blocked from full UI implementation"
-          actions={
-            <CanvasPill theme={theme} tone="warn">
-              Canvas missing
-            </CanvasPill>
-          }
+      <EnterpriseKpiGrid>
+        <EnterpriseKpi
+          label="Queues"
+          value="3"
+          delta="+1"
+          deltaTone="up"
+          sub="overview, reassignments, supply coverage"
+          hint="shell_scope"
+        />
+        <EnterpriseKpi
+          label="Health"
+          value="healthy"
+          sub="sidebar footer mirrors shared shell contract"
+          hint="ui_health_envelope"
+        />
+        <EnterpriseKpi
+          label="Embed"
+          value="ready"
+          sub="host chrome and webview status available"
+          hint="embedded_shell"
+        />
+      </EnterpriseKpiGrid>
+
+      <div style={enterpriseCardGridStyle}>
+        <EnterpriseCard
+          title="Shell contract"
+          actions={<EnterprisePill tone="ops">ops realm</EnterprisePill>}
         >
-          <ul style={listStyle}>
-            <li>
-              No `Enterprise Dispatch.html` canvas exists under
-              `docs/05-ui/drts-design-canvas`.
-            </li>
-            <li>
-              Screen-level information architecture and interaction design
-              remain undefined.
-            </li>
-            <li>
-              A requirements note is recorded in the task sidecar artifact.
-            </li>
-          </ul>
-        </CanvasCard>
+          <EnterpriseDl
+            cols={1}
+            items={[
+              { k: "Source", v: "mgmt-shell.jsx / ui-tokens ops realm" },
+              { k: "Navigation", v: "dispatch-only; no admin IA inheritance" },
+              { k: "Topbar", v: "refresh tier, alerts, identity chip" },
+              { k: "Footer", v: "health envelope with last checked timestamp" },
+            ]}
+          />
+        </EnterpriseCard>
+
+        <EnterpriseCard
+          title="Primitives in app"
+          actions={<EnterprisePill tone="info">base kit</EnterprisePill>}
+        >
+          <EnterpriseDl
+            cols={1}
+            items={[
+              { k: "Wrapped", v: "header, card, KPI, DL, field, input, select" },
+              { k: "Status", v: "pill, banner, stale banner, buttons" },
+              { k: "Layout", v: "page stack and KPI grid helpers" },
+              { k: "Usage", v: "future screens import enterprise wrappers only" },
+            ]}
+          />
+        </EnterpriseCard>
       </div>
 
-      <CanvasEmptyState
-        theme={theme}
-        title="Dispatch dashboard pending design handoff"
-        body="Add the dedicated design canvas before implementing workflow boards, reassignment queues, or operator detail panels."
-      />
+      <EnterpriseSection>
+        <EnterpriseBanner
+          tone="info"
+          title="Embedded shell preview available"
+          body="Use the embedded preview route to validate host chrome, webview state, and compact operator actions."
+          actions={
+            <Link
+              href="/embedded-preview"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                height: 24,
+                padding: "4px 8px",
+                borderRadius: 7,
+                border: "1px solid currentColor",
+                textDecoration: "none",
+                fontSize: 11.5,
+                fontWeight: 500,
+              }}
+            >
+              Open preview
+            </Link>
+          }
+        />
+        <EnterpriseEmptyState
+          title="Workflow boards intentionally deferred"
+          body="Queue composition, reassignment state machine screens, and detail drawers remain blocked on a dedicated Enterprise Dispatch design canvas."
+        />
+      </EnterpriseSection>
     </div>
   );
 }
