@@ -10,7 +10,7 @@ body {
 
 body {
   min-height: 100vh;
-  background: #fbfaf8;
+  background: transparent;
 }
 
 a {

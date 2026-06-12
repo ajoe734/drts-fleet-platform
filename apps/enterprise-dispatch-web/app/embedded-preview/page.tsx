@@ -1,12 +1,10 @@
 import {
+  EnterpriseBanner,
   EnterpriseBtn,
   EnterpriseCard,
   EnterpriseDl,
-  EnterpriseField,
-  EnterpriseInput,
   EnterprisePageHeader,
   EnterprisePill,
-  EnterpriseSelect,
 } from "@/components/enterprise-primitives";
 import { EnterpriseEmbedShell } from "@/components/enterprise-shell";
 import { enterprisePageStyle } from "@/lib/enterprise-theme";
@@ -16,50 +14,36 @@ export default function EmbeddedPreviewPage() {
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
         title="Embedded Shell Preview"
-        subtitle="Compact host chrome for embedded operator dispatch entry points."
+        subtitle="企業 App 內嵌版的 compact chrome，不顯示後台導覽。"
         sticky={false}
       />
-      <EnterpriseEmbedShell host="tenant portal" state="live">
+      <EnterpriseEmbedShell host="hongshuo-workspace" state="live">
         <div style={{ padding: 16, display: "grid", gap: 16 }}>
           <EnterpriseCard
-            title="Embedded dispatch handoff"
-            actions={<EnterprisePill tone="success">session resolved</EnterprisePill>}
+            title="Host hand-off"
+            actions={<EnterprisePill tone="success">handoff ok</EnterprisePill>}
           >
             <EnterpriseDl
               cols={2}
               items={[
-                { k: "Entry", v: "cross-app dispatch launch" },
-                { k: "Source", v: "tenant portal", mono: true },
-                { k: "Context", v: "dispatch-only tools inside host frame" },
-                { k: "Security", v: "no admin shell bleed-through" },
+                { k: "來源", v: "企業 App", mono: true },
+                { k: "身分", v: "tenant-scoped session accepted" },
+                { k: "模式", v: "compact chrome + self-service flow" },
+                { k: "限制", v: "不顯示 admin / ops 導覽" },
               ]}
             />
           </EnterpriseCard>
 
-          <EnterpriseCard title="Quick action tray">
-            <div
-              style={{
-                display: "grid",
-                gap: 14,
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              }}
-            >
-              <EnterpriseField
-                label="Dispatch ID"
-                hint="Embed can arrive with host-selected context."
-              >
-                <EnterpriseInput mono value="ord_8234" suffix="resolved" />
-              </EnterpriseField>
-              <EnterpriseField
-                label="Action mode"
-                hint="Compact controls use the same primitive kit."
-              >
-                <EnterpriseSelect value="Manual review" />
-              </EnterpriseField>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <EnterpriseBtn variant="primary">Resume dispatch</EnterpriseBtn>
-              <EnterpriseBtn variant="secondary">Open full shell</EnterpriseBtn>
+          <EnterpriseBanner
+            tone="info"
+            title="內嵌狀態模板"
+            body="同一套 booking flow 可依 handoff_ok、reauth_required、unsupported_host、fallback_to_web 切換。"
+          />
+
+          <EnterpriseCard title="入口操作">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <EnterpriseBtn variant="primary">繼續建立預約</EnterpriseBtn>
+              <EnterpriseBtn variant="secondary">回到企業網站版</EnterpriseBtn>
             </div>
           </EnterpriseCard>
         </div>

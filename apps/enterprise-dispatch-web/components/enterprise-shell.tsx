@@ -1,326 +1,109 @@
 "use client";
 
-import {
-  CanvasBtn,
-  CanvasIcon,
-  CanvasShell,
-  CanvasWindowChrome,
-  type CanvasShellNavItem,
-} from "@drts/ui-web";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
+import { CanvasIcon, CanvasWindowChrome } from "@drts/ui-web";
 import { enterpriseTheme } from "@/lib/enterprise-theme";
 
-type FreshnessState = "fresh" | "stale" | "degraded" | "unknown";
-type HealthState = "healthy" | "degraded" | "down";
+const tenantIdentity = {
+  mark: "鴻",
+  name: "鴻碩科技",
+  subtitle: "企業派車",
+  operator: "智慧運輸科技 DRTS",
+};
+
+const navItems = [
+  { key: "home", href: "/", label: "首頁" },
+  { key: "bookings", href: "/bookings", label: "我的預約" },
+  { key: "trip", href: "/trip", label: "行程" },
+  { key: "help", href: "/help", label: "說明" },
+] as const;
 
 export interface EnterpriseShellProps {
   children: ReactNode;
 }
 
-const enterpriseNav: CanvasShellNavItem[] = [
-  {
-    key: "overview",
-    href: "/",
-    label: "Dispatch Overview",
-    icon: "dashboard",
-  },
-  {
-    key: "reassignments",
-    href: "/reassignments",
-    label: "Reassignments",
-    icon: "dispatch",
-    badge: "2",
-    badgeTone: "warn",
-    matchPaths: ["/reassignments"],
-  },
-  {
-    key: "supply",
-    href: "/supply",
-    label: "Supply Coverage",
-    icon: "fleet",
-    badge: "1",
-    badgeTone: "danger",
-    matchPaths: ["/supply"],
-  },
-];
+function isActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function topLinkStyle(active: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "8px 14px",
+    borderRadius: 10,
+    fontSize: 13.5,
+    fontWeight: active ? 700 : 500,
+    color: active ? enterpriseTheme.accent : enterpriseTheme.text,
+    background: active ? enterpriseTheme.accentBg : "transparent",
+    textDecoration: "none",
+  };
+}
 
 function iconButtonStyle(): CSSProperties {
   return {
-    width: 28,
-    height: 28,
-    borderRadius: 7,
-    background: "transparent",
-    border: "1px solid transparent",
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    border: `1px solid ${enterpriseTheme.border}`,
+    background: enterpriseTheme.surface,
     color: enterpriseTheme.textMuted,
-    display: "flex",
+    display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     padding: 0,
   };
 }
 
-function RefreshTierBadge({
-  code,
-  seconds,
-  freshness,
-}: {
-  code: string;
-  seconds: number | null;
-  freshness: FreshnessState;
-}) {
-  const tones = {
-    fresh: {
-      fg: enterpriseTheme.success,
-      bg: enterpriseTheme.successBg,
-      bd: enterpriseTheme.successBorder,
-      label: "fresh",
-    },
-    stale: {
-      fg: enterpriseTheme.warn,
-      bg: enterpriseTheme.warnBg,
-      bd: enterpriseTheme.warnBorder,
-      label: "stale",
-    },
-    degraded: {
-      fg: enterpriseTheme.danger,
-      bg: enterpriseTheme.dangerBg,
-      bd: enterpriseTheme.dangerBorder,
-      label: "degraded",
-    },
-    unknown: {
-      fg: enterpriseTheme.textMuted,
-      bg: enterpriseTheme.neutralBg,
-      bd: enterpriseTheme.neutralBorder,
-      label: "unknown",
-    },
-  } as const;
-
-  const tone = tones[freshness];
-
+function UserChip() {
   return (
     <div
-      title="Dispatch refresh metadata"
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
-        padding: "4px 8px",
-        borderRadius: 6,
-        background: tone.bg,
-        border: `1px solid ${tone.bd}`,
-        fontSize: 10.5,
-        fontWeight: 600,
-        color: tone.fg,
-        fontFamily: enterpriseTheme.monoFamily,
+        gap: 8,
       }}
     >
       <span
         style={{
-          width: 5,
-          height: 5,
+          width: 30,
+          height: 30,
           borderRadius: 999,
-          background: tone.fg,
-          flexShrink: 0,
-        }}
-      />
-      <span>{code}</span>
-      <span>{seconds === null ? "MANUAL" : `${seconds}s`}</span>
-      {freshness !== "fresh" ? <span>· {tone.label}</span> : null}
-    </div>
-  );
-}
-
-function IdentityChip() {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "stretch",
-        gap: 1,
-        background: enterpriseTheme.surfaceLo,
-        border: `1px solid ${enterpriseTheme.border}`,
-        borderRadius: 7,
-        overflow: "hidden",
-        height: 28,
-      }}
-    >
-      <div
-        style={{
-          padding: "0 8px",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
           background: enterpriseTheme.accentBg,
+          border: `1px solid ${enterpriseTheme.accentBorder}`,
           color: enterpriseTheme.accent,
-          fontSize: 10.5,
-          fontWeight: 700,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-        }}
-      >
-        <span
-          style={{
-            width: 4,
-            height: 4,
-            borderRadius: 999,
-            background: enterpriseTheme.accent,
-          }}
-        />
-        OPS
-      </div>
-      <div
-        style={{
-          padding: "0 8px",
-          display: "flex",
+          display: "inline-flex",
           alignItems: "center",
-          gap: 4,
-          color: enterpriseTheme.success,
-          fontSize: 10.5,
-          fontWeight: 700,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-          fontFamily: enterpriseTheme.monoFamily,
-        }}
-      >
-        <span
-          style={{
-            width: 4,
-            height: 4,
-            borderRadius: 999,
-            background: enterpriseTheme.success,
-          }}
-        />
-        production
-      </div>
-      <div
-        style={{
-          padding: "0 8px",
-          display: "flex",
-          alignItems: "center",
-          borderLeft: `1px solid ${enterpriseTheme.border}`,
-          color: enterpriseTheme.textMuted,
+          justifyContent: "center",
           fontSize: 11,
-          fontWeight: 600,
-          fontFamily: enterpriseTheme.monoFamily,
+          fontWeight: 700,
         }}
       >
-        ent_dispatch
-      </div>
-      <div
-        style={{
-          padding: "0 8px 0 6px",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          borderLeft: `1px solid ${enterpriseTheme.border}`,
-        }}
-      >
-        <div
-          style={{
-            width: 18,
-            height: 18,
-            borderRadius: 999,
-            background: enterpriseTheme.accentBg,
-            color: enterpriseTheme.accent,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 9.5,
-            fontWeight: 700,
-            border: `1px solid ${enterpriseTheme.accentBorder}`,
-          }}
-        >
-          YL
-        </div>
+        林
+      </span>
+      <span style={{ lineHeight: 1.15 }}>
         <span
           style={{
-            fontSize: 11.5,
+            display: "block",
+            fontSize: 12.5,
+            fontWeight: 600,
             color: enterpriseTheme.text,
-            fontWeight: 500,
-            whiteSpace: "nowrap",
           }}
         >
           林宜君
         </span>
-      </div>
-    </div>
-  );
-}
-
-function HealthFooter({
-  state,
-  lastCheckedAt,
-}: {
-  state: HealthState;
-  lastCheckedAt: string;
-}) {
-  const tones = {
-    healthy: {
-      fg: enterpriseTheme.success,
-      bg: enterpriseTheme.successBg,
-      label: "API healthy",
-      code: "healthy",
-    },
-    degraded: {
-      fg: enterpriseTheme.warn,
-      bg: enterpriseTheme.warnBg,
-      label: "API degraded",
-      code: "degraded",
-    },
-    down: {
-      fg: enterpriseTheme.danger,
-      bg: enterpriseTheme.dangerBg,
-      label: "API down",
-      code: "down",
-    },
-  } as const;
-
-  const tone = tones[state];
-
-  return (
-    <div style={{ display: "grid", gap: 6 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "5px 8px",
-          borderRadius: 6,
-          background: tone.bg,
-          fontSize: 11,
-          fontWeight: 600,
-          color: tone.fg,
-        }}
-      >
         <span
           style={{
-            width: 6,
-            height: 6,
-            borderRadius: 999,
-            background: tone.fg,
-            flexShrink: 0,
+            display: "block",
+            fontSize: 10.5,
+            color: enterpriseTheme.textMuted,
           }}
-        />
-        <span style={{ flex: 1 }}>{tone.label}</span>
-        <span style={{ fontFamily: enterpriseTheme.monoFamily, opacity: 0.7 }}>
-          {tone.code}
+        >
+          行政祕書
         </span>
-      </div>
-      <div
-        style={{
-          fontSize: 10,
-          color: enterpriseTheme.textDim,
-          display: "flex",
-          justifyContent: "space-between",
-          padding: "0 2px",
-        }}
-      >
-        <span>last checked</span>
-        <span style={{ fontFamily: enterpriseTheme.monoFamily }}>
-          {lastCheckedAt} ago
-        </span>
-      </div>
+      </span>
     </div>
   );
 }
@@ -329,70 +112,153 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
   const pathname = usePathname();
 
   return (
-    <CanvasShell
-      theme={enterpriseTheme}
-      nav={enterpriseNav}
-      currentPath={pathname}
-      brandLabel="Enterprise Dispatch"
-      brandSubLabel="Dispatch Workspace"
-      title="Enterprise Dispatch"
-      env="production"
-      versionLabel="v1-shell"
-      sidebarFooter={<HealthFooter state="healthy" lastCheckedAt="14s" />}
-      headerControls={
-        <>
+    <div
+      style={{
+        minHeight: "100vh",
+        background: enterpriseTheme.bg,
+        color: enterpriseTheme.text,
+        fontFamily: enterpriseTheme.fontFamily,
+      }}
+    >
+      <header
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 20,
+          borderBottom: `1px solid ${enterpriseTheme.border}`,
+          background: enterpriseTheme.surface,
+          backdropFilter: "blur(12px)",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1180,
+            margin: "0 auto",
+            padding: "0 24px",
+            minHeight: 60,
+            display: "flex",
+            alignItems: "center",
+            gap: 24,
+            flexWrap: "wrap",
+          }}
+        >
           <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-              padding: "5px 10px",
-              borderRadius: 7,
-              background: enterpriseTheme.surfaceLo,
-              border: `1px solid ${enterpriseTheme.border}`,
-              width: 220,
-              color: enterpriseTheme.textMuted,
-            }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 11 }}
           >
-            <CanvasIcon name="search" size={13} />
-            <span style={{ fontSize: 12, color: enterpriseTheme.textDim }}>
-              Search bookings, riders, drivers
+            <span
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                background: `linear-gradient(150deg, ${enterpriseTheme.accent}, ${enterpriseTheme.info})`,
+                color: enterpriseTheme.surface,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 15,
+                fontWeight: 800,
+              }}
+            >
+              {tenantIdentity.mark}
+            </span>
+            <span style={{ lineHeight: 1.15 }}>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 14.5,
+                  fontWeight: 700,
+                }}
+              >
+                {tenantIdentity.name}
+              </span>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 10.5,
+                  color: enterpriseTheme.textMuted,
+                }}
+              >
+                {tenantIdentity.subtitle}
+              </span>
             </span>
           </div>
+
+          <nav style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {navItems.map((item) => (
+              <Link
+                key={item.key}
+                href={item.href}
+                style={topLinkStyle(isActive(pathname, item.href))}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+
           <div
             style={{
-              fontFamily: enterpriseTheme.monoFamily,
-              fontSize: 10.5,
-              padding: "2px 6px",
-              borderRadius: 5,
-              border: `1px solid ${enterpriseTheme.border}`,
-              background: enterpriseTheme.surfaceLo,
-              color: enterpriseTheme.textMuted,
-              fontWeight: 600,
+              marginLeft: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 12,
             }}
           >
-            ⌘K
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "6px 12px",
+                borderRadius: 999,
+                border: `1px solid ${enterpriseTheme.border}`,
+                background: enterpriseTheme.surface,
+                fontSize: 12,
+                color: enterpriseTheme.text,
+              }}
+            >
+              <CanvasIcon
+                name="clock"
+                size={13}
+                style={{ color: enterpriseTheme.accent }}
+              />
+              本月額度
+              <strong style={{ fontFamily: enterpriseTheme.monoFamily }}>
+                NT$ 31,000
+              </strong>
+            </span>
+            <button type="button" style={iconButtonStyle()} title="支援通知">
+              <CanvasIcon name="bell" size={14} />
+            </button>
+            <UserChip />
           </div>
-          <RefreshTierBadge
-            code="MEDIUM_SLOW"
-            seconds={30}
-            freshness="fresh"
-          />
-          <button type="button" style={iconButtonStyle()} title="Open alerts">
-            <CanvasIcon name="bell" size={15} />
-          </button>
-          <IdentityChip />
-        </>
-      }
-    >
-      {children}
-    </CanvasShell>
+        </div>
+      </header>
+
+      <main>{children}</main>
+
+      <footer
+        style={{
+          maxWidth: 1180,
+          margin: "0 auto",
+          padding: "8px 24px 36px",
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+          fontSize: 11,
+          color: enterpriseTheme.textDim,
+        }}
+      >
+        <span>© 2026 {tenantIdentity.name} · 企業派車前台</span>
+        <span>接送服務由 {tenantIdentity.operator} 營運</span>
+      </footer>
+    </div>
   );
 }
 
 export function EnterpriseEmbedShell({
   children,
-  host = "tenant portal",
+  host = "hongshuo-workspace",
   state = "live",
 }: {
   children: ReactNode;
@@ -413,7 +279,7 @@ export function EnterpriseEmbedShell({
       width="100%"
       height={720}
       outerPadding={20}
-      style={{ background: "#ece9e2" }}
+      style={{ background: enterpriseTheme.bg }}
     >
       <div
         style={{
@@ -428,71 +294,90 @@ export function EnterpriseEmbedShell({
       >
         <div
           style={{
-            background: enterpriseTheme.accent,
-            color: "#fff",
-            padding: "10px 14px 11px",
+            height: 44,
+            background: enterpriseTheme.info,
+            color: enterpriseTheme.surface,
+            padding: "0 20px 6px",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "space-between",
+            fontSize: 12.5,
+            fontWeight: 600,
+          }}
+        >
+          <span>9:41</span>
+          <span
+            style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
+          >
+            <CanvasIcon name="clock" size={12} />
+            <CanvasIcon name="health" size={12} />
+          </span>
+        </div>
+
+        <div
+          style={{
+            background: enterpriseTheme.info,
+            color: enterpriseTheme.surface,
+            padding: "4px 12px 12px",
             display: "flex",
             alignItems: "center",
-            gap: 9,
-            flexShrink: 0,
+            gap: 10,
           }}
         >
           <button
             type="button"
             style={{
-              width: 28,
-              height: 28,
+              width: 30,
+              height: 30,
               borderRadius: 999,
-              background: "rgba(255,255,255,0.14)",
+              background: enterpriseTheme.accentBg,
               border: "none",
-              color: "#fff",
-              display: "flex",
+              color: enterpriseTheme.surface,
+              display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
+              padding: 0,
             }}
           >
             <CanvasIcon
-              name="arrow"
+              name="chevR"
               size={16}
               style={{ transform: "rotate(180deg)" }}
             />
           </button>
           <div style={{ flex: 1, lineHeight: 1.2 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-              Enterprise Dispatch
-            </div>
-            <div style={{ fontSize: 10, opacity: 0.72 }}>
-              Embedded operator workspace
+            <div style={{ fontSize: 14.5, fontWeight: 700 }}>企業派車</div>
+            <div style={{ fontSize: 10, opacity: 0.74 }}>
+              {tenantIdentity.name} · 企業 App
             </div>
           </div>
-          <div
+          <span
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
               fontSize: 9.5,
               fontFamily: enterpriseTheme.monoFamily,
-              opacity: 0.8,
-              background: "rgba(255,255,255,0.1)",
+              background: enterpriseTheme.accentBg,
               padding: "4px 8px",
               borderRadius: 999,
             }}
           >
-            <CanvasIcon name="ext" size={10} />
+            <CanvasIcon name="health" size={10} />
             {host}
-          </div>
+          </span>
         </div>
+
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 6,
             padding: "6px 14px",
-            background: "#fff",
+            background: enterpriseTheme.surface,
             borderBottom: `1px solid ${enterpriseTheme.border}`,
             fontSize: 10.5,
             color: enterpriseTheme.textMuted,
-            flexShrink: 0,
           }}
         >
           <span
@@ -503,24 +388,14 @@ export function EnterpriseEmbedShell({
               background: statusColor,
             }}
           />
-          <span style={{ fontFamily: enterpriseTheme.monoFamily }}>webview</span>
-          <span>· embedded in {host}</span>
+          <span style={{ fontFamily: enterpriseTheme.monoFamily }}>
+            webview
+          </span>
+          <span>· embedded in {tenantIdentity.name} app</span>
         </div>
+
         <div style={{ flex: 1, overflow: "auto" }}>{children}</div>
       </div>
     </CanvasWindowChrome>
-  );
-}
-
-export function EnterpriseShellActions() {
-  return (
-    <div style={{ display: "flex", gap: 8 }}>
-      <CanvasBtn theme={enterpriseTheme} variant="secondary" size="xs">
-        Mirror window
-      </CanvasBtn>
-      <CanvasBtn theme={enterpriseTheme} variant="primary" size="xs">
-        Open dispatch
-      </CanvasBtn>
-    </div>
   );
 }

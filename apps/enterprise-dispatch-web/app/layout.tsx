@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Enterprise Dispatch",
-  description: "Enterprise dispatch operations workspace shell.",
+  description: "Enterprise employee self-service dispatch shell.",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="zh-Hant">
       <body>
         <EnterpriseShell>{children}</EnterpriseShell>
       </body>
