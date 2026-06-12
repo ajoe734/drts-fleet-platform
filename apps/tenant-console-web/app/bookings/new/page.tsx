@@ -51,7 +51,7 @@ function parseEmptyReason(
     : null;
 }
 
-function parseSubtype(value: string | undefined): BusinessDispatchSubtype {
+function parseSubtype(_value: string | undefined): BusinessDispatchSubtype {
   return ENTERPRISE_SUBTYPE;
 }
 

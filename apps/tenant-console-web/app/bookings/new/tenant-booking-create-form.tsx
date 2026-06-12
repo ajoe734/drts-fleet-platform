@@ -105,18 +105,6 @@ type Translator = (
   params?: Record<string, string | number>,
 ) => string;
 
-function getBusinessSubtypeOptions(t: Translator): Array<{
-  value: BusinessDispatchSubtype;
-  label: string;
-}> {
-  return [
-    {
-      value: "enterprise_dispatch",
-      label: t("newBooking.program.enterprise"),
-    },
-  ];
-}
-
 function getValidationMessages(t: Translator): TenantBookingValidationMessages {
   return {
     reservationWindowStartRequired: t(
