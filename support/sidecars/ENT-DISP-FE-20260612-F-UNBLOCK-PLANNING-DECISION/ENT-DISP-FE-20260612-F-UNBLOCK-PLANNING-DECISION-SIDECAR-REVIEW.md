@@ -5,7 +5,7 @@
 **Parent Owner:** `Codex`  
 **Parent Reviewer:** `Claude2` (machine-truth reviewer of record)  
 **Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Codex2`  
+**Sidecar Reviewer:** `Claude2`  
 **Generated:** `2026-06-12` (UTC)  
 **Status:** `REVIEW SUPPORT ARTIFACT` — support-only; does not modify
 canonical truth, runtime behavior, or the parent task implementation.
@@ -16,7 +16,7 @@ product or backend contract decision; it is blocked by missing publication of
 the already-authored Enterprise Dispatch design authority into shared branch
 history. This sidecar does not approve or reopen the parent by itself. It
 gives the assigned reviewers a compact evidence map and the main consistency
-checks to apply against parent commit `ff18ac5d`.
+checks to apply against parent commit `4973c335`.
 
 Machine truth remains authoritative for lifecycle state. This packet snapshots
 the current state for reviewer convenience only.
@@ -53,8 +53,8 @@ Out of scope:
 `ai-status.json` → `ENT-DISP-FE-20260612-F-UNBLOCK-PLANNING-DECISION-SIDECAR-REVIEW`
 
 - owner=`Codex`
-- reviewer=`Codex2`
-- status=`in_progress` at packet generation time
+- reviewer=`Claude2`
+- status=`review_approved` at current machine-truth closeout time
 - helper_parent=`ENT-DISP-FE-20260612-F-UNBLOCK-PLANNING-DECISION`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
@@ -66,28 +66,29 @@ Out of scope:
 
 - owner=`Codex`
 - reviewer=`Claude2`
-- status=`review`
+- status=`review_approved`
 - depends_on=`[ENT-DISP-FE-20260612-A]`
 - artifact=`support/unblock/ENT-DISP-FE-20260612-F/ENT-DISP-FE-20260612-F-UNBLOCK-PLANNING-DECISION.md`
 - mutates_canonical=`true`
-- `next` says reviewer was reassigned from `Codex2` to `Claude2`
+- `next` records that reviewer attribution was corrected on the parent tip and
+  the packet's evidence remains substantively approved
 
 ### 2.3 Parent commit / push evidence
 
-Parent branch and commit visible from this worktree:
+Parent branch and latest commit visible from this worktree:
 
 - branch=`origin/codex/ent-disp-fe-20260612-f-unblock-planning-decision`
-- commit=`ff18ac5da76bddfc5e347e80747ebd0609b06bce`
-- subject=`docs(ENT-DISP-FE-20260612-F-UNBLOCK-PLANNING-DECISION): record planning resolution`
+- commit=`4973c3356b62e78fac0ea57bf5a4fbdeb9519932`
+- subject=`docs(ENT-DISP-FE-20260612-F-UNBLOCK-PLANNING-DECISION): correct reviewer attribution for closeout`
 - trailers:
   - `LLM-Agent: Codex`
   - `Task-ID: ENT-DISP-FE-20260612-F-UNBLOCK-PLANNING-DECISION`
-  - `Reviewer: Codex2`
+  - `Reviewer: Claude2`
 
-Reviewer note: the commit trailer still names `Codex2`, while machine truth now
-records `Claude2` as the active parent reviewer. That mismatch is explainable
-by the later reviewer reassignment recorded in `ai-status.json`, but it should
-be acknowledged rather than silently ignored.
+Historical note: the earlier parent commit `ff18ac5d` carried
+`Reviewer: Codex2`, but the current parent tip `4973c335` corrects the
+reviewer attribution to `Claude2`. This sidecar packet now reflects the
+post-correction state.
 
 ---
 
@@ -211,12 +212,13 @@ baseline before `C`/`D`/`E` or `F` proceed.
 **Expected:** If the parent changed canonical planning/support materials, the
 review should have commit evidence.
 
-**Evidence:** Parent commit `ff18ac5d` is on
+**Evidence:** Parent closeout correction commit `4973c335` is on
 `origin/codex/ent-disp-fe-20260612-f-unblock-planning-decision` and contains
-the task trailers.
+the corrected task trailers. The underlying planning-resolution change remains
+anchored by `ff18ac5d`.
 
-**Reviewer read:** Commit/push evidence exists. Note that the reviewer trailer
-is stale relative to machine truth because the reviewer was later reassigned.
+**Reviewer read:** Commit/push evidence exists and reviewer attribution now
+matches machine truth.
 
 ### AC-4 — Update the parent task with the concrete unblocked next step
 
@@ -249,7 +251,7 @@ the reviewer agrees that `B` is indeed the gating publication slice.
 
 | ID | Finding | Severity | Why it matters |
 | --- | --- | --- | --- |
-| F-01 | Parent artifact header still says `Reviewer: Codex2`, but machine truth says `Claude2`. | Medium | Review approval should cite the active reviewer of record so the audit trail is not ambiguous. |
+| F-01 | Historical reviewer mismatch on parent commit `ff18ac5d` was corrected by parent tip `4973c335`. | Resolved | Keep the historical note for audit traceability, but this is no longer an open approval risk. |
 | F-02 | Parent depends on branch-level evidence from `claude2/ent-disp-fe-20260612`, not files reachable on `origin/dev`. | Medium | The rerouting decision is sound only if reviewers accept branch evidence as sufficient proof that the design authority already exists. |
 | F-03 | The parent says `ENT-DISP-FE-20260612-B` is the mandatory bridge task, but this is recorded in support artifacts rather than machine-truth dependency edges. | Low | A reviewer may want the parent owner or supervisor to ensure downstream task routing matches the artifact claim. |
 
@@ -258,26 +260,25 @@ the reviewer agrees that `B` is indeed the gating publication slice.
 - **Approve** if you agree the blocker was misclassified as a contract problem
   and the evidence is sufficient to reroute it to shared-baseline publication.
 - **Reopen** if you require the design-canvas baseline to be visible from
-  `origin/dev` before accepting the planning resolution, or if the reviewer
-  identity mismatch in the artifact must be corrected in the parent branch.
+  `origin/dev` before accepting the planning resolution.
 
 ---
 
 ## 7. Handoff Summary For Sidecar Reviewer
 
-This sidecar packet reviewed the parent's only shipped commit `ff18ac5d` and
-confirmed that it is a support-only planning resolution packet. No canonical
-runtime code changed. The parent's substantive claim is well-supported: the
-repo already documents a shell stop-line, and the dedicated Enterprise
-Dispatch canvas family already exists on the umbrella branch. The main review
-risk is audit consistency, not product semantics: the parent artifact still
-names `Codex2` as reviewer while machine truth now names `Claude2`.
+This sidecar packet reviewed the parent's planning-resolution change
+(`ff18ac5d`) plus the follow-up closeout correction (`4973c335`) and confirmed
+that they remain support-only planning artifacts. No canonical runtime code
+changed. The parent's substantive claim is well-supported: the repo already
+documents a shell stop-line, and the dedicated Enterprise Dispatch canvas
+family already exists on the umbrella branch. The remaining review risk is
+about accepting branch-level design-authority evidence, not reviewer
+attribution drift.
 
 Suggested sidecar-review conclusion:
 
 > Packet is usable for reviewer handoff. Parent review should focus on whether
 > branch-level design-authority evidence is sufficient to reroute the blocker
-> from "missing contract decision" to "shared-baseline publication pending",
-> and should explicitly acknowledge the reviewer reassignment mismatch.
+> from "missing contract decision" to "shared-baseline publication pending".
 
 _Support-only artifact complete. Ready for sidecar reviewer handoff._
