@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { RootShell } from "@/components/root-shell";
+import { EnterpriseAppFrame } from "@/components/enterprise-app-frame";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="zh-Hant">
       <body>
-        <RootShell>{children}</RootShell>
+        <EnterpriseAppFrame>{children}</EnterpriseAppFrame>
       </body>
     </html>
   );

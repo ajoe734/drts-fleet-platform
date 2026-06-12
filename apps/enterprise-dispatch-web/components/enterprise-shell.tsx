@@ -15,9 +15,8 @@ const tenantIdentity = {
 
 const navItems = [
   { key: "home", href: "/", label: "首頁" },
-  { key: "history", href: "/history", label: "我的預約" },
-  { key: "trip", href: "/trip", label: "目前行程" },
-  { key: "receipt", href: "/receipt", label: "收據" },
+  { key: "bookings", href: "/bookings", label: "我的預約" },
+  { key: "trip", href: "/trip", label: "行程" },
   { key: "help", href: "/help", label: "說明" },
 ] as const;
 

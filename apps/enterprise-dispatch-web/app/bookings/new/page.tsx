@@ -7,30 +7,51 @@ import {
   EnterprisePill,
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
-import { EnterpriseBookingFlowStepper } from "@/components/enterprise-booking-flow";
-import { enterpriseBookingDraft, policyNotes } from "@/lib/enterprise-fixtures";
+import {
+  enterpriseAddresses,
+  enterpriseBookingDraft,
+  enterpriseCostCenters,
+  enterprisePassengers,
+} from "@/lib/enterprise-fixtures";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
 
-const primaryLinkStyle = {
+const cardGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.95fr)",
+} as const;
+
+const fieldStyle = {
+  display: "grid",
+  gap: 6,
+} as const;
+
+const labelStyle = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: enterpriseTheme.textMuted,
+} as const;
+
+const valueStyle = {
+  minHeight: 42,
+  padding: "11px 12px",
+  borderRadius: 12,
+  border: `1px solid ${enterpriseTheme.border}`,
+  background: enterpriseTheme.surfaceLo,
+  color: enterpriseTheme.text,
+  fontSize: 13,
+} as const;
+
+const actionLinkStyle = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 36,
-  padding: "8px 14px",
+  minHeight: 34,
+  padding: "8px 12px",
   borderRadius: 10,
-  border: `1px solid ${enterpriseTheme.accent}`,
-  background: enterpriseTheme.accent,
-  color: enterpriseTheme.surface,
-  fontSize: 13,
-  fontWeight: 700,
   textDecoration: "none",
-} as const;
-
-const secondaryLinkStyle = {
-  ...primaryLinkStyle,
-  border: `1px solid ${enterpriseTheme.border}`,
-  background: enterpriseTheme.surface,
-  color: enterpriseTheme.text,
+  fontSize: 12.5,
+  fontWeight: 600,
 } as const;
 
 export default function NewBookingPage() {
@@ -38,115 +59,123 @@ export default function NewBookingPage() {
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
         title="建立預約"
-        subtitle="企業版網站首頁進入的 self-service 建單畫面，先確認行程與成本中心。"
+        subtitle="先確認乘客、成本中心與企業情境，再進入 review page。"
         actions={
-          <EnterprisePill tone="info">new_booking_fixture</EnterprisePill>
+          <Link
+            href="/bookings/review"
+            style={{
+              ...actionLinkStyle,
+              background: enterpriseTheme.accent,
+              border: `1px solid ${enterpriseTheme.accent}`,
+              color: enterpriseTheme.surface,
+            }}
+          >
+            前往確認頁
+          </Link>
         }
       />
 
-      <EnterpriseBookingFlowStepper current="new" />
-
       <EnterpriseBanner
         tone="info"
-        title="建立階段先填資料，真正的 gate 在 review"
-        body="建立預約頁負責讓下單人確認乘客、行程、成本中心與預估費用；送出前的額度與審批判定集中在下一步。"
+        title="企業語意優先"
+        body="這裡先確認 passenger、bookedBy、cost center、quota 與 approval posture；機場欄位只在情境需要時出現。"
       />
 
-      <EnterpriseSection
-        style={{ gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 0.8fr)" }}
-      >
-        <EnterpriseCard title="行程與乘客">
-          <EnterpriseDl
-            cols={2}
-            items={[
-              { k: "乘客", v: enterpriseBookingDraft.passenger },
-              {
-                k: "乘客電話",
-                v: enterpriseBookingDraft.passengerPhone,
-                mono: true,
-              },
-              { k: "下單人", v: enterpriseBookingDraft.bookedBy },
-              { k: "代訂關係", v: enterpriseBookingDraft.relation },
-              { k: "上車", v: enterpriseBookingDraft.from },
-              { k: "下車", v: enterpriseBookingDraft.to },
-              {
-                k: "日期 / 時間",
-                v: `${enterpriseBookingDraft.date} ${enterpriseBookingDraft.pickupTime}`,
-                mono: true,
-              },
-              { k: "航班", v: enterpriseBookingDraft.flightNo, mono: true },
-              { k: "車型偏好", v: enterpriseBookingDraft.vehiclePreference },
-              { k: "現場聯絡", v: enterpriseBookingDraft.onsiteContact },
-            ]}
-          />
-          <div
-            style={{
-              marginTop: 14,
-              padding: 12,
-              borderRadius: 12,
-              background: enterpriseTheme.surfaceLo,
-              fontSize: 12.5,
-              color: enterpriseTheme.text,
-            }}
-          >
-            備註：{enterpriseBookingDraft.note}
+      <div style={cardGridStyle}>
+        <EnterpriseCard title="預約內容">
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>乘客</span>
+              <div style={valueStyle}>{enterpriseBookingDraft.passenger}</div>
+            </div>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>下單人</span>
+              <div style={valueStyle}>{enterpriseBookingDraft.bookedBy}</div>
+            </div>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>上車地點</span>
+              <div style={valueStyle}>{enterpriseBookingDraft.pickup}</div>
+            </div>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>下車地點</span>
+              <div style={valueStyle}>{enterpriseBookingDraft.dropoff}</div>
+            </div>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>預約時段</span>
+              <div style={valueStyle}>{enterpriseBookingDraft.reservationWindow}</div>
+            </div>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>成本中心</span>
+              <div style={valueStyle}>{enterpriseBookingDraft.costCenter}</div>
+            </div>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>機場情境</span>
+              <div style={valueStyle}>
+                {enterpriseBookingDraft.flight} · {enterpriseBookingDraft.terminal}
+                · {enterpriseBookingDraft.luggage}
+              </div>
+            </div>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>現場聯絡</span>
+              <div style={valueStyle}>{enterpriseBookingDraft.onsiteContact}</div>
+            </div>
           </div>
         </EnterpriseCard>
 
         <EnterpriseSection>
           <EnterpriseCard
-            title="費用歸屬"
-            actions={<EnterprisePill tone="tenant">cost_center</EnterprisePill>}
+            title="政策預覽"
+            actions={<EnterprisePill tone="warn">approval</EnterprisePill>}
           >
             <EnterpriseDl
               cols={1}
               items={[
-                {
-                  k: "成本中心",
-                  v: enterpriseBookingDraft.costCenter,
-                  mono: true,
-                },
-                { k: "部門 / 專案", v: enterpriseBookingDraft.costCenterName },
-                {
-                  k: "預估費用",
-                  v: enterpriseBookingDraft.estimatedFare,
-                  mono: true,
-                },
-                {
-                  k: "本月額度",
-                  v: enterpriseBookingDraft.quotaBefore,
-                  mono: true,
-                },
+                { k: "審批結果", v: enterpriseBookingDraft.approval },
+                { k: "額度影響", v: enterpriseBookingDraft.quotaImpact },
+                { k: "車型", v: enterpriseBookingDraft.vehicle },
               ]}
             />
           </EnterpriseCard>
 
-          <EnterpriseCard
-            title="送出前提醒"
-            actions={<EnterprisePill tone="warn">policy</EnterprisePill>}
-          >
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
-              {policyNotes.map((note) => (
-                <li
-                  key={note}
-                  style={{ fontSize: 12.5, color: enterpriseTheme.text }}
-                >
-                  {note}
-                </li>
-              ))}
-            </ul>
+          <EnterpriseCard title="常用選項">
+            <EnterpriseDl
+              cols={1}
+              items={[
+                { k: "乘客捷徑", v: enterprisePassengers.join(" / ") },
+                { k: "常用地址", v: enterpriseAddresses.slice(0, 2).join(" / ") },
+                { k: "成本中心", v: enterpriseCostCenters.join(" / ") },
+              ]}
+            />
           </EnterpriseCard>
         </EnterpriseSection>
-      </EnterpriseSection>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Link href="/bookings/review" style={primaryLinkStyle}>
-          前往確認權責
-        </Link>
-        <Link href="/" style={secondaryLinkStyle}>
-          返回首頁
-        </Link>
       </div>
+
+      <EnterpriseCard title="下一步">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Link
+            href="/bookings/review"
+            style={{
+              ...actionLinkStyle,
+              background: enterpriseTheme.accent,
+              border: `1px solid ${enterpriseTheme.accent}`,
+              color: enterpriseTheme.surface,
+            }}
+          >
+            繼續到 review
+          </Link>
+          <Link
+            href="/bookings"
+            style={{
+              ...actionLinkStyle,
+              background: enterpriseTheme.surface,
+              border: `1px solid ${enterpriseTheme.border}`,
+              color: enterpriseTheme.text,
+            }}
+          >
+            返回我的預約
+          </Link>
+        </div>
+      </EnterpriseCard>
     </div>
   );
 }
