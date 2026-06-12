@@ -7,18 +7,30 @@
 **Sidecar Owner:** `Claude`
 **Sidecar Reviewer:** `Codex`
 **Generated:** `2026-06-12` (UTC)
+**Machine-truth snapshot as of:** `2026-06-12T17:27Z` (refreshed after reviewer
+reopen; volatile lifecycle fields must still be re-read live at review time)
 **Status:** `REVIEW SUPPORT ARTIFACT` — support-only; does not modify canonical
 truth, runtime behavior, L1/L2 product truth, the parent task acceptance, or the
 parent-side review outcome.
 
 This packet exists only to support sidecar reviewer handoff for the
 `ENT-DISP-FE-20260612` umbrella. The canonical reviewed artifacts remain inside
-each parent slice's own write scope (`apps/enterprise-dispatch-web/**`, the
-design-canvas files under `docs/05-ui/**`, and the parent sidecar evidence under
-`support/sidecars/ENT-DISP-FE-20260612/`). This sidecar captures the stable
-machine-truth anchors, the umbrella slice map, the dependency baseline, the
-evidence anchors, and the exact checks the sidecar reviewer should repeat before
-approving this support slice.
+each parent slice's own write scope (`apps/enterprise-dispatch-web/**` and the
+parent sidecar evidence under `support/sidecars/ENT-DISP-FE-20260612/`). This
+sidecar captures the stable machine-truth anchors, the umbrella slice map, the
+dependency baseline, the evidence anchors, and the exact checks the sidecar
+reviewer should repeat before approving this support slice.
+
+> **Refresh note (this revision).** A prior revision of this packet was reopened
+> by the sidecar reviewer because its hard-coded snapshot had drifted from live
+> machine truth and it cited design-canvas files that are not present in the
+> branch tree. This revision re-anchors every snapshot value to the
+> `2026-06-12T17:27Z` machine-truth read, removes the non-verifiable
+> design-canvas references (`Enterprise Dispatch.html`, `ent-kit.jsx`,
+> `ent-shell.jsx`) and the absent screen-requirements doc from this packet's own
+> claims, and demotes the umbrella's still-listed-but-absent `artifacts` paths to
+> a record-only parent-side note. Volatile fields (`status`, `last_update`, and
+> the in-flight C/D/E slices) are expected to keep moving; re-read them live.
 
 ---
 
@@ -38,9 +50,8 @@ Out of scope:
 
 - editing parent runtime code under `apps/enterprise-dispatch-web/**` or any
   other `apps/**` / `packages/**` target
-- editing the design-canvas authority files
-  (`docs/05-ui/drts-design-canvas/Enterprise Dispatch.html`,
-  `ent-kit.jsx`, `ent-shell.jsx`) or the screen-requirements doc
+- editing any design-canvas authority files under
+  `docs/05-ui/drts-design-canvas/**` or any screen-requirements doc
 - editing `phase1_*`, the product spec, contracts, or any other canonical truth
 - substituting this packet for any parent slice's own review verdict, approval
   note, commit, or push evidence
@@ -76,64 +87,82 @@ Live sidecar lifecycle state:
 
 ### Parent umbrella — `ENT-DISP-FE-20260612`
 
-`ai-status.json` records (read at sidecar-start time):
+`ai-status.json` records (machine-truth snapshot `2026-06-12T17:27Z`):
 
 - owner=`Codex`
 - reviewer=`Claude2`
-- status=`in_progress`
+- status=`in owner-closeout` — observed oscillating between `review_approved`
+  and `in_progress` across reads at ~17:27Z; the umbrella was parent-reviewer
+  approved and the owner is now running owner closeout (finalize commit +
+  verification + push) before `done`. This is a volatile field; re-read it live.
+- integration_status=`null` (no umbrella-level finalize evidence recorded yet)
 - depends_on=`(none)`
-- artifacts=`support/sidecars/ENT-DISP-FE-20260612/development-work-package.md`,
+- artifacts (as recorded on the umbrella, **record-only — see note below**)=
+  `support/sidecars/ENT-DISP-FE-20260612/development-work-package.md`,
   `docs/05-ui/enterprise-dispatch-booking-screen-requirements-20260612.md`,
   `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html`
 - acceptance=`完成 A-F 開發切片並通過各 slice 驗收; 保持 enterprise_dispatch 與
   credit_card_airport_transfer 產品邊界; supervisor board 有完整 task trail`
-- last_update=`2026-06-12T17:22:05Z`
-- parent `next` (umbrella owner) is re-checking reopened blockers on the umbrella
-  branch — verifying the tenant-console revert and the enterprise theme surface
-  before fixing and re-handing off
+- parent `next`=`owner closeout: preparing task-scoped finalize commit with
+  verification, then normal push and done status`
+
+> **Record-only note on the umbrella `artifacts` field.** Two of the three paths
+> the umbrella lists —
+> `docs/05-ui/enterprise-dispatch-booking-screen-requirements-20260612.md` and
+> `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html` — are **not present**
+> in this sidecar branch's working tree or in this packet's commit. The
+> design-canvas directory contains the other realm canvases (Bank / Driver / Ops
+> / Tenant / Platform / Partner-Booking, plus `README.md`) but **no**
+> `Enterprise Dispatch.html`, `ent-kit.jsx`, or `ent-shell.jsx`. This packet
+> therefore does **not** cite those paths as reviewed/verifiable surfaces.
+> Reconciling the umbrella's `artifacts` field against what actually shipped is a
+> parent-side concern for the umbrella owner/reviewer; this sidecar must not edit
+> that field and cannot verify those paths in-tree.
 
 Implication for this sidecar:
 
-- the umbrella is NOT `done`; it is `in_progress`, with the owner actively
-  reconciling reopened blockers
-- no umbrella-level commit / push / integration evidence is recorded yet, so this
-  sidecar cannot claim umbrella finalize evidence
+- the umbrella is NOT `done`; it is in owner-closeout, with no umbrella-level
+  commit / push / integration evidence recorded yet, so this sidecar cannot claim
+  umbrella finalize evidence
 - approving this sidecar does not approve or close the umbrella or any A–F slice
 
 ---
 
 ## 3. Umbrella Slice Map
 
-Live A–F slice states from `ai-status.json` (read at sidecar-start time). This
-sidecar records the snapshot only; the slices keep moving through their own
-lifecycles and the reviewer should re-read live state at review time.
+Live A–F slice states from `ai-status.json` (machine-truth snapshot
+`2026-06-12T17:27Z`). This sidecar records the snapshot only; the in-flight
+slices (`C`/`D`/`E`) keep moving through their own lifecycles and the reviewer
+should re-read live state at review time.
 
 | Slice | Title | Owner | Reviewer | Status | depends_on |
 |---|---|---|---|---|---|
 | `ENT-DISP-FE-20260612-A` | Enterprise Dispatch app scaffold | `Codex` | `Claude2` | `done` | (none) |
-| `ENT-DISP-FE-20260612-B` | Enterprise Dispatch shell and primitives | `Codex` | `Claude2` | `review_approved` | `A` |
-| `ENT-DISP-FE-20260612-C` | (open slice) | `Claude2` | `Codex` | `backlog` | — |
-| `ENT-DISP-FE-20260612-D` | (open slice) | `Codex` | `Claude2` | `backlog` | — |
-| `ENT-DISP-FE-20260612-E` | (open slice) | `Claude2` | `Codex` | `backlog` | — |
+| `ENT-DISP-FE-20260612-B` | Enterprise Dispatch shell and primitives | `Codex` | `Claude2` | `done` | `A` |
+| `ENT-DISP-FE-20260612-C` | Enterprise Dispatch website booking flow | `Claude2` | `Codex` | `in_progress` | `B` |
+| `ENT-DISP-FE-20260612-D` | Enterprise Dispatch status and outcome pages | `Codex` | `Claude2` | `in_progress` | `B` |
+| `ENT-DISP-FE-20260612-E` | Enterprise Dispatch gates and embed states | `Codex` | `Claude2` | `in_progress` | `B` |
 | `ENT-DISP-FE-20260612-F` | Enterprise Dispatch API tests and rollout | `Codex` | `Claude2` | `done` | `A` |
 
-Recorded finalize evidence for the closed slices:
+Recorded finalize evidence for the closed slices (`done`):
 
-- `A` — commit `19ecc7c1`
-  (`ENT-DISP-FE-20260612-A: finalize owner closeout`), pushed
-  `origin/codex/ent-disp-fe-20260612-a`, `integration_status=merged_to_dev`
-  (`merged_ref=origin/dev`).
-- `B` — `review_approved` at branch tip `2429ecc4`
-  (`ENT-DISP-FE-20260612-B: isolate embedded shell preview`),
-  `integration_status=branch_pushed`; owner closeout (merge to dev) still
-  pending per the parent reviewer's approval note.
-- `F` — commit `0cb53c20`
-  (`ENT-DISP-FE-20260612-F: finalize tenant api tests and rollout evidence`),
-  `integration_status=merged_to_dev` (`merge_commit=0cb53c20`,
-  `merged_ref=origin/dev`).
+- `A` — `integration_status=merged_to_dev`, `merged_ref=origin/dev` (the
+  status record carries no `commit`/`merge_commit` hash; the matching finalize
+  commit visible in this branch's history is `19ecc7c1`
+  `ENT-DISP-FE-20260612-A: finalize owner closeout`).
+- `B` — `status=done`, `integration_status=merged_to_dev`,
+  `merge_commit=f640b3d3`, `push_remote=origin`, `push_branch=dev`. Owner
+  closeout note: "merged approved enterprise dispatch shell branch into dev at
+  `f640b3d3` and pushed to origin/dev". (This supersedes the prior revision's
+  `review_approved`/`2429ecc4`/`branch_pushed` reading — B has since been merged
+  and closed.)
+- `F` — `status=done`, `integration_status=merged_to_dev`,
+  `merge_commit=0cb53c20`, `merged_ref=origin/dev`
+  (`ENT-DISP-FE-20260612-F: finalize tenant api tests and rollout evidence`).
 
-Open slices `C`, `D`, `E` remain in `backlog` and are outside the evidence this
-packet can summarize; they have no finalize evidence yet.
+Open slices `C`, `D`, `E` are `in_progress` (each `depends_on B`, now `done`)
+and are outside the closed-slice evidence this packet summarizes; they have no
+finalize evidence yet, and their status will keep moving — re-read live.
 
 ---
 
@@ -144,65 +173,68 @@ graph is the relevant baseline:
 
 | Slice | Depends on | Status of dependency | Role |
 |---|---|---|---|
-| `B` | `A` | `A` `done`, commit `19ecc7c1`, `merged_to_dev` | scaffold app + product-boundary README are upstream truth for the shell/primitives slice |
-| `F` | `A` | `A` `done`, commit `19ecc7c1`, `merged_to_dev` | scaffold app is upstream truth for the `/api/tenant/*` wiring + test slice |
+| `B` | `A` | `A` `done`, `merged_to_dev` (`origin/dev`) | scaffold app + product-boundary README are upstream truth for the shell/primitives slice |
+| `F` | `A` | `A` `done`, `merged_to_dev` (`origin/dev`) | scaffold app is upstream truth for the `/api/tenant/*` wiring + test slice |
+| `C` | `B` | `B` `done`, `merged_to_dev` `f640b3d3` | shell + primitives are upstream truth for the website booking flow |
+| `D` | `B` | `B` `done`, `merged_to_dev` `f640b3d3` | shell + primitives are upstream truth for the status / outcome pages |
+| `E` | `B` | `B` `done`, `merged_to_dev` `f640b3d3` | shell + primitives are upstream truth for the gates / embed states |
 
 Why this matters for the sidecar review:
 
-- slices `B` and `F` can safely assume the `apps/enterprise-dispatch-web`
-  scaffold and its product-boundary README are accepted upstream truth — slice
-  `A` is `done` and reachable from `origin/dev`
+- the closed slices `A`, `B`, `F` and the gating dependency for the open slices
+  are all `done` and reachable from `origin/dev`; the `apps/enterprise-dispatch-web`
+  scaffold, its product-boundary README, and the merged shell/primitives are
+  accepted upstream truth
+- the three open slices `C`/`D`/`E` all depend on `B`, which is now `done` and
+  merged — their dependency gate is satisfied, so they are unblocked and
+  in-flight, not waiting on this sidecar
 - no upstream dependency needs to be re-reviewed for this sidecar
 - the product boundary established by `A` (enterprise dispatch must NOT inherit
   `tenant-portal-web`, `tenant-console-web`, or `partner-booking-web` as its
-  baseline) is the constraint the umbrella owner's reopened-blocker recheck in §2
-  is currently reconciling against the tenant-console revert
+  baseline) is recorded here as the umbrella-level constraint; its enforcement
+  lives in the per-slice machine truth, not in this sidecar
 
 ---
 
 ## 5. Reviewed Artifacts
 
-The umbrella's reviewed write scope, read from the slice `next` text, the slice
-artifact fields, and the live working tree:
+The umbrella's reviewed write scope, restricted to surfaces that actually exist
+in this branch's working tree (paths that cannot be verified in-tree are NOT
+cited here):
 
 - `apps/enterprise-dispatch-web/**` — standalone Next.js workspace app
-  (`@drts/enterprise-dispatch-web`):
-  - renderable shell with the enterprise realm theme surface
-    (`surface='enterprise'`); per slice `B` approval, the enterprise accent
-    tokens (light `#2457D6` / lightHi `#1A45AD` / lightBg `#EBF1FE`) match the
-    design canvas exactly and are NOT platform indigo
-  - shell IA matches the canvas `ent-shell.jsx` (首頁 / 我的預約 / 行程 / 說明),
-    with NO admin / ops nav; the A-scaffold ops pages were correctly removed when
-    `B` landed the real shell
-  - `/embedded-preview` routed to a standalone embed shell (no outer chrome) per
-    the canvas WebShell / EmbedShell split
-  - app-local `/api/tenant/*` fixture wiring, gap map, and vitest coverage for
-    booking, gate, and embed-fallback behavior (slice `F`)
-- `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html`,
-  `docs/05-ui/drts-design-canvas/ent-kit.jsx`,
-  `docs/05-ui/drts-design-canvas/ent-shell.jsx` — design-canvas authority for the
-  enterprise realm (referenced by slices `A` and `B`)
-- `docs/05-ui/enterprise-dispatch-booking-screen-requirements-20260612.md` —
-  screen-requirements note recorded because a production screen layout is gated
-  on the design canvas
+  (`@drts/enterprise-dispatch-web`), the delivered runtime scope surfaced through
+  the A/B/F slices. Verified present: `app/`, `lib/`, `public/`, `tests/`,
+  `package.json`, `next.config.ts`, `tsconfig.json`, `eslint.config.mjs`,
+  `README.md`. Behavioral claims about the enterprise realm theme, shell IA, and
+  embed isolation are owned by the per-slice machine truth (slice `B`'s closeout
+  note), not re-asserted here against any specific in-tree file.
+  - app-local `/api/tenant/*` fixture wiring, gap map, and test coverage for
+    booking, gate, and embed-fallback behavior (slice `F`); verified test files:
+    `tests/unit/dispatch-fixture-adapter.test.ts`,
+    `tests/smoke/tenant-contract-wiring.test.ts`
 - `support/sidecars/ENT-DISP-FE-20260612/development-work-package.md`,
   `tenant-api-gap-map.md`, `rollout-evidence.md` — parent-side sidecar evidence
-  authored by the slice owners (NOT by this review-packet sidecar)
+  authored by the slice owners (NOT by this review-packet sidecar); all three are
+  verified present in-tree
 
 Record-only notes (not sidecar findings to act on):
 
-- the umbrella's `artifacts` field lists the design-canvas
-  `Enterprise Dispatch.html`, the screen-requirements doc, and the
-  development-work-package; the actual delivered runtime scope is
-  `apps/enterprise-dispatch-web/**`, surfaced through the individual A/B/F
-  slices. The reviewer should treat the per-slice runtime write scope as the
-  authoritative reviewed surface and leave any umbrella `artifacts`-field cleanup
-  to the umbrella owner / reviewer. This sidecar must not edit that field.
-- slice `B`'s approval note records a non-blocking residual (dark-mode darkHi
-  `#7A9DF0` invented but dormant — no dark render) and a residual that the
-  umbrella owner is reconciling now: the tenant-console revert + enterprise theme
-  surface recheck in §2. Both are parent-side concerns; this sidecar only records
-  them.
+- the umbrella's `artifacts` field lists
+  `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html` and
+  `docs/05-ui/enterprise-dispatch-booking-screen-requirements-20260612.md`, but
+  **neither path exists in this sidecar branch's tree** (the design-canvas dir
+  has the other realm canvases but no `Enterprise Dispatch.html` / `ent-kit.jsx`
+  / `ent-shell.jsx`). The actual delivered runtime scope is
+  `apps/enterprise-dispatch-web/**`. The reviewer should treat the per-slice
+  runtime write scope as the authoritative reviewed surface; reconciling the
+  umbrella `artifacts` field against what shipped is a parent-side concern for
+  the umbrella owner / reviewer. This sidecar must not edit that field and does
+  not cite those absent paths as verifiable evidence.
+- any per-slice theming residuals (e.g. dormant dark-mode tokens) and the
+  enterprise-vs-tenant product-boundary reconciliation are parent-side concerns
+  carried in the slice records; this sidecar only points to them and does not
+  re-derive their values.
 
 ---
 
@@ -211,30 +243,28 @@ Record-only notes (not sidecar findings to act on):
 Evidence the umbrella slices are in a genuinely reviewable / closed state (not
 just labeled):
 
-1. Slice `A` is `done` with full finalize evidence: commit `19ecc7c1`, pushed
-   `origin/codex/ent-disp-fe-20260612-a`, `integration_status=merged_to_dev`,
-   `merged_ref=origin/dev`. The parent reviewer's recorded `review_notes_zh`
-   confirm lint / typecheck / build green at `c3366e95` and product-boundary
-   README enforcement (no inheritance of tenant-portal / tenant-console /
-   partner-booking).
-2. Slice `B` is `review_approved` at branch tip `2429ecc4` with a detailed,
-   file-anchored approval note (16-file delta `19ecc7c1..2429ecc4`): realm/theme
-   correctness, shell IA match to canvas, embed isolation, additive
-   backward-compatible shared-primitive change, and app typecheck / lint
-   (max-warnings=0) / build (9 routes) PASS. `integration_status=branch_pushed`;
-   owner closeout (merge to dev) is the remaining step.
-3. Slice `F` is `done` with finalize evidence: commit `0cb53c20`,
-   `integration_status=merged_to_dev` (`merge_commit=0cb53c20`,
-   `merged_ref=origin/dev`). Owner reports passing
-   `pnpm --filter @drts/enterprise-dispatch-web test && … lint && … typecheck`.
+1. Slice `A` is `done` with finalize evidence: `integration_status=merged_to_dev`,
+   `merged_ref=origin/dev` (matching branch-history finalize commit `19ecc7c1`
+   `ENT-DISP-FE-20260612-A: finalize owner closeout`). The status carries no
+   discrete commit hash; the integration level is `merged_to_dev`.
+2. Slice `B` is `done` (no longer `review_approved`): parent-reviewer approved,
+   then owner-closed — `integration_status=merged_to_dev`,
+   `merge_commit=f640b3d3`, pushed `origin/dev`. Owner closeout note: "merged
+   approved enterprise dispatch shell branch into dev at `f640b3d3` and pushed to
+   origin/dev". `f640b3d3` is the current `origin/dev` tip.
+3. Slice `F` is `done` with finalize evidence: `integration_status=merged_to_dev`,
+   `merge_commit=0cb53c20`, `merged_ref=origin/dev`
+   (`ENT-DISP-FE-20260612-F: finalize tenant api tests and rollout evidence`).
 4. The `apps/enterprise-dispatch-web` app exists in the working tree with the
-   scaffold, shell, lib, and `tests/` (unit
+   scaffold, app, lib, and `tests/` (unit
    `tests/unit/dispatch-fixture-adapter.test.ts`, smoke
    `tests/smoke/tenant-contract-wiring.test.ts`) — consistent with the A/B/F
    slice descriptions.
-5. The umbrella branch base for this sidecar (`origin/dev`, tip `0cb53c20`) is
-   the same commit as slice `F`'s merge commit, so the delivered A and F content
-   is reachable from the trunk this sidecar branches from.
+5. This sidecar branch is based at `0cb53c20` (= slice `F`'s merge commit);
+   `origin/dev` has since advanced to `f640b3d3` (= slice `B`'s merge commit).
+   The delivered A / B / F content is therefore reachable from `origin/dev`.
+   (`f640b3d3` is confirmed an ancestor of `origin/dev`; the trunk is ahead of
+   this docs-only sidecar branch, which is expected for a support slice.)
 
 Evidence about this sidecar itself:
 
@@ -250,14 +280,17 @@ Evidence about this sidecar itself:
 
 What this packet intentionally does NOT claim:
 
-- it does not claim the umbrella `ENT-DISP-FE-20260612` is approved or `done`
-  (it is `in_progress` with an active reopened-blocker recheck)
+- it does not claim the umbrella `ENT-DISP-FE-20260612` is `done` (it is in
+  owner-closeout, parent-reviewer approved but not yet finalized)
 - it does not record an umbrella-level commit hash, push remote, or push branch
-  (none exist yet)
+  (`integration_status` is still `null`)
 - it does not claim any slice is `dev_deployed`; the closed slices are at most
   `merged_to_dev`, never deploy-verified, per their own machine truth
 - it does not pre-judge the parent reviewer `Claude2`'s remaining decisions on
-  the umbrella, on slice `B` closeout, or on the open C/D/E slices
+  the umbrella finalize or on the open in-progress C/D/E slices
+- it does not cite the absent design-canvas `Enterprise Dispatch.html` /
+  `ent-kit.jsx` / `ent-shell.jsx` or the absent screen-requirements doc as
+  reviewed or verifiable surfaces
 
 ---
 
@@ -272,18 +305,21 @@ What to verify on this sidecar (not on the parent / umbrella):
 - the stable sidecar fields in §2 still match `ai-status.json`:
   - owner=`Claude`, reviewer=`Codex`, helper_parent=`ENT-DISP-FE-20260612`,
     helper_kind=`review_packet`, mutates_canonical=`false`
-- the umbrella + slice snapshot in §2/§3 still matches `ai-status.json` at review
-  time (re-read live state; the snapshot does not need a refresh just because a
-  slice moved forward):
-  - umbrella status is `in_progress`, reviewer `Claude2`
-  - `A` and `F` `done`, `B` `review_approved`, `C`/`D`/`E` `backlog`
+- the umbrella + slice snapshot in §2/§3 matches `ai-status.json` at the
+  `2026-06-12T17:27Z` anchor; re-read live state, since volatile fields move:
+  - umbrella owner `Codex`, reviewer `Claude2`, in owner-closeout
+    (parent-approved, finalizing — not yet `done`)
+  - `A`/`B`/`F` `done`; `C`/`D`/`E` `in_progress` (each `depends_on B`).
+    Minor C/D/E status drift does not invalidate this packet — they are
+    explicitly out of the closed-slice evidence scope
 - the finalize evidence in §3/§6 still matches the live slice records
-  (`A`=`19ecc7c1` merged_to_dev, `B`=`2429ecc4` branch_pushed, `F`=`0cb53c20`
-  merged_to_dev)
-- §5 names the per-slice runtime write scope and explicitly does not edit the
-  umbrella's `artifacts` field
-- §6 evidence claims are anchored to slice `next` / `review_notes_zh` text and to
-  files that exist in the working tree
+  (`A` `merged_to_dev`/`origin/dev`; `B` `merged_to_dev` `f640b3d3`/`origin/dev`;
+  `F` `merged_to_dev` `0cb53c20`/`origin/dev`)
+- §2/§5 demote the umbrella's still-listed-but-absent design-canvas and
+  screen-requirements `artifacts` paths to record-only and do not cite them as
+  verifiable surfaces; this sidecar does not edit the umbrella `artifacts` field
+- §6 evidence claims are anchored to slice machine-truth fields and to files that
+  exist in the working tree
 - the packet stays support-only and does not mutate canonical truth, runtime
   behavior, any parent task field, or any L1 / L2 product truth
 
@@ -294,13 +330,18 @@ Suggested reviewer checks:
   `ai-status.json`)
 - `git diff --no-index --check /dev/null support/sidecars/ENT-DISP-FE-20260612/ENT-DISP-FE-20260612-SIDECAR-REVIEW.md`
   (no whitespace diagnostics)
-- spot-check the cited surfaces exist:
+- spot-check the cited surfaces exist (every surface this packet cites is
+  present in-tree; the packet deliberately cites no absent paths):
   - `apps/enterprise-dispatch-web/` (app, lib, tests)
   - `apps/enterprise-dispatch-web/tests/unit/dispatch-fixture-adapter.test.ts`
   - `apps/enterprise-dispatch-web/tests/smoke/tenant-contract-wiring.test.ts`
-  - `docs/05-ui/drts-design-canvas/ent-shell.jsx` and `ent-kit.jsx`
   - `support/sidecars/ENT-DISP-FE-20260612/development-work-package.md`,
     `tenant-api-gap-map.md`, `rollout-evidence.md`
+  - (negative check) confirm `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html`,
+    `ent-kit.jsx`, `ent-shell.jsx`, and
+    `docs/05-ui/enterprise-dispatch-booking-screen-requirements-20260612.md` are
+    absent in-tree and are referenced only as record-only umbrella-`artifacts`
+    notes, never as this packet's verified evidence
 
 If approved:
 
@@ -325,18 +366,28 @@ Reminder for later closeout (sidecar owner step, after sidecar review approval):
 
 ## 8. Owner Verification
 
-Verification run while assembling this sidecar:
+Verification run while refreshing this sidecar (this revision, after reopen):
 
-- read the umbrella and sidecar task snapshots from `ai-status.json` via
-  `scripts/ai-status.sh show` (single-task slices, not the full file)
-- read the A–F slice snapshots from `ai-status.json`, including the recorded
-  finalize evidence (commits, push refs, integration status) for `A`, `B`, `F`
-- spot-checked the cited surfaces in the working tree:
+- re-read the umbrella, sidecar, and A–F slice snapshots from `ai-status.json`
+  via `scripts/ai-status.sh show` (single-task slices, not the full file),
+  capturing the recorded finalize evidence (integration status, merge commits,
+  push refs) for `A`, `B`, `F` at the `2026-06-12T17:27Z` anchor
+- reconciled the three reopen findings against live truth and corrected them:
+  umbrella moved to parent-approved owner-closeout (not `in_progress`); `B` is
+  `done`/`merged_to_dev` `f640b3d3` (not `review_approved`/`2429ecc4`); `C`/`D`/`E`
+  are `in_progress` each `depends_on B` (not `backlog`)
+- spot-checked the cited surfaces in the working tree (all present):
   - `apps/enterprise-dispatch-web/` (app, lib, `tests/unit`, `tests/smoke`)
   - `support/sidecars/ENT-DISP-FE-20260612/development-work-package.md`,
     `tenant-api-gap-map.md`, `rollout-evidence.md`
-- confirmed this branch's base (`origin/dev`, tip `0cb53c20`) equals slice `F`'s
-  merge commit, so delivered A/F content is reachable from the trunk
+- confirmed the reopen's path complaint: `Enterprise Dispatch.html`,
+  `ent-kit.jsx`, `ent-shell.jsx`, and the screen-requirements doc are **absent**
+  in-tree (`ls docs/05-ui/drts-design-canvas/` + `git ls-tree be7bfd63`), and
+  removed them from this packet's verified claims
+- confirmed branch base `0cb53c20` (= slice `F`'s merge commit) and that
+  `origin/dev` has advanced to `f640b3d3` (= slice `B`'s merge commit, confirmed
+  ancestor of `origin/dev`), so delivered A/B/F content is reachable from the
+  trunk
 
 Whitespace check on this packet:
 
