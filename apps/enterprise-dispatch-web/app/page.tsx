@@ -1,20 +1,18 @@
 import Link from "next/link";
 import {
-  EnterpriseBanner,
   EnterpriseCard,
   EnterpriseDl,
   EnterpriseKpi,
   EnterpriseKpiGrid,
   EnterprisePageHeader,
   EnterprisePill,
-  EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import {
+  activeTrip,
   bookingStateMeta,
   enterpriseBookings,
   enterpriseTenant,
   enterpriseUser,
-  policyNotes,
 } from "@/lib/enterprise-fixtures";
 import {
   enterpriseCardGridStyle,
@@ -22,64 +20,16 @@ import {
   enterpriseTheme,
 } from "@/lib/enterprise-theme";
 
-const primaryLinkStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: `1px solid ${enterpriseTheme.accent}`,
-  background: enterpriseTheme.accent,
-  color: enterpriseTheme.surface,
-  fontSize: 12,
-  fontWeight: 500,
-  textDecoration: "none",
-} as const;
-
-const secondaryLinkStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: `1px solid ${enterpriseTheme.border}`,
-  background: enterpriseTheme.surface,
-  color: enterpriseTheme.text,
-  fontSize: 12,
-  fontWeight: 500,
-  textDecoration: "none",
-} as const;
-
-const ghostLinkStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: "1px solid transparent",
-  background: "transparent",
-  color: enterpriseTheme.textMuted,
-  fontSize: 12,
-  fontWeight: 500,
+const linkStyle = {
   textDecoration: "none",
 } as const;
 
 export default function HomePage() {
-  const activeTrip = enterpriseBookings[0];
-
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
         title={`嗨，${enterpriseUser.name}，要去哪裡？`}
-        subtitle={`${enterpriseTenant.name} · 為自己或同事建立企業派車，費用走成本中心、超額需審批。`}
-        actions={
-          <Link href="/bookings" style={primaryLinkStyle}>
-            建立預約
-          </Link>
-        }
+        subtitle={`${enterpriseTenant.name} · 為自己或同事建立企業派車，費用走成本中心與審批。`}
       />
 
       <EnterpriseKpiGrid>
@@ -90,144 +40,58 @@ export default function HomePage() {
           hint="quota"
         />
         <EnterpriseKpi
-          label="審批狀態"
+          label="待處理"
           value="1 件待審"
           sub="EB-6ND812 · 等待主管核准"
           hint="approval"
         />
         <EnterpriseKpi
-          label="本月已用車"
-          value="23 趟"
-          delta="+6%"
-          deltaTone="up"
-          sub="產品部"
-          hint="trips"
+          label="歷史預約"
+          value={`${enterpriseBookings.length} 筆`}
+          sub="含已完成與進行中"
+          hint="history"
         />
       </EnterpriseKpiGrid>
 
       <div style={enterpriseCardGridStyle}>
         <EnterpriseCard
           title="進行中的行程"
-          actions={
-            <EnterprisePill tone="success">
-              {bookingStateMeta.assigned.label}
-            </EnterprisePill>
-          }
+          actions={<EnterprisePill tone="success">已派車</EnterprisePill>}
         >
           <EnterpriseDl
             cols={1}
             items={[
               { k: "乘客", v: activeTrip.passenger },
-              { k: "下單人", v: `${activeTrip.bookedBy} 代訂` },
               { k: "行程", v: `${activeTrip.from} → ${activeTrip.to}` },
-              {
-                k: "ETA",
-                v: `${activeTrip.etaMinutes} 分鐘 · 估計`,
-                mono: true,
-              },
+              { k: "ETA", v: `${activeTrip.etaMinutes} 分鐘`, mono: true },
             ]}
           />
           <div style={{ marginTop: 12 }}>
-            <Link href="/trip" style={secondaryLinkStyle}>
-              查看目前行程
+            <Link href="/trip" style={linkStyle}>
+              <EnterprisePill tone={bookingStateMeta.assigned.tone}>
+                查看目前行程
+              </EnterprisePill>
             </Link>
           </div>
         </EnterpriseCard>
 
         <EnterpriseCard
-          title="快速建立"
+          title="快速入口"
           actions={<EnterprisePill tone="info">self-service</EnterprisePill>}
         >
           <div style={{ display: "grid", gap: 10 }}>
-            <Link
-              href="/bookings"
-              style={{ ...primaryLinkStyle, width: "100%" }}
-            >
-              為自己預約
+            <Link href="/history" style={linkStyle}>
+              <EnterprisePill tone="info">我的預約</EnterprisePill>
             </Link>
-            <Link
-              href="/bookings"
-              style={{ ...secondaryLinkStyle, width: "100%" }}
-            >
-              為同事 / 訪客代訂
+            <Link href="/detail" style={linkStyle}>
+              <EnterprisePill tone="warn">待審批詳情</EnterprisePill>
             </Link>
-            <Link href="/help" style={{ ...ghostLinkStyle, width: "100%" }}>
-              查看政策與支援
+            <Link href="/receipt" style={linkStyle}>
+              <EnterprisePill tone="neutral">最近收據</EnterprisePill>
             </Link>
           </div>
         </EnterpriseCard>
       </div>
-
-      <EnterpriseSection>
-        <EnterpriseCard
-          title="即將到來的預約"
-          actions={
-            <EnterprisePill tone="neutral">
-              {enterpriseBookings.length} 筆
-            </EnterprisePill>
-          }
-        >
-          <div style={{ display: "grid", gap: 12 }}>
-            {enterpriseBookings.map((booking, index) => (
-              <div
-                key={booking.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1.2fr 2fr 120px",
-                  gap: 12,
-                  alignItems: "center",
-                  paddingBottom: 12,
-                  borderBottom:
-                    index === enterpriseBookings.length - 1
-                      ? "1px solid transparent"
-                      : `1px solid ${enterpriseTheme.border}`,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>
-                    {booking.passenger}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      color: enterpriseTheme.textMuted,
-                    }}
-                  >
-                    {booking.self ? "本人預約" : `${booking.bookedBy} 代訂`}
-                  </div>
-                </div>
-                <div style={{ fontSize: 12.5 }}>
-                  <div>{booking.from}</div>
-                  <div style={{ color: enterpriseTheme.textMuted }}>
-                    {booking.to}
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontFamily: enterpriseTheme.monoFamily,
-                    }}
-                  >
-                    {booking.window}
-                  </div>
-                  <div style={{ marginTop: 4 }}>
-                    <EnterprisePill tone={bookingStateMeta[booking.state].tone}>
-                      {bookingStateMeta[booking.state].label}
-                    </EnterprisePill>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </EnterpriseCard>
-
-        <EnterpriseBanner
-          tone="info"
-          title="政策提醒"
-          body={`${policyNotes[0]}；${policyNotes[1]}；${policyNotes[2]}。`}
-        />
-      </EnterpriseSection>
     </div>
   );
 }
