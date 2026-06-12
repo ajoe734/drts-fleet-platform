@@ -1402,34 +1402,71 @@ function renderScreen(
   if (screen === "landing") {
     if (theme.kind === "travel") {
       const roster = [
-        ["林〇雄", "領隊 · guide", "舉牌聯絡"],
-        ["陳〇如", "旅客", "輪椅"],
-        ["吳〇翰 +2", "家庭 3 人", "兒童座椅 ×1"],
-        ["其餘 6 名旅客", "roster", ""],
+        [
+          s("林〇雄", "Lin H."),
+          s("領隊 · guide", "Tour guide"),
+          s("舉牌聯絡", "Signboard contact"),
+        ],
+        [
+          s("陳〇如", "Chen R."),
+          s("旅客", "Traveler"),
+          s("輪椅", "Wheelchair"),
+        ],
+        [
+          s("吳〇翰 +2", "Wu H. +2"),
+          s("家庭 3 人", "Family of 3"),
+          s("兒童座椅 ×1", "Child seat x1"),
+        ],
+        [s("其餘 6 名旅客", "Remaining 6 travelers"), "roster", ""],
       ] as const;
       const batches = [
-        ["第 1 批 · 入境接機", "06-28 14:20", "中型巴士 ×1 · 12 / 12 席"],
-        ["第 2 批 · 飯店接駁", "06-28 16:00", "商務車 ×2 · 8 席"],
+        [
+          s("第 1 批 · 入境接機", "Batch 1 · arrival pickup"),
+          "06-28 14:20",
+          s("中型巴士 ×1 · 12 / 12 席", "Medium bus x1 · 12 / 12 seats"),
+        ],
+        [
+          s("第 2 批 · 飯店接駁", "Batch 2 · hotel shuttle"),
+          "06-28 16:00",
+          s("商務車 ×2 · 8 席", "Business cars x2 · 8 seats"),
+        ],
       ] as const;
 
       return (
         <>
           <Band
             theme={theme}
-            title="團體席次與分批"
-            subtitle="旅行社接送 · roster + batching"
+            title={s("團體席次與分批", "Group seats and batching")}
+            subtitle={s(
+              "旅行社接送 · roster + batching",
+              "Travel transfer · roster + batching",
+            )}
             trailing="GROUP"
           />
           <Card
-            title="本團席次"
+            title={s("本團席次", "Group seats")}
             style={{
               borderColor: theme.surface.border,
               background: theme.surface.bg,
             }}
           >
-            <Row label="團體 / 訂單參照" value={demo.bookingRef} mono />
-            <Row label="行程連結" value="LION 日本關西 5 日 → 查看" />
-            <Row label="接送段數" value="4 段 · 第 1 段" mono />
+            <Row
+              label={s("團體 / 訂單參照", "Group / booking ref")}
+              value={demo.bookingRef}
+              mono
+            />
+            <Row
+              label={s("行程連結", "Itinerary link")}
+              value={s(
+                "LION 日本關西 5 日 → 查看",
+                "LION Japan Kansai 5 days -> View",
+              )}
+            />
+            <Row
+              label={s("接送段數", "Transfer segments")}
+              value={s("4 段 · 第 1 段", "4 segments · segment 1")}
+              mono
+            />
             <div style={{ marginTop: "12px" }}>
               <BenefitMeter
                 theme={theme}
@@ -1439,7 +1476,7 @@ function renderScreen(
               />
             </div>
           </Card>
-          <Card title="乘客名單 · roster (12)">
+          <Card title={s("乘客名單 · roster (12)", "Passenger roster (12)")}>
             {roster.map(([name, role, tag], index) => (
               <div
                 key={name}
@@ -1484,7 +1521,7 @@ function renderScreen(
               </div>
             ))}
           </Card>
-          <Card title="分批接送 · pickup batching">
+          <Card title={s("分批接送 · pickup batching", "Pickup batching")}>
             {batches.map(([title, time, detail], index) => (
               <div
                 key={title}
@@ -1521,7 +1558,7 @@ function renderScreen(
           </Card>
           <Button
             theme={theme}
-            label="確認席次並前往預約"
+            label={s("確認席次並前往預約", "Confirm seats and continue")}
             href={reviewHref}
             primary
           />
@@ -1751,31 +1788,49 @@ function renderScreen(
     if (theme.kind === "insurance") {
       const checks = [
         {
-          title: "保單有效",
+          title: s("保單有效", "Policy valid"),
           code: "insurance_policy",
-          detail: "POL-558-22019 · 富邦產險",
-          note: "保單於保障期間內 · 含代步附約",
+          detail: s(
+            "POL-558-22019 · 富邦產險",
+            "POL-558-22019 · Fubon Insurance",
+          ),
+          note: s(
+            "保單於保障期間內 · 含代步附約",
+            "Policy is in coverage · replacement rider included",
+          ),
         },
         {
-          title: "代步車輛權益",
+          title: s("代步車輛權益", "Replacement vehicle benefit"),
           code: "insurance_replacement_vehicle",
-          detail: "一般 / 商務車型 · 每日上限 NT$ 1,600",
-          note: "代步期間 2026-06-01 ~ 06-30（剩 14 天）",
+          detail: s(
+            "一般 / 商務車型 · 每日上限 NT$ 1,600",
+            "Standard / business class · daily cap NT$ 1,600",
+          ),
+          note: s(
+            "代步期間 2026-06-01 ~ 06-30（剩 14 天）",
+            "Replacement period 2026-06-01 ~ 06-30 (14 days left)",
+          ),
         },
         {
-          title: "乘客名單",
+          title: s("乘客名單", "Passenger roster"),
           code: "insurance_roster",
-          detail: "理賠申請人 王〇華 +1 名陪同",
-          note: "名單須與理賠案件一致",
+          detail: s(
+            "理賠申請人 王〇華 +1 名陪同",
+            "Claimant Wang H. +1 companion",
+          ),
+          note: s("名單須與理賠案件一致", "Roster must match the claim case"),
         },
       ] as const;
       return (
         <>
           <Band
             theme={theme}
-            title="資格驗證"
-            subtitle="保險理賠代步 · 依理賠案件核定"
-            trailing="理賠額度"
+            title={s("資格驗證", "Eligibility verification")}
+            subtitle={s(
+              "保險理賠代步 · 依理賠案件核定",
+              "Insurance replacement ride · approved by claim case",
+            )}
+            trailing={s("理賠額度", "CLAIM")}
           />
           <Card
             style={{
@@ -1791,7 +1846,7 @@ function renderScreen(
               }}
             >
               <span style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
-                本案理賠額度 · claim allowance
+                {s("本案理賠額度 · claim allowance", "This claim allowance")}
               </span>
               <span
                 style={{
@@ -1840,7 +1895,9 @@ function renderScreen(
               <span>{s("代步期間剩 14 天", "14 days left in coverage")}</span>
             </div>
           </Card>
-          <Card title="核定項目 · eligibility checks">
+          <Card
+            title={s("核定項目 · eligibility checks", "Eligibility checks")}
+          >
             {checks.map((item, index) => (
               <div
                 key={item.code}
@@ -1927,13 +1984,19 @@ function renderScreen(
                   fontWeight: 700,
                 }}
               >
-                三項核定通過 · eligibility_verified
+                {s(
+                  "三項核定通過 · eligibility_verified",
+                  "Three checks passed · eligibility_verified",
+                )}
               </span>
             </div>
           </Card>
           <Button
             theme={theme}
-            label="確認並建立代步行程"
+            label={s(
+              "確認並建立代步行程",
+              "Confirm and create replacement ride",
+            )}
             href={getProgramScreenHref(basePath, "review")}
             primary
           />
@@ -2251,13 +2314,13 @@ function renderScreen(
             <TokenRow
               label={t("program.embed.unsupported.host")}
               code="origin_host"
-              value="未授權"
+              value={s("未授權", "Unauthorized")}
               ok={false}
             />
             <TokenRow
               label={t("program.embed.unsupported.signature")}
               code="issuer_signature"
-              value="缺少"
+              value={s("缺少", "Missing")}
               ok={false}
             />
           </Card>
@@ -2487,136 +2550,222 @@ function renderScreen(
   if (INSURANCE_ONLY_SCREEN_IDS.has(screen)) {
     const insuranceState = {
       insurance_policy: {
-        title: "保單資格不符",
-        subtitle: "保單或附約未通過驗證",
-        badge: "insurance_policy · 保單封鎖",
+        title: s("保單資格不符", "Policy eligibility failed"),
+        subtitle: s("保單或附約未通過驗證", "Policy or rider did not verify"),
+        badge: s(
+          "insurance_policy · 保單封鎖",
+          "insurance_policy · policy blocked",
+        ),
         tone: "danger" as const,
         glyph: "policy" as const,
-        reason:
+        reason: s(
           "保單 POL-558-22019 未包含有效的代步附約，或保障期間已不涵蓋本次理賠代步需求。",
+          "Policy POL-558-22019 does not include a valid replacement-ride rider, or the coverage period does not cover this request.",
+        ),
         rows: [
-          ["保單號", "POL-558-22019"],
-          ["保單狀態", "附約不符 / 需人工覆核"],
-          ["保障期間", "2026-01-01 ~ 2026-12-31"],
-          ["下一步", "請聯絡富邦產險承辦人"],
+          [s("保單號", "Policy No."), "POL-558-22019"],
+          [
+            s("保單狀態", "Policy status"),
+            s("附約不符 / 需人工覆核", "Rider mismatch / needs manual review"),
+          ],
+          [s("保障期間", "Coverage period"), "2026-01-01 ~ 2026-12-31"],
+          [
+            s("下一步", "Next step"),
+            s("請聯絡富邦產險承辦人", "Contact the Fubon Insurance handler"),
+          ],
         ],
-        primaryLabel: "聯絡富邦產險",
+        primaryLabel: s("聯絡富邦產險", "Contact Fubon Insurance"),
         primaryHref: landingHref,
-        secondaryLabel: "返回入口",
+        secondaryLabel: s("返回入口", "Back to entry"),
         secondaryHref: landingHref,
       },
       insurance_replacement_vehicle: {
-        title: "代步車權益未核定",
-        subtitle: "車型或代步期間尚未核准",
-        badge: "insurance_replacement_vehicle · 權益未核定",
+        title: s(
+          "代步車權益未核定",
+          "Replacement vehicle benefit not approved",
+        ),
+        subtitle: s(
+          "車型或代步期間尚未核准",
+          "Vehicle class or replacement period is not approved",
+        ),
+        badge: s(
+          "insurance_replacement_vehicle · 權益未核定",
+          "insurance_replacement_vehicle · benefit pending",
+        ),
         tone: "warn" as const,
         glyph: "car" as const,
-        reason:
+        reason: s(
           "理賠案件尚未核定可使用的代步車型或額度上限。需等待承辦人確認一般 / 商務車型與可用天數。",
+          "The claim has not approved a replacement vehicle class or allowance cap yet. Wait for the handler to confirm standard / business class and eligible days.",
+        ),
         rows: [
-          ["理賠號", "CLM-2026-88142"],
-          ["目前車型", "待核定"],
-          ["代步期間", "待富邦產險確認"],
-          ["建議", "查看理賠進度"],
+          [s("理賠號", "Claim No."), "CLM-2026-88142"],
+          [
+            s("目前車型", "Current vehicle class"),
+            s("待核定", "Pending approval"),
+          ],
+          [
+            s("代步期間", "Replacement period"),
+            s("待富邦產險確認", "Awaiting Fubon confirmation"),
+          ],
+          [
+            s("建議", "Recommendation"),
+            s("查看理賠進度", "Check claim progress"),
+          ],
         ],
-        primaryLabel: "查看理賠進度",
+        primaryLabel: s("查看理賠進度", "Check claim progress"),
         primaryHref: eligibilityHref,
-        secondaryLabel: "聯絡承辦人",
+        secondaryLabel: s("聯絡承辦人", "Contact handler"),
         secondaryHref: landingHref,
       },
       insurance_roster: {
-        title: "乘客名單不一致",
-        subtitle: "申請人與搭乘名單未對齊",
-        badge: "insurance_roster · 名單待修正",
+        title: s("乘客名單不一致", "Passenger roster mismatch"),
+        subtitle: s(
+          "申請人與搭乘名單未對齊",
+          "Claimant and rider list do not match",
+        ),
+        badge: s(
+          "insurance_roster · 名單待修正",
+          "insurance_roster · roster needs update",
+        ),
         tone: "danger" as const,
         glyph: "roster" as const,
-        reason:
+        reason: s(
           "目前輸入的乘客資料與理賠案件名單不一致。代步服務僅能提供給已核定的申請人與陪同名單。",
+          "The submitted passenger details do not match the claim roster. Replacement rides can only serve approved claimants and companions.",
+        ),
         rows: [
-          ["理賠申請人", "王〇華"],
-          ["目前搭乘名單", "2 人 · 含未授權乘客"],
-          ["名單狀態", "需重新比對"],
-          ["建議", "請修正乘客名單"],
+          [s("理賠申請人", "Claimant"), s("王〇華", "Wang H.")],
+          [
+            s("目前搭乘名單", "Current rider list"),
+            s(
+              "2 人 · 含未授權乘客",
+              "2 people · includes unauthorized passenger",
+            ),
+          ],
+          [s("名單狀態", "Roster status"), s("需重新比對", "Needs recheck")],
+          [
+            s("建議", "Recommendation"),
+            s("請修正乘客名單", "Update passenger roster"),
+          ],
         ],
-        primaryLabel: "重新輸入名單",
+        primaryLabel: s("重新輸入名單", "Re-enter roster"),
         primaryHref: eligibilityHref,
-        secondaryLabel: "聯絡承辦人",
+        secondaryLabel: s("聯絡承辦人", "Contact handler"),
         secondaryHref: landingHref,
       },
       insurance_pending: {
-        title: "理賠審核中",
-        subtitle: "代步權益尚未核定",
-        badge: "insurance_pending · 審核中",
+        title: s("理賠審核中", "Claim under review"),
+        subtitle: s(
+          "代步權益尚未核定",
+          "Replacement benefit is not approved yet",
+        ),
+        badge: s(
+          "insurance_pending · 審核中",
+          "insurance_pending · under review",
+        ),
         tone: "warn" as const,
         glyph: "clock" as const,
-        reason:
+        reason: s(
           "理賠案件 CLM-2026-88142 仍在富邦產險審核流程中，代步權益需理賠核定後才能啟用。",
+          "Claim CLM-2026-88142 is still under Fubon Insurance review. Replacement mobility unlocks after the claim is approved.",
+        ),
         rows: [
-          ["理賠號", "CLM-2026-88142"],
-          ["目前狀態", "理賠審核中"],
-          ["預計核定", "1-2 個工作日"],
-          ["通知方式", "簡訊 + Email"],
+          [s("理賠號", "Claim No."), "CLM-2026-88142"],
+          [
+            s("目前狀態", "Current status"),
+            s("理賠審核中", "Claim under review"),
+          ],
+          [
+            s("預計核定", "Estimated approval"),
+            s("1-2 個工作日", "1-2 business days"),
+          ],
+          [s("通知方式", "Notification method"), "SMS + Email"],
         ],
-        primaryLabel: "查看理賠進度",
+        primaryLabel: s("查看理賠進度", "Check claim progress"),
         primaryHref: eligibilityHref,
-        secondaryLabel: "聯絡承辦人",
+        secondaryLabel: s("聯絡承辦人", "Contact handler"),
         secondaryHref: landingHref,
       },
       insurance_missing: {
-        title: "查無理賠案件",
-        subtitle: "保單或理賠編號有誤",
-        badge: "insurance_missing · 查無資料",
+        title: s("查無理賠案件", "No claim found"),
+        subtitle: s(
+          "保單或理賠編號有誤",
+          "Policy or claim reference is incorrect",
+        ),
+        badge: s(
+          "insurance_missing · 查無資料",
+          "insurance_missing · no matching case",
+        ),
         tone: "danger" as const,
         glyph: "search" as const,
-        reason:
+        reason: s(
           "依您提供的保單號 / 理賠參照查無對應案件。請確認號碼是否正確，或聯絡富邦產險確認案件已建立。",
+          "No matching case was found for the policy / claim reference provided. Confirm the numbers or contact Fubon Insurance to verify the case has been created.",
+        ),
         rows: [
-          ["輸入保單號", "POL-558-2201X"],
-          ["輸入理賠號", "CLM-2026-8814X"],
-          ["比對結果", "查無對應案件"],
-          ["建議", "重新輸入或洽承辦"],
+          [s("輸入保單號", "Entered policy No."), "POL-558-2201X"],
+          [s("輸入理賠號", "Entered claim No."), "CLM-2026-8814X"],
+          [
+            s("比對結果", "Match result"),
+            s("查無對應案件", "No matching case"),
+          ],
+          [
+            s("建議", "Recommendation"),
+            s("重新輸入或洽承辦", "Re-enter details or contact handler"),
+          ],
         ],
-        primaryLabel: "重新輸入",
+        primaryLabel: s("重新輸入", "Re-enter details"),
         primaryHref: eligibilityHref,
-        secondaryLabel: "聯絡富邦產險",
+        secondaryLabel: s("聯絡富邦產險", "Contact Fubon Insurance"),
         secondaryHref: landingHref,
       },
       insurance_expired: {
-        title: "代步期間已結束",
-        subtitle: "保障窗口已逾期",
-        badge: "insurance_expired · 已逾期",
+        title: s("代步期間已結束", "Replacement period ended"),
+        subtitle: s("保障窗口已逾期", "Coverage window has expired"),
+        badge: s("insurance_expired · 已逾期", "insurance_expired · expired"),
         tone: "danger" as const,
         glyph: "alert" as const,
-        reason:
+        reason: s(
           "本理賠案件的代步期間（2026-05-01 ~ 05-31）已結束，無法再建立代步行程。如有特殊情形請洽承辦人申請延長。",
+          "The replacement period for this claim (2026-05-01 ~ 05-31) has ended, so no new replacement ride can be created. Contact the handler to request an extension for exceptional cases.",
+        ),
         rows: [
-          ["理賠號", "CLM-2026-77013"],
-          ["代步期間", "2026-05-01 ~ 2026-05-31"],
-          ["到期日", "已逾期 10 天"],
-          ["剩餘額度", "已關閉"],
+          [s("理賠號", "Claim No."), "CLM-2026-77013"],
+          [s("代步期間", "Replacement period"), "2026-05-01 ~ 2026-05-31"],
+          [s("到期日", "Expiry"), s("已逾期 10 天", "Expired 10 days ago")],
+          [s("剩餘額度", "Remaining allowance"), s("已關閉", "Closed")],
         ],
-        primaryLabel: "申請延長代步",
+        primaryLabel: s("申請延長代步", "Request extension"),
         primaryHref: landingHref,
-        secondaryLabel: "返回入口",
+        secondaryLabel: s("返回入口", "Back to entry"),
         secondaryHref: landingHref,
       },
       insurance_cancelled: {
-        title: "理賠案件已結案",
-        subtitle: "案件取消 / 已結清",
-        badge: "insurance_cancelled · 已結案",
+        title: s("理賠案件已結案", "Claim case closed"),
+        subtitle: s("案件取消 / 已結清", "Case cancelled / settled"),
+        badge: s(
+          "insurance_cancelled · 已結案",
+          "insurance_cancelled · closed",
+        ),
         tone: "danger" as const,
         glyph: "ban" as const,
-        reason:
+        reason: s(
           "理賠案件 CLM-2026-66200 已結案或取消，代步權益隨之關閉。若為誤判，請聯絡富邦產險重啟案件。",
+          "Claim CLM-2026-66200 has been closed or cancelled, so the replacement benefit is closed. If this is incorrect, contact Fubon Insurance to reopen the case.",
+        ),
         rows: [
-          ["理賠號", "CLM-2026-66200"],
-          ["案件狀態", "已結案 / 取消"],
-          ["關閉日", "2026-06-02"],
-          ["代步權益", "已停用"],
+          [s("理賠號", "Claim No."), "CLM-2026-66200"],
+          [
+            s("案件狀態", "Case status"),
+            s("已結案 / 取消", "Closed / cancelled"),
+          ],
+          [s("關閉日", "Closed date"), "2026-06-02"],
+          [s("代步權益", "Replacement benefit"), s("已停用", "Disabled")],
         ],
-        primaryLabel: "聯絡富邦產險",
+        primaryLabel: s("聯絡富邦產險", "Contact Fubon Insurance"),
         primaryHref: landingHref,
-        secondaryLabel: "返回入口",
+        secondaryLabel: s("返回入口", "Back to entry"),
         secondaryHref: landingHref,
       },
     } as const satisfies Record<
@@ -2673,18 +2822,18 @@ function renderScreen(
             <Chip theme={theme} tone={tone} label={state.badge} />
           </div>
         </Card>
-        <Card title="原因">
+        <Card title={s("原因", "Reason")}>
           <div style={{ fontSize: "13px", color: "#0e1424", lineHeight: 1.65 }}>
             {state.reason}
           </div>
         </Card>
-        <Card title="案件資訊">
+        <Card title={s("案件資訊", "Case information")}>
           {state.rows.map(([label, value]) => (
             <Row
               key={label}
               label={label}
               value={value}
-              mono={label.includes("號")}
+              mono={label.includes("號") || label.includes("No.")}
             />
           ))}
         </Card>
@@ -2695,7 +2844,10 @@ function renderScreen(
             lineHeight: 1.55,
           }}
         >
-          此狀態由理賠系統判定，接送無法在此狀態下派車。本頁不會擷取任何卡片或付款資料。
+          {s(
+            "此狀態由理賠系統判定，接送無法在此狀態下派車。本頁不會擷取任何卡片或付款資料。",
+            "This state is determined by the claim system. Dispatch is blocked in this state, and this page does not collect any card or payment data.",
+          )}
         </div>
         <Button
           theme={theme}
@@ -2718,8 +2870,8 @@ function renderScreen(
         <>
           <Band
             theme={theme}
-            title="下單前確認"
-            subtitle="團體接送 · 第 1 段"
+            title={s("下單前確認", "Review before booking")}
+            subtitle={s("團體接送 · 第 1 段", "Group transfer · segment 1")}
           />
           <Card>
             <Row label={s("上車", "Pickup")} value={demo.pickup} />
@@ -2727,23 +2879,47 @@ function renderScreen(
             <Row label={s("下車", "Drop-off")} value={demo.dropoff} />
             <Row label="" value={demo.dropoffDetail} />
           </Card>
-          <Card title="團體與 roster">
-            <Row label="團體 / 訂單參照" value={demo.bookingRef} mono />
-            <Row label="團體席次" value="12 / 12 席" mono />
-            <Row label="行李" value="18 件" />
-            <Row label="集合點" value="入境大廳北側遊覽車上車處" />
-            <Row label="時間" value={demo.departureTime} mono />
+          <Card title={s("團體與 roster", "Group and roster")}>
+            <Row
+              label={s("團體 / 訂單參照", "Group / booking ref")}
+              value={demo.bookingRef}
+              mono
+            />
+            <Row
+              label={s("團體席次", "Group seats")}
+              value={s("12 / 12 席", "12 / 12 seats")}
+              mono
+            />
+            <Row label={s("行李", "Luggage")} value={s("18 件", "18 bags")} />
+            <Row
+              label={s("集合點", "Meeting point")}
+              value={s(
+                "入境大廳北側遊覽車上車處",
+                "North coach pickup area in arrivals hall",
+              )}
+            />
+            <Row label={s("時間", "Time")} value={demo.departureTime} mono />
           </Card>
           <Card
-            title="車輛配置與費用"
+            title={s("車輛配置與費用", "Vehicle assignment and fees")}
             style={{
               borderColor: theme.surface.border,
               background: theme.surface.bg,
             }}
           >
-            <Row label="車輛配置" value="中型巴士 ×1" />
-            <Row label="接送段數" value="第 1 / 4 段" mono />
-            <Row label="費用" value="已含團費" />
+            <Row
+              label={s("車輛配置", "Vehicle assignment")}
+              value={s("中型巴士 ×1", "Medium bus x1")}
+            />
+            <Row
+              label={s("接送段數", "Transfer segment")}
+              value={s("第 1 / 4 段", "Segment 1 / 4")}
+              mono
+            />
+            <Row
+              label={s("費用", "Fee")}
+              value={s("已含團費", "Included in group fee")}
+            />
             <div
               style={{
                 display: "flex",
@@ -2757,7 +2933,10 @@ function renderScreen(
             >
               <Chip theme={theme} tone="accent" label="roster verified" />
               <span style={{ fontSize: "11px", color: theme.chrome.pageMuted }}>
-                roster 與團體席次已對齊，可直接送出派車。
+                {s(
+                  "roster 與團體席次已對齊，可直接送出派車。",
+                  "Roster and group seats are aligned, so dispatch can be submitted.",
+                )}
               </span>
             </div>
           </Card>

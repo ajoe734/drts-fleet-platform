@@ -191,4 +191,67 @@ test.describe("partner booking localization smoke", () => {
     await expect(page.locator("body")).not.toContainText("信用卡機場接送");
     await expect(page.locator("body")).not.toContainText("查看資格確認");
   });
+
+  test("en insurance blocked state keeps claim copy localized", async ({
+    page,
+  }, testInfo) => {
+    await primeLocale(
+      page,
+      "en",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
+    );
+    await gotoAndSettle(page, "/fubon/program/site/insurance_policy");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText(
+      "Policy eligibility failed",
+    );
+    await expect(page.locator("body")).toContainText("Policy No.");
+    await expect(page.locator("body")).toContainText("Contact Fubon Insurance");
+    await expect(page.locator("body")).not.toContainText("保單資格不符");
+    await expect(page.locator("body")).not.toContainText("聯絡富邦產險");
+    await expect(page.locator("body")).not.toContainText("原因");
+  });
+
+  test("en travel review keeps group transfer copy localized", async ({
+    page,
+  }, testInfo) => {
+    await primeLocale(
+      page,
+      "en",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
+    );
+    await gotoAndSettle(page, "/lion/program/site/review");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText(
+      "Group transfer · segment 1",
+    );
+    await expect(page.locator("body")).toContainText(
+      "Vehicle assignment and fees",
+    );
+    await expect(page.locator("body")).toContainText(
+      "Roster and group seats are aligned",
+    );
+    await expect(page.locator("body")).not.toContainText("團體接送");
+    await expect(page.locator("body")).not.toContainText("車輛配置與費用");
+    await expect(page.locator("body")).not.toContainText("已含團費");
+  });
+
+  test("en embed unsupported token values stay localized", async ({
+    page,
+  }, testInfo) => {
+    await primeLocale(
+      page,
+      "en",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
+    );
+    await gotoAndSettle(
+      page,
+      "/bank-demo-alpha-airport/program/embed/embed-unsupported",
+    );
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator("body")).toContainText("Unauthorized");
+    await expect(page.locator("body")).toContainText("Missing");
+    await expect(page.locator("body")).not.toContainText("未授權");
+    await expect(page.locator("body")).not.toContainText("缺少");
+  });
 });
