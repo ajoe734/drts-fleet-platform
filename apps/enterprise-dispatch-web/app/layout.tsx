@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { EnterpriseShell } from "@/components/enterprise-shell";
+import { RootShell } from "@/components/root-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="zh-Hant">
       <body>
-        <EnterpriseShell>{children}</EnterpriseShell>
+        <RootShell>{children}</RootShell>
       </body>
     </html>
   );
