@@ -71,7 +71,7 @@ const ghostLinkStyle = {
 } as const;
 
 export default function HomePage() {
-  const activeTrip = enterpriseBookings[0];
+  const activeTrip = enterpriseBookings[0]!;
 
   return (
     <div style={enterprisePageStyle}>
