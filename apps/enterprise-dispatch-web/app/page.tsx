@@ -17,7 +17,6 @@ import {
 import {
   enterpriseCardGridStyle,
   enterprisePageStyle,
-  enterpriseTheme,
 } from "@/lib/enterprise-theme";
 
 const linkStyle = {
