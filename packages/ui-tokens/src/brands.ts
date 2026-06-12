@@ -380,7 +380,7 @@ export const BRAND_TEMPLATES = {
     programName: "World Elite",
     tenantCode: "CTBC_BIZ",
     host: "ride.ctbc.com.tw",
-    tagline: "卡友禮賓接送 · in-app webview · 7 步驟漏斗",
+    tagline: "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗",
     tokens: PARTNER_BRAND_TOKENS.CTBC,
     hotline: {
       label: "24 小時禮賓專線",

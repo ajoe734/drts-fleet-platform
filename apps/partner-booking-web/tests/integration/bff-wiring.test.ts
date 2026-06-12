@@ -158,7 +158,12 @@ describe("partner-booking-web BFF wiring", () => {
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
-      brand: expect.objectContaining({ slug: "ctbc" }),
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+        tagline:
+          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+      }),
     });
 
     await expect(getPublicPartnerEntry("ghost")).rejects.toMatchObject({
@@ -188,7 +193,12 @@ describe("partner-booking-web BFF wiring", () => {
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
-      brand: expect.objectContaining({ slug: "ctbc" }),
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+        tagline:
+          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+      }),
     });
     await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
       code: "PARTNER_ENTRY_NOT_FOUND",
@@ -232,7 +242,12 @@ describe("partner-booking-web BFF wiring", () => {
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
-      brand: expect.objectContaining({ slug: "ctbc" }),
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+        tagline:
+          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+      }),
     });
     await expect(
       getPartnerRouteContext("ctbc", { allowMissing: true }),

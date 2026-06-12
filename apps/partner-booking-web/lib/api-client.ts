@@ -138,17 +138,20 @@ function getAuthorityClient(session: PartnerSessionRecord): ApiClient {
 }
 
 function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
-  const base = BRAND_TEMPLATES.CTBC;
+  const normalizedSlug = slug.toLowerCase();
+  const base =
+    Object.values(BRAND_TEMPLATES).find((brand) => {
+      return (
+        brand.slug.toLowerCase() === normalizedSlug ||
+        brand.code.toLowerCase() === normalizedSlug
+      );
+    }) ?? BRAND_TEMPLATES.CTBC;
   return {
     ...base,
     slug,
-    displayName: slug
-      .split("-")
-      .filter(Boolean)
-      .map((part) => part[0]?.toUpperCase() + part.slice(1))
-      .join(" "),
+    displayName: base.displayName,
     host: `${slug}.partner.invalid`,
-    tagline: "Partner booking channel awaiting active backend authority.",
+    tagline: `${base.tagline} · 等待後端合作入口啟用`,
     theme: PARTNER_DEFAULT_THEME,
   };
 }
