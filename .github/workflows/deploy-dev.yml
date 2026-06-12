@@ -58,6 +58,7 @@ env:
   DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
   DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.DEV_GCP_TENANT_CONSOLE_SERVICE }}
+  DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_BANK_CONSOLE_SERVICE: ${{ vars.DEV_GCP_BANK_CONSOLE_SERVICE }}
   DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
   DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
@@ -66,6 +67,7 @@ env:
   DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED }}
   DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
   DEV_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED }}
+  DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED }}
   DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED }}
   DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
@@ -74,6 +76,7 @@ env:
   DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
   DEV_FLEET_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ORIGIN }}
   DEV_TENANT_CONSOLE_ORIGIN: ${{ vars.DEV_TENANT_CONSOLE_ORIGIN }}
+  DEV_ENTERPRISE_DISPATCH_ORIGIN: ${{ vars.DEV_ENTERPRISE_DISPATCH_ORIGIN }}
   DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME: ${{ vars.DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME }}
   DEV_OPENCLAW_AGENT_MODEL: ${{ vars.DEV_OPENCLAW_AGENT_MODEL }}
   DEV_OPENCLAW_SUMMARIZER_MODEL: ${{ vars.DEV_OPENCLAW_SUMMARIZER_MODEL }}
@@ -94,6 +97,7 @@ env:
   WAJI_GCP_OPS_CONSOLE_SERVICE: ${{ vars.WAJI_GCP_OPS_CONSOLE_SERVICE }}
   WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
   WAJI_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.WAJI_GCP_TENANT_CONSOLE_SERVICE }}
+  WAJI_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.WAJI_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   WAJI_GCP_BANK_CONSOLE_SERVICE: ${{ vars.WAJI_GCP_BANK_CONSOLE_SERVICE }}
   WAJI_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.WAJI_GCP_PARTNER_BOOKING_SERVICE }}
   WAJI_GCP_MIGRATION_JOB: ${{ vars.WAJI_GCP_MIGRATION_JOB }}
@@ -125,6 +129,7 @@ jobs:
       ops_console_service: ${{ steps.resolve.outputs.ops_console_service }}
       fleet_partner_portal_service: ${{ steps.resolve.outputs.fleet_partner_portal_service }}
       tenant_console_service: ${{ steps.resolve.outputs.tenant_console_service }}
+      enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       bank_console_service: ${{ steps.resolve.outputs.bank_console_service }}
       partner_booking_service: ${{ steps.resolve.outputs.partner_booking_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
@@ -133,6 +138,7 @@ jobs:
       ops_console_exposure_flag: ${{ steps.resolve.outputs.ops_console_exposure_flag }}
       fleet_partner_portal_exposure_flag: ${{ steps.resolve.outputs.fleet_partner_portal_exposure_flag }}
       tenant_console_exposure_flag: ${{ steps.resolve.outputs.tenant_console_exposure_flag }}
+      enterprise_dispatch_exposure_flag: ${{ steps.resolve.outputs.enterprise_dispatch_exposure_flag }}
       bank_console_exposure_flag: ${{ steps.resolve.outputs.bank_console_exposure_flag }}
       partner_booking_exposure_flag: ${{ steps.resolve.outputs.partner_booking_exposure_flag }}
       api_origin: ${{ steps.resolve.outputs.api_origin }}
@@ -140,6 +146,7 @@ jobs:
       ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
       fleet_partner_portal_origin: ${{ steps.resolve.outputs.fleet_partner_portal_origin }}
       tenant_console_origin: ${{ steps.resolve.outputs.tenant_console_origin }}
+      enterprise_dispatch_origin: ${{ steps.resolve.outputs.enterprise_dispatch_origin }}
       waji_wif_provider: ${{ steps.resolve.outputs.waji_wif_provider }}
       waji_deployer_service_account: ${{ steps.resolve.outputs.waji_deployer_service_account }}
 
@@ -333,6 +340,7 @@ jobs:
           ops_console_service="$(pick "${DEV_GCP_OPS_CONSOLE_SERVICE:-}" "" "drts-ops-console-web")"
           fleet_partner_portal_service="$(pick "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-fleet-partner-portal-web")"
           tenant_console_service="$(pick "${DEV_GCP_TENANT_CONSOLE_SERVICE:-}" "" "drts-tenant-console-web")"
+          enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-enterprise-dispatch-web")"
           bank_console_service="$(pick "${DEV_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-bank-console-web")"
           partner_booking_service="$(pick "${DEV_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-partner-booking-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
@@ -341,6 +349,7 @@ jobs:
           ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
           fleet_partner_portal_exposure_flag="$(exposure_flag "${DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" true)"
           tenant_console_exposure_flag="$(exposure_flag "${DEV_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
+          enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" true)"
           bank_console_exposure_flag="$(exposure_flag "${DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
           partner_booking_exposure_flag="$(exposure_flag "${DEV_PARTNER_BOOKING_ALLOW_UNAUTHENTICATED:-}" true)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
@@ -348,6 +357,7 @@ jobs:
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
           fleet_partner_portal_origin="${DEV_FLEET_PARTNER_PORTAL_ORIGIN:-}"
           tenant_console_origin="${DEV_TENANT_CONSOLE_ORIGIN:-}"
+          enterprise_dispatch_origin="${DEV_ENTERPRISE_DISPATCH_ORIGIN:-}"
 
           target_profile="${INPUT_TARGET_PROFILE:-waji}"
           case "$target_profile" in
@@ -374,6 +384,7 @@ jobs:
             ops_console_service="$(pick "${WAJI_GCP_OPS_CONSOLE_SERVICE:-}" "" "drts-dev-ops-console-web")"
             fleet_partner_portal_service="$(pick "${WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-dev-fleet-partner-portal-web")"
             tenant_console_service="$(pick "${WAJI_GCP_TENANT_CONSOLE_SERVICE:-}" "" "drts-dev-tenant-console-web")"
+            enterprise_dispatch_service="$(pick "${WAJI_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-dev-enterprise-dispatch-web")"
             bank_console_service="$(pick "${WAJI_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-dev-bank-console-web")"
             partner_booking_service="$(pick "${WAJI_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-dev-partner-booking-web")"
             migration_job="$(pick "${WAJI_GCP_MIGRATION_JOB:-}" "" "drts-dev-migrate")"
@@ -382,6 +393,7 @@ jobs:
             ops_console_exposure_flag="--allow-unauthenticated"
             fleet_partner_portal_exposure_flag="--allow-unauthenticated"
             tenant_console_exposure_flag="--allow-unauthenticated"
+            enterprise_dispatch_exposure_flag="--allow-unauthenticated"
             bank_console_exposure_flag="--allow-unauthenticated"
             partner_booking_exposure_flag="--allow-unauthenticated"
             api_origin=""
@@ -389,6 +401,7 @@ jobs:
             ops_console_origin=""
             fleet_partner_portal_origin=""
             tenant_console_origin=""
+            enterprise_dispatch_origin=""
           fi
 
           waji_wif_provider=""
@@ -473,6 +486,7 @@ jobs:
           emit ops_console_service "$ops_console_service"
           emit fleet_partner_portal_service "$fleet_partner_portal_service"
           emit tenant_console_service "$tenant_console_service"
+          emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit bank_console_service "$bank_console_service"
           emit partner_booking_service "$partner_booking_service"
           emit migration_job "$migration_job"
@@ -481,6 +495,7 @@ jobs:
           emit ops_console_exposure_flag "$ops_console_exposure_flag"
           emit fleet_partner_portal_exposure_flag "$fleet_partner_portal_exposure_flag"
           emit tenant_console_exposure_flag "$tenant_console_exposure_flag"
+          emit enterprise_dispatch_exposure_flag "$enterprise_dispatch_exposure_flag"
           emit bank_console_exposure_flag "$bank_console_exposure_flag"
           emit partner_booking_exposure_flag "$partner_booking_exposure_flag"
           emit api_origin "$api_origin"
@@ -488,6 +503,7 @@ jobs:
           emit ops_console_origin "$ops_console_origin"
           emit fleet_partner_portal_origin "$fleet_partner_portal_origin"
           emit tenant_console_origin "$tenant_console_origin"
+          emit enterprise_dispatch_origin "$enterprise_dispatch_origin"
           emit waji_wif_provider "$waji_wif_provider"
           emit waji_deployer_service_account "$waji_deployer_service_account"
 
@@ -600,6 +616,18 @@ jobs:
             ${{ needs.prepare.outputs.registry }}/tenant-console-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/tenant-console-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/tenant-console-web:cache,mode=max
+
+      - name: Build & push — enterprise-dispatch-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/enterprise-dispatch-web/Dockerfile
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:cache,mode=max
 
       - name: Build & push — bank-console-web
         uses: docker/build-push-action@v5
@@ -900,6 +928,23 @@ jobs:
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
+      - name: Deploy — enterprise-dispatch-web
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ needs.build-push.outputs.image_tag }}"
+
+          gcloud run deploy "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3010 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            ${{ needs.prepare.outputs.enterprise_dispatch_exposure_flag }} \
+            --min-instances 0 \
+            --max-instances 2 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
       - name: Deploy — bank-console-web
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/bank-console-web:${{ needs.build-push.outputs.image_tag }}"
@@ -964,6 +1009,7 @@ jobs:
             "${{ needs.prepare.outputs.ops_console_service }}" \
             "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             "${{ needs.prepare.outputs.tenant_console_service }}" \
+            "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             "${{ needs.prepare.outputs.bank_console_service }}" \
             "${{ needs.prepare.outputs.partner_booking_service }}"; do
             echo "Waiting for ${svc} ..."
@@ -1013,6 +1059,10 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
+          enterprise_dispatch_url="$(gcloud run services describe "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
           bank_console_url="$(gcloud run services describe "${{ needs.prepare.outputs.bank_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
@@ -1027,6 +1077,7 @@ jobs:
           echo "ops_console=${ops_console_url}" >> "$GITHUB_OUTPUT"
           echo "fleet_partner_portal=${fleet_partner_portal_url}" >> "$GITHUB_OUTPUT"
           echo "tenant_console=${tenant_console_url}" >> "$GITHUB_OUTPUT"
+          echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "bank_console=${bank_console_url}" >> "$GITHUB_OUTPUT"
           echo "partner_booking=${partner_booking_url}" >> "$GITHUB_OUTPUT"
 
@@ -1037,6 +1088,7 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.ops_console }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.tenant_console }}" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.bank_console }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc/program" >/dev/null
@@ -1049,5 +1101,6 @@ jobs:
           echo "  ops-console: ${{ steps.urls.outputs.ops_console }}"
           echo "  fleet-partner-portal: ${{ steps.urls.outputs.fleet_partner_portal }}"
           echo "  tenant-console: ${{ steps.urls.outputs.tenant_console }}"
+          echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  bank-console: ${{ steps.urls.outputs.bank_console }}"
           echo "  partner-booking: ${{ steps.urls.outputs.partner_booking }}"
