@@ -5,7 +5,7 @@
 - Task: `ENT-DISP-FE-20260612-F-UNBLOCK-PLANNING-DECISION`
 - Parent: `ENT-DISP-FE-20260612-F`
 - Owner: `Codex`
-- Reviewer: `Codex2`
+- Reviewer: `Claude2`
 - Decision date: `2026-06-12`
 
 ## Diagnosis
