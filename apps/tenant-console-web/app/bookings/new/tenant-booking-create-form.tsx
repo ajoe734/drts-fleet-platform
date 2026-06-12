@@ -344,8 +344,18 @@ function formatAge(generatedAt: string, nowMs: number, t: Translator) {
 }
 
 function describeSubtype(value: BusinessDispatchSubtype, t: Translator) {
-  return getBusinessSubtypeOptions(t).find((option) => option.value === value)
-    ?.label;
+  switch (value) {
+    case "enterprise_dispatch":
+      return t("newBooking.program.enterprise");
+    case "credit_card_airport_transfer":
+      return t("newBooking.program.creditCard");
+    case "insurance_replacement_vehicle":
+      return "insurance_replacement_vehicle";
+    case "travel_agency_transfer":
+      return "travel_agency_transfer";
+    default:
+      return value;
+  }
 }
 
 function describeDirection(value: "" | "pickup" | "dropoff", t: Translator) {
