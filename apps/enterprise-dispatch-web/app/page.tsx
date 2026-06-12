@@ -9,7 +9,9 @@ import {
   EnterprisePill,
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
+import { EnterpriseBookingFlowStepper } from "@/components/enterprise-booking-flow";
 import {
+  enterpriseBookingDraft,
   bookingStateMeta,
   enterpriseBookings,
   enterpriseTenant,
@@ -76,11 +78,13 @@ export default function HomePage() {
         title={`嗨，${enterpriseUser.name}，要去哪裡？`}
         subtitle={`${enterpriseTenant.name} · 為自己或同事建立企業派車，費用走成本中心、超額需審批。`}
         actions={
-          <Link href="/bookings" style={primaryLinkStyle}>
+          <Link href="/bookings/new" style={primaryLinkStyle}>
             建立預約
           </Link>
         }
       />
+
+      <EnterpriseBookingFlowStepper current="home" />
 
       <EnterpriseKpiGrid>
         <EnterpriseKpi
@@ -140,13 +144,13 @@ export default function HomePage() {
         >
           <div style={{ display: "grid", gap: 10 }}>
             <Link
-              href="/bookings"
+              href="/bookings/new"
               style={{ ...primaryLinkStyle, width: "100%" }}
             >
               為自己預約
             </Link>
             <Link
-              href="/bookings"
+              href="/bookings/new"
               style={{ ...secondaryLinkStyle, width: "100%" }}
             >
               為同事 / 訪客代訂
@@ -159,6 +163,54 @@ export default function HomePage() {
       </div>
 
       <EnterpriseSection>
+        <EnterpriseCard
+          title="本次 dispatch fixture"
+          actions={
+            <EnterprisePill tone="info">
+              home → new → review → submitted
+            </EnterprisePill>
+          }
+        >
+          <EnterpriseDl
+            cols={2}
+            items={[
+              { k: "乘客", v: enterpriseBookingDraft.passenger },
+              { k: "代訂人", v: enterpriseBookingDraft.bookedBy },
+              {
+                k: "成本中心",
+                v: enterpriseBookingDraft.costCenter,
+                mono: true,
+              },
+              {
+                k: "預估費用",
+                v: enterpriseBookingDraft.estimatedFare,
+                mono: true,
+              },
+            ]}
+          />
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              marginTop: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <Link href="/bookings/new" style={primaryLinkStyle}>
+              從首頁開始走流程
+            </Link>
+            <Link href="/bookings/review" style={secondaryLinkStyle}>
+              直接看 review 核心
+            </Link>
+            <Link
+              href="/bookings/submitted?state=pending"
+              style={ghostLinkStyle}
+            >
+              查看 pending submitted
+            </Link>
+          </div>
+        </EnterpriseCard>
+
         <EnterpriseCard
           title="即將到來的預約"
           actions={
