@@ -332,18 +332,6 @@ export default async function HomePage() {
         ) : null}
       </CalloutPanel>
 
-      <CalloutPanel
-        title="合作夥伴模式在受限介面中運作"
-        description="合作夥伴訂單位於 `/partner/*`，擁有獨立的 bootstrap session、僅限合作夥伴的導覽，且不暴露租戶管理治理。當 entry 未設定為 `eligibility_mode = none` 時，建立訂單需要 entry 範圍的資格驗證。"
-        tone="warning"
-      >
-        <div className="link-row">
-          <Link className="text-link" href="/partner/login">
-            開啟合作夥伴登入
-          </Link>
-        </div>
-      </CalloutPanel>
-
       {data.errors.length > 0 ? (
         <CalloutPanel
           title="部分資料警告"
