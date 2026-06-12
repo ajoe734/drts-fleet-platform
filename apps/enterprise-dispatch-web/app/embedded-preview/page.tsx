@@ -43,7 +43,9 @@ export default function EmbeddedPreviewPage() {
               <EnterpriseCard
                 title={state.title}
                 actions={
-                  <EnterprisePill tone={state.tone}>{state.code}</EnterprisePill>
+                  <EnterprisePill tone={state.tone}>
+                    {state.code}
+                  </EnterprisePill>
                 }
               >
                 <div style={{ display: "grid", gap: 14 }}>
