@@ -1,110 +1,92 @@
-# ENT-DISP-FE-20260612-A Acceptance Packet
+# ENT-DISP-FE-20260612-A Sidecar Acceptance Packet
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `ENT-DISP-FE-20260612-A`  
-**Sidecar Task:** `ENT-DISP-FE-20260612-A-SIDECAR-ACCEPTANCE`  
-**Prepared By:** `Codex`  
-**Assigned Reviewer:** `Claude2`  
-**Last Revised:** `2026-06-12T15:00Z`  
-**Status:** support artifact prepared for reviewer handoff
+**Parent task:** `ENT-DISP-FE-20260612-A`
+**Sidecar task:** `ENT-DISP-FE-20260612-A-SIDECAR-ACCEPTANCE`
+**Prepared by:** Codex
+**Date:** 2026-06-12
+**Scope:** support artifact only; no canonical truth changes.
 
-## 1. Scope Boundary
+## Parent Summary
 
-This sidecar is support-only. It does not modify canonical truth, runtime code, contracts, registry state, or the parent scaffold implementation.
+`ENT-DISP-FE-20260612-A` creates the dedicated Enterprise Dispatch frontend app scaffold:
 
-- In scope: acceptance framing, dependency map, observable repo baseline, reviewer handoff notes.
-- Out of scope: creating `apps/enterprise-dispatch-web`, changing existing app surfaces, or rewriting product truth.
+- app path: `apps/enterprise-dispatch-web`
+- package: `@drts/enterprise-dispatch-web`
+- dev/start port: `3010`
+- product boundary: enterprise employee self-service booking, S1 web + S2 embedded app
 
-## 2. Machine Truth Snapshot
+The parent is intentionally only the scaffold slice. Full design kit, routes, fixture data, API wiring, tests, and rollout evidence belong to later slices B-F.
 
-From task-state slices on `2026-06-12`:
+## Acceptance Checklist
 
-- Parent task `ENT-DISP-FE-20260612-A` is `in_progress`, owner=`Claude2`, reviewer=`Claude`.
-- Parent acceptance requires:
-  - create `@drts/enterprise-dispatch-web`
-  - `typecheck` / `lint` executable
-  - `/` renders a basic shell
-  - README explicitly forbids reusing tenant-portal / tenant-console / partner-booking
-- Parent `next` field says: `A worker completed scaffold with port 3010. Codex is reviewing local diff and verification before owner handoff to Claude.`
-- This sidecar task is support-only with no formal dependencies and no canonical mutations.
+| Acceptance item | Evidence | Status |
+|---|---|---|
+| Add `@drts/enterprise-dispatch-web` package | `apps/enterprise-dispatch-web/package.json` | PASS |
+| Use dev/start port `3010` | `apps/enterprise-dispatch-web/package.json` | PASS |
+| Render a basic `/` shell | `apps/enterprise-dispatch-web/app/page.tsx` | PASS |
+| Add layout and global CSS | `apps/enterprise-dispatch-web/app/layout.tsx`, `apps/enterprise-dispatch-web/app/globals.css` | PASS |
+| Add Next/TS/ESLint config | `next.config.ts`, `tsconfig.json`, `eslint.config.mjs` | PASS |
+| Add public placeholder | `apps/enterprise-dispatch-web/public/.gitkeep` | PASS |
+| Add README with product boundary | `apps/enterprise-dispatch-web/README.md` | PASS |
+| Root dev script exists | root `package.json` `dev:enterprise-dispatch` | PASS |
+| Avoid `3008` / `3009` in new app | `rg -- "3008|3009" apps/enterprise-dispatch-web package.json` | PASS |
 
-## 3. Observable Repo Baseline In This Worktree
+## Verification Commands
 
-The current task worktree does **not** contain the two parent artifacts referenced by machine truth:
+Commands re-run locally from `drts-fleet-platform`:
 
-| Expected Artifact | Observable State on `codex/ent-disp-fe-20260612-a-sidecar-acceptance` | Implication |
-| --- | --- | --- |
-| `apps/enterprise-dispatch-web` | Not present in this worktree | Parent acceptance cannot be revalidated here by direct file inspection |
-| `support/sidecars/ENT-DISP-FE-20260612/development-work-package.md` | Not present in this worktree | Sidecar cannot cite the claimed work package directly |
-
-Observable enterprise-dispatch-related anchors that **are** present:
-
-| Anchor | What It Confirms |
-| --- | --- |
-| `tests/e2e/E2E-001-enterprise-dispatch.sh` | Repo already recognizes an enterprise-dispatch end-to-end scenario across tenant, ops, and driver surfaces |
-| `docs/04-uat/phase1-uat-scenarios.md` | UAT narrative includes Enterprise Dispatch booking flow |
-| `docs/02-architecture/operational-glossary.md` | `enterprise_dispatch` exists as an accepted business subtype label |
-| `apps/api/src/modules/service-product/service-product.service.ts` | Backend service-product baseline already exposes Enterprise Dispatch metadata |
-| Existing surfaces under `apps/tenant-portal-web`, `apps/ops-console-web`, `apps/driver-app` | The repo currently models enterprise dispatch through existing product surfaces, not through a dedicated web app in this worktree snapshot |
-
-## 4. Dependency Map
-
-### Formal Dependencies
-
-Machine truth lists **none** for `ENT-DISP-FE-20260612-A-SIDECAR-ACCEPTANCE`.
-
-### Practical Upstream Inputs
-
-| Dependency | Type | Why It Matters |
-| --- | --- | --- |
-| Parent task `ENT-DISP-FE-20260612-A` | implementation source | This sidecar can only package and hand off what the parent actually delivers |
-| `tests/e2e/E2E-001-enterprise-dispatch.sh` | acceptance anchor | Defines the cross-surface enterprise-dispatch story already recognized in the repo |
-| `docs/04-uat/phase1-uat-scenarios.md` | UAT baseline | Confirms enterprise-dispatch flow already exists at product-scenario level |
-| `apps/api/src/modules/service-product/service-product.service.ts` | backend baseline | Shows enterprise-dispatch is already a known service-product type |
-
-### Practical Review Risk
-
-The sidecar reviewer should treat the current snapshot as a **visibility gap** rather than proof of parent failure. Machine truth says scaffold work exists, but this sidecar worktree cannot inspect that scaffold directly.
-
-## 5. Parent Acceptance Checklist For Reviewer
-
-The checklist below mirrors the parent task acceptance without inventing new product requirements.
-
-| Parent Acceptance Item | Observable Here? | Reviewer Expectation |
-| --- | --- | --- |
-| `@drts/enterprise-dispatch-web` app exists | No | Review against the parent owner branch/worktree that contains the scaffold |
-| `typecheck` and `lint` executable | No | Require command evidence from the parent owner or reviewer worktree |
-| `/` renders a basic shell | No | Require screenshot, browser check, or route implementation evidence from the parent owner branch |
-| README forbids reusing tenant-portal / tenant-console / partner-booking | No | Verify wording in the new app README directly |
-
-## 6. Support Assessment
-
-This packet finds no contradiction in canonical product truth, but it does find an evidence gap between:
-
-- machine-truth status claiming scaffold completion on port `3010`, and
-- the current sidecar worktree snapshot, which does not contain the scaffold directory or referenced development packet.
-
-That gap should be resolved by reviewer inspection of the parent owner branch rather than by changing this support artifact.
-
-## 7. Reviewer Handoff Notes
-
-Recommended reviewer focus for `Claude2`:
-
-1. Confirm whether the parent scaffold exists on the parent owner branch/worktree even though it is absent from this sidecar snapshot.
-2. Re-run or inspect `lint`, `typecheck`, and `/` shell evidence on the parent artifact itself.
-3. Verify the README explicitly preserves the boundary: do not reuse tenant-portal, tenant-console, or partner-booking as canonical implementation.
-4. Treat this packet as support-only evidence packaging, not as parent implementation approval by itself.
-
-Suggested approval wording:
-
-> `ENT-DISP-FE-20260612-A acceptance packet is ready for use. It stays support-only, records the current visibility gap between machine truth and this sidecar worktree, and gives the reviewer a direct checklist for validating the parent scaffold on the owner branch.`
-
-Suggested reopen wording:
-
-> `ENT-DISP-FE-20260612-A acceptance packet needs revision: [specify missing dependency mapping, inaccurate repo baseline, or unsupported inference].`
-
-## 8. Owner Handoff Command
-
-```bash
-AI_NAME=Codex scripts/ai-status.sh handoff ENT-DISP-FE-20260612-A-SIDECAR-ACCEPTANCE Claude2 "Prepared support-only acceptance packet at support/sidecars/ENT-DISP-FE-20260612-A/ENT-DISP-FE-20260612-A-SIDECAR-ACCEPTANCE.md. The packet records the current visibility gap between machine truth and this sidecar worktree, maps practical dependencies, and gives the reviewer a direct checklist for validating the parent scaffold on the owner branch without changing canonical truth."
+```sh
+pnpm --filter @drts/enterprise-dispatch-web typecheck
+pnpm --filter @drts/enterprise-dispatch-web lint
+pnpm --filter @drts/enterprise-dispatch-web test
 ```
+
+Results:
+
+- typecheck: PASS
+- lint: PASS
+- test: PASS, no test files found as expected for scaffold-only slice
+
+## Dependency Map
+
+Parent dependencies:
+
+- none
+
+Downstream dependencies:
+
+- `ENT-DISP-FE-20260612-B` should wait for A review approval before building shell/primitives.
+- `ENT-DISP-FE-20260612-C`, `D`, and `E` should wait for B.
+- `ENT-DISP-FE-20260612-F` may continue API gap mapping now, but API wiring/tests/rollout should wait for route implementation.
+
+## Product Boundary Checks
+
+The scaffold README explicitly states this app is not:
+
+- credit-card airport transfer
+- `apps/partner-booking-web`
+- sunset `apps/tenant-portal-web`
+- `apps/tenant-console-web` admin
+
+The dedicated freeze decision for Lovable confusion is now recorded:
+
+- `docs/01-decisions/SD-DP-20260612-007-enterprise-dispatch-frontend-and-lovable-freeze.md`
+
+External `tenant-commute-hub/README.md` also has a freeze banner. Future workers should not route new Enterprise Dispatch frontend work to Lovable.
+
+## Reviewer Notes
+
+The `/` page is a scaffold placeholder, not final visual implementation. It uses the Enterprise Dispatch blue accent to preserve the design direction, but B must replace this with production primitives from:
+
+- `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html`
+- `docs/05-ui/drts-design-canvas/ent-kit.jsx`
+- `docs/05-ui/drts-design-canvas/ent-shell.jsx`
+
+Do not require A to implement route completeness or API wiring; that would pull B-F scope into the scaffold slice.
+
+## Residual Risks
+
+- No app-level tests yet beyond pass-with-no-tests scaffold baseline.
+- No route structure beyond `/`.
+- No API adapter yet.
+- No production Docker/deploy config yet; add in rollout slice if deployment target is accepted.
