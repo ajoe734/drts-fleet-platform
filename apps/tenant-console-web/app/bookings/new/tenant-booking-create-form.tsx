@@ -111,10 +111,6 @@ function getBusinessSubtypeOptions(t: Translator): Array<{
 }> {
   return [
     {
-      value: "credit_card_airport_transfer",
-      label: t("newBooking.program.creditCard"),
-    },
-    {
       value: "enterprise_dispatch",
       label: t("newBooking.program.enterprise"),
     },
@@ -782,10 +778,7 @@ export function TenantBookingCreateForm({
   const [timingMode, setTimingMode] = useState<"scheduled" | "immediate">(
     "scheduled",
   );
-  const [businessDispatchSubtype, setBusinessDispatchSubtype] =
-    useState<BusinessDispatchSubtype>(
-      pageModel.prefill.businessDispatchSubtype,
-    );
+  const businessDispatchSubtype: BusinessDispatchSubtype = "enterprise_dispatch";
   const [selectedPassengerId, setSelectedPassengerId] = useState(
     pageModel.prefill.selectedPassengerId,
   );
@@ -806,11 +799,11 @@ export function TenantBookingCreateForm({
   const [passengerName, setPassengerName] = useState("");
   const [passengerPhone, setPassengerPhone] = useState("");
   const [costCenter, setCostCenter] = useState("");
-  const [benefitReference, setBenefitReference] = useState("");
+  const benefitReference = "";
   const [vehiclePreference, setVehiclePreference] = useState("");
-  const [direction, setDirection] = useState(pageModel.prefill.direction);
-  const [flightNo, setFlightNo] = useState("");
-  const [terminal, setTerminal] = useState("");
+  const direction: "" | "pickup" | "dropoff" = "";
+  const flightNo = "";
+  const terminal = "";
   const [luggageCount, setLuggageCount] = useState("");
   const [notes, setNotes] = useState("");
   const [bookedByName, setBookedByName] = useState("");
@@ -886,7 +879,6 @@ export function TenantBookingCreateForm({
     Boolean(activePassenger) && Boolean(activePassenger?.mobile?.trim());
   const policyPreviewReady =
     isReadyForTenantBookingPolicyPreview(draft) && Boolean(costCenter.trim());
-  const businessSubtypeOptions = getBusinessSubtypeOptions(t);
   const validationMessages = getValidationMessages(t);
   const formatErrors = getTenantBookingFieldErrors(draft, {
     messages: validationMessages,
@@ -1361,21 +1353,12 @@ export function TenantBookingCreateForm({
               >
                 <div style={fieldGridStyle}>
                   <FieldShell label={t("newBooking.field.serviceSubtype")}>
-                    <select
-                      onChange={(event) =>
-                        setBusinessDispatchSubtype(
-                          event.target.value as BusinessDispatchSubtype,
-                        )
-                      }
+                    <input
+                      readOnly
                       style={inputBaseStyle}
-                      value={businessDispatchSubtype}
-                    >
-                      {businessSubtypeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                      type="text"
+                      value={describeSubtype(businessDispatchSubtype, t) ?? ""}
+                    />
                   </FieldShell>
 
                   <FieldShell label={t("newBooking.field.timingMode")}>
@@ -1698,11 +1681,7 @@ export function TenantBookingCreateForm({
                   tone="info"
                   icon="spark"
                   title={t("newBooking.programSection.title")}
-                  body={
-                    businessDispatchSubtype === "credit_card_airport_transfer"
-                      ? t("newBooking.programHint.creditCard")
-                      : t("newBooking.programHint.enterprise")
-                  }
+                  body={t("newBooking.programHint.enterprise")}
                 />
                 <div style={fieldGridStyle}>
                   <FieldShell
@@ -1754,19 +1733,6 @@ export function TenantBookingCreateForm({
                   </FieldShell>
 
                   <FieldShell
-                    label={t("newBooking.programField.benefitReference")}
-                  >
-                    <input
-                      onChange={(event) =>
-                        setBenefitReference(event.target.value)
-                      }
-                      style={inputBaseStyle}
-                      type="text"
-                      value={benefitReference}
-                    />
-                  </FieldShell>
-
-                  <FieldShell
                     label={t("newBooking.programField.vehiclePreference")}
                   >
                     <input
@@ -1776,52 +1742,6 @@ export function TenantBookingCreateForm({
                       style={inputBaseStyle}
                       type="text"
                       value={vehiclePreference}
-                    />
-                  </FieldShell>
-
-                  <FieldShell label={t("newBooking.programField.direction")}>
-                    <select
-                      onChange={(event) =>
-                        setDirection(
-                          event.target.value as "" | "pickup" | "dropoff",
-                        )
-                      }
-                      style={inputBaseStyle}
-                      value={direction}
-                    >
-                      <option value="">{t("newBooking.option.notSet")}</option>
-                      <option value="pickup">
-                        {t("newBooking.option.pickup")}
-                      </option>
-                      <option value="dropoff">
-                        {t("newBooking.option.dropoff")}
-                      </option>
-                    </select>
-                  </FieldShell>
-
-                  <FieldShell
-                    error={visibleFieldErrors.flightNo}
-                    label={t("newBooking.programField.flightNo")}
-                  >
-                    <input
-                      onChange={(event) => setFlightNo(event.target.value)}
-                      style={{
-                        ...inputBaseStyle,
-                        ...(visibleFieldErrors.flightNo
-                          ? { borderColor: "#ef4444" }
-                          : {}),
-                      }}
-                      type="text"
-                      value={flightNo}
-                    />
-                  </FieldShell>
-
-                  <FieldShell label={t("newBooking.programField.terminal")}>
-                    <input
-                      onChange={(event) => setTerminal(event.target.value)}
-                      style={inputBaseStyle}
-                      type="text"
-                      value={terminal}
                     />
                   </FieldShell>
 
