@@ -7,47 +7,80 @@ import {
   EnterprisePill,
 } from "@/components/enterprise-primitives";
 import { EnterpriseEmbedShell } from "@/components/enterprise-shell";
-import { enterprisePageStyle } from "@/lib/enterprise-theme";
+import { embedStateFixtures } from "@/lib/enterprise-fixtures";
+import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
 
 export default function EmbeddedPreviewPage() {
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
-        title="Embedded Shell Preview"
-        subtitle="企業 App 內嵌版的 compact chrome，不顯示後台導覽。"
+        title="Embedded Identity States"
+        subtitle="企業 App 內嵌版 compact chrome 與身分交付狀態總覽；不顯示後台導覽或管理憑證輸入。"
         sticky={false}
       />
-      <EnterpriseEmbedShell host="hongshuo-workspace" state="live">
-        <div style={{ padding: 16, display: "grid", gap: 16 }}>
-          <EnterpriseCard
-            title="Host hand-off"
-            actions={<EnterprisePill tone="success">handoff ok</EnterprisePill>}
+
+      <EnterpriseBanner
+        tone="info"
+        title="Embed contract"
+        body="只接受受信任 host 的 tenant-scoped handoff；若 session 失效、host 不受信任或缺少 consent，僅顯示 support-safe 引導。"
+      />
+
+      <div style={{ display: "grid", gap: 24 }}>
+        {Object.values(embedStateFixtures).map((state) => (
+          <EnterpriseEmbedShell
+            key={state.code}
+            host={state.host}
+            state={state.shellState}
           >
-            <EnterpriseDl
-              cols={2}
-              items={[
-                { k: "來源", v: "企業 App", mono: true },
-                { k: "身分", v: "tenant-scoped session accepted" },
-                { k: "模式", v: "compact chrome + self-service flow" },
-                { k: "限制", v: "不顯示 admin / ops 導覽" },
-              ]}
-            />
-          </EnterpriseCard>
+            <div
+              style={{
+                padding: 16,
+                display: "grid",
+                gap: 16,
+                alignContent: "start",
+              }}
+            >
+              <EnterpriseCard
+                title={state.title}
+                actions={
+                  <EnterprisePill tone={state.tone}>{state.code}</EnterprisePill>
+                }
+              >
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                      {state.summary}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        color: enterpriseTheme.textMuted,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {state.body}
+                    </div>
+                  </div>
+                  <EnterpriseDl cols={2} items={Array.from(state.facts)} />
+                </div>
+              </EnterpriseCard>
 
-          <EnterpriseBanner
-            tone="info"
-            title="內嵌狀態模板"
-            body="同一套 booking flow 可依 handoff_ok、reauth_required、unsupported_host、fallback_to_web 切換。"
-          />
-
-          <EnterpriseCard title="入口操作">
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <EnterpriseBtn variant="primary">繼續建立預約</EnterpriseBtn>
-              <EnterpriseBtn variant="secondary">回到企業網站版</EnterpriseBtn>
+              <EnterpriseCard title="入口操作">
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {state.actions.map((action, index) => (
+                    <EnterpriseBtn
+                      key={action}
+                      variant={index === 0 ? "primary" : "secondary"}
+                    >
+                      {action}
+                    </EnterpriseBtn>
+                  ))}
+                </div>
+              </EnterpriseCard>
             </div>
-          </EnterpriseCard>
-        </div>
-      </EnterpriseEmbedShell>
+          </EnterpriseEmbedShell>
+        ))}
+      </div>
     </div>
   );
 }
