@@ -409,6 +409,38 @@ body {
   font-weight: 700;
 }
 
+.bank-auth-boundary {
+  display: grid;
+  min-height: min(520px, calc(100vh - 160px));
+  align-content: center;
+}
+
+.bank-auth-boundary .callout-panel {
+  display: grid;
+  gap: 4px;
+}
+
+.bank-auth-boundary-cta {
+  justify-self: start;
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(94, 234, 212, 0.32);
+  background: rgba(20, 184, 166, 0.18);
+  color: #ccfbf1;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.bank-auth-boundary-cta:hover {
+  border-color: rgba(94, 234, 212, 0.58);
+  background: rgba(20, 184, 166, 0.28);
+}
+
 .contracts-inline-header {
   display: flex;
   align-items: center;
