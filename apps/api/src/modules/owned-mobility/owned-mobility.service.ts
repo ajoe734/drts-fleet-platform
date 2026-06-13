@@ -74,6 +74,7 @@ import {
   OwnedMobilityRepository,
   type OwnedMobilityQueryExecutor,
 } from "./owned-mobility.repository";
+import type { LiveSettlementTripRecord } from "../billing-settlement/billing-settlement.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
@@ -3027,6 +3028,54 @@ export class OwnedMobilityService implements OnModuleInit {
           this.forwarderSourceMap.get(task.orderId) ?? null;
       }
       return clone;
+    });
+  }
+
+  listLiveSettlementTrips(): LiveSettlementTripRecord[] {
+    const ordersById = new Map(
+      this.orders.map((order) => [order.orderId, order] as const),
+    );
+
+    return this.driverTasks.flatMap((task) => {
+      if (task.status !== "completed" || !task.completedAt) {
+        return [];
+      }
+
+      const order = ordersById.get(task.orderId);
+      if (
+        !order?.tenantId ||
+        order.serviceBucket !== "business_dispatch" ||
+        !order.businessDispatchSubtype
+      ) {
+        return [];
+      }
+
+      const grossEarning =
+        task.fare ?? order.quotedFare ?? DEFAULT_PLATFORM_QUOTED_FARE;
+
+      return [
+        {
+          tenantId: order.tenantId,
+          driverId: task.driverId,
+          orderId: order.orderId,
+          completedAt: task.completedAt,
+          grossEarning: { ...grossEarning },
+          orderSource: order.orderSource,
+          serviceBucket: order.serviceBucket,
+          businessDispatchSubtype: order.businessDispatchSubtype,
+          costCenterCode: order.costCenter,
+          riderId: order.passenger?.passengerId ?? null,
+          partnerId: order.partnerId,
+          partnerProgramId: order.partnerProgramId,
+          partnerEntrySlug: order.partnerEntrySlug,
+          eligibilityVerificationId: order.eligibilityVerificationId,
+          issuerAuthorizationRef: order.issuerAuthorizationRef,
+          benefitReference: order.benefitReference,
+          serviceProduct: order.businessDispatchSubtype,
+          tenantServiceProgramId: null,
+          sourcePlatform: order.orderSource,
+        },
+      ];
     });
   }
 

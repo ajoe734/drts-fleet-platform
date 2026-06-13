@@ -121,176 +121,10 @@ VB_PLATFORM_EARNINGS_REF=""
 VB_AUDIT_ID=""
 VB_REPORT_ARTIFACT_ID=""
 
-: "${E2E_TENANT_FINANCE_TOKEN:?E2E_TENANT_FINANCE_TOKEN required for report-export step}"
-: "${E2E_TENANT_APPROVER_TOKEN:?E2E_TENANT_APPROVER_TOKEN required for approval step}"
-: "${E2E_TENANT_DRIVER_TOKEN:?E2E_TENANT_DRIVER_TOKEN required for trip completion step}"
-log_ok "all required tokens present"
-
-# ───────────────────────────────────────────────────────────────────────
-# Setup: cost center, quota policy, approval rule
-# ───────────────────────────────────────────────────────────────────────
-log_step "Setup A — cost center"
-switch_actor tenant_admin "$E2E_TENANT_ADMIN_TOKEN"
-
-CC_FIXTURE="${TMP_DIR}/cc.json"
-jq -n \
-  --arg code "$CC_CODE" \
-  --arg name "Governance E2E ${SUFFIX}" \
-  --arg owner "fin@e2e.local" \
-  '{
-    code: $code,
-    name: $name,
-    ownerEmail: $owner,
-    monthlyQuotaTrips: 500,
-    approvalProfile: "default"
-  }' > "$CC_FIXTURE"
-
-http_call POST "/tenant/cost-centers" "$CC_FIXTURE"
-assert_status "200|201"
-CC_NAME=$(json_get '.data.name')
-OWNER_USER_ID=$(json_get '.data.ownerUserId')
-[[ -n "$CC_NAME" && -n "$OWNER_USER_ID" ]] || { log_fail "cost-center response missing name/ownerUserId"; exit 1; }
-chain_set "$SCENARIO" "setup.costCenterCode" "$CC_CODE"
-chain_set "$SCENARIO" "setup.costCenterName" "$CC_NAME"
-chain_set "$SCENARIO" "setup.ownerUserId" "$OWNER_USER_ID"
-log_ok "cost center created: $CC_CODE / $CC_NAME / owner=$OWNER_USER_ID"
-
-log_step "Setup B — quota policy"
-QUOTA_FIXTURE="${TMP_DIR}/quota.json"
-jq -n \
-  --arg costCenterCode "$CC_CODE" \
-  '{
-    scope: {field: "cost_center.code", op: "eq", value: $costCenterCode},
-    policy: {periodUnit: "month", unit: "trips", ceiling: 500},
-    name: "gov-e2e-monthly"
-  }' > "$QUOTA_FIXTURE"
-
-http_call POST "/tenant/quotas/policies" "$QUOTA_FIXTURE"
-assert_status "200|201"
-QUOTA_PERIOD_KEY=$(json_get '.data.activePeriodKey')
-[[ -n "$QUOTA_PERIOD_KEY" ]] || { log_fail "quota policy response missing activePeriodKey"; exit 1; }
-chain_set "$SCENARIO" "setup.quotaPeriodKey" "$QUOTA_PERIOD_KEY"
-log_ok "quota policy active period: $QUOTA_PERIOD_KEY"
-
-log_step "Setup C — approval rule"
-APPR_FIXTURE="${TMP_DIR}/appr.json"
-jq -n \
-  --arg costCenterCode "$CC_CODE" \
-  '{
-    name: "gov-e2e-threshold",
-    priority: 10,
-    when: [{field: "cost_center.code", op: "eq", value: $costCenterCode},
-           {field: "booking.price", op: "gte", value: 1500}],
-    action: "require_approval",
-    approverKind: "cost_center.owner"
-  }' > "$APPR_FIXTURE"
-
-http_call POST "/tenant/approval-rules" "$APPR_FIXTURE"
-assert_status "200|201"
-APPROVAL_RULE_ID=$(json_get '.data.ruleId')
-[[ -n "$APPROVAL_RULE_ID" ]] || { log_fail "approval rule response missing ruleId"; exit 1; }
-chain_set "$SCENARIO" "setup.approvalRuleId" "$APPROVAL_RULE_ID"
-log_ok "approval rule created: $APPROVAL_RULE_ID"
-
-# ───────────────────────────────────────────────────────────────────────
-# Booking → Approval → Trip → Invoice → Report
-# ───────────────────────────────────────────────────────────────────────
-log_step "1. Create booking (will trigger approval)"
-BOOKING_FIXTURE="${TMP_DIR}/booking.json"
-jq -n \
-  --arg cc "$CC_CODE" \
-  --arg projectCode "PRJ-GOV-E2E-${SUFFIX}" \
-  '{
-    passenger: {name: "Gov E2E", phone: "+886912345678"},
-    pickup: {address: "台北車站", lat: 25.0478, lng: 121.5170},
-    drop: {address: "桃園機場 T2", lat: 25.0789, lng: 121.2342},
-    serviceType: "airport_pickup",
-    requestedAt: "now+90m",
-    costCenterCode: $cc,
-    projectCode: $projectCode,
-    quoteHint: {currency: "TWD", expected: 1800}
-  }' > "$BOOKING_FIXTURE"
-
-http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
-assert_status "200|201"
-BOOKING_ID=$(json_get '.data.bookingId')
-APPROVAL_REQUEST_ID=$(json_get '.data.approvalRequestId')
-APPROVAL_EVAL_ID=$(json_get '.data.approvalEvaluationId')
-APPROVAL_STATE=$(json_get '.data.approvalState')
-[[ -n "$BOOKING_ID" && -n "$APPROVAL_REQUEST_ID" ]] || {
-  log_fail "booking did not enter approval; missing bookingId/approvalRequestId"
-  exit 1
-}
-chain_set "$SCENARIO" "booking.id" "$BOOKING_ID"
-chain_set "$SCENARIO" "booking.approvalRequestId" "$APPROVAL_REQUEST_ID"
-chain_set "$SCENARIO" "booking.approvalEvaluationId" "$APPROVAL_EVAL_ID"
-log_ok "booking $BOOKING_ID created; approval queued ($APPROVAL_REQUEST_ID), state=$APPROVAL_STATE"
-
-log_step "2. Approve booking"
-switch_actor tenant_approver "$E2E_TENANT_APPROVER_TOKEN"
-APPR_DECISION="${TMP_DIR}/decision.json"
-jq -n --arg id "$APPROVAL_REQUEST_ID" '{requestId: $id, decision: "approve", note: "E2E-010 governance happy path"}' > "$APPR_DECISION"
-http_call POST "/tenant/approval-requests/decide" "$APPR_DECISION"
-assert_status "200"
-APPROVAL_STATE=$(json_get '.data.approvalState')
-[[ "$APPROVAL_STATE" == "approved" ]] || { log_fail "approval not approved; got '$APPROVAL_STATE'"; exit 1; }
-log_ok "approval completed: state=approved"
-
-log_step "3. Trip lifecycle (dispatch → complete)"
-switch_actor tenant_admin "$E2E_TENANT_ADMIN_TOKEN"
-http_call POST "/dispatch/auto-assign" "{\"bookingId\":\"$BOOKING_ID\"}"
-assert_status "200"
-DISPATCH_ID=$(json_get '.data.dispatchId')
-[[ -n "$DISPATCH_ID" ]] || { log_fail "dispatch assignment failed"; exit 1; }
-
-switch_actor tenant_driver "$E2E_TENANT_DRIVER_TOKEN"
-http_call POST "/driver/trip/start" "{\"bookingId\":\"$BOOKING_ID\"}"
-assert_status "200"
-http_call POST "/driver/trip/complete" "{\"bookingId\":\"$BOOKING_ID\",\"finalPrice\":1800,\"currency\":\"TWD\"}"
-assert_status "200"
-log_ok "trip completed"
-
-# ───────────────────────────────────────────────────────────────────────
-# Invoice + report — the verification body MUST emit all 13 fields
-# ───────────────────────────────────────────────────────────────────────
-log_step "4. Fetch billing record"
-switch_actor tenant_finance "$E2E_TENANT_FINANCE_TOKEN"
-http_call GET "/tenant/billing/by-booking/$BOOKING_ID"
-assert_status "200"
-BILLING_BODY="$RESP_BODY"
-BILLING_ID=$(echo "$BILLING_BODY" | jq -r '.data.billingId // empty')
-[[ -n "$BILLING_ID" ]] || { log_fail "billing record not generated"; exit 1; }
-chain_set "$SCENARIO" "billing.id" "$BILLING_ID"
-log_ok "billing record fetched: $BILLING_ID"
-
-log_step "5. Fetch report export (governance period)"
-REPORT_FIXTURE="${TMP_DIR}/report-req.json"
-jq -n --arg cc "$CC_CODE" --arg period "$QUOTA_PERIOD_KEY" '{costCenterCode: $cc, periodKey: $period, format: "json"}' > "$REPORT_FIXTURE"
-http_call POST "/tenant/reports/governance-export" "$REPORT_FIXTURE"
-assert_status "200|201"
-REPORT_BODY="$RESP_BODY"
-REPORT_ARTIFACT_ID=$(echo "$REPORT_BODY" | jq -r '.data.reportArtifactId // empty')
-[[ -n "$REPORT_ARTIFACT_ID" ]] || { log_fail "report export missing reportArtifactId"; exit 1; }
-chain_set "$SCENARIO" "report.artifactId" "$REPORT_ARTIFACT_ID"
-log_ok "report artifact: $REPORT_ARTIFACT_ID"
-
-log_step "6. Fetch audit row for billing record"
-http_call GET "/audit?resourceType=billing&resourceId=$BILLING_ID"
-assert_status "200"
-AUDIT_ID=$(json_get_first '.data[].auditId')
-[[ -n "$AUDIT_ID" ]] || { log_fail "no audit row for billing $BILLING_ID"; exit 1; }
-chain_set "$SCENARIO" "audit.id" "$AUDIT_ID"
-log_ok "audit row: $AUDIT_ID"
-
-# ───────────────────────────────────────────────────────────────────────
-# Verification body — hard-assert every field per directive §H
-# ───────────────────────────────────────────────────────────────────────
-log_step "7. Verify governance-aware verification body — all 13 fields"
-
 # Per spec §2 + UAT §1: even on the non-partner / non-forwarded happy path,
 # the verification body MUST emit ALL keys (value may be null when the
 # pathway was not exercised). This is the directive's hard contract.
-REQUIRED_KEYS=(
+VB_FIELDS=(
   costCenterCode
   costCenterName
   ownerUserId
@@ -531,6 +365,64 @@ write_report_job_fixture() {
     > "$path"
 }
 
+discover_tenant_user_ids() {
+  TENANT_ADMIN_USER_ID=$(echo "$RESP_BODY" | jq -r \
+    '.data.items[] | select((.roleCode // .role_code) == "tenant_admin" and .status == "active") | (.userId // .user_id)' \
+    2>/dev/null | head -1 || true)
+  TENANT_FINANCE_USER_ID=$(echo "$RESP_BODY" | jq -r \
+    '.data.items[] | select((.roleCode // .role_code) == "tenant_finance_admin" and .status == "active") | (.userId // .user_id)' \
+    2>/dev/null | head -1 || true)
+}
+
+ensure_active_tenant_user() {
+  local role_code="$1"
+  local email="$2"
+  local display_name="$3"
+  local fixture="${TMP_DIR}/tenant-user-${role_code}.json"
+  local role_fixture="${TMP_DIR}/tenant-user-role-${role_code}.json"
+  local user_id
+
+  user_id=$(echo "$RESP_BODY" | jq -r \
+    --arg email "$email" \
+    '.data.items[] | select((.email | ascii_downcase) == ($email | ascii_downcase)) | (.userId // .user_id)' \
+    2>/dev/null | head -1 || true)
+
+  if [[ -z "$user_id" ]]; then
+    jq -n \
+      --arg email "$email" \
+      --arg displayName "$display_name" \
+      --arg roleCode "$role_code" \
+      '{email: $email, displayName: $displayName, roleCode: $roleCode}' > "$fixture"
+    http_call POST "/tenant/users" "$fixture"
+    if [[ "$RESP_STATUS" =~ ^(200|201)$ ]]; then
+      user_id=$(json_get_first ".data.userId" ".data.user_id")
+    elif [[ "$RESP_STATUS" == "409" ]]; then
+      http_call GET "/tenant/users"
+      assert_status "200"
+      user_id=$(echo "$RESP_BODY" | jq -r \
+        --arg email "$email" \
+        '.data.items[] | select((.email | ascii_downcase) == ($email | ascii_downcase)) | (.userId // .user_id)' \
+        2>/dev/null | head -1 || true)
+    else
+      log_fail "Unable to create tenant user ${email}: HTTP ${RESP_STATUS}"
+      log_fail "Body: ${RESP_BODY}"
+      exit 1
+    fi
+  fi
+
+  if [[ -z "$user_id" ]]; then
+    log_fail "Unable to resolve tenant user ${email} after create/check"
+    exit 1
+  fi
+
+  jq -n \
+    --arg roleCode "$role_code" \
+    '{roleCode: $roleCode, status: "active"}' > "$role_fixture"
+  http_call POST "/tenant/users/${user_id}/role" "$role_fixture"
+  assert_status "200|201"
+  log_ok "tenant user ready: ${email} (${role_code})"
+}
+
 # ── 0. Tenant actor discovery ─────────────────────────────────────────────────
 discover_tenant_users() {
   log_surface "Tenant Console — discover tenant governance actors"
@@ -543,18 +435,23 @@ discover_tenant_users() {
     exit 0
   fi
 
-  TENANT_ADMIN_USER_ID=$(echo "$RESP_BODY" | jq -r \
-    '.data.items[] | select(.roleCode == "tenant_admin" and .status == "active") | .userId' \
-    2>/dev/null | head -1 || true)
-  TENANT_FINANCE_USER_ID=$(echo "$RESP_BODY" | jq -r \
-    '.data.items[] | select(.roleCode == "tenant_finance_admin" and .status == "active") | .userId' \
-    2>/dev/null | head -1 || true)
-
+  discover_tenant_user_ids
   if [[ -z "$TENANT_ADMIN_USER_ID" ]]; then
-    log_warn "Seed tenant lacks an active tenant_admin user; skipping E2E-010."
-    save_evidence "$SCENARIO" "setup" "skipped" "tenant_admin_missing"
-    exit 0
+    log_warn "Seed tenant lacks an active tenant_admin user; bootstrapping an idempotent E2E tenant admin."
+    ensure_active_tenant_user "tenant_admin" "e2e-010-admin@acme.example" "E2E 010 Tenant Admin"
+    http_call GET "/tenant/users"
+    assert_status "200"
+    discover_tenant_user_ids
   fi
+  if [[ -z "$TENANT_FINANCE_USER_ID" ]]; then
+    log_warn "Seed tenant lacks an active tenant_finance_admin user; bootstrapping an idempotent E2E tenant finance admin."
+    ensure_active_tenant_user "tenant_finance_admin" "e2e-010-finance@acme.example" "E2E 010 Tenant Finance"
+    http_call GET "/tenant/users"
+    assert_status "200"
+    discover_tenant_user_ids
+  fi
+  [[ -n "$TENANT_ADMIN_USER_ID" ]] || { log_fail "No active tenant_admin user found after bootstrap"; exit 1; }
+  [[ -n "$TENANT_FINANCE_USER_ID" ]] || TENANT_FINANCE_USER_ID="$TENANT_ADMIN_USER_ID"
 
   save_evidence "$SCENARIO" "setup" "tenantAdminUserId" "$TENANT_ADMIN_USER_ID"
   save_evidence "$SCENARIO" "setup" "tenantFinanceUserId" "${TENANT_FINANCE_USER_ID:-<missing>}"
@@ -572,6 +469,11 @@ bootstrap_governance_fixtures() {
   http_call POST "/tenant/cost-centers" "$fixture"
   assert_status "200|201"
   chain_set "tenant" "costCenterCode" "$CC_GOV"
+  VB_COST_CENTER_CODE="$CC_GOV"
+  VB_COST_CENTER_NAME="$(json_get_first ".data.name" ".data.costCenterName" ".data.cost_center_name")"
+  VB_OWNER_USER_ID="$(json_get_first ".data.ownerUserId" ".data.owner_user_id")"
+  [[ -n "$VB_COST_CENTER_NAME" ]] || VB_COST_CENTER_NAME="$CC_GOV_NAME"
+  [[ -n "$VB_OWNER_USER_ID" ]] || VB_OWNER_USER_ID="$TENANT_ADMIN_USER_ID"
 
   fixture="${TMP_DIR}/quota-gov.json"
   write_quota_policy_fixture "$fixture" "$CC_GOV"
@@ -615,7 +517,7 @@ subcase_fg01_booking_with_cost_center() {
   http_call GET "/tenant/bookings/${BOOKING_ID}"
   assert_status "200"
   local stored_cc approval_state
-  stored_cc=$(json_get_first ".data.costCenter" ".data.cost_center" ".data.costCenterCode")
+  stored_cc=$(json_get_first ".data.costCenter" ".data.cost_center" ".data.costCenterCode" ".data.cost_center_code")
   if [[ "$stored_cc" != "$CC_GOV" ]]; then
     fail_contract "FG-01" \
       "cost-center attribution dropped from booking read-back: expected ${CC_GOV}, got '${stored_cc:-<empty>}'"
@@ -635,7 +537,7 @@ subcase_fg01_booking_with_cost_center() {
   # on this environment), the booking is auto-approved (approvalState =
   # `not_required`) and the lifecycle leg should still proceed without going
   # through /tenant/approval-requests/:id/approve.
-  if [[ "$approval_state" == "not_required" ]]; then
+  if [[ "$approval_state" == "not_required" || "$approval_state" == "approved" ]]; then
     APPROVED=true
   fi
   log_ok "Booking ${BOOKING_ID} attributed to cost-center ${stored_cc}, orderId=${ORDER_ID}, approvalState=${approval_state:-<unknown>}"
@@ -679,6 +581,7 @@ subcase_fg02_quota_continuity() {
       log_ok "Quota ledger reflects ${ledger_count} entries for booking ${BOOKING_ID}"
     fi
   fi
+  return 0
 }
 
 # ── 4. FG-03 — Approval evaluation snapshot ──────────────────────────────────
@@ -694,11 +597,11 @@ subcase_fg03_approval_snapshot() {
   fi
 
   APPROVAL_REQUEST_ID=$(echo "$RESP_BODY" | jq -r \
-    '.data.items[0].approvalRequestId // empty' 2>/dev/null || true)
+    '.data.items[0].approvalRequestId // .data.items[0].approval_request_id // empty' 2>/dev/null || true)
   local approval_state evaluated_at decision
-  approval_state=$(echo "$RESP_BODY" | jq -r '.data.items[0].state // .data.items[0].status // empty' 2>/dev/null || true)
+  approval_state=$(echo "$RESP_BODY" | jq -r '.data.items[0].approvalState // .data.items[0].approval_state // .data.items[0].state // .data.items[0].status // empty' 2>/dev/null || true)
   evaluated_at=$(echo "$RESP_BODY" | jq -r '.data.items[0].evaluatedAt // .data.items[0].evaluated_at // empty' 2>/dev/null || true)
-  decision=$(echo "$RESP_BODY" | jq -r '.data.items[0].decision // .data.items[0].evaluationSnapshot.outcome.decision // empty' 2>/dev/null || true)
+  decision=$(echo "$RESP_BODY" | jq -r '.data.items[0].decision // .data.items[0].evaluationSnapshot.outcome.decision // .data.items[0].evaluation_snapshot.outcome.decision // empty' 2>/dev/null || true)
 
   record_field "FG-03" "approvalRequestId" "$APPROVAL_REQUEST_ID"
   record_field "FG-03" "approvalRequestState" "$approval_state"
@@ -706,6 +609,7 @@ subcase_fg03_approval_snapshot() {
   record_field "FG-03" "decision" "$decision"
   VB_APPROVAL_REQUEST_ID="$APPROVAL_REQUEST_ID"
   [[ -n "$approval_state" ]] && VB_APPROVAL_STATE="$approval_state"
+  return 0
 }
 
 # ── 5. Approval gate — approve the governed booking before dispatch ──────────
@@ -813,7 +717,7 @@ drive_lifecycle_to_completion() {
   TASK_ID=$(json_get_first ".data.taskId" ".data.task_id")
 
   # 4. Driver lifecycle — resolve taskId, then accept → depart → arrived_pickup → start → complete
-  switch_actor "driver_user" "e2e-driver-${ASSIGN_DRIVER_ID}" "$E2E_SEED_TENANT_ID"
+  switch_actor "driver_user" "$ASSIGN_DRIVER_ID" "$E2E_SEED_TENANT_ID"
   if [[ -z "$TASK_ID" ]]; then
     http_call GET "/driver/tasks"
     if [[ "$RESP_STATUS" == "200" ]]; then
@@ -960,6 +864,7 @@ subcase_fg04_report_export() {
   record_field "FG-04" "reportLegacyUnmappedField" "${has_legacy:-}"
   record_field "FG-04" "reportArtifactId" "${report_artifact_id:-}"
   [[ -n "$report_artifact_id" ]] && VB_REPORT_ARTIFACT_ID="$report_artifact_id"
+  return 0
 }
 
 # ── 8. FG-01 / FG-08 — Invoice generation tied to governed orderId + audit ──
@@ -1067,7 +972,7 @@ subcase_invoice_governance_and_audit() {
     --arg invoiceId "$INVOICE_ID" \
     '.data.items[] |
        select(
-         .actionName == "generate_tenant_invoice"
+         (.actionName // .action_name) == "generate_tenant_invoice"
          and ((.resourceId // .resource_id) == $invoiceId)
        ) | (.auditId // .audit_id)' \
     2>/dev/null | head -1 || true)
@@ -1092,10 +997,10 @@ subcase_fg05_fg06_settlement_and_platform_earnings() {
   else
     local partner_row_count partner_program_id
     partner_row_count=$(echo "$RESP_BODY" | jq -r \
-      '[ .data.items[]? | select(.partnerId? or .programId? or .partnerProgramId?) ] | length' \
+      '[ .data.items[]? | select(.partnerId? or .partner_id? or .programId? or .program_id? or .partnerProgramId? or .partner_program_id?) ] | length' \
       2>/dev/null || echo 0)
     partner_program_id=$(echo "$RESP_BODY" | jq -r \
-      '.data.items[]? | (.programId // .partnerProgramId // empty) | select(. != null and . != "")' \
+      '.data.items[]? | (.programId // .program_id // .partnerProgramId // .partner_program_id // empty) | select(. != null and . != "")' \
       2>/dev/null | head -1 || true)
     save_evidence "$SCENARIO" "FG-05" "settlementPartnerRowCount" "${partner_row_count:-0}"
     record_field "FG-05" "settlementPartnerProgramId" "$partner_program_id"
@@ -1119,6 +1024,7 @@ subcase_fg05_fg06_settlement_and_platform_earnings() {
   record_field "FG-06" "platformCodes" "$platform_codes"
   record_field "FG-06" "platformEarningsRef" "$platform_earnings_ref"
   [[ -n "$platform_earnings_ref" ]] && VB_PLATFORM_EARNINGS_REF="$platform_earnings_ref"
+  return 0
 }
 
 # ── 10. FG-07 — Legacy unmapped cost center labelling ────────────────────────

@@ -3,6 +3,8 @@ import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { DatabaseModule } from "../../common/db";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
+import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
+import { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import { CallcenterModule } from "../callcenter/callcenter.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
@@ -21,6 +23,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     ServiceProductModule,
     VehicleEligibilityModule,
     AuditNotificationModule,
+    BillingSettlementModule,
     CallcenterModule,
     forwardRef(() => TenantPartnerModule),
   ],
@@ -37,11 +40,15 @@ export class OwnedMobilityModule implements OnModuleInit {
   constructor(
     private readonly ownedMobilityService: OwnedMobilityService,
     private readonly tenantPartnerService: TenantPartnerService,
+    private readonly billingSettlementService: BillingSettlementService,
   ) {}
 
   onModuleInit() {
     this.tenantPartnerService.registerOrderFeedProvider(() =>
       this.ownedMobilityService.listOrders(),
+    );
+    this.billingSettlementService.registerLiveSettlementTripProvider(() =>
+      this.ownedMobilityService.listLiveSettlementTrips(),
     );
   }
 }

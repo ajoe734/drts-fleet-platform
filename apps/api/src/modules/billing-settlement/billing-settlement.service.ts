@@ -106,6 +106,10 @@ export type BillingSettlementTripRecord = {
   sourcePlatform?: string | null;
 };
 
+export type LiveSettlementTripProvider = () =>
+  | readonly LiveSettlementTripRecord[]
+  | Promise<readonly LiveSettlementTripRecord[]>;
+
 type StoredTenantInvoice = TenantInvoiceRecord & {
   artifactDownloadMetadata: ControlledDownloadMetadata;
 };
@@ -316,12 +320,19 @@ export class BillingSettlementService implements OnModuleInit {
     platformFundedDiscount: { ...trip.platformFundedDiscount },
   }));
 
+  private readonly liveSettlementTripProviders: LiveSettlementTripProvider[] =
+    [];
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     private readonly billingSettlementRepository?: BillingSettlementRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
   ) {}
+
+  registerLiveSettlementTripProvider(provider: LiveSettlementTripProvider) {
+    this.liveSettlementTripProviders.push(provider);
+  }
 
   async onModuleInit() {
     if (!this.billingSettlementRepository) {
@@ -2013,25 +2024,70 @@ export class BillingSettlementService implements OnModuleInit {
     periodStart: string,
     periodEnd: string,
   ) {
-    if (!this.billingSettlementRepository?.isEnabled()) {
-      return [];
+    const snapshots: BillingSettlementTripRecord[] = [];
+
+    if (this.billingSettlementRepository?.isEnabled()) {
+      try {
+        const trips =
+          await this.billingSettlementRepository.listLiveCompletedTenantTrips(
+            tenantId,
+            periodStart,
+            periodEnd,
+          );
+        snapshots.push(
+          ...trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip)),
+        );
+      } catch (error) {
+        this.billingSettlementRepository.reportPersistenceFailure(
+          error,
+          "list_live_completed_tenant_trips",
+        );
+      }
     }
 
-    try {
-      const trips =
-        await this.billingSettlementRepository.listLiveCompletedTenantTrips(
+    snapshots.push(
+      ...this.filterLiveSettlementTrips(
+        await this.listRegisteredLiveSettlementTrips(),
+        {
           tenantId,
           periodStart,
           periodEnd,
-        );
-      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
-    } catch (error) {
-      this.billingSettlementRepository.reportPersistenceFailure(
-        error,
-        "list_live_completed_tenant_trips",
-      );
-      return [];
+        },
+      ).map((trip) => this.mapLiveTripToSettlementSnapshot(trip)),
+    );
+
+    return snapshots;
+  }
+
+  private async listRegisteredLiveSettlementTrips() {
+    const trips: LiveSettlementTripRecord[] = [];
+    for (const provider of this.liveSettlementTripProviders) {
+      trips.push(...(await provider()));
     }
+    return trips;
+  }
+
+  private filterLiveSettlementTrips(
+    trips: readonly LiveSettlementTripRecord[],
+    query: {
+      periodStart: string;
+      periodEnd: string;
+      tenantId?: string;
+      driverId?: string;
+    },
+  ) {
+    const start = new Date(query.periodStart).getTime();
+    const end = new Date(query.periodEnd).getTime();
+    return trips.filter((trip) => {
+      const completedAt = new Date(trip.completedAt).getTime();
+      return (
+        Number.isFinite(completedAt) &&
+        completedAt >= start &&
+        completedAt <= end &&
+        (!query.tenantId || trip.tenantId === query.tenantId) &&
+        (!query.driverId || trip.driverId === query.driverId)
+      );
+    });
   }
 
   private async listLiveDriverStatementTripsInPeriod(
@@ -2039,31 +2095,45 @@ export class BillingSettlementService implements OnModuleInit {
     periodEnd: string,
     driverId?: string,
   ) {
-    if (!this.billingSettlementRepository?.isEnabled()) {
-      return [];
+    const snapshots: BillingSettlementTripRecord[] = [];
+
+    if (this.billingSettlementRepository?.isEnabled()) {
+      try {
+        const trips = driverId
+          ? await this.billingSettlementRepository.listLiveDriverTripsInPeriodForDriver(
+              driverId,
+              periodStart,
+              periodEnd,
+            )
+          : await this.billingSettlementRepository.listLiveDriverTripsInPeriod(
+              periodStart,
+              periodEnd,
+            );
+        snapshots.push(
+          ...trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip)),
+        );
+      } catch (error) {
+        this.billingSettlementRepository.reportPersistenceFailure(
+          error,
+          driverId
+            ? "list_live_driver_trips_in_period_for_driver"
+            : "list_live_driver_trips_in_period",
+        );
+      }
     }
 
-    try {
-      const trips = driverId
-        ? await this.billingSettlementRepository.listLiveDriverTripsInPeriodForDriver(
-            driverId,
-            periodStart,
-            periodEnd,
-          )
-        : await this.billingSettlementRepository.listLiveDriverTripsInPeriod(
-            periodStart,
-            periodEnd,
-          );
-      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
-    } catch (error) {
-      this.billingSettlementRepository.reportPersistenceFailure(
-        error,
-        driverId
-          ? "list_live_driver_trips_in_period_for_driver"
-          : "list_live_driver_trips_in_period",
-      );
-      return [];
-    }
+    snapshots.push(
+      ...this.filterLiveSettlementTrips(
+        await this.listRegisteredLiveSettlementTrips(),
+        {
+          periodStart,
+          periodEnd,
+          ...(driverId ? { driverId } : {}),
+        },
+      ).map((trip) => this.mapLiveTripToSettlementSnapshot(trip)),
+    );
+
+    return snapshots;
   }
 
   private async resolveTenantSettlementPeriodMonth(
