@@ -329,6 +329,51 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
+  it("lets public shells fallback when the mounted internal key is rejected", async () => {
+    process.env.DRTS_INTERNAL_KEY = "stale-dev-key";
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(
+        {
+          error: {
+            code: "INTERNAL_KEY_INVALID",
+            message:
+              "x-drts-internal-key header is invalid for this environment.",
+            details: {
+              route: "/api/partner/entries/ctbc",
+              method: "GET",
+            },
+            retryable: false,
+          },
+        },
+        401,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowInactive: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+      }),
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_URL}/api/partner/entries/ctbc`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-drts-internal-key": "stale-dev-key",
+        }),
+      }),
+    );
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "INTERNAL_KEY_INVALID",
+      status: 401,
+    });
+  });
+
   it("lets public shells fallback when the dev authority is offline", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
     vi.stubGlobal("fetch", fetchMock);
