@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { LanguageProvider } from "@/lib/i18n";
-import { RuntimeConfigScript } from "@/lib/runtime-config";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -24,7 +23,6 @@ export default async function RootLayout({
   return (
     <html lang={locale === "zh" ? "zh-Hant" : "en"}>
       <body>
-        <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>{children}</LanguageProvider>
       </body>
     </html>
