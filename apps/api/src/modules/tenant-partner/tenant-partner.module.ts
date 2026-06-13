@@ -7,6 +7,7 @@ import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
+import { ReferralChannelScaffoldService } from "./referral-channel.scaffold.service";
 import { TenantPartnerController } from "./tenant-partner.controller";
 import { TenantPartnerRepository } from "./tenant-partner.repository";
 import {
@@ -27,6 +28,7 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
   providers: [
     TenantPartnerService,
     TenantPartnerRepository,
+    ReferralChannelScaffoldService,
     WebhookDispatchService,
     BankCardInlineEligibilityAdapter,
     ReferenceTokenEligibilityAdapter,
@@ -46,6 +48,6 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
       ],
     },
   ],
-  exports: [TenantPartnerService],
+  exports: [TenantPartnerService, ReferralChannelScaffoldService],
 })
 export class TenantPartnerModule {}
