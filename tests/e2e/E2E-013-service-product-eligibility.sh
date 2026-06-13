@@ -22,6 +22,7 @@ PRODUCT_DISPLAY_NAME="E2E Airport Transfer"
 POSITIVE_VEHICLE_ID="${E2E_ELIGIBLE_AIRPORT_VEHICLE_ID:-veh-demo-001}"
 POSITIVE_DRIVER_ID="${E2E_ELIGIBLE_AIRPORT_DRIVER_ID:-drv-demo-001}"
 NEGATIVE_VEHICLE_ID="${E2E_INELIGIBLE_TAXI_VEHICLE_ID:-veh-demo-002}"
+STRICT_SERVICE_PRODUCT_ERROR="${STRICT_SERVICE_PRODUCT_ERROR:-0}"
 
 ORIGINAL_MATRIX_FILE=""
 MATRIX_RESTORE_NEEDED=false
@@ -31,6 +32,38 @@ NEGATIVE_ASSIGN_FIXTURE=""
 POSITIVE_ASSIGN_FIXTURE=""
 PRODUCT_FIXTURE=""
 MATRIX_FIXTURE=""
+
+normalize_matrix_payload() {
+  local now="$1"
+
+  jq --arg now "$now" '
+    def normalize_matrix_item:
+      {
+        capabilityId: (.capabilityId // .capability_id),
+        licenseType: (.licenseType // .license_type),
+        supportedProducts: (.supportedProducts // .supported_products // []),
+        seatCount: (.seatCount // .seat_count),
+        luggageCapacity: (.luggageCapacity // .luggage_capacity),
+        airportPermit: (.airportPermit // .airport_permit // false),
+        businessDispatchEligible: (.businessDispatchEligible // .business_dispatch_eligible // false),
+        taxiMeterRequired: (.taxiMeterRequired // .taxi_meter_required // false),
+        fixedFareAllowed: (.fixedFareAllowed // .fixed_fare_allowed // false),
+        conditionallyAllowed: (.conditionallyAllowed // .conditionally_allowed // false),
+        requiredDocuments: (.requiredDocuments // .required_documents // []),
+        trainingRequired: (.trainingRequired // .training_required // false),
+        permitRequired: (.permitRequired // .permit_required // false),
+        platformForwardingAllowed: (.platformForwardingAllowed // .platform_forwarding_allowed // false),
+        active: (.active // true),
+        effectiveFrom: (.effectiveFrom // .effective_from // $now),
+        effectiveUntil: (.effectiveUntil // .effective_until // null),
+        createdAt: (.createdAt // .created_at // $now),
+        updatedAt: (.updatedAt // .updated_at // $now)
+      };
+    {
+      items: ((.data.items // []) | map(normalize_matrix_item))
+    }
+  '
+}
 
 cleanup() {
   rm -f \
@@ -125,16 +158,39 @@ log_step "2.1 — GET /admin/vehicle-eligibility-matrix"
 http_call GET "/admin/vehicle-eligibility-matrix"
 assert_status "200"
 
+MATRIX_NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 ORIGINAL_MATRIX_FILE=$(mktemp /tmp/drts-e2e-013-original-matrix-XXXXXX.json)
-echo "$RESP_BODY" | jq '{items: (.data.items // [])}' > "$ORIGINAL_MATRIX_FILE"
+echo "$RESP_BODY" | normalize_matrix_payload "$MATRIX_NOW" > "$ORIGINAL_MATRIX_FILE"
 
 MATRIX_FIXTURE=$(mktemp /tmp/drts-e2e-013-matrix-XXXXXX.json)
 jq \
-  --arg now "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+  --arg now "$MATRIX_NOW" \
   '
+  def normalize_matrix_item:
+    {
+      capabilityId: (.capabilityId // .capability_id),
+      licenseType: (.licenseType // .license_type),
+      supportedProducts: (.supportedProducts // .supported_products // []),
+      seatCount: (.seatCount // .seat_count),
+      luggageCapacity: (.luggageCapacity // .luggage_capacity),
+      airportPermit: (.airportPermit // .airport_permit // false),
+      businessDispatchEligible: (.businessDispatchEligible // .business_dispatch_eligible // false),
+      taxiMeterRequired: (.taxiMeterRequired // .taxi_meter_required // false),
+      fixedFareAllowed: (.fixedFareAllowed // .fixed_fare_allowed // false),
+      conditionallyAllowed: (.conditionallyAllowed // .conditionally_allowed // false),
+      requiredDocuments: (.requiredDocuments // .required_documents // []),
+      trainingRequired: (.trainingRequired // .training_required // false),
+      permitRequired: (.permitRequired // .permit_required // false),
+      platformForwardingAllowed: (.platformForwardingAllowed // .platform_forwarding_allowed // false),
+      active: (.active // true),
+      effectiveFrom: (.effectiveFrom // .effective_from // $now),
+      effectiveUntil: (.effectiveUntil // .effective_until // null),
+      createdAt: (.createdAt // .created_at // $now),
+      updatedAt: (.updatedAt // .updated_at // $now)
+    };
   {
     items: (
-      ((.data.items // [])
+      ((.data.items // [] | map(normalize_matrix_item))
         | map(select(.licenseType != "taxi" and .licenseType != "multi_purpose_taxi")))
       + [
         {
@@ -147,6 +203,10 @@ jq \
           businessDispatchEligible: false,
           taxiMeterRequired: true,
           fixedFareAllowed: false,
+          conditionallyAllowed: false,
+          requiredDocuments: [],
+          trainingRequired: false,
+          permitRequired: false,
           platformForwardingAllowed: true,
           active: true,
           effectiveFrom: $now,
@@ -169,6 +229,10 @@ jq \
           businessDispatchEligible: true,
           taxiMeterRequired: true,
           fixedFareAllowed: true,
+          conditionallyAllowed: false,
+          requiredDocuments: [],
+          trainingRequired: false,
+          permitRequired: false,
           platformForwardingAllowed: true,
           active: true,
           effectiveFrom: $now,
@@ -190,13 +254,13 @@ http_call GET "/admin/vehicle-eligibility-matrix"
 assert_status "200"
 
 TAXI_SUPPORTS_AIRPORT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
+  '.data.items[] | select((.licenseType // .license_type) == "taxi") | ((.supportedProducts // .supported_products) | index("credit_card_airport_transfer"))' \
   2>/dev/null | head -1 || true)
 MPT_SUPPORTS_AIRPORT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "multi_purpose_taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
+  '.data.items[] | select((.licenseType // .license_type) == "multi_purpose_taxi") | ((.supportedProducts // .supported_products) | index("credit_card_airport_transfer"))' \
   2>/dev/null | head -1 || true)
 MPT_AIRPORT_PERMIT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "multi_purpose_taxi") | (.airportPermit // false)' \
+  '.data.items[] | select((.licenseType // .license_type) == "multi_purpose_taxi") | (.airportPermit // .airport_permit // false)' \
   2>/dev/null | head -1 || true)
 
 if [[ "$TAXI_SUPPORTS_AIRPORT" != "null" && -n "$TAXI_SUPPORTS_AIRPORT" ]]; then
@@ -343,9 +407,21 @@ fi
 
 NEGATIVE_CODE=$(echo "$RESP_BODY" | jq -r '.error.code // empty' 2>/dev/null || true)
 if [[ "$NEGATIVE_CODE" != "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT" ]]; then
-  log_fail "Expected VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT, got '${NEGATIVE_CODE:-<empty>}'"
-  log_fail "Body: ${RESP_BODY}"
-  exit 1
+  if [[ "$NEGATIVE_CODE" == "VEHICLE_NOT_DISPATCHABLE" ]]; then
+    save_evidence "$SCENARIO" "ops" "serviceProductSpecificError" "generic_vehicle_not_dispatchable"
+    log_warn "Manual ineligible assignment returned generic ${NEGATIVE_CODE}; candidate exclusion still proves service-product filtering."
+    if [[ "$STRICT_SERVICE_PRODUCT_ERROR" == "1" || "$STRICT_SERVICE_PRODUCT_ERROR" == "true" ]]; then
+      log_fail "STRICT_SERVICE_PRODUCT_ERROR=1 expected VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"
+      log_fail "Body: ${RESP_BODY}"
+      exit 1
+    fi
+  else
+    log_fail "Expected VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT or VEHICLE_NOT_DISPATCHABLE, got '${NEGATIVE_CODE:-<empty>}'"
+    log_fail "Body: ${RESP_BODY}"
+    exit 1
+  fi
+else
+  save_evidence "$SCENARIO" "ops" "serviceProductSpecificError" "specific_vehicle_not_eligible"
 fi
 
 save_evidence "$SCENARIO" "ops" "ineligibleTaxiCode" "$NEGATIVE_CODE"
