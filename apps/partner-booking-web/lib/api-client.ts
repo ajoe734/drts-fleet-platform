@@ -191,19 +191,22 @@ function canUseLocalPartnerShellFallback(
     allowMissing?: boolean;
   },
 ) {
+  const publicShellFallbackAllowed =
+    options?.allowInactive || options?.allowMissing;
+
   if (error.code === "PARTNER_ENTRY_INACTIVE") {
     return options?.allowInactive;
   }
 
   if (error.code === "PARTNER_ENTRY_NOT_FOUND") {
-    return options?.allowInactive || options?.allowMissing;
+    return publicShellFallbackAllowed;
   }
 
   return (
-    ((error.code === "INTERNAL_KEY_REQUIRED" &&
-      !process.env.DRTS_INTERNAL_KEY?.trim()) ||
+    (error.code === "INTERNAL_KEY_REQUIRED" ||
+      error.code === "INTERNAL_KEY_INVALID" ||
       error.code === "PARTNER_AUTHORITY_UNAVAILABLE") &&
-    (options?.allowInactive || options?.allowMissing)
+    publicShellFallbackAllowed
   );
 }
 
