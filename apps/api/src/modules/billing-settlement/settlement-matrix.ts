@@ -51,18 +51,17 @@ const SETTLEMENT_MATRIX: readonly SettlementMatrixRecord[] = Object.freeze([
     channelLabel: "Partner referral / revenue-share channel",
     orderDomain: "owned" as const,
     orderSources: ["portal", "api"],
-    payerType: "drts platform",
+    payerType: "DRTS platform",
     sponsorType: "partner referral channel",
     invoiceOwner: "platform finance with partner payable statement",
-    invoicePath: "partner referral settlement statement",
+    invoicePath: "referral settlement statement",
     receiptOwner: "drts platform",
     driverPayoutAuthority: "platform settlement engine",
     discountFundingSource:
       "platform-funded referral revenue share after completed-trip attribution",
     reimbursementRule:
-      "Revenue-share settlement is payable from DRTS to the referral partner after attribution and closeout; no external issuer reimbursement applies.",
-    reconciliationPath:
-      "partner referral attribution review + revenue-share settlement closeout",
+      "Settlement direction is drts_pays_partner: DRTS pays the referral partner after attribution closeout; no external issuer reimbursement applies.",
+    reconciliationPath: "referral settlement statement + attribution audit",
     reportingArtifacts: ["revenue_summary", "monthly_trip_report"],
     localLedgerMode: "full_service" as const,
     notes:
