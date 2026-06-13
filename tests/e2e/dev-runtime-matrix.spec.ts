@@ -9,6 +9,7 @@ const skippedRuntimeSurfaces = [
 
 type RuntimeSurfaceKey =
   | "api"
+  | "enterprise-dispatch-web"
   | "platform-admin-web"
   | "ops-console-web"
   | "fleet-partner-portal-web"
@@ -134,6 +135,29 @@ const tenantActors: ActorProfile[] = [
   },
 ];
 
+const enterpriseActors: ActorProfile[] = [
+  {
+    key: "enterprise-employee",
+    role: "enterprise_employee",
+    tenant: "hongshuo",
+  },
+  {
+    key: "enterprise-delegate",
+    role: "enterprise_delegate",
+    tenant: "hongshuo",
+  },
+  {
+    key: "enterprise-approver",
+    role: "enterprise_approver",
+    tenant: "hongshuo",
+  },
+  {
+    key: "enterprise-finance-viewer",
+    role: "enterprise_finance_viewer",
+    tenant: "hongshuo",
+  },
+];
+
 const apiActors: ActorProfile[] = [
   { key: "api-smoke", role: "runtime_smoke" },
   { key: "api-observer", role: "runtime_observer" },
@@ -143,6 +167,8 @@ const platformMarker = /DRTS 平台管理|Platform|平台管理|租戶|稽核|�
 const opsMarker = /Operations Console|營運控制台|派車調度|營運總覽|客服中心/i;
 const fleetMarker = /Fleet Partner Portal|車行夥伴入口|車行營運總覽|分潤/i;
 const tenantMarker = /租戶後台|Tenant|訂單|工作面|帳務概覽/i;
+const enterpriseMarker =
+  /企業派車|鴻碩科技|建立預約|我的預約|成本中心|身分交付/i;
 
 const surfaces: RuntimeSurface[] = [
   {
@@ -158,6 +184,94 @@ const surfaces: RuntimeSurface[] = [
         path: "/health",
         operation: "service health contract",
         marker: /"status"\s*:\s*"ok"/i,
+      },
+    ],
+  },
+  {
+    key: "enterprise-dispatch-web",
+    family: "enterprise dispatch self-service",
+    baseUrl:
+      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL ??
+      "https://drts-dev-enterprise-dispatch-web-waji3fer3a-uc.a.run.app",
+    actors: enterpriseActors,
+    routes: [
+      {
+        key: "home",
+        path: "/",
+        operation: "employee dispatch landing",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "bookings",
+        path: "/bookings",
+        operation: "employee booking list",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-new",
+        path: "/bookings/new",
+        operation: "employee booking create",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-review",
+        path: "/bookings/review",
+        operation: "booking responsibility review",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-submitted",
+        path: "/bookings/submitted",
+        operation: "booking command accepted",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-detail",
+        path: "/bookings/EB-7K2E1D",
+        operation: "booking detail",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "trip",
+        path: "/trip",
+        operation: "active trip status",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "receipt",
+        path: "/receipts/EB-7K28Z2",
+        operation: "receipt view",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "help",
+        path: "/help",
+        operation: "employee support",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "auth-required",
+        path: "/auth-required",
+        operation: "auth gate",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "quota-blocked",
+        path: "/quota-blocked",
+        operation: "quota gate",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "embed",
+        path: "/embed",
+        operation: "embedded identity handoff",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "embed-unsupported",
+        path: "/embed/unsupported-host",
+        operation: "embedded unsupported host",
+        marker: enterpriseMarker,
       },
     ],
   },
