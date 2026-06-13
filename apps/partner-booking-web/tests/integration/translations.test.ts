@@ -101,9 +101,24 @@ describe("partner-booking i18n dictionary", () => {
       new URL("../../lib/program-screens.tsx", import.meta.url),
       "utf8",
     );
-    const legacyProgramScreenPage = readFileSync(
+    const programSitePage = readFileSync(
+      new URL("../../app/[tenantSlug]/program/site/page.tsx", import.meta.url),
+      "utf8",
+    );
+    const programSiteScreenPage = readFileSync(
       new URL(
-        "../../app/[tenantSlug]/program/[screen]/page.tsx",
+        "../../app/[tenantSlug]/program/site/[screen]/page.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const programEmbedPage = readFileSync(
+      new URL("../../app/[tenantSlug]/program/embed/page.tsx", import.meta.url),
+      "utf8",
+    );
+    const programEmbedScreenPage = readFileSync(
+      new URL(
+        "../../app/[tenantSlug]/program/embed/[screen]/page.tsx",
         import.meta.url,
       ),
       "utf8",
@@ -117,11 +132,19 @@ describe("partner-booking i18n dictionary", () => {
     expect(programScreens).toContain("!CARD_ONLY_SCREEN_IDS.has(screen.id)");
     expect(programScreens).toContain('basePath.endsWith("/embed")');
     expect(programScreens).toContain("data-program-surface={surface}");
-    expect(legacyProgramScreenPage).toContain(
-      "`/${tenantSlug}/program/embed/${segment}`",
+    expect(programSitePage).toContain('mode="site"');
+    expect(programSiteScreenPage).toContain("resolveProgramScreenSegment");
+    expect(programSiteScreenPage).toContain(
+      'listProgramScreensForTheme(theme, "site")',
     );
-    expect(legacyProgramScreenPage).toContain(
-      "`/${tenantSlug}/program/site/${segment}`",
+    expect(programEmbedPage).not.toContain("AirportTransferSite");
+    expect(programEmbedPage).toContain('screen="embed_handoff"');
+    expect(programEmbedPage).toContain('surface="embed"');
+    expect(programEmbedPage).toContain('theme.kind !== "card"');
+    expect(programEmbedScreenPage).toContain("resolveEmbedScreen");
+    expect(programEmbedScreenPage).toContain(
+      'listProgramScreensForTheme(theme, "embed")',
     );
+    expect(programEmbedScreenPage).toContain('theme.kind !== "card"');
   });
 });

@@ -2828,6 +2828,10 @@ function renderScreen(
           </div>
         </Card>
         <Card title={s("案件資訊", "Case information")}>
+          <Row
+            label={s("權益類型", "Entitlement type")}
+            value={theme.benefitNoun}
+          />
           {state.rows.map(([label, value]) => (
             <Row
               key={label}
@@ -3354,7 +3358,18 @@ function renderScreen(
         subtitle={s("您的申請正在審查", "Your request is under review")}
       />
       <Card>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <Row
+          label={s("權益類型", "Entitlement type")}
+          value={theme.benefitNoun}
+        />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            marginTop: "8px",
+          }}
+        >
           <Chip theme={theme} tone="primary" label="manual_review" />
           <span style={{ fontSize: "13px", color: theme.chrome.pageMuted }}>
             {s("預計 1 個工作天內回覆", "Expected reply within 1 business day")}

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
-import { AirportTransferSite } from "@/components/airport-transfer-site";
-import { getAirportBank } from "@/lib/airport-site-data";
+import { getTenantProgramTheme } from "@/lib/program-route-context";
+import { ProgramBookingFlow } from "@/lib/program-screens";
+import { getServerLocale } from "@/lib/server-locale";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +11,20 @@ type PageProps = {
 
 export default async function ProgramEmbedFlowPage({ params }: PageProps) {
   const { tenantSlug } = await params;
+  const locale = await getServerLocale();
+  const theme = await getTenantProgramTheme(tenantSlug);
 
-  // The online-banking app embed is the same airport-transfer website rendered
-  // inside the bank's app webview (per docs/05-ui/drts-design-canvas/bank-sites).
-  const bank = getAirportBank(tenantSlug);
-  if (!bank) {
+  if (theme.kind !== "card") {
     notFound();
   }
 
-  return <AirportTransferSite bank={bank} mode="embed" />;
+  return (
+    <ProgramBookingFlow
+      theme={theme}
+      screen="embed_handoff"
+      basePath={`/${tenantSlug}/program/embed`}
+      locale={locale}
+      surface="embed"
+    />
+  );
 }
