@@ -51,6 +51,7 @@
     "test:e2e:bank-console-depth": "playwright test -c playwright.bank-console-depth.config.ts",
     "test:e2e:enterprise-dispatch": "playwright test -c playwright.enterprise-dispatch.config.ts",
     "test:e2e:ops-console-parity": "playwright test -c playwright.ops-console-parity.config.ts",
+    "test:e2e:platform-admin-parity": "playwright test -c playwright.platform-admin-parity.config.ts",
     "test:e2e:partner-booking-surfaces": "playwright test -c playwright.partner-booking-surfaces.config.ts",
     "test:e2e:tenant-localization": "playwright test -c playwright.tenant-localization.config.ts",
     "test:e2e:dev-runtime-matrix": "playwright test -c playwright.dev-runtime-matrix.config.ts",
