@@ -10,17 +10,14 @@ const ACCOUNT_PERSONAS = [
   {
     key: "programAdmin",
     role: "bank_program_admin",
-    emailSuffix: "program-admin",
   },
   {
     key: "opsViewer",
     role: "bank_ops_viewer",
-    emailSuffix: "ops-viewer",
   },
   {
     key: "finance",
     role: "bank_finance",
-    emailSuffix: "finance",
   },
 ] as const;
 
@@ -87,10 +84,7 @@ export default async function LoginPage({
               >
                 <span>{activeBank.shortName[locale]}</span>
                 <strong>{t(`login.${persona.key}`, locale)}</strong>
-                <small>
-                  {persona.emailSuffix}@{activeBank.issuerCode.toLowerCase()}
-                  .demo
-                </small>
+                <small>{t("login.demoPersona", locale)}</small>
                 <em>{t("login.signIn", locale)}</em>
               </Link>
             ))}
