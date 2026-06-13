@@ -46,8 +46,8 @@ function loginHref(
   const next = new URLSearchParams(searchParams.toString());
   next.set("bank", bank.code);
   next.set("locale", locale);
-  next.delete("signedOut");
-  return `/?${next.toString()}`;
+  next.set("signedOut", "1");
+  return `/login?${next.toString()}`;
 }
 
 function userManagementHref(
