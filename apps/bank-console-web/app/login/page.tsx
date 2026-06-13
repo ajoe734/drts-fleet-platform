@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   BANK_DEMO_TENANTS,
+  getLocaleTag,
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
@@ -29,20 +30,36 @@ function homeHref(bank: string, locale: string, role: string) {
   return `/?${params.toString()}`;
 }
 
+function loginHref(bank: string, locale: string) {
+  const params = new URLSearchParams({ bank, locale });
+  return `/login?${params.toString()}`;
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams?: Promise<{
     bank?: string | string[];
     locale?: string | string[];
+    signedOut?: string | string[];
   }>;
 }) {
   const params = await searchParams;
   const locale = resolveLocale(params?.locale);
   const activeBank = resolveBankDemoTenant(params?.bank);
+  const signedOut =
+    (Array.isArray(params?.signedOut)
+      ? params?.signedOut[0]
+      : params?.signedOut) === "1";
+  const localeTag = getLocaleTag(locale);
 
   return (
     <div className="page-shell login-page">
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `document.documentElement.lang=${JSON.stringify(localeTag)};`,
+        }}
+      />
       <section className="login-hero">
         <span className="eyebrow">{t("login.eyebrow", locale)}</span>
         <h1>{t("login.title", locale)}</h1>
@@ -64,7 +81,11 @@ export default async function LoginPage({
                   bank.code === activeBank.code ? "page" : undefined
                 }
                 className="login-bank-card"
-                href={`/login?bank=${bank.code}&locale=${locale}`}
+                href={
+                  signedOut
+                    ? `/login?bank=${bank.code}&locale=${locale}&signedOut=1`
+                    : loginHref(bank.code, locale)
+                }
                 key={bank.code}
               >
                 <strong>{bank.name[locale]}</strong>
@@ -76,25 +97,42 @@ export default async function LoginPage({
 
         <article className="surface-card">
           <span className="surface-kicker">
-            {t("login.chooseAccount", locale)}
+            {signedOut
+              ? t("login.signedOutAccountHidden", locale)
+              : t("login.chooseAccount", locale)}
           </span>
-          <div className="login-account-grid">
-            {ACCOUNT_PERSONAS.map((persona) => (
+          {signedOut ? (
+            <div className="callout-panel is-warning">
+              <strong>{activeBank.name[locale]}</strong>
+              <p>{t("login.signedOutAccountHiddenBody", locale)}</p>
               <Link
                 className="login-account-card"
-                href={homeHref(activeBank.code, locale, persona.role)}
-                key={persona.key}
+                href={loginHref(activeBank.code, locale)}
               >
                 <span>{activeBank.shortName[locale]}</span>
-                <strong>{t(`login.${persona.key}`, locale)}</strong>
-                <small>
-                  {persona.emailSuffix}@{activeBank.issuerCode.toLowerCase()}
-                  .demo
-                </small>
+                <strong>{t("authBoundary.cta", locale)}</strong>
                 <em>{t("login.signIn", locale)}</em>
               </Link>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="login-account-grid">
+              {ACCOUNT_PERSONAS.map((persona) => (
+                <Link
+                  className="login-account-card"
+                  href={homeHref(activeBank.code, locale, persona.role)}
+                  key={persona.key}
+                >
+                  <span>{activeBank.shortName[locale]}</span>
+                  <strong>{t(`login.${persona.key}`, locale)}</strong>
+                  <small>
+                    {persona.emailSuffix}@{activeBank.issuerCode.toLowerCase()}
+                    .demo
+                  </small>
+                  <em>{t("login.signIn", locale)}</em>
+                </Link>
+              ))}
+            </div>
+          )}
         </article>
       </section>
 

@@ -1,30 +1,36 @@
 import type { ReactNode } from "react";
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { StatusChip } from "@drts/ui-web";
+import { BANK_DEMO_TENANTS, type BankDemoTenant } from "@/lib/demo-tenants";
 import type { ContractHealth } from "@/lib/contracts-data";
 import { t } from "@/lib/translations";
 
-const ctbcDarkTokens = BRAND_TEMPLATES.CTBC.tokens.dark;
+const defaultTenant = BANK_DEMO_TENANTS.ctbc;
 
-export function IssuerBrandPill() {
+export function IssuerBrandPill({
+  tenant = defaultTenant,
+}: {
+  tenant?: BankDemoTenant;
+}) {
+  const tokens = tenant.template.tokens.dark;
+
   return (
     <span
       className="issuer-brand-pill"
       style={{
-        color: ctbcDarkTokens.text.strong,
-        background: ctbcDarkTokens.theme.panel,
-        borderColor: ctbcDarkTokens.surface.border,
-        boxShadow: `inset 0 0 0 1px ${ctbcDarkTokens.theme.panelBorder}`,
+        color: tokens.text.strong,
+        background: tokens.theme.panel,
+        borderColor: tokens.surface.border,
+        boxShadow: `inset 0 0 0 1px ${tokens.theme.panelBorder}`,
       }}
     >
       <span
         className="issuer-brand-pill__mark"
         style={{
-          background: `linear-gradient(135deg, ${ctbcDarkTokens.primary}, ${ctbcDarkTokens.accent})`,
+          background: `linear-gradient(135deg, ${tokens.primary}, ${tokens.accent})`,
         }}
       />
       <span className="issuer-brand-pill__text">
-        {BRAND_TEMPLATES.CTBC.cardArt.issuerLabel}
+        {tenant.template.cardArt.issuerLabel}
       </span>
     </span>
   );

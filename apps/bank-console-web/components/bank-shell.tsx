@@ -72,8 +72,16 @@ function SignedOutBoundary({
 function BankShellContent({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const locale = resolveLocale(searchParams.get("locale"));
-  const bank = resolveBankDemoTenant(searchParams.get("bank"));
+  const browserParams =
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search);
+  const locale = resolveLocale(
+    searchParams.get("locale") ?? browserParams?.get("locale"),
+  );
+  const bank = resolveBankDemoTenant(
+    searchParams.get("bank") ?? browserParams?.get("bank"),
+  );
   const signedOut = searchParams.get("signedOut") === "1";
   const navEntries = buildBankNavEntries(locale, searchParams.toString());
   const activeItem = findNavItem(pathname, navEntries);

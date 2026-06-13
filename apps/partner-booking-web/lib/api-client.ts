@@ -297,7 +297,7 @@ function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
     ...base,
     slug,
     displayName: base.displayName,
-    host: `${slug}.partner.invalid`,
+    host: isKnownBrand ? base.host : `${slug}.partner.invalid`,
     tagline: `${base.tagline} · 等待後端合作入口啟用`,
     theme: isKnownBrand ? base.theme : PARTNER_DEFAULT_THEME,
   };

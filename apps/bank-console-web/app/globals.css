@@ -30,11 +30,17 @@ body {
   min-height: 100vh;
   height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 22%),
+    radial-gradient(
+      circle at top left,
+      rgba(15, 118, 110, 0.18),
+      transparent 22%
+    ),
     #060b13;
 }
 
 .bank-demo-controls {
+  position: relative;
+  z-index: 1000;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -43,6 +49,10 @@ body {
 
 .bank-demo-controls details {
   position: relative;
+}
+
+.bank-demo-controls details[open] {
+  z-index: 1001;
 }
 
 .bank-demo-controls summary {
@@ -97,7 +107,7 @@ body {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 20;
+  z-index: 1002;
   width: 260px;
   padding: 12px;
   border-radius: 14px;
@@ -963,12 +973,11 @@ body {
   justify-content: center;
   padding: 18px;
   border-radius: 12px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--issuer-primary-dark) 82%, transparent),
-      color-mix(in srgb, var(--issuer-soft) 92%, transparent)
-    );
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--issuer-primary-dark) 82%, transparent),
+    color-mix(in srgb, var(--issuer-soft) 92%, transparent)
+  );
   border: 1px solid color-mix(in srgb, var(--issuer-accent) 28%, transparent);
 }
 
@@ -990,12 +999,11 @@ body {
   color: #ffffff;
   font-weight: 700;
   text-decoration: none;
-  background:
-    linear-gradient(
-      135deg,
-      var(--issuer-primary),
-      color-mix(in srgb, var(--issuer-primary-dark) 72%, var(--issuer-accent))
-    );
+  background: linear-gradient(
+    135deg,
+    var(--issuer-primary),
+    color-mix(in srgb, var(--issuer-primary-dark) 72%, var(--issuer-accent))
+  );
 }
 
 .ops-link-button.is-disabled {
@@ -1123,12 +1131,11 @@ body {
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--issuer-accent) 34%, transparent);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--issuer-accent) 16%, transparent),
-      color-mix(in srgb, var(--issuer-primary-dark) 84%, transparent)
-    );
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--issuer-accent) 16%, transparent),
+    color-mix(in srgb, var(--issuer-primary-dark) 84%, transparent)
+  );
 }
 
 .booking-impact-banner strong {
@@ -1151,13 +1158,12 @@ body {
   padding: 20px 22px;
   border-radius: 14px;
   border: 1px solid var(--issuer-panel-border);
-  background:
-    linear-gradient(
-      135deg,
-      var(--issuer-accent-soft),
-      rgba(15, 42, 40, 0.92) 48%,
-      rgba(19, 78, 72, 0.88)
-    );
+  background: linear-gradient(
+    135deg,
+    var(--issuer-accent-soft),
+    rgba(15, 42, 40, 0.92) 48%,
+    rgba(19, 78, 72, 0.88)
+  );
 }
 
 .programs-banner h2 {
@@ -1226,13 +1232,12 @@ body {
 
 .programs-kpi-primary {
   border-color: var(--issuer-panel-border);
-  background:
-    linear-gradient(
-      180deg,
-      rgba(var(--issuer-primary-rgb), 0.12),
-      rgba(15, 42, 40, 0.96) 38%,
-      #0f2a28
-    );
+  background: linear-gradient(
+    180deg,
+    rgba(var(--issuer-primary-rgb), 0.12),
+    rgba(15, 42, 40, 0.96) 38%,
+    #0f2a28
+  );
 }
 
 .programs-kpi-value-row,
@@ -1911,7 +1916,6 @@ body {
     grid-template-columns: 1fr;
   }
 }
-
 
 /* ── Home / overview (BK_Home) ───────────────────────────────────────────────
  * Body styling for the role-cut posture dashboard. Window chrome stays tenant

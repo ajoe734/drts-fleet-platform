@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { PARTNER_BRAND_TOKENS } from "@drts/ui-tokens";
 import {
   CalloutPanel,
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref, projectIssuerText } from "@/lib/issuer-projection";
 import { t, type TranslationKey } from "@/lib/translations";
 
 type SearchParamValue = string | string[] | undefined;
@@ -55,8 +56,6 @@ type AuditFilterState = {
   period: string;
   subject: string;
 };
-
-const issuerBrand = PARTNER_BRAND_TOKENS.CTBC.light;
 
 const auditTypeOptions: AuditEventType[] = [
   "eligibility_decision",
@@ -280,15 +279,41 @@ function getSummaryCount(records: AuditRecord[], type: AuditEventType) {
   return records.filter((record) => record.type === type).length;
 }
 
+function projectAuditRecords(
+  records: AuditRecord[],
+  tenant: ReturnType<typeof resolveBankDemoTenant>,
+  locale: ReturnType<typeof resolveLocale>,
+) {
+  return records.map((record) => ({
+    ...record,
+    actorHandle: projectIssuerText(record.actorHandle, tenant, locale),
+    subjectMasked: projectIssuerText(record.subjectMasked, tenant, locale),
+    summary: projectIssuerText(record.summary, tenant, locale),
+    relatedEntity: {
+      ...record.relatedEntity,
+      href: bankScopedHref(
+        projectIssuerText(record.relatedEntity.href, tenant, locale),
+        tenant,
+        locale,
+      ),
+      label: projectIssuerText(record.relatedEntity.label, tenant, locale),
+    },
+  }));
+}
+
 type AuditPageProps = {
   searchParams?: Promise<Record<string, SearchParamValue>>;
 };
 
 export default async function AuditPage({ searchParams }: AuditPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const issuerBrand = tenant.template.tokens.dark;
+  const auditRecords = projectAuditRecords(sampleAuditRecords, tenant, locale);
   const filters = parseFilters(resolvedSearchParams);
-  const records = filterRecords(sampleAuditRecords, filters);
-  const periods = getPeriodOptions(sampleAuditRecords);
+  const records = filterRecords(auditRecords, filters);
+  const periods = getPeriodOptions(auditRecords);
   const allMasked = records.every((record) =>
     isMaskedReference(record.subjectMasked),
   );
@@ -309,7 +334,9 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                 color: issuerBrand.primaryDark,
               }}
             >
-              {t("audit.issuerBadge")}
+              {locale === "zh"
+                ? `${tenant.issuerCode} 發卡行租戶`
+                : `${tenant.issuerCode} issuer tenant`}
             </span>
           </span>
         }
@@ -350,12 +377,17 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
             <h2>{t("audit.filters.title")}</h2>
             <p>{t("audit.filters.description")}</p>
           </div>
-          <Link className="audit-reset-link" href="/audit">
+          <Link
+            className="audit-reset-link"
+            href={bankScopedHref("/audit", tenant, locale)}
+          >
             {t("audit.filters.reset")}
           </Link>
         </div>
 
         <form className="audit-filter-grid" method="get">
+          <input name="bank" type="hidden" value={tenant.code} />
+          <input name="locale" type="hidden" value={locale} />
           <label className="audit-filter-field">
             <span>{t("audit.filters.type")}</span>
             <select name="type" defaultValue={filters.type}>

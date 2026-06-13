@@ -1,4 +1,3 @@
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { DataTable, Td, Tr, CanvasPill } from "@drts/ui-web";
 import type { CSSProperties } from "react";
 import Link from "next/link";
@@ -8,15 +7,15 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import {
-  bookingPeriods,
-  bookingPrograms,
   filterBookings,
+  getBookingPeriods,
+  getBookingPrograms,
   type BookingDirection,
   type BookingState,
 } from "@/lib/bookings";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref } from "@/lib/issuer-projection";
 import { t } from "@/lib/translations";
-
-const issuerBrand = BRAND_TEMPLATES.CTBC;
 
 const bookingPillTone: Record<
   BookingState,
@@ -73,6 +72,9 @@ export default async function BookingsPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const issuerBrand = tenant.template;
   const programCode = one(resolvedSearchParams.program);
   const direction = one(resolvedSearchParams.direction) as
     | BookingDirection
@@ -87,7 +89,9 @@ export default async function BookingsPage({
     ...(period ? { period } : {}),
     ...(cardholder ? { cardholder } : {}),
   };
-  const bookings = filterBookings(filters);
+  const bookingPrograms = getBookingPrograms(tenant, locale);
+  const bookingPeriods = getBookingPeriods(tenant, locale);
+  const bookings = filterBookings(filters, tenant, locale);
   const activeCount = bookings.filter(
     (item) => item.state === "assigned" || item.state === "en_route",
   ).length;
@@ -150,12 +154,17 @@ export default async function BookingsPage({
             <h3>{t("bookings.filters.title")}</h3>
             <p>{t("bookings.filters.description")}</p>
           </div>
-          <a className="filters-reset" href="/bookings">
+          <a
+            className="filters-reset"
+            href={bankScopedHref("/bookings", tenant, locale)}
+          >
             {t("bookings.filters.reset")}
           </a>
         </div>
 
         <form className="filters-form" method="get">
+          <input name="bank" type="hidden" value={tenant.code} />
+          <input name="locale" type="hidden" value={locale} />
           <label className="filter-field">
             <span>{t("bookings.filters.program")}</span>
             <select name="program" defaultValue={filters.programCode ?? ""}>
@@ -265,7 +274,11 @@ export default async function BookingsPage({
                 <div className="cell-stack">
                   <Link
                     className="text-link"
-                    href={`/bookings/${item.orderId}`}
+                    href={bankScopedHref(
+                      `/bookings/${item.orderId}`,
+                      tenant,
+                      locale,
+                    )}
                   >
                     {item.orderNo}
                   </Link>

@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { t } from "@/lib/translations";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref, projectIssuerText } from "@/lib/issuer-projection";
 import {
   BANK_ACTORS,
   EXCEPTIONS,
@@ -21,12 +22,6 @@ import {
   type QuotaRow,
   type SlaMetric,
 } from "@/lib/home-data";
-
-// Issuer brand (中信/CTBC navy + gold) sourced from the @drts/ui-tokens token
-// set — never a hand-picked hex (keeps scripts/check_ui_realm_tokens.py green).
-// The window chrome stays on the tenant realm (teal) via BankShell; the issuer
-// brand only accents the card-benefit data (screen-requirements §7 VQ-1).
-const ctbc = BRAND_TEMPLATES.CTBC.tokens.dark;
 
 function Card({
   title,
@@ -145,11 +140,21 @@ function SlaRow({ metric }: { metric: SlaMetric }) {
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ role?: string | string[] }>;
+  searchParams: Promise<{
+    bank?: string | string[];
+    locale?: string | string[];
+    role?: string | string[];
+  }>;
 }) {
   const params = await searchParams;
+  const locale = resolveLocale(params.locale);
+  const tenant = resolveBankDemoTenant(params.bank);
+  const issuerTokens = tenant.template.tokens.dark;
   const role = resolveRole(params.role);
-  const actor = BANK_ACTORS[role];
+  const actor = {
+    ...BANK_ACTORS[role],
+    display: role === "admin" ? tenant.actorName : BANK_ACTORS[role].display,
+  };
   const view = roleView(role);
   const onTime = ON_TIME_SLA;
 
@@ -162,14 +167,18 @@ export default async function HomePage({
     view.seeFinance && !view.seeOrders
       ? EXCEPTIONS.filter((e) => e.kind === "sla_breach")
       : EXCEPTIONS;
+  const projectedExceptions = exceptions.map((exception) => ({
+    ...exception,
+    entity: projectIssuerText(exception.entity, tenant, locale),
+  }));
 
   const issuerVars = {
-    "--issuer-primary": ctbc.primary,
-    "--issuer-primary-dark": ctbc.primaryDark,
-    "--issuer-accent": ctbc.accent,
-    "--issuer-ink": ctbc.ink,
-    "--issuer-surface": ctbc.surface.bg,
-    "--issuer-border": ctbc.surface.border,
+    "--issuer-primary": issuerTokens.primary,
+    "--issuer-primary-dark": issuerTokens.primaryDark,
+    "--issuer-accent": issuerTokens.accent,
+    "--issuer-ink": issuerTokens.ink,
+    "--issuer-surface": issuerTokens.surface.bg,
+    "--issuer-border": issuerTokens.surface.border,
   } as CSSProperties;
 
   return (
@@ -178,7 +187,7 @@ export default async function HomePage({
         <span className="eyebrow">{t("home.eyebrow")}</span>
         <h1 className="bank-home-greeting">
           {t("home.greeting", "zh", { name: actor.display })}
-          <span className="issuer-badge">CTBC</span>
+          <span className="issuer-badge">{tenant.issuerCode}</span>
         </h1>
         <p className="bank-home-subtitle">
           {t("home.subtitle", "zh", { date: TODAY, period: PERIOD })}
@@ -246,7 +255,10 @@ export default async function HomePage({
                 n: UPCOMING_ORDERS.length,
               })}
               actions={
-                <a className="card-link" href="/bookings">
+                <a
+                  className="card-link"
+                  href={bankScopedHref("/bookings", tenant, locale)}
+                >
                   {t("home.upcoming.cta")} →
                 </a>
               }
@@ -303,7 +315,10 @@ export default async function HomePage({
               })}
               subtitle={t("home.statement.subtitle")}
               actions={
-                <a className="card-link" href="/statements">
+                <a
+                  className="card-link"
+                  href={bankScopedHref("/statements", tenant, locale)}
+                >
                   {t("home.settlement.cta")} →
                 </a>
               }
@@ -358,7 +373,7 @@ export default async function HomePage({
             }
           >
             <div className="exception-list">
-              {exceptions.map((e, i) => (
+              {projectedExceptions.map((e, i) => (
                 <div
                   key={`${e.entity}-${i}`}
                   className={`exception is-${e.tone}`}
@@ -372,7 +387,10 @@ export default async function HomePage({
                   <p>
                     {t(`home.ex.${e.kind}.body`, "zh", { entity: e.entity })}
                   </p>
-                  <a className="card-link" href="/bookings">
+                  <a
+                    className="card-link"
+                    href={bankScopedHref("/bookings", tenant, locale)}
+                  >
                     {e.entity} →
                   </a>
                 </div>

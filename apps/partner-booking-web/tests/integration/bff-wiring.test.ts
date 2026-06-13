@@ -283,6 +283,7 @@ describe("partner-booking-web BFF wiring", () => {
       brand: expect.objectContaining({
         displayName: "CTBC World Elite",
         slug: "ctbc",
+        host: "ride.ctbc.com.tw",
         tagline:
           "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
       }),
@@ -290,6 +291,41 @@ describe("partner-booking-web BFF wiring", () => {
     await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
       code: "PARTNER_ENTRY_NOT_FOUND",
       status: 404,
+    });
+  });
+
+  it("preserves canonical hosts for known-brand fallback shells", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      const entrySlug = input.split("/").pop() ?? "unknown";
+      return jsonResponse(
+        {
+          error: {
+            code: "PARTNER_ENTRY_NOT_FOUND",
+            message: "The partner entry could not be found.",
+            details: { entrySlug },
+            retryable: false,
+          },
+        },
+        404,
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      brand: expect.objectContaining({
+        slug: "ctbc",
+        host: "ride.ctbc.com.tw",
+      }),
+    });
+    await expect(
+      getPartnerRouteContext("unknown-bank", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      brand: expect.objectContaining({
+        slug: "unknown-bank",
+        host: "unknown-bank.partner.invalid",
+      }),
     });
   });
 
