@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { PARTNER_BRAND_TOKENS } from "@drts/ui-tokens";
 import {
   CalloutPanel,
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { t, type TranslationKey } from "@/lib/translations";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import { tenantDisplayText } from "@/lib/tenant-display";
+import { t, type Locale, type TranslationKey } from "@/lib/translations";
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -55,8 +57,6 @@ type AuditFilterState = {
   period: string;
   subject: string;
 };
-
-const issuerBrand = PARTNER_BRAND_TOKENS.CTBC.light;
 
 const auditTypeOptions: AuditEventType[] = [
   "eligibility_decision",
@@ -219,18 +219,18 @@ function isMaskedReference(value: string) {
   return ["****", "***", "masked"].some((token) => value.includes(token));
 }
 
-function getTypeLabel(type: AuditEventType) {
-  return t(auditTypeLabelKeys[type]);
+function getTypeLabel(type: AuditEventType, locale: Locale) {
+  return t(auditTypeLabelKeys[type], locale);
 }
 
-function getReasonLabel(reasonCode: AuditReasonCode) {
-  return t(auditReasonLabelKeys[reasonCode]);
+function getReasonLabel(reasonCode: AuditReasonCode, locale: Locale) {
+  return t(auditReasonLabelKeys[reasonCode], locale);
 }
 
-function getLinkLabel(kind: AuditLinkKind, value: string) {
+function getLinkLabel(kind: AuditLinkKind, value: string, locale: Locale) {
   const key =
     kind === "statement" ? "audit.related.statement" : "audit.related.booking";
-  return `${t(key)} ${value}`;
+  return `${t(key, locale)} ${value}`;
 }
 
 function filterRecords(records: AuditRecord[], filters: AuditFilterState) {
@@ -286,6 +286,14 @@ type AuditPageProps = {
 
 export default async function AuditPage({ searchParams }: AuditPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const session = getBankConsoleSession(
+    tenant,
+    locale,
+    resolvedSearchParams.role,
+  );
+  const issuerBrand = tenant.template.tokens.light;
   const filters = parseFilters(resolvedSearchParams);
   const records = filterRecords(sampleAuditRecords, filters);
   const periods = getPeriodOptions(sampleAuditRecords);
@@ -296,11 +304,11 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow={t("audit.eyebrow")}
+        eyebrow={t("audit.eyebrow", locale)}
         title={
           <span className="audit-title-wrap">
-            <span>{t("audit.title")}</span>
-            <span className="status-chip">{t("audit.readOnly")}</span>
+            <span>{t("audit.title", locale)}</span>
+            <span className="status-chip">{t("audit.readOnly", locale)}</span>
             <span
               className="audit-issuer-badge"
               style={{
@@ -309,81 +317,89 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                 color: issuerBrand.primaryDark,
               }}
             >
-              {t("audit.issuerBadge")}
+              {tenant.name[locale]}
             </span>
           </span>
         }
-        description={t("audit.description")}
+        description={t("audit.description", locale)}
       />
 
       <div className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker={t("audit.summary.eligibilityKicker")}
-          title={`${getSummaryCount(records, "eligibility_decision")} ${t("audit.summary.events")}`}
-          description={t("audit.summary.eligibilityBody")}
+          kicker={t("audit.summary.eligibilityKicker", locale)}
+          title={`${getSummaryCount(records, "eligibility_decision")} ${t("audit.summary.events", locale)}`}
+          description={t("audit.summary.eligibilityBody", locale)}
         />
         <SurfaceCard
-          kicker={t("audit.summary.dispatchKicker")}
-          title={`${getSummaryCount(records, "dispatch_assignment")} ${t("audit.summary.events")}`}
-          description={t("audit.summary.dispatchBody")}
+          kicker={t("audit.summary.dispatchKicker", locale)}
+          title={`${getSummaryCount(records, "dispatch_assignment")} ${t("audit.summary.events", locale)}`}
+          description={t("audit.summary.dispatchBody", locale)}
         />
         <SurfaceCard
-          kicker={t("audit.summary.settlementKicker")}
-          title={`${getSummaryCount(records, "settlement_close")} ${t("audit.summary.events")}`}
-          description={t("audit.summary.settlementBody")}
+          kicker={t("audit.summary.settlementKicker", locale)}
+          title={`${getSummaryCount(records, "settlement_close")} ${t("audit.summary.events", locale)}`}
+          description={t("audit.summary.settlementBody", locale)}
         />
       </div>
 
       <CalloutPanel
-        title={t("audit.callout.title")}
+        title={t("audit.callout.title", locale)}
         description={
           allMasked
-            ? t("audit.callout.bodyMasked")
-            : t("audit.callout.bodyFallback")
+            ? t("audit.callout.bodyMasked", locale)
+            : t("audit.callout.bodyFallback", locale)
         }
       />
 
       <section className="audit-panel">
         <div className="audit-panel-head">
           <div>
-            <span className="surface-kicker">{t("audit.filters.kicker")}</span>
-            <h2>{t("audit.filters.title")}</h2>
-            <p>{t("audit.filters.description")}</p>
+            <span className="surface-kicker">
+              {t("audit.filters.kicker", locale)}
+            </span>
+            <h2>{t("audit.filters.title", locale)}</h2>
+            <p>{t("audit.filters.description", locale)}</p>
           </div>
-          <Link className="audit-reset-link" href="/audit">
-            {t("audit.filters.reset")}
+          <Link
+            className="audit-reset-link"
+            href={bankConsoleHref("/audit", tenant, locale, session.role)}
+          >
+            {t("audit.filters.reset", locale)}
           </Link>
         </div>
 
         <form className="audit-filter-grid" method="get">
+          <input name="bank" type="hidden" value={tenant.code} />
+          <input name="locale" type="hidden" value={locale} />
+          <input name="role" type="hidden" value={session.role} />
           <label className="audit-filter-field">
-            <span>{t("audit.filters.type")}</span>
+            <span>{t("audit.filters.type", locale)}</span>
             <select name="type" defaultValue={filters.type}>
-              <option value="">{t("audit.filters.allTypes")}</option>
+              <option value="">{t("audit.filters.allTypes", locale)}</option>
               {auditTypeOptions.map((option) => (
                 <option key={option} value={option}>
-                  {getTypeLabel(option)}
+                  {getTypeLabel(option, locale)}
                 </option>
               ))}
             </select>
           </label>
 
           <label className="audit-filter-field">
-            <span>{t("audit.filters.actor")}</span>
+            <span>{t("audit.filters.actor", locale)}</span>
             <select name="actor" defaultValue={filters.actor}>
-              <option value="">{t("audit.filters.allActors")}</option>
+              <option value="">{t("audit.filters.allActors", locale)}</option>
               {actorOptions.map((option) => (
                 <option key={option} value={option}>
-                  {t(auditActorLabelKeys[option])}
+                  {t(auditActorLabelKeys[option], locale)}
                 </option>
               ))}
             </select>
           </label>
 
           <label className="audit-filter-field">
-            <span>{t("audit.filters.period")}</span>
+            <span>{t("audit.filters.period", locale)}</span>
             <select name="period" defaultValue={filters.period}>
-              <option value="">{t("audit.filters.allPeriods")}</option>
+              <option value="">{t("audit.filters.allPeriods", locale)}</option>
               {periods.map((period) => (
                 <option key={period} value={period}>
                   {period}
@@ -393,18 +409,18 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
           </label>
 
           <label className="audit-filter-field">
-            <span>{t("audit.filters.subject")}</span>
+            <span>{t("audit.filters.subject", locale)}</span>
             <input
               defaultValue={filters.subject}
               name="subject"
-              placeholder={t("audit.filters.subjectPlaceholder")}
+              placeholder={t("audit.filters.subjectPlaceholder", locale)}
               type="search"
             />
           </label>
 
           <div className="audit-filter-actions">
             <button className="audit-apply-button" type="submit">
-              {t("audit.filters.apply")}
+              {t("audit.filters.apply", locale)}
             </button>
           </div>
         </form>
@@ -413,16 +429,18 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
       <section className="audit-panel">
         <div className="audit-panel-head">
           <div>
-            <span className="surface-kicker">{t("audit.list.kicker")}</span>
-            <h2>{t("audit.list.title", "zh", { count: records.length })}</h2>
-            <p>{t("audit.list.description")}</p>
+            <span className="surface-kicker">
+              {t("audit.list.kicker", locale)}
+            </span>
+            <h2>{t("audit.list.title", locale, { count: records.length })}</h2>
+            <p>{t("audit.list.description", locale)}</p>
           </div>
         </div>
 
         {records.length === 0 ? (
           <div className="audit-empty-state">
-            <strong>{t("audit.empty.title")}</strong>
-            <p>{t("audit.empty.body")}</p>
+            <strong>{t("audit.empty.title", locale)}</strong>
+            <p>{t("audit.empty.body", locale)}</p>
           </div>
         ) : (
           <div className="audit-list">
@@ -434,50 +452,60 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                       {record.timestamp.replace("T", " ").slice(0, 16)}
                     </time>
                     <span className="audit-type-pill">
-                      {getTypeLabel(record.type)}
+                      {getTypeLabel(record.type, locale)}
                     </span>
                     <span className="audit-reason-pill">
-                      {getReasonLabel(record.reasonCode)}
+                      {getReasonLabel(record.reasonCode, locale)}
                     </span>
                   </div>
 
                   <div className="audit-row-grid">
                     <div>
                       <span className="audit-label">
-                        {t("audit.column.actor")}
+                        {t("audit.column.actor", locale)}
                       </span>
-                      <strong>{record.actorLabel}</strong>
-                      <p>{record.actorHandle}</p>
+                      <strong>
+                        {t(auditActorLabelKeys[record.actor], locale)}
+                      </strong>
+                      <p>{tenantDisplayText(record.actorHandle, tenant)}</p>
                     </div>
                     <div>
                       <span className="audit-label">
-                        {t("audit.column.subject")}
+                        {t("audit.column.subject", locale)}
                       </span>
-                      <strong>{record.subjectMasked}</strong>
+                      <strong>
+                        {tenantDisplayText(record.subjectMasked, tenant)}
+                      </strong>
                       <p>
                         {isMaskedReference(record.subjectMasked)
-                          ? t("audit.mask.ok")
-                          : t("audit.mask.needsReview")}
+                          ? t("audit.mask.ok", locale)
+                          : t("audit.mask.needsReview", locale)}
                       </p>
                     </div>
                     <div>
                       <span className="audit-label">
-                        {t("audit.column.reasonCode")}
+                        {t("audit.column.reasonCode", locale)}
                       </span>
                       <strong>{record.reasonCode}</strong>
-                      <p>{record.summary}</p>
+                      <p>{tenantDisplayText(record.summary, tenant)}</p>
                     </div>
                     <div>
                       <span className="audit-label">
-                        {t("audit.column.related")}
+                        {t("audit.column.related", locale)}
                       </span>
                       <Link
                         className="audit-entity-link"
-                        href={record.relatedEntity.href}
+                        href={bankConsoleHref(
+                          record.relatedEntity.href,
+                          tenant,
+                          locale,
+                          session.role,
+                        )}
                       >
                         {getLinkLabel(
                           record.relatedEntity.kind,
                           record.relatedEntity.label,
+                          locale,
                         )}
                       </Link>
                       <p>{record.id}</p>

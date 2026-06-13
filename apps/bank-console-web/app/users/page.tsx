@@ -5,16 +5,12 @@ import {
   resolveLocale,
   type BankDemoTenant,
 } from "@/lib/demo-tenants";
+import { getBankConsoleSession, type BankConsoleRole } from "@/lib/session";
 import { t, type Locale } from "@/lib/translations";
 
-type BankRole = "bank_program_admin" | "bank_ops_viewer" | "bank_finance";
+type BankRole = BankConsoleRole;
 type UserStatus = "active" | "invited" | "suspended";
 type UserFilter = "all" | UserStatus;
-
-const CURRENT_ACTOR = {
-  display: "周敬文",
-  role: "bank_program_admin" as BankRole,
-};
 
 const USERS: Array<{
   name: string;
@@ -102,8 +98,9 @@ function getActionHref(
   filter: UserFilter,
   bank: BankDemoTenant,
   locale: Locale,
+  role: BankRole,
 ) {
-  const params = new URLSearchParams({ bank: bank.code, locale });
+  const params = new URLSearchParams({ bank: bank.code, locale, role });
   if (filter !== "all") {
     params.set("status", filter);
   }
@@ -125,17 +122,19 @@ export default async function UsersPage({
   searchParams?: Promise<{
     bank?: string | string[];
     locale?: string | string[];
+    role?: string | string[];
     status?: string;
   }>;
 }) {
   const params = await searchParams;
   const locale = resolveLocale(params?.locale);
   const tenant = resolveBankDemoTenant(params?.bank);
+  const session = getBankConsoleSession(tenant, locale, params?.role);
   const issuerTokens = tenant.template.tokens.dark;
   const activeFilter = FILTERS.includes(params?.status as UserFilter)
     ? (params?.status as UserFilter)
     : "all";
-  const canManageUsers = CURRENT_ACTOR.role === "bank_program_admin";
+  const canManageUsers = session.role === "bank_program_admin";
   const visibleUsers =
     activeFilter === "all"
       ? USERS
@@ -180,7 +179,7 @@ export default async function UsersPage({
             <Link
               aria-current={isActive ? "page" : undefined}
               className={`users-filter-tab${isActive ? " is-active" : ""}`}
-              href={getActionHref(filter, tenant, locale)}
+              href={getActionHref(filter, tenant, locale, session.role)}
               key={filter}
             >
               <span>{filterLabel(filter, locale)}</span>
@@ -279,8 +278,8 @@ export default async function UsersPage({
 
       <p className="users-footnote">
         {t("users.auditFootnote", locale, {
-          actor: CURRENT_ACTOR.display,
-          role: roleLabel(CURRENT_ACTOR.role, locale),
+          actor: session.actorName,
+          role: session.roleLabel,
         })}
       </p>
     </div>

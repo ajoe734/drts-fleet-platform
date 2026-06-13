@@ -1,4 +1,3 @@
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { CanvasPill, DataTable, Td, Tr } from "@drts/ui-web";
 import type { CSSProperties } from "react";
 import {
@@ -6,14 +5,15 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import { tenantDisplayText } from "@/lib/tenant-display";
 import {
   filterStatements,
   settlementStatements,
   type StatementStatus,
 } from "@/lib/statements";
-import { t } from "@/lib/translations";
-
-const issuerBrand = BRAND_TEMPLATES.CTBC;
+import { t, type Locale } from "@/lib/translations";
 
 const statementStatusTone: Record<
   StatementStatus,
@@ -51,8 +51,8 @@ function formatDate(value: string) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("zh-TW", {
+function formatCurrency(amount: number, locale: Locale) {
+  return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
     style: "currency",
     currency: "TWD",
     maximumFractionDigits: 0,
@@ -65,6 +65,19 @@ export default async function StatementsPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const session = getBankConsoleSession(
+    tenant,
+    locale,
+    resolvedSearchParams.role,
+  );
+  const issuerBrand = tenant.template;
+  const baseQuery = {
+    bank: tenant.code,
+    locale,
+    role: session.role,
+  };
   const status = one(resolvedSearchParams.status) as
     | StatementStatus
     | undefined;
@@ -93,36 +106,40 @@ export default async function StatementsPage({
       }
     >
       <PageHero
-        eyebrow={t("statements.eyebrow")}
+        eyebrow={t("statements.eyebrow", locale)}
         title={
           <span className="bank-title-block">
-            {t("statements.title")}
+            {t("statements.title", locale)}
             <span className="issuer-chip">
-              {issuerBrand.bankName} · {t("statements.direction")}
+              {tenant.name[locale]} · {t("statements.direction", locale)}
             </span>
           </span>
         }
-        description={t("statements.purpose")}
+        description={t("statements.purpose", locale)}
       />
 
       <section className="issuer-strip">
         <div>
-          <span className="eyebrow">{t("statements.strip.periods")}</span>
+          <span className="eyebrow">
+            {t("statements.strip.periods", locale)}
+          </span>
           <strong>{String(statements.length)}</strong>
         </div>
         <div>
-          <span className="eyebrow">{t("statements.strip.published")}</span>
+          <span className="eyebrow">
+            {t("statements.strip.published", locale)}
+          </span>
           <strong>{String(publishedCount)}</strong>
         </div>
         <div>
-          <span className="eyebrow">{t("statements.strip.total")}</span>
-          <strong>{formatCurrency(totalIssuerPaid)}</strong>
+          <span className="eyebrow">{t("statements.strip.total", locale)}</span>
+          <strong>{formatCurrency(totalIssuerPaid, locale)}</strong>
         </div>
       </section>
 
       <CalloutPanel
-        title={t("statements.callout.title")}
-        description={t("statements.callout.body")}
+        title={t("statements.callout.title", locale)}
+        description={t("statements.callout.body", locale)}
         tone="warning"
       />
 
@@ -130,50 +147,60 @@ export default async function StatementsPage({
         <div className="bank-section-head">
           <div>
             <span className="surface-kicker">
-              {t("statements.filters.kicker")}
+              {t("statements.filters.kicker", locale)}
             </span>
-            <h3>{t("statements.filters.title")}</h3>
-            <p>{t("statements.filters.description")}</p>
+            <h3>{t("statements.filters.title", locale)}</h3>
+            <p>{t("statements.filters.description", locale)}</p>
           </div>
-          <a className="filters-reset" href="/statements">
-            {t("statements.filters.reset")}
+          <a
+            className="filters-reset"
+            href={bankConsoleHref("/statements", tenant, locale, session.role)}
+          >
+            {t("statements.filters.reset", locale)}
           </a>
         </div>
 
         <form className="statements-filter-form" method="get">
+          <input name="bank" type="hidden" value={baseQuery.bank} />
+          <input name="locale" type="hidden" value={baseQuery.locale} />
+          <input name="role" type="hidden" value={baseQuery.role} />
           <label className="filter-field">
-            <span>{t("statements.filters.status")}</span>
+            <span>{t("statements.filters.status", locale)}</span>
             <select name="status" defaultValue={status ?? ""}>
-              <option value="">{t("common.all")}</option>
+              <option value="">{t("common.all", locale)}</option>
               <option value="published">
-                {t(statementStatusLabelKey.published)}
+                {t(statementStatusLabelKey.published, locale)}
               </option>
-              <option value="paid">{t(statementStatusLabelKey.paid)}</option>
-              <option value="due">{t(statementStatusLabelKey.due)}</option>
+              <option value="paid">
+                {t(statementStatusLabelKey.paid, locale)}
+              </option>
+              <option value="due">
+                {t(statementStatusLabelKey.due, locale)}
+              </option>
             </select>
           </label>
 
           <button className="filters-submit" type="submit">
-            {t("statements.filters.apply")}
+            {t("statements.filters.apply", locale)}
           </button>
         </form>
       </section>
 
       <section className="surface-grid">
         <SurfaceCard
-          kicker={t("statements.metrics.kicker")}
+          kicker={t("statements.metrics.kicker", locale)}
           title={String(statements.length)}
-          description={t("statements.metrics.periods")}
+          description={t("statements.metrics.periods", locale)}
         />
         <SurfaceCard
-          kicker={t("statements.metrics.kicker")}
+          kicker={t("statements.metrics.kicker", locale)}
           title={String(dueCount)}
-          description={t("statements.metrics.due")}
+          description={t("statements.metrics.due", locale)}
         />
         <SurfaceCard
-          kicker={t("statements.metrics.kicker")}
-          title={formatCurrency(totalIssuerPaid)}
-          description={t("statements.metrics.issuerPays")}
+          kicker={t("statements.metrics.kicker", locale)}
+          title={formatCurrency(totalIssuerPaid, locale)}
+          description={t("statements.metrics.issuerPays", locale)}
         />
       </section>
 
@@ -181,10 +208,10 @@ export default async function StatementsPage({
         <div className="bank-section-head">
           <div>
             <span className="surface-kicker">
-              {t("statements.list.kicker")}
+              {t("statements.list.kicker", locale)}
             </span>
-            <h3>{t("statements.list.title")}</h3>
-            <p>{t("statements.list.description")}</p>
+            <h3>{t("statements.list.title", locale)}</h3>
+            <p>{t("statements.list.description", locale)}</p>
           </div>
         </div>
 
@@ -192,15 +219,18 @@ export default async function StatementsPage({
           density="compact"
           tone="tenant"
           minWidth={1020}
-          empty={t("statements.empty")}
+          empty={t("statements.empty", locale)}
           columns={[
-            { label: t("statements.columns.period"), width: "120px" },
-            { label: t("statements.columns.total"), width: "140px" },
-            { label: t("statements.columns.status"), width: "120px" },
-            { label: t("statements.columns.issued"), width: "140px" },
-            { label: t("statements.columns.due"), width: "140px" },
-            { label: t("statements.columns.artifact"), width: "170px" },
-            { label: t("statements.columns.detail"), width: "150px" },
+            { label: t("statements.columns.period", locale), width: "120px" },
+            { label: t("statements.columns.total", locale), width: "140px" },
+            { label: t("statements.columns.status", locale), width: "120px" },
+            { label: t("statements.columns.issued", locale), width: "140px" },
+            { label: t("statements.columns.due", locale), width: "140px" },
+            {
+              label: t("statements.columns.artifact", locale),
+              width: "170px",
+            },
+            { label: t("statements.columns.detail", locale), width: "150px" },
           ]}
         >
           {statements.map((statement) => (
@@ -208,13 +238,17 @@ export default async function StatementsPage({
               <Td mono>
                 <div className="cell-stack">
                   <strong>{formatPeriod(statement.period)}</strong>
-                  <span>{statement.statementNo}</span>
+                  <span>
+                    {tenantDisplayText(statement.statementNo, tenant)}
+                  </span>
                 </div>
               </Td>
-              <Td mono>{formatCurrency(statement.totalIssuerPayableAmount)}</Td>
+              <Td mono>
+                {formatCurrency(statement.totalIssuerPayableAmount, locale)}
+              </Td>
               <Td>
                 <CanvasPill tone={statementStatusTone[statement.status]} dot>
-                  {t(statementStatusLabelKey[statement.status])}
+                  {t(statementStatusLabelKey[statement.status], locale)}
                 </CanvasPill>
               </Td>
               <Td mono>{formatDate(statement.issuedAt)}</Td>
@@ -224,15 +258,20 @@ export default async function StatementsPage({
                   className="statement-link"
                   href={statement.signedArtifactHref}
                 >
-                  {t("statements.actions.download")}
+                  {t("statements.actions.download", locale)}
                 </a>
               </Td>
               <Td>
                 <a
                   className="statement-link"
-                  href={`/statements/${statement.period}`}
+                  href={bankConsoleHref(
+                    `/statements/${statement.period}`,
+                    tenant,
+                    locale,
+                    session.role,
+                  )}
                 >
-                  {t("statements.actions.viewDetail")}
+                  {t("statements.actions.viewDetail", locale)}
                 </a>
               </Td>
             </Tr>
