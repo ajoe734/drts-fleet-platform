@@ -8,12 +8,14 @@ import { Reflector } from "@nestjs/core";
 
 import { ApiRequestError } from "../api-envelope";
 import { DriverDeviceSessionService } from "../../modules/auth/driver-device-session.service";
+import { AuditNotificationService } from "../../modules/audit-notification/audit-notification.service";
 import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
 } from "./auth.constants";
 import type {
+  AuthActorType,
   AuthenticatedRequestLike,
   BootstrapRequestIdentity,
 } from "./auth.types";
@@ -99,6 +101,20 @@ function extractBearerToken(
   return value.slice(7).trim() || null;
 }
 
+function headerValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return value ?? null;
+}
+
+function auditActorType(
+  actorType: AuthActorType,
+): Exclude<AuthActorType, "driver_user"> {
+  return actorType === "driver_user" ? "system" : actorType;
+}
+
 @Injectable()
 export class BootstrapAuthGuard implements CanActivate {
   constructor(
@@ -106,6 +122,8 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional() private readonly jwtAuthService?: JwtAuthService,
     @Optional()
     private readonly driverDeviceSessionService?: DriverDeviceSessionService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -257,6 +275,10 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
+    this.recordRejectedAttempt("auth.realm_denied", identity, request, {
+      allowedRealms,
+      realm: identity.realm,
+    });
     throw new ApiRequestError(
       403,
       "AUTH_REALM_DENIED",
@@ -283,6 +305,10 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
+    this.recordRejectedAttempt("auth.scope_denied", identity, request, {
+      requiredScopes,
+      grantedScopes: identity.scopes,
+    });
     throw new ApiRequestError(
       403,
       "AUTH_SCOPE_DENIED",
@@ -313,5 +339,40 @@ export class BootstrapAuthGuard implements CanActivate {
       payload.sub,
       route,
     );
+  }
+
+  private recordRejectedAttempt(
+    actionName: "auth.realm_denied" | "auth.scope_denied",
+    identity: BootstrapRequestIdentity,
+    request: AuthenticatedRequestLike,
+    details: Record<string, unknown>,
+  ) {
+    if (!this.auditNotificationService) {
+      return;
+    }
+
+    const method = request.method ?? "GET";
+    const route = request.originalUrl ?? request.url ?? "";
+    const policy = resolveRouteAuthPolicy(method, route);
+    const requestId =
+      identity.requestId ?? headerValue(request.headers["x-request-id"]);
+    this.auditNotificationService.recordAuditLog({
+      actorId: identity.actorId,
+      actorType: auditActorType(identity.actorType),
+      tenantId: identity.tenantId,
+      moduleName: "auth",
+      actionName,
+      resourceType: "route_policy",
+      resourceId: policy?.routeKey ?? route,
+      newValuesSummary: {
+        route,
+        method,
+        routeKey: policy?.routeKey ?? null,
+        requiredScopes: policy?.requiredScopes ?? [],
+        allowedRealms: policy?.allowedRealms ?? [],
+        ...details,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
   }
 }

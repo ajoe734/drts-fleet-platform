@@ -13,8 +13,9 @@
 #
 # Environment note:
 #   Mixed owned+forwarded visibility depends on seeded driver tasks or live
-#   external-platform adapter data. When the environment lacks that mixed seed,
-#   the scenario exits 0 with warnings instead of hard-failing.
+#   external-platform adapter data. Missing seed is a hard failure by default;
+#   set E2E_ALLOW_MISSING_FORWARDER_SEED=true only for exploratory runs where a
+#   warning-skip must not be counted as release proof.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,14 +60,26 @@ FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
     2>/dev/null | head -1 || true)
 
 if [[ -z "$OWNED_TASK_ID" || -z "$FORWARDED_TASK_ID" ]]; then
-  log_warn "E2E-006 requires one owned task and one forwarded task in the same driver inbox."
-  log_warn "ownedTaskId=${OWNED_TASK_ID:-<missing>} forwardedTaskId=${FORWARDED_TASK_ID:-<missing>}"
-  log_warn "Gracefully skipping — mixed multi-platform seed data is not available in this environment."
-  exit 0
+  save_evidence "$SCENARIO" "driver" "mixedSeedAvailable" "false"
+  save_evidence "$SCENARIO" "driver" "ownedTaskId" "${OWNED_TASK_ID:-<missing>}"
+  save_evidence "$SCENARIO" "driver" "forwardedTaskId" "${FORWARDED_TASK_ID:-<missing>}"
+
+  if [[ "${E2E_ALLOW_MISSING_FORWARDER_SEED:-false}" == "true" ]]; then
+    log_warn "E2E-006 requires one owned task and one forwarded task in the same driver inbox."
+    log_warn "ownedTaskId=${OWNED_TASK_ID:-<missing>} forwardedTaskId=${FORWARDED_TASK_ID:-<missing>}"
+    log_warn "Warning-skip allowed by E2E_ALLOW_MISSING_FORWARDER_SEED=true; this does not count as WF-DRV-MP-001 proof."
+    exit 0
+  fi
+
+  log_fail "E2E-006 requires one owned task and one forwarded task in the same driver inbox."
+  log_fail "ownedTaskId=${OWNED_TASK_ID:-<missing>} forwardedTaskId=${FORWARDED_TASK_ID:-<missing>}"
+  log_fail "Seed the mixed owned+forwarded driver inbox or set E2E_ALLOW_MISSING_FORWARDER_SEED=true for a non-proof exploratory run."
+  exit 1
 fi
 
 chain_set "driver" "ownedTaskId" "$OWNED_TASK_ID"
 chain_set "driver" "forwardedTaskId" "$FORWARDED_TASK_ID"
+save_evidence "$SCENARIO" "driver" "mixedSeedAvailable" "true"
 save_evidence "$SCENARIO" "driver" "ownedTaskId" "$OWNED_TASK_ID"
 save_evidence "$SCENARIO" "driver" "forwardedTaskId" "$FORWARDED_TASK_ID"
 log_ok "Found ownedTaskId=${OWNED_TASK_ID} and forwardedTaskId=${FORWARDED_TASK_ID}"

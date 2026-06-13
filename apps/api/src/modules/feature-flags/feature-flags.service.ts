@@ -1,7 +1,8 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { FeatureFlag } from "@drts/contracts";
+import type { FeatureFlag, IdentityContext } from "@drts/contracts";
 
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { FeatureFlagRepository } from "./feature-flag.repository";
 
 export interface FeatureFlagSeed {
@@ -20,6 +21,8 @@ export class FeatureFlagsService {
 
   constructor(
     @Optional() private readonly featureFlagRepository?: FeatureFlagRepository,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {
     this.seedDefaults();
   }
@@ -203,9 +206,24 @@ export class FeatureFlagsService {
   async updateFlag(
     key: string,
     enabled: boolean,
+    requestId?: string,
+    identity?: IdentityContext | null,
   ): Promise<FeatureFlag | undefined> {
+    const before = await this.getByKey(key);
     if (this.getDb()) {
-      return this.featureFlagRepository!.updateFlag(key, enabled);
+      const updated = await this.featureFlagRepository!.updateFlag(
+        key,
+        enabled,
+      );
+      this.recordAudit(
+        "update_feature_flag",
+        key,
+        before ?? null,
+        updated ?? null,
+        requestId,
+        identity,
+      );
+      return updated;
     }
     const existing = this.inMemoryFlags.get(key);
     if (!existing) return undefined;
@@ -215,6 +233,14 @@ export class FeatureFlagsService {
       updatedAt: new Date().toISOString(),
     };
     this.inMemoryFlags.set(key, updated);
+    this.recordAudit(
+      "update_feature_flag",
+      key,
+      before ?? null,
+      updated,
+      requestId,
+      identity,
+    );
     return updated;
   }
 
@@ -228,18 +254,31 @@ export class FeatureFlagsService {
     tenantId: string,
     enabled: boolean,
     description?: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
   ): Promise<FeatureFlag | undefined> {
+    const before = await this.getByKey(key, tenantId);
     const globalFlag = await this.getByKey(key);
     const desc =
       description ?? globalFlag?.description ?? `Tenant override for ${key}`;
 
     if (this.getDb()) {
-      return this.featureFlagRepository!.upsertTenantOverride(
+      const updated = await this.featureFlagRepository!.upsertTenantOverride(
         key,
         tenantId,
         enabled,
         desc,
       );
+      this.recordAudit(
+        "upsert_feature_flag_tenant_override",
+        key,
+        before ?? null,
+        updated ?? null,
+        requestId,
+        identity,
+        tenantId,
+      );
+      return updated;
     }
     // In-memory fallback
     const updated: FeatureFlag = {
@@ -250,6 +289,61 @@ export class FeatureFlagsService {
       tenantId: tenantId,
     };
     this.inMemoryFlags.set(this.inMemoryOverrideKey(key, tenantId), updated);
+    this.recordAudit(
+      "upsert_feature_flag_tenant_override",
+      key,
+      before ?? null,
+      updated,
+      requestId,
+      identity,
+      tenantId,
+    );
     return updated;
+  }
+
+  private recordAudit(
+    actionName: "update_feature_flag" | "upsert_feature_flag_tenant_override",
+    key: string,
+    before: FeatureFlag | null,
+    after: FeatureFlag | null,
+    requestId?: string,
+    identity?: IdentityContext | null,
+    tenantId?: string | null,
+  ) {
+    if (!this.auditNotificationService || !after) {
+      return;
+    }
+
+    this.auditNotificationService.recordAuditLog({
+      actorId: identity?.actorId ?? null,
+      actorType:
+        identity?.actorType === "tenant_admin" ||
+        identity?.actorType === "ops_user" ||
+        identity?.actorType === "partner_api_key" ||
+        identity?.actorType === "system"
+          ? identity.actorType
+          : "platform_admin",
+      tenantId: tenantId ?? after.tenantId ?? null,
+      moduleName: "feature-flags",
+      actionName,
+      resourceType: "feature_flag",
+      resourceId: tenantId ? `${key}:${tenantId}` : key,
+      ...(before
+        ? {
+            oldValuesSummary: {
+              key: before.key,
+              enabled: before.enabled,
+              tenantId: before.tenantId ?? null,
+            },
+          }
+        : {}),
+      newValuesSummary: {
+        key: after.key,
+        enabled: after.enabled,
+        tenantId: after.tenantId ?? null,
+        description: after.description,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
   }
 }

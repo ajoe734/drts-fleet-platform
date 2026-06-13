@@ -652,9 +652,13 @@ export class TenantsService implements OnModuleInit {
     if (tenant.status === "rollback_hold") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
-        "TENANT_IN_ROLLBACK_HOLD",
+        "production_rollback_hold_active",
         "Tenant is in rollback hold. Resolve the hold before promoting.",
-        { tenantId: tenant.id, status: tenant.status },
+        {
+          tenantId: tenant.id,
+          status: tenant.status,
+          reasonCode: "production_rollback_hold_active",
+        },
       );
     }
 

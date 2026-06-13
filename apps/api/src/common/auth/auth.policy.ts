@@ -107,6 +107,19 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "admin/flags" || routePath.startsWith("admin/flags/")) {
+    return {
+      routeKey: `admin:flags:${upperMethod}`,
+      requiredScopes: methodScope(
+        "foundation:read",
+        "foundation:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Platform feature flag management",
+    };
+  }
+
   if (routePath === "admin/fleet-partners") {
     return {
       routeKey: `admin:fleet-partners:${upperMethod}`,

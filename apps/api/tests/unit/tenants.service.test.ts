@@ -249,7 +249,7 @@ describe("TenantsService", () => {
 
     expectApiError(
       () => service.setRolloutStage(created.id, { stage: "pilot" }),
-      "TENANT_IN_ROLLBACK_HOLD",
+      "production_rollback_hold_active",
     );
   });
 
