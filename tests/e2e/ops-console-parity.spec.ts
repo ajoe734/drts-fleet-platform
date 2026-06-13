@@ -11,6 +11,10 @@ type RouteSpec = {
   hrefFrom?: {
     sourcePath: string;
     selector: string;
+    fallback?: {
+      idPattern: RegExp;
+      pathPrefix: string;
+    };
   };
 };
 
@@ -40,7 +44,7 @@ const routeSpecs: RouteSpec[] = [
     key: "callcenter",
     path: "/callcenter",
     title: /客服中心|call center/i,
-    markers: [/session|callback|queue/i],
+    markers: [/通話工作階段|session/i, /回撥|callback/i, /佇列|queue/i],
     screenshot: "ops-callcenter.png",
   },
   {
@@ -115,8 +119,15 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "drivers-detail",
-    path: "/drivers/DRV-001",
-    title: /司機|Driver|DRV-001/i,
+    hrefFrom: {
+      sourcePath: "/drivers",
+      selector: 'a[href^="/drivers/"]',
+      fallback: {
+        idPattern: /\bdrv-demo-\d+\b/i,
+        pathPrefix: "/drivers/",
+      },
+    },
+    title: /司機|Driver/i,
     markers: [/Manual override|suppression|platform|司機/i],
     screenshot: "ops-drivers-detail.png",
   },
@@ -129,8 +140,15 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "vehicles-detail",
-    path: "/vehicles/VEH-001",
-    title: /VEH-001|Vehicle|車輛/i,
+    hrefFrom: {
+      sourcePath: "/vehicles",
+      selector: 'a[href^="/vehicles/"]',
+      fallback: {
+        idPattern: /\bveh-demo-\d+\b/i,
+        pathPrefix: "/vehicles/",
+      },
+    },
+    title: /Vehicle|車輛/i,
     markers: [/audit|contract|maintenance|車輛/i],
     screenshot: "ops-vehicles-detail.png",
   },
@@ -143,8 +161,15 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "contracts-detail",
-    path: "/contracts/CTR-310",
-    title: /CTR-310|ops read-only|合約/i,
+    hrefFrom: {
+      sourcePath: "/contracts",
+      selector: 'a[href^="/contracts/"]',
+      fallback: {
+        idPattern: /\bcontract-demo-\d+\b/i,
+        pathPrefix: "/contracts/",
+      },
+    },
+    title: /Contract|ops read-only|合約/i,
     markers: [/Operational terms|Version history|Platform Admin|合約/i],
     screenshot: "ops-contracts-detail.png",
   },
@@ -170,11 +195,28 @@ async function resolveRoutePath(page: Page, spec: RouteSpec) {
   const href = await page
     .locator(spec.hrefFrom.selector)
     .first()
-    .getAttribute("href");
-  if (!href) {
-    throw new Error(`Could not resolve href for ${spec.key}`);
+    .getAttribute("href", { timeout: 5_000 })
+    .catch(() => null);
+  if (!href && spec.hrefFrom.fallback) {
+    const sourceText = await page.locator("body").innerText();
+    const id = sourceText.match(spec.hrefFrom.fallback.idPattern)?.[0];
+    if (id) {
+      return `${spec.hrefFrom.fallback.pathPrefix}${encodeURIComponent(id)}`;
+    }
   }
-  return href;
+  if (!href) {
+    throw new Error(
+      `Could not resolve href for ${spec.key} from ${spec.hrefFrom.sourcePath}`,
+    );
+  }
+  const resolved = new URL(href, baseUrl);
+  const expectedOrigin = new URL(baseUrl).origin;
+  if (resolved.origin !== expectedOrigin) {
+    throw new Error(
+      `Resolved ${spec.key} to external origin ${resolved.origin}`,
+    );
+  }
+  return `${resolved.pathname}${resolved.search}${resolved.hash}`;
 }
 
 async function assertShell(page: Page) {
