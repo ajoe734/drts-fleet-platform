@@ -33,6 +33,7 @@ echo -e "${BOLD}═════════════════════�
 
 PRIMARY_EXTERNAL_ORDER_ID="SBX-E2E-002-PRIMARY-${_E2E_RUN_ID}"
 SECONDARY_EXTERNAL_ORDER_ID="SBX-E2E-002-CANCEL-${_E2E_RUN_ID}"
+FORWARDED_DRIVER_ID="${E2E_SEED_DRIVER_ID}"
 
 create_inbound_fixture() {
   local external_order_id="$1"
@@ -103,8 +104,7 @@ COMPLETED_SYNC_FIXTURE=$(mktemp /tmp/drts-e2e-002-completed-XXXXXX.json)
 CANCELLED_SYNC_FIXTURE=$(create_sync_fixture "cancelled_by_platform" "cancelled_by_platform")
 trap 'rm -f "$PRIMARY_INBOUND_FIXTURE" "$SECONDARY_INBOUND_FIXTURE" "$BROADCAST_FIXTURE" "$DRIVER_FIXTURE" "$CONFIRMED_SYNC_FIXTURE" "$COMPLETED_SYNC_FIXTURE" "$CANCELLED_SYNC_FIXTURE"' EXIT
 
-jq -n --arg driverId "$E2E_SEED_DRIVER_ID" \
-  '{ candidateDriverIds: [$driverId] }' > "$BROADCAST_FIXTURE"
+jq -n '{ candidateDriverIds: [] }' > "$BROADCAST_FIXTURE"
 
 jq -n \
   '{
@@ -125,13 +125,13 @@ SECONDARY_MIRROR_ORDER_ID=""
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops Console — sandbox forwarded mirror creation"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-002"
 
 log_step "1.1 — POST /forwarder/orders/inbound (primary sandbox order)"
 http_call POST "/forwarder/orders/inbound" "$PRIMARY_INBOUND_FIXTURE"
 assert_status "200|201"
 
-PRIMARY_MIRROR_ORDER_ID=$(json_get ".data.mirrorOrderId")
+PRIMARY_MIRROR_ORDER_ID=$(json_get_first ".data.mirrorOrderId" ".data.mirror_order_id")
 if [[ -z "$PRIMARY_MIRROR_ORDER_ID" ]]; then
   log_fail "Primary sandbox mirrorOrderId missing from inbound response."
   exit 1
@@ -145,7 +145,7 @@ log_ok "Primary sandbox mirror created: ${PRIMARY_MIRROR_ORDER_ID}"
 log_step "1.2 — POST /forwarder/orders/:orderId/broadcast"
 http_call POST "/forwarder/orders/${PRIMARY_MIRROR_ORDER_ID}/broadcast" "$BROADCAST_FIXTURE"
 assert_status "200|201"
-log_ok "Primary sandbox mirror broadcasted to driver ${E2E_SEED_DRIVER_ID}"
+log_ok "Primary sandbox mirror broadcasted to eligible local driver candidates"
 
 log_step "1.3 — GET /forwarder/orders (verify mirror row)"
 http_call GET "/forwarder/orders"
@@ -153,15 +153,27 @@ assert_status "200"
 
 PRIMARY_MIRROR_STATUS=$(echo "$RESP_BODY" | \
   jq -r --arg externalOrderId "$PRIMARY_EXTERNAL_ORDER_ID" \
-    '.data.items[] | select(.externalOrderId == $externalOrderId) | .status' \
+    '.data.items[] | select((.externalOrderId // .external_order_id) == $externalOrderId) | .status' \
+    2>/dev/null | head -1 || true)
+PRIMARY_CANDIDATE_DRIVER_ID=$(echo "$RESP_BODY" | \
+  jq -r --arg externalOrderId "$PRIMARY_EXTERNAL_ORDER_ID" \
+    '.data.items[] | select((.externalOrderId // .external_order_id) == $externalOrderId) | ((.candidateDriverIds // .candidate_driver_ids)[0] // empty)' \
     2>/dev/null | head -1 || true)
 
 if [[ "$PRIMARY_MIRROR_STATUS" != "broadcasted" ]]; then
   log_fail "Expected primary mirror status broadcasted, got ${PRIMARY_MIRROR_STATUS:-empty}."
   exit 1
 fi
+if [[ -z "$PRIMARY_CANDIDATE_DRIVER_ID" ]]; then
+  log_fail "Primary mirror did not expose an eligible candidate driver."
+  exit 1
+fi
+
+FORWARDED_DRIVER_ID="$PRIMARY_CANDIDATE_DRIVER_ID"
+jq -n --arg driverId "$FORWARDED_DRIVER_ID" '{ driverId: $driverId }' > "$DRIVER_FIXTURE"
 
 save_evidence "$SCENARIO" "ops" "primaryMirrorStatus" "$PRIMARY_MIRROR_STATUS"
+save_evidence "$SCENARIO" "ops" "forwardedDriverId" "$FORWARDED_DRIVER_ID"
 log_ok "Primary mirror visible in forwarder list with status=${PRIMARY_MIRROR_STATUS}"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -169,7 +181,7 @@ log_ok "Primary mirror visible in forwarder list with status=${PRIMARY_MIRROR_ST
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Driver App — forwarded task visibility"
 
-switch_actor "driver_user" "$E2E_SEED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
+switch_actor "driver_user" "$FORWARDED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
 
 log_step "2.1 — GET /driver/task-views"
 http_call GET "/driver/task-views"
@@ -177,7 +189,7 @@ assert_status "200"
 
 FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
   jq -r --arg externalOrderId "$PRIMARY_EXTERNAL_ORDER_ID" \
-    '.data.items[] | select(.externalOrderId == $externalOrderId) | .taskId' \
+    '.data.items[] | select((.externalOrderId // .external_order_id) == $externalOrderId) | (.taskId // .task_id)' \
     2>/dev/null | head -1 || true)
 
 if [[ -z "$FORWARDED_TASK_ID" ]]; then
@@ -193,9 +205,9 @@ log_step "2.2 — GET /driver/task-views/:taskId"
 http_call GET "/driver/task-views/${FORWARDED_TASK_ID}"
 assert_status "200"
 
-FORWARDED_ROUTE_LOCKED=$(json_get ".data.routeLocked")
-FORWARDED_SOURCE_PLATFORM=$(json_get ".data.sourcePlatform")
-FORWARDED_ACTION_STATE=$(json_get ".data.driverActionState")
+FORWARDED_ROUTE_LOCKED=$(json_get_first ".data.routeLocked" ".data.route_locked")
+FORWARDED_SOURCE_PLATFORM=$(json_get_first ".data.sourcePlatform" ".data.source_platform")
+FORWARDED_ACTION_STATE=$(json_get_first ".data.driverActionState" ".data.driver_action_state")
 
 save_evidence "$SCENARIO" "driver" "routeLocked" "${FORWARDED_ROUTE_LOCKED:-false}"
 save_evidence "$SCENARIO" "driver" "sourcePlatform" "${FORWARDED_SOURCE_PLATFORM:-unknown}"
@@ -223,7 +235,7 @@ http_call POST "/driver/forwarded-orders/${FORWARDED_TASK_ID}/accept" "$DRIVER_F
 assert_status "200|201"
 
 ACCEPT_OUTCOME=$(json_get ".data.outcome")
-ACCEPT_MIRROR_ORDER_ID=$(json_get ".data.managementCorrelationIds.mirrorOrderId")
+ACCEPT_MIRROR_ORDER_ID=$(json_get_first ".data.managementCorrelationIds.mirrorOrderId" ".data.management_correlation_ids.mirror_order_id")
 if [[ "$ACCEPT_OUTCOME" != "accept_pending" ]]; then
   log_fail "Expected accept outcome accept_pending, got ${ACCEPT_OUTCOME:-empty}."
   exit 1
@@ -237,7 +249,7 @@ fi
 save_evidence "$SCENARIO" "driver" "acceptOutcome" "$ACCEPT_OUTCOME"
 log_ok "Forwarded accept relay acknowledged with outcome=${ACCEPT_OUTCOME}"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-002"
 
 log_step "3.2 — POST /forwarder/orders/:orderId/sync-status (confirmed_by_platform)"
 http_call POST "/forwarder/orders/${PRIMARY_MIRROR_ORDER_ID}/sync-status" "$CONFIRMED_SYNC_FIXTURE"
@@ -249,19 +261,19 @@ if [[ "$PRIMARY_CONFIRMED_STATUS" != "confirmed_by_platform" ]]; then
 fi
 save_evidence "$SCENARIO" "ops" "primaryStatusAfterConfirmedSync" "$PRIMARY_CONFIRMED_STATUS"
 
-switch_actor "driver_user" "$E2E_SEED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
+switch_actor "driver_user" "$FORWARDED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
 
 log_step "3.3 — GET /driver/task-views/:taskId (confirmed state)"
 http_call GET "/driver/task-views/${FORWARDED_TASK_ID}"
 assert_status "200"
-PRIMARY_DRIVER_CONFIRMED_STATUS=$(json_get ".data.localStatus")
+PRIMARY_DRIVER_CONFIRMED_STATUS=$(json_get_first ".data.localStatus" ".data.local_status")
 if [[ "$PRIMARY_DRIVER_CONFIRMED_STATUS" != "confirmed_by_platform" ]]; then
   log_fail "Driver view did not reflect confirmed_by_platform."
   exit 1
 fi
 save_evidence "$SCENARIO" "driver" "primaryDriverConfirmedStatus" "$PRIMARY_DRIVER_CONFIRMED_STATUS"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-002"
 
 log_step "3.4 — POST /forwarder/orders/:orderId/sync-status (completed)"
 http_call POST "/forwarder/orders/${PRIMARY_MIRROR_ORDER_ID}/sync-status" "$COMPLETED_SYNC_FIXTURE"
@@ -273,13 +285,13 @@ if [[ "$PRIMARY_COMPLETED_STATUS" != "completed_synced" ]]; then
 fi
 save_evidence "$SCENARIO" "ops" "primaryStatusAfterCompletedSync" "$PRIMARY_COMPLETED_STATUS"
 
-switch_actor "driver_user" "$E2E_SEED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
+switch_actor "driver_user" "$FORWARDED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
 
 log_step "3.5 — GET /driver/task-views/:taskId (completed sync reflected)"
 http_call GET "/driver/task-views/${FORWARDED_TASK_ID}"
 assert_status "200"
-PRIMARY_DRIVER_COMPLETED_STATUS=$(json_get ".data.localStatus")
-PRIMARY_DRIVER_COMPLETED_ACTION_STATE=$(json_get ".data.driverActionState")
+PRIMARY_DRIVER_COMPLETED_STATUS=$(json_get_first ".data.localStatus" ".data.local_status")
+PRIMARY_DRIVER_COMPLETED_ACTION_STATE=$(json_get_first ".data.driverActionState" ".data.driver_action_state")
 if [[ "$PRIMARY_DRIVER_COMPLETED_STATUS" != "completed_synced" ]]; then
   log_fail "Driver view did not reflect completed_synced."
   exit 1
@@ -293,13 +305,13 @@ log_ok "Primary forwarded task completed through sandbox status sync"
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops + Driver — sandbox cancellation path"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-002"
 
 log_step "4.1 — POST /forwarder/orders/inbound (secondary sandbox order)"
 http_call POST "/forwarder/orders/inbound" "$SECONDARY_INBOUND_FIXTURE"
 assert_status "200|201"
 
-SECONDARY_MIRROR_ORDER_ID=$(json_get ".data.mirrorOrderId")
+SECONDARY_MIRROR_ORDER_ID=$(json_get_first ".data.mirrorOrderId" ".data.mirror_order_id")
 if [[ -z "$SECONDARY_MIRROR_ORDER_ID" ]]; then
   log_fail "Secondary sandbox mirrorOrderId missing from inbound response."
   exit 1
@@ -313,7 +325,7 @@ log_step "4.2 — POST /forwarder/orders/:orderId/broadcast"
 http_call POST "/forwarder/orders/${SECONDARY_MIRROR_ORDER_ID}/broadcast" "$BROADCAST_FIXTURE"
 assert_status "200|201"
 
-switch_actor "driver_user" "$E2E_SEED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
+switch_actor "driver_user" "$FORWARDED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
 
 log_step "4.3 — GET /driver/task-views (find secondary order)"
 http_call GET "/driver/task-views"
@@ -321,7 +333,7 @@ assert_status "200"
 
 SECONDARY_FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
   jq -r --arg externalOrderId "$SECONDARY_EXTERNAL_ORDER_ID" \
-    '.data.items[] | select(.externalOrderId == $externalOrderId) | .taskId' \
+    '.data.items[] | select((.externalOrderId // .external_order_id) == $externalOrderId) | (.taskId // .task_id)' \
     2>/dev/null | head -1 || true)
 
 if [[ -z "$SECONDARY_FORWARDED_TASK_ID" ]]; then
@@ -340,7 +352,7 @@ if [[ "$SECONDARY_ACCEPT_OUTCOME" != "accept_pending" ]]; then
   exit 1
 fi
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-002"
 
 log_step "4.5 — POST /forwarder/orders/:orderId/sync-status (cancelled_by_platform)"
 http_call POST "/forwarder/orders/${SECONDARY_MIRROR_ORDER_ID}/sync-status" "$CANCELLED_SYNC_FIXTURE"
@@ -352,12 +364,12 @@ if [[ "$SECONDARY_CANCELLED_STATUS" != "cancelled_by_platform" ]]; then
 fi
 save_evidence "$SCENARIO" "ops" "secondaryStatusAfterCancelSync" "$SECONDARY_CANCELLED_STATUS"
 
-switch_actor "driver_user" "$E2E_SEED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
+switch_actor "driver_user" "$FORWARDED_DRIVER_ID" "$E2E_SEED_TENANT_ID"
 
 log_step "4.6 — GET /driver/task-views/:taskId (cancel reflected)"
 http_call GET "/driver/task-views/${SECONDARY_FORWARDED_TASK_ID}"
 assert_status "200"
-SECONDARY_DRIVER_CANCELLED_STATUS=$(json_get ".data.localStatus")
+SECONDARY_DRIVER_CANCELLED_STATUS=$(json_get_first ".data.localStatus" ".data.local_status")
 if [[ "$SECONDARY_DRIVER_CANCELLED_STATUS" != "cancelled_by_platform" ]]; then
   log_fail "Driver view did not reflect cancelled_by_platform."
   exit 1
@@ -394,6 +406,8 @@ fi
 save_evidence "$SCENARIO" "finance" "settlementChannelKey" "forwarded_shadow"
 save_evidence "$SCENARIO" "finance" "settlementLedgerMode" "$SETTLEMENT_LEDGER_MODE"
 log_ok "Settlement matrix confirms forwarded_shadow / shadow_only"
+
+switch_actor "ops_user" "e2e-ops-002"
 
 log_step "5.2 — GET /dispatch/tasks (verify no owned dispatch job for either mirror)"
 http_call GET "/dispatch/tasks"
