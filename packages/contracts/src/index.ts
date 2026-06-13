@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
   DriverMatchingSuppression,
@@ -8,6 +9,8 @@ import type {
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "./ui-runtime";
+
+export * from "./referral-channel";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -460,7 +463,7 @@ export interface PartnerIngressCredentialIssued {
 export interface PartnerChannelEntryRecord {
   partnerId: string;
   partnerCode: string;
-  partnerType: string;
+  partnerType: PartnerType;
   programId: string;
   programCode: string | null;
   tenantId: string;
@@ -488,7 +491,7 @@ export interface PartnerChannelEntryRecord {
 export interface CreatePartnerChannelEntryCommand {
   tenantId: string;
   partnerCode: string;
-  partnerType: string;
+  partnerType: PartnerType;
   programId: string;
   programCode?: string | null;
   bankCode?: string | null;
@@ -508,7 +511,7 @@ export interface CreatePartnerChannelEntryCommand {
 export interface UpdatePartnerChannelEntryCommand {
   tenantId?: string;
   partnerCode?: string;
-  partnerType?: string;
+  partnerType?: PartnerType;
   programId?: string;
   programCode?: string | null;
   bankCode?: string | null;
