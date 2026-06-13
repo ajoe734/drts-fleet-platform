@@ -52,6 +52,7 @@ repo also includes deployed-dev and surface-specific Playwright suites:
 | Partner Booking surfaces     | `pnpm test:e2e:partner-booking-surfaces`    | Local by default; external dev with `DRTS_DEV_PARTNER_BOOKING_BASE_URL` | Card website vs bank-app embed identity states, consent/fallback, insurance/travel site funnels, and non-card embed blocking                                                                              |
 | Enterprise Dispatch surfaces | `pnpm test:e2e:enterprise-dispatch`         | Local by default; external dev with `ENTERPRISE_DISPATCH_BASE_URL`      | Website booking routes, support-safe gate states, and compact embed identity states                                                                                                                       |
 | Fleet Partner Portal parity  | `pnpm test:e2e:fleet-partner-portal-parity` | External dev by default; override with `FLEET_PARTNER_PORTAL_BASE_URL`  | Deep fleet partner routes: drivers, vehicles, trips, revenue, statements, documents, training, cases, quality, locale chrome, and revenue-label safety                                                    |
+| Tenant Console parity        | `pnpm test:e2e:tenant-console-parity`       | External dev by default; override with `TENANT_CONSOLE_BASE_URL`        | Deep tenant routes: booking creation, directory, governance, users, notifications, finance, integration, system routes, locale shell, and management-surface separation                                   |
 
 Canonical external dev URLs used by the matrix:
 
