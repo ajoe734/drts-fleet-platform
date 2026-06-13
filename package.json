@@ -32,7 +32,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "pnpm lint:root && turbo run lint",
-    "lint:root": "eslint eslint.config.mjs playwright.config.ts vitest.config.ts tests --max-warnings=0",
+    "lint:root": "eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0",
     "orchestrator:dashboard": "bash scripts/run-dashboard.sh",
     "orchestrator:dashboard:tunnel": "bash scripts/run-dashboard-tunnel.sh",
     "orchestrator:dashboard:public": "HOST=0.0.0.0 bash scripts/run-dashboard.sh",
@@ -48,6 +48,7 @@
     "test": "pnpm test:unit && turbo run test",
     "test:e2e": "playwright test",
     "test:e2e:tenant-localization": "playwright test -c playwright.tenant-localization.config.ts",
+    "test:e2e:dev-runtime-matrix": "playwright test -c playwright.dev-runtime-matrix.config.ts",
     "test:unit": "vitest run",
     "typecheck": "pnpm typecheck:root && turbo run typecheck",
     "typecheck:root": "tsc -p tsconfig.json --noEmit"
