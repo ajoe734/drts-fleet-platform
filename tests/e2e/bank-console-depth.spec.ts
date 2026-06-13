@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const protectedData = /CH••••98|BK-240611-018|BE••••42/;
 const ctbcVisibleLeak = /CTBC|ctbc|中信/;
@@ -19,6 +19,22 @@ const managementRoutes = [
 function withQuery(path: string, query: Record<string, string>) {
   const params = new URLSearchParams(query);
   return `${path}?${params.toString()}`;
+}
+
+async function expectRoute(
+  page: Page,
+  pathname: string,
+  query: Record<string, string>,
+) {
+  await expect(page).toHaveURL((url) => {
+    if (url.pathname !== pathname) {
+      return false;
+    }
+
+    return Object.entries(query).every(
+      ([key, value]) => url.searchParams.get(key) === value,
+    );
+  });
 }
 
 test.describe("bank console deep runtime coverage", () => {
@@ -95,9 +111,11 @@ test.describe("bank console deep runtime coverage", () => {
     await page.locator(".bank-account-menu summary").click();
     await page.getByRole("link", { name: "登出" }).click();
 
-    await expect(page).toHaveURL(
-      "http://127.0.0.1:3008/login?bank=fubon&locale=zh&signedOut=1",
-    );
+    await expectRoute(page, "/login", {
+      bank: "fubon",
+      locale: "zh",
+      signedOut: "1",
+    });
     await expect(page.locator("main")).toContainText("你目前已登出");
     await expect(page.locator("main")).not.toContainText(protectedData);
 
@@ -108,9 +126,11 @@ test.describe("bank console deep runtime coverage", () => {
         role: "bank_finance",
       }),
     );
-    await expect(page).toHaveURL(
-      "http://127.0.0.1:3008/login?bank=fubon&locale=zh&signedOut=1",
-    );
+    await expectRoute(page, "/login", {
+      bank: "fubon",
+      locale: "zh",
+      signedOut: "1",
+    });
     await expect(page.locator("main")).not.toContainText(/STM-FUBON|應付/);
   });
 });
