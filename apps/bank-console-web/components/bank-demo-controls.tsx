@@ -7,6 +7,7 @@ import {
   type BankDemoTenant,
   type BankDemoTenantCode,
 } from "@/lib/demo-tenants";
+import { getBankConsoleSession } from "@/lib/session";
 import { t, type Locale } from "@/lib/translations";
 
 type QueryUpdate = {
@@ -75,6 +76,8 @@ export function BankDemoControls({
   searchParams: ReadonlyURLSearchParams;
   signedOut: boolean;
 }) {
+  const session = getBankConsoleSession(bank, locale, searchParams.get("role"));
+
   return (
     <div
       className="bank-demo-controls"
@@ -125,12 +128,10 @@ export function BankDemoControls({
       <details className="bank-account-menu">
         <summary>
           <span className="bank-account-name">
-            {signedOut ? t("shell.signedOut", locale) : bank.actorName}
+            {signedOut ? t("shell.signedOut", locale) : session.actorName}
           </span>
           <span className="bank-account-role">
-            {signedOut
-              ? t("shell.loginRequired", locale)
-              : bank.roleLabel[locale]}
+            {signedOut ? t("shell.loginRequired", locale) : session.roleLabel}
           </span>
         </summary>
         <div className="bank-account-popover">
@@ -148,13 +149,13 @@ export function BankDemoControls({
             <>
               <p>
                 {t("shell.signedInAs", locale, {
-                  email: bank.actorEmail,
+                  email: session.actorEmail,
                 })}
               </p>
               <dl>
                 <div>
                   <dt>{t("shell.role", locale)}</dt>
-                  <dd>{bank.roleLabel[locale]}</dd>
+                  <dd>{session.roleLabel}</dd>
                 </div>
                 <div>
                   <dt>{t("shell.tenant", locale)}</dt>

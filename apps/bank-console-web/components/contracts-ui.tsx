@@ -1,36 +1,46 @@
 import type { ReactNode } from "react";
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { StatusChip } from "@drts/ui-web";
+import type { BankDemoTenant } from "@/lib/demo-tenants";
 import type { ContractHealth } from "@/lib/contracts-data";
-import { t } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 
-const ctbcDarkTokens = BRAND_TEMPLATES.CTBC.tokens.dark;
+export function IssuerBrandPill({
+  locale,
+  tenant,
+}: {
+  locale: Locale;
+  tenant: BankDemoTenant;
+}) {
+  const issuerTokens = tenant.template.tokens.dark;
 
-export function IssuerBrandPill() {
   return (
     <span
       className="issuer-brand-pill"
       style={{
-        color: ctbcDarkTokens.text.strong,
-        background: ctbcDarkTokens.theme.panel,
-        borderColor: ctbcDarkTokens.surface.border,
-        boxShadow: `inset 0 0 0 1px ${ctbcDarkTokens.theme.panelBorder}`,
+        color: issuerTokens.text.strong,
+        background: issuerTokens.theme.panel,
+        borderColor: issuerTokens.surface.border,
+        boxShadow: `inset 0 0 0 1px ${issuerTokens.theme.panelBorder}`,
       }}
     >
       <span
         className="issuer-brand-pill__mark"
         style={{
-          background: `linear-gradient(135deg, ${ctbcDarkTokens.primary}, ${ctbcDarkTokens.accent})`,
+          background: `linear-gradient(135deg, ${issuerTokens.primary}, ${issuerTokens.accent})`,
         }}
       />
-      <span className="issuer-brand-pill__text">
-        {BRAND_TEMPLATES.CTBC.cardArt.issuerLabel}
-      </span>
+      <span className="issuer-brand-pill__text">{tenant.name[locale]}</span>
     </span>
   );
 }
 
-export function ContractHealthBadge({ health }: { health: ContractHealth }) {
+export function ContractHealthBadge({
+  health,
+  locale = "zh",
+}: {
+  health: ContractHealth;
+  locale?: Locale;
+}) {
   const tone =
     health === "healthy"
       ? "success"
@@ -38,23 +48,27 @@ export function ContractHealthBadge({ health }: { health: ContractHealth }) {
         ? "warning"
         : "danger";
 
-  return <StatusChip tone={tone} label={t(`contracts.health.${health}`)} />;
+  return (
+    <StatusChip tone={tone} label={t(`contracts.health.${health}`, locale)} />
+  );
 }
 
 export function ReadOnlyPanel({
   title,
   description,
   children,
+  locale = "zh",
 }: {
   title: string;
   description: string;
   children?: ReactNode;
+  locale?: Locale;
 }) {
   return (
     <section className="callout-panel">
       <div className="contracts-inline-header">
         <strong>{title}</strong>
-        <span className="status-chip">{t("contracts.readOnly")}</span>
+        <span className="status-chip">{t("contracts.readOnly", locale)}</span>
       </div>
       <p>{description}</p>
       {children}

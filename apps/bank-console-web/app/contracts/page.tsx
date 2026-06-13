@@ -5,6 +5,9 @@ import {
   IssuerBrandPill,
   ReadOnlyPanel,
 } from "@/components/contracts-ui";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import { tenantDisplayText } from "@/lib/tenant-display";
 import {
   countOpenExceptions,
   formatPercent,
@@ -13,7 +16,19 @@ import {
 } from "@/lib/contracts-data";
 import { t } from "@/lib/translations";
 
-export default function ContractsPage() {
+export default async function ContractsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const session = getBankConsoleSession(
+    tenant,
+    locale,
+    resolvedSearchParams.role,
+  );
   const contracts = listContractRecords();
   const healthyCount = contracts.filter(
     (record) => record.health === "healthy",
@@ -28,56 +43,57 @@ export default function ContractsPage() {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow={t("contracts.eyebrow")}
+        eyebrow={t("contracts.eyebrow", locale)}
         title={
           <span className="pending-title">
-            {t("contracts.title")}
-            <IssuerBrandPill />
+            {t("contracts.title", locale)}
+            <IssuerBrandPill locale={locale} tenant={tenant} />
           </span>
         }
-        description={t("contracts.purpose")}
+        description={t("contracts.purpose", locale)}
       />
 
       <ReadOnlyPanel
-        title={t("contracts.summaryTitle")}
-        description={t("contracts.summaryLead")}
+        title={t("contracts.summaryTitle", locale)}
+        description={t("contracts.summaryLead", locale)}
+        locale={locale}
       />
 
       <section className="surface-grid">
         <SurfaceCard
-          kicker={t("contracts.readOnly")}
-          title={t("contracts.summaryHealthy")}
+          kicker={t("contracts.readOnly", locale)}
+          title={t("contracts.summaryHealthy", locale)}
           description={`${healthyCount} / ${contracts.length}`}
         />
         <SurfaceCard
-          kicker={t("contracts.readOnly")}
-          title={t("contracts.summaryAtRisk")}
+          kicker={t("contracts.readOnly", locale)}
+          title={t("contracts.summaryAtRisk", locale)}
           description={`${atRiskCount} / ${contracts.length}`}
         />
         <SurfaceCard
-          kicker={t("contracts.readOnly")}
-          title={t("contracts.summaryBreached")}
+          kicker={t("contracts.readOnly", locale)}
+          title={t("contracts.summaryBreached", locale)}
           description={`${breachedCount} / ${contracts.length}`}
         />
       </section>
 
       <section className="contracts-table-card">
         <div className="contracts-inline-header">
-          <h2>{t("contracts.summaryTitle")}</h2>
-          <span className="status-chip">{t("contracts.readOnly")}</span>
+          <h2>{t("contracts.summaryTitle", locale)}</h2>
+          <span className="status-chip">{t("contracts.readOnly", locale)}</span>
         </div>
 
         <div className="contracts-table-scroll">
           <table className="contracts-table">
             <thead>
               <tr>
-                <th>{t("contracts.table.program")}</th>
-                <th>{t("contracts.table.period")}</th>
-                <th>{t("contracts.table.status")}</th>
-                <th>{t("contracts.table.targets")}</th>
-                <th>{t("contracts.table.attainment")}</th>
-                <th>{t("contracts.table.exceptions")}</th>
-                <th>{t("contracts.table.summary")}</th>
+                <th>{t("contracts.table.program", locale)}</th>
+                <th>{t("contracts.table.period", locale)}</th>
+                <th>{t("contracts.table.status", locale)}</th>
+                <th>{t("contracts.table.targets", locale)}</th>
+                <th>{t("contracts.table.attainment", locale)}</th>
+                <th>{t("contracts.table.exceptions", locale)}</th>
+                <th>{t("contracts.table.summary", locale)}</th>
                 <th />
               </tr>
             </thead>
@@ -89,8 +105,12 @@ export default function ContractsPage() {
                   <tr key={record.contractId}>
                     <td>
                       <div className="contracts-cell-stack">
-                        <strong>{record.displayName}</strong>
-                        <span>{record.programCode}</span>
+                        <strong>
+                          {tenantDisplayText(record.displayName, tenant)}
+                        </strong>
+                        <span>
+                          {tenantDisplayText(record.programCode, tenant)}
+                        </span>
                       </div>
                     </td>
                     <td>
@@ -101,18 +121,21 @@ export default function ContractsPage() {
                         <span>
                           {record.term.startsAt.slice(0, 10)} -{" "}
                           {record.term.endsAt?.slice(0, 10) ??
-                            t("contracts.detail.ongoing")}
+                            t("contracts.detail.ongoing", locale)}
                         </span>
                       </div>
                     </td>
                     <td>
-                      <ContractHealthBadge health={record.health} />
+                      <ContractHealthBadge
+                        health={record.health}
+                        locale={locale}
+                      />
                     </td>
                     <td>
                       <div className="contracts-cell-stack">
                         {record.slaTargets.map((target) => (
                           <span key={target.metric}>
-                            {t(`contracts.metric.${target.metric}`)}{" "}
+                            {t(`contracts.metric.${target.metric}`, locale)}{" "}
                             <strong>{target.thresholdPercent}%</strong>
                           </span>
                         ))}
@@ -121,7 +144,7 @@ export default function ContractsPage() {
                     <td>
                       <div className="contracts-cell-stack">
                         <span>
-                          {t("contracts.metric.pickup_punctuality")}{" "}
+                          {t("contracts.metric.pickup_punctuality", locale)}{" "}
                           <strong>
                             {formatPercent(
                               record.periodAttainment.pickupPunctualityPercent,
@@ -129,7 +152,7 @@ export default function ContractsPage() {
                           </strong>
                         </span>
                         <span>
-                          {t("contracts.metric.completion_rate")}{" "}
+                          {t("contracts.metric.completion_rate", locale)}{" "}
                           <strong>
                             {formatPercent(
                               record.periodAttainment.completionRatePercent,
@@ -143,19 +166,24 @@ export default function ContractsPage() {
                         <strong>{openExceptions}</strong>
                         <span>
                           {record.exceptions.length}{" "}
-                          {t("contracts.detail.total")}
+                          {t("contracts.detail.total", locale)}
                         </span>
                       </div>
                     </td>
                     <td className="contracts-summary-cell">
-                      {record.attainmentSummary}
+                      {tenantDisplayText(record.attainmentSummary, tenant)}
                     </td>
                     <td>
                       <Link
                         className="inline-link-button"
-                        href={`/contracts/${record.contractId}`}
+                        href={bankConsoleHref(
+                          `/contracts/${record.contractId}`,
+                          tenant,
+                          locale,
+                          session.role,
+                        )}
                       >
-                        {t("contracts.table.view")}
+                        {t("contracts.table.view", locale)}
                       </Link>
                     </td>
                   </tr>

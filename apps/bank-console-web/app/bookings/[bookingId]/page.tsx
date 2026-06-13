@@ -1,9 +1,12 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BRAND_TEMPLATES, REALM_COLORS } from "@drts/ui-tokens";
+import { REALM_COLORS } from "@drts/ui-tokens";
 import { CanvasPill } from "@drts/ui-web";
 import { CalloutPanel, PageHero } from "@/components/page-primitives";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import { tenantDisplayText, tenantIssuerVars } from "@/lib/tenant-display";
 import {
   getBookingDetail,
   type BookingActorRealm,
@@ -11,9 +14,7 @@ import {
   type BookingOpsLinkState,
   type BookingState,
 } from "@/lib/bookings";
-import { t } from "@/lib/translations";
-
-const issuerBrand = BRAND_TEMPLATES.CTBC.tokens.dark;
+import { t, type Locale } from "@/lib/translations";
 
 const bookingPillTone: Record<
   BookingState,
@@ -74,28 +75,28 @@ function getCurrentStep(state: BookingState) {
   return 4;
 }
 
-function getOpsLinkCopy(state: BookingOpsLinkState) {
+function getOpsLinkCopy(state: BookingOpsLinkState, locale: Locale) {
   if (state === "allowed") {
     return {
-      label: t("bookings.detail.opsLink.allowed"),
-      hint: t("bookings.detail.opsLink.allowedHint"),
+      label: t("bookings.detail.opsLink.allowed", locale),
+      hint: t("bookings.detail.opsLink.allowedHint", locale),
     };
   }
   if (state === "unavailable") {
     return {
-      label: t("bookings.detail.opsLink.unavailable"),
-      hint: t("bookings.detail.opsLink.unavailableHint"),
+      label: t("bookings.detail.opsLink.unavailable", locale),
+      hint: t("bookings.detail.opsLink.unavailableHint", locale),
     };
   }
   if (state === "stale") {
     return {
-      label: t("bookings.detail.opsLink.stale"),
-      hint: t("bookings.detail.opsLink.staleHint"),
+      label: t("bookings.detail.opsLink.stale", locale),
+      hint: t("bookings.detail.opsLink.staleHint", locale),
     };
   }
   return {
-    label: t("bookings.detail.opsLink.forbidden"),
-    hint: t("bookings.detail.opsLink.forbiddenHint"),
+    label: t("bookings.detail.opsLink.forbidden", locale),
+    hint: t("bookings.detail.opsLink.forbiddenHint", locale),
   };
 }
 
@@ -124,10 +125,20 @@ function RealmChip({
 
 export default async function BookingDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ bookingId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { bookingId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const session = getBankConsoleSession(
+    tenant,
+    locale,
+    resolvedSearchParams.role,
+  );
   const booking = getBookingDetail(bookingId);
 
   if (!booking) {
@@ -135,50 +146,50 @@ export default async function BookingDetailPage({
   }
 
   const stepIndex = getCurrentStep(booking.state);
-  const opsLinkCopy = getOpsLinkCopy(booking.opsLink.state);
-  const issuerVars = {
-    "--issuer-primary": issuerBrand.primary,
-    "--issuer-primary-dark": issuerBrand.primaryDark,
-    "--issuer-accent": issuerBrand.accent,
-    "--issuer-ink": issuerBrand.ink,
-    "--issuer-soft": issuerBrand.theme.accentSoft,
-    "--issuer-panel": issuerBrand.theme.panel,
-    "--issuer-panel-border": issuerBrand.theme.panelBorder,
-  } as CSSProperties;
+  const opsLinkCopy = getOpsLinkCopy(booking.opsLink.state, locale);
+  const issuerVars = tenantIssuerVars(tenant) as CSSProperties;
 
   return (
     <div className="page-shell bank-booking-detail-page" style={issuerVars}>
-      <Link className="text-link" href="/bookings">
-        {t("bookings.detail.back")}
+      <Link
+        className="text-link"
+        href={bankConsoleHref("/bookings", tenant, locale, session.role)}
+      >
+        {t("bookings.detail.back", locale)}
       </Link>
 
       <PageHero
-        eyebrow={t("bookings.detail.eyebrow")}
+        eyebrow={t("bookings.detail.eyebrow", locale)}
         title={
           <span className="bank-title-block">
             {booking.orderNo}
             <CanvasPill tone={bookingPillTone[booking.state]} dot>
-              {t(stateLabelKey[booking.state])}
+              {t(stateLabelKey[booking.state], locale)}
             </CanvasPill>
           </span>
         }
-        description={`${t(directionLabelKey[booking.direction])} · ${booking.flightNo} · ${booking.terminal} · ${formatDateTime(booking.scheduledAt)}`}
+        description={`${t(directionLabelKey[booking.direction], locale)} · ${booking.flightNo} · ${booking.terminal} · ${formatDateTime(booking.scheduledAt)}`}
       />
 
       <section className="issuer-strip">
         <div>
-          <span className="eyebrow">{t("bookings.detail.header.order")}</span>
-          <strong>{booking.orderId}</strong>
+          <span className="eyebrow">
+            {t("bookings.detail.header.order", locale)}
+          </span>
+          <strong>{tenantDisplayText(booking.orderId, tenant)}</strong>
         </div>
         <div>
-          <span className="eyebrow">{t("bookings.detail.header.program")}</span>
+          <span className="eyebrow">
+            {t("bookings.detail.header.program", locale)}
+          </span>
           <strong>
-            {booking.programLabel} · {booking.programCode}
+            {tenantDisplayText(booking.programLabel, tenant)} ·{" "}
+            {tenantDisplayText(booking.programCode, tenant)}
           </strong>
         </div>
         <div>
           <span className="eyebrow">
-            {t("bookings.detail.header.cardholder")}
+            {t("bookings.detail.header.cardholder", locale)}
           </span>
           <strong>{booking.cardholderRefMasked}</strong>
         </div>
@@ -186,13 +197,13 @@ export default async function BookingDetailPage({
 
       <section className="booking-detail-topbar">
         <CalloutPanel
-          title={t("bookings.detail.readonlyTitle")}
-          description={t("bookings.detail.readonlyBody")}
+          title={t("bookings.detail.readonlyTitle", locale)}
+          description={t("bookings.detail.readonlyBody", locale)}
         />
 
         <div className="booking-ops-card">
           <span className="surface-kicker">
-            {t("bookings.detail.opsLink.kicker")}
+            {t("bookings.detail.opsLink.kicker", locale)}
           </span>
           {booking.opsLink.state === "allowed" ? (
             <Link className="ops-link-button" href={booking.opsLink.href}>
@@ -214,23 +225,23 @@ export default async function BookingDetailPage({
       {booking.opsLink.state === "unavailable" ? (
         <CalloutPanel
           tone="warning"
-          title={t("bookings.detail.notice.opsUnavailableTitle")}
-          description={t("bookings.detail.notice.opsUnavailableBody")}
+          title={t("bookings.detail.notice.opsUnavailableTitle", locale)}
+          description={t("bookings.detail.notice.opsUnavailableBody", locale)}
         />
       ) : null}
 
       {booking.opsLink.state === "stale" ? (
         <CalloutPanel
           tone="warning"
-          title={t("bookings.detail.notice.opsStaleTitle")}
-          description={t("bookings.detail.notice.opsStaleBody")}
+          title={t("bookings.detail.notice.opsStaleTitle", locale)}
+          description={t("bookings.detail.notice.opsStaleBody", locale)}
         />
       ) : null}
 
       {booking.driverEligibilityNote ? (
         <CalloutPanel
           tone="warning"
-          title={t("bookings.detail.notice.driverTitle")}
+          title={t("bookings.detail.notice.driverTitle", locale)}
           description={booking.driverEligibilityNote}
         />
       ) : null}
@@ -241,10 +252,10 @@ export default async function BookingDetailPage({
             <div className="bank-section-head">
               <div>
                 <span className="surface-kicker">
-                  {t("bookings.detail.timeline.kicker")}
+                  {t("bookings.detail.timeline.kicker", locale)}
                 </span>
-                <h3>{t("bookings.detail.timeline.title")}</h3>
-                <p>{t("bookings.detail.timeline.description")}</p>
+                <h3>{t("bookings.detail.timeline.title", locale)}</h3>
+                <p>{t("bookings.detail.timeline.description", locale)}</p>
               </div>
             </div>
 
@@ -261,8 +272,8 @@ export default async function BookingDetailPage({
                     key={key}
                   >
                     {index === 4 && booking.state === "cancelled"
-                      ? t("bookings.detail.timeline.cancelled")
-                      : t(key)}
+                      ? t("bookings.detail.timeline.cancelled", locale)
+                      : t(key, locale)}
                   </span>
                 );
               })}
@@ -281,7 +292,7 @@ export default async function BookingDetailPage({
                       <RealmChip realm={event.actorRealm} label={event.actor} />
                       {event.current ? (
                         <span className="booking-current-flag">
-                          {t("bookings.detail.timeline.current")}
+                          {t("bookings.detail.timeline.current", locale)}
                         </span>
                       ) : null}
                     </div>
@@ -296,43 +307,43 @@ export default async function BookingDetailPage({
             <div className="bank-section-head">
               <div>
                 <span className="surface-kicker">
-                  {t("bookings.detail.airport.kicker")}
+                  {t("bookings.detail.airport.kicker", locale)}
                 </span>
-                <h3>{t("bookings.detail.airport.title")}</h3>
+                <h3>{t("bookings.detail.airport.title", locale)}</h3>
               </div>
             </div>
 
             <dl className="booking-meta-grid">
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.direction")}</dt>
-                <dd>{t(directionLabelKey[booking.direction])}</dd>
+                <dt>{t("bookings.detail.airport.direction", locale)}</dt>
+                <dd>{t(directionLabelKey[booking.direction], locale)}</dd>
               </div>
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.flight")}</dt>
+                <dt>{t("bookings.detail.airport.flight", locale)}</dt>
                 <dd>{booking.flightNo}</dd>
               </div>
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.terminal")}</dt>
+                <dt>{t("bookings.detail.airport.terminal", locale)}</dt>
                 <dd>{booking.terminal}</dd>
               </div>
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.tolerance")}</dt>
+                <dt>{t("bookings.detail.airport.tolerance", locale)}</dt>
                 <dd>{booking.flightDelayToleranceLabel}</dd>
               </div>
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.pickup")}</dt>
+                <dt>{t("bookings.detail.airport.pickup", locale)}</dt>
                 <dd>{booking.pickupLabel}</dd>
               </div>
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.dropoff")}</dt>
+                <dt>{t("bookings.detail.airport.dropoff", locale)}</dt>
                 <dd>{booking.dropoffLabel}</dd>
               </div>
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.window")}</dt>
+                <dt>{t("bookings.detail.airport.window", locale)}</dt>
                 <dd>{formatDateTime(booking.scheduledAt)}</dd>
               </div>
               <div className="booking-meta-item">
-                <dt>{t("bookings.detail.airport.greeting")}</dt>
+                <dt>{t("bookings.detail.airport.greeting", locale)}</dt>
                 <dd>{booking.greetingLabel}</dd>
               </div>
             </dl>
@@ -344,32 +355,33 @@ export default async function BookingDetailPage({
             <div className="bank-section-head">
               <div>
                 <span className="surface-kicker">
-                  {t("bookings.detail.header.kicker")}
+                  {t("bookings.detail.header.kicker", locale)}
                 </span>
-                <h3>{t("bookings.detail.header.title")}</h3>
+                <h3>{t("bookings.detail.header.title", locale)}</h3>
               </div>
             </div>
 
             <dl className="booking-summary-list">
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.header.order")}</dt>
-                <dd>{booking.orderId}</dd>
+                <dt>{t("bookings.detail.header.order", locale)}</dt>
+                <dd>{tenantDisplayText(booking.orderId, tenant)}</dd>
               </div>
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.header.program")}</dt>
+                <dt>{t("bookings.detail.header.program", locale)}</dt>
                 <dd>
-                  {booking.programLabel} · {booking.programCode}
+                  {tenantDisplayText(booking.programLabel, tenant)} ·{" "}
+                  {tenantDisplayText(booking.programCode, tenant)}
                 </dd>
               </div>
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.header.cardholder")}</dt>
+                <dt>{t("bookings.detail.header.cardholder", locale)}</dt>
                 <dd>{booking.cardholderRefMasked}</dd>
               </div>
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.header.state")}</dt>
+                <dt>{t("bookings.detail.header.state", locale)}</dt>
                 <dd>
                   <CanvasPill tone={bookingPillTone[booking.state]} dot>
-                    {t(stateLabelKey[booking.state])}
+                    {t(stateLabelKey[booking.state], locale)}
                   </CanvasPill>
                 </dd>
               </div>
@@ -380,31 +392,34 @@ export default async function BookingDetailPage({
             <div className="bank-section-head">
               <div>
                 <span className="surface-kicker">
-                  {t("bookings.detail.benefit.kicker")}
+                  {t("bookings.detail.benefit.kicker", locale)}
                 </span>
-                <h3>{t("bookings.detail.benefit.title")}</h3>
+                <h3>{t("bookings.detail.benefit.title", locale)}</h3>
               </div>
             </div>
 
             <dl className="booking-summary-list">
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.benefit.program")}</dt>
+                <dt>{t("bookings.detail.benefit.program", locale)}</dt>
                 <dd>
-                  {booking.programLabel} · {booking.programCode}
+                  {tenantDisplayText(booking.programLabel, tenant)} ·{" "}
+                  {tenantDisplayText(booking.programCode, tenant)}
                 </dd>
               </div>
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.benefit.benefitRef")}</dt>
+                <dt>{t("bookings.detail.benefit.benefitRef", locale)}</dt>
                 <dd>{booking.benefitReferenceMasked}</dd>
               </div>
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.benefit.authRef")}</dt>
+                <dt>{t("bookings.detail.benefit.authRef", locale)}</dt>
                 <dd>{booking.authorizationReferenceMasked}</dd>
               </div>
             </dl>
 
             <div className="booking-impact-banner">
-              <strong>{t("bookings.detail.benefit.quotaImpact")}</strong>
+              <strong>
+                {t("bookings.detail.benefit.quotaImpact", locale)}
+              </strong>
               <span>
                 {booking.quotaImpactLabel} · {booking.quotaPolicyLabel}
               </span>
@@ -415,19 +430,19 @@ export default async function BookingDetailPage({
             <div className="bank-section-head">
               <div>
                 <span className="surface-kicker">
-                  {t("bookings.detail.fulfilment.kicker")}
+                  {t("bookings.detail.fulfilment.kicker", locale)}
                 </span>
-                <h3>{t("bookings.detail.fulfilment.title")}</h3>
+                <h3>{t("bookings.detail.fulfilment.title", locale)}</h3>
               </div>
             </div>
 
             <dl className="booking-summary-list">
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.fulfilment.driver")}</dt>
+                <dt>{t("bookings.detail.fulfilment.driver", locale)}</dt>
                 <dd>{booking.driverReferenceMasked}</dd>
               </div>
               <div className="booking-summary-item">
-                <dt>{t("bookings.detail.fulfilment.vehicle")}</dt>
+                <dt>{t("bookings.detail.fulfilment.vehicle", locale)}</dt>
                 <dd>{booking.vehicleReferenceMasked}</dd>
               </div>
             </dl>
@@ -437,12 +452,12 @@ export default async function BookingDetailPage({
             <div className="bank-section-head">
               <div>
                 <span className="surface-kicker">
-                  {t("bookings.detail.constraints.kicker")}
+                  {t("bookings.detail.constraints.kicker", locale)}
                 </span>
-                <h3>{t("bookings.detail.constraints.title")}</h3>
+                <h3>{t("bookings.detail.constraints.title", locale)}</h3>
               </div>
             </div>
-            <p>{t("bookings.detail.constraints.body")}</p>
+            <p>{t("bookings.detail.constraints.body", locale)}</p>
           </article>
         </div>
       </section>
