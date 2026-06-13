@@ -1,5 +1,43 @@
 import { expect, test } from "@playwright/test";
 
+const insuranceBlockedStates = [
+  {
+    segment: "insurance_policy",
+    code: "insurance_policy",
+    copy: "保單資格不符",
+  },
+  {
+    segment: "insurance_replacement_vehicle",
+    code: "insurance_replacement_vehicle",
+    copy: "代步車權益未核定",
+  },
+  {
+    segment: "insurance_roster",
+    code: "insurance_roster",
+    copy: "乘客名單不一致",
+  },
+  {
+    segment: "insurance_pending",
+    code: "insurance_pending",
+    copy: "理賠審核中",
+  },
+  {
+    segment: "insurance_missing",
+    code: "insurance_missing",
+    copy: "查無理賠案件",
+  },
+  {
+    segment: "insurance_expired",
+    code: "insurance_expired",
+    copy: "代步期間已結束",
+  },
+  {
+    segment: "insurance_cancelled",
+    code: "insurance_cancelled",
+    copy: "理賠案件已結案",
+  },
+] as const;
+
 test.describe("partner booking program surfaces", () => {
   test("keeps card website booking and bank-app embed identity states distinct", async ({
     page,
@@ -29,6 +67,32 @@ test.describe("partner booking program surfaces", () => {
     );
     expect(unsupportedResponse?.status()).toBe(200);
     await expect(page.getByText("unknown-host.example")).toBeVisible();
+  });
+
+  test("renders embed consent and standalone fallback without raw-card capture", async ({
+    page,
+  }) => {
+    const consentResponse = await page.goto("/ctbc/program/embed/consent");
+    expect(consentResponse?.status()).toBe(200);
+    await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
+    await expect(page.getByText("program: card · embed")).toBeVisible();
+    await expect(page.getByText("授權使用接送服務")).toBeVisible();
+    await expect(page.getByText("identity.read")).toBeVisible();
+    await expect(page.getByText("trip.share")).toBeVisible();
+    await expect(page.getByText("billing.link")).toBeVisible();
+    await expect(page.getByText("原始卡資料")).toHaveCount(0);
+    await expect(
+      page.getByRole("textbox", { name: /卡號|信用卡|card/i }),
+    ).toHaveCount(0);
+
+    const fallbackResponse = await page.goto("/ctbc/program/embed/fallback");
+    expect(fallbackResponse?.status()).toBe(200);
+    await expect(page.locator("[data-program-surface='embed']")).toBeVisible();
+    await expect(page.getByText("未偵測到銀行登入")).toBeVisible();
+    await expect(page.getByText("no_embed_session · 改用官網")).toBeVisible();
+    await expect(page.getByText("末四碼 / 網銀帳號")).toBeVisible();
+    await expect(page.getByText("不在此頁輸入原始卡資料")).toBeVisible();
+    await expect(page.getByText("ref_token")).toHaveCount(0);
   });
 
   test("keeps insurance and travel on site funnel states while blocking embed", async ({
@@ -62,6 +126,37 @@ test.describe("partner booking program surfaces", () => {
 
     const lionEmbed = await page.goto("/lion/program/embed/embed-handoff");
     expect(lionEmbed?.status()).toBe(404);
+  });
+
+  test("renders every insurance eligibility state as a site-only blocked surface", async ({
+    page,
+  }) => {
+    for (const state of insuranceBlockedStates) {
+      const response = await page.goto(`/fubon/program/site/${state.segment}`);
+      expect(response?.status(), state.segment).toBe(200);
+      await expect(
+        page.locator("[data-program-kind='insurance']"),
+        state.segment,
+      ).toBeVisible();
+      await expect(page.locator("body"), state.segment).toContainText(
+        "program: insurance · site",
+      );
+      await expect(page.locator("body"), state.segment).toContainText(
+        state.code,
+      );
+      await expect(page.locator("body"), state.segment).toContainText(
+        state.copy,
+      );
+      await expect(page.locator("body"), state.segment).toContainText(
+        "理賠額度",
+      );
+      await expect(page.locator("body"), state.segment).not.toContainText(
+        "ref_token",
+      );
+      await expect(page.locator("[data-program-surface='embed']")).toHaveCount(
+        0,
+      );
+    }
   });
 
   test("only card program selector offers the bank-app embed surface", async ({
