@@ -126,6 +126,80 @@ test.describe("tenant console localization smoke", () => {
       "此租戶目前還沒有任何訂單",
     );
   });
+
+  test("en tenant long-tail routes translate legacy shell copy", async ({
+    page,
+  }, testInfo) => {
+    await primeLocale(
+      page,
+      "en",
+      String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3304"),
+    );
+
+    const cases = [
+      {
+        route: "/",
+        include: ["Tenant operations, billing, and readiness"],
+        exclude: ["工作面", "進行中訂單", "財務快照"],
+      },
+      {
+        route: "/passengers",
+        include: ["Passenger directory", "Directory filters"],
+        exclude: ["乘客通訊錄", "目錄篩選", "乘客名冊"],
+      },
+      {
+        route: "/cost-centers",
+        include: ["Cost centers", "Current tenant directory total"],
+        exclude: ["目前租戶目錄總數", "空狀態原因預覽"],
+      },
+      {
+        route: "/rules",
+        include: ["Approval and quota", "Rule list"],
+        exclude: ["審批與配額", "規則清單", "建立或編輯規則"],
+      },
+      {
+        route: "/notifications",
+        include: ["Notification preferences", "Event × channel"],
+        exclude: ["通知偏好", "事件 × 通道", "儲存設定"],
+      },
+      {
+        route: "/sla",
+        include: ["SLA profile", "Current thresholds"],
+        exclude: ["SLA 設定檔", "當前門檻", "重算既有訂單"],
+      },
+      {
+        route: "/reports",
+        include: ["Reports", "Cross-app report traceability remains explicit"],
+        exclude: ["報表", "跨應用報表追溯保持明確", "建立工作"],
+      },
+      {
+        route: "/api-keys",
+        include: ["API keys", "Create key"],
+        exclude: ["API 金鑰", "建立金鑰", "完整明文"],
+      },
+      {
+        route: "/webhooks",
+        include: ["Endpoints · event subscriptions", "Delivery health"],
+        exclude: ["新增端點", "投遞健康", "治理政策"],
+      },
+      {
+        route: "/audit",
+        include: ["Audit · cross-actor", "Cross-actor visibility"],
+        exclude: ["稽核 · cross-actor", "跨 actor 可見性", "稽核回執"],
+      },
+    ] as const;
+
+    for (const item of cases) {
+      await gotoAndSettle(page, item.route);
+      await page.waitForTimeout(350);
+      for (const text of item.include) {
+        await expect(page.locator("body"), item.route).toContainText(text);
+      }
+      for (const text of item.exclude) {
+        await expect(page.locator("body"), item.route).not.toContainText(text);
+      }
+    }
+  });
 });
 
 test.describe("partner booking localization smoke", () => {
