@@ -87,6 +87,7 @@ export function LocalizedText({
 export function PartnerShellControls() {
   const { locale, setLocale, t } = useTranslation();
   const { status, lastCheckedAt } = useApiHealth();
+  const nextLocale = locale === "en" ? "zh" : "en";
   const statusCopy = {
     checking: { label: t("shell.health.checking"), color: "#64748b" },
     healthy: { label: t("shell.health.healthy"), color: "#0f766e" },
@@ -106,18 +107,22 @@ export function PartnerShellControls() {
         <span style={{ ...healthDotStyle, background: current.color }} />
         <span>{current.label}</span>
       </div>
-      <button
-        type="button"
+      <a
+        href={`?locale=${nextLocale}`}
+        role="button"
         style={languageButtonStyle}
         title={t("shell.language.switch")}
         aria-label={t("shell.language.switch")}
-        onClick={() => setLocale(locale === "en" ? "zh" : "en")}
+        onClick={(event) => {
+          event.preventDefault();
+          setLocale(nextLocale);
+        }}
       >
         <span aria-hidden="true">文/A</span>
         <span>
           {locale === "en" ? t("shell.language.zh") : t("shell.language.en")}
         </span>
-      </button>
+      </a>
     </div>
   );
 }
@@ -162,4 +167,5 @@ const languageButtonStyle: CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   whiteSpace: "nowrap",
+  textDecoration: "none",
 };
