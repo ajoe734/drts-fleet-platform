@@ -1528,6 +1528,258 @@ const en = {
   "webhooks.secretCard.receiptRotatedAt": "Rotated at: {time}",
 
   // ── apiKeys (i18n-fullsweep 20260614) ──
+  "apiKeys.page.title": "API keys",
+  "apiKeys.page.subtitle":
+    "Live / sandbox · scope · last seen · revocation cannot be undone",
+  "apiKeys.page.docs": "API docs",
+  "apiKeys.page.refresh": "Refresh T5",
+  "apiKeys.page.issue": "Issue API key",
+  "apiKeys.tab.list": "List",
+  "apiKeys.tab.editor": "Issue / rotate",
+  "apiKeys.tab.governance": "Governance",
+  "apiKeys.banner.plaintextOnce.title": "Q-TEN09: plaintext appears only once",
+  "apiKeys.banner.plaintextOnce.body":
+    "After issue and rotate succeed, the full key is revealed only once in this window. After dismissal, only the key prefix and masked suffix remain. Rotate again if the secret is lost.",
+  "apiKeys.banner.refresh.title":
+    "T5 refresh tier · polls every 30 seconds{recommendation}",
+  "apiKeys.banner.refresh.recommendation": "refresh now recommended",
+  "apiKeys.banner.refresh.body":
+    "Snapshot created at {timestamp} ({relative}). The page refreshes automatically while visible, and you can also refresh manually for the latest state.",
+  "apiKeys.time.unknown": "time unknown",
+  "apiKeys.error.bannerTitle": "Some API key data could not be loaded",
+  "apiKeys.error.apiKeysLoadFailed": "The tenant API key inventory could not be loaded.",
+  "apiKeys.error.governanceLoadFailed":
+    "The integration governance policy could not be loaded.",
+  "apiKeys.error.identityLoadFailed":
+    "The tenant identity context could not be loaded.",
+  "apiKeys.kpi.active.label": "Active",
+  "apiKeys.kpi.active.sub": "usable",
+  "apiKeys.kpi.expiring.label": "Expiring",
+  "apiKeys.kpi.expiring.sub": "within 7 days",
+  "apiKeys.kpi.revoked.label": "Revoked",
+  "apiKeys.kpi.revoked.sub": "audit visible",
+  "apiKeys.kpi.refreshTier.label": "Refresh tier",
+  "apiKeys.kpi.refreshTier.value": "T5",
+  "apiKeys.kpi.refreshTier.sub": "30 second target",
+  "apiKeys.risk.high": "High",
+  "apiKeys.risk.medium": "Medium",
+  "apiKeys.risk.low": "Low",
+  "apiKeys.state.active": "active",
+  "apiKeys.state.expiring": "expiring",
+  "apiKeys.state.expired": "expired",
+  "apiKeys.state.revoked": "revoked",
+  "apiKeys.action.issue": "Issue API key",
+  "apiKeys.action.rotate": "Rotate API key",
+  "apiKeys.action.revoke": "Revoke API key",
+  "apiKeys.action.issueDescription":
+    "Q-TEN09 plaintext-once modal; scope and expiry are constrained by governance policy.",
+  "apiKeys.action.rotateDescription":
+    "Invalidate the previous credential immediately and issue a new plaintext value shown only once.",
+  "apiKeys.action.revokeDescription":
+    "High-risk action. A revocation reason must be recorded before submission.",
+  "apiKeys.action.available": "Available now.",
+  "apiKeys.action.disabledReason.label": "Disabled reason",
+  "apiKeys.action.disabledReason.identity_unavailable": "Identity context unavailable",
+  "apiKeys.action.disabledReason.permission_denied": "Permission denied",
+  "apiKeys.action.disabledReason.governance_unavailable":
+    "Governance policy unavailable",
+  "apiKeys.action.disabledReason.not_provisioned": "Not provisioned",
+  "apiKeys.action.disabledReason.no_data": "No API keys available",
+  "apiKeys.action.disabledReason.unknown": "Action unavailable",
+  "apiKeys.empty.filtered.title": "No keys match the current filters",
+  "apiKeys.empty.filtered.body":
+    "Clear the search term or switch to another state filter. Revoked and expired keys remain available for audit review.",
+  "apiKeys.empty.filtered.badge": "Filtered",
+  "apiKeys.empty.fetchFailed.title": "The API key list is temporarily unavailable",
+  "apiKeys.empty.fetchFailed.body":
+    "The page did not receive the key inventory. Refresh first, then check the tenant API and audit log if the failure continues.",
+  "apiKeys.empty.fetchFailed.badge": "Fetch failed",
+  "apiKeys.empty.permissionDenied.title":
+    "This identity cannot manage API keys",
+  "apiKeys.empty.permissionDenied.body":
+    "The current tenant session is not `tc_admin` or `tc_integration_mgr`. Other modules remain visible, but issue, rotate, and revoke stay disabled.",
+  "apiKeys.empty.permissionDenied.badge": "Access",
+  "apiKeys.empty.externalUnavailable.title":
+    "The governance policy is temporarily unavailable",
+  "apiKeys.empty.externalUnavailable.body":
+    "The integration governance package did not load, so the scope catalog and expiry policy cannot be evaluated safely.",
+  "apiKeys.empty.externalUnavailable.badge": "Degraded",
+  "apiKeys.empty.notProvisioned.title":
+    "This tenant has not completed API key onboarding",
+  "apiKeys.empty.notProvisioned.body":
+    "No keys exist yet, and the governance summary still shows API key readiness as incomplete. Finish the first integration credential and dependent module setup first.",
+  "apiKeys.empty.notProvisioned.badge": "Setup",
+  "apiKeys.empty.noData.title": "No tenant API keys exist yet",
+  "apiKeys.empty.noData.body":
+    "The list stays empty until the first credential is issued. After issue, only the key prefix and masked suffix remain available.",
+  "apiKeys.empty.noData.badge": "Empty",
+  "apiKeys.empty.action.clearFilters": "Clear filters",
+  "apiKeys.empty.action.refresh": "Refresh",
+  "apiKeys.empty.action.checkAccess": "Check roles and tenant access",
+  "apiKeys.empty.action.integrationGovernance": "Open /integration-governance",
+  "apiKeys.empty.action.webhooks": "Open /webhooks",
+  "apiKeys.empty.action.audit": "View audit log",
+  "apiKeys.editor.issueTitle": "Issue API key",
+  "apiKeys.editor.rotateTitle": "Rotate {keyName}",
+  "apiKeys.editor.subtitle":
+    "Available actions come from `availableActions`; high-risk behavior is no longer hardcoded from role names.",
+  "apiKeys.editor.collapse": "Collapse",
+  "apiKeys.editor.openForm": "Open form",
+  "apiKeys.editor.name": "Name",
+  "apiKeys.editor.namePlaceholder": "Operations reporting integration",
+  "apiKeys.editor.expiresAt": "Expires at",
+  "apiKeys.editor.expiresAtHint":
+    "ISO 8601 with timezone; leave blank to use the default {days}-day policy.",
+  "apiKeys.editor.expiresAtFallbackHint": "For example 2026-08-09T01:52:30Z",
+  "apiKeys.editor.expiresAtPlaceholder": "2026-08-09T01:52:30Z",
+  "apiKeys.editor.scope": "Scope",
+  "apiKeys.editor.scopeHint":
+    "Select at least one published scope. Rotation keeps the existing scope set by default, but you can adjust it before submitting.",
+  "apiKeys.editor.scopeUnavailable":
+    "The governance policy did not load or does not publish allowed scopes yet, so submission is unavailable.",
+  "apiKeys.editor.policySummary":
+    "Default {defaultDays} days · max {maxDays} days · revoke effect {revokeEffect}",
+  "apiKeys.editor.policyUnavailable": "Governance policy unavailable",
+  "apiKeys.editor.submitting": "Submitting...",
+  "apiKeys.editor.confirmRotate": "Confirm rotation",
+  "apiKeys.editor.confirmIssue": "Issue API key",
+  "apiKeys.editor.closedHint":
+    "Open the issue / rotate form from the header CTA or a table row action.",
+  "apiKeys.availableActions.title": "Available actions",
+  "apiKeys.availableActions.subtitle":
+    "Risk level and disabled reasons map directly from `availableActions`; empty and permission-denied states no longer pretend the actions exist.",
+  "apiKeys.filters.title": "List filters",
+  "apiKeys.filters.subtitle":
+    "Search key name, ID, and scope while keeping revoked and expired views available for audit tracking.",
+  "apiKeys.filters.search": "Search",
+  "apiKeys.filters.searchPlaceholder": "Search key name, ID, scope",
+  "apiKeys.filters.state": "State",
+  "apiKeys.filterState.all": "All",
+  "apiKeys.filterState.active": "Active",
+  "apiKeys.filterState.expiring": "Expiring",
+  "apiKeys.filterState.expired": "Expired",
+  "apiKeys.filterState.revoked": "Revoked",
+  "apiKeys.governance.title": "Governance package",
+  "apiKeys.governance.subtitle":
+    "Published policy snapshot for this tenant integration surface.",
+  "apiKeys.governance.identity": "Identity",
+  "apiKeys.governance.generatedAt": "Generated at",
+  "apiKeys.governance.defaultLifetime": "Default lifetime",
+  "apiKeys.governance.maxLifetime": "Maximum lifetime",
+  "apiKeys.governance.expiryMode": "Expiry mode",
+  "apiKeys.governance.breakGlass": "Break-glass exception",
+  "apiKeys.governance.days": "{count} days",
+  "apiKeys.governance.expiryRequired": "Required",
+  "apiKeys.governance.expiryOptional": "Optional",
+  "apiKeys.governance.breakGlassApproval": "Platform approval required",
+  "apiKeys.governance.breakGlassUnavailable": "Unpublished",
+  "apiKeys.governance.allowedScopes": "Allowed scopes",
+  "apiKeys.governance.compatibilityAliases": "Compatibility aliases",
+  "apiKeys.governance.onboardingChecklist": "Onboarding checklist",
+  "apiKeys.governance.unavailable":
+    "Integration governance could not be loaded for this tenant.",
+  "apiKeys.deepLinks.title": "Deep links",
+  "apiKeys.deepLinks.subtitle":
+    "Follow the packet from the API key surface into governance, notifications, SLA, reports, and audit modules.",
+  "apiKeys.deepLinks.governance.title": "Integration governance",
+  "apiKeys.deepLinks.governance.body":
+    "Compare aggregated readiness, published scopes, and the onboarding checklist.",
+  "apiKeys.deepLinks.governance.path": "/integration-governance",
+  "apiKeys.deepLinks.webhooks.title": "Webhook management",
+  "apiKeys.deepLinks.webhooks.body":
+    "Check whether the webhook receiver associated with this key is ready.",
+  "apiKeys.deepLinks.webhooks.path": "/webhooks",
+  "apiKeys.deepLinks.notifications.title": "Notification preferences",
+  "apiKeys.deepLinks.notifications.body":
+    "Verify delivery-failure and onboarding notifications are enabled.",
+  "apiKeys.deepLinks.notifications.path": "/notifications",
+  "apiKeys.deepLinks.sla.title": "SLA settings",
+  "apiKeys.deepLinks.sla.body":
+    "Review notification points and tenant response windows for integration incidents.",
+  "apiKeys.deepLinks.sla.path": "/sla",
+  "apiKeys.deepLinks.reports.title": "Reports workspace",
+  "apiKeys.deepLinks.reports.body":
+    "Check whether report jobs tied to the API key are ready to run and download.",
+  "apiKeys.deepLinks.reports.path": "/reports",
+  "apiKeys.deepLinks.audit.title": "Audit log",
+  "apiKeys.deepLinks.audit.body":
+    "After issue, rotate, or revoke, return to the audit lane to trace the action.",
+  "apiKeys.deepLinks.audit.path": "/audit",
+  "apiKeys.table.title": "API key inventory",
+  "apiKeys.table.column.name": "Name",
+  "apiKeys.table.column.prefix": "Prefix",
+  "apiKeys.table.column.mask": "Mask",
+  "apiKeys.table.column.scope": "Scope",
+  "apiKeys.table.column.lastUsed": "Last used",
+  "apiKeys.table.column.expiresAt": "Expires",
+  "apiKeys.table.column.revokedAt": "Revoked",
+  "apiKeys.table.column.state": "State",
+  "apiKeys.table.action.rotate": "Rotate",
+  "apiKeys.table.action.revoke": "Revoke",
+  "apiKeys.table.notAvailable": "—",
+  "apiKeys.table.revokedAt": "Revoked {timestamp}",
+  "apiKeys.secretModal.issueTitle": "New API key issued",
+  "apiKeys.secretModal.rotateTitle": "New API key rotated",
+  "apiKeys.secretModal.subtitle":
+    "The full plaintext appears only this once. After dismissal, use the masked suffix and audit trail for tracking.",
+  "apiKeys.secretModal.badge": "Show once",
+  "apiKeys.secretModal.copy": "Copy plaintext",
+  "apiKeys.secretModal.copied": "Copied",
+  "apiKeys.secretModal.download": "Download .txt",
+  "apiKeys.secretModal.audit": "Open /audit",
+  "apiKeys.secretModal.confirmation":
+    "I have stored this API key securely and understand that after closing, only the masked suffix remains visible. If the secret is lost, I must issue or rotate again.",
+  "apiKeys.secretModal.footerNamed": "{keyName} · {status}",
+  "apiKeys.secretModal.footerFallback":
+    "Store this key securely outside the UI before closing.",
+  "apiKeys.secretModal.statusIssued": "issued",
+  "apiKeys.secretModal.statusRotated": "rotated",
+  "apiKeys.secretModal.close": "I have stored it, close",
+  "apiKeys.revokeModal.title": "Revoke API key",
+  "apiKeys.revokeModal.subtitle":
+    "High-risk action. After revocation, this key cannot authenticate again, and a reason is required first.",
+  "apiKeys.revokeModal.keyName": "Key name",
+  "apiKeys.revokeModal.id": "ID",
+  "apiKeys.revokeModal.mask": "Mask",
+  "apiKeys.revokeModal.lastUsed": "Last used",
+  "apiKeys.revokeModal.reason": "Revocation reason",
+  "apiKeys.revokeModal.reasonHint":
+    "For example credential leakage, integration sunset, or reduced scope.",
+  "apiKeys.revokeModal.cancel": "Cancel",
+  "apiKeys.revokeModal.confirm": "Confirm revocation",
+  "apiKeys.download.filenameFallback": "tenant-api-key",
+  "apiKeys.download.issuedAtLabel": "Issued at",
+  "apiKeys.flash.issueSuccess.title": "API key issued",
+  "apiKeys.flash.issueSuccess.description":
+    "{keyName} is now active. Save the plaintext value now because subsequent fetches only show the masked suffix.",
+  "apiKeys.flash.rotateSuccess.title": "API key rotated",
+  "apiKeys.flash.rotateSuccess.description":
+    "{keyName} has a new plaintext value. The previously active credential is invalidated immediately.",
+  "apiKeys.flash.revokeSuccess.title": "API key revoked",
+  "apiKeys.flash.revokeSuccess.description":
+    "{keyName} is now revoked and cannot authenticate again.",
+  "apiKeys.flash.issueError.title": "API key could not be issued",
+  "apiKeys.flash.rotateError.title": "API key could not be rotated",
+  "apiKeys.flash.revokeError.title": "API key could not be revoked",
+  "apiKeys.flash.issueError.description.generic":
+    "The API key could not be issued. Check the form and retry.",
+  "apiKeys.flash.rotateError.description.generic":
+    "The API key could not be rotated. Check the form and retry.",
+  "apiKeys.flash.revokeError.description.generic":
+    "The API key could not be revoked. Check the form and retry.",
+  "apiKeys.flash.error.scopeRequired":
+    "Select at least one published API key scope.",
+  "apiKeys.flash.error.scopeUnsupported":
+    "Unsupported API key scope: {scope}",
+  "apiKeys.flash.error.expiryTimezoneRequired":
+    "Expiry must include an explicit timezone offset or Z suffix.",
+  "apiKeys.flash.error.expiryInvalid":
+    "Expiry must be a valid ISO 8601 timestamp.",
+  "apiKeys.flash.error.keyNameRequired": "API key label is required.",
+  "apiKeys.flash.error.apiKeySelectionRequired":
+    "An API key selection is required for this action.",
+  "apiKeys.flash.error.revocationReasonRequired":
+    "A revocation reason is required.",
 
   // ── costCenters (i18n-fullsweep 20260614) ──
 
@@ -4216,6 +4468,241 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.secretCard.receiptRotatedAt": "輪替時間：{time}",
 
   // ── apiKeys (i18n-fullsweep 20260614) ──
+  "apiKeys.page.title": "API 金鑰",
+  "apiKeys.page.subtitle": "Live / sandbox · scope · 最近使用 · 撤銷後永久不可復原",
+  "apiKeys.page.docs": "API 文件",
+  "apiKeys.page.refresh": "刷新 T5",
+  "apiKeys.page.issue": "建立金鑰",
+  "apiKeys.tab.list": "清單",
+  "apiKeys.tab.editor": "建立／輪替",
+  "apiKeys.tab.governance": "治理",
+  "apiKeys.banner.plaintextOnce.title": "Q-TEN09：完整明文只顯示一次",
+  "apiKeys.banner.plaintextOnce.body":
+    "建立與輪替成功後，都只會在這個視窗內揭露一次完整 key。關閉後僅保留 key prefix 與 masked suffix，遺失請重新輪替。",
+  "apiKeys.banner.refresh.title": "T5 更新層級 · 每 30 秒輪詢一次{recommendation}",
+  "apiKeys.banner.refresh.recommendation": "建議立即刷新",
+  "apiKeys.banner.refresh.body":
+    "目前快照建立於 {timestamp}（{relative}）。頁面可見時會自動刷新；你也可以手動刷新以取得最新狀態。",
+  "apiKeys.time.unknown": "時間未知",
+  "apiKeys.error.bannerTitle": "部分 API 金鑰資料無法載入",
+  "apiKeys.error.apiKeysLoadFailed": "租戶 API 金鑰清單無法載入。",
+  "apiKeys.error.governanceLoadFailed": "整合治理策略無法載入。",
+  "apiKeys.error.identityLoadFailed": "租戶身分內容無法載入。",
+  "apiKeys.kpi.active.label": "啟用",
+  "apiKeys.kpi.active.sub": "可使用",
+  "apiKeys.kpi.expiring.label": "即將到期",
+  "apiKeys.kpi.expiring.sub": "7 天內",
+  "apiKeys.kpi.revoked.label": "已撤銷",
+  "apiKeys.kpi.revoked.sub": "稽核可見",
+  "apiKeys.kpi.refreshTier.label": "更新層級",
+  "apiKeys.kpi.refreshTier.value": "T5",
+  "apiKeys.kpi.refreshTier.sub": "30 秒目標",
+  "apiKeys.risk.high": "高",
+  "apiKeys.risk.medium": "中",
+  "apiKeys.risk.low": "低",
+  "apiKeys.state.active": "啟用",
+  "apiKeys.state.expiring": "即將到期",
+  "apiKeys.state.expired": "已過期",
+  "apiKeys.state.revoked": "已撤銷",
+  "apiKeys.action.issue": "建立金鑰",
+  "apiKeys.action.rotate": "輪替金鑰",
+  "apiKeys.action.revoke": "撤銷金鑰",
+  "apiKeys.action.issueDescription":
+    "Q-TEN09 plaintext-once modal；scope 與到期時間由治理策略限制。",
+  "apiKeys.action.rotateDescription":
+    "立即使舊憑證失效，並重新發出只顯示一次的新明文。",
+  "apiKeys.action.revokeDescription":
+    "高風險操作，必須先記錄撤銷原因後才可送出。",
+  "apiKeys.action.available": "目前可執行。",
+  "apiKeys.action.disabledReason.label": "停用原因",
+  "apiKeys.action.disabledReason.identity_unavailable": "身分內容不可用",
+  "apiKeys.action.disabledReason.permission_denied": "權限不足",
+  "apiKeys.action.disabledReason.governance_unavailable": "治理策略不可用",
+  "apiKeys.action.disabledReason.not_provisioned": "尚未完成開通",
+  "apiKeys.action.disabledReason.no_data": "目前沒有 API 金鑰",
+  "apiKeys.action.disabledReason.unknown": "操作暫時不可用",
+  "apiKeys.empty.filtered.title": "目前篩選條件沒有符合的金鑰",
+  "apiKeys.empty.filtered.body":
+    "請清除搜尋字詞或切回其他狀態篩選。已撤銷與已過期的金鑰仍會保留在清單中供稽核檢視。",
+  "apiKeys.empty.filtered.badge": "Filtered",
+  "apiKeys.empty.fetchFailed.title": "API 金鑰清單暫時無法讀取",
+  "apiKeys.empty.fetchFailed.body":
+    "畫面沒有收到 key inventory。請先重新整理，若持續失敗再檢查租戶 API 與稽核紀錄。",
+  "apiKeys.empty.fetchFailed.badge": "Fetch failed",
+  "apiKeys.empty.permissionDenied.title": "目前身分沒有管理 API 金鑰的權限",
+  "apiKeys.empty.permissionDenied.body":
+    "此租戶會話不是 `tc_admin` 或 `tc_integration_mgr`。你仍可透過其他模組追蹤整合狀態，但建立、輪替、撤銷都會保持停用。",
+  "apiKeys.empty.permissionDenied.badge": "Access",
+  "apiKeys.empty.externalUnavailable.title": "治理策略暫時不可用",
+  "apiKeys.empty.externalUnavailable.body":
+    "Integration governance package 沒有成功載入，因此無法安全判斷 scope catalogue 與期限策略。",
+  "apiKeys.empty.externalUnavailable.badge": "Degraded",
+  "apiKeys.empty.notProvisioned.title": "此租戶尚未完成 API 金鑰 onboarding",
+  "apiKeys.empty.notProvisioned.body":
+    "目前沒有既有金鑰，而且治理摘要仍顯示 API 金鑰 readiness 未完成。請先完成第一組整合憑證與相依模組設定。",
+  "apiKeys.empty.notProvisioned.badge": "Setup",
+  "apiKeys.empty.noData.title": "目前沒有任何租戶 API 金鑰",
+  "apiKeys.empty.noData.body":
+    "清單保持空白直到第一組憑證發出。建立後只會在當下顯示完整明文，後續僅保留 key prefix 與 masked suffix。",
+  "apiKeys.empty.noData.badge": "Empty",
+  "apiKeys.empty.action.clearFilters": "清除篩選",
+  "apiKeys.empty.action.refresh": "重新整理",
+  "apiKeys.empty.action.checkAccess": "檢查角色與租戶權限",
+  "apiKeys.empty.action.integrationGovernance": "前往 /integration-governance",
+  "apiKeys.empty.action.webhooks": "前往 /webhooks",
+  "apiKeys.empty.action.audit": "查看稽核紀錄",
+  "apiKeys.editor.issueTitle": "建立 API 金鑰",
+  "apiKeys.editor.rotateTitle": "輪替 {keyName}",
+  "apiKeys.editor.subtitle":
+    "可用操作由 `availableActions` 決定；高風險動作不再依角色名稱硬編碼。",
+  "apiKeys.editor.collapse": "收合",
+  "apiKeys.editor.openForm": "開啟表單",
+  "apiKeys.editor.name": "名稱",
+  "apiKeys.editor.namePlaceholder": "營運報表整合",
+  "apiKeys.editor.expiresAt": "到期時間",
+  "apiKeys.editor.expiresAtHint":
+    "ISO 8601 含時區；留空則遵循預設 {days} 天政策。",
+  "apiKeys.editor.expiresAtFallbackHint": "例如 2026-08-09T01:52:30Z",
+  "apiKeys.editor.expiresAtPlaceholder": "2026-08-09T01:52:30Z",
+  "apiKeys.editor.scope": "範圍",
+  "apiKeys.editor.scopeHint":
+    "至少選擇一個已發布 scope。輪替預設沿用原 scope，但可在送出前微調。",
+  "apiKeys.editor.scopeUnavailable":
+    "治理策略尚未載入或尚未發布允許 scope，暫時無法送出。",
+  "apiKeys.editor.policySummary":
+    "預設 {defaultDays} 天 · 最長 {maxDays} 天 · 撤銷效果 {revokeEffect}",
+  "apiKeys.editor.policyUnavailable": "治理策略不可用",
+  "apiKeys.editor.submitting": "送出中...",
+  "apiKeys.editor.confirmRotate": "確認輪替",
+  "apiKeys.editor.confirmIssue": "建立金鑰",
+  "apiKeys.editor.closedHint":
+    "可從上方 CTA 或清單列操作開啟建立／輪替表單。",
+  "apiKeys.availableActions.title": "可用操作",
+  "apiKeys.availableActions.subtitle":
+    "風險層級與停用原因直接映射 `availableActions`；空清單與無權限時不再假裝可操作。",
+  "apiKeys.filters.title": "清單篩選",
+  "apiKeys.filters.subtitle":
+    "搜尋 key 名稱、ID 與 scope，並保留已撤銷／已過期視圖供稽核追蹤。",
+  "apiKeys.filters.search": "搜尋",
+  "apiKeys.filters.searchPlaceholder": "搜尋 key name、ID、scope",
+  "apiKeys.filters.state": "狀態",
+  "apiKeys.filterState.all": "全部",
+  "apiKeys.filterState.active": "啟用",
+  "apiKeys.filterState.expiring": "即將到期",
+  "apiKeys.filterState.expired": "已過期",
+  "apiKeys.filterState.revoked": "已撤銷",
+  "apiKeys.governance.title": "治理套件",
+  "apiKeys.governance.subtitle": "此租戶整合介面的已發布政策快照。",
+  "apiKeys.governance.identity": "身分",
+  "apiKeys.governance.generatedAt": "產生時間",
+  "apiKeys.governance.defaultLifetime": "預設效期",
+  "apiKeys.governance.maxLifetime": "最長效期",
+  "apiKeys.governance.expiryMode": "到期設定",
+  "apiKeys.governance.breakGlass": "緊急例外",
+  "apiKeys.governance.days": "{count} 天",
+  "apiKeys.governance.expiryRequired": "必填",
+  "apiKeys.governance.expiryOptional": "選填",
+  "apiKeys.governance.breakGlassApproval": "需平台核准",
+  "apiKeys.governance.breakGlassUnavailable": "未發布",
+  "apiKeys.governance.allowedScopes": "允許範圍",
+  "apiKeys.governance.compatibilityAliases": "Compatibility aliases",
+  "apiKeys.governance.onboardingChecklist": "Onboarding checklist",
+  "apiKeys.governance.unavailable": "此租戶的 integration governance 無法載入。",
+  "apiKeys.deepLinks.title": "深層連結",
+  "apiKeys.deepLinks.subtitle":
+    "依 packet 從 API 金鑰畫面連到治理、通知、SLA、報表與稽核模組。",
+  "apiKeys.deepLinks.governance.title": "整合就緒度",
+  "apiKeys.deepLinks.governance.body":
+    "對照 aggregated readiness、published scope 與 onboarding checklist。",
+  "apiKeys.deepLinks.governance.path": "/integration-governance",
+  "apiKeys.deepLinks.webhooks.title": "Webhook 管理",
+  "apiKeys.deepLinks.webhooks.body":
+    "檢查這組金鑰對應的 webhook receiver 是否已就緒。",
+  "apiKeys.deepLinks.webhooks.path": "/webhooks",
+  "apiKeys.deepLinks.notifications.title": "通知偏好",
+  "apiKeys.deepLinks.notifications.body":
+    "確認 delivery failure 與 onboarding 通知是否已開通。",
+  "apiKeys.deepLinks.notifications.path": "/notifications",
+  "apiKeys.deepLinks.sla.title": "SLA 設定",
+  "apiKeys.deepLinks.sla.body":
+    "檢視整合異常的通知節點與租戶回應時限。",
+  "apiKeys.deepLinks.sla.path": "/sla",
+  "apiKeys.deepLinks.reports.title": "報表工作台",
+  "apiKeys.deepLinks.reports.body":
+    "檢查 API 金鑰對應的報表工作是否已具備可執行與可下載的就緒度。",
+  "apiKeys.deepLinks.reports.path": "/reports",
+  "apiKeys.deepLinks.audit.title": "稽核紀錄",
+  "apiKeys.deepLinks.audit.body":
+    "Issue / rotate / revoke 後可回到 audit lane 追蹤動作。",
+  "apiKeys.deepLinks.audit.path": "/audit",
+  "apiKeys.table.title": "API 金鑰清單",
+  "apiKeys.table.column.name": "名稱",
+  "apiKeys.table.column.prefix": "前綴",
+  "apiKeys.table.column.mask": "遮罩",
+  "apiKeys.table.column.scope": "範圍",
+  "apiKeys.table.column.lastUsed": "最近使用",
+  "apiKeys.table.column.expiresAt": "到期",
+  "apiKeys.table.column.revokedAt": "撤銷",
+  "apiKeys.table.column.state": "狀態",
+  "apiKeys.table.action.rotate": "輪替",
+  "apiKeys.table.action.revoke": "撤銷",
+  "apiKeys.table.notAvailable": "—",
+  "apiKeys.table.revokedAt": "已撤銷 {timestamp}",
+  "apiKeys.secretModal.issueTitle": "新的金鑰已建立",
+  "apiKeys.secretModal.rotateTitle": "新的金鑰已輪替",
+  "apiKeys.secretModal.subtitle":
+    "完整 plaintext 只會顯示這一次。關閉後請改用 masked suffix 與 audit trail 追蹤。",
+  "apiKeys.secretModal.badge": "只顯示一次",
+  "apiKeys.secretModal.copy": "複製明文",
+  "apiKeys.secretModal.copied": "已複製",
+  "apiKeys.secretModal.download": "下載 .txt",
+  "apiKeys.secretModal.audit": "前往 /audit",
+  "apiKeys.secretModal.confirmation":
+    "我已安全保存這組 API key，了解關閉後只能再看到 masked suffix；若遺失必須重新建立或輪替。",
+  "apiKeys.secretModal.footerNamed": "{keyName} · {status}",
+  "apiKeys.secretModal.footerFallback": "關閉前請在 UI 以外安全保存此 key。",
+  "apiKeys.secretModal.statusIssued": "已建立",
+  "apiKeys.secretModal.statusRotated": "已輪替",
+  "apiKeys.secretModal.close": "我已保存，關閉視窗",
+  "apiKeys.revokeModal.title": "撤銷 API 金鑰",
+  "apiKeys.revokeModal.subtitle":
+    "高風險操作。撤銷後此 key 不可再次用於認證，且必須先填寫原因。",
+  "apiKeys.revokeModal.keyName": "Key 名稱",
+  "apiKeys.revokeModal.id": "ID",
+  "apiKeys.revokeModal.mask": "遮罩",
+  "apiKeys.revokeModal.lastUsed": "最近使用",
+  "apiKeys.revokeModal.reason": "撤銷原因",
+  "apiKeys.revokeModal.reasonHint": "例如憑證外洩、整合下線、scope 縮減。",
+  "apiKeys.revokeModal.cancel": "取消",
+  "apiKeys.revokeModal.confirm": "確認撤銷",
+  "apiKeys.download.filenameFallback": "tenant-api-key",
+  "apiKeys.download.issuedAtLabel": "建立時間",
+  "apiKeys.flash.issueSuccess.title": "API 金鑰已建立",
+  "apiKeys.flash.issueSuccess.description":
+    "{keyName} 已啟用。請立刻保存完整明文，因為後續讀取只會顯示 masked suffix。",
+  "apiKeys.flash.rotateSuccess.title": "API 金鑰已輪替",
+  "apiKeys.flash.rotateSuccess.description":
+    "{keyName} 已產生新的明文值，原本啟用中的憑證會立即失效。",
+  "apiKeys.flash.revokeSuccess.title": "API 金鑰已撤銷",
+  "apiKeys.flash.revokeSuccess.description":
+    "{keyName} 已撤銷，不能再用於驗證。",
+  "apiKeys.flash.issueError.title": "無法建立 API 金鑰",
+  "apiKeys.flash.rotateError.title": "無法輪替 API 金鑰",
+  "apiKeys.flash.revokeError.title": "無法撤銷 API 金鑰",
+  "apiKeys.flash.issueError.description.generic":
+    "目前無法建立 API 金鑰。請檢查表單內容後重試。",
+  "apiKeys.flash.rotateError.description.generic":
+    "目前無法輪替 API 金鑰。請檢查表單內容後重試。",
+  "apiKeys.flash.revokeError.description.generic":
+    "目前無法撤銷 API 金鑰。請檢查表單內容後重試。",
+  "apiKeys.flash.error.scopeRequired": "至少選擇一個已發布的 API 金鑰 scope。",
+  "apiKeys.flash.error.scopeUnsupported": "不支援的 API 金鑰 scope：{scope}",
+  "apiKeys.flash.error.expiryTimezoneRequired":
+    "到期時間必須包含明確時區偏移或 Z 後綴。",
+  "apiKeys.flash.error.expiryInvalid": "到期時間必須是有效的 ISO 8601 timestamp。",
+  "apiKeys.flash.error.keyNameRequired": "API 金鑰名稱為必填。",
+  "apiKeys.flash.error.apiKeySelectionRequired": "此操作必須先選擇一組 API 金鑰。",
+  "apiKeys.flash.error.revocationReasonRequired": "撤銷原因為必填。",
 
   // ── costCenters (i18n-fullsweep 20260614) ──
 
