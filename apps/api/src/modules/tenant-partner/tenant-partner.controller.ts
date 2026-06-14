@@ -95,7 +95,10 @@ import type {
   PartnerReferralRevenuePeriodRecord,
   PartnerReferralUsagePeriodRecord,
 } from "./partner-referral-portal.types";
-import { TenantPartnerService } from "./tenant-partner.service";
+import {
+  TenantPartnerService,
+  type UpsertReferralRevenueShareRuleCommand,
+} from "./tenant-partner.service";
 
 type JwtExpiresIn = NonNullable<
   Extract<
@@ -477,6 +480,34 @@ export class TenantPartnerController {
   listPlatformPartnerEntries(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       toApiListData(this.tenantPartnerService.listPlatformPartnerEntries()),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/referral-rates")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listReferralRevenueShareRules(
+    @Query("entrySlug") entrySlug?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        this.tenantPartnerService.listReferralRevenueShareRules(entrySlug),
+      ),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/referral-rates")
+  upsertReferralRevenueShareRule(
+    @Body() command: UpsertReferralRevenueShareRuleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertReferralRevenueShareRule(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

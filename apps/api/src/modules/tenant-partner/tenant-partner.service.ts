@@ -126,7 +126,42 @@ import type {
   WebhookDeliveryRecord,
   WebhookRetryPolicyRecord,
   UiRefreshMetadata,
+  ReferralRevenueShareRule,
 } from "@drts/contracts";
+import {
+  REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+  PARTNER_REFERRAL_CHANNEL_KEY,
+} from "@drts/contracts";
+
+/** Seed referral revenue-share rules (mirrors the WP0 referral scaffold seed). */
+const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
+  Object.freeze([
+    Object.freeze({
+      ruleId: "referral-rule-demo-001",
+      partnerId: "partner-referral-demo-001",
+      partnerEntrySlug: "referral-demo-community",
+      rateType: "percent" as const,
+      value: 15,
+      currency: "NTD",
+      effectiveFrom: "2026-06-01T00:00:00.000Z",
+      effectiveUntil: null,
+      settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+      channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    }),
+  ]);
+
+/** Admin upsert payload for a referral revenue-share rule (CRC-BE-006). */
+export interface UpsertReferralRevenueShareRuleCommand {
+  partnerEntrySlug: string;
+  partnerId?: string;
+  rateType: "percent" | "per_trip";
+  value: number;
+  currency?: string;
+  effectiveFrom?: string;
+  effectiveUntil?: string | null;
+}
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
@@ -3755,6 +3790,109 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   listPlatformPartnerEntries() {
     return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  }
+
+  // ── Referral revenue-share rate config (CRC-BE-006) ──────────────────────
+  private referralRevenueShareRules: ReferralRevenueShareRule[] =
+    REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+
+  listReferralRevenueShareRules(entrySlug?: string): ReferralRevenueShareRule[] {
+    const slug = entrySlug?.trim();
+    return this.referralRevenueShareRules
+      .filter((rule) => !slug || rule.partnerEntrySlug === slug)
+      .map((rule) => ({ ...rule }));
+  }
+
+  upsertReferralRevenueShareRule(
+    command: UpsertReferralRevenueShareRuleCommand,
+    requestId?: string,
+  ): ReferralRevenueShareRule {
+    const partnerEntrySlug = this.requireNonBlank(
+      command.partnerEntrySlug,
+      "partnerEntrySlug",
+    );
+    if (command.rateType !== "percent" && command.rateType !== "per_trip") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "rateType must be 'percent' or 'per_trip'.",
+        { rateType: command.rateType },
+      );
+    }
+    if (
+      typeof command.value !== "number" ||
+      Number.isNaN(command.value) ||
+      command.value < 0
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "value must be a number >= 0.",
+        { value: command.value },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const existing = this.referralRevenueShareRules.find(
+      (rule) => rule.partnerEntrySlug === partnerEntrySlug,
+    );
+    const record: ReferralRevenueShareRule = {
+      ruleId: existing?.ruleId ?? `referral-rule-${randomUUID()}`,
+      partnerId:
+        this.normalizeNullableText(command.partnerId ?? null) ??
+        existing?.partnerId ??
+        `partner_${partnerEntrySlug}`,
+      partnerEntrySlug,
+      rateType: command.rateType,
+      value: command.value,
+      currency:
+        this.normalizeNullableText(command.currency ?? null) ??
+        existing?.currency ??
+        "NTD",
+      effectiveFrom:
+        this.normalizeNullableText(command.effectiveFrom ?? null) ??
+        existing?.effectiveFrom ??
+        now,
+      effectiveUntil:
+        command.effectiveUntil === undefined
+          ? (existing?.effectiveUntil ?? null)
+          : this.normalizeNullableText(command.effectiveUntil),
+      settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+      channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    if (existing) {
+      this.referralRevenueShareRules = this.referralRevenueShareRules.map(
+        (rule) => (rule.ruleId === record.ruleId ? record : rule),
+      );
+    } else {
+      this.referralRevenueShareRules.push(record);
+    }
+
+    this.auditNotificationService.recordAuditLog({
+      actorId: null,
+      actorType: "system",
+      tenantId: null,
+      moduleName: "tenant-partner",
+      actionName: existing
+        ? "referral.revenue_share_rule.updated"
+        : "referral.revenue_share_rule.created",
+      resourceType: "referral_revenue_share_rule",
+      resourceId: partnerEntrySlug,
+      newValuesSummary: {
+        partnerEntrySlug,
+        rateType: record.rateType,
+        value: record.value,
+        currency: record.currency,
+        effectiveFrom: record.effectiveFrom,
+        effectiveUntil: record.effectiveUntil,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+
+    return { ...record };
   }
 
   listPlatformPartnerIngressCredentials(entrySlug: string) {
