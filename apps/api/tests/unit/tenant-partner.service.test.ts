@@ -3,10 +3,11 @@ import { resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { OwnedOrderRecord } from "@drts/contracts";
+import type { IdentityContext, OwnedOrderRecord } from "@drts/contracts";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
 import { BankCardInlineEligibilityAdapter } from "../../src/modules/tenant-partner/bank-card-inline-eligibility.adapter";
 import {
   PartnerEligibilityAdapterError,
@@ -2759,5 +2760,142 @@ describe("TenantPartnerService approval rules", () => {
     expect(allExpressions.join("\n")).toContain(
       "tenant_governance_cost_center_validation_reject_total",
     );
+  });
+
+  it("returns partner-scoped referral portal usage revenue and statements", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    const billingSettlementService = new BillingSettlementService(
+      new AuditNotificationService(),
+    );
+    const identity: IdentityContext = {
+      actorType: "partner_api_key",
+      actorId: "partner-referral-demo-001",
+      realm: "partner",
+      authMode: "bootstrap_headers",
+      roleFamilies: ["partner"],
+      roles: ["partner"],
+      scopes: ["billing:read"],
+      tenantId: "tenant-demo-001",
+      partnerId: "partner-referral-demo-001",
+      partnerProgramId: "program-referral-community",
+      partnerEntrySlug: "referral-demo-community",
+      supportedExecutionModes: ["discussion_planning"],
+    };
+
+    const [dashboard, usage, revenue, statements] = await Promise.all([
+      service.getPartnerReferralDashboard(
+        identity,
+        billingSettlementService,
+        "2026-06",
+      ),
+      service.listPartnerReferralUsage(identity, billingSettlementService),
+      service.listPartnerReferralRevenue(identity, billingSettlementService),
+      service.listPartnerReferralStatements(identity, billingSettlementService),
+    ]);
+
+    expect(dashboard).toMatchObject({
+      partnerEntrySlug: "referral-demo-community",
+      period: "2026-06",
+      activeUserCount: 2,
+      tripCount: 2,
+      latestStatementPeriod: "2026-06",
+      pendingStatementCount: 1,
+    });
+    expect(dashboard.gmv.amountMinor).toBe(150000);
+    expect(dashboard.estimatedShareAmount.amountMinor).toBe(22500);
+
+    expect(usage).toEqual([
+      expect.objectContaining({
+        partnerEntrySlug: "referral-demo-community",
+        period: "2026-06",
+        activeUserCount: 2,
+        tripCount: 2,
+      }),
+    ]);
+    expect(usage[0]?.gmv.amountMinor).toBe(150000);
+
+    expect(revenue).toEqual([
+      expect.objectContaining({
+        partnerEntrySlug: "referral-demo-community",
+        period: "2026-06",
+        tripCount: 2,
+        statementStatus: "due",
+      }),
+    ]);
+    expect(revenue[0]?.shareAmount.amountMinor).toBe(22500);
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatchObject({
+      partnerEntrySlug: "referral-demo-community",
+      period: "2026-06",
+    });
+  });
+
+  it("rejects referral portal reads when partner identity scope does not match the provisioned entry", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    const billingSettlementService = new BillingSettlementService(
+      new AuditNotificationService(),
+    );
+
+    await expect(
+      service.listPartnerReferralStatements(
+        {
+          actorType: "partner_api_key",
+          actorId: "partner-referral-demo-001",
+          realm: "partner",
+          authMode: "bootstrap_headers",
+          roleFamilies: ["partner"],
+          roles: ["partner"],
+          scopes: ["billing:read"],
+          tenantId: "tenant-demo-001",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "referral-demo-community",
+          supportedExecutionModes: ["discussion_planning"],
+        },
+        billingSettlementService,
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      response: {
+        error: {
+          code: "PARTNER_SCOPE_MISMATCH",
+        },
+      },
+    } satisfies Partial<ApiRequestError>);
+  });
+
+  it("rejects referral portal reads from non-referral partner entries", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    const billingSettlementService = new BillingSettlementService(
+      new AuditNotificationService(),
+    );
+
+    await expect(
+      service.listPartnerReferralRevenue(
+        {
+          actorType: "partner_api_key",
+          actorId: "partner-bank-demo-001",
+          realm: "partner",
+          authMode: "bootstrap_headers",
+          roleFamilies: ["partner"],
+          roles: ["partner"],
+          scopes: ["billing:read"],
+          tenantId: "tenant-demo-001",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          supportedExecutionModes: ["discussion_planning"],
+        },
+        billingSettlementService,
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      response: {
+        error: {
+          code: "PARTNER_SCOPE_UNSUPPORTED",
+        },
+      },
+    } satisfies Partial<ApiRequestError>);
   });
 });

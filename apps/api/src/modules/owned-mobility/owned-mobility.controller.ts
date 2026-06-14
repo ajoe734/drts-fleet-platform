@@ -102,10 +102,12 @@ export class OwnedMobilityController {
   @Post("orders")
   createOwnedOrder(
     @Body() command: CreateOwnedOrderCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     const order = this.ownedMobilityService.createPassengerOrder(
       command,
+      identity,
       requestId,
     );
     return toApiSuccessEnvelope(

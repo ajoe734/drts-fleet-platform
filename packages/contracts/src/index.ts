@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
   DriverMatchingSuppression,
@@ -8,6 +9,8 @@ import type {
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "./ui-runtime";
+
+export * from "./referral-channel";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -222,7 +225,8 @@ export interface IdentityContext {
     | "tenant_admin"
     | "ops_user"
     | "driver_user"
-    | "partner_api_key";
+    | "partner_api_key"
+    | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
   authMode: "bootstrap_headers" | "jwt_bearer";
@@ -460,7 +464,7 @@ export interface PartnerIngressCredentialIssued {
 export interface PartnerChannelEntryRecord {
   partnerId: string;
   partnerCode: string;
-  partnerType: string;
+  partnerType: PartnerType;
   programId: string;
   programCode: string | null;
   tenantId: string;
@@ -488,7 +492,7 @@ export interface PartnerChannelEntryRecord {
 export interface CreatePartnerChannelEntryCommand {
   tenantId: string;
   partnerCode: string;
-  partnerType: string;
+  partnerType: PartnerType;
   programId: string;
   programCode?: string | null;
   bankCode?: string | null;
@@ -508,7 +512,7 @@ export interface CreatePartnerChannelEntryCommand {
 export interface UpdatePartnerChannelEntryCommand {
   tenantId?: string;
   partnerCode?: string;
-  partnerType?: string;
+  partnerType?: PartnerType;
   programId?: string;
   programCode?: string | null;
   bankCode?: string | null;
@@ -642,7 +646,8 @@ export interface AuditLogRecord {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
-    | "partner_api_key";
+    | "partner_api_key"
+    | "referral_passenger";
   tenantId: string | null;
   moduleName: string;
   actionName: string;

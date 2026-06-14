@@ -7,6 +7,11 @@ import { findPassengerNavItem, passengerNavItems } from "@/lib/navigation";
 
 export function PassengerShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+
+  if (pathname.startsWith("/embed/")) {
+    return <>{children}</>;
+  }
+
   const activeItem = findPassengerNavItem(pathname);
 
   return (

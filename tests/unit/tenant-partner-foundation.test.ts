@@ -177,11 +177,14 @@ describe("tenant partner foundation service", () => {
       "bank-demo-alpha-airport",
     );
 
-    expect(entries).toHaveLength(2);
+    // 3 active entries now: the 2 bank-airport flows + the referral-channel
+    // demo entry added for the community-app referral read APIs (CRC-BE-007).
+    expect(entries).toHaveLength(3);
     expect(entries.map((entry) => entry.entrySlug)).toEqual(
       expect.arrayContaining([
         "bank-demo-alpha-airport",
         "bank-demo-beta-airport",
+        "referral-demo-community",
       ]),
     );
     expect(alphaEntry).toMatchObject({
@@ -344,7 +347,7 @@ describe("tenant partner foundation service", () => {
     );
     await reloadedService.onModuleInit();
 
-    expect(store.snapshot().partnerEntries).toHaveLength(2);
+    expect(store.snapshot().partnerEntries).toHaveLength(3);
     expect(reloadedService.listPartnerEntries()).toEqual(
       firstService.listPartnerEntries(),
     );
@@ -1396,5 +1399,56 @@ describe("tenant partner foundation service", () => {
         ]),
       }),
     );
+  });
+});
+
+describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
+  it("lists seeded referral rates and filters by entrySlug", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    const all = service.listReferralRevenueShareRules();
+    expect(all.length).toBeGreaterThanOrEqual(1);
+    const filtered = service.listReferralRevenueShareRules(
+      "referral-demo-community",
+    );
+    expect(filtered.every((r) => r.partnerEntrySlug === "referral-demo-community")).toBe(
+      true,
+    );
+  });
+
+  it("upserts a referral rate and writes an audit log", () => {
+    const audit = new AuditNotificationService();
+    const service = new TenantPartnerService(audit);
+    const rule = service.upsertReferralRevenueShareRule({
+      partnerEntrySlug: "referral-demo-community",
+      rateType: "per_trip",
+      value: 5000,
+      currency: "NTD",
+    });
+    expect(rule.rateType).toBe("per_trip");
+    expect(rule.value).toBe(5000);
+    expect(rule.channelKey).toBe("partner_referral");
+    expect(rule.settlementDirection).toBe("drts_pays_partner");
+    const audits = audit
+      .listAuditLogs()
+      .filter((a) => a.resourceType === "referral_revenue_share_rule");
+    expect(audits.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("rejects an invalid rateType or negative value", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    expect(() =>
+      service.upsertReferralRevenueShareRule({
+        partnerEntrySlug: "x",
+        rateType: "bogus" as any,
+        value: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      service.upsertReferralRevenueShareRule({
+        partnerEntrySlug: "x",
+        rateType: "percent",
+        value: -5,
+      }),
+    ).toThrow();
   });
 });

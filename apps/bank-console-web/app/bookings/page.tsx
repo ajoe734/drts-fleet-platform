@@ -1,4 +1,3 @@
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { DataTable, Td, Tr, CanvasPill } from "@drts/ui-web";
 import type { CSSProperties } from "react";
 import Link from "next/link";
@@ -7,6 +6,9 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { getBankConsoleSession, bankConsoleHref } from "@/lib/session";
+import { tenantDisplayText } from "@/lib/tenant-display";
 import {
   bookingPeriods,
   bookingPrograms,
@@ -15,8 +17,6 @@ import {
   type BookingState,
 } from "@/lib/bookings";
 import { t } from "@/lib/translations";
-
-const issuerBrand = BRAND_TEMPLATES.CTBC;
 
 const bookingPillTone: Record<
   BookingState,
@@ -73,6 +73,19 @@ export default async function BookingsPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const session = getBankConsoleSession(
+    tenant,
+    locale,
+    resolvedSearchParams.role,
+  );
+  const issuerBrand = tenant.template;
+  const baseQuery = {
+    bank: tenant.code,
+    locale,
+    role: session.role,
+  };
   const programCode = one(resolvedSearchParams.program);
   const direction = one(resolvedSearchParams.direction) as
     | BookingDirection
@@ -109,89 +122,107 @@ export default async function BookingsPage({
       }
     >
       <PageHero
-        eyebrow={t("bookings.eyebrow")}
+        eyebrow={t("bookings.eyebrow", locale)}
         title={
           <span className="bank-title-block">
-            {t("bookings.title")}
+            {t("bookings.title", locale)}
             <span className="issuer-chip">
-              {issuerBrand.bankName} · {issuerBrand.programName}
+              {tenant.name[locale]} · {tenant.programSeed.premium[locale]}
             </span>
           </span>
         }
-        description={t("bookings.purpose")}
+        description={t("bookings.purpose", locale)}
       />
 
       <section className="issuer-strip">
         <div>
-          <span className="eyebrow">{t("bookings.scopeLabel")}</span>
-          <strong>{t("bookings.scopeValue")}</strong>
+          <span className="eyebrow">{t("bookings.scopeLabel", locale)}</span>
+          <strong>{tenant.name[locale]}</strong>
         </div>
         <div>
-          <span className="eyebrow">{t("bookings.periodLabel")}</span>
+          <span className="eyebrow">{t("bookings.periodLabel", locale)}</span>
           <strong>{formatPeriod(currentPeriod)}</strong>
         </div>
         <div>
-          <span className="eyebrow">{t("bookings.maskingLabel")}</span>
-          <strong>{t("bookings.maskingValue")}</strong>
+          <span className="eyebrow">{t("bookings.maskingLabel", locale)}</span>
+          <strong>{t("bookings.maskingValue", locale)}</strong>
         </div>
       </section>
 
       <CalloutPanel
-        title={t("bookings.readonlyTitle")}
-        description={t("bookings.readonlyBody")}
+        title={t("bookings.readonlyTitle", locale)}
+        description={t("bookings.readonlyBody", locale)}
       />
 
       <section className="surface-card bookings-filter-card">
         <div className="bank-section-head">
           <div>
             <span className="surface-kicker">
-              {t("bookings.filters.kicker")}
+              {t("bookings.filters.kicker", locale)}
             </span>
-            <h3>{t("bookings.filters.title")}</h3>
-            <p>{t("bookings.filters.description")}</p>
+            <h3>{t("bookings.filters.title", locale)}</h3>
+            <p>{t("bookings.filters.description", locale)}</p>
           </div>
-          <a className="filters-reset" href="/bookings">
-            {t("bookings.filters.reset")}
+          <a
+            className="filters-reset"
+            href={bankConsoleHref("/bookings", tenant, locale, session.role)}
+          >
+            {t("bookings.filters.reset", locale)}
           </a>
         </div>
 
         <form className="filters-form" method="get">
+          <input name="bank" type="hidden" value={baseQuery.bank} />
+          <input name="locale" type="hidden" value={baseQuery.locale} />
+          <input name="role" type="hidden" value={baseQuery.role} />
           <label className="filter-field">
-            <span>{t("bookings.filters.program")}</span>
+            <span>{t("bookings.filters.program", locale)}</span>
             <select name="program" defaultValue={filters.programCode ?? ""}>
-              <option value="">{t("common.all")}</option>
+              <option value="">{t("common.all", locale)}</option>
               {bookingPrograms.map((program) => (
                 <option key={program.code} value={program.code}>
-                  {program.label}
+                  {tenantDisplayText(program.label, tenant)}
                 </option>
               ))}
             </select>
           </label>
 
           <label className="filter-field">
-            <span>{t("bookings.filters.direction")}</span>
+            <span>{t("bookings.filters.direction", locale)}</span>
             <select name="direction" defaultValue={filters.direction ?? ""}>
-              <option value="">{t("common.all")}</option>
-              <option value="outbound">{t(directionLabelKey.outbound)}</option>
-              <option value="inbound">{t(directionLabelKey.inbound)}</option>
+              <option value="">{t("common.all", locale)}</option>
+              <option value="outbound">
+                {t(directionLabelKey.outbound, locale)}
+              </option>
+              <option value="inbound">
+                {t(directionLabelKey.inbound, locale)}
+              </option>
             </select>
           </label>
 
           <label className="filter-field">
-            <span>{t("bookings.filters.state")}</span>
+            <span>{t("bookings.filters.state", locale)}</span>
             <select name="state" defaultValue={filters.state ?? ""}>
-              <option value="">{t("common.all")}</option>
-              <option value="assigned">{t(stateLabelKey.assigned)}</option>
-              <option value="en_route">{t(stateLabelKey.en_route)}</option>
-              <option value="completed">{t(stateLabelKey.completed)}</option>
-              <option value="cancelled">{t(stateLabelKey.cancelled)}</option>
+              <option value="">{t("common.all", locale)}</option>
+              <option value="assigned">
+                {t(stateLabelKey.assigned, locale)}
+              </option>
+              <option value="en_route">
+                {t(stateLabelKey.en_route, locale)}
+              </option>
+              <option value="completed">
+                {t(stateLabelKey.completed, locale)}
+              </option>
+              <option value="cancelled">
+                {t(stateLabelKey.cancelled, locale)}
+              </option>
             </select>
           </label>
 
           <label className="filter-field">
-            <span>{t("bookings.filters.period")}</span>
+            <span>{t("bookings.filters.period", locale)}</span>
             <select name="period" defaultValue={filters.period ?? ""}>
-              <option value="">{t("common.all")}</option>
+              <option value="">{t("common.all", locale)}</option>
               {bookingPeriods.map((period) => (
                 <option key={period} value={period}>
                   {formatPeriod(period)}
@@ -201,44 +232,46 @@ export default async function BookingsPage({
           </label>
 
           <label className="filter-field">
-            <span>{t("bookings.filters.cardholder")}</span>
+            <span>{t("bookings.filters.cardholder", locale)}</span>
             <input
               name="cardholder"
               defaultValue={filters.cardholder ?? ""}
-              placeholder={t("bookings.filters.cardholderPlaceholder")}
+              placeholder={t("bookings.filters.cardholderPlaceholder", locale)}
             />
           </label>
 
           <button className="filters-submit" type="submit">
-            {t("bookings.filters.apply")}
+            {t("bookings.filters.apply", locale)}
           </button>
         </form>
       </section>
 
       <section className="surface-grid">
         <SurfaceCard
-          kicker={t("bookings.metrics.kicker")}
+          kicker={t("bookings.metrics.kicker", locale)}
           title={String(bookings.length)}
-          description={t("bookings.metrics.total")}
+          description={t("bookings.metrics.total", locale)}
         />
         <SurfaceCard
-          kicker={t("bookings.metrics.kicker")}
+          kicker={t("bookings.metrics.kicker", locale)}
           title={String(activeCount)}
-          description={t("bookings.metrics.active")}
+          description={t("bookings.metrics.active", locale)}
         />
         <SurfaceCard
-          kicker={t("bookings.metrics.kicker")}
+          kicker={t("bookings.metrics.kicker", locale)}
           title={String(completedCount)}
-          description={t("bookings.metrics.completed")}
+          description={t("bookings.metrics.completed", locale)}
         />
       </section>
 
       <section className="surface-card bookings-table-card">
         <div className="bank-section-head">
           <div>
-            <span className="surface-kicker">{t("bookings.table.kicker")}</span>
-            <h3>{t("bookings.table.title")}</h3>
-            <p>{t("bookings.table.description")}</p>
+            <span className="surface-kicker">
+              {t("bookings.table.kicker", locale)}
+            </span>
+            <h3>{t("bookings.table.title", locale)}</h3>
+            <p>{t("bookings.table.description", locale)}</p>
           </div>
         </div>
 
@@ -246,17 +279,20 @@ export default async function BookingsPage({
           density="compact"
           tone="tenant"
           minWidth={1180}
-          empty={t("bookings.empty")}
+          empty={t("bookings.empty", locale)}
           columns={[
-            { label: t("bookings.columns.order"), width: "136px" },
-            { label: t("bookings.columns.cardholder"), width: "138px" },
-            { label: t("bookings.columns.program"), width: "176px" },
-            { label: t("bookings.columns.direction"), width: "96px" },
-            { label: t("bookings.columns.flight"), width: "124px" },
-            { label: t("bookings.columns.route"), width: "260px" },
-            { label: t("bookings.columns.window"), width: "150px" },
-            { label: t("bookings.columns.state"), width: "108px" },
-            { label: t("bookings.columns.benefit"), width: "136px" },
+            { label: t("bookings.columns.order", locale), width: "136px" },
+            {
+              label: t("bookings.columns.cardholder", locale),
+              width: "138px",
+            },
+            { label: t("bookings.columns.program", locale), width: "176px" },
+            { label: t("bookings.columns.direction", locale), width: "96px" },
+            { label: t("bookings.columns.flight", locale), width: "124px" },
+            { label: t("bookings.columns.route", locale), width: "260px" },
+            { label: t("bookings.columns.window", locale), width: "150px" },
+            { label: t("bookings.columns.state", locale), width: "108px" },
+            { label: t("bookings.columns.benefit", locale), width: "136px" },
           ]}
         >
           {bookings.map((item) => (
@@ -265,21 +301,28 @@ export default async function BookingsPage({
                 <div className="cell-stack">
                   <Link
                     className="text-link"
-                    href={`/bookings/${item.orderId}`}
+                    href={bankConsoleHref(
+                      `/bookings/${item.orderId}`,
+                      tenant,
+                      locale,
+                      session.role,
+                    )}
                   >
                     {item.orderNo}
                   </Link>
-                  <span>{item.orderId}</span>
+                  <span>{tenantDisplayText(item.orderId, tenant)}</span>
                 </div>
               </Td>
               <Td mono>{item.cardholderRefMasked}</Td>
               <Td>
                 <div className="cell-stack">
-                  <strong>{item.programLabel}</strong>
+                  <strong>
+                    {tenantDisplayText(item.programLabel, tenant)}
+                  </strong>
                   <span>{item.programCode}</span>
                 </div>
               </Td>
-              <Td>{t(directionLabelKey[item.direction])}</Td>
+              <Td>{t(directionLabelKey[item.direction], locale)}</Td>
               <Td>
                 <div className="cell-stack">
                   <strong>{item.flightNo}</strong>
@@ -295,7 +338,7 @@ export default async function BookingsPage({
               <Td mono>{formatDateTime(item.scheduledAt)}</Td>
               <Td>
                 <CanvasPill tone={bookingPillTone[item.state]} dot>
-                  {t(stateLabelKey[item.state])}
+                  {t(stateLabelKey[item.state], locale)}
                 </CanvasPill>
               </Td>
               <Td mono>{item.benefitReferenceMasked}</Td>

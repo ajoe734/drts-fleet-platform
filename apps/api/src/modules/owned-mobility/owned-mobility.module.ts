@@ -11,6 +11,7 @@ import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
+import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
@@ -29,9 +30,10 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     OwnedMobilityRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
+    ReferralBindingScaffoldService,
     OpsDispatchEventsService,
   ],
-  exports: [OwnedMobilityService],
+  exports: [OwnedMobilityService, ReferralBindingScaffoldService],
 })
 export class OwnedMobilityModule implements OnModuleInit {
   constructor(

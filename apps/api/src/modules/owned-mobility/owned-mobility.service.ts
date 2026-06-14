@@ -265,7 +265,11 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
-  createPassengerOrder(command: CreateOwnedOrderCommand, requestId?: string) {
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ) {
     this.assertAddress(command.pickup.address, "pickup.address");
     this.assertAddress(command.dropoff.address, "dropoff.address");
 
@@ -274,15 +278,21 @@ export class OwnedMobilityService implements OnModuleInit {
       etaMinutes: 8,
       calculatedAt: now,
     };
+    // CRC-BE-003: attribute referral-channel passenger rides. The handoff
+    // session (CRC-BE-002) carries partnerEntrySlug on the identity; stamp it
+    // onto the order so owned-mobility → billing-settlement referral settlement
+    // (CRC-BE-005) can attribute + revenue-share the ride. Non-referral rides
+    // (no partnerEntrySlug on the identity) stay null.
+    const partnerEntrySlug = identity?.partnerEntrySlug?.trim() || null;
     const order: OwnedOrderRecord = {
       orderId: randomUUID(),
       orderNo: this.nextOrderNo(),
       orderSource: "app",
       orderDomain: "owned",
       tenantId: null,
-      partnerId: null,
+      partnerId: identity?.partnerId ?? null,
       partnerProgramId: null,
-      partnerEntrySlug: null,
+      partnerEntrySlug,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
       serviceBucket: "standard_taxi",

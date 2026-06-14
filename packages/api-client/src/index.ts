@@ -124,6 +124,7 @@ import type {
   OperationalObservabilitySnapshot,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
+  ReferralRevenueShareRule,
   PartnerBootstrapSession,
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
@@ -2298,6 +2299,31 @@ export class ApiClient {
   async listPlatformPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
     return this.getList<PartnerChannelEntryRecord>(
       "/api/platform-admin/partner-entries",
+    );
+  }
+
+  async listReferralRevenueShareRules(
+    entrySlug?: string,
+  ): Promise<ReferralRevenueShareRule[]> {
+    const search = entrySlug
+      ? `?entrySlug=${encodeURIComponent(entrySlug)}`
+      : "";
+    return this.getList<ReferralRevenueShareRule>(
+      `/api/platform-admin/referral-rates${search}`,
+    );
+  }
+
+  async upsertReferralRevenueShareRule(command: {
+    partnerEntrySlug: string;
+    rateType: "percent" | "per_trip";
+    value: number;
+    currency?: string;
+    effectiveFrom?: string;
+    effectiveUntil?: string | null;
+  }): Promise<ReferralRevenueShareRule> {
+    return this.post<ReferralRevenueShareRule>(
+      "/api/platform-admin/referral-rates",
+      { body: command },
     );
   }
 

@@ -7,6 +7,9 @@ import {
   IssuerBrandPill,
   ReadOnlyPanel,
 } from "@/components/contracts-ui";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
+import { tenantDisplayText } from "@/lib/tenant-display";
 import {
   formatDateTime,
   formatPercent,
@@ -20,10 +23,20 @@ import { t } from "@/lib/translations";
 
 export default async function ContractDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ contractId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { contractId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const session = getBankConsoleSession(
+    tenant,
+    locale,
+    resolvedSearchParams.role,
+  );
   const contract = getContractRecord(contractId);
 
   if (!contract) {
@@ -34,59 +47,69 @@ export default async function ContractDetailPage({
 
   return (
     <div className="page-shell">
-      <Link className="text-link" href="/contracts">
-        {t("contracts.detail.back")}
+      <Link
+        className="text-link"
+        href={bankConsoleHref("/contracts", tenant, locale, session.role)}
+      >
+        {t("contracts.detail.back", locale)}
       </Link>
 
       <PageHero
-        eyebrow={t("contracts.eyebrow")}
+        eyebrow={t("contracts.eyebrow", locale)}
         title={
           <span className="pending-title">
-            {contractRecord.displayName}
-            <ContractHealthBadge health={contractRecord.health} />
-            <IssuerBrandPill />
+            {tenantDisplayText(contractRecord.displayName, tenant)}
+            <ContractHealthBadge
+              health={contractRecord.health}
+              locale={locale}
+            />
+            <IssuerBrandPill locale={locale} tenant={tenant} />
           </span>
         }
-        description={contractRecord.attainmentSummary}
+        description={tenantDisplayText(
+          contractRecord.attainmentSummary,
+          tenant,
+        )}
       />
 
       <ReadOnlyPanel
-        title={t("contracts.detail.readOnlyTitle")}
-        description={t("contracts.detail.readOnlyBody")}
+        title={t("contracts.detail.readOnlyTitle", locale)}
+        description={t("contracts.detail.readOnlyBody", locale)}
+        locale={locale}
       />
 
       <section className="surface-grid">
         <SurfaceCard
-          kicker={t("contracts.detail.term")}
+          kicker={t("contracts.detail.term", locale)}
           title={formatPeriod(contractRecord.periodAttainment.period)}
-          description={`${contractRecord.term.startsAt.slice(0, 10)} - ${contractRecord.term.endsAt?.slice(0, 10) ?? t("contracts.detail.ongoing")}`}
+          description={`${contractRecord.term.startsAt.slice(0, 10)} - ${contractRecord.term.endsAt?.slice(0, 10) ?? t("contracts.detail.ongoing", locale)}`}
         />
         <SurfaceCard
-          kicker={t("contracts.detail.evaluatedAt")}
+          kicker={t("contracts.detail.evaluatedAt", locale)}
           title={formatDateTime(contractRecord.periodAttainment.evaluatedAt)}
-          description={t("contracts.readOnly")}
+          description={t("contracts.readOnly", locale)}
         />
         <SurfaceCard
-          kicker={t("contracts.detail.completedTrips")}
+          kicker={t("contracts.detail.completedTrips", locale)}
           title={`${contractRecord.periodAttainment.completedTrips}`}
-          description={`${t("contracts.detail.totalTrips")} ${contractRecord.periodAttainment.totalTrips}`}
+          description={`${t("contracts.detail.totalTrips", locale)} ${contractRecord.periodAttainment.totalTrips}`}
         />
       </section>
 
       <section className="contracts-table-card">
         <div className="contracts-inline-header">
-          <h2>{t("contracts.detail.targets")}</h2>
-          <span className="status-chip">{t("contracts.readOnly")}</span>
+          <h2>{t("contracts.detail.targets", locale)}</h2>
+          <span className="status-chip">{t("contracts.readOnly", locale)}</span>
         </div>
         <div className="contracts-table-scroll">
           <table className="contracts-table">
             <thead>
               <tr>
-                <th>{t("contracts.table.targets")}</th>
-                <th>{t("contracts.detail.target")}</th>
-                <th>{t("contracts.detail.current")}</th>
-                <th>{t("contracts.detail.delta")}</th>
-                <th>{t("contracts.detail.result")}</th>
+                <th>{t("contracts.table.targets", locale)}</th>
+                <th>{t("contracts.detail.target", locale)}</th>
+                <th>{t("contracts.detail.current", locale)}</th>
+                <th>{t("contracts.detail.delta", locale)}</th>
+                <th>{t("contracts.detail.result", locale)}</th>
               </tr>
             </thead>
             <tbody>
@@ -100,7 +123,7 @@ export default async function ContractDetailPage({
 
                 return (
                   <tr key={target.metric}>
-                    <td>{t(`contracts.metric.${target.metric}`)}</td>
+                    <td>{t(`contracts.metric.${target.metric}`, locale)}</td>
                     <td>{target.thresholdPercent}%</td>
                     <td>{formatPercent(current)}</td>
                     <td
@@ -117,8 +140,8 @@ export default async function ContractDetailPage({
                         tone={passed ? "success" : "danger"}
                         label={
                           passed
-                            ? t("contracts.summaryHealthy")
-                            : t("contracts.summaryBreached")
+                            ? t("contracts.summaryHealthy", locale)
+                            : t("contracts.summaryBreached", locale)
                         }
                       />
                     </td>
@@ -132,24 +155,24 @@ export default async function ContractDetailPage({
 
       <section className="contracts-table-card">
         <div className="contracts-inline-header">
-          <h2>{t("contracts.detail.exceptions")}</h2>
-          <span className="status-chip">{t("contracts.readOnly")}</span>
+          <h2>{t("contracts.detail.exceptions", locale)}</h2>
+          <span className="status-chip">{t("contracts.readOnly", locale)}</span>
         </div>
 
         {contractRecord.exceptions.length === 0 ? (
           <p className="contracts-empty-note">
-            {t("contracts.detail.emptyExceptions")}
+            {t("contracts.detail.emptyExceptions", locale)}
           </p>
         ) : (
           <div className="contracts-table-scroll">
             <table className="contracts-table">
               <thead>
                 <tr>
-                  <th>{t("contracts.detail.orderId")}</th>
-                  <th>{t("contracts.detail.occurredAt")}</th>
-                  <th>{t("contracts.detail.reason")}</th>
-                  <th>{t("contracts.detail.maskedRefs")}</th>
-                  <th>{t("contracts.table.status")}</th>
+                  <th>{t("contracts.detail.orderId", locale)}</th>
+                  <th>{t("contracts.detail.occurredAt", locale)}</th>
+                  <th>{t("contracts.detail.reason", locale)}</th>
+                  <th>{t("contracts.detail.maskedRefs", locale)}</th>
+                  <th>{t("contracts.table.status", locale)}</th>
                   <th />
                 </tr>
               </thead>
@@ -161,7 +184,9 @@ export default async function ContractDetailPage({
                     <td>
                       <div className="contracts-cell-stack">
                         <strong>{exception.reasonCode}</strong>
-                        <span>{exception.summary}</span>
+                        <span>
+                          {tenantDisplayText(exception.summary, tenant)}
+                        </span>
                       </div>
                     </td>
                     <td>
@@ -179,15 +204,23 @@ export default async function ContractDetailPage({
                             ? "success"
                             : "warning"
                         }
-                        label={t(`contracts.exception.${exception.status}`)}
+                        label={t(
+                          `contracts.exception.${exception.status}`,
+                          locale,
+                        )}
                       />
                     </td>
                     <td>
                       <Link
                         className="inline-link-button"
-                        href={`/bookings/${exception.orderId}`}
+                        href={bankConsoleHref(
+                          `/bookings/${exception.orderId}`,
+                          tenant,
+                          locale,
+                          session.role,
+                        )}
                       >
-                        {t("contracts.detail.bookingLink")}
+                        {t("contracts.detail.bookingLink", locale)}
                       </Link>
                     </td>
                   </tr>

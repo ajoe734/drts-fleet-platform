@@ -20,6 +20,7 @@ export interface JwtIdentityPayload {
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
+  drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
 }
@@ -45,6 +46,7 @@ type JwtSignIdentityBase =
   | IdentityContext;
 
 type JwtSignIdentity = JwtSignIdentityBase & {
+  drtsPassengerId?: string | null;
   driverBindingId?: string | null;
   driverDeviceId?: string | null;
 };
@@ -117,6 +119,7 @@ export class JwtAuthService {
       roleFamilies: identity.roleFamilies,
       roles: identity.roles,
       scopes: identity.scopes,
+      drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
     };

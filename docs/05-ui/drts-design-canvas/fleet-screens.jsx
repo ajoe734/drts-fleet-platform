@@ -377,7 +377,7 @@ function FLP_Quality({ theme: th }) {
       <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {FX_FLEET_QUALITY.map((q, i) => (
-            <Kpi key={i} label={q.k} en={q.en} value={q.v} delta={q.delta} deltaTone={q.tone === 'success' ? 'up' : q.tone === 'warn' ? 'down' : 'neutral'} />
+            <Kpi key={i} theme={th} label={q.k} en={q.en} value={q.v} delta={q.delta} deltaTone={q.tone === 'success' ? 'up' : q.tone === 'warn' ? 'down' : 'neutral'} />
           ))}
         </div>
         <Card theme={th} title="品質責任說明">

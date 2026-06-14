@@ -2,13 +2,13 @@ import { expect, test, type APIResponse } from "@playwright/test";
 
 const TARGET_CASE_COUNT = 3_000;
 
-const skippedRuntimeSurfaces = [
-  "bank-console-web",
-  "partner-booking-web",
-] as const;
+const skippedRuntimeSurfaces = [] as const;
 
 type RuntimeSurfaceKey =
   | "api"
+  | "bank-console-web"
+  | "enterprise-dispatch-web"
+  | "partner-booking-web"
   | "platform-admin-web"
   | "ops-console-web"
   | "fleet-partner-portal-web"
@@ -134,6 +134,41 @@ const tenantActors: ActorProfile[] = [
   },
 ];
 
+const enterpriseActors: ActorProfile[] = [
+  {
+    key: "enterprise-employee",
+    role: "enterprise_employee",
+    tenant: "hongshuo",
+  },
+  {
+    key: "enterprise-delegate",
+    role: "enterprise_delegate",
+    tenant: "hongshuo",
+  },
+  {
+    key: "enterprise-approver",
+    role: "enterprise_approver",
+    tenant: "hongshuo",
+  },
+  {
+    key: "enterprise-finance-viewer",
+    role: "enterprise_finance_viewer",
+    tenant: "hongshuo",
+  },
+];
+
+const bankActors: ActorProfile[] = [
+  {
+    key: "bank-program-admin",
+    role: "bank_program_admin",
+    tenant: "tenant-ctbc-001",
+  },
+];
+
+const partnerBookingActors: ActorProfile[] = [
+  { key: "partner-booking-visitor", role: "partner_booking_visitor" },
+];
+
 const apiActors: ActorProfile[] = [
   { key: "api-smoke", role: "runtime_smoke" },
   { key: "api-observer", role: "runtime_observer" },
@@ -143,6 +178,8 @@ const platformMarker = /DRTS 平台管理|Platform|平台管理|租戶|稽核|�
 const opsMarker = /Operations Console|營運控制台|派車調度|營運總覽|客服中心/i;
 const fleetMarker = /Fleet Partner Portal|車行夥伴入口|車行營運總覽|分潤/i;
 const tenantMarker = /租戶後台|Tenant|訂單|工作面|帳務概覽/i;
+const enterpriseMarker =
+  /企業派車|鴻碩科技|建立預約|我的預約|成本中心|身分交付/i;
 
 const surfaces: RuntimeSurface[] = [
   {
@@ -158,6 +195,210 @@ const surfaces: RuntimeSurface[] = [
         path: "/health",
         operation: "service health contract",
         marker: /"status"\s*:\s*"ok"/i,
+      },
+    ],
+  },
+  {
+    key: "bank-console-web",
+    family: "issuer bank management console",
+    baseUrl:
+      process.env.DRTS_DEV_BANK_CONSOLE_BASE_URL ??
+      "https://drts-dev-bank-console-web-waji3fer3a-uc.a.run.app",
+    actors: bankActors,
+    routes: [
+      {
+        key: "home",
+        path: "/?bank=ctbc",
+        operation: "issuer dashboard",
+        marker: /發卡行工作面|本期訂單|禮遇配額/i,
+      },
+      {
+        key: "bookings",
+        path: "/bookings?bank=ctbc",
+        operation: "issuer booking list",
+        marker: /發卡行訂單工作面|卡友訂單|唯讀履約視圖/i,
+      },
+      {
+        key: "booking-detail",
+        path: "/bookings/ord_ctbc_240611_01?bank=ctbc",
+        operation: "issuer booking detail",
+        marker: /訂單詳情|機場履約|BK-240611-018/i,
+      },
+      {
+        key: "users",
+        path: "/users?bank=cathay",
+        operation: "issuer user governance",
+        marker: /人員與角色|program_admin|使用者 Email/i,
+      },
+      {
+        key: "programs",
+        path: "/programs?bank=ctbc",
+        operation: "issuer benefit programs",
+        marker: /方案與配額|禮遇|本月需關注/i,
+      },
+      {
+        key: "contracts",
+        path: "/contracts?bank=ctbc",
+        operation: "issuer contract registry",
+        marker: /合約與 SLA|服務水準|合約/i,
+      },
+      {
+        key: "statement",
+        path: "/statements/2026-06?bank=fubon",
+        operation: "issuer statement detail",
+        marker: /結算對帳單|對帳|STM-FUBON/i,
+      },
+      {
+        key: "audit",
+        path: "/audit?bank=ctbc",
+        operation: "issuer audit trail",
+        marker: /稽核|Audit|事件/i,
+      },
+    ],
+  },
+  {
+    key: "partner-booking-web",
+    family: "partner white-label booking surface",
+    baseUrl:
+      process.env.DRTS_DEV_PARTNER_BOOKING_BASE_URL ??
+      "https://drts-dev-partner-booking-web-waji3fer3a-uc.a.run.app",
+    actors: partnerBookingActors,
+    routes: [
+      {
+        key: "card-site",
+        path: "/ctbc/program/site",
+        operation: "credit-card website booking",
+        marker: /世界卡禮賓|全年 12 趟免費接送|機場接送禮遇/i,
+      },
+      {
+        key: "card-embed",
+        path: "/ctbc/program/embed",
+        operation: "credit-card bank-app embed handoff",
+        marker: /reference token|issuer_signature|cardholder_resolved/i,
+      },
+      {
+        key: "card-embed-reauth",
+        path: "/ctbc/program/embed/reauth",
+        operation: "credit-card bank-app embed reauth",
+        marker: /issuer_session expired|token_expired|ref_token stale/i,
+      },
+      {
+        key: "card-embed-unsupported",
+        path: "/ctbc/program/embed/embed-unsupported",
+        operation: "credit-card bank-app embed unsupported host",
+        marker: /unknown-host\.example|unsupported host|不受支援/i,
+      },
+      {
+        key: "insurance-review",
+        path: "/fubon/program/site/review",
+        operation: "insurance replacement mobility review",
+        marker: /保險理賠代步|理賠額度|下單前確認/i,
+      },
+      {
+        key: "insurance-pending",
+        path: "/fubon/program/site/insurance_pending",
+        operation: "insurance pending eligibility block",
+        marker: /insurance_pending|理賠審核中|理賠額度/i,
+      },
+      {
+        key: "travel-manual-review",
+        path: "/lion/program/site/manual-review",
+        operation: "travel group transfer manual review",
+        marker: /旅行社團體接送|manual_review|團體席次/i,
+      },
+      {
+        key: "travel-site",
+        path: "/lion/program/site",
+        operation: "travel group transfer website booking",
+        marker: /旅行社團體接送|團體席次|雄獅旅遊/i,
+      },
+    ],
+  },
+  {
+    key: "enterprise-dispatch-web",
+    family: "enterprise dispatch self-service",
+    baseUrl:
+      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL ??
+      "https://drts-dev-enterprise-dispatch-web-waji3fer3a-uc.a.run.app",
+    actors: enterpriseActors,
+    routes: [
+      {
+        key: "home",
+        path: "/",
+        operation: "employee dispatch landing",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "bookings",
+        path: "/bookings",
+        operation: "employee booking list",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-new",
+        path: "/bookings/new",
+        operation: "employee booking create",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-review",
+        path: "/bookings/review",
+        operation: "booking responsibility review",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-submitted",
+        path: "/bookings/submitted",
+        operation: "booking command accepted",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "booking-detail",
+        path: "/bookings/EB-7K2E1D",
+        operation: "booking detail",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "trip",
+        path: "/trip",
+        operation: "active trip status",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "receipt",
+        path: "/receipts/EB-7K28Z2",
+        operation: "receipt view",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "help",
+        path: "/help",
+        operation: "employee support",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "auth-required",
+        path: "/auth-required",
+        operation: "auth gate",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "quota-blocked",
+        path: "/quota-blocked",
+        operation: "quota gate",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "embed",
+        path: "/embed",
+        operation: "embedded identity handoff",
+        marker: enterpriseMarker,
+      },
+      {
+        key: "embed-unsupported",
+        path: "/embed/unsupported-host",
+        operation: "embedded unsupported host",
+        marker: enterpriseMarker,
       },
     ],
   },

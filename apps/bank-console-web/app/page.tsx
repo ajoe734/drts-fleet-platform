@@ -1,8 +1,9 @@
-import type { CSSProperties, ReactNode } from "react";
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
-import { t } from "@/lib/translations";
+import type { ReactNode } from "react";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { getBankConsoleSession, toHomeRole } from "@/lib/session";
+import { tenantDisplayText, tenantIssuerVars } from "@/lib/tenant-display";
+import { t, type Locale } from "@/lib/translations";
 import {
-  BANK_ACTORS,
   EXCEPTIONS,
   ON_TIME_SLA,
   ORDER_TALLIES,
@@ -15,18 +16,11 @@ import {
   UPCOMING_ORDERS,
   orderStateTone,
   quotaPct,
-  resolveRole,
   roleView,
   slaMet,
   type QuotaRow,
   type SlaMetric,
 } from "@/lib/home-data";
-
-// Issuer brand (中信/CTBC navy + gold) sourced from the @drts/ui-tokens token
-// set — never a hand-picked hex (keeps scripts/check_ui_realm_tokens.py green).
-// The window chrome stays on the tenant realm (teal) via BankShell; the issuer
-// brand only accents the card-benefit data (screen-requirements §7 VQ-1).
-const ctbc = BRAND_TEMPLATES.CTBC.tokens.dark;
 
 function Card({
   title,
@@ -93,7 +87,15 @@ function DlItem({
   );
 }
 
-function QuotaBar({ row, label }: { row: QuotaRow; label: string }) {
+function QuotaBar({
+  row,
+  label,
+  locale,
+}: {
+  row: QuotaRow;
+  label: string;
+  locale: Locale;
+}) {
   const pct = quotaPct(row);
   const remaining = (row.total - row.used).toLocaleString();
   return (
@@ -102,41 +104,43 @@ function QuotaBar({ row, label }: { row: QuotaRow; label: string }) {
       <div className="quota-figures">
         <span className="quota-used">{row.used.toLocaleString()}</span>
         <span className="quota-total">
-          {t("home.quota.totalUnit", "zh", {
+          {t("home.quota.totalUnit", locale, {
             total: row.total.toLocaleString(),
           })}
         </span>
-        <span className="quota-pct">{t("home.quota.used", "zh", { pct })}</span>
+        <span className="quota-pct">
+          {t("home.quota.used", locale, { pct })}
+        </span>
       </div>
       <div className="quota-track">
         <div className="quota-fill" style={{ width: `${pct}%` }} />
       </div>
       <span className="quota-remaining">
-        {t("home.quota.remaining", "zh", { remaining })}
+        {t("home.quota.remaining", locale, { remaining })}
       </span>
     </div>
   );
 }
 
-function SlaRow({ metric }: { metric: SlaMetric }) {
+function SlaRow({ metric, locale }: { metric: SlaMetric; locale: Locale }) {
   const ok = slaMet(metric);
   return (
     <div className="sla-row">
-      <span className="sla-label">{t(`home.sla.${metric.key}`)}</span>
+      <span className="sla-label">{t(`home.sla.${metric.key}`, locale)}</span>
       <div className="sla-values">
         <span className={ok ? "sla-value" : "sla-value is-breach"}>
           {metric.value}
           {metric.unit}
         </span>
         <span className="sla-target">
-          {t("home.sla.target", "zh", {
+          {t("home.sla.target", locale, {
             target: metric.target,
             unit: metric.unit,
           })}
         </span>
       </div>
       <span className={`pill dot tone-${ok ? "success" : "danger"}`}>
-        {ok ? t("home.sla.met") : t("home.sla.breach")}
+        {ok ? t("home.sla.met", locale) : t("home.sla.breach", locale)}
       </span>
     </div>
   );
@@ -145,13 +149,19 @@ function SlaRow({ metric }: { metric: SlaMetric }) {
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ role?: string | string[] }>;
+  searchParams: Promise<{
+    bank?: string | string[];
+    locale?: string | string[];
+    role?: string | string[];
+  }>;
 }) {
   const params = await searchParams;
-  const role = resolveRole(params.role);
-  const actor = BANK_ACTORS[role];
-  const view = roleView(role);
+  const locale = resolveLocale(params.locale);
+  const tenant = resolveBankDemoTenant(params.bank);
+  const session = getBankConsoleSession(tenant, locale, params.role);
+  const view = roleView(toHomeRole(session.role));
   const onTime = ON_TIME_SLA;
+  const bankQuery = `bank=${tenant.code}&locale=${locale}&role=${session.role}`;
 
   const manualN = EXCEPTIONS.filter((e) => e.kind === "manual_review").length;
   const supplyN = EXCEPTIONS.filter((e) => e.kind === "no_supply").length;
@@ -163,39 +173,30 @@ export default async function HomePage({
       ? EXCEPTIONS.filter((e) => e.kind === "sla_breach")
       : EXCEPTIONS;
 
-  const issuerVars = {
-    "--issuer-primary": ctbc.primary,
-    "--issuer-primary-dark": ctbc.primaryDark,
-    "--issuer-accent": ctbc.accent,
-    "--issuer-ink": ctbc.ink,
-    "--issuer-surface": ctbc.surface.bg,
-    "--issuer-border": ctbc.surface.border,
-  } as CSSProperties;
-
   return (
-    <div className="page-shell bank-home" style={issuerVars}>
+    <div className="page-shell bank-home" style={tenantIssuerVars(tenant)}>
       <header className="bank-home-head">
-        <span className="eyebrow">{t("home.eyebrow")}</span>
+        <span className="eyebrow">{t("home.eyebrow", locale)}</span>
         <h1 className="bank-home-greeting">
-          {t("home.greeting", "zh", { name: actor.display })}
-          <span className="issuer-badge">CTBC</span>
+          {t("home.greeting", locale, { name: session.actorName })}
+          <span className="issuer-badge">{tenant.issuerCode}</span>
         </h1>
         <p className="bank-home-subtitle">
-          {t("home.subtitle", "zh", { date: TODAY, period: PERIOD })}
+          {t("home.subtitle", locale, { date: TODAY, period: PERIOD })}
         </p>
         <div className="bank-home-meta">
-          <span className="pill tone-issuer">
-            {t(`home.role.${actor.persona}`)}
+          <span className="pill tone-issuer">{session.roleLabel}</span>
+          <span className="bank-home-readonly">
+            {t("home.readonly", locale)}
           </span>
-          <span className="bank-home-readonly">{t("home.readonly")}</span>
         </div>
       </header>
 
       <section className="bank-home-kpis">
         <Kpi
-          label={t("home.kpi.orders")}
+          label={t("home.kpi.orders", locale)}
           value={ORDER_TALLIES.total.toLocaleString()}
-          sub={t("home.kpi.orders.sub", "zh", {
+          sub={t("home.kpi.orders.sub", locale, {
             reserved: ORDER_TALLIES.reserved,
             live: ORDER_TALLIES.live,
             done: ORDER_TALLIES.completed,
@@ -203,32 +204,32 @@ export default async function HomePage({
           })}
         />
         <Kpi
-          label={t("home.kpi.quota")}
+          label={t("home.kpi.quota", locale)}
           value={`${quotaPct(QUOTA_ALL)}%`}
-          sub={t("home.kpi.quota.sub", "zh", {
+          sub={t("home.kpi.quota.sub", locale, {
             used: QUOTA_ALL.used.toLocaleString(),
             total: QUOTA_ALL.total.toLocaleString(),
           })}
         />
         <Kpi
-          label={t("home.kpi.onTime")}
+          label={t("home.kpi.onTime", locale)}
           value={`${onTime.value}%`}
-          delta={t("home.kpi.onTime.delta", "zh", { target: onTime.target })}
+          delta={t("home.kpi.onTime.delta", locale, { target: onTime.target })}
         />
         {view.seeFinance ? (
           <Kpi
-            label={t("home.kpi.statement")}
+            label={t("home.kpi.statement", locale)}
             value={STATEMENT.totalCompact}
-            delta={t("home.kpi.statement.delta", "zh", {
+            delta={t("home.kpi.statement.delta", locale, {
               period: STATEMENT.period,
               due: STATEMENT.due.slice(5),
             })}
           />
         ) : (
           <Kpi
-            label={t("home.kpi.exceptions")}
+            label={t("home.kpi.exceptions", locale)}
             value={String(EXCEPTIONS.length)}
-            delta={t("home.kpi.exceptions.delta", "zh", {
+            delta={t("home.kpi.exceptions.delta", locale, {
               manual: manualN,
               supply: supplyN,
               sla: slaN,
@@ -241,13 +242,13 @@ export default async function HomePage({
         <div className="bank-home-col">
           {view.seeOrders ? (
             <Card
-              title={t("home.upcoming.title")}
-              subtitle={t("home.upcoming.subtitle", "zh", {
+              title={t("home.upcoming.title", locale)}
+              subtitle={t("home.upcoming.subtitle", locale, {
                 n: UPCOMING_ORDERS.length,
               })}
               actions={
-                <a className="card-link" href="/bookings">
-                  {t("home.upcoming.cta")} →
+                <a className="card-link" href={`/bookings?${bankQuery}`}>
+                  {t("home.upcoming.cta", locale)} →
                 </a>
               }
             >
@@ -255,12 +256,12 @@ export default async function HomePage({
                 <table className="bank-table">
                   <thead>
                     <tr>
-                      <th>{t("home.col.id")}</th>
-                      <th>{t("home.col.direction")}</th>
-                      <th>{t("home.col.flight")}</th>
-                      <th>{t("home.col.window")}</th>
-                      <th>{t("home.col.cardholder")}</th>
-                      <th>{t("home.col.state")}</th>
+                      <th>{t("home.col.id", locale)}</th>
+                      <th>{t("home.col.direction", locale)}</th>
+                      <th>{t("home.col.flight", locale)}</th>
+                      <th>{t("home.col.window", locale)}</th>
+                      <th>{t("home.col.cardholder", locale)}</th>
+                      <th>{t("home.col.state", locale)}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -273,7 +274,7 @@ export default async function HomePage({
                               o.direction === "outbound" ? "info" : "neutral"
                             }`}
                           >
-                            {t(`home.direction.${o.direction}`)}
+                            {t(`home.direction.${o.direction}`, locale)}
                           </span>
                         </td>
                         <td className="mono-cell">
@@ -285,7 +286,7 @@ export default async function HomePage({
                           <span
                             className={`pill dot tone-${orderStateTone(o.state)}`}
                           >
-                            {t(`home.state.${o.state}`)}
+                            {t(`home.state.${o.state}`, locale)}
                           </span>
                         </td>
                       </tr>
@@ -298,49 +299,49 @@ export default async function HomePage({
 
           {!view.seeOrders && view.seeFinance ? (
             <Card
-              title={t("home.statement.title", "zh", {
+              title={t("home.statement.title", locale, {
                 period: STATEMENT.period,
               })}
-              subtitle={t("home.statement.subtitle")}
+              subtitle={t("home.statement.subtitle", locale)}
               actions={
-                <a className="card-link" href="/statements">
-                  {t("home.settlement.cta")} →
+                <a className="card-link" href={`/statements?${bankQuery}`}>
+                  {t("home.settlement.cta", locale)} →
                 </a>
               }
             >
               <div className="bank-dl cols-2">
                 <DlItem
-                  label={t("home.settlement.period")}
+                  label={t("home.settlement.period", locale)}
                   value={STATEMENT.period}
                   mono
                 />
                 <DlItem
-                  label={t("home.settlement.status")}
+                  label={t("home.settlement.status", locale)}
                   value={
                     <span className="pill dot tone-warning">
-                      {t("home.settlement.dueBadge")}
+                      {t("home.settlement.dueBadge", locale)}
                     </span>
                   }
                 />
                 <DlItem
-                  label={t("home.settlement.trips")}
-                  value={t("home.settlement.tripsUnit", "zh", {
+                  label={t("home.settlement.trips", locale)}
+                  value={t("home.settlement.tripsUnit", locale, {
                     trips: STATEMENT.trips,
                   })}
                   mono
                 />
                 <DlItem
-                  label={t("home.settlement.total")}
+                  label={t("home.settlement.total", locale)}
                   value={STATEMENT.totalFull}
                   mono
                 />
                 <DlItem
-                  label={t("home.settlement.issued")}
+                  label={t("home.settlement.issued", locale)}
                   value={STATEMENT.issued}
                   mono
                 />
                 <DlItem
-                  label={t("home.settlement.due")}
+                  label={t("home.settlement.due", locale)}
                   value={STATEMENT.due}
                   mono
                 />
@@ -349,11 +350,11 @@ export default async function HomePage({
           ) : null}
 
           <Card
-            title={t("home.exceptions.title")}
-            subtitle={t("home.exceptions.subtitle")}
+            title={t("home.exceptions.title", locale)}
+            subtitle={t("home.exceptions.subtitle", locale)}
             actions={
               <span className="pill tone-warning">
-                {t("home.exceptions.badge", "zh", { n: EXCEPTIONS.length })}
+                {t("home.exceptions.badge", locale, { n: EXCEPTIONS.length })}
               </span>
             }
           >
@@ -365,15 +366,19 @@ export default async function HomePage({
                 >
                   <div className="exception-head">
                     <strong>
-                      {t(`home.ex.${e.kind}.title`, "zh", { entity: e.entity })}
+                      {t(`home.ex.${e.kind}.title`, locale, {
+                        entity: tenantDisplayText(e.entity, tenant),
+                      })}
                     </strong>
                     <span className="exception-code">{e.kind}</span>
                   </div>
                   <p>
-                    {t(`home.ex.${e.kind}.body`, "zh", { entity: e.entity })}
+                    {t(`home.ex.${e.kind}.body`, locale, {
+                      entity: tenantDisplayText(e.entity, tenant),
+                    })}
                   </p>
-                  <a className="card-link" href="/bookings">
-                    {e.entity} →
+                  <a className="card-link" href={`/bookings?${bankQuery}`}>
+                    {tenantDisplayText(e.entity, tenant)} →
                   </a>
                 </div>
               ))}
@@ -384,56 +389,64 @@ export default async function HomePage({
         <div className="bank-home-col">
           {view.seeQuota ? (
             <Card
-              title={t("home.quota.title")}
-              subtitle={t("home.quota.subtitle")}
+              title={t("home.quota.title", locale)}
+              subtitle={t("home.quota.subtitle", locale)}
               accent
             >
-              <QuotaBar row={QUOTA_ALL} label={t("home.program.all")} />
+              <QuotaBar
+                row={QUOTA_ALL}
+                label={t("home.program.all", locale)}
+                locale={locale}
+              />
               {QUOTA_PROGRAMS.map((r) => (
                 <QuotaBar
                   key={r.program}
                   row={r}
-                  label={t(`home.program.${r.program}`)}
+                  label={t(`home.program.${r.program}`, locale)}
+                  locale={locale}
                 />
               ))}
             </Card>
           ) : null}
 
           {view.seeSla ? (
-            <Card title={t("home.sla.title")} subtitle={t("home.sla.subtitle")}>
+            <Card
+              title={t("home.sla.title", locale)}
+              subtitle={t("home.sla.subtitle", locale)}
+            >
               {SLA_METRICS.map((m) => (
-                <SlaRow key={m.key} metric={m} />
+                <SlaRow key={m.key} metric={m} locale={locale} />
               ))}
-              <p className="sla-note">{t("home.sla.note")}</p>
+              <p className="sla-note">{t("home.sla.note", locale)}</p>
             </Card>
           ) : null}
 
           {view.seeFinance && view.seeOrders ? (
             <Card
-              title={t("home.settlement.title")}
-              subtitle={t("home.settlement.subtitle")}
+              title={t("home.settlement.title", locale)}
+              subtitle={t("home.settlement.subtitle", locale)}
             >
               <div className="bank-dl cols-2">
                 <DlItem
-                  label={t("home.settlement.period")}
+                  label={t("home.settlement.period", locale)}
                   value={STATEMENT.period}
                   mono
                 />
                 <DlItem
-                  label={t("home.settlement.status")}
+                  label={t("home.settlement.status", locale)}
                   value={
                     <span className="pill dot tone-warning">
-                      {t("home.settlement.dueBadge")}
+                      {t("home.settlement.dueBadge", locale)}
                     </span>
                   }
                 />
                 <DlItem
-                  label={t("home.settlement.total")}
+                  label={t("home.settlement.total", locale)}
                   value={STATEMENT.totalCompact}
                   mono
                 />
                 <DlItem
-                  label={t("home.settlement.due")}
+                  label={t("home.settlement.due", locale)}
                   value={STATEMENT.due.slice(5)}
                   mono
                 />
@@ -442,10 +455,10 @@ export default async function HomePage({
           ) : null}
 
           {!view.seeFinance ? (
-            <Card title={t("home.settlement.title")}>
+            <Card title={t("home.settlement.title", locale)}>
               <div className="empty-state">
                 <span className="lock-dot" aria-hidden="true" />
-                <p>{t("home.settlement.denied")}</p>
+                <p>{t("home.settlement.denied", locale)}</p>
               </div>
             </Card>
           ) : null}

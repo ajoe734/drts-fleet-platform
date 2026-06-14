@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UpdateTenantNotificationsCommand } from "@drts/contracts";
 
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { BillingSettlementController } from "../../apps/api/src/modules/billing-settlement/billing-settlement.controller";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
@@ -170,6 +171,7 @@ describe("multi-tenant header controller routing", () => {
       tenantPartnerService,
       {} as never,
       {} as never,
+      new JwtAuthService(),
     );
 
     let thrown: unknown;
@@ -214,6 +216,7 @@ describe("multi-tenant header controller routing", () => {
       tenantPartnerService,
       {} as never,
       {} as never,
+      new JwtAuthService(),
     );
     const requestId = "req-tenant-partner-alpha";
     const headerTenantId = " tenant-alpha ";
