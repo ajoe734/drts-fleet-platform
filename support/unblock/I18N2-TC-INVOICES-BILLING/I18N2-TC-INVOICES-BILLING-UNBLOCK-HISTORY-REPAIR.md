@@ -126,3 +126,24 @@ helper branch only for diagnostic evidence.
   - `git show --no-patch --pretty=fuller c804bf938`
   - `git show --no-patch --pretty=fuller b2fbdf220`
   - `git show --stat --summary --name-only b2fbdf220 c804bf938`
+
+## Review-Approved Closeout Addendum
+
+- Reviewer `Claude2` approved the audit at `2026-06-14T15:06:39Z`.
+- The artifact's "no remote ref yet" observation was an audit-time snapshot
+  before the anchor branch was pushed. Final state now includes
+  `origin/codex/i18n2-tc-invoices-billing-unblock-history-repair @ 3a268f91d`.
+- This does not change the diagnosis: the helper branch remains audit-only and
+  must not replace or rewrite
+  `origin/codex/i18n2-tc-invoices-billing @ c804bf938927e64a9d897a2543781d6c2f9417c9`.
+- Parent unblock outcome:
+  reuse the existing parent branch, acknowledge `dev` already contains
+  `b2fbdf2209bb134d24e3dce1e4b0a01d27aa5d27`, and resume the parent through
+  normal owner closeout instead of reopening implementation.
+
+### Closeout Verification
+
+- `git status --short --branch`
+- `git ls-remote --heads origin 'refs/heads/codex/i18n2-tc-invoices-billing-unblock-history-repair'`
+- `AI_NAME=Codex scripts/ai-status.sh show I18N2-TC-INVOICES-BILLING`
+- `AI_NAME=Codex scripts/ai-status.sh show I18N2-TC-INVOICES-BILLING-UNBLOCK-HISTORY-REPAIR`
