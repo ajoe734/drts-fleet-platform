@@ -127,6 +127,8 @@ import type {
   WebhookRetryPolicyRecord,
   UiRefreshMetadata,
   ReferralRevenueShareRule,
+} from "@drts/contracts";
+import {
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
   PARTNER_REFERRAL_CHANNEL_KEY,
 } from "@drts/contracts";
