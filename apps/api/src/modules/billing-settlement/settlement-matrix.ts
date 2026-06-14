@@ -1,4 +1,7 @@
-import type { SettlementMatrixRecord } from "@drts/contracts";
+import {
+  PARTNER_REFERRAL_CHANNEL_KEY,
+  type SettlementMatrixRecord,
+} from "@drts/contracts";
 
 const SETTLEMENT_MATRIX: readonly SettlementMatrixRecord[] = Object.freeze([
   Object.freeze({
@@ -42,6 +45,27 @@ const SETTLEMENT_MATRIX: readonly SettlementMatrixRecord[] = Object.freeze([
     localLedgerMode: "full_service" as const,
     notes:
       "Partner provenance, eligibility, and issuer references must survive settlement and reporting end to end.",
+  }),
+  Object.freeze({
+    channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
+    channelLabel: "Partner referral / revenue-share channel",
+    orderDomain: "owned" as const,
+    orderSources: ["portal", "api"],
+    payerType: "DRTS platform",
+    sponsorType: "partner referral channel",
+    invoiceOwner: "platform finance with partner payable statement",
+    invoicePath: "referral settlement statement",
+    receiptOwner: "drts platform",
+    driverPayoutAuthority: "platform settlement engine",
+    discountFundingSource:
+      "platform-funded referral revenue share after completed-trip attribution",
+    reimbursementRule:
+      "Settlement direction is drts_pays_partner: DRTS pays the referral partner after attribution closeout; no external issuer reimbursement applies.",
+    reconciliationPath: "referral settlement statement + attribution audit",
+    reportingArtifacts: ["revenue_summary", "monthly_trip_report"],
+    localLedgerMode: "full_service" as const,
+    notes:
+      "Referral channels require durable passenger binding and partner-user attribution before settlement can be released.",
   }),
   Object.freeze({
     channelKey: "phone_dispatch",

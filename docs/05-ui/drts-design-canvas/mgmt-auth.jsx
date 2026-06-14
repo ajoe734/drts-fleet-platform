@@ -313,8 +313,8 @@ function HealthBanner({ theme: th, status = 'degraded', degradedServices = [] })
 
 // ── ActorRealmChip — for cross-actor audit (Q-TEN13) ────────────────────────
 function ActorRealmChip({ theme: th, realm = 'tenant', actor }) {
-  const labels = { tenant: '租戶', ops: '營運', platform: '平台', system: '系統', driver: '司機' };
-  const ens    = { tenant: 'tenant', ops: 'ops', platform: 'platform', system: 'system', driver: 'driver' };
+  const labels = { tenant: '租戶', ops: '營運', platform: '平台', system: '系統', driver: '司機', issuer: '發卡行' };
+  const ens    = { tenant: 'tenant', ops: 'ops', platform: 'platform', system: 'system', driver: 'driver', issuer: 'issuer' };
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <Pill theme={th} tone={realm} dot>{labels[realm]}<span style={{ marginLeft: 4, opacity: 0.7, fontFamily: '"JetBrains Mono", monospace', fontSize: 9.5 }}>{ens[realm]}</span></Pill>

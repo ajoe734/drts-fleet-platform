@@ -603,6 +603,7 @@ const en = {
   "login.programAdmin": "Program admin",
   "login.opsViewer": "Ops viewer",
   "login.finance": "Finance",
+  "login.demoPersona": "Demo persona",
   "login.signIn": "Sign in as demo user",
   "login.securityNoteTitle": "Runtime boundary",
   "login.securityNoteBody":
@@ -1194,6 +1195,7 @@ const zh: Record<keyof typeof en, string> = {
   "login.programAdmin": "方案管理員",
   "login.opsViewer": "營運查看",
   "login.finance": "財務",
+  "login.demoPersona": "Demo 角色",
   "login.signIn": "以 demo 使用者登入",
   "login.securityNoteTitle": "Runtime 邊界",
   "login.securityNoteBody":

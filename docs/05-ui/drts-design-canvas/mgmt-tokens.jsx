@@ -32,6 +32,12 @@ const MGMT_ACCENTS = {
     dark:  '#6EE7B7', darkHi:  '#A7F3D0', darkBg:  '#052E22', darkBorder:  '#0F5132',
     name: 'Fleet Partner Portal', tagline: '車行供給與分潤後台',
   },
+  // Bank Console — 發卡行方案監管台 (issuer tenant; 中信 navy/gold brand)
+  bank: {
+    light: '#13478F', lightHi: '#1C5FB0', lightBg: '#EDF2FB', lightBorder: '#C3D5EF',
+    dark:  '#84A9E8', darkHi:  '#A9C5F2', darkBg:  '#0F1E3C', darkBorder:  '#21376A',
+    name: 'Bank Console', tagline: '發卡行方案監管台',
+  },
 };
 
 // ── Actor realm colors — for cross-actor audit chips (Q-TEN13) ──────────────
@@ -42,6 +48,7 @@ const REALM_COLORS = {
     platform: { fg: '#4F46E5', bg: '#EEF2FF', bd: '#C7D2FE' },
     system:   { fg: '#6B7280', bg: '#F1F4F8', bd: '#CBD5E1' },
     driver:   { fg: '#A8590B', bg: '#FCEED6', bd: '#F0CC95' },
+    issuer:   { fg: '#13478F', bg: '#EDF2FB', bd: '#C3D5EF' },
   },
   dark: {
     tenant:   { fg: '#5EEAD4', bg: '#0F2A28', bd: '#134E48' },
@@ -49,6 +56,7 @@ const REALM_COLORS = {
     platform: { fg: '#A5B4FC', bg: '#1E1B4B', bd: '#312E81' },
     system:   { fg: '#94A3B8', bg: '#1A2230', bd: '#2A3445' },
     driver:   { fg: '#FCD34D', bg: '#3A2A0A', bd: '#5C4218' },
+    issuer:   { fg: '#84A9E8', bg: '#0F1E3C', bd: '#21376A' },
   },
 };
 
@@ -148,6 +156,7 @@ function buildMgmtTheme({ console: surface = 'platform', dark = false, density =
     accent, accentHi, accentBg, accentBorder,
     surfaceName: a.name, surfaceTagline: a.tagline,
     ...palette, ...D,
+    consoleId: surface, // non-clobbered: palette.surface (a color) overwrites `surface` above
   };
 }
 

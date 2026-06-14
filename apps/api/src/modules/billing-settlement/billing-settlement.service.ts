@@ -36,6 +36,7 @@ import type {
   TenantPayableInvoiceStatus,
   UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
+  ReferralRevenueShareRule,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -65,6 +66,13 @@ import {
   type SettlementStatementRecord,
   type SettlementStatementStatus,
 } from "./settlement-statement.types";
+import {
+  REFERRAL_STATEMENT_CHANNEL_KEY,
+  REFERRAL_STATEMENT_DIRECTION,
+  type ReferralStatementLine,
+  type ReferralStatementRecord,
+  type ReferralStatementStatus,
+} from "./referral-statement.types";
 import { ForwarderService } from "../forwarder/forwarder.service";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 
@@ -277,7 +285,85 @@ const SETTLEMENT_TRIP_SEED: BillingSettlementTripRecord[] = [
     tenantServiceProgramId: null,
     sourcePlatform: "portal",
   },
+  // Referral-channel attributed trips (community-app导流): owned rides tagged
+  // with a referral partnerEntrySlug. These settle drts_pays_partner — DRTS
+  // owes the channel a revenue share per completed ride.
+  {
+    settlementId: "settlement-referral-202606-001",
+    tenantId: DEMO_TENANT_ID,
+    driverId: "drv-demo-002",
+    orderId: "order-referral-001",
+    completedAt: "2026-06-04T08:15:00Z",
+    orderSource: "portal",
+    grossEarning: { currency: DEFAULT_CURRENCY, amountMinor: 60000 },
+    subsidy: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    platformFundedDiscount: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    pricingVersionSnapshot: "tenant-pricing-v1",
+    eligibleForTenantInvoice: true,
+    eligibleForDriverStatement: true,
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: "enterprise_dispatch",
+    costCenterCode: null,
+    riderId: "rider-referral-001",
+    partnerId: "partner-referral-demo-001",
+    partnerProgramId: null,
+    partnerEntrySlug: "referral-demo-community",
+    eligibilityVerificationId: null,
+    issuerAuthorizationRef: null,
+    benefitReference: null,
+    serviceProduct: "enterprise_dispatch",
+    tenantServiceProgramId: null,
+    sourcePlatform: "portal",
+  },
+  {
+    settlementId: "settlement-referral-202606-002",
+    tenantId: DEMO_TENANT_ID,
+    driverId: "drv-demo-003",
+    orderId: "order-referral-002",
+    completedAt: "2026-06-18T19:40:00Z",
+    orderSource: "portal",
+    grossEarning: { currency: DEFAULT_CURRENCY, amountMinor: 90000 },
+    subsidy: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    platformFundedDiscount: { currency: DEFAULT_CURRENCY, amountMinor: 0 },
+    pricingVersionSnapshot: "tenant-pricing-v1",
+    eligibleForTenantInvoice: true,
+    eligibleForDriverStatement: true,
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: "enterprise_dispatch",
+    costCenterCode: null,
+    riderId: "rider-referral-002",
+    partnerId: "partner-referral-demo-001",
+    partnerProgramId: null,
+    partnerEntrySlug: "referral-demo-community",
+    eligibilityVerificationId: null,
+    issuerAuthorizationRef: null,
+    benefitReference: null,
+    serviceProduct: "enterprise_dispatch",
+    tenantServiceProgramId: null,
+    sourcePlatform: "portal",
+  },
 ];
+
+// Referral revenue-share rules keyed by partnerEntrySlug. BE-006 surfaces these
+// for admin config; here they back the per-trip share computation. Seeded to
+// match the WP0 referral-channel scaffold seed.
+const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
+  Object.freeze([
+    Object.freeze({
+      ruleId: "referral-rule-demo-001",
+      partnerId: "partner-referral-demo-001",
+      partnerEntrySlug: "referral-demo-community",
+      rateType: "percent" as const,
+      value: 15,
+      currency: DEFAULT_CURRENCY,
+      effectiveFrom: "2026-06-01T00:00:00.000Z",
+      effectiveUntil: null,
+      settlementDirection: REFERRAL_STATEMENT_DIRECTION,
+      channelKey: REFERRAL_STATEMENT_CHANNEL_KEY,
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    }),
+  ]);
 
 @Injectable()
 export class BillingSettlementService implements OnModuleInit {
@@ -1883,6 +1969,176 @@ export class BillingSettlementService implements OnModuleInit {
       issuerAuthorizationRef: trip.issuerAuthorizationRef as string,
       cardholderRefMasked: maskOpaqueToken(trip.riderId, 4, 2) ?? "***",
       eligibilityVerificationId: trip.eligibilityVerificationId,
+    };
+  }
+
+  // ── Referral-channel settlement (drts_pays_partner) ──────────────────────
+  // Mirror of the card-benefit statement: per completed ride attributed to a
+  // referral channel (community / property-management app) via partnerEntrySlug,
+  // DRTS owes the channel a revenue share (percent of fare, or flat per-trip).
+
+  private referralRevenueShareRules: ReferralRevenueShareRule[] =
+    REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
+
+  /** Active referral revenue-share rule for an entry at a given completion time. */
+  resolveReferralRevenueShareRule(
+    partnerEntrySlug: string,
+    atIso: string,
+  ): ReferralRevenueShareRule | null {
+    const at = new Date(atIso).getTime();
+    const candidates = this.referralRevenueShareRules
+      .filter((rule) => rule.partnerEntrySlug === partnerEntrySlug)
+      .filter((rule) => {
+        const from = new Date(rule.effectiveFrom).getTime();
+        const until = rule.effectiveUntil
+          ? new Date(rule.effectiveUntil).getTime()
+          : Number.POSITIVE_INFINITY;
+        return at >= from && at <= until;
+      })
+      .sort(
+        (left, right) =>
+          new Date(right.effectiveFrom).getTime() -
+          new Date(left.effectiveFrom).getTime(),
+      );
+    return candidates[0] ?? null;
+  }
+
+  private isReferralSettlementTrip(trip: BillingSettlementTripRecord): boolean {
+    return (
+      Boolean(trip.partnerEntrySlug) &&
+      this.resolveReferralRevenueShareRule(
+        trip.partnerEntrySlug as string,
+        trip.completedAt,
+      ) !== null
+    );
+  }
+
+  private computeReferralShareMinor(
+    fareMinor: number,
+    rule: ReferralRevenueShareRule,
+  ): number {
+    if (rule.rateType === "per_trip") {
+      return Math.max(0, Math.round(rule.value));
+    }
+    // percent
+    return Math.max(0, Math.round((fareMinor * rule.value) / 100));
+  }
+
+  /** Referral statements for a channel across all periods with attributed rides. */
+  async listReferralStatements(
+    partnerEntrySlug: string,
+  ): Promise<ReferralStatementRecord[]> {
+    this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
+    const months = new Set<string>();
+    for (const trip of this.settlementTrips) {
+      if (
+        trip.partnerEntrySlug === partnerEntrySlug &&
+        this.isReferralSettlementTrip(trip)
+      ) {
+        months.add(this.toPeriodMonth(trip.completedAt));
+      }
+    }
+    const periods = [...months].sort((left, right) =>
+      right.localeCompare(left),
+    );
+    return periods.map((period) =>
+      this.buildReferralStatement(partnerEntrySlug, period),
+    );
+  }
+
+  /** Referral statement for a single channel + `YYYY-MM` period. */
+  getReferralStatement(
+    partnerEntrySlug: string,
+    periodMonth: string,
+  ): ReferralStatementRecord {
+    this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
+    const normalizedPeriod = periodMonth?.trim();
+    if (!normalizedPeriod) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "period must be in YYYY-MM format.",
+        { period: periodMonth },
+      );
+    }
+    this.getPeriodMonthRange(normalizedPeriod);
+    return this.buildReferralStatement(partnerEntrySlug, normalizedPeriod);
+  }
+
+  private buildReferralStatement(
+    partnerEntrySlug: string,
+    periodMonth: string,
+  ): ReferralStatementRecord {
+    const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
+    const start = new Date(periodStart).getTime();
+    const end = new Date(periodEnd).getTime();
+    const trips = this.settlementTrips.filter((trip) => {
+      const completedAt = new Date(trip.completedAt).getTime();
+      return (
+        trip.partnerEntrySlug === partnerEntrySlug &&
+        this.isReferralSettlementTrip(trip) &&
+        completedAt >= start &&
+        completedAt <= end
+      );
+    });
+
+    const lines = trips.map((trip) => this.createReferralStatementLine(trip));
+    const gmv = this.sumMoney(lines.map((line) => line.fare));
+    const shareTotal = this.sumMoney(lines.map((line) => line.shareAmount));
+    const activeRiderCount = new Set(
+      trips.map((trip) => trip.riderId).filter(Boolean),
+    ).size;
+    const manifestHash = this.computeHash({
+      partnerEntrySlug,
+      period: periodMonth,
+      direction: REFERRAL_STATEMENT_DIRECTION,
+      lines,
+    });
+
+    return {
+      statementId: `referral-statement-${partnerEntrySlug}-${periodMonth}`,
+      partnerEntrySlug,
+      period: periodMonth,
+      periodStart,
+      periodEnd,
+      channelKey: REFERRAL_STATEMENT_CHANNEL_KEY,
+      direction: REFERRAL_STATEMENT_DIRECTION,
+      currency: DEFAULT_CURRENCY,
+      status: "due" as ReferralStatementStatus,
+      lines,
+      totals: {
+        tripCount: lines.length,
+        activeRiderCount,
+        gmv,
+        shareTotal,
+      },
+      artifactRef: {
+        artifactId: `referral-statement-${partnerEntrySlug}-${periodMonth}`,
+        kind: "referral_settlement_statement",
+        manifestHash,
+      },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private createReferralStatementLine(
+    trip: BillingSettlementTripRecord,
+  ): ReferralStatementLine {
+    const fare = { ...trip.grossEarning };
+    // Guaranteed present by isReferralSettlementTrip filter.
+    const rule = this.resolveReferralRevenueShareRule(
+      trip.partnerEntrySlug as string,
+      trip.completedAt,
+    ) as ReferralRevenueShareRule;
+    const shareMinor = this.computeReferralShareMinor(fare.amountMinor, rule);
+    return {
+      tripId: trip.orderId,
+      completedAt: trip.completedAt,
+      partnerEntrySlug: trip.partnerEntrySlug as string,
+      fare,
+      rateType: rule.rateType,
+      rateValue: rule.value,
+      shareAmount: this.money(shareMinor),
     };
   }
 

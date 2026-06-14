@@ -641,7 +641,16 @@ export function ApiKeyManager({
   );
   const [revokeReason, setRevokeReason] = useState("");
 
-  const allowedScopes: string[] = governance?.apiKeyPolicy.allowedScopes ?? [];
+  const allowedScopeSignature = (
+    governance?.apiKeyPolicy.allowedScopes ?? []
+  ).join("\u0000");
+  const allowedScopes = useMemo(
+    () =>
+      allowedScopeSignature.length > 0
+        ? allowedScopeSignature.split("\u0000")
+        : [],
+    [allowedScopeSignature],
+  );
   const compatibilityAliases: Array<[string, string]> = Object.entries(
     governance?.apiKeyPolicy.compatibilityAliases ?? {},
   );

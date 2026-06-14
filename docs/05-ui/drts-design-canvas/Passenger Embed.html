@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Passenger Embed · 社區物業 App 內嵌叫車 · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #ECEEF3; font-family: "Inter","Noto Sans TC",system-ui,sans-serif; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#0F766E"/>
+  <rect x="30" y="14" width="40" height="72" rx="9" fill="#fff"/>
+  <rect x="36" y="22" width="28" height="40" rx="3" fill="#D7F0EC"/>
+  <path d="M40 54l2-5a2 2 0 012-1.4h12a2 2 0 012 1.4l2 5M40 54h20v5H40z" fill="none" stroke="#0F766E" stroke-width="2.4"/>
+  <rect x="42" y="68" width="16" height="4" rx="2" fill="#0F766E"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="ent-kit.jsx"></script>
+<script type="text/babel" src="ent-shell.jsx"></script>
+<script type="text/babel" src="pe-data.jsx"></script>
+<script type="text/babel" src="passenger-embed-screens.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "partner": "yuhe",
+  "dark": false
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const p = PE_PARTNERS[tw.partner] || PE_PARTNERS.yuhe;
+  // brand drives accent — themeAccent from partner entry, never hardcoded
+  const t = buildEnt({ dark: tw.dark, density: 'comfy', accent: p.themeAccent });
+  const PW = 392, PH = 812;
+  const Phone = ({ children }) => <PhoneFrame t={t} width={PW} height={PH}>{children}</PhoneFrame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Passenger Embed · 社區物業 App 內嵌叫車"
+        subtitle="community referral channel · /embed/[entrySlug] · compact webview · 品牌走 partner themeAccent · 持久身分 · zh-TW">
+
+        <DCSection id="identity" title="A1 · 身分交接狀態機" subtitle="住戶從社區 App 點「叫車」進入 · 鏡像 PB-EMBED 5 態 · compact chrome">
+          <DCArtboard id="handoff" label="Handoff · 已交接帶入" width={PW} height={PH}><Phone><PE_Handoff t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="reauth" label="Reauth · 重新認證" width={PW} height={PH}><Phone><PE_Reauth t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="unsupported" label="Unsupported · 非授權宿主" width={PW} height={PH}><Phone><PE_Unsupported t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="consent" label="Consent · 同意範圍" width={PW} height={PH}><Phone><PE_Consent t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="fallback" label="Fallback · 回獨立站" width={PW} height={PH}><Phone><PE_Fallback t={t} p={p} /></Phone></DCArtboard>
+        </DCSection>
+
+        <DCSection id="book" title="A2 · 叫車請求 + 負向狀態" subtitle="compact 叫車表單 · denied / ineligible / no-supply / degraded">
+          <DCArtboard id="book" label="叫車 · book" width={PW} height={PH}><Phone><PE_Book t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="neg-nosupply" label="負向 · no-supply" width={PW} height={PH}><Phone><PE_Negative t={t} p={p} kind="nosupply" /></Phone></DCArtboard>
+          <DCArtboard id="neg-ineligible" label="負向 · ineligible" width={PW} height={PH}><Phone><PE_Negative t={t} p={p} kind="ineligible" /></Phone></DCArtboard>
+          <DCArtboard id="neg-denied" label="負向 · denied" width={PW} height={PH}><Phone><PE_Negative t={t} p={p} kind="denied" /></Phone></DCArtboard>
+          <DCArtboard id="neg-degraded" label="負向 · degraded" width={PW} height={PH}><Phone><PE_Negative t={t} p={p} kind="degraded" /></Phone></DCArtboard>
+        </DCSection>
+
+        <DCSection id="trip" title="A3–A6 · 行程 · 歷史 · 收據 · 結果" subtitle="持久身分：重開宿主 App 仍可找回進行中行程與收據 · PII 遮罩">
+          <DCArtboard id="active" label="A3 · 進行中行程（持久）" width={PW} height={PH}><Phone><PE_Active t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="trips" label="A4 · 行程歷史" width={PW} height={PH}><Phone><PE_Trips t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="receipt" label="A5 · 收據（PII 遮罩）" width={PW} height={PH}><Phone><PE_Receipt t={t} p={p} /></Phone></DCArtboard>
+          <DCArtboard id="completed" label="A6 · 完成 + 評分" width={PW} height={PH}><Phone><PE_Outcome t={t} p={p} kind="completed" /></Phone></DCArtboard>
+          <DCArtboard id="cancelled" label="A6 · 取消" width={PW} height={PH}><Phone><PE_Outcome t={t} p={p} kind="cancelled" /></Phone></DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="渠道夥伴 Partner">
+          <TweakRadio label="社區品牌" value={tw.partner} onChange={v => setTweak('partner', v)}
+            options={[{ value: 'yuhe', label: '御和物業' }, { value: 'cambridge', label: '康橋社區' }]} />
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <div style={{ fontSize: 11, color: '#8C96A8', lineHeight: 1.5, marginTop: 6 }}>品牌主色由 partner entry 的 themeAccent 帶入，非寫死 hex。</div>
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
