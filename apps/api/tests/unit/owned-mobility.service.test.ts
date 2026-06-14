@@ -3148,3 +3148,29 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.lastDispatchFailureReason).toBe("driver_rejected");
   });
 });
+
+describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
+  const baseCommand = {
+    pickup: { address: "Taipei Main Station", lat: 25.0478, lng: 121.5319 },
+    dropoff: { address: "Songshan Airport" },
+    passenger: { name: "Rider One", phone: "0912000000" },
+  };
+
+  it("stamps partnerEntrySlug from the handoff session identity onto the order", () => {
+    const service = createOwnedMobilityService();
+    const order = service.createPassengerOrder(baseCommand as any, {
+      partnerEntrySlug: "referral-demo-community",
+      partnerId: "partner-referral-demo-001",
+    } as any);
+    expect(order.partnerEntrySlug).toBe("referral-demo-community");
+    expect(order.partnerId).toBe("partner-referral-demo-001");
+  });
+
+  it("leaves partnerEntrySlug null for non-referral passenger rides", () => {
+    const service = createOwnedMobilityService();
+    const order = service.createPassengerOrder(baseCommand as any);
+    expect(order.partnerEntrySlug).toBeNull();
+    const order2 = service.createPassengerOrder(baseCommand as any, null);
+    expect(order2.partnerEntrySlug).toBeNull();
+  });
+});
