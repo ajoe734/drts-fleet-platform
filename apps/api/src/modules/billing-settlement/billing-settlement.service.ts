@@ -36,7 +36,7 @@ import type {
   TenantPayableInvoiceStatus,
   UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
-  type ReferralRevenueShareRule,
+  ReferralRevenueShareRule,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
