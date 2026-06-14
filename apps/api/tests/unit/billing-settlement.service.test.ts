@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { ForwarderReconciliationIssue } from "@drts/contracts";
+import {
+  PARTNER_REFERRAL_CHANNEL_KEY,
+  REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+  type ForwarderReconciliationIssue,
+} from "@drts/contracts";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
+import { ReferralSettlementScaffoldService } from "../../src/modules/billing-settlement/referral-settlement.scaffold.service";
 import { settlementChannelKeyForTrip } from "../../src/modules/billing-settlement/settlement-matrix";
 
 function createService(forwarderIssues: ForwarderReconciliationIssue[] = []) {
@@ -33,6 +38,15 @@ describe("BillingSettlementService settlement matrix", () => {
           reimbursementRule: expect.stringContaining("reimbursement"),
         }),
         expect.objectContaining({
+          channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
+          payerType: "DRTS platform",
+          reimbursementRule: expect.stringContaining(
+            REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+          ),
+          reconciliationPath:
+            "referral settlement statement + attribution audit",
+        }),
+        expect.objectContaining({
           channelKey: "phone_dispatch",
           orderSources: expect.arrayContaining(["phone"]),
           discountFundingSource: expect.stringContaining("manual"),
@@ -44,6 +58,24 @@ describe("BillingSettlementService settlement matrix", () => {
           driverPayoutAuthority: expect.stringContaining("external platform"),
         }),
       ]),
+    );
+  });
+
+  it("keeps partner referral matrix semantics consistent with referral settlement contracts", () => {
+    const service = createService();
+    const scaffold = new ReferralSettlementScaffoldService();
+    const row = service
+      .listSettlementMatrix()
+      .find((entry) => entry.channelKey === PARTNER_REFERRAL_CHANNEL_KEY);
+
+    expect(row).toMatchObject({
+      channelKey: scaffold.getReferralSettlementScaffold().channelKey,
+      payerType: "DRTS platform",
+      invoicePath: "referral settlement statement",
+      reconciliationPath: "referral settlement statement + attribution audit",
+    });
+    expect(row?.reimbursementRule).toContain(
+      scaffold.getReferralSettlementScaffold().direction,
     );
   });
 
