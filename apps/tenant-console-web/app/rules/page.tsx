@@ -7,6 +7,8 @@ import type {
   TenantQuotaSummary,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { RulesManager } from "./rules-manager";
 
 export const dynamic = "force-dynamic";
@@ -107,6 +109,7 @@ function inferEmptyReason(data: {
 async function loadRulesPageData(
   emptyReasonOverride: EmptyReason | null,
 ): Promise<RulesPageData> {
+  const locale = await getServerLocale();
   const client = getTenantClient();
   const errors: string[] = [];
 
@@ -138,7 +141,7 @@ async function loadRulesPageData(
     errors.push(
       rulesResult.reason instanceof Error
         ? rulesResult.reason.message
-        : "Unable to load tenant approval rules.",
+        : t("rules.page.error.loadRules", locale),
     );
   }
 
@@ -146,7 +149,7 @@ async function loadRulesPageData(
     errors.push(
       quotaSummaryResult.reason instanceof Error
         ? quotaSummaryResult.reason.message
-        : "Unable to load tenant quota summary.",
+        : t("rules.page.error.loadQuotaSummary", locale),
     );
   }
 
@@ -154,7 +157,7 @@ async function loadRulesPageData(
     errors.push(
       approvalRequestsResult.reason instanceof Error
         ? approvalRequestsResult.reason.message
-        : "Unable to load pending approval requests.",
+        : t("rules.page.error.loadApprovalRequests", locale),
     );
   }
 
@@ -162,7 +165,7 @@ async function loadRulesPageData(
     errors.push(
       ledgerEntriesResult.reason instanceof Error
         ? ledgerEntriesResult.reason.message
-        : "Unable to load tenant quota ledger entries.",
+        : t("rules.page.error.loadLedgerEntries", locale),
     );
   }
 
