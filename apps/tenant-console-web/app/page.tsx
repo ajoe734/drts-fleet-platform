@@ -15,7 +15,8 @@ import {
 } from "@/components/page-primitives";
 import { getTenantClient } from "@/lib/api-client";
 import { formatCount, formatDateTime } from "@/lib/formatters";
-import { t } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
+import { getServerLocale } from "@/lib/server-locale";
 
 const ATTENTION_STATUSES = new Set([
   "dispatch_failed",
@@ -39,7 +40,7 @@ type DashboardData = {
   errors: string[];
 };
 
-async function loadDashboardData(): Promise<DashboardData> {
+async function loadDashboardData(locale: Locale): Promise<DashboardData> {
   const client = getTenantClient();
   const [
     identityResult,
@@ -65,19 +66,24 @@ async function loadDashboardData(): Promise<DashboardData> {
     result: PromiseSettledResult<unknown>,
   ) => {
     if (result.status === "rejected") {
-      errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "未知錯誤"}`,
-      );
+      const reason =
+        result.reason instanceof Error
+          ? result.reason.message
+          : t("dashboard.error.unknown", locale);
+      errors.push(`${label}: ${reason}`);
     }
   };
 
-  collectError("身分", identityResult);
-  collectError("功能旗標", flagsResult);
-  collectError("訂單", bookingsResult);
-  collectError("發票", invoicesResult);
-  collectError("對帳單", statementsResult);
-  collectError("通知", notificationsResult);
-  collectError("整合就緒度", governanceResult);
+  collectError(t("dashboard.errorLabel.identity", locale), identityResult);
+  collectError(t("dashboard.errorLabel.flags", locale), flagsResult);
+  collectError(t("dashboard.errorLabel.bookings", locale), bookingsResult);
+  collectError(t("dashboard.errorLabel.invoices", locale), invoicesResult);
+  collectError(t("dashboard.errorLabel.statements", locale), statementsResult);
+  collectError(
+    t("dashboard.errorLabel.notifications", locale),
+    notificationsResult,
+  );
+  collectError(t("dashboard.errorLabel.governance", locale), governanceResult);
 
   return {
     identity:
@@ -98,7 +104,8 @@ async function loadDashboardData(): Promise<DashboardData> {
 }
 
 export default async function HomePage() {
-  const data = await loadDashboardData();
+  const locale = await getServerLocale();
+  const data = await loadDashboardData(locale);
   const activeBookings = data.bookings.filter(
     (booking) =>
       booking.orderStatus !== "completed" &&
@@ -118,35 +125,41 @@ export default async function HomePage() {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow={t("dashboard.hero.eyebrow")}
-        title={t("dashboard.hero.title")}
-        description={t("dashboard.hero.description")}
+        eyebrow={t("dashboard.hero.eyebrow", locale)}
+        title={t("dashboard.hero.title", locale)}
+        description={t("dashboard.hero.description", locale)}
       />
 
       <section className="metric-grid">
         <article className="metric-card">
-          <span className="metric-label">{t("dashboard.kpi.inProgress")}</span>
+          <span className="metric-label">
+            {t("dashboard.kpi.inProgress", locale)}
+          </span>
           <strong>{formatCount(activeBookings.length)}</strong>
           <p>
             {attentionBookings.length > 0
-              ? `有 ${formatCount(attentionBookings.length)} 筆訂單需要在 dispatch 或 proof 狀態追蹤處理。`
-              : t("dashboard.empty.activeBookings")}
+              ? t("dashboard.kpi.attentionBookingsActive", locale, {
+                  count: formatCount(attentionBookings.length),
+                })
+              : t("dashboard.empty.activeBookings", locale)}
           </p>
         </article>
         <article className="metric-card">
           <span className="metric-label">
-            {t("dashboard.kpi.currentInvoice")}
+            {t("dashboard.kpi.currentInvoice", locale)}
           </span>
           <strong>{formatCount(openInvoices.length)}</strong>
           <p>
             {data.invoices.length > 0
-              ? `租戶帳務授權可見 ${formatCount(data.invoices.length)} 份發票檔案。`
-              : "此租戶情境目前沒有可用的發票檔案。"}
+              ? t("dashboard.kpi.invoiceFilesVisible", locale, {
+                  count: formatCount(data.invoices.length),
+                })
+              : t("dashboard.empty.invoices", locale)}
           </p>
         </article>
         <article className="metric-card">
           <span className="metric-label">
-            {t("dashboard.kpi.todayCompleted")}
+            {t("dashboard.kpi.todayCompleted", locale)}
           </span>
           <strong>
             {formatCount(
@@ -157,26 +170,34 @@ export default async function HomePage() {
           </strong>
           <p>
             {recentNotifications.length > 0
-              ? `首頁顯示了 ${formatCount(recentNotifications.length)} 則近期提醒。`
-              : "目前快照沒有回傳任何租戶通知。"}
+              ? t("dashboard.kpi.recentReminders", locale, {
+                  count: formatCount(recentNotifications.length),
+                })
+              : t("dashboard.empty.notificationsSnapshot", locale)}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">{t("dashboard.kpi.mtdUsage")}</span>
+          <span className="metric-label">
+            {t("dashboard.kpi.mtdUsage", locale)}
+          </span>
           <strong>{formatCount(data.bookings.length)}</strong>
           <p>
             {data.governance?.onboardingChecklist.length
-              ? `有 ${formatCount(data.governance.onboardingChecklist.length)} 項待辦的整合檢查清單。`
-              : "沒有待辦的導入檢查清單項目。"}
+              ? t("dashboard.kpi.pendingChecklist", locale, {
+                  count: formatCount(
+                    data.governance.onboardingChecklist.length,
+                  ),
+                })
+              : t("dashboard.empty.checklist", locale)}
           </p>
         </article>
       </section>
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker={t("dashboard.section.activeBookings")}
-          title={t("dashboard.section.activeBookings")}
-          description={t("dashboard.section.activeBookingsSub")}
+          kicker={t("dashboard.section.activeBookings", locale)}
+          title={t("dashboard.section.activeBookings", locale)}
+          description={t("dashboard.section.activeBookingsSub", locale)}
         >
           {activeBookings.length > 0 ? (
             <ul className="panel-list">
@@ -192,22 +213,24 @@ export default async function HomePage() {
               ))}
             </ul>
           ) : (
-            <p className="muted-copy">{t("dashboard.empty.activeBookings")}</p>
+            <p className="muted-copy">
+              {t("dashboard.empty.activeBookings", locale)}
+            </p>
           )}
           <div className="link-row">
             <Link className="text-link" href="/bookings">
-              {t("dashboard.link.openBookings")}
+              {t("dashboard.link.openBookings", locale)}
             </Link>
             <Link className="text-link" href="/bookings/new">
-              {t("dashboard.link.newBooking")}
+              {t("dashboard.link.newBooking", locale)}
             </Link>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker={t("dashboard.section.finance")}
-          title={t("dashboard.section.finance")}
-          description={t("dashboard.section.financeSub")}
+          kicker={t("dashboard.section.finance", locale)}
+          title={t("dashboard.section.finance", locale)}
+          description={t("dashboard.section.financeSub", locale)}
         >
           {recentStatements.length > 0 ? (
             <ul className="panel-list">
@@ -225,19 +248,21 @@ export default async function HomePage() {
               ))}
             </ul>
           ) : (
-            <p className="muted-copy">{t("dashboard.empty.statements")}</p>
+            <p className="muted-copy">
+              {t("dashboard.empty.statements", locale)}
+            </p>
           )}
           <div className="link-row">
             <Link className="text-link" href="/billing">
-              {t("dashboard.link.openBilling")}
+              {t("dashboard.link.openBilling", locale)}
             </Link>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker={t("dashboard.section.integration")}
-          title={t("dashboard.section.integration")}
-          description={t("dashboard.section.integrationSub")}
+          kicker={t("dashboard.section.integration", locale)}
+          title={t("dashboard.section.integration", locale)}
+          description={t("dashboard.section.integrationSub", locale)}
         >
           {data.governance?.onboardingChecklist.length ? (
             <ul className="panel-list">
@@ -247,18 +272,18 @@ export default async function HomePage() {
             </ul>
           ) : (
             <p className="muted-copy">
-              API 金鑰與 Webhook 導入目前沒有任何待辦的檢查清單項目。
+              {t("dashboard.empty.integrationChecklist", locale)}
             </p>
           )}
           <div className="link-row">
             <Link className="text-link" href="/integration-governance">
-              {t("dashboard.link.openGovernance")}
+              {t("dashboard.link.openGovernance", locale)}
             </Link>
             <Link className="text-link" href="/api-keys">
-              查看 API 金鑰
+              {t("dashboard.link.viewApiKeys", locale)}
             </Link>
             <Link className="text-link" href="/webhooks">
-              查看 Webhook
+              {t("dashboard.link.viewWebhooks", locale)}
             </Link>
           </div>
         </SurfaceCard>
@@ -266,34 +291,43 @@ export default async function HomePage() {
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="身分"
-          title="租戶授權上下文"
-          description="儀表板直接從後端讀取租戶身分，因此 actor 與 realm 都以授權來源為準。"
+          kicker={t("dashboard.section.identity", locale)}
+          title={t("dashboard.section.identityTitle", locale)}
+          description={t("dashboard.section.identitySub", locale)}
         >
           <dl className="definition-grid">
             <div>
-              <dt>租戶</dt>
-              <dd>{data.identity?.tenantId ?? "無資料"}</dd>
+              <dt>{t("dashboard.identity.tenant", locale)}</dt>
+              <dd>
+                {data.identity?.tenantId ?? t("dashboard.value.noData", locale)}
+              </dd>
             </div>
             <div>
               <dt>Realm</dt>
-              <dd>{data.identity?.realm ?? "無資料"}</dd>
+              <dd>
+                {data.identity?.realm ?? t("dashboard.value.noData", locale)}
+              </dd>
             </div>
             <div>
               <dt>Actor</dt>
-              <dd>{data.identity?.actorType ?? "無資料"}</dd>
+              <dd>
+                {data.identity?.actorType ??
+                  t("dashboard.value.noData", locale)}
+              </dd>
             </div>
             <div>
-              <dt>授權模式</dt>
-              <dd>{data.identity?.authMode ?? "無資料"}</dd>
+              <dt>{t("dashboard.identity.authMode", locale)}</dt>
+              <dd>
+                {data.identity?.authMode ?? t("dashboard.value.noData", locale)}
+              </dd>
             </div>
           </dl>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="通知"
-          title="近期提醒"
-          description="平台與租戶通知都會留在工作面首頁，無需離開即可查看。"
+          kicker={t("dashboard.section.notifications", locale)}
+          title={t("dashboard.section.notificationsTitle", locale)}
+          description={t("dashboard.section.notificationsSub", locale)}
         >
           {recentNotifications.length > 0 ? (
             <ul className="panel-list">
@@ -308,17 +342,21 @@ export default async function HomePage() {
               ))}
             </ul>
           ) : (
-            <p className="muted-copy">目前沒有可顯示的租戶通知。</p>
+            <p className="muted-copy">
+              {t("dashboard.empty.notifications", locale)}
+            </p>
           )}
         </SurfaceCard>
       </section>
 
       <CalloutPanel
-        title="已啟用模組快照"
+        title={t("dashboard.callout.enabledModules", locale)}
         description={
           enabledFlags.length > 0
-            ? `${enabledFlags.length} feature flag(s) currently resolve enabled for this tenant context.`
-            : "功能旗標明細目前無法取得，或沒有任何租戶專屬模組旗標啟用。"
+            ? t("dashboard.callout.flagsEnabled", locale, {
+                count: formatCount(enabledFlags.length),
+              })
+            : t("dashboard.callout.flagsUnavailable", locale)
         }
       >
         {enabledFlags.length > 0 ? (
@@ -334,8 +372,8 @@ export default async function HomePage() {
 
       {data.errors.length > 0 ? (
         <CalloutPanel
-          title="部分資料警告"
-          description="部分儀表板區塊已回退，因為目前的授權來源未回應所有讀取。"
+          title={t("dashboard.callout.partialData", locale)}
+          description={t("dashboard.callout.partialDataSub", locale)}
           tone="warning"
         >
           <ul className="panel-list">

@@ -3768,6 +3768,41 @@ const en = {
     "There is currently no visible feature flag data for this tenant realm.",
 
   // ── home (i18n-fullsweep 20260614) ──
+
+  // ── home dashboard (i18n-fullsweep 20260614 finish) ──
+  "dashboard.error.unknown": "Unknown error",
+  "dashboard.errorLabel.identity": "Identity",
+  "dashboard.errorLabel.flags": "Feature flags",
+  "dashboard.errorLabel.bookings": "Bookings",
+  "dashboard.errorLabel.invoices": "Invoices",
+  "dashboard.errorLabel.statements": "Statements",
+  "dashboard.errorLabel.notifications": "Notifications",
+  "dashboard.errorLabel.governance": "Integration readiness",
+  "dashboard.kpi.attentionBookingsActive": "{count} booking(s) need tracking in dispatch or proof status.",
+  "dashboard.kpi.invoiceFilesVisible": "{count} invoice artifact(s) are visible under tenant billing authority.",
+  "dashboard.empty.invoices": "No invoice artifacts are available for this tenant context.",
+  "dashboard.kpi.recentReminders": "The home surface shows {count} recent reminder(s).",
+  "dashboard.empty.notificationsSnapshot": "The current snapshot returned no tenant notifications.",
+  "dashboard.kpi.pendingChecklist": "{count} pending integration checklist item(s).",
+  "dashboard.empty.checklist": "No pending onboarding checklist items.",
+  "dashboard.empty.integrationChecklist": "API key and webhook onboarding has no pending checklist items right now.",
+  "dashboard.link.viewApiKeys": "View API keys",
+  "dashboard.link.viewWebhooks": "View webhooks",
+  "dashboard.section.identity": "Identity",
+  "dashboard.section.identityTitle": "Tenant authorization context",
+  "dashboard.section.identitySub": "The dashboard reads tenant identity directly from the backend, so actor and realm follow the authorization source.",
+  "dashboard.identity.tenant": "Tenant",
+  "dashboard.identity.authMode": "Auth mode",
+  "dashboard.value.noData": "No data",
+  "dashboard.section.notifications": "Notifications",
+  "dashboard.section.notificationsTitle": "Recent reminders",
+  "dashboard.section.notificationsSub": "Platform and tenant notifications stay on the workspace home so you can review without leaving.",
+  "dashboard.empty.notifications": "No tenant notifications to show right now.",
+  "dashboard.callout.enabledModules": "Enabled module snapshot",
+  "dashboard.callout.flagsEnabled": "{count} feature flag(s) currently resolve enabled for this tenant context.",
+  "dashboard.callout.flagsUnavailable": "Feature flag details are unavailable, or no tenant-specific module flags are enabled.",
+  "dashboard.callout.partialData": "Partial data warning",
+  "dashboard.callout.partialDataSub": "Some dashboard sections fell back because the current authorization source did not answer all reads.",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -7299,6 +7334,41 @@ const zh: Record<keyof typeof en, string> = {
     "這個租戶領域目前沒有任何 flag 對應的可見資料。",
 
   // ── home (i18n-fullsweep 20260614) ──
+
+  // ── home dashboard (i18n-fullsweep 20260614 finish) ──
+  "dashboard.error.unknown": "未知錯誤",
+  "dashboard.errorLabel.identity": "身分",
+  "dashboard.errorLabel.flags": "功能旗標",
+  "dashboard.errorLabel.bookings": "訂單",
+  "dashboard.errorLabel.invoices": "發票",
+  "dashboard.errorLabel.statements": "對帳單",
+  "dashboard.errorLabel.notifications": "通知",
+  "dashboard.errorLabel.governance": "整合就緒度",
+  "dashboard.kpi.attentionBookingsActive": "有 {count} 筆訂單需要在 dispatch 或 proof 狀態追蹤處理。",
+  "dashboard.kpi.invoiceFilesVisible": "租戶帳務授權可見 {count} 份發票檔案。",
+  "dashboard.empty.invoices": "此租戶情境目前沒有可用的發票檔案。",
+  "dashboard.kpi.recentReminders": "首頁顯示了 {count} 則近期提醒。",
+  "dashboard.empty.notificationsSnapshot": "目前快照沒有回傳任何租戶通知。",
+  "dashboard.kpi.pendingChecklist": "有 {count} 項待辦的整合檢查清單。",
+  "dashboard.empty.checklist": "沒有待辦的導入檢查清單項目。",
+  "dashboard.empty.integrationChecklist": "API 金鑰與 Webhook 導入目前沒有任何待辦的檢查清單項目。",
+  "dashboard.link.viewApiKeys": "查看 API 金鑰",
+  "dashboard.link.viewWebhooks": "查看 Webhook",
+  "dashboard.section.identity": "身分",
+  "dashboard.section.identityTitle": "租戶授權上下文",
+  "dashboard.section.identitySub": "儀表板直接從後端讀取租戶身分，因此 actor 與 realm 都以授權來源為準。",
+  "dashboard.identity.tenant": "租戶",
+  "dashboard.identity.authMode": "授權模式",
+  "dashboard.value.noData": "無資料",
+  "dashboard.section.notifications": "通知",
+  "dashboard.section.notificationsTitle": "近期提醒",
+  "dashboard.section.notificationsSub": "平台與租戶通知都會留在工作面首頁，無需離開即可查看。",
+  "dashboard.empty.notifications": "目前沒有可顯示的租戶通知。",
+  "dashboard.callout.enabledModules": "已啟用模組快照",
+  "dashboard.callout.flagsEnabled": "目前有 {count} 個功能旗標在此租戶情境啟用。",
+  "dashboard.callout.flagsUnavailable": "功能旗標明細目前無法取得，或沒有任何租戶專屬模組旗標啟用。",
+  "dashboard.callout.partialData": "部分資料警告",
+  "dashboard.callout.partialDataSub": "部分儀表板區塊已回退，因為目前的授權來源未回應所有讀取。",
 };
 
 export const translations = { en, zh } as const;
