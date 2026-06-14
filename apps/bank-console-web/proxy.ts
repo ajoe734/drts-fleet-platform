@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 const LOGIN_PATH = "/login";
 const SIGNED_OUT_COOKIE = "drts-bank-console-signed-out";
 const AUTH_BOUNDARY_HEADER = "x-drts-bank-console-auth-boundary";
+const LOCALE_HEADER = "x-drts-bank-console-locale";
 
 function addNoStore(response: NextResponse) {
   response.headers.set("Cache-Control", "no-store");
@@ -11,6 +12,14 @@ function addNoStore(response: NextResponse) {
 
 function nextResponse(request: NextRequest, authBoundary = false) {
   const requestHeaders = new Headers(request.headers);
+  const locale = request.nextUrl.searchParams.get("locale");
+
+  if (locale) {
+    requestHeaders.set(LOCALE_HEADER, locale);
+  } else {
+    requestHeaders.delete(LOCALE_HEADER);
+  }
+
   if (authBoundary) {
     requestHeaders.set(AUTH_BOUNDARY_HEADER, "1");
   } else {

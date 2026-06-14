@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BRAND_TEMPLATES, REALM_COLORS } from "@drts/ui-tokens";
+import { REALM_COLORS } from "@drts/ui-tokens";
 import { CanvasPill } from "@drts/ui-web";
 import { CalloutPanel, PageHero } from "@/components/page-primitives";
 import {
@@ -11,9 +11,9 @@ import {
   type BookingOpsLinkState,
   type BookingState,
 } from "@/lib/bookings";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref } from "@/lib/issuer-projection";
 import { t } from "@/lib/translations";
-
-const issuerBrand = BRAND_TEMPLATES.CTBC.tokens.dark;
 
 const bookingPillTone: Record<
   BookingState,
@@ -124,11 +124,17 @@ function RealmChip({
 
 export default async function BookingDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ bookingId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { bookingId } = await params;
-  const booking = getBookingDetail(bookingId);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const issuerBrand = tenant.template.tokens.dark;
+  const booking = getBookingDetail(bookingId, tenant, locale);
 
   if (!booking) {
     notFound();
@@ -148,7 +154,10 @@ export default async function BookingDetailPage({
 
   return (
     <div className="page-shell bank-booking-detail-page" style={issuerVars}>
-      <Link className="text-link" href="/bookings">
+      <Link
+        className="text-link"
+        href={bankScopedHref("/bookings", tenant, locale)}
+      >
         {t("bookings.detail.back")}
       </Link>
 

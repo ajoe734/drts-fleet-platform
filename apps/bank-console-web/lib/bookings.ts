@@ -1,3 +1,7 @@
+import type { BankDemoTenant } from "@/lib/demo-tenants";
+import type { Locale } from "@/lib/translations";
+import { projectIssuerText } from "@/lib/issuer-projection";
+
 export type BookingDirection = "outbound" | "inbound";
 export type BookingState = "assigned" | "en_route" | "completed" | "cancelled";
 export type BookingActorRealm = "tenant" | "ops" | "system" | "driver";
@@ -446,33 +450,133 @@ const RAW_BOOKINGS: readonly RawBookingRecord[] = [
   },
 ];
 
-export const bookingPrograms: BookingProgram[] = Array.from(
-  new Map(
-    RAW_BOOKINGS.map((item) => [
-      item.programCode,
-      {
-        code: item.programCode,
-        label: item.programLabel,
-      },
-    ]),
-  ).values(),
-);
+function projectTimelineEvent(
+  event: BookingTimelineEvent,
+  tenant: BankDemoTenant | undefined,
+  locale: Locale,
+): BookingTimelineEvent {
+  if (!tenant) {
+    return event;
+  }
 
-export const bookingList: BookingListItem[] = RAW_BOOKINGS.map((item) => ({
-  orderId: item.orderId,
-  orderNo: item.orderNo,
-  cardholderRefMasked: maskRef(item.cardholderRef),
-  programCode: item.programCode,
-  programLabel: item.programLabel,
-  direction: item.direction,
-  flightNo: item.flightNo,
-  terminal: item.terminal,
-  pickupLabel: item.pickupLabel,
-  dropoffLabel: item.dropoffLabel,
-  scheduledAt: item.scheduledAt,
-  state: item.state,
-  benefitReferenceMasked: maskRef(item.benefitReference),
-}));
+  return {
+    ...event,
+    title: projectIssuerText(event.title, tenant, locale),
+    actor: projectIssuerText(event.actor, tenant, locale),
+    detail: projectIssuerText(event.detail, tenant, locale),
+  };
+}
+
+function projectBookingRecord(
+  item: RawBookingRecord,
+  tenant: BankDemoTenant | undefined,
+  locale: Locale,
+): RawBookingRecord {
+  if (!tenant) {
+    return item;
+  }
+
+  return {
+    ...item,
+    orderId: projectIssuerText(item.orderId, tenant, locale),
+    programLabel: projectIssuerText(item.programLabel, tenant, locale),
+    benefitReference: projectIssuerText(item.benefitReference, tenant, locale),
+    authorizationReference: projectIssuerText(
+      item.authorizationReference,
+      tenant,
+      locale,
+    ),
+    timeline: item.timeline.map((event) =>
+      projectTimelineEvent(event, tenant, locale),
+    ),
+    ...(item.driverEligibilityNote
+      ? {
+          driverEligibilityNote: projectIssuerText(
+            item.driverEligibilityNote,
+            tenant,
+            locale,
+          ),
+        }
+      : {}),
+  };
+}
+
+function getRawBookings(tenant?: BankDemoTenant, locale: Locale = "zh") {
+  return RAW_BOOKINGS.map((item) => projectBookingRecord(item, tenant, locale));
+}
+
+function buildBookingPrograms(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+): BookingProgram[] {
+  return Array.from(
+    new Map(
+      getRawBookings(tenant, locale).map((item) => [
+        item.programCode,
+        {
+          code: item.programCode,
+          label: item.programLabel,
+        },
+      ]),
+    ).values(),
+  );
+}
+
+function buildBookingList(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+): BookingListItem[] {
+  return getRawBookings(tenant, locale).map((item) => ({
+    orderId: item.orderId,
+    orderNo: item.orderNo,
+    cardholderRefMasked: maskRef(item.cardholderRef),
+    programCode: item.programCode,
+    programLabel: item.programLabel,
+    direction: item.direction,
+    flightNo: item.flightNo,
+    terminal: item.terminal,
+    pickupLabel: item.pickupLabel,
+    dropoffLabel: item.dropoffLabel,
+    scheduledAt: item.scheduledAt,
+    state: item.state,
+    benefitReferenceMasked: maskRef(item.benefitReference),
+  }));
+}
+
+export const bookingPrograms: BookingProgram[] = buildBookingPrograms();
+
+export const bookingList: BookingListItem[] = buildBookingList();
+
+export const bookingDetails: BookingDetailRecord[] =
+  getRawBookings().map(toBookingDetail);
+
+export const bookingPeriods = getBookingPeriods();
+
+export function getBookingPrograms(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  return buildBookingPrograms(tenant, locale);
+}
+
+export function getBookingPeriods(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  return Array.from(
+    new Set(
+      buildBookingList(tenant, locale).map((item) =>
+        item.scheduledAt.slice(0, 7),
+      ),
+    ),
+  ).sort((left, right) => right.localeCompare(left));
+}
+
+/*
+ * Legacy exports above intentionally keep CTBC as the default fixture for
+ * existing imports. New bank-aware routes should call the functions below with
+ * the resolved demo tenant.
+ */
 
 function toBookingDetail(item: RawBookingRecord): BookingDetailRecord {
   const detail: BookingDetailRecord = {
@@ -507,17 +611,15 @@ function toBookingDetail(item: RawBookingRecord): BookingDetailRecord {
   return detail;
 }
 
-export const bookingDetails: BookingDetailRecord[] =
-  RAW_BOOKINGS.map(toBookingDetail);
-
-export const bookingPeriods = Array.from(
-  new Set(bookingList.map((item) => item.scheduledAt.slice(0, 7))),
-).sort((left, right) => right.localeCompare(left));
-
-export function filterBookings(filters: BookingFilters) {
+export function filterBookings(
+  filters: BookingFilters,
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
   const cardholderNeedle = filters.cardholder?.trim().toLowerCase();
+  const list = buildBookingList(tenant, locale);
 
-  return bookingList.filter((item) => {
+  return list.filter((item) => {
     if (filters.programCode && item.programCode !== filters.programCode) {
       return false;
     }
@@ -540,6 +642,20 @@ export function filterBookings(filters: BookingFilters) {
   });
 }
 
-export function getBookingDetail(orderId: string) {
-  return bookingDetails.find((item) => item.orderId === orderId);
+export function getBookingDetail(
+  orderId: string,
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  const projected = getRawBookings(tenant, locale);
+
+  return projected.map(toBookingDetail).find((item, index) => {
+    const raw = RAW_BOOKINGS[index];
+    return (
+      item.orderId === orderId ||
+      item.orderNo === orderId ||
+      raw?.orderId === orderId ||
+      raw?.orderNo === orderId
+    );
+  });
 }
