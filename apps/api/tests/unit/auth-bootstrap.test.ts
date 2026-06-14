@@ -261,6 +261,35 @@ describe("bootstrap auth extraction", () => {
       });
     },
   );
+
+  it.each([
+    [
+      "/api/partner/referral/dashboard",
+      "partner:referral:dashboard:GET",
+    ],
+    ["/api/partner/referral/usage", "partner:referral:usage:GET"],
+    ["/api/partner/referral/revenue", "partner:referral:revenue:GET"],
+    [
+      "/api/partner/referral/statements",
+      "partner:referral:statements:GET",
+    ],
+    [
+      "/api/partner/referral/statements/2026-06",
+      "partner:referral:statements/2026-06:GET",
+    ],
+  ])(
+    "protects referral partner portal route %s with partner realm access",
+    (path, routeKey) => {
+      const policy = resolveRouteAuthPolicy("GET", path);
+
+      expect(policy).toEqual({
+        routeKey,
+        requiredScopes: ["billing:read"],
+        allowedRealms: ["system", "partner"],
+        description: "Referral partner self-service access",
+      });
+    },
+  );
 });
 
 describe("bootstrap auth guard", () => {
