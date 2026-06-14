@@ -1,6 +1,8 @@
 import type { TenantSlaProfileView } from "@drts/contracts";
 import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { SlaManager } from "./sla-manager";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +36,7 @@ async function loadSlaPageData(): Promise<{
 }
 
 export default async function SlaPage() {
+  const locale = await getServerLocale();
   const data = await loadSlaPageData();
 
   return (
@@ -43,7 +46,7 @@ export default async function SlaPage() {
           <CanvasBanner
             theme={th}
             tone="warn"
-            title="SLA 設定檔請求失敗"
+            title={t("sla.error.requestFailedTitle", locale)}
             body={data.transportErrorMessage}
           />
         </div>

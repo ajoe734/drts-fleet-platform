@@ -20,6 +20,8 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -208,6 +210,12 @@ type TenantAuditListLike = ApiListData<AuditLogRecord> & {
   refresh?: UiRefreshMetadata;
 };
 
+type AuditEmptyCopy = {
+  tone: "warn" | "danger" | "info" | "neutral";
+  title: string;
+  body: string;
+};
+
 const ACTOR_REALM_OPTIONS = [
   "tenant",
   "ops",
@@ -311,6 +319,24 @@ function getActorRealm(
   }
 }
 
+function getActorRealmLabel(
+  actorRealm: (typeof ACTOR_REALM_OPTIONS)[number],
+  locale: Locale,
+) {
+  switch (actorRealm) {
+    case "tenant":
+      return t("audit.actor.tenant", locale);
+    case "ops":
+      return t("audit.actor.ops", locale);
+    case "platform":
+      return t("audit.actor.platform", locale);
+    case "partner":
+      return t("audit.actor.partner", locale);
+    case "system":
+      return t("audit.actor.system", locale);
+  }
+}
+
 function getActorPillTone(actorType: AuditLogRecord["actorType"]) {
   switch (getActorRealm(actorType)) {
     case "tenant":
@@ -327,9 +353,11 @@ function getActorPillTone(actorType: AuditLogRecord["actorType"]) {
   }
 }
 
-function formatActorName(log: AuditLogRecord) {
+function formatActorName(log: AuditLogRecord, locale: Locale) {
   if (log.actorId) return log.actorId;
-  return log.actorType === "system" ? "system" : "masked";
+  return log.actorType === "system"
+    ? t("audit.actor.systemName", locale)
+    : t("audit.actor.masked", locale);
 }
 
 function formatResourceLabel(log: AuditLogRecord) {
@@ -399,7 +427,10 @@ function isOpsOwnedResource(log: AuditLogRecord) {
   );
 }
 
-function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
+function buildResourceLink(
+  log: AuditLogRecord,
+  locale: Locale,
+): CrossAppResourceLink | null {
   const id = log.resourceId;
 
   if (isTenantOwnedResource(log)) {
@@ -415,7 +446,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: bookingId,
         openMode: "same_tab",
-        label: "查看租戶叫車",
+        label: t("audit.link.bookings", locale),
       };
     }
     if (log.resourceType === "invoice") {
@@ -425,7 +456,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: id ?? "invoice",
         openMode: "same_tab",
-        label: "查看發票",
+        label: t("audit.link.invoices", locale),
       };
     }
     if (log.resourceType === "cost_center") {
@@ -435,7 +466,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: id ?? "cost_center",
         openMode: "same_tab",
-        label: "查看成本中心",
+        label: t("audit.link.costCenters", locale),
       };
     }
     if (
@@ -449,7 +480,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看使用者與角色",
+        label: t("audit.link.users", locale),
       };
     }
     if (log.resourceType === "tenant_passenger") {
@@ -459,7 +490,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看乘客名錄",
+        label: t("audit.link.passengers", locale),
       };
     }
     if (log.resourceType === "tenant_address") {
@@ -469,7 +500,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "在 Tenant Console 檢視地址脈絡",
+        label: t("audit.link.addresses", locale),
       };
     }
     if (
@@ -485,7 +516,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看審批規則與請求",
+        label: t("audit.link.rules", locale),
       };
     }
     if (
@@ -504,7 +535,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看成本中心與額度",
+        label: t("audit.link.costCenterQuota", locale),
       };
     }
     if (
@@ -521,7 +552,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看租戶設定",
+        label: t("audit.link.settings", locale),
       };
     }
     if (log.resourceType === "tenant_api_key") {
@@ -531,7 +562,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看 API 金鑰",
+        label: t("audit.link.apiKeys", locale),
       };
     }
     if (["webhook_endpoint", "webhook_delivery"].includes(log.resourceType)) {
@@ -541,7 +572,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看 Webhook 狀態",
+        label: t("audit.link.webhooks", locale),
       };
     }
     if (
@@ -557,7 +588,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看 Partner Booking 設定",
+        label: t("audit.link.partner", locale),
       };
     }
     if (log.resourceType === "report_job") {
@@ -569,7 +600,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看報表工作明細",
+        label: t("audit.link.reportJob", locale),
       };
     }
     return {
@@ -578,7 +609,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
       resourceType: log.resourceType,
       resourceId: tenantResourceId,
       openMode: "same_tab",
-      label: "在 Tenant Console 檢視",
+      label: t("audit.link.tenantConsole", locale),
     };
   }
 
@@ -595,7 +626,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
       resourceType: log.resourceType,
       resourceId: id ?? log.auditId,
       openMode: "new_tab",
-      label: "在 Ops Console 開啟",
+      label: t("audit.link.opsConsole", locale),
     };
   }
 
@@ -617,8 +648,8 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
       openMode: "new_tab",
       label:
         log.actorType === "platform_admin"
-          ? "在 Platform Admin 開啟"
-          : "在 Platform Admin 檢視稽核",
+          ? t("audit.link.platformAdminOpen", locale)
+          : t("audit.link.platformAdminAudit", locale),
     };
   }
 
@@ -661,11 +692,12 @@ function filterLogs(logs: AuditLogRecord[], query: AuditQuery) {
   });
 }
 
-function buildAuditRows(logs: AuditLogRecord[]): AuditRow[] {
+function buildAuditRows(logs: AuditLogRecord[], locale: Locale): AuditRow[] {
   return logs.map((log) => {
-    const resourceLink = buildResourceLink(log);
+    const resourceLink = buildResourceLink(log, locale);
     const resourceHref = resourceLink ? resolveHref(resourceLink) : null;
     const masked = isMasked(log);
+    const actorRealm = getActorRealm(log.actorType);
 
     return {
       at: formatAuditAt(log.createdAt),
@@ -673,15 +705,15 @@ function buildAuditRows(logs: AuditLogRecord[]): AuditRow[] {
         <div style={actorCellStyle}>
           <div style={chipRowStyle}>
             <CanvasPill theme={th} tone={getActorPillTone(log.actorType)} dot>
-              {getActorRealm(log.actorType)}
+              {getActorRealmLabel(actorRealm, locale)}
             </CanvasPill>
             {masked ? (
               <CanvasPill theme={th} tone="neutral">
-                masked
+                {t("audit.actor.masked", locale)}
               </CanvasPill>
             ) : null}
           </div>
-          <strong>{formatActorName(log)}</strong>
+          <strong>{formatActorName(log, locale)}</strong>
           <span style={actorIdStyle}>{log.actorType}</span>
         </div>
       ),
@@ -717,28 +749,38 @@ function buildAuditRows(logs: AuditLogRecord[]): AuditRow[] {
       request: log.requestId,
       detail: (
         <details>
-          <summary style={detailSummaryStyle}>展開</summary>
+          <summary style={detailSummaryStyle}>
+            {t("audit.detail.expand", locale)}
+          </summary>
           <div style={detailBodyStyle}>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>audit</span>
+              <span style={detailKeyStyle}>
+                {t("audit.detail.audit", locale)}
+              </span>
               <span style={{ ...detailValueStyle, fontFamily: th.monoFamily }}>
                 {log.auditId}
               </span>
             </div>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>old</span>
+              <span style={detailKeyStyle}>
+                {t("audit.detail.old", locale)}
+              </span>
               <span style={detailValueStyle}>
                 {stringifySummary(log.oldValuesSummary)}
               </span>
             </div>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>new</span>
+              <span style={detailKeyStyle}>
+                {t("audit.detail.new", locale)}
+              </span>
               <span style={detailValueStyle}>
                 {stringifySummary(log.newValuesSummary)}
               </span>
             </div>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>link</span>
+              <span style={detailKeyStyle}>
+                {t("audit.detail.link", locale)}
+              </span>
               {resourceHref ? (
                 <a
                   href={resourceHref}
@@ -755,7 +797,9 @@ function buildAuditRows(logs: AuditLogRecord[]): AuditRow[] {
                   {resourceLink?.label}
                 </a>
               ) : (
-                <span style={detailValueStyle}>無可導向的資源明細</span>
+                <span style={detailValueStyle}>
+                  {t("audit.detail.noResource", locale)}
+                </span>
               )}
             </div>
           </div>
@@ -778,27 +822,27 @@ function buildQueryString(query: AuditQuery) {
   return value ? `?${value}` : "";
 }
 
-function getActionVisualSpec(action: string): ActionVisualSpec {
+function getActionVisualSpec(action: string, locale: Locale): ActionVisualSpec {
   switch (action) {
     case "filter":
       return {
-        label: "篩選",
-        helper: "依 actor、module、action、時間範圍收斂結果。",
+        label: t("audit.pageAction.filter.label", locale),
+        helper: t("audit.pageAction.filter.helper", locale),
       };
     case "refresh":
       return {
-        label: "重新整理",
-        helper: "T6 manual tier，不做自動輪詢。",
+        label: t("audit.pageAction.refresh.label", locale),
+        helper: t("audit.pageAction.refresh.helper", locale),
       };
     case "export":
       return {
-        label: "匯出",
-        helper: "匯出目前篩選結果，對應 signed artifact workflow。",
+        label: t("audit.pageAction.export.label", locale),
+        helper: t("audit.pageAction.export.helper", locale),
       };
     default:
       return {
         label: action,
-        helper: "由 availableActions 決定是否顯示或禁用。",
+        helper: t("audit.pageAction.default.helper", locale),
       };
   }
 }
@@ -830,18 +874,18 @@ function escapeCsvCell(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function buildCsvHref(logs: AuditLogRecord[]) {
+function buildCsvHref(logs: AuditLogRecord[], locale: Locale) {
   const header = [
-    "createdAt",
-    "auditId",
-    "actorRealm",
-    "actorType",
-    "actorId",
-    "moduleName",
-    "actionName",
-    "resourceType",
-    "resourceId",
-    "requestId",
+    t("audit.csv.createdAt", locale),
+    t("audit.csv.auditId", locale),
+    t("audit.csv.actorRealm", locale),
+    t("audit.csv.actorType", locale),
+    t("audit.csv.actorId", locale),
+    t("audit.csv.moduleName", locale),
+    t("audit.csv.actionName", locale),
+    t("audit.csv.resourceType", locale),
+    t("audit.csv.resourceId", locale),
+    t("audit.csv.requestId", locale),
   ];
   const rows = logs.map((log) =>
     [
@@ -849,7 +893,7 @@ function buildCsvHref(logs: AuditLogRecord[]) {
       log.auditId,
       getActorRealm(log.actorType),
       log.actorType,
-      log.actorId ?? "masked",
+      log.actorId ?? t("audit.actor.masked", locale),
       log.moduleName,
       log.actionName,
       log.resourceType,
@@ -893,44 +937,44 @@ function deriveEmptyReason(input: {
   return "no_data";
 }
 
-function getEmptyCopy(reason: EmptyReason) {
+function getEmptyCopy(reason: EmptyReason, locale: Locale): AuditEmptyCopy {
   switch (reason) {
     case "not_provisioned":
       return {
         tone: "warn" as const,
-        title: "租戶尚未啟用稽核檢視",
-        body: "此租戶的 evidence lane 尚未 provision 完成。等治理設定完成後，tenant admin 與 finance 才會看到 append-only audit ledger。",
+        title: t("audit.empty.notProvisioned.title", locale),
+        body: t("audit.empty.notProvisioned.body", locale),
       };
     case "permission_denied":
       return {
         tone: "danger" as const,
-        title: "目前身分沒有 audit read 權限",
-        body: "此頁只對具備 tenant-scoped audit visibility 的角色開放。若這不是預期行為，請由 tenant admin 檢查角色與範圍設定。",
+        title: t("audit.empty.permissionDenied.title", locale),
+        body: t("audit.empty.permissionDenied.body", locale),
       };
     case "external_unavailable":
       return {
         tone: "warn" as const,
-        title: "外部 evidence 來源暫時不可用",
-        body: "目前顯示通道未能取得完整 cross-actor evidence。這種情況不會假裝成空資料；待上游恢復後請手動 refresh。",
+        title: t("audit.empty.externalUnavailable.title", locale),
+        body: t("audit.empty.externalUnavailable.body", locale),
       };
     case "fetch_failed":
       return {
         tone: "danger" as const,
-        title: "稽核資料讀取失敗",
-        body: "後端回應失敗，因此頁面沒有用假資料填補。請稍後重整，或確認 API 與 auth bootstrap 是否正常。",
+        title: t("audit.empty.fetchFailed.title", locale),
+        body: t("audit.empty.fetchFailed.body", locale),
       };
     case "filtered_empty":
       return {
         tone: "info" as const,
-        title: "目前篩選條件沒有命中紀錄",
-        body: "Cross-actor audit 仍存在，但此組 actor、module、action、時間條件下沒有相符列。清除篩選即可回到完整 tenant scope。",
+        title: t("audit.empty.filteredEmpty.title", locale),
+        body: t("audit.empty.filteredEmpty.body", locale),
       };
     case "no_data":
     default:
       return {
         tone: "neutral" as const,
-        title: "目前沒有任何稽核紀錄",
-        body: "此租戶尚未產生可見的 state-changing evidence。等第一筆 tenant、ops、platform 或 system 動作落地後，這裡會顯示 append-only ledger。",
+        title: t("audit.empty.noData.title", locale),
+        body: t("audit.empty.noData.body", locale),
       };
   }
 }
@@ -984,6 +1028,7 @@ export default async function AuditPage({
 }: {
   searchParams: Promise<Record<string, QueryValue>>;
 }) {
+  const locale = await getServerLocale();
   const query = parseAuditQuery(await searchParams);
   const generatedAt = new Date();
   const client = getTenantClient();
@@ -1007,7 +1052,8 @@ export default async function AuditPage({
     serverActions = auditResponse.availableActions;
     refreshMetadata = auditResponse.refreshMetadata;
   } catch (error) {
-    loadError = error instanceof Error ? error.message : "unknown error";
+    loadError =
+      error instanceof Error ? error.message : t("sla.error.unknown", locale);
   }
 
   const filteredLogs = loadError ? [] : filterLogs(logs, query);
@@ -1035,9 +1081,9 @@ export default async function AuditPage({
     pageActions.map((action) => [action.action, action] as const),
   );
   const exportHref = actionLookup.get("export")?.enabled
-    ? buildCsvHref(visibleLogs)
+    ? buildCsvHref(visibleLogs, locale)
     : undefined;
-  const rows = buildAuditRows(visibleLogs);
+  const rows = buildAuditRows(visibleLogs, locale);
   const moduleOptions = Array.from(
     new Set(logs.map((log) => log.moduleName)),
   ).sort();
@@ -1047,28 +1093,28 @@ export default async function AuditPage({
   const focusedLog = query.auditId
     ? (logs.find((log) => log.auditId === query.auditId) ?? null)
     : null;
-  const emptyCopy = emptyReason ? getEmptyCopy(emptyReason) : null;
+  const emptyCopy = emptyReason ? getEmptyCopy(emptyReason, locale) : null;
 
   const columns: CanvasTableColumn<AuditRow>[] = [
-    { h: "時間", k: "at", w: 170, mono: true },
-    { h: "操作者", k: "actor", w: 280 },
-    { h: "模組", k: "module", w: 140, mono: true },
-    { h: "動作", k: "action", w: 190 },
-    { h: "資源", k: "resource", w: 220 },
-    { h: "請求", k: "request", w: 160, mono: true },
-    { h: "明細", k: "detail", w: 260 },
+    { h: t("audit.col.at", locale), k: "at", w: 170, mono: true },
+    { h: t("audit.col.actor", locale), k: "actor", w: 280 },
+    { h: t("audit.col.module", locale), k: "module", w: 140, mono: true },
+    { h: t("audit.col.action", locale), k: "action", w: 190 },
+    { h: t("audit.col.resource", locale), k: "resource", w: 220 },
+    { h: t("audit.col.request", locale), k: "request", w: 160, mono: true },
+    { h: t("audit.col.detail", locale), k: "detail", w: 260 },
   ];
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="稽核 · cross-actor"
-        subtitle="不可變 · 7 年保存 · 含所有 actor realm 對 tenant 資源的動作 (Q-TEN13)"
+        title={t("audit.header.title", locale)}
+        subtitle={t("audit.header.subtitle", locale)}
         actions={renderActionButton({
           action: actionLookup.get("export"),
           href: exportHref,
-          label: "匯出 (簽名 artifact)",
+          label: t("audit.header.export", locale),
           icon: "export",
           download: "tenant-audit-export.csv",
         })}
@@ -1077,21 +1123,22 @@ export default async function AuditPage({
       <div style={pageBodyStyle}>
         <div style={heroMetaStyle}>
           <CanvasPill theme={th} tone="neutral" dot>
-            T6 manual refresh
+            {t("audit.meta.refresh", locale)}
           </CanvasPill>
           <CanvasPill theme={th} tone="accent">
-            visible {visibleLogs.length}
+            {t("audit.meta.visible", locale, { count: visibleLogs.length })}
           </CanvasPill>
           <CanvasPill theme={th} tone="info">
-            tenant scope {logs.length}
+            {t("audit.meta.scope", locale, { count: logs.length })}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
-            snapshot{" "}
-            {formatGeneratedAt(
-              refreshMetadata?.generatedAt
-                ? new Date(refreshMetadata.generatedAt)
-                : generatedAt,
-            )}
+            {t("audit.meta.snapshot", locale, {
+              time: formatGeneratedAt(
+                refreshMetadata?.generatedAt
+                  ? new Date(refreshMetadata.generatedAt)
+                  : generatedAt,
+              ),
+            })}
           </CanvasPill>
           <CanvasPill
             theme={th}
@@ -1103,18 +1150,20 @@ export default async function AuditPage({
                   : "neutral"
             }
           >
-            {refreshMetadata?.dataFreshness ?? "manual"}
+            {refreshMetadata?.dataFreshness ?? t("audit.meta.manual", locale)}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
-            source {refreshMetadata?.source ?? "live"}
+            {t("audit.meta.source", locale, {
+              source: refreshMetadata?.source ?? t("audit.meta.live", locale),
+            })}
           </CanvasPill>
         </div>
 
         <CanvasBanner
           theme={th}
           tone="info"
-          title="跨 actor 可見性 · Q-TEN13"
-          body="本租戶可看到：(a) 自家使用者對自家資源的動作；(b) ops 對 booking / complaint 的動作；(c) platform admin 影響租戶設定的動作；(d) system 對租戶資源的動作。敏感欄位由 policy 自動 mask。"
+          title={t("audit.banner.visibility.title", locale)}
+          body={t("audit.banner.visibility.body", locale)}
         />
 
         {query.auditId ? (
@@ -1123,25 +1172,27 @@ export default async function AuditPage({
             tone={focusedLog ? "accent" : "warn"}
             title={
               focusedLog
-                ? `Receipt deep link · ${query.auditId}`
-                : "Receipt deep link 未命中"
+                ? t("audit.banner.receiptHitTitle", locale, {
+                    auditId: query.auditId,
+                  })
+                : t("audit.banner.receiptMissTitle", locale)
             }
             body={
               focusedLog
-                ? "此頁已接住 action receipt 的 auditId，並將 ledger 聚焦到該筆紀錄。"
-                : "目前 tenant scope 內找不到這筆 auditId；可能不屬於此租戶、資料尚未同步，或 receipt 指向錯誤。"
+                ? t("audit.banner.receiptHitBody", locale)
+                : t("audit.banner.receiptMissBody", locale)
             }
           />
         ) : null}
 
         <CanvasCard
           theme={th}
-          title="篩選"
-          subtitle="依 actor、module、action、time range 調查 tenant-owned evidence。"
+          title={t("audit.filters.title", locale)}
+          subtitle={t("audit.filters.subtitle", locale)}
           actions={
             <div style={chipRowStyle}>
               {pageActions.map((action) => {
-                const spec = getActionVisualSpec(action.action);
+                const spec = getActionVisualSpec(action.action, locale);
                 return (
                   <CanvasPill
                     key={action.action}
@@ -1151,7 +1202,7 @@ export default async function AuditPage({
                     {spec.label}
                     {action.enabled
                       ? ""
-                      : ` · ${action.disabledReasonCode ?? "disabled"}`}
+                      : ` · ${action.disabledReasonCode ?? t("audit.filters.disabled", locale)}`}
                   </CanvasPill>
                 );
               })}
@@ -1159,27 +1210,33 @@ export default async function AuditPage({
           }
         >
           <form action="/audit" method="get" style={filterGridStyle}>
-            <CanvasField theme={th} label="操作者 realm">
+            <CanvasField
+              theme={th}
+              label={t("audit.filters.actorLabel", locale)}
+            >
               <select
                 defaultValue={query.actor}
                 name="actor"
                 style={inputStyle}
               >
-                <option value="">All actor realms</option>
+                <option value="">{t("audit.filters.actorAll", locale)}</option>
                 {ACTOR_REALM_OPTIONS.map((actor) => (
                   <option key={actor} value={actor}>
-                    {actor}
+                    {getActorRealmLabel(actor, locale)}
                   </option>
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="模組">
+            <CanvasField
+              theme={th}
+              label={t("audit.filters.moduleLabel", locale)}
+            >
               <select
                 defaultValue={query.module}
                 name="module"
                 style={inputStyle}
               >
-                <option value="">All modules</option>
+                <option value="">{t("audit.filters.moduleAll", locale)}</option>
                 {moduleOptions.map((moduleName) => (
                   <option key={moduleName} value={moduleName}>
                     {moduleName}
@@ -1187,13 +1244,16 @@ export default async function AuditPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="動作">
+            <CanvasField
+              theme={th}
+              label={t("audit.filters.actionLabel", locale)}
+            >
               <select
                 defaultValue={query.action}
                 name="action"
                 style={inputStyle}
               >
-                <option value="">All actions</option>
+                <option value="">{t("audit.filters.actionAll", locale)}</option>
                 {actionOptions.map((actionName) => (
                   <option key={actionName} value={actionName}>
                     {actionName}
@@ -1201,7 +1261,10 @@ export default async function AuditPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="起">
+            <CanvasField
+              theme={th}
+              label={t("audit.filters.fromLabel", locale)}
+            >
               <input
                 defaultValue={query.from}
                 name="from"
@@ -1209,7 +1272,7 @@ export default async function AuditPage({
                 type="date"
               />
             </CanvasField>
-            <CanvasField theme={th} label="迄">
+            <CanvasField theme={th} label={t("audit.filters.toLabel", locale)}>
               <input
                 defaultValue={query.to}
                 name="to"
@@ -1219,74 +1282,86 @@ export default async function AuditPage({
             </CanvasField>
             <CanvasField
               theme={th}
-              label="稽核回執"
-              hint="支援 action receipt deep link。"
+              label={t("audit.filters.auditIdLabel", locale)}
+              hint={t("audit.filters.auditIdHint", locale)}
             >
               <input
                 defaultValue={query.auditId}
                 name="auditId"
-                placeholder="audit_..."
+                placeholder={t("audit.filters.auditIdPlaceholder", locale)}
                 style={inputStyle}
                 type="text"
               />
             </CanvasField>
             <CanvasField
               theme={th}
-              label="空狀態示範"
-              hint="驗證 6 種 distinct states。"
+              label={t("audit.filters.emptyReasonLabel", locale)}
+              hint={t("audit.filters.emptyReasonHint", locale)}
             >
               <select
                 defaultValue={query.emptyReason}
                 name="emptyReason"
                 style={inputStyle}
               >
-                <option value="">Live data</option>
-                <option value="no_data">no_data</option>
-                <option value="not_provisioned">not_provisioned</option>
-                <option value="fetch_failed">fetch_failed</option>
-                <option value="permission_denied">permission_denied</option>
-                <option value="external_unavailable">
-                  external_unavailable
+                <option value="">
+                  {t("audit.filters.emptyReason.live", locale)}
                 </option>
-                <option value="filtered_empty">filtered_empty</option>
+                <option value="no_data">
+                  {t("audit.filters.emptyReason.noData", locale)}
+                </option>
+                <option value="not_provisioned">
+                  {t("audit.filters.emptyReason.notProvisioned", locale)}
+                </option>
+                <option value="fetch_failed">
+                  {t("audit.filters.emptyReason.fetchFailed", locale)}
+                </option>
+                <option value="permission_denied">
+                  {t("audit.filters.emptyReason.permissionDenied", locale)}
+                </option>
+                <option value="external_unavailable">
+                  {t("audit.filters.emptyReason.externalUnavailable", locale)}
+                </option>
+                <option value="filtered_empty">
+                  {t("audit.filters.emptyReason.filteredEmpty", locale)}
+                </option>
               </select>
             </CanvasField>
 
             <div style={{ ...formActionStyle, gridColumn: "1 / -1" }}>
               <CanvasBtn theme={th} variant="primary" size="sm" type="submit">
-                套用篩選
+                {t("audit.filters.apply", locale)}
               </CanvasBtn>
               {renderActionButton({
                 action: actionLookup.get("refresh"),
                 href: `/audit${buildQueryString(query)}`,
-                label: "手動刷新",
+                label: t("audit.filters.refresh", locale),
                 icon: "refresh",
                 download: undefined,
               })}
               {renderActionButton({
                 action: actionLookup.get("export"),
                 href: exportHref,
-                label: "匯出篩選結果",
+                label: t("audit.filters.export", locale),
                 icon: "export",
                 download: "tenant-audit-export.csv",
               })}
               <Link href="/audit" style={linkStyle}>
-                清除條件
+                {t("audit.filters.clear", locale)}
               </Link>
             </div>
 
             <div style={{ ...formFootnoteStyle, gridColumn: "1 / -1" }}>
               {loadError
-                ? `目前 audit API 讀取失敗：${loadError}`
-                : "Tenant-owned resource 留在本 app；ops / platform-owned evidence 走 deep link 新分頁。manual tier 不會自動輪詢。"}
+                ? `${t("audit.filters.loadErrorPrefix", locale)}：${loadError}`
+                : t("audit.filters.footnote", locale)}
             </div>
           </form>
         </CanvasCard>
 
         <CanvasCard
           theme={th}
-          title="僅可附加帳冊"
-          subtitle="時間優先、request-first correlation，並保留 per-record expand 與跨 app deep links。"
+          title={t("audit.ledger.title", locale)}
+          subtitle={t("audit.ledger.subtitle", locale)}
           padding={0}
         >
           {emptyCopy ? (
