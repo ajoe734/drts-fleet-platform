@@ -28,7 +28,7 @@ export function ReferralUsagePeriodsTable({
   rows: ReferralUsagePeriod[];
 }) {
   const theme = buildFleetTheme();
-  const { locale, t } = useTranslation();
+  const { t } = useTranslation();
   const columns: CanvasTableColumn<ReferralUsagePeriod>[] = [
     { h: t("table.period"), k: "period", w: 120, mono: true },
     {
