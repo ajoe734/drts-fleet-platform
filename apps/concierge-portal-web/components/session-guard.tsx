@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { useTranslation } from "@/lib/i18n";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 export function SessionGuard({
@@ -13,16 +14,14 @@ export function SessionGuard({
 }) {
   const { ready, session } = useConciergePortal();
   const desk = useSelectedDesk();
+  const { t } = useTranslation();
 
   if (!ready) {
     return (
       <section className="panel-card">
-        <span className="section-kicker">Bootstrap</span>
-        <h2>Loading local portal session.</h2>
-        <p>
-          This route waits for the repo-local assisted-entry bootstrap because
-          dedicated call-point auth is still gated outside the repo.
-        </p>
+        <span className="section-kicker">{t("guard.loading.eyebrow")}</span>
+        <h2>{t("guard.loading.title")}</h2>
+        <p>{t("guard.loading.body")}</p>
       </section>
     );
   }
@@ -30,15 +29,12 @@ export function SessionGuard({
   if (!session) {
     return (
       <section className="panel-card tone-warning">
-        <span className="section-kicker">Sign-in required</span>
-        <h2>Desk bootstrap has not been created yet.</h2>
-        <p>
-          Use the repo-local sign-in route first, then choose a fixed site
-          before opening bookings, lookup, or callback follow-up.
-        </p>
+        <span className="section-kicker">{t("guard.signedOut.eyebrow")}</span>
+        <h2>{t("guard.signedOut.title")}</h2>
+        <p>{t("guard.signedOut.body")}</p>
         <div className="inline-actions">
           <Link className="primary-link" href="/login">
-            Open bootstrap sign-in
+            {t("guard.signedOut.cta")}
           </Link>
         </div>
       </section>
@@ -48,15 +44,12 @@ export function SessionGuard({
   if (requireDesk && !desk) {
     return (
       <section className="panel-card tone-warning">
-        <span className="section-kicker">Desk selection required</span>
-        <h2>Select the fixed site first.</h2>
-        <p>
-          Phase 1 requires every call point to be bound to a site before proxy
-          booking starts. The portal keeps that selection explicit.
-        </p>
+        <span className="section-kicker">{t("guard.noDesk.eyebrow")}</span>
+        <h2>{t("guard.noDesk.title")}</h2>
+        <p>{t("guard.noDesk.body")}</p>
         <div className="inline-actions">
           <Link className="primary-link" href="/start">
-            Choose site-bound desk
+            {t("guard.noDesk.cta")}
           </Link>
         </div>
       </section>
