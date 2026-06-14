@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export default async function FeatureFlagsPage() {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
 
   let flags: unknown[] = [];
@@ -12,18 +15,18 @@ export default async function FeatureFlagsPage() {
     const summary = await client.getFeatureFlags();
     flags = summary.flags;
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("featureFlags.error.unknown", locale);
   }
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Feature Flags"
-        description={`Fetched from /api/admin/flags. ${flags.length} flag(s) found.`}
+        title={t("featureFlags.title", locale)}
+        description={t("featureFlags.description", locale, { count: flags.length })}
       >
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("featureFlags.error.label", locale)}</strong> {error}
           </div>
         )}
 
@@ -32,10 +35,10 @@ export default async function FeatureFlagsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Key</th>
-                  <th>Status</th>
-                  <th>Description</th>
-                  <th>Updated</th>
+                  <th>{t("featureFlags.table.key", locale)}</th>
+                  <th>{t("featureFlags.table.status", locale)}</th>
+                  <th>{t("featureFlags.table.description", locale)}</th>
+                  <th>{t("featureFlags.table.updated", locale)}</th>
                 </tr>
               </thead>
               <tbody>
@@ -44,7 +47,11 @@ export default async function FeatureFlagsPage() {
                     <td>
                       <code>{flag.key}</code>
                     </td>
-                    <td>{flag.enabled ? "✅ Enabled" : "❌ Disabled"}</td>
+                    <td>
+                      {flag.enabled
+                        ? t("featureFlags.status.enabled", locale)
+                        : t("featureFlags.status.disabled", locale)}
+                    </td>
                     <td>{flag.description}</td>
                     <td>
                       {flag.updatedAt
@@ -57,12 +64,12 @@ export default async function FeatureFlagsPage() {
             </table>
           </div>
         ) : (
-          <p className="empty-state">No feature flags found.</p>
+          <p className="empty-state">{t("featureFlags.empty", locale)}</p>
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("featureFlags.backHome.title", locale)}</strong>
+          {t("featureFlags.backHome.description", locale)}
         </Link>
       </AppShellCard>
     </main>

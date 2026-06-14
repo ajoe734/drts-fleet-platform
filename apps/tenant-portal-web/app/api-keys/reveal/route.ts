@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 const ONE_TIME_KEY_COOKIE = "tenant-api-key-flash";
 
@@ -36,6 +38,7 @@ function escapeHtml(value: string) {
 }
 
 export async function GET(request: Request) {
+  const locale = await getServerLocale();
   const cookieStore = await cookies();
   const encodedFlash = cookieStore.get(ONE_TIME_KEY_COOKIE)?.value;
   const flash = decodeOneTimeKeyFlash(encodedFlash);
@@ -44,7 +47,7 @@ export async function GET(request: Request) {
     const redirectUrl = new URL("/api-keys", request.url);
     redirectUrl.searchParams.set(
       "error",
-      "No pending plaintext key was found. Issue or rotate a key again if you still need it.",
+      t("apiKeys.reveal.error.noPendingKey", locale),
     );
     const response = NextResponse.redirect(redirectUrl);
     response.cookies.set(ONE_TIME_KEY_COOKIE, "", {
@@ -58,11 +61,11 @@ export async function GET(request: Request) {
 
   const success = new URL(request.url).searchParams.get("success");
   const html = `<!doctype html>
-<html lang="en">
+<html lang="${locale === "zh" ? "zh-TW" : "en"}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>One-time API key reveal</title>
+    <title>${escapeHtml(t("apiKeys.reveal.title", locale))}</title>
     <style>
       :root {
         color-scheme: light;
@@ -145,16 +148,18 @@ export async function GET(request: Request) {
       <div class="panel">
         ${
           success
-            ? `<div class="banner"><strong>Success:</strong> ${escapeHtml(success)}</div>`
+            ? `<div class="banner"><strong>${escapeHtml(
+                t("apiKeys.reveal.successLabel", locale),
+              )}</strong> ${escapeHtml(success)}</div>`
             : ""
         }
         <div class="meta">
           <div>
-            <h1 style="margin: 0; font-size: 1.75rem;">One-time plaintext key for ${escapeHtml(
-              flash.keyName,
+            <h1 style="margin: 0; font-size: 1.75rem;">${escapeHtml(
+              t("apiKeys.reveal.heading", locale, { name: flash.keyName }),
             )}</h1>
             <p class="muted" style="margin: 0.75rem 0 0;">
-              This value has been consumed from the flash cookie and will not be shown again on refresh or revisit. Move it into your secret vault now.
+              ${escapeHtml(t("apiKeys.reveal.consumedNote", locale))}
             </p>
           </div>
           <span class="badge">${escapeHtml(flash.keyId)}</span>
@@ -162,13 +167,17 @@ export async function GET(request: Request) {
         <pre>${escapeHtml(flash.plaintextKey)}</pre>
         ${
           flash.revokedApiKeyId
-            ? `<p class="muted" style="margin-top: 0.85rem;">Rotation revoked previous key <code>${escapeHtml(
+            ? `<p class="muted" style="margin-top: 0.85rem;">${escapeHtml(
+                t("apiKeys.reveal.rotationRevokedPrefix", locale),
+              )} <code>${escapeHtml(
                 flash.revokedApiKeyId,
-              )}</code>.</p>`
+              )}</code>${escapeHtml(t("apiKeys.reveal.rotationRevokedSuffix", locale))}</p>`
             : ""
         }
         <p style="margin: 1.2rem 0 0;">
-          <a href="/api-keys">Return to API keys</a>
+          <a href="/api-keys">${escapeHtml(
+            t("apiKeys.reveal.returnLink", locale),
+          )}</a>
         </p>
       </div>
     </main>

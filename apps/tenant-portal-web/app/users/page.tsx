@@ -5,11 +5,15 @@ import {
   FORMAL_TENANT_ROLE_FRAMING,
   describeRoleSnapshot,
   getTenantRoleSnapshot,
+  roleCatalogLabels,
 } from "@/lib/rbac";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 export default async function UsersPage() {
+  const locale = await getServerLocale();
   const { users, error } = await getUsers();
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
@@ -20,8 +24,10 @@ export default async function UsersPage() {
   try {
     roleCatalog = await client.listTenantRoles();
   } catch (e) {
-    roleCatalogError = e instanceof Error ? e.message : "Unknown error";
+    roleCatalogError = e instanceof Error ? e.message : t("users.error.unknown", locale);
   }
+
+  const catalogLabels = roleCatalogLabels(roleSnapshot, locale);
 
   const combinedError = [error, roleCatalogError, roleSnapshot.identityError]
     .filter(Boolean)
@@ -36,19 +42,21 @@ export default async function UsersPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="User Management"
+        title={t("users.title", locale)}
         description={
           adminAccess
-            ? "Invite users and manage tenant access with formal role framing anchored to server-issued authority."
-            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. Tenant admin authority is required to manage users.`
+            ? t("users.description.admin", locale)
+            : t("users.description.viewer", locale, {
+                role: describeRoleSnapshot(roleSnapshot, locale),
+              })
         }
       >
         <div className="panel-stack">
           <p className="muted-copy">
-            Current authority roles:{" "}
-            {roleSnapshot.roleCatalogBackedLabels.length > 0
-              ? roleSnapshot.roleCatalogBackedLabels.join(", ")
-              : "unavailable"}
+            {t("users.authorityRoles.label", locale)}{" "}
+            {catalogLabels.length > 0
+              ? catalogLabels.join(", ")
+              : t("users.authorityRoles.unavailable", locale)}
           </p>
           <div className="surface-grid">
             {FORMAL_TENANT_ROLE_FRAMING.map((roleFrame) => {
@@ -60,11 +68,11 @@ export default async function UsersPage() {
                 <article className="surface-card" key={roleFrame.key}>
                   <span className="surface-kicker">
                     {active
-                      ? "Active in current identity"
-                      : "Prototype framing"}
+                      ? t("users.role.active", locale)
+                      : t("users.role.prototype", locale)}
                   </span>
-                  <h3>{roleFrame.label}</h3>
-                  <p>{roleFrame.summary}</p>
+                  <h3>{t("role." + roleFrame.key + ".label", locale)}</h3>
+                  <p>{t("role." + roleFrame.key + ".summary", locale)}</p>
                 </article>
               );
             })}
@@ -73,16 +81,15 @@ export default async function UsersPage() {
 
         {combinedError && (
           <div className="error-banner">
-            <strong>Error:</strong> {combinedError}
+            <strong>{t("users.error.label", locale)}</strong> {combinedError}
           </div>
         )}
 
         {adminAccess && roleCatalog.length > 0 ? (
-          <InviteForm roleCatalog={roleCatalog} />
+          <InviteForm roleCatalog={roleCatalog} locale={locale} />
         ) : adminAccess ? (
           <p className="empty-state">
-            Role catalog unavailable. Invite and role-change actions stay
-            disabled until `/api/tenant/roles` responds.
+            {t("users.catalog.unavailable", locale)}
           </p>
         ) : null}
 
@@ -91,12 +98,12 @@ export default async function UsersPage() {
             <table>
               <thead>
                 <tr>
-                  <th>User ID</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  {adminAccess && <th>Actions</th>}
+                  <th>{t("users.table.userId", locale)}</th>
+                  <th>{t("users.table.name", locale)}</th>
+                  <th>{t("users.table.email", locale)}</th>
+                  <th>{t("users.table.role", locale)}</th>
+                  <th>{t("users.table.status", locale)}</th>
+                  {adminAccess && <th>{t("users.table.actions", locale)}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -113,6 +120,7 @@ export default async function UsersPage() {
                           user={user}
                           roleCatalog={roleCatalog}
                           disabled={roleCatalog.length === 0}
+                          locale={locale}
                         />
                       </td>
                     )}
@@ -123,19 +131,18 @@ export default async function UsersPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No users found.
-            {adminAccess && " Invite a user using the form above."}
+            {t("users.empty.none", locale)}
+            {adminAccess && " " + t("users.empty.inviteHint", locale)}
           </p>
         )}
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("users.link.home.title", locale)}</strong>
+          {t("users.link.home.summary", locale)}
         </Link>
         <Link className="route-link" href="/settings">
-          <strong>Settings lane</strong>
-          Review the tenant capability and governance summary that backs these
-          role assumptions.
+          <strong>{t("users.link.settings.title", locale)}</strong>
+          {t("users.link.settings.summary", locale)}
         </Link>
       </AppShellCard>
     </main>
@@ -144,8 +151,10 @@ export default async function UsersPage() {
 
 function InviteForm({
   roleCatalog,
+  locale,
 }: {
   roleCatalog: TenantRoleCatalogRecord[];
+  locale: Locale;
 }) {
   return (
     <form action={inviteUser}>
@@ -153,9 +162,9 @@ function InviteForm({
         <table>
           <thead>
             <tr>
-              <th>Email</th>
-              <th>Display Name</th>
-              <th>Role</th>
+              <th>{t("users.invite.email", locale)}</th>
+              <th>{t("users.invite.displayName", locale)}</th>
+              <th>{t("users.invite.role", locale)}</th>
               <th></th>
             </tr>
           </thead>
@@ -165,7 +174,7 @@ function InviteForm({
                 <input
                   type="email"
                   name="email"
-                  placeholder="user@example.com"
+                  placeholder={t("users.invite.emailPlaceholder", locale)}
                   required
                   style={{ width: "100%" }}
                 />
@@ -174,7 +183,7 @@ function InviteForm({
                 <input
                   type="text"
                   name="displayName"
-                  placeholder="John Doe"
+                  placeholder={t("users.invite.namePlaceholder", locale)}
                   required
                   style={{ width: "100%" }}
                 />
@@ -197,7 +206,7 @@ function InviteForm({
               </td>
               <td>
                 <button type="submit" className="btn-primary">
-                  Invite User
+                  {t("users.invite.submit", locale)}
                 </button>
               </td>
             </tr>
@@ -212,10 +221,12 @@ function RoleUpdateForm({
   user,
   roleCatalog,
   disabled,
+  locale,
 }: {
   user: { userId: string; roleCode: string; status: string };
   roleCatalog: TenantRoleCatalogRecord[];
   disabled: boolean;
+  locale: Locale;
 }) {
   return (
     <form action={updateUserRole} style={{ display: "flex", gap: "0.5rem" }}>
@@ -232,12 +243,12 @@ function RoleUpdateForm({
         ))}
       </select>
       <select name="status" defaultValue={user.status}>
-        <option value="invited">Invited</option>
-        <option value="active">Active</option>
-        <option value="suspended">Suspended</option>
+        <option value="invited">{t("users.status.invited", locale)}</option>
+        <option value="active">{t("users.status.active", locale)}</option>
+        <option value="suspended">{t("users.status.suspended", locale)}</option>
       </select>
       <button type="submit" className="btn-secondary" disabled={disabled}>
-        Update
+        {t("users.roleUpdate.submit", locale)}
       </button>
     </form>
   );

@@ -3,16 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import type {
   CreateReportJobCommand,
   ReportOutputFormat,
 } from "@drts/contracts";
 
 export async function createReportJob(formData: FormData): Promise<void> {
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteReports,
-    "Reports write authority required.",
+    t("reports.error.writeAuthorityRequired", locale),
   );
   const client = await getTenantClient();
 

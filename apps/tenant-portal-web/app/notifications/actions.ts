@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import type {
   TenantNotificationPreferences,
   TenantNotificationSubscription,
@@ -71,9 +73,11 @@ export async function getNotificationPreferences(): Promise<{
     // Fallback to defaults if API returns empty/unexpected
     return { preferences: buildDefaultPreferences(), error: null };
   } catch (e) {
+    const locale = await getServerLocale();
     return {
       preferences: buildDefaultPreferences(),
-      error: e instanceof Error ? e.message : "Unknown error",
+      error:
+        e instanceof Error ? e.message : t("notifications.error.unknown", locale),
     };
   }
 }
@@ -81,10 +85,11 @@ export async function getNotificationPreferences(): Promise<{
 export async function updateNotificationPreferences(
   formData: FormData,
 ): Promise<void> {
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteNotifications,
-    "Tenant write authority required to update notification preferences.",
+    t("notifications.error.writeAuthorityRequired", locale),
   );
   const client = await getTenantClient();
   const subscriptions: TenantNotificationSubscription[] = [];

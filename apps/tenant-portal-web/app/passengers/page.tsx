@@ -9,12 +9,16 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 
 export default async function PassengersPage({
   searchParams,
 }: {
   searchParams?: { edit?: string; error?: string };
 }) {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
 
   let passengers: TenantPassengerRecord[] = [];
@@ -23,7 +27,7 @@ export default async function PassengersPage({
   try {
     passengers = await client.listPassengers();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("passengers.error.unknown", locale);
   }
 
   const editId = searchParams?.edit;
@@ -36,68 +40,75 @@ export default async function PassengersPage({
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Passengers"
-        description={`${passengers.length} passenger(s) found.`}
+        title={t("passengers.title", locale)}
+        description={t("passengers.count", locale, { count: passengers.length })}
       >
         {error && (
           <div className="error-banner">
-            <strong>Error loading passengers:</strong> {error}
+            <strong>{t("passengers.error.loading", locale)}</strong> {error}
           </div>
         )}
 
         {editingPassenger ? (
-          <EditPassengerForm passenger={editingPassenger} />
+          <EditPassengerForm passenger={editingPassenger} locale={locale} />
         ) : (
           <>
-            <NewPassengerForm formError={formError} />
-            <PassengerList passengers={passengers} />
+            <NewPassengerForm formError={formError} locale={locale} />
+            <PassengerList passengers={passengers} locale={locale} />
           </>
         )}
 
         <Link className="route-link" href="/">
-          Back to home
+          {t("passengers.backToHome", locale)}
         </Link>
       </AppShellCard>
     </main>
   );
 }
 
-function NewPassengerForm({ formError }: { formError: string | null }) {
+function NewPassengerForm({
+  formError,
+  locale,
+}: {
+  formError: string | null;
+  locale: Locale;
+}) {
   return (
     <div className="form-section">
-      <h3>New Passenger</h3>
+      <h3>{t("passengers.new.heading", locale)}</h3>
       {formError && (
         <div className="error-banner">
-          <strong>Error:</strong> {formError}
+          <strong>{t("passengers.error.label", locale)}</strong> {formError}
         </div>
       )}
       <form action={createPassenger} className="form-grid">
         <div className="form-row">
-          <label htmlFor="fullName">Full Name *</label>
+          <label htmlFor="fullName">{t("passengers.field.fullName", locale)}</label>
           <input type="text" id="fullName" name="fullName" required />
         </div>
         <div className="form-row">
-          <label htmlFor="employeeNo">Employee No</label>
+          <label htmlFor="employeeNo">{t("passengers.field.employeeNo", locale)}</label>
           <input type="text" id="employeeNo" name="employeeNo" />
         </div>
         <div className="form-row">
-          <label htmlFor="departmentName">Department</label>
+          <label htmlFor="departmentName">{t("passengers.field.department", locale)}</label>
           <input type="text" id="departmentName" name="departmentName" />
         </div>
         <div className="form-row">
-          <label htmlFor="mobile">Mobile</label>
+          <label htmlFor="mobile">{t("passengers.field.mobile", locale)}</label>
           <input type="tel" id="mobile" name="mobile" />
         </div>
         <div className="form-row">
-          <label htmlFor="email">Email</label>
+          <label htmlFor="email">{t("passengers.field.email", locale)}</label>
           <input type="email" id="email" name="email" />
         </div>
         <div className="form-row">
           <label>
-            <input type="checkbox" name="activeFlag" defaultChecked /> Active
+            <input type="checkbox" name="activeFlag" defaultChecked />{" "}
+            {t("passengers.field.active", locale)}
           </label>
         </div>
-        <button type="submit">Create Passenger</button>
+        <button type="submit">{t("passengers.action.create", locale)}</button>
       </form>
     </div>
   );
@@ -105,16 +116,20 @@ function NewPassengerForm({ formError }: { formError: string | null }) {
 
 function EditPassengerForm({
   passenger,
+  locale,
 }: {
   passenger: TenantPassengerRecord;
+  locale: Locale;
 }) {
   return (
     <div className="form-section">
-      <h3>Edit Passenger: {passenger.fullName}</h3>
+      <h3>
+        {t("passengers.edit.heading", locale, { name: passenger.fullName })}
+      </h3>
       <form action={updatePassenger} className="form-grid">
         <input type="hidden" name="passengerId" value={passenger.passengerId} />
         <div className="form-row">
-          <label htmlFor="fullName">Full Name *</label>
+          <label htmlFor="fullName">{t("passengers.field.fullName", locale)}</label>
           <input
             type="text"
             id="fullName"
@@ -124,7 +139,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="employeeNo">Employee No</label>
+          <label htmlFor="employeeNo">{t("passengers.field.employeeNo", locale)}</label>
           <input
             type="text"
             id="employeeNo"
@@ -133,7 +148,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="departmentName">Department</label>
+          <label htmlFor="departmentName">{t("passengers.field.department", locale)}</label>
           <input
             type="text"
             id="departmentName"
@@ -142,7 +157,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="mobile">Mobile</label>
+          <label htmlFor="mobile">{t("passengers.field.mobile", locale)}</label>
           <input
             type="tel"
             id="mobile"
@@ -151,7 +166,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="email">Email</label>
+          <label htmlFor="email">{t("passengers.field.email", locale)}</label>
           <input
             type="email"
             id="email"
@@ -166,12 +181,12 @@ function EditPassengerForm({
               name="activeFlag"
               defaultChecked={passenger.activeFlag}
             />{" "}
-            Active
+            {t("passengers.field.active", locale)}
           </label>
         </div>
         <div className="form-actions">
-          <button type="submit">Save Changes</button>
-          <Link href="/passengers">Cancel</Link>
+          <button type="submit">{t("passengers.action.save", locale)}</button>
+          <Link href="/passengers">{t("passengers.action.cancel", locale)}</Link>
         </div>
       </form>
     </div>
@@ -180,24 +195,26 @@ function EditPassengerForm({
 
 function PassengerList({
   passengers,
+  locale,
 }: {
   passengers: TenantPassengerRecord[];
+  locale: Locale;
 }) {
   return (
     <div className="data-table">
       {passengers.length === 0 ? (
-        <p className="empty-state">No passengers found. Create one above.</p>
+        <p className="empty-state">{t("passengers.empty", locale)}</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Employee No</th>
-              <th>Department</th>
-              <th>Mobile</th>
-              <th>Email</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>{t("passengers.column.name", locale)}</th>
+              <th>{t("passengers.column.employeeNo", locale)}</th>
+              <th>{t("passengers.column.department", locale)}</th>
+              <th>{t("passengers.column.mobile", locale)}</th>
+              <th>{t("passengers.column.email", locale)}</th>
+              <th>{t("passengers.column.status", locale)}</th>
+              <th>{t("passengers.column.actions", locale)}</th>
             </tr>
           </thead>
           <tbody>
@@ -208,9 +225,15 @@ function PassengerList({
                 <td>{p.departmentName ?? "-"}</td>
                 <td>{p.mobile ?? "-"}</td>
                 <td>{p.email ?? "-"}</td>
-                <td>{p.activeFlag ? "Active" : "Inactive"}</td>
                 <td>
-                  <Link href={`/passengers?edit=${p.passengerId}`}>Edit</Link>
+                  {p.activeFlag
+                    ? t("passengers.status.active", locale)
+                    : t("passengers.status.inactive", locale)}
+                </td>
+                <td>
+                  <Link href={`/passengers?edit=${p.passengerId}`}>
+                    {t("passengers.action.edit", locale)}
+                  </Link>
                   {" | "}
                   <form action={deletePassenger} style={{ display: "inline" }}>
                     <input
@@ -220,9 +243,11 @@ function PassengerList({
                     />
                     <ConfirmSubmitButton
                       type="submit"
-                      confirmMessage={`Delete passenger "${p.fullName}"?`}
+                      confirmMessage={t("passengers.confirm.delete", locale, {
+                        name: p.fullName,
+                      })}
                     >
-                      Delete
+                      {t("passengers.action.delete", locale)}
                     </ConfirmSubmitButton>
                   </form>
                 </td>
@@ -237,10 +262,11 @@ function PassengerList({
 
 async function createPassenger(formData: FormData) {
   "use server";
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage passengers.",
+    t("passengers.error.writeAuthority", locale),
   );
   const client = await getTenantClient();
 
@@ -257,17 +283,18 @@ async function createPassenger(formData: FormData) {
     await client.upsertPassenger(command);
     revalidatePath("/passengers");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = e instanceof Error ? e.message : t("passengers.error.unknown", locale);
     redirect(`/passengers?error=${encodeURIComponent(msg)}`);
   }
 }
 
 async function updatePassenger(formData: FormData) {
   "use server";
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage passengers.",
+    t("passengers.error.writeAuthority", locale),
   );
   const client = await getTenantClient();
 
@@ -285,7 +312,7 @@ async function updatePassenger(formData: FormData) {
     await client.upsertPassenger(command);
     revalidatePath("/passengers");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = e instanceof Error ? e.message : t("passengers.error.unknown", locale);
     redirect(
       `/passengers?edit=${command.passengerId}&error=${encodeURIComponent(msg)}`,
     );
@@ -294,10 +321,11 @@ async function updatePassenger(formData: FormData) {
 
 async function deletePassenger(formData: FormData) {
   "use server";
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage passengers.",
+    t("passengers.error.writeAuthority", locale),
   );
   const client = await getTenantClient();
 
@@ -314,7 +342,7 @@ async function deletePassenger(formData: FormData) {
     await client.upsertPassenger(command);
     revalidatePath("/passengers");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = e instanceof Error ? e.message : t("passengers.error.unknown", locale);
     redirect(`/passengers?error=${encodeURIComponent(msg)}`);
   }
 }

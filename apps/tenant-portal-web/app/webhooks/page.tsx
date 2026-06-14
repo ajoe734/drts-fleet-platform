@@ -13,16 +13,17 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
 const WEBHOOK_DELIVERY_DISCLAIMER = {
-  title: "Phase 1 visibility boundary",
-  summary:
-    "Delivery records are authoritative visibility from the tenant webhook endpoints, but retry and replay controls stay hidden until the backend exposes them.",
-  detail:
-    "Use this page to inspect endpoint health, delivery outcomes, and related notices. Do not assume replay, resend, or manual retry exists just because a delivery row is visible.",
-};
+  titleKey: "webhooks.disclaimer.title",
+  summaryKey: "webhooks.disclaimer.summary",
+  detailKey: "webhooks.disclaimer.detail",
+} as const;
 
 const infoPanelStyle = {
   borderRadius: "18px",
@@ -48,21 +49,24 @@ type PageData = {
   errors: string[];
 };
 
-function formatDateTime(value: string | null | undefined) {
+function formatDateTime(value: string | null | undefined, locale: Locale) {
   if (!value) {
-    return "Not available";
+    return t("webhooks.value.notAvailable", locale);
   }
 
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
 }
 
-function getWebhookStatusPresentation(webhook: TenantWebhookEndpoint) {
+function getWebhookStatusPresentation(
+  webhook: TenantWebhookEndpoint,
+  locale: Locale,
+) {
   if (webhook.status === "disabled") {
     return {
-      label: "Disabled",
+      label: t("webhooks.status.disabled", locale),
       background: "rgba(244, 63, 94, 0.12)",
       color: "#9f1239",
     };
@@ -70,14 +74,14 @@ function getWebhookStatusPresentation(webhook: TenantWebhookEndpoint) {
 
   if (webhook.status === "test_pending") {
     return {
-      label: "Test pending",
+      label: t("webhooks.status.testPending", locale),
       background: "rgba(245, 158, 11, 0.14)",
       color: "#b45309",
     };
   }
 
   return {
-    label: "Active",
+    label: t("webhooks.status.active", locale),
     background: "rgba(15, 118, 110, 0.12)",
     color: "#0f766e",
   };
@@ -110,6 +114,7 @@ function deriveRelevantNotifications(notifications: NotificationRecord[]) {
 
 async function loadPageData(
   deliveryWebhookId: string | undefined,
+  locale: Locale,
 ): Promise<PageData> {
   const client = await getTenantClient();
   const [
@@ -133,15 +138,21 @@ async function loadPageData(
   ) => {
     if (result.status === "rejected") {
       errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
+        `${label}: ${result.reason instanceof Error ? result.reason.message : t("webhooks.error.unknown", locale)}`,
       );
     }
   };
 
-  collectError("Webhooks", webhooksResult);
-  collectError("Notifications", notificationsResult);
-  collectError("Integration governance", governanceResult);
-  collectError("Deliveries", deliveriesResult);
+  collectError(t("webhooks.errorLabel.webhooks", locale), webhooksResult);
+  collectError(
+    t("webhooks.errorLabel.notifications", locale),
+    notificationsResult,
+  );
+  collectError(
+    t("webhooks.errorLabel.integrationGovernance", locale),
+    governanceResult,
+  );
+  collectError(t("webhooks.errorLabel.deliveries", locale), deliveriesResult);
 
   return {
     webhooks: webhooksResult.status === "fulfilled" ? webhooksResult.value : [],
@@ -181,11 +192,12 @@ export default async function WebhooksPage({
     success?: string;
   }>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = (await searchParams) ?? {};
   const roleSnapshot = await getTenantRoleSnapshot();
   const deliveryWebhookId = resolvedSearchParams.deliveries;
   const { webhooks, notifications, governance, deliveries, errors } =
-    await loadPageData(deliveryWebhookId);
+    await loadPageData(deliveryWebhookId, locale);
 
   const createMode = resolvedSearchParams.create === "true";
   const editWebhookId = resolvedSearchParams.edit;
@@ -209,32 +221,34 @@ export default async function WebhooksPage({
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Webhooks & Delivery Visibility"
+        title={t("webhooks.page.title", locale)}
         description={
           roleSnapshot.capabilities.canWriteWebhooks
-            ? "Manage tenant endpoint subscriptions, validation posture, and observable delivery health without inventing retry controls that the backend does not actually expose."
-            : "Webhook delivery visibility remains readable in this backend-issued identity, but endpoint create/edit/delete stays hidden without webhook write scope."
+            ? t("webhooks.page.description.write", locale)
+            : t("webhooks.page.description.read", locale)
         }
       >
         {errors.map((error) => (
           <div key={error} className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("webhooks.banner.error", locale)}</strong> {error}
           </div>
         ))}
 
         {resolvedSearchParams.success ? (
           <div className="success-banner">
-            <strong>Success:</strong> {resolvedSearchParams.success}
+            <strong>{t("webhooks.banner.success", locale)}</strong>{" "}
+            {resolvedSearchParams.success}
           </div>
         ) : null}
 
         {resolvedSearchParams.error ? (
           <div className="error-banner">
-            <strong>Error:</strong> {resolvedSearchParams.error}
+            <strong>{t("webhooks.banner.error", locale)}</strong>{" "}
+            {resolvedSearchParams.error}
           </div>
         ) : null}
 
-        <WebhookDeliveryDisclaimer />
+        <WebhookDeliveryDisclaimer locale={locale} />
 
         <section
           style={{
@@ -245,7 +259,9 @@ export default async function WebhooksPage({
           }}
         >
           <div style={infoPanelStyle}>
-            <span className="metric-label">Active endpoints</span>
+            <span className="metric-label">
+              {t("webhooks.metric.activeEndpoints", locale)}
+            </span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -256,11 +272,13 @@ export default async function WebhooksPage({
               {activeCount}
             </div>
             <p className="muted-copy">
-              Validated endpoints receiving live traffic.
+              {t("webhooks.metric.activeEndpoints.hint", locale)}
             </p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Pending validation</span>
+            <span className="metric-label">
+              {t("webhooks.metric.pendingValidation", locale)}
+            </span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -271,11 +289,13 @@ export default async function WebhooksPage({
               {pendingCount}
             </div>
             <p className="muted-copy">
-              New or changed endpoints waiting for test evidence.
+              {t("webhooks.metric.pendingValidation.hint", locale)}
             </p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Disabled</span>
+            <span className="metric-label">
+              {t("webhooks.metric.disabled", locale)}
+            </span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -286,12 +306,14 @@ export default async function WebhooksPage({
               {disabledCount}
             </div>
             <p className="muted-copy">
-              Paused endpoints that need validation before reuse.
+              {t("webhooks.metric.disabled.hint", locale)}
             </p>
           </div>
           {deliveryWebhookId ? (
             <div style={infoPanelStyle}>
-              <span className="metric-label">Selected log</span>
+              <span className="metric-label">
+                {t("webhooks.metric.selectedLog", locale)}
+              </span>
               <div
                 style={{
                   fontSize: "1.8rem",
@@ -302,8 +324,11 @@ export default async function WebhooksPage({
                 {deliverySummary.total}
               </div>
               <p className="muted-copy">
-                {deliverySummary.delivered} delivered, {deliverySummary.failed}{" "}
-                failed, {deliverySummary.queued} queued.
+                {t("webhooks.metric.selectedLog.hint", locale, {
+                  delivered: deliverySummary.delivered,
+                  failed: deliverySummary.failed,
+                  queued: deliverySummary.queued,
+                })}
               </p>
             </div>
           ) : null}
@@ -311,7 +336,7 @@ export default async function WebhooksPage({
 
         {webhookPolicy ? (
           <section style={{ ...infoPanelStyle, marginBottom: "1rem" }}>
-            <strong>Authority policy snapshot</strong>
+            <strong>{t("webhooks.policy.title", locale)}</strong>
             <div
               style={{
                 display: "grid",
@@ -321,37 +346,48 @@ export default async function WebhooksPage({
               }}
             >
               <div>
-                <div className="metric-label">Baseline events</div>
+                <div className="metric-label">
+                  {t("webhooks.policy.baselineEvents", locale)}
+                </div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
                   {baselineEvents.length > 0
                     ? baselineEvents.join(", ")
-                    : "No baseline events available from governance."}
+                    : t("webhooks.policy.baselineEvents.empty", locale)}
                 </p>
               </div>
               <div>
-                <div className="metric-label">Retry contract</div>
+                <div className="metric-label">
+                  {t("webhooks.policy.retryContract", locale)}
+                </div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-                  {webhookPolicy.retryPolicy.maxAttempts} attempts, starting at{" "}
-                  {webhookPolicy.retryPolicy.initialBackoffSeconds}s, capped at{" "}
-                  {webhookPolicy.retryPolicy.maxBackoffSeconds}s.
+                  {t("webhooks.policy.retryContract.value", locale, {
+                    maxAttempts: webhookPolicy.retryPolicy.maxAttempts,
+                    initialBackoff:
+                      webhookPolicy.retryPolicy.initialBackoffSeconds,
+                    maxBackoff: webhookPolicy.retryPolicy.maxBackoffSeconds,
+                  })}
                 </p>
               </div>
               <div>
-                <div className="metric-label">Validation rules</div>
+                <div className="metric-label">
+                  {t("webhooks.policy.validationRules", locale)}
+                </div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-                  New or changed endpoints re-enter <code>test_pending</code>.
-                  Secret rotation also requires revalidation.
+                  {t("webhooks.policy.validationRules.before", locale)}{" "}
+                  <code>test_pending</code>.{" "}
+                  {t("webhooks.policy.validationRules.after", locale)}
                 </p>
               </div>
               <div>
-                <div className="metric-label">Failure notices</div>
+                <div className="metric-label">
+                  {t("webhooks.policy.failureNotices", locale)}
+                </div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-                  Final delivery failure auto-disables the endpoint and surfaces
-                  a{" "}
+                  {t("webhooks.policy.failureNotices.before", locale)}{" "}
                   <code>
                     {webhookPolicy.deliveryFailureNotificationChannel}
                   </code>{" "}
-                  notification.
+                  {t("webhooks.policy.failureNotices.after", locale)}
                 </p>
               </div>
             </div>
@@ -360,11 +396,11 @@ export default async function WebhooksPage({
 
         {createMode ? (
           roleSnapshot.capabilities.canWriteWebhooks ? (
-            <CreateWebhookForm baselineEvents={baselineEvents} />
+            <CreateWebhookForm baselineEvents={baselineEvents} locale={locale} />
           ) : (
             <div className="error-banner">
-              <strong>Access denied:</strong> Tenant webhook write authority is
-              required to add endpoints.
+              <strong>{t("webhooks.accessDenied.label", locale)}</strong>{" "}
+              {t("webhooks.accessDenied.add", locale)}
             </div>
           )
         ) : editWebhookId ? (
@@ -373,17 +409,18 @@ export default async function WebhooksPage({
               <EditWebhookForm
                 baselineEvents={baselineEvents}
                 webhook={editingWebhook}
+                locale={locale}
               />
             ) : (
               <div className="error-banner">
-                <strong>Access denied:</strong> Tenant webhook write authority
-                is required to edit endpoints.
+                <strong>{t("webhooks.accessDenied.label", locale)}</strong>{" "}
+                {t("webhooks.accessDenied.edit", locale)}
               </div>
             )
           ) : (
             <div className="error-banner">
-              <strong>Error:</strong> The selected webhook endpoint was not
-              found.
+              <strong>{t("webhooks.banner.error", locale)}</strong>{" "}
+              {t("webhooks.notFound", locale)}
             </div>
           )
         ) : deliveryWebhookId ? (
@@ -391,37 +428,42 @@ export default async function WebhooksPage({
             webhookId={deliveryWebhookId}
             deliveries={deliveries}
             webhooks={webhooks}
+            locale={locale}
           />
         ) : (
           <>
             {roleSnapshot.capabilities.canWriteWebhooks ? (
               <div className="form-actions" style={{ marginBottom: "1rem" }}>
                 <Link href="/webhooks?create=true" className="btn-primary">
-                  Add Webhook Endpoint
+                  {t("webhooks.action.addEndpoint", locale)}
                 </Link>
               </div>
             ) : null}
             <WebhookList
               webhooks={webhooks}
               canManage={roleSnapshot.capabilities.canWriteWebhooks}
+              locale={locale}
             />
-            <NotificationsList notifications={relevantNotifications} />
+            <NotificationsList
+              notifications={relevantNotifications}
+              locale={locale}
+            />
           </>
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("webhooks.backHome.title", locale)}</strong>
+          {t("webhooks.backHome.subtitle", locale)}
         </Link>
       </AppShellCard>
     </main>
   );
 }
 
-function WebhookDeliveryDisclaimer() {
+function WebhookDeliveryDisclaimer({ locale }: { locale: Locale }) {
   return (
     <section
-      aria-label="Webhook delivery disclaimer"
+      aria-label={t("webhooks.disclaimer.ariaLabel", locale)}
       style={{
         marginBottom: "1rem",
         padding: "1rem 1.25rem",
@@ -432,13 +474,13 @@ function WebhookDeliveryDisclaimer() {
       }}
     >
       <p style={{ margin: 0, fontWeight: 700 }}>
-        {WEBHOOK_DELIVERY_DISCLAIMER.title}
+        {t(WEBHOOK_DELIVERY_DISCLAIMER.titleKey, locale)}
       </p>
       <p style={{ margin: "0.5rem 0 0" }}>
-        {WEBHOOK_DELIVERY_DISCLAIMER.summary}
+        {t(WEBHOOK_DELIVERY_DISCLAIMER.summaryKey, locale)}
       </p>
       <p style={{ margin: "0.5rem 0 0", color: "#9a3412" }}>
-        {WEBHOOK_DELIVERY_DISCLAIMER.detail}
+        {t(WEBHOOK_DELIVERY_DISCLAIMER.detailKey, locale)}
       </p>
     </section>
   );
@@ -447,16 +489,20 @@ function WebhookDeliveryDisclaimer() {
 function EventChecklist({
   baselineEvents,
   selectedEvents,
+  locale,
 }: {
   baselineEvents: string[];
   selectedEvents?: string[];
+  locale: Locale;
 }) {
   const selected = new Set(selectedEvents ?? []);
 
   if (baselineEvents.length === 0) {
     return (
       <div className="form-row">
-        <label htmlFor="extraEvents">Events *</label>
+        <label htmlFor="extraEvents">
+          {t("webhooks.form.events.label", locale)}
+        </label>
         <input
           type="text"
           id="extraEvents"
@@ -471,7 +517,7 @@ function EventChecklist({
   return (
     <>
       <div className="form-row">
-        <label>Baseline events *</label>
+        <label>{t("webhooks.form.baselineEvents.label", locale)}</label>
         <div
           style={{
             display: "grid",
@@ -504,7 +550,9 @@ function EventChecklist({
         </div>
       </div>
       <div className="form-row">
-        <label htmlFor="extraEvents">Additional events</label>
+        <label htmlFor="extraEvents">
+          {t("webhooks.form.additionalEvents.label", locale)}
+        </label>
         <input
           type="text"
           id="extraEvents"
@@ -512,24 +560,30 @@ function EventChecklist({
           defaultValue={(selectedEvents ?? [])
             .filter((eventType) => !baselineEvents.includes(eventType))
             .join(", ")}
-          placeholder="Comma-separated custom events if authority adds more"
+          placeholder={t("webhooks.form.additionalEvents.placeholder", locale)}
         />
       </div>
     </>
   );
 }
 
-function CreateWebhookForm({ baselineEvents }: { baselineEvents: string[] }) {
+function CreateWebhookForm({
+  baselineEvents,
+  locale,
+}: {
+  baselineEvents: string[];
+  locale: Locale;
+}) {
   return (
     <div className="form-section">
-      <h3>Create Webhook Endpoint</h3>
+      <h3>{t("webhooks.create.heading", locale)}</h3>
       <p className="muted-copy">
-        New endpoints start in <code>test_pending</code> until validation
-        succeeds.
+        {t("webhooks.create.hint.before", locale)} <code>test_pending</code>{" "}
+        {t("webhooks.create.hint.after", locale)}
       </p>
       <form action={createWebhook} className="form-grid">
         <div className="form-row">
-          <label htmlFor="url">Webhook URL *</label>
+          <label htmlFor="url">{t("webhooks.form.url.label", locale)}</label>
           <input
             type="url"
             id="url"
@@ -539,7 +593,9 @@ function CreateWebhookForm({ baselineEvents }: { baselineEvents: string[] }) {
           />
         </div>
         <div className="form-row">
-          <label htmlFor="secret">Secret *</label>
+          <label htmlFor="secret">
+            {t("webhooks.form.secret.label", locale)}
+          </label>
           <input
             type="text"
             id="secret"
@@ -548,10 +604,12 @@ function CreateWebhookForm({ baselineEvents }: { baselineEvents: string[] }) {
             required
           />
         </div>
-        <EventChecklist baselineEvents={baselineEvents} />
+        <EventChecklist baselineEvents={baselineEvents} locale={locale} />
         <div className="form-actions">
-          <button type="submit">Create Endpoint</button>
-          <Link href="/webhooks">Cancel</Link>
+          <button type="submit">
+            {t("webhooks.action.createEndpoint", locale)}
+          </button>
+          <Link href="/webhooks">{t("webhooks.action.cancel", locale)}</Link>
         </div>
       </form>
     </div>
@@ -561,21 +619,22 @@ function CreateWebhookForm({ baselineEvents }: { baselineEvents: string[] }) {
 function EditWebhookForm({
   baselineEvents,
   webhook,
+  locale,
 }: {
   baselineEvents: string[];
   webhook: TenantWebhookEndpoint;
+  locale: Locale;
 }) {
   return (
     <div className="form-section">
-      <h3>Edit Webhook Endpoint</h3>
-      <p className="muted-copy">
-        Changing the URL, events, or secret lifecycle requires another
-        validation pass.
-      </p>
+      <h3>{t("webhooks.edit.heading", locale)}</h3>
+      <p className="muted-copy">{t("webhooks.edit.hint", locale)}</p>
       <form action={updateWebhook} className="form-grid">
         <input type="hidden" name="webhookId" value={webhook.webhookId} />
         <div className="form-row">
-          <label htmlFor="edit-url">Webhook URL *</label>
+          <label htmlFor="edit-url">
+            {t("webhooks.form.url.label", locale)}
+          </label>
           <input
             type="url"
             id="edit-url"
@@ -587,23 +646,34 @@ function EditWebhookForm({
         <EventChecklist
           baselineEvents={baselineEvents}
           selectedEvents={webhook.events}
+          locale={locale}
         />
         <div className="form-row">
-          <label htmlFor="edit-status">Status *</label>
+          <label htmlFor="edit-status">
+            {t("webhooks.form.status.label", locale)}
+          </label>
           <select
             id="edit-status"
             name="status"
             defaultValue={webhook.status}
             required
           >
-            <option value="active">Active</option>
-            <option value="test_pending">Test Pending</option>
-            <option value="disabled">Disabled</option>
+            <option value="active">
+              {t("webhooks.status.active", locale)}
+            </option>
+            <option value="test_pending">
+              {t("webhooks.status.testPending", locale)}
+            </option>
+            <option value="disabled">
+              {t("webhooks.status.disabled", locale)}
+            </option>
           </select>
         </div>
         <div className="form-actions">
-          <button type="submit">Update Endpoint</button>
-          <Link href="/webhooks">Cancel</Link>
+          <button type="submit">
+            {t("webhooks.action.updateEndpoint", locale)}
+          </button>
+          <Link href="/webhooks">{t("webhooks.action.cancel", locale)}</Link>
         </div>
       </form>
     </div>
@@ -613,34 +683,36 @@ function EditWebhookForm({
 function WebhookList({
   webhooks,
   canManage,
+  locale,
 }: {
   webhooks: TenantWebhookEndpoint[];
   canManage: boolean;
+  locale: Locale;
 }) {
   return (
     <div className="webhooks-section">
-      <h3>Webhook Endpoints</h3>
+      <h3>{t("webhooks.list.heading", locale)}</h3>
       {webhooks.length === 0 ? (
-        <p className="empty-state">
-          No webhook endpoints configured. Add one to receive tenant event
-          notifications.
-        </p>
+        <p className="empty-state">{t("webhooks.list.empty", locale)}</p>
       ) : (
         <div className="data-table">
           <table>
             <thead>
               <tr>
-                <th>Endpoint</th>
-                <th>Events</th>
-                <th>Status</th>
-                <th>Secret</th>
-                <th>Runtime</th>
-                <th>Actions</th>
+                <th>{t("webhooks.table.endpoint", locale)}</th>
+                <th>{t("webhooks.table.events", locale)}</th>
+                <th>{t("webhooks.table.status", locale)}</th>
+                <th>{t("webhooks.table.secret", locale)}</th>
+                <th>{t("webhooks.table.runtime", locale)}</th>
+                <th>{t("webhooks.table.actions", locale)}</th>
               </tr>
             </thead>
             <tbody>
               {webhooks.map((webhook) => {
-                const presentation = getWebhookStatusPresentation(webhook);
+                const presentation = getWebhookStatusPresentation(
+                  webhook,
+                  locale,
+                );
                 const runtime = webhook.runtimeMetadata;
 
                 return (
@@ -657,8 +729,10 @@ function WebhookList({
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Created {formatDateTime(webhook.createdAt)}. Updated{" "}
-                        {formatDateTime(webhook.updatedAt)}.
+                        {t("webhooks.list.timestamps", locale, {
+                          created: formatDateTime(webhook.createdAt, locale),
+                          updated: formatDateTime(webhook.updatedAt, locale),
+                        })}
                       </div>
                     </td>
                     <td>{webhook.events.join(", ")}</td>
@@ -677,7 +751,8 @@ function WebhookList({
                           className="muted-copy"
                           style={{ marginTop: "0.35rem" }}
                         >
-                          Disable reason: <code>{runtime.disableReason}</code>
+                          {t("webhooks.list.disableReason", locale)}{" "}
+                          <code>{runtime.disableReason}</code>
                         </div>
                       ) : null}
                     </td>
@@ -687,53 +762,68 @@ function WebhookList({
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Preview <code>{webhook.secretPreview}</code>
+                        {t("webhooks.list.secretPreview", locale)}{" "}
+                        <code>{webhook.secretPreview}</code>
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Rotation history{" "}
-                        {runtime?.secretRotation.rotationCount ??
-                          webhook.secretHistory?.length ??
-                          0}
+                        {t("webhooks.list.rotationHistory", locale, {
+                          count:
+                            runtime?.secretRotation.rotationCount ??
+                            webhook.secretHistory?.length ??
+                            0,
+                        })}
                       </div>
                     </td>
                     <td>
                       <div className="muted-copy">
-                        Deliveries {runtime?.deliveryCount ?? 0}, failed{" "}
-                        {runtime?.failedDeliveryCount ?? 0}
+                        {t("webhooks.list.deliveryCounts", locale, {
+                          deliveries: runtime?.deliveryCount ?? 0,
+                          failed: runtime?.failedDeliveryCount ?? 0,
+                        })}
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Last attempt {formatDateTime(runtime?.lastAttemptAt)}
+                        {t("webhooks.list.lastAttempt", locale, {
+                          value: formatDateTime(runtime?.lastAttemptAt, locale),
+                        })}
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Last delivered{" "}
-                        {formatDateTime(runtime?.lastDeliveredAt)}
+                        {t("webhooks.list.lastDelivered", locale, {
+                          value: formatDateTime(
+                            runtime?.lastDeliveredAt,
+                            locale,
+                          ),
+                        })}
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Last validated{" "}
-                        {formatDateTime(runtime?.lastValidatedAt)}
+                        {t("webhooks.list.lastValidated", locale, {
+                          value: formatDateTime(
+                            runtime?.lastValidatedAt,
+                            locale,
+                          ),
+                        })}
                       </div>
                     </td>
                     <td>
                       <Link href={`/webhooks?deliveries=${webhook.webhookId}`}>
-                        Deliveries
+                        {t("webhooks.action.deliveries", locale)}
                       </Link>
                       {canManage ? (
                         <>
                           {" | "}
                           <Link href={`/webhooks?edit=${webhook.webhookId}`}>
-                            Edit
+                            {t("webhooks.action.edit", locale)}
                           </Link>
                           {" | "}
                           <form
@@ -747,14 +837,21 @@ function WebhookList({
                             />
                             <ConfirmSubmitButton
                               type="submit"
-                              confirmMessage={`Delete webhook endpoint "${webhook.url}"? This action cannot be undone.`}
+                              confirmMessage={t(
+                                "webhooks.action.delete.confirm",
+                                locale,
+                                { url: webhook.url },
+                              )}
                             >
-                              Delete
+                              {t("webhooks.action.delete", locale)}
                             </ConfirmSubmitButton>
                           </form>
                         </>
                       ) : (
-                        <span className="muted-copy"> | Audit only</span>
+                        <span className="muted-copy">
+                          {" "}
+                          {t("webhooks.action.auditOnly", locale)}
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -772,30 +869,36 @@ function DeliveryLogView({
   webhookId,
   deliveries,
   webhooks,
+  locale,
 }: {
   webhookId: string;
   deliveries: WebhookDeliveryRecord[];
   webhooks: TenantWebhookEndpoint[];
+  locale: Locale;
 }) {
   const webhook = webhooks.find((item) => item.webhookId === webhookId);
   const summary = summarizeDeliveries(deliveries);
 
   return (
     <div className="delivery-log-section">
-      <h3>Delivery Log</h3>
+      <h3>{t("webhooks.deliveryLog.heading", locale)}</h3>
       <p className="muted-copy">
         {webhook ? (
           <>
-            Endpoint <code>{webhook.url}</code>
+            {t("webhooks.deliveryLog.endpoint", locale)}{" "}
+            <code>{webhook.url}</code>
           </>
         ) : (
           <>
-            Endpoint <code>{webhookId}</code>
+            {t("webhooks.deliveryLog.endpoint", locale)}{" "}
+            <code>{webhookId}</code>
           </>
         )}
       </p>
       <p style={{ marginBottom: "1rem" }}>
-        <Link href="/webhooks">Back to webhooks</Link>
+        <Link href="/webhooks">
+          {t("webhooks.deliveryLog.back", locale)}
+        </Link>
       </p>
       <section
         style={{
@@ -806,7 +909,9 @@ function DeliveryLogView({
         }}
       >
         <div style={infoPanelStyle}>
-          <span className="metric-label">Total</span>
+          <span className="metric-label">
+            {t("webhooks.summary.total", locale)}
+          </span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -814,7 +919,9 @@ function DeliveryLogView({
           </div>
         </div>
         <div style={infoPanelStyle}>
-          <span className="metric-label">Delivered</span>
+          <span className="metric-label">
+            {t("webhooks.summary.delivered", locale)}
+          </span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -822,7 +929,9 @@ function DeliveryLogView({
           </div>
         </div>
         <div style={infoPanelStyle}>
-          <span className="metric-label">Queued</span>
+          <span className="metric-label">
+            {t("webhooks.summary.queued", locale)}
+          </span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -830,7 +939,9 @@ function DeliveryLogView({
           </div>
         </div>
         <div style={infoPanelStyle}>
-          <span className="metric-label">Failed</span>
+          <span className="metric-label">
+            {t("webhooks.summary.failed", locale)}
+          </span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -839,19 +950,21 @@ function DeliveryLogView({
         </div>
       </section>
       {deliveries.length === 0 ? (
-        <p className="empty-state">No delivery records for this webhook.</p>
+        <p className="empty-state">
+          {t("webhooks.deliveryLog.empty", locale)}
+        </p>
       ) : (
         <div className="data-table">
           <table>
             <thead>
               <tr>
-                <th>Delivery ID</th>
-                <th>Event Type</th>
-                <th>Attempt</th>
-                <th>Status</th>
-                <th>HTTP Status</th>
-                <th>Signature</th>
-                <th>Created</th>
+                <th>{t("webhooks.deliveryTable.deliveryId", locale)}</th>
+                <th>{t("webhooks.deliveryTable.eventType", locale)}</th>
+                <th>{t("webhooks.deliveryTable.attempt", locale)}</th>
+                <th>{t("webhooks.deliveryTable.status", locale)}</th>
+                <th>{t("webhooks.deliveryTable.httpStatus", locale)}</th>
+                <th>{t("webhooks.deliveryTable.signature", locale)}</th>
+                <th>{t("webhooks.deliveryTable.created", locale)}</th>
               </tr>
             </thead>
             <tbody>
@@ -864,16 +977,16 @@ function DeliveryLogView({
                   <td>{delivery.attempt}</td>
                   <td>
                     {delivery.status === "delivered"
-                      ? "Delivered"
+                      ? t("webhooks.deliveryStatus.delivered", locale)
                       : delivery.status === "queued"
-                        ? "Queued"
-                        : "Delivery failed"}
+                        ? t("webhooks.deliveryStatus.queued", locale)
+                        : t("webhooks.deliveryStatus.failed", locale)}
                   </td>
                   <td>{delivery.httpStatus ?? "-"}</td>
                   <td>
                     <code>{delivery.signature.slice(0, 20)}...</code>
                   </td>
-                  <td>{formatDateTime(delivery.createdAt)}</td>
+                  <td>{formatDateTime(delivery.createdAt, locale)}</td>
                 </tr>
               ))}
             </tbody>
@@ -886,30 +999,31 @@ function DeliveryLogView({
 
 function NotificationsList({
   notifications,
+  locale,
 }: {
   notifications: NotificationRecord[];
+  locale: Locale;
 }) {
   return (
     <div className="notifications-section" style={{ marginTop: "2rem" }}>
-      <h3>Related notifications</h3>
+      <h3>{t("webhooks.notifications.heading", locale)}</h3>
       <p className="muted-copy" style={{ marginBottom: "0.85rem" }}>
-        Delivery failure and endpoint-governance notices should remain visible
-        in the tenant notification feed.
+        {t("webhooks.notifications.hint", locale)}
       </p>
       {notifications.length === 0 ? (
         <p className="empty-state">
-          No webhook-specific notifications are visible in the current feed.
+          {t("webhooks.notifications.empty", locale)}
         </p>
       ) : (
         <div className="data-table">
           <table>
             <thead>
               <tr>
-                <th>Notification ID</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Channel</th>
-                <th>Created</th>
+                <th>{t("webhooks.notificationsTable.id", locale)}</th>
+                <th>{t("webhooks.notificationsTable.title", locale)}</th>
+                <th>{t("webhooks.notificationsTable.status", locale)}</th>
+                <th>{t("webhooks.notificationsTable.channel", locale)}</th>
+                <th>{t("webhooks.notificationsTable.created", locale)}</th>
               </tr>
             </thead>
             <tbody>
@@ -921,7 +1035,7 @@ function NotificationsList({
                   <td>{notification.title}</td>
                   <td>{notification.status}</td>
                   <td>{notification.channel}</td>
-                  <td>{formatDateTime(notification.createdAt)}</td>
+                  <td>{formatDateTime(notification.createdAt, locale)}</td>
                 </tr>
               ))}
             </tbody>
@@ -935,10 +1049,11 @@ function NotificationsList({
 async function createWebhook(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteWebhooks,
-    "Tenant webhook write authority required.",
+    t("webhooks.error.writeAuthorityRequired", locale),
   );
   const client = await getTenantClient();
   const events = parseEvents(formData);
@@ -946,7 +1061,7 @@ async function createWebhook(formData: FormData) {
 
   try {
     if (events.length === 0) {
-      throw new Error("Select at least one webhook event.");
+      throw new Error(t("webhooks.error.selectEvent", locale));
     }
 
     const command: CreateTenantWebhookEndpointCommand = {
@@ -956,16 +1071,19 @@ async function createWebhook(formData: FormData) {
     };
 
     if (!command.url || !command.secret) {
-      throw new Error("Webhook URL and secret are required.");
+      throw new Error(t("webhooks.error.urlSecretRequired", locale));
     }
 
     await client.createWebhookEndpoint(command);
     revalidatePath("/webhooks");
     destination = `/webhooks?success=${encodeURIComponent(
-      "Webhook endpoint created in test_pending status.",
+      t("webhooks.success.created", locale),
     )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message =
+      error instanceof Error
+        ? error.message
+        : t("webhooks.error.unknown", locale);
     destination = `/webhooks?create=true&error=${encodeURIComponent(message)}`;
   }
 
@@ -975,10 +1093,11 @@ async function createWebhook(formData: FormData) {
 async function updateWebhook(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteWebhooks,
-    "Tenant webhook write authority required.",
+    t("webhooks.error.writeAuthorityRequired", locale),
   );
   const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
@@ -987,10 +1106,10 @@ async function updateWebhook(formData: FormData) {
 
   try {
     if (!webhookId) {
-      throw new Error("Webhook ID is required.");
+      throw new Error(t("webhooks.error.idRequired", locale));
     }
     if (events.length === 0) {
-      throw new Error("Select at least one webhook event.");
+      throw new Error(t("webhooks.error.selectEvent", locale));
     }
 
     const command: UpdateTenantWebhookEndpointCommand = {
@@ -1003,16 +1122,19 @@ async function updateWebhook(formData: FormData) {
     };
 
     if (!command.url || !command.status) {
-      throw new Error("Webhook URL and status are required.");
+      throw new Error(t("webhooks.error.urlStatusRequired", locale));
     }
 
     await client.updateWebhookEndpoint(webhookId, command);
     revalidatePath("/webhooks");
     destination = `/webhooks?success=${encodeURIComponent(
-      "Webhook endpoint updated successfully.",
+      t("webhooks.success.updated", locale),
     )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message =
+      error instanceof Error
+        ? error.message
+        : t("webhooks.error.unknown", locale);
     destination = `/webhooks?edit=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(message)}`;
   }
 
@@ -1022,10 +1144,11 @@ async function updateWebhook(formData: FormData) {
 async function deleteWebhook(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteWebhooks,
-    "Tenant webhook write authority required.",
+    t("webhooks.error.writeAuthorityRequired", locale),
   );
   const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
@@ -1033,16 +1156,19 @@ async function deleteWebhook(formData: FormData) {
 
   try {
     if (!webhookId) {
-      throw new Error("Webhook ID is required.");
+      throw new Error(t("webhooks.error.idRequired", locale));
     }
 
     await client.deleteWebhookEndpoint(webhookId, {
       reason: "tenant_portal_delete_webhook",
     });
     revalidatePath("/webhooks");
-    destination = `/webhooks?success=${encodeURIComponent("Webhook endpoint deleted successfully.")}`;
+    destination = `/webhooks?success=${encodeURIComponent(t("webhooks.success.deleted", locale))}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message =
+      error instanceof Error
+        ? error.message
+        : t("webhooks.error.unknown", locale);
     destination = `/webhooks?error=${encodeURIComponent(message)}`;
   }
 

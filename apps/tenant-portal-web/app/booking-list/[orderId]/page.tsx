@@ -17,6 +17,8 @@ import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,7 @@ export default async function BookingDetailPage({
 }: {
   params: Promise<{ orderId: string }>;
 }) {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const { orderId: bookingId } = await params;
@@ -39,8 +42,8 @@ export default async function BookingDetailPage({
   }
 
   const booking = bookingResult.value;
-  const source = getBookingSourceVisibility(booking);
-  const timeline = buildBookingTimeline(booking);
+  const source = getBookingSourceVisibility(booking, locale);
+  const timeline = buildBookingTimeline(booking, locale);
   const relatedInvoices: TenantInvoiceRecord[] =
     invoicesResult.status === "fulfilled"
       ? findInvoicesForOrder(invoicesResult.value, booking.orderId)
@@ -49,67 +52,69 @@ export default async function BookingDetailPage({
     invoicesResult.status === "rejected"
       ? invoicesResult.reason instanceof Error
         ? invoicesResult.reason.message
-        : "Invoice context unavailable"
+        : t("bookingList.detail.invoiceUnavailable", locale)
       : null;
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title={`Booking ${booking.bookingId}`}
-        description="Productized tenant booking detail: lifecycle timeline, route and passenger context, fulfillment summary, fare and invoice context, and allowed tenant actions only."
+        title={t("bookingList.detail.title", locale, {
+          bookingId: booking.bookingId,
+        })}
+        description={t("bookingList.detail.description", locale)}
       >
         <section className="surface-grid surface-grid-wide">
           <article className="surface-card">
-            <span className="surface-kicker">Overview</span>
-            <h3>Workflow and fulfillment summary</h3>
-            <p>
-              Booking and order state remain distinct: tenant booking status
-              describes the business record, while order status reflects
-              dispatch execution.
-            </p>
+            <span className="surface-kicker">{t("bookingList.detail.overview.kicker", locale)}</span>
+            <h3>{t("bookingList.detail.overview.heading", locale)}</h3>
+            <p>{t("bookingList.detail.overview.body", locale)}</p>
             <div className="chip-row">
               <span className={`status-badge status-${booking.orderStatus}`}>
                 {booking.orderStatus}
               </span>
-              <span className="status-chip">Booking {booking.status}</span>
+              <span className="status-chip">
+                {t("bookingList.cell.booking", locale, {
+                  status: booking.status,
+                })}
+              </span>
               <span className={getSourceToneClassName(source.tone)}>
                 {source.badge}
               </span>
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>Order ID</dt>
+                <dt>{t("bookingList.detail.orderId", locale)}</dt>
                 <dd>{booking.orderId}</dd>
               </div>
               <div>
-                <dt>Service bucket</dt>
+                <dt>{t("bookingList.detail.serviceBucket", locale)}</dt>
                 <dd>{booking.serviceBucket}</dd>
               </div>
               <div>
-                <dt>Dispatch subtype</dt>
+                <dt>{t("bookingList.detail.dispatchSubtype", locale)}</dt>
                 <dd>{booking.businessDispatchSubtype}</dd>
               </div>
               <div>
-                <dt>Booking type</dt>
+                <dt>{t("bookingList.detail.bookingType", locale)}</dt>
                 <dd>{booking.bookingType}</dd>
               </div>
               <div>
-                <dt>Fulfillment path</dt>
+                <dt>{t("bookingList.detail.fulfillmentPath", locale)}</dt>
                 <dd>{source.summary}</dd>
               </div>
               <div>
-                <dt>Authority owner</dt>
+                <dt>{t("bookingList.detail.authorityOwner", locale)}</dt>
                 <dd>{source.badge}</dd>
               </div>
               <div>
-                <dt>Created</dt>
-                <dd>{formatDateTime(booking.createdAt)}</dd>
+                <dt>{t("bookingList.detail.created", locale)}</dt>
+                <dd>{formatDateTime(booking.createdAt, locale)}</dd>
               </div>
             </dl>
             <p className="source-note">{source.detail}</p>
             {source.domain === "forwarded_authority" ? (
               <article className="callout-panel is-warning">
-                <strong>Forwarded-authority boundary</strong>
+                <strong>{t("bookingList.detail.forwardedBoundary", locale)}</strong>
                 <p>{source.statusBoundary}</p>
                 <p>{source.escalationHint}</p>
               </article>
@@ -117,20 +122,17 @@ export default async function BookingDetailPage({
           </article>
 
           <article className="surface-card">
-            <span className="surface-kicker">Timeline</span>
-            <h3>Booking lifecycle checkpoints</h3>
-            <p>
-              Tenant detail surfaces published booking checkpoints. Low-level
-              dispatch trace and driver task projection remain on the ops
-              console authority lane until a tenant-projected timeline endpoint
-              ships (XS-UI-001 BD-1).
-            </p>
+            <span className="surface-kicker">{t("bookingList.detail.timeline.kicker", locale)}</span>
+            <h3>{t("bookingList.detail.timeline.heading", locale)}</h3>
+            <p>{t("bookingList.detail.timeline.body", locale)}</p>
             <ol className="booking-timeline">
               {timeline.map((point) => (
                 <li className="booking-timeline-item" key={point.key}>
                   <strong>{point.label}</strong>
                   <span>
-                    {point.at ? formatDateTime(point.at) : "Not published"}
+                    {point.at
+                      ? formatDateTime(point.at, locale)
+                      : t("bookingList.detail.notPublished", locale)}
                   </span>
                   <p className="muted-copy">{point.detail}</p>
                 </li>
@@ -141,126 +143,142 @@ export default async function BookingDetailPage({
 
         <section className="surface-grid surface-grid-wide">
           <article className="surface-card">
-            <span className="surface-kicker">Passenger and route</span>
-            <h3>Rider context</h3>
-            <p>
-              Passenger and route context stay together so tenant users can
-              confirm the business reservation without opening a dispatch-only
-              screen.
-            </p>
+            <span className="surface-kicker">{t("bookingList.detail.passengerRoute.kicker", locale)}</span>
+            <h3>{t("bookingList.detail.passengerRoute.heading", locale)}</h3>
+            <p>{t("bookingList.detail.passengerRoute.body", locale)}</p>
             <dl className="definition-grid">
               <div>
-                <dt>Passenger</dt>
+                <dt>{t("bookingList.detail.passenger", locale)}</dt>
                 <dd>{booking.passenger.name}</dd>
               </div>
               <div>
-                <dt>Phone</dt>
-                <dd>{booking.passenger.phone || "Not provided"}</dd>
+                <dt>{t("bookingList.detail.phone", locale)}</dt>
+                <dd>
+                  {booking.passenger.phone ||
+                    t("bookingList.value.notProvided", locale)}
+                </dd>
               </div>
               <div>
-                <dt>Pickup</dt>
+                <dt>{t("bookingList.detail.pickup", locale)}</dt>
                 <dd>{booking.pickup.address}</dd>
               </div>
               <div>
-                <dt>Dropoff</dt>
+                <dt>{t("bookingList.detail.dropoff", locale)}</dt>
                 <dd>{booking.dropoff.address}</dd>
               </div>
               <div>
-                <dt>Window start</dt>
-                <dd>{formatDateTime(booking.reservationWindowStart)}</dd>
+                <dt>{t("bookingList.detail.windowStart", locale)}</dt>
+                <dd>{formatDateTime(booking.reservationWindowStart, locale)}</dd>
               </div>
               <div>
-                <dt>Window end</dt>
-                <dd>{formatDateTime(booking.reservationWindowEnd)}</dd>
+                <dt>{t("bookingList.detail.windowEnd", locale)}</dt>
+                <dd>{formatDateTime(booking.reservationWindowEnd, locale)}</dd>
               </div>
               <div>
-                <dt>Direction</dt>
-                <dd>{booking.direction ?? "Not specified"}</dd>
+                <dt>{t("bookingList.detail.direction", locale)}</dt>
+                <dd>
+                  {booking.direction ??
+                    t("bookingList.value.notSpecified", locale)}
+                </dd>
               </div>
               <div>
-                <dt>Recurrence</dt>
-                <dd>{booking.recurrenceRule ?? "Single trip"}</dd>
+                <dt>{t("bookingList.detail.recurrence", locale)}</dt>
+                <dd>
+                  {booking.recurrenceRule ??
+                    t("bookingList.value.singleTrip", locale)}
+                </dd>
               </div>
             </dl>
           </article>
 
           <article className="surface-card">
-            <span className="surface-kicker">Fulfillment</span>
-            <h3>Authority-safe fulfillment summary</h3>
-            <p>
-              Fulfillment ownership is summarized from the booking record.
-              Driver identity, vehicle assignment, and live dispatch candidate
-              state remain outside tenant authority unless a dedicated
-              tenant-projected read model is added later (XS-UI-001 BD-2).
-            </p>
+            <span className="surface-kicker">{t("bookingList.detail.fulfillment.kicker", locale)}</span>
+            <h3>{t("bookingList.detail.fulfillment.heading", locale)}</h3>
+            <p>{t("bookingList.detail.fulfillment.body", locale)}</p>
             <dl className="definition-grid">
               <div>
-                <dt>Source domain</dt>
+                <dt>{t("bookingList.detail.sourceDomain", locale)}</dt>
                 <dd>{source.badge}</dd>
               </div>
               <div>
-                <dt>Partner program</dt>
-                <dd>{booking.partnerProgramId ?? "Not applicable"}</dd>
+                <dt>{t("bookingList.detail.partnerProgram", locale)}</dt>
+                <dd>
+                  {booking.partnerProgramId ??
+                    t("bookingList.value.notApplicable", locale)}
+                </dd>
               </div>
               <div>
-                <dt>Partner entry</dt>
-                <dd>{booking.partnerEntrySlug ?? "Not applicable"}</dd>
+                <dt>{t("bookingList.detail.partnerEntry", locale)}</dt>
+                <dd>
+                  {booking.partnerEntrySlug ??
+                    t("bookingList.value.notApplicable", locale)}
+                </dd>
               </div>
               <div>
-                <dt>Eligibility</dt>
-                <dd>{booking.eligibilityVerificationId ?? "Not applicable"}</dd>
+                <dt>{t("bookingList.detail.eligibility", locale)}</dt>
+                <dd>
+                  {booking.eligibilityVerificationId ??
+                    t("bookingList.value.notApplicable", locale)}
+                </dd>
               </div>
               <div>
-                <dt>Issuer authorization</dt>
-                <dd>{booking.issuerAuthorizationRef ?? "Not applicable"}</dd>
+                <dt>{t("bookingList.detail.issuerAuthorization", locale)}</dt>
+                <dd>
+                  {booking.issuerAuthorizationRef ??
+                    t("bookingList.value.notApplicable", locale)}
+                </dd>
               </div>
               <div>
-                <dt>Compliance</dt>
-                <dd>{summarizeComplianceGates(booking.complianceGates)}</dd>
+                <dt>{t("bookingList.detail.compliance", locale)}</dt>
+                <dd>{summarizeComplianceGates(booking.complianceGates, locale)}</dd>
               </div>
               <div>
-                <dt>Finance authority</dt>
+                <dt>{t("bookingList.detail.financeAuthority", locale)}</dt>
                 <dd>{source.financeAuthority}</dd>
               </div>
             </dl>
             <p className="muted-copy">
-              Driver, vehicle, and live ETA detail are intentionally suppressed
-              until a tenant-cleared fulfillment projection is published.
+              {t("bookingList.detail.fulfillment.note", locale)}
             </p>
           </article>
         </section>
 
         <section className="surface-grid surface-grid-wide">
           <article className="surface-card">
-            <span className="surface-kicker">Fare and invoice</span>
-            <h3>Tenant-visible finance context</h3>
-            <p>
-              The detail surface shows quoted fare authority and invoice linkage
-              when the backend already publishes them.
-            </p>
+            <span className="surface-kicker">{t("bookingList.detail.fareInvoice.kicker", locale)}</span>
+            <h3>{t("bookingList.detail.fareInvoice.heading", locale)}</h3>
+            <p>{t("bookingList.detail.fareInvoice.body", locale)}</p>
             <dl className="definition-grid">
               <div>
-                <dt>Quoted fare</dt>
-                <dd>{formatMoney(booking.quotedFare)}</dd>
+                <dt>{t("bookingList.detail.quotedFare", locale)}</dt>
+                <dd>{formatMoney(booking.quotedFare, locale)}</dd>
               </div>
               <div>
-                <dt>Fare source</dt>
-                <dd>{booking.quotedFareSource ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>Pricing version</dt>
-                <dd>{booking.quotedFareRuleVersion ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>Manual override</dt>
+                <dt>{t("bookingList.detail.fareSource", locale)}</dt>
                 <dd>
-                  {describeManualFareOverride(booking.manualFareOverride)}
+                  {booking.quotedFareSource ??
+                    t("bookingList.value.notPublished", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingList.detail.pricingVersion", locale)}</dt>
+                <dd>
+                  {booking.quotedFareRuleVersion ??
+                    t("bookingList.value.notPublished", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingList.detail.manualOverride", locale)}</dt>
+                <dd>
+                  {describeManualFareOverride(booking.manualFareOverride, locale)}
                 </dd>
               </div>
             </dl>
             {invoiceWarning ? (
               <p className="muted-copy">
-                Invoice context unavailable: {invoiceWarning}
+                {t("bookingList.detail.invoiceWarning", locale, {
+                  message: invoiceWarning,
+                })}
               </p>
             ) : null}
             {relatedInvoices.length > 0 ? (
@@ -269,90 +287,108 @@ export default async function BookingDetailPage({
                   <li key={invoice.invoiceId}>
                     <strong>{invoice.invoiceId}</strong>
                     <span className="list-note">
-                      {invoice.status} · {formatMoney(invoice.amount)} · period{" "}
-                      {formatDateTime(invoice.periodStart)} →{" "}
-                      {formatDateTime(invoice.periodEnd)}
+                      {invoice.status} · {formatMoney(invoice.amount, locale)} ·{" "}
+                      {t("bookingList.detail.invoicePeriod", locale, {
+                        start: formatDateTime(invoice.periodStart, locale),
+                        end: formatDateTime(invoice.periodEnd, locale),
+                      })}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : invoiceWarning ? null : (
               <p className="muted-copy">
-                No tenant invoice row is currently linked to this order. Invoice
-                linkage is period-based today (XS-UI-001 BD-3).
+                {t("bookingList.detail.noInvoiceLinked", locale)}
               </p>
             )}
           </article>
 
           <article className="surface-card">
-            <span className="surface-kicker">Business context</span>
-            <h3>Reservation attributes</h3>
-            <p>
-              Optional business-travel fields stay readable here so tenant users
-              can confirm the reservation payload without mutating workflow
-              state.
-            </p>
+            <span className="surface-kicker">{t("bookingList.detail.businessContext.kicker", locale)}</span>
+            <h3>{t("bookingList.detail.businessContext.heading", locale)}</h3>
+            <p>{t("bookingList.detail.businessContext.body", locale)}</p>
             <dl className="definition-grid">
               <div>
-                <dt>Cost center</dt>
-                <dd>{booking.costCenter ?? "Not provided"}</dd>
-              </div>
-              <div>
-                <dt>Vehicle preference</dt>
-                <dd>{booking.vehiclePreference ?? "Not provided"}</dd>
-              </div>
-              <div>
-                <dt>Benefit reference</dt>
-                <dd>{booking.benefitReference ?? "Not provided"}</dd>
-              </div>
-              <div>
-                <dt>Flight</dt>
-                <dd>{booking.flightNo ?? "Not provided"}</dd>
-              </div>
-              <div>
-                <dt>Terminal</dt>
-                <dd>{booking.terminal ?? "Not provided"}</dd>
-              </div>
-              <div>
-                <dt>Luggage</dt>
+                <dt>{t("bookingList.detail.costCenter", locale)}</dt>
                 <dd>
-                  {booking.luggageCount == null
-                    ? "Not provided"
-                    : `${booking.luggageCount} bag(s)`}
+                  {booking.costCenter ??
+                    t("bookingList.value.notProvided", locale)}
                 </dd>
               </div>
               <div>
-                <dt>Booked by</dt>
+                <dt>{t("bookingList.detail.vehiclePreference", locale)}</dt>
+                <dd>
+                  {booking.vehiclePreference ??
+                    t("bookingList.value.notProvided", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingList.detail.benefitReference", locale)}</dt>
+                <dd>
+                  {booking.benefitReference ??
+                    t("bookingList.value.notProvided", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingList.detail.flight", locale)}</dt>
+                <dd>
+                  {booking.flightNo ??
+                    t("bookingList.value.notProvided", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingList.detail.terminal", locale)}</dt>
+                <dd>
+                  {booking.terminal ??
+                    t("bookingList.value.notProvided", locale)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingList.detail.luggage", locale)}</dt>
+                <dd>
+                  {booking.luggageCount == null
+                    ? t("bookingList.value.notProvided", locale)
+                    : t("bookingList.value.luggageBags", locale, {
+                        count: booking.luggageCount,
+                      })}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("bookingList.detail.bookedBy", locale)}</dt>
                 <dd>
                   {booking.bookedBy
                     ? `${booking.bookedBy.name} · ${booking.bookedBy.email}`
-                    : "Not provided"}
+                    : t("bookingList.value.notProvided", locale)}
                 </dd>
               </div>
               <div>
-                <dt>Onsite contact</dt>
+                <dt>{t("bookingList.detail.onsiteContact", locale)}</dt>
                 <dd>
                   {booking.onsiteContact
                     ? `${booking.onsiteContact.name} · ${booking.onsiteContact.phone}`
-                    : "Not provided"}
+                    : t("bookingList.value.notProvided", locale)}
                 </dd>
               </div>
               <div>
-                <dt>Notes</dt>
-                <dd>{booking.notes ?? "Not provided"}</dd>
+                <dt>{t("bookingList.detail.notes", locale)}</dt>
+                <dd>
+                  {booking.notes ??
+                    t("bookingList.value.notProvided", locale)}
+                </dd>
               </div>
             </dl>
           </article>
         </section>
 
         <article className="surface-card">
-          <span className="surface-kicker">Allowed actions</span>
-          <h3>Tenant command lane</h3>
+          <span className="surface-kicker">{t("bookingList.detail.allowedActions.kicker", locale)}</span>
+          <h3>{t("bookingList.detail.allowedActions.heading", locale)}</h3>
           <p>
-            Only supported tenant commands appear here. Update routes through
-            <code> PUT /api/tenant/bookings/:bookingId </code>and cancel routes
-            through <code> POST /api/tenant/bookings/:bookingId/cancel </code>
-            via the canonical api-client.
+            {t("bookingList.detail.allowedActions.bodyPrefix", locale)}
+            <code> PUT /api/tenant/bookings/:bookingId </code>
+            {t("bookingList.detail.allowedActions.bodyMiddle", locale)}
+            <code> POST /api/tenant/bookings/:bookingId/cancel </code>
+            {t("bookingList.detail.allowedActions.bodySuffix", locale)}
           </p>
           <BookingCommandPanel
             booking={booking}
@@ -361,18 +397,13 @@ export default async function BookingDetailPage({
         </article>
 
         <section className="callout-panel">
-          <strong>Authority boundary</strong>
-          <p>
-            Driver assignment, dispatch override, manual fare override, and
-            external settlement actions are not exposed on the tenant surface.
-            Refer to the cross-system command-action matrix (XS-UI-003) and the
-            route-to-endpoint map (XS-UI-001) for the full authority partition.
-          </p>
+          <strong>{t("bookingList.authority.title", locale)}</strong>
+          <p>{t("bookingList.detail.authority.body", locale)}</p>
         </section>
 
         <Link className="route-link" href="/booking-list">
-          <strong>Back to booking list</strong>
-          Return to the productized booking oversight surface.
+          <strong>{t("bookingList.detail.backToList.title", locale)}</strong>
+          {t("bookingList.detail.backToList.body", locale)}
         </Link>
       </AppShellCard>
     </main>

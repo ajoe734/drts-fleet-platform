@@ -8,6 +8,7 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import { OWNED_ORDER_STATUSES } from "@drts/contracts";
+import { type Locale, t } from "./translations";
 
 const TERMINAL_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
   "completed",
@@ -27,47 +28,50 @@ export type BookingTimelinePoint = {
 
 export function buildBookingTimeline(
   booking: BookingRecord,
+  locale: Locale = "zh",
 ): BookingTimelinePoint[] {
   return [
     {
       key: "created",
-      label: "Booking created",
+      label: t("bookingDomain.timeline.created.label", locale),
       at: booking.createdAt,
-      detail: "Tenant intake accepted into the booking ledger.",
+      detail: t("bookingDomain.timeline.created.detail", locale),
     },
     {
       key: "window-start",
-      label: "Reservation window opens",
+      label: t("bookingDomain.timeline.windowStart.label", locale),
       at: booking.reservationWindowStart,
-      detail: "Primary service commitment window begins.",
+      detail: t("bookingDomain.timeline.windowStart.detail", locale),
     },
     {
       key: "window-end",
-      label: "Reservation window closes",
+      label: t("bookingDomain.timeline.windowEnd.label", locale),
       at: booking.reservationWindowEnd,
-      detail: "Requested pickup or dropoff commitment window ends.",
+      detail: t("bookingDomain.timeline.windowEnd.detail", locale),
     },
     {
       key: "modify-cutoff",
-      label: "Tenant modification cutoff",
+      label: t("bookingDomain.timeline.modifyCutoff.label", locale),
       at: booking.modifiableUntil,
       detail: booking.modifiableUntil
-        ? "Further tenant edits follow this cutoff."
-        : "No explicit tenant edit cutoff was published.",
+        ? t("bookingDomain.timeline.modifyCutoff.detail", locale)
+        : t("bookingDomain.timeline.modifyCutoff.detailNone", locale),
     },
     {
       key: "cancel-cutoff",
-      label: "Tenant cancellation cutoff",
+      label: t("bookingDomain.timeline.cancelCutoff.label", locale),
       at: booking.cancelableUntil,
       detail: booking.cancelableUntil
-        ? "Further tenant cancellation follows this cutoff."
-        : "No explicit tenant cancellation cutoff was published.",
+        ? t("bookingDomain.timeline.cancelCutoff.detail", locale)
+        : t("bookingDomain.timeline.cancelCutoff.detailNone", locale),
     },
     {
       key: "current",
-      label: "Current workflow state",
+      label: t("bookingDomain.timeline.current.label", locale),
       at: booking.updatedAt,
-      detail: `Order status is ${booking.orderStatus}.`,
+      detail: t("bookingDomain.timeline.current.detail", locale, {
+        status: formatBookingStatusLabel(booking.orderStatus, locale),
+      }),
     },
   ];
 }
@@ -88,6 +92,7 @@ function isCutoffOpen(cutoff: string | null): boolean {
 
 export function getBookingActionCapabilities(
   booking: BookingRecord,
+  locale: Locale = "zh",
 ): BookingActionCapabilities {
   const isTerminal = TERMINAL_ORDER_STATUSES.has(booking.orderStatus);
   const isOnTripLane = ON_TRIP_ORDER_STATUSES.has(booking.orderStatus);
@@ -98,17 +103,17 @@ export function getBookingActionCapabilities(
     canUpdate: !isTerminal && !isOnTripLane && updateWindowOpen,
     canCancel: !isTerminal && cancelWindowOpen,
     updateReason: isTerminal
-      ? "Completed and cancelled bookings are read-only."
+      ? t("bookingDomain.action.update.terminal", locale)
       : isOnTripLane
-        ? "On-trip bookings can no longer be edited from tenant control."
+        ? t("bookingDomain.action.update.onTrip", locale)
         : updateWindowOpen
           ? null
-          : "Tenant edit window has closed.",
+          : t("bookingDomain.action.update.windowClosed", locale),
     cancelReason: isTerminal
-      ? "Completed and cancelled bookings cannot be cancelled again."
+      ? t("bookingDomain.action.cancel.terminal", locale)
       : cancelWindowOpen
         ? null
-        : "Tenant cancellation window has closed.",
+        : t("bookingDomain.action.cancel.windowClosed", locale),
   };
 }
 
@@ -123,28 +128,38 @@ export function findInvoicesForOrder(
 
 export function describeManualFareOverride(
   override: ManualFareOverrideRecord | null,
+  locale: Locale = "zh",
 ): string {
-  if (!override) return "None";
+  if (!override) return t("bookingDomain.override.none", locale);
   return `${override.actorType} · ${override.reason}`;
 }
 
 export function summarizeComplianceGates(
   gates: ComplianceGateRecord[] | undefined,
+  locale: Locale = "zh",
 ): string {
   if (!gates || gates.length === 0) {
-    return "No tenant-visible compliance gates published.";
+    return t("bookingDomain.compliance.none", locale);
   }
   const blocked = gates.filter((gate) => gate.blocking).length;
   if (blocked > 0) {
-    return `${blocked} blocking gate(s) of ${gates.length} total.`;
+    return t("bookingDomain.compliance.blocking", locale, {
+      count: blocked,
+      total: gates.length,
+    });
   }
-  return `${gates.length} compliance gate(s) on file, none currently blocking.`;
+  return t("bookingDomain.compliance.noneBlocking", locale, {
+    count: gates.length,
+  });
 }
 
-export function formatMoney(amount: MoneyAmount | null | undefined): string {
-  if (!amount) return "Not published";
+export function formatMoney(
+  amount: MoneyAmount | null | undefined,
+  locale: Locale = "zh",
+): string {
+  if (!amount) return t("bookingDomain.notPublished", locale);
   const minor = Number(amount.amountMinor);
-  if (!Number.isFinite(minor)) return "Not published";
+  if (!Number.isFinite(minor)) return t("bookingDomain.notPublished", locale);
   const major = (minor / 100).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -152,15 +167,25 @@ export function formatMoney(amount: MoneyAmount | null | undefined): string {
   return `${major} ${amount.currency}`;
 }
 
-export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "Not published";
+export function formatDateTime(
+  iso: string | null | undefined,
+  locale: Locale = "zh",
+): string {
+  if (!iso) return t("bookingDomain.notPublished", locale);
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "Not published";
-  return date.toLocaleString();
+  if (Number.isNaN(date.getTime())) {
+    return t("bookingDomain.notPublished", locale);
+  }
+  return date.toLocaleString(locale === "zh" ? "zh-TW" : "en-US");
 }
 
-export function formatBookingStatusLabel(status: OwnedOrderStatus): string {
-  return status.replace(/_/g, " ");
+export function formatBookingStatusLabel(
+  status: OwnedOrderStatus,
+  locale: Locale = "zh",
+): string {
+  const key = `bookingStatus.${status}`;
+  const label = t(key, locale);
+  return label === key ? status.replace(/_/g, " ") : label;
 }
 
 // ── Shared list query model (XS-UI-004 SharedListQueryV1) ──────────────────

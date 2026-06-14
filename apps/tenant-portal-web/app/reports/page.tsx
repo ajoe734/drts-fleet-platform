@@ -8,8 +8,11 @@ import {
   getSourceToneClassName,
 } from "@/lib/source-domain";
 import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export default async function ReportsPage() {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
 
@@ -19,25 +22,27 @@ export default async function ReportsPage() {
   try {
     jobs = await client.listTenantReportJobs();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("reports.error.unknown", locale);
   }
 
-  const desc =
-    "Fetched from /api/tenant/reports/jobs. " + jobs.length + " job(s) found.";
+  const desc = t("reports.description.summary", locale, { count: jobs.length });
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Reports"
+        title={t("reports.title", locale)}
         description={
           roleSnapshot.capabilities.canWriteReports
             ? desc
-            : `${desc} Viewing as ${describeRoleSnapshot(roleSnapshot)} with read-only report access.`
+            : t("reports.description.readOnly", locale, {
+                summary: desc,
+                role: describeRoleSnapshot(roleSnapshot, locale),
+              })
         }
       >
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("reports.error.label", locale)}</strong> {error}
           </div>
         )}
 
@@ -48,7 +53,7 @@ export default async function ReportsPage() {
           style={{ marginBottom: 16 }}
         >
           <label htmlFor="jobType" style={{ marginRight: 8 }}>
-            Job Type
+            {t("reports.field.jobType", locale)}
           </label>
           <select
             id="jobType"
@@ -62,7 +67,7 @@ export default async function ReportsPage() {
             <option value="revenue_summary">revenue_summary</option>
           </select>
           <label htmlFor="format" style={{ marginRight: 8 }}>
-            Format
+            {t("reports.field.format", locale)}
           </label>
           <select
             id="format"
@@ -79,14 +84,14 @@ export default async function ReportsPage() {
             type="submit"
             disabled={!roleSnapshot.capabilities.canWriteReports}
           >
-            Create Job
+            {t("reports.action.createJob", locale)}
           </button>
           <button
             type="submit"
             formAction={refreshReports}
             style={{ marginLeft: 8 }}
           >
-            Refresh
+            {t("reports.action.refresh", locale)}
           </button>
         </form>
 
@@ -95,19 +100,19 @@ export default async function ReportsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
-                  <th>Status</th>
-                  <th>Job Type</th>
-                  <th>Source Domain</th>
-                  <th>Format</th>
-                  <th>Artifact</th>
-                  <th>Expires</th>
-                  <th>Created</th>
+                  <th>{t("reports.column.jobId", locale)}</th>
+                  <th>{t("reports.column.status", locale)}</th>
+                  <th>{t("reports.column.jobType", locale)}</th>
+                  <th>{t("reports.column.sourceDomain", locale)}</th>
+                  <th>{t("reports.column.format", locale)}</th>
+                  <th>{t("reports.column.artifact", locale)}</th>
+                  <th>{t("reports.column.expires", locale)}</th>
+                  <th>{t("reports.column.created", locale)}</th>
                 </tr>
               </thead>
               <tbody>
                 {jobs.map((job) => {
-                  const source = getReportJobSourceSummary(job);
+                  const source = getReportJobSourceSummary(job, locale);
                   return (
                     <tr key={job.jobId}>
                       <td>{job.jobId}</td>
@@ -127,10 +132,10 @@ export default async function ReportsPage() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Download
+                            {t("reports.action.download", locale)}
                           </a>
                         ) : (
-                          <em>pending</em>
+                          <em>{t("reports.status.pending", locale)}</em>
                         )}
                       </td>
                       <td>
@@ -146,14 +151,12 @@ export default async function ReportsPage() {
             </table>
           </div>
         ) : (
-          <p className="empty-state">
-            No report jobs found. Create one via POST /api/tenant/reports/jobs.
-          </p>
+          <p className="empty-state">{t("reports.empty.jobs", locale)}</p>
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("reports.link.backHome", locale)}</strong>
+          {t("reports.link.backHomeDetail", locale)}
         </Link>
       </AppShellCard>
     </main>

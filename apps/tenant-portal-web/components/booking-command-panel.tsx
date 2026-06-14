@@ -10,6 +10,7 @@ import {
   formatDateTime,
   getBookingActionCapabilities,
 } from "@/lib/booking-domain";
+import { useTranslation } from "@/lib/i18n";
 
 type Mode = "update" | "cancel" | null;
 
@@ -21,16 +22,17 @@ export function BookingCommandPanel({
   allowMutations: boolean;
 }) {
   const router = useRouter();
-  const baseCapabilities = getBookingActionCapabilities(booking);
+  const { t, locale } = useTranslation();
+  const baseCapabilities = getBookingActionCapabilities(booking, locale);
   const capabilities = {
     canUpdate: allowMutations && baseCapabilities.canUpdate,
     canCancel: allowMutations && baseCapabilities.canCancel,
     updateReason: allowMutations
       ? baseCapabilities.updateReason
-      : "Current tenant role cannot update bookings.",
+      : t("bookingPanel.reason.roleCannotUpdate"),
     cancelReason: allowMutations
       ? baseCapabilities.cancelReason
-      : "Current tenant role cannot cancel bookings.",
+      : t("bookingPanel.reason.roleCannotCancel"),
   };
   const [mode, setMode] = useState<Mode>(null);
   const [loading, setLoading] = useState(false);
@@ -75,7 +77,7 @@ export function BookingCommandPanel({
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "Unknown update failure.",
+          : t("bookingPanel.error.unknownUpdate"),
       );
     } finally {
       setLoading(false);
@@ -105,7 +107,7 @@ export function BookingCommandPanel({
       setError(
         submitError instanceof Error
           ? submitError.message
-          : "Unknown cancel failure.",
+          : t("bookingPanel.error.unknownCancel"),
       );
     } finally {
       setLoading(false);
@@ -116,12 +118,9 @@ export function BookingCommandPanel({
     <div className="booking-action-panel">
       <div className="booking-action-stack">
         <div>
-          <strong>Allowed tenant actions</strong>
+          <strong>{t("bookingPanel.allowedActions.title")}</strong>
           <p className="muted-copy">
-            Tenant users can only call supported booking commands. Driver
-            assignment, dispatch override, manual fare override, and external
-            settlement actions stay on the ops console authority lane and never
-            surface here.
+            {t("bookingPanel.allowedActions.description")}
           </p>
         </div>
 
@@ -135,7 +134,7 @@ export function BookingCommandPanel({
             }}
             type="button"
           >
-            Update booking
+            {t("bookingPanel.button.updateBooking")}
           </button>
           <button
             className="action-button-danger"
@@ -146,23 +145,31 @@ export function BookingCommandPanel({
             }}
             type="button"
           >
-            Cancel booking
+            {t("bookingPanel.button.cancelBooking")}
           </button>
         </div>
 
         {capabilities.updateReason ? (
           <p className="booking-action-note">
-            Update unavailable: {capabilities.updateReason}
+            {t("bookingPanel.note.updateUnavailable", {
+              reason: capabilities.updateReason,
+            })}
             {booking.modifiableUntil
-              ? ` (cutoff ${formatDateTime(booking.modifiableUntil)})`
+              ? t("bookingPanel.note.cutoff", {
+                  cutoff: formatDateTime(booking.modifiableUntil, locale),
+                })
               : ""}
           </p>
         ) : null}
         {capabilities.cancelReason ? (
           <p className="booking-action-note">
-            Cancel unavailable: {capabilities.cancelReason}
+            {t("bookingPanel.note.cancelUnavailable", {
+              reason: capabilities.cancelReason,
+            })}
             {booking.cancelableUntil
-              ? ` (cutoff ${formatDateTime(booking.cancelableUntil)})`
+              ? t("bookingPanel.note.cutoff", {
+                  cutoff: formatDateTime(booking.cancelableUntil, locale),
+                })
               : ""}
           </p>
         ) : null}
@@ -174,12 +181,18 @@ export function BookingCommandPanel({
             aria-modal="true"
             className="booking-modal-panel"
             role="dialog"
-            aria-label={mode === "update" ? "Update booking" : "Cancel booking"}
+            aria-label={
+              mode === "update"
+                ? t("bookingPanel.modal.updateTitle")
+                : t("bookingPanel.modal.cancelTitle")
+            }
           >
             <div className="booking-modal-header">
               <div>
                 <strong>
-                  {mode === "update" ? "Update booking" : "Cancel booking"}
+                  {mode === "update"
+                    ? t("bookingPanel.modal.updateTitle")
+                    : t("bookingPanel.modal.cancelTitle")}
                 </strong>
                 <p className="muted-copy">{booking.bookingId}</p>
               </div>
@@ -188,7 +201,7 @@ export function BookingCommandPanel({
                 onClick={() => setMode(null)}
                 type="button"
               >
-                Close
+                {t("bookingPanel.modal.close")}
               </button>
             </div>
 
@@ -197,7 +210,7 @@ export function BookingCommandPanel({
             {mode === "update" ? (
               <div className="booking-form-stack">
                 <label className="booking-field">
-                  <span>Pickup address</span>
+                  <span>{t("bookingPanel.field.pickupAddress")}</span>
                   <input
                     onChange={(event) => setPickupAddress(event.target.value)}
                     type="text"
@@ -205,7 +218,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Dropoff address</span>
+                  <span>{t("bookingPanel.field.dropoffAddress")}</span>
                   <input
                     onChange={(event) => setDropoffAddress(event.target.value)}
                     type="text"
@@ -213,7 +226,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Notes</span>
+                  <span>{t("bookingPanel.field.notes")}</span>
                   <textarea
                     onChange={(event) => setNotes(event.target.value)}
                     rows={3}
@@ -221,7 +234,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Cost center</span>
+                  <span>{t("bookingPanel.field.costCenter")}</span>
                   <input
                     onChange={(event) => setCostCenter(event.target.value)}
                     type="text"
@@ -229,7 +242,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Vehicle preference</span>
+                  <span>{t("bookingPanel.field.vehiclePreference")}</span>
                   <input
                     onChange={(event) =>
                       setVehiclePreference(event.target.value)
@@ -245,14 +258,16 @@ export function BookingCommandPanel({
                     onClick={() => void submitUpdate()}
                     type="button"
                   >
-                    {loading ? "Saving..." : "Save changes"}
+                    {loading
+                      ? t("bookingPanel.button.saving")
+                      : t("bookingPanel.button.saveChanges")}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="booking-form-stack">
                 <label className="booking-field">
-                  <span>Cancellation reason (optional)</span>
+                  <span>{t("bookingPanel.field.cancellationReason")}</span>
                   <textarea
                     onChange={(event) => setCancelReason(event.target.value)}
                     rows={4}
@@ -266,7 +281,9 @@ export function BookingCommandPanel({
                     onClick={() => void submitCancel()}
                     type="button"
                   >
-                    {loading ? "Cancelling..." : "Confirm cancel"}
+                    {loading
+                      ? t("bookingPanel.button.cancelling")
+                      : t("bookingPanel.button.confirmCancel")}
                   </button>
                 </div>
               </div>

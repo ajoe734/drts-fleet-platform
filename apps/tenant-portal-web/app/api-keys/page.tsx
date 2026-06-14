@@ -15,6 +15,9 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -58,23 +61,23 @@ type ExpirySelection = {
   expirySummary: string;
 };
 
-function formatDateTime(value: string | null | undefined) {
+function formatDateTime(value: string | null | undefined, locale: Locale) {
   if (!value) {
-    return "Not available";
+    return t("apiKeys.date.notAvailable", locale);
   }
 
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
 }
 
-function formatShortDate(value: string | null | undefined) {
+function formatShortDate(value: string | null | undefined, locale: Locale) {
   if (!value) {
-    return "No expiry";
+    return t("apiKeys.date.noExpiry", locale);
   }
 
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en", {
     dateStyle: "medium",
   }).format(new Date(value));
 }
@@ -91,22 +94,28 @@ function getFallbackPolicy(): TenantApiKeyGovernancePolicy {
   };
 }
 
-function resolveApiKeyStatus(key: TenantApiKeyRecord) {
+function resolveApiKeyStatus(key: TenantApiKeyRecord, locale: Locale) {
   if (key.revokedAt) {
     return {
-      label: "Revoked",
+      code: "revoked" as const,
+      label: t("apiKeys.status.revoked", locale),
       tone: "#9f1239",
       background: "rgba(244, 63, 94, 0.12)",
-      detail: `Revoked ${formatDateTime(key.revokedAt)}`,
+      detail: t("apiKeys.status.detail.revoked", locale, {
+        date: formatDateTime(key.revokedAt, locale),
+      }),
     };
   }
 
   if (key.expiresAt && new Date(key.expiresAt).getTime() <= Date.now()) {
     return {
-      label: "Expired",
+      code: "expired" as const,
+      label: t("apiKeys.status.expired", locale),
       tone: "#b45309",
       background: "rgba(245, 158, 11, 0.14)",
-      detail: `Expired ${formatDateTime(key.expiresAt)}`,
+      detail: t("apiKeys.status.detail.expired", locale, {
+        date: formatDateTime(key.expiresAt, locale),
+      }),
     };
   }
 
@@ -118,24 +127,30 @@ function resolveApiKeyStatus(key: TenantApiKeyRecord) {
     millisUntilExpiry <= 7 * 24 * 60 * 60 * 1000
   ) {
     return {
-      label: "Expiring soon",
+      code: "expiringSoon" as const,
+      label: t("apiKeys.status.expiringSoon", locale),
       tone: "#b45309",
       background: "rgba(245, 158, 11, 0.14)",
-      detail: `Expires ${formatDateTime(key.expiresAt)}`,
+      detail: t("apiKeys.status.detail.expires", locale, {
+        date: formatDateTime(key.expiresAt, locale),
+      }),
     };
   }
 
   return {
-    label: "Active",
+    code: "active" as const,
+    label: t("apiKeys.status.active", locale),
     tone: "#0f766e",
     background: "rgba(15, 118, 110, 0.12)",
     detail: key.expiresAt
-      ? `Expires ${formatDateTime(key.expiresAt)}`
-      : "No expiry recorded",
+      ? t("apiKeys.status.detail.expires", locale, {
+          date: formatDateTime(key.expiresAt, locale),
+        })
+      : t("apiKeys.status.detail.noExpiry", locale),
   };
 }
 
-async function loadPageData(): Promise<PageData> {
+async function loadPageData(locale: Locale): Promise<PageData> {
   const client = await getTenantClient();
   const [apiKeysResult, governanceResult] = await Promise.allSettled([
     client.listApiKeys(),
@@ -145,12 +160,22 @@ async function loadPageData(): Promise<PageData> {
   const errors: string[] = [];
   if (apiKeysResult.status === "rejected") {
     errors.push(
-      `API keys: ${apiKeysResult.reason instanceof Error ? apiKeysResult.reason.message : "Unknown error"}`,
+      t("apiKeys.error.loadApiKeys", locale, {
+        message:
+          apiKeysResult.reason instanceof Error
+            ? apiKeysResult.reason.message
+            : t("apiKeys.error.unknown", locale),
+      }),
     );
   }
   if (governanceResult.status === "rejected") {
     errors.push(
-      `Integration governance: ${governanceResult.reason instanceof Error ? governanceResult.reason.message : "Unknown error"}`,
+      t("apiKeys.error.loadGovernance", locale, {
+        message:
+          governanceResult.reason instanceof Error
+            ? governanceResult.reason.message
+            : t("apiKeys.error.unknown", locale),
+      }),
     );
   }
 
@@ -172,23 +197,24 @@ function parseScopeValues(formData: FormData) {
 function resolveExpirySelection(
   formData: FormData,
   policy: TenantApiKeyGovernancePolicy,
+  locale: Locale,
 ): ExpirySelection {
   const preset = String(formData.get("lifetimePreset") ?? "recommended");
   const customExpiresAt = String(formData.get("expiresAt") ?? "").trim();
   let expiresAt: string | null = null;
-  let expirySummary = "Authority default lifetime";
+  let expirySummary = t("apiKeys.expiry.summary.authorityDefault", locale);
 
   if (preset === "custom") {
     if (!customExpiresAt) {
       if (policy.requireExpiry) {
-        throw new Error(
-          "Choose a custom expiry or use one of the governance presets.",
-        );
+        throw new Error(t("apiKeys.error.expiryRequired", locale));
       }
       return { expiresAt: null, expirySummary };
     }
     expiresAt = new Date(customExpiresAt).toISOString();
-    expirySummary = `Custom expiry: ${formatDateTime(expiresAt)}`;
+    expirySummary = t("apiKeys.expiry.summary.custom", locale, {
+      date: formatDateTime(expiresAt, locale),
+    });
   } else {
     const days =
       preset === "short"
@@ -199,7 +225,7 @@ function resolveExpirySelection(
     const target = new Date();
     target.setUTCDate(target.getUTCDate() + days);
     expiresAt = target.toISOString();
-    expirySummary = `Preset expiry: ${days} day(s)`;
+    expirySummary = t("apiKeys.expiry.summary.preset", locale, { days });
   }
 
   if (!expiresAt) {
@@ -210,14 +236,16 @@ function resolveExpirySelection(
     (policy.maxLifetimeDays || DEFAULT_MAX_LIFETIME_DAYS) * 24 * 60 * 60 * 1000;
   const expiryMillis = new Date(expiresAt).getTime();
   if (Number.isNaN(expiryMillis)) {
-    throw new Error("Invalid expiry date.");
+    throw new Error(t("apiKeys.error.invalidExpiry", locale));
   }
   if (expiryMillis <= Date.now()) {
-    throw new Error("Expiry must be in the future.");
+    throw new Error(t("apiKeys.error.expiryFuture", locale));
   }
   if (expiryMillis - Date.now() > maxLifetimeMillis) {
     throw new Error(
-      `Expiry exceeds the ${policy.maxLifetimeDays}-day governance limit.`,
+      t("apiKeys.error.expiryExceedsLimit", locale, {
+        days: policy.maxLifetimeDays,
+      }),
     );
   }
 
@@ -255,10 +283,11 @@ export default async function ApiKeysPage({
     success?: string;
   }>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = (await searchParams) ?? {};
   const cookieStore = await cookies();
   const roleSnapshot = await getTenantRoleSnapshot();
-  const { apiKeys, governance, errors } = await loadPageData();
+  const { apiKeys, governance, errors } = await loadPageData(locale);
   const policy = governance?.apiKeyPolicy ?? getFallbackPolicy();
   const oneTimeKeyFlash = cookieStore.get(ONE_TIME_KEY_COOKIE)?.value;
 
@@ -272,8 +301,8 @@ export default async function ApiKeysPage({
     ? (apiKeys.find((key) => key.apiKeyId === rotateKeyId) ?? null)
     : null;
   const isApiKeyUsable = (key: TenantApiKeyRecord) => {
-    const status = resolveApiKeyStatus(key);
-    return status.label !== "Revoked" && status.label !== "Expired";
+    const status = resolveApiKeyStatus(key, locale);
+    return status.code !== "revoked" && status.code !== "expired";
   };
   const activeKeyCount = apiKeys.filter(isApiKeyUsable).length;
   const unusedKeyCount = apiKeys.filter(
@@ -283,28 +312,30 @@ export default async function ApiKeysPage({
   return (
     <main className="app-grid">
       <AppShellCard
-        title="API Keys"
+        title={t("apiKeys.title", locale)}
         description={
           roleSnapshot.capabilities.canManageApiKeys
-            ? "Give tenant integration owners a governed place to issue, rotate, and revoke credentials without losing scope, expiry, or last-used visibility."
-            : "Backend identity resolves this tenant session as read-only for API key governance. Credential inventory remains visible for audit, but issue/rotate/revoke stays tenant-admin only."
+            ? t("apiKeys.description.manage", locale)
+            : t("apiKeys.description.readOnly", locale)
         }
       >
         {errors.map((error) => (
           <div key={error} className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("apiKeys.banner.error", locale)}</strong> {error}
           </div>
         ))}
 
         {resolvedSearchParams.success ? (
           <div className="success-banner">
-            <strong>Success:</strong> {resolvedSearchParams.success}
+            <strong>{t("apiKeys.banner.success", locale)}</strong>{" "}
+            {resolvedSearchParams.success}
           </div>
         ) : null}
 
         {resolvedSearchParams.error ? (
           <div className="error-banner">
-            <strong>Error:</strong> {resolvedSearchParams.error}
+            <strong>{t("apiKeys.banner.error", locale)}</strong>{" "}
+            {resolvedSearchParams.error}
           </div>
         ) : null}
 
@@ -317,7 +348,9 @@ export default async function ApiKeysPage({
           }}
         >
           <div style={infoPanelStyle}>
-            <span className="metric-label">Active keys</span>
+            <span className="metric-label">
+              {t("apiKeys.metric.activeKeys", locale)}
+            </span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -328,12 +361,13 @@ export default async function ApiKeysPage({
               {activeKeyCount}
             </div>
             <p className="muted-copy">
-              Revoked and expired credentials are kept visible for audit
-              context.
+              {t("apiKeys.metric.activeKeys.help", locale)}
             </p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Unused keys</span>
+            <span className="metric-label">
+              {t("apiKeys.metric.unusedKeys", locale)}
+            </span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -344,11 +378,13 @@ export default async function ApiKeysPage({
               {unusedKeyCount}
             </div>
             <p className="muted-copy">
-              Review unused secrets before they drift into long-lived risk.
+              {t("apiKeys.metric.unusedKeys.help", locale)}
             </p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Rotation window</span>
+            <span className="metric-label">
+              {t("apiKeys.metric.rotationWindow", locale)}
+            </span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -356,21 +392,22 @@ export default async function ApiKeysPage({
                 marginTop: "0.5rem",
               }}
             >
-              {policy.defaultLifetimeDays}d
+              {t("apiKeys.metric.rotationWindow.value", locale, {
+                days: policy.defaultLifetimeDays,
+              })}
             </div>
             <p className="muted-copy">
-              Recommended lifetime. Hard maximum is {policy.maxLifetimeDays}{" "}
-              days.
+              {t("apiKeys.metric.rotationWindow.help", locale, {
+                days: policy.maxLifetimeDays,
+              })}
             </p>
           </div>
         </section>
 
         <section style={{ ...infoPanelStyle, marginBottom: "1rem" }}>
-          <strong>Governed scope catalog</strong>
+          <strong>{t("apiKeys.scopeCatalog.title", locale)}</strong>
           <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-            Tenant-issued keys stay inside the authority-approved scope list.
-            Break-glass access is a platform-admin process, not a self-service
-            checkbox.
+            {t("apiKeys.scopeCatalog.description", locale)}
           </p>
           <div
             style={{
@@ -387,34 +424,41 @@ export default async function ApiKeysPage({
             ))}
           </div>
           <p className="muted-copy" style={{ marginTop: "0.85rem" }}>
-            Expiry{" "}
-            {policy.requireExpiry ? "is required" : "defaults at the authority"}
-            . Revoke effect: {policy.revokeEffect}. Compatibility aliases:{" "}
-            {Object.keys(policy.compatibilityAliases).length > 0
-              ? Object.entries(policy.compatibilityAliases)
-                  .map(([alias, canonical]) => `${alias} -> ${canonical}`)
-                  .join(", ")
-              : "none"}
-            .
+            {t("apiKeys.scopeCatalog.policySummary", locale, {
+              expiry: policy.requireExpiry
+                ? t("apiKeys.scopeCatalog.expiryRequired", locale)
+                : t("apiKeys.scopeCatalog.expiryDefault", locale),
+              revokeEffect: policy.revokeEffect,
+              aliases:
+                Object.keys(policy.compatibilityAliases).length > 0
+                  ? Object.entries(policy.compatibilityAliases)
+                      .map(([alias, canonical]) => `${alias} -> ${canonical}`)
+                      .join(", ")
+                  : t("apiKeys.scopeCatalog.aliasesNone", locale),
+            })}
           </p>
         </section>
 
         {rotatingKey ? (
           roleSnapshot.capabilities.canManageApiKeys ? (
-            <RotateKeyForm apiKey={rotatingKey} policy={policy} />
+            <RotateKeyForm
+              apiKey={rotatingKey}
+              policy={policy}
+              locale={locale}
+            />
           ) : (
             <div className="error-banner">
-              <strong>Access denied:</strong> Tenant admin authority is required
-              to rotate API keys.
+              <strong>{t("apiKeys.accessDenied", locale)}</strong>{" "}
+              {t("apiKeys.accessDenied.rotate", locale)}
             </div>
           )
         ) : issueMode ? (
           roleSnapshot.capabilities.canManageApiKeys ? (
-            <IssueKeyForm policy={policy} />
+            <IssueKeyForm policy={policy} locale={locale} />
           ) : (
             <div className="error-banner">
-              <strong>Access denied:</strong> Tenant admin authority is required
-              to issue API keys.
+              <strong>{t("apiKeys.accessDenied", locale)}</strong>{" "}
+              {t("apiKeys.accessDenied.issue", locale)}
             </div>
           )
         ) : (
@@ -422,20 +466,21 @@ export default async function ApiKeysPage({
             {roleSnapshot.capabilities.canManageApiKeys ? (
               <div className="form-actions" style={{ marginBottom: "1rem" }}>
                 <Link href="/api-keys?issue=true" className="btn-primary">
-                  Issue New Key
+                  {t("apiKeys.action.issueNewKey", locale)}
                 </Link>
               </div>
             ) : null}
             <ApiKeyList
               apiKeys={apiKeys}
               canManage={roleSnapshot.capabilities.canManageApiKeys}
+              locale={locale}
             />
           </>
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("apiKeys.backHome.title", locale)}</strong>
+          {t("apiKeys.backHome.subtitle", locale)}
         </Link>
       </AppShellCard>
     </main>
@@ -445,15 +490,17 @@ export default async function ApiKeysPage({
 function ScopeChecklist({
   allowedScopes,
   defaultScopes,
+  locale,
 }: {
   allowedScopes: string[];
   defaultScopes?: string[];
+  locale: Locale;
 }) {
   const selected = new Set(defaultScopes ?? []);
 
   return (
     <div className="form-row">
-      <label>Scopes *</label>
+      <label>{t("apiKeys.form.scopes.label", locale)}</label>
       <div
         style={{
           display: "grid",
@@ -488,59 +535,84 @@ function ScopeChecklist({
   );
 }
 
-function ExpiryControls({ policy }: { policy: TenantApiKeyGovernancePolicy }) {
+function ExpiryControls({
+  policy,
+  locale,
+}: {
+  policy: TenantApiKeyGovernancePolicy;
+  locale: Locale;
+}) {
   return (
     <>
       <div className="form-row">
-        <label htmlFor="lifetimePreset">Expiry policy *</label>
+        <label htmlFor="lifetimePreset">
+          {t("apiKeys.form.expiryPolicy.label", locale)}
+        </label>
         <select
           id="lifetimePreset"
           name="lifetimePreset"
           defaultValue="recommended"
         >
           <option value="recommended">
-            Recommended ({policy.defaultLifetimeDays} days)
+            {t("apiKeys.form.expiry.recommended", locale, {
+              days: policy.defaultLifetimeDays,
+            })}
           </option>
-          <option value="short">Short-lived (30 days)</option>
-          <option value="max">Maximum ({policy.maxLifetimeDays} days)</option>
-          <option value="custom">Custom datetime</option>
+          <option value="short">
+            {t("apiKeys.form.expiry.short", locale)}
+          </option>
+          <option value="max">
+            {t("apiKeys.form.expiry.max", locale, {
+              days: policy.maxLifetimeDays,
+            })}
+          </option>
+          <option value="custom">
+            {t("apiKeys.form.expiry.custom", locale)}
+          </option>
         </select>
       </div>
       <div className="form-row">
-        <label htmlFor="expiresAt">Custom expiry</label>
+        <label htmlFor="expiresAt">
+          {t("apiKeys.form.customExpiry.label", locale)}
+        </label>
         <input type="datetime-local" id="expiresAt" name="expiresAt" />
         <p className="muted-copy" style={{ marginTop: "0.35rem" }}>
-          Used only when the preset is set to custom.
+          {t("apiKeys.form.customExpiry.help", locale)}
         </p>
       </div>
     </>
   );
 }
 
-function IssueKeyForm({ policy }: { policy: TenantApiKeyGovernancePolicy }) {
+function IssueKeyForm({
+  policy,
+  locale,
+}: {
+  policy: TenantApiKeyGovernancePolicy;
+  locale: Locale;
+}) {
   return (
     <div className="form-section">
-      <h3>Issue New API Key</h3>
-      <p className="muted-copy">
-        Create a tenant-scoped credential with explicit lifetime and auditable
-        scope selection.
-      </p>
+      <h3>{t("apiKeys.issueForm.title", locale)}</h3>
+      <p className="muted-copy">{t("apiKeys.issueForm.description", locale)}</p>
       <form action={issueApiKey} className="form-grid">
         <div className="form-row">
-          <label htmlFor="keyName">Key Name *</label>
+          <label htmlFor="keyName">
+            {t("apiKeys.form.keyName.label", locale)}
+          </label>
           <input
             type="text"
             id="keyName"
             name="keyName"
-            placeholder="e.g., production-booking-sync"
+            placeholder={t("apiKeys.form.keyName.placeholder", locale)}
             required
           />
         </div>
-        <ScopeChecklist allowedScopes={policy.allowedScopes} />
-        <ExpiryControls policy={policy} />
+        <ScopeChecklist allowedScopes={policy.allowedScopes} locale={locale} />
+        <ExpiryControls policy={policy} locale={locale} />
         <div className="form-actions">
-          <button type="submit">Issue Key</button>
-          <Link href="/api-keys">Cancel</Link>
+          <button type="submit">{t("apiKeys.action.issueKey", locale)}</button>
+          <Link href="/api-keys">{t("apiKeys.action.cancel", locale)}</Link>
         </div>
       </form>
     </div>
@@ -550,25 +622,28 @@ function IssueKeyForm({ policy }: { policy: TenantApiKeyGovernancePolicy }) {
 function RotateKeyForm({
   apiKey,
   policy,
+  locale,
 }: {
   apiKey: TenantApiKeyRecord;
   policy: TenantApiKeyGovernancePolicy;
+  locale: Locale;
 }) {
-  const status = resolveApiKeyStatus(apiKey);
+  const status = resolveApiKeyStatus(apiKey, locale);
 
   return (
     <div className="form-section">
-      <h3>Rotate API Key</h3>
-      <p className="muted-copy">
-        Rotating revokes the current credential immediately and issues a new
-        plaintext key one time.
-      </p>
+      <h3>{t("apiKeys.rotateForm.title", locale)}</h3>
+      <p className="muted-copy">{t("apiKeys.rotateForm.description", locale)}</p>
       <div style={{ ...infoPanelStyle, marginBottom: "1rem" }}>
         <strong>{apiKey.keyName}</strong>
         <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-          Prefix <code>{apiKey.keyPrefix}</code>, suffix{" "}
-          <code>{apiKey.maskedSuffix}</code>, last used{" "}
-          {formatDateTime(apiKey.lastUsedAt)}.
+          {t("apiKeys.rotateForm.prefixLabel", locale)}{" "}
+          <code>{apiKey.keyPrefix}</code>
+          {t("apiKeys.rotateForm.suffixLabel", locale)}{" "}
+          <code>{apiKey.maskedSuffix}</code>
+          {t("apiKeys.rotateForm.lastUsedLabel", locale)}{" "}
+          {formatDateTime(apiKey.lastUsedAt, locale)}
+          {t("apiKeys.rotateForm.metaEnd", locale)}
         </p>
         <span
           style={{
@@ -584,7 +659,9 @@ function RotateKeyForm({
       <form action={rotateApiKey} className="form-grid">
         <input type="hidden" name="apiKeyId" value={apiKey.apiKeyId} />
         <div className="form-row">
-          <label htmlFor="keyName">Key Name *</label>
+          <label htmlFor="keyName">
+            {t("apiKeys.form.keyName.label", locale)}
+          </label>
           <input
             type="text"
             id="keyName"
@@ -596,11 +673,12 @@ function RotateKeyForm({
         <ScopeChecklist
           allowedScopes={policy.allowedScopes}
           defaultScopes={apiKey.scopes}
+          locale={locale}
         />
-        <ExpiryControls policy={policy} />
+        <ExpiryControls policy={policy} locale={locale} />
         <div className="form-actions">
-          <button type="submit">Rotate Key</button>
-          <Link href="/api-keys">Cancel</Link>
+          <button type="submit">{t("apiKeys.action.rotateKey", locale)}</button>
+          <Link href="/api-keys">{t("apiKeys.action.cancel", locale)}</Link>
         </div>
       </form>
     </div>
@@ -610,32 +688,32 @@ function RotateKeyForm({
 function ApiKeyList({
   apiKeys,
   canManage,
+  locale,
 }: {
   apiKeys: TenantApiKeyRecord[];
   canManage: boolean;
+  locale: Locale;
 }) {
   return (
     <div className="data-table">
       {apiKeys.length === 0 ? (
-        <p className="empty-state">
-          No API keys found. Issue a governed credential to get started.
-        </p>
+        <p className="empty-state">{t("apiKeys.list.empty", locale)}</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Credential</th>
-              <th>Scopes</th>
-              <th>Last used</th>
-              <th>Expiry</th>
-              <th>Created</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>{t("apiKeys.table.credential", locale)}</th>
+              <th>{t("apiKeys.table.scopes", locale)}</th>
+              <th>{t("apiKeys.table.lastUsed", locale)}</th>
+              <th>{t("apiKeys.table.expiry", locale)}</th>
+              <th>{t("apiKeys.table.created", locale)}</th>
+              <th>{t("apiKeys.table.status", locale)}</th>
+              <th>{t("apiKeys.table.actions", locale)}</th>
             </tr>
           </thead>
           <tbody>
             {apiKeys.map((key) => {
-              const status = resolveApiKeyStatus(key);
+              const status = resolveApiKeyStatus(key, locale);
 
               return (
                 <tr key={key.apiKeyId}>
@@ -659,21 +737,21 @@ function ApiKeyList({
                   <td>{key.scopes.join(", ")}</td>
                   <td>
                     {key.lastUsedAt
-                      ? formatDateTime(key.lastUsedAt)
-                      : "Never used"}
+                      ? formatDateTime(key.lastUsedAt, locale)
+                      : t("apiKeys.list.neverUsed", locale)}
                   </td>
                   <td>
-                    <strong>{formatShortDate(key.expiresAt)}</strong>
+                    <strong>{formatShortDate(key.expiresAt, locale)}</strong>
                     <div
                       className="muted-copy"
                       style={{ marginTop: "0.35rem" }}
                     >
                       {key.expiresAt
-                        ? formatDateTime(key.expiresAt)
-                        : "Authority default / none"}
+                        ? formatDateTime(key.expiresAt, locale)
+                        : t("apiKeys.list.authorityDefaultOrNone", locale)}
                     </div>
                   </td>
-                  <td>{formatDateTime(key.createdAt)}</td>
+                  <td>{formatDateTime(key.createdAt, locale)}</td>
                   <td>
                     <span
                       style={{
@@ -695,7 +773,7 @@ function ApiKeyList({
                     {!key.revokedAt && canManage ? (
                       <>
                         <Link href={`/api-keys?rotate=${key.apiKeyId}`}>
-                          Rotate
+                          {t("apiKeys.action.rotate", locale)}
                         </Link>
                         {" | "}
                         <form
@@ -709,14 +787,20 @@ function ApiKeyList({
                           />
                           <ConfirmSubmitButton
                             type="submit"
-                            confirmMessage={`Revoke API key "${key.keyName}" immediately? This cannot be undone.`}
+                            confirmMessage={t(
+                              "apiKeys.action.revoke.confirm",
+                              locale,
+                              { name: key.keyName },
+                            )}
                           >
-                            Revoke
+                            {t("apiKeys.action.revoke", locale)}
                           </ConfirmSubmitButton>
                         </form>
                       </>
                     ) : (
-                      <span className="muted-copy">Audit only</span>
+                      <span className="muted-copy">
+                        {t("apiKeys.list.auditOnly", locale)}
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -732,10 +816,11 @@ function ApiKeyList({
 async function issueApiKey(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canManageApiKeys,
-    "Tenant admin authority required to issue API keys.",
+    t("apiKeys.error.requireIssue", locale),
   );
   const client = await getTenantClient();
   const scopes = parseScopeValues(formData);
@@ -746,7 +831,7 @@ async function issueApiKey(formData: FormData) {
       .apiKeyPolicy;
 
     if (scopes.length === 0) {
-      throw new Error("Select at least one scope.");
+      throw new Error(t("apiKeys.error.selectScope", locale));
     }
 
     const invalidScopes = scopes.filter(
@@ -754,13 +839,16 @@ async function issueApiKey(formData: FormData) {
     );
     if (invalidScopes.length > 0) {
       throw new Error(
-        `Unsupported scope selection: ${invalidScopes.join(", ")}`,
+        t("apiKeys.error.unsupportedScopes", locale, {
+          scopes: invalidScopes.join(", "),
+        }),
       );
     }
 
     const { expiresAt, expirySummary } = resolveExpirySelection(
       formData,
       policy,
+      locale,
     );
     const command: IssueTenantApiKeyCommand = {
       keyName: String(formData.get("keyName") ?? "").trim(),
@@ -769,17 +857,24 @@ async function issueApiKey(formData: FormData) {
     };
 
     if (!command.keyName) {
-      throw new Error("Key name is required.");
+      throw new Error(t("apiKeys.error.keyNameRequired", locale));
     }
 
     const result = await client.issueApiKey(command);
     await writeOneTimeKeyFlash(result);
     revalidatePath("/api-keys");
     destination = `/api-keys/reveal?success=${encodeURIComponent(
-      `Issued ${result.apiKey.keyName} with ${scopes.length} scope(s). ${expirySummary}.`,
+      t("apiKeys.success.issued", locale, {
+        name: result.apiKey.keyName,
+        count: scopes.length,
+        summary: expirySummary,
+      }),
     )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message =
+      error instanceof Error
+        ? error.message
+        : t("apiKeys.error.unknown", locale);
     destination = `/api-keys?issue=true&error=${encodeURIComponent(message)}`;
   }
 
@@ -789,10 +884,11 @@ async function issueApiKey(formData: FormData) {
 async function rotateApiKey(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canManageApiKeys,
-    "Tenant admin authority required to rotate API keys.",
+    t("apiKeys.error.requireRotate", locale),
   );
   const client = await getTenantClient();
   const apiKeyId = String(formData.get("apiKeyId") ?? "");
@@ -804,10 +900,10 @@ async function rotateApiKey(formData: FormData) {
       .apiKeyPolicy;
 
     if (!apiKeyId) {
-      throw new Error("API key ID is required.");
+      throw new Error(t("apiKeys.error.apiKeyIdRequired", locale));
     }
     if (scopes.length === 0) {
-      throw new Error("Select at least one scope.");
+      throw new Error(t("apiKeys.error.selectScope", locale));
     }
 
     const invalidScopes = scopes.filter(
@@ -815,13 +911,16 @@ async function rotateApiKey(formData: FormData) {
     );
     if (invalidScopes.length > 0) {
       throw new Error(
-        `Unsupported scope selection: ${invalidScopes.join(", ")}`,
+        t("apiKeys.error.unsupportedScopes", locale, {
+          scopes: invalidScopes.join(", "),
+        }),
       );
     }
 
     const { expiresAt, expirySummary } = resolveExpirySelection(
       formData,
       policy,
+      locale,
     );
     const command: RotateTenantApiKeyCommand = {
       keyName: String(formData.get("keyName") ?? "").trim(),
@@ -830,17 +929,23 @@ async function rotateApiKey(formData: FormData) {
     };
 
     if (!command.keyName) {
-      throw new Error("Key name is required.");
+      throw new Error(t("apiKeys.error.keyNameRequired", locale));
     }
 
     const result = await client.rotateApiKey(apiKeyId, command);
     await writeOneTimeKeyFlash(result);
     revalidatePath("/api-keys");
     destination = `/api-keys/reveal?success=${encodeURIComponent(
-      `Rotated ${result.apiKey.keyName}. Previous key revoked immediately. ${expirySummary}.`,
+      t("apiKeys.success.rotated", locale, {
+        name: result.apiKey.keyName,
+        summary: expirySummary,
+      }),
     )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message =
+      error instanceof Error
+        ? error.message
+        : t("apiKeys.error.unknown", locale);
     destination = `/api-keys?rotate=${encodeURIComponent(apiKeyId)}&error=${encodeURIComponent(message)}`;
   }
 
@@ -850,10 +955,11 @@ async function rotateApiKey(formData: FormData) {
 async function revokeApiKey(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canManageApiKeys,
-    "Tenant admin authority required to revoke API keys.",
+    t("apiKeys.error.requireRevoke", locale),
   );
   const client = await getTenantClient();
   const apiKeyId = String(formData.get("apiKeyId") ?? "");
@@ -861,14 +967,19 @@ async function revokeApiKey(formData: FormData) {
 
   try {
     if (!apiKeyId) {
-      throw new Error("API key ID is required.");
+      throw new Error(t("apiKeys.error.apiKeyIdRequired", locale));
     }
 
     await client.revokeApiKey(apiKeyId);
     revalidatePath("/api-keys");
-    destination = `/api-keys?success=${encodeURIComponent("API key revoked immediately.")}`;
+    destination = `/api-keys?success=${encodeURIComponent(
+      t("apiKeys.success.revoked", locale),
+    )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message =
+      error instanceof Error
+        ? error.message
+        : t("apiKeys.error.unknown", locale);
     destination = `/api-keys?error=${encodeURIComponent(message)}`;
   }
 

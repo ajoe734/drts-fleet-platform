@@ -1,44 +1,52 @@
 import Link from "next/link";
 import { getAuditLogs } from "./actions";
-import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
+import {
+  describeRoleSnapshot,
+  getTenantRoleSnapshot,
+  roleCatalogLabels,
+} from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { AppShellCard } from "@drts/ui-web";
 
 export default async function AuditPage() {
+  const locale = await getServerLocale();
   const { logs, error } = await getAuditLogs();
   const roleSnapshot = await getTenantRoleSnapshot();
   const combinedError = [error, roleSnapshot.identityError]
     .filter(Boolean)
     .join(" | ");
+  const catalogLabels = roleCatalogLabels(roleSnapshot, locale);
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Audit Trail"
-        description={`Viewing as ${describeRoleSnapshot(roleSnapshot)}. Audit logs stay tenant-scoped, while user-management and integration actions remain attributable to the current authority context.`}
+        title={t("audit.title", locale)}
+        description={t("audit.description", locale, {
+          role: describeRoleSnapshot(roleSnapshot, locale),
+        })}
       >
         <div className="callout-panel">
-          <strong>Formal governance framing</strong>
-          <p>
-            Tenant admin, operator, finance / analyst, integration manager, and
-            viewer all need an auditable history. Current backend authority
-            still emits the catalog-backed tenant role codes shown below.
-          </p>
+          <strong>{t("audit.governance.heading", locale)}</strong>
+          <p>{t("audit.governance.body", locale)}</p>
           <div className="chip-row">
-            {roleSnapshot.roleCatalogBackedLabels.length > 0 ? (
-              roleSnapshot.roleCatalogBackedLabels.map((roleLabel) => (
+            {catalogLabels.length > 0 ? (
+              catalogLabels.map((roleLabel) => (
                 <span className="status-chip" key={roleLabel}>
                   {roleLabel}
                 </span>
               ))
             ) : (
-              <span className="status-chip">authority unavailable</span>
+              <span className="status-chip">
+                {t("audit.authority.unavailable", locale)}
+              </span>
             )}
           </div>
         </div>
 
         {combinedError && (
           <div className="error-banner">
-            <strong>Error:</strong> {combinedError}
+            <strong>{t("audit.error.label", locale)}</strong> {combinedError}
           </div>
         )}
 
@@ -47,12 +55,12 @@ export default async function AuditPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Actor</th>
-                  <th>Module</th>
-                  <th>Action</th>
-                  <th>Resource</th>
-                  <th>Request ID</th>
+                  <th>{t("audit.table.time", locale)}</th>
+                  <th>{t("audit.table.actor", locale)}</th>
+                  <th>{t("audit.table.module", locale)}</th>
+                  <th>{t("audit.table.action", locale)}</th>
+                  <th>{t("audit.table.resource", locale)}</th>
+                  <th>{t("audit.table.requestId", locale)}</th>
                 </tr>
               </thead>
               <tbody>
@@ -83,17 +91,16 @@ export default async function AuditPage() {
             </table>
           </div>
         ) : (
-          <p className="empty-state">No audit logs found.</p>
+          <p className="empty-state">{t("audit.empty.logs", locale)}</p>
         )}
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("audit.link.home.title", locale)}</strong>
+          {t("audit.link.home.desc", locale)}
         </Link>
         <Link className="route-link" href="/settings">
-          <strong>Settings lane</strong>
-          Review the tenant settings summary for SLA, notifications, and
-          capability guardrails.
+          <strong>{t("audit.link.settings.title", locale)}</strong>
+          {t("audit.link.settings.desc", locale)}
         </Link>
       </AppShellCard>
     </main>

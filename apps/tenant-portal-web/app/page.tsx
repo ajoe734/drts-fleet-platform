@@ -9,6 +9,9 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 
 const ATTENTION_STATUSES = new Set([
   "dispatch_failed",
@@ -54,7 +57,7 @@ type DashboardData = {
   flagsAvailable: boolean;
 };
 
-async function loadDashboardData(): Promise<DashboardData> {
+async function loadDashboardData(locale: Locale): Promise<DashboardData> {
   const client = await getTenantClient();
   const [
     identityResult,
@@ -79,17 +82,20 @@ async function loadDashboardData(): Promise<DashboardData> {
   ) => {
     if (result.status === "rejected") {
       errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
+        `${label}: ${result.reason instanceof Error ? result.reason.message : t("home.error.unknown", locale)}`,
       );
     }
   };
 
-  collectError("Identity", identityResult);
-  collectError("Feature flags", flagsResult);
-  collectError("Bookings", bookingsResult);
-  collectError("Invoices", invoicesResult);
-  collectError("Notifications", notificationsResult);
-  collectError("Integration governance", governanceResult);
+  collectError(t("home.error.label.identity", locale), identityResult);
+  collectError(t("home.error.label.featureFlags", locale), flagsResult);
+  collectError(t("home.error.label.bookings", locale), bookingsResult);
+  collectError(t("home.error.label.invoices", locale), invoicesResult);
+  collectError(t("home.error.label.notifications", locale), notificationsResult);
+  collectError(
+    t("home.error.label.integrationGovernance", locale),
+    governanceResult,
+  );
 
   return {
     identity:
@@ -134,9 +140,9 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en", {
   timeStyle: "short",
 });
 
-function formatDateTime(value: string | null | undefined) {
+function formatDateTime(value: string | null | undefined, locale: Locale) {
   if (!value) {
-    return "Not available";
+    return t("home.value.notAvailable", locale);
   }
 
   return DATE_TIME_FORMATTER.format(new Date(value));
@@ -204,7 +210,8 @@ function CalloutPanel({
 }
 
 export default async function HomePage() {
-  const data = await loadDashboardData();
+  const locale = await getServerLocale();
+  const data = await loadDashboardData(locale);
   const moduleStatus = deriveModuleStatus(data);
 
   const activeBookings = data.bookings.filter(
@@ -226,107 +233,133 @@ export default async function HomePage() {
   return (
     <main className="page-shell">
       <PageHero
-        eyebrow="Tenant home"
-        title="Tenant operators land in a real workspace, not a launcher."
-        description="This dashboard anchors the tenant identity context, active-booking status, billing and notice reminders, integration posture, and quick-entry actions for the tenant portal surface."
+        eyebrow={t("home.hero.eyebrow", locale)}
+        title={t("home.hero.title", locale)}
+        description={t("home.hero.description", locale)}
       />
 
       <section className="metric-grid">
         <article className="metric-card">
-          <span className="metric-label">Active bookings</span>
+          <span className="metric-label">
+            {t("home.metric.activeBookings.label", locale)}
+          </span>
           <strong>{formatCount(activeBookings.length)}</strong>
           <p>
             {attentionBookings.length > 0
-              ? `${formatCount(attentionBookings.length)} booking(s) need follow-up across dispatch or proof states.`
-              : "No active bookings currently need tenant-side follow-up."}
+              ? t("home.metric.activeBookings.attention", locale, {
+                  count: formatCount(attentionBookings.length),
+                })
+              : t("home.metric.activeBookings.clear", locale)}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Open invoices</span>
+          <span className="metric-label">
+            {t("home.metric.openInvoices.label", locale)}
+          </span>
           <strong>{formatCount(openInvoices.length)}</strong>
           <p>
             {data.invoices.length > 0
-              ? `${formatCount(data.invoices.length)} invoice artifact(s) are visible from tenant billing authority.`
-              : "Invoice artifacts are not currently available for this tenant context."}
+              ? t("home.metric.openInvoices.visible", locale, {
+                  count: formatCount(data.invoices.length),
+                })
+              : t("home.metric.openInvoices.empty", locale)}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Notifications</span>
+          <span className="metric-label">
+            {t("home.metric.notifications.label", locale)}
+          </span>
           <strong>{formatCount(recentNotifications.length)}</strong>
           <p>
             {recentNotifications.length > 0
-              ? "Recent platform and tenant reminders surface here before users drill into settings."
-              : "No tenant notification feed items were returned in the current snapshot."}
+              ? t("home.metric.notifications.present", locale)
+              : t("home.metric.notifications.empty", locale)}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Integration posture</span>
+          <span className="metric-label">
+            {t("home.metric.integrationPosture.label", locale)}
+          </span>
           <strong>
             {onboardingChecklist.length > 0
               ? formatCount(onboardingChecklist.length)
-              : "Ready"}
+              : t("home.metric.integrationPosture.ready", locale)}
           </strong>
           <p>
             {onboardingChecklist.length > 0
-              ? "Checklist items still frame the integration work that API keys and webhooks must cover."
-              : "No outstanding onboarding checklist items were returned."}
+              ? t("home.metric.integrationPosture.pending", locale)
+              : t("home.metric.integrationPosture.empty", locale)}
           </p>
         </article>
       </section>
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="Identity"
-          title="Tenant authority context"
-          description="The dashboard reads the backend identity context directly so role, realm, and tenant ownership stay authority-driven."
+          kicker={t("home.identity.kicker", locale)}
+          title={t("home.identity.title", locale)}
+          description={t("home.identity.description", locale)}
         >
           <dl className="definition-grid">
             <div>
-              <dt>Tenant</dt>
-              <dd>{data.identity?.tenantId ?? "Unavailable"}</dd>
+              <dt>{t("home.identity.tenant", locale)}</dt>
+              <dd>
+                {data.identity?.tenantId ??
+                  t("home.value.unavailable", locale)}
+              </dd>
             </div>
             <div>
-              <dt>Realm</dt>
-              <dd>{data.identity?.realm ?? "Unavailable"}</dd>
+              <dt>{t("home.identity.realm", locale)}</dt>
+              <dd>
+                {data.identity?.realm ?? t("home.value.unavailable", locale)}
+              </dd>
             </div>
             <div>
-              <dt>Actor</dt>
-              <dd>{data.identity?.actorType ?? "Unavailable"}</dd>
+              <dt>{t("home.identity.actor", locale)}</dt>
+              <dd>
+                {data.identity?.actorType ??
+                  t("home.value.unavailable", locale)}
+              </dd>
             </div>
             <div>
-              <dt>Auth mode</dt>
-              <dd>{data.identity?.authMode ?? "Unavailable"}</dd>
+              <dt>{t("home.identity.authMode", locale)}</dt>
+              <dd>
+                {data.identity?.authMode ??
+                  t("home.value.unavailable", locale)}
+              </dd>
             </div>
           </dl>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Bookings"
-          title="Tenant operations quick lane"
-          description="Bookings remain the primary operating surface; the route list and detail model stay anchored to the tenant booking entry."
+          kicker={t("home.bookings.kicker", locale)}
+          title={t("home.bookings.title", locale)}
+          description={t("home.bookings.description", locale)}
         >
           <div className="panel-stack">
             <p>
-              Next reservation window:{" "}
+              {t("home.bookings.nextReservation", locale)}{" "}
               <strong>
                 {activeBookings[0]
-                  ? formatDateTime(activeBookings[0].reservationWindowStart)
-                  : "No active reservation queued"}
+                  ? formatDateTime(
+                      activeBookings[0].reservationWindowStart,
+                      locale,
+                    )
+                  : t("home.bookings.noReservation", locale)}
               </strong>
             </p>
             <div className="link-row">
               {moduleStatus.booking ? (
                 <>
                   <Link className="text-link" href="/booking-list">
-                    Open booking oversight
+                    {t("home.bookings.openOversight", locale)}
                   </Link>
                   <Link className="text-link" href="/bookings/new">
-                    Start new booking intake
+                    {t("home.bookings.startIntake", locale)}
                   </Link>
                 </>
               ) : (
                 <span className="muted-copy">
-                  Booking module is not enabled for this tenant.
+                  {t("home.bookings.disabled", locale)}
                 </span>
               )}
             </div>
@@ -334,9 +367,9 @@ export default async function HomePage() {
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Billing and notices"
-          title="Operational reminders stay visible"
-          description="Billing posture and notification reminders sit on the home lane so tenant admins do not need to discover them through secondary navigation."
+          kicker={t("home.billing.kicker", locale)}
+          title={t("home.billing.title", locale)}
+          description={t("home.billing.description", locale)}
         >
           {recentNotifications.length > 0 ? (
             <ul className="panel-list">
@@ -345,32 +378,32 @@ export default async function HomePage() {
                   <strong>{notification.title}</strong>
                   <span className="list-note">
                     {notification.channel} ·{" "}
-                    {formatDateTime(notification.createdAt)}
+                    {formatDateTime(notification.createdAt, locale)}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
             <p className="muted-copy">
-              No tenant notification feed items are currently available.
+              {t("home.billing.notificationsEmpty", locale)}
             </p>
           )}
           <div className="link-row">
             {moduleStatus.billing ? (
               <Link className="text-link" href="/billing">
-                Review billing posture
+                {t("home.billing.reviewPosture", locale)}
               </Link>
             ) : null}
             <Link className="text-link" href="/notifications">
-              Notification preferences
+              {t("home.billing.notificationPreferences", locale)}
             </Link>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Integration"
-          title="Integration readiness and governance"
-          description="Integration reminders summarize the backend-owned checklist instead of inventing client-local readiness truth."
+          kicker={t("home.integration.kicker", locale)}
+          title={t("home.integration.title", locale)}
+          description={t("home.integration.description", locale)}
         >
           {onboardingChecklist.length > 0 ? (
             <ul className="panel-list">
@@ -380,19 +413,18 @@ export default async function HomePage() {
             </ul>
           ) : (
             <p className="muted-copy">
-              API key and webhook onboarding is not currently reporting any open
-              checklist item.
+              {t("home.integration.checklistEmpty", locale)}
             </p>
           )}
           <div className="link-row">
             {moduleStatus.directory ? (
               <Link className="text-link" href="/api-keys">
-                Review API keys
+                {t("home.integration.reviewApiKeys", locale)}
               </Link>
             ) : null}
             {moduleStatus.webhooks ? (
               <Link className="text-link" href="/webhooks">
-                Review webhooks
+                {t("home.integration.reviewWebhooks", locale)}
               </Link>
             ) : null}
           </div>
@@ -400,65 +432,67 @@ export default async function HomePage() {
       </section>
 
       <CalloutPanel
-        title="Quick actions"
-        description="Common tenant entry points stay one click away from the home lane."
+        title={t("home.quickActions.title", locale)}
+        description={t("home.quickActions.description", locale)}
       >
         <div className="link-row">
           {moduleStatus.booking ? (
             <Link className="text-link" href="/bookings/new">
-              New booking
+              {t("home.quickActions.newBooking", locale)}
             </Link>
           ) : null}
           {moduleStatus.billing ? (
             <Link className="text-link" href="/billing">
-              Billing
+              {t("home.quickActions.billing", locale)}
             </Link>
           ) : null}
           {moduleStatus.reports ? (
             <Link className="text-link" href="/reports">
-              Reports
+              {t("home.quickActions.reports", locale)}
             </Link>
           ) : null}
           {moduleStatus.directory ? (
             <Link className="text-link" href="/passengers">
-              Passenger directory
+              {t("home.quickActions.passengerDirectory", locale)}
             </Link>
           ) : null}
           {moduleStatus.directory ? (
             <Link className="text-link" href="/addresses">
-              Address book
+              {t("home.quickActions.addressBook", locale)}
             </Link>
           ) : null}
           {moduleStatus.admin ? (
             <Link className="text-link" href="/users">
-              User management
+              {t("home.quickActions.userManagement", locale)}
             </Link>
           ) : null}
           {moduleStatus.admin ? (
             <Link className="text-link" href="/audit">
-              Audit trail
+              {t("home.quickActions.auditTrail", locale)}
             </Link>
           ) : null}
           <Link className="text-link" href="/settings">
-            Settings
+            {t("home.quickActions.settings", locale)}
           </Link>
           <Link className="text-link" href="/sla">
-            SLA profile
+            {t("home.quickActions.slaProfile", locale)}
           </Link>
           <Link className="text-link" href="/feature-flags">
-            Feature flags
+            {t("home.quickActions.featureFlags", locale)}
           </Link>
         </div>
       </CalloutPanel>
 
       <CalloutPanel
-        title="Enabled module snapshot"
+        title={t("home.moduleSnapshot.title", locale)}
         description={
           enabledFlags.length > 0
-            ? `${enabledFlags.length} feature flag(s) currently resolve enabled for this tenant context.`
+            ? t("home.moduleSnapshot.enabled", locale, {
+                count: enabledFlags.length,
+              })
             : data.flagsAvailable
-              ? "No tenant-specific module flag resolved enabled."
-              : "Feature flag detail is currently unavailable; modules display in fallback-enabled mode."
+              ? t("home.moduleSnapshot.none", locale)
+              : t("home.moduleSnapshot.unavailable", locale)
         }
       >
         {enabledFlags.length > 0 ? (
@@ -474,8 +508,8 @@ export default async function HomePage() {
 
       {data.errors.length > 0 ? (
         <CalloutPanel
-          title="Partial data warning"
-          description="Some dashboard slices fell back because the current authority surface did not answer every read."
+          title={t("home.partialData.title", locale)}
+          description={t("home.partialData.description", locale)}
           tone="warning"
         >
           <ul className="panel-list">

@@ -9,7 +9,11 @@ import {
   FORMAL_TENANT_ROLE_FRAMING,
   describeRoleSnapshot,
   getTenantRoleSnapshot,
+  roleCatalogLabels,
 } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -18,15 +22,16 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en", {
   timeStyle: "short",
 });
 
-function formatDateTime(value: string | null | undefined) {
+function formatDateTime(value: string | null | undefined, locale: Locale) {
   if (!value) {
-    return "Not available";
+    return t("settings.dateTime.notAvailable", locale);
   }
 
   return DATE_TIME_FORMATTER.format(new Date(value));
 }
 
 export default async function SettingsPage() {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const [preferencesResult, slaResult, governanceResult, flagsResult] =
@@ -47,37 +52,50 @@ export default async function SettingsPage() {
   const errors = [
     roleSnapshot.identityError,
     preferencesResult.status === "rejected"
-      ? `Notification preferences: ${preferencesResult.reason instanceof Error ? preferencesResult.reason.message : "Unknown error"}`
+      ? t("settings.error.notificationPreferences", locale, {
+          message:
+            preferencesResult.reason instanceof Error
+              ? preferencesResult.reason.message
+              : t("settings.error.unknown", locale),
+        })
       : null,
     slaResult.status === "rejected"
-      ? `SLA profile: ${slaResult.reason instanceof Error ? slaResult.reason.message : "Unknown error"}`
+      ? t("settings.error.slaProfile", locale, {
+          message:
+            slaResult.reason instanceof Error
+              ? slaResult.reason.message
+              : t("settings.error.unknown", locale),
+        })
       : null,
     governanceResult.status === "rejected"
-      ? `Integration governance: ${governanceResult.reason instanceof Error ? governanceResult.reason.message : "Unknown error"}`
+      ? t("settings.error.integrationGovernance", locale, {
+          message:
+            governanceResult.reason instanceof Error
+              ? governanceResult.reason.message
+              : t("settings.error.unknown", locale),
+        })
       : null,
     flagsResult.status === "rejected"
-      ? `Feature flags: ${flagsResult.reason instanceof Error ? flagsResult.reason.message : "Unknown error"}`
+      ? t("settings.error.featureFlags", locale, {
+          message:
+            flagsResult.reason instanceof Error
+              ? flagsResult.reason.message
+              : t("settings.error.unknown", locale),
+        })
       : null,
   ].filter(Boolean) as string[];
 
   return (
     <main className="page-shell">
       <section className="page-hero">
-        <span className="eyebrow">Settings</span>
-        <h1>
-          Tenant settings summarize live authority, preference, and capability
-          truth.
-        </h1>
-        <p>
-          This surface groups notification posture, SLA framing, integration
-          governance, and the formal tenant role model without fabricating
-          backend-only actions.
-        </p>
+        <span className="eyebrow">{t("settings.hero.eyebrow", locale)}</span>
+        <h1>{t("settings.hero.title", locale)}</h1>
+        <p>{t("settings.hero.description", locale)}</p>
       </section>
 
       {errors.length > 0 ? (
         <section className="callout-panel is-warning">
-          <strong>Some settings data is unavailable</strong>
+          <strong>{t("settings.error.heading", locale)}</strong>
           <ul className="panel-list">
             {errors.map((message) => (
               <li key={message}>{message}</li>
@@ -88,52 +106,57 @@ export default async function SettingsPage() {
 
       <section className="surface-grid surface-grid-wide">
         <article className="surface-card">
-          <span className="surface-kicker">Role model</span>
-          <h3>Formal tenant roles</h3>
+          <span className="surface-kicker">
+            {t("settings.roleModel.kicker", locale)}
+          </span>
+          <h3>{t("settings.roleModel.title", locale)}</h3>
           <p>
-            Current identity resolves as {describeRoleSnapshot(roleSnapshot)}.
-            The selected prototype expects these governance lanes.
+            {t("settings.roleModel.description", locale, {
+              identity: describeRoleSnapshot(roleSnapshot, locale),
+            })}
           </p>
           <ul className="panel-list">
             {FORMAL_TENANT_ROLE_FRAMING.map((roleFrame) => (
               <li key={roleFrame.key}>
-                <strong>{roleFrame.label}</strong>
-                <span className="list-note">{roleFrame.summary}</span>
+                <strong>{t("role." + roleFrame.key + ".label", locale)}</strong>
+                <span className="list-note">
+                  {t("role." + roleFrame.key + ".summary", locale)}
+                </span>
               </li>
             ))}
           </ul>
         </article>
 
         <article className="surface-card">
-          <span className="surface-kicker">Authority</span>
-          <h3>Current backend role catalog</h3>
-          <p>
-            UI gating follows server-issued roles from the identity context.
-            Integration manager is still carried by tenant admin authority until
-            the backend exposes a distinct role code.
-          </p>
+          <span className="surface-kicker">
+            {t("settings.authority.kicker", locale)}
+          </span>
+          <h3>{t("settings.authority.title", locale)}</h3>
+          <p>{t("settings.authority.description", locale)}</p>
           <div className="chip-row">
-            {roleSnapshot.roleCatalogBackedLabels.length > 0 ? (
-              roleSnapshot.roleCatalogBackedLabels.map((roleLabel) => (
-                <span className="status-chip" key={roleLabel}>
-                  {roleLabel}
+            {(() => {
+              const catalogLabels = roleCatalogLabels(roleSnapshot, locale);
+              return catalogLabels.length > 0 ? (
+                catalogLabels.map((roleLabel) => (
+                  <span className="status-chip" key={roleLabel}>
+                    {roleLabel}
+                  </span>
+                ))
+              ) : (
+                <span className="status-chip">
+                  {t("settings.authority.empty", locale)}
                 </span>
-              ))
-            ) : (
-              <span className="status-chip">
-                No role catalog labels resolved
-              </span>
-            )}
+              );
+            })()}
           </div>
         </article>
 
         <article className="surface-card">
-          <span className="surface-kicker">Notifications</span>
-          <h3>Tenant notification subscriptions</h3>
-          <p>
-            Preferences stay tenant-scoped and separate from platform-wide
-            notices or ops-console escalations.
-          </p>
+          <span className="surface-kicker">
+            {t("settings.notifications.kicker", locale)}
+          </span>
+          <h3>{t("settings.notifications.title", locale)}</h3>
+          <p>{t("settings.notifications.description", locale)}</p>
           {preferences ? (
             <>
               <ul className="panel-list">
@@ -142,59 +165,76 @@ export default async function SettingsPage() {
                     <strong>{subscription.eventType}</strong>
                     <span className="list-note">
                       {subscription.channel} ·{" "}
-                      {subscription.enabled ? "enabled" : "disabled"}
+                      {subscription.enabled
+                        ? t("settings.notifications.enabled", locale)
+                        : t("settings.notifications.disabled", locale)}
                     </span>
                   </li>
                 ))}
               </ul>
               <p className="muted-copy">
-                Updated {formatDateTime(preferences.updatedAt)}
+                {t("settings.notifications.updated", locale, {
+                  date: formatDateTime(preferences.updatedAt, locale),
+                })}
               </p>
             </>
           ) : (
-            <p className="muted-copy">Notification preferences unavailable.</p>
+            <p className="muted-copy">
+              {t("settings.notifications.unavailable", locale)}
+            </p>
           )}
         </article>
 
         <article className="surface-card">
-          <span className="surface-kicker">SLA</span>
-          <h3>Tenant service thresholds</h3>
-          <p>
-            SLA settings remain tenant-facing expectation framing and do not
-            leak dispatch-only internal controls.
-          </p>
+          <span className="surface-kicker">
+            {t("settings.sla.kicker", locale)}
+          </span>
+          <h3>{t("settings.sla.title", locale)}</h3>
+          <p>{t("settings.sla.description", locale)}</p>
           {sla ? (
             <dl className="definition-grid">
               <div>
-                <dt>Wait threshold</dt>
-                <dd>{sla.waitThresholdMin} min</dd>
+                <dt>{t("settings.sla.waitThreshold", locale)}</dt>
+                <dd>
+                  {t("settings.sla.minutes", locale, {
+                    count: sla.waitThresholdMin,
+                  })}
+                </dd>
               </div>
               <div>
-                <dt>Arrival threshold</dt>
-                <dd>{sla.arrivalThresholdMin} min</dd>
+                <dt>{t("settings.sla.arrivalThreshold", locale)}</dt>
+                <dd>
+                  {t("settings.sla.minutes", locale, {
+                    count: sla.arrivalThresholdMin,
+                  })}
+                </dd>
               </div>
               <div>
-                <dt>Completion threshold</dt>
-                <dd>{sla.completionThresholdMin} min</dd>
+                <dt>{t("settings.sla.completionThreshold", locale)}</dt>
+                <dd>
+                  {t("settings.sla.minutes", locale, {
+                    count: sla.completionThresholdMin,
+                  })}
+                </dd>
               </div>
               <div>
-                <dt>Updated</dt>
-                <dd>{formatDateTime(sla.updatedAt)}</dd>
+                <dt>{t("settings.sla.updated", locale)}</dt>
+                <dd>{formatDateTime(sla.updatedAt, locale)}</dd>
               </div>
             </dl>
           ) : (
-            <p className="muted-copy">SLA profile unavailable.</p>
+            <p className="muted-copy">
+              {t("settings.sla.unavailable", locale)}
+            </p>
           )}
         </article>
 
         <article className="surface-card">
-          <span className="surface-kicker">Integration</span>
-          <h3>Capability and onboarding posture</h3>
-          <p>
-            Integration governance belongs on dedicated API key and webhook
-            routes, but settings should still summarize the posture those routes
-            depend on.
-          </p>
+          <span className="surface-kicker">
+            {t("settings.integration.kicker", locale)}
+          </span>
+          <h3>{t("settings.integration.title", locale)}</h3>
+          <p>{t("settings.integration.description", locale)}</p>
           <div className="chip-row">
             {flags?.flags
               .filter((flag) => flag.enabled)
@@ -213,19 +253,15 @@ export default async function SettingsPage() {
             </ul>
           ) : (
             <p className="muted-copy">
-              No onboarding checklist items were returned.
+              {t("settings.integration.empty", locale)}
             </p>
           )}
         </article>
       </section>
 
       <section className="callout-panel">
-        <strong>Scope guardrail</strong>
-        <p>
-          This route intentionally stops at tenant-scoped preferences and
-          governance summary. Invite mutations, webhook credential lifecycle,
-          and API key actions stay on their dedicated authority surfaces.
-        </p>
+        <strong>{t("settings.guardrail.heading", locale)}</strong>
+        <p>{t("settings.guardrail.description", locale)}</p>
       </section>
     </main>
   );

@@ -3,76 +3,98 @@ import { AppShellCard } from "@drts/ui-web";
 import { getSlaProfile, updateSlaProfile } from "./actions";
 import type { TenantSlaProfile } from "@drts/contracts";
 import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 
 export default async function SlaPage() {
+  const locale = await getServerLocale();
   const { profile, error: fetchError } = await getSlaProfile();
   const roleSnapshot = await getTenantRoleSnapshot();
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="SLA Profile"
+        title={t("sla.title", locale)}
         description={
           roleSnapshot.capabilities.canWriteSla
-            ? "View and update SLA thresholds for wait, arrival, and completion times across DRTS-operated and externally fulfilled bookings."
-            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. SLA thresholds are readable but not writable for this role.`
+            ? t("sla.description.write", locale)
+            : t("sla.description.readonly", locale, {
+                role: describeRoleSnapshot(roleSnapshot, locale),
+              })
         }
       >
         {fetchError && (
           <div className="error-banner">
-            <strong>Error loading SLA profile:</strong> {fetchError}
+            <strong>{t("sla.error.loading", locale)}</strong> {fetchError}
           </div>
         )}
 
         <div className="source-guidance">
-          <strong>How to read these thresholds:</strong> DRTS-operated bookings
-          measure dispatch and trip delay inside the platform. Externally
-          fulfilled bookings still surface here, but tenant-facing delay can
-          come from the external fulfillment handoff rather than a DRTS dispatch
-          queue alone.
+          <strong>{t("sla.guidance.title", locale)}</strong>{" "}
+          {t("sla.guidance.body", locale)}
         </div>
 
-        {profile && <SlaProfileTable profile={profile} />}
+        {profile && <SlaProfileTable profile={profile} locale={locale} />}
 
         <UpdateSlaForm
           profile={profile}
           canWrite={roleSnapshot.capabilities.canWriteSla}
+          locale={locale}
         />
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("sla.backHome.title", locale)}</strong>
+          {t("sla.backHome.body", locale)}
         </Link>
       </AppShellCard>
     </main>
   );
 }
 
-function SlaProfileTable({ profile }: { profile: TenantSlaProfile }) {
+function SlaProfileTable({
+  profile,
+  locale,
+}: {
+  profile: TenantSlaProfile;
+  locale: Locale;
+}) {
   return (
     <div className="data-table" style={{ marginBottom: "1rem" }}>
       <table>
         <thead>
           <tr>
-            <th>Metric</th>
-            <th>Threshold (minutes)</th>
+            <th>{t("sla.table.metric", locale)}</th>
+            <th>{t("sla.table.thresholdMinutes", locale)}</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Wait Time Threshold</td>
-            <td>{profile.waitThresholdMin} min</td>
+            <td>{t("sla.metric.waitThreshold", locale)}</td>
+            <td>
+              {t("sla.value.minutes", locale, {
+                count: profile.waitThresholdMin,
+              })}
+            </td>
           </tr>
           <tr>
-            <td>Arrival Time Threshold</td>
-            <td>{profile.arrivalThresholdMin} min</td>
+            <td>{t("sla.metric.arrivalThreshold", locale)}</td>
+            <td>
+              {t("sla.value.minutes", locale, {
+                count: profile.arrivalThresholdMin,
+              })}
+            </td>
           </tr>
           <tr>
-            <td>Completion Time Threshold</td>
-            <td>{profile.completionThresholdMin} min</td>
+            <td>{t("sla.metric.completionThreshold", locale)}</td>
+            <td>
+              {t("sla.value.minutes", locale, {
+                count: profile.completionThresholdMin,
+              })}
+            </td>
           </tr>
           <tr>
-            <td>Last Updated</td>
+            <td>{t("sla.metric.lastUpdated", locale)}</td>
             <td>
               {profile.updatedAt
                 ? new Date(profile.updatedAt).toLocaleString()
@@ -88,9 +110,11 @@ function SlaProfileTable({ profile }: { profile: TenantSlaProfile }) {
 function UpdateSlaForm({
   profile,
   canWrite,
+  locale,
 }: {
   profile: TenantSlaProfile | null;
   canWrite: boolean;
+  locale: Locale;
 }) {
   return (
     <form action={updateSlaProfile}>
@@ -98,14 +122,16 @@ function UpdateSlaForm({
         <table>
           <thead>
             <tr>
-              <th>Metric</th>
-              <th>New Value (minutes)</th>
+              <th>{t("sla.table.metric", locale)}</th>
+              <th>{t("sla.table.newValueMinutes", locale)}</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td>
-                <label htmlFor="waitThresholdMin">Wait Time</label>
+                <label htmlFor="waitThresholdMin">
+                  {t("sla.metric.waitTime", locale)}
+                </label>
               </td>
               <td>
                 <input
@@ -120,7 +146,9 @@ function UpdateSlaForm({
             </tr>
             <tr>
               <td>
-                <label htmlFor="arrivalThresholdMin">Arrival Time</label>
+                <label htmlFor="arrivalThresholdMin">
+                  {t("sla.metric.arrivalTime", locale)}
+                </label>
               </td>
               <td>
                 <input
@@ -135,7 +163,9 @@ function UpdateSlaForm({
             </tr>
             <tr>
               <td>
-                <label htmlFor="completionThresholdMin">Completion Time</label>
+                <label htmlFor="completionThresholdMin">
+                  {t("sla.metric.completionTime", locale)}
+                </label>
               </td>
               <td>
                 <input
@@ -154,7 +184,9 @@ function UpdateSlaForm({
 
       <div style={{ marginTop: "1rem" }}>
         <button type="submit" className="btn-primary" disabled={!canWrite}>
-          {canWrite ? "Update SLA Profile" : "Read-only"}
+          {canWrite
+            ? t("sla.action.update", locale)
+            : t("sla.action.readonly", locale)}
         </button>
       </div>
     </form>

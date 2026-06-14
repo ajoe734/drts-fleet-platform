@@ -13,41 +13,16 @@ import {
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t, type Locale } from "@/lib/translations";
 
 const MANUAL_ENTRY = "__manual__";
-const SUBTYPE_LABELS: Record<
-  BusinessDispatchSubtype,
-  {
-    label: string;
-    reservationPolicy: string;
-    guidance: string;
-  }
-> = {
-  enterprise_dispatch: {
-    label: "Enterprise Dispatch",
-    reservationPolicy: "Modify or cancel up to 30 minutes before the window.",
-    guidance:
-      "Best for internal employee or department travel with tenant-side policy tracking.",
-  },
-  credit_card_airport_transfer: {
-    label: "Credit Card Airport Transfer",
-    reservationPolicy: "Modify or cancel up to 60 minutes before the window.",
-    guidance:
-      "Use when airport routing, flight context, or sponsor/benefit references matter.",
-  },
-  insurance_replacement_vehicle: {
-    label: "Insurance Replacement Vehicle",
-    reservationPolicy: "Modify or cancel up to 120 minutes before the window.",
-    guidance:
-      "Use when claim, policy, or replacement-period context must stay attached to the booking.",
-  },
-  travel_agency_transfer: {
-    label: "Travel Agency Transfer",
-    reservationPolicy: "Modify or cancel up to 90 minutes before the window.",
-    guidance:
-      "Use when group transfer, meeting point, or agency roster context drives the trip.",
-  },
-};
+const SUBTYPE_KEYS: BusinessDispatchSubtype[] = [
+  "enterprise_dispatch",
+  "credit_card_airport_transfer",
+  "insurance_replacement_vehicle",
+  "travel_agency_transfer",
+];
 
 function toIsoString(localDateTime: string): string {
   if (!localDateTime) return "";
@@ -80,11 +55,24 @@ function redirectWithError(message: string) {
   redirect(`/bookings/new?error=${encodeURIComponent(message)}`);
 }
 
-function getSubtypeLabel(subtype: BusinessDispatchSubtype) {
-  return SUBTYPE_LABELS[subtype]?.label ?? subtype;
+function getSubtypeLabel(subtype: BusinessDispatchSubtype, locale: Locale) {
+  if (SUBTYPE_KEYS.includes(subtype)) {
+    return t(`bookingNew.subtype.${subtype}.label`, locale);
+  }
+  return subtype;
 }
 
-function describePassenger(passenger: TenantPassengerRecord) {
+function getSubtypeReservationPolicy(
+  subtype: BusinessDispatchSubtype,
+  locale: Locale,
+) {
+  if (SUBTYPE_KEYS.includes(subtype)) {
+    return t(`bookingNew.subtype.${subtype}.reservationPolicy`, locale);
+  }
+  return t("bookingNew.subtype.policyFallback", locale);
+}
+
+function describePassenger(passenger: TenantPassengerRecord, locale: Locale) {
   const details = [
     passenger.employeeNo,
     passenger.departmentName,
@@ -92,11 +80,15 @@ function describePassenger(passenger: TenantPassengerRecord) {
   ].filter(Boolean);
 
   if (!passenger.mobile) {
-    details.push("phone missing");
+    details.push(t("bookingNew.passenger.phoneMissing", locale));
   }
 
   if ((passenger.qualityIssues?.length ?? 0) > 0) {
-    details.push(`issues: ${passenger.qualityIssues?.join(", ")}`);
+    details.push(
+      t("bookingNew.passenger.issues", locale, {
+        issues: passenger.qualityIssues?.join(", ") ?? "",
+      }),
+    );
   }
 
   return `${passenger.fullName}${details.length > 0 ? ` · ${details.join(" · ")}` : ""}`;
@@ -105,6 +97,7 @@ function describePassenger(passenger: TenantPassengerRecord) {
 function describeAddress(
   address: TenantAddressRecord,
   passengerNameById: Map<string, string>,
+  locale: Locale,
 ) {
   const details: string[] = [];
 
@@ -114,12 +107,20 @@ function describeAddress(
 
   if (address.ownerPassengerId) {
     details.push(
-      `owner ${passengerNameById.get(address.ownerPassengerId) ?? address.ownerPassengerId}`,
+      t("bookingNew.address.owner", locale, {
+        owner:
+          passengerNameById.get(address.ownerPassengerId) ??
+          address.ownerPassengerId,
+      }),
     );
   }
 
   if ((address.qualityIssues?.length ?? 0) > 0) {
-    details.push(`issues: ${address.qualityIssues?.join(", ")}`);
+    details.push(
+      t("bookingNew.address.issues", locale, {
+        issues: address.qualityIssues?.join(", ") ?? "",
+      }),
+    );
   }
 
   return `${address.addressName}${details.length > 0 ? ` · ${details.join(" · ")}` : ""}`;
@@ -300,6 +301,7 @@ export default async function NewBookingPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const params = await searchParams;
@@ -328,16 +330,16 @@ export default async function NewBookingPage({
 
   const warnings = [
     identityResult.status === "rejected"
-      ? "Identity context unavailable. This page now depends on a backend-issued tenant bearer session, so create authority cannot be confirmed."
+      ? t("bookingNew.warning.identity", locale)
       : null,
     passengersResult.status === "rejected"
-      ? "Passenger directory unavailable. Manual passenger entry remains available."
+      ? t("bookingNew.warning.passengers", locale)
       : null,
     addressesResult.status === "rejected"
-      ? "Address book unavailable. Manual pickup and dropoff entry remains available."
+      ? t("bookingNew.warning.addresses", locale)
       : null,
     catalogResult.status === "rejected"
-      ? "Product rule catalog unavailable. Using built-in subtype labels and pricing authority defaults."
+      ? t("bookingNew.warning.catalog", locale)
       : null,
   ].filter(Boolean) as string[];
 
@@ -365,10 +367,11 @@ export default async function NewBookingPage({
   async function createBooking(formData: FormData) {
     "use server";
 
+    const actionLocale = await getServerLocale();
     const actionRoleSnapshot = await getTenantRoleSnapshot();
     requireCapability(
       actionRoleSnapshot.capabilities.canWriteTenant,
-      "Tenant write authority required to create bookings.",
+      t("bookingNew.action.writeAuthorityRequired", actionLocale),
     );
     const client = await getTenantClient();
     const businessDispatchSubtype = trimFormValue(
@@ -413,36 +416,40 @@ export default async function NewBookingPage({
     const validationErrors: string[] = [];
 
     if (!BUSINESS_DISPATCH_SUBTYPES.includes(businessDispatchSubtype)) {
-      validationErrors.push("Choose a supported booking subtype.");
+      validationErrors.push(
+        t("bookingNew.validation.subtype", actionLocale),
+      );
     }
 
     if (!windowStartLocal || !windowEndLocal) {
-      validationErrors.push("Reservation window start and end are required.");
+      validationErrors.push(
+        t("bookingNew.validation.windowRequired", actionLocale),
+      );
     } else if (
       Number.isNaN(new Date(windowStartLocal).getTime()) ||
       Number.isNaN(new Date(windowEndLocal).getTime()) ||
       new Date(windowStartLocal).getTime() >= new Date(windowEndLocal).getTime()
     ) {
       validationErrors.push(
-        "Reservation window end must be after the reservation window start.",
+        t("bookingNew.validation.windowOrder", actionLocale),
       );
     }
 
     if (!pickupAddressId && !pickupAddress) {
       validationErrors.push(
-        "Select a pickup address from the address book or enter one manually.",
+        t("bookingNew.validation.pickupRequired", actionLocale),
       );
     }
 
     if (!dropoffAddressId && !dropoffAddress) {
       validationErrors.push(
-        "Select a dropoff address from the address book or enter one manually.",
+        t("bookingNew.validation.dropoffRequired", actionLocale),
       );
     }
 
     if (!passengerId && (!passengerName || !passengerPhone)) {
       validationErrors.push(
-        "Select a passenger from the directory or provide manual passenger name and phone.",
+        t("bookingNew.validation.passengerRequired", actionLocale),
       );
     }
 
@@ -452,7 +459,7 @@ export default async function NewBookingPage({
       !flightNo
     ) {
       validationErrors.push(
-        "Flight number is required for airport pickup bookings.",
+        t("bookingNew.validation.flightRequired", actionLocale),
       );
     }
 
@@ -461,7 +468,7 @@ export default async function NewBookingPage({
       (!onsiteContactName && onsiteContactPhone)
     ) {
       validationErrors.push(
-        "Provide both onsite contact name and phone, or leave both blank.",
+        t("bookingNew.validation.onsiteContact", actionLocale),
       );
     }
 
@@ -470,7 +477,7 @@ export default async function NewBookingPage({
       (luggageCount != null && luggageCount < 0)
     ) {
       validationErrors.push(
-        "Luggage count must be a whole number of 0 or more.",
+        t("bookingNew.validation.luggageCount", actionLocale),
       );
     }
 
@@ -479,7 +486,7 @@ export default async function NewBookingPage({
       (minPhotoCount != null && (minPhotoCount < 1 || minPhotoCount > 5))
     ) {
       validationErrors.push(
-        "Completion photo requirement must stay between 1 and 5 photos.",
+        t("bookingNew.validation.photoCount", actionLocale),
       );
     }
 
@@ -526,7 +533,9 @@ export default async function NewBookingPage({
       redirect("/booking-list");
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unknown booking error";
+        error instanceof Error
+          ? error.message
+          : t("bookingNew.error.unknown", actionLocale);
       redirectWithError(message);
     }
   }
@@ -534,18 +543,19 @@ export default async function NewBookingPage({
   return (
     <main className="app-grid" style={pageStyle}>
       <AppShellCard
-        title="New Booking"
-        description="Create a tenant booking against the live create-booking command, with passenger and address masters folded in where available."
+        title={t("bookingNew.card.title", locale)}
+        description={t("bookingNew.card.description", locale)}
       >
         {formError ? (
           <div style={alertStyle}>
-            <strong>Submit blocked:</strong> {formError}
+            <strong>{t("bookingNew.alert.submitBlocked", locale)}</strong>{" "}
+            {formError}
           </div>
         ) : null}
 
         {warnings.length > 0 ? (
           <div style={alertStyle}>
-            <strong>Fallback mode:</strong>
+            <strong>{t("bookingNew.alert.fallbackMode", locale)}</strong>
             <ul style={warningListStyle}>
               {warnings.map((warning) => (
                 <li key={warning}>{warning}</li>
@@ -556,18 +566,23 @@ export default async function NewBookingPage({
 
         {!roleSnapshot.capabilities.canWriteTenant ? (
           <div style={alertStyle}>
-            <strong>Read-only identity:</strong> Current backend-issued role can
-            review booking inputs but cannot submit new tenant bookings.
+            <strong>{t("bookingNew.alert.readOnly.label", locale)}</strong>{" "}
+            {t("bookingNew.alert.readOnly.body", locale)}
           </div>
         ) : null}
 
         <div style={overviewGridStyle}>
           <div style={overviewCardStyle}>
-            <span style={overviewLabelStyle}>Authority Context</span>
+            <span style={overviewLabelStyle}>
+              {t("bookingNew.overview.authority.label", locale)}
+            </span>
             <strong>
               {identity
-                ? `${identity.actorType} in ${identity.realm} scope`
-                : "Bootstrap tenant scope"}
+                ? t("bookingNew.overview.authority.value", locale, {
+                    actorType: identity.actorType,
+                    realm: identity.realm,
+                  })
+                : t("bookingNew.overview.authority.bootstrap", locale)}
             </strong>
             <div style={roleListStyle}>
               {(identity?.roles.length ?? 0) > 0 ? (
@@ -577,34 +592,37 @@ export default async function NewBookingPage({
                   </span>
                 ))
               ) : (
-                <span style={subtleBadgeStyle}>roles unavailable</span>
+                <span style={subtleBadgeStyle}>
+                  {t("bookingNew.overview.authority.rolesUnavailable", locale)}
+                </span>
               )}
             </div>
             <p style={mutedNoteStyle}>
               {isPartnerMode
-                ? "Partner mode remains create-only. Tenant-admin governance actions stay hidden and out of scope here."
-                : "This page only exposes tenant-safe create fields. Status edits, dispatch overrides, and fare overrides stay server-side."}
+                ? t("bookingNew.overview.authority.partnerNote", locale)
+                : t("bookingNew.overview.authority.tenantNote", locale)}
             </p>
           </div>
 
           <div style={overviewCardStyle}>
-            <span style={overviewLabelStyle}>Pricing Authority</span>
+            <span style={overviewLabelStyle}>
+              {t("bookingNew.overview.pricing.label", locale)}
+            </span>
             <strong>{pricingAuthority.canonicalQuotedFareSource}</strong>
             <p style={mutedNoteStyle}>
-              Quoted fare resolves from rule version{" "}
-              <code>{pricingAuthority.canonicalPricingRuleVersion}</code>.
-              Tenant submitters can create the booking, but cannot set or
-              override fare values from this form.
+              {t("bookingNew.overview.pricing.notePrefix", locale)}{" "}
+              <code>{pricingAuthority.canonicalPricingRuleVersion}</code>
+              {t("bookingNew.overview.pricing.noteSuffix", locale)}
             </p>
           </div>
 
           <div style={overviewCardStyle}>
-            <span style={overviewLabelStyle}>Policy Framing</span>
-            <strong>Cost center + proof requirements</strong>
+            <span style={overviewLabelStyle}>
+              {t("bookingNew.overview.policy.label", locale)}
+            </span>
+            <strong>{t("bookingNew.overview.policy.value", locale)}</strong>
             <p style={mutedNoteStyle}>
-              Cost center persists as free text today. Sign-off and expense
-              proof flags shape downstream evidence expectations, but there is
-              no tenant-visible approval queue or save-draft command yet.
+              {t("bookingNew.overview.policy.note", locale)}
             </p>
           </div>
         </div>
@@ -612,10 +630,11 @@ export default async function NewBookingPage({
         <form action={createBooking} style={formStyle}>
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Service And Schedule</h2>
+              <h2 style={sectionTitleStyle}>
+                {t("bookingNew.section.schedule.title", locale)}
+              </h2>
               <p style={sectionDescriptionStyle}>
-                Pick the booking subtype, booking direction, and reservation
-                window that define the backend policy envelope for this request.
+                {t("bookingNew.section.schedule.description", locale)}
               </p>
             </div>
 
@@ -625,7 +644,7 @@ export default async function NewBookingPage({
                   htmlFor="businessDispatchSubtype"
                   style={fieldLabelStyle}
                 >
-                  Booking subtype
+                  {t("bookingNew.field.subtype.label", locale)}
                 </label>
                 <select
                   id="businessDispatchSubtype"
@@ -636,19 +655,22 @@ export default async function NewBookingPage({
                 >
                   {subtypeOptions.map((subtype) => (
                     <option key={subtype} value={subtype}>
-                      {getSubtypeLabel(subtype)}
+                      {getSubtypeLabel(subtype, locale)}
                     </option>
                   ))}
                 </select>
                 <p style={fieldHintStyle}>
-                  {SUBTYPE_LABELS.enterprise_dispatch.guidance}{" "}
-                  {SUBTYPE_LABELS.credit_card_airport_transfer.guidance}
+                  {t("bookingNew.subtype.enterprise_dispatch.guidance", locale)}{" "}
+                  {t(
+                    "bookingNew.subtype.credit_card_airport_transfer.guidance",
+                    locale,
+                  )}
                 </p>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="direction" style={fieldLabelStyle}>
-                  Direction
+                  {t("bookingNew.field.direction.label", locale)}
                 </label>
                 <select
                   id="direction"
@@ -656,17 +678,21 @@ export default async function NewBookingPage({
                   defaultValue="pickup"
                   style={fieldInputStyle}
                 >
-                  <option value="pickup">Pickup</option>
-                  <option value="dropoff">Dropoff</option>
+                  <option value="pickup">
+                    {t("bookingNew.direction.pickup", locale)}
+                  </option>
+                  <option value="dropoff">
+                    {t("bookingNew.direction.dropoff", locale)}
+                  </option>
                 </select>
                 <p style={fieldHintStyle}>
-                  Airport-transfer pickup requests must include a flight number.
+                  {t("bookingNew.field.direction.hint", locale)}
                 </p>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="reservationWindowStart" style={fieldLabelStyle}>
-                  Window start
+                  {t("bookingNew.field.windowStart.label", locale)}
                 </label>
                 <input
                   id="reservationWindowStart"
@@ -679,7 +705,7 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="reservationWindowEnd" style={fieldLabelStyle}>
-                  Window end
+                  {t("bookingNew.field.windowEnd.label", locale)}
                 </label>
                 <input
                   id="reservationWindowEnd"
@@ -694,9 +720,8 @@ export default async function NewBookingPage({
             <div style={roleListStyle}>
               {subtypeOptions.map((subtype) => (
                 <span key={subtype} style={subtleBadgeStyle}>
-                  {getSubtypeLabel(subtype)}:{" "}
-                  {SUBTYPE_LABELS[subtype]?.reservationPolicy ??
-                    "Submit to view policy window."}
+                  {getSubtypeLabel(subtype, locale)}:{" "}
+                  {getSubtypeReservationPolicy(subtype, locale)}
                 </span>
               ))}
             </div>
@@ -704,18 +729,18 @@ export default async function NewBookingPage({
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Passenger Selection</h2>
+              <h2 style={sectionTitleStyle}>
+                {t("bookingNew.section.passenger.title", locale)}
+              </h2>
               <p style={sectionDescriptionStyle}>
-                Reuse a passenger master record when possible. Manual fallback
-                fields still travel with the command and can cover missing
-                contact data.
+                {t("bookingNew.section.passenger.description", locale)}
               </p>
             </div>
 
             <div style={inputGridStyle}>
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="passengerId" style={fieldLabelStyle}>
-                  Passenger directory entry
+                  {t("bookingNew.field.passengerId.label", locale)}
                 </label>
                 <select
                   id="passengerId"
@@ -724,51 +749,57 @@ export default async function NewBookingPage({
                   style={fieldInputStyle}
                 >
                   <option value={MANUAL_ENTRY}>
-                    Manual entry / no saved passenger
+                    {t("bookingNew.field.passengerId.manualOption", locale)}
                   </option>
                   {activePassengers.map((passenger) => (
                     <option
                       key={passenger.passengerId}
                       value={passenger.passengerId}
                     >
-                      {describePassenger(passenger)}
+                      {describePassenger(passenger, locale)}
                     </option>
                   ))}
                 </select>
                 <p style={fieldHintStyle}>
-                  {activePassengers.length} active passenger record(s)
-                  available. Use{" "}
+                  {t("bookingNew.field.passengerId.hintPrefix", locale, {
+                    count: activePassengers.length,
+                  })}{" "}
                   <Link href="/passengers">
                     <strong>/passengers</strong>
                   </Link>{" "}
-                  to repair missing mobile numbers before relying on
-                  directory-only submit.
+                  {t("bookingNew.field.passengerId.hintSuffix", locale)}
                 </p>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="passengerName" style={fieldLabelStyle}>
-                  Manual passenger name
+                  {t("bookingNew.field.passengerName.label", locale)}
                 </label>
                 <input
                   id="passengerName"
                   name="passengerName"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="Passenger full name"
+                  placeholder={t(
+                    "bookingNew.field.passengerName.placeholder",
+                    locale,
+                  )}
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="passengerPhone" style={fieldLabelStyle}>
-                  Manual or fallback phone
+                  {t("bookingNew.field.passengerPhone.label", locale)}
                 </label>
                 <input
                   id="passengerPhone"
                   name="passengerPhone"
                   type="tel"
                   style={fieldInputStyle}
-                  placeholder="+886 9xx xxx xxx"
+                  placeholder={t(
+                    "bookingNew.field.passengerPhone.placeholder",
+                    locale,
+                  )}
                 />
               </div>
             </div>
@@ -776,19 +807,18 @@ export default async function NewBookingPage({
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Route And Address Book</h2>
+              <h2 style={sectionTitleStyle}>
+                {t("bookingNew.section.route.title", locale)}
+              </h2>
               <p style={sectionDescriptionStyle}>
-                Each stop can reference the tenant address book or accept a
-                fresh manual address. The backend resolves saved addresses by
-                `addressId` and falls back to manual text when no directory
-                entry is selected.
+                {t("bookingNew.section.route.description", locale)}
               </p>
             </div>
 
             <div style={inputGridStyle}>
               <div style={formFieldStyle}>
                 <label htmlFor="pickupAddressId" style={fieldLabelStyle}>
-                  Pickup address book entry
+                  {t("bookingNew.field.pickupAddressId.label", locale)}
                 </label>
                 <select
                   id="pickupAddressId"
@@ -797,11 +827,11 @@ export default async function NewBookingPage({
                   style={fieldInputStyle}
                 >
                   <option value={MANUAL_ENTRY}>
-                    Manual pickup / no saved address
+                    {t("bookingNew.field.pickupAddressId.manualOption", locale)}
                   </option>
                   {activeAddresses.map((address) => (
                     <option key={address.addressId} value={address.addressId}>
-                      {describeAddress(address, passengerNameById)}
+                      {describeAddress(address, passengerNameById, locale)}
                     </option>
                   ))}
                 </select>
@@ -809,7 +839,7 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="dropoffAddressId" style={fieldLabelStyle}>
-                  Dropoff address book entry
+                  {t("bookingNew.field.dropoffAddressId.label", locale)}
                 </label>
                 <select
                   id="dropoffAddressId"
@@ -818,11 +848,11 @@ export default async function NewBookingPage({
                   style={fieldInputStyle}
                 >
                   <option value={MANUAL_ENTRY}>
-                    Manual dropoff / no saved address
+                    {t("bookingNew.field.dropoffAddressId.manualOption", locale)}
                   </option>
                   {activeAddresses.map((address) => (
                     <option key={address.addressId} value={address.addressId}>
-                      {describeAddress(address, passengerNameById)}
+                      {describeAddress(address, passengerNameById, locale)}
                     </option>
                   ))}
                 </select>
@@ -830,110 +860,123 @@ export default async function NewBookingPage({
 
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="pickupAddress" style={fieldLabelStyle}>
-                  Manual pickup address
+                  {t("bookingNew.field.pickupAddress.label", locale)}
                 </label>
                 <textarea
                   id="pickupAddress"
                   name="pickupAddress"
                   rows={3}
                   style={fieldInputStyle}
-                  placeholder="Enter a pickup address when not reusing the address book."
+                  placeholder={t(
+                    "bookingNew.field.pickupAddress.placeholder",
+                    locale,
+                  )}
                 />
               </div>
 
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="dropoffAddress" style={fieldLabelStyle}>
-                  Manual dropoff address
+                  {t("bookingNew.field.dropoffAddress.label", locale)}
                 </label>
                 <textarea
                   id="dropoffAddress"
                   name="dropoffAddress"
                   rows={3}
                   style={fieldInputStyle}
-                  placeholder="Enter a dropoff address when not reusing the address book."
+                  placeholder={t(
+                    "bookingNew.field.dropoffAddress.placeholder",
+                    locale,
+                  )}
                 />
               </div>
             </div>
 
             <p style={fieldHintStyle}>
-              {activeAddresses.length} active address record(s) available. Use{" "}
+              {t("bookingNew.field.addressBook.hintPrefix", locale, {
+                count: activeAddresses.length,
+              })}{" "}
               <Link href="/addresses">
                 <strong>/addresses</strong>
               </Link>{" "}
-              to maintain owner-linked addresses, tags, and geocode hygiene.
+              {t("bookingNew.field.addressBook.hintSuffix", locale)}
             </p>
           </section>
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Policy And Service Attributes</h2>
+              <h2 style={sectionTitleStyle}>
+                {t("bookingNew.section.policy.title", locale)}
+              </h2>
               <p style={sectionDescriptionStyle}>
-                These fields capture fulfillment context without leaking
-                authority that belongs to pricing, approvals, or dispatch
-                operations.
+                {t("bookingNew.section.policy.description", locale)}
               </p>
             </div>
 
             <div style={inputGridStyle}>
               <div style={formFieldStyle}>
                 <label htmlFor="costCenter" style={fieldLabelStyle}>
-                  Cost center
+                  {t("bookingNew.field.costCenter.label", locale)}
                 </label>
                 <input
                   id="costCenter"
                   name="costCenter"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="DEPT-001 / Travel Ops"
+                  placeholder={t(
+                    "bookingNew.field.costCenter.placeholder",
+                    locale,
+                  )}
                 />
                 <p style={fieldHintStyle}>
-                  Recorded as free text today. No server-backed cost-center
-                  catalog or quota lookup is available yet.
+                  {t("bookingNew.field.costCenter.hint", locale)}
                 </p>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="vehiclePreference" style={fieldLabelStyle}>
-                  Vehicle preference
+                  {t("bookingNew.field.vehiclePreference.label", locale)}
                 </label>
                 <input
                   id="vehiclePreference"
                   name="vehiclePreference"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="Sedan, van, executive, wheelchair..."
+                  placeholder={t(
+                    "bookingNew.field.vehiclePreference.placeholder",
+                    locale,
+                  )}
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="flightNo" style={fieldLabelStyle}>
-                  Flight number
+                  {t("bookingNew.field.flightNo.label", locale)}
                 </label>
                 <input
                   id="flightNo"
                   name="flightNo"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="CI101 / BR18"
+                  placeholder={t("bookingNew.field.flightNo.placeholder", locale)}
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="terminal" style={fieldLabelStyle}>
-                  Terminal
+                  {t("bookingNew.field.terminal.label", locale)}
                 </label>
                 <input
                   id="terminal"
                   name="terminal"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="T1 / T2 / Arrival Hall B"
+                  placeholder={t("bookingNew.field.terminal.placeholder", locale)}
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="luggageCount" style={fieldLabelStyle}>
-                  Luggage count
+                  {t("bookingNew.field.luggageCount.label", locale)}
                 </label>
                 <input
                   id="luggageCount"
@@ -948,7 +991,7 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="minPhotoCount" style={fieldLabelStyle}>
-                  Completion photo minimum
+                  {t("bookingNew.field.minPhotoCount.label", locale)}
                 </label>
                 <select
                   id="minPhotoCount"
@@ -956,50 +999,76 @@ export default async function NewBookingPage({
                   defaultValue="1"
                   style={fieldInputStyle}
                 >
-                  <option value="1">1 photo</option>
-                  <option value="2">2 photos</option>
-                  <option value="3">3 photos</option>
-                  <option value="4">4 photos</option>
-                  <option value="5">5 photos</option>
+                  <option value="1">
+                    {t("bookingNew.field.minPhotoCount.option", locale, {
+                      count: 1,
+                    })}
+                  </option>
+                  <option value="2">
+                    {t("bookingNew.field.minPhotoCount.option", locale, {
+                      count: 2,
+                    })}
+                  </option>
+                  <option value="3">
+                    {t("bookingNew.field.minPhotoCount.option", locale, {
+                      count: 3,
+                    })}
+                  </option>
+                  <option value="4">
+                    {t("bookingNew.field.minPhotoCount.option", locale, {
+                      count: 4,
+                    })}
+                  </option>
+                  <option value="5">
+                    {t("bookingNew.field.minPhotoCount.option", locale, {
+                      count: 5,
+                    })}
+                  </option>
                 </select>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="onsiteContactName" style={fieldLabelStyle}>
-                  Onsite contact name
+                  {t("bookingNew.field.onsiteContactName.label", locale)}
                 </label>
                 <input
                   id="onsiteContactName"
                   name="onsiteContactName"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="Lobby or event contact"
+                  placeholder={t(
+                    "bookingNew.field.onsiteContactName.placeholder",
+                    locale,
+                  )}
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="onsiteContactPhone" style={fieldLabelStyle}>
-                  Onsite contact phone
+                  {t("bookingNew.field.onsiteContactPhone.label", locale)}
                 </label>
                 <input
                   id="onsiteContactPhone"
                   name="onsiteContactPhone"
                   type="tel"
                   style={fieldInputStyle}
-                  placeholder="+886 9xx xxx xxx"
+                  placeholder={t(
+                    "bookingNew.field.onsiteContactPhone.placeholder",
+                    locale,
+                  )}
                 />
               </div>
 
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="notes" style={fieldLabelStyle}>
-                  Notes
+                  {t("bookingNew.field.notes.label", locale)}
                 </label>
                 <textarea
                   id="notes"
                   name="notes"
                   rows={4}
                   style={fieldInputStyle}
-                  placeholder="Arrival instructions, gate constraints, rider preferences, or other authority-safe notes."
+                  placeholder={t("bookingNew.field.notes.placeholder", locale)}
                 />
               </div>
             </div>
@@ -1007,16 +1076,12 @@ export default async function NewBookingPage({
             <div style={checkboxStackStyle}>
               <label style={checkboxRowStyle}>
                 <input type="checkbox" name="signoffRequired" />
-                <span>
-                  Require onsite sign-off. This increases downstream completion
-                  proof requirements; it does not open a separate tenant
-                  approval queue.
-                </span>
+                <span>{t("bookingNew.field.signoffRequired.label", locale)}</span>
               </label>
               <label style={checkboxRowStyle}>
                 <input type="checkbox" name="expenseProofRequired" />
                 <span>
-                  Require expense proof for reimbursement or finance follow-up.
+                  {t("bookingNew.field.expenseProofRequired.label", locale)}
                 </span>
               </label>
             </div>
@@ -1024,12 +1089,13 @@ export default async function NewBookingPage({
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Submit Flow</h2>
+              <h2 style={sectionTitleStyle}>
+                {t("bookingNew.section.submit.title", locale)}
+              </h2>
               <p style={sectionDescriptionStyle}>
-                Submit creates a live booking through{" "}
-                <code>POST /api/tenant/bookings</code>. Save-draft is
-                intentionally absent because there is no authority-safe draft
-                command in the current contract.
+                {t("bookingNew.section.submit.descriptionPrefix", locale)}{" "}
+                <code>POST /api/tenant/bookings</code>
+                {t("bookingNew.section.submit.descriptionSuffix", locale)}
               </p>
             </div>
 
@@ -1039,19 +1105,16 @@ export default async function NewBookingPage({
                 style={primaryButtonStyle}
                 disabled={!roleSnapshot.capabilities.canWriteTenant}
               >
-                Submit Booking
+                {t("bookingNew.submit.button", locale)}
               </button>
               <Link className="route-link" href="/booking-list">
-                <strong>Back to booking list</strong>
-                Return to the tenant booking registry.
+                <strong>{t("bookingNew.submit.backLink.title", locale)}</strong>
+                {t("bookingNew.submit.backLink.subtitle", locale)}
               </Link>
             </div>
 
             <p style={mutedNoteStyle}>
-              Draft save, approval-routing selection, and cost-center catalog
-              lookup remain explicit backend gaps. This form only materializes
-              the create flow that is already backed by canonical tenant
-              commands.
+              {t("bookingNew.submit.note", locale)}
             </p>
           </section>
         </form>

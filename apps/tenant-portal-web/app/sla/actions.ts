@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import type {
   UpdateTenantSlaProfileCommand,
   TenantSlaProfile,
@@ -12,6 +14,7 @@ export async function getSlaProfile(): Promise<{
   profile: TenantSlaProfile | null;
   error: string | null;
 }> {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
   try {
     const profile = (await client.getSlaProfile()) as TenantSlaProfile;
@@ -19,16 +22,17 @@ export async function getSlaProfile(): Promise<{
   } catch (e) {
     return {
       profile: null,
-      error: e instanceof Error ? e.message : "Unknown error",
+      error: e instanceof Error ? e.message : t("sla.error.unknown", locale),
     };
   }
 }
 
 export async function updateSlaProfile(formData: FormData): Promise<void> {
+  const locale = await getServerLocale();
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteSla,
-    "Tenant SLA write authority required.",
+    t("sla.error.writeAuthorityRequired", locale),
   );
   const client = await getTenantClient();
 

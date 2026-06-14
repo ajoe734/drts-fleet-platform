@@ -6,24 +6,30 @@ import {
 } from "./actions";
 import type { PreferenceRow } from "./actions";
 import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export default async function NotificationsPage() {
+  const locale = await getServerLocale();
   const { preferences, error: fetchError } = await getNotificationPreferences();
   const roleSnapshot = await getTenantRoleSnapshot();
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Notification Preferences"
+        title={t("notifications.title", locale)}
         description={
           roleSnapshot.capabilities.canWriteNotifications
-            ? "Configure which events are sent to which channels."
-            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. This role can review notification posture but cannot change it.`
+            ? t("notifications.description.canWrite", locale)
+            : t("notifications.description.readOnly", locale, {
+                role: describeRoleSnapshot(roleSnapshot, locale),
+              })
         }
       >
         {fetchError && (
           <div className="error-banner">
-            <strong>Error loading preferences:</strong> {fetchError}
+            <strong>{t("notifications.error.loadLabel", locale)}</strong>{" "}
+            {fetchError}
           </div>
         )}
 
@@ -32,10 +38,10 @@ export default async function NotificationsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Event Type</th>
-                  <th>Email</th>
-                  <th>Webhook</th>
-                  <th>Ops Console</th>
+                  <th>{t("notifications.table.eventType", locale)}</th>
+                  <th>{t("notifications.table.email", locale)}</th>
+                  <th>{t("notifications.table.webhook", locale)}</th>
+                  <th>{t("notifications.table.opsConsole", locale)}</th>
                 </tr>
               </thead>
               <tbody>
@@ -44,7 +50,7 @@ export default async function NotificationsPage() {
                 ) : (
                   <tr>
                     <td colSpan={4} className="empty-state">
-                      No notification preferences available.
+                      {t("notifications.empty", locale)}
                     </td>
                   </tr>
                 )}
@@ -59,15 +65,15 @@ export default async function NotificationsPage() {
               disabled={!roleSnapshot.capabilities.canWriteNotifications}
             >
               {roleSnapshot.capabilities.canWriteNotifications
-                ? "Save Preferences"
-                : "Read-only"}
+                ? t("notifications.button.save", locale)
+                : t("notifications.button.readOnly", locale)}
             </button>
           </div>
         </form>
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("notifications.backLink.title", locale)}</strong>
+          {t("notifications.backLink.description", locale)}
         </Link>
       </AppShellCard>
     </main>

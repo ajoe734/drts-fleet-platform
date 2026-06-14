@@ -16,6 +16,8 @@ import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,7 @@ export default async function BookingListPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const rawParams = await searchParams;
@@ -36,56 +39,52 @@ export default async function BookingListPage({
   try {
     bookings = await client.listTenantBookings();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("bookingList.error.unknown", locale);
   }
 
   const result = applyBookingListQuery(bookings, query);
   const hasForwardedAuthority = result.items.some(
     (booking) =>
-      getBookingSourceVisibility(booking).domain === "forwarded_authority",
+      getBookingSourceVisibility(booking, locale).domain ===
+      "forwarded_authority",
   );
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Booking oversight"
-        description="Booking list aligned to the new tenant console model: shared filter shape, canonical OwnedOrderStatus, fulfillment source visibility, fare context, and view-only deep link into the productized detail surface."
+        title={t("bookingList.page.title", locale)}
+        description={t("bookingList.page.description", locale)}
       >
         {error ? (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("bookingList.error.label", locale)}</strong> {error}
           </div>
         ) : null}
 
         <section className="surface-grid surface-grid-wide">
           <article className="surface-card">
-            <span className="surface-kicker">Query</span>
-            <h3>Shared list contract</h3>
-            <p>
-              Search, status, date window, and pagination follow the
-              SharedListQueryV1 vocabulary recommended by the cross-system
-              filter normalization packet (XS-UI-004). Status accepts only
-              persisted backend OwnedOrderStatus values.
-            </p>
+            <span className="surface-kicker">{t("bookingList.query.kicker", locale)}</span>
+            <h3>{t("bookingList.query.heading", locale)}</h3>
+            <p>{t("bookingList.query.body", locale)}</p>
             <form action="/booking-list" className="booking-query-form">
               <label className="booking-field">
-                <span>Search</span>
+                <span>{t("bookingList.field.search", locale)}</span>
                 <input
                   defaultValue={query.q}
                   name="q"
-                  placeholder="Booking ID, order ID, passenger, route, cost center"
+                  placeholder={t("bookingList.field.searchPlaceholder", locale)}
                   type="text"
                 />
               </label>
               <label className="booking-field">
-                <span>Date field</span>
+                <span>{t("bookingList.field.dateField", locale)}</span>
                 <select defaultValue={query.dateField} name="dateField">
-                  <option value="reservationStart">Reservation start</option>
-                  <option value="createdAt">Created at</option>
+                  <option value="reservationStart">{t("bookingList.field.reservationStart", locale)}</option>
+                  <option value="createdAt">{t("bookingList.field.createdAt", locale)}</option>
                 </select>
               </label>
               <label className="booking-field">
-                <span>From</span>
+                <span>{t("bookingList.field.from", locale)}</span>
                 <input
                   defaultValue={query.dateFrom}
                   name="dateFrom"
@@ -93,11 +92,11 @@ export default async function BookingListPage({
                 />
               </label>
               <label className="booking-field">
-                <span>To</span>
+                <span>{t("bookingList.field.to", locale)}</span>
                 <input defaultValue={query.dateTo} name="dateTo" type="date" />
               </label>
               <label className="booking-field">
-                <span>Page size</span>
+                <span>{t("bookingList.field.pageSize", locale)}</span>
                 <select defaultValue={String(query.pageSize)} name="pageSize">
                   <option value="10">10</option>
                   <option value="25">25</option>
@@ -113,23 +112,19 @@ export default async function BookingListPage({
               ) : null}
               <div className="booking-form-actions">
                 <button className="action-button-primary" type="submit">
-                  Apply filters
+                  {t("bookingList.action.applyFilters", locale)}
                 </button>
                 <Link className="action-button-secondary" href="/booking-list">
-                  Reset
+                  {t("bookingList.action.reset", locale)}
                 </Link>
               </div>
             </form>
           </article>
 
           <article className="surface-card">
-            <span className="surface-kicker">Status</span>
-            <h3>Order status stays canonical</h3>
-            <p>
-              The chip row toggles canonical OwnedOrderStatus filters. Service
-              buckets, fulfillment source, and tenant-only labels never replace
-              the workflow vocabulary.
-            </p>
+            <span className="surface-kicker">{t("bookingList.status.kicker", locale)}</span>
+            <h3>{t("bookingList.status.heading", locale)}</h3>
+            <p>{t("bookingList.status.body", locale)}</p>
             <div className="chip-row">
               {OWNED_ORDER_STATUSES.map((status) => {
                 const nextStatuses = toggleStatus(query.statuses, status);
@@ -156,41 +151,39 @@ export default async function BookingListPage({
             {roleSnapshot.capabilities.canWriteTenant ? (
               <div className="link-row">
                 <Link className="text-link" href="/bookings/new">
-                  Start new booking intake
+                  {t("bookingList.action.startIntake", locale)}
                 </Link>
               </div>
             ) : (
               <p className="muted-copy">
-                Current role can review bookings but cannot create new ones.
+                {t("bookingList.status.readOnlyNote", locale)}
               </p>
             )}
           </article>
         </section>
 
         <article className="surface-card">
-          <span className="surface-kicker">List</span>
-          <h3>{`Showing ${result.items.length} of ${result.total} booking row(s)`}</h3>
+          <span className="surface-kicker">{t("bookingList.list.kicker", locale)}</span>
+          <h3>
+            {t("bookingList.list.showing", locale, {
+              shown: result.items.length,
+              total: result.total,
+            })}
+          </h3>
           <p>
-            The list reads <code>/api/tenant/bookings</code>. Mutate actions are
-            limited to authority-safe commands; deeper fulfillment trace,
-            fare/invoice linkage, and timeline context belong on the booking
-            detail page.
+            {t("bookingList.list.bodyPrefix", locale)}{" "}
+            <code>/api/tenant/bookings</code>
+            {t("bookingList.list.bodySuffix", locale)}
           </p>
           {hasForwardedAuthority ? (
             <article className="callout-panel is-warning">
-              <strong>
-                Forwarded bookings keep external-platform authority
-              </strong>
-              <p>
-                Tenant booking oversight keeps the business record readable, but
-                adapter-native lifecycle states and platform recovery still
-                belong to ops and driver routes.
-              </p>
+              <strong>{t("bookingList.forwarded.title", locale)}</strong>
+              <p>{t("bookingList.forwarded.body", locale)}</p>
               <p>
                 <code>accept_pending</code>, <code>confirmed_by_platform</code>,
                 <code>lost_race</code>, <code>cancelled_by_platform</code>, and
-                <code>sync_failed</code> never become tenant workflow actions on
-                this surface.
+                <code>sync_failed</code>{" "}
+                {t("bookingList.forwarded.statesNote", locale)}
               </p>
             </article>
           ) : null}
@@ -200,19 +193,19 @@ export default async function BookingListPage({
               <table>
                 <thead>
                   <tr>
-                    <th>Booking</th>
-                    <th>Passenger</th>
-                    <th>Reservation</th>
-                    <th>Status</th>
-                    <th>Fulfillment</th>
-                    <th>Route</th>
-                    <th>Fare</th>
-                    <th>Action</th>
+                    <th>{t("bookingList.column.booking", locale)}</th>
+                    <th>{t("bookingList.column.passenger", locale)}</th>
+                    <th>{t("bookingList.column.reservation", locale)}</th>
+                    <th>{t("bookingList.column.status", locale)}</th>
+                    <th>{t("bookingList.column.fulfillment", locale)}</th>
+                    <th>{t("bookingList.column.route", locale)}</th>
+                    <th>{t("bookingList.column.fare", locale)}</th>
+                    <th>{t("bookingList.column.action", locale)}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.items.map((booking) => {
-                    const source = getBookingSourceVisibility(booking);
+                    const source = getBookingSourceVisibility(booking, locale);
                     return (
                       <tr key={booking.bookingId}>
                         <td>
@@ -223,7 +216,9 @@ export default async function BookingListPage({
                             {booking.bookingId}
                           </Link>
                           <div className="source-detail">
-                            Order {booking.orderId}
+                            {t("bookingList.cell.order", locale, {
+                              orderId: booking.orderId,
+                            })}
                           </div>
                         </td>
                         <td>
@@ -233,9 +228,14 @@ export default async function BookingListPage({
                           </div>
                         </td>
                         <td>
-                          {formatDateTime(booking.reservationWindowStart)}
+                          {formatDateTime(booking.reservationWindowStart, locale)}
                           <div className="source-detail">
-                            to {formatDateTime(booking.reservationWindowEnd)}
+                            {t("bookingList.cell.to", locale, {
+                              value: formatDateTime(
+                                booking.reservationWindowEnd,
+                                locale,
+                              ),
+                            })}
                           </div>
                         </td>
                         <td>
@@ -245,7 +245,9 @@ export default async function BookingListPage({
                             {booking.orderStatus}
                           </span>
                           <div className="source-detail">
-                            Booking {booking.status}
+                            {t("bookingList.cell.booking", locale, {
+                              status: booking.status,
+                            })}
                           </div>
                         </td>
                         <td>
@@ -260,13 +262,13 @@ export default async function BookingListPage({
                             → {booking.dropoff.address}
                           </div>
                         </td>
-                        <td>{formatMoney(booking.quotedFare)}</td>
+                        <td>{formatMoney(booking.quotedFare, locale)}</td>
                         <td>
                           <Link
                             className="text-link"
                             href={`/booking-list/${booking.bookingId}`}
                           >
-                            View detail
+                            {t("bookingList.action.viewDetail", locale)}
                           </Link>
                         </td>
                       </tr>
@@ -277,14 +279,16 @@ export default async function BookingListPage({
             </div>
           ) : (
             <p className="empty-state">
-              No booking matched the current query. Try clearing status chips or
-              broadening the search window.
+              {t("bookingList.empty.list", locale)}
             </p>
           )}
 
           <div className="booking-pagination">
             <span className="muted-copy">
-              Page {result.page} of {result.totalPages}
+              {t("bookingList.pagination.page", locale, {
+                page: result.page,
+                totalPages: result.totalPages,
+              })}
             </span>
             <div className="link-row">
               {result.page > 1 ? (
@@ -294,7 +298,7 @@ export default async function BookingListPage({
                     page: result.page - 1,
                   })}`}
                 >
-                  Previous
+                  {t("bookingList.pagination.previous", locale)}
                 </Link>
               ) : null}
               {result.page < result.totalPages ? (
@@ -304,7 +308,7 @@ export default async function BookingListPage({
                     page: result.page + 1,
                   })}`}
                 >
-                  Next
+                  {t("bookingList.pagination.next", locale)}
                 </Link>
               ) : null}
             </div>
@@ -312,18 +316,13 @@ export default async function BookingListPage({
         </article>
 
         <section className="callout-panel">
-          <strong>Authority boundary</strong>
-          <p>
-            The list never invents tenant-local workflow aliases. Status maps to
-            canonical OwnedOrderStatus values, fare values come from the booking
-            record, and deeper dispatch trace belongs to the ops console
-            authority lane.
-          </p>
+          <strong>{t("bookingList.authority.title", locale)}</strong>
+          <p>{t("bookingList.authority.body", locale)}</p>
         </section>
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("bookingList.backHome.title", locale)}</strong>
+          {t("bookingList.backHome.body", locale)}
         </Link>
       </AppShellCard>
     </main>

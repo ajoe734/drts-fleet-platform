@@ -1,21 +1,17 @@
 import Link from "next/link";
 import type {
-  MoneyAmount,
   TenantBillingProfile,
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { formatMoney } from "@/lib/booking-domain";
 import { summarizeInvoiceSourceDomains } from "@/lib/source-domain";
-
-function formatMoney(amount: MoneyAmount | null | undefined): string {
-  if (!amount) {
-    return "-";
-  }
-  return `${amount.currency} ${(amount.amountMinor / 100).toFixed(2)}`;
-}
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export default async function BillingPage() {
+  const locale = await getServerLocale();
   const client = await getTenantClient();
 
   let profile: TenantBillingProfile | null = null;
@@ -30,107 +26,108 @@ export default async function BillingPage() {
     profile = profileData;
     invoices = invoiceData;
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("billing.error.unknown", locale);
   }
 
   const invoiceSummary =
     invoices.length > 0
-      ? summarizeInvoiceSourceDomains({
-          lines: invoices.flatMap((invoice) => invoice.lines),
-        })
+      ? summarizeInvoiceSourceDomains(
+          {
+            lines: invoices.flatMap((invoice) => invoice.lines),
+          },
+          locale,
+        )
       : null;
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Billing"
-        description={`Fetched from /api/tenant/billing/profile and /api/tenant/invoices. ${invoices.length} invoice(s) found.`}
+        title={t("billing.title", locale)}
+        description={t("billing.description", locale, {
+          count: invoices.length,
+        })}
       >
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("billing.error.label", locale)}</strong> {error}
           </div>
         )}
 
         {profile && (
           <div className="billing-profile">
-            <h3>Billing Profile</h3>
+            <h3>{t("billing.profile.heading", locale)}</h3>
             <table style={{ width: "100%" }}>
               <tbody>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Invoice Title
+                    {t("billing.profile.invoiceTitle", locale)}
                   </td>
                   <td>{profile.invoiceTitle}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Contact
+                    {t("billing.profile.contact", locale)}
                   </td>
                   <td>{profile.contactName ?? "-"}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Billing Email
+                    {t("billing.profile.billingEmail", locale)}
                   </td>
                   <td>{profile.email}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Tax ID
+                    {t("billing.profile.taxId", locale)}
                   </td>
                   <td>{profile.taxId ?? "-"}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Source-Domain Note
+                    {t("billing.profile.sourceDomainNote.label", locale)}
                   </td>
-                  <td>
-                    DRTS-operated lines bill through platform finance. Any
-                    externally fulfilled or shadow-only lines stay visible here
-                    with their external finance authority preserved.
-                  </td>
+                  <td>{t("billing.profile.sourceDomainNote.body", locale)}</td>
                 </tr>
               </tbody>
             </table>
           </div>
         )}
 
-        {invoiceSummary?.badge === "External finance authority present" ? (
+        {invoiceSummary?.badge ===
+        t("source.summary.externalFinance.badge", locale) ? (
           <article className="callout-panel is-warning">
-            <strong>Forwarded finance authority remains external</strong>
+            <strong>{t("billing.forwardedAuthority.heading", locale)}</strong>
             <p>{invoiceSummary.detail}</p>
-            <p>
-              Tenant billing can mirror audit-safe amounts, but settlement,
-              receipt ownership, payout, and reconciliation remain on the
-              external-platform or ops authority lanes.
-            </p>
+            <p>{t("billing.forwardedAuthority.body", locale)}</p>
           </article>
         ) : null}
 
         {invoices.length > 0 ? (
           <div className="data-table">
-            <h3>Invoices</h3>
+            <h3>{t("billing.invoices.heading", locale)}</h3>
             <table>
               <thead>
                 <tr>
-                  <th>Invoice ID</th>
-                  <th>Status</th>
-                  <th>Amount</th>
-                  <th>Source Domain</th>
-                  <th>Billing Period</th>
-                  <th>Updated</th>
-                  <th>Download</th>
+                  <th>{t("billing.invoices.column.invoiceId", locale)}</th>
+                  <th>{t("billing.invoices.column.status", locale)}</th>
+                  <th>{t("billing.invoices.column.amount", locale)}</th>
+                  <th>{t("billing.invoices.column.sourceDomain", locale)}</th>
+                  <th>{t("billing.invoices.column.billingPeriod", locale)}</th>
+                  <th>{t("billing.invoices.column.updated", locale)}</th>
+                  <th>{t("billing.invoices.column.download", locale)}</th>
                 </tr>
               </thead>
               <tbody>
                 {invoices.map((invoice) => {
-                  const sourceSummary = summarizeInvoiceSourceDomains(invoice);
+                  const sourceSummary = summarizeInvoiceSourceDomains(
+                    invoice,
+                    locale,
+                  );
                   return (
                     <tr key={invoice.invoiceId}>
                       <td>{invoice.invoiceId}</td>
                       <td>{invoice.status}</td>
-                      <td>{formatMoney(invoice.amount)}</td>
+                      <td>{formatMoney(invoice.amount, locale)}</td>
                       <td>
                         <strong>{sourceSummary.badge}</strong>
                         <div className="source-detail">
@@ -149,7 +146,7 @@ export default async function BillingPage() {
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            Download
+                            {t("billing.invoices.download", locale)}
                           </a>
                         ) : (
                           <span>—</span>
@@ -162,14 +159,12 @@ export default async function BillingPage() {
             </table>
           </div>
         ) : (
-          <p className="empty-state">
-            No invoices found for the current tenant.
-          </p>
+          <p className="empty-state">{t("billing.invoices.empty", locale)}</p>
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>{t("billing.backHome.label", locale)}</strong>
+          {t("billing.backHome.description", locale)}
         </Link>
       </AppShellCard>
     </main>
