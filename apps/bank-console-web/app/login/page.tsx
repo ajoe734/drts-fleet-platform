@@ -97,15 +97,14 @@ export default async function LoginPage({
             <div className="callout-panel is-warning">
               <strong>{activeBank.name[locale]}</strong>
               <p>{t("login.signedOutAccountHiddenBody", locale)}</p>
-              <Link
+              <a
                 className="login-account-card"
                 href={loginHref(activeBank.code, locale)}
-                prefetch={false}
               >
                 <span>{activeBank.shortName[locale]}</span>
                 <strong>{t("authBoundary.cta", locale)}</strong>
                 <em>{t("login.signIn", locale)}</em>
-              </Link>
+              </a>
             </div>
           ) : (
             <div className="login-account-grid">
