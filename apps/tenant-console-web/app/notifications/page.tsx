@@ -21,13 +21,14 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import {
-  CANVAS_EMPTY_REASONS,
   CANVAS_REFRESH_TIERS,
-  CANVAS_RISK_LEVELS,
   CanvasToggle,
   type CanvasEmptyReason,
 } from "@/lib/notification-canvas";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
+import { NOTIFICATION_EVENT_CATALOG } from "./constants";
 
 export const dynamic = "force-dynamic";
 
@@ -164,36 +165,10 @@ const matrixNoteStyle: CSSProperties = {
   fontSize: 11.5,
 };
 
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
-const numberFormatter = new Intl.NumberFormat("en");
-
 const T5_TIER = CANVAS_REFRESH_TIERS.slow;
-const UPDATE_RISK = CANVAS_RISK_LEVELS.medium;
 
 const NOTIFICATION_CHANNELS = ["email", "webhook", "ops_console"] as const;
 type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
-
-const CHANNEL_LABEL: Record<NotificationChannel, string> = {
-  email: "EMAIL",
-  webhook: "WEBHOOK",
-  ops_console: "TENANT CONSOLE",
-};
-
-const EVENT_DESCRIPTIONS: Record<string, string> = {
-  "booking.created": "新訂單建立後立即發出",
-  "booking.confirmed": "司機接單,在抵達取車點之前",
-  "booking.cancelled": "訂單取消 (tenant / ops / driver 任一方)",
-  "booking.approval_required": "達 approval rule 條件,需主管簽核",
-  "booking.approval_approved": "簽核通過,訂單繼續派遣",
-  "booking.approval_rejected": "簽核退回,訂單需要重新調整",
-  "invoice.ready": "月結 invoice 已生成",
-  "webhook.delivery_failed": "Webhook 端點連續失敗 3 次",
-  "quota.threshold_warning": "配額使用率 ≥ 80%",
-};
 
 const EVENT_ORDER = [
   "booking.created",
@@ -208,8 +183,8 @@ const EVENT_ORDER = [
 ] as const;
 
 type CrossAppLink = {
-  label: string;
-  hint: string;
+  labelKey: string;
+  hintKey: string;
   href: string;
   targetApp: "tenant-console" | "ops-console" | "platform-admin";
   openMode: "new_tab" | "same_tab";
@@ -217,22 +192,22 @@ type CrossAppLink = {
 
 const CROSS_APP_LINKS: CrossAppLink[] = [
   {
-    label: "整合就緒度",
-    hint: "回到 /integration-governance 查看整體 readiness",
+    labelKey: "notifications.crossApp.integrationGovernance.label",
+    hintKey: "notifications.crossApp.integrationGovernance.hint",
     href: "/integration-governance",
     targetApp: "tenant-console",
     openMode: "same_tab",
   },
   {
-    label: "Webhook 端點",
-    hint: "前往 /webhooks 啟用 webhook channel",
+    labelKey: "notifications.crossApp.webhooks.label",
+    hintKey: "notifications.crossApp.webhooks.hint",
     href: "/webhooks",
     targetApp: "tenant-console",
     openMode: "same_tab",
   },
   {
-    label: "Webhook 投遞詳細",
-    hint: "深入 platform-admin 對帳投遞失敗 (Q-X03)",
+    labelKey: "notifications.crossApp.webhookDeliveries.label",
+    hintKey: "notifications.crossApp.webhookDeliveries.hint",
     href: "/integrations/webhooks",
     targetApp: "platform-admin",
     openMode: "new_tab",
@@ -247,18 +222,24 @@ type NotificationsPageData = {
 };
 
 function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
-function formatUpdated(value: string | null | undefined) {
-  if (!value) return "—";
+function formatUpdated(value: string | null | undefined, locale: Locale) {
+  if (!value) return t("notifications.common.none", locale);
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return dateTimeFormatter.format(parsed);
+  if (Number.isNaN(parsed.getTime()))
+    return t("notifications.common.none", locale);
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-Hant" : "en", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(parsed);
 }
 
-function formatCount(value: number) {
-  return numberFormatter.format(value);
+function formatCount(value: number, locale: Locale) {
+  return new Intl.NumberFormat(locale === "zh" ? "zh-Hant" : "en").format(
+    value,
+  );
 }
 
 function getEmptyReasonTone(reason: CanvasEmptyReason): CanvasTone {
@@ -280,7 +261,33 @@ function getEmptyReasonTone(reason: CanvasEmptyReason): CanvasTone {
   }
 }
 
-async function loadNotificationsData(): Promise<NotificationsPageData> {
+function getEmptyReasonMeta(reason: CanvasEmptyReason, locale: Locale) {
+  return {
+    label: t(`notifications.emptyReason.${reason}.label`, locale),
+    pill: t(`notifications.emptyReason.${reason}.pill`, locale),
+    hint: t(`notifications.emptyReason.${reason}.hint`, locale),
+  };
+}
+
+function getRefreshTierLabel(locale: Locale) {
+  return t("notifications.refreshTier.slow.label", locale);
+}
+
+function getRefreshTierNote(locale: Locale) {
+  return t("notifications.refreshTier.slow.note", locale);
+}
+
+function getRiskLabel(locale: Locale) {
+  return t("notifications.risk.medium.label", locale);
+}
+
+function getRiskPattern(locale: Locale) {
+  return t("notifications.risk.medium.pattern", locale);
+}
+
+async function loadNotificationsData(
+  locale: Locale,
+): Promise<NotificationsPageData> {
   const client = getTenantClient();
   const [preferencesResult, governanceResult, webhooksResult] =
     await Promise.allSettled([
@@ -292,13 +299,25 @@ async function loadNotificationsData(): Promise<NotificationsPageData> {
   const errors: string[] = [];
 
   if (preferencesResult.status === "rejected") {
-    errors.push(`通知偏好: ${toErrorMessage(preferencesResult.reason)}`);
+    errors.push(
+      t("notifications.error.preferences", locale, {
+        message: toErrorMessage(preferencesResult.reason),
+      }),
+    );
   }
   if (governanceResult.status === "rejected") {
-    errors.push(`治理基線: ${toErrorMessage(governanceResult.reason)}`);
+    errors.push(
+      t("notifications.error.governance", locale, {
+        message: toErrorMessage(governanceResult.reason),
+      }),
+    );
   }
   if (webhooksResult.status === "rejected") {
-    errors.push(`Webhook 端點: ${toErrorMessage(webhooksResult.reason)}`);
+    errors.push(
+      t("notifications.error.webhooks", locale, {
+        message: toErrorMessage(webhooksResult.reason),
+      }),
+    );
   }
 
   return {
@@ -347,6 +366,7 @@ function buildMatrixRows(
   primary: Map<string, Map<NotificationChannel, boolean>>,
   fallback: Map<string, Map<NotificationChannel, boolean>>,
   unavailableChannels: Set<NotificationChannel>,
+  locale: Locale,
 ): MatrixRow[] {
   const eventTypes = new Set<string>(EVENT_ORDER);
   for (const eventType of primary.keys()) eventTypes.add(eventType);
@@ -378,7 +398,13 @@ function buildMatrixRows(
       }
       return {
         eventType,
-        description: EVENT_DESCRIPTIONS[eventType] ?? "—",
+        description:
+          t(
+            NOTIFICATION_EVENT_CATALOG.find(
+              (item) => item.eventType === eventType,
+            )?.descriptionKey ?? "notifications.common.none",
+            locale,
+          ) ?? t("notifications.common.none", locale),
         cells,
       };
     });
@@ -439,20 +465,23 @@ function deriveUpdateAction(
  * enum, so no out-of-set value (e.g. a driver-app `driver_not_eligible`) can
  * reach an unguarded lookup.
  */
-function deriveActiveEmptyReason(data: NotificationsPageData): {
+function deriveActiveEmptyReason(
+  data: NotificationsPageData,
+  locale: Locale,
+): {
   reason: CanvasEmptyReason;
   detail: string;
 } | null {
   if (data.errors.length > 0 && data.preferences === null) {
     return {
       reason: "fetch_failed",
-      detail: "通知偏好讀取失敗,顯示既有治理基線供參考。",
+      detail: t("notifications.activeState.fetchFailed", locale),
     };
   }
   if (data.preferences === null && data.governance === null) {
     return {
       reason: "not_provisioned",
-      detail: "通知路由尚未為此租戶設定,請先完成基線設定。",
+      detail: t("notifications.activeState.notProvisioned", locale),
     };
   }
   if (
@@ -461,14 +490,15 @@ function deriveActiveEmptyReason(data: NotificationsPageData): {
   ) {
     return {
       reason: "no_data",
-      detail: "尚未訂閱任何事件,所有 channel 預設關閉。",
+      detail: t("notifications.activeState.noData", locale),
     };
   }
   return null;
 }
 
 export default async function NotificationsPage() {
-  const data = await loadNotificationsData();
+  const locale = await getServerLocale();
+  const data = await loadNotificationsData(locale);
   const subscriptions = data.preferences?.subscriptions ?? [];
   const baselineSubscriptions =
     data.governance?.baselineNotificationSubscriptions ?? [];
@@ -490,6 +520,7 @@ export default async function NotificationsPage() {
     primaryIndex,
     baselineIndex,
     unavailableChannels,
+    locale,
   );
 
   const enabledCount = matrixRows.reduce(
@@ -510,9 +541,12 @@ export default async function NotificationsPage() {
     data.preferences,
     data.errors.length > 0,
   );
-  const activeEmptyReason = deriveActiveEmptyReason(data);
+  const activeEmptyReason = deriveActiveEmptyReason(data, locale);
 
-  const headerSubtitle = `${T5_TIER.code} · ${T5_TIER.note} · 事件 × 通道矩陣 · spec §9.6.6`;
+  const headerSubtitle = t("notifications.header.subtitle", locale, {
+    code: T5_TIER.code,
+    note: getRefreshTierNote(locale),
+  });
 
   const channelEnabledByChannel: Record<NotificationChannel, number> = {
     email: 0,
@@ -531,9 +565,13 @@ export default async function NotificationsPage() {
   // key (`k`) rather than carry `r:` render functions — functions cannot cross
   // the server→client boundary. Pre-render each cell into the row data below.
   const matrixColumns: CanvasTableColumn<MatrixRow>[] = [
-    { h: "事件類型", w: 240, k: "c_event" },
+    {
+      h: t("notifications.table.column.eventType", locale),
+      w: 240,
+      k: "c_event",
+    },
     ...NOTIFICATION_CHANNELS.map<CanvasTableColumn<MatrixRow>>((channel) => ({
-      h: CHANNEL_LABEL[channel],
+      h: t(`notifications.channel.${channel}` as const, locale),
       w: 160,
       k: `c_${channel}`,
     })),
@@ -553,14 +591,19 @@ export default async function NotificationsPage() {
         cell === "not_provisioned" ? (
           <CanvasPill theme={th} tone="neutral">
             <CanvasIcon name="x" size={10} />
-            not_provisioned
+            {t("notifications.channel.notProvisioned", locale)}
           </CanvasPill>
         ) : (
           <span style={matrixCellStyle}>
             <CanvasToggle
               theme={th}
               on={cell === "enabled"}
-              label={cell === "enabled" ? "on" : "off"}
+              label={t(
+                cell === "enabled"
+                  ? "notifications.toggle.on"
+                  : "notifications.toggle.off",
+                locale,
+              )}
             />
           </span>
         );
@@ -572,12 +615,12 @@ export default async function NotificationsPage() {
     <div>
       <CanvasPageHeader
         theme={th}
-        title="通知偏好"
+        title={t("notifications.header.title", locale)}
         subtitle={headerSubtitle}
         actions={
           <>
             <CanvasBtn theme={th} icon="ext" size="sm">
-              webhook payload schema
+              {t("notifications.header.schema", locale)}
             </CanvasBtn>
             <CanvasBtn
               theme={th}
@@ -586,7 +629,7 @@ export default async function NotificationsPage() {
               size="sm"
               disabled={!updateAction.enabled}
             >
-              儲存設定
+              {t("notifications.header.save", locale)}
             </CanvasBtn>
           </>
         }
@@ -598,7 +641,7 @@ export default async function NotificationsPage() {
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分通知資料無法載入"
+            title={t("notifications.banner.partialFailure.title", locale)}
             body={data.errors.join(" · ")}
           />
         ) : null}
@@ -608,44 +651,51 @@ export default async function NotificationsPage() {
             theme={th}
             tone="info"
             icon="info"
-            title="Webhook channel 尚未設定"
-            body="目前沒有任何 webhook endpoint,該 channel 將以 not_provisioned 呈現。前往 /webhooks 新增端點後即可啟用。"
+            title={t(
+              "notifications.banner.webhookNotProvisioned.title",
+              locale,
+            )}
+            body={t("notifications.banner.webhookNotProvisioned.body", locale)}
           />
         ) : null}
 
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="事件"
-            value={formatCount(matrixRows.length)}
-            sub="事件類型"
+            label={t("notifications.kpi.events.label", locale)}
+            value={formatCount(matrixRows.length, locale)}
+            sub={t("notifications.kpi.events.sub", locale)}
           />
           <CanvasKPI
             theme={th}
-            label="訂閱"
-            value={`${formatCount(enabledCount)} / ${formatCount(totalCells)}`}
+            label={t("notifications.kpi.subscriptions.label", locale)}
+            value={`${formatCount(enabledCount, locale)} / ${formatCount(totalCells, locale)}`}
             sub={
               hasCustomConfiguration
-                ? `${formatCount(overridesCount)} 項覆寫`
-                : "全為治理基線"
+                ? t("notifications.kpi.subscriptions.custom", locale, {
+                    count: formatCount(overridesCount, locale),
+                  })
+                : t("notifications.kpi.subscriptions.baseline", locale)
             }
           />
           <CanvasKPI
             theme={th}
-            label="Webhook"
-            value={formatCount(activeWebhookEndpoints)}
+            label={t("notifications.kpi.webhooks.label", locale)}
+            value={formatCount(activeWebhookEndpoints, locale)}
             sub={
               webhookChannelProvisioned
-                ? "個 active 端點"
-                : "尚未設定 (not_provisioned)"
+                ? t("notifications.kpi.webhooks.active", locale)
+                : t("notifications.kpi.webhooks.notProvisioned", locale)
             }
           />
           <CanvasKPI
             theme={th}
-            label="最後更新"
-            value={formatUpdated(data.preferences?.updatedAt)}
+            label={t("notifications.kpi.updated.label", locale)}
+            value={formatUpdated(data.preferences?.updatedAt, locale)}
             sub={
-              hasCustomConfiguration ? "Custom configuration" : "All defaults"
+              hasCustomConfiguration
+                ? t("notifications.state.customConfiguration", locale)
+                : t("notifications.state.allDefaults", locale)
             }
           />
         </div>
@@ -653,8 +703,12 @@ export default async function NotificationsPage() {
         <div style={contentGridStyle}>
           <CanvasCard
             theme={th}
-            title="事件 × 通道"
-            subtitle={`每個事件可獨立選擇是否經由 ${NOTIFICATION_CHANNELS.length} 個通道送出 · ${UPDATE_RISK.label} (${UPDATE_RISK.pattern})`}
+            title={t("notifications.matrix.title", locale)}
+            subtitle={t("notifications.matrix.subtitle", locale, {
+              count: NOTIFICATION_CHANNELS.length,
+              risk: getRiskLabel(locale),
+              pattern: getRiskPattern(locale),
+            })}
             padding={0}
             style={matrixCardStyle}
           >
@@ -667,19 +721,32 @@ export default async function NotificationsPage() {
                 />
                 <div style={matrixNoteStyle}>
                   {hasCustomConfiguration
-                    ? `已套用 ${formatCount(overridesCount)} 個租戶覆寫 · 最後更新 ${formatUpdated(data.preferences?.updatedAt)}`
-                    : `尚未覆寫,顯示治理基線快照 ${formatUpdated(data.governance?.generatedAt)}`}
+                    ? t("notifications.matrix.note.custom", locale, {
+                        count: formatCount(overridesCount, locale),
+                        updatedAt: formatUpdated(
+                          data.preferences?.updatedAt,
+                          locale,
+                        ),
+                      })
+                    : t("notifications.matrix.note.baseline", locale, {
+                        generatedAt: formatUpdated(
+                          data.governance?.generatedAt,
+                          locale,
+                        ),
+                      })}
                 </div>
               </>
             ) : (
-              <div style={tableEmptyStateStyle}>目前沒有可顯示的事件路由</div>
+              <div style={tableEmptyStateStyle}>
+                {t("notifications.matrix.empty", locale)}
+              </div>
             )}
           </CanvasCard>
 
           <CanvasCard
             theme={th}
-            title="狀態概要"
-            subtitle="State variants 自動偵測"
+            title={t("notifications.summary.title", locale)}
+            subtitle={t("notifications.summary.subtitle", locale)}
             style={sideCardStyle}
           >
             <CanvasDL
@@ -687,49 +754,53 @@ export default async function NotificationsPage() {
               cols={1}
               items={[
                 {
-                  k: "Variant",
+                  k: t("notifications.summary.variant", locale),
                   v: hasCustomConfiguration
-                    ? "Custom configuration"
-                    : "All defaults",
+                    ? t("notifications.state.customConfiguration", locale)
+                    : t("notifications.state.allDefaults", locale),
                   mono: true,
                 },
                 {
-                  k: "Refresh tier",
-                  v: `${T5_TIER.code} · ${T5_TIER.label}`,
+                  k: t("notifications.summary.refreshTier", locale),
+                  v: `${T5_TIER.code} · ${getRefreshTierLabel(locale)}`,
                   mono: true,
                 },
                 {
-                  k: "Spec ref",
-                  v: "§9.6.6 (Q-TEN02)",
+                  k: t("notifications.summary.specRef", locale),
+                  v: t("notifications.summary.specRefValue", locale),
                   mono: true,
                 },
                 {
-                  k: "Risk",
-                  v: `${UPDATE_RISK.label} · ${UPDATE_RISK.pattern}`,
+                  k: t("notifications.summary.risk", locale),
+                  v: `${getRiskLabel(locale)} · ${getRiskPattern(locale)}`,
                   mono: true,
                 },
                 {
-                  k: "Action",
+                  k: t("notifications.summary.action", locale),
                   v: updateAction.enabled
-                    ? "update_subscription"
-                    : `disabled (${updateAction.disabledReasonCode ?? "blocked"})`,
+                    ? t("notifications.summary.actionEnabled", locale)
+                    : t("notifications.summary.actionDisabled", locale, {
+                        code:
+                          updateAction.disabledReasonCode ??
+                          t("notifications.summary.blocked", locale),
+                      }),
                   mono: true,
                 },
                 {
-                  k: "Email 訂閱",
-                  v: `${formatCount(channelEnabledByChannel.email)} / ${formatCount(matrixRows.length)}`,
+                  k: t("notifications.summary.emailSubscriptions", locale),
+                  v: `${formatCount(channelEnabledByChannel.email, locale)} / ${formatCount(matrixRows.length, locale)}`,
                   mono: true,
                 },
                 {
-                  k: "Webhook 訂閱",
+                  k: t("notifications.summary.webhookSubscriptions", locale),
                   v: webhookChannelProvisioned
-                    ? `${formatCount(channelEnabledByChannel.webhook)} / ${formatCount(matrixRows.length)}`
-                    : "not_provisioned",
+                    ? `${formatCount(channelEnabledByChannel.webhook, locale)} / ${formatCount(matrixRows.length, locale)}`
+                    : t("notifications.channel.notProvisioned", locale),
                   mono: true,
                 },
                 {
-                  k: "Ops console 訂閱",
-                  v: `${formatCount(channelEnabledByChannel.ops_console)} / ${formatCount(matrixRows.length)}`,
+                  k: t("notifications.summary.opsConsoleSubscriptions", locale),
+                  v: `${formatCount(channelEnabledByChannel.ops_console, locale)} / ${formatCount(matrixRows.length, locale)}`,
                   mono: true,
                 },
               ]}
@@ -752,7 +823,10 @@ export default async function NotificationsPage() {
                         ? "lock"
                         : "info"
                   }
-                  title={`目前狀態: ${CANVAS_EMPTY_REASONS[activeEmptyReason.reason].label}`}
+                  title={t("notifications.summary.currentState", locale, {
+                    state: getEmptyReasonMeta(activeEmptyReason.reason, locale)
+                      .label,
+                  })}
                   body={activeEmptyReason.detail}
                 />
               </div>
@@ -762,8 +836,8 @@ export default async function NotificationsPage() {
 
         <CanvasCard
           theme={th}
-          title="EmptyReason 對照"
-          subtitle="六種 EmptyReason 視覺差異 · 配合 Q-X15 統一處理"
+          title={t("notifications.emptyCatalog.title", locale)}
+          subtitle={t("notifications.emptyCatalog.subtitle", locale)}
         >
           <div style={emptyCatalogStyle}>
             {/*
@@ -784,7 +858,7 @@ export default async function NotificationsPage() {
                 "filtered_empty",
               ] as const
             ).map((reason) => {
-              const meta = CANVAS_EMPTY_REASONS[reason];
+              const meta = getEmptyReasonMeta(reason, locale);
               const tone = getEmptyReasonTone(reason);
               const isActive = activeEmptyReason?.reason === reason;
               return (
@@ -798,11 +872,11 @@ export default async function NotificationsPage() {
                 >
                   <div style={emptyHeaderStyle}>
                     <CanvasPill theme={th} tone={tone} dot>
-                      {meta.en}
+                      {meta.pill}
                     </CanvasPill>
                     {isActive ? (
                       <CanvasPill theme={th} tone="accent">
-                        active
+                        {t("notifications.emptyCatalog.active", locale)}
                       </CanvasPill>
                     ) : null}
                   </div>
@@ -817,8 +891,8 @@ export default async function NotificationsPage() {
 
         <CanvasCard
           theme={th}
-          title="跨應用導向"
-          subtitle="Q-X03 / Q-TEN10 / Q-TEN08 · 通知偏好的相關深連結"
+          title={t("notifications.crossApp.title", locale)}
+          subtitle={t("notifications.crossApp.subtitle", locale)}
         >
           <div style={crossAppListStyle}>
             {CROSS_APP_LINKS.map((link) => (
@@ -834,12 +908,14 @@ export default async function NotificationsPage() {
                   name={link.openMode === "new_tab" ? "ext" : "arrow"}
                   size={13}
                 />
-                <span style={{ fontWeight: 600 }}>{link.label}</span>
+                <span style={{ fontWeight: 600 }}>
+                  {t(link.labelKey, locale)}
+                </span>
                 <CanvasPill theme={th} tone="neutral">
                   {link.targetApp}
                 </CanvasPill>
                 <span style={{ color: th.textMuted, fontSize: 11.5 }}>
-                  {link.hint}
+                  {t(link.hintKey, locale)}
                 </span>
                 <span
                   style={{
@@ -849,7 +925,12 @@ export default async function NotificationsPage() {
                     fontSize: 11,
                   }}
                 >
-                  {link.openMode === "new_tab" ? "new tab" : "in app"}
+                  {t(
+                    link.openMode === "new_tab"
+                      ? "notifications.crossApp.newTab"
+                      : "notifications.crossApp.inApp",
+                    locale,
+                  )}
                 </span>
               </a>
             ))}

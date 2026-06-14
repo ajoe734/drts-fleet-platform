@@ -15,85 +15,95 @@ export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const NOTIFICATION_EVENT_CATALOG = [
   {
     eventType: "booking.created",
-    description: "新訂單建立後立即發出。",
-    defaultAudience: "tenant admin / integration manager",
+    descriptionKey: "notifications.event.bookingCreated.description",
+    defaultAudienceKey: "notifications.event.bookingCreated.audience",
   },
   {
     eventType: "booking.confirmed",
-    description: "司機接單或 booking 轉成可執行狀態後發出。",
-    defaultAudience: "dispatcher / requester",
+    descriptionKey: "notifications.event.bookingConfirmed.description",
+    defaultAudienceKey: "notifications.event.bookingConfirmed.audience",
   },
   {
     eventType: "booking.cancelled",
-    description: "訂單取消，包含 tenant / ops / driver 來源。",
-    defaultAudience: "requester / approver / admin",
+    descriptionKey: "notifications.event.bookingCancelled.description",
+    defaultAudienceKey: "notifications.event.bookingCancelled.audience",
   },
   {
     eventType: "booking.approval_required",
-    description: "命中 approval rule，需要 tenant 主管簽核。",
-    defaultAudience: "approver / tenant admin",
+    descriptionKey: "notifications.event.bookingApprovalRequired.description",
+    defaultAudienceKey: "notifications.event.bookingApprovalRequired.audience",
+  },
+  {
+    eventType: "booking.approval_approved",
+    descriptionKey: "notifications.event.bookingApprovalApproved.description",
+    defaultAudienceKey: "notifications.event.bookingApprovalApproved.audience",
+  },
+  {
+    eventType: "booking.approval_rejected",
+    descriptionKey: "notifications.event.bookingApprovalRejected.description",
+    defaultAudienceKey: "notifications.event.bookingApprovalRejected.audience",
   },
   {
     eventType: "invoice.ready",
-    description: "月結 invoice 產生完成，可供下載與對帳。",
-    defaultAudience: "billing contact / tenant admin",
+    descriptionKey: "notifications.event.invoiceReady.description",
+    defaultAudienceKey: "notifications.event.invoiceReady.audience",
   },
   {
     eventType: "webhook.delivery_failed",
-    description: "某個 webhook endpoint 連續失敗，需要追查 delivery。",
-    defaultAudience: "integration manager / ops escalation",
+    descriptionKey: "notifications.event.webhookDeliveryFailed.description",
+    defaultAudienceKey: "notifications.event.webhookDeliveryFailed.audience",
   },
   {
     eventType: "quota.threshold_warning",
-    description: "月配額使用量接近上限，需提早調整策略。",
-    defaultAudience: "quota owner / tenant admin",
+    descriptionKey: "notifications.event.quotaThresholdWarning.description",
+    defaultAudienceKey: "notifications.event.quotaThresholdWarning.audience",
   },
 ] as const;
 
 export const EMPTY_REASON_COPY: Record<
   Exclude<EmptyReason, "driver_not_eligible">,
   {
-    title: string;
-    body: string;
+    titleKey: string;
+    bodyKey: string;
     tone: "neutral" | "info" | "warn" | "danger";
-    action?: ResourceActionDescriptor & { label: string; href?: string };
+    action?: ResourceActionDescriptor & { labelKey: string; href?: string };
   }
 > = {
   no_data: {
-    title: "尚無通知偏好資料",
-    body: "此租戶目前沒有任何自訂矩陣，將回退到 governance baseline。",
+    titleKey: "notifications.empty.noData.title",
+    bodyKey: "notifications.empty.noData.body",
     tone: "neutral",
   },
   not_provisioned: {
-    title: "通道尚未設定完成",
-    body: "至少一個通知通道未 provision，頁面會保留該欄位但禁止變更。",
+    titleKey: "notifications.empty.notProvisioned.title",
+    bodyKey: "notifications.empty.notProvisioned.body",
     tone: "info",
     action: {
       action: "configure_webhook",
       enabled: true,
       riskLevel: "low",
-      label: "前往 Webhook",
+      labelKey: "notifications.empty.notProvisioned.cta",
       href: "/webhooks",
     },
   },
   fetch_failed: {
-    title: "通知偏好無法載入",
-    body: "API 讀取失敗，請稍後重整或改由稽核 / 營運端追查。",
+    titleKey: "notifications.empty.fetchFailed.title",
+    bodyKey: "notifications.empty.fetchFailed.body",
     tone: "danger",
   },
   permission_denied: {
-    title: "目前角色僅可檢視",
-    body: "你可以查看通知姿態，但沒有更新租戶通知矩陣的權限。",
+    titleKey: "notifications.empty.permissionDenied.title",
+    bodyKey: "notifications.empty.permissionDenied.body",
     tone: "warn",
   },
   external_unavailable: {
-    title: "外部通道暫時不可用",
-    body: "外部 delivery 路徑降級中；租戶內通知仍可讀，跨系統路由請改走營運追查。",
+    titleKey: "notifications.empty.externalUnavailable.title",
+    bodyKey: "notifications.empty.externalUnavailable.body",
     tone: "warn",
   },
   filtered_empty: {
-    title: "篩選後沒有結果",
-    body: "目前的 channel / event 篩選沒有符合項目，請清除篩選條件。",
+    titleKey: "notifications.empty.filteredEmpty.title",
+    bodyKey: "notifications.empty.filteredEmpty.body",
     tone: "neutral",
   },
 };

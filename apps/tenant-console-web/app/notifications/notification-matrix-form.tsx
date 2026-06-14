@@ -12,6 +12,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import type { ResourceActionDescriptor } from "@drts/contracts";
+import { useTranslation } from "@/lib/i18n";
 import type { NotificationChannel } from "./constants";
 
 const th = buildCanvasTheme({
@@ -77,6 +78,7 @@ function ChannelToggle({
   state: ChannelState;
   readOnly: boolean;
 }) {
+  const { t } = useTranslation();
   if (!state.provisioned) {
     return (
       <div style={{ display: "grid", gap: 6, justifyItems: "center" }}>
@@ -85,7 +87,7 @@ function ChannelToggle({
             style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
           >
             <CanvasIcon name="warn" size={11} />
-            not_provisioned
+            {t("notifications.channel.notProvisioned")}
           </span>
         </CanvasPill>
         {state.disabledReason ? (
@@ -102,7 +104,10 @@ function ChannelToggle({
         name={`pref__${eventType}__${state.channel}`}
         defaultChecked={state.enabled}
         style={checkboxStyle}
-        aria-label={`${eventType} ${state.channel}`}
+        aria-label={t("notifications.form.channelToggleAria", {
+          eventType,
+          channel: state.channel,
+        })}
         disabled={readOnly}
       />
     </label>
@@ -111,6 +116,7 @@ function ChannelToggle({
 
 function SubmitButton({ enabled }: { enabled: boolean }) {
   const { pending } = useFormStatus();
+  const { t } = useTranslation();
   return (
     <CanvasBtn
       theme={th}
@@ -119,7 +125,11 @@ function SubmitButton({ enabled }: { enabled: boolean }) {
       size="sm"
       disabled={!enabled || pending}
     >
-      {pending ? "儲存中…" : enabled ? "儲存設定" : "唯讀"}
+      {pending
+        ? t("notifications.form.saving")
+        : enabled
+          ? t("notifications.form.save")
+          : t("notifications.form.readOnly")}
     </CanvasBtn>
   );
 }
@@ -135,9 +145,10 @@ export function NotificationMatrixForm({
   action: (formData: FormData) => Promise<void>;
   readOnly: boolean;
 }) {
+  const { t } = useTranslation();
   const columns: CanvasTableColumn<NotificationMatrixRow>[] = [
     {
-      h: "事件類型",
+      h: t("notifications.form.column.eventType"),
       w: 220,
       r: (row) => (
         <div>
@@ -147,12 +158,12 @@ export function NotificationMatrixForm({
       ),
     },
     {
-      h: "時機",
+      h: t("notifications.form.column.when"),
       w: 330,
       r: (row) => <span style={subcopyStyle}>{row.description}</span>,
     },
     {
-      h: "電子郵件",
+      h: t("notifications.channel.email"),
       w: 120,
       r: (row) => (
         <ChannelToggle
@@ -163,7 +174,7 @@ export function NotificationMatrixForm({
       ),
     },
     {
-      h: "WEBHOOK",
+      h: t("notifications.channel.webhook"),
       w: 140,
       r: (row) => (
         <ChannelToggle
@@ -174,7 +185,7 @@ export function NotificationMatrixForm({
       ),
     },
     {
-      h: "OPS CONSOLE",
+      h: t("notifications.channel.ops_console"),
       w: 140,
       r: (row) => (
         <ChannelToggle
@@ -211,8 +222,10 @@ export function NotificationMatrixForm({
       >
         <div style={{ fontSize: 11.5, color: th.textMuted }}>
           {saveAction.disabledReasonCode
-            ? `update_subscription disabled: ${saveAction.disabledReasonCode}`
-            : "`availableActions.update_subscription` adapter drives the submit CTA."}
+            ? t("notifications.form.submitDisabled", {
+                code: saveAction.disabledReasonCode,
+              })
+            : t("notifications.form.submitEnabled")}
         </div>
         <SubmitButton enabled={saveAction.enabled} />
       </div>
