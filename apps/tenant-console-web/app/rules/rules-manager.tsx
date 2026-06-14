@@ -49,6 +49,7 @@ import {
   upsertApprovalRuleAction,
   upsertTenantQuotaPolicyAction,
 } from "./actions";
+import { useTranslation } from "@/lib/i18n";
 import type { RulesFlashPayload } from "./constants";
 
 type RulesManagerProps = {
@@ -107,6 +108,11 @@ type QuotaDraft = {
 type EvaluationDecision = NonNullable<
   TenantApprovalEvaluationResult["outcome"]
 >["decision"];
+
+type RulesTranslator = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
 
 const TENANT_APPROVAL_FALLBACK_POLICIES: readonly TenantApprovalFallbackPolicy[] =
   ["auto_reject", "escalate_to_tenant_admin", "manual_ops_review"] as const;
@@ -448,7 +454,10 @@ function getQuotaTriggerTone(triggered: string) {
   }
 }
 
-function describeApprover(approver: TenantPrincipalRef) {
+function describeApprover(
+  approver: TenantPrincipalRef,
+  translate: RulesTranslator,
+) {
   if (approver.displayName) {
     return approver.displayName;
   }
@@ -456,43 +465,73 @@ function describeApprover(approver: TenantPrincipalRef) {
   switch (approver.kind) {
     case "cost_center_owner":
       return approver.costCenterCode
-        ? `cost_center_owner:${approver.costCenterCode}`
-        : "cost_center_owner";
+        ? translate("rules.approver.kindWithValue", {
+            kind: translate("rules.enum.principalKind.cost_center_owner"),
+            value: approver.costCenterCode,
+          })
+        : translate("rules.enum.principalKind.cost_center_owner");
     case "tenant_user":
     case "user":
-      return approver.userId ? `user:${approver.userId}` : approver.kind;
+      return approver.userId
+        ? translate("rules.approver.kindWithValue", {
+            kind: translate(`rules.enum.principalKind.${approver.kind}`),
+            value: approver.userId,
+          })
+        : translate(`rules.enum.principalKind.${approver.kind}`);
     case "tenant_role":
     case "role":
-      return approver.roleCode ? `role:${approver.roleCode}` : approver.kind;
+      return approver.roleCode
+        ? translate("rules.approver.kindWithValue", {
+            kind: translate(`rules.enum.principalKind.${approver.kind}`),
+            value: approver.roleCode,
+          })
+        : translate(`rules.enum.principalKind.${approver.kind}`);
     default:
-      return approver.kind;
+      return translate(`rules.enum.principalKind.${approver.kind}`);
   }
 }
 
-function formatConditionSummary(condition: TenantApprovalRuleCondition) {
+function formatConditionSummary(
+  condition: TenantApprovalRuleCondition,
+  translate: RulesTranslator,
+) {
   const operator = condition.op ?? condition.operator ?? "eq";
   const value = formatConditionValue(condition.value ?? condition.values);
-  return `${condition.field} ${operator} ${value}`;
+  return translate("rules.condition.summary", {
+    field: translate(`rules.enum.conditionField.${condition.field}`),
+    operator: translate(`rules.enum.operator.${operator}`),
+    value,
+  });
 }
 
-function formatRuleSummary(rule: TenantApprovalRuleRecord) {
-  return rule.conditions.map(formatConditionSummary).join(" AND ");
+function formatRuleSummary(
+  rule: TenantApprovalRuleRecord,
+  translate: RulesTranslator,
+) {
+  return rule.conditions
+    .map((condition) => formatConditionSummary(condition, translate))
+    .join(` ${translate("rules.condition.and")} `);
 }
 
-function formatRuleApprovers(rule: TenantApprovalRuleRecord) {
+function formatRuleApprovers(
+  rule: TenantApprovalRuleRecord,
+  translate: RulesTranslator,
+) {
   if (rule.action !== "require_approval" || rule.approvers.length === 0) {
-    return "無審批鏈";
+    return translate("rules.value.noApprovalChain");
   }
 
-  return rule.approvers.map(describeApprover).join(" + ");
+  return rule.approvers
+    .map((approver) => describeApprover(approver, translate))
+    .join(` ${translate("rules.value.joinPlus")} `);
 }
 
-function formatQuotaValue(value: number | null) {
-  return value === null ? "Unlimited" : formatCount(value);
+function formatQuotaValue(value: number | null, translate: RulesTranslator) {
+  return value === null ? translate("rules.value.unlimited") : formatCount(value);
 }
 
-function formatPercentage(value: number | null) {
-  return value === null ? "Unknown" : `${value}%`;
+function formatPercentage(value: number | null, translate: RulesTranslator) {
+  return value === null ? translate("rules.value.unknown") : `${value}%`;
 }
 
 function swapRuleOrder(ruleIds: string[], ruleId: string, delta: number) {
@@ -543,44 +582,38 @@ function getEmptyStateTone(reason: EmptyReason | null) {
   }
 }
 
-function getEmptyStateCopy(reason: EmptyReason | null) {
+function getEmptyStateCopy(reason: EmptyReason | null, translate: RulesTranslator) {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "Approval governance is not provisioned yet",
-        description:
-          "此租戶的配額讀取、審批待辦與規則狀態都是空的。請先定義第一條審批規則，並連結相關的成本中心負責人。",
+        title: translate("rules.empty.notProvisioned.title"),
+        description: translate("rules.empty.notProvisioned.description"),
       };
     case "fetch_failed":
       return {
-        title: "Approval rules could not be loaded",
-        description:
-          "租戶治理路由仍可連線，但規則清單載入失敗。請待後端依賴恢復後重試。",
+        title: translate("rules.empty.fetchFailed.title"),
+        description: translate("rules.empty.fetchFailed.description"),
       };
     case "permission_denied":
       return {
-        title: "This actor cannot administer approval rules",
-        description:
-          "頁面可見，但目前的 actor 沒有讀取或變更租戶審批治理的權限。",
+        title: translate("rules.empty.permissionDenied.title"),
+        description: translate("rules.empty.permissionDenied.description"),
       };
     case "external_unavailable":
       return {
-        title: "A dependent governance service is unavailable",
-        description:
-          "規則編輯功能降級，因為一個以上的上游租戶治理服務停擺或回傳過期資料。",
+        title: translate("rules.empty.externalUnavailable.title"),
+        description: translate("rules.empty.externalUnavailable.description"),
       };
     case "filtered_empty":
       return {
-        title: "No rules match the current filter",
-        description:
-          "此租戶有審批規則，但目前篩選條件產生了空清單。請清除篩選或選擇其他 action 類型。",
+        title: translate("rules.empty.filteredEmpty.title"),
+        description: translate("rules.empty.filteredEmpty.description"),
       };
     case "no_data":
     default:
       return {
-        title: "No approval rules published yet",
-        description:
-          "請在下方建立第一條租戶治理規則，而非自行假設未發布的預設值。",
+        title: translate("rules.empty.noData.title"),
+        description: translate("rules.empty.noData.description"),
       };
   }
 }
@@ -604,6 +637,7 @@ export function RulesManager({
   availableActions,
 }: RulesManagerProps) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [flash, setFlash] = useState<RulesFlashPayload | null>(null);
   const [evaluation, setEvaluation] =
     useState<TenantApprovalEvaluationResult | null>(null);
@@ -660,7 +694,7 @@ export function RulesManager({
   const disableRuleAction = findAction(availableActions, "disable_rule");
   const reorderRuleAction = findAction(availableActions, "reorder_precedence");
   const dryRunAction = findAction(availableActions, "dry_run_evaluate");
-  const emptyStateCopy = getEmptyStateCopy(emptyReason);
+  const emptyStateCopy = getEmptyStateCopy(emptyReason, t);
 
   function selectRule(rule: TenantApprovalRuleRecord) {
     setSelectedRuleId(rule.ruleId);
@@ -739,22 +773,22 @@ export function RulesManager({
   return (
     <div style={pageStackStyle}>
       <PageHeader
-        eyebrow="治理"
-        title="審批與配額"
-        subtitle="審批規則、配額狀態、待審項目與 dry-run 評估，現在都集中在同一個由已發布租戶契約支撐的租戶治理介面。"
+        eyebrow={t("rules.header.eyebrow")}
+        title={t("rules.header.title")}
+        subtitle={t("rules.header.subtitle")}
         meta={[
           {
-            label: "規則",
+            label: t("rules.meta.rules"),
             value: formatCount(sortedRules.length),
             tone: "tenant",
           },
           {
-            label: "啟用",
+            label: t("rules.meta.active"),
             value: formatCount(activeRules.length),
             tone: "success",
           },
           {
-            label: "待審批",
+            label: t("rules.meta.pendingApprovals"),
             value: formatCount(pendingApprovals.length),
             tone: "warning",
           },
@@ -770,7 +804,7 @@ export function RulesManager({
               }
               title={createRuleAction?.disabledReasonCode}
             >
-              New rule
+              {t("rules.action.newRule")}
             </a>
             <a
               href="#rule-dry-run"
@@ -781,7 +815,7 @@ export function RulesManager({
               }
               title={dryRunAction?.disabledReasonCode}
             >
-              Dry-run
+              {t("rules.action.dryRun")}
             </a>
           </>
         }
@@ -798,8 +832,8 @@ export function RulesManager({
 
       {errors.length > 0 ? (
         <CalloutBanner
-          title="規則資料無法完整載入"
-          description="頁面仍可使用，但一個以上的治理讀取失敗。"
+          title={t("rules.error.partialLoadTitle")}
+          description={t("rules.error.partialLoadDescription")}
           tone="warning"
           density="compact"
         >
@@ -812,23 +846,26 @@ export function RulesManager({
       ) : null}
 
       <CalloutBanner
-        title="更新層級 T5：租戶慢速"
-        description={`This route refreshes on the 30-second tenant-slow cadence (${refreshTier}). Snapshot loaded ${formatDateTime(generatedAt)}.`}
+        title={t("rules.banner.refreshTitle")}
+        description={t("rules.banner.refreshDescription", {
+          refreshTier,
+          generatedAt: formatDateTime(generatedAt),
+        })}
         tone="info"
         density="compact"
       />
 
       <KpiRow minWidth="180px">
         <KpiCard
-          label="規則"
+          label={t("rules.kpi.rules")}
           value={formatCount(sortedRules.length)}
-          detail="Priority-ordered tenant governance rules"
+          detail={t("rules.kpi.rulesDetail")}
           tone="tenant"
         />
         <KpiCard
-          label="剩餘配額"
-          value={formatPercentage(remainingQuotaPercent)}
-          detail="Tenant-wide monthly remaining percentage"
+          label={t("rules.kpi.remainingQuota")}
+          value={formatPercentage(remainingQuotaPercent, t)}
+          detail={t("rules.kpi.remainingQuotaDetail")}
           tone={
             remainingQuotaPercent !== null && remainingQuotaPercent <= 10
               ? "warning"
@@ -836,29 +873,29 @@ export function RulesManager({
           }
         />
         <KpiCard
-          label="審批待辦"
+          label={t("rules.kpi.pending")}
           value={formatCount(pendingApprovals.length)}
-          detail="Tenant approval requests still unresolved"
+          detail={t("rules.kpi.pendingDetail")}
           tone="warning"
         />
         <KpiCard
-          label="帳冊筆數"
+          label={t("rules.kpi.ledger")}
           value={formatCount(ledgerEntries.length)}
-          detail="Recent quota ledger evidence loaded on this page"
+          detail={t("rules.kpi.ledgerDetail")}
           tone="info"
         />
       </KpiRow>
 
       <CalloutBanner
-        title="所有治理變更都以契約為依據"
-        description="本頁直接使用租戶的 approval-rule、quota-policy、approval-request 與 quota-ledger API，不會自行假造前端審批狀態或配額計算。"
+        title={t("rules.banner.contractTitle")}
+        description={t("rules.banner.contractDescription")}
         tone="tenant"
         density="compact"
       />
 
       <CalloutBanner
-        title="審批連結與其所屬租戶資源緊鄰呈現"
-        description={`Entry comes from /cost-centers, approver maintenance stays on /users, and live approval backlog can jump straight into /bookings/[id]. Available actions stay routed through published descriptors for create, update, disable, reorder, and dry-run.`}
+        title={t("rules.banner.linksTitle")}
+        description={t("rules.banner.linksDescription")}
         tone="tenant"
         density="compact"
       />
@@ -867,11 +904,13 @@ export function RulesManager({
         main={
           <>
             <DataViewCard
-              title="規則清單"
-              subtitle="主表格在同一視野內保留優先序、條件摘要、action、審批路徑與狀態，符合 TN_Rules 對齊目標。"
+              title={t("rules.list.title")}
+              subtitle={t("rules.list.subtitle")}
               tone="tenant"
               density="compact"
-              summary={`${sortedRules.length} rule(s) currently loaded from /api/tenant/approval-rules. Entry: /cost-centers. Approver maintenance: /users.`}
+              summary={t("rules.list.summary", {
+                count: sortedRules.length,
+              })}
             >
               {sortedRules.length > 0 ? (
                 <div style={compactTableWrapStyle}>
@@ -879,14 +918,14 @@ export function RulesManager({
                     density="compact"
                     tone="tenant"
                     columns={[
-                      { label: "優先序", width: "70px" },
-                      { label: "規則", width: "220px" },
-                      { label: "條件", width: "360px" },
-                      { label: "動作", width: "140px" },
-                      { label: "審批人", width: "220px" },
-                      { label: "狀態", width: "110px" },
-                      { label: "更新時間", width: "150px" },
-                      { label: "焦點", width: "110px" },
+                      { label: t("rules.list.column.priority"), width: "70px" },
+                      { label: t("rules.list.column.rule"), width: "220px" },
+                      { label: t("rules.list.column.conditions"), width: "360px" },
+                      { label: t("rules.list.column.action"), width: "140px" },
+                      { label: t("rules.list.column.approvers"), width: "220px" },
+                      { label: t("rules.list.column.status"), width: "110px" },
+                      { label: t("rules.list.column.updatedAt"), width: "150px" },
+                      { label: t("rules.list.column.focus"), width: "110px" },
                     ]}
                   >
                     {sortedRules.map((rule) => (
@@ -906,41 +945,56 @@ export function RulesManager({
                         </Td>
                         <Td density="compact">
                           <DataCellStack
-                            primary={formatRuleSummary(rule)}
+                            primary={formatRuleSummary(rule, t)}
                             secondary={
                               rule.effectiveUntil
-                                ? `Until ${formatDateTime(rule.effectiveUntil)}`
+                                ? t("rules.list.window.until", {
+                                    value: formatDateTime(rule.effectiveUntil),
+                                  })
                                 : rule.effectiveFrom
-                                  ? `From ${formatDateTime(rule.effectiveFrom)}`
-                                  : "No time window"
+                                  ? t("rules.list.window.from", {
+                                      value: formatDateTime(rule.effectiveFrom),
+                                    })
+                                  : t("rules.list.window.none")
                             }
                           />
                         </Td>
                         <Td density="compact">
                           <div style={chipWrapStyle}>
-                            <StatusChip tone="tenant" label={rule.action} />
+                            <StatusChip
+                              tone="tenant"
+                              label={t(`rules.enum.action.${rule.action}`)}
+                            />
                             {rule.approvalMode ? (
                               <StatusChip
                                 tone="info"
-                                label={rule.approvalMode}
+                                label={t(
+                                  `rules.enum.approvalMode.${rule.approvalMode}`,
+                                )}
                               />
                             ) : null}
                           </div>
                         </Td>
                         <Td density="compact">
                           <DataCellStack
-                            primary={formatRuleApprovers(rule)}
+                            primary={formatRuleApprovers(rule, t)}
                             secondary={
                               rule.timeoutHoursOverride
-                                ? `${rule.timeoutHoursOverride}h timeout`
-                                : "Default timeout"
+                                ? t("rules.list.timeout.override", {
+                                    hours: rule.timeoutHoursOverride,
+                                  })
+                                : t("rules.list.timeout.default")
                             }
                           />
                         </Td>
                         <Td density="compact">
                           <StatusChip
                             tone={getRuleStateTone(rule)}
-                            label={rule.activeFlag ? "active" : "paused"}
+                            label={t(
+                              rule.activeFlag
+                                ? "rules.state.active"
+                                : "rules.state.paused",
+                            )}
                           />
                         </Td>
                         <Td density="compact" mono>
@@ -953,8 +1007,8 @@ export function RulesManager({
                             type="button"
                           >
                             {selectedRuleId === rule.ruleId
-                              ? "Selected"
-                              : "Edit"}
+                              ? t("rules.action.selected")
+                              : t("rules.action.edit")}
                           </button>
                         </Td>
                       </Tr>
@@ -973,14 +1027,21 @@ export function RulesManager({
 
             <div id="rule-editor">
               <DataViewCard
-                title="建立或編輯規則"
-                subtitle="編輯器直接寫入 approval-rule 命令介面，明確保留條件／審批人結構，而非藏在文字區塊中。"
+                title={t("rules.editor.title")}
+                subtitle={t("rules.editor.subtitle")}
                 tone="tenant"
                 density="compact"
                 summary={
                   selectedRule
-                    ? `Editing ${selectedRule.ruleName ?? selectedRule.ruleId}.`
-                    : `Creating a new tenant approval rule. Update action published: ${updateRuleAction?.enabled === false ? "disabled" : "enabled"}.`
+                    ? t("rules.editor.summaryEditing", {
+                        name: selectedRule.ruleName ?? selectedRule.ruleId,
+                      })
+                    : t("rules.editor.summaryCreating", {
+                        state:
+                          updateRuleAction?.enabled === false
+                            ? t("rules.state.disabled")
+                            : t("rules.state.enabled"),
+                      })
                 }
               >
                 <form
@@ -1024,7 +1085,7 @@ export function RulesManager({
 
                   <div style={columnGridStyle}>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>規則名稱</span>
+                      <span style={fieldLabelStyle}>{t("rules.form.ruleName")}</span>
                       <input
                         name="ruleName"
                         onChange={(event) =>
@@ -1033,13 +1094,13 @@ export function RulesManager({
                             ruleName: event.target.value,
                           }))
                         }
-                        placeholder="高額財務審批"
+                        placeholder={t("rules.form.ruleNamePlaceholder")}
                         style={inputStyle}
                         value={ruleDraft.ruleName}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>優先序</span>
+                      <span style={fieldLabelStyle}>{t("rules.form.priority")}</span>
                       <input
                         name="priority"
                         onChange={(event) =>
@@ -1053,12 +1114,13 @@ export function RulesManager({
                         value={ruleDraft.priority}
                       />
                       <span style={hintStyle}>
-                        Backend normalizes reorder results to increments of{" "}
-                        {TENANT_APPROVAL_RULE_PRIORITY_STEP}.
+                        {t("rules.form.priorityHint", {
+                          step: TENANT_APPROVAL_RULE_PRIORITY_STEP,
+                        })}
                       </span>
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>動作</span>
+                      <span style={fieldLabelStyle}>{t("rules.form.action")}</span>
                       <select
                         name="action"
                         onChange={(event) =>
@@ -1073,13 +1135,13 @@ export function RulesManager({
                       >
                         {TENANT_APPROVAL_RULE_ACTIONS.map((action) => (
                           <option key={action} value={action}>
-                            {action}
+                            {t(`rules.enum.action.${action}`)}
                           </option>
                         ))}
                       </select>
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>啟用</span>
+                      <span style={fieldLabelStyle}>{t("rules.form.active")}</span>
                       <label
                         style={{
                           ...inputStyle,
@@ -1101,15 +1163,15 @@ export function RulesManager({
                         />
                         <span>
                           {ruleDraft.activeFlag
-                            ? "Rule participates in evaluation"
-                            : "Rule is paused"}
+                            ? t("rules.form.activeEnabled")
+                            : t("rules.form.activePaused")}
                         </span>
                       </label>
                     </label>
                   </div>
 
                   <label style={fieldGridStyle}>
-                    <span style={fieldLabelStyle}>說明</span>
+                    <span style={fieldLabelStyle}>{t("rules.form.description")}</span>
                     <textarea
                       name="description"
                       onChange={(event) =>
@@ -1118,7 +1180,7 @@ export function RulesManager({
                           description: event.target.value,
                         }))
                       }
-                      placeholder="說明此規則的治理原因或營運政策。"
+                      placeholder={t("rules.form.descriptionPlaceholder")}
                       style={textareaStyle}
                       value={ruleDraft.description}
                     />
@@ -1126,7 +1188,7 @@ export function RulesManager({
 
                   <div style={columnGridStyle}>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>生效起</span>
+                      <span style={fieldLabelStyle}>{t("rules.form.effectiveFrom")}</span>
                       <input
                         name="effectiveFrom"
                         onChange={(event) =>
@@ -1135,13 +1197,13 @@ export function RulesManager({
                             effectiveFrom: event.target.value,
                           }))
                         }
-                        placeholder="2026-06-01T00:00:00+08:00"
+                        placeholder={t("rules.form.effectiveFromPlaceholder")}
                         style={inputStyle}
                         value={ruleDraft.effectiveFrom}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>生效迄</span>
+                      <span style={fieldLabelStyle}>{t("rules.form.effectiveUntil")}</span>
                       <input
                         name="effectiveUntil"
                         onChange={(event) =>
@@ -1150,13 +1212,13 @@ export function RulesManager({
                             effectiveUntil: event.target.value,
                           }))
                         }
-                        placeholder="2026-06-30T23:59:59+08:00"
+                        placeholder={t("rules.form.effectiveUntilPlaceholder")}
                         style={inputStyle}
                         value={ruleDraft.effectiveUntil}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>停用原因</span>
+                      <span style={fieldLabelStyle}>{t("rules.form.disabledReason")}</span>
                       <input
                         name="disabledReason"
                         onChange={(event) =>
@@ -1165,14 +1227,14 @@ export function RulesManager({
                             disabledReason: event.target.value,
                           }))
                         }
-                        placeholder="季節性活動已結束"
+                        placeholder={t("rules.form.disabledReasonPlaceholder")}
                         style={inputStyle}
                         value={ruleDraft.disabledReason}
                       />
                     </label>
                     <label style={fieldGridStyle}>
                       <span style={fieldLabelStyle}>
-                        Timeout override (hours)
+                        {t("rules.form.timeoutHoursOverride")}
                       </span>
                       <input
                         name="timeoutHoursOverride"
@@ -1182,7 +1244,7 @@ export function RulesManager({
                             timeoutHoursOverride: event.target.value,
                           }))
                         }
-                        placeholder="24"
+                        placeholder={t("rules.form.timeoutHoursOverridePlaceholder")}
                         style={inputStyle}
                         type="number"
                         value={ruleDraft.timeoutHoursOverride}
@@ -1192,10 +1254,9 @@ export function RulesManager({
 
                   <section style={sectionDividerStyle}>
                     <div style={fieldGridStyle}>
-                      <strong>條件</strong>
+                      <strong>{t("rules.conditions.title")}</strong>
                       <span style={hintStyle}>
-                        Each rule can compose multiple structured conditions;
-                        the backend evaluates all of them in priority order.
+                        {t("rules.conditions.hint")}
                       </span>
                     </div>
                     {ruleDraft.conditions.map((condition, index) => (
@@ -1210,7 +1271,9 @@ export function RulesManager({
                         }}
                       >
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>欄位 {index + 1}</span>
+                          <span style={fieldLabelStyle}>
+                            {t("rules.conditions.field", { index: index + 1 })}
+                          </span>
                           <select
                             onChange={(event) =>
                               updateCondition(
@@ -1225,14 +1288,14 @@ export function RulesManager({
                             {TENANT_APPROVAL_RULE_CONDITION_FIELDS.map(
                               (field) => (
                                 <option key={field} value={field}>
-                                  {field}
+                                  {t(`rules.enum.conditionField.${field}`)}
                                 </option>
                               ),
                             )}
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>運算子</span>
+                          <span style={fieldLabelStyle}>{t("rules.conditions.operator")}</span>
                           <select
                             onChange={(event) =>
                               updateCondition(
@@ -1247,14 +1310,14 @@ export function RulesManager({
                             {TENANT_APPROVAL_RULE_CONDITION_OPERATORS.map(
                               (operator) => (
                                 <option key={operator} value={operator}>
-                                  {operator}
+                                  {t(`rules.enum.operator.${operator}`)}
                                 </option>
                               ),
                             )}
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>值類型</span>
+                          <span style={fieldLabelStyle}>{t("rules.conditions.valueKind")}</span>
                           <select
                             onChange={(event) =>
                               updateCondition(
@@ -1266,14 +1329,14 @@ export function RulesManager({
                             style={inputStyle}
                             value={condition.valueKind}
                           >
-                            <option value="text">text</option>
-                            <option value="number">number</option>
-                            <option value="boolean">boolean</option>
-                            <option value="list">list</option>
+                            <option value="text">{t("rules.enum.valueKind.text")}</option>
+                            <option value="number">{t("rules.enum.valueKind.number")}</option>
+                            <option value="boolean">{t("rules.enum.valueKind.boolean")}</option>
+                            <option value="list">{t("rules.enum.valueKind.list")}</option>
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>值</span>
+                          <span style={fieldLabelStyle}>{t("rules.conditions.value")}</span>
                           <input
                             onChange={(event) =>
                               updateCondition(
@@ -1284,10 +1347,10 @@ export function RulesManager({
                             }
                             placeholder={
                               condition.valueKind === "list"
-                                ? "enterprise_dispatch, airport_pickup"
+                                ? t("rules.conditions.placeholder.list")
                                 : condition.valueKind === "boolean"
-                                  ? "true"
-                                  : "100000"
+                                  ? t("rules.conditions.placeholder.boolean")
+                                  : t("rules.conditions.placeholder.default")
                             }
                             style={inputStyle}
                             value={condition.valueText}
@@ -1306,7 +1369,7 @@ export function RulesManager({
                           style={dangerButtonStyle}
                           type="button"
                         >
-                          Remove
+                          {t("rules.action.remove")}
                         </button>
                       </div>
                     ))}
@@ -1326,7 +1389,7 @@ export function RulesManager({
                         style={secondaryButtonStyle}
                         type="button"
                       >
-                        Add condition
+                        {t("rules.action.addCondition")}
                       </button>
                     </div>
                   </section>
@@ -1334,17 +1397,15 @@ export function RulesManager({
                   {ruleDraft.action === "require_approval" ? (
                     <section style={sectionDividerStyle}>
                       <div style={fieldGridStyle}>
-                        <strong>審批計畫</strong>
+                        <strong>{t("rules.approvalPlan.title")}</strong>
                         <span style={hintStyle}>
-                          Approvers stay structured as tenant principals so
-                          dry-run output and live approval requests resolve
-                          against the same backend-owned descriptors.
+                          {t("rules.approvalPlan.hint")}
                         </span>
                       </div>
 
                       <div style={columnGridStyle}>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>審批模式</span>
+                          <span style={fieldLabelStyle}>{t("rules.approvalPlan.mode")}</span>
                           <select
                             name="approvalMode"
                             onChange={(event) =>
@@ -1359,13 +1420,13 @@ export function RulesManager({
                           >
                             {TENANT_APPROVAL_MODES.map((mode) => (
                               <option key={mode} value={mode}>
-                                {mode}
+                                {t(`rules.enum.approvalMode.${mode}`)}
                               </option>
                             ))}
                           </select>
                         </label>
                         <label style={fieldGridStyle}>
-                          <span style={fieldLabelStyle}>後備策略</span>
+                          <span style={fieldLabelStyle}>{t("rules.approvalPlan.fallbackPolicy")}</span>
                           <select
                             name="fallbackPolicy"
                             onChange={(event) =>
@@ -1380,7 +1441,7 @@ export function RulesManager({
                           >
                             {TENANT_APPROVAL_FALLBACK_POLICIES.map((policy) => (
                               <option key={policy} value={policy}>
-                                {policy}
+                                {t(`rules.enum.fallbackPolicy.${policy}`)}
                               </option>
                             ))}
                           </select>
@@ -1400,7 +1461,9 @@ export function RulesManager({
                         >
                           <label style={fieldGridStyle}>
                             <span style={fieldLabelStyle}>
-                              Approver {index + 1}
+                              {t("rules.approvalPlan.approver", {
+                                index: index + 1,
+                              })}
                             </span>
                             <select
                               onChange={(event) =>
@@ -1415,13 +1478,13 @@ export function RulesManager({
                             >
                               {TENANT_PRINCIPAL_KINDS.map((kind) => (
                                 <option key={kind} value={kind}>
-                                  {kind}
+                                  {t(`rules.enum.principalKind.${kind}`)}
                                 </option>
                               ))}
                             </select>
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>使用者 ID</span>
+                            <span style={fieldLabelStyle}>{t("rules.approvalPlan.userId")}</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1430,13 +1493,13 @@ export function RulesManager({
                                   event.target.value,
                                 )
                               }
-                              placeholder="tenant-demo-admin"
+                              placeholder={t("rules.approvalPlan.userIdPlaceholder")}
                               style={inputStyle}
                               value={approver.userId}
                             />
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>角色代碼</span>
+                            <span style={fieldLabelStyle}>{t("rules.approvalPlan.roleCode")}</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1445,13 +1508,13 @@ export function RulesManager({
                                   event.target.value,
                                 )
                               }
-                              placeholder="tenant_finance_admin"
+                              placeholder={t("rules.approvalPlan.roleCodePlaceholder")}
                               style={inputStyle}
                               value={approver.roleCode}
                             />
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>成本中心</span>
+                            <span style={fieldLabelStyle}>{t("rules.approvalPlan.costCenter")}</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1460,13 +1523,13 @@ export function RulesManager({
                                   event.target.value,
                                 )
                               }
-                              placeholder="CC-FIN"
+                              placeholder={t("rules.approvalPlan.costCenterPlaceholder")}
                               style={inputStyle}
                               value={approver.costCenterCode}
                             />
                           </label>
                           <label style={fieldGridStyle}>
-                            <span style={fieldLabelStyle}>顯示名稱</span>
+                            <span style={fieldLabelStyle}>{t("rules.approvalPlan.displayName")}</span>
                             <input
                               onChange={(event) =>
                                 updateApprover(
@@ -1475,7 +1538,7 @@ export function RulesManager({
                                   event.target.value,
                                 )
                               }
-                              placeholder="財務管理員"
+                              placeholder={t("rules.approvalPlan.displayNamePlaceholder")}
                               style={inputStyle}
                               value={approver.displayName}
                             />
@@ -1493,7 +1556,7 @@ export function RulesManager({
                             style={dangerButtonStyle}
                             type="button"
                           >
-                            Remove
+                            {t("rules.action.remove")}
                           </button>
                         </div>
                       ))}
@@ -1518,7 +1581,7 @@ export function RulesManager({
                           style={secondaryButtonStyle}
                           type="button"
                         >
-                          Add approver
+                          {t("rules.action.addApprover")}
                         </button>
                       </div>
                     </section>
@@ -1547,14 +1610,16 @@ export function RulesManager({
                       }
                       type="submit"
                     >
-                      {ruleDraft.ruleId ? "Save rule" : "Create rule"}
+                      {ruleDraft.ruleId
+                        ? t("rules.action.saveRule")
+                        : t("rules.action.createRule")}
                     </button>
                     <button
                       onClick={resetRuleDraft}
                       style={secondaryButtonStyle}
                       type="button"
                     >
-                      New rule
+                      {t("rules.action.newRule")}
                     </button>
                     <button
                       disabled={
@@ -1584,7 +1649,7 @@ export function RulesManager({
                       title={reorderRuleAction?.disabledReasonCode}
                       type="button"
                     >
-                      Move earlier
+                      {t("rules.action.moveEarlier")}
                     </button>
                     <button
                       disabled={
@@ -1615,7 +1680,7 @@ export function RulesManager({
                       title={reorderRuleAction?.disabledReasonCode}
                       type="button"
                     >
-                      Move later
+                      {t("rules.action.moveLater")}
                     </button>
                     <button
                       disabled={
@@ -1641,7 +1706,7 @@ export function RulesManager({
                       title={disableRuleAction?.disabledReasonCode}
                       type="button"
                     >
-                      Disable selected
+                      {t("rules.action.disableSelected")}
                     </button>
                   </div>
                 </form>
@@ -1650,11 +1715,11 @@ export function RulesManager({
 
             <div id="rule-dry-run">
               <DataViewCard
-                title="Dry-run 評估"
-                subtitle="評估器會先預覽配額影響，再把影響快照送入規則評估，讓配額相關規則與審批決策保持一致。"
+                title={t("rules.dryRun.title")}
+                subtitle={t("rules.dryRun.subtitle")}
                 tone="tenant"
                 density="compact"
-                summary="用一筆具代表性的訂單快照，在正式流量進入後端前，先看看符合的規則、配額觸發與審批計畫輸出。"
+                summary={t("rules.dryRun.summary")}
               >
                 <form
                   action="#"
@@ -1672,121 +1737,121 @@ export function RulesManager({
                     style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}
                   >
                     <a href="/cost-centers" style={actionLinkStyle}>
-                      Cost centers
+                      {t("rules.link.costCenters")}
                     </a>
                     <a href="/users" style={actionLinkStyle}>
-                      Users
+                      {t("rules.link.users")}
                     </a>
                     <a
                       href="/audit?module=tenant-governance"
                       style={actionLinkStyle}
                     >
-                      Audit trail
+                      {t("rules.link.auditTrail")}
                     </a>
                   </div>
                   <div style={columnGridStyle}>
                     <label style={fieldGridStyle}>
                       <span style={fieldLabelStyle}>
-                        Reservation window start
+                        {t("rules.dryRun.reservationWindowStart")}
                       </span>
                       <input
-                        defaultValue="2026-06-01T09:30:00+08:00"
+                        defaultValue={t("rules.dryRun.reservationWindowStartExample")}
                         name="reservationWindowStart"
-                        placeholder="2026-06-01T09:30:00+08:00"
+                        placeholder={t("rules.dryRun.reservationWindowStartPlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>金額（minor）</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.amountMinor")}</span>
                       <input
-                        defaultValue="180000"
+                        defaultValue={t("rules.dryRun.amountMinorExample")}
                         name="amountMinor"
-                        placeholder="180000"
+                        placeholder={t("rules.dryRun.amountMinorPlaceholder")}
                         style={inputStyle}
                         type="number"
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>幣別</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.currency")}</span>
                       <input
                         defaultValue={quotaDraft.currency}
                         name="currency"
-                        placeholder="TWD"
+                        placeholder={t("rules.dryRun.currencyPlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>成本中心</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.costCenter")}</span>
                       <input
                         defaultValue=""
                         name="costCenterCode"
-                        placeholder="CC-FIN"
+                        placeholder={t("rules.dryRun.costCenterPlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>乘客角色</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.passengerRole")}</span>
                       <input
-                        defaultValue="employee"
+                        defaultValue={t("rules.dryRun.passengerRoleExample")}
                         name="passengerRole"
-                        placeholder="employee"
+                        placeholder={t("rules.dryRun.passengerRolePlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>乘客 ID</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.passengerId")}</span>
                       <input
-                        defaultValue="passenger-demo-001"
+                        defaultValue={t("rules.dryRun.passengerIdExample")}
                         name="passengerId"
-                        placeholder="passenger-demo-001"
+                        placeholder={t("rules.dryRun.passengerIdPlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>派遣子類型</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.dispatchSubtype")}</span>
                       <input
-                        defaultValue="enterprise_dispatch"
+                        defaultValue={t("rules.dryRun.dispatchSubtypeExample")}
                         name="businessDispatchSubtype"
-                        placeholder="enterprise_dispatch"
+                        placeholder={t("rules.dryRun.dispatchSubtypePlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>車輛偏好</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.vehiclePreference")}</span>
                       <input
-                        defaultValue="standard_taxi"
+                        defaultValue={t("rules.dryRun.vehiclePreferenceExample")}
                         name="vehiclePreference"
-                        placeholder="standard_taxi"
+                        placeholder={t("rules.dryRun.vehiclePreferencePlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>方向</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.direction")}</span>
                       <input
-                        defaultValue="pickup"
+                        defaultValue={t("rules.dryRun.directionExample")}
                         name="direction"
-                        placeholder="pickup"
+                        placeholder={t("rules.dryRun.directionPlaceholder")}
                         style={inputStyle}
                       />
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>有航班編號</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.flightNoPresent")}</span>
                       <select
                         defaultValue="false"
                         name="flightNoPresent"
                         style={inputStyle}
                       >
-                        <option value="">Unknown</option>
-                        <option value="false">false</option>
-                        <option value="true">true</option>
+                        <option value="">{t("rules.value.unknown")}</option>
+                        <option value="false">{t("rules.value.false")}</option>
+                        <option value="true">{t("rules.value.true")}</option>
                       </select>
                     </label>
                     <label style={fieldGridStyle}>
-                      <span style={fieldLabelStyle}>航班編號</span>
+                      <span style={fieldLabelStyle}>{t("rules.dryRun.flightNo")}</span>
                       <input
                         defaultValue=""
                         name="flightNo"
-                        placeholder="CI201"
+                        placeholder={t("rules.dryRun.flightNoPlaceholder")}
                         style={inputStyle}
                       />
                     </label>
@@ -1801,7 +1866,7 @@ export function RulesManager({
                       title={dryRunAction?.disabledReasonCode}
                       type="submit"
                     >
-                      Evaluate rules
+                      {t("rules.action.evaluateRules")}
                     </button>
                   </div>
                 </form>
@@ -1814,10 +1879,12 @@ export function RulesManager({
                       items={[
                         {
                           id: "decision",
-                          label: "判定",
+                          label: t("rules.evaluation.decision"),
                           value: (
                             <StatusChip
-                              label={evaluation.outcome?.decision ?? "unknown"}
+                              label={t(
+                                `rules.enum.decision.${evaluation.outcome?.decision ?? "unknown"}`,
+                              )}
                               tone={getDecisionTone(
                                 evaluation.outcome?.decision,
                               )}
@@ -1826,29 +1893,31 @@ export function RulesManager({
                         },
                         {
                           id: "matched",
-                          label: "符合規則",
+                          label: t("rules.evaluation.matchedRules"),
                           value: formatCount(evaluation.matchedRules.length),
                         },
                         {
                           id: "approval-required",
-                          label: "需審批",
+                          label: t("rules.evaluation.approvalRequired"),
                           value: evaluation.outcome?.approvalRequired
-                            ? "Yes"
-                            : "No",
+                            ? t("rules.value.yes")
+                            : t("rules.value.no"),
                         },
                         {
                           id: "blocked",
-                          label: "已封鎖",
-                          value: evaluation.outcome?.blocked ? "Yes" : "No",
+                          label: t("rules.evaluation.blocked"),
+                          value: evaluation.outcome?.blocked
+                            ? t("rules.value.yes")
+                            : t("rules.value.no"),
                         },
                         {
                           id: "warnings",
-                          label: "警告",
+                          label: t("rules.evaluation.warnings"),
                           value: formatCount(maybeCountWarnings(evaluation)),
                         },
                         {
                           id: "evaluated-at",
-                          label: "評估時間",
+                          label: t("rules.evaluation.evaluatedAt"),
                           value: formatDateTime(evaluation.evaluatedAt),
                         },
                       ]}
@@ -1856,8 +1925,8 @@ export function RulesManager({
 
                     <div style={columnGridStyle}>
                       <DataViewCard
-                        title="符合的規則"
-                        subtitle="dry-run 輸出中保留 all-match 語意。"
+                        title={t("rules.evaluation.matchedTitle")}
+                        subtitle={t("rules.evaluation.matchedSubtitle")}
                         tone="tenant"
                         density="compact"
                       >
@@ -1878,26 +1947,30 @@ export function RulesManager({
                                 <div style={chipWrapStyle}>
                                   <StatusChip
                                     tone="tenant"
-                                    label={rule.action}
+                                    label={t(`rules.enum.action.${rule.action}`)}
                                   />
                                   <StatusChip
                                     tone="info"
-                                    label={`priority ${rule.priority}`}
+                                    label={t("rules.evaluation.priority", {
+                                      value: rule.priority,
+                                    })}
                                   />
                                 </div>
                                 <strong>{rule.ruleName}</strong>
                                 <span style={hintStyle}>
                                   {rule.matchedConditions
-                                    .map(formatConditionSummary)
-                                    .join(" AND ")}
+                                    .map((condition) =>
+                                      formatConditionSummary(condition, t),
+                                    )
+                                    .join(` ${t("rules.condition.and")} `)}
                                 </span>
                               </div>
                             ))}
                           </div>
                         ) : (
                           <WorkflowEmptyState
-                            title="沒有規則符合此樣本"
-                            description="配額預覽仍有執行，但規則評估器未對此輸入快照選出任何啟用中的租戶規則。"
+                            title={t("rules.evaluation.emptyMatchedTitle")}
+                            description={t("rules.evaluation.emptyMatchedDescription")}
                             tone="neutral"
                             density="compact"
                           />
@@ -1905,8 +1978,8 @@ export function RulesManager({
                       </DataViewCard>
 
                       <DataViewCard
-                        title="配額影響與審批計畫"
-                        subtitle="配額預覽輸出附在同一個評估封包中。"
+                        title={t("rules.evaluation.planTitle")}
+                        subtitle={t("rules.evaluation.planSubtitle")}
                         tone="tenant"
                         density="compact"
                       >
@@ -1916,7 +1989,15 @@ export function RulesManager({
                               (impact, index) => (
                                 <StatusChip
                                   key={`${impact.scope}-${impact.dimension}-${index}`}
-                                  label={`${impact.scope}:${impact.dimension}:${impact.triggered}`}
+                                  label={t("rules.evaluation.quotaImpact", {
+                                    scope: impact.scope,
+                                    dimension: t(
+                                      `rules.enum.ledgerDimension.${impact.dimension}`,
+                                    ),
+                                    trigger: t(
+                                      `rules.enum.quotaTrigger.${impact.triggered}`,
+                                    ),
+                                  })}
                                   tone={getQuotaTriggerTone(impact.triggered)}
                                 />
                               ),
@@ -1929,34 +2010,42 @@ export function RulesManager({
                               items={[
                                 {
                                   id: "plan-mode",
-                                  label: "審批模式",
-                                  value: evaluation.approvalPlan.approvalMode,
+                                  label: t("rules.approvalPlan.mode"),
+                                  value: t(
+                                    `rules.enum.approvalMode.${evaluation.approvalPlan.approvalMode}`,
+                                  ),
                                 },
                                 {
                                   id: "plan-timeout",
-                                  label: "逾時",
-                                  value: `${evaluation.approvalPlan.timeoutHours}h`,
+                                  label: t("rules.evaluation.timeout"),
+                                  value: t("rules.list.timeout.override", {
+                                    hours: evaluation.approvalPlan.timeoutHours,
+                                  }),
                                 },
                                 {
                                   id: "plan-fallback",
-                                  label: "後備",
-                                  value: evaluation.approvalPlan.fallbackPolicy,
+                                  label: t("rules.approvalPlan.fallbackPolicy"),
+                                  value: t(
+                                    `rules.enum.fallbackPolicy.${evaluation.approvalPlan.fallbackPolicy}`,
+                                  ),
                                 },
                                 {
                                   id: "plan-approvers",
-                                  label: "審批人",
+                                  label: t("rules.list.column.approvers"),
                                   value:
                                     evaluation.approvalPlan.approvers.length > 0
                                       ? evaluation.approvalPlan.approvers
-                                          .map(describeApprover)
-                                          .join(" + ")
-                                      : "None",
+                                          .map((approver) =>
+                                            describeApprover(approver, t),
+                                          )
+                                          .join(` ${t("rules.value.joinPlus")} `)
+                                      : t("rules.value.none"),
                                 },
                               ]}
                             />
                           ) : (
                             <span style={hintStyle}>
-                              No approval plan was required for this evaluation.
+                              {t("rules.evaluation.noApprovalPlan")}
                             </span>
                           )}
                         </div>
@@ -1971,8 +2060,8 @@ export function RulesManager({
         side={
           <>
             <DataViewCard
-              title="狀態變體"
-              subtitle="在後端 envelope 補齊前，Q-X15 的各種空狀態原因仍可在此路由個別預覽。"
+              title={t("rules.emptyPreview.title")}
+              subtitle={t("rules.emptyPreview.subtitle")}
               tone="tenant"
               density="compact"
             >
@@ -1994,15 +2083,15 @@ export function RulesManager({
                         : actionLinkStyle
                     }
                   >
-                    {reason}
+                    {t(`rules.enum.emptyReason.${reason}`)}
                   </a>
                 ))}
               </div>
             </DataViewCard>
 
             <DataViewCard
-              title="配額狀態"
-              subtitle="租戶配額摘要與政策編輯相鄰呈現，因為配額相關規則依賴同一份後端擁有的強制狀態。"
+              title={t("rules.quota.title")}
+              subtitle={t("rules.quota.subtitle")}
               tone="tenant"
               density="compact"
             >
@@ -2014,52 +2103,59 @@ export function RulesManager({
                     items={[
                       {
                         id: "period",
-                        label: "期別",
+                        label: t("rules.quota.period"),
                         value: `${quotaSummary.period}:${quotaSummary.periodKey}`,
                       },
                       {
                         id: "count-limit",
-                        label: "訂單上限",
+                        label: t("rules.quota.bookingCountLimit"),
                         value: formatQuotaValue(
                           quotaSummary.limit.bookingCountLimit,
+                          t,
                         ),
                       },
                       {
                         id: "amount-limit",
-                        label: "金額上限",
+                        label: t("rules.quota.amountMinorLimit"),
                         value: formatQuotaValue(
                           quotaSummary.limit.amountMinorLimit,
+                          t,
                         ),
                       },
                       {
                         id: "enforce",
-                        label: "強制方式",
-                        value: quotaSummary.limit.enforcementMode,
+                        label: t("rules.quota.enforcementMode"),
+                        value: t(
+                          `rules.enum.enforcementMode.${quotaSummary.limit.enforcementMode}`,
+                        ),
                       },
                       {
                         id: "remaining-count",
-                        label: "剩餘次數",
+                        label: t("rules.quota.remainingCount"),
                         value: formatQuotaValue(
                           quotaSummary.usage.bookingCountRemaining,
+                          t,
                         ),
                       },
                       {
                         id: "remaining-amount",
-                        label: "剩餘金額",
+                        label: t("rules.quota.remainingAmount"),
                         value: formatQuotaValue(
                           quotaSummary.usage.amountMinorRemaining,
+                          t,
                         ),
                       },
                       {
                         id: "remaining-percent",
-                        label: "剩餘百分比",
+                        label: t("rules.quota.remainingPercent"),
                         value: formatPercentage(
                           quotaSummary.usage.remainingPercent,
+                          t,
                         ),
                       },
                       {
                         id: "refreshed",
-                        label: "更新時間",
+                        label: t("rules.quota.refreshedAt"),
                         value: formatDateTime(quotaSummary.refreshedAt),
                       },
                     ]}
@@ -2079,7 +2175,7 @@ export function RulesManager({
                   >
                     <div style={columnGridStyle}>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>訂單次數上限</span>
+                        <span style={fieldLabelStyle}>{t("rules.quota.bookingCountLimitInput")}</span>
                         <input
                           name="bookingCountLimit"
                           onChange={(event) =>
@@ -2088,14 +2184,14 @@ export function RulesManager({
                               bookingCountLimit: event.target.value,
                             }))
                           }
-                          placeholder="12"
+                          placeholder={t("rules.quota.bookingCountLimitPlaceholder")}
                           style={inputStyle}
                           type="number"
                           value={quotaDraft.bookingCountLimit}
                         />
                       </label>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>金額上限（minor）</span>
+                        <span style={fieldLabelStyle}>{t("rules.quota.amountMinorLimitInput")}</span>
                         <input
                           name="amountMinorLimit"
                           onChange={(event) =>
@@ -2104,14 +2200,14 @@ export function RulesManager({
                               amountMinorLimit: event.target.value,
                             }))
                           }
-                          placeholder="500000"
+                          placeholder={t("rules.quota.amountMinorLimitPlaceholder")}
                           style={inputStyle}
                           type="number"
                           value={quotaDraft.amountMinorLimit}
                         />
                       </label>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>幣別</span>
+                        <span style={fieldLabelStyle}>{t("rules.dryRun.currency")}</span>
                         <input
                           name="currency"
                           onChange={(event) =>
@@ -2120,13 +2216,13 @@ export function RulesManager({
                               currency: event.target.value,
                             }))
                           }
-                          placeholder="TWD"
+                          placeholder={t("rules.quota.currencyPlaceholder")}
                           style={inputStyle}
                           value={quotaDraft.currency}
                         />
                       </label>
                       <label style={fieldGridStyle}>
-                        <span style={fieldLabelStyle}>強制方式</span>
+                        <span style={fieldLabelStyle}>{t("rules.quota.enforcementMode")}</span>
                         <select
                           name="enforcementMode"
                           onChange={(event) =>
@@ -2141,7 +2237,7 @@ export function RulesManager({
                         >
                           {TENANT_QUOTA_ENFORCEMENT_MODES.map((mode) => (
                             <option key={mode} value={mode}>
-                              {mode}
+                              {t(`rules.enum.enforcementMode.${mode}`)}
                             </option>
                           ))}
                         </select>
@@ -2153,14 +2249,14 @@ export function RulesManager({
                       style={pillButtonStyle(true)}
                       type="submit"
                     >
-                      Save quota policy
+                      {t("rules.action.saveQuotaPolicy")}
                     </button>
                   </form>
                 </div>
               ) : (
                 <WorkflowEmptyState
-                  title="配額摘要無法取得"
-                  description="頁面仍可編輯規則，但此請求的租戶配額讀取失敗。"
+                  title={t("rules.quota.emptyTitle")}
+                  description={t("rules.quota.emptyDescription")}
                   tone="warning"
                   density="compact"
                 />
@@ -2168,8 +2264,8 @@ export function RulesManager({
             </DataViewCard>
 
             <DataViewCard
-              title="待審批佇列"
-              subtitle="審批請求保留在此，讓規則變更可對照即時待辦來判斷。"
+              title={t("rules.pendingQueue.title")}
+              subtitle={t("rules.pendingQueue.subtitle")}
               tone="tenant"
               density="compact"
             >
@@ -2189,35 +2285,41 @@ export function RulesManager({
                     >
                       <div style={chipWrapStyle}>
                         <StatusChip
-                          label={request.status}
+                          label={t(`rules.enum.requestStatus.${request.status}`)}
                           tone={getApprovalRequestTone(request.status)}
                         />
                         <StatusChip
-                          label={request.approvalMode}
+                          label={t(
+                            `rules.enum.approvalMode.${request.approvalMode}`,
+                          )}
                           tone="tenant"
                         />
                       </div>
                       <strong>{request.bookingId}</strong>
                       <span style={hintStyle}>
-                        {request.ruleIds.length} rule(s) · due{" "}
-                        {formatDateTime(request.timeoutAt)}
+                        {t("rules.pendingQueue.ruleDue", {
+                          count: request.ruleIds.length,
+                          dueAt: formatDateTime(request.timeoutAt),
+                        })}
                       </span>
                       <span style={hintStyle}>
-                        {request.approvers.map(describeApprover).join(" + ")}
+                        {request.approvers
+                          .map((approver) => describeApprover(approver, t))
+                          .join(` ${t("rules.value.joinPlus")} `)}
                       </span>
                       <a
                         href={`/bookings/${request.bookingId}`}
                         style={actionLinkStyle}
                       >
-                        Open booking
+                        {t("rules.action.openBooking")}
                       </a>
                     </div>
                   ))}
                 </div>
               ) : (
                 <WorkflowEmptyState
-                  title="沒有待審批的請求"
-                  description="目前租戶沒有待辦，因此規則變更不會與進行中的審批佇列競爭。"
+                  title={t("rules.pendingQueue.emptyTitle")}
+                  description={t("rules.pendingQueue.emptyDescription")}
                   tone="success"
                   density="compact"
                 />
@@ -2225,8 +2327,8 @@ export function RulesManager({
             </DataViewCard>
 
             <DataViewCard
-              title="近期配額帳冊"
-              subtitle="配額 reserve／release／consume 事件可在規則介面旁檢視。"
+              title={t("rules.ledger.title")}
+              subtitle={t("rules.ledger.subtitle")}
               tone="tenant"
               density="compact"
             >
@@ -2236,11 +2338,11 @@ export function RulesManager({
                     density="compact"
                     tone="tenant"
                     columns={[
-                      { label: "訂單", width: "120px" },
-                      { label: "維度", width: "95px" },
-                      { label: "類型", width: "90px" },
-                      { label: "金額", width: "95px" },
-                      { label: "建立時間", width: "130px" },
+                      { label: t("rules.ledger.column.booking"), width: "120px" },
+                      { label: t("rules.ledger.column.dimension"), width: "95px" },
+                      { label: t("rules.ledger.column.type"), width: "90px" },
+                      { label: t("rules.ledger.column.amount"), width: "95px" },
+                      { label: t("rules.ledger.column.createdAt"), width: "130px" },
                     ]}
                   >
                     {ledgerEntries.slice(0, 8).map((entry) => (
@@ -2248,8 +2350,12 @@ export function RulesManager({
                         <Td density="compact" mono>
                           {entry.bookingId}
                         </Td>
-                        <Td density="compact">{entry.dimension}</Td>
-                        <Td density="compact">{entry.entryType}</Td>
+                        <Td density="compact">
+                          {t(`rules.enum.ledgerDimension.${entry.dimension}`)}
+                        </Td>
+                        <Td density="compact">
+                          {t(`rules.enum.ledgerEntryType.${entry.entryType}`)}
+                        </Td>
                         <Td density="compact" mono>
                           {entry.amount}
                         </Td>
@@ -2262,8 +2368,8 @@ export function RulesManager({
                 </div>
               ) : (
                 <WorkflowEmptyState
-                  title="未載入配額帳冊資料"
-                  description="已載入的快照中，租戶配額沒有近期的 reserve/release/consume 紀錄。"
+                  title={t("rules.ledger.emptyTitle")}
+                  description={t("rules.ledger.emptyDescription")}
                   tone="neutral"
                   density="compact"
                 />
