@@ -1,5 +1,6 @@
 import { Module, forwardRef } from "@nestjs/common";
 
+import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
@@ -28,6 +29,7 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
   controllers: [TenantPartnerController],
   providers: [
     TenantPartnerService,
+    JwtAuthService,
     TenantPartnerRepository,
     PartnerUserIdentityLinkRepository,
     ReferralChannelScaffoldService,
