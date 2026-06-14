@@ -1,5 +1,5 @@
 import type { MoneyAmount } from "@drts/contracts";
-import type { Locale } from "./translations";
+import { t, type Locale } from "./translations";
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   year: "numeric",
@@ -16,7 +16,7 @@ export function formatDateTime(
   locale: Locale = "en",
 ) {
   if (!value) {
-    return locale === "zh" ? "無資料" : "Not available";
+    return t("dashboard.value.noData", locale);
   }
 
   return new Intl.DateTimeFormat(toIntlLocale(locale), {
@@ -38,7 +38,7 @@ export function formatMoney(
   locale: Locale = "en",
 ) {
   if (!value) {
-    return locale === "zh" ? "無資料" : "Not available";
+    return t("dashboard.value.noData", locale);
   }
 
   return new Intl.NumberFormat(toIntlLocale(locale), {

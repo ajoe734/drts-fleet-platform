@@ -868,7 +868,7 @@ function TenantShellControls({
         style={languageButtonStyle}
         onClick={() => setLocale(locale === "en" ? "zh" : "en")}
       >
-        <span aria-hidden="true">文/A</span>
+        <span aria-hidden="true">{t("shell.language.icon")}</span>
         <span>
           {locale === "en" ? t("shell.language.zh") : t("shell.language.en")}
         </span>

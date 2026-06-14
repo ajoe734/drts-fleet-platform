@@ -1202,7 +1202,7 @@ export function TenantBookingCreateForm({
         <div style={pageMetaGridStyle}>
           <div style={metaItemStyle}>
             <span style={labelStyle}>{t("newBooking.meta.command")}</span>
-            <strong>POST /api/tenant/bookings/commands/create</strong>
+            <strong>{t("newBooking.meta.commandEndpoint")}</strong>
           </div>
           <div style={metaItemStyle}>
             <span style={labelStyle}>{t("newBooking.meta.updateTier")}</span>

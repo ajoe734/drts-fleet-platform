@@ -12,6 +12,7 @@ const en = {
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
   "shell.language.switch": "Switch language",
+  "shell.language.icon": "A/文",
   "shell.health.notChecked": "not checked",
   "shell.health.checking": "API checking",
   "shell.health.healthy": "API healthy",
@@ -746,8 +747,7 @@ const en = {
   "integrationGovernance.emptyReason.externalUnavailable":
     "external unavailable",
   "integrationGovernance.emptyReason.filteredEmpty": "filtered empty",
-  "integrationGovernance.emptyReason.driverNotEligible":
-    "driver not eligible",
+  "integrationGovernance.emptyReason.driverNotEligible": "driver not eligible",
   "integrationGovernance.emptyReason.unknown": "reason {reason}",
   "integrationGovernance.state.ready.label": "Fully ready",
   "integrationGovernance.state.ready.body":
@@ -849,7 +849,8 @@ const en = {
   "users.empty.filteredEmpty.title": "No users match the current filters",
   "users.empty.filteredEmpty.body":
     "The current role or status filters did not match any members. Relax the filters to return to the full roster.",
-  "users.empty.noData.title": "This tenant does not have additional members yet",
+  "users.empty.noData.title":
+    "This tenant does not have additional members yet",
   "users.empty.noData.body":
     "Only the tenant admin remains, or the roster has not been created yet. Use the invite flow to add the first operator, finance, or viewer user.",
   "users.empty.refreshAction": "Refresh",
@@ -865,8 +866,7 @@ const en = {
   "users.identity.realmTenant": "tenant",
   "users.identity.actorChip": "{actor} / {realm} / {tenantId} / production",
   "users.identity.summaryUnavailable": "Identity unavailable",
-  "users.identity.summary":
-    "{actor} · {authMode} · roles={roles}",
+  "users.identity.summary": "{actor} · {authMode} · roles={roles}",
   "users.header.title": "Users",
   "users.header.subtitle":
     "tc_admin only · tenant_admin / operator / finance / viewer",
@@ -954,10 +954,8 @@ const en = {
   "users.contract.highRisk": "high-risk row action",
   "users.contract.invitedRows": "invited rows expose a resend affordance",
   "users.contract.disabled": "disabled · {reason}",
-  "users.refresh.summaryMissing":
-    "The backend did not return refreshMetadata",
-  "users.refresh.summary":
-    "{freshness} · {source} · stale after {staleAfter}",
+  "users.refresh.summaryMissing": "The backend did not return refreshMetadata",
+  "users.refresh.summary": "{freshness} · {source} · stale after {staleAfter}",
   "users.refresh.freshness.fresh": "fresh",
   "users.refresh.freshness.stale": "stale",
   "users.refresh.freshness.degraded": "degraded",
@@ -1079,6 +1077,8 @@ const en = {
   "newBooking.header.subtitle":
     "Booked by self or proxy · scheduled / immediate · synchronized command mode (Q-TEN04)",
   "newBooking.meta.command": "Command",
+  "newBooking.meta.commandEndpoint":
+    "POST /api/tenant/bookings/commands/create",
   "newBooking.meta.updateTier": "Refresh tier",
   "newBooking.meta.directoryCoverage": "Directory coverage",
   "newBooking.meta.requiredActions": "Required actions",
@@ -1651,10 +1651,12 @@ const en = {
 
   // ── webhooks (i18n-fullsweep 20260614) ──
   "webhooks.error.unknown": "Unknown error",
-  "webhooks.health.disabledAfterFailureCluster": "disabled after failure cluster",
+  "webhooks.health.disabledAfterFailureCluster":
+    "disabled after failure cluster",
   "webhooks.health.manuallyPaused": "manually paused",
   "webhooks.health.awaitingTestTraffic": "awaiting verification traffic",
-  "webhooks.health.failedOfDeliveries": "{failures} failed / {deliveries} deliveries",
+  "webhooks.health.failedOfDeliveries":
+    "{failures} failed / {deliveries} deliveries",
   "webhooks.health.deliveriesHealthy": "{deliveries} deliveries · healthy",
   "webhooks.health.healthy": "healthy",
   "webhooks.lastActivity.delivered": "Delivered {time}",
@@ -1663,17 +1665,25 @@ const en = {
   "webhooks.delivery.failed": "failed",
   "webhooks.delivery.timeout": "timeout",
   "webhooks.empty.notProvisioned.title": "Webhook engine not yet provisioned",
-  "webhooks.empty.notProvisioned.body": "This tenant currently has no delivery engine enabled. Per Q-TEN08, the page does not backfill any fake delivery log; complete platform-side provisioning first, then create an endpoint.",
-  "webhooks.empty.permissionDenied.title": "Current identity has no webhook permission",
-  "webhooks.empty.permissionDenied.body": "The backend refused to return this section's data. Switch to an identity with `tc_admin` or `tc_integration_mgr` permission, or ask a platform/tenant admin for help.",
-  "webhooks.empty.externalUnavailable.title": "Delivery engine temporarily unavailable",
-  "webhooks.empty.externalUnavailable.body": "The backend or external destination is temporarily unavailable, so webhook visibility data cannot be retrieved. Keep the current query and manually refresh to retry later.",
+  "webhooks.empty.notProvisioned.body":
+    "This tenant currently has no delivery engine enabled. Per Q-TEN08, the page does not backfill any fake delivery log; complete platform-side provisioning first, then create an endpoint.",
+  "webhooks.empty.permissionDenied.title":
+    "Current identity has no webhook permission",
+  "webhooks.empty.permissionDenied.body":
+    "The backend refused to return this section's data. Switch to an identity with `tc_admin` or `tc_integration_mgr` permission, or ask a platform/tenant admin for help.",
+  "webhooks.empty.externalUnavailable.title":
+    "Delivery engine temporarily unavailable",
+  "webhooks.empty.externalUnavailable.body":
+    "The backend or external destination is temporarily unavailable, so webhook visibility data cannot be retrieved. Keep the current query and manually refresh to retry later.",
   "webhooks.empty.fetchFailed.title": "Data fetch failed",
-  "webhooks.empty.fetchFailed.body": "Check API availability and the current environment headers. This is not an empty state but a read model read failure.",
+  "webhooks.empty.fetchFailed.body":
+    "Check API availability and the current environment headers. This is not an empty state but a read model read failure.",
   "webhooks.empty.filteredEmpty.title": "No results under the current filter",
-  "webhooks.empty.filteredEmpty.body": "The data source is still available, but the current `status` or endpoint filter matched nothing. Clear the filter to return to the full view.",
+  "webhooks.empty.filteredEmpty.body":
+    "The data source is still available, but the current `status` or endpoint filter matched nothing. Clear the filter to return to the full view.",
   "webhooks.empty.noData.title": "No endpoint created yet",
-  "webhooks.empty.noData.body": "There is currently no webhook endpoint, so there will be no delivery log. Create the first endpoint and the system will begin generating real delivery visibility.",
+  "webhooks.empty.noData.body":
+    "There is currently no webhook endpoint, so there will be no delivery log. Create the first endpoint and the system will begin generating real delivery visibility.",
   "webhooks.action.payloadSchema": "payload schema",
   "webhooks.action.create": "Add endpoint",
   "webhooks.action.update": "Update",
@@ -1688,66 +1698,96 @@ const en = {
   "webhooks.tabLabel.endpoints": "Endpoints",
   "webhooks.event.label": "Events",
   "webhooks.event.baselineLabel": "Baseline events",
-  "webhooks.event.baselineHint": "Baseline webhook events provided by the governance package. Multiple can be selected.",
+  "webhooks.event.baselineHint":
+    "Baseline webhook events provided by the governance package. Multiple can be selected.",
   "webhooks.error.atLeastOneEvent": "Please select at least one event.",
   "webhooks.error.urlAndSecretRequired": "Webhook URL and secret are required.",
-  "webhooks.success.endpointCreated": "Endpoint created, status is test_pending.",
+  "webhooks.success.endpointCreated":
+    "Endpoint created, status is test_pending.",
   "webhooks.error.missingWebhookId": "Missing webhookId.",
-  "webhooks.error.endpointNotFound": "Could not find the current webhook endpoint.",
-  "webhooks.error.urlStatusEventRequired": "URL, status and at least one event are required.",
-  "webhooks.error.disableActionUnavailable": "This endpoint currently has no disableWebhookEndpoint action, so it cannot be disabled through the update flow.",
-  "webhooks.error.disableReasonRequired": "A reason is required when disabling an endpoint.",
-  "webhooks.error.disableFlowOnlyDisable": "The disable flow only allows running disableWebhookEndpoint; please save URL / events changes first, then disable the endpoint separately.",
+  "webhooks.error.endpointNotFound":
+    "Could not find the current webhook endpoint.",
+  "webhooks.error.urlStatusEventRequired":
+    "URL, status and at least one event are required.",
+  "webhooks.error.disableActionUnavailable":
+    "This endpoint currently has no disableWebhookEndpoint action, so it cannot be disabled through the update flow.",
+  "webhooks.error.disableReasonRequired":
+    "A reason is required when disabling an endpoint.",
+  "webhooks.error.disableFlowOnlyDisable":
+    "The disable flow only allows running disableWebhookEndpoint; please save URL / events changes first, then disable the endpoint separately.",
   "webhooks.success.endpointUpdated": "Endpoint updated.",
-  "webhooks.error.deleteReasonRequired": "A reason is required when deleting an endpoint.",
+  "webhooks.error.deleteReasonRequired":
+    "A reason is required when deleting an endpoint.",
   "webhooks.success.endpointDeleted": "Endpoint deleted.",
-  "webhooks.error.webhookIdAndSecretRequired": "webhookId and the new secret are required.",
-  "webhooks.success.secretRotated": "Secret rotated. Per governance rules, the endpoint re-enters test_pending, and the full value is shown only on this screen.",
+  "webhooks.error.webhookIdAndSecretRequired":
+    "webhookId and the new secret are required.",
+  "webhooks.success.secretRotated":
+    "Secret rotated. Per governance rules, the endpoint re-enters test_pending, and the full value is shown only on this screen.",
   "webhooks.error.missingWebhookOrDelivery": "Missing webhookId or deliveryId.",
   "webhooks.success.retrySubmitted": "Failed delivery retry submitted.",
-  "webhooks.success.receiptClosed": "Secret receipt closed. The main list reverts to masked preview.",
+  "webhooks.success.receiptClosed":
+    "Secret receipt closed. The main list reverts to masked preview.",
   "webhooks.form.createTitle": "Create endpoint",
   "webhooks.form.updateTitle": "Update endpoint",
-  "webhooks.form.createSubtitle": "Create / update is a medium action; a new endpoint always enters test_pending.",
-  "webhooks.form.updateSubtitle": "Disable / delete are high-risk operations. The UI forces a reason before submitting to the existing backend contract.",
+  "webhooks.form.createSubtitle":
+    "Create / update is a medium action; a new endpoint always enters test_pending.",
+  "webhooks.form.updateSubtitle":
+    "Disable / delete are high-risk operations. The UI forces a reason before submitting to the existing backend contract.",
   "webhooks.form.urlLabel": "Webhook URL",
   "webhooks.form.urlPlaceholder": "https://partner.example.com/drts/webhooks",
   "webhooks.form.secretLabel": "Initial secret",
-  "webhooks.form.secretHint": "The secret is stored back to the read model as a masked preview.",
+  "webhooks.form.secretHint":
+    "The secret is stored back to the read model as a masked preview.",
   "webhooks.form.secretPlaceholder": "whsec_...",
   "webhooks.form.statusLabel": "Status",
-  "webhooks.form.statusHintWithAction": "Changing URL / events / active state triggers the validation flow.",
-  "webhooks.form.statusHintNoAction": "Changing URL / events / active state triggers validation; the disabled state can only be entered after the backend publishes the disableWebhookEndpoint action.",
+  "webhooks.form.statusHintWithAction":
+    "Changing URL / events / active state triggers the validation flow.",
+  "webhooks.form.statusHintNoAction":
+    "Changing URL / events / active state triggers validation; the disabled state can only be entered after the backend publishes the disableWebhookEndpoint action.",
   "webhooks.form.extraEventsLabel": "Extra events",
   "webhooks.form.extraEventsPlaceholder": "Comma-separated extra events",
   "webhooks.form.eventsPlaceholder": "booking.created, invoice.ready",
   "webhooks.form.disableReasonLabel": "Disable reason",
-  "webhooks.form.disableReasonHintEnabled": "Required when status is changed to disabled; matches the packet's high-risk reason gate.",
-  "webhooks.form.disableUnavailableHint": "Disable action unavailable: {reason}",
-  "webhooks.form.disableReasonPlaceholder": "Receiver maintenance window, repeated failures, security freeze, etc.",
+  "webhooks.form.disableReasonHintEnabled":
+    "Required when status is changed to disabled; matches the packet's high-risk reason gate.",
+  "webhooks.form.disableUnavailableHint":
+    "Disable action unavailable: {reason}",
+  "webhooks.form.disableReasonPlaceholder":
+    "Receiver maintenance window, repeated failures, security freeze, etc.",
   "webhooks.form.disableLabel": "Disable",
-  "webhooks.form.disableUnavailableAlreadyDisabled": "High-risk disable is not currently published by endpoint.availableActions[]. The reason gate stays closed. This endpoint is already disabled, and can only return to active/test_pending before waiting for the backend to republish the disable action.",
-  "webhooks.form.disableUnavailableReason": "High-risk disable is not currently published by endpoint.availableActions[]. The reason gate stays closed. Disabled reason: {reason}.",
-  "webhooks.form.disableUnavailableValue": "Disable action unavailable on this endpoint",
+  "webhooks.form.disableUnavailableAlreadyDisabled":
+    "High-risk disable is not currently published by endpoint.availableActions[]. The reason gate stays closed. This endpoint is already disabled, and can only return to active/test_pending before waiting for the backend to republish the disable action.",
+  "webhooks.form.disableUnavailableReason":
+    "High-risk disable is not currently published by endpoint.availableActions[]. The reason gate stays closed. Disabled reason: {reason}.",
+  "webhooks.form.disableUnavailableValue":
+    "Disable action unavailable on this endpoint",
   "webhooks.form.submitCreate": "Create endpoint",
   "webhooks.form.submitUpdate": "Save changes",
   "webhooks.form.cancel": "Cancel",
   "webhooks.form.highRiskTitle": "High-risk actions",
-  "webhooks.form.highRiskBody": "Delete and disable are high actions per the packet; delete requires a reason before submit, and disable can only be submitted via the fields above when `disableWebhookEndpoint` has been published.",
-  "webhooks.form.deleteReasonPlaceholder": "Decommissioned integration, duplicate endpoint, security incident, etc.",
+  "webhooks.form.highRiskBody":
+    "Delete and disable are high actions per the packet; delete requires a reason before submit, and disable can only be submitted via the fields above when `disableWebhookEndpoint` has been published.",
+  "webhooks.form.deleteReasonPlaceholder":
+    "Decommissioned integration, duplicate endpoint, security incident, etc.",
   "webhooks.form.submitDelete": "Delete endpoint",
-  "webhooks.form.deleteWithheld": "Delete CTA withheld until endpoint.availableActions[] publishes deleteWebhookEndpoint.",
-  "webhooks.form.rotateWithheld": "Rotate CTA withheld until endpoint.availableActions[] publishes rotateWebhookSecret.",
+  "webhooks.form.deleteWithheld":
+    "Delete CTA withheld until endpoint.availableActions[] publishes deleteWebhookEndpoint.",
+  "webhooks.form.rotateWithheld":
+    "Rotate CTA withheld until endpoint.availableActions[] publishes rotateWebhookSecret.",
   "webhooks.rotate.title": "Rotate webhook secret",
-  "webhooks.rotate.subtitle": "High-risk action. Per the packet, the endpoint must be re-verified after secret rotation.",
+  "webhooks.rotate.subtitle":
+    "High-risk action. Per the packet, the endpoint must be re-verified after secret rotation.",
   "webhooks.rotate.endpointLabel": "Endpoint",
   "webhooks.rotate.currentPreviewLabel": "Current preview",
   "webhooks.rotate.newSecretLabel": "New secret",
-  "webhooks.rotate.newSecretHint": "The rotate command still requires a new secret; after submit the UI immediately enters the plaintext-once receipt, offering copy / download, then returns to masked preview.",
+  "webhooks.rotate.newSecretHint":
+    "The rotate command still requires a new secret; after submit the UI immediately enters the plaintext-once receipt, offering copy / download, then returns to masked preview.",
   "webhooks.rotate.newSecretPlaceholder": "whsec_new...",
   "webhooks.rotate.reasonLabel": "Rotation reason",
-  "webhooks.rotate.reasonHint": "After submit it immediately enters the plaintext-once receipt, offering copy / download; the main list afterwards keeps only the masked preview.",
-  "webhooks.rotate.reasonPlaceholder": "Receiver key leak, planned credential rotation, etc.",
+  "webhooks.rotate.reasonHint":
+    "After submit it immediately enters the plaintext-once receipt, offering copy / download; the main list afterwards keeps only the masked preview.",
+  "webhooks.rotate.reasonPlaceholder":
+    "Receiver key leak, planned credential rotation, etc.",
   "webhooks.rotate.submit": "Rotate secret",
   "webhooks.col.url": "URL",
   "webhooks.col.events": "Events",
@@ -1766,9 +1806,11 @@ const en = {
   "webhooks.globalError.readiness": "readiness: {error}",
   "webhooks.globalError.notifications": "Notifications: {error}",
   "webhooks.page.title": "Webhook",
-  "webhooks.page.subtitle": "Endpoints · event subscriptions · delivery records · retry policy — whether the backend engine is enabled directly determines the screen (Q-TEN08)",
+  "webhooks.page.subtitle":
+    "Endpoints · event subscriptions · delivery records · retry policy — whether the backend engine is enabled directly determines the screen (Q-TEN08)",
   "webhooks.card.refreshTitle": "Refresh tier",
-  "webhooks.card.refreshSubtitle": "`/webhooks` is T5 Tenant slow. The frontend only offers manual refresh; data freshness follows the backend contract.",
+  "webhooks.card.refreshSubtitle":
+    "`/webhooks` is T5 Tenant slow. The frontend only offers manual refresh; data freshness follows the backend contract.",
   "webhooks.refreshNow": "Refresh now",
   "webhooks.metric.refreshTier": "Refresh tier",
   "webhooks.metric.refreshTierLabel": "T5 Tenant slow · 30s",
@@ -1779,42 +1821,59 @@ const en = {
   "webhooks.metric.scopeTenantWide": "tenant-wide",
   "webhooks.metric.scopeAllEndpoints": "All endpoints + delivery visibility",
   "webhooks.metric.readiness": "Readiness",
-  "webhooks.readiness.unavailable": "Integration readiness summary is not currently available.",
+  "webhooks.readiness.unavailable":
+    "Integration readiness summary is not currently available.",
   "webhooks.card.policyTitle": "Governance policy",
-  "webhooks.card.policySubtitle": "Retry / verification policy comes from the governance package.",
+  "webhooks.card.policySubtitle":
+    "Retry / verification policy comes from the governance package.",
   "webhooks.policy.testEvent": "Test event",
   "webhooks.policy.retryPolicy": "Retry policy",
   "webhooks.policy.retryAttempts": "{count} attempts",
   "webhooks.policy.failureNotification": "Failure notification",
   "webhooks.card.payloadTitle": "Payload schema",
-  "webhooks.card.payloadSubtitle": "Header CTA target. Visibility still comes from governance.availableActions[].",
+  "webhooks.card.payloadSubtitle":
+    "Header CTA target. Visibility still comes from governance.availableActions[].",
   "webhooks.payload.baselineEvents": "baseline events",
-  "webhooks.payload.noBaseline": "The governance package has not yet provided a baseline event schema.",
-  "webhooks.payload.note": "Endpoint create / update must reuse this event schema; the UI does not invent extra payload types.",
+  "webhooks.payload.noBaseline":
+    "The governance package has not yet provided a baseline event schema.",
+  "webhooks.payload.note":
+    "Endpoint create / update must reuse this event schema; the UI does not invent extra payload types.",
   "webhooks.banner.successTitle": "Operation complete",
   "webhooks.banner.errorTitle": "Operation failed",
   "webhooks.banner.receiptExpiredTitle": "Rotate secret receipt expired",
-  "webhooks.banner.receiptExpiredBody": "The full secret is shown only once. If you have left the receipt flow, the main list keeps only the masked preview. Re-run rotate secret when a new value is needed.",
+  "webhooks.banner.receiptExpiredBody":
+    "The full secret is shown only once. If you have left the receipt flow, the main list keeps only the masked preview. Re-run rotate secret when a new value is needed.",
   "webhooks.card.receiptTitle": "Rotate secret receipt",
-  "webhooks.card.receiptSubtitle": "One-time plaintext display for the webhook secret rotation. After this step the read model returns to masked preview.",
-  "webhooks.receipt.title": "The full webhook secret is shown only on this screen",
+  "webhooks.card.receiptSubtitle":
+    "One-time plaintext display for the webhook secret rotation. After this step the read model returns to masked preview.",
+  "webhooks.receipt.title":
+    "The full webhook secret is shown only on this screen",
   "webhooks.receipt.subtitle": "One-time plaintext · webhook secret rotation",
-  "webhooks.receipt.body": "Copy or download the new secret first, then complete the downstream receiver update. After you leave, the main list keeps only the masked preview.",
-  "webhooks.banner.partialReadModelsTitle": "Some supporting read models could not load",
+  "webhooks.receipt.body":
+    "Copy or download the new secret first, then complete the downstream receiver update. After you leave, the main list keeps only the masked preview.",
+  "webhooks.banner.partialReadModelsTitle":
+    "Some supporting read models could not load",
   "webhooks.banner.readinessTitle": "Webhook readiness: {status}",
-  "webhooks.banner.readinessBody": "Backend integration readiness reports this subsystem as not fully ready.",
+  "webhooks.banner.readinessBody":
+    "Backend integration readiness reports this subsystem as not fully ready.",
   "webhooks.banner.createBlockedTitle": "Create flow unavailable",
-  "webhooks.banner.createBlockedBodyReason": "The page did not receive an executable createWebhookEndpoint action. Disabled reason: {reason}.",
-  "webhooks.banner.createBlockedBodyNoFallback": "The page did not receive an executable createWebhookEndpoint action. The UI will not add a fallback create CTA.",
+  "webhooks.banner.createBlockedBodyReason":
+    "The page did not receive an executable createWebhookEndpoint action. Disabled reason: {reason}.",
+  "webhooks.banner.createBlockedBodyNoFallback":
+    "The page did not receive an executable createWebhookEndpoint action. The UI will not add a fallback create CTA.",
   "webhooks.banner.editBlockedTitle": "Edit flow unavailable",
-  "webhooks.banner.editBlockedBody": "This endpoint has not published the updateWebhookEndpoint action, so the UI will not open the edit form directly.",
+  "webhooks.banner.editBlockedBody":
+    "This endpoint has not published the updateWebhookEndpoint action, so the UI will not open the edit form directly.",
   "webhooks.banner.rotateBlockedTitle": "Rotate flow unavailable",
-  "webhooks.banner.rotateBlockedBody": "This endpoint has not published the rotateWebhookSecret action, so the UI will not open the rotate form directly.",
+  "webhooks.banner.rotateBlockedBody":
+    "This endpoint has not published the rotateWebhookSecret action, so the UI will not open the rotate form directly.",
   "webhooks.card.engineTitle": "Webhook engine",
-  "webhooks.card.engineSubtitle": "Page-level empty state per Q-TEN08. When the real engine is not yet provisioned, the route must not imply fake endpoint or delivery data.",
+  "webhooks.card.engineSubtitle":
+    "Page-level empty state per Q-TEN08. When the real engine is not yet provisioned, the route must not imply fake endpoint or delivery data.",
   "webhooks.engine.openGovernance": "Open integration governance",
   "webhooks.engine.notificationRouting": "Notification routing",
-  "webhooks.engine.note": "Cross-app operational triage remains available below, but the primary page surface stays empty until provisioning is complete.",
+  "webhooks.engine.note":
+    "Cross-app operational triage remains available below, but the primary page surface stays empty until provisioning is complete.",
   "webhooks.card.endpointStatusTitle": "Endpoint status",
   "webhooks.status.active": "active",
   "webhooks.status.testPending": "test_pending",
@@ -1826,59 +1885,84 @@ const en = {
   "webhooks.status.queued": "queued",
   "webhooks.status.failed": "failed",
   "webhooks.card.replayStatusTitle": "Replay status",
-  "webhooks.card.replayStatusSubtitle": "Retries remain contract-driven. The UI only presents status and does not fabricate a replay engine.",
+  "webhooks.card.replayStatusSubtitle":
+    "Retries remain contract-driven. The UI only presents status and does not fabricate a replay engine.",
   "webhooks.replay.retryableFailed": "retryable failed",
   "webhooks.replay.queuedRetries": "queued retries",
   "webhooks.card.endpointListTitle": "Endpoints · {count} entries",
-  "webhooks.card.endpointListSubtitle": "availableActions are rendered as visible CTAs: enable, disable with reason, never hidden.",
+  "webhooks.card.endpointListSubtitle":
+    "availableActions are rendered as visible CTAs: enable, disable with reason, never hidden.",
   "webhooks.filter.clear": "Clear filter",
   "webhooks.card.selectedEndpointTitle": "Selected endpoint",
   "webhooks.card.actionMatrixTitle": "Action matrix",
-  "webhooks.card.selectedEndpointSubtitle": "Per-endpoint actions and contract notes",
-  "webhooks.card.actionMatrixSubtitle": "Pick an endpoint to inspect delivery scope or update actions.",
-  "webhooks.endpoint.noActionsPublished": "Backend has not published `availableActions[]` on this endpoint; the UI no longer derives a fallback CTA.",
-  "webhooks.endpoint.lifecycleNote": "The endpoint layer keeps lifecycle actions; delivery-specific `retry failed` appears below in delivery rows / selected delivery detail per `delivery.availableActions`.",
+  "webhooks.card.selectedEndpointSubtitle":
+    "Per-endpoint actions and contract notes",
+  "webhooks.card.actionMatrixSubtitle":
+    "Pick an endpoint to inspect delivery scope or update actions.",
+  "webhooks.endpoint.noActionsPublished":
+    "Backend has not published `availableActions[]` on this endpoint; the UI no longer derives a fallback CTA.",
+  "webhooks.endpoint.lifecycleNote":
+    "The endpoint layer keeps lifecycle actions; delivery-specific `retry failed` appears below in delivery rows / selected delivery detail per `delivery.availableActions`.",
   "webhooks.endpoint.selectTitle": "Select an endpoint",
-  "webhooks.endpoint.selectBody": "Pick `delivery log` / `Update` / `rotate secret` from the left list to enter the per-endpoint flow.",
-  "webhooks.endpoint.bullet1": "Create / update is backed by a real backend route.",
-  "webhooks.endpoint.bullet2": "Rotate secret directly calls `/api/tenant/webhooks/:id/rotate-secret`.",
-  "webhooks.endpoint.bullet3": "Delivery rows directly reflect the enabled/disabled state of `retryFailedDelivery`, and submit a manual retry directly when enabled.",
+  "webhooks.endpoint.selectBody":
+    "Pick `delivery log` / `Update` / `rotate secret` from the left list to enter the per-endpoint flow.",
+  "webhooks.endpoint.bullet1":
+    "Create / update is backed by a real backend route.",
+  "webhooks.endpoint.bullet2":
+    "Rotate secret directly calls `/api/tenant/webhooks/:id/rotate-secret`.",
+  "webhooks.endpoint.bullet3":
+    "Delivery rows directly reflect the enabled/disabled state of `retryFailedDelivery`, and submit a manual retry directly when enabled.",
   "webhooks.endpoint.noPublishedActions": "No published endpoint actions.",
-  "webhooks.endpoint.noSupportedActions": "No supported endpoint actions published for this surface.",
+  "webhooks.endpoint.noSupportedActions":
+    "No supported endpoint actions published for this surface.",
   "webhooks.delivery.noPublishedActions": "No published delivery actions.",
-  "webhooks.delivery.noSupportedActions": "No supported delivery actions published for this surface.",
+  "webhooks.delivery.noSupportedActions":
+    "No supported delivery actions published for this surface.",
   "webhooks.card.deliveryLogTitle": "Delivery log",
   "webhooks.card.recentDeliveriesTitle": "Deliveries in last 24h",
-  "webhooks.card.deliveryLogSubtitleSelected": "{url} · real engine records only",
-  "webhooks.card.deliveryLogSubtitleTenant": "Tenant-wide delivery stream · no mock replay rows",
+  "webhooks.card.deliveryLogSubtitleSelected":
+    "{url} · real engine records only",
+  "webhooks.card.deliveryLogSubtitleTenant":
+    "Tenant-wide delivery stream · no mock replay rows",
   "webhooks.delivery.clearEndpointScope": "Clear endpoint scope",
   "webhooks.card.selectedDeliveryTitle": "Selected delivery",
   "webhooks.card.replaySignalsTitle": "Replay / signals",
-  "webhooks.card.selectedDeliverySubtitle": "Per-delivery actions come from delivery.availableActions[].",
-  "webhooks.card.replaySignalsSubtitle": "Entry/exit per packet: notification deep link + integration governance + audit.",
+  "webhooks.card.selectedDeliverySubtitle":
+    "Per-delivery actions come from delivery.availableActions[].",
+  "webhooks.card.replaySignalsSubtitle":
+    "Entry/exit per packet: notification deep link + integration governance + audit.",
   "webhooks.delivery.deliveryLabel": "Delivery",
   "webhooks.delivery.endpointLabel": "Endpoint",
   "webhooks.delivery.signatureLabel": "Signature",
   "webhooks.delivery.attemptLabel": "Attempt",
   "webhooks.delivery.clearDeliveryScope": "Clear delivery scope",
-  "webhooks.delivery.retryNote": "The retry CTA follows the delivery read model's `availableActions`; when enabled it calls `/api/tenant/webhooks/:webhookId/deliveries/:deliveryId/retry`.",
-  "webhooks.delivery.noFallbackReplay": "This delivery has not published `availableActions[]`, so no fallback replay CTA is shown.",
+  "webhooks.delivery.retryNote":
+    "The retry CTA follows the delivery read model's `availableActions`; when enabled it calls `/api/tenant/webhooks/:webhookId/deliveries/:deliveryId/retry`.",
+  "webhooks.delivery.noFallbackReplay":
+    "This delivery has not published `availableActions[]`, so no fallback replay CTA is shown.",
   "webhooks.feed.title": "Notification feed",
-  "webhooks.feed.empty": "The notification feed currently has no webhook / delivery related items.",
+  "webhooks.feed.empty":
+    "The notification feed currently has no webhook / delivery related items.",
   "webhooks.feed.openPreferences": "Open notification preferences",
   "webhooks.replay.notesTitle": "Replay notes",
-  "webhooks.replay.notesBody1": "This page's replay only runs the retry posture that the backend has published. If `retryFailedDelivery` is not yet enabled, the screen keeps the disabled reason rather than adding an unauthorized replay CTA.",
-  "webhooks.replay.notesBody2": "For cross-system troubleshooting, use the deep links at the bottom of the page to go to ops triage, governance or audit.",
+  "webhooks.replay.notesBody1":
+    "This page's replay only runs the retry posture that the backend has published. If `retryFailedDelivery` is not yet enabled, the screen keeps the disabled reason rather than adding an unauthorized replay CTA.",
+  "webhooks.replay.notesBody2":
+    "For cross-system troubleshooting, use the deep links at the bottom of the page to go to ops triage, governance or audit.",
   "webhooks.deepLinks.title": "Cross-app deep links",
-  "webhooks.deepLinks.subtitle": "Entry paths required by the packet: notifications, integration readiness, audit and ops triage.",
+  "webhooks.deepLinks.subtitle":
+    "Entry paths required by the packet: notifications, integration readiness, audit and ops triage.",
   "webhooks.deepLinks.notificationPreferences": "Notification preferences",
   "webhooks.deepLinks.integrationGovernance": "Integration governance",
   "webhooks.deepLinks.tenantAudit": "Tenant audit trail",
   "webhooks.deepLinks.opsTriageLabel": "Open ops triage",
-  "webhooks.deepLinks.opsTriageDescription": "Cross-app deep link for operational triage when delivery failures need downstream intervention.",
+  "webhooks.deepLinks.opsTriageDescription":
+    "Cross-app deep link for operational triage when delivery failures need downstream intervention.",
   "webhooks.deepLinks.platformAuditLabel": "View platform audit",
-  "webhooks.deepLinks.platformAuditDescription": "Cross-app audit trail for secret rotation, endpoint lifecycle, and integration governance events.",
-  "webhooks.deepLinks.missingBaseUrl": "Missing base URL env; configure `NEXT_PUBLIC_OPS_CONSOLE_URL` / `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab navigation.",
+  "webhooks.deepLinks.platformAuditDescription":
+    "Cross-app audit trail for secret rotation, endpoint lifecycle, and integration governance events.",
+  "webhooks.deepLinks.missingBaseUrl":
+    "Missing base URL env; configure `NEXT_PUBLIC_OPS_CONSOLE_URL` / `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab navigation.",
   "webhooks.secretCard.endpoint": "Endpoint",
   "webhooks.secretCard.maskedPreview": "Masked preview",
   "webhooks.secretCard.secretVersion": "Secret version",
@@ -1913,7 +1997,8 @@ const en = {
     "Snapshot created at {timestamp} ({relative}). The page refreshes automatically while visible, and you can also refresh manually for the latest state.",
   "apiKeys.time.unknown": "time unknown",
   "apiKeys.error.bannerTitle": "Some API key data could not be loaded",
-  "apiKeys.error.apiKeysLoadFailed": "The tenant API key inventory could not be loaded.",
+  "apiKeys.error.apiKeysLoadFailed":
+    "The tenant API key inventory could not be loaded.",
   "apiKeys.error.governanceLoadFailed":
     "The integration governance policy could not be loaded.",
   "apiKeys.error.identityLoadFailed":
@@ -1945,7 +2030,8 @@ const en = {
     "High-risk action. A revocation reason must be recorded before submission.",
   "apiKeys.action.available": "Available now.",
   "apiKeys.action.disabledReason.label": "Disabled reason",
-  "apiKeys.action.disabledReason.identity_unavailable": "Identity context unavailable",
+  "apiKeys.action.disabledReason.identity_unavailable":
+    "Identity context unavailable",
   "apiKeys.action.disabledReason.permission_denied": "Permission denied",
   "apiKeys.action.disabledReason.governance_unavailable":
     "Governance policy unavailable",
@@ -1956,7 +2042,8 @@ const en = {
   "apiKeys.empty.filtered.body":
     "Clear the search term or switch to another state filter. Revoked and expired keys remain available for audit review.",
   "apiKeys.empty.filtered.badge": "Filtered",
-  "apiKeys.empty.fetchFailed.title": "The API key list is temporarily unavailable",
+  "apiKeys.empty.fetchFailed.title":
+    "The API key list is temporarily unavailable",
   "apiKeys.empty.fetchFailed.body":
     "The page did not receive the key inventory. Refresh first, then check the tenant API and audit log if the failure continues.",
   "apiKeys.empty.fetchFailed.badge": "Fetch failed",
@@ -2135,8 +2222,7 @@ const en = {
     "The API key could not be revoked. Check the form and retry.",
   "apiKeys.flash.error.scopeRequired":
     "Select at least one published API key scope.",
-  "apiKeys.flash.error.scopeUnsupported":
-    "Unsupported API key scope: {scope}",
+  "apiKeys.flash.error.scopeUnsupported": "Unsupported API key scope: {scope}",
   "apiKeys.flash.error.expiryTimezoneRequired":
     "Expiry must include an explicit timezone offset or Z suffix.",
   "apiKeys.flash.error.expiryInvalid":
@@ -2317,7 +2403,8 @@ const en = {
   "rules.kpi.remainingQuotaDetail":
     "Percent remaining in the current monthly quota window.",
   "rules.kpi.pending": "Pending approvals",
-  "rules.kpi.pendingDetail": "Approval requests currently waiting on approvers.",
+  "rules.kpi.pendingDetail":
+    "Approval requests currently waiting on approvers.",
   "rules.kpi.ledger": "Ledger entries",
   "rules.kpi.ledgerDetail":
     "Recent quota ledger activity rendered from the backend read model.",
@@ -2397,8 +2484,7 @@ const en = {
     "Run the same approval evaluation flow the backend uses before a booking enters approval.",
   "rules.dryRun.reservationWindowStart": "Reservation window start",
   "rules.dryRun.reservationWindowStartExample": "2026-06-01T09:30:00+08:00",
-  "rules.dryRun.reservationWindowStartPlaceholder":
-    "2026-06-01T09:30:00+08:00",
+  "rules.dryRun.reservationWindowStartPlaceholder": "2026-06-01T09:30:00+08:00",
   "rules.dryRun.amountMinor": "Amount minor",
   "rules.dryRun.amountMinorExample": "180000",
   "rules.dryRun.amountMinorPlaceholder": "180000",
@@ -2440,8 +2526,7 @@ const en = {
   "rules.evaluation.planTitle": "Evaluation plan",
   "rules.evaluation.planSubtitle":
     "Quota impact, approval chain, timeout, and fallback policy.",
-  "rules.evaluation.quotaImpact":
-    "{scope} {dimension}: trigger {trigger}",
+  "rules.evaluation.quotaImpact": "{scope} {dimension}: trigger {trigger}",
   "rules.evaluation.timeout": "Timeout",
   "rules.evaluation.noApprovalPlan":
     "This evaluation did not produce an approval plan.",
@@ -2470,8 +2555,7 @@ const en = {
   "rules.pendingQueue.title": "Pending approval queue",
   "rules.pendingQueue.subtitle":
     "Recent approval requests that are still waiting on tenant approvers.",
-  "rules.pendingQueue.ruleDue":
-    "{count} rules matched. Timeout at {dueAt}.",
+  "rules.pendingQueue.ruleDue": "{count} rules matched. Timeout at {dueAt}.",
   "rules.pendingQueue.emptyTitle": "No pending approvals",
   "rules.pendingQueue.emptyDescription":
     "There are no approval requests waiting on approvers right now.",
@@ -2552,8 +2636,7 @@ const en = {
     "Condition value must be numeric: {value}.",
   "rules.action.error.conditionBooleanInvalid":
     "Boolean conditions accept only true or false.",
-  "rules.action.error.conditionRequired":
-    "At least one condition is required.",
+  "rules.action.error.conditionRequired": "At least one condition is required.",
   "rules.action.error.ruleNameRequired": "Rule name is required.",
   "rules.action.error.priorityRequired": "Priority is required.",
   "rules.action.error.ruleActionRequired": "Rule action is required.",
@@ -2569,16 +2652,14 @@ const en = {
   "rules.action.error.ruleDisableTitle": "Could not disable rule",
   "rules.action.error.ruleDisableDescription":
     "Review the selected rule and disabled reason, then retry.",
-  "rules.action.error.orderedRuleIdsRequired":
-    "Ordered rule ids are required.",
+  "rules.action.error.orderedRuleIdsRequired": "Ordered rule ids are required.",
   "rules.action.error.ruleOrderUpdateTitle": "Could not reorder rules",
   "rules.action.error.ruleOrderUpdateDescription":
     "Retry after refreshing the current rule list.",
   "rules.action.error.quotaCurrencyRequired": "Currency is required.",
   "rules.action.error.quotaEnforcementModeRequired":
     "Quota enforcement mode is required.",
-  "rules.action.error.quotaPolicyUpdateTitle":
-    "Could not save quota policy",
+  "rules.action.error.quotaPolicyUpdateTitle": "Could not save quota policy",
   "rules.action.error.quotaPolicyUpdateDescription":
     "Review the quota values and enforcement mode, then retry.",
   "rules.action.error.dryRunStartRequired":
@@ -2599,8 +2680,7 @@ const en = {
   "rules.action.success.quotaPolicyUpdatedTitle": "Quota policy updated",
   "rules.action.success.quotaPolicyUpdatedDescription":
     "Monthly quota policy has been saved.",
-  "rules.action.success.dryRunCompletedTitle":
-    "Dry-run evaluation completed",
+  "rules.action.success.dryRunCompletedTitle": "Dry-run evaluation completed",
   "rules.action.success.dryRunCompletedDescription":
     "Decision: {decision}. Review matched rules and quota impact below.",
   "rules.value.noApprovalChain": "No approval chain",
@@ -2626,8 +2706,7 @@ const en = {
   "rules.enum.conditionField.booking.amount_minor": "Booking amount minor",
   "rules.enum.conditionField.booking.business_dispatch_subtype":
     "Dispatch subtype",
-  "rules.enum.conditionField.booking.vehicle_preference":
-    "Vehicle preference",
+  "rules.enum.conditionField.booking.vehicle_preference": "Vehicle preference",
   "rules.enum.conditionField.booking.direction": "Direction",
   "rules.enum.conditionField.booking.flight_no_present":
     "Flight number present",
@@ -3066,8 +3145,7 @@ const en = {
     "External artifact services are temporarily unavailable",
   "invoices.empty.externalUnavailable.body":
     "The invoices route still exists, but signed downloads or related external dependencies cannot return complete results right now.",
-  "invoices.empty.filteredEmpty.title":
-    "No invoices match the current filters",
+  "invoices.empty.filteredEmpty.title": "No invoices match the current filters",
   "invoices.empty.filteredEmpty.body":
     "Keep the status, period, and invoice id search context visible, and provide a clear recovery path so a failed search is not mistaken for missing tenant invoices.",
   "invoices.empty.noData.title": "This tenant does not have invoices yet",
@@ -3294,7 +3372,8 @@ const en = {
     "A dependency is temporarily unavailable",
   "passengers.empty.externalUnavailable.body":
     "An external integration that the tenant directory depends on is unavailable, so the passenger directory cannot be returned.",
-  "passengers.empty.filteredEmpty.title": "No results match the current filters",
+  "passengers.empty.filteredEmpty.title":
+    "No results match the current filters",
   "passengers.empty.filteredEmpty.body":
     "Widen the keyword or department filters, or switch the active/deactivated filter to return to the full passenger directory.",
   "passengers.empty.filteredEmpty.cta": "Clear filters",
@@ -3313,7 +3392,8 @@ const en = {
   "passengers.state.active": "Active",
   "passengers.state.deactivated": "Deactivated",
   "passengers.refresh.summary": "{freshness} · {time} · {source}",
-  "passengers.refresh.summaryFallback": "30s tenant slow tier · fallback {time}",
+  "passengers.refresh.summaryFallback":
+    "30s tenant slow tier · fallback {time}",
   "passengers.refresh.tier.fallback": "T5 · 30s fallback",
   "passengers.refresh.tier.live": "T5 · live snapshot",
   "passengers.refresh.tier.cache": "T5 · cached snapshot",
@@ -3422,7 +3502,8 @@ const en = {
   "addresses.form.addressName": "Address name",
   "addresses.form.addressNamePlaceholder": "Acme HQ",
   "addresses.form.addressText": "Address text",
-  "addresses.form.addressTextPlaceholder": "No. 1, Shifu Rd., Xinyi Dist., Taipei City",
+  "addresses.form.addressTextPlaceholder":
+    "No. 1, Shifu Rd., Xinyi Dist., Taipei City",
   "addresses.form.lat": "Latitude",
   "addresses.form.lng": "Longitude",
   "addresses.form.tags": "Tags",
@@ -3472,8 +3553,7 @@ const en = {
     "The driver-only state does not apply on this page",
   "addresses.empty.driverNotEligible.message":
     "This enum still needs its own treatment so the shared `EmptyReason` contract stays complete.",
-  "addresses.empty.filteredEmpty.title":
-    "No results match the current filters",
+  "addresses.empty.filteredEmpty.title": "No results match the current filters",
   "addresses.empty.filteredEmpty.message":
     "Widen the tag, owner, or keyword filters, or switch to include inactive records.",
   "addresses.empty.reasonBadge": "Empty reason · {reason}",
@@ -3778,31 +3858,43 @@ const en = {
   "dashboard.errorLabel.statements": "Statements",
   "dashboard.errorLabel.notifications": "Notifications",
   "dashboard.errorLabel.governance": "Integration readiness",
-  "dashboard.kpi.attentionBookingsActive": "{count} booking(s) need tracking in dispatch or proof status.",
-  "dashboard.kpi.invoiceFilesVisible": "{count} invoice artifact(s) are visible under tenant billing authority.",
-  "dashboard.empty.invoices": "No invoice artifacts are available for this tenant context.",
-  "dashboard.kpi.recentReminders": "The home surface shows {count} recent reminder(s).",
-  "dashboard.empty.notificationsSnapshot": "The current snapshot returned no tenant notifications.",
-  "dashboard.kpi.pendingChecklist": "{count} pending integration checklist item(s).",
+  "dashboard.kpi.attentionBookingsActive":
+    "{count} booking(s) need tracking in dispatch or proof status.",
+  "dashboard.kpi.invoiceFilesVisible":
+    "{count} invoice artifact(s) are visible under tenant billing authority.",
+  "dashboard.empty.invoices":
+    "No invoice artifacts are available for this tenant context.",
+  "dashboard.kpi.recentReminders":
+    "The home surface shows {count} recent reminder(s).",
+  "dashboard.empty.notificationsSnapshot":
+    "The current snapshot returned no tenant notifications.",
+  "dashboard.kpi.pendingChecklist":
+    "{count} pending integration checklist item(s).",
   "dashboard.empty.checklist": "No pending onboarding checklist items.",
-  "dashboard.empty.integrationChecklist": "API key and webhook onboarding has no pending checklist items right now.",
+  "dashboard.empty.integrationChecklist":
+    "API key and webhook onboarding has no pending checklist items right now.",
   "dashboard.link.viewApiKeys": "View API keys",
   "dashboard.link.viewWebhooks": "View webhooks",
   "dashboard.section.identity": "Identity",
   "dashboard.section.identityTitle": "Tenant authorization context",
-  "dashboard.section.identitySub": "The dashboard reads tenant identity directly from the backend, so actor and realm follow the authorization source.",
+  "dashboard.section.identitySub":
+    "The dashboard reads tenant identity directly from the backend, so actor and realm follow the authorization source.",
   "dashboard.identity.tenant": "Tenant",
   "dashboard.identity.authMode": "Auth mode",
   "dashboard.value.noData": "No data",
   "dashboard.section.notifications": "Notifications",
   "dashboard.section.notificationsTitle": "Recent reminders",
-  "dashboard.section.notificationsSub": "Platform and tenant notifications stay on the workspace home so you can review without leaving.",
+  "dashboard.section.notificationsSub":
+    "Platform and tenant notifications stay on the workspace home so you can review without leaving.",
   "dashboard.empty.notifications": "No tenant notifications to show right now.",
   "dashboard.callout.enabledModules": "Enabled module snapshot",
-  "dashboard.callout.flagsEnabled": "{count} feature flag(s) currently resolve enabled for this tenant context.",
-  "dashboard.callout.flagsUnavailable": "Feature flag details are unavailable, or no tenant-specific module flags are enabled.",
+  "dashboard.callout.flagsEnabled":
+    "{count} feature flag(s) currently resolve enabled for this tenant context.",
+  "dashboard.callout.flagsUnavailable":
+    "Feature flag details are unavailable, or no tenant-specific module flags are enabled.",
   "dashboard.callout.partialData": "Partial data warning",
-  "dashboard.callout.partialDataSub": "Some dashboard sections fell back because the current authorization source did not answer all reads.",
+  "dashboard.callout.partialDataSub":
+    "Some dashboard sections fell back because the current authorization source did not answer all reads.",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -3817,6 +3909,7 @@ const zh: Record<keyof typeof en, string> = {
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
   "shell.language.switch": "切換語系",
+  "shell.language.icon": "文/A",
   "shell.health.notChecked": "尚未檢查",
   "shell.health.checking": "API 檢查中",
   "shell.health.healthy": "API 正常",
@@ -4803,6 +4896,8 @@ const zh: Record<keyof typeof en, string> = {
   "newBooking.header.subtitle":
     "代訂或本人 · 預約 / 即時 · 同步 command 模式 (Q-TEN04)",
   "newBooking.meta.command": "命令",
+  "newBooking.meta.commandEndpoint":
+    "POST /api/tenant/bookings/commands/create",
   "newBooking.meta.updateTier": "更新層級",
   "newBooking.meta.directoryCoverage": "目錄覆蓋",
   "newBooking.meta.requiredActions": "必備操作",
@@ -5343,7 +5438,8 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.health.disabledAfterFailureCluster": "因失敗叢集而停用",
   "webhooks.health.manuallyPaused": "手動暫停",
   "webhooks.health.awaitingTestTraffic": "等待驗證流量",
-  "webhooks.health.failedOfDeliveries": "{failures} 筆失敗 / {deliveries} 筆投遞",
+  "webhooks.health.failedOfDeliveries":
+    "{failures} 筆失敗 / {deliveries} 筆投遞",
   "webhooks.health.deliveriesHealthy": "{deliveries} 筆投遞 · 健康",
   "webhooks.health.healthy": "健康",
   "webhooks.lastActivity.delivered": "已投遞 {time}",
@@ -5352,17 +5448,23 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.delivery.failed": "failed",
   "webhooks.delivery.timeout": "timeout",
   "webhooks.empty.notProvisioned.title": "Webhook engine 尚未開通",
-  "webhooks.empty.notProvisioned.body": "此租戶目前沒有啟用 delivery engine。依 Q-TEN08，畫面不會回填任何假 delivery log；請先完成平台側開通，再建立 endpoint。",
+  "webhooks.empty.notProvisioned.body":
+    "此租戶目前沒有啟用 delivery engine。依 Q-TEN08，畫面不會回填任何假 delivery log；請先完成平台側開通，再建立 endpoint。",
   "webhooks.empty.permissionDenied.title": "目前身分沒有 webhook 權限",
-  "webhooks.empty.permissionDenied.body": "後端拒絕回傳此區塊資料。請改用具 `tc_admin` 或 `tc_integration_mgr` 權限的身分，或請平台/租戶管理員協助。",
+  "webhooks.empty.permissionDenied.body":
+    "後端拒絕回傳此區塊資料。請改用具 `tc_admin` 或 `tc_integration_mgr` 權限的身分，或請平台/租戶管理員協助。",
   "webhooks.empty.externalUnavailable.title": "Delivery engine 暫時不可用",
-  "webhooks.empty.externalUnavailable.body": "後端或外部目的端暫時不可用，因此無法取得 webhook 可視資料。保留目前查詢條件，稍後手動 refresh 再試。",
+  "webhooks.empty.externalUnavailable.body":
+    "後端或外部目的端暫時不可用，因此無法取得 webhook 可視資料。保留目前查詢條件，稍後手動 refresh 再試。",
   "webhooks.empty.fetchFailed.title": "資料抓取失敗",
-  "webhooks.empty.fetchFailed.body": "請檢查 API 可用性與目前環境 headers。這不是無資料狀態，而是 read model 讀取失敗。",
+  "webhooks.empty.fetchFailed.body":
+    "請檢查 API 可用性與目前環境 headers。這不是無資料狀態，而是 read model 讀取失敗。",
   "webhooks.empty.filteredEmpty.title": "目前篩選條件下沒有結果",
-  "webhooks.empty.filteredEmpty.body": "資料源仍可用，但現有 `status` 或 endpoint 篩選沒有命中任何項目。清除篩選即可回到完整檢視。",
+  "webhooks.empty.filteredEmpty.body":
+    "資料源仍可用，但現有 `status` 或 endpoint 篩選沒有命中任何項目。清除篩選即可回到完整檢視。",
   "webhooks.empty.noData.title": "尚未建立任何 endpoint",
-  "webhooks.empty.noData.body": "目前沒有 webhook endpoint，因此也不會有 delivery log。先建立第一個 endpoint，系統才會開始產生真實 delivery visibility。",
+  "webhooks.empty.noData.body":
+    "目前沒有 webhook endpoint，因此也不會有 delivery log。先建立第一個 endpoint，系統才會開始產生真實 delivery visibility。",
   "webhooks.action.payloadSchema": "Payload 結構描述",
   "webhooks.action.create": "新增端點",
   "webhooks.action.update": "更新",
@@ -5377,65 +5479,86 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.tabLabel.endpoints": "端點",
   "webhooks.event.label": "事件",
   "webhooks.event.baselineLabel": "基準事件",
-  "webhooks.event.baselineHint": "治理套件提供的 baseline webhook events。可同時勾選多個。",
+  "webhooks.event.baselineHint":
+    "治理套件提供的 baseline webhook events。可同時勾選多個。",
   "webhooks.error.atLeastOneEvent": "請至少選擇一個 event。",
   "webhooks.error.urlAndSecretRequired": "Webhook URL 與 secret 為必填。",
   "webhooks.success.endpointCreated": "Endpoint 已建立，狀態為 test_pending。",
   "webhooks.error.missingWebhookId": "缺少 webhookId。",
   "webhooks.error.endpointNotFound": "找不到目前的 webhook endpoint。",
-  "webhooks.error.urlStatusEventRequired": "URL、status 與至少一個 event 為必填。",
-  "webhooks.error.disableActionUnavailable": "此 endpoint 目前沒有 disableWebhookEndpoint action，不能透過 update flow 停用。",
+  "webhooks.error.urlStatusEventRequired":
+    "URL、status 與至少一個 event 為必填。",
+  "webhooks.error.disableActionUnavailable":
+    "此 endpoint 目前沒有 disableWebhookEndpoint action，不能透過 update flow 停用。",
   "webhooks.error.disableReasonRequired": "停用 endpoint 時必須填寫 reason。",
-  "webhooks.error.disableFlowOnlyDisable": "停用 flow 只允許執行 disableWebhookEndpoint；請先儲存 URL / events 變更，再單獨停用 endpoint。",
+  "webhooks.error.disableFlowOnlyDisable":
+    "停用 flow 只允許執行 disableWebhookEndpoint；請先儲存 URL / events 變更，再單獨停用 endpoint。",
   "webhooks.success.endpointUpdated": "Endpoint 已更新。",
   "webhooks.error.deleteReasonRequired": "刪除 endpoint 時必須填寫 reason。",
   "webhooks.success.endpointDeleted": "Endpoint 已刪除。",
   "webhooks.error.webhookIdAndSecretRequired": "webhookId 與新 secret 為必填。",
-  "webhooks.success.secretRotated": "Secret 已旋轉。依治理規則，endpoint 會重新進入 test_pending，完整值只在本次畫面顯示。",
+  "webhooks.success.secretRotated":
+    "Secret 已旋轉。依治理規則，endpoint 會重新進入 test_pending，完整值只在本次畫面顯示。",
   "webhooks.error.missingWebhookOrDelivery": "缺少 webhookId 或 deliveryId。",
   "webhooks.success.retrySubmitted": "Failed delivery retry 已送出。",
-  "webhooks.success.receiptClosed": "Secret receipt 已關閉。主列表恢復為 masked preview。",
+  "webhooks.success.receiptClosed":
+    "Secret receipt 已關閉。主列表恢復為 masked preview。",
   "webhooks.form.createTitle": "建立 endpoint",
   "webhooks.form.updateTitle": "更新 endpoint",
-  "webhooks.form.createSubtitle": "Create / update 屬於 medium action；新 endpoint 一律進入 test_pending。",
-  "webhooks.form.updateSubtitle": "Disable / delete 是 high-risk 操作。UI 會強制填寫 reason 後才送出既有 backend contract。",
+  "webhooks.form.createSubtitle":
+    "Create / update 屬於 medium action；新 endpoint 一律進入 test_pending。",
+  "webhooks.form.updateSubtitle":
+    "Disable / delete 是 high-risk 操作。UI 會強制填寫 reason 後才送出既有 backend contract。",
   "webhooks.form.urlLabel": "Webhook URL",
   "webhooks.form.urlPlaceholder": "https://partner.example.com/drts/webhooks",
   "webhooks.form.secretLabel": "初始密鑰",
   "webhooks.form.secretHint": "Secret 會以 masked preview 存回 read model。",
   "webhooks.form.secretPlaceholder": "whsec_...",
   "webhooks.form.statusLabel": "狀態",
-  "webhooks.form.statusHintWithAction": "變更 URL / events / active state 都會觸發 validation 流程。",
-  "webhooks.form.statusHintNoAction": "變更 URL / events / active state 會觸發 validation；disable 狀態需由 backend 發布 disableWebhookEndpoint action 後才可進入。",
+  "webhooks.form.statusHintWithAction":
+    "變更 URL / events / active state 都會觸發 validation 流程。",
+  "webhooks.form.statusHintNoAction":
+    "變更 URL / events / active state 會觸發 validation；disable 狀態需由 backend 發布 disableWebhookEndpoint action 後才可進入。",
   "webhooks.form.extraEventsLabel": "額外事件",
   "webhooks.form.extraEventsPlaceholder": "以逗號分隔的額外事件",
   "webhooks.form.eventsPlaceholder": "booking.created, invoice.ready",
   "webhooks.form.disableReasonLabel": "停用原因",
-  "webhooks.form.disableReasonHintEnabled": "當 status 改為 disabled 時必填；符合 packet 的 high-risk reason gate。",
+  "webhooks.form.disableReasonHintEnabled":
+    "當 status 改為 disabled 時必填；符合 packet 的 high-risk reason gate。",
   "webhooks.form.disableUnavailableHint": "Disable action 不可用：{reason}",
-  "webhooks.form.disableReasonPlaceholder": "接收端維護時段、連續失敗、安全凍結等",
+  "webhooks.form.disableReasonPlaceholder":
+    "接收端維護時段、連續失敗、安全凍結等",
   "webhooks.form.disableLabel": "停用",
-  "webhooks.form.disableUnavailableAlreadyDisabled": "High-risk disable 目前未由 endpoint.availableActions[] 發布。Reason gate 保持關閉。 此 endpoint 已是 disabled，只能先回到 active/test_pending 後再等待 backend 重新發布 disable action。",
-  "webhooks.form.disableUnavailableReason": "High-risk disable 目前未由 endpoint.availableActions[] 發布。Reason gate 保持關閉。 Disabled reason: {reason}.",
-  "webhooks.form.disableUnavailableValue": "此 endpoint 無法使用 disable action",
+  "webhooks.form.disableUnavailableAlreadyDisabled":
+    "High-risk disable 目前未由 endpoint.availableActions[] 發布。Reason gate 保持關閉。 此 endpoint 已是 disabled，只能先回到 active/test_pending 後再等待 backend 重新發布 disable action。",
+  "webhooks.form.disableUnavailableReason":
+    "High-risk disable 目前未由 endpoint.availableActions[] 發布。Reason gate 保持關閉。 Disabled reason: {reason}.",
+  "webhooks.form.disableUnavailableValue":
+    "此 endpoint 無法使用 disable action",
   "webhooks.form.submitCreate": "建立 endpoint",
   "webhooks.form.submitUpdate": "儲存變更",
   "webhooks.form.cancel": "取消",
   "webhooks.form.highRiskTitle": "High-risk 操作",
-  "webhooks.form.highRiskBody": "Delete 與 disable 依 packet 屬 high action；delete 送出前必須填 reason，disable 只有在 `disableWebhookEndpoint` 已發布時才可透過上方欄位提交。",
+  "webhooks.form.highRiskBody":
+    "Delete 與 disable 依 packet 屬 high action；delete 送出前必須填 reason，disable 只有在 `disableWebhookEndpoint` 已發布時才可透過上方欄位提交。",
   "webhooks.form.deleteReasonPlaceholder": "已下線的整合、重複端點、安全事件等",
   "webhooks.form.submitDelete": "刪除 endpoint",
-  "webhooks.form.deleteWithheld": "Delete CTA 將保留，直到 endpoint.availableActions[] 發布 deleteWebhookEndpoint。",
-  "webhooks.form.rotateWithheld": "Rotate CTA 將保留，直到 endpoint.availableActions[] 發布 rotateWebhookSecret。",
+  "webhooks.form.deleteWithheld":
+    "Delete CTA 將保留，直到 endpoint.availableActions[] 發布 deleteWebhookEndpoint。",
+  "webhooks.form.rotateWithheld":
+    "Rotate CTA 將保留，直到 endpoint.availableActions[] 發布 rotateWebhookSecret。",
   "webhooks.rotate.title": "輪替 Webhook 密鑰",
-  "webhooks.rotate.subtitle": "High-risk action。依 packet，secret rotation 後 endpoint 需要重新驗證。",
+  "webhooks.rotate.subtitle":
+    "High-risk action。依 packet，secret rotation 後 endpoint 需要重新驗證。",
   "webhooks.rotate.endpointLabel": "端點",
   "webhooks.rotate.currentPreviewLabel": "目前預覽",
   "webhooks.rotate.newSecretLabel": "新密鑰",
-  "webhooks.rotate.newSecretHint": "目前 rotate command 仍需提交新的 secret；送出後 UI 會立刻進入 plaintext-once receipt，提供 copy / download，再回到 masked preview。",
+  "webhooks.rotate.newSecretHint":
+    "目前 rotate command 仍需提交新的 secret；送出後 UI 會立刻進入 plaintext-once receipt，提供 copy / download，再回到 masked preview。",
   "webhooks.rotate.newSecretPlaceholder": "whsec_new...",
   "webhooks.rotate.reasonLabel": "輪替原因",
-  "webhooks.rotate.reasonHint": "送出後會立即進入 plaintext-once receipt，提供 copy / download；主列表之後只保留 masked preview。",
+  "webhooks.rotate.reasonHint":
+    "送出後會立即進入 plaintext-once receipt，提供 copy / download；主列表之後只保留 masked preview。",
   "webhooks.rotate.reasonPlaceholder": "接收端金鑰外洩、計畫性憑證輪替等",
   "webhooks.rotate.submit": "旋轉 secret",
   "webhooks.col.url": "URL",
@@ -5455,9 +5578,11 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.globalError.readiness": "就緒度：{error}",
   "webhooks.globalError.notifications": "通知: {error}",
   "webhooks.page.title": "Webhook",
-  "webhooks.page.subtitle": "端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 是否啟用直接決定畫面 (Q-TEN08)",
+  "webhooks.page.subtitle":
+    "端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 是否啟用直接決定畫面 (Q-TEN08)",
   "webhooks.card.refreshTitle": "更新層級",
-  "webhooks.card.refreshSubtitle": "`/webhooks` 屬 T5 Tenant slow。前端只提供手動 refresh；資料新鮮度以 backend contract 為準。",
+  "webhooks.card.refreshSubtitle":
+    "`/webhooks` 屬 T5 Tenant slow。前端只提供手動 refresh；資料新鮮度以 backend contract 為準。",
   "webhooks.refreshNow": "立即重新整理",
   "webhooks.metric.refreshTier": "更新層級",
   "webhooks.metric.refreshTierLabel": "T5 Tenant slow · 30s",
@@ -5476,34 +5601,48 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.policy.retryAttempts": "{count} 次嘗試",
   "webhooks.policy.failureNotification": "失敗通知",
   "webhooks.card.payloadTitle": "Payload 結構描述",
-  "webhooks.card.payloadSubtitle": "標頭 CTA 目標。可見性仍來自 governance.availableActions[]。",
+  "webhooks.card.payloadSubtitle":
+    "標頭 CTA 目標。可見性仍來自 governance.availableActions[]。",
   "webhooks.payload.baselineEvents": "基準事件",
-  "webhooks.payload.noBaseline": "Governance package 尚未提供 baseline event schema。",
-  "webhooks.payload.note": "Endpoint create / update 必須沿用這組 event schema；UI 不自行發明 額外 payload 類型。",
+  "webhooks.payload.noBaseline":
+    "Governance package 尚未提供 baseline event schema。",
+  "webhooks.payload.note":
+    "Endpoint create / update 必須沿用這組 event schema；UI 不自行發明 額外 payload 類型。",
   "webhooks.banner.successTitle": "操作完成",
   "webhooks.banner.errorTitle": "操作失敗",
   "webhooks.banner.receiptExpiredTitle": "Rotate secret receipt 已失效",
-  "webhooks.banner.receiptExpiredBody": "完整 secret 只會顯示一次。若你已離開 receipt 流程，主列表只保留 masked preview。需要新值時請重新執行 rotate secret。",
+  "webhooks.banner.receiptExpiredBody":
+    "完整 secret 只會顯示一次。若你已離開 receipt 流程，主列表只保留 masked preview。需要新值時請重新執行 rotate secret。",
   "webhooks.card.receiptTitle": "輪替密鑰回執",
-  "webhooks.card.receiptSubtitle": "Webhook 密鑰輪替的一次性明文顯示。此步驟後讀取模型會回到遮罩預覽。",
+  "webhooks.card.receiptSubtitle":
+    "Webhook 密鑰輪替的一次性明文顯示。此步驟後讀取模型會回到遮罩預覽。",
   "webhooks.receipt.title": "完整 webhook secret 只在本次畫面顯示",
   "webhooks.receipt.subtitle": "一次性明文 · webhook 密鑰輪替",
-  "webhooks.receipt.body": "請先複製或下載新的 secret，再完成後續 receiver 更新。離開後主列表只保留 masked preview。",
-  "webhooks.banner.partialReadModelsTitle": "部分 supporting read models 無法載入",
+  "webhooks.receipt.body":
+    "請先複製或下載新的 secret，再完成後續 receiver 更新。離開後主列表只保留 masked preview。",
+  "webhooks.banner.partialReadModelsTitle":
+    "部分 supporting read models 無法載入",
   "webhooks.banner.readinessTitle": "Webhook 就緒度：{status}",
-  "webhooks.banner.readinessBody": "Backend 整合就緒度回報此子系統尚未完全就緒。",
+  "webhooks.banner.readinessBody":
+    "Backend 整合就緒度回報此子系統尚未完全就緒。",
   "webhooks.banner.createBlockedTitle": "建立流程無法使用",
-  "webhooks.banner.createBlockedBodyReason": "頁面沒有收到可執行的 createWebhookEndpoint action。 Disabled reason: {reason}.",
-  "webhooks.banner.createBlockedBodyNoFallback": "頁面沒有收到可執行的 createWebhookEndpoint action。 UI 不會補上 fallback create CTA。",
+  "webhooks.banner.createBlockedBodyReason":
+    "頁面沒有收到可執行的 createWebhookEndpoint action。 Disabled reason: {reason}.",
+  "webhooks.banner.createBlockedBodyNoFallback":
+    "頁面沒有收到可執行的 createWebhookEndpoint action。 UI 不會補上 fallback create CTA。",
   "webhooks.banner.editBlockedTitle": "編輯流程無法使用",
-  "webhooks.banner.editBlockedBody": "此 endpoint 未發布 updateWebhookEndpoint action，因此 UI 不會直接開啟編輯表單。",
+  "webhooks.banner.editBlockedBody":
+    "此 endpoint 未發布 updateWebhookEndpoint action，因此 UI 不會直接開啟編輯表單。",
   "webhooks.banner.rotateBlockedTitle": "輪替流程無法使用",
-  "webhooks.banner.rotateBlockedBody": "此 endpoint 未發布 rotateWebhookSecret action，因此 UI 不會直接開啟 rotate 表單。",
+  "webhooks.banner.rotateBlockedBody":
+    "此 endpoint 未發布 rotateWebhookSecret action，因此 UI 不會直接開啟 rotate 表單。",
   "webhooks.card.engineTitle": "Webhook 引擎",
-  "webhooks.card.engineSubtitle": "依 Q-TEN08 的頁面層空狀態。當真實引擎尚未 provision 時，路由不得暗示有假的端點或投遞資料。",
+  "webhooks.card.engineSubtitle":
+    "依 Q-TEN08 的頁面層空狀態。當真實引擎尚未 provision 時，路由不得暗示有假的端點或投遞資料。",
   "webhooks.engine.openGovernance": "開啟整合治理",
   "webhooks.engine.notificationRouting": "通知路由",
-  "webhooks.engine.note": "頁面底部仍提供跨應用維運分流，但在開通完成前，主頁面會維持空白。",
+  "webhooks.engine.note":
+    "頁面底部仍提供跨應用維運分流，但在開通完成前，主頁面會維持空白。",
   "webhooks.card.endpointStatusTitle": "端點狀態",
   "webhooks.status.active": "active",
   "webhooks.status.testPending": "test_pending",
@@ -5515,59 +5654,82 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.status.queued": "queued",
   "webhooks.status.failed": "failed",
   "webhooks.card.replayStatusTitle": "重播狀態",
-  "webhooks.card.replayStatusSubtitle": "重試仍以契約驅動。UI 只呈現狀態，不會自行假造重播引擎。",
+  "webhooks.card.replayStatusSubtitle":
+    "重試仍以契約驅動。UI 只呈現狀態，不會自行假造重播引擎。",
   "webhooks.replay.retryableFailed": "可重試失敗",
   "webhooks.replay.queuedRetries": "已排程重試",
   "webhooks.card.endpointListTitle": "端點 · {count} entries",
-  "webhooks.card.endpointListSubtitle": "availableActions 以可見 CTA 呈現：啟用、附原因停用，絕不隱藏。",
+  "webhooks.card.endpointListSubtitle":
+    "availableActions 以可見 CTA 呈現：啟用、附原因停用，絕不隱藏。",
   "webhooks.filter.clear": "清除篩選",
   "webhooks.card.selectedEndpointTitle": "已選 endpoint",
   "webhooks.card.actionMatrixTitle": "Action 矩陣",
-  "webhooks.card.selectedEndpointSubtitle": "各 endpoint 的 actions 與 contract 註記",
-  "webhooks.card.actionMatrixSubtitle": "選擇一個 endpoint 以檢視 delivery scope 或 update actions。",
-  "webhooks.endpoint.noActionsPublished": "Backend 尚未在此 endpoint publish `availableActions[]`； UI 不再推導 fallback CTA。",
-  "webhooks.endpoint.lifecycleNote": "Endpoint 層保留 lifecycle actions；delivery-specific `retry failed` 會在下方 delivery rows / selected delivery detail 依 `delivery.availableActions` 顯示。",
+  "webhooks.card.selectedEndpointSubtitle":
+    "各 endpoint 的 actions 與 contract 註記",
+  "webhooks.card.actionMatrixSubtitle":
+    "選擇一個 endpoint 以檢視 delivery scope 或 update actions。",
+  "webhooks.endpoint.noActionsPublished":
+    "Backend 尚未在此 endpoint publish `availableActions[]`； UI 不再推導 fallback CTA。",
+  "webhooks.endpoint.lifecycleNote":
+    "Endpoint 層保留 lifecycle actions；delivery-specific `retry failed` 會在下方 delivery rows / selected delivery detail 依 `delivery.availableActions` 顯示。",
   "webhooks.endpoint.selectTitle": "選擇一個端點",
-  "webhooks.endpoint.selectBody": "從左側列表點選 `delivery log` / `更新` / `rotate secret` 即可進入 per-endpoint flow。",
+  "webhooks.endpoint.selectBody":
+    "從左側列表點選 `delivery log` / `更新` / `rotate secret` 即可進入 per-endpoint flow。",
   "webhooks.endpoint.bullet1": "Create / update 由真實 backend route 支援。",
-  "webhooks.endpoint.bullet2": "Rotate secret 直接呼叫 `/api/tenant/webhooks/:id/rotate-secret`。",
-  "webhooks.endpoint.bullet3": "Delivery row 會直接反映 `retryFailedDelivery` 的 enabled/disabled 狀態，並在 enabled 時直接提交 manual retry。",
+  "webhooks.endpoint.bullet2":
+    "Rotate secret 直接呼叫 `/api/tenant/webhooks/:id/rotate-secret`。",
+  "webhooks.endpoint.bullet3":
+    "Delivery row 會直接反映 `retryFailedDelivery` 的 enabled/disabled 狀態，並在 enabled 時直接提交 manual retry。",
   "webhooks.endpoint.noPublishedActions": "沒有已發布的 endpoint actions。",
-  "webhooks.endpoint.noSupportedActions": "此介面沒有發布支援的 endpoint actions。",
+  "webhooks.endpoint.noSupportedActions":
+    "此介面沒有發布支援的 endpoint actions。",
   "webhooks.delivery.noPublishedActions": "沒有已發布的 delivery actions。",
-  "webhooks.delivery.noSupportedActions": "此介面沒有發布支援的 delivery actions。",
+  "webhooks.delivery.noSupportedActions":
+    "此介面沒有發布支援的 delivery actions。",
   "webhooks.card.deliveryLogTitle": "投遞紀錄",
   "webhooks.card.recentDeliveriesTitle": "近 24h 投遞",
   "webhooks.card.deliveryLogSubtitleSelected": "{url} · 僅真實 engine 紀錄",
-  "webhooks.card.deliveryLogSubtitleTenant": "租戶範圍 delivery stream · 無 mock replay 列",
+  "webhooks.card.deliveryLogSubtitleTenant":
+    "租戶範圍 delivery stream · 無 mock replay 列",
   "webhooks.delivery.clearEndpointScope": "清除 endpoint 範圍",
   "webhooks.card.selectedDeliveryTitle": "已選 delivery",
   "webhooks.card.replaySignalsTitle": "Replay / 訊號",
-  "webhooks.card.selectedDeliverySubtitle": "各 delivery 的 actions 來自 delivery.availableActions[]。",
-  "webhooks.card.replaySignalsSubtitle": "依 packet 的進出點：notification deep link + 整合治理 + 稽核。",
+  "webhooks.card.selectedDeliverySubtitle":
+    "各 delivery 的 actions 來自 delivery.availableActions[]。",
+  "webhooks.card.replaySignalsSubtitle":
+    "依 packet 的進出點：notification deep link + 整合治理 + 稽核。",
   "webhooks.delivery.deliveryLabel": "投遞",
   "webhooks.delivery.endpointLabel": "端點",
   "webhooks.delivery.signatureLabel": "簽章",
   "webhooks.delivery.attemptLabel": "嘗試",
   "webhooks.delivery.clearDeliveryScope": "清除 delivery 範圍",
-  "webhooks.delivery.retryNote": "Retry CTA 直接跟著 delivery read model 的 `availableActions`；enabled 時會呼叫 `/api/tenant/webhooks/:webhookId/deliveries/:deliveryId/retry`。",
-  "webhooks.delivery.noFallbackReplay": "這筆 delivery 尚未發布 `availableActions[]`，因此不顯示 fallback replay CTA。",
+  "webhooks.delivery.retryNote":
+    "Retry CTA 直接跟著 delivery read model 的 `availableActions`；enabled 時會呼叫 `/api/tenant/webhooks/:webhookId/deliveries/:deliveryId/retry`。",
+  "webhooks.delivery.noFallbackReplay":
+    "這筆 delivery 尚未發布 `availableActions[]`，因此不顯示 fallback replay CTA。",
   "webhooks.feed.title": "通知動態",
-  "webhooks.feed.empty": "目前 notification feed 沒有 webhook / delivery 相關項目。",
+  "webhooks.feed.empty":
+    "目前 notification feed 沒有 webhook / delivery 相關項目。",
   "webhooks.feed.openPreferences": "開啟通知偏好設定",
   "webhooks.replay.notesTitle": "Replay 註記",
-  "webhooks.replay.notesBody1": "本頁的 replay 只執行 backend 已公開的 retry posture。若 `retryFailedDelivery` 尚未啟用，畫面會保留 disabled reason，而不會補出未授權的 replay CTA。",
-  "webhooks.replay.notesBody2": "需要跨系統排查時，請使用頁面底部的 deep links 前往 ops triage、governance 或 audit。",
+  "webhooks.replay.notesBody1":
+    "本頁的 replay 只執行 backend 已公開的 retry posture。若 `retryFailedDelivery` 尚未啟用，畫面會保留 disabled reason，而不會補出未授權的 replay CTA。",
+  "webhooks.replay.notesBody2":
+    "需要跨系統排查時，請使用頁面底部的 deep links 前往 ops triage、governance 或 audit。",
   "webhooks.deepLinks.title": "跨應用深層連結",
-  "webhooks.deepLinks.subtitle": "packet 要求的進入路徑：通知、整合就緒度、audit 與 ops 分流。",
+  "webhooks.deepLinks.subtitle":
+    "packet 要求的進入路徑：通知、整合就緒度、audit 與 ops 分流。",
   "webhooks.deepLinks.notificationPreferences": "通知偏好設定",
   "webhooks.deepLinks.integrationGovernance": "整合治理",
   "webhooks.deepLinks.tenantAudit": "租戶稽核軌跡",
   "webhooks.deepLinks.opsTriageLabel": "開啟維運分流",
-  "webhooks.deepLinks.opsTriageDescription": "當 delivery 失敗需要下游介入時，前往維運分流的跨應用 deep link。",
+  "webhooks.deepLinks.opsTriageDescription":
+    "當 delivery 失敗需要下游介入時，前往維運分流的跨應用 deep link。",
   "webhooks.deepLinks.platformAuditLabel": "檢視平台稽核",
-  "webhooks.deepLinks.platformAuditDescription": "secret 輪替、endpoint 生命週期與整合治理事件的跨應用稽核軌跡。",
-  "webhooks.deepLinks.missingBaseUrl": "缺少 base URL 環境變數；請設定 `NEXT_PUBLIC_OPS_CONSOLE_URL` / `NEXT_PUBLIC_PLATFORM_ADMIN_URL` 以啟用開新分頁導覽。",
+  "webhooks.deepLinks.platformAuditDescription":
+    "secret 輪替、endpoint 生命週期與整合治理事件的跨應用稽核軌跡。",
+  "webhooks.deepLinks.missingBaseUrl":
+    "缺少 base URL 環境變數；請設定 `NEXT_PUBLIC_OPS_CONSOLE_URL` / `NEXT_PUBLIC_PLATFORM_ADMIN_URL` 以啟用開新分頁導覽。",
   "webhooks.secretCard.endpoint": "端點",
   "webhooks.secretCard.maskedPreview": "遮罩預覽",
   "webhooks.secretCard.secretVersion": "密鑰版本",
@@ -5584,7 +5746,8 @@ const zh: Record<keyof typeof en, string> = {
 
   // ── apiKeys (i18n-fullsweep 20260614) ──
   "apiKeys.page.title": "API 金鑰",
-  "apiKeys.page.subtitle": "Live / sandbox · scope · 最近使用 · 撤銷後永久不可復原",
+  "apiKeys.page.subtitle":
+    "Live / sandbox · scope · 最近使用 · 撤銷後永久不可復原",
   "apiKeys.page.docs": "API 文件",
   "apiKeys.page.refresh": "刷新 T5",
   "apiKeys.page.issue": "建立金鑰",
@@ -5594,7 +5757,8 @@ const zh: Record<keyof typeof en, string> = {
   "apiKeys.banner.plaintextOnce.title": "Q-TEN09：完整明文只顯示一次",
   "apiKeys.banner.plaintextOnce.body":
     "建立與輪替成功後，都只會在這個視窗內揭露一次完整 key。關閉後僅保留 key prefix 與 masked suffix，遺失請重新輪替。",
-  "apiKeys.banner.refresh.title": "T5 更新層級 · 每 30 秒輪詢一次{recommendation}",
+  "apiKeys.banner.refresh.title":
+    "T5 更新層級 · 每 30 秒輪詢一次{recommendation}",
   "apiKeys.banner.refresh.recommendation": "建議立即刷新",
   "apiKeys.banner.refresh.body":
     "目前快照建立於 {timestamp}（{relative}）。頁面可見時會自動刷新；你也可以手動刷新以取得最新狀態。",
@@ -5690,8 +5854,7 @@ const zh: Record<keyof typeof en, string> = {
   "apiKeys.editor.submitting": "送出中...",
   "apiKeys.editor.confirmRotate": "確認輪替",
   "apiKeys.editor.confirmIssue": "建立金鑰",
-  "apiKeys.editor.closedHint":
-    "可從上方 CTA 或清單列操作開啟建立／輪替表單。",
+  "apiKeys.editor.closedHint": "可從上方 CTA 或清單列操作開啟建立／輪替表單。",
   "apiKeys.availableActions.title": "可用操作",
   "apiKeys.availableActions.subtitle":
     "風險層級與停用原因直接映射 `availableActions`；空清單與無權限時不再假裝可操作。",
@@ -5722,7 +5885,8 @@ const zh: Record<keyof typeof en, string> = {
   "apiKeys.governance.allowedScopes": "允許範圍",
   "apiKeys.governance.compatibilityAliases": "Compatibility aliases",
   "apiKeys.governance.onboardingChecklist": "Onboarding checklist",
-  "apiKeys.governance.unavailable": "此租戶的 integration governance 無法載入。",
+  "apiKeys.governance.unavailable":
+    "此租戶的 integration governance 無法載入。",
   "apiKeys.deepLinks.title": "深層連結",
   "apiKeys.deepLinks.subtitle":
     "依 packet 從 API 金鑰畫面連到治理、通知、SLA、報表與稽核模組。",
@@ -5739,8 +5903,7 @@ const zh: Record<keyof typeof en, string> = {
     "確認 delivery failure 與 onboarding 通知是否已開通。",
   "apiKeys.deepLinks.notifications.path": "/notifications",
   "apiKeys.deepLinks.sla.title": "SLA 設定",
-  "apiKeys.deepLinks.sla.body":
-    "檢視整合異常的通知節點與租戶回應時限。",
+  "apiKeys.deepLinks.sla.body": "檢視整合異常的通知節點與租戶回應時限。",
   "apiKeys.deepLinks.sla.path": "/sla",
   "apiKeys.deepLinks.reports.title": "報表工作台",
   "apiKeys.deepLinks.reports.body":
@@ -5814,9 +5977,11 @@ const zh: Record<keyof typeof en, string> = {
   "apiKeys.flash.error.scopeUnsupported": "不支援的 API 金鑰 scope：{scope}",
   "apiKeys.flash.error.expiryTimezoneRequired":
     "到期時間必須包含明確時區偏移或 Z 後綴。",
-  "apiKeys.flash.error.expiryInvalid": "到期時間必須是有效的 ISO 8601 timestamp。",
+  "apiKeys.flash.error.expiryInvalid":
+    "到期時間必須是有效的 ISO 8601 timestamp。",
   "apiKeys.flash.error.keyNameRequired": "API 金鑰名稱為必填。",
-  "apiKeys.flash.error.apiKeySelectionRequired": "此操作必須先選擇一組 API 金鑰。",
+  "apiKeys.flash.error.apiKeySelectionRequired":
+    "此操作必須先選擇一組 API 金鑰。",
   "apiKeys.flash.error.revocationReasonRequired": "撤銷原因為必填。",
 
   // ── costCenters (i18n-fullsweep 20260614) ──
@@ -6017,8 +6182,7 @@ const zh: Record<keyof typeof en, string> = {
   "rules.form.timeoutHoursOverride": "審批逾時覆寫（小時）",
   "rules.form.timeoutHoursOverridePlaceholder": "24",
   "rules.conditions.title": "條件",
-  "rules.conditions.hint":
-    "每個條件都會先對照訂單與額度快照，再套用規則動作。",
+  "rules.conditions.hint": "每個條件都會先對照訂單與額度快照，再套用規則動作。",
   "rules.conditions.field": "條件 {index}",
   "rules.conditions.operator": "運算子",
   "rules.conditions.valueKind": "值型別",
@@ -6046,8 +6210,7 @@ const zh: Record<keyof typeof en, string> = {
     "這裡會執行與後端一致的審批評估流程，再決定訂單是否需要進入審批。",
   "rules.dryRun.reservationWindowStart": "預約時窗起點",
   "rules.dryRun.reservationWindowStartExample": "2026-06-01T09:30:00+08:00",
-  "rules.dryRun.reservationWindowStartPlaceholder":
-    "2026-06-01T09:30:00+08:00",
+  "rules.dryRun.reservationWindowStartPlaceholder": "2026-06-01T09:30:00+08:00",
   "rules.dryRun.amountMinor": "金額 minor",
   "rules.dryRun.amountMinorExample": "180000",
   "rules.dryRun.amountMinorPlaceholder": "180000",
@@ -6086,7 +6249,8 @@ const zh: Record<keyof typeof en, string> = {
   "rules.evaluation.emptyMatchedDescription":
     "此輸入會直接落到額度政策與預設審批行為。",
   "rules.evaluation.planTitle": "評估結果",
-  "rules.evaluation.planSubtitle": "檢視額度影響、審批鏈、逾時與 fallback 政策。",
+  "rules.evaluation.planSubtitle":
+    "檢視額度影響、審批鏈、逾時與 fallback 政策。",
   "rules.evaluation.quotaImpact": "{scope} {dimension}：觸發 {trigger}",
   "rules.evaluation.timeout": "逾時",
   "rules.evaluation.noApprovalPlan": "此次評估沒有產生審批鏈。",
@@ -6115,7 +6279,8 @@ const zh: Record<keyof typeof en, string> = {
   "rules.pendingQueue.subtitle": "近期仍在等待租戶 approver 處理的審批請求。",
   "rules.pendingQueue.ruleDue": "共命中 {count} 條規則。逾時時間：{dueAt}。",
   "rules.pendingQueue.emptyTitle": "目前沒有待審批請求",
-  "rules.pendingQueue.emptyDescription": "目前沒有 approver 尚未處理的審批請求。",
+  "rules.pendingQueue.emptyDescription":
+    "目前沒有 approver 尚未處理的審批請求。",
   "rules.ledger.title": "額度 ledger",
   "rules.ledger.subtitle": "近期 reserve、release、consume 與 adjust 紀錄。",
   "rules.ledger.column.booking": "訂單",
@@ -6172,12 +6337,9 @@ const zh: Record<keyof typeof en, string> = {
   "rules.action.error.timestampInvalid": "{field} 不是有效時間戳。",
   "rules.action.error.requiredField": "{field} 為必填。",
   "rules.action.error.jsonInvalid": "{field} 必須是有效 JSON。",
-  "rules.action.error.unsupportedApprovalAction":
-    "不支援的規則動作：{value}。",
-  "rules.action.error.unsupportedApprovalMode":
-    "不支援的審批模式：{value}。",
-  "rules.action.error.unsupportedConditionField":
-    "不支援的條件欄位：{value}。",
+  "rules.action.error.unsupportedApprovalAction": "不支援的規則動作：{value}。",
+  "rules.action.error.unsupportedApprovalMode": "不支援的審批模式：{value}。",
+  "rules.action.error.unsupportedConditionField": "不支援的條件欄位：{value}。",
   "rules.action.error.unsupportedConditionOperator":
     "不支援的條件運算子：{value}。",
   "rules.action.error.unsupportedApproverKind":
@@ -6187,8 +6349,7 @@ const zh: Record<keyof typeof en, string> = {
   "rules.action.error.unsupportedQuotaEnforcementMode":
     "不支援的額度 enforcement 模式：{value}。",
   "rules.action.error.conditionValueRequired": "每個條件都必須提供比較值。",
-  "rules.action.error.conditionNumberInvalid":
-    "條件值必須是數字：{value}。",
+  "rules.action.error.conditionNumberInvalid": "條件值必須是數字：{value}。",
   "rules.action.error.conditionBooleanInvalid":
     "布林條件只接受 true 或 false。",
   "rules.action.error.conditionRequired": "至少需要一個條件。",
@@ -6217,8 +6378,7 @@ const zh: Record<keyof typeof en, string> = {
   "rules.action.error.dryRunStartRequired":
     "dry run 評估必須提供預約時窗起點。",
   "rules.action.error.dryRunTitle": "無法評估規則",
-  "rules.action.error.dryRunDescription":
-    "請檢查 dry run 快照欄位後再試一次。",
+  "rules.action.error.dryRunDescription": "請檢查 dry run 快照欄位後再試一次。",
   "rules.action.success.ruleUpdatedTitle": "規則已更新",
   "rules.action.success.ruleCreatedTitle": "規則已建立",
   "rules.action.success.ruleSavedDescription":
@@ -6612,7 +6772,8 @@ const zh: Record<keyof typeof en, string> = {
   "invoices.meta.overdue": "{count} 筆逾期",
   "invoices.meta.expiredArtifacts": "{count} 筆檔案已過期",
   "invoices.summary.visible.label": "可見發票",
-  "invoices.summary.visible.caption": "套用狀態、期別與 id 篩選後的當前清單切片",
+  "invoices.summary.visible.caption":
+    "套用狀態、期別與 id 篩選後的當前清單切片",
   "invoices.summary.overdue.label": "逾期",
   "invoices.summary.overdue.caption": "緊急狀態需與一般已開立發票區分顯示",
   "invoices.summary.expired.label": "已過期檔案",
@@ -7344,31 +7505,38 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.errorLabel.statements": "對帳單",
   "dashboard.errorLabel.notifications": "通知",
   "dashboard.errorLabel.governance": "整合就緒度",
-  "dashboard.kpi.attentionBookingsActive": "有 {count} 筆訂單需要在 dispatch 或 proof 狀態追蹤處理。",
+  "dashboard.kpi.attentionBookingsActive":
+    "有 {count} 筆訂單需要在 dispatch 或 proof 狀態追蹤處理。",
   "dashboard.kpi.invoiceFilesVisible": "租戶帳務授權可見 {count} 份發票檔案。",
   "dashboard.empty.invoices": "此租戶情境目前沒有可用的發票檔案。",
   "dashboard.kpi.recentReminders": "首頁顯示了 {count} 則近期提醒。",
   "dashboard.empty.notificationsSnapshot": "目前快照沒有回傳任何租戶通知。",
   "dashboard.kpi.pendingChecklist": "有 {count} 項待辦的整合檢查清單。",
   "dashboard.empty.checklist": "沒有待辦的導入檢查清單項目。",
-  "dashboard.empty.integrationChecklist": "API 金鑰與 Webhook 導入目前沒有任何待辦的檢查清單項目。",
+  "dashboard.empty.integrationChecklist":
+    "API 金鑰與 Webhook 導入目前沒有任何待辦的檢查清單項目。",
   "dashboard.link.viewApiKeys": "查看 API 金鑰",
   "dashboard.link.viewWebhooks": "查看 Webhook",
   "dashboard.section.identity": "身分",
   "dashboard.section.identityTitle": "租戶授權上下文",
-  "dashboard.section.identitySub": "儀表板直接從後端讀取租戶身分，因此 actor 與 realm 都以授權來源為準。",
+  "dashboard.section.identitySub":
+    "儀表板直接從後端讀取租戶身分，因此 actor 與 realm 都以授權來源為準。",
   "dashboard.identity.tenant": "租戶",
   "dashboard.identity.authMode": "授權模式",
   "dashboard.value.noData": "無資料",
   "dashboard.section.notifications": "通知",
   "dashboard.section.notificationsTitle": "近期提醒",
-  "dashboard.section.notificationsSub": "平台與租戶通知都會留在工作面首頁，無需離開即可查看。",
+  "dashboard.section.notificationsSub":
+    "平台與租戶通知都會留在工作面首頁，無需離開即可查看。",
   "dashboard.empty.notifications": "目前沒有可顯示的租戶通知。",
   "dashboard.callout.enabledModules": "已啟用模組快照",
-  "dashboard.callout.flagsEnabled": "目前有 {count} 個功能旗標在此租戶情境啟用。",
-  "dashboard.callout.flagsUnavailable": "功能旗標明細目前無法取得，或沒有任何租戶專屬模組旗標啟用。",
+  "dashboard.callout.flagsEnabled":
+    "目前有 {count} 個功能旗標在此租戶情境啟用。",
+  "dashboard.callout.flagsUnavailable":
+    "功能旗標明細目前無法取得，或沒有任何租戶專屬模組旗標啟用。",
   "dashboard.callout.partialData": "部分資料警告",
-  "dashboard.callout.partialDataSub": "部分儀表板區塊已回退，因為目前的授權來源未回應所有讀取。",
+  "dashboard.callout.partialDataSub":
+    "部分儀表板區塊已回退，因為目前的授權來源未回應所有讀取。",
 };
 
 export const translations = { en, zh } as const;
