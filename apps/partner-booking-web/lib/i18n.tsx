@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
 import { PARTNER_LOCALE_COOKIE } from "./locale-config";
 import { type Locale, t as translate, translations } from "./translations";
 
@@ -31,9 +30,18 @@ export function LanguageProvider({
   defaultLocale?: Locale;
 }) {
   const [locale, setLocaleState] = useState<Locale>(defaultLocale);
-  const router = useRouter();
 
   useEffect(() => {
+    const requestedLocale = new URLSearchParams(window.location.search).get(
+      "locale",
+    ) as Locale | null;
+    if (requestedLocale && requestedLocale in translations) {
+      localStorage.setItem(PARTNER_LOCALE_COOKIE, requestedLocale);
+      document.cookie = `${PARTNER_LOCALE_COOKIE}=${requestedLocale};path=/;max-age=31536000;SameSite=Lax`;
+      setLocaleState(requestedLocale);
+      return;
+    }
+
     const stored = localStorage.getItem(PARTNER_LOCALE_COOKIE) as Locale | null;
     if (stored && stored in translations) {
       setLocaleState(stored);
@@ -42,21 +50,23 @@ export function LanguageProvider({
     setLocaleState(defaultLocale);
   }, [defaultLocale]);
 
-  const setLocale = useCallback(
-    (next: Locale) => {
-      setLocaleState((current) => {
-        if (current === next) {
-          return current;
-        }
+  const setLocale = useCallback((next: Locale) => {
+    setLocaleState((current) => {
+      if (current === next) {
+        return current;
+      }
 
-        localStorage.setItem(PARTNER_LOCALE_COOKIE, next);
-        document.cookie = `${PARTNER_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
-        router.refresh();
-        return next;
-      });
-    },
-    [router],
-  );
+      localStorage.setItem(PARTNER_LOCALE_COOKIE, next);
+      document.cookie = `${PARTNER_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
+
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set("locale", next);
+      window.location.assign(
+        `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`,
+      );
+      return next;
+    });
+  }, []);
 
   const value = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
 

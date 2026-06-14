@@ -7,12 +7,16 @@ import { t } from "@/lib/translations";
 
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: t("app.title", undefined, "zh"),
-  description: t("app.description", undefined, "zh"),
-};
-
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getServerLocale();
+
+  return {
+    title: t("app.title", undefined, locale),
+    description: t("app.description", undefined, locale),
+  };
+}
 
 export default async function RootLayout({
   children,

@@ -13,7 +13,7 @@ describe("partner-booking i18n dictionary", () => {
     expect(rootLayout).toContain('locale === "zh" ? "zh-Hant" : "en"');
   });
 
-  it("keeps root metadata zh-TW primary through the dictionary", () => {
+  it("generates root metadata from the resolved server locale", () => {
     const rootLayout = readFileSync(
       new URL("../../app/layout.tsx", import.meta.url),
       "utf8",
@@ -23,9 +23,27 @@ describe("partner-booking i18n dictionary", () => {
     expect(translations.zh["app.description"]).toBe(
       "DRTS 白標合作預約入口，依合作夥伴路由提供卡友機場接送與其他方案流程。",
     );
-    expect(rootLayout).toContain('title: t("app.title", undefined, "zh")');
+    expect(rootLayout).toContain("export async function generateMetadata");
+    expect(rootLayout).toContain('title: t("app.title", undefined, locale)');
     expect(rootLayout).toContain(
-      'description: t("app.description", undefined, "zh")',
+      'description: t("app.description", undefined, locale)',
+    );
+  });
+
+  it("generates tenant metadata from the resolved server locale", () => {
+    const tenantLayout = readFileSync(
+      new URL("../../app/[tenantSlug]/layout.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(tenantLayout).toContain("getServerLocale");
+    expect(tenantLayout).toContain("getTenantMetadataDescription");
+    expect(tenantLayout).toContain(
+      'title: `${brand.displayName} · ${t("app.title", undefined, locale)}`',
+    );
+    expect(tenantLayout).toContain('t("app.description", undefined, locale)');
+    expect(tenantLayout).toContain(
+      'return { title: t("app.title", undefined, locale) }',
     );
   });
 
