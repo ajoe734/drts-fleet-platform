@@ -3,6 +3,7 @@
 import { useEffect, useEffectEvent, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CanvasBtn, CanvasPill, buildCanvasTheme } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -19,12 +20,12 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
 
 function formatSnapshot(value: string | null) {
   if (!value) {
-    return "尚未取得快照";
+    return null;
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return "尚未取得快照";
+    return null;
   }
 
   return dateTimeFormatter.format(parsed);
@@ -36,6 +37,7 @@ export function IntegrationGovernanceRefreshControl({
   computedAt: string | null;
 }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [isPending, startTransition] = useTransition();
 
   const refreshPage = useEffectEvent(() => {
@@ -65,10 +67,14 @@ export function IntegrationGovernanceRefreshControl({
       }}
     >
       <CanvasPill theme={th} tone="info" dot>
-        T5 slow · 30s
+        {t("integrationGovernance.refresh.tier")}
       </CanvasPill>
       <CanvasPill theme={th} tone="neutral">
-        快照 {formatSnapshot(computedAt)}
+        {formatSnapshot(computedAt)
+          ? t("integrationGovernance.refresh.snapshot", {
+              value: formatSnapshot(computedAt) as string,
+            })
+          : t("integrationGovernance.refresh.noSnapshot")}
       </CanvasPill>
       <CanvasBtn
         theme={th}
@@ -78,7 +84,9 @@ export function IntegrationGovernanceRefreshControl({
         onClick={refreshPage}
         disabled={isPending}
       >
-        {isPending ? "更新中…" : "立即刷新"}
+        {isPending
+          ? t("refreshControl.refreshing")
+          : t("refreshControl.refresh")}
       </CanvasBtn>
     </div>
   );

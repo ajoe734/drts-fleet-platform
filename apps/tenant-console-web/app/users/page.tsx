@@ -24,6 +24,8 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -416,10 +418,10 @@ function getStateTone(status: TenantUserRoleRecord["status"]): CanvasTone {
   return "neutral";
 }
 
-function getStateLabel(status: TenantUserRoleRecord["status"]) {
-  if (status === "active") return "active";
-  if (status === "invited") return "pending_invite";
-  return "suspended";
+function getStateLabel(status: TenantUserRoleRecord["status"], locale: Locale) {
+  if (status === "active") return t("users.status.active", locale);
+  if (status === "invited") return t("users.status.pendingInvite", locale);
+  return t("users.status.suspended", locale);
 }
 
 function getRefreshTone(
@@ -432,9 +434,13 @@ function getRefreshTone(
   return "info";
 }
 
-function getRefreshSummary(metadata: UiRefreshMetadata | null) {
-  if (!metadata) return "backend did not return refreshMetadata";
-  return `${metadata.dataFreshness} · ${metadata.source} · staleAfter ${formatDurationMs(metadata.staleAfterMs)}`;
+function getRefreshSummary(metadata: UiRefreshMetadata | null, locale: Locale) {
+  if (!metadata) return t("users.refresh.summaryMissing", locale);
+  return t("users.refresh.summary", locale, {
+    freshness: metadata.dataFreshness,
+    source: metadata.source,
+    staleAfter: formatDurationMs(metadata.staleAfterMs),
+  });
 }
 
 function compareUsers(a: TenantUserRoleRecord, b: TenantUserRoleRecord) {
@@ -456,8 +462,10 @@ function compareRoles(a: TenantRoleCatalogRecord, b: TenantRoleCatalogRecord) {
   return a.roleCode.localeCompare(b.roleCode, "en");
 }
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
+function toErrorMessage(error: unknown, locale: Locale) {
+  return error instanceof Error
+    ? error.message
+    : t("users.error.unknown", locale);
 }
 
 function classifyFailureReason(message: string): EmptyReason {
@@ -601,63 +609,64 @@ function getEmptyStateConfig(
   reason: EmptyReason,
   nextAction: ResourceActionDescriptor | undefined,
   refreshHref: string | null,
+  locale: Locale,
 ): EmptyStateConfig {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "尚未開通使用者管理",
-        body: "租戶角色目錄尚未準備完成，無法建立或指派使用者。請先完成 tenant access provisioning。",
+        title: t("users.empty.notProvisioned.title", locale),
+        body: t("users.empty.notProvisioned.body", locale),
         tone: "info",
         icon: "info",
         nextAction,
       };
     case "fetch_failed":
       return {
-        title: "使用者資料讀取失敗",
-        body: "後端快照沒有成功回來。請重新整理，若持續失敗再進 audit 或支援流程。",
+        title: t("users.empty.fetchFailed.title", locale),
+        body: t("users.empty.fetchFailed.body", locale),
         tone: "danger",
         icon: "warn",
         ...(refreshHref
           ? {
               actionHref: refreshHref,
-              actionLabel: "重新整理",
+              actionLabel: t("users.empty.refresh", locale),
               actionIcon: "refresh" as const,
             }
           : {}),
       };
     case "permission_denied":
       return {
-        title: "目前身分無法檢視 /users",
-        body: "此頁是 tc_admin only。若這是異常授權狀態，請檢查跨 app audit 與 platform-admin role assignment。",
+        title: t("users.empty.permissionDenied.title", locale),
+        body: t("users.empty.permissionDenied.body", locale),
         tone: "warn",
         icon: "warn",
       };
     case "external_unavailable":
       return {
-        title: "外部身份依賴暫時不可用",
-        body: "租戶使用者清單可讀性受外部 identity / session 依賴影響。可先到 audit 查看近期 role 變更。",
+        title: t("users.empty.externalUnavailable.title", locale),
+        body: t("users.empty.externalUnavailable.body", locale),
         tone: "warn",
         icon: "warn",
         ...(refreshHref
           ? {
               actionHref: refreshHref,
-              actionLabel: "重新整理",
+              actionLabel: t("users.empty.refresh", locale),
               actionIcon: "refresh" as const,
             }
           : {}),
       };
     case "filtered_empty":
       return {
-        title: "篩選結果為空",
-        body: "目前 role / status 篩選沒有命中任何成員。放寬條件後會回到完整 roster。",
+        title: t("users.empty.filteredEmpty.title", locale),
+        body: t("users.empty.filteredEmpty.body", locale),
         tone: "neutral",
         icon: "warn",
       };
     case "no_data":
     default:
       return {
-        title: "租戶尚未有其他成員",
-        body: "目前只剩 tenant admin 或整個 roster 尚未建立。從 invite flow 加入第一位 operator / finance / viewer。",
+        title: t("users.empty.noData.title", locale),
+        body: t("users.empty.noData.body", locale),
         tone: "neutral",
         icon: "info",
         nextAction,
@@ -671,7 +680,7 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
   return new URL(link.route, appBaseUrl).toString();
 }
 
-async function loadUsersData(): Promise<UsersPageData> {
+async function loadUsersData(locale: Locale): Promise<UsersPageData> {
   const client = getTenantClient();
   const [identityResult, usersResult, rolesResult] = await Promise.allSettled([
     client.getIdentityContext() as Promise<IdentityContext>,
@@ -695,7 +704,7 @@ async function loadUsersData(): Promise<UsersPageData> {
       : [];
 
   if (usersResult.status === "rejected") {
-    const message = toErrorMessage(usersResult.reason);
+    const message = toErrorMessage(usersResult.reason, locale);
     failures.push({
       source: "users",
       message,
@@ -703,7 +712,7 @@ async function loadUsersData(): Promise<UsersPageData> {
     });
   }
   if (rolesResult.status === "rejected") {
-    const message = toErrorMessage(rolesResult.reason);
+    const message = toErrorMessage(rolesResult.reason, locale);
     failures.push({
       source: "roles",
       message,
@@ -716,7 +725,7 @@ async function loadUsersData(): Promise<UsersPageData> {
       identityResult.status === "fulfilled" ? identityResult.value : null,
     identityError:
       identityResult.status === "rejected"
-        ? toErrorMessage(identityResult.reason)
+        ? toErrorMessage(identityResult.reason, locale)
         : null,
     users,
     roles,
@@ -744,23 +753,23 @@ async function loadUsersData(): Promise<UsersPageData> {
   };
 }
 
-function getActionLabel(action: string) {
+function getActionLabel(action: string, locale: Locale) {
   switch (action) {
     case "invite":
     case "create_user":
     case "create_tenant_user":
-      return "邀請";
+      return t("users.action.invite", locale);
     case "resend_invitation":
     case "resend_invite":
-      return "重送邀請";
+      return t("users.action.resendInvite", locale);
     case "update_role":
     case "role":
     case "update_tenant_role":
-      return "更新角色";
+      return t("users.action.updateRole", locale);
     case "suspend":
-      return "停用";
+      return t("users.action.suspend", locale);
     case "refresh":
-      return "重新整理";
+      return t("users.action.refresh", locale);
     default:
       return action;
   }
@@ -864,11 +873,13 @@ function ActionDescriptorButton({
 
 function ActionDescriptorList({
   actions,
+  locale,
   size = "sm",
   excludeActions = [],
   resolveHref,
 }: {
   actions: ResourceActionDescriptor[];
+  locale: Locale;
   size?: "xs" | "sm" | "md";
   excludeActions?: string[];
   resolveHref?: (descriptor: ResourceActionDescriptor) => string | undefined;
@@ -884,7 +895,7 @@ function ActionDescriptorList({
         <ActionDescriptorButton
           key={descriptor.action}
           descriptor={descriptor}
-          label={getActionLabel(descriptor.action)}
+          label={getActionLabel(descriptor.action, locale)}
           size={size}
           href={resolveHref?.(descriptor)}
           {...(getActionIcon(descriptor.action)
@@ -937,9 +948,11 @@ function FilterPillLink({
 function EmptyStateBlock({
   reason,
   config,
+  locale,
 }: {
   reason: EmptyReason;
   config: EmptyStateConfig;
+  locale: Locale;
 }) {
   return (
     <div style={emptyStateStyle}>
@@ -960,7 +973,7 @@ function EmptyStateBlock({
       {config.nextAction ? (
         <ActionDescriptorButton
           descriptor={config.nextAction}
-          label={getActionLabel(config.nextAction.action)}
+          label={getActionLabel(config.nextAction.action, locale)}
           icon={config.nextAction.action === "refresh" ? "refresh" : "plus"}
         />
       ) : config.actionHref && config.actionLabel ? (
@@ -979,8 +992,8 @@ function getActorChip(identity: IdentityContext | null, tenantId: string) {
   return `${identity.actorId ?? identity.actorType} / ${identity.realm} / ${identity.tenantId ?? tenantId} / production`;
 }
 
-function getActorSummary(identity: IdentityContext | null) {
-  if (!identity) return "identity unavailable";
+function getActorSummary(identity: IdentityContext | null, locale: Locale) {
+  if (!identity) return t("users.actor.unavailable", locale);
   return `${identity.actorId ?? identity.actorType} · ${identity.authMode} · roles=${identity.roles.join(", ") || "none"}`;
 }
 
@@ -989,6 +1002,7 @@ export default async function UsersPage({
 }: {
   searchParams?: Promise<SearchParams>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const {
     identity,
@@ -1000,7 +1014,7 @@ export default async function UsersPage({
     emptyState,
     refreshMetadata: backendRefreshMetadata,
     crossAppLinks: backendCrossAppLinks,
-  } = await loadUsersData();
+  } = await loadUsersData(locale);
   const refreshHref = buildQueryString(resolvedSearchParams, {
     refreshedAt: Date.now().toString(),
   });
@@ -1043,6 +1057,7 @@ export default async function UsersPage({
             ? refreshAction
             : inviteAction),
         refreshHref,
+        locale,
       )
     : null;
 
@@ -1067,7 +1082,7 @@ export default async function UsersPage({
 
   const columns: CanvasTableColumn<UserRow>[] = [
     {
-      h: "姓名",
+      h: t("users.column.name", locale),
       k: "displayName",
       w: 200,
       r: (row) => (
@@ -1078,13 +1093,13 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "電子郵件",
+      h: t("users.column.email", locale),
       k: "email",
       mono: true,
       w: 220,
     },
     {
-      h: "角色",
+      h: t("users.column.role", locale),
       k: "roleCode",
       w: 180,
       r: (row) => (
@@ -1097,40 +1112,41 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "狀態",
+      h: t("users.column.status", locale),
       w: 130,
       r: (row) => (
         <CanvasPill theme={th} tone={getStateTone(row.status)} dot>
-          {getStateLabel(row.status)}
+          {getStateLabel(row.status, locale)}
         </CanvasPill>
       ),
     },
     {
-      h: "邀請時間",
+      h: t("users.column.invitedAt", locale),
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.invitedAt),
     },
     {
-      h: "最後登入",
+      h: t("users.column.lastLogin", locale),
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.lastLoginAt),
     },
     {
-      h: "更新",
+      h: t("users.column.updated", locale),
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.updatedAt),
     },
     {
-      h: "操作",
+      h: t("users.column.actions", locale),
       w: 260,
       r: (row) => (
         <div style={rowActionMetaStyle}>
           <div style={rowActionStyle}>
             <ActionDescriptorList
               actions={row.availableActions}
+              locale={locale}
               size="xs"
               excludeActions={["refresh"]}
             />
@@ -1144,12 +1160,13 @@ export default async function UsersPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="使用者"
-        subtitle="只有 tc_admin 可操作 · tenant_admin / operator / finance / viewer"
+        title={t("users.header.title", locale)}
+        subtitle={t("users.header.subtitle", locale)}
         actions={
           <>
             <ActionDescriptorList
               actions={availableActions}
+              locale={locale}
               resolveHref={(descriptor) =>
                 descriptor.action === "refresh" ? refreshHref : undefined
               }
@@ -1164,8 +1181,14 @@ export default async function UsersPage({
             theme={th}
             tone={getRefreshTone(backendRefreshMetadata)}
             icon="refresh"
-            title={`Snapshot ${formatUpdated(backendRefreshMetadata.generatedAt)}`}
-            body={`Refresh tier T5 · ${TENANT_REFRESH_TIER} · cadence ${TENANT_REFRESH_CADENCE_MS / 1000}s · ${getRefreshSummary(backendRefreshMetadata)}`}
+            title={t("users.refresh.snapshotTitle", locale, {
+              value: formatUpdated(backendRefreshMetadata.generatedAt),
+            })}
+            body={t("users.refresh.body", locale, {
+              tier: TENANT_REFRESH_TIER,
+              cadence: TENANT_REFRESH_CADENCE_MS / 1000,
+              summary: getRefreshSummary(backendRefreshMetadata, locale),
+            })}
           />
         ) : null}
 
@@ -1174,8 +1197,10 @@ export default async function UsersPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="身份上下文讀取失敗"
-            body={`IdentityContext 無法讀取，因此頁面改以 tenant users snapshot 推導 tenant 範圍。${identityError}`}
+            title={t("users.banner.identityError.title", locale)}
+            body={t("users.banner.identityError.body", locale, {
+              error: identityError,
+            })}
           />
         ) : null}
 
@@ -1184,7 +1209,7 @@ export default async function UsersPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="頁面處於 degraded state"
+            title={t("users.banner.degraded.title", locale)}
             body={failures
               .map(
                 (failure) =>
@@ -1196,71 +1221,91 @@ export default async function UsersPage({
 
         <div style={stripGridStyle}>
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>網站地圖／進入</div>
+            <div style={stripLabelStyle}>
+              {t("users.strip.sitemap.label", locale)}
+            </div>
             <div style={routeCodeStyle}>/users</div>
             <div style={stripValueStyle}>
-              Sidebar · tenant access management
+              {t("users.strip.sitemap.value", locale)}
             </div>
             <div style={hintCopyStyle}>
-              Entry from sidebar or action receipt deep link.
+              {t("users.strip.sitemap.hint", locale)}
             </div>
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>標頭標籤</div>
+            <div style={stripLabelStyle}>
+              {t("users.strip.actor.label", locale)}
+            </div>
             <div style={stripValueStyle}>
               {getActorChip(identity, tenantId)}
             </div>
-            <div style={hintCopyStyle}>{getActorSummary(identity)}</div>
+            <div style={hintCopyStyle}>{getActorSummary(identity, locale)}</div>
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>名冊快照</div>
+            <div style={stripLabelStyle}>
+              {t("users.strip.roster.label", locale)}
+            </div>
             <div style={pillRowStyle}>
               <CanvasPill theme={th} tone="accent">
-                {formatCount(users.length)} users
+                {t("users.strip.roster.users", locale, {
+                  count: formatCount(users.length),
+                })}
               </CanvasPill>
               <CanvasPill theme={th} tone="success">
-                {formatCount(activeUsers)} active
+                {t("users.strip.roster.active", locale, {
+                  count: formatCount(activeUsers),
+                })}
               </CanvasPill>
               <CanvasPill theme={th} tone="warn">
-                {formatCount(invitedUsers)} pending_invite
+                {t("users.strip.roster.pendingInvite", locale, {
+                  count: formatCount(invitedUsers),
+                })}
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
-                {formatCount(suspendedUsers)} suspended
+                {t("users.strip.roster.suspended", locale, {
+                  count: formatCount(suspendedUsers),
+                })}
               </CanvasPill>
             </div>
             <div style={hintCopyStyle}>
-              latest roster update{" "}
-              {latestUpdated ? formatUpdated(latestUpdated) : "—"}
+              {t("users.strip.roster.hint", locale, {
+                value: latestUpdated ? formatUpdated(latestUpdated) : "—",
+              })}
             </div>
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>跨應用稽核</div>
+            <div style={stripLabelStyle}>
+              {t("users.strip.crossApp.label", locale)}
+            </div>
             <div style={stripValueStyle}>
-              Tenant same-tab · ops/platform new-tab
+              {t("users.strip.crossApp.value", locale)}
             </div>
             <div style={hintCopyStyle}>
-              Cross-app access traces stay explicit so tenant admins can follow
-              platform-owned changes without losing their current roster view.
+              {t("users.strip.crossApp.hint", locale)}
             </div>
           </div>
         </div>
 
         <div style={summaryGridStyle}>
-          <CanvasCard theme={th} title="篩選" subtitle="role + status">
+          <CanvasCard
+            theme={th}
+            title={t("users.filter.title", locale)}
+            subtitle={t("users.filter.subtitle", locale)}
+          >
             <div style={stackStyle}>
               <CanvasField
                 theme={th}
-                label="角色"
-                hint="依 packet §5.7，必須可按角色檢視。"
+                label={t("users.filter.role.label", locale)}
+                hint={t("users.filter.role.hint", locale)}
               >
                 <div style={pillRowStyle}>
                   <FilterPillLink
                     href={allRoleHref}
                     active={roleFilter === "all"}
-                    label="all roles"
+                    label={t("users.filter.allRoles", locale)}
                     tone="accent"
                   />
                   {roles.map((role) => (
@@ -1279,14 +1324,14 @@ export default async function UsersPage({
 
               <CanvasField
                 theme={th}
-                label="狀態"
-                hint="active / invited / suspended 都必須分開辨識。"
+                label={t("users.filter.status.label", locale)}
+                hint={t("users.filter.status.hint", locale)}
               >
                 <div style={pillRowStyle}>
                   <FilterPillLink
                     href={allStatusHref}
                     active={statusFilter === "all"}
-                    label="all states"
+                    label={t("users.filter.allStates", locale)}
                     tone="accent"
                   />
                   <FilterPillLink
@@ -1294,7 +1339,7 @@ export default async function UsersPage({
                       status: "active",
                     })}
                     active={statusFilter === "active"}
-                    label="active"
+                    label={t("users.status.active", locale)}
                     tone="success"
                   />
                   <FilterPillLink
@@ -1302,7 +1347,7 @@ export default async function UsersPage({
                       status: "invited",
                     })}
                     active={statusFilter === "invited"}
-                    label="pending_invite"
+                    label={t("users.status.pendingInvite", locale)}
                     tone="warn"
                   />
                   <FilterPillLink
@@ -1310,7 +1355,7 @@ export default async function UsersPage({
                       status: "suspended",
                     })}
                     active={statusFilter === "suspended"}
-                    label="suspended"
+                    label={t("users.status.suspended", locale)}
                     tone="neutral"
                   />
                 </div>
@@ -1320,8 +1365,8 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="權限／更新"
-            subtitle="tc_admin 防護 + T5 快照鮮度"
+            title={t("users.perms.title", locale)}
+            subtitle={t("users.perms.subtitle", locale)}
           >
             <div style={stackStyle}>
               <div style={metricGridStyle}>
@@ -1329,14 +1374,18 @@ export default async function UsersPage({
                   <div style={metricValueStyle}>
                     {formatCount(emptyReason ? 0 : filteredUsers.length)}
                   </div>
-                  <div style={metricLabelStyle}>visible rows</div>
+                  <div style={metricLabelStyle}>
+                    {t("users.perms.visibleRows", locale)}
+                  </div>
                 </div>
                 <div style={metricCardStyle}>
                   <div style={metricValueStyle}>
                     {formatCount(assignableRoles.length)} /{" "}
                     {formatCount(roles.length)}
                   </div>
-                  <div style={metricLabelStyle}>assignable roles</div>
+                  <div style={metricLabelStyle}>
+                    {t("users.perms.assignableRoles", locale)}
+                  </div>
                 </div>
               </div>
 
@@ -1345,51 +1394,52 @@ export default async function UsersPage({
                 cols={1}
                 items={[
                   {
-                    k: "Primary persona",
-                    v: "tc_admin only",
+                    k: t("users.perms.dl.persona.k", locale),
+                    v: t("users.perms.dl.persona.v", locale),
                     mono: true,
                   },
                   {
-                    k: "Entry / exit",
-                    v: "sidebar → /users · audit deep links only",
+                    k: t("users.perms.dl.entry.k", locale),
+                    v: t("users.perms.dl.entry.v", locale),
                     mono: true,
                   },
                   {
-                    k: "Must-support actions",
+                    k: t("users.perms.dl.mustSupport.k", locale),
                     v:
                       sortAvailableActions(availableActions)
                         .map((descriptor) => descriptor.action)
-                        .join(" / ") || "runtime_unavailable",
+                        .join(" / ") ||
+                      t("users.perms.runtimeUnavailable", locale),
                     mono: true,
                   },
                   {
-                    k: "Refresh tier",
+                    k: t("users.perms.dl.refreshTier.k", locale),
                     v: `T5 / ${TENANT_REFRESH_TIER} / ${TENANT_REFRESH_CADENCE_MS / 1000}s`,
                     mono: true,
                   },
                   {
-                    k: "Snapshot generated",
+                    k: t("users.perms.dl.snapshotGenerated.k", locale),
                     v: backendRefreshMetadata
                       ? formatUpdated(backendRefreshMetadata.generatedAt)
-                      : "runtime_unavailable",
+                      : t("users.perms.runtimeUnavailable", locale),
                     mono: true,
                   },
                   {
-                    k: "Freshness / source",
+                    k: t("users.perms.dl.freshnessSource.k", locale),
                     v: backendRefreshMetadata
                       ? `${backendRefreshMetadata.dataFreshness} / ${backendRefreshMetadata.source}`
-                      : "runtime_unavailable",
+                      : t("users.perms.runtimeUnavailable", locale),
                     mono: true,
                   },
                   {
-                    k: "Stale after",
+                    k: t("users.perms.dl.staleAfter.k", locale),
                     v: backendRefreshMetadata
                       ? formatDurationMs(backendRefreshMetadata.staleAfterMs)
-                      : "runtime_unavailable",
+                      : t("users.perms.runtimeUnavailable", locale),
                     mono: true,
                   },
                   {
-                    k: "Tenant audit",
+                    k: t("users.perms.dl.tenantAudit.k", locale),
                     v: "/audit?resourceType=tenant_user_role",
                     mono: true,
                   },
@@ -1401,12 +1451,16 @@ export default async function UsersPage({
 
         <CanvasCard
           theme={th}
-          title="租戶名冊"
-          subtitle="使用者 id · 顯示名稱 · 電子郵件 · 角色 · 狀態 · 邀請時間 · 最後登入 · 更新"
+          title={t("users.roster.title", locale)}
+          subtitle={t("users.roster.subtitle", locale)}
           padding={0}
         >
           {emptyReason && emptyConfig ? (
-            <EmptyStateBlock reason={emptyReason} config={emptyConfig} />
+            <EmptyStateBlock
+              reason={emptyReason}
+              config={emptyConfig}
+              locale={locale}
+            />
           ) : (
             <CanvasTable<UserRow>
               theme={th}
@@ -1419,8 +1473,8 @@ export default async function UsersPage({
         <div style={supportingGridStyle}>
           <CanvasCard
             theme={th}
-            title="角色目錄"
-            subtitle="角色目錄仍由後端擁有"
+            title={t("users.roleCatalog.title", locale)}
+            subtitle={t("users.roleCatalog.subtitle", locale)}
           >
             {roles.length > 0 ? (
               <div style={roleListStyle}>
@@ -1441,27 +1495,28 @@ export default async function UsersPage({
                       {role.description}
                     </div>
                     <div style={compactMetaStyle}>
-                      {role.assignable ? "assignable" : "system-managed only"}
+                      {role.assignable
+                        ? t("users.roleCatalog.assignable", locale)
+                        : t("users.roleCatalog.systemManaged", locale)}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
               <div style={hintCopyStyle}>
-                角色目錄目前沒有資料。此區等待後端 role catalog 契約補齊，
-                不再本地推導 empty reason。
+                {t("users.roleCatalog.empty", locale)}
               </div>
             )}
           </CanvasCard>
 
           <CanvasCard
             theme={th}
-            title="跨應用稽核"
-            subtitle="影響租戶存取的 ops／platform 操作會在新分頁開啟"
+            title={t("users.crossApp.title", locale)}
+            subtitle={t("users.crossApp.subtitle", locale)}
           >
             <div style={cardStackStyle}>
               <div style={authorityMetaStyle}>
-                <span>跨應用深層連結</span>
+                <span>{t("users.crossApp.deepLink", locale)}</span>
                 <CanvasPill theme={th} tone="info">
                   new_tab
                 </CanvasPill>
@@ -1471,9 +1526,11 @@ export default async function UsersPage({
                   href="/audit?resourceType=tenant_user_role"
                   style={linkCardStyle}
                 >
-                  <span style={linkTitleStyle}>Tenant Console audit</span>
+                  <span style={linkTitleStyle}>
+                    {t("users.crossApp.auditTitle", locale)}
+                  </span>
                   <span style={linkMetaStyle}>
-                    same-tab filtered view for tenant-owned user actions
+                    {t("users.crossApp.auditMeta", locale)}
                   </span>
                 </a>
                 {crossAppLinks.map((link) => (
@@ -1504,50 +1561,52 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="操作契約"
-            subtitle="availableActions 決定每個 CTA；UI 不從角色推斷權限"
+            title={t("users.contract.title", locale)}
+            subtitle={t("users.contract.subtitle", locale)}
           >
             <CanvasDL
               theme={th}
               cols={1}
               items={[
                 {
-                  k: "Invite user",
+                  k: t("users.contract.invite.k", locale),
                   v: inviteAction
                     ? inviteAction.enabled
-                      ? "runtime-driven primary CTA"
-                      : `disabled · ${inviteAction.disabledReasonCode ?? "runtime"}`
-                    : "not returned in current snapshot",
+                      ? t("users.contract.invite.runtime", locale)
+                      : t("users.contract.invite.disabled", locale, {
+                          reason: inviteAction.disabledReasonCode ?? "runtime",
+                        })
+                    : t("users.contract.notReturned", locale),
                 },
                 {
-                  k: "Update role",
+                  k: t("users.contract.updateRole.k", locale),
                   v: userRows.some((row) =>
                     row.availableActions.some((action) =>
                       rowRoleActionNames.includes(action.action),
                     ),
                   )
-                    ? "row-level runtime action"
-                    : "not returned in current snapshot",
+                    ? t("users.contract.updateRole.runtime", locale)
+                    : t("users.contract.notReturned", locale),
                 },
                 {
-                  k: "Suspend",
+                  k: t("users.contract.suspend.k", locale),
                   v: userRows.some((row) =>
                     row.availableActions.some((action) =>
                       rowSuspendActionNames.includes(action.action),
                     ),
                   )
-                    ? "high risk row action"
-                    : "not returned in current snapshot",
+                    ? t("users.contract.suspend.runtime", locale)
+                    : t("users.contract.notReturned", locale),
                 },
                 {
-                  k: "Resend invitation",
+                  k: t("users.contract.resend.k", locale),
                   v: userRows.some((row) =>
                     row.availableActions.some((action) =>
                       rowResendActionNames.includes(action.action),
                     ),
                   )
-                    ? "invited rows expose resend affordance"
-                    : "not returned in current snapshot",
+                    ? t("users.contract.resend.runtime", locale)
+                    : t("users.contract.notReturned", locale),
                 },
               ]}
             />
