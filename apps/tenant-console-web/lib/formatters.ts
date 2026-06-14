@@ -16,7 +16,7 @@ export function formatDateTime(
   locale: Locale = "en",
 ) {
   if (!value) {
-    return t("formatters.notAvailable", locale);
+    return t("dashboard.value.noData", locale);
   }
 
   return new Intl.DateTimeFormat(toIntlLocale(locale), {
@@ -38,7 +38,7 @@ export function formatMoney(
   locale: Locale = "en",
 ) {
   if (!value) {
-    return t("formatters.notAvailable", locale);
+    return t("dashboard.value.noData", locale);
   }
 
   return new Intl.NumberFormat(toIntlLocale(locale), {
