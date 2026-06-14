@@ -404,7 +404,7 @@ function getActionAssistiveCopy(
     });
   }
   if (!action.enabled) {
-    return "無資料";
+    return t("integrationGovernance.action.noData", locale);
   }
   return undefined;
 }
