@@ -469,3 +469,50 @@ describe("BillingSettlementService settlement matrix", () => {
     expect(statement.direction).toBe("issuer_pays_drts");
   });
 });
+
+describe("BillingSettlementService referral settlement (drts_pays_partner)", () => {
+  it("builds a referral statement with per-trip share, GMV, and active riders", () => {
+    const service = createService();
+    const statement = service.getReferralStatement(
+      "referral-demo-community",
+      "2026-06",
+    );
+    expect(statement.channelKey).toBe(PARTNER_REFERRAL_CHANNEL_KEY);
+    expect(statement.direction).toBe(
+      REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+    );
+    // 2 seeded referral trips in 2026-06: fares 60000 + 90000 = 150000 GMV.
+    expect(statement.totals.tripCount).toBe(2);
+    expect(statement.totals.activeRiderCount).toBe(2);
+    expect(statement.totals.gmv.amountMinor).toBe(150000);
+    // 15% percent rule → 9000 + 13500 = 22500 payable to the partner.
+    expect(statement.totals.shareTotal.amountMinor).toBe(22500);
+    expect(statement.lines).toHaveLength(2);
+    expect(statement.lines[0].rateType).toBe("percent");
+  });
+
+  it("resolves the active referral revenue-share rule for an attributed trip", () => {
+    const service = createService();
+    const rule = service.resolveReferralRevenueShareRule(
+      "referral-demo-community",
+      "2026-06-10T00:00:00Z",
+    );
+    expect(rule).not.toBeNull();
+    expect(rule?.rateType).toBe("percent");
+    expect(rule?.value).toBe(15);
+    expect(
+      service.resolveReferralRevenueShareRule("unknown-channel", "2026-06-10T00:00:00Z"),
+    ).toBeNull();
+  });
+
+  it("lists referral statements only for periods with attributed rides", async () => {
+    const service = createService();
+    const statements = await service.listReferralStatements(
+      "referral-demo-community",
+    );
+    expect(statements.length).toBeGreaterThanOrEqual(1);
+    expect(statements.every((s) => s.partnerEntrySlug === "referral-demo-community")).toBe(
+      true,
+    );
+  });
+});
