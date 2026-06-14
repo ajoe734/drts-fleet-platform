@@ -1,41 +1,29 @@
 import type { IdentityContext } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { type Locale, t } from "@/lib/translations";
 
+// Display label and summary for each role come from translations.ts keys
+// `role.<key>.label` / `role.<key>.summary`; consumers translate by `key`.
 export const FORMAL_TENANT_ROLE_FRAMING = [
   {
     key: "tenant_admin",
-    label: "Tenant admin",
     authorityRoles: ["tenant_admin"],
-    summary:
-      "Owns tenant-wide administration across users, booking policy, billing, reports, and integration governance.",
   },
   {
     key: "operator",
-    label: "Operator",
     authorityRoles: ["tenant_ops_admin"],
-    summary:
-      "Runs booking, passenger, address, and day-to-day operational workflows.",
   },
   {
     key: "finance_analyst",
-    label: "Finance / analyst",
     authorityRoles: ["tenant_finance_admin"],
-    summary:
-      "Reviews invoice, reporting, and audit follow-up authority for the tenant.",
   },
   {
     key: "integration_manager",
-    label: "Integration manager",
     authorityRoles: ["tenant_admin"],
-    summary:
-      "Current backend authority still carries API key issuance under tenant admin until a dedicated integration role code ships.",
   },
   {
     key: "viewer",
-    label: "Viewer",
     authorityRoles: ["tenant_viewer"],
-    summary:
-      "Read-only access to tenant-visible surfaces without mutation authority.",
   },
 ] as const;
 
@@ -67,8 +55,6 @@ export type TenantRoleSnapshot = {
   roles: string[];
   scopes: string[];
   activeFormalRoles: FormalTenantRoleKey[];
-  activeFormalLabels: string[];
-  roleCatalogBackedLabels: string[];
   capabilities: TenantPortalCapabilities;
   canManageUsers: boolean;
   canManageIntegrations: boolean;
@@ -141,10 +127,6 @@ function buildRoleSnapshot(identity: IdentityContext): TenantRoleSnapshot {
     roles,
     scopes,
     activeFormalRoles,
-    activeFormalLabels: FORMAL_TENANT_ROLE_FRAMING.filter((role) =>
-      activeFormalRoles.includes(role.key),
-    ).map((role) => role.label),
-    roleCatalogBackedLabels: roles.map(formatAuthorityRoleCode),
     capabilities,
     canManageUsers: capabilities.canManageUsers,
     canManageIntegrations:
@@ -167,8 +149,6 @@ export async function getTenantRoleSnapshot(): Promise<TenantRoleSnapshot> {
       roles: [],
       scopes: [],
       activeFormalRoles: [],
-      activeFormalLabels: [],
-      roleCatalogBackedLabels: [],
       capabilities: EMPTY_CAPABILITIES,
       canManageUsers: false,
       canManageIntegrations: false,
@@ -178,31 +158,48 @@ export async function getTenantRoleSnapshot(): Promise<TenantRoleSnapshot> {
   }
 }
 
-export function formatAuthorityRoleCode(roleCode: string): string {
-  switch (roleCode) {
-    case "tenant_admin":
-      return "Tenant Admin";
-    case "tenant_ops_admin":
-      return "Tenant Ops Admin";
-    case "tenant_finance_admin":
-      return "Tenant Finance Admin";
-    case "tenant_viewer":
-      return "Tenant Viewer";
-    default:
-      return roleCode;
+const KNOWN_AUTHORITY_ROLE_CODES = new Set([
+  "tenant_admin",
+  "tenant_ops_admin",
+  "tenant_finance_admin",
+  "tenant_viewer",
+]);
+
+export function formatAuthorityRoleCode(
+  roleCode: string,
+  locale: Locale = "zh",
+): string {
+  if (KNOWN_AUTHORITY_ROLE_CODES.has(roleCode)) {
+    return t(`role.code.${roleCode}`, locale);
   }
+  return roleCode;
 }
 
-export function describeRoleSnapshot(snapshot: TenantRoleSnapshot): string {
-  if (snapshot.activeFormalLabels.length > 0) {
-    return snapshot.activeFormalLabels.join(" / ");
+export function roleCatalogLabels(
+  snapshot: TenantRoleSnapshot,
+  locale: Locale = "zh",
+): string[] {
+  return snapshot.roles.map((roleCode) =>
+    formatAuthorityRoleCode(roleCode, locale),
+  );
+}
+
+export function describeRoleSnapshot(
+  snapshot: TenantRoleSnapshot,
+  locale: Locale = "zh",
+): string {
+  if (snapshot.activeFormalRoles.length > 0) {
+    return snapshot.activeFormalRoles
+      .map((roleKey) => t(`role.${roleKey}.label`, locale))
+      .join(" / ");
   }
 
-  if (snapshot.roleCatalogBackedLabels.length > 0) {
-    return snapshot.roleCatalogBackedLabels.join(" / ");
+  const catalogLabels = roleCatalogLabels(snapshot, locale);
+  if (catalogLabels.length > 0) {
+    return catalogLabels.join(" / ");
   }
 
-  return "Role context unavailable";
+  return t("role.unavailable", locale);
 }
 
 export function requireCapability(
@@ -221,44 +218,50 @@ export type TenantPortalNavItem = {
 
 export function getTenantPortalNavItems(
   snapshot: TenantRoleSnapshot,
+  locale: Locale = "zh",
 ): TenantPortalNavItem[] {
   const { capabilities } = snapshot;
-  const items: TenantPortalNavItem[] = [{ href: "/", label: "Home" }];
+  const items: TenantPortalNavItem[] = [
+    { href: "/", label: t("nav.home", locale) },
+  ];
 
   if (capabilities.canReadTenant) {
-    items.push({ href: "/booking-list", label: "Bookings" });
-    items.push({ href: "/passengers", label: "Passengers" });
-    items.push({ href: "/addresses", label: "Addresses" });
-    items.push({ href: "/notifications", label: "Notifications" });
-    items.push({ href: "/settings", label: "Settings" });
+    items.push({ href: "/booking-list", label: t("nav.bookings", locale) });
+    items.push({ href: "/passengers", label: t("nav.passengers", locale) });
+    items.push({ href: "/addresses", label: t("nav.addresses", locale) });
+    items.push({
+      href: "/notifications",
+      label: t("nav.notifications", locale),
+    });
+    items.push({ href: "/settings", label: t("nav.settings", locale) });
   }
 
   if (capabilities.canWriteTenant) {
-    items.push({ href: "/bookings/new", label: "New Booking" });
+    items.push({ href: "/bookings/new", label: t("nav.newBooking", locale) });
   }
 
   if (capabilities.canReadBilling) {
-    items.push({ href: "/billing", label: "Billing" });
+    items.push({ href: "/billing", label: t("nav.billing", locale) });
   }
 
   if (capabilities.canReadReports) {
-    items.push({ href: "/reports", label: "Reports" });
+    items.push({ href: "/reports", label: t("nav.reports", locale) });
   }
 
   if (capabilities.canReadWebhooks) {
-    items.push({ href: "/webhooks", label: "Webhooks" });
+    items.push({ href: "/webhooks", label: t("nav.webhooks", locale) });
   }
 
   if (capabilities.canViewApiKeys) {
-    items.push({ href: "/api-keys", label: "API Keys" });
+    items.push({ href: "/api-keys", label: t("nav.apiKeys", locale) });
   }
 
   if (capabilities.canViewUsers) {
-    items.push({ href: "/users", label: "Users" });
+    items.push({ href: "/users", label: t("nav.users", locale) });
   }
 
   if (capabilities.canReadAudit) {
-    items.push({ href: "/audit", label: "Audit" });
+    items.push({ href: "/audit", label: t("nav.audit", locale) });
   }
 
   return items;

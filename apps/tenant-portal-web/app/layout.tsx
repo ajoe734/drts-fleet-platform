@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { TenantPortalChrome } from "@/components/tenant-portal-chrome";
+import { TenantPortalLocaleToggle } from "@/components/tenant-portal-locale-toggle";
+import { LanguageProvider } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import {
   clearTenantPortalSession,
   getTenantPortalSession,
@@ -16,12 +20,11 @@ import {
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tenant Portal",
-  description:
-    "Tenant workspace for formal tenant roles, operational settings, and authority-driven governance surfaces.",
+  title: t("app.title"),
+  description: t("app.description"),
 };
 
-function SignOutForm() {
+function SignOutForm({ label }: { label: string }) {
   async function signOut() {
     "use server";
     await clearTenantPortalSession();
@@ -42,7 +45,7 @@ function SignOutForm() {
           cursor: "pointer",
         }}
       >
-        Sign out
+        {label}
       </button>
     </form>
   );
@@ -53,9 +56,12 @@ export default async function RootLayout({
 }: {
   children: ReactNode;
 }) {
+  const locale = await getServerLocale();
   const session = await getTenantPortalSession();
   const roleSnapshot = session ? await getTenantRoleSnapshot() : null;
-  const navItems = roleSnapshot ? getTenantPortalNavItems(roleSnapshot) : [];
+  const navItems = roleSnapshot
+    ? getTenantPortalNavItems(roleSnapshot, locale)
+    : [];
   const footer =
     session && roleSnapshot ? (
       <div style={{ display: "grid", gap: "0.75rem" }}>
@@ -64,18 +70,21 @@ export default async function RootLayout({
             {session.fullName}
           </div>
           <div>{session.email}</div>
-          <div>{describeRoleSnapshot(roleSnapshot)}</div>
+          <div>{describeRoleSnapshot(roleSnapshot, locale)}</div>
         </div>
-        <SignOutForm />
+        <TenantPortalLocaleToggle />
+        <SignOutForm label={t("shell.signOut", locale)} />
       </div>
     ) : null;
 
   return (
-    <html lang="en">
+    <html lang={locale === "zh" ? "zh-Hant" : "en"}>
       <body>
-        <TenantPortalChrome navItems={navItems} footer={footer}>
-          {children}
-        </TenantPortalChrome>
+        <LanguageProvider defaultLocale={locale}>
+          <TenantPortalChrome navItems={navItems} footer={footer}>
+            {children}
+          </TenantPortalChrome>
+        </LanguageProvider>
       </body>
     </html>
   );

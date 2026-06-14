@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import type { TenantPortalNavItem } from "@/lib/rbac";
 
 type TenantPortalChromeProps = {
@@ -17,6 +18,7 @@ export function TenantPortalChrome({
   footer,
 }: TenantPortalChromeProps) {
   const pathname = usePathname();
+  const { t } = useTranslation();
   const showSidebar = pathname !== "/login" && navItems.length > 0;
 
   if (!showSidebar) {
@@ -32,8 +34,8 @@ export function TenantPortalChrome({
       }}
     >
       <AppSidebar
-        brand="Tenant Portal"
-        brandSub="Authority-backed workspace"
+        brand={t("shell.brand")}
+        brandSub={t("shell.brandSub")}
         navItems={navItems}
         currentPath={pathname}
         footer={footer}
