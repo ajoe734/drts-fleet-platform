@@ -1,10 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
-import {
-  buildEmbedTheme,
-  getEntryHost,
-  type EmbedContext,
-} from "@/lib/embed-context";
+import type { EmbedContext } from "@/lib/embed-context";
+import { useTranslation } from "@/lib/i18n";
 import {
   embedReceipt,
   embedResident,
@@ -13,6 +12,7 @@ import {
   embedTripHistory,
   embedVehicles,
 } from "@/lib/embed-fixtures";
+import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
 
 function buildHref(context: EmbedContext, next: Record<string, string>) {
   const params = new URLSearchParams({
@@ -74,6 +74,7 @@ function EmbedShell({
   const theme = buildEmbedTheme(context.accent);
   const appName = context.strings.appName;
   const displayName = context.strings.displayName;
+  const { t } = useTranslation();
 
   return (
     <div
@@ -88,7 +89,7 @@ function EmbedShell({
         minHeight: "100vh",
         background: theme.neutralBg,
         padding: "24px 12px",
-        fontFamily: '"Noto Sans TC", "IBM Plex Sans", "Segoe UI", sans-serif',
+        fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
       }}
     >
       <div
@@ -120,7 +121,7 @@ function EmbedShell({
             }}
           >
             <span>9:41</span>
-            <span>webview</span>
+            <span>{t("embed.chrome.webview")}</span>
           </div>
           <div
             style={{
@@ -145,7 +146,9 @@ function EmbedShell({
               {displayName.slice(0, 1)}
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 800 }}>社區叫車</div>
+              <div style={{ fontSize: 16, fontWeight: 800 }}>
+                {t("embed.chrome.title")}
+              </div>
               <div style={{ fontSize: 11, opacity: 0.9 }}>
                 {appName} · {displayName}
               </div>
@@ -270,87 +273,97 @@ function ActionLink({
 
 function IdentityState({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const { t } = useTranslation();
   const handoffRows = [
-    ["社區簽章有效", "valid"],
-    ["住戶身分已解析", embedResident.name],
-    ["社區 / 戶別", embedResident.unit],
+    [t("embed.field.signature"), "valid"],
+    [t("embed.field.identity"), embedResident.name],
+    [t("embed.field.unit"), embedResident.unit],
   ];
   const bodyByState = {
     handoff: {
-      title: `以 ${context.strings.displayName} 身分為您準備叫車`,
-      badge: "handoff · 已交接",
+      title: t("embed.state.handoff.title", {
+        name: context.strings.displayName,
+      }),
+      badge: t("embed.state.handoff.badge"),
       tone: "success",
       footer: (
         <ActionLink
           href={buildHref(context, { screen: "book" })}
-          label="開始叫車"
+          label={t("embed.field.confirmRide")}
         />
       ),
+      message: t("embed.message.handoff", { appName: context.strings.appName }),
     },
     reauth: {
-      title: "登入狀態已逾時",
-      badge: "reauth_required",
+      title: t("embed.state.reauth.title"),
+      badge: t("embed.state.reauth.badge"),
       tone: "warn",
       footer: (
         <>
           <ActionLink
             href={buildHref(context, { state: "handoff" })}
-            label={`回 ${context.strings.appName} 重新進入`}
+            label={t("embed.field.returnToEntry", {
+              appName: context.strings.appName,
+            })}
           />
           <ActionLink
             href={buildHref(context, { state: "fallback" })}
-            label="稍後再試"
+            label={t("embed.field.tryLater")}
             tone="ghost"
           />
         </>
       ),
+      message: t("embed.message.reauth", { appName: context.strings.appName }),
     },
     unsupported: {
-      title: "無法在此環境開啟",
-      badge: "unsupported_host · 已封鎖",
+      title: t("embed.state.unsupported.title"),
+      badge: t("embed.state.unsupported.badge"),
       tone: "danger",
       footer: (
         <ActionLink
           href={buildHref(context, { state: "fallback" })}
-          label="前往獨立叫車網站"
+          label={t("embed.field.openStandalone")}
         />
       ),
+      message: t("embed.message.unsupported"),
     },
     consent: {
-      title: "授權使用叫車服務",
-      badge: "consent_required",
+      title: t("embed.state.consent.title"),
+      badge: t("embed.state.consent.badge"),
       tone: "info",
       footer: (
         <>
           <ActionLink
             href={buildHref(context, { state: "handoff", screen: "book" })}
-            label="同意並開始"
+            label={t("embed.field.agree")}
           />
           <ActionLink
             href={buildHref(context, { state: "fallback" })}
-            label="暫不使用"
+            label={t("embed.field.notNow")}
             tone="ghost"
           />
         </>
       ),
+      message: t("embed.message.consent"),
     },
     fallback: {
-      title: "內嵌服務暫時無法使用",
-      badge: "fallback_to_web · 改用網站",
+      title: t("embed.state.fallback.title"),
+      badge: t("embed.state.fallback.badge"),
       tone: "warn",
       footer: (
         <>
           <ActionLink
             href={buildHref(context, { state: "fallback", screen: "receipt" })}
-            label="前往獨立叫車網站"
+            label={t("embed.field.openStandalone")}
           />
           <ActionLink
             href={buildHref(context, { state: "handoff" })}
-            label="回社區 App"
+            label={t("embed.field.returnToApp")}
             tone="ghost"
           />
         </>
       ),
+      message: t("embed.message.fallback"),
     },
   } as const;
 
@@ -375,7 +388,10 @@ function IdentityState({ context }: { context: EmbedContext }) {
       <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.25 }}>
         {current.title}
       </div>
-      <Card title="身分交接摘要" subtitle="signed handoff token">
+      <Card
+        title={t("embed.card.handoffSummary")}
+        subtitle={t("embed.card.handoffSubtitle")}
+      >
         {handoffRows.map(([label, value]) => (
           <div
             key={label}
@@ -398,35 +414,28 @@ function IdentityState({ context }: { context: EmbedContext }) {
             fontSize: 13,
           }}
         >
-          <span>DRTS Passenger</span>
-          <strong>{context.session?.drtsPassengerId || "未建立"}</strong>
+          <span>{t("embed.field.passengerId")}</span>
+          <strong>
+            {context.session?.drtsPassengerId || t("common.none")}
+          </strong>
         </div>
       </Card>
       <Card>
-        <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-          {context.state === "unsupported"
-            ? "目前來源不在授權宿主白名單內，基於安全考量已阻擋內嵌載入。"
-            : context.state === "reauth"
-              ? `為保護您的住戶帳號，請回到 ${context.strings.appName} 重新進入叫車。`
-              : context.state === "consent"
-                ? "首次使用需確認授權範圍，行程與收據會綁定既有住戶身分。"
-                : context.state === "fallback"
-                  ? "目前無法在社區 App 內完成叫車，改用獨立網站後仍可找回行程與收據。"
-                  : `免再登入，由 ${context.strings.appName} 安全帶入住戶身分。`}
-        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.6 }}>{current.message}</div>
       </Card>
     </EmbedShell>
   );
 }
 
 function FlowNav({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
   const screens: Array<[string, string]> = [
-    ["book", "叫車"],
-    ["trip", "進行中"],
-    ["trips", "歷史"],
-    ["receipt", "收據"],
-    ["completed", "完成"],
-    ["cancelled", "取消"],
+    ["book", t("embed.nav.book")],
+    ["trip", t("embed.nav.trip")],
+    ["trips", t("embed.nav.trips")],
+    ["receipt", t("embed.nav.receipt")],
+    ["completed", t("embed.nav.completed")],
+    ["cancelled", t("embed.nav.cancelled")],
   ];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -453,6 +462,8 @@ function FlowNav({ context }: { context: EmbedContext }) {
 }
 
 function CompactFlow({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
+
   const footer = (() => {
     switch (context.screen) {
       case "trip":
@@ -460,11 +471,13 @@ function CompactFlow({ context }: { context: EmbedContext }) {
           <>
             <ActionLink
               href={buildHref(context, { screen: "receipt" })}
-              label="聯絡司機 / 查看收據"
+              label={t("embed.field.contact")}
             />
             <ActionLink
               href={buildHref(context, { screen: "cancelled" })}
-              label={`取消行程 · 剩 ${embedTrip.cancelWindowMin} 分鐘`}
+              label={t("embed.field.cancelTrip", {
+                minutes: embedTrip.cancelWindowMin,
+              })}
               tone="danger"
             />
           </>
@@ -473,21 +486,21 @@ function CompactFlow({ context }: { context: EmbedContext }) {
         return (
           <ActionLink
             href={buildHref(context, { screen: "trips" })}
-            label="查看歷史行程"
+            label={t("embed.field.viewHistory")}
           />
         );
       case "completed":
         return (
           <ActionLink
             href={buildHref(context, { screen: "receipt" })}
-            label="查看收據"
+            label={t("embed.field.viewReceipt")}
           />
         );
       case "cancelled":
         return (
           <ActionLink
             href={buildHref(context, { screen: "book" })}
-            label="重新叫車"
+            label={t("embed.field.rebook")}
           />
         );
       case "nosupply":
@@ -498,11 +511,11 @@ function CompactFlow({ context }: { context: EmbedContext }) {
           <>
             <ActionLink
               href={buildHref(context, { screen: "book" })}
-              label="返回叫車表單"
+              label={t("embed.field.backToBook")}
             />
             <ActionLink
               href={buildHref(context, { screen: "trip" })}
-              label="查看既有行程"
+              label={t("embed.field.viewTrip")}
               tone="ghost"
             />
           </>
@@ -517,12 +530,12 @@ function CompactFlow({ context }: { context: EmbedContext }) {
                 fontSize: 13,
               }}
             >
-              <span>預估車資</span>
-              <strong>約 NT$ 290</strong>
+              <span>{t("common.estimatedFare")}</span>
+              <strong>{t("common.approxNtd", { amount: 290 })}</strong>
             </div>
             <ActionLink
               href={buildHref(context, { screen: "trip" })}
-              label="確認叫車"
+              label={t("embed.field.confirmRide")}
             />
           </>
         );
@@ -535,21 +548,42 @@ function CompactFlow({ context }: { context: EmbedContext }) {
       {context.screen === "book" ? (
         <>
           <Card
-            title={`${embedResident.name} · ${embedResident.unit}`}
+            title={t("embed.book.subtitle", {
+              name: embedResident.name,
+              unit: embedResident.unit,
+            })}
             subtitle={context.strings.displayName}
           >
             <div style={{ fontSize: 13, color: "var(--embed-neutral-fg)" }}>
-              已綁定 referral handoff session：
-              {context.session?.drtsPassengerId}
+              {t("embed.book.identity", {
+                id: context.session?.drtsPassengerId || t("common.none"),
+              })}
             </div>
           </Card>
-          <Card title="行程" subtitle="上車 · 下車 · 時間">
-            <div>上車地點：御和雲峰 A 棟 1F 大廳</div>
-            <div>下車地點：台北榮民總醫院 · 門診大樓</div>
-            <div>用車時間：現在出發</div>
-            <div>常用地點：{embedSavedPlaces.join(" · ")}</div>
+          <Card
+            title={t("embed.card.trip")}
+            subtitle={t("embed.card.tripSubtitle")}
+          >
+            <div>
+              {t("embed.field.pickup")}：{t("embed.book.pickup")}
+            </div>
+            <div>
+              {t("embed.field.dropoff")}：{t("embed.book.dropoff")}
+            </div>
+            <div>
+              {t("embed.field.when")}：{t("embed.book.now")}
+            </div>
+            <div>
+              {t("embed.field.savedPlaces")}：
+              {embedSavedPlaces
+                .map((place) => t(`embed.place.${place}`))
+                .join(" · ")}
+            </div>
           </Card>
-          <Card title="車種" subtitle="owned mobility">
+          <Card
+            title={t("embed.card.vehicles")}
+            subtitle={t("embed.card.vehiclesSubtitle")}
+          >
             {embedVehicles.map((vehicle) => (
               <div
                 key={vehicle.id}
@@ -559,14 +593,14 @@ function CompactFlow({ context }: { context: EmbedContext }) {
                   gap: 12,
                 }}
               >
-                <span>{vehicle.name}</span>
-                <span>{vehicle.note}</span>
+                <span>{t(`embed.vehicle.${vehicle.id}.name`)}</span>
+                <span>{t(`embed.vehicle.${vehicle.id}.note`)}</span>
               </div>
             ))}
           </Card>
-          <Card title="測試負向狀態">
+          <Card title={t("embed.card.negatives")}>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {["nosupply", "ineligible", "denied", "degraded"].map(
+              {(["nosupply", "ineligible", "denied", "degraded"] as const).map(
                 (screen) => (
                   <Link
                     key={screen}
@@ -578,7 +612,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
                         "1px solid color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)",
                     }}
                   >
-                    {screen}
+                    {t(`embed.book.negative.${screen}`)}
                   </Link>
                 ),
               )}
@@ -590,27 +624,35 @@ function CompactFlow({ context }: { context: EmbedContext }) {
       {context.screen === "trip" ? (
         <>
           <Card
-            title={`行程 ${embedTrip.id}`}
-            subtitle={`${embedTrip.status} · ${embedTrip.statusCode}`}
+            title={t("trip.snapshot.kicker", { id: embedTrip.id })}
+            subtitle={`${t(`embed.trip.status.${embedTrip.statusCode}`)} · ${embedTrip.statusCode}`}
           >
-            <div>上車：{embedTrip.from}</div>
-            <div>下車：{embedTrip.to}</div>
-            <div>ETA：{embedTrip.etaMin} 分鐘</div>
             <div>
-              司機：{embedTrip.driver} · {embedTrip.plate}
+              {t("embed.field.pickup")}：{t("embed.book.pickup")}
+            </div>
+            <div>
+              {t("embed.field.dropoff")}：{t("embed.book.dropoff")}
+            </div>
+            <div>
+              {t("embed.field.eta")}：{embedTrip.etaMin}
+            </div>
+            <div>
+              {t("embed.field.driver")}：{embedTrip.driver} · {embedTrip.plate}
             </div>
           </Card>
           <Card>
             <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-              此行程已綁定您的 referral passenger 身分。重開社區 App 後仍可透過
-              handoff session 找回。
+              {t("embed.trip.bound")}
             </div>
           </Card>
         </>
       ) : null}
 
       {context.screen === "trips" ? (
-        <Card title="歷史行程" subtitle="持久身分 · reopen-safe">
+        <Card
+          title={t("embed.card.history")}
+          subtitle={t("embed.card.historySubtitle")}
+        >
           {embedTripHistory.map((trip) => (
             <div
               key={trip.id}
@@ -623,10 +665,11 @@ function CompactFlow({ context }: { context: EmbedContext }) {
               }}
             >
               <strong>
-                {trip.id} · {trip.status}
+                {trip.id} · {t(`embed.history.${trip.status}`)}
               </strong>
               <span>
-                {trip.date} · {trip.from} → {trip.to}
+                {trip.date} · {t(`embed.place.${trip.from}`)} →{" "}
+                {t(`embed.place.${trip.to}`)}
               </span>
               <span>{trip.fare}</span>
             </div>
@@ -635,54 +678,52 @@ function CompactFlow({ context }: { context: EmbedContext }) {
       ) : null}
 
       {context.screen === "receipt" ? (
-        <Card title="收據" subtitle={embedReceipt.id}>
-          <div>完成時間：{embedReceipt.completedAt}</div>
+        <Card title={t("embed.card.receipt")} subtitle={embedReceipt.id}>
           <div>
-            乘客：{embedReceipt.passenger} · {embedReceipt.maskedPhone}
+            {t("embed.field.completedAt")}：{embedReceipt.completedAt}
           </div>
           <div>
-            路線：{embedReceipt.from} → {embedReceipt.to}
+            {t("embed.field.passenger")}：{embedReceipt.passenger} ·{" "}
+            {embedReceipt.maskedPhone}
           </div>
           <div>
-            車輛：{embedReceipt.vehicle} · {embedReceipt.plate}
+            {t("embed.field.route")}：{t("embed.place.station")} →{" "}
+            {t("embed.book.pickup")}
           </div>
-          <div>付款：{embedReceipt.pay}</div>
-          <div style={{ fontWeight: 900 }}>合計：{embedReceipt.total}</div>
+          <div>
+            {t("embed.field.vehicle")}：{t("embed.vehicle.standard.name")} ·{" "}
+            {embedReceipt.plate}
+          </div>
+          <div>
+            {t("embed.field.payment")}：{t("embed.receipt.pay")}
+          </div>
+          <div style={{ fontWeight: 900 }}>
+            {t("embed.field.total")}：{embedReceipt.total}
+          </div>
         </Card>
       ) : null}
 
       {context.screen === "completed" ? (
-        <Card title="行程已完成" subtitle="completed">
-          <div>本次行程已順利結束，可直接查看收據與歷史行程。</div>
+        <Card title={t("embed.card.completed")} subtitle="completed">
+          <div>{t("embed.completed.body")}</div>
         </Card>
       ) : null}
 
       {context.screen === "cancelled" ? (
-        <Card title="行程已取消" subtitle="cancelled">
-          <div>已保留取消結果與來源脈絡，不會丟失既有 handoff 乘客身分。</div>
+        <Card title={t("embed.card.cancelled")} subtitle="cancelled">
+          <div>{t("embed.cancelled.body")}</div>
         </Card>
       ) : null}
 
-      {["nosupply", "ineligible", "denied", "degraded"].includes(
-        context.screen,
+      {(["nosupply", "ineligible", "denied", "degraded"] as const).includes(
+        context.screen as "nosupply" | "ineligible" | "denied" | "degraded",
       ) ? (
         <Card
-          title={`負向狀態 · ${context.screen}`}
+          title={t("embed.card.negative", { screen: context.screen })}
           subtitle={context.strings.supportPhone}
         >
           <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-            {context.screen === "nosupply"
-              ? "附近暫無可派車輛，請稍後重試或改約時間。"
-              : null}
-            {context.screen === "ineligible"
-              ? "您的住戶身分目前未開通叫車服務，請洽社區管理中心。"
-              : null}
-            {context.screen === "denied"
-              ? "此次叫車請求未通過，請確認上下車地點是否在服務範圍內。"
-              : null}
-            {context.screen === "degraded"
-              ? "服務目前回應較慢，系統恢復後會自動繼續。"
-              : null}
+            {t(`embed.negative.${context.screen}`)}
           </div>
         </Card>
       ) : null}
@@ -691,11 +732,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
 }
 
 export function PassengerEmbed({ context }: { context: EmbedContext }) {
-  if (context.state === "handoff" && context.screen !== "book") {
-    return <CompactFlow context={context} />;
-  }
-
-  if (context.state === "handoff" && context.screen === "book") {
+  if (context.state === "handoff") {
     return <CompactFlow context={context} />;
   }
 
