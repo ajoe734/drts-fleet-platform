@@ -1107,6 +1107,181 @@ const en = {
   "billing.col.payoutStatus": "Payout",
 
   // ── settings (i18n-fullsweep 20260614) ──
+  "settings.value.notSet": "Not set",
+  "settings.value.unassigned": "Unassigned",
+  "settings.value.unlimited": "Unlimited",
+  "settings.value.unknownError": "Unknown error",
+  "settings.consent.notConfigured": "Not configured",
+  "settings.quota.perMonthTrips": "{count} trips / month",
+  "settings.quota.perMonthAmount": "{currency} {amount} / month",
+  "settings.quota.tripsRemaining": "{count} trips left",
+  "settings.quota.amountRemaining": "{currency} {amount} left",
+  "settings.policy.apiKeyLifetime": "{days} days (max {max} days)",
+  "settings.policy.webhookRetry": "{count} retries",
+  "settings.tooltip.refreshRuntime": "Refetch the current settings snapshot.",
+  "settings.tooltip.moduleRoutePending":
+    "This module is still handled by the settings posture; no standalone route yet.",
+  "settings.tooltip.routePending":
+    "This module route is not live yet; in-app navigation is unavailable.",
+  "settings.tooltip.unresolved":
+    "The backend provided this action descriptor, but settings has not defined a canonical destination.",
+  "settings.emptyReason.noData.title": "No tenant overrides",
+  "settings.emptyReason.noData.body":
+    "When a new tenant has not created custom notification or governance overrides, this is a valid empty state.",
+  "settings.emptyReason.notProvisioned.title": "Module not provisioned",
+  "settings.emptyReason.notProvisioned.body":
+    "For example, the webhook engine or a dedicated notification channel has not been provisioned for this tenant yet.",
+  "settings.emptyReason.fetchFailed.title": "Fetch failed",
+  "settings.emptyReason.fetchFailed.body":
+    "The backend could not return the current filtered result and must show the failure reason instead of pretending there is no data.",
+  "settings.emptyReason.permissionDenied.title": "Permission denied",
+  "settings.emptyReason.permissionDenied.body":
+    "The current actor only has a restricted posture and cannot operate this settings surface or data subset.",
+  "settings.emptyReason.externalUnavailable.title":
+    "External dependency degraded",
+  "settings.emptyReason.externalUnavailable.body":
+    "When the upstream identity, notification, or third-party delivery provider is faulty, keep the degraded explanation and a trace entry point.",
+  "settings.emptyReason.filteredEmpty.title": "Empty after filtering",
+  "settings.emptyReason.filteredEmpty.body":
+    "The current filter is too narrow, so the result is empty; this differs from truly having no data.",
+  "settings.emptyReason.unsupported.title": "Unsupported empty state",
+  "settings.emptyReason.unsupported.body":
+    "Tenant settings only supports the 6 EmptyReason values defined by the packet; any other value is treated as a contract mismatch.",
+  "settings.tag.identity": "Tenant identity",
+  "settings.tag.billing": "Billing settings",
+  "settings.tag.notifications": "Notification subscriptions",
+  "settings.tag.sla": "SLA thresholds",
+  "settings.tag.governance": "Integration governance",
+  "settings.tag.quota": "Tenant quota",
+  "settings.tag.users": "Tenant people",
+  "settings.tag.audit": "Tenant audit",
+  "settings.surface.billingData": "Billing data",
+  "settings.surface.notificationPrefs": "Notification preferences",
+  "settings.surface.sla": "SLA settings",
+  "settings.surface.apiKeys": "API keys",
+  "settings.surface.webhooks": "Webhook",
+  "settings.surface.people": "People & roles",
+  "settings.notifications.lastUpdated": "Last updated {time}",
+  "settings.notifications.baselineShown":
+    "Tenant subscriptions not overridden yet; showing governance baseline {time}",
+  "settings.notifications.noEvents": "No notification events configured yet",
+  "settings.runtime.refreshTier": "Refresh tier",
+  "settings.sitemap.general.title": "General",
+  "settings.sitemap.general.detail":
+    "Tenant code, billing data, identity, and default posture stay in this page overview; until the billing detail route lands, this page summary carries it.",
+  "settings.sitemap.notifications.title": "Notifications & SLA",
+  "settings.sitemap.notifications.detail":
+    "The notification event matrix and SLA thresholds are separate module routes; this page only shows posture.",
+  "settings.sitemap.integration.title": "Integration defaults",
+  "settings.sitemap.integration.detail":
+    "API key / webhook governance stays in the tenant app; feature rollout and platform-owned changes are explained via cross-app trace.",
+  "settings.sitemap.people.title": "People, privacy, cross-app",
+  "settings.sitemap.people.detail":
+    "Permissions, privacy consent, and platform-owned settings changes are linked via cross-app audit trace.",
+  "settings.sitemap.featureVisibility.title": "Feature visibility",
+  "settings.sitemap.featureVisibility.detail":
+    "Feature visibility is a read-scoped, platform-owned surface; settings only keeps the governance context and a new-tab trace.",
+  "settings.deepLink.platformAudit.title": "Platform audit",
+  "settings.deepLink.platformAudit.detail":
+    "When a platform admin changes feature rollout, billing governance, or a rollout gate, trace back to the platform-owned audit.",
+  "settings.deepLink.platformAudit.label": "Open platform-admin /audit",
+  "settings.deepLink.opsComplaints.title": "Ops complaints / incidents",
+  "settings.deepLink.opsComplaints.detail":
+    "If a settings change affects live bookings or webhook delivery, cross-app to ops-console to track incidents and manual handling.",
+  "settings.deepLink.opsComplaints.label": "Open ops-console /complaints",
+  "settings.deepLink.rolloutTrace.title": "Platform rollout trace",
+  "settings.deepLink.rolloutTrace.detail":
+    "Feature visibility is a platform-owned surface; this page only keeps posture—to trace tenant overrides or rollout gates, view it in platform-admin.",
+  "settings.deepLink.rolloutTrace.label": "Open platform-admin feature trace",
+  "settings.header.title": "Tenant settings",
+  "settings.header.subtitle":
+    "General · Notification defaults · Privacy · Integration defaults",
+  "settings.tab.general": "General",
+  "settings.tab.notifications": "Notifications",
+  "settings.tab.privacy": "Privacy",
+  "settings.tab.integration": "Integration",
+  "settings.banner.degraded.title":
+    "Some settings module snapshots are not fresh",
+  "settings.banner.noActions.title":
+    "The current actor has no backend actions available",
+  "settings.banner.noActions.body":
+    "Settings CTAs come directly from each module/list envelope's availableActions; if the backend provides none, the screen conservatively shows read-only.",
+  "settings.banner.legacy.title": "Some modules are still legacy payloads",
+  "settings.banner.legacy.body":
+    "Missing UiRefreshMetadata / ui-runtime envelope: {modules}",
+  "settings.banner.errors.title": "Some settings data could not be loaded",
+  "settings.refresh.label": "Refresh snapshot",
+  "settings.refresh.refreshing": "Refreshing...",
+  "settings.field.tenantCode": "Tenant code · tenant_code",
+  "settings.field.displayName": "Display name · display_name",
+  "settings.field.taxId": "Tax ID · tax_id",
+  "settings.field.billingContact": "Billing contact",
+  "settings.field.defaultLocale": "Default locale · default_locale",
+  "settings.field.timezone": "Default timezone · timezone",
+  "settings.status.cardTitle": "Current status",
+  "settings.status.enabledModules": "Enabled modules",
+  "settings.status.quota": "Quota",
+  "settings.status.webhookSignature": "Webhook signature",
+  "settings.status.privacy": "Privacy",
+  "settings.status.privacyValue": "Phone masking · relayed transfer",
+  "settings.status.consentVersion": "Consent version",
+  "settings.dl.authMode": "Auth mode",
+  "settings.dl.roleSummary": "Role summary",
+  "settings.dl.billingEmail": "Billing email",
+  "settings.dl.billingAddress": "Billing address",
+  "settings.dl.billingSnapshot": "Billing snapshot",
+  "settings.actions.cardTitle": "Available actions & posture",
+  "settings.actions.cardSubtitle":
+    "All header CTAs and the module shortcuts below come from runtime `availableActions`.",
+  "settings.sitemapCard.title": "Settings sitemap",
+  "settings.sitemapCard.subtitle":
+    "`/settings` keeps the overview; modules that have not landed fall back to this page posture or a cross-app trace.",
+  "settings.notifCard.subtitle": "Event code · route · status",
+  "settings.notifCard.empty": "No event notifications subscribed yet",
+  "settings.slaCard.title": "SLA & integration posture",
+  "settings.slaCard.subtitle":
+    "Wait / arrival / completion thresholds · monthly quota posture · governance defaults",
+  "settings.kpi.wait": "Wait",
+  "settings.kpi.waitSub": "Wait threshold",
+  "settings.kpi.arrival": "Arrival",
+  "settings.kpi.arrivalSub": "Arrival threshold",
+  "settings.kpi.completion": "Completion",
+  "settings.kpi.completionSub": "Completion threshold",
+  "settings.kpi.remainingQuota": "Remaining quota",
+  "settings.sla.apiKeyLifetimeLabel": "API key lifetime",
+  "settings.sla.webhookRetryLabel": "Webhook retry",
+  "settings.sla.webhookBaselineLabel": "Webhook baseline",
+  "settings.sla.webhookBaselineValue": "{count} items",
+  "settings.sla.enforcementLabel": "Enforcement mode",
+  "settings.sla.confirmedTripsLabel": "Confirmed trips",
+  "settings.sla.updatedLabel": "Updated",
+  "settings.deepLinkCard.title": "Cross-app deep links",
+  "settings.deepLinkCard.subtitle":
+    "Platform-owned / ops-owned traces always open in a new tab; settings keeps the owner-app pointer.",
+  "settings.capabilityCard.title": "Capabilities & integration readiness",
+  "settings.capabilityCard.subtitle":
+    "Tenant-available settings surfaces · webhook baseline · onboarding checklist",
+  "settings.capability.surfacesLabel": "Available settings surfaces",
+  "settings.capability.tenantStateLabel": "Tenant state",
+  "settings.capability.noPosture": "No posture items to disclose right now",
+  "settings.capability.webhookBaselineLabel": "Webhook baseline events",
+  "settings.capability.noBaseline": "No event baseline published yet",
+  "settings.checklist.bannerTitle":
+    "Integration readiness still has open items",
+  "settings.checklist.bannerBody":
+    "{count} checks still need confirmation; keep the pre-cutover capability framing.",
+  "settings.checklist.empty": "No additional pre-cutover checks right now",
+  "settings.emptyStateCard.title": "Runtime empty states",
+  "settings.emptyStateCard.subtitle":
+    "Each module's returned `emptyState` maps directly to the screen, no longer using query params or local mock data to demo.",
+  "settings.emptyStateCard.none":
+    "No module returned an `emptyState`; this page keeps the normal snapshot posture.",
+  "settings.notifTable.event": "Event",
+  "settings.notifTable.channel": "Channel",
+  "settings.notifTable.status": "Status",
+  "settings.notifTable.updated": "Updated",
+  "settings.notifTable.enabled": "On",
+  "settings.notifTable.disabled": "Off",
 
   // ── webhooks (i18n-fullsweep 20260614) ──
 
@@ -2512,6 +2687,175 @@ const zh: Record<keyof typeof en, string> = {
   "billing.col.payoutStatus": "撥付狀態",
 
   // ── settings (i18n-fullsweep 20260614) ──
+  "settings.value.notSet": "未設定",
+  "settings.value.unassigned": "未指派",
+  "settings.value.unlimited": "無上限",
+  "settings.value.unknownError": "未知錯誤",
+  "settings.consent.notConfigured": "尚未設定",
+  "settings.quota.perMonthTrips": "{count} 趟 / 月",
+  "settings.quota.perMonthAmount": "{currency} {amount} / 月",
+  "settings.quota.tripsRemaining": "{count} 趟剩餘",
+  "settings.quota.amountRemaining": "{currency} {amount} 剩餘",
+  "settings.policy.apiKeyLifetime": "{days} 天 (最長 {max} 天)",
+  "settings.policy.webhookRetry": "{count} 次重送",
+  "settings.tooltip.refreshRuntime": "重新抓取目前 settings snapshot。",
+  "settings.tooltip.moduleRoutePending":
+    "此 module 仍由 settings posture 承接；尚未提供獨立 route。",
+  "settings.tooltip.routePending":
+    "此 module route 尚未落地；目前不提供站內跳轉。",
+  "settings.tooltip.unresolved":
+    "後端已提供此 action descriptor，但 settings 尚未定義 canonical 導向。",
+  "settings.emptyReason.noData.title": "尚無租戶覆寫",
+  "settings.emptyReason.noData.body":
+    "新租戶尚未建立自訂通知與治理覆寫時，這是合法空狀態。",
+  "settings.emptyReason.notProvisioned.title": "模組未開通",
+  "settings.emptyReason.notProvisioned.body":
+    "例如 webhook engine 或專屬通知 channel 尚未為此 tenant provision。",
+  "settings.emptyReason.fetchFailed.title": "讀取失敗",
+  "settings.emptyReason.fetchFailed.body":
+    "後端無法提供目前篩選結果，必須顯示失敗原因，而不是假裝沒有資料。",
+  "settings.emptyReason.permissionDenied.title": "權限不足",
+  "settings.emptyReason.permissionDenied.body":
+    "當前 actor 只有受限 posture，不能操作這個設定面或資料子集。",
+  "settings.emptyReason.externalUnavailable.title": "外部依賴降級",
+  "settings.emptyReason.externalUnavailable.body":
+    "上游身分、通知或第三方 delivery 供應商異常時，要保留降級說明與 trace 入口。",
+  "settings.emptyReason.filteredEmpty.title": "篩選後無結果",
+  "settings.emptyReason.filteredEmpty.body":
+    "目前篩選條件過窄，因此結果為空；這與真正沒有資料不同。",
+  "settings.emptyReason.unsupported.title": "不支援的空狀態",
+  "settings.emptyReason.unsupported.body":
+    "tenant settings 僅支援 packet 定義的 6 種 EmptyReason；其餘值視為 contract mismatch。",
+  "settings.tag.identity": "租戶身分",
+  "settings.tag.billing": "計費設定",
+  "settings.tag.notifications": "通知訂閱",
+  "settings.tag.sla": "SLA 門檻",
+  "settings.tag.governance": "整合治理",
+  "settings.tag.quota": "租戶配額",
+  "settings.tag.users": "租戶人員",
+  "settings.tag.audit": "租戶稽核",
+  "settings.surface.billingData": "計費資料",
+  "settings.surface.notificationPrefs": "通知偏好",
+  "settings.surface.sla": "SLA 設定",
+  "settings.surface.apiKeys": "API 金鑰",
+  "settings.surface.webhooks": "Webhook",
+  "settings.surface.people": "人員與角色",
+  "settings.notifications.lastUpdated": "最後更新 {time}",
+  "settings.notifications.baselineShown":
+    "尚未覆寫租戶訂閱，顯示治理基線 {time}",
+  "settings.notifications.noEvents": "尚未設定任何通知事件",
+  "settings.runtime.refreshTier": "更新層級",
+  "settings.sitemap.general.title": "一般資料",
+  "settings.sitemap.general.detail":
+    "租戶代碼、計費資料、身分與預設 posture 留在此頁總覽；計費細節 route 尚未落地前，以本頁摘要承接。",
+  "settings.sitemap.notifications.title": "通知與 SLA",
+  "settings.sitemap.notifications.detail":
+    "通知事件矩陣與 SLA 門檻屬獨立 module route；此頁只顯示 posture。",
+  "settings.sitemap.integration.title": "整合預設",
+  "settings.sitemap.integration.detail":
+    "API key / webhook 治理留在 tenant app；feature rollout 與 platform-owned 變更從 cross-app trace 解釋。",
+  "settings.sitemap.people.title": "人員、隱私、跨 app",
+  "settings.sitemap.people.detail":
+    "權限、隱私同意與 platform-owned 設定變更用 cross-app audit trace 串起來。",
+  "settings.sitemap.featureVisibility.title": "功能可見性",
+  "settings.sitemap.featureVisibility.detail":
+    "feature visibility 是 read-scoped、platform-owned surface；settings 只保留治理脈絡與 new-tab trace。",
+  "settings.deepLink.platformAudit.title": "平台稽核",
+  "settings.deepLink.platformAudit.detail":
+    "平台管理員變更 feature rollout、billing governance 或 rollout gate 時，trace 回 platform-owned audit。",
+  "settings.deepLink.platformAudit.label": "前往 platform-admin /audit",
+  "settings.deepLink.opsComplaints.title": "營運客訴/事件",
+  "settings.deepLink.opsComplaints.detail":
+    "若設定變更影響現場訂單或 webhook 投遞，cross-app 到 ops-console 追事故與人工處置。",
+  "settings.deepLink.opsComplaints.label": "前往 ops-console /complaints",
+  "settings.deepLink.rolloutTrace.title": "平台 rollout trace",
+  "settings.deepLink.rolloutTrace.detail":
+    "功能可見性是 platform-owned surface；本頁只保留 posture，若需追 tenant override 或 rollout gate，從 platform-admin 查看。",
+  "settings.deepLink.rolloutTrace.label": "前往 platform-admin feature trace",
+  "settings.header.title": "租戶設定",
+  "settings.header.subtitle": "一般 · 通知預設 · 隱私 · 整合預設",
+  "settings.tab.general": "一般",
+  "settings.tab.notifications": "通知",
+  "settings.tab.privacy": "隱私",
+  "settings.tab.integration": "整合",
+  "settings.banner.degraded.title": "部分 settings module snapshot 不是 fresh",
+  "settings.banner.noActions.title": "目前 actor 沒有 backend 可用動作",
+  "settings.banner.noActions.body":
+    "settings CTA 直接取自各 module/list envelope 的 availableActions；若後端未提供，畫面會保守顯示 read-only。",
+  "settings.banner.legacy.title": "部分 module 仍是 legacy payload",
+  "settings.banner.legacy.body":
+    "缺少 UiRefreshMetadata / ui-runtime envelope：{modules}",
+  "settings.banner.errors.title": "部分設定資料無法載入",
+  "settings.refresh.label": "更新快照",
+  "settings.refresh.refreshing": "重新整理中…",
+  "settings.field.tenantCode": "租戶代碼 · tenant_code",
+  "settings.field.displayName": "顯示名稱 · display_name",
+  "settings.field.taxId": "統一編號 · tax_id",
+  "settings.field.billingContact": "計費聯絡人",
+  "settings.field.defaultLocale": "預設語系 · default_locale",
+  "settings.field.timezone": "預設時區 · timezone",
+  "settings.status.cardTitle": "當期狀態",
+  "settings.status.enabledModules": "啟用模組",
+  "settings.status.quota": "配額",
+  "settings.status.webhookSignature": "webhook 簽章",
+  "settings.status.privacy": "隱私",
+  "settings.status.privacyValue": "電話遮罩 · 中介轉接",
+  "settings.status.consentVersion": "同意書版本",
+  "settings.dl.authMode": "驗證模式",
+  "settings.dl.roleSummary": "角色摘要",
+  "settings.dl.billingEmail": "計費信箱",
+  "settings.dl.billingAddress": "計費地址",
+  "settings.dl.billingSnapshot": "計費快照",
+  "settings.actions.cardTitle": "可用動作與 posture",
+  "settings.actions.cardSubtitle":
+    "header CTA 與下列模組捷徑全部取自 runtime `availableActions`。",
+  "settings.sitemapCard.title": "設定 sitemap",
+  "settings.sitemapCard.subtitle":
+    "`/settings` 保留總覽；未落地 module 先回到本頁 posture 或 cross-app trace。",
+  "settings.notifCard.subtitle": "事件代碼 · 路由 · 狀態",
+  "settings.notifCard.empty": "尚未訂閱任何事件通知",
+  "settings.slaCard.title": "SLA 與整合姿態",
+  "settings.slaCard.subtitle": "等待 / 抵達 / 完成門檻 · 月配額姿態 · 治理預設",
+  "settings.kpi.wait": "等候",
+  "settings.kpi.waitSub": "等候門檻",
+  "settings.kpi.arrival": "抵達",
+  "settings.kpi.arrivalSub": "抵達門檻",
+  "settings.kpi.completion": "完成",
+  "settings.kpi.completionSub": "完成門檻",
+  "settings.kpi.remainingQuota": "剩餘配額",
+  "settings.sla.apiKeyLifetimeLabel": "API key 壽命",
+  "settings.sla.webhookRetryLabel": "webhook 重送",
+  "settings.sla.webhookBaselineLabel": "Webhook 基線",
+  "settings.sla.webhookBaselineValue": "{count} 項",
+  "settings.sla.enforcementLabel": "強制模式",
+  "settings.sla.confirmedTripsLabel": "已確認趟次",
+  "settings.sla.updatedLabel": "更新時間",
+  "settings.deepLinkCard.title": "跨應用深層連結",
+  "settings.deepLinkCard.subtitle":
+    "platform-owned / ops-owned trace 一律 new tab；settings 保留 owner app 指向。",
+  "settings.capabilityCard.title": "能力與整合準備",
+  "settings.capabilityCard.subtitle":
+    "租戶可用設定面 · webhook 基線 · onboarding checklist",
+  "settings.capability.surfacesLabel": "可用設定面",
+  "settings.capability.tenantStateLabel": "租戶狀態",
+  "settings.capability.noPosture": "目前沒有可揭露的 posture 項目",
+  "settings.capability.webhookBaselineLabel": "Webhook 基線事件",
+  "settings.capability.noBaseline": "尚未發佈事件基線",
+  "settings.checklist.bannerTitle": "整合準備仍有待辦",
+  "settings.checklist.bannerBody":
+    "{count} 項檢查仍需確認，保留 cutover 前的 capability framing。",
+  "settings.checklist.empty": "目前沒有額外切換前檢查項目",
+  "settings.emptyStateCard.title": "執行期空狀態",
+  "settings.emptyStateCard.subtitle":
+    "各 module 回傳的 `emptyState` 直接映射到畫面，不再用 query param 或本地假資料示範。",
+  "settings.emptyStateCard.none":
+    "目前沒有 module 回傳 `emptyState`；此頁維持正常 snapshot posture。",
+  "settings.notifTable.event": "事件",
+  "settings.notifTable.channel": "通道",
+  "settings.notifTable.status": "狀態",
+  "settings.notifTable.updated": "更新",
+  "settings.notifTable.enabled": "啟用",
+  "settings.notifTable.disabled": "停用",
 
   // ── webhooks (i18n-fullsweep 20260614) ──
 
