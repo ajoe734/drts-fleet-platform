@@ -1,15 +1,14 @@
 # syntax=docker/dockerfile:1.7
 #
-# PBK-UI-001 guardrail: this app is NOT deployed in Wave 5. The Dockerfile is
-# present so CI can prove the standalone build works end-to-end. Live deploy
-# decisions are tracked in PBK-UI-005 (new vs. legacy partner mode cutover).
+# Partner Booking is now part of the shared dev deploy: the same image serves
+# credit-card airport transfer, insurance replacement, and travel-agency flows.
 
 ARG NODE_VERSION=22-alpine
 FROM node:${NODE_VERSION} AS base
 
 LABEL org.opencontainers.image.source="drts-fleet-platform" \
       org.opencontainers.image.title="drts-partner-booking-web" \
-      org.opencontainers.image.description="DRTS Phase 1 white-label partner booking surface (CI build only in Wave 5)"
+      org.opencontainers.image.description="DRTS Phase 1 white-label partner booking surface"
 
 ENV CI=1 \
     HUSKY=0 \

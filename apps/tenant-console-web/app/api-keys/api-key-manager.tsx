@@ -376,7 +376,7 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return dateTimeFormatter.format(parsed);
+  return dateTimeFormatter.format(parsed).replace(/[\u00a0\u202f\u2009]/g, " ");
 }
 
 function isRevoked(apiKey: TenantApiKeyRecord) {
@@ -447,9 +447,9 @@ function getActionTone(action: ApiKeyActionKind): CanvasTone {
 }
 
 function getRiskLabel(action: ResourceActionDescriptor["riskLevel"]) {
-  if (action === "high") return "High";
-  if (action === "medium") return "Medium";
-  return "Low";
+  if (action === "high") return "高";
+  if (action === "medium") return "中";
+  return "低";
 }
 
 function getActionLabel(action: ApiKeyActionKind) {
@@ -619,7 +619,10 @@ export function ApiKeyManager({
   const router = useRouter();
   const [flash, setFlash] = useState<ApiKeyFlashPayload | null>(null);
   const [pending, startTransition] = useTransition();
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => {
+    const loadedAtMs = new Date(loadedAt).getTime();
+    return Number.isFinite(loadedAtMs) ? loadedAtMs : 0;
+  });
   const [statusFilter, setStatusFilter] = useState<ApiKeyStatusFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
@@ -914,7 +917,7 @@ export function ApiKeyManager({
 
   const columns: CanvasTableColumn<ApiKeyRow>[] = [
     {
-      h: "NAME",
+      h: "名稱",
       w: 290,
       r: (row) => {
         const state = resolveApiKeyState(row);
@@ -924,7 +927,7 @@ export function ApiKeyManager({
             <div style={nameMetaRowStyle}>
               <span>{row.apiKeyId}</span>
               {state === "revoked" ? (
-                <span>revoked {formatDateTime(row.revokedAt)}</span>
+                <span>已撤銷 {formatDateTime(row.revokedAt)}</span>
               ) : (
                 <>
                   <button
@@ -970,19 +973,19 @@ export function ApiKeyManager({
       },
     },
     {
-      h: "PREFIX",
+      h: "前綴",
       k: "keyPrefix",
       w: 110,
       mono: true,
     },
     {
-      h: "MASK",
+      h: "遮罩",
       w: 120,
       mono: true,
       r: (row) => `••••${row.maskedSuffix}`,
     },
     {
-      h: "SCOPE",
+      h: "範圍",
       w: 270,
       mono: true,
       r: (row) => (
@@ -992,25 +995,25 @@ export function ApiKeyManager({
       ),
     },
     {
-      h: "LAST",
+      h: "最近",
       w: 142,
       mono: true,
       r: (row) => formatDateTime(row.lastUsedAt),
     },
     {
-      h: "EXPIRES",
+      h: "到期",
       w: 142,
       mono: true,
       r: (row) => formatDateTime(row.expiresAt),
     },
     {
-      h: "REVOKED",
+      h: "撤銷",
       w: 142,
       mono: true,
       r: (row) => formatDateTime(row.revokedAt),
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 108,
       r: (row) => {
         const state = resolveApiKeyState(row);
@@ -1028,16 +1031,16 @@ export function ApiKeyManager({
       <CanvasPageHeader
         theme={th}
         title="API 金鑰"
-        subtitle="Live / sandbox · scope · last seen · 撤銷後永久不可復原"
-        tabs={["Inventory", "Issue / Rotate", "Governance"]}
-        activeTab="Inventory"
+        subtitle="正式／沙盒 · scope · 最近使用 · 撤銷後永久不可復原"
+        tabs={["清單", "建立／輪替", "治理"]}
+        activeTab="清單"
         actions={
           <>
             <CanvasBtn theme={th} icon="ext" size="sm">
               API 文件
             </CanvasBtn>
             <CanvasBtn theme={th} size="sm" onClick={() => router.refresh()}>
-              Refresh T5
+              刷新 T5
             </CanvasBtn>
             <CanvasBtn
               theme={th}
@@ -1059,15 +1062,15 @@ export function ApiKeyManager({
           tone="info"
           icon="warn"
           title="Q-TEN09: 完整明文只顯示一次"
-          body="Issue 與 rotate 成功後都只會在 modal 內揭露一次完整 key。關閉後僅保留 key prefix 與 masked suffix，遺失請重新輪替。"
+          body="建立與輪替成功後，都只會在視窗內揭露一次完整 key。關閉後僅保留 key prefix 與 masked suffix，遺失請重新輪替。"
         />
 
         <CanvasBanner
           theme={th}
           tone={refreshStateTone}
           icon="clock"
-          title={`T5 refresh tier · 每 30 秒輪詢一次${refreshAgeMs >= REFRESH_INTERVAL_MS ? " · 建議立即刷新" : ""}`}
-          body={`目前快照建立於 ${formatDateTime(loadedAt)}（${formatRelativeAge(loadedAt, nowMs)}）。頁面可見時會自動 refresh；你也可以手動刷新以取得最新狀態。`}
+          title={`T5 更新層級 · 每 30 秒輪詢一次${refreshAgeMs >= REFRESH_INTERVAL_MS ? " · 建議立即刷新" : ""}`}
+          body={`目前快照建立於 ${formatDateTime(loadedAt)}（${formatRelativeAge(loadedAt, nowMs)}）。頁面可見時會自動刷新；你也可以手動刷新以取得最新狀態。`}
         />
 
         {flash && !flash.plaintextKey ? (
@@ -1093,28 +1096,23 @@ export function ApiKeyManager({
         <section style={overviewGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Active"
+            label="啟用"
             value={String(kpis.active)}
-            sub="usable"
+            sub="可使用"
           />
           <CanvasKPI
             theme={th}
-            label="Expiring"
+            label="即將到期"
             value={String(kpis.expiring)}
-            sub="<= 7 days"
+            sub="7 天內"
           />
           <CanvasKPI
             theme={th}
-            label="Revoked"
+            label="已撤銷"
             value={String(kpis.revoked)}
-            sub="audit visible"
+            sub="稽核可見"
           />
-          <CanvasKPI
-            theme={th}
-            label="Refresh tier"
-            value="T5"
-            sub="30s target"
-          />
+          <CanvasKPI theme={th} label="更新層級" value="T5" sub="30 秒目標" />
         </section>
 
         <section style={actionLaneStyle}>
@@ -1160,7 +1158,7 @@ export function ApiKeyManager({
                     <input
                       value={draftName}
                       onChange={(event) => setDraftName(event.target.value)}
-                      placeholder="Operations reporting integration"
+                      placeholder="營運報表整合"
                       style={nativeInputStyle}
                     />
                   </CanvasField>
@@ -1169,7 +1167,7 @@ export function ApiKeyManager({
                     label="到期時間"
                     hint={
                       governance
-                        ? `ISO 8601 with timezone；留空則遵循預設 ${governance.apiKeyPolicy.defaultLifetimeDays} 天。`
+                        ? `ISO 8601 含時區；留空則遵循預設 ${governance.apiKeyPolicy.defaultLifetimeDays} 天。`
                         : "例如 2026-08-09T01:52:30Z"
                     }
                   >
@@ -1186,9 +1184,9 @@ export function ApiKeyManager({
 
                 <CanvasField
                   theme={th}
-                  label="Scopes"
+                  label="範圍"
                   required
-                  hint="至少選擇一個 published scope。Rotate 預設沿用原 scope，但可在送出前微調。"
+                  hint="至少選擇一個已發布 scope。輪替預設沿用原 scope，但可在送出前微調。"
                 >
                   <div style={scopeGridStyle}>
                     {allowedScopes.length > 0 ? (
@@ -1211,8 +1209,7 @@ export function ApiKeyManager({
                       })
                     ) : (
                       <div style={formNoteStyle}>
-                        Governance policy 尚未載入或未提供 allowed
-                        scope，暫時無法送出。
+                        治理政策尚未載入或未提供允許 scope，暫時無法送出。
                       </div>
                     )}
                   </div>
@@ -1221,8 +1218,8 @@ export function ApiKeyManager({
                 <div style={formFooterStyle}>
                   <div style={formNoteStyle}>
                     {governance
-                      ? `Default ${governance.apiKeyPolicy.defaultLifetimeDays} days · Max ${governance.apiKeyPolicy.maxLifetimeDays} days · Revoke effect ${governance.apiKeyPolicy.revokeEffect}`
-                      : "Governance policy unavailable"}
+                      ? `預設 ${governance.apiKeyPolicy.defaultLifetimeDays} 天 · 最長 ${governance.apiKeyPolicy.maxLifetimeDays} 天 · 撤銷效果 ${governance.apiKeyPolicy.revokeEffect}`
+                      : "治理政策不可用"}
                   </div>
                   <button
                     type="submit"
@@ -1269,7 +1266,7 @@ export function ApiKeyManager({
               </form>
             ) : (
               <div style={formNoteStyle}>
-                從上方 CTA 或清單列操作開啟 issue / rotate 表單。
+                從上方 CTA 或清單列操作開啟建立／輪替表單。
               </div>
             )}
           </CanvasCard>
@@ -1277,7 +1274,7 @@ export function ApiKeyManager({
           <CanvasCard
             theme={th}
             title="可用操作"
-            subtitle="Risk tier 與 disabled reason 直接映射 availableActions，空清單與無權限時不再假裝可操作。"
+            subtitle="風險層級與停用原因直接映射 availableActions，空清單與無權限時不再假裝可操作。"
           >
             {renderActionCatalog()}
           </CanvasCard>
@@ -1286,8 +1283,8 @@ export function ApiKeyManager({
         <section style={secondaryCardGridStyle}>
           <CanvasCard
             theme={th}
-            title="Inventory"
-            subtitle="搜尋 key name、ID、scope；並保留 revoked / expired 視圖供稽核追蹤。"
+            title="清單"
+            subtitle="搜尋 key 名稱、ID、scope；並保留已撤銷／已過期視圖供稽核追蹤。"
           >
             <div style={compactFieldGridStyle}>
               <CanvasField theme={th} label="搜尋">
@@ -1307,10 +1304,10 @@ export function ApiKeyManager({
                   style={nativeInputStyle}
                 >
                   <option value="all">全部</option>
-                  <option value="active">active</option>
-                  <option value="expiring">expiring</option>
-                  <option value="expired">expired</option>
-                  <option value="revoked">revoked</option>
+                  <option value="active">啟用</option>
+                  <option value="expiring">即將到期</option>
+                  <option value="expired">已過期</option>
+                  <option value="revoked">已撤銷</option>
                 </select>
               </CanvasField>
             </div>
@@ -1318,8 +1315,8 @@ export function ApiKeyManager({
 
           <CanvasCard
             theme={th}
-            title="Governance package"
-            subtitle="Published policy snapshot for this tenant integration surface."
+            title="治理套件"
+            subtitle="此租戶整合介面的已發布政策快照。"
           >
             {governance ? (
               <>
@@ -1328,46 +1325,46 @@ export function ApiKeyManager({
                   cols={2}
                   items={[
                     {
-                      k: "Identity",
+                      k: "身分",
                       v:
                         identity?.roles.join(", ") ||
                         identity?.actorType ||
-                        "unavailable",
+                        "不可用",
                     },
                     {
-                      k: "Generated",
+                      k: "產生時間",
                       v: formatDateTime(governance.generatedAt),
                       mono: true,
                     },
                     {
-                      k: "Default life",
-                      v: `${governance.apiKeyPolicy.defaultLifetimeDays} days`,
+                      k: "預設效期",
+                      v: `${governance.apiKeyPolicy.defaultLifetimeDays} 天`,
                       mono: true,
                     },
                     {
-                      k: "Maximum",
-                      v: `${governance.apiKeyPolicy.maxLifetimeDays} days`,
+                      k: "最長效期",
+                      v: `${governance.apiKeyPolicy.maxLifetimeDays} 天`,
                       mono: true,
                     },
                     {
-                      k: "Expiry",
+                      k: "到期設定",
                       v: governance.apiKeyPolicy.requireExpiry
-                        ? "required"
-                        : "optional",
+                        ? "必填"
+                        : "選填",
                       mono: true,
                     },
                     {
-                      k: "Break-glass",
+                      k: "緊急例外",
                       v: governance.apiKeyPolicy
                         .breakGlassRequiresPlatformApproval
-                        ? "platform approval"
-                        : "not published",
+                        ? "需平台核准"
+                        : "未發布",
                       mono: true,
                     },
                   ]}
                 />
 
-                <div style={sectionLabelStyle}>Allowed scopes</div>
+                <div style={sectionLabelStyle}>允許範圍</div>
                 <div style={scopeGridStyle}>
                   {allowedScopes.map((scope: string) => (
                     <CanvasPill key={scope} theme={th} tone="info">
@@ -1419,13 +1416,13 @@ export function ApiKeyManager({
 
           <CanvasCard
             theme={th}
-            title="Deep links"
+            title="深層連結"
             subtitle="依 packet 從 API key surface 連到治理、通知、SLA、報表與稽核模組。"
           >
             <div style={deepLinkListStyle}>
               <div style={deepLinkItemStyle}>
                 <div style={deepLinkMetaStyle}>
-                  <strong>Integration governance</strong>
+                  <strong>整合就緒度</strong>
                   <div style={formNoteStyle}>
                     對照 aggregated readiness、published scope 與 onboarding
                     checklist。
@@ -1495,7 +1492,7 @@ export function ApiKeyManager({
           </CanvasCard>
         </section>
 
-        <CanvasCard theme={th} title="API key inventory" padding={0}>
+        <CanvasCard theme={th} title="API 金鑰清單" padding={0}>
           {filteredKeys.length > 0 ? (
             <CanvasTable<ApiKeyRow>
               theme={th}
@@ -1529,7 +1526,7 @@ export function ApiKeyManager({
                 </div>
               </div>
               <CanvasPill theme={th} tone="warn">
-                Once only
+                只顯示一次
               </CanvasPill>
             </div>
             <div style={modalBodyStyle}>
@@ -1581,15 +1578,15 @@ export function ApiKeyManager({
                 />
                 <span>
                   我已安全保存這組 API key，了解關閉後只能再看到 masked suffix，
-                  若遺失必須重新 issue / rotate。
+                  若遺失必須重新建立或輪替。
                 </span>
               </label>
             </div>
             <div style={modalFooterStyle}>
               <div style={formNoteStyle}>
                 {flash.keyName
-                  ? `${flash.keyName} · ${flash.action === "rotate" ? "rotated" : "issued"}`
-                  : "Persist this key outside the UI before closing."}
+                  ? `${flash.keyName} · ${flash.action === "rotate" ? "已輪替" : "已建立"}`
+                  : "關閉前請在 UI 以外安全保存此 key。"}
               </div>
               <CanvasBtn
                 theme={th}
@@ -1621,7 +1618,7 @@ export function ApiKeyManager({
                 </div>
               </div>
               <CanvasPill theme={th} tone="danger">
-                High risk
+                高風險
               </CanvasPill>
             </div>
             <div style={modalBodyStyle}>
@@ -1629,15 +1626,15 @@ export function ApiKeyManager({
                 theme={th}
                 cols={2}
                 items={[
-                  { k: "Key", v: revokeTarget.keyName },
+                  { k: "Key 名稱", v: revokeTarget.keyName },
                   { k: "ID", v: revokeTarget.apiKeyId, mono: true },
                   {
-                    k: "Mask",
+                    k: "遮罩",
                     v: `${revokeTarget.keyPrefix}••••${revokeTarget.maskedSuffix}`,
                     mono: true,
                   },
                   {
-                    k: "Last used",
+                    k: "最近使用",
                     v: formatDateTime(revokeTarget.lastUsedAt),
                     mono: true,
                   },
@@ -1647,7 +1644,7 @@ export function ApiKeyManager({
                 theme={th}
                 label="撤銷原因"
                 required
-                hint="例如 credential exposure、integration sunset、scope reduction。"
+                hint="例如憑證外洩、整合下線、scope 縮減。"
               >
                 <textarea
                   value={revokeReason}

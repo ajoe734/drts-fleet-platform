@@ -1,32 +1,79 @@
 import Link from "next/link";
+import { PartnerShellControls } from "@/components/shell/partner-shell-controls";
 import { getPartnerChromeVars, listKnownBrands } from "@/lib/brand";
+import {
+  isCardAirportIssuerBrand,
+  isPartnerProgramSurfaceBrand,
+} from "@/lib/program-theme";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
-export default function RootIndex() {
+const ENGLISH_BRAND_NAMES = {
+  CTBC: { bankName: "CTBC Bank", displayName: "CTBC World Elite" },
+  CATHAY: { bankName: "Cathay United Bank", displayName: "Cathay CUBE World" },
+  TAISHIN: { bankName: "Taishin Bank", displayName: "Taishin Infinite" },
+  DBS: { bankName: "DBS Bank", displayName: "DBS Insignia" },
+  GRAND: { bankName: "Grand Hotel", displayName: "Grand Concierge" },
+  FUBON: { bankName: "Fubon Insurance", displayName: "Fubon Claim Mobility" },
+  LION: { bankName: "Lion Travel", displayName: "Lion Group Transfer" },
+} as const;
+
+function getRootBrandDisplay(
+  brand: ReturnType<typeof listKnownBrands>[number],
+  locale: Locale,
+) {
+  if (locale === "zh") {
+    return {
+      displayName: brand.displayName,
+      bankName: brand.bankName,
+      programName: brand.programName,
+    };
+  }
+
+  const names = ENGLISH_BRAND_NAMES[brand.code];
+  const programName =
+    brand.code === "FUBON"
+      ? "Insurance replacement mobility"
+      : brand.code === "LION"
+        ? "Travel agency group transfer"
+        : brand.code === "GRAND"
+          ? "Concierge booking"
+          : "Credit-card airport transfer";
+
+  return {
+    displayName: names.displayName,
+    bankName: names.bankName,
+    programName,
+  };
+}
+
+export default async function RootIndex() {
+  const locale = await getServerLocale();
   const brands = listKnownBrands();
   return (
     <main
-      className="min-h-screen bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
+      className="min-h-dvh bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
       style={getPartnerChromeVars()}
     >
       <div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-16">
         <header className="flex flex-col gap-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--pbk-muted)]">
-            Partner Booking · White Label
-          </span>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--pbk-muted)]">
+              {t("root.eyebrow", undefined, locale)}
+            </span>
+            <PartnerShellControls />
+          </div>
           <h1 className="text-3xl font-semibold leading-tight text-[color:var(--pbk-fg)]">
-            Pick a tenant slug to enter the partner booking funnel.
+            {t("root.title", undefined, locale)}
           </h1>
           <p className="text-sm leading-6 text-[color:var(--pbk-muted)]">
-            This app is white-label by construction. Every functional surface
-            lives under <code>/[tenantSlug]/...</code>; the root path only
-            exists to direct internal traffic to a tenant entry point during
-            PBK-UI-001 / PBK-UI-002 bring-up.
+            {t("root.description", undefined, locale)}
           </p>
         </header>
 
         <section className="rounded-xl border border-[color:var(--pbk-panel-border)] bg-[color:var(--pbk-panel)] p-6 shadow-sm">
           <h2 className="text-base font-semibold text-[color:var(--pbk-fg)]">
-            Known reference tenants
+            {t("root.knownTenants", undefined, locale)}
           </h2>
           <ul className="mt-4 grid gap-3">
             {brands.map((brand) => (
@@ -37,10 +84,11 @@ export default function RootIndex() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="text-sm font-semibold text-[color:var(--pbk-fg)]">
-                      {brand.displayName}
+                      {getRootBrandDisplay(brand, locale).displayName}
                     </div>
                     <div className="text-xs text-[color:var(--pbk-muted)]">
-                      {brand.bankName} · {brand.programName} ·{" "}
+                      {getRootBrandDisplay(brand, locale).bankName} ·{" "}
+                      {getRootBrandDisplay(brand, locale).programName} ·{" "}
                       {brand.hotline.phone}
                     </div>
                   </div>
@@ -48,8 +96,40 @@ export default function RootIndex() {
                     href={`/${brand.slug}`}
                     className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--pbk-panel-border)] px-4 py-2 text-sm font-medium text-[color:var(--pbk-accent)] hover:bg-[color:var(--pbk-accent-soft)]"
                   >
-                    Open /{brand.slug}
+                    {t("root.openTenant", { slug: brand.slug }, locale)}
                   </Link>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Link
+                    href={`/${brand.slug}`}
+                    className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
+                  >
+                    {t("root.surface.website", undefined, locale)}
+                  </Link>
+                  {isPartnerProgramSurfaceBrand(brand) ? (
+                    <Link
+                      href={`/${brand.slug}/program/site`}
+                      className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
+                    >
+                      {t("root.surface.funnel", undefined, locale)}
+                    </Link>
+                  ) : null}
+                  {isCardAirportIssuerBrand(brand) ? (
+                    <Link
+                      href={`/${brand.slug}/program/embed`}
+                      className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
+                    >
+                      {t("root.surface.embed", undefined, locale)}
+                    </Link>
+                  ) : null}
+                  {isPartnerProgramSurfaceBrand(brand) ? (
+                    <Link
+                      href={`/${brand.slug}/program`}
+                      className="inline-flex items-center rounded-lg border border-[color:var(--pbk-panel-border)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-muted)]"
+                    >
+                      {t("root.surface.selector", undefined, locale)}
+                    </Link>
+                  ) : null}
                 </div>
               </li>
             ))}

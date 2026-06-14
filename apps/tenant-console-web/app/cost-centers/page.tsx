@@ -31,6 +31,20 @@ const EMPTY_REASONS: EmptyReason[] = [
   "filtered_empty",
 ];
 
+function toArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) {
+    return value as T[];
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    Array.isArray((value as { items?: unknown }).items)
+  ) {
+    return (value as { items: T[] }).items;
+  }
+  return [];
+}
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知錯誤";
 }
@@ -65,16 +79,25 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
   ]);
 
   const costCenters =
-    costCentersResult.status === "fulfilled" ? costCentersResult.value : [];
+    costCentersResult.status === "fulfilled"
+      ? toArray<TenantCostCenterRecord>(costCentersResult.value)
+      : [];
   const approvalRules =
     approvalRulesResult.status === "fulfilled"
-      ? approvalRulesResult.value.filter((rule) => rule.activeFlag)
+      ? toArray<TenantApprovalRuleRecord>(approvalRulesResult.value).filter(
+          (rule) => rule.activeFlag,
+        )
       : [];
-  const users = usersResult.status === "fulfilled" ? usersResult.value : [];
+  const users =
+    usersResult.status === "fulfilled"
+      ? toArray<TenantUserRoleRecord>(usersResult.value)
+      : [];
   const coverageReport =
     coverageResult.status === "fulfilled" ? coverageResult.value : null;
   const reportJobs =
-    reportJobsResult.status === "fulfilled" ? reportJobsResult.value : [];
+    reportJobsResult.status === "fulfilled"
+      ? toArray<ReportJobRecord>(reportJobsResult.value)
+      : [];
 
   if (costCentersResult.status === "rejected") {
     errors.push(`成本中心目錄: ${toErrorMessage(costCentersResult.reason)}`);

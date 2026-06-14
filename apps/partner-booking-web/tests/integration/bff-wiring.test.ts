@@ -55,6 +55,44 @@ const activeEntry = {
   },
 } as unknown as PartnerChannelEntryRecord;
 
+const snakeCaseEntry = {
+  partner_id: "partner-bank-demo-001",
+  partner_code: "bank_demo_alpha",
+  partner_type: "bank_partner",
+  program_id: "program-airport-alpha",
+  program_code: "AIRPORT_ALPHA",
+  tenant_id: "tenant-demo-001",
+  bank_code: "BANK_DEMO_ALPHA",
+  entry_slug: "bank-demo-alpha-airport",
+  display_name: "Bank Demo Alpha Airport Transfer",
+  business_dispatch_subtype: "credit_card_airport_transfer",
+  auth_mode: "partner_api_key",
+  eligibility_mode: "bank_card_inline",
+  entry_host: null,
+  entry_path: "/partner/bank-demo-alpha-airport",
+  theme_accent: "#0b7285",
+  branding_metadata: {
+    display_name: "Bank Demo Alpha Airport Transfer",
+    theme_accent: "#0b7285",
+    support_email: "alpha-airport@bank-demo.example",
+    support_phone: "0800-000-111",
+  },
+  eligibility_contract: null,
+  status: "active",
+  active_flag: true,
+  revoked_at: null,
+  revoked_by: null,
+  revoke_reason: null,
+  created_at: "2026-04-10T00:00:00.000Z",
+  updated_at: "2026-04-10T00:00:00.000Z",
+  audit_metadata: {
+    source: "seed_bootstrap",
+    request_id: null,
+    created_by: "system:seed",
+    updated_by: "system:seed",
+  },
+};
+
 const session = {
   accessToken: "partner-token",
   expiresIn: "1h",
@@ -85,6 +123,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("partner-booking-web BFF wiring", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete process.env.DRTS_INTERNAL_KEY;
   });
 
   it("resolves public partner entries from backend authority", async () => {
@@ -119,6 +158,55 @@ describe("partner-booking-web BFF wiring", () => {
       `${API_URL}/api/partner/entries/ctbc`,
       expect.objectContaining({ cache: "no-store" }),
     );
+  });
+
+  it("normalizes snake_case public partner entries from the dev API envelope", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: snakeCaseEntry,
+          meta: {
+            request_id: "req-126",
+            timestamp: "2026-06-12T00:00:00.000Z",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: snakeCaseEntry,
+          meta: {
+            request_id: "req-127",
+            timestamp: "2026-06-12T00:00:01.000Z",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPublicPartnerEntry("bank-demo-alpha-airport"),
+    ).resolves.toMatchObject({
+      entrySlug: "bank-demo-alpha-airport",
+      displayName: "Bank Demo Alpha Airport Transfer",
+      activeFlag: true,
+      brandingMetadata: {
+        displayName: "Bank Demo Alpha Airport Transfer",
+        supportEmail: "alpha-airport@bank-demo.example",
+      },
+      auditMetadata: {
+        createdBy: "system:seed",
+      },
+    });
+
+    await expect(
+      getPartnerRouteContext("bank-demo-alpha-airport"),
+    ).resolves.toMatchObject({
+      inactive: false,
+      brand: expect.objectContaining({
+        slug: "bank-demo-alpha-airport",
+        displayName: "Bank Demo Alpha Airport Transfer",
+      }),
+    });
   });
 
   it("distinguishes inactive partner entries from unknown slugs", async () => {
@@ -157,11 +245,157 @@ describe("partner-booking-web BFF wiring", () => {
     ).resolves.toMatchObject({
       inactive: true,
       entry: null,
-      brand: expect.objectContaining({ slug: "ctbc" }),
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+        tagline:
+          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+      }),
     });
 
     await expect(getPublicPartnerEntry("ghost")).rejects.toMatchObject({
       code: "PARTNER_ENTRY_NOT_FOUND",
+      status: 404,
+    });
+  });
+
+  it("uses the local shell fallback for program routes before a dev entry is seeded", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(
+        {
+          error: {
+            code: "PARTNER_ENTRY_NOT_FOUND",
+            message: "The partner entry could not be found.",
+            details: { entrySlug: "ctbc" },
+            retryable: false,
+          },
+        },
+        404,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowInactive: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+        tagline:
+          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+      }),
+    });
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "PARTNER_ENTRY_NOT_FOUND",
+      status: 404,
+    });
+  });
+
+  it("lets public shells fallback when the dev authority requires an internal key that is not mounted", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(
+        {
+          error: {
+            code: "INTERNAL_KEY_REQUIRED",
+            message:
+              "x-drts-internal-key header is required for this environment.",
+            details: {
+              route: "/api/partner/entries/ctbc",
+              method: "GET",
+            },
+            retryable: false,
+          },
+        },
+        401,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+      }),
+    });
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "INTERNAL_KEY_REQUIRED",
+      status: 401,
+    });
+  });
+
+  it("lets public shells fallback when the dev authority is offline", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+      }),
+    });
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "PARTNER_AUTHORITY_UNAVAILABLE",
+      status: 503,
+    });
+  });
+
+  it("lets public shells fallback on missing entries without swallowing inactive entries", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: "PARTNER_ENTRY_NOT_FOUND",
+              message: "The partner entry could not be found.",
+              details: { entrySlug: "ctbc" },
+              retryable: false,
+            },
+          },
+          404,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: {
+              code: "PARTNER_ENTRY_INACTIVE",
+              message: "The partner entry is inactive and cannot be used.",
+              details: { entrySlug: "ctbc", status: "inactive" },
+              retryable: false,
+            },
+          },
+          404,
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+        tagline:
+          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+      }),
+    });
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).rejects.toMatchObject({
+      code: "PARTNER_ENTRY_INACTIVE",
       status: 404,
     });
   });
@@ -191,6 +425,31 @@ describe("partner-booking-web BFF wiring", () => {
       code: "ELIGIBILITY_VERIFICATION_REQUIRED",
       status: 422,
     });
+  });
+
+  it("adds the server-only internal key to authority requests when configured", async () => {
+    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: activeEntry,
+        meta: {
+          requestId: "req-125",
+          timestamp: "2026-05-19T00:00:02.000Z",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPublicPartnerEntry("ctbc")).resolves.toEqual(activeEntry);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_URL}/api/partner/entries/ctbc`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-drts-internal-key": "dev-internal-key",
+        }),
+      }),
+    );
   });
 
   it("overlays backend branding metadata on top of the local template", () => {

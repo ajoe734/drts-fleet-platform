@@ -999,9 +999,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           this.cloneQuotaMonthlySnapshot(snapshot),
         ]),
       );
-      this.userRoles = userRoles.map((userRole) =>
-        this.cloneUserRole(userRole),
-      );
+      this.userRoles =
+        userRoles.length > 0
+          ? userRoles.map((userRole) => this.cloneUserRole(userRole))
+          : USER_ROLE_SEED.map((userRole) => this.cloneUserRole(userRole));
       this.apiKeys = apiKeys.map((apiKey) => this.cloneStoredApiKey(apiKey));
       if (partnerEntries.length === 0) {
         this.persistChanges(
@@ -1032,6 +1033,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
           },
           "module init tenant cost-center bootstrap",
+        );
+      }
+      if (userRoles.length === 0) {
+        this.persistChanges(
+          {
+            userRoles: this.userRoles.map((userRole) =>
+              this.cloneUserRole(userRole),
+            ),
+          },
+          "module init tenant user bootstrap",
         );
       }
       this.schedulePersistedWebhookRetries();

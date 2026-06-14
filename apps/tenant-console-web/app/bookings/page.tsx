@@ -32,10 +32,12 @@ import {
 } from "@/lib/booking-list";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/formatters";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { t as translate, type Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -155,7 +157,12 @@ const inlineMetaStyle: CSSProperties = {
 };
 
 type SearchParamValue = string | string[] | undefined;
+type TranslationParams = Record<string, string | number>;
 type BookingEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+
+function t(key: string, params: TranslationParams | undefined, locale: Locale) {
+  return translate(key, locale, params);
+}
 
 type BookingSlaStatus = {
   label: string;
@@ -215,32 +222,54 @@ function parseDate(value: string | null | undefined) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function formatMinutes(minutes: number) {
-  return `${new Intl.NumberFormat("en").format(minutes)}m`;
+function formatMinutes(minutes: number, locale: Locale) {
+  return t(
+    "bookingList.format.minutes",
+    {
+      count: new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en").format(
+        minutes,
+      ),
+    },
+    locale,
+  );
 }
 
-function formatRelativeDuration(value: string | null | undefined) {
+function formatRelativeDuration(
+  value: string | null | undefined,
+  locale: Locale,
+) {
   const parsed = parseDate(value);
   if (!parsed) {
-    return "Unknown";
+    return t("bookingList.format.unknown", undefined, locale);
   }
 
   const diffMs = Date.now() - parsed.getTime();
   const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
 
   if (diffMinutes < 60) {
-    return `${formatMinutes(diffMinutes)} old`;
+    return t(
+      "bookingList.format.minutesAgo",
+      { value: formatMinutes(diffMinutes, locale) },
+      locale,
+    );
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h old`;
+    return t("bookingList.format.hoursAgo", { count: diffHours }, locale);
   }
 
-  return `${Math.floor(diffHours / 24)}d old`;
+  return t(
+    "bookingList.format.daysAgo",
+    { count: Math.floor(diffHours / 24) },
+    locale,
+  );
 }
 
-function formatRemainingWindow(value: string | null | undefined) {
+function formatRemainingWindow(
+  value: string | null | undefined,
+  locale: Locale,
+) {
   const parsed = parseDate(value);
   if (!parsed) {
     return null;
@@ -250,16 +279,24 @@ function formatRemainingWindow(value: string | null | undefined) {
   const diffMinutes = Math.round(diffMs / 60000);
 
   if (diffMinutes <= 0) {
-    return "Closed";
+    return t("bookingList.format.ended", undefined, locale);
   }
 
   if (diffMinutes < 60) {
-    return `${formatMinutes(diffMinutes)} left`;
+    return t(
+      "bookingList.format.remainingMinutes",
+      { value: formatMinutes(diffMinutes, locale) },
+      locale,
+    );
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   const remainderMinutes = diffMinutes % 60;
-  return `${diffHours}h ${remainderMinutes}m left`;
+  return t(
+    "bookingList.format.remainingHoursMinutes",
+    { hours: diffHours, minutes: remainderMinutes },
+    locale,
+  );
 }
 
 function getStatusTone(status: BookingRecord["orderStatus"]): CanvasTone {
@@ -299,37 +336,52 @@ function isActionableStatus(status: BookingRecord["orderStatus"]) {
   return status !== "completed" && status !== "cancelled";
 }
 
-function getActionDisabledReason(reasonCode?: string) {
+function getActionDisabledReason(
+  reasonCode: string | undefined,
+  locale: Locale,
+) {
   switch (reasonCode) {
     case "editable_window_passed":
-      return "Edit window closed";
+      return t(
+        "bookingList.actionDisabled.editWindowPassed",
+        undefined,
+        locale,
+      );
     case "cancel_window_passed":
-      return "Cancellation window closed";
+      return t(
+        "bookingList.actionDisabled.cancelWindowPassed",
+        undefined,
+        locale,
+      );
     case "workflow_locked":
-      return "Workflow no longer accepts tenant changes";
+      return t("bookingList.actionDisabled.workflowLocked", undefined, locale);
     default:
-      return "Unavailable";
+      return t("bookingList.actionDisabled.default", undefined, locale);
   }
 }
 
-function getActionLabel(action: string) {
+function getActionLabel(action: string, locale: Locale) {
   switch (action) {
     case "open_detail":
-      return "Open detail";
+      return t("bookingList.action.openDetail", undefined, locale);
     case "update_booking":
-      return "Edit";
+      return t("bookingList.action.update", undefined, locale);
     case "cancel_booking":
-      return "Cancel";
+      return t("bookingList.action.cancel", undefined, locale);
     case "create_booking":
-      return "New";
+      return t("bookingList.action.create", undefined, locale);
     case "open_ops_approval":
-      return "Ops approval";
+      return t("bookingList.action.openOpsApproval", undefined, locale);
     case "open_ops_dispatch":
-      return "Ops dispatch";
+      return t("bookingList.action.openOpsDispatch", undefined, locale);
     case "open_integration_governance":
-      return "Integration governance";
+      return t(
+        "bookingList.action.openIntegrationGovernance",
+        undefined,
+        locale,
+      );
     case "reset_filters":
-      return "Clear filters";
+      return t("bookingList.action.resetFilters", undefined, locale);
     default:
       return action;
   }
@@ -342,6 +394,7 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
 
 function buildBookingCrossAppLinks(
   booking: BookingRecord,
+  locale: Locale,
 ): CrossAppResourceLink[] {
   const links: CrossAppResourceLink[] = [];
 
@@ -357,7 +410,7 @@ function buildBookingCrossAppLinks(
       resourceType: "tenant_booking_approval_request",
       resourceId: booking.bookingId,
       openMode: "new_tab",
-      label: "Open ops approval queue",
+      label: t("bookingList.crossApp.approval", undefined, locale),
     });
   }
 
@@ -373,7 +426,7 @@ function buildBookingCrossAppLinks(
       resourceType: "dispatch_queue_item",
       resourceId: booking.bookingId,
       openMode: "new_tab",
-      label: "Open ops dispatch queue",
+      label: t("bookingList.crossApp.dispatch", undefined, locale),
     });
   }
 
@@ -382,6 +435,7 @@ function buildBookingCrossAppLinks(
 
 function buildBookingActions(
   booking: BookingRecord,
+  locale: Locale,
 ): ResourceActionDescriptor[] {
   const modifiableUntil = parseDate(booking.modifiableUntil);
   const cancelableUntil = parseDate(booking.cancelableUntil);
@@ -439,7 +493,7 @@ function buildBookingActions(
   }
 
   if (
-    buildBookingCrossAppLinks(booking).some(
+    buildBookingCrossAppLinks(booking, locale).some(
       (link) => link.resourceType === "dispatch_queue_item",
     )
   ) {
@@ -453,7 +507,10 @@ function buildBookingActions(
   return actions;
 }
 
-function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
+function deriveSlaStatus(
+  booking: BookingRecord,
+  locale: Locale,
+): BookingSlaStatus | null {
   if (
     booking.orderStatus === "dispatch_failed" ||
     booking.orderStatus === "dispatch_timeout" ||
@@ -461,10 +518,9 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
     booking.orderStatus === "exception_hold"
   ) {
     return {
-      label: "SLA at risk",
+      label: t("bookingList.sla.risk", undefined, locale),
       tone: "warn",
-      detail:
-        "Dispatch recovery is required to protect this reservation window.",
+      detail: t("bookingList.sla.riskDetail", undefined, locale),
     };
   }
 
@@ -482,22 +538,29 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
     isActionableStatus(booking.orderStatus)
   ) {
     return {
-      label: "SLA watch",
+      label: t("bookingList.sla.watch", undefined, locale),
       tone: "info",
-      detail: `Pickup window opens in ${formatMinutes(minutesUntilStart)}.`,
+      detail: t(
+        "bookingList.sla.watchDetail",
+        { value: formatMinutes(minutesUntilStart, locale) },
+        locale,
+      ),
     };
   }
 
   return null;
 }
 
-function toBookingListRecord(booking: BookingRecord): BookingListRecord {
+function toBookingListRecord(
+  booking: BookingRecord,
+  locale: Locale,
+): BookingListRecord {
   return {
     ...booking,
-    availableActions: buildBookingActions(booking),
+    availableActions: buildBookingActions(booking, locale),
     editableUntil: booking.modifiableUntil,
-    crossAppLinks: buildBookingCrossAppLinks(booking),
-    slaStatus: deriveSlaStatus(booking),
+    crossAppLinks: buildBookingCrossAppLinks(booking, locale),
+    slaStatus: deriveSlaStatus(booking, locale),
   };
 }
 
@@ -520,21 +583,24 @@ function getActionHref(action: string, booking: BookingListRecord) {
   }
 }
 
-function getSubtypeLabel(subtype: BookingRecord["businessDispatchSubtype"]) {
+function getSubtypeLabel(
+  subtype: BookingRecord["businessDispatchSubtype"],
+  locale: Locale,
+) {
   switch (subtype) {
     case "credit_card_airport_transfer":
-      return "Airport transfer";
+      return t("bookingList.subtype.creditCardAirport", undefined, locale);
     case "enterprise_dispatch":
-      return "Enterprise dispatch";
+      return t("bookingList.subtype.enterprise", undefined, locale);
     default:
       return subtype;
   }
 }
 
-function getServiceBucketLabel(bucket: string) {
+function getServiceBucketLabel(bucket: string, locale: Locale) {
   switch (bucket) {
     case "business_dispatch":
-      return "Business dispatch";
+      return t("bookingList.serviceBucket.businessDispatch", undefined, locale);
     default:
       return bucket;
   }
@@ -566,6 +632,7 @@ function mapErrorToEmptyReason(
 function getEmptyStateContent(
   reason: BookingEmptyReason,
   queryString: string,
+  locale: Locale,
 ): {
   title: string;
   description: string;
@@ -578,9 +645,12 @@ function getEmptyStateContent(
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "Tenant setup is not provisioned yet",
-        description:
-          "Bookings stay unavailable until tenant governance and downstream integrations finish setup for this workspace.",
+        title: t("bookingList.empty.notProvisioned.title", undefined, locale),
+        description: t(
+          "bookingList.empty.notProvisioned.description",
+          undefined,
+          locale,
+        ),
         tone: "info",
         nextAction: {
           descriptor: {
@@ -593,30 +663,46 @@ function getEmptyStateContent(
       };
     case "permission_denied":
       return {
-        title: "You do not have permission to see bookings",
-        description:
-          "The current tenant actor can enter the shell, but booking ledger access is not granted for this role context.",
+        title: t("bookingList.empty.permissionDenied.title", undefined, locale),
+        description: t(
+          "bookingList.empty.permissionDenied.description",
+          undefined,
+          locale,
+        ),
         tone: "warn",
       };
     case "external_unavailable":
       return {
-        title: "Booking data is temporarily unavailable",
-        description:
-          "An upstream dependency did not respond in time. Retry this page, then escalate through ops if the stale window persists.",
+        title: t(
+          "bookingList.empty.externalUnavailable.title",
+          undefined,
+          locale,
+        ),
+        description: t(
+          "bookingList.empty.externalUnavailable.description",
+          undefined,
+          locale,
+        ),
         tone: "warn",
       };
     case "fetch_failed":
       return {
-        title: "The booking list failed to load",
-        description:
-          "The page could not retrieve a valid tenant booking snapshot. Retry the page and review service health if the failure repeats.",
+        title: t("bookingList.empty.fetchFailed.title", undefined, locale),
+        description: t(
+          "bookingList.empty.fetchFailed.description",
+          undefined,
+          locale,
+        ),
         tone: "warn",
       };
     case "filtered_empty":
       return {
-        title: "No bookings match these filters",
-        description:
-          "Try widening the reservation date range, clearing status chips, or moving back to all service buckets.",
+        title: t("bookingList.empty.filteredEmpty.title", undefined, locale),
+        description: t(
+          "bookingList.empty.filteredEmpty.description",
+          undefined,
+          locale,
+        ),
         tone: "info",
         nextAction: {
           descriptor: {
@@ -630,9 +716,12 @@ function getEmptyStateContent(
     case "no_data":
     default:
       return {
-        title: "No bookings exist for this tenant yet",
-        description:
-          "This looks like a brand-new tenant workspace. Create the first booking or wait for upstream booking intake to populate this ledger.",
+        title: t("bookingList.empty.noData.title", undefined, locale),
+        description: t(
+          "bookingList.empty.noData.description",
+          undefined,
+          locale,
+        ),
         tone: "info",
         nextAction: {
           descriptor: {
@@ -646,7 +735,9 @@ function getEmptyStateContent(
   }
 }
 
-async function loadBookingsPageData(): Promise<BookingListPageData> {
+async function loadBookingsPageData(
+  locale: Locale,
+): Promise<BookingListPageData> {
   const refresh: UiRefreshMetadata = {
     generatedAt: new Date().toISOString(),
     staleAfterMs: BOOKING_STALE_AFTER_MS,
@@ -686,7 +777,9 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
           response.status,
           errorEnvelope?.error.code,
         ),
-        errorMessage: errorEnvelope?.error.message ?? "Unknown booking error.",
+        errorMessage:
+          errorEnvelope?.error.message ??
+          t("bookingList.error.unknown", undefined, locale),
       };
     }
 
@@ -695,7 +788,9 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
     >;
 
     return {
-      bookings: envelope.data.items.map(toBookingListRecord),
+      bookings: envelope.data.items.map((booking) =>
+        toBookingListRecord(booking, locale),
+      ),
       pageInfo: envelope.data.pageInfo,
       refresh: {
         generatedAt: envelope.meta.timestamp,
@@ -721,7 +816,9 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
       },
       emptyReason: "fetch_failed",
       errorMessage:
-        error instanceof Error ? error.message : "Unknown booking error.",
+        error instanceof Error
+          ? error.message
+          : t("bookingList.error.unknown", undefined, locale),
     };
   }
 }
@@ -749,18 +846,18 @@ function renderActionLink({
   );
 }
 
-function renderBookingActionLinks(booking: BookingListRecord) {
+function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
   return (
     <div style={compactActionRowStyle}>
       {booking.availableActions.map((action) => {
-        const label = getActionLabel(action.action);
+        const label = getActionLabel(action.action, locale);
 
         if (!action.enabled) {
           return (
             <span
               key={action.action}
               style={disabledActionStyle}
-              title={getActionDisabledReason(action.disabledReasonCode)}
+              title={getActionDisabledReason(action.disabledReasonCode, locale)}
             >
               {label}
             </span>
@@ -796,9 +893,25 @@ function renderBookingActionLinks(booking: BookingListRecord) {
   );
 }
 
-function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
+function getSourceBadge(booking: BookingListRecord, locale: Locale) {
+  const source = getBookingSourceVisibility(booking);
+  switch (source.domain) {
+    case "forwarded_authority":
+      return t("bookingList.source.forwarded", undefined, locale);
+    case "partner_external":
+      return t("bookingList.source.external", undefined, locale);
+    case "owned":
+    default:
+      return t("bookingList.source.owned", undefined, locale);
+  }
+}
+
+function buildBookingRows(
+  bookings: BookingListRecord[],
+  locale: Locale,
+): BookingRow[] {
   return bookings.map((booking) => {
-    const editWindow = formatRemainingWindow(booking.editableUntil);
+    const editWindow = formatRemainingWindow(booking.editableUntil, locale);
     const source = getBookingSourceVisibility(booking);
     const sourceToneClassName = getSourceToneClassName(source.tone);
 
@@ -809,18 +922,20 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
             <span style={primaryTextStyle}>{booking.bookingId}</span>
           </Link>
           <span style={secondaryTextStyle}>{booking.orderId}</span>
-          {renderBookingActionLinks(booking)}
+          {renderBookingActionLinks(booking, locale)}
         </div>
       ),
       typeCell: (
         <div style={{ display: "grid", gap: 4 }}>
           <span style={primaryTextStyle}>
-            {getSubtypeLabel(booking.businessDispatchSubtype)}
+            {getSubtypeLabel(booking.businessDispatchSubtype, locale)}
           </span>
           <span style={secondaryTextStyle}>
-            {getServiceBucketLabel(booking.serviceBucket)}
+            {getServiceBucketLabel(booking.serviceBucket, locale)}
           </span>
-          <span className={sourceToneClassName}>{source.badge}</span>
+          <span className={sourceToneClassName}>
+            {getSourceBadge(booking, locale)}
+          </span>
         </div>
       ),
       routeCell: (
@@ -832,24 +947,41 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
       windowCell: (
         <div style={{ display: "grid", gap: 6 }}>
           <span style={primaryTextStyle}>
-            {formatDateTime(booking.reservationWindowStart)}
+            {formatDateTime(booking.reservationWindowStart, locale)}
           </span>
           <span style={secondaryTextStyle}>
-            to {formatDateTime(booking.reservationWindowEnd)}
+            {t(
+              "bookingList.window.to",
+              { value: formatDateTime(booking.reservationWindowEnd, locale) },
+              locale,
+            )}
           </span>
           <div style={inlineMetaStyle}>
             <CanvasPill theme={theme} tone="neutral">
-              Age {formatRelativeDuration(booking.createdAt)}
+              {t(
+                "bookingList.pill.age",
+                { value: formatRelativeDuration(booking.createdAt, locale) },
+                locale,
+              )}
             </CanvasPill>
             <CanvasPill theme={theme} tone="info">
-              Updated {formatRelativeDuration(booking.updatedAt)}
+              {t(
+                "bookingList.pill.updated",
+                { value: formatRelativeDuration(booking.updatedAt, locale) },
+                locale,
+              )}
             </CanvasPill>
             {editWindow ? (
               <CanvasPill
                 theme={theme}
-                tone={editWindow === "Closed" ? "neutral" : "warn"}
+                tone={
+                  editWindow ===
+                  t("bookingList.format.ended", undefined, locale)
+                    ? "neutral"
+                    : "warn"
+                }
               >
-                Editable {editWindow}
+                {t("bookingList.pill.editable", { value: editWindow }, locale)}
               </CanvasPill>
             ) : null}
           </div>
@@ -860,7 +992,8 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           <span style={primaryTextStyle}>{booking.passenger.name}</span>
           <span style={secondaryTextStyle}>{booking.passenger.phone}</span>
           <span style={secondaryTextStyle}>
-            {booking.costCenter ?? "No cost center"}
+            {booking.costCenter ??
+              t("bookingList.value.noCostCenter", undefined, locale)}
           </span>
         </div>
       ),
@@ -878,7 +1011,11 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
               theme={theme}
               tone={getApprovalTone(booking.approvalState)}
             >
-              approval {booking.approvalState}
+              {t(
+                "bookingList.pill.approval",
+                { state: booking.approvalState },
+                locale,
+              )}
             </CanvasPill>
             {booking.slaStatus ? (
               <CanvasPill theme={theme} tone={booking.slaStatus.tone}>
@@ -890,7 +1027,9 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           {booking.slaStatus ? (
             <span style={secondaryTextStyle}>{booking.slaStatus.detail}</span>
           ) : (
-            <span style={secondaryTextStyle}>No SLA warning is published.</span>
+            <span style={secondaryTextStyle}>
+              {t("bookingList.sla.none", undefined, locale)}
+            </span>
           )}
         </div>
       ),
@@ -917,7 +1056,7 @@ function getPageDeepLinks(bookings: BookingListRecord[]) {
   return [...links.values()];
 }
 
-function getHeaderTabs(bookings: BookingListRecord[]) {
+function getHeaderTabs(bookings: BookingListRecord[], locale: Locale) {
   const liveCount = bookings.filter((booking) =>
     isActionableStatus(booking.orderStatus),
   ).length;
@@ -936,12 +1075,36 @@ function getHeaderTabs(bookings: BookingListRecord[]) {
   ).length;
 
   const tabs = [
-    { id: "all", label: "全部", badge: String(bookings.length) },
-    { id: "live", label: "進行中", badge: String(liveCount) },
-    { id: "reserve", label: "預約", badge: String(reserveCount) },
-    { id: "approval", label: "待審批", badge: String(approvalCount) },
-    { id: "done", label: "已完成", badge: String(completedCount) },
-    { id: "cancel", label: "取消", badge: String(cancelledCount) },
+    {
+      id: "all",
+      label: t("bookingList.tab.all", undefined, locale),
+      badge: String(bookings.length),
+    },
+    {
+      id: "live",
+      label: t("bookingList.tab.live", undefined, locale),
+      badge: String(liveCount),
+    },
+    {
+      id: "reserve",
+      label: t("bookingList.tab.reserve", undefined, locale),
+      badge: String(reserveCount),
+    },
+    {
+      id: "approval",
+      label: t("bookingList.tab.approval", undefined, locale),
+      badge: String(approvalCount),
+    },
+    {
+      id: "done",
+      label: t("bookingList.tab.done", undefined, locale),
+      badge: String(completedCount),
+    },
+    {
+      id: "cancel",
+      label: t("bookingList.tab.cancel", undefined, locale),
+      badge: String(cancelledCount),
+    },
   ];
 
   return tabs.map((tab) => (
@@ -957,12 +1120,13 @@ export default async function BookingsPage({
 }: {
   searchParams: Promise<Record<string, SearchParamValue>>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
   const query = parseBookingListQuery(resolvedSearchParams);
   const forcedEmptyReason = parseEmptyReason(
     first(resolvedSearchParams.emptyReason),
   );
-  const data = await loadBookingsPageData();
+  const data = await loadBookingsPageData(locale);
   const result = applyBookingListQuery(data.bookings, query);
   const computedEmptyReason: BookingEmptyReason | null =
     forcedEmptyReason ??
@@ -975,47 +1139,71 @@ export default async function BookingsPage({
 
   const queryString = buildBookingListQueryString(query);
   const rows =
-    computedEmptyReason === null ? buildBookingRows(result.items) : [];
+    computedEmptyReason === null ? buildBookingRows(result.items, locale) : [];
   const emptyState =
     computedEmptyReason !== null
-      ? getEmptyStateContent(computedEmptyReason, queryString)
+      ? getEmptyStateContent(computedEmptyReason, queryString, locale)
       : null;
   const pageDeepLinks =
     computedEmptyReason === null ? getPageDeepLinks(result.items) : [];
-  const headerTabs = getHeaderTabs(data.bookings);
+  const headerTabs = getHeaderTabs(data.bookings, locale);
   const activeHeaderTab = headerTabs[0];
 
   const columns: CanvasTableColumn<BookingRow>[] = [
-    { h: "BK", k: "bookingCell", w: 180 },
-    { h: "TYPE", k: "typeCell", w: 150 },
-    { h: "PICKUP → DROP", k: "routeCell", w: 300 },
-    { h: "WIN", k: "windowCell", w: 240 },
-    { h: "PASS.", k: "passengerCell", w: 140 },
-    { h: "STATE", k: "stateCell", w: 220 },
+    {
+      h: t("bookingList.column.booking", undefined, locale),
+      k: "bookingCell",
+      w: 180,
+    },
+    {
+      h: t("bookingList.column.type", undefined, locale),
+      k: "typeCell",
+      w: 150,
+    },
+    {
+      h: t("bookingList.column.route", undefined, locale),
+      k: "routeCell",
+      w: 300,
+    },
+    {
+      h: t("bookingList.column.window", undefined, locale),
+      k: "windowCell",
+      w: 240,
+    },
+    {
+      h: t("bookingList.column.passenger", undefined, locale),
+      k: "passengerCell",
+      w: 140,
+    },
+    {
+      h: t("bookingList.column.status", undefined, locale),
+      k: "stateCell",
+      w: 220,
+    },
   ];
 
   return (
     <div>
       <CanvasPageHeader
         theme={theme}
-        title="訂單"
-        subtitle="本月所有預約 · 含進行中與已完成"
+        title={t("bookingList.header.title", undefined, locale)}
+        subtitle={t("bookingList.header.subtitle", undefined, locale)}
         tabs={headerTabs}
         activeTab={activeHeaderTab}
         actions={
           <div style={actionRowStyle}>
             <Link href="#booking-filters" style={actionLinkStyle("secondary")}>
-              Filter
+              {t("bookingList.header.filter", undefined, locale)}
             </Link>
             <span
               style={disabledActionStyle}
-              title="Export is not available yet"
+              title={t("bookingList.header.exportDisabled", undefined, locale)}
             >
-              Export
+              {t("bookingList.header.export", undefined, locale)}
             </span>
             {renderActionLink({
               href: "/bookings/new",
-              label: "New",
+              label: t("bookingList.action.create", undefined, locale),
               variant: "primary",
             })}
             <RefreshTierControl
@@ -1032,46 +1220,52 @@ export default async function BookingsPage({
             theme={theme}
             tone="warn"
             icon="warn"
-            title="Tenant booking snapshot degraded"
+            title={t("bookingList.banner.degraded", undefined, locale)}
             body={data.errorMessage}
           />
         ) : null}
 
         <CanvasCard
           theme={theme}
-          title="Filters"
-          subtitle="Search by booking, order, or passenger, then narrow by status, service bucket, and reservation date range."
+          title={t("bookingList.filter.title", undefined, locale)}
+          subtitle={t("bookingList.filter.subtitle", undefined, locale)}
         >
           <form action="/bookings" id="booking-filters" style={filterFormStyle}>
             <input name="dateField" type="hidden" value={query.dateField} />
 
             <div style={filterGridStyle}>
               <label style={fieldLabelStyle}>
-                Search
+                {t("bookingList.filter.search", undefined, locale)}
                 <input
                   defaultValue={query.q}
                   name="q"
-                  placeholder="Booking, order, passenger"
+                  placeholder={t(
+                    "bookingList.filter.searchPlaceholder",
+                    undefined,
+                    locale,
+                  )}
                   style={inputStyle}
                 />
               </label>
               <label style={fieldLabelStyle}>
-                Service bucket
+                {t("bookingList.filter.serviceBucket", undefined, locale)}
                 <select
                   defaultValue={query.serviceBucket}
                   name="serviceBucket"
                   style={inputStyle}
                 >
-                  <option value="all">All buckets</option>
+                  <option value="all">
+                    {t("bookingList.filter.allBuckets", undefined, locale)}
+                  </option>
                   {PHASE1_SERVICE_BUCKETS.map((bucket) => (
                     <option key={bucket} value={bucket}>
-                      {getServiceBucketLabel(bucket)}
+                      {getServiceBucketLabel(bucket, locale)}
                     </option>
                   ))}
                 </select>
               </label>
               <label style={fieldLabelStyle}>
-                From
+                {t("bookingList.filter.from", undefined, locale)}
                 <input
                   defaultValue={query.dateFrom}
                   name="dateFrom"
@@ -1080,7 +1274,7 @@ export default async function BookingsPage({
                 />
               </label>
               <label style={fieldLabelStyle}>
-                To
+                {t("bookingList.filter.to", undefined, locale)}
                 <input
                   defaultValue={query.dateTo}
                   name="dateTo"
@@ -1089,7 +1283,7 @@ export default async function BookingsPage({
                 />
               </label>
               <label style={fieldLabelStyle}>
-                Page size
+                {t("bookingList.filter.pageSize", undefined, locale)}
                 <select
                   defaultValue={String(query.pageSize)}
                   name="pageSize"
@@ -1144,10 +1338,10 @@ export default async function BookingsPage({
 
             <div style={actionRowStyle}>
               <button type="submit" style={actionLinkStyle("primary")}>
-                Apply filters
+                {t("bookingList.filter.apply", undefined, locale)}
               </button>
               <Link href="/bookings" style={actionLinkStyle("secondary")}>
-                Reset
+                {t("bookingList.filter.reset", undefined, locale)}
               </Link>
             </div>
           </form>
@@ -1155,10 +1349,20 @@ export default async function BookingsPage({
 
         <CanvasCard
           theme={theme}
-          title={`Bookings · ${result.items.length} shown / ${result.total} matched`}
-          subtitle={`Page ${result.page} of ${result.totalPages} · snapshot ${formatDateTime(
-            data.refresh.generatedAt,
-          )}`}
+          title={t(
+            "bookingList.table.title",
+            { shown: result.items.length, total: result.total },
+            locale,
+          )}
+          subtitle={t(
+            "bookingList.table.subtitle",
+            {
+              page: result.page,
+              totalPages: result.totalPages,
+              snapshot: formatDateTime(data.refresh.generatedAt, locale),
+            },
+            locale,
+          )}
           padding={0}
         >
           {computedEmptyReason === null ? (
@@ -1180,8 +1384,15 @@ export default async function BookingsPage({
                 }}
               >
                 <span style={secondaryTextStyle}>
-                  API page {data.pageInfo.page} · snapshot size{" "}
-                  {data.pageInfo.pageSize} · total {data.pageInfo.totalItems}
+                  {t(
+                    "bookingList.footer.apiPage",
+                    {
+                      page: data.pageInfo.page,
+                      pageSize: data.pageInfo.pageSize,
+                      total: data.pageInfo.totalItems,
+                    },
+                    locale,
+                  )}
                 </span>
                 <div style={actionRowStyle}>
                   {result.page > 1
@@ -1189,7 +1400,11 @@ export default async function BookingsPage({
                         href: `/bookings?${buildBookingListQueryString(query, {
                           page: result.page - 1,
                         })}`,
-                        label: "Previous",
+                        label: t(
+                          "bookingList.pagination.previous",
+                          undefined,
+                          locale,
+                        ),
                       })
                     : null}
                   {result.page < result.totalPages
@@ -1197,7 +1412,11 @@ export default async function BookingsPage({
                         href: `/bookings?${buildBookingListQueryString(query, {
                           page: result.page + 1,
                         })}`,
-                        label: "Next",
+                        label: t(
+                          "bookingList.pagination.next",
+                          undefined,
+                          locale,
+                        ),
                       })
                     : null}
                 </div>
@@ -1217,6 +1436,7 @@ export default async function BookingsPage({
                     href: emptyState.nextAction.href,
                     label: getActionLabel(
                       emptyState.nextAction.descriptor.action,
+                      locale,
                     ),
                     variant:
                       emptyState.nextAction.descriptor.action ===

@@ -448,6 +448,37 @@ function compareSubscriptions(
   return left.eventType.localeCompare(right.eventType, "en");
 }
 
+function normalizeSubscription(
+  value: unknown,
+): TenantNotificationSubscription | null {
+  if (!isObject(value)) return null;
+  const eventType = getStringMember(value, "eventType", "event_type");
+  const channel = getStringMember(value, "channel", "channel");
+  const enabled = getRecordMember(value, "enabled", "enabled");
+  if (!eventType || !channel || typeof enabled !== "boolean") {
+    return null;
+  }
+
+  return {
+    eventType,
+    channel: channel as TenantNotificationSubscription["channel"],
+    enabled,
+  };
+}
+
+function normalizeSubscriptions(
+  values: unknown[] | undefined,
+): TenantNotificationSubscription[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values.flatMap((value) => {
+    const subscription = normalizeSubscription(value);
+    return subscription ? [subscription] : [];
+  });
+}
+
 function getChannelRank(channel: TenantNotificationSubscription["channel"]) {
   switch (channel) {
     case "ops_console":
@@ -485,19 +516,38 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function parseRefreshMetadata(value: unknown): UiRefreshMetadata | null {
   if (!isObject(value)) return null;
+  const generatedAt =
+    typeof value.generatedAt === "string"
+      ? value.generatedAt
+      : typeof value.generated_at === "string"
+        ? value.generated_at
+        : null;
+  const staleAfterMs =
+    typeof value.staleAfterMs === "number"
+      ? value.staleAfterMs
+      : typeof value.stale_after_ms === "number"
+        ? value.stale_after_ms
+        : null;
+  const dataFreshness =
+    typeof value.dataFreshness === "string"
+      ? value.dataFreshness
+      : typeof value.data_freshness === "string"
+        ? value.data_freshness
+        : null;
+
   if (
-    typeof value.generatedAt !== "string" ||
-    typeof value.staleAfterMs !== "number" ||
-    typeof value.dataFreshness !== "string" ||
+    generatedAt === null ||
+    staleAfterMs === null ||
+    dataFreshness === null ||
     typeof value.source !== "string"
   ) {
     return null;
   }
 
   return {
-    generatedAt: value.generatedAt,
-    staleAfterMs: value.staleAfterMs,
-    dataFreshness: value.dataFreshness as UiRefreshMetadata["dataFreshness"],
+    generatedAt,
+    staleAfterMs,
+    dataFreshness: dataFreshness as UiRefreshMetadata["dataFreshness"],
     source: value.source as UiRefreshMetadata["source"],
   };
 }
@@ -994,6 +1044,70 @@ function getSurfaceActionDescriptors(surface: {
   });
 }
 
+function getRecordMember(
+  value: unknown,
+  camelKey: string,
+  snakeKey: string,
+): unknown {
+  if (!isObject(value)) return undefined;
+  return value[camelKey] ?? value[snakeKey];
+}
+
+function getNumberMember(
+  value: unknown,
+  camelKey: string,
+  snakeKey: string,
+): number | null {
+  const member = getRecordMember(value, camelKey, snakeKey);
+  return typeof member === "number" ? member : null;
+}
+
+function getStringMember(
+  value: unknown,
+  camelKey: string,
+  snakeKey: string,
+): string | null {
+  const member = getRecordMember(value, camelKey, snakeKey);
+  return typeof member === "string" ? member : null;
+}
+
+function getArrayMember<T>(
+  value: unknown,
+  camelKey: string,
+  snakeKey: string,
+): T[] {
+  const member = getRecordMember(value, camelKey, snakeKey);
+  return Array.isArray(member) ? (member as T[]) : [];
+}
+
+function getGovernanceApiKeyPolicy(value: unknown) {
+  const policy = getRecordMember(value, "apiKeyPolicy", "api_key_policy");
+  if (!isObject(policy)) return null;
+
+  return {
+    defaultLifetimeDays: getNumberMember(
+      policy,
+      "defaultLifetimeDays",
+      "default_lifetime_days",
+    ),
+    maxLifetimeDays: getNumberMember(
+      policy,
+      "maxLifetimeDays",
+      "max_lifetime_days",
+    ),
+  };
+}
+
+function getGovernanceWebhookPolicy(value: unknown) {
+  const policy = getRecordMember(value, "webhookPolicy", "webhook_policy");
+  const retryPolicy = getRecordMember(policy, "retryPolicy", "retry_policy");
+  if (!isObject(retryPolicy)) return null;
+
+  return {
+    maxAttempts: getNumberMember(retryPolicy, "maxAttempts", "max_attempts"),
+  };
+}
+
 function renderEmptyStateSurface(surface: EmptyStateSurface) {
   const copy = getEmptyReasonCopy(surface.envelope.reason);
 
@@ -1194,22 +1308,48 @@ export default async function SettingsPage() {
       .slice(0, 3)
       .map((role) => role.replace(/^tc_/, ""))
       .join(" · ") ?? "—";
+  const governance = data.governance.item;
+  const apiKeyPolicy = getGovernanceApiKeyPolicy(governance);
+  const webhookPolicy = getGovernanceWebhookPolicy(governance);
+  const governanceGeneratedAt = getStringMember(
+    governance,
+    "generatedAt",
+    "generated_at",
+  );
 
-  const apiKeyLifetime = data.governance.item
-    ? `${data.governance.item.apiKeyPolicy.defaultLifetimeDays} 天 (最長 ${data.governance.item.apiKeyPolicy.maxLifetimeDays} 天)`
-    : "—";
-  const webhookRetry = data.governance.item
-    ? `${data.governance.item.webhookPolicy.retryPolicy.maxAttempts} 次重送`
-    : "—";
-  const subscriptions =
-    data.preferences.item?.subscriptions?.slice().sort(compareSubscriptions) ??
-    [];
-  const baselineSubscriptions =
-    data.governance.item?.baselineNotificationSubscriptions
-      ?.slice()
-      .sort(compareSubscriptions) ?? [];
-  const checklist = data.governance.item?.onboardingChecklist ?? [];
-  const baselineEvents = data.governance.item?.baselineWebhookEvents ?? [];
+  const apiKeyLifetime =
+    apiKeyPolicy?.defaultLifetimeDays != null &&
+    apiKeyPolicy.maxLifetimeDays != null
+      ? `${apiKeyPolicy.defaultLifetimeDays} 天 (最長 ${apiKeyPolicy.maxLifetimeDays} 天)`
+      : "未設定";
+  const webhookRetry =
+    webhookPolicy?.maxAttempts != null
+      ? `${webhookPolicy.maxAttempts} 次重送`
+      : "未設定";
+  const subscriptions = normalizeSubscriptions(
+    data.preferences.item?.subscriptions,
+  )
+    .slice()
+    .sort(compareSubscriptions);
+  const baselineSubscriptions = normalizeSubscriptions(
+    getArrayMember<unknown>(
+      governance,
+      "baselineNotificationSubscriptions",
+      "baseline_notification_subscriptions",
+    ),
+  )
+    .slice()
+    .sort(compareSubscriptions);
+  const checklist = getArrayMember<string>(
+    governance,
+    "onboardingChecklist",
+    "onboarding_checklist",
+  );
+  const baselineEvents = getArrayMember<string>(
+    governance,
+    "baselineWebhookEvents",
+    "baseline_webhook_events",
+  );
   const notificationRows: SettingsNotificationRow[] = (
     subscriptions.length > 0 ? subscriptions : baselineSubscriptions
   ).map((subscription) => ({
@@ -1217,13 +1357,13 @@ export default async function SettingsPage() {
     updatedAt:
       subscriptions.length > 0
         ? (data.preferences.item?.updatedAt ?? null)
-        : (data.governance.item?.generatedAt ?? null),
+        : governanceGeneratedAt,
   }));
   const notificationFootnote =
     subscriptions.length > 0
       ? `最後更新 ${formatUpdated(data.preferences.item?.updatedAt)}`
       : baselineSubscriptions.length > 0
-        ? `尚未覆寫租戶訂閱，顯示治理基線 ${formatUpdated(data.governance.item?.generatedAt)}`
+        ? `尚未覆寫租戶訂閱，顯示治理基線 ${formatUpdated(governanceGeneratedAt)}`
         : "尚未設定任何通知事件";
   const quotaSummary = data.quotaSummary.item;
   const currentStageValue = TENANT_CONSOLE_ENV;
@@ -1264,13 +1404,13 @@ export default async function SettingsPage() {
           tone: "accent" as const,
         }
       : null,
-    data.governance.item?.apiKeyPolicy
+    apiKeyPolicy
       ? {
           label: "api_key_policy",
           tone: "info" as const,
         }
       : null,
-    data.governance.item?.webhookPolicy
+    webhookPolicy
       ? {
           label: "webhook_governance",
           tone: "info" as const,
@@ -1441,7 +1581,7 @@ export default async function SettingsPage() {
   );
   const runtimeChips: RuntimeChip[] = [
     {
-      label: "refresh tier",
+      label: "更新層級",
       value: SETTINGS_PAGE_TIER.label,
       mono: true,
     },
@@ -1691,7 +1831,7 @@ export default async function SettingsPage() {
         <div style={runtimeStripStyle}>
           {!hasRefreshAction ? (
             <SettingsRefreshButton
-              label="Refresh snapshot"
+              label="更新快照"
               title="重新抓取目前 settings snapshot。"
               style={{
                 display: "inline-flex",
@@ -2004,7 +2144,7 @@ export default async function SettingsPage() {
 
             <CanvasCard
               theme={th}
-              title="Cross-app deep links"
+              title="跨應用深層連結"
               subtitle="platform-owned / ops-owned trace 一律 new tab；settings 保留 owner app 指向。"
             >
               <div style={linkStackStyle}>
@@ -2088,7 +2228,7 @@ export default async function SettingsPage() {
                 </div>
 
                 <div>
-                  <div style={sectionLabelStyle}>Tenant posture</div>
+                  <div style={sectionLabelStyle}>租戶狀態</div>
                   {capabilityChips.length > 0 ? (
                     <div style={chipRowStyle}>
                       {capabilityChips.map((chip) => (
@@ -2151,7 +2291,7 @@ export default async function SettingsPage() {
 
             <CanvasCard
               theme={th}
-              title="Runtime empty states"
+              title="執行期空狀態"
               subtitle="各 module 回傳的 `emptyState` 直接映射到畫面，不再用 query param 或本地假資料示範。"
             >
               {emptyStateSurfaces.length > 0 ? (

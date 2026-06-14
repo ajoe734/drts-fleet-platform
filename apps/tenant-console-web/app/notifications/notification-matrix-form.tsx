@@ -137,7 +137,7 @@ export function NotificationMatrixForm({
 }) {
   const columns: CanvasTableColumn<NotificationMatrixRow>[] = [
     {
-      h: "EVENT TYPE",
+      h: "事件類型",
       w: 220,
       r: (row) => (
         <div>
@@ -147,12 +147,12 @@ export function NotificationMatrixForm({
       ),
     },
     {
-      h: "WHEN",
+      h: "時機",
       w: 330,
       r: (row) => <span style={subcopyStyle}>{row.description}</span>,
     },
     {
-      h: "EMAIL",
+      h: "電子郵件",
       w: 120,
       r: (row) => (
         <ChannelToggle

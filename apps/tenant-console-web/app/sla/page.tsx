@@ -43,7 +43,7 @@ export default async function SlaPage() {
           <CanvasBanner
             theme={th}
             tone="warn"
-            title="SLA profile request failed"
+            title="SLA 設定檔請求失敗"
             body={data.transportErrorMessage}
           />
         </div>

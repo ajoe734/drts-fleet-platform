@@ -181,21 +181,19 @@ export class OwnedMobilityController {
   }
 
   @Post("tenant/bookings")
-  createTenantBooking(
+  async createTenantBooking(
     @Body() command: CreateTenantBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.createTenantBooking(
-        command,
-        this.requireTenantId(tenantId),
-        identity,
-        requestId,
-      ),
+    const result = await this.ownedMobilityService.createTenantBooking(
+      command,
+      this.requireTenantId(tenantId),
+      identity,
       requestId,
     );
+    return toApiSuccessEnvelope(result, requestId);
   }
 
   @Get("tenant/bookings")
@@ -230,23 +228,21 @@ export class OwnedMobilityController {
   }
 
   @Put("tenant/bookings/:bookingId")
-  updateTenantBooking(
+  async updateTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: UpdateTenantBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.updateTenantBooking(
-        this.requireTenantId(tenantId),
-        bookingId,
-        command,
-        identity,
-        requestId,
-      ),
+    const result = await this.ownedMobilityService.updateTenantBooking(
+      this.requireTenantId(tenantId),
+      bookingId,
+      command,
+      identity,
       requestId,
     );
+    return toApiSuccessEnvelope(result, requestId);
   }
 
   @Post("orders/:orderId/manual-fare-override")

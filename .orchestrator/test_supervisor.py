@@ -2665,6 +2665,71 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
         self.assertIn("sidecar_task_created", activity_types)
         self.assertIn("sidecar_wave_started", activity_types)
 
+    def test_sidecar_owner_uses_status_canonical_name_when_config_display_is_tool_name(self) -> None:
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "TEL-001",
+                    "agent_id": "codex",
+                    "provider": "codex",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+            "underutilization": {
+                "below_threshold_since": "2026-04-10T00:00:00Z",
+                "last_sidecar_wave_at": None,
+            },
+        }
+        config = json.loads(json.dumps(self.config))
+        config["agents"]["gemini"]["display_name"] = "Antigravity"
+        parent_task = {
+            "id": "APP-001",
+            "phase": "Phase 5: Persona and Application Surfaces",
+            "status": "todo",
+            "owner": "Claude",
+            "reviewer": "Codex",
+            "depends_on": [],
+            "title": "Define BFF query surfaces",
+            "artifacts": ["services/control-plane/bff/"],
+        }
+        created_sidecar = {
+            "id": "APP-001-SIDECAR-BFF-HANDOFF",
+            "phase": "Phase 5: Persona and Application Surfaces",
+            "status": "todo",
+            "owner": "Gemini",
+            "reviewer": "Claude",
+            "depends_on": [],
+            "task_class": "sidecar",
+            "helper_parent": "APP-001",
+            "helper_kind": "bff_handoff_packet",
+            "artifacts": ["support/sidecars/APP-001/APP-001-SIDECAR-BFF-HANDOFF.md"],
+        }
+        status_before = {
+            "agents": [{"name": "Codex"}, {"name": "Claude"}, {"name": "Gemini"}],
+            "tasks": [parent_task],
+        }
+        status_after = {
+            "agents": [{"name": "Codex"}, {"name": "Claude"}, {"name": "Gemini"}],
+            "tasks": [parent_task, created_sidecar],
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", side_effect=[status_before, status_after]),
+            mock.patch.object(supervisor, "load_sidecar_catalog", return_value=[]),
+            mock.patch.object(supervisor, "load_provider_report", return_value={"agent_adapters": {"gemini": {"can_auto_deliver": True}}}),
+            mock.patch.object(supervisor, "create_sidecar_task", return_value=(True, "")) as create_sidecar_task,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+            mock.patch.object(supervisor, "utc_now", return_value="2026-04-10T00:16:05Z"),
+        ):
+            changed = supervisor.dispatch_underutilization_sidecars(config, state)
+
+        self.assertTrue(changed)
+        self.assertEqual(create_sidecar_task.call_args.kwargs["owner"], "Gemini")
+
     def test_resets_underutilization_timer_when_utilization_recovers(self) -> None:
         state = {
             "queue": {"events": {}},
@@ -5284,6 +5349,69 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertEqual(state["chair_review"]["active_review"]["reason"], "provider_health_triage")
         enqueue_event.assert_called_once()
 
+    def test_chair_reviewer_skips_lane_without_auto_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            (root / "ai-status.json").write_text('{"agents": [{"name": "Gemini"}, {"name": "Codex"}], "tasks": []}\n', encoding="utf-8")
+            config = {
+                "agents": {
+                    "gemini": {"id": "gemini", "display_name": "Gemini", "provider": "gemini"},
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                },
+                "paths": {
+                    "event_queue": str(root / "event-queue.jsonl"),
+                    "status_file": str(root / "ai-status.json"),
+                },
+                "ready_dispatcher": {"active_worker_statuses": []},
+            }
+            state = {"workers": {}, "queue": {"events": {}}, "provider_pauses": {}, "chair_review": {}}
+            status = {"agents": [{"name": "Gemini"}, {"name": "Codex"}], "tasks": []}
+            provider_report = {
+                "agent_adapters": {
+                    "gemini": {"supported": True, "can_auto_deliver": False},
+                    "codex": {"supported": True, "can_auto_deliver": True},
+                }
+            }
+
+            chosen = supervisor.choose_chair_reviewer(config, state, status, provider_report)
+
+        self.assertEqual(chosen, ("codex", "Codex"))
+
+    def test_chair_reviewer_skips_stale_adapter_capability_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            (root / "ai-status.json").write_text('{"agents": [{"name": "Gemini"}, {"name": "Codex"}], "tasks": []}\n', encoding="utf-8")
+            config = {
+                "agents": {
+                    "gemini": {
+                        "id": "gemini",
+                        "display_name": "Gemini",
+                        "provider": "gemini",
+                        "adapter": "antigravity",
+                    },
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex", "adapter": "codex"},
+                },
+                "paths": {
+                    "event_queue": str(root / "event-queue.jsonl"),
+                    "status_file": str(root / "ai-status.json"),
+                },
+                "ready_dispatcher": {"active_worker_statuses": []},
+            }
+            state = {"workers": {}, "queue": {"events": {}}, "provider_pauses": {}, "chair_review": {}}
+            status = {"agents": [{"name": "Gemini"}, {"name": "Codex"}], "tasks": []}
+            provider_report = {
+                "agent_adapters": {
+                    "gemini": {"adapter": "gemini", "supported": True, "can_auto_deliver": True},
+                    "codex": {"adapter": "codex", "supported": True, "can_auto_deliver": True},
+                }
+            }
+
+            chosen = supervisor.choose_chair_reviewer(config, state, status, provider_report)
+
+        self.assertEqual(chosen, ("codex", "Codex"))
+
     def test_urgent_chair_review_records_blocked_when_no_lane_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5678,6 +5806,52 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertEqual(state["chair_review"]["max_sidecars"], 2)
             self.assertIsNotNone(state["chair_review"]["sidecar_approved_until"])
             self.assertNotIn("gemini2", state.get("provider_pauses", {}))
+
+    def test_refresh_chair_review_state_classifies_lost_queue_event(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "missing.md"
+            json_path = review_dir / "missing.json"
+            config = {
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            state = {
+                "queue": {"events": {}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "gemini",
+                        "agent": "Gemini",
+                        "reason": "provider_health_triage",
+                        "queue_event_id": "evt-missing",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            records = [
+                json.loads(line)
+                for line in (root / "activity-log.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(records[-1]["type"], "chair_review_lost_queue_event")
 
     def test_refresh_chair_review_state_accepts_reassignment_aliases_and_preserves_separation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -7540,6 +7714,29 @@ class ProviderReportPreloadTests(unittest.TestCase):
         mock_load.assert_not_called()
         # retry_due_workers must receive the sentinel that was passed in.
         self.assertEqual(mock_retry.call_args[0][2], sentinel)
+
+
+class WorkerProcessReaperTests(unittest.TestCase):
+    def test_pid_is_alive_reaps_zombie_child(self) -> None:
+        with mock.patch.object(supervisor.Path, "read_text", return_value="123 (codex) Z 1 1 1"), \
+             mock.patch.object(supervisor.os, "waitpid", return_value=(123, 0)) as waitpid, \
+             mock.patch.object(supervisor.os, "kill") as kill:
+            alive = supervisor.pid_is_alive(123)
+
+        self.assertFalse(alive)
+        waitpid.assert_called_once_with(123, supervisor.os.WNOHANG)
+        kill.assert_not_called()
+
+    def test_reap_finished_children_reaps_until_empty(self) -> None:
+        with mock.patch.object(
+            supervisor.os,
+            "waitpid",
+            side_effect=[(111, 0), (222, 0), (0, 0)],
+        ) as waitpid:
+            count = supervisor.reap_finished_children()
+
+        self.assertEqual(count, 2)
+        self.assertEqual(waitpid.call_count, 3)
 class PruneDoneTasksTests(unittest.TestCase):
     """`prune_done_tasks` bounds ai-status.json's tasks array.
 

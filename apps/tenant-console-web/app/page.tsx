@@ -66,18 +66,18 @@ async function loadDashboardData(): Promise<DashboardData> {
   ) => {
     if (result.status === "rejected") {
       errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
+        `${label}: ${result.reason instanceof Error ? result.reason.message : "未知錯誤"}`,
       );
     }
   };
 
-  collectError("Identity", identityResult);
-  collectError("Feature flags", flagsResult);
-  collectError("Bookings", bookingsResult);
-  collectError("Invoices", invoicesResult);
-  collectError("Statements", statementsResult);
-  collectError("Notifications", notificationsResult);
-  collectError("Integration governance", governanceResult);
+  collectError("身分", identityResult);
+  collectError("功能旗標", flagsResult);
+  collectError("訂單", bookingsResult);
+  collectError("發票", invoicesResult);
+  collectError("對帳單", statementsResult);
+  collectError("通知", notificationsResult);
+  collectError("整合就緒度", governanceResult);
 
   return {
     identity:
@@ -129,7 +129,7 @@ export default async function HomePage() {
           <strong>{formatCount(activeBookings.length)}</strong>
           <p>
             {attentionBookings.length > 0
-              ? `${formatCount(attentionBookings.length)} booking(s) need follow-up across dispatch or proof states.`
+              ? `有 ${formatCount(attentionBookings.length)} 筆訂單需要在 dispatch 或 proof 狀態追蹤處理。`
               : t("dashboard.empty.activeBookings")}
           </p>
         </article>
@@ -140,8 +140,8 @@ export default async function HomePage() {
           <strong>{formatCount(openInvoices.length)}</strong>
           <p>
             {data.invoices.length > 0
-              ? `${formatCount(data.invoices.length)} invoice artifact(s) are visible from tenant billing authority.`
-              : "Invoice artifacts are not currently available for this tenant context."}
+              ? `租戶帳務授權可見 ${formatCount(data.invoices.length)} 份發票檔案。`
+              : "此租戶情境目前沒有可用的發票檔案。"}
           </p>
         </article>
         <article className="metric-card">
@@ -157,8 +157,8 @@ export default async function HomePage() {
           </strong>
           <p>
             {recentNotifications.length > 0
-              ? `${formatCount(recentNotifications.length)} recent reminder(s) surfaced on the home lane.`
-              : "No tenant notification feed items were returned in the current snapshot."}
+              ? `首頁顯示了 ${formatCount(recentNotifications.length)} 則近期提醒。`
+              : "目前快照沒有回傳任何租戶通知。"}
           </p>
         </article>
         <article className="metric-card">
@@ -166,8 +166,8 @@ export default async function HomePage() {
           <strong>{formatCount(data.bookings.length)}</strong>
           <p>
             {data.governance?.onboardingChecklist.length
-              ? `${formatCount(data.governance.onboardingChecklist.length)} open integration checklist item(s).`
-              : "No outstanding onboarding checklist items were returned."}
+              ? `有 ${formatCount(data.governance.onboardingChecklist.length)} 項待辦的整合檢查清單。`
+              : "沒有待辦的導入檢查清單項目。"}
           </p>
         </article>
       </section>
@@ -247,8 +247,7 @@ export default async function HomePage() {
             </ul>
           ) : (
             <p className="muted-copy">
-              API key and webhook onboarding is not currently reporting any open
-              checklist item.
+              API 金鑰與 Webhook 導入目前沒有任何待辦的檢查清單項目。
             </p>
           )}
           <div className="link-row">
@@ -256,10 +255,10 @@ export default async function HomePage() {
               {t("dashboard.link.openGovernance")}
             </Link>
             <Link className="text-link" href="/api-keys">
-              Review API keys
+              查看 API 金鑰
             </Link>
             <Link className="text-link" href="/webhooks">
-              Review webhooks
+              查看 Webhook
             </Link>
           </div>
         </SurfaceCard>
@@ -267,34 +266,34 @@ export default async function HomePage() {
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="Identity"
-          title="Tenant authority context"
-          description="The dashboard reads tenant identity directly from the backend so actor and realm remain authority-driven."
+          kicker="身分"
+          title="租戶授權上下文"
+          description="儀表板直接從後端讀取租戶身分，因此 actor 與 realm 都以授權來源為準。"
         >
           <dl className="definition-grid">
             <div>
-              <dt>Tenant</dt>
-              <dd>{data.identity?.tenantId ?? "Unavailable"}</dd>
+              <dt>租戶</dt>
+              <dd>{data.identity?.tenantId ?? "無資料"}</dd>
             </div>
             <div>
               <dt>Realm</dt>
-              <dd>{data.identity?.realm ?? "Unavailable"}</dd>
+              <dd>{data.identity?.realm ?? "無資料"}</dd>
             </div>
             <div>
               <dt>Actor</dt>
-              <dd>{data.identity?.actorType ?? "Unavailable"}</dd>
+              <dd>{data.identity?.actorType ?? "無資料"}</dd>
             </div>
             <div>
-              <dt>Auth mode</dt>
-              <dd>{data.identity?.authMode ?? "Unavailable"}</dd>
+              <dt>授權模式</dt>
+              <dd>{data.identity?.authMode ?? "無資料"}</dd>
             </div>
           </dl>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Notifications"
-          title="Recent reminders"
-          description="Platform and tenant notices remain visible without leaving the workspace home."
+          kicker="通知"
+          title="近期提醒"
+          description="平台與租戶通知都會留在工作面首頁，無需離開即可查看。"
         >
           {recentNotifications.length > 0 ? (
             <ul className="panel-list">
@@ -309,19 +308,17 @@ export default async function HomePage() {
               ))}
             </ul>
           ) : (
-            <p className="muted-copy">
-              No tenant notification feed items are currently available.
-            </p>
+            <p className="muted-copy">目前沒有可顯示的租戶通知。</p>
           )}
         </SurfaceCard>
       </section>
 
       <CalloutPanel
-        title="Enabled module snapshot"
+        title="已啟用模組快照"
         description={
           enabledFlags.length > 0
             ? `${enabledFlags.length} feature flag(s) currently resolve enabled for this tenant context.`
-            : "Feature flag detail is currently unavailable or no tenant-specific module flag resolved enabled."
+            : "功能旗標明細目前無法取得，或沒有任何租戶專屬模組旗標啟用。"
         }
       >
         {enabledFlags.length > 0 ? (
@@ -335,22 +332,10 @@ export default async function HomePage() {
         ) : null}
       </CalloutPanel>
 
-      <CalloutPanel
-        title="Partner mode runs in a constrained shell"
-        description="Partner booking lives at `/partner/*` with its own bootstrap session, partner-only navigation, and no tenant-admin governance exposure. Booking creation requires entry-scoped eligibility verification when the entry is not configured with `eligibility_mode = none`."
-        tone="warning"
-      >
-        <div className="link-row">
-          <Link className="text-link" href="/partner/login">
-            Open partner sign-in
-          </Link>
-        </div>
-      </CalloutPanel>
-
       {data.errors.length > 0 ? (
         <CalloutPanel
-          title="Partial data warning"
-          description="Some dashboard slices fell back because the current authority surface did not answer every read."
+          title="部分資料警告"
+          description="部分儀表板區塊已回退，因為目前的授權來源未回應所有讀取。"
           tone="warning"
         >
           <ul className="panel-list">

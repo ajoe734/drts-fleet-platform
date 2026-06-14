@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Enterprise Dispatch · 企業派車前台 · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #ECEEF3; font-family: "Inter","Noto Sans TC",system-ui,sans-serif; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#2457D6"/>
+  <rect x="20" y="26" width="60" height="44" rx="6" fill="#fff"/>
+  <path d="M30 58l3-8a3 3 0 013-2h16a3 3 0 013 2l3 8M30 58h30v6H30z" fill="none" stroke="#2457D6" stroke-width="3"/>
+  <circle cx="36" cy="64" r="3" fill="#2457D6"/><circle cx="58" cy="64" r="3" fill="#2457D6"/>
+  <rect x="40" y="34" width="20" height="4" rx="2" fill="#2457D6"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="ent-kit.jsx"></script>
+<script type="text/babel" src="ent-shell.jsx"></script>
+<script type="text/babel" src="ent-data.jsx"></script>
+<script type="text/babel" src="ent-screens-1.jsx"></script>
+<script type="text/babel" src="ent-screens-2.jsx"></script>
+<script type="text/babel" src="ent-states.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "density": "comfy",
+  "accent": "#2457D6"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const t = buildEnt({ dark: tw.dark, density: tw.density, accent: tw.accent });
+  const W = 1280, H = 880, PW = 392, PH = 812;
+
+  const Web = ({ route, children }) => <BrowserFrame t={t} route={route} width={W} height={H}>{children}</BrowserFrame>;
+  const Phone = ({ children }) => <PhoneFrame t={t} width={PW} height={PH}>{children}</PhoneFrame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Enterprise Dispatch · 企業派車前台"
+        subtitle="enterprise_dispatch · 員工自助叫車 · 網站 + App 內嵌 · 租戶品牌（非卡友白牌）· /api/tenant/* · zh-TW / en">
+
+        <DCSection id="web-flow" title="S1 · 網站版 · 主要流程" subtitle="企業 SSO 身分 · 成本中心 / 審批 / 額度為一級 · bookedBy ≠ passenger">
+          <DCArtboard id="home" label="首頁 · /" width={W} height={H}><Web route="/"><ENT_Home t={t} /></Web></DCArtboard>
+          <DCArtboard id="new" label="建立預約 · /bookings/new" width={W} height={H}><Web route="/bookings/new"><ENT_New t={t} /></Web></DCArtboard>
+          <DCArtboard id="review" label="確認權責 · /bookings/review" width={W} height={H}><Web route="/bookings/review"><ENT_Review t={t} /></Web></DCArtboard>
+          <DCArtboard id="submitted" label="已受理 · /bookings/submitted" width={W} height={H}><Web route="/bookings/submitted"><ENT_Submitted t={t} posture="approval" /></Web></DCArtboard>
+        </DCSection>
+
+        <DCSection id="web-manage" title="S1 · 網站版 · 查詢與結果" subtitle="detail / history / trip / receipt / help · availableActions 授權">
+          <DCArtboard id="detail" label="預約詳情 · /bookings/[id]" width={W} height={H}><Web route="/bookings/EB-7K2E1D"><ENT_Detail t={t} /></Web></DCArtboard>
+          <DCArtboard id="history" label="我的預約 · /bookings" width={W} height={H}><Web route="/bookings"><ENT_History t={t} /></Web></DCArtboard>
+          <DCArtboard id="trip" label="目前行程 · /trip" width={W} height={H}><Web route="/trip"><ENT_Trip t={t} /></Web></DCArtboard>
+          <DCArtboard id="receipt" label="行程收據 · /receipts/[id]" width={W} height={H}><Web route="/receipts/EB-7K28Z2"><ENT_Receipt t={t} /></Web></DCArtboard>
+          <DCArtboard id="help" label="說明與支援 · /help" width={W} height={H}><Web route="/help"><ENT_Help t={t} /></Web></DCArtboard>
+        </DCSection>
+
+        <DCSection id="gates" title="負向 / 閘門狀態" subtitle="support-safe 統一模板 · 企業品牌語氣 · 不用後台錯誤頁腔調 (VQ-5)">
+          <DCArtboard id="auth" label="需要登入 · /auth-required" width={W} height={H}><Web route="/auth-required"><ENT_Gate t={t} kind="auth-required" /></Web></DCArtboard>
+          <DCArtboard id="suspended" label="無使用權限 · /suspended" width={W} height={H}><Web route="/suspended"><ENT_Gate t={t} kind="suspended" /></Web></DCArtboard>
+          <DCArtboard id="appr-pending" label="待審批 · /approval-pending" width={W} height={H}><Web route="/approval-pending"><ENT_Gate t={t} kind="approval-pending" /></Web></DCArtboard>
+          <DCArtboard id="appr-rejected" label="審批拒絕 · /approval-rejected" width={W} height={H}><Web route="/approval-rejected"><ENT_Gate t={t} kind="approval-rejected" /></Web></DCArtboard>
+          <DCArtboard id="quota" label="額度受限 · /quota-blocked" width={W} height={H}><Web route="/quota-blocked"><ENT_Gate t={t} kind="quota-blocked" /></Web></DCArtboard>
+          <DCArtboard id="nosupply" label="無法派車 · /no-supply" width={W} height={H}><Web route="/no-supply"><ENT_Gate t={t} kind="no-supply" /></Web></DCArtboard>
+          <DCArtboard id="degraded" label="服務降級 · /degraded" width={W} height={H}><Web route="/degraded"><ENT_Gate t={t} kind="degraded" /></Web></DCArtboard>
+        </DCSection>
+
+        <DCSection id="embed" title="S2 · App 內嵌 · 身分交付狀態" subtitle="企業 App webview · host signed session · compact chrome · 同一套預約流程，僅外殼密度不同 (VQ-1)">
+          <DCArtboard id="e-handoff" label="handoff_ok · 已登入帶入" width={PW} height={PH}><Phone><ENT_EmbedHandoff t={t} /></Phone></DCArtboard>
+          <DCArtboard id="e-reauth" label="reauth_required · 逾時重驗" width={PW} height={PH}><Phone><ENT_EmbedReauth t={t} /></Phone></DCArtboard>
+          <DCArtboard id="e-unsupported" label="unsupported_host · 封鎖" width={PW} height={PH}><Phone><ENT_EmbedUnsupported t={t} /></Phone></DCArtboard>
+          <DCArtboard id="e-consent" label="consent_required · 授權範圍" width={PW} height={PH}><Phone><ENT_EmbedConsent t={t} /></Phone></DCArtboard>
+          <DCArtboard id="e-fallback" label="fallback_to_web · 回退網站" width={PW} height={PH}><Phone><ENT_EmbedFallback t={t} /></Phone></DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="主題 Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)}
+            options={[{ value: 'comfy', label: 'Comfy' }, { value: 'compact', label: 'Compact' }]} />
+          <TweakColor label="品牌主色" value={tw.accent} onChange={v => setTweak('accent', v)}
+            options={['#2457D6', '#0F766E', '#7338CC', '#B0335F']} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

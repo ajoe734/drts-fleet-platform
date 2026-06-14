@@ -2005,12 +2005,36 @@ def pid_is_alive(pid: int | None) -> bool:
     if stat_text:
         parts = stat_text.split()
         if len(parts) >= 3 and parts[2] == "Z":
+            reap_child_pid(pid)
             return False
     try:
         os.kill(pid, 0)
     except OSError:
         return False
     return True
+
+
+def reap_child_pid(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        reaped_pid, _status = os.waitpid(int(pid), os.WNOHANG)
+    except (ChildProcessError, OSError, ValueError):
+        return False
+    return reaped_pid == int(pid)
+
+
+def reap_finished_children(*, limit: int = 64) -> int:
+    reaped = 0
+    while reaped < limit:
+        try:
+            pid, _status = os.waitpid(-1, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            break
+        if pid == 0:
+            break
+        reaped += 1
+    return reaped
 
 
 def terminate_worker_pid(pid: int | None) -> bool:
@@ -2029,6 +2053,7 @@ def terminate_worker_pid(pid: int | None) -> bool:
     deadline = time.time() + 1.0
     while time.time() < deadline:
         if not pid_is_alive(pid):
+            reap_child_pid(pid)
             return True
         time.sleep(0.05)
     try:
@@ -2038,6 +2063,7 @@ def terminate_worker_pid(pid: int | None) -> bool:
             os.kill(pid, signal.SIGKILL)
         except OSError:
             return signaled
+    reap_child_pid(pid)
     return True
 
 
@@ -2832,10 +2858,16 @@ def worker_assignment_role(config: dict[str, Any], worker: dict[str, Any], task:
     if not task:
         return None
     agent_name = display_name_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    agent_ids = {
+        normalize_agent_id(str(worker.get("agent_id") or "")),
+        normalize_agent_id(str(worker.get("provider") or "")),
+        normalize_agent_id(agent_name),
+    }
+    agent_ids.discard("")
     task_status = str(task.get("status") or "").lower()
-    if task_status == "review" and str(task.get("reviewer") or "") == agent_name:
+    if task_status == "review" and normalize_agent_id(str(task.get("reviewer") or "")) in agent_ids:
         return "reviewer"
-    if str(task.get("owner") or "") == agent_name:
+    if normalize_agent_id(str(task.get("owner") or "")) in agent_ids:
         return "owner"
     return None
 
@@ -3054,15 +3086,82 @@ def normalized_mapping_values(mapping: dict[str, Any], key: str) -> list[str]:
 
 
 def known_agent_display_names(config: dict[str, Any]) -> set[str]:
-    return {
+    names = {
         str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         for agent_id, agent in (config.get("agents", {}) or {}).items()
         if str(agent.get("display_name") or agent.get("name") or agent_id).strip()
     }
+    try:
+        status = load_status(config)
+    except Exception:
+        status = {}
+    for agent in status.get("agents", []) or []:
+        if not isinstance(agent, dict):
+            continue
+        name = str(agent.get("name") or "").strip()
+        if name:
+            names.add(name)
+    return names
 
 
 def display_name_is_legacy_alias(name: str | None) -> bool:
     return "legacy alias" in str(name or "").lower()
+
+
+def status_agent_names_by_lane(status: dict[str, Any] | None) -> dict[str, str]:
+    names: dict[str, str] = {}
+    if not isinstance(status, dict):
+        return names
+    for agent in status.get("agents", []) or []:
+        if not isinstance(agent, dict):
+            continue
+        name = str(agent.get("name") or "").strip()
+        if not name:
+            continue
+        normalized = normalize_agent_id(name)
+        if normalized:
+            names[normalized] = name
+    return names
+
+
+def task_agent_display_name(config: dict[str, Any], status: dict[str, Any] | None, agent_id: str) -> str:
+    agent = agent_config_for(config, agent_id)
+    configured = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+    by_lane = status_agent_names_by_lane(status)
+    for candidate in (
+        agent.get("provider"),
+        agent.get("id"),
+        agent_id,
+        configured,
+    ):
+        normalized = normalize_agent_id(str(candidate or ""))
+        if normalized in by_lane:
+            return by_lane[normalized]
+    return configured
+
+
+def agent_supports_auto_delivery(
+    config: dict[str, Any],
+    provider_report: dict[str, Any] | None,
+    agent_id: str,
+) -> bool:
+    report = provider_report if isinstance(provider_report, dict) else {}
+    provider_info = provider_info_for_agent(config, report, agent_id)
+    if provider_info.get("auth_ready") is False:
+        return False
+    adapter_info = adapter_info_for_agent(config, report, agent_id)
+    if adapter_info:
+        expected_adapter = str(agent_config_for(config, agent_id).get("adapter") or "").strip()
+        reported_adapter = str(adapter_info.get("adapter") or "").strip()
+        if expected_adapter and reported_adapter and expected_adapter != reported_adapter:
+            return False
+        if adapter_info.get("supported") is False or adapter_info.get("can_auto_deliver") is False:
+            return False
+        if adapter_info.get("can_auto_deliver") is True:
+            return True
+    if provider_info.get("local_cli_worker_supported") is False:
+        return False
+    return True
 
 
 def first_viable_agent(
@@ -5224,13 +5323,18 @@ def eligible_idle_agents_for_sidecars(
     task_map = task_index_from_status(config, status)
     agents: list[str] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
-        display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        display_name = task_agent_display_name(config, status, agent_id)
         if "legacy alias" in display_name.lower():
             continue
         normalized = normalize_agent_id(agent_id)
         if normalized in active_agents or normalized in pending_agents:
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+            continue
+        if not agent_supports_auto_delivery(config, provider_report, agent_id):
+            continue
+        if configured_display_name and display_name_is_legacy_alias(configured_display_name):
             continue
         if count_open_sidecars_for_agent(status, display_name) >= max_active_sidecars_per_agent:
             continue
@@ -5912,6 +6016,12 @@ def worker_matches_current_assignment(
     if not task:
         return False
     agent_name = display_name_for(config, str(worker.get("agent_id") or ""))
+    agent_ids = {
+        normalize_agent_id(str(worker.get("agent_id") or "")),
+        normalize_agent_id(str(worker.get("provider") or "")),
+        normalize_agent_id(agent_name),
+    }
+    agent_ids.discard("")
     settings = ready_dispatch_settings(config)
     review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
     finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
@@ -5924,11 +6034,11 @@ def worker_matches_current_assignment(
     if task_status in dependency_done_statuses:
         return False
     if task_status in review_statuses:
-        return task.get(reviewer_field) == agent_name
+        return normalize_agent_id(str(task.get(reviewer_field) or "")) in agent_ids
     if task_status in finalize_statuses:
-        return task.get(owner_field) == agent_name
+        return normalize_agent_id(str(task.get(owner_field) or "")) in agent_ids
     if task_status in owned_statuses:
-        return task.get(owner_field) == agent_name
+        return normalize_agent_id(str(task.get(owner_field) or "")) in agent_ids
     return False
 
 
@@ -6243,7 +6353,7 @@ def _chair_review_summary_lines(
     now_ts = datetime.now(timezone.utc).timestamp()
     pauses = provider_pause_registry(state)
     for agent_id, agent in (config.get("agents", {}) or {}).items():
-        display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        display_name = task_agent_display_name(config, status, agent_id)
         normalized = normalize_agent_id(agent_id)
         if not display_name or display_name_is_legacy_alias(display_name):
             continue
@@ -6260,7 +6370,7 @@ def _chair_review_summary_lines(
         adapter_info = (report.get("agent_adapters", {}) or {}).get(normalized, {})
         if provider_info.get("auth_ready") is False:
             continue
-        if provider_info.get("local_cli_worker_supported") is False and adapter_info.get("can_auto_deliver") is False:
+        if not agent_supports_auto_delivery(config, provider_report, agent_id):
             continue
         details = ["not_paused=true"]
         if provider_info.get("auth_ready") is not None:
@@ -6458,13 +6568,16 @@ def choose_chair_reviewer(
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
-        display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        if not display_name or "legacy alias" in display_name.lower():
+        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        display_name = task_agent_display_name(config, status, agent_id)
+        if not display_name or display_name_is_legacy_alias(display_name) or display_name_is_legacy_alias(configured_display_name):
             continue
         normalized = normalize_agent_id(agent_id)
         if normalized in active_agents or normalized in pending_agents:
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+            continue
+        if not agent_supports_auto_delivery(config, provider_report, agent_id):
             continue
         if display_name in failing_agents:
             continue
@@ -7922,13 +8035,13 @@ def refresh_chair_review_state(
         )
         return True
 
-    def invalidate(reason: str) -> bool:
+    def invalidate(reason: str, *, event_type: str = "chair_review_invalid_schema") -> bool:
         chair_state["active_review"] = None
         chair_state["cooldown_until"] = None
         write_activity_log(
             config,
             {
-                "type": "chair_review_invalid_schema",
+                "type": event_type,
                 "message": reason,
                 "target_agent": active.get("agent"),
                 "queue_event_id": queue_event_id or None,
@@ -8024,10 +8137,16 @@ def refresh_chair_review_state(
     if active_worker is not None:
         return False
     if not queue_event_id or queue_event_id not in queue_events:
-        return invalidate(f"Chair review from {active.get('agent')} lost its queue event before completion.")
+        return invalidate(
+            f"Chair review from {active.get('agent')} lost its queue event before completion.",
+            event_type="chair_review_lost_queue_event",
+        )
     if record.get("status") not in {"completed", "failed"}:
         return False
-    return invalidate(f"Chair review from {active.get('agent')} finished without producing the required JSON report.")
+    return invalidate(
+        f"Chair review from {active.get('agent')} finished without producing the required JSON report.",
+        event_type="chair_review_missing_output",
+    )
 
 
 def dispatch_ready_tasks(
@@ -8532,8 +8651,9 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
 
     idle_agent_names: list[str] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
-        display = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        if "legacy alias" in display.lower():
+        configured_display = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        display = task_agent_display_name(config, status, agent_id)
+        if display_name_is_legacy_alias(display) or display_name_is_legacy_alias(configured_display):
             continue
         normalized = normalize_agent_id(agent_id)
         lane_capacity = max_tasks_per_agent_for_lane(dispatch_settings, normalized)
@@ -8541,6 +8661,8 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
         if lane_load >= lane_capacity:
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+            continue
+        if not agent_supports_auto_delivery(config, provider_report, agent_id):
             continue
         idle_agent_names.append(display)
 
@@ -8726,7 +8848,18 @@ def run_once(
 ) -> bool:
     heartbeat_at = utc_now()
     state = load_runtime_state(config)
+    reaped_children = reap_finished_children()
     changed = maintain_disk_guard(config, state)
+    if reaped_children:
+        changed = True
+        write_activity_log(
+            config,
+            {
+                "type": "worker_child_processes_reaped",
+                "message": f"Reaped {reaped_children} finished supervisor child process(es).",
+                "count": reaped_children,
+            },
+        )
     disk_guard_record = dict(state.get("disk_guard", {}) or {})
     if manage_pid_file:
         write_supervisor_pid(config)
