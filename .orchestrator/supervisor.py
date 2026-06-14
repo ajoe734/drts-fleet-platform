@@ -3495,10 +3495,6 @@ def sync_status_pipeline(config: dict[str, Any]) -> bool:
 # time the throttle elapses; that is safe because reconcile is idempotent.
 _RECONCILE_PROCS: dict[str, dict[str, Any]] = {}
 
-# Module-level registry of in-flight auto-integrate subprocesses, keyed the same
-# way as _RECONCILE_PROCS. See auto_integrate_review_approved.
-_AUTO_INTEGRATE_PROCS: dict[str, dict[str, Any]] = {}
-
 
 def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> bool:
     """Bridge git-merged closeouts → state-machine `done` periodically.
@@ -3653,177 +3649,6 @@ def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> 
         now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     )
     _RECONCILE_PROCS[key] = {
-        "proc": proc,
-        "stdout_path": stdout_path,
-        "stderr_path": stderr_path,
-        "stdout_fh": stdout_fh,
-        "stderr_fh": stderr_fh,
-        "started_at": now,
-    }
-    return False
-
-
-def auto_integrate_review_approved(config: dict[str, Any], state: dict[str, Any]) -> bool:
-    """Drain review-approved task branches onto dev periodically.
-
-    Closes the loop the integration gate exposes but does not itself fill: under
-    the enforce gate a task may not close as ``done`` until its commit reaches
-    ``origin/dev``, but nothing rebases the approved branch onto the moving trunk,
-    CI-gates it, and merges it — so without a human those tasks sit at
-    ``review_approved`` forever. This spawns the existing ``scripts/auto-integrate.py``
-    (rebase-clean + green-required-checks + squash-merge + reconcile) so an
-    auto-worker wave finishes the last mile itself.
-
-    Opt-in + conservative, mirroring the guards:
-      * ``supervisor.auto_integrate.enabled`` — default ``False`` (ships off).
-      * ``supervisor.auto_integrate.interval_seconds`` — throttle (default 600).
-      * ``supervisor.auto_integrate.match`` — task-id regex passed to
-        ``--match`` (default ``""`` = every candidate).
-      * ``supervisor.auto_integrate.max_per_run`` — ``--max`` cap (default 3).
-      * ``supervisor.auto_integrate.open_unblock`` — when true, pass
-        ``--open-unblock`` so a conflicting/red task is surfaced as an unblock
-        task instead of silently skipped.
-
-    auto-integrate.py is itself conservative (only clean rebases + green CI ever
-    merge; conflicts and cross-task CI ripples are never force-resolved), so the
-    risk here is bounded to "merges work that already passes the same required
-    checks branch protection enforces." Non-blocking design is identical to
-    ``reconcile_status_from_git``: spawn a ``subprocess.Popen``, stream output to
-    tempfiles, poll on later ticks, throttle via ``last_auto_integrate_at``.
-
-    Returns True only when a completed run merged something (so callers that OR
-    this into ``changed`` get the right signal). A disabled gate, fresh spawn, or
-    in-flight no-op returns False.
-    """
-    ai_cfg = dict((config.get("supervisor", {}) or {}).get("auto_integrate", {}) or {})
-    if not ai_cfg.get("enabled"):
-        return False
-    try:
-        status_root = config_path(config, "status_file").parent
-    except KeyError:
-        return False
-    script = status_root / "scripts" / "auto-integrate.py"
-    key = str(script.resolve())
-
-    # 1. If a previous run is still in flight, peek + maybe finalize.
-    in_flight = _AUTO_INTEGRATE_PROCS.get(key)
-    if in_flight is not None:
-        proc = in_flight["proc"]
-        if proc.poll() is None:
-            return False
-        rc = proc.returncode
-        stdout_path = in_flight["stdout_path"]
-        stderr_path = in_flight["stderr_path"]
-        for handle_key in ("stdout_fh", "stderr_fh"):
-            handle = in_flight.get(handle_key)
-            if handle is not None:
-                try:
-                    handle.close()
-                except OSError:
-                    pass
-        try:
-            stdout = stdout_path.read_text() if stdout_path.exists() else ""
-        except OSError:
-            stdout = ""
-        try:
-            stderr = stderr_path.read_text() if stderr_path.exists() else ""
-        except OSError:
-            stderr = ""
-        for p in (stdout_path, stderr_path):
-            try:
-                p.unlink()
-            except OSError:
-                pass
-        try:
-            stdout_path.parent.rmdir()
-        except OSError:
-            pass
-        _AUTO_INTEGRATE_PROCS.pop(key, None)
-        if rc != 0:
-            write_activity_log(
-                config,
-                {
-                    "type": "auto_integrate_failed",
-                    "message": (stderr.strip() or stdout.strip() or "unknown error")[:500],
-                },
-            )
-            return False
-        stdout_stripped = stdout.strip()
-        merged_something = "merged" in stdout_stripped.lower()
-        if stdout_stripped and "No candidate" not in stdout_stripped:
-            for line in stdout_stripped.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                write_activity_log(
-                    config,
-                    {"type": "auto_integrate", "message": line[:500]},
-                )
-        return merged_something
-
-    # 2. No in-flight subprocess — honour the throttle before spawning.
-    interval = float(ai_cfg.get("interval_seconds", 600.0))
-    supervisor_state = state.setdefault("supervisor", {})
-    last_at_raw = supervisor_state.get("last_auto_integrate_at")
-    now = datetime.now(timezone.utc)
-    if last_at_raw:
-        try:
-            last_at = datetime.fromisoformat(str(last_at_raw).replace("Z", "+00:00"))
-            if (now - last_at).total_seconds() < interval:
-                return False
-        except (ValueError, TypeError):
-            pass
-
-    if not script.exists():
-        return False
-
-    # 3. Spawn auto-integrate in the background, streaming output to tempfiles.
-    import tempfile
-    tmp_dir = Path(tempfile.mkdtemp(prefix="drts-auto-integrate-"))
-    stdout_path = tmp_dir / "stdout"
-    stderr_path = tmp_dir / "stderr"
-    match = str(ai_cfg.get("match", ""))
-    max_per_run = max(1, int(ai_cfg.get("max_per_run", 3)))
-    argv = [sys.executable, str(script), "--match", match, "--max", str(max_per_run)]
-    if ai_cfg.get("open_unblock"):
-        argv.append("--open-unblock")
-    try:
-        stdout_fh = open(stdout_path, "wb")
-        stderr_fh = open(stderr_path, "wb")
-        proc = subprocess.Popen(
-            argv,
-            cwd=str(status_root),
-            stdout=stdout_fh,
-            stderr=stderr_fh,
-        )
-    except OSError as exc:
-        for handle in (stdout_fh, stderr_fh):
-            try:
-                handle.close()
-            except OSError:
-                pass
-        write_activity_log(
-            config,
-            {
-                "type": "auto_integrate_failed",
-                "message": f"failed to spawn auto-integrate subprocess: {exc}",
-            },
-        )
-        for p in (stdout_path, stderr_path):
-            try:
-                p.unlink()
-            except OSError:
-                pass
-        try:
-            tmp_dir.rmdir()
-        except OSError:
-            pass
-        return False
-
-    supervisor_state["last_auto_integrate_at"] = (
-        now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    )
-    _AUTO_INTEGRATE_PROCS[key] = {
         "proc": proc,
         "stdout_path": stdout_path,
         "stderr_path": stderr_path,
@@ -9076,7 +8901,6 @@ def run_once(
     changed = poll_workers(config, state, provider_report) or changed
     changed = reconcile_queue_records(config, state) or changed
     reconcile_status_from_git(config, state)
-    changed = auto_integrate_review_approved(config, state) or changed
     changed = prune_event_queue(config, state) or changed
     changed = prune_completed_dispatch_pauses(state, status, config=config, provider_report=provider_report) or changed
     changed = prune_failure_streaks(state, status) or changed
