@@ -23,6 +23,7 @@ import {
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateInput, formatDateTime } from "@/lib/formatters";
+import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
@@ -170,8 +171,34 @@ function findAction(
   return actions.find((item) => item.action === action) ?? null;
 }
 
+function getBillingStatusLabel(
+  status: TenantInvoiceRecord["status"],
+  locale: "en" | "zh",
+) {
+  switch (status) {
+    case "draft":
+      return t("billing.status.draft", locale);
+    case "issued":
+      return t("billing.status.issued", locale);
+    case "paid":
+      return t("billing.status.paid", locale);
+    default:
+      return status;
+  }
+}
+
+function getPayoutStatusLabel(status: string, locale: "en" | "zh") {
+  switch (status) {
+    case "paid":
+      return t("billing.status.paid", locale);
+    default:
+      return t("billing.status.pending", locale);
+  }
+}
+
 async function loadBillingData(
   emptyReasonOverride: EmptyReason | null,
+  locale: "en" | "zh",
 ): Promise<BillingData> {
   const client = getTenantClient();
   const errors: string[] = [];
@@ -196,7 +223,7 @@ async function loadBillingData(
     errors.push(
       profileResult.reason instanceof Error
         ? profileResult.reason.message
-        : "Unable to load tenant billing profile.",
+        : t("billing.error.profile", locale),
     );
   }
 
@@ -204,7 +231,7 @@ async function loadBillingData(
     errors.push(
       invoicesResult.reason instanceof Error
         ? invoicesResult.reason.message
-        : "Unable to load tenant invoices.",
+        : t("billing.error.invoices", locale),
     );
   }
 
@@ -212,7 +239,7 @@ async function loadBillingData(
     errors.push(
       statementsResult.reason instanceof Error
         ? statementsResult.reason.message
-        : "Unable to load tenant statements.",
+        : t("billing.error.statements", locale),
     );
   }
 
@@ -220,7 +247,7 @@ async function loadBillingData(
     errors.push(
       quotaResult.reason instanceof Error
         ? quotaResult.reason.message
-        : "Unable to load tenant quota summary.",
+        : t("billing.error.quota", locale),
     );
   }
 
@@ -380,7 +407,10 @@ function getEmptyStateTone(
   }
 }
 
-function getEmptyStateCopy(reason: EmptyReason): {
+function getEmptyStateCopy(
+  reason: EmptyReason,
+  locale: "en" | "zh",
+): {
   icon: "warn" | "x" | "filter" | "billing";
   title: string;
   body: string;
@@ -389,39 +419,39 @@ function getEmptyStateCopy(reason: EmptyReason): {
     case "not_provisioned":
       return {
         icon: "billing",
-        title: t("billing.title"),
-        body: "此租戶還沒有計費檔案、當期用量或發票紀錄。請先完成帳務資料設定，再回到此頁查看當期快照。",
+        title: t("billing.empty.notProvisioned.title", locale),
+        body: t("billing.empty.notProvisioned.body", locale),
       };
     case "fetch_failed":
       return {
         icon: "warn",
-        title: "帳務資料載入失敗",
-        body: "路由維持可用，但計費檔案讀取失敗。請於後端相依服務恢復後重試。",
+        title: t("billing.empty.fetchFailed.title", locale),
+        body: t("billing.empty.fetchFailed.body", locale),
       };
     case "permission_denied":
       return {
         icon: "x",
-        title: "目前角色無法檢視帳務",
-        body: "此頁面可見，但目前操作者沒有檢視租戶帳務的權限 (需 tc_admin 或 tc_finance)。",
+        title: t("billing.empty.permissionDenied.title", locale),
+        body: t("billing.empty.permissionDenied.body", locale),
       };
     case "external_unavailable":
       return {
         icon: "warn",
-        title: "下游帳務服務暫時無法使用",
-        body: "用量與發票來源的某些上游服務目前無回應或回傳過期資料，當期數字可能不完整。",
+        title: t("billing.empty.externalUnavailable.title", locale),
+        body: t("billing.empty.externalUnavailable.body", locale),
       };
     case "filtered_empty":
       return {
         icon: "filter",
-        title: "目前篩選條件沒有資料",
-        body: "帳務資料存在，但目前的篩選沒有對應結果。請清除篩選或改選其他期別。",
+        title: t("billing.empty.filteredEmpty.title", locale),
+        body: t("billing.empty.filteredEmpty.body", locale),
       };
     case "no_data":
     default:
       return {
         icon: "billing",
-        title: "本期尚無帳務活動",
-        body: "計費檔案已建立，但本期還沒有發票或用量紀錄。當期一旦產生即會顯示於此。",
+        title: t("billing.empty.noData.title", locale),
+        body: t("billing.empty.noData.body", locale),
       };
   }
 }
@@ -470,13 +500,14 @@ function ActionCta({
 }
 
 export default async function BillingPage({ searchParams }: BillingPageProps) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const requestedEmptyReason = Array.isArray(resolvedSearchParams?.emptyReason)
     ? resolvedSearchParams?.emptyReason[0]
     : resolvedSearchParams?.emptyReason;
   const emptyReasonOverride = parseEmptyReason(requestedEmptyReason);
 
-  const data = await loadBillingData(emptyReasonOverride);
+  const data = await loadBillingData(emptyReasonOverride, locale);
 
   const editProfileAction = findAction(
     data.availableActions,
@@ -495,11 +526,12 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
   const bookingLimit = data.quota?.limit.bookingCountLimit ?? null;
   const quotaShare =
     bookingLimit && bookingLimit > 0
-      ? `${Math.round((tripCount / bookingLimit) * 100)}% of ${formatCanvasCount(
-          bookingLimit,
-        )} 配額`
+      ? t("billing.quota.share", locale, {
+          percent: Math.round((tripCount / bookingLimit) * 100),
+          count: formatCanvasCount(bookingLimit),
+        })
       : data.quota
-        ? "未設定趟次配額"
+        ? t("billing.quota.unset", locale)
         : "—";
 
   const recentInvoices: InvoiceRow[] = [...data.invoices]
@@ -508,23 +540,30 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
     .map((invoice) => ({ ...invoice }));
 
   const emptyState = data.emptyReason
-    ? getEmptyStateCopy(data.emptyReason)
+    ? getEmptyStateCopy(data.emptyReason, locale)
     : null;
 
   const profileItems = data.profile
     ? [
-        { k: "發票抬頭", v: data.profile.invoiceTitle },
-        { k: "統一編號", v: data.profile.taxId ?? "—", mono: true },
         {
-          k: "計費聯絡人",
+          k: t("billing.profile.invoiceTitle", locale),
+          v: data.profile.invoiceTitle,
+        },
+        { k: t("billing.profile.taxId", locale), v: data.profile.taxId ?? "—", mono: true },
+        {
+          k: t("billing.profile.contact", locale),
           v: data.profile.contactName
             ? `${data.profile.contactName} · ${data.profile.email}`
             : data.profile.email,
         },
-        { k: "billing address", v: data.profile.address ?? "—" },
-        { k: "結算方式", v: "月結發票 (invoice)", mono: true },
+        { k: t("billing.profile.address", locale), v: data.profile.address ?? "—" },
         {
-          k: "最後更新",
+          k: t("billing.profile.settlementMethod", locale),
+          v: t("billing.profile.settlementMethodValue", locale),
+          mono: true,
+        },
+        {
+          k: t("billing.profile.updatedAt", locale),
           v: formatDateTime(data.profile.updatedAt),
           mono: true,
         },
@@ -533,7 +572,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
 
   const invoiceColumns: CanvasTableColumn<InvoiceRow>[] = [
     {
-      h: "發票",
+      h: t("billing.col.invoice", locale),
       w: 200,
       mono: true,
       r: (row) =>
@@ -552,29 +591,29 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
         ),
     },
     {
-      h: "期別",
+      h: t("billing.col.period", locale),
       w: 110,
       mono: true,
       r: (row) => toPeriodKey(row.periodStart),
     },
     {
-      h: "金額",
+      h: t("billing.col.amount", locale),
       w: 160,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.amount),
     },
     {
-      h: "狀態",
+      h: t("billing.col.status", locale),
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={getInvoiceStatusTone(row.status)} dot>
-          {row.status}
+          {getBillingStatusLabel(row.status, locale)}
         </CanvasPill>
       ),
     },
     {
-      h: "到期",
+      h: t("billing.col.due", locale),
       w: 130,
       mono: true,
       r: (row) => formatDateInput(row.periodEnd) || "—",
@@ -587,53 +626,53 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
 
   const statementColumns: CanvasTableColumn<DriverStatementRecord>[] = [
     {
-      h: t("billing.col.statement"),
+      h: t("billing.col.statement", locale),
       w: 180,
       mono: true,
       r: (row) => row.statementId,
     },
     {
-      h: t("dashboard.col.driver"),
+      h: t("dashboard.col.driver", locale),
       w: 110,
       mono: true,
       r: (row) => row.driverId,
     },
     {
-      h: t("dashboard.col.period"),
+      h: t("dashboard.col.period", locale),
       w: 90,
       mono: true,
       r: (row) => row.periodMonth,
     },
     {
-      h: t("billing.col.gross"),
+      h: t("billing.col.gross", locale),
       w: 120,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.grossEarning),
     },
     {
-      h: t("billing.col.serviceFee"),
+      h: t("billing.col.serviceFee", locale),
       w: 120,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.serviceFee),
     },
     {
-      h: t("billing.col.subsidy"),
+      h: t("billing.col.subsidy", locale),
       w: 120,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.subsidy),
     },
     {
-      h: t("billing.col.net"),
+      h: t("billing.col.net", locale),
       w: 120,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.netAmount),
     },
     {
-      h: t("billing.col.payoutStatus"),
+      h: t("billing.col.payoutStatus", locale),
       w: 110,
       r: (row) => (
         <CanvasPill
@@ -641,7 +680,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
           tone={row.payoutStatus === "paid" ? "success" : "info"}
           dot
         >
-          {row.payoutStatus}
+          {getPayoutStatusLabel(row.payoutStatus, locale)}
         </CanvasPill>
       ),
     },
@@ -651,8 +690,8 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
     <div>
       <CanvasPageHeader
         theme={th}
-        title={t("billing.title")}
-        subtitle={t("billing.subtitle")}
+        title={t("billing.title", locale)}
+        subtitle={t("billing.subtitle", locale)}
         actions={
           <>
             <ActionCta
@@ -660,14 +699,14 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
               href="/settings"
               icon="billing"
             >
-              編輯帳務資料
+              {t("billing.action.editProfile", locale)}
             </ActionCta>
             <ActionCta
               descriptor={viewInvoicesAction}
               href="/invoices"
               icon="chevR"
             >
-              前往發票 →
+              {t("billing.action.openInvoices", locale)}
             </ActionCta>
           </>
         }
@@ -679,11 +718,15 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
           theme={th}
           tone="info"
           icon="clock"
-          title="更新頻率 T5 · 租戶慢速 (30 秒)"
-          body={`此頁面以 ${REFRESH_CADENCE_MS / 1000} 秒的租戶慢速節奏更新 (tier: ${data.refreshTier})。快照載入於 ${formatDateTime(data.generatedAt)}。`}
+          title={t("billing.refresh.title", locale)}
+          body={t("billing.refresh.body", locale, {
+            seconds: REFRESH_CADENCE_MS / 1000,
+            tier: data.refreshTier,
+            generatedAt: formatDateTime(data.generatedAt),
+          })}
           actions={
             <ActionCta descriptor={refreshAction} href="/billing" icon="chevR">
-              重新整理
+              {t("billing.action.refresh", locale)}
             </ActionCta>
           }
         />
@@ -693,7 +736,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
             theme={th}
             tone="warn"
             icon="warn"
-            title="帳務資料暫時無法完整載入"
+            title={t("billing.error.loadTitle", locale)}
             body={data.errors.join(" / ")}
           />
         ) : null}
@@ -712,7 +755,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
                   href="/settings"
                   icon="billing"
                 >
-                  設定帳務資料
+                  {t("billing.action.editProfile", locale)}
                 </ActionCta>
               ) : undefined
             }
@@ -722,47 +765,49 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="本期累計"
+            label={t("billing.kpi.accrued", locale)}
             value={formatCanvasMoney(accruedAmount)}
             sub={data.quota ? data.quota.periodKey : "—"}
           />
           <CanvasKPI
             theme={th}
-            label="預估結帳 (run-rate)"
+            label={t("billing.kpi.projected", locale)}
             value={formatCanvasMoney(projectedClose)}
             sub={
               data.quota
-                ? `${data.quota.periodKey} 月結 · 線性推估`
-                : "尚無當期"
+                ? t("billing.kpi.projectedSub", locale, {
+                    periodKey: data.quota.periodKey,
+                  })
+                : t("billing.kpi.projectedEmpty", locale)
             }
           />
           <CanvasKPI
             theme={th}
-            label="本期趟次"
+            label={t("billing.kpi.tripCount", locale)}
             value={data.quota ? formatCanvasCount(tripCount) : "—"}
             sub={quotaShare}
           />
           <CanvasKPI
             theme={th}
-            label="平均單筆"
+            label={t("billing.kpi.averageTicket", locale)}
             value={formatCanvasMoney(averageTicket)}
           />
         </div>
 
         <div style={splitGridStyle}>
-          <CanvasCard theme={th} title="帳務設定檔">
+          <CanvasCard theme={th} title={t("billing.section.profile", locale)}>
             {data.profile ? (
               <CanvasDL theme={th} cols={1} items={profileItems} />
             ) : (
               <div style={emptyStateStyle}>
-                計費檔案尚未建立。完成設定後，發票抬頭、統一編號與聯絡人將顯示於此。
+                {t("billing.section.profileEmpty", locale)}
               </div>
             )}
           </CanvasCard>
 
           <CanvasCard
             theme={th}
-            title={t("billing.section.invoices")}
+            title={t("billing.section.invoices", locale)}
             padding={0}
             actions={
               <ActionCta
@@ -770,7 +815,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
                 href="/invoices"
                 icon="chevR"
               >
-                前往發票 →
+                {t("billing.action.openInvoices", locale)}
               </ActionCta>
             }
           >
@@ -782,15 +827,15 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
                 dense
               />
             ) : (
-              <div style={emptyStateStyle}>目前沒有可顯示的發票。</div>
+              <div style={emptyStateStyle}>{t("billing.empty.invoices", locale)}</div>
             )}
           </CanvasCard>
         </div>
 
         <CanvasCard
           theme={th}
-          title={t("billing.section.statements")}
-          subtitle={t("billing.section.statementsSub")}
+          title={t("billing.section.statements", locale)}
+          subtitle={t("billing.section.statementsSub", locale)}
           padding={0}
         >
           {statementRows.length > 0 ? (
@@ -801,7 +846,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
               dense
             />
           ) : (
-            <div style={emptyStateStyle}>{t("billing.empty.statements")}</div>
+            <div style={emptyStateStyle}>{t("billing.empty.statements", locale)}</div>
           )}
         </CanvasCard>
       </div>
