@@ -4,6 +4,9 @@ import type {
   IssuerContractSlaMetric,
   IssuerContractStatusRecord,
 } from "@drts/contracts";
+import type { BankDemoTenant } from "@/lib/demo-tenants";
+import { projectIssuerText } from "@/lib/issuer-projection";
+import type { Locale } from "@/lib/translations";
 
 export type ContractHealth = "healthy" | "at_risk" | "breached";
 
@@ -195,14 +198,76 @@ const contractRecords: ContractRecord[] = [
   },
 ];
 
-export function listContractRecords() {
-  return contractRecords;
+function projectContractRecord(
+  record: ContractRecord,
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+): ContractRecord {
+  if (!tenant) {
+    return record;
+  }
+
+  return {
+    ...record,
+    contractId: projectIssuerText(record.contractId, tenant, locale),
+    tenantId: tenant.tenantId,
+    programId: projectIssuerText(record.programId, tenant, locale),
+    programCode: projectIssuerText(record.programCode, tenant, locale),
+    displayName: projectIssuerText(record.displayName, tenant, locale),
+    term: {
+      ...record.term,
+      issuerTenantId: tenant.tenantId,
+    },
+    exceptions: record.exceptions.map((exception) => ({
+      ...exception,
+      summary: projectIssuerText(exception.summary, tenant, locale),
+      benefitReferenceMasked: exception.benefitReferenceMasked
+        ? projectIssuerText(exception.benefitReferenceMasked, tenant, locale)
+        : exception.benefitReferenceMasked,
+      issuerAuthorizationRefMasked: exception.issuerAuthorizationRefMasked
+        ? projectIssuerText(
+            exception.issuerAuthorizationRefMasked,
+            tenant,
+            locale,
+          )
+        : exception.issuerAuthorizationRefMasked,
+    })),
+    attainmentSummary: projectIssuerText(
+      record.attainmentSummary,
+      tenant,
+      locale,
+    ),
+    bookingIds: record.bookingIds.map((bookingId) =>
+      projectIssuerText(bookingId, tenant, locale),
+    ),
+  };
 }
 
-export function getContractRecord(contractId: string) {
-  return (
-    contractRecords.find((record) => record.contractId === contractId) ?? null
+export function listContractRecords(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  return contractRecords.map((record) =>
+    projectContractRecord(record, tenant, locale),
   );
+}
+
+export function getContractRecord(
+  contractId: string,
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  for (const record of contractRecords) {
+    const projected = projectContractRecord(record, tenant, locale);
+    if (
+      projected.contractId === contractId ||
+      record.contractId === contractId
+    ) {
+      return projected;
+    }
+  }
+
+  return null;
 }
 
 export function metricValue(

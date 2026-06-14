@@ -11,10 +11,19 @@ import {
   formatPeriod,
   listContractRecords,
 } from "@/lib/contracts-data";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref } from "@/lib/issuer-projection";
 import { t } from "@/lib/translations";
 
-export default function ContractsPage() {
-  const contracts = listContractRecords();
+export default async function ContractsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const contracts = listContractRecords(tenant, locale);
   const healthyCount = contracts.filter(
     (record) => record.health === "healthy",
   ).length;
@@ -32,7 +41,7 @@ export default function ContractsPage() {
         title={
           <span className="pending-title">
             {t("contracts.title")}
-            <IssuerBrandPill />
+            <IssuerBrandPill tenant={tenant} />
           </span>
         }
         description={t("contracts.purpose")}
@@ -153,7 +162,11 @@ export default function ContractsPage() {
                     <td>
                       <Link
                         className="inline-link-button"
-                        href={`/contracts/${record.contractId}`}
+                        href={bankScopedHref(
+                          `/contracts/${record.contractId}`,
+                          tenant,
+                          locale,
+                        )}
                       >
                         {t("contracts.table.view")}
                       </Link>

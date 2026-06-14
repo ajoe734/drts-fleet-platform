@@ -16,15 +16,22 @@ import {
   metricDelta,
   metricValue,
 } from "@/lib/contracts-data";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref } from "@/lib/issuer-projection";
 import { t } from "@/lib/translations";
 
 export default async function ContractDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ contractId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { contractId } = await params;
-  const contract = getContractRecord(contractId);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const contract = getContractRecord(contractId, tenant, locale);
 
   if (!contract) {
     notFound();
@@ -34,7 +41,10 @@ export default async function ContractDetailPage({
 
   return (
     <div className="page-shell">
-      <Link className="text-link" href="/contracts">
+      <Link
+        className="text-link"
+        href={bankScopedHref("/contracts", tenant, locale)}
+      >
         {t("contracts.detail.back")}
       </Link>
 
@@ -44,7 +54,7 @@ export default async function ContractDetailPage({
           <span className="pending-title">
             {contractRecord.displayName}
             <ContractHealthBadge health={contractRecord.health} />
-            <IssuerBrandPill />
+            <IssuerBrandPill tenant={tenant} />
           </span>
         }
         description={contractRecord.attainmentSummary}
@@ -185,7 +195,11 @@ export default async function ContractDetailPage({
                     <td>
                       <Link
                         className="inline-link-button"
-                        href={`/bookings/${exception.orderId}`}
+                        href={bankScopedHref(
+                          `/bookings/${exception.orderId}`,
+                          tenant,
+                          locale,
+                        )}
                       >
                         {t("contracts.detail.bookingLink")}
                       </Link>
