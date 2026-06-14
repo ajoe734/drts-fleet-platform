@@ -248,8 +248,7 @@ describe("partner-booking-web BFF wiring", () => {
       brand: expect.objectContaining({
         displayName: "CTBC World Elite",
         slug: "ctbc",
-        tagline:
-          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+        tagline: "卡友禮賓接送 · 網站預約入口 · 等待後端合作入口啟用",
       }),
     });
 
@@ -283,13 +282,48 @@ describe("partner-booking-web BFF wiring", () => {
       brand: expect.objectContaining({
         displayName: "CTBC World Elite",
         slug: "ctbc",
-        tagline:
-          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+        host: "ride.ctbc.com.tw",
+        tagline: "卡友禮賓接送 · 網站預約入口 · 等待後端合作入口啟用",
       }),
     });
     await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
       code: "PARTNER_ENTRY_NOT_FOUND",
       status: 404,
+    });
+  });
+
+  it("preserves canonical hosts for known-brand fallback shells", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      const entrySlug = input.split("/").pop() ?? "unknown";
+      return jsonResponse(
+        {
+          error: {
+            code: "PARTNER_ENTRY_NOT_FOUND",
+            message: "The partner entry could not be found.",
+            details: { entrySlug },
+            retryable: false,
+          },
+        },
+        404,
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      brand: expect.objectContaining({
+        slug: "ctbc",
+        host: "ride.ctbc.com.tw",
+      }),
+    });
+    await expect(
+      getPartnerRouteContext("unknown-bank", { allowMissing: true }),
+    ).resolves.toMatchObject({
+      brand: expect.objectContaining({
+        slug: "unknown-bank",
+        host: "unknown-bank.partner.invalid",
+      }),
     });
   });
 
@@ -388,8 +422,7 @@ describe("partner-booking-web BFF wiring", () => {
       brand: expect.objectContaining({
         displayName: "CTBC World Elite",
         slug: "ctbc",
-        tagline:
-          "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗 · 等待後端合作入口啟用",
+        tagline: "卡友禮賓接送 · 網站預約入口 · 等待後端合作入口啟用",
       }),
     });
     await expect(
@@ -456,8 +489,19 @@ describe("partner-booking-web BFF wiring", () => {
     const brand = resolvePartnerBrand(activeEntry);
     expect(brand.displayName).toBe("CTBC Premier Ride");
     expect(brand.hotline.phone).toBe("0800-000-001");
+    expect(brand.tagline).toContain("卡友禮賓接送");
     expect(brand.tagline).toContain("vip@ctbc.example");
+    expect(brand.tagline).not.toMatch(/行動銀行|ref_token|issuer_signature/i);
     expect(brand.primary).toBe("#0047AB");
+  });
+
+  it("does not let placeholder entry hosts pollute known-brand public CTAs", () => {
+    const brand = resolvePartnerBrand({
+      ...activeEntry,
+      entryHost: "ctbc.partner.invalid",
+    });
+
+    expect(brand.host).toBe("ride.ctbc.com.tw");
   });
 
   it("matches lion travel branding from host and subtype hints", () => {

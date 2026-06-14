@@ -600,6 +600,9 @@ const en = {
     "You are signed out. Bank-console data stays hidden until you pick an account below.",
   "login.chooseBank": "Issuer tenant",
   "login.chooseAccount": "Operator account",
+  "login.signedOutAccountHidden": "Signed-out boundary",
+  "login.signedOutAccountHiddenBody":
+    "Operator accounts are hidden in the signed-out state. Re-enter sign-in mode before selecting a demo persona.",
   "login.programAdmin": "Program admin",
   "login.opsViewer": "Ops viewer",
   "login.finance": "Finance",
@@ -1191,6 +1194,9 @@ const zh: Record<keyof typeof en, string> = {
     "你目前已登出；重新選擇帳號前，銀行後台資料會保持隱藏。",
   "login.chooseBank": "發卡行租戶",
   "login.chooseAccount": "操作員帳號",
+  "login.signedOutAccountHidden": "登出邊界",
+  "login.signedOutAccountHiddenBody":
+    "登出狀態不顯示操作員帳號。請先回到登入模式，再選擇 demo persona。",
   "login.programAdmin": "方案管理員",
   "login.opsViewer": "營運查看",
   "login.finance": "財務",

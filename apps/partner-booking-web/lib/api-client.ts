@@ -119,6 +119,31 @@ type PartnerAuditMetadataWireRecord = Partial<PartnerRecordAuditMetadata> & {
   updated_by?: string | null;
 };
 
+const EMBED_ONLY_TAGLINE_PATTERN =
+  /session_resolved|token_expired|unsupported_host|no_embed_session|issuer_signature|ref_token|reference token|webview|銀行 App|行動銀行/i;
+
+function getSiteSafeTaglineRoot(base: PartnerBrandTemplate): string {
+  const firstSegment = base.tagline
+    .split("·")
+    .map((segment) => segment.trim())
+    .find(Boolean);
+
+  return firstSegment ?? base.programName ?? base.displayName;
+}
+
+function getSiteSafeBrandTagline(base: PartnerBrandTemplate): string {
+  const tagline = base.tagline.trim();
+  if (!tagline || EMBED_ONLY_TAGLINE_PATTERN.test(tagline)) {
+    return getSiteSafeTaglineRoot(base);
+  }
+
+  return tagline;
+}
+
+function isPlaceholderPartnerHost(host: string): boolean {
+  return /\.partner\.invalid$/i.test(host.trim());
+}
+
 function normalizeBrandingMetadata(
   metadata: PartnerBrandingMetadataWireRecord | null | undefined,
 ): PartnerEntryBrandingMetadata | null {
@@ -297,8 +322,8 @@ function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
     ...base,
     slug,
     displayName: base.displayName,
-    host: `${slug}.partner.invalid`,
-    tagline: `${base.tagline} · 等待後端合作入口啟用`,
+    host: isKnownBrand ? base.host : `${slug}.partner.invalid`,
+    tagline: `${getSiteSafeTaglineRoot(base)} · 網站預約入口 · 等待後端合作入口啟用`,
     theme: isKnownBrand ? base.theme : PARTNER_DEFAULT_THEME,
   };
 }
@@ -361,15 +386,21 @@ export function resolvePartnerBrand(
   const hotlinePhone =
     entry.brandingMetadata?.supportPhone?.trim() || base.hotline.phone;
   const supportEmail = entry.brandingMetadata?.supportEmail?.trim();
+  const siteSafeTagline = getSiteSafeBrandTagline(base);
 
   return {
     ...base,
     slug: entry.entrySlug,
     displayName,
-    host: entry.entryHost?.trim() || base.host,
+    host:
+      entry.entryHost?.trim() && !isPlaceholderPartnerHost(entry.entryHost)
+        ? entry.entryHost.trim()
+        : base.host,
     bankName: entry.bankCode?.trim() || base.bankName,
     programName: entry.programCode?.trim() || base.programName,
-    tagline: supportEmail ? `${base.tagline} · ${supportEmail}` : base.tagline,
+    tagline: supportEmail
+      ? `${siteSafeTagline} · ${supportEmail}`
+      : siteSafeTagline,
     primary: accent,
     accent,
     theme: {
