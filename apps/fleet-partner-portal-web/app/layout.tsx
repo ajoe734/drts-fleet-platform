@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { FleetPortalShell } from "@/components/fleet-portal-shell";
 import { buildFleetPortalNav } from "@/lib/fleet-portal-nav";
+import { buildReferralPortalNav } from "@/lib/referral-portal-nav";
 import { loadNavBadges } from "@/lib/fleet-portal-data.server";
 import { LanguageProvider } from "@/lib/i18n";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
@@ -25,7 +26,8 @@ export default async function RootLayout({
 }) {
   const locale = await getServerLocale();
   const badges = await loadNavBadges();
-  const nav = buildFleetPortalNav(locale, badges);
+  const fleetNav = buildFleetPortalNav(locale, badges);
+  const referralNav = buildReferralPortalNav(locale);
 
   return (
     <html lang={locale}>
@@ -33,10 +35,14 @@ export default async function RootLayout({
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
           <FleetPortalShell
-            nav={nav}
-            brandLabel={t("app.name", locale)}
-            brandSubLabel={t("app.sub", locale)}
-            brandMark={t("app.brandMark", locale)}
+            fleetNav={fleetNav}
+            referralNav={referralNav}
+            fleetBrandLabel={t("app.name", locale)}
+            fleetBrandSubLabel={t("app.sub", locale)}
+            fleetBrandMark={t("app.brandMark", locale)}
+            referralBrandLabel={t("referral.app.name", locale)}
+            referralBrandSubLabel={t("referral.app.sub", locale)}
+            referralBrandMark={t("referral.app.brandMark", locale)}
             searchPlaceholder={t("common.search", locale)}
           >
             {children}

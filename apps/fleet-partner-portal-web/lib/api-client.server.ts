@@ -83,6 +83,12 @@ export interface ServerFleetPartnerClient {
   fleetPartnerId: string;
 }
 
+export interface ServerReferralPartnerClient {
+  client: ApiClient;
+  partnerId: string;
+  partnerEntrySlug: string;
+}
+
 export async function getServerFleetPartnerClient(): Promise<ServerFleetPartnerClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
@@ -135,4 +141,107 @@ export async function getServerFleetPartnerClient(): Promise<ServerFleetPartnerC
   );
 
   return { client, fleetPartnerId };
+}
+
+function resolveHeaderOrEnv(
+  requestHeaders: Headers,
+  headerName: string,
+  envName: string,
+  fallback?: string,
+): string | null {
+  const fromHeader = requestHeaders.get(headerName)?.trim();
+  if (fromHeader) {
+    return fromHeader;
+  }
+
+  const fromEnv = process.env[envName]?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  return fallback ?? null;
+}
+
+export async function getServerReferralPartnerClient(): Promise<ServerReferralPartnerClient> {
+  const apiUrl = resolveServerApiBaseUrl();
+  const requestHeaders = await nextHeaders();
+  const partnerId =
+    resolveHeaderOrEnv(
+    requestHeaders,
+    "x-partner-id",
+    "DRTS_PARTNER_ID",
+    "partner-referral-demo-001",
+    ) ?? "partner-referral-demo-001";
+  const tenantId = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-tenant-id",
+    "DRTS_TENANT_ID",
+    "tenant-demo-001",
+  );
+  const partnerProgramId = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-partner-program-id",
+    "DRTS_PARTNER_PROGRAM_ID",
+    "program-referral-community",
+  );
+  const partnerEntrySlug = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-partner-entry-slug",
+    "DRTS_PARTNER_ENTRY_SLUG",
+    "referral-demo-community",
+  );
+
+  const defaultHeaders: Record<string, string> = {
+    "x-actor-type": "partner_api_key",
+    "x-actor-id": partnerId,
+    "x-partner-id": partnerId,
+    "x-roles": "partner",
+    "x-role-families": "partner",
+    "x-scopes": PORTAL_SCOPES.join(","),
+    "x-realm": "partner",
+  };
+
+  if (tenantId) {
+    defaultHeaders["x-tenant-id"] = tenantId;
+  }
+  if (partnerProgramId) {
+    defaultHeaders["x-partner-program-id"] = partnerProgramId;
+  }
+  if (partnerEntrySlug) {
+    defaultHeaders["x-partner-entry-slug"] = partnerEntrySlug;
+  }
+
+  const iapEmail = requestHeaders.get(CONTROL_PLANE_IAP_EMAIL_HEADER);
+  if (iapEmail) {
+    defaultHeaders[CONTROL_PLANE_IAP_EMAIL_HEADER] = iapEmail;
+  }
+
+  const requestId = requestHeaders.get("x-request-id");
+  if (requestId) {
+    defaultHeaders["x-request-id"] = requestId;
+  }
+
+  const protectedAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
+  if (protectedAudience) {
+    const metadataToken = await mintMetadataIdentityToken(protectedAudience);
+    if (metadataToken) {
+      defaultHeaders.authorization = `Bearer ${metadataToken}`;
+    }
+  }
+
+  if (!defaultHeaders.authorization && apiUrl.includes(".a.run.app")) {
+    const metadataToken = await mintMetadataIdentityToken(apiUrl);
+    if (metadataToken) {
+      defaultHeaders["x-serverless-authorization"] = `Bearer ${metadataToken}`;
+    }
+  }
+
+  return {
+    client: new ApiClient({
+      baseUrl: apiUrl,
+      defaultHeaders,
+    }),
+    partnerId,
+    partnerEntrySlug: partnerEntrySlug ?? "referral-demo-community",
+  };
 }

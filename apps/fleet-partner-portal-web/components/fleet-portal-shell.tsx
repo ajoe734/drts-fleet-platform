@@ -7,34 +7,43 @@ import { FleetPortalHealthFooter } from "@/components/fleet-portal-health-footer
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 
 export function FleetPortalShell({
-  nav,
-  brandLabel,
-  brandSubLabel,
-  brandMark,
+  fleetNav,
+  referralNav,
+  fleetBrandLabel,
+  fleetBrandSubLabel,
+  fleetBrandMark,
+  referralBrandLabel,
+  referralBrandSubLabel,
+  referralBrandMark,
   searchPlaceholder,
   children,
 }: {
-  nav: CanvasShellNavItem[];
-  brandLabel: ReactNode;
-  brandSubLabel: ReactNode;
-  brandMark: ReactNode;
+  fleetNav: CanvasShellNavItem[];
+  referralNav: CanvasShellNavItem[];
+  fleetBrandLabel: ReactNode;
+  fleetBrandSubLabel: ReactNode;
+  fleetBrandMark: ReactNode;
+  referralBrandLabel: ReactNode;
+  referralBrandSubLabel: ReactNode;
+  referralBrandMark: ReactNode;
   searchPlaceholder: string;
   children: ReactNode;
 }) {
   const theme = buildFleetTheme();
   const pathname = usePathname();
+  const isReferral = pathname.startsWith("/referral");
 
   return (
     <CanvasShell
       theme={theme}
-      nav={nav}
+      nav={isReferral ? referralNav : fleetNav}
       currentPath={pathname}
-      brandLabel={brandLabel}
-      brandSubLabel={brandSubLabel}
-      brandMark={brandMark}
+      brandLabel={isReferral ? referralBrandLabel : fleetBrandLabel}
+      brandSubLabel={isReferral ? referralBrandSubLabel : fleetBrandSubLabel}
+      brandMark={isReferral ? referralBrandMark : fleetBrandMark}
       searchPlaceholder={searchPlaceholder}
       env="production"
-      avatarLabel="CH"
+      avatarLabel={isReferral ? "YU" : "CH"}
       sidebarFooter={<FleetPortalHealthFooter />}
       style={{ minHeight: "100dvh", height: "100dvh" }}
     >
