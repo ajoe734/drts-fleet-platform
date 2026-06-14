@@ -28,6 +28,7 @@ function Pill({ theme: th, tone = 'neutral', children, dot, style = {}, en }) {
     platform:{ fg: th.realm.platform.fg, bg: th.realm.platform.bg, bd: th.realm.platform.bd },
     system:  { fg: th.realm.system.fg,   bg: th.realm.system.bg,   bd: th.realm.system.bd },
     driver:  { fg: th.realm.driver.fg,   bg: th.realm.driver.bg,   bd: th.realm.driver.bd },
+    issuer:  { fg: th.realm.issuer.fg,   bg: th.realm.issuer.bg,   bd: th.realm.issuer.bd },
   };
   const c = map[tone] || map.neutral;
   return (
@@ -149,6 +150,7 @@ function Banner({ theme: th, tone = 'info', icon = 'warn', title, body, actions,
     danger:  { fg: th.danger,  bg: th.dangerBg,  bd: th.dangerBorder },
     info:    { fg: th.info,    bg: th.infoBg,    bd: th.infoBorder },
     accent:  { fg: th.accent,  bg: th.accentBg,  bd: th.accentBorder },
+    neutral: { fg: th.textMuted, bg: th.neutralBg, bd: th.neutralBorder },
   };
   const c = map[tone];
   return (

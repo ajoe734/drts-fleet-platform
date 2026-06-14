@@ -40,6 +40,7 @@
 <script type="text/babel" src="mgmt-data.jsx"></script>
 <script type="text/babel" src="fleet-data.jsx"></script>
 <script type="text/babel" src="fleet-screens.jsx"></script>
+<script type="text/babel" src="fleet-referral.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -59,7 +60,7 @@ function App() {
 
   return (
     <>
-      <DesignCanvas projectName="Fleet Partner Portal" subtitle="車行 / 車隊合作後台 · 大都會車隊範例 · 10 routes · spec Part E" accent="#047857">
+      <DesignCanvas projectName="Fleet Partner Portal" subtitle="車行 / 車隊合作後台 · 大都會車隊範例 · 10 routes + 渠道分潤 · spec Part E + CRC 群組 B" accent="#047857">
         <DCSection id="workspace" title="01 · Workspace">
           <DCArtboard id="dashboard" label="營運總覽 / Dashboard" width={W} height={H}><Hero url="/dashboard"><FLP_Dashboard theme={th} /></Hero></DCArtboard>
         </DCSection>
@@ -80,6 +81,13 @@ function App() {
           <DCArtboard id="training" label="訓練 / Training · 完成率" width={W} height={H}><Bare><FLP_Training theme={th} /></Bare></DCArtboard>
           <DCArtboard id="cases" label="事故 / 申訴 · 責任歸屬" width={W} height={H}><Bare><FLP_Cases theme={th} /></Bare></DCArtboard>
           <DCArtboard id="quality" label="品質指標 / Quality Metrics" width={W} height={H}><Bare><FLP_Quality theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="referral" title="05 · 渠道分潤 Channel Partner Portal · CRC 群組 B" subtitle="物業 App 渠道夥伴看自家數字 · 金流 DRTS → 夥伴（應收分潤）· 同一 portal realm">
+          <DCArtboard id="ref-dashboard" label="B1 · 渠道總覽 Dashboard" width={W} height={H}><Hero url="/referral/dashboard"><FLP_RefDashboard theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="ref-usage" label="B2 · 用量明細 Usage · 去識別下探" width={W} height={H}><Bare><FLP_RefUsage theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-statements" label="B3 · 分潤對帳單 · 列表" width={W} height={H}><Bare><FLP_RefStatements theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-statement-detail" label="B3 · 分潤對帳單 · 明細 + artifact" width={W} height={H}><Bare><FLP_RefStatementDetail theme={th} /></Bare></DCArtboard>
         </DCSection>
       </DesignCanvas>
 

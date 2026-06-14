@@ -12,9 +12,6 @@
 - [`ops-console-design-handoff-packet-20260525.md`](./ops-console-design-handoff-packet-20260525.md) — established shape
 - [`platform-admin-design-handoff-packet-20260525.md`](./platform-admin-design-handoff-packet-20260525.md) — companion
 
-> **🎨 2026-05-25 update — visual design has landed.**
-> The visual design team produced [`drts-design-canvas/`](./drts-design-canvas/) v0.6 against this packet + the system design answers. The visual specification for Tenant Console screens is now [`drts-design-canvas/Tenant Console.html`](./drts-design-canvas/Tenant%20Console.html) (teal accent, 20 routes including the 9 NEW routes per Q-TEN02, command-pattern `accepted+pending` state, cross-actor audit, aggregated integration-governance, YAMATO fixture data). Partner Booking Mode visuals are archived in [`drts-design-canvas/archive/`](./drts-design-canvas/archive/) per Q-TEN03 — they get a fresh packet + design when `apps/partner-booking-web` is in scope. Many of the §7 purely-visual open questions below are now answered by the canvas — see §7 inline annotations. The implementation lane that picks up `apps/tenant-console-web` should treat the canvas as authority for visual decisions, and this packet as authority for behavior / data / API contracts.
-
 ---
 
 ## 0. How to read this document
@@ -63,13 +60,6 @@ From spec §9.3. Partner booking user is **NOT** in this packet (moved to partne
 | Viewer                     | 只讀查詢                                | `tc_viewer`          | Read-only access to most pages                                                                                                       |
 
 `tc_admin` is the most powerful tenant-scoped role per spec §9.6.5 ("只有 tenant admin 可操作"). The visual must NOT hard-code; CTAs come from `availableActions` per resource (Q-X13).
-
-For contract authority, treat the table above as IA/persona shorthand only.
-The authoritative assignable role codes still come from `GET /api/tenant/roles`.
-At the current Phase 1 contract surface that catalog is
-`tenant_admin`, `tenant_ops_admin`, `tenant_finance_admin`, and
-`tenant_viewer`. There is no separate `tc_integration_mgr` role code for the
-`/users` page to invent locally.
 
 **Important:** All roles are scoped within the tenant — there is no cross-tenant authority at this level (cross-tenant operations live in ops-console or platform-admin). This is enforced by backend; visual designer just respects the principle.
 
@@ -451,12 +441,13 @@ Schema per page (same as previous packets): spec ref / refresh tier / primary pe
 - **Primary persona / roles:** `tc_admin` only ("只有 tenant admin 可操作" per spec)
 - **Primary task:** Manage tenant internal users and their roles.
 - **Must-show data:**
-  - user list: user id, display name, email, role, status, invited at, updated at
+  - user list: user id, display name, email, role, status, invited at, last login
   - Filter by role, by status
 - **Must-support actions** per `availableActions`:
   - Invite user (medium)
   - Update role (medium)
-  - Update status to active/suspended via the existing role-update command
+  - Suspend (high — requires reason)
+  - Resend invitation (medium)
 - **Decision points:**
   - What role is correct?
   - Should this user be suspended pending investigation?
@@ -464,11 +455,6 @@ Schema per page (same as previous packets): spec ref / refresh tier / primary pe
   - Empty (only the admin themselves)
   - Pending invitations visible
   - Suspended users visible (separate filter)
-- **Contract note:** Current canonical backend surface does not expose a
-  dedicated resend-invite command, a required-reason suspend payload, a
-  `lastLogin` field, or a separate integration-manager role code. `/users`
-  must consume the existing backend role catalog and invite/update contracts
-  verbatim.
 - **Entry:** Sidebar
 - **Exit:** None terminal
 
@@ -793,7 +779,7 @@ Schema per page (same as previous packets): spec ref / refresh tier / primary pe
 | `/bookings/[id]`          | booking detail with `availableActions` + `editableUntil` (Q-TEN05), audit subset                 | update command, cancel command (per Q-TEN04)                                                                            |
 | `/passengers`             | passenger list (TBD)                                                                             | create, update, soft deactivate (Q-TEN06)                                                                               |
 | `/addresses`              | address list (TBD)                                                                               | create, update, soft deactivate (Q-TEN06)                                                                               |
-| `/users`                  | `listTenantUsers`, `listTenantRoles`                                                            | `createTenantUser`, `updateTenantRole` (role + status); no resend-invite command                                        |
+| `/users`                  | `createTenantUser` reads, role catalog                                                           | `createTenantUser`, update role, suspend                                                                                |
 | `/notifications`          | subscription matrix (TBD)                                                                        | update subscriptions                                                                                                    |
 | `/sla`                    | SLA profile read (TBD)                                                                           | update SLA (Q-TEN07 minutes), recalculate existing bookings (admin command)                                             |
 | `/webhooks`               | webhook endpoints + delivery logs (real engine per Q-TEN08)                                      | `createWebhookEndpoint` (note "test_pending" status per existing memory), update, disable, delete, rotate secret, retry |
@@ -814,9 +800,7 @@ Methods marked TBD need to be added to `packages/api-client/src/index.ts`. The a
 
 ## 7. Purely visual open questions
 
-> **🎨 2026-05-25 status:** the visual design team has answered most of these in [`drts-design-canvas/Tenant Console.html`](./drts-design-canvas/Tenant%20Console.html) (v0.6, teal accent, YAMATO fixture). The implementer should consult the canvas first; remaining "still open" items are ones the canvas explicitly did not address. Canvas wins for visual; this packet wins for behavior/data/API.
-
-§3 covers cross-cutting; most decisions baked in. Remaining below are visual / interaction / IA choices — most now answered.
+§3 covers cross-cutting; most decisions baked in. Remaining are visual / interaction / IA choices.
 
 ### 7.1 Cross-cutting (shared with ops-console and platform-admin packets)
 

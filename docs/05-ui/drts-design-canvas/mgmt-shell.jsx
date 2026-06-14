@@ -185,7 +185,7 @@ function IdentityChip({ theme: th, env = 'production', tenant, actor = {} }) {
         textTransform: 'uppercase',
       }}>
         <span style={{ width: 4, height: 4, borderRadius: 2, background: th.accent }} />
-        {th.surface === 'platform' ? 'PLATFORM' : th.surface === 'ops' ? 'OPS' : th.surface === 'tenant' ? 'TENANT' : th.surface.toUpperCase()}
+        {th.consoleId === 'platform' ? 'PLATFORM' : th.consoleId === 'ops' ? 'OPS' : th.consoleId === 'tenant' ? 'TENANT' : th.consoleId === 'bank' ? 'ISSUER' : (th.consoleId || th.surface).toUpperCase()}
       </div>
       {/* env chip */}
       <div style={{
