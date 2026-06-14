@@ -89,6 +89,12 @@ import {
 } from "../../common/throttling/rate-limit.constants";
 import { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
+import type { ReferralStatementRecord } from "../billing-settlement/referral-statement.types";
+import type {
+  PartnerReferralDashboardRecord,
+  PartnerReferralRevenuePeriodRecord,
+  PartnerReferralUsagePeriodRecord,
+} from "./partner-referral-portal.types";
 import { TenantPartnerService } from "./tenant-partner.service";
 
 type JwtExpiresIn = NonNullable<
@@ -377,6 +383,91 @@ export class TenantPartnerController {
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.getPartnerEntry(entrySlug),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/dashboard")
+  @RequireRealms("partner")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getPartnerReferralDashboard(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: PartnerReferralDashboardRecord =
+      await this.tenantPartnerService.getPartnerReferralDashboard(
+        identity,
+        this.billingSettlementService,
+        periodMonth,
+        requestId,
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("partner/referral/usage")
+  @RequireRealms("partner")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async listPartnerReferralUsage(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: PartnerReferralUsagePeriodRecord[] =
+      await this.tenantPartnerService.listPartnerReferralUsage(
+        identity,
+        this.billingSettlementService,
+        requestId,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("partner/referral/revenue")
+  @RequireRealms("partner")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async listPartnerReferralRevenue(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: PartnerReferralRevenuePeriodRecord[] =
+      await this.tenantPartnerService.listPartnerReferralRevenue(
+        identity,
+        this.billingSettlementService,
+        requestId,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("partner/referral/statements")
+  @RequireRealms("partner")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async listPartnerReferralStatements(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: ReferralStatementRecord[] =
+      await this.tenantPartnerService.listPartnerReferralStatements(
+        identity,
+        this.billingSettlementService,
+        requestId,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("partner/referral/statements/:period")
+  @RequireRealms("partner")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerReferralStatement(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Param("period") period: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getPartnerReferralStatement(
+        identity,
+        this.billingSettlementService,
+        period,
+        requestId,
+      ),
       requestId,
     );
   }

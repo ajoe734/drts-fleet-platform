@@ -94,6 +94,16 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("partner/referral/")) {
+    const routeSuffix = routePath.slice("partner/referral/".length) || "root";
+    return {
+      routeKey: `partner:referral:${routeSuffix}:${upperMethod}`,
+      requiredScopes: ["billing:read"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Referral partner self-service access",
+    };
+  }
+
   if (routePath.startsWith("platform-admin/")) {
     return {
       routeKey: `platform-admin:${upperMethod}`,

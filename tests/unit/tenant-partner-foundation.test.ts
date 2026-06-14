@@ -177,11 +177,14 @@ describe("tenant partner foundation service", () => {
       "bank-demo-alpha-airport",
     );
 
-    expect(entries).toHaveLength(2);
+    // 3 active entries now: the 2 bank-airport flows + the referral-channel
+    // demo entry added for the community-app referral read APIs (CRC-BE-007).
+    expect(entries).toHaveLength(3);
     expect(entries.map((entry) => entry.entrySlug)).toEqual(
       expect.arrayContaining([
         "bank-demo-alpha-airport",
         "bank-demo-beta-airport",
+        "referral-demo-community",
       ]),
     );
     expect(alphaEntry).toMatchObject({
@@ -344,7 +347,7 @@ describe("tenant partner foundation service", () => {
     );
     await reloadedService.onModuleInit();
 
-    expect(store.snapshot().partnerEntries).toHaveLength(2);
+    expect(store.snapshot().partnerEntries).toHaveLength(3);
     expect(reloadedService.listPartnerEntries()).toEqual(
       firstService.listPartnerEntries(),
     );

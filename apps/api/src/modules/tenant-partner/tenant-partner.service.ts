@@ -193,6 +193,12 @@ import {
   type WebhookRetryPolicy,
 } from "./webhook-dispatch.service";
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
+import type {
+  PartnerReferralDashboardRecord,
+  PartnerReferralRevenuePeriodRecord,
+  PartnerReferralUsagePeriodRecord,
+} from "./partner-referral-portal.types";
+import type { ReferralStatementRecord } from "../billing-settlement/referral-statement.types";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
@@ -658,6 +664,43 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     revokeReason: null,
     createdAt: "2026-04-10T00:10:00.000Z",
     updatedAt: "2026-04-10T00:10:00.000Z",
+    auditMetadata: {
+      source: "seed_bootstrap",
+      requestId: null,
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
+    partnerId: "partner-referral-demo-001",
+    partnerCode: "referral_demo_community",
+    partnerType: "referral_channel",
+    programId: "program-referral-community",
+    programCode: "REFERRAL_COMMUNITY",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: null,
+    entrySlug: "referral-demo-community",
+    displayName: "Referral Demo Community Channel",
+    businessDispatchSubtype: "enterprise_dispatch",
+    authMode: "partner_api_key",
+    eligibilityMode: "none",
+    entryHost: "yuhe-residence.example",
+    entryPath: "/partner/referral-demo-community",
+    themeAccent: "#0f766e",
+    brandingMetadata: {
+      displayName: "Referral Demo Community Channel",
+      themeAccent: "#0f766e",
+      supportEmail: "community-referral@partner-demo.example",
+      supportPhone: "0800-000-333",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
     auditMetadata: {
       source: "seed_bootstrap",
       requestId: null,
@@ -3800,6 +3843,87 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   getPartnerEntry(entrySlug: string) {
     return this.clonePartnerEntry(this.requirePublicPartnerEntry(entrySlug));
+  }
+
+  async getPartnerReferralDashboard(
+    identity: IdentityContext | null,
+    billingSettlementService: BillingSettlementService,
+    periodMonth?: string,
+    requestId?: string,
+  ): Promise<PartnerReferralDashboardRecord> {
+    const entry = this.requirePartnerReferralPortalEntry(identity, requestId);
+    const statements = await billingSettlementService.listReferralStatements(
+      entry.entrySlug,
+    );
+    const period =
+      periodMonth?.trim() || statements[0]?.period || new Date().toISOString().slice(0, 7);
+    const statement = billingSettlementService.getReferralStatement(
+      entry.entrySlug,
+      period,
+    );
+
+    return {
+      partnerEntrySlug: entry.entrySlug,
+      period,
+      activeUserCount: statement.totals.activeRiderCount,
+      tripCount: statement.totals.tripCount,
+      gmv: { ...statement.totals.gmv },
+      estimatedShareAmount: { ...statement.totals.shareTotal },
+      statementId: statement.statementId,
+      statementStatus: statement.status,
+      latestStatementPeriod: statements[0]?.period ?? null,
+      pendingStatementCount: statements.filter(
+        (candidate) => candidate.status !== "paid",
+      ).length,
+    };
+  }
+
+  async listPartnerReferralUsage(
+    identity: IdentityContext | null,
+    billingSettlementService: BillingSettlementService,
+    requestId?: string,
+  ): Promise<PartnerReferralUsagePeriodRecord[]> {
+    const entry = this.requirePartnerReferralPortalEntry(identity, requestId);
+    const statements = await billingSettlementService.listReferralStatements(
+      entry.entrySlug,
+    );
+    return statements.map((statement) => this.toPartnerReferralUsage(statement));
+  }
+
+  async listPartnerReferralRevenue(
+    identity: IdentityContext | null,
+    billingSettlementService: BillingSettlementService,
+    requestId?: string,
+  ): Promise<PartnerReferralRevenuePeriodRecord[]> {
+    const entry = this.requirePartnerReferralPortalEntry(identity, requestId);
+    const statements = await billingSettlementService.listReferralStatements(
+      entry.entrySlug,
+    );
+    return statements.map((statement) =>
+      this.toPartnerReferralRevenue(statement),
+    );
+  }
+
+  async listPartnerReferralStatements(
+    identity: IdentityContext | null,
+    billingSettlementService: BillingSettlementService,
+    requestId?: string,
+  ): Promise<ReferralStatementRecord[]> {
+    const entry = this.requirePartnerReferralPortalEntry(identity, requestId);
+    return billingSettlementService.listReferralStatements(entry.entrySlug);
+  }
+
+  getPartnerReferralStatement(
+    identity: IdentityContext | null,
+    billingSettlementService: BillingSettlementService,
+    periodMonth: string,
+    requestId?: string,
+  ): ReferralStatementRecord {
+    const entry = this.requirePartnerReferralPortalEntry(identity, requestId);
+    return billingSettlementService.getReferralStatement(
+      entry.entrySlug,
+      periodMonth,
+    );
   }
 
   createPlatformPartnerEntry(
@@ -7532,6 +7656,89 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return (
       this.partnerEntries.find((entry) => entry.entrySlug === entrySlug) ?? null
     );
+  }
+
+  private requirePartnerReferralPortalEntry(
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    if (
+      !identity ||
+      identity.actorType !== "partner_api_key" ||
+      identity.realm !== "partner" ||
+      !identity.partnerEntrySlug
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_REQUIRED",
+        "Authenticated partner identity is required for referral portal reads.",
+      );
+    }
+
+    const entry = this.requireAccessiblePartnerEntry(
+      identity.partnerEntrySlug,
+      requestId,
+      "authenticate",
+    );
+    const partnerMismatch =
+      identity.tenantId !== entry.tenantId ||
+      (identity.partnerId ?? null) !== entry.partnerId ||
+      (identity.partnerProgramId ?? null) !== entry.programId ||
+      identity.partnerEntrySlug !== entry.entrySlug;
+
+    if (partnerMismatch) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_MISMATCH",
+        "Authenticated partner identity cannot access another partner entry.",
+        {
+          entrySlug: entry.entrySlug,
+          tenantId: entry.tenantId,
+        },
+      );
+    }
+
+    if (entry.partnerType !== "referral_channel") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_SCOPE_UNSUPPORTED",
+        "Authenticated partner identity is not provisioned for the referral partner portal.",
+        {
+          entrySlug: entry.entrySlug,
+          partnerType: entry.partnerType,
+        },
+      );
+    }
+
+    return entry;
+  }
+
+  private toPartnerReferralUsage(
+    statement: ReferralStatementRecord,
+  ): PartnerReferralUsagePeriodRecord {
+    return {
+      partnerEntrySlug: statement.partnerEntrySlug,
+      period: statement.period,
+      activeUserCount: statement.totals.activeRiderCount,
+      tripCount: statement.totals.tripCount,
+      gmv: { ...statement.totals.gmv },
+    };
+  }
+
+  private toPartnerReferralRevenue(
+    statement: ReferralStatementRecord,
+  ): PartnerReferralRevenuePeriodRecord {
+    return {
+      partnerEntrySlug: statement.partnerEntrySlug,
+      period: statement.period,
+      currency: statement.currency,
+      tripCount: statement.totals.tripCount,
+      gmv: { ...statement.totals.gmv },
+      shareAmount: { ...statement.totals.shareTotal },
+      statementId: statement.statementId,
+      statementStatus: statement.status,
+      generatedAt: statement.generatedAt,
+    };
   }
 
   private buildIssuedPartnerIngressCredential(
