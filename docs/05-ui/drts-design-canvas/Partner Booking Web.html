@@ -33,6 +33,8 @@
 <script type="text/babel" src="design-canvas.jsx"></script>
 <script type="text/babel" src="ios-frame.jsx"></script>
 <script type="text/babel" src="pb-screens.jsx"></script>
+<script type="text/babel" src="pb-states.jsx"></script>
+<script type="text/babel" src="pb-embed.jsx"></script>
 
 <script type="text/babel">
 function App() {
@@ -53,20 +55,38 @@ function App() {
         <DCArtboard id="card-track" label="行程追蹤 Tracking" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Tracking program="card" /></Phone></DCArtboard>
       </DCSection>
 
-      <DCSection id="insurance" title="02 · 保險代步 · Insurance Replacement" subtitle="富邦產險 · 理賠承辦或使用者">
+      <DCSection id="insurance" title="02 · 保險代步 · Insurance Replacement" subtitle="富邦產險 · claim.fubon-ins.com.tw · 理賠額度 (非趟次) · reference/claim-driven">
         <DCArtboard id="ins-landing" label="入口 · 代步額度" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Landing program="insurance" /></Phone></DCArtboard>
-        <DCArtboard id="ins-elig" label="資格驗證 · 保單/理賠" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Eligibility program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-elig" label="資格驗證 · policy + replacement-vehicle + roster" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsEligibility /></Phone></DCArtboard>
         <DCArtboard id="ins-book" label="預約表單 · insurance fields" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookInsurance /></Phone></DCArtboard>
         <DCArtboard id="ins-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Review program="insurance" /></Phone></DCArtboard>
-        <DCArtboard id="ins-error" label="需人工審核 · Manual Review (Part C2-7)" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Error program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Success program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-track" label="行程追蹤 Tracking" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Tracking program="insurance" /></Phone></DCArtboard>
       </DCSection>
 
-      <DCSection id="travel" title="03 · 旅行社接送 · Travel Agency Transfer" subtitle="雄獅旅遊 · 團體窗口">
+      <DCSection id="insurance-states" title="02b · 保險 · 資格 / 阻擋狀態 · Eligibility States" subtitle="contract enum 各對應一個畫面狀態 · 由理賠系統判定">
+        <DCArtboard id="ins-pending" label="insurance_pending · 理賠審核中" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_pending" /></Phone></DCArtboard>
+        <DCArtboard id="ins-missing" label="insurance_missing · 查無案件" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_missing" /></Phone></DCArtboard>
+        <DCArtboard id="ins-expired" label="insurance_expired · 代步逾期" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_expired" /></Phone></DCArtboard>
+        <DCArtboard id="ins-cancelled" label="insurance_cancelled · 已結案" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsBlocked state="insurance_cancelled" /></Phone></DCArtboard>
+        <DCArtboard id="ins-manual" label="manual_review · 需人工審核" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Error program="insurance" /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="travel" title="03 · 旅行社接送 · Travel Agency Transfer" subtitle="雄獅旅遊 · booking.lion-travel.com.tw · 團體席次 · roster-driven">
         <DCArtboard id="trv-landing" label="入口 · 接送額度" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Landing program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-elig" label="資格驗證 · 團號" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Eligibility program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-roster" label="團體席次 · roster + itinerary + batching" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvRoster /></Phone></DCArtboard>
         <DCArtboard id="trv-book" label="預約表單 · travel fields" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookTravel /></Phone></DCArtboard>
         <DCArtboard id="trv-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Review program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Success program="travel" /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="embed" title="04 · 網銀 App 內嵌身分狀態 · Online-banking Embed Identity (B1–B5)" subtitle="身分來自銀行 session (reference token) · 永不擷取卡片資料 · 中信 App webview">
+        <DCArtboard id="embed-b1" label="B1 · 已登入帶入 (happy path)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedHandoff /></Phone></DCArtboard>
+        <DCArtboard id="embed-b2" label="B2 · 權杖逾時 · 需重新驗證" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedReauth /></Phone></DCArtboard>
+        <DCArtboard id="embed-b3" label="B3 · 非授權環境 · 封鎖" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedUnsupported /></Phone></DCArtboard>
+        <DCArtboard id="embed-b4" label="B4 · 授權範圍同意 (scope)" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedConsent /></Phone></DCArtboard>
+        <DCArtboard id="embed-b5" label="B5 · 回退至官網 standalone" width={W} height={H}><Phone p={PROGRAMS.card}><PB_EmbedFallback /></Phone></DCArtboard>
       </DCSection>
 
     </DesignCanvas>

@@ -42,6 +42,7 @@
 <script type="text/babel" src="platform-screens-1.jsx"></script>
 <script type="text/babel" src="platform-screens-2.jsx"></script>
 <script type="text/babel" src="platform-screens-3.jsx"></script>
+<script type="text/babel" src="platform-referral.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -78,6 +79,14 @@ function App() {
           <DCArtboard id="partner-detail" label="合作夥伴詳情 · readiness + credentials" width={W} height={H}><Hero url="/partners/ctbc-elite"><PA_PartnerDetail theme={th} /></Hero></DCArtboard>
           <DCArtboard id="partner-secret" label="✨ 發 credential · plaintext-once modal (Q-ADM07)" width={W} height={H}><Bare><PA_PartnerDetail theme={th} showSecretModal /></Bare></DCArtboard>
           <DCArtboard id="users" label="平台人員 · 6 角色" width={W} height={H}><Bare><PA_Users theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="referral" title="03b · Referral 渠道管理 · CRC 群組 C" subtitle="DRTS 營運方建立/維運社區物業叫車渠道 · partnerType=referral_channel · 擴充 partner-entries">
+          <DCArtboard id="ref-channels" label="C1 · Referral 渠道清單" width={W} height={H}><Hero url="/partners?type=referral"><PA_RefChannels theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="ref-channel-edit" label="C1 · 建立/編輯 · entryHost 白名單 + 品牌" width={W} height={H}><Bare><PA_RefChannelEdit theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-rates" label="C2 · 分潤費率設定 · 寫 audit" width={W} height={H}><Bare><PA_RefRates theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-creds" label="C3 · Ingress 憑證管理" width={W} height={H}><Bare><PA_RefCredentials theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="ref-creds-secret" label="✨ C3 · 簽發憑證 · plaintext-once" width={W} height={H}><Bare><PA_RefCredentials theme={th} showSecretModal /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">
