@@ -1923,6 +1923,186 @@ const en = {
   // ── integrationGovernance (i18n-fullsweep 20260614) ──
 
   // ── notifications (i18n-fullsweep 20260614) ──
+  "notifications.common.none": "—",
+  "notifications.header.title": "Notification preferences",
+  "notifications.header.subtitle":
+    "{code} · {note} · event × channel matrix · spec §9.6.6",
+  "notifications.header.schema": "Webhook payload schema",
+  "notifications.header.save": "Save settings",
+  "notifications.banner.partialFailure.title":
+    "Some notification data could not be loaded",
+  "notifications.banner.webhookNotProvisioned.title":
+    "Webhook channel is not provisioned",
+  "notifications.banner.webhookNotProvisioned.body":
+    "No webhook endpoint is configured yet. This channel remains `not_provisioned` until a webhook is added in `/webhooks`.",
+  "notifications.kpi.events.label": "Events",
+  "notifications.kpi.events.sub": "Event types",
+  "notifications.kpi.subscriptions.label": "Subscriptions",
+  "notifications.kpi.subscriptions.custom": "{count} overrides",
+  "notifications.kpi.subscriptions.baseline": "Governance baseline only",
+  "notifications.kpi.webhooks.label": "Webhooks",
+  "notifications.kpi.webhooks.active": "active endpoints",
+  "notifications.kpi.webhooks.notProvisioned": "Not provisioned",
+  "notifications.kpi.updated.label": "Last updated",
+  "notifications.state.customConfiguration": "Custom configuration",
+  "notifications.state.allDefaults": "All defaults",
+  "notifications.matrix.title": "Event × channel",
+  "notifications.matrix.subtitle":
+    "Each event can be delivered through {count} channels independently · {risk} ({pattern})",
+  "notifications.matrix.note.custom":
+    "{count} tenant overrides applied · last updated {updatedAt}",
+  "notifications.matrix.note.baseline":
+    "No tenant override yet · showing governance baseline snapshot from {generatedAt}",
+  "notifications.matrix.empty": "No event routing is available to display.",
+  "notifications.summary.title": "Status summary",
+  "notifications.summary.subtitle": "State variants are detected automatically",
+  "notifications.summary.variant": "Variant",
+  "notifications.summary.refreshTier": "Refresh tier",
+  "notifications.summary.specRef": "Spec ref",
+  "notifications.summary.specRefValue": "§9.6.6 (Q-TEN02)",
+  "notifications.summary.risk": "Risk",
+  "notifications.summary.action": "Action",
+  "notifications.summary.actionEnabled": "update_subscription",
+  "notifications.summary.actionDisabled": "disabled ({code})",
+  "notifications.summary.blocked": "blocked",
+  "notifications.summary.emailSubscriptions": "Email subscriptions",
+  "notifications.summary.webhookSubscriptions": "Webhook subscriptions",
+  "notifications.summary.opsConsoleSubscriptions":
+    "Tenant Console subscriptions",
+  "notifications.summary.currentState": "Current state: {state}",
+  "notifications.emptyCatalog.title": "EmptyReason catalog",
+  "notifications.emptyCatalog.subtitle":
+    "Six EmptyReason variants rendered with the shared Q-X15 treatment",
+  "notifications.emptyCatalog.active": "active",
+  "notifications.crossApp.title": "Cross-app links",
+  "notifications.crossApp.subtitle":
+    "Q-X03 / Q-TEN10 / Q-TEN08 deep links related to notification preferences",
+  "notifications.crossApp.integrationGovernance.label":
+    "Integration governance",
+  "notifications.crossApp.integrationGovernance.hint":
+    "Return to `/integration-governance` to inspect overall readiness",
+  "notifications.crossApp.webhooks.label": "Webhook endpoints",
+  "notifications.crossApp.webhooks.hint":
+    "Open `/webhooks` to provision the webhook channel",
+  "notifications.crossApp.webhookDeliveries.label": "Webhook delivery details",
+  "notifications.crossApp.webhookDeliveries.hint":
+    "Inspect failed webhook deliveries in platform admin (Q-X03)",
+  "notifications.crossApp.newTab": "new tab",
+  "notifications.crossApp.inApp": "in app",
+  "notifications.channel.email": "EMAIL",
+  "notifications.channel.webhook": "WEBHOOK",
+  "notifications.channel.ops_console": "TENANT CONSOLE",
+  "notifications.channel.notProvisioned": "not_provisioned",
+  "notifications.toggle.on": "on",
+  "notifications.toggle.off": "off",
+  "notifications.table.column.eventType": "Event type",
+  "notifications.refreshTier.slow.label": "Tenant slow",
+  "notifications.refreshTier.slow.note": "30s polling",
+  "notifications.risk.medium.label": "Medium",
+  "notifications.risk.medium.pattern": "modal confirm + receipt",
+  "notifications.error.preferences": "Notification preferences: {message}",
+  "notifications.error.governance": "Governance baseline: {message}",
+  "notifications.error.webhooks": "Webhook endpoints: {message}",
+  "notifications.activeState.fetchFailed":
+    "Notification preferences failed to load. The existing governance baseline is shown for reference.",
+  "notifications.activeState.notProvisioned":
+    "Notification routing is not configured for this tenant yet. Finish baseline setup first.",
+  "notifications.activeState.noData":
+    "No event is subscribed yet, so every channel remains off by default.",
+  "notifications.event.bookingCreated.description":
+    "Published immediately after a new booking is created.",
+  "notifications.event.bookingCreated.audience":
+    "tenant admin / integration manager",
+  "notifications.event.bookingConfirmed.description":
+    "Published after a driver accepts or the booking becomes executable.",
+  "notifications.event.bookingConfirmed.audience": "dispatcher / requester",
+  "notifications.event.bookingCancelled.description":
+    "Published when the booking is cancelled by tenant, ops, or driver.",
+  "notifications.event.bookingCancelled.audience":
+    "requester / approver / admin",
+  "notifications.event.bookingApprovalRequired.description":
+    "Published when an approval rule requires tenant sign-off.",
+  "notifications.event.bookingApprovalRequired.audience":
+    "approver / tenant admin",
+  "notifications.event.bookingApprovalApproved.description":
+    "Published after approval clears and dispatch can continue.",
+  "notifications.event.bookingApprovalApproved.audience":
+    "requester / dispatcher / tenant admin",
+  "notifications.event.bookingApprovalRejected.description":
+    "Published after approval is rejected and the booking needs revision.",
+  "notifications.event.bookingApprovalRejected.audience":
+    "requester / approver / tenant admin",
+  "notifications.event.invoiceReady.description":
+    "Published after the monthly invoice is generated for download and reconciliation.",
+  "notifications.event.invoiceReady.audience": "billing contact / tenant admin",
+  "notifications.event.webhookDeliveryFailed.description":
+    "Published when a webhook endpoint fails repeatedly and needs follow-up.",
+  "notifications.event.webhookDeliveryFailed.audience":
+    "integration manager / ops escalation",
+  "notifications.event.quotaThresholdWarning.description":
+    "Published when monthly quota usage approaches the limit.",
+  "notifications.event.quotaThresholdWarning.audience":
+    "quota owner / tenant admin",
+  "notifications.empty.noData.title": "No notification preference data",
+  "notifications.empty.noData.body":
+    "This tenant has no custom matrix yet and falls back to the governance baseline.",
+  "notifications.empty.notProvisioned.title":
+    "Channels are not fully provisioned",
+  "notifications.empty.notProvisioned.body":
+    "At least one notification channel is not provisioned. The column stays visible but cannot be changed.",
+  "notifications.empty.notProvisioned.cta": "Open webhooks",
+  "notifications.empty.fetchFailed.title":
+    "Notification preferences could not be loaded",
+  "notifications.empty.fetchFailed.body":
+    "The API read failed. Refresh later or inspect the audit and ops lanes for follow-up.",
+  "notifications.empty.permissionDenied.title": "This role is view only",
+  "notifications.empty.permissionDenied.body":
+    "You can inspect notification posture, but you cannot update the tenant notification matrix.",
+  "notifications.empty.externalUnavailable.title":
+    "External channels are temporarily unavailable",
+  "notifications.empty.externalUnavailable.body":
+    "External delivery is degraded. In-tenant visibility remains readable, but cross-system routing needs ops follow-up.",
+  "notifications.empty.filteredEmpty.title": "No results after filtering",
+  "notifications.empty.filteredEmpty.body":
+    "The current channel and event filters do not match anything. Clear the filters and try again.",
+  "notifications.emptyReason.no_data.label": "No data",
+  "notifications.emptyReason.no_data.pill": "NO DATA",
+  "notifications.emptyReason.no_data.hint":
+    "The feature is ready, but there is no data to display yet.",
+  "notifications.emptyReason.not_provisioned.label": "Not provisioned",
+  "notifications.emptyReason.not_provisioned.pill": "NOT PROVISIONED",
+  "notifications.emptyReason.not_provisioned.hint":
+    "This feature or channel is not enabled for the tenant yet and needs baseline setup first.",
+  "notifications.emptyReason.fetch_failed.label": "Fetch failed",
+  "notifications.emptyReason.fetch_failed.pill": "FETCH FAILED",
+  "notifications.emptyReason.fetch_failed.hint":
+    "The backend read failed. Retry later or inspect connectivity.",
+  "notifications.emptyReason.permission_denied.label": "Permission denied",
+  "notifications.emptyReason.permission_denied.pill": "PERMISSION DENIED",
+  "notifications.emptyReason.permission_denied.hint":
+    "The current role cannot inspect this data. Contact a tenant admin.",
+  "notifications.emptyReason.external_unavailable.label":
+    "External unavailable",
+  "notifications.emptyReason.external_unavailable.pill": "EXTERNAL UNAVAILABLE",
+  "notifications.emptyReason.external_unavailable.hint":
+    "A dependent external service is temporarily unavailable and should recover automatically.",
+  "notifications.emptyReason.driver_not_eligible.label": "Driver not eligible",
+  "notifications.emptyReason.driver_not_eligible.pill": "DRIVER NOT ELIGIBLE",
+  "notifications.emptyReason.driver_not_eligible.hint":
+    "The driver cannot receive dispatch right now. This state is driver-app only.",
+  "notifications.emptyReason.filtered_empty.label": "Filtered empty",
+  "notifications.emptyReason.filtered_empty.pill": "FILTERED EMPTY",
+  "notifications.emptyReason.filtered_empty.hint":
+    "No data matches the current filters. Adjust the filters to continue.",
+  "notifications.form.saving": "Saving...",
+  "notifications.form.save": "Save settings",
+  "notifications.form.readOnly": "Read only",
+  "notifications.form.column.eventType": "Event type",
+  "notifications.form.column.when": "When",
+  "notifications.form.channelToggleAria": "{eventType} {channel}",
+  "notifications.form.submitDisabled": "update_subscription disabled: {code}",
+  "notifications.form.submitEnabled":
+    "`availableActions.update_subscription` drives the submit CTA.",
 
   // ── featureFlags (i18n-fullsweep 20260614) ──
 
@@ -3734,6 +3914,176 @@ const zh: Record<keyof typeof en, string> = {
   // ── integrationGovernance (i18n-fullsweep 20260614) ──
 
   // ── notifications (i18n-fullsweep 20260614) ──
+  "notifications.common.none": "—",
+  "notifications.header.title": "通知偏好",
+  "notifications.header.subtitle":
+    "{code} · {note} · 事件 × 通道矩陣 · spec §9.6.6",
+  "notifications.header.schema": "Webhook payload schema",
+  "notifications.header.save": "儲存設定",
+  "notifications.banner.partialFailure.title": "部分通知資料無法載入",
+  "notifications.banner.webhookNotProvisioned.title": "Webhook 通道尚未設定",
+  "notifications.banner.webhookNotProvisioned.body":
+    "目前沒有任何 webhook endpoint。新增 `/webhooks` 設定前，這個通道會維持 `not_provisioned`。",
+  "notifications.kpi.events.label": "事件",
+  "notifications.kpi.events.sub": "事件類型",
+  "notifications.kpi.subscriptions.label": "訂閱",
+  "notifications.kpi.subscriptions.custom": "{count} 項覆寫",
+  "notifications.kpi.subscriptions.baseline": "目前僅套用治理基線",
+  "notifications.kpi.webhooks.label": "Webhook",
+  "notifications.kpi.webhooks.active": "個 active 端點",
+  "notifications.kpi.webhooks.notProvisioned": "尚未設定",
+  "notifications.kpi.updated.label": "最後更新",
+  "notifications.state.customConfiguration": "自訂設定",
+  "notifications.state.allDefaults": "全部預設",
+  "notifications.matrix.title": "事件 × 通道",
+  "notifications.matrix.subtitle":
+    "每個事件都可獨立決定是否透過 {count} 個通道送出 · {risk}（{pattern}）",
+  "notifications.matrix.note.custom":
+    "已套用 {count} 個租戶覆寫 · 最後更新 {updatedAt}",
+  "notifications.matrix.note.baseline":
+    "尚未建立租戶覆寫 · 顯示治理基線快照 {generatedAt}",
+  "notifications.matrix.empty": "目前沒有可顯示的事件路由。",
+  "notifications.summary.title": "狀態概要",
+  "notifications.summary.subtitle": "自動偵測 State variant",
+  "notifications.summary.variant": "Variant",
+  "notifications.summary.refreshTier": "Refresh tier",
+  "notifications.summary.specRef": "Spec ref",
+  "notifications.summary.specRefValue": "§9.6.6（Q-TEN02）",
+  "notifications.summary.risk": "Risk",
+  "notifications.summary.action": "Action",
+  "notifications.summary.actionEnabled": "update_subscription",
+  "notifications.summary.actionDisabled": "disabled（{code}）",
+  "notifications.summary.blocked": "blocked",
+  "notifications.summary.emailSubscriptions": "Email 訂閱",
+  "notifications.summary.webhookSubscriptions": "Webhook 訂閱",
+  "notifications.summary.opsConsoleSubscriptions": "Tenant Console 訂閱",
+  "notifications.summary.currentState": "目前狀態：{state}",
+  "notifications.emptyCatalog.title": "EmptyReason 對照",
+  "notifications.emptyCatalog.subtitle":
+    "六種 EmptyReason 視覺差異 · 統一套用 Q-X15 規則",
+  "notifications.emptyCatalog.active": "active",
+  "notifications.crossApp.title": "跨應用導向",
+  "notifications.crossApp.subtitle":
+    "Q-X03 / Q-TEN10 / Q-TEN08 · 通知偏好的相關深連結",
+  "notifications.crossApp.integrationGovernance.label": "整合就緒度",
+  "notifications.crossApp.integrationGovernance.hint":
+    "回到 `/integration-governance` 檢視整體 readiness",
+  "notifications.crossApp.webhooks.label": "Webhook 端點",
+  "notifications.crossApp.webhooks.hint": "前往 `/webhooks` 啟用 webhook 通道",
+  "notifications.crossApp.webhookDeliveries.label": "Webhook 投遞詳細",
+  "notifications.crossApp.webhookDeliveries.hint":
+    "前往 platform admin 追查 webhook 投遞失敗（Q-X03）",
+  "notifications.crossApp.newTab": "new tab",
+  "notifications.crossApp.inApp": "in app",
+  "notifications.channel.email": "電子郵件",
+  "notifications.channel.webhook": "WEBHOOK",
+  "notifications.channel.ops_console": "TENANT CONSOLE",
+  "notifications.channel.notProvisioned": "not_provisioned",
+  "notifications.toggle.on": "on",
+  "notifications.toggle.off": "off",
+  "notifications.table.column.eventType": "事件類型",
+  "notifications.refreshTier.slow.label": "Tenant slow",
+  "notifications.refreshTier.slow.note": "30s 輪詢",
+  "notifications.risk.medium.label": "Medium",
+  "notifications.risk.medium.pattern": "modal confirm + receipt",
+  "notifications.error.preferences": "通知偏好：{message}",
+  "notifications.error.governance": "治理基線：{message}",
+  "notifications.error.webhooks": "Webhook 端點：{message}",
+  "notifications.activeState.fetchFailed":
+    "通知偏好讀取失敗，目前顯示既有治理基線供參考。",
+  "notifications.activeState.notProvisioned":
+    "此租戶尚未完成通知路由設定，請先完成基線設定。",
+  "notifications.activeState.noData":
+    "目前尚未訂閱任何事件，所以所有通道都維持預設關閉。",
+  "notifications.event.bookingCreated.description": "新訂單建立後立即發出。",
+  "notifications.event.bookingCreated.audience":
+    "tenant admin / integration manager",
+  "notifications.event.bookingConfirmed.description":
+    "司機接單或 booking 轉成可執行狀態後發出。",
+  "notifications.event.bookingConfirmed.audience": "dispatcher / requester",
+  "notifications.event.bookingCancelled.description":
+    "訂單取消，包含 tenant / ops / driver 來源。",
+  "notifications.event.bookingCancelled.audience":
+    "requester / approver / admin",
+  "notifications.event.bookingApprovalRequired.description":
+    "命中 approval rule，需要 tenant 主管簽核。",
+  "notifications.event.bookingApprovalRequired.audience":
+    "approver / tenant admin",
+  "notifications.event.bookingApprovalApproved.description":
+    "簽核通過後發出，訂單可繼續派遣。",
+  "notifications.event.bookingApprovalApproved.audience":
+    "requester / dispatcher / tenant admin",
+  "notifications.event.bookingApprovalRejected.description":
+    "簽核退回後發出，訂單需要重新調整。",
+  "notifications.event.bookingApprovalRejected.audience":
+    "requester / approver / tenant admin",
+  "notifications.event.invoiceReady.description":
+    "月結 invoice 產生完成，可供下載與對帳。",
+  "notifications.event.invoiceReady.audience": "billing contact / tenant admin",
+  "notifications.event.webhookDeliveryFailed.description":
+    "某個 webhook endpoint 連續失敗，需要追查 delivery。",
+  "notifications.event.webhookDeliveryFailed.audience":
+    "integration manager / ops escalation",
+  "notifications.event.quotaThresholdWarning.description":
+    "月配額使用量接近上限，需提早調整策略。",
+  "notifications.event.quotaThresholdWarning.audience":
+    "quota owner / tenant admin",
+  "notifications.empty.noData.title": "尚無通知偏好資料",
+  "notifications.empty.noData.body":
+    "此租戶目前沒有任何自訂矩陣，會回退到治理基線。",
+  "notifications.empty.notProvisioned.title": "通道尚未設定完成",
+  "notifications.empty.notProvisioned.body":
+    "至少一個通知通道尚未 provision。欄位仍會顯示，但暫時不能調整。",
+  "notifications.empty.notProvisioned.cta": "前往 Webhook",
+  "notifications.empty.fetchFailed.title": "通知偏好無法載入",
+  "notifications.empty.fetchFailed.body":
+    "API 讀取失敗，請稍後重整，或改由稽核與營運端追查。",
+  "notifications.empty.permissionDenied.title": "目前角色僅可檢視",
+  "notifications.empty.permissionDenied.body":
+    "你可以查看通知姿態，但沒有更新租戶通知矩陣的權限。",
+  "notifications.empty.externalUnavailable.title": "外部通道暫時不可用",
+  "notifications.empty.externalUnavailable.body":
+    "外部 delivery 路徑降級中；租戶內通知仍可讀，但跨系統路由需要營運追查。",
+  "notifications.empty.filteredEmpty.title": "篩選後沒有結果",
+  "notifications.empty.filteredEmpty.body":
+    "目前的 channel / event 篩選沒有符合項目，請清除條件後再試。",
+  "notifications.emptyReason.no_data.label": "尚無資料",
+  "notifications.emptyReason.no_data.pill": "NO DATA",
+  "notifications.emptyReason.no_data.hint":
+    "功能已就緒，目前沒有可顯示的資料。",
+  "notifications.emptyReason.not_provisioned.label": "尚未設定",
+  "notifications.emptyReason.not_provisioned.pill": "NOT PROVISIONED",
+  "notifications.emptyReason.not_provisioned.hint":
+    "此功能或通道尚未為租戶啟用，需要先完成基線設定。",
+  "notifications.emptyReason.fetch_failed.label": "讀取失敗",
+  "notifications.emptyReason.fetch_failed.pill": "FETCH FAILED",
+  "notifications.emptyReason.fetch_failed.hint":
+    "後端讀取發生錯誤，請稍後重試或檢查連線。",
+  "notifications.emptyReason.permission_denied.label": "權限不足",
+  "notifications.emptyReason.permission_denied.pill": "PERMISSION DENIED",
+  "notifications.emptyReason.permission_denied.hint":
+    "目前角色無法檢視此資料，請洽 tenant admin。",
+  "notifications.emptyReason.external_unavailable.label": "外部服務異常",
+  "notifications.emptyReason.external_unavailable.pill": "EXTERNAL UNAVAILABLE",
+  "notifications.emptyReason.external_unavailable.hint":
+    "相依的外部服務暫時無法使用，稍後會自動恢復。",
+  "notifications.emptyReason.driver_not_eligible.label": "司機未符資格",
+  "notifications.emptyReason.driver_not_eligible.pill": "DRIVER NOT ELIGIBLE",
+  "notifications.emptyReason.driver_not_eligible.hint":
+    "司機目前無法接收派遣（driver app 專用狀態）。",
+  "notifications.emptyReason.filtered_empty.label": "篩選後為空",
+  "notifications.emptyReason.filtered_empty.pill": "FILTERED EMPTY",
+  "notifications.emptyReason.filtered_empty.hint":
+    "目前篩選條件下沒有符合的資料，調整條件即可。",
+  "notifications.form.saving": "儲存中…",
+  "notifications.form.save": "儲存設定",
+  "notifications.form.readOnly": "唯讀",
+  "notifications.form.column.eventType": "事件類型",
+  "notifications.form.column.when": "時機",
+  "notifications.form.channelToggleAria": "{eventType} {channel}",
+  "notifications.form.submitDisabled": "update_subscription disabled: {code}",
+  "notifications.form.submitEnabled":
+    "`availableActions.update_subscription` 會決定送出按鈕狀態。",
 
   // ── featureFlags (i18n-fullsweep 20260614) ──
 
