@@ -34,6 +34,8 @@ import {
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 import { TENANT_CONSOLE_ENV } from "@/lib/navigation";
 import { getRefreshTierDefinition } from "@/lib/ui-runtime";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 import {
   SettingsNotificationTable,
   type SettingsNotificationRow,
@@ -389,32 +391,45 @@ function formatCount(value: number) {
   return numberFormatter.format(value);
 }
 
-function formatQuotaLimit(summary: TenantQuotaSummary | null) {
+function formatQuotaLimit(summary: TenantQuotaSummary | null, locale: Locale) {
   if (!summary) return "—";
 
   if (summary.limit.bookingCountLimit !== null) {
-    return `${formatCount(summary.limit.bookingCountLimit)} 趟 / 月`;
+    return t("settings.quota.perMonthTrips", locale, {
+      count: formatCount(summary.limit.bookingCountLimit),
+    });
   }
 
   if (summary.limit.amountMinorLimit !== null) {
-    return `${summary.limit.currency} ${formatCount(summary.limit.amountMinorLimit / 100)} / 月`;
+    return t("settings.quota.perMonthAmount", locale, {
+      currency: summary.limit.currency,
+      amount: formatCount(summary.limit.amountMinorLimit / 100),
+    });
   }
 
-  return "無上限";
+  return t("settings.value.unlimited", locale);
 }
 
-function formatQuotaRemaining(summary: TenantQuotaSummary | null) {
+function formatQuotaRemaining(
+  summary: TenantQuotaSummary | null,
+  locale: Locale,
+) {
   if (!summary) return "—";
 
   if (summary.usage.bookingCountRemaining !== null) {
-    return `${formatCount(summary.usage.bookingCountRemaining)} 趟剩餘`;
+    return t("settings.quota.tripsRemaining", locale, {
+      count: formatCount(summary.usage.bookingCountRemaining),
+    });
   }
 
   if (summary.usage.amountMinorRemaining !== null) {
-    return `${summary.limit.currency} ${formatCount(summary.usage.amountMinorRemaining / 100)} 剩餘`;
+    return t("settings.quota.amountRemaining", locale, {
+      currency: summary.limit.currency,
+      amount: formatCount(summary.usage.amountMinorRemaining / 100),
+    });
   }
 
-  return "無上限";
+  return t("settings.value.unlimited", locale);
 }
 
 function formatRemainingPercent(summary: TenantQuotaSummary | null) {
@@ -425,9 +440,12 @@ function formatRemainingPercent(summary: TenantQuotaSummary | null) {
   return `${summary.usage.remainingPercent}%`;
 }
 
-function getConsentValue(preferences: TenantNotificationPreferences | null) {
+function getConsentValue(
+  preferences: TenantNotificationPreferences | null,
+  locale: Locale,
+) {
   if (!preferences?.updatedAt) {
-    return "尚未設定";
+    return t("settings.consent.notConfigured", locale);
   }
 
   return `pp · ${formatDate(preferences.updatedAt)}`;
@@ -772,10 +790,10 @@ function getActionVariant(descriptor: ResourceActionDescriptor) {
   };
 }
 
-function renderActionLink(action: ActionLink, key: string) {
+function renderActionLink(action: ActionLink, key: string, locale: Locale) {
   const href = resolveActionHref(action);
   const variant = getActionVariant(action.descriptor);
-  const tooltip = formatActionTooltip(action);
+  const tooltip = formatActionTooltip(action, locale);
   const content = (
     <>
       <span>{action.label}</span>
@@ -870,21 +888,21 @@ function formatRefreshChipValue(refresh: UiRefreshMetadata) {
   return `${refresh.dataFreshness} · ${refresh.source}`;
 }
 
-function formatActionTooltip(action: ActionLink) {
+function formatActionTooltip(action: ActionLink, locale: Locale) {
   if (!action.descriptor.enabled) {
     return action.descriptor.disabledReasonCode ?? "disabled";
   }
   if (action.note === "refresh-runtime") {
-    return "重新抓取目前 settings snapshot。";
+    return t("settings.tooltip.refreshRuntime", locale);
   }
   if (action.note === "module-route-pending") {
-    return "此 module 仍由 settings posture 承接；尚未提供獨立 route。";
+    return t("settings.tooltip.moduleRoutePending", locale);
   }
   if (action.note === "route-pending") {
-    return "此 module route 尚未落地；目前不提供站內跳轉。";
+    return t("settings.tooltip.routePending", locale);
   }
   if (action.kind === "unresolved") {
-    return "後端已提供此 action descriptor，但 settings 尚未定義 canonical 導向。";
+    return t("settings.tooltip.unresolved", locale);
   }
   return action.note ?? null;
 }
@@ -965,45 +983,48 @@ function getEmptyReasonCardStyle(reason: EmptyReason): CSSProperties {
   }
 }
 
-function getEmptyReasonCopy(reason: EmptyReason): {
+function getEmptyReasonCopy(
+  reason: EmptyReason,
+  locale: Locale,
+): {
   title: string;
   body: string;
 } {
   switch (reason) {
     case "no_data":
       return {
-        title: "尚無租戶覆寫",
-        body: "新租戶尚未建立自訂通知與治理覆寫時，這是合法空狀態。",
+        title: t("settings.emptyReason.noData.title", locale),
+        body: t("settings.emptyReason.noData.body", locale),
       };
     case "not_provisioned":
       return {
-        title: "模組未開通",
-        body: "例如 webhook engine 或專屬通知 channel 尚未為此 tenant provision。",
+        title: t("settings.emptyReason.notProvisioned.title", locale),
+        body: t("settings.emptyReason.notProvisioned.body", locale),
       };
     case "fetch_failed":
       return {
-        title: "讀取失敗",
-        body: "後端無法提供目前篩選結果，必須顯示失敗原因，而不是假裝沒有資料。",
+        title: t("settings.emptyReason.fetchFailed.title", locale),
+        body: t("settings.emptyReason.fetchFailed.body", locale),
       };
     case "permission_denied":
       return {
-        title: "權限不足",
-        body: "當前 actor 只有受限 posture，不能操作這個設定面或資料子集。",
+        title: t("settings.emptyReason.permissionDenied.title", locale),
+        body: t("settings.emptyReason.permissionDenied.body", locale),
       };
     case "external_unavailable":
       return {
-        title: "外部依賴降級",
-        body: "上游身分、通知或第三方 delivery 供應商異常時，要保留降級說明與 trace 入口。",
+        title: t("settings.emptyReason.externalUnavailable.title", locale),
+        body: t("settings.emptyReason.externalUnavailable.body", locale),
       };
     case "filtered_empty":
       return {
-        title: "篩選後無結果",
-        body: "目前篩選條件過窄，因此結果為空；這與真正沒有資料不同。",
+        title: t("settings.emptyReason.filteredEmpty.title", locale),
+        body: t("settings.emptyReason.filteredEmpty.body", locale),
       };
     default:
       return {
-        title: "不支援的空狀態",
-        body: "tenant settings 僅支援 packet 定義的 6 種 EmptyReason；其餘值視為 contract mismatch。",
+        title: t("settings.emptyReason.unsupported.title", locale),
+        body: t("settings.emptyReason.unsupported.body", locale),
       };
   }
 }
@@ -1108,8 +1129,8 @@ function getGovernanceWebhookPolicy(value: unknown) {
   };
 }
 
-function renderEmptyStateSurface(surface: EmptyStateSurface) {
-  const copy = getEmptyReasonCopy(surface.envelope.reason);
+function renderEmptyStateSurface(surface: EmptyStateSurface, locale: Locale) {
+  const copy = getEmptyReasonCopy(surface.envelope.reason, locale);
 
   return (
     <div
@@ -1150,7 +1171,7 @@ function renderEmptyStateSurface(surface: EmptyStateSurface) {
       {surface.actions.length > 0 ? (
         <div style={{ ...actionRowStyle, marginTop: 10 }}>
           {surface.actions.map((action, index) =>
-            renderActionLink(action, `${surface.key}-${index}`),
+            renderActionLink(action, `${surface.key}-${index}`, locale),
           )}
         </div>
       ) : null}
@@ -1158,7 +1179,7 @@ function renderEmptyStateSurface(surface: EmptyStateSurface) {
   );
 }
 
-async function loadSettingsData(): Promise<SettingsData> {
+async function loadSettingsData(locale: Locale): Promise<SettingsData> {
   const [
     identity,
     billingProfile,
@@ -1183,9 +1204,21 @@ async function loadSettingsData(): Promise<SettingsData> {
     fetchTenantRuntime<unknown>("/api/tenant/audit"),
   ]);
 
+  const moduleLabels = {
+    identity: t("settings.tag.identity", locale),
+    billing: t("settings.tag.billing", locale),
+    notifications: t("settings.tag.notifications", locale),
+    sla: t("settings.tag.sla", locale),
+    governance: t("settings.tag.governance", locale),
+    quota: t("settings.tag.quota", locale),
+    users: t("settings.tag.users", locale),
+    apiKeys: t("settings.surface.apiKeys", locale),
+    webhooks: t("settings.surface.webhooks", locale),
+    audit: t("settings.tag.audit", locale),
+  };
   const errors: string[] = [];
   const tag = (label: string, reason: unknown) =>
-    `${label}: ${reason instanceof Error ? reason.message : "未知錯誤"}`;
+    `${label}: ${reason instanceof Error ? reason.message : t("settings.value.unknownError", locale)}`;
   const missingRuntimeLabels: string[] = [];
   const markRuntimeGap = (
     label: string,
@@ -1197,23 +1230,24 @@ async function loadSettingsData(): Promise<SettingsData> {
   };
 
   if (identity.status === "rejected")
-    errors.push(tag("租戶身分", identity.reason));
+    errors.push(tag(moduleLabels.identity, identity.reason));
   if (billingProfile.status === "rejected")
-    errors.push(tag("計費設定", billingProfile.reason));
+    errors.push(tag(moduleLabels.billing, billingProfile.reason));
   if (preferences.status === "rejected")
-    errors.push(tag("通知訂閱", preferences.reason));
-  if (sla.status === "rejected") errors.push(tag("SLA 門檻", sla.reason));
+    errors.push(tag(moduleLabels.notifications, preferences.reason));
+  if (sla.status === "rejected") errors.push(tag(moduleLabels.sla, sla.reason));
   if (governance.status === "rejected")
-    errors.push(tag("整合治理", governance.reason));
+    errors.push(tag(moduleLabels.governance, governance.reason));
   if (quotaSummary.status === "rejected")
-    errors.push(tag("租戶配額", quotaSummary.reason));
-  if (users.status === "rejected") errors.push(tag("租戶人員", users.reason));
+    errors.push(tag(moduleLabels.quota, quotaSummary.reason));
+  if (users.status === "rejected")
+    errors.push(tag(moduleLabels.users, users.reason));
   if (apiKeys.status === "rejected")
-    errors.push(tag("API 金鑰", apiKeys.reason));
+    errors.push(tag(moduleLabels.apiKeys, apiKeys.reason));
   if (webhooks.status === "rejected")
-    errors.push(tag("Webhook", webhooks.reason));
+    errors.push(tag(moduleLabels.webhooks, webhooks.reason));
   if (auditLogs.status === "rejected")
-    errors.push(tag("租戶稽核", auditLogs.reason));
+    errors.push(tag(moduleLabels.audit, auditLogs.reason));
 
   const identityValue =
     identity.status === "fulfilled"
@@ -1260,16 +1294,16 @@ async function loadSettingsData(): Promise<SettingsData> {
       ? parseListSurface<AuditLogRecord>(auditLogs.value.data)
       : parseListSurface<AuditLogRecord>(null);
 
-  markRuntimeGap("租戶身分", identityValue);
-  markRuntimeGap("計費設定", billingValue);
-  markRuntimeGap("通知訂閱", preferenceValue);
-  markRuntimeGap("SLA 門檻", slaValue);
-  markRuntimeGap("整合治理", governanceValue);
-  markRuntimeGap("租戶配額", quotaValue);
-  markRuntimeGap("租戶人員", usersValue);
-  markRuntimeGap("API 金鑰", apiKeysValue);
-  markRuntimeGap("Webhook", webhooksValue);
-  markRuntimeGap("租戶稽核", auditLogsValue);
+  markRuntimeGap(moduleLabels.identity, identityValue);
+  markRuntimeGap(moduleLabels.billing, billingValue);
+  markRuntimeGap(moduleLabels.notifications, preferenceValue);
+  markRuntimeGap(moduleLabels.sla, slaValue);
+  markRuntimeGap(moduleLabels.governance, governanceValue);
+  markRuntimeGap(moduleLabels.quota, quotaValue);
+  markRuntimeGap(moduleLabels.users, usersValue);
+  markRuntimeGap(moduleLabels.apiKeys, apiKeysValue);
+  markRuntimeGap(moduleLabels.webhooks, webhooksValue);
+  markRuntimeGap(moduleLabels.audit, auditLogsValue);
 
   if (missingRuntimeLabels.length > 0) {
     errors.push(
@@ -1293,15 +1327,17 @@ async function loadSettingsData(): Promise<SettingsData> {
 }
 
 export default async function SettingsPage() {
-  const data = await loadSettingsData();
+  const locale = await getServerLocale();
+  const data = await loadSettingsData(locale);
 
   const tenantCode = data.identity.item?.tenantId ?? DEMO_TENANT_ID;
-  const displayName = data.billingProfile.item?.invoiceTitle ?? "未設定";
-  const taxId = data.billingProfile.item?.taxId ?? "未設定";
+  const notSet = t("settings.value.notSet", locale);
+  const displayName = data.billingProfile.item?.invoiceTitle ?? notSet;
+  const taxId = data.billingProfile.item?.taxId ?? notSet;
   const billingContact = data.billingProfile.item
-    ? `${data.billingProfile.item.contactName ?? "未指派"} · ${data.billingProfile.item.email}`
-    : "未設定";
-  const billingAddress = data.billingProfile.item?.address ?? "未設定";
+    ? `${data.billingProfile.item.contactName ?? t("settings.value.unassigned", locale)} · ${data.billingProfile.item.email}`
+    : notSet;
+  const billingAddress = data.billingProfile.item?.address ?? notSet;
   const authMode = data.identity.item?.authMode ?? "—";
   const roleSummary =
     data.identity.item?.roles
@@ -1320,12 +1356,17 @@ export default async function SettingsPage() {
   const apiKeyLifetime =
     apiKeyPolicy?.defaultLifetimeDays != null &&
     apiKeyPolicy.maxLifetimeDays != null
-      ? `${apiKeyPolicy.defaultLifetimeDays} 天 (最長 ${apiKeyPolicy.maxLifetimeDays} 天)`
-      : "未設定";
+      ? t("settings.policy.apiKeyLifetime", locale, {
+          days: apiKeyPolicy.defaultLifetimeDays,
+          max: apiKeyPolicy.maxLifetimeDays,
+        })
+      : notSet;
   const webhookRetry =
     webhookPolicy?.maxAttempts != null
-      ? `${webhookPolicy.maxAttempts} 次重送`
-      : "未設定";
+      ? t("settings.policy.webhookRetry", locale, {
+          count: webhookPolicy.maxAttempts,
+        })
+      : notSet;
   const subscriptions = normalizeSubscriptions(
     data.preferences.item?.subscriptions,
   )
@@ -1361,13 +1402,17 @@ export default async function SettingsPage() {
   }));
   const notificationFootnote =
     subscriptions.length > 0
-      ? `最後更新 ${formatUpdated(data.preferences.item?.updatedAt)}`
+      ? t("settings.notifications.lastUpdated", locale, {
+          time: formatUpdated(data.preferences.item?.updatedAt),
+        })
       : baselineSubscriptions.length > 0
-        ? `尚未覆寫租戶訂閱，顯示治理基線 ${formatUpdated(governanceGeneratedAt)}`
-        : "尚未設定任何通知事件";
+        ? t("settings.notifications.baselineShown", locale, {
+            time: formatUpdated(governanceGeneratedAt),
+          })
+        : t("settings.notifications.noEvents", locale);
   const quotaSummary = data.quotaSummary.item;
   const currentStageValue = TENANT_CONSOLE_ENV;
-  const consentValue = getConsentValue(data.preferences.item);
+  const consentValue = getConsentValue(data.preferences.item, locale);
   const settingsModuleRoutes = [
     "/settings",
     "/users",
@@ -1423,14 +1468,14 @@ export default async function SettingsPage() {
   const generalActions = flattenActionLinks(
     {
       surface: {
-        label: "計費資料",
+        label: t("settings.surface.billingData", locale),
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.billingProfile),
     },
     {
       surface: {
-        label: "租戶稽核",
+        label: t("settings.tag.audit", locale),
         href: "/audit",
         note: "same-tab",
       },
@@ -1440,14 +1485,14 @@ export default async function SettingsPage() {
   const notificationActions = flattenActionLinks(
     {
       surface: {
-        label: "通知偏好",
+        label: t("settings.surface.notificationPrefs", locale),
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.preferences),
     },
     {
       surface: {
-        label: "SLA 設定",
+        label: t("settings.surface.sla", locale),
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.sla),
@@ -1456,14 +1501,14 @@ export default async function SettingsPage() {
   const integrationActions = flattenActionLinks(
     {
       surface: {
-        label: "API 金鑰",
+        label: t("settings.surface.apiKeys", locale),
         href: "/api-keys",
       },
       descriptors: getSurfaceActionDescriptors(data.apiKeys),
     },
     {
       surface: {
-        label: "Webhook",
+        label: t("settings.surface.webhooks", locale),
         href: "/webhooks",
       },
       descriptors: getSurfaceActionDescriptors(data.webhooks),
@@ -1471,7 +1516,7 @@ export default async function SettingsPage() {
   );
   const peopleActions = flattenActionLinks({
     surface: {
-      label: "人員與角色",
+      label: t("settings.surface.people", locale),
       href: "/users",
     },
     descriptors: getSurfaceActionDescriptors(data.users),
@@ -1479,49 +1524,49 @@ export default async function SettingsPage() {
   const headerActions = flattenActionLinks(
     {
       surface: {
-        label: "計費資料",
+        label: t("settings.surface.billingData", locale),
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.billingProfile),
     },
     {
       surface: {
-        label: "通知偏好",
+        label: t("settings.surface.notificationPrefs", locale),
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.preferences),
     },
     {
       surface: {
-        label: "SLA 設定",
+        label: t("settings.surface.sla", locale),
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.sla),
     },
     {
       surface: {
-        label: "人員與角色",
+        label: t("settings.surface.people", locale),
         href: "/users",
       },
       descriptors: getSurfaceActionDescriptors(data.users),
     },
     {
       surface: {
-        label: "API 金鑰",
+        label: t("settings.surface.apiKeys", locale),
         href: "/api-keys",
       },
       descriptors: getSurfaceActionDescriptors(data.apiKeys),
     },
     {
       surface: {
-        label: "Webhook",
+        label: t("settings.surface.webhooks", locale),
         href: "/webhooks",
       },
       descriptors: getSurfaceActionDescriptors(data.webhooks),
     },
     {
       surface: {
-        label: "租戶稽核",
+        label: t("settings.tag.audit", locale),
         href: "/audit",
         note: "same-tab",
       },
@@ -1581,7 +1626,7 @@ export default async function SettingsPage() {
   );
   const runtimeChips: RuntimeChip[] = [
     {
-      label: "更新層級",
+      label: t("settings.runtime.refreshTier", locale),
       value: SETTINGS_PAGE_TIER.label,
       mono: true,
     },
@@ -1605,39 +1650,34 @@ export default async function SettingsPage() {
 
   const sitemapEntries: SettingsSitemapEntry[] = [
     {
-      title: "一般資料",
+      title: t("settings.sitemap.general.title", locale),
       route: "/settings · /billing (deferred)",
-      detail:
-        "租戶代碼、計費資料、身分與預設 posture 留在此頁總覽；計費細節 route 尚未落地前，以本頁摘要承接。",
+      detail: t("settings.sitemap.general.detail", locale),
       actions: generalActions,
     },
     {
-      title: "通知與 SLA",
+      title: t("settings.sitemap.notifications.title", locale),
       route: "/notifications · /sla",
-      detail:
-        "通知事件矩陣與 SLA 門檻屬獨立 module route；此頁只顯示 posture。",
+      detail: t("settings.sitemap.notifications.detail", locale),
       actions: notificationActions,
     },
     {
-      title: "整合預設",
+      title: t("settings.sitemap.integration.title", locale),
       route:
         "/integration-governance (deferred) · /api-keys · /webhooks · platform-admin /audit",
-      detail:
-        "API key / webhook 治理留在 tenant app；feature rollout 與 platform-owned 變更從 cross-app trace 解釋。",
+      detail: t("settings.sitemap.integration.detail", locale),
       actions: integrationActions,
     },
     {
-      title: "人員、隱私、跨 app",
+      title: t("settings.sitemap.people.title", locale),
       route: "/users · /audit · platform-admin /audit",
-      detail:
-        "權限、隱私同意與 platform-owned 設定變更用 cross-app audit trace 串起來。",
+      detail: t("settings.sitemap.people.detail", locale),
       actions: peopleActions,
     },
     {
-      title: "功能可見性",
+      title: t("settings.sitemap.featureVisibility.title", locale),
       route: "/feature-flags (platform trace)",
-      detail:
-        "feature visibility 是 read-scoped、platform-owned surface；settings 只保留治理脈絡與 new-tab trace。",
+      detail: t("settings.sitemap.featureVisibility.detail", locale),
       actions: [],
     },
   ];
@@ -1648,42 +1688,39 @@ export default async function SettingsPage() {
     link: CrossAppResourceLink;
   }> = [
     {
-      title: "平台稽核",
-      detail:
-        "平台管理員變更 feature rollout、billing governance 或 rollout gate 時，trace 回 platform-owned audit。",
+      title: t("settings.deepLink.platformAudit.title", locale),
+      detail: t("settings.deepLink.platformAudit.detail", locale),
       link: {
         targetApp: "platform-admin",
         route: `/audit?tenantId=${encodeURIComponent(tenantCode)}`,
         resourceType: "tenant",
         resourceId: tenantCode,
         openMode: "new_tab",
-        label: "前往 platform-admin /audit",
+        label: t("settings.deepLink.platformAudit.label", locale),
       },
     },
     {
-      title: "營運客訴/事件",
-      detail:
-        "若設定變更影響現場訂單或 webhook 投遞，cross-app 到 ops-console 追事故與人工處置。",
+      title: t("settings.deepLink.opsComplaints.title", locale),
+      detail: t("settings.deepLink.opsComplaints.detail", locale),
       link: {
         targetApp: "ops-console",
         route: "/complaints",
         resourceType: "complaint_case",
         resourceId: tenantCode,
         openMode: "new_tab",
-        label: "前往 ops-console /complaints",
+        label: t("settings.deepLink.opsComplaints.label", locale),
       },
     },
     {
-      title: "平台 rollout trace",
-      detail:
-        "功能可見性是 platform-owned surface；本頁只保留 posture，若需追 tenant override 或 rollout gate，從 platform-admin 查看。",
+      title: t("settings.deepLink.rolloutTrace.title", locale),
+      detail: t("settings.deepLink.rolloutTrace.detail", locale),
       link: {
         targetApp: "platform-admin",
         route: "/feature-flags",
         resourceType: "tenant",
         resourceId: tenantCode,
         openMode: "new_tab",
-        label: "前往 platform-admin feature trace",
+        label: t("settings.deepLink.rolloutTrace.label", locale),
       },
     },
   ];
@@ -1691,12 +1728,12 @@ export default async function SettingsPage() {
   const emptyStateSurfaceCandidates: EmptyStateSurfaceCandidate[] = [
     {
       key: "notifications",
-      title: "通知訂閱",
+      title: t("settings.tag.notifications", locale),
       route: "/notifications",
       envelope: data.preferences.emptyState,
       actions: flattenActionLinks({
         surface: {
-          label: "通知偏好",
+          label: t("settings.surface.notificationPrefs", locale),
           note: "module-route-pending",
         },
         descriptors: getSurfaceActionDescriptors(data.preferences),
@@ -1704,12 +1741,12 @@ export default async function SettingsPage() {
     },
     {
       key: "users",
-      title: "人員與角色",
+      title: t("settings.surface.people", locale),
       route: "/users",
       envelope: data.users.emptyState,
       actions: flattenActionLinks({
         surface: {
-          label: "人員與角色",
+          label: t("settings.surface.people", locale),
           href: "/users",
         },
         descriptors: getSurfaceActionDescriptors(data.users),
@@ -1717,12 +1754,12 @@ export default async function SettingsPage() {
     },
     {
       key: "api-keys",
-      title: "API 金鑰",
+      title: t("settings.surface.apiKeys", locale),
       route: "/api-keys",
       envelope: data.apiKeys.emptyState,
       actions: flattenActionLinks({
         surface: {
-          label: "API 金鑰",
+          label: t("settings.surface.apiKeys", locale),
           href: "/api-keys",
         },
         descriptors: getSurfaceActionDescriptors(data.apiKeys),
@@ -1730,12 +1767,12 @@ export default async function SettingsPage() {
     },
     {
       key: "webhooks",
-      title: "Webhook",
+      title: t("settings.surface.webhooks", locale),
       route: "/webhooks",
       envelope: data.webhooks.emptyState,
       actions: flattenActionLinks({
         surface: {
-          label: "Webhook",
+          label: t("settings.surface.webhooks", locale),
           href: "/webhooks",
         },
         descriptors: getSurfaceActionDescriptors(data.webhooks),
@@ -1743,12 +1780,12 @@ export default async function SettingsPage() {
     },
     {
       key: "audit",
-      title: "租戶稽核",
+      title: t("settings.tag.audit", locale),
       route: "/audit",
       envelope: data.auditLogs.emptyState,
       actions: flattenActionLinks({
         surface: {
-          label: "租戶稽核",
+          label: t("settings.tag.audit", locale),
           href: "/audit",
           note: "same-tab",
         },
@@ -1769,14 +1806,19 @@ export default async function SettingsPage() {
     <div>
       <CanvasPageHeader
         theme={th}
-        title="租戶設定"
-        subtitle="一般 · 通知預設 · 隱私 · 整合預設"
-        tabs={["一般", "通知", "隱私", "整合"]}
-        activeTab="一般"
+        title={t("settings.header.title", locale)}
+        subtitle={t("settings.header.subtitle", locale)}
+        tabs={[
+          t("settings.tab.general", locale),
+          t("settings.tab.notifications", locale),
+          t("settings.tab.privacy", locale),
+          t("settings.tab.integration", locale),
+        ]}
+        activeTab={t("settings.tab.general", locale)}
         actions={
           <div style={actionRowStyle}>
             {headerActions.map((action, index) =>
-              renderActionLink(action, `header-${index}`),
+              renderActionLink(action, `header-${index}`, locale),
             )}
           </div>
         }
@@ -1788,7 +1830,7 @@ export default async function SettingsPage() {
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分 settings module snapshot 不是 fresh"
+            title={t("settings.banner.degraded.title", locale)}
             body={degradedModules
               .map((surface) => {
                 if (!surface.refresh) return surface.label;
@@ -1803,8 +1845,8 @@ export default async function SettingsPage() {
             theme={th}
             tone="info"
             icon="warn"
-            title="目前 actor 沒有 backend 可用動作"
-            body="settings CTA 直接取自各 module/list envelope 的 availableActions；若後端未提供，畫面會保守顯示 read-only。"
+            title={t("settings.banner.noActions.title", locale)}
+            body={t("settings.banner.noActions.body", locale)}
           />
         ) : null}
 
@@ -1813,8 +1855,12 @@ export default async function SettingsPage() {
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分 module 仍是 legacy payload"
-            body={`缺少 UiRefreshMetadata / ui-runtime envelope：${legacyModules.map((surface) => surface.label).join(" · ")}`}
+            title={t("settings.banner.legacy.title", locale)}
+            body={t("settings.banner.legacy.body", locale, {
+              modules: legacyModules
+                .map((surface) => surface.label)
+                .join(" · "),
+            })}
           />
         ) : null}
 
@@ -1823,7 +1869,7 @@ export default async function SettingsPage() {
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分設定資料無法載入"
+            title={t("settings.banner.errors.title", locale)}
             body={data.errors.join(" · ")}
           />
         ) : null}
@@ -1831,8 +1877,8 @@ export default async function SettingsPage() {
         <div style={runtimeStripStyle}>
           {!hasRefreshAction ? (
             <SettingsRefreshButton
-              label="更新快照"
-              title="重新抓取目前 settings snapshot。"
+              label={t("settings.refresh.label", locale)}
+              title={t("settings.tooltip.refreshRuntime", locale)}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1874,54 +1920,83 @@ export default async function SettingsPage() {
 
         <div style={topCanvasGridStyle}>
           <div id="general-overview">
-            <CanvasCard theme={th} title="一般" style={generalCardStyle}>
+            <CanvasCard
+              theme={th}
+              title={t("settings.tab.general", locale)}
+              style={generalCardStyle}
+            >
               <div style={generalGridStyle}>
-                <CanvasField theme={th} label="租戶代碼 · tenant_code">
+                <CanvasField
+                  theme={th}
+                  label={t("settings.field.tenantCode", locale)}
+                >
                   <CanvasInput theme={th} value={tenantCode} mono />
                 </CanvasField>
-                <CanvasField theme={th} label="顯示名稱 · display_name">
+                <CanvasField
+                  theme={th}
+                  label={t("settings.field.displayName", locale)}
+                >
                   <CanvasInput theme={th} value={displayName} />
                 </CanvasField>
-                <CanvasField theme={th} label="統一編號 · tax_id">
+                <CanvasField
+                  theme={th}
+                  label={t("settings.field.taxId", locale)}
+                >
                   <CanvasInput theme={th} value={taxId} mono />
                 </CanvasField>
-                <CanvasField theme={th} label="計費聯絡人">
+                <CanvasField
+                  theme={th}
+                  label={t("settings.field.billingContact", locale)}
+                >
                   <CanvasInput theme={th} value={billingContact} />
                 </CanvasField>
-                <CanvasField theme={th} label="預設語系 · default_locale">
+                <CanvasField
+                  theme={th}
+                  label={t("settings.field.defaultLocale", locale)}
+                >
                   <CanvasSelect theme={th} value="zh-Hant" />
                 </CanvasField>
-                <CanvasField theme={th} label="預設時區 · timezone">
+                <CanvasField
+                  theme={th}
+                  label={t("settings.field.timezone", locale)}
+                >
                   <CanvasSelect theme={th} value="Asia/Taipei" />
                 </CanvasField>
               </div>
             </CanvasCard>
           </div>
 
-          <CanvasCard theme={th} title="當期狀態" style={statusCardStyle}>
+          <CanvasCard
+            theme={th}
+            title={t("settings.status.cardTitle", locale)}
+            style={statusCardStyle}
+          >
             <CanvasDL
               theme={th}
               cols={1}
               items={[
                 { k: "STAGE", v: currentStageValue, mono: true },
                 {
-                  k: "啟用模組",
+                  k: t("settings.status.enabledModules", locale),
                   v: `${localModuleCount} / ${moduleCatalogCount}`,
                   mono: true,
                 },
                 {
-                  k: "配額",
-                  v: formatQuotaLimit(quotaSummary),
+                  k: t("settings.status.quota", locale),
+                  v: formatQuotaLimit(quotaSummary, locale),
                   mono: true,
                 },
                 {
-                  k: "webhook 簽章",
+                  k: t("settings.status.webhookSignature", locale),
                   v: "sha256-hmac",
                   mono: true,
                 },
-                { k: "隱私", v: "電話遮罩 · 中介轉接" },
                 {
-                  k: "同意書版本",
+                  k: t("settings.status.privacy", locale),
+                  v: t("settings.status.privacyValue", locale),
+                },
+                {
+                  k: t("settings.status.consentVersion", locale),
                   v: consentValue,
                   mono: true,
                 },
@@ -1933,8 +2008,8 @@ export default async function SettingsPage() {
         <div style={summaryGridStyle}>
           <CanvasCard
             theme={th}
-            title="設定 sitemap"
-            subtitle="`/settings` 保留總覽；未落地 module 先回到本頁 posture 或 cross-app trace。"
+            title={t("settings.sitemapCard.title", locale)}
+            subtitle={t("settings.sitemapCard.subtitle", locale)}
           >
             <div style={sitemapListStyle}>
               {sitemapEntries.map((entry) => (
@@ -1972,7 +2047,11 @@ export default async function SettingsPage() {
                   </div>
                   <div style={{ ...actionRowStyle, marginTop: 10 }}>
                     {entry.actions.map((action, index) =>
-                      renderActionLink(action, `${entry.title}-${index}`),
+                      renderActionLink(
+                        action,
+                        `${entry.title}-${index}`,
+                        locale,
+                      ),
                     )}
                   </div>
                 </div>
@@ -1982,8 +2061,8 @@ export default async function SettingsPage() {
 
           <CanvasCard
             theme={th}
-            title="可用動作與 posture"
-            subtitle="header CTA 與下列模組捷徑全部取自 runtime `availableActions`。"
+            title={t("settings.actions.cardTitle", locale)}
+            subtitle={t("settings.actions.cardSubtitle", locale)}
           >
             <div style={summaryStackStyle}>
               <div style={actionPanelStyle}>
@@ -1991,12 +2070,12 @@ export default async function SettingsPage() {
                 {headerActions.length > 0 ? (
                   <div style={actionRowStyle}>
                     {headerActions.map((action, index) =>
-                      renderActionLink(action, `page-action-${index}`),
+                      renderActionLink(action, `page-action-${index}`, locale),
                     )}
                   </div>
                 ) : (
                   <div style={emptyStateStyle}>
-                    目前 actor 沒有 backend 可用動作
+                    {t("settings.banner.noActions.title", locale)}
                   </div>
                 )}
               </div>
@@ -2010,19 +2089,27 @@ export default async function SettingsPage() {
                     v: data.identity.item?.realm ?? "tenant",
                     mono: true,
                   },
-                  { k: "auth mode", v: authMode, mono: true },
-                  { k: "角色摘要", v: roleSummary, mono: true },
                   {
-                    k: "billing email",
+                    k: t("settings.dl.authMode", locale),
+                    v: authMode,
+                    mono: true,
+                  },
+                  {
+                    k: t("settings.dl.roleSummary", locale),
+                    v: roleSummary,
+                    mono: true,
+                  },
+                  {
+                    k: t("settings.dl.billingEmail", locale),
                     v: data.billingProfile.item?.email ?? "—",
                     mono: true,
                   },
                   {
-                    k: "billing address",
+                    k: t("settings.dl.billingAddress", locale),
                     v: billingAddress,
                   },
                   {
-                    k: "billing snapshot",
+                    k: t("settings.dl.billingSnapshot", locale),
                     v: formatUpdated(data.billingProfile.refresh?.generatedAt),
                     mono: true,
                   },
@@ -2036,18 +2123,23 @@ export default async function SettingsPage() {
           <div id="notification-subscriptions">
             <CanvasCard
               theme={th}
-              title="通知訂閱"
-              subtitle="事件代碼 · 路由 · 狀態"
+              title={t("settings.tag.notifications", locale)}
+              subtitle={t("settings.notifCard.subtitle", locale)}
               padding={0}
             >
               {notificationRows.length > 0 ? (
                 <SettingsNotificationTable rows={notificationRows} />
               ) : notificationEmptyStateSurface ? (
                 <div style={{ padding: "14px" }}>
-                  {renderEmptyStateSurface(notificationEmptyStateSurface)}
+                  {renderEmptyStateSurface(
+                    notificationEmptyStateSurface,
+                    locale,
+                  )}
                 </div>
               ) : (
-                <div style={emptyStateStyle}>尚未訂閱任何事件通知</div>
+                <div style={emptyStateStyle}>
+                  {t("settings.notifCard.empty", locale)}
+                </div>
               )}
               <div style={{ ...mutedFootnoteStyle, padding: "10px 14px 14px" }}>
                 {notificationFootnote}
@@ -2059,43 +2151,43 @@ export default async function SettingsPage() {
             <div id="sla-governance-posture">
               <CanvasCard
                 theme={th}
-                title="SLA 與整合姿態"
-                subtitle="等待 / 抵達 / 完成門檻 · 月配額姿態 · 治理預設"
+                title={t("settings.slaCard.title", locale)}
+                subtitle={t("settings.slaCard.subtitle", locale)}
               >
                 <div style={kpiGridStyle}>
                   <CanvasKPI
                     theme={th}
-                    label="等候"
+                    label={t("settings.kpi.wait", locale)}
                     value={
                       data.sla.item ? `${data.sla.item.waitThresholdMin}m` : "—"
                     }
-                    sub="等候門檻"
+                    sub={t("settings.kpi.waitSub", locale)}
                   />
                   <CanvasKPI
                     theme={th}
-                    label="抵達"
+                    label={t("settings.kpi.arrival", locale)}
                     value={
                       data.sla.item
                         ? `${data.sla.item.arrivalThresholdMin}m`
                         : "—"
                     }
-                    sub="抵達門檻"
+                    sub={t("settings.kpi.arrivalSub", locale)}
                   />
                   <CanvasKPI
                     theme={th}
-                    label="完成"
+                    label={t("settings.kpi.completion", locale)}
                     value={
                       data.sla.item
                         ? `${data.sla.item.completionThresholdMin}m`
                         : "—"
                     }
-                    sub="完成門檻"
+                    sub={t("settings.kpi.completionSub", locale)}
                   />
                   <CanvasKPI
                     theme={th}
-                    label="剩餘配額"
+                    label={t("settings.kpi.remainingQuota", locale)}
                     value={formatRemainingPercent(quotaSummary)}
-                    sub={formatQuotaRemaining(quotaSummary)}
+                    sub={formatQuotaRemaining(quotaSummary, locale)}
                   />
                 </div>
 
@@ -2104,34 +2196,36 @@ export default async function SettingsPage() {
                   cols={2}
                   items={[
                     {
-                      k: "API key 壽命",
+                      k: t("settings.sla.apiKeyLifetimeLabel", locale),
                       v: apiKeyLifetime,
                       mono: true,
                     },
                     {
-                      k: "webhook 重送",
+                      k: t("settings.sla.webhookRetryLabel", locale),
                       v: webhookRetry,
                       mono: true,
                     },
                     {
-                      k: "Webhook 基線",
-                      v: `${baselineEvents.length} 項`,
+                      k: t("settings.sla.webhookBaselineLabel", locale),
+                      v: t("settings.sla.webhookBaselineValue", locale, {
+                        count: baselineEvents.length,
+                      }),
                       mono: true,
                     },
                     {
-                      k: "強制模式",
+                      k: t("settings.sla.enforcementLabel", locale),
                       v: quotaSummary?.limit.enforcementMode ?? "—",
                       mono: true,
                     },
                     {
-                      k: "已確認趟次",
+                      k: t("settings.sla.confirmedTripsLabel", locale),
                       v: quotaSummary
                         ? formatCount(quotaSummary.usage.confirmedBookingCount)
                         : "—",
                       mono: true,
                     },
                     {
-                      k: "更新時間",
+                      k: t("settings.sla.updatedLabel", locale),
                       v: formatUpdated(
                         quotaSummary?.refreshedAt ?? data.sla.item?.updatedAt,
                       ),
@@ -2144,8 +2238,8 @@ export default async function SettingsPage() {
 
             <CanvasCard
               theme={th}
-              title="跨應用深層連結"
-              subtitle="platform-owned / ops-owned trace 一律 new tab；settings 保留 owner app 指向。"
+              title={t("settings.deepLinkCard.title", locale)}
+              subtitle={t("settings.deepLinkCard.subtitle", locale)}
             >
               <div style={linkStackStyle}>
                 {deepLinks.map((item) => {
@@ -2212,12 +2306,14 @@ export default async function SettingsPage() {
           <div style={splitGridStyle}>
             <CanvasCard
               theme={th}
-              title="能力與整合準備"
-              subtitle="租戶可用設定面 · webhook 基線 · onboarding checklist"
+              title={t("settings.capabilityCard.title", locale)}
+              subtitle={t("settings.capabilityCard.subtitle", locale)}
             >
               <div style={capabilityStackStyle}>
                 <div>
-                  <div style={sectionLabelStyle}>可用設定面</div>
+                  <div style={sectionLabelStyle}>
+                    {t("settings.capability.surfacesLabel", locale)}
+                  </div>
                   <div style={chipRowStyle}>
                     {settingsModuleRoutes.map((route) => (
                       <CanvasPill key={route} theme={th} tone="accent">
@@ -2228,7 +2324,9 @@ export default async function SettingsPage() {
                 </div>
 
                 <div>
-                  <div style={sectionLabelStyle}>租戶狀態</div>
+                  <div style={sectionLabelStyle}>
+                    {t("settings.capability.tenantStateLabel", locale)}
+                  </div>
                   {capabilityChips.length > 0 ? (
                     <div style={chipRowStyle}>
                       {capabilityChips.map((chip) => (
@@ -2243,13 +2341,15 @@ export default async function SettingsPage() {
                     </div>
                   ) : (
                     <div style={emptyStateStyle}>
-                      目前沒有可揭露的 posture 項目
+                      {t("settings.capability.noPosture", locale)}
                     </div>
                   )}
                 </div>
 
                 <div>
-                  <div style={sectionLabelStyle}>Webhook 基線事件</div>
+                  <div style={sectionLabelStyle}>
+                    {t("settings.capability.webhookBaselineLabel", locale)}
+                  </div>
                   {baselineEvents.length > 0 ? (
                     <div style={chipRowStyle}>
                       {baselineEvents.slice(0, 8).map((eventType) => (
@@ -2259,7 +2359,9 @@ export default async function SettingsPage() {
                       ))}
                     </div>
                   ) : (
-                    <div style={emptyStateStyle}>尚未發佈事件基線</div>
+                    <div style={emptyStateStyle}>
+                      {t("settings.capability.noBaseline", locale)}
+                    </div>
                   )}
                 </div>
 
@@ -2269,8 +2371,10 @@ export default async function SettingsPage() {
                       theme={th}
                       tone="info"
                       icon="warn"
-                      title="整合準備仍有待辦"
-                      body={`${checklist.length} 項檢查仍需確認，保留 cutover 前的 capability framing。`}
+                      title={t("settings.checklist.bannerTitle", locale)}
+                      body={t("settings.checklist.bannerBody", locale, {
+                        count: checklist.length,
+                      })}
                     />
                     <ul style={checklistStyle}>
                       {checklist.map((item, index) => (
@@ -2284,26 +2388,27 @@ export default async function SettingsPage() {
                     </ul>
                   </>
                 ) : (
-                  <div style={emptyStateStyle}>目前沒有額外切換前檢查項目</div>
+                  <div style={emptyStateStyle}>
+                    {t("settings.checklist.empty", locale)}
+                  </div>
                 )}
               </div>
             </CanvasCard>
 
             <CanvasCard
               theme={th}
-              title="執行期空狀態"
-              subtitle="各 module 回傳的 `emptyState` 直接映射到畫面，不再用 query param 或本地假資料示範。"
+              title={t("settings.emptyStateCard.title", locale)}
+              subtitle={t("settings.emptyStateCard.subtitle", locale)}
             >
               {emptyStateSurfaces.length > 0 ? (
                 <div style={emptyReasonGridStyle}>
                   {emptyStateSurfaces.map((surface) =>
-                    renderEmptyStateSurface(surface),
+                    renderEmptyStateSurface(surface, locale),
                   )}
                 </div>
               ) : (
                 <div style={emptyStateStyle}>
-                  目前沒有 module 回傳 `emptyState`；此頁維持正常 snapshot
-                  posture。
+                  {t("settings.emptyStateCard.none", locale)}
                 </div>
               )}
             </CanvasCard>
