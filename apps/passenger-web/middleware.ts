@@ -8,14 +8,18 @@ const EMBED_ALLOWED_ENTRY_HOSTS_ENV = "PASSENGER_WEB_EMBED_ALLOWED_HOSTS";
 
 function createBlockedResponse(
   decision: ReturnType<typeof buildEmbedSecurityDecision>,
+  request: NextRequest,
 ) {
-  const response = new NextResponse("Embedded access denied.", {
-    status: 403,
-    headers: {
-      "Cache-Control": "no-store, max-age=0",
-      "Content-Type": "text/plain; charset=utf-8",
-    },
-  });
+  const isEmbedRoute = request.nextUrl.pathname.startsWith("/embed/");
+  const response = isEmbedRoute
+    ? NextResponse.next()
+    : new NextResponse("Embedded access denied.", {
+        status: 403,
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+          "Content-Type": "text/plain; charset=utf-8",
+        },
+      });
 
   applyEmbedSecurityHeaders(response.headers, decision);
 
@@ -30,7 +34,7 @@ export function middleware(request: NextRequest) {
   });
 
   if (decision.block) {
-    return createBlockedResponse(decision);
+    return createBlockedResponse(decision, request);
   }
 
   const response = NextResponse.next();

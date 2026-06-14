@@ -1,4 +1,4 @@
-type EmbedSecurityDecision = {
+export type EmbedSecurityDecision = {
   allowedEntryHosts: string[];
   allowedPostMessageOrigins: string[];
   contentSecurityPolicy: string;
