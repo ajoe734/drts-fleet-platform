@@ -1,47 +1,46 @@
-import Link from "next/link";
+"use client";
 
-const degradedAffordances = [
-  {
-    state: "available",
-    name: "View existing trip status",
-    body: "Read paths still work. Riders can confirm whether an in-progress trip exists and view its last-known status snapshot.",
-  },
-  {
-    state: "blocked",
-    name: "Submit new booking request",
-    body: "Mutating endpoints are intentionally disabled while the platform is in degraded mode. The submit affordance is hidden, not faked.",
-  },
-  {
-    state: "blocked",
-    name: "Cancel an active trip",
-    body: "Cancellation is also held back; ops/support owns mutations during the degraded window so two writers cannot race.",
-  },
-  {
-    state: "available",
-    name: "Contact support",
-    body: "Support escalation is always available, including a clearly-named incident reference for the rider to share.",
-  },
-];
+import Link from "next/link";
+import { useTranslation } from "@/lib/i18n";
 
 export default function BookingDegradedPage() {
+  const { t } = useTranslation();
+  const degradedAffordances = [
+    {
+      state: t("degraded.row1.state"),
+      name: t("degraded.row1.name"),
+      body: t("degraded.row1.body"),
+    },
+    {
+      state: t("degraded.row2.state"),
+      name: t("degraded.row2.name"),
+      body: t("degraded.row2.body"),
+    },
+    {
+      state: t("degraded.row3.state"),
+      name: t("degraded.row3.name"),
+      body: t("degraded.row3.body"),
+    },
+    {
+      state: t("degraded.row4.state"),
+      name: t("degraded.row4.name"),
+      body: t("degraded.row4.body"),
+    },
+  ];
+
   return (
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-negative">
-          Read-only fallback
+          {t("degraded.eyebrow")}
         </span>
-        <h1>Booking is in degraded mode.</h1>
-        <p>
-          The booking surface has detected a degraded backend. The route stays
-          honest about which affordances are available and which are
-          intentionally blocked instead of failing silently when a submit is
-          attempted.
-        </p>
+        <h1>{t("degraded.title")}</h1>
+        <p>{t("degraded.body")}</p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Affordance matrix</span>
-        <h3>What works, what is blocked, and why</h3>
+        <span className="surface-kicker">{t("degraded.kicker")}</span>
+        <h3>{t("degraded.listTitle")}</h3>
         <ul className="check-list">
           {degradedAffordances.map((row) => (
             <li className={`check-item check-${row.state}`} key={row.name}>
@@ -55,29 +54,21 @@ export default function BookingDegradedPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Where the signal comes from</strong>
-          <p>
-            Degraded mode is driven by an upstream health signal, not by the UI
-            guessing. The rider sees the same posture support is operating on,
-            so explanations stay consistent.
-          </p>
+          <strong>{t("degraded.callout.signal.title")}</strong>
+          <p>{t("degraded.callout.signal.body")}</p>
         </article>
         <article className="callout-card warning">
-          <strong>No fake retries</strong>
-          <p>
-            The route never silently retries a blocked mutation in the
-            background. Retries are explicit rider actions tied to the recovery
-            state.
-          </p>
+          <strong>{t("degraded.callout.retry.title")}</strong>
+          <p>{t("degraded.callout.retry.body")}</p>
         </article>
       </section>
 
       <section className="hero-actions">
         <Link className="primary-link" href="/trip">
-          View any active trip status
+          {t("degraded.cta.trip")}
         </Link>
         <Link className="secondary-link" href="/unsupported">
-          Open unsupported fallback
+          {t("degraded.cta.unsupported")}
         </Link>
       </section>
     </div>

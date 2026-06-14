@@ -1,44 +1,34 @@
-import Link from "next/link";
+"use client";
 
-const reauthCauses = [
-  {
-    code: "session.expired",
-    body: "The rider's session token expired during the trip. Trip data stays hidden until the rider re-verifies.",
-  },
-  {
-    code: "session.revoked",
-    body: "The session was revoked from another device or by support. Re-authentication is required.",
-  },
-  {
-    code: "context.mismatch",
-    body: "The trip context cannot be re-established because the rider profile changed. Verification clears it.",
-  },
-];
+import Link from "next/link";
+import { useTranslation } from "@/lib/i18n";
 
 export default function TripReauthRequiredPage() {
+  const { t } = useTranslation();
+  const reauthCauses = [
+    { code: t("tripReauth.cause1.code"), body: t("tripReauth.cause1") },
+    { code: t("tripReauth.cause2.code"), body: t("tripReauth.cause2") },
+    { code: t("tripReauth.cause3.code"), body: t("tripReauth.cause3") },
+  ];
+
   return (
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-negative">
-          Session expired
+          {t("tripReauth.eyebrow")}
         </span>
-        <h1>Re-authentication is required to continue.</h1>
-        <p>
-          The platform held back trip data because it can no longer prove who
-          the rider is. The route does not show stale trip details and does not
-          silently downgrade to anonymous mode. Re-verification is the only way
-          forward.
-        </p>
+        <h1>{t("tripReauth.title")}</h1>
+        <p>{t("tripReauth.body")}</p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Why this happens</span>
-        <h3>Reauth is triggered by an explicit signal</h3>
+        <span className="surface-kicker">{t("tripReauth.kicker")}</span>
+        <h3>{t("tripReauth.listTitle")}</h3>
         <ul className="check-list">
           {reauthCauses.map((cause) => (
             <li className="check-item check-blocked" key={cause.code}>
               <strong>{cause.code}</strong>
-              <span className="check-state">blocked</span>
+              <span className="check-state">{t("tripReauth.state")}</span>
               <p>{cause.body}</p>
             </li>
           ))}
@@ -47,23 +37,17 @@ export default function TripReauthRequiredPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Re-verify identity</strong>
-          <p>
-            The auth entry route owns the actual reauthentication path. After it
-            clears, the rider returns to the active trip view automatically.
-          </p>
+          <strong>{t("tripReauth.callout.verify.title")}</strong>
+          <p>{t("tripReauth.callout.verify.body")}</p>
           <Link className="text-link" href="/auth">
-            Go to auth entry
+            {t("tripReauth.callout.verify.cta")}
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>What stays hidden</strong>
-          <p>
-            Trip status, ETA, vehicle, and driver details all stay hidden during
-            reauth. The unauthenticated guardrails apply.
-          </p>
+          <strong>{t("tripReauth.callout.hidden.title")}</strong>
+          <p>{t("tripReauth.callout.hidden.body")}</p>
           <Link className="text-link" href="/unauthenticated">
-            See unauthenticated fallback
+            {t("tripReauth.callout.hidden.cta")}
           </Link>
         </article>
       </section>

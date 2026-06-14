@@ -1,55 +1,47 @@
-import Link from "next/link";
+"use client";
 
-const tripCards = [
-  {
-    title: "Completed trip",
-    note: "DRTS-owned receipt available",
-    detail:
-      "A completed direct passenger trip can expose a platform-issued receipt and trip trace from the same lane.",
-    href: "/trip/completed",
-    cta: "Open completed-trip view",
-  },
-  {
-    title: "Partner or tenant-funded trip",
-    note: "External receipt reference",
-    detail:
-      "History stays visible, but billing ownership may point the rider to the source channel that actually owns the receipt artifact.",
-    href: "/trip/read-only",
-    cta: "Open read-only trip view",
-  },
-  {
-    title: "Cancelled trip",
-    note: "Cancellation outcome",
-    detail:
-      "History keeps cancelled trips with the cancelling actor named so the rider does not have to reconstruct what happened.",
-    href: "/trip/cancelled",
-    cta: "Open cancelled-trip view",
-  },
-  {
-    title: "No prior trips",
-    note: "Empty state",
-    detail:
-      "The route still explains how to find an active trip or re-enter via auth instead of rendering an empty table shell.",
-    href: "/auth",
-    cta: "Re-enter through auth",
-  },
-];
+import Link from "next/link";
+import { useTranslation } from "@/lib/i18n";
 
 export default function TripHistoryPage() {
+  const { t } = useTranslation();
+  const tripCards = [
+    {
+      title: t("trips.card1.title"),
+      note: t("trips.card1.note"),
+      detail: t("trips.card1.body"),
+      href: "/trip/completed",
+      cta: t("trips.card1.cta"),
+    },
+    {
+      title: t("trips.card2.title"),
+      note: t("trips.card2.note"),
+      detail: t("trips.card2.body"),
+      href: "/trip/read-only",
+      cta: t("trips.card2.cta"),
+    },
+    {
+      title: t("trips.card3.title"),
+      note: t("trips.card3.note"),
+      detail: t("trips.card3.body"),
+      href: "/trip/cancelled",
+      cta: t("trips.card3.cta"),
+    },
+    {
+      title: t("trips.card4.title"),
+      note: t("trips.card4.note"),
+      detail: t("trips.card4.body"),
+      href: "/auth",
+      cta: t("trips.card4.cta"),
+    },
+  ];
+
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow">Trip history</span>
-        <h1>
-          Trip history is a real passenger sub-surface with explicit outcome
-          links.
-        </h1>
-        <p>
-          The reopened passenger app no longer leaves trip history as deferred
-          prose. This route surfaces completed, cancelled, and read-only past
-          trips, each linked to its own outcome route from the `SYS-UI-004`
-          materialization.
-        </p>
+        <span className="eyebrow">{t("trips.eyebrow")}</span>
+        <h1>{t("trips.title")}</h1>
+        <p>{t("trips.body")}</p>
       </section>
 
       <section className="content-grid">
@@ -67,21 +59,15 @@ export default function TripHistoryPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Receipt center handoff</strong>
-          <p>
-            Receipt rendering rules are owned by the dedicated receipt lane, so
-            trip history links forward instead of duplicating billing logic.
-          </p>
+          <strong>{t("trips.callout.receipt.title")}</strong>
+          <p>{t("trips.callout.receipt.body")}</p>
           <Link className="text-link" href="/receipts">
-            Open receipt center
+            {t("trips.callout.receipt.cta")}
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>What history does not do</strong>
-          <p>
-            History does not re-issue receipts, does not invent cancellation
-            credits, and does not surface trips owned by other riders.
-          </p>
+          <strong>{t("trips.callout.notdo.title")}</strong>
+          <p>{t("trips.callout.notdo.body")}</p>
         </article>
       </section>
     </div>
