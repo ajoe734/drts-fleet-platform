@@ -798,7 +798,9 @@ function getActionLabel(action: string, locale: Locale) {
     case "refresh":
       return t("users.action.refresh", locale);
     default:
-      return action;
+      return t("users.action.unknown", locale, {
+        action,
+      });
   }
 }
 
@@ -999,7 +1001,7 @@ function EmptyStateBlock({
   return (
     <div style={emptyStateStyle}>
       <CanvasPill theme={th} tone={config.tone}>
-        {reason}
+        {getFailureReasonLabel(reason, locale)}
       </CanvasPill>
       <div style={{ color: th.text, fontWeight: 600 }}>{config.title}</div>
       <div
@@ -1037,7 +1039,7 @@ function getActorChip(
 ) {
   return t("users.identity.actorChip", locale, {
     actor: identity?.actorId ?? identity?.actorType ?? t("users.identity.unknownActor", locale),
-    realm: identity?.realm ?? "tenant",
+    realm: identity?.realm ?? t("users.identity.realmTenant", locale),
     tenantId: identity?.tenantId ?? tenantId,
   });
 }
