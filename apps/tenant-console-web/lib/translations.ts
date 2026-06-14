@@ -1105,6 +1105,40 @@ const en = {
   "billing.col.subsidy": "Subsidy",
   "billing.col.net": "Net",
   "billing.col.payoutStatus": "Payout",
+
+  // ── settings (i18n-fullsweep 20260614) ──
+
+  // ── webhooks (i18n-fullsweep 20260614) ──
+
+  // ── apiKeys (i18n-fullsweep 20260614) ──
+
+  // ── costCenters (i18n-fullsweep 20260614) ──
+
+  // ── reports (i18n-fullsweep 20260614) ──
+
+  // ── rules (i18n-fullsweep 20260614) ──
+
+  // ── sla (i18n-fullsweep 20260614) ──
+
+  // ── audit (i18n-fullsweep 20260614) ──
+
+  // ── invoices (i18n-fullsweep 20260614) ──
+
+  // ── billing (i18n-fullsweep 20260614) ──
+
+  // ── passengers (i18n-fullsweep 20260614) ──
+
+  // ── addresses (i18n-fullsweep 20260614) ──
+
+  // ── users (i18n-fullsweep 20260614) ──
+
+  // ── integrationGovernance (i18n-fullsweep 20260614) ──
+
+  // ── notifications (i18n-fullsweep 20260614) ──
+
+  // ── featureFlags (i18n-fullsweep 20260614) ──
+
+  // ── home (i18n-fullsweep 20260614) ──
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -2136,6 +2170,40 @@ const zh: Record<keyof typeof en, string> = {
   "billing.col.subsidy": "補貼",
   "billing.col.net": "淨額",
   "billing.col.payoutStatus": "撥付狀態",
+
+  // ── settings (i18n-fullsweep 20260614) ──
+
+  // ── webhooks (i18n-fullsweep 20260614) ──
+
+  // ── apiKeys (i18n-fullsweep 20260614) ──
+
+  // ── costCenters (i18n-fullsweep 20260614) ──
+
+  // ── reports (i18n-fullsweep 20260614) ──
+
+  // ── rules (i18n-fullsweep 20260614) ──
+
+  // ── sla (i18n-fullsweep 20260614) ──
+
+  // ── audit (i18n-fullsweep 20260614) ──
+
+  // ── invoices (i18n-fullsweep 20260614) ──
+
+  // ── billing (i18n-fullsweep 20260614) ──
+
+  // ── passengers (i18n-fullsweep 20260614) ──
+
+  // ── addresses (i18n-fullsweep 20260614) ──
+
+  // ── users (i18n-fullsweep 20260614) ──
+
+  // ── integrationGovernance (i18n-fullsweep 20260614) ──
+
+  // ── notifications (i18n-fullsweep 20260614) ──
+
+  // ── featureFlags (i18n-fullsweep 20260614) ──
+
+  // ── home (i18n-fullsweep 20260614) ──
 };
 
 export const translations = { en, zh } as const;
