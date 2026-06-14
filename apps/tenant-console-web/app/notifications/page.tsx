@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   ResourceActionDescriptor,
   TenantIntegrationGovernancePackage,
@@ -527,31 +527,35 @@ export default async function NotificationsPage() {
     }
   }
 
+  // CanvasTable is a "use client" component, so columns must reference cells by
+  // key (`k`) rather than carry `r:` render functions — functions cannot cross
+  // the server→client boundary. Pre-render each cell into the row data below.
   const matrixColumns: CanvasTableColumn<MatrixRow>[] = [
-    {
-      h: "EVENT TYPE",
-      w: 240,
-      r: (row) => (
+    { h: "事件類型", w: 240, k: "c_event" },
+    ...NOTIFICATION_CHANNELS.map<CanvasTableColumn<MatrixRow>>((channel) => ({
+      h: CHANNEL_LABEL[channel],
+      w: 160,
+      k: `c_${channel}`,
+    })),
+  ];
+  const displayRows: MatrixRow[] = matrixRows.map((row) => {
+    const cellNodes: Record<string, ReactNode> = {
+      c_event: (
         <div style={matrixEventCellStyle}>
           <span style={matrixEventCodeStyle}>{row.eventType}</span>
           <span style={matrixEventDescStyle}>{row.description}</span>
         </div>
       ),
-    },
-    ...NOTIFICATION_CHANNELS.map<CanvasTableColumn<MatrixRow>>((channel) => ({
-      h: CHANNEL_LABEL[channel],
-      w: 160,
-      r: (row) => {
-        const cell = row.cells[channel];
-        if (cell === "not_provisioned") {
-          return (
-            <CanvasPill theme={th} tone="neutral">
-              <CanvasIcon name="x" size={10} />
-              not_provisioned
-            </CanvasPill>
-          );
-        }
-        return (
+    };
+    for (const channel of NOTIFICATION_CHANNELS) {
+      const cell = row.cells[channel];
+      cellNodes[`c_${channel}`] =
+        cell === "not_provisioned" ? (
+          <CanvasPill theme={th} tone="neutral">
+            <CanvasIcon name="x" size={10} />
+            not_provisioned
+          </CanvasPill>
+        ) : (
           <span style={matrixCellStyle}>
             <CanvasToggle
               theme={th}
@@ -560,9 +564,9 @@ export default async function NotificationsPage() {
             />
           </span>
         );
-      },
-    })),
-  ];
+    }
+    return { ...row, ...cellNodes };
+  });
 
   return (
     <div>
@@ -612,13 +616,13 @@ export default async function NotificationsPage() {
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Events"
+            label="事件"
             value={formatCount(matrixRows.length)}
             sub="事件類型"
           />
           <CanvasKPI
             theme={th}
-            label="Subscriptions"
+            label="訂閱"
             value={`${formatCount(enabledCount)} / ${formatCount(totalCells)}`}
             sub={
               hasCustomConfiguration
@@ -638,7 +642,7 @@ export default async function NotificationsPage() {
           />
           <CanvasKPI
             theme={th}
-            label="Last update"
+            label="最後更新"
             value={formatUpdated(data.preferences?.updatedAt)}
             sub={
               hasCustomConfiguration ? "Custom configuration" : "All defaults"
@@ -659,7 +663,7 @@ export default async function NotificationsPage() {
                 <CanvasTable<MatrixRow>
                   theme={th}
                   columns={matrixColumns}
-                  rows={matrixRows}
+                  rows={displayRows}
                 />
                 <div style={matrixNoteStyle}>
                   {hasCustomConfiguration

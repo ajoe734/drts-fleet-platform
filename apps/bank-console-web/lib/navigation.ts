@@ -1,5 +1,5 @@
 import type { CanvasTone } from "@drts/ui-web";
-import { t } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 
 export const BANK_CONSOLE_BRAND = "DRTS";
 export const BANK_CONSOLE_BRAND_SUB = "BANK CONSOLE";
@@ -35,73 +35,99 @@ export type BankNavItem = {
 
 export type BankNavEntry = BankNavDivider | BankNavItem;
 
-export const bankNavEntries: BankNavEntry[] = [
-  { divider: t("nav.section.workspace") },
-  { key: "home", href: "/", icon: "home", label: t("nav.home") },
-  {
-    key: "bookings",
-    href: "/bookings",
-    icon: "bookings",
-    label: t("nav.bookings"),
-    matchPaths: ["/bookings"],
-  },
-  { divider: t("nav.section.finance") },
-  {
-    key: "contracts",
-    href: "/contracts",
-    icon: "sla",
-    label: t("nav.contracts"),
-    matchPaths: ["/contracts"],
-  },
-  {
-    key: "statements",
-    href: "/statements",
-    icon: "billing",
-    label: t("nav.statements"),
-    matchPaths: ["/statements"],
-  },
-  {
-    key: "programs",
-    href: "/programs",
-    icon: "reports",
-    label: t("nav.programs"),
-  },
-  { divider: t("nav.section.governance") },
-  {
-    key: "users",
-    href: "/users",
-    icon: "users",
-    label: t("nav.users"),
-  },
-  {
-    key: "audit",
-    href: "/audit",
-    icon: "audit",
-    label: t("nav.audit"),
-  },
-];
+function hrefWithQuery(href: string, queryString = "") {
+  if (!queryString) {
+    return href;
+  }
 
-export const bankNavItems = bankNavEntries.filter(
-  (entry): entry is BankNavItem => "href" in entry,
-);
+  return `${href}?${queryString}`;
+}
 
-const bankNavItemsBySpecificity = [...bankNavItems].sort((left, right) => {
-  return right.href.length - left.href.length;
-});
+export function buildBankNavEntries(
+  locale: Locale = "zh",
+  queryString = "",
+): BankNavEntry[] {
+  return [
+    { divider: t("nav.section.workspace", locale) },
+    {
+      key: "home",
+      href: hrefWithQuery("/", queryString),
+      icon: "home",
+      label: t("nav.home", locale),
+    },
+    {
+      key: "bookings",
+      href: hrefWithQuery("/bookings", queryString),
+      icon: "bookings",
+      label: t("nav.bookings", locale),
+      matchPaths: ["/bookings"],
+    },
+    { divider: t("nav.section.finance", locale) },
+    {
+      key: "contracts",
+      href: hrefWithQuery("/contracts", queryString),
+      icon: "sla",
+      label: t("nav.contracts", locale),
+      matchPaths: ["/contracts"],
+    },
+    {
+      key: "statements",
+      href: hrefWithQuery("/statements", queryString),
+      icon: "billing",
+      label: t("nav.statements", locale),
+      matchPaths: ["/statements"],
+    },
+    {
+      key: "programs",
+      href: hrefWithQuery("/programs", queryString),
+      icon: "reports",
+      label: t("nav.programs", locale),
+    },
+    { divider: t("nav.section.governance", locale) },
+    {
+      key: "users",
+      href: hrefWithQuery("/users", queryString),
+      icon: "users",
+      label: t("nav.users", locale),
+    },
+    {
+      key: "audit",
+      href: hrefWithQuery("/audit", queryString),
+      icon: "audit",
+      label: t("nav.audit", locale),
+    },
+  ];
+}
+
+export const bankNavEntries: BankNavEntry[] = buildBankNavEntries();
+
+function navItemsFor(entries: BankNavEntry[]) {
+  return entries.filter((entry): entry is BankNavItem => "href" in entry);
+}
+
+export const bankNavItems = navItemsFor(bankNavEntries);
+
+function hrefPath(href: string) {
+  return href.split("?")[0] ?? href;
+}
 
 export function isNavItemActive(pathname: string, item: BankNavItem) {
-  const matches = [item.href, ...(item.matchPaths ?? [])];
+  const matches = [hrefPath(item.href), ...(item.matchPaths ?? [])];
   return matches.some(
     (match) => pathname === match || pathname.startsWith(`${match}/`),
   );
 }
 
-export function findNavItem(pathname: string) {
-  for (const item of bankNavItemsBySpecificity) {
+export function findNavItem(pathname: string, entries = bankNavEntries) {
+  const itemsBySpecificity = [...navItemsFor(entries)].sort((left, right) => {
+    return hrefPath(right.href).length - hrefPath(left.href).length;
+  });
+
+  for (const item of itemsBySpecificity) {
     if (isNavItemActive(pathname, item)) {
       return item;
     }
   }
 
-  return bankNavItems[0] ?? null;
+  return navItemsFor(entries)[0] ?? null;
 }

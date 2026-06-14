@@ -483,7 +483,7 @@ export default async function FeatureFlagsPage({
     TenantFeatureFlagRecord & Record<string, unknown>
   >[] = [
     {
-      h: "KEY",
+      h: "鍵",
       w: 360,
       r: (row) => (
         <div style={keyCellStyle}>
@@ -495,7 +495,7 @@ export default async function FeatureFlagsPage({
       ),
     },
     {
-      h: "CURRENT",
+      h: "目前",
       w: 150,
       r: (row) => (
         <span style={currentCellStyle}>
@@ -511,7 +511,7 @@ export default async function FeatureFlagsPage({
       ),
     },
     {
-      h: "SCOPE",
+      h: "範圍",
       w: 150,
       r: (row) => (
         <CanvasPill theme={th} tone={getScopeTone(row.scope)}>
@@ -520,18 +520,18 @@ export default async function FeatureFlagsPage({
       ),
     },
     {
-      h: "LAST CHANGED BY",
+      h: "最後變更者",
       w: 180,
       r: (row) => row.updatedBy ?? "—",
     },
     {
-      h: "AT",
+      h: "時間",
       w: 150,
       mono: true,
       r: (row) => formatChangedAt(row.updatedAt),
     },
     {
-      h: "HISTORY",
+      h: "歷史",
       w: 90,
       align: "right",
       r: (row) =>
@@ -607,7 +607,7 @@ export default async function FeatureFlagsPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Flags"
+            label="旗標"
             value={formatCount(data.flags.length)}
             sub={
               data.totalCount !== data.flags.length
@@ -617,19 +617,19 @@ export default async function FeatureFlagsPage({
           />
           <CanvasKPI
             theme={th}
-            label="Overrides"
+            label="覆寫"
             value={formatCount(tenantOverrides)}
             sub="tenant_override"
           />
           <CanvasKPI
             theme={th}
-            label="Enabled"
+            label="啟用"
             value={formatCount(enabledCount)}
             sub="current value on"
           />
           <CanvasKPI
             theme={th}
-            label="Rolling out"
+            label="推行中"
             value={formatCount(rollingOutCount)}
             sub="partial rollout"
           />

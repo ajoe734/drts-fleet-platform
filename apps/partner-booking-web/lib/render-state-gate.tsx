@@ -6,6 +6,7 @@ import {
   PartnerAuthorityError,
   getPartnerRouteContext,
 } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
 import { notFound, redirect } from "next/navigation";
 
 type PageProps = {
@@ -21,6 +22,7 @@ export async function renderPartnerStateGate(
   searchParams?: PageProps["searchParams"],
 ) {
   const { tenantSlug } = await params;
+  const locale = await getServerLocale();
   const resolvedSearchParams = searchParams ? await searchParams : null;
   try {
     const { brand } = await getPartnerRouteContext(tenantSlug, {
@@ -40,6 +42,7 @@ export async function renderPartnerStateGate(
           persistentQuery={new URLSearchParams({
             eligibilityVerificationId,
           }).toString()}
+          locale={locale}
         />
       );
     }
@@ -49,6 +52,7 @@ export async function renderPartnerStateGate(
         brand={brand}
         state={state}
         basePath={`/${tenantSlug}`}
+        locale={locale}
       />
     );
   } catch (error) {

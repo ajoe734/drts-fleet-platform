@@ -9,12 +9,13 @@
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3008",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@drts/api-client": "workspace:*",
     "@drts/contracts": "workspace:*",
     "@drts/shared-types": "workspace:*",
+    "@drts/ui-tokens": "workspace:*",
     "@drts/ui-web": "workspace:*",
     "next": "^16.2.3",
     "react": "^19.2.5",

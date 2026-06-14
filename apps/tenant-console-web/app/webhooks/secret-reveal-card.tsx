@@ -135,19 +135,19 @@ export function SecretRevealCard({
         </div>
         <div style={metaGridStyle}>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Endpoint</span>
+            <span style={metaLabelStyle(theme)}>端點</span>
             <span style={metaValueStyle(theme)}>{endpointUrl}</span>
           </div>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Masked preview</span>
+            <span style={metaLabelStyle(theme)}>遮罩預覽</span>
             <span style={metaValueStyle(theme)}>{secretPreview}</span>
           </div>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Secret version</span>
+            <span style={metaLabelStyle(theme)}>密鑰版本</span>
             <span style={metaValueStyle(theme)}>v{secretVersion}</span>
           </div>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Rotated at</span>
+            <span style={metaLabelStyle(theme)}>輪替時間</span>
             <span style={metaValueStyle(theme)}>{rotatedAt}</span>
           </div>
         </div>

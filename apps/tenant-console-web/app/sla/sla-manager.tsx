@@ -341,7 +341,7 @@ function getAction(
 }
 
 function disabledReasonLabel(reason: string | undefined) {
-  if (!reason) return "Unavailable";
+  if (!reason) return "無資料";
   return reason.replaceAll("_", " ");
 }
 
@@ -912,7 +912,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
     <div>
       <CanvasPageHeader
         theme={th}
-        title="SLA Profile"
+        title="SLA 設定檔"
         subtitle="wait · arrival · completion 三個門檻 · 單位 = 分鐘 (Q-TEN07)"
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -991,7 +991,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
         ) : null}
 
         {receiptState ? (
-          <CanvasCard theme={th} title="Action receipt">
+          <CanvasCard theme={th} title="操作回執">
             <CanvasBanner
               theme={th}
               tone={getReceiptTone(receiptState.receipt)}
@@ -1080,7 +1080,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           <CanvasBanner
             theme={th}
             tone="danger"
-            title="Unsupported empty-state reason"
+            title="不支援的空狀態原因"
             body="Backend returned driver_not_eligible for a tenant SLA route. This page only accepts the six tenant-console empty reasons from Q-X15/Q-TEN02."
           />
         ) : null}
@@ -1123,8 +1123,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         placeholder="分鐘"
                       />
                       <div style={inputMetaStyle}>
-                        <span>unit</span>
-                        <span>min</span>
+                        <span>單位</span>
+                        <span>分鐘</span>
                       </div>
                     </div>
                   </CanvasField>
@@ -1146,8 +1146,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         placeholder="分鐘"
                       />
                       <div style={inputMetaStyle}>
-                        <span>unit</span>
-                        <span>min</span>
+                        <span>單位</span>
+                        <span>分鐘</span>
                       </div>
                     </div>
                   </CanvasField>
@@ -1169,8 +1169,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         placeholder="分鐘"
                       />
                       <div style={inputMetaStyle}>
-                        <span>unit</span>
-                        <span>min</span>
+                        <span>單位</span>
+                        <span>分鐘</span>
                       </div>
                     </div>
                   </CanvasField>

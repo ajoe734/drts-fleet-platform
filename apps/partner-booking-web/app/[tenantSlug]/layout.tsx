@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { TenantShell } from "@/components/tenant-shell";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   PartnerAuthorityError,
   getPartnerRouteContext,
@@ -23,7 +24,7 @@ export async function generateMetadata({
       allowInactive: true,
     });
     return {
-      title: `${brand.displayName} · Partner Booking`,
+      title: `${brand.displayName} · 合作預約`,
       description: brand.tagline,
     };
   } catch (error) {
@@ -31,7 +32,7 @@ export async function generateMetadata({
       error instanceof PartnerAuthorityError &&
       error.code === "PARTNER_ENTRY_NOT_FOUND"
     ) {
-      return { title: "Partner Booking" };
+      return { title: "合作預約" };
     }
     throw error;
   }
@@ -43,7 +44,12 @@ export default async function TenantLayout({ children, params }: LayoutProps) {
     const { brand } = await getPartnerRouteContext(tenantSlug, {
       allowInactive: true,
     });
-    return <TenantShell brand={brand}>{children}</TenantShell>;
+    const locale = await getServerLocale();
+    return (
+      <TenantShell brand={brand} locale={locale}>
+        {children}
+      </TenantShell>
+    );
   } catch (error) {
     if (
       error instanceof PartnerAuthorityError &&

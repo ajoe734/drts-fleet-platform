@@ -16,6 +16,8 @@ import {
   TenantBookingCreateForm,
   type TenantBookingCreatePageModel,
 } from "./tenant-booking-create-form";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +31,8 @@ const EMPTY_REASON_VALUES: EmptyReason[] = [
   "filtered_empty",
 ];
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
+function toErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function firstParam(value: string | string[] | undefined) {
@@ -175,6 +177,9 @@ export default async function NewBookingPage({
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const client = getTenantClient();
+  const locale = await getServerLocale();
+  const translate = (key: string, params?: Record<string, string | number>) =>
+    t(key, locale, params);
   const generatedAt = new Date().toISOString();
 
   const [passengersResult, addressesResult, costCentersResult] =
@@ -195,13 +200,28 @@ export default async function NewBookingPage({
     costCentersResult.status === "fulfilled" ? costCentersResult.value : [];
 
   if (passengersResult.status === "rejected") {
-    errors.push(`passengers: ${toErrorMessage(passengersResult.reason)}`);
+    errors.push(
+      `passengers: ${toErrorMessage(
+        passengersResult.reason,
+        translate("newBooking.error.unknown"),
+      )}`,
+    );
   }
   if (addressesResult.status === "rejected") {
-    errors.push(`addresses: ${toErrorMessage(addressesResult.reason)}`);
+    errors.push(
+      `addresses: ${toErrorMessage(
+        addressesResult.reason,
+        translate("newBooking.error.unknown"),
+      )}`,
+    );
   }
   if (costCentersResult.status === "rejected") {
-    errors.push(`cost_centers: ${toErrorMessage(costCentersResult.reason)}`);
+    errors.push(
+      `cost_centers: ${toErrorMessage(
+        costCentersResult.reason,
+        translate("newBooking.error.unknown"),
+      )}`,
+    );
   }
 
   const activePassengers = passengers.filter((row) => row.activeFlag);
@@ -246,9 +266,21 @@ export default async function NewBookingPage({
     (Boolean(dropoffAddressId) && !prefillDropoff);
 
   const prefillBadges = [
-    prefillPassenger ? `Passenger · ${prefillPassenger.fullName}` : null,
-    prefillPickup ? `Pickup · ${prefillPickup.addressName}` : null,
-    prefillDropoff ? `Drop-off · ${prefillDropoff.addressName}` : null,
+    prefillPassenger
+      ? translate("newBooking.prefill.passenger", {
+          name: prefillPassenger.fullName,
+        })
+      : null,
+    prefillPickup
+      ? translate("newBooking.prefill.pickup", {
+          name: prefillPickup.addressName,
+        })
+      : null,
+    prefillDropoff
+      ? translate("newBooking.prefill.dropoff", {
+          name: prefillDropoff.addressName,
+        })
+      : null,
   ].filter(Boolean) as string[];
 
   const pageModel: TenantBookingCreatePageModel = {
@@ -296,7 +328,7 @@ export default async function NewBookingPage({
       badges: prefillBadges,
       sourceLabel:
         prefillBadges.length > 0
-          ? "Shortcut prefill from tenant directory"
+          ? translate("newBooking.prefill.source")
           : null,
     },
     errors,

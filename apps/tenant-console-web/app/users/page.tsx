@@ -1067,7 +1067,7 @@ export default async function UsersPage({
 
   const columns: CanvasTableColumn<UserRow>[] = [
     {
-      h: "NAME",
+      h: "姓名",
       k: "displayName",
       w: 200,
       r: (row) => (
@@ -1078,13 +1078,13 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "EMAIL",
+      h: "電子郵件",
       k: "email",
       mono: true,
       w: 220,
     },
     {
-      h: "ROLE",
+      h: "角色",
       k: "roleCode",
       w: 180,
       r: (row) => (
@@ -1097,7 +1097,7 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 130,
       r: (row) => (
         <CanvasPill theme={th} tone={getStateTone(row.status)} dot>
@@ -1106,25 +1106,25 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "INVITED",
+      h: "邀請時間",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.invitedAt),
     },
     {
-      h: "LAST LOGIN",
+      h: "最後登入",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.lastLoginAt),
     },
     {
-      h: "UPDATED",
+      h: "更新",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.updatedAt),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 260,
       r: (row) => (
         <div style={rowActionMetaStyle}>
@@ -1196,7 +1196,7 @@ export default async function UsersPage({
 
         <div style={stripGridStyle}>
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Sitemap / Entry</div>
+            <div style={stripLabelStyle}>網站地圖／進入</div>
             <div style={routeCodeStyle}>/users</div>
             <div style={stripValueStyle}>
               Sidebar · tenant access management
@@ -1207,7 +1207,7 @@ export default async function UsersPage({
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Header Chip</div>
+            <div style={stripLabelStyle}>標頭標籤</div>
             <div style={stripValueStyle}>
               {getActorChip(identity, tenantId)}
             </div>
@@ -1215,7 +1215,7 @@ export default async function UsersPage({
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Roster Snapshot</div>
+            <div style={stripLabelStyle}>名冊快照</div>
             <div style={pillRowStyle}>
               <CanvasPill theme={th} tone="accent">
                 {formatCount(users.length)} users
@@ -1237,7 +1237,7 @@ export default async function UsersPage({
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Cross-App Audit</div>
+            <div style={stripLabelStyle}>跨應用稽核</div>
             <div style={stripValueStyle}>
               Tenant same-tab · ops/platform new-tab
             </div>
@@ -1253,7 +1253,7 @@ export default async function UsersPage({
             <div style={stackStyle}>
               <CanvasField
                 theme={th}
-                label="Role"
+                label="角色"
                 hint="依 packet §5.7，必須可按角色檢視。"
               >
                 <div style={pillRowStyle}>
@@ -1279,7 +1279,7 @@ export default async function UsersPage({
 
               <CanvasField
                 theme={th}
-                label="Status"
+                label="狀態"
                 hint="active / invited / suspended 都必須分開辨識。"
               >
                 <div style={pillRowStyle}>
@@ -1320,8 +1320,8 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="Authority / Refresh"
-            subtitle="tc_admin guardrail + T5 snapshot freshness"
+            title="權限／更新"
+            subtitle="tc_admin 防護 + T5 快照鮮度"
           >
             <div style={stackStyle}>
               <div style={metricGridStyle}>
@@ -1401,8 +1401,8 @@ export default async function UsersPage({
 
         <CanvasCard
           theme={th}
-          title="Tenant roster"
-          subtitle="user id · display name · email · role · status · invited at · last login · updated"
+          title="租戶名冊"
+          subtitle="使用者 id · 顯示名稱 · 電子郵件 · 角色 · 狀態 · 邀請時間 · 最後登入 · 更新"
           padding={0}
         >
           {emptyReason && emptyConfig ? (
@@ -1420,7 +1420,7 @@ export default async function UsersPage({
           <CanvasCard
             theme={th}
             title="角色目錄"
-            subtitle="role catalog remains backend-owned"
+            subtitle="角色目錄仍由後端擁有"
           >
             {roles.length > 0 ? (
               <div style={roleListStyle}>
@@ -1456,12 +1456,12 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="Cross-app audit"
-            subtitle="ops / platform actions affecting tenant access open in new tab"
+            title="跨應用稽核"
+            subtitle="影響租戶存取的 ops／platform 操作會在新分頁開啟"
           >
             <div style={cardStackStyle}>
               <div style={authorityMetaStyle}>
-                <span>cross-app deep links</span>
+                <span>跨應用深層連結</span>
                 <CanvasPill theme={th} tone="info">
                   new_tab
                 </CanvasPill>
@@ -1504,8 +1504,8 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="Action contract"
-            subtitle="availableActions decides every CTA; UI does not infer permissions from role"
+            title="操作契約"
+            subtitle="availableActions 決定每個 CTA；UI 不從角色推斷權限"
           >
             <CanvasDL
               theme={th}

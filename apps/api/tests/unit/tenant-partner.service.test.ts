@@ -770,6 +770,55 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
+  it("bootstraps tenant users when persisted snapshots exist without a user directory", async () => {
+    const initialState = createEmptyRepositoryState();
+    initialState.costCenters = [
+      {
+        tenantId: "tenant-demo-001",
+        code: "CC-PERSISTED",
+        name: "Persisted cost center",
+        description: null,
+        ownerUserId: null,
+        ownerName: null,
+        activeFlag: true,
+        disabledAt: null,
+        disabledReason: null,
+        createdAt: "2026-04-10T00:00:00.000Z",
+        updatedAt: "2026-04-10T00:00:00.000Z",
+      },
+    ];
+    const repository = createInMemoryTenantPartnerRepository(initialState);
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.listTenantUsers("tenant-demo-001")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          email: "admin@acme.example",
+          roleCode: "tenant_admin",
+          status: "active",
+        }),
+        expect.objectContaining({
+          email: "finance@acme.example",
+          roleCode: "tenant_finance_admin",
+          status: "active",
+        }),
+      ]),
+    );
+    expect(repository.getState().userRoles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          email: "admin@acme.example",
+          roleCode: "tenant_admin",
+        }),
+      ]),
+    );
+  });
+
   it("persists entry revoke metadata together with credential revocation", async () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";

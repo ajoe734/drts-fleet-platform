@@ -5,6 +5,11 @@ export { StatCard } from "./stat-card";
 export { PageHeader } from "./page-header";
 export type { PageHeaderProps } from "./page-header";
 export * as CanvasPrimitives from "./canvas-primitives";
+export { Table as CanvasTable } from "./canvas-primitives/table";
+export type {
+  TableColumn as CanvasTableColumn,
+  TableProps as CanvasTableProps,
+} from "./canvas-primitives/table";
 export {
   ActionButton,
   Banner as CanvasBanner,
@@ -22,7 +27,6 @@ export {
   Select as CanvasSelect,
   Shell as CanvasShell,
   StaleBanner as CanvasStaleBanner,
-  Table as CanvasTable,
   TrafficLights as CanvasTrafficLights,
   WindowChrome as CanvasWindowChrome,
 } from "./canvas-primitives";
@@ -44,8 +48,6 @@ export type {
   ShellNavItem as CanvasShellNavItem,
   ShellProps as CanvasShellProps,
   StaleBannerProps as CanvasStaleBannerProps,
-  TableColumn as CanvasTableColumn,
-  TableProps as CanvasTableProps,
   WindowChromeProps as CanvasWindowChromeProps,
 } from "./canvas-primitives";
 export {

@@ -1,9 +1,5 @@
 import type { MoneyAmount } from "@drts/contracts";
-
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+import type { Locale } from "./translations";
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   year: "numeric",
@@ -11,16 +7,22 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
-const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
-  numeric: "auto",
-});
+function toIntlLocale(locale: Locale) {
+  return locale === "zh" ? "zh-TW" : "en";
+}
 
-export function formatDateTime(value: string | null | undefined) {
+export function formatDateTime(
+  value: string | null | undefined,
+  locale: Locale = "en",
+) {
   if (!value) {
-    return "Not available";
+    return locale === "zh" ? "無資料" : "Not available";
   }
 
-  return DATE_TIME_FORMATTER.format(new Date(value));
+  return new Intl.DateTimeFormat(toIntlLocale(locale), {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export function formatDateInput(value: string | null | undefined) {
@@ -31,12 +33,15 @@ export function formatDateInput(value: string | null | undefined) {
   return DATE_FORMATTER.format(new Date(value));
 }
 
-export function formatMoney(value: MoneyAmount | null | undefined) {
+export function formatMoney(
+  value: MoneyAmount | null | undefined,
+  locale: Locale = "en",
+) {
   if (!value) {
-    return "Not available";
+    return locale === "zh" ? "無資料" : "Not available";
   }
 
-  return new Intl.NumberFormat("en", {
+  return new Intl.NumberFormat(toIntlLocale(locale), {
     style: "currency",
     currency: value.currency,
   }).format(value.amountMinor / 100);
@@ -54,7 +59,10 @@ export function isFutureIso(value: string | null | undefined) {
   return new Date(value).getTime() > Date.now();
 }
 
-export function formatRelativeTime(value: string | null | undefined) {
+export function formatRelativeTime(
+  value: string | null | undefined,
+  locale: Locale = "en",
+) {
   if (!value) {
     return null;
   }
@@ -65,15 +73,18 @@ export function formatRelativeTime(value: string | null | undefined) {
   }
 
   const diffMinutes = Math.round(diffMs / 60000);
+  const formatter = new Intl.RelativeTimeFormat(toIntlLocale(locale), {
+    numeric: "auto",
+  });
   if (Math.abs(diffMinutes) < 60) {
-    return RELATIVE_TIME_FORMATTER.format(diffMinutes, "minute");
+    return formatter.format(diffMinutes, "minute");
   }
 
   const diffHours = Math.round(diffMinutes / 60);
   if (Math.abs(diffHours) < 48) {
-    return RELATIVE_TIME_FORMATTER.format(diffHours, "hour");
+    return formatter.format(diffHours, "hour");
   }
 
   const diffDays = Math.round(diffHours / 24);
-  return RELATIVE_TIME_FORMATTER.format(diffDays, "day");
+  return formatter.format(diffDays, "day");
 }

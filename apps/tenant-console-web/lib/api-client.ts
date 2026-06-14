@@ -1,6 +1,7 @@
 import { ApiClient, createTenantClient } from "@drts/api-client";
+import { getServerApiBaseUrl } from "./runtime-config";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const API_URL = getServerApiBaseUrl();
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEMO_ACTOR_ID = "demo-tenant-user";
 

@@ -90,13 +90,17 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    # --diff-filter excludes pure Deletions (D): the guard exists to keep
+    # *regenerated* mirror content (Added/Modified/Renamed/Copied/Type-changed)
+    # out of commits and PRs. Removing a mirror that was mistakenly tracked is
+    # the cure, not a violation — and .gitignore prevents it from coming back.
     if args.range:
         base, head = args.range
-        names = diff_names(["--name-only", f"{base}..{head}"])
+        names = diff_names(["--name-only", "--diff-filter=ACMRT", f"{base}..{head}"])
         mode_label = f"diff {base}..{head}"
     else:
         # default = pre-commit mode
-        names = diff_names(["--cached", "--name-only"])
+        names = diff_names(["--cached", "--name-only", "--diff-filter=ACMRT"])
         mode_label = "staged index"
 
     hits = [(n, matches_block(n)) for n in names if matches_block(n)]

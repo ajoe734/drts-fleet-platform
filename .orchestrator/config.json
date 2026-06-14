@@ -208,7 +208,7 @@
       "file_inbox_path": ".llm-inbox/claude.md"
     },
     "gemini": {
-      "display_name": "Antigravity",
+      "display_name": "Gemini",
       "provider": "gemini",
       "adapter": "antigravity",
       "wake_template": ".orchestrator/templates/wakeup.txt",
@@ -222,7 +222,7 @@
       "file_inbox_path": ".llm-inbox/claude2.md"
     },
     "gemini2": {
-      "display_name": "Antigravity2",
+      "display_name": "Gemini2",
       "provider": "gemini2",
       "adapter": "antigravity",
       "wake_template": ".orchestrator/templates/wakeup.txt",

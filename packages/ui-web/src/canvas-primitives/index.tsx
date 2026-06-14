@@ -142,6 +142,7 @@ export interface ShellProps {
   searchPlaceholder?: string;
   searchWidth?: number;
   avatarLabel?: ReactNode;
+  headerControls?: ReactNode;
   style?: CSSProperties;
 }
 
@@ -302,6 +303,7 @@ export function Shell({
   searchPlaceholder,
   searchWidth = 220,
   avatarLabel = "YL",
+  headerControls,
   style,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
@@ -545,46 +547,50 @@ export function Shell({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <SearchBox
-            theme={theme}
-            width={searchWidth}
-            placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
-          />
-          <Kbd theme={theme}>⌘K</Kbd>
-          <button
-            type="button"
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              background: "transparent",
-              border: "1px solid transparent",
-              color: theme.textMuted,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-            }}
-          >
-            <CanvasIcon name="bell" size={15} />
-          </button>
-          <div
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 13,
-              background: theme.accentBg,
-              color: theme.accent,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              fontWeight: 700,
-              border: `1px solid ${theme.accentBorder}`,
-            }}
-          >
-            {avatarLabel}
-          </div>
+          {headerControls ?? (
+            <>
+              <SearchBox
+                theme={theme}
+                width={searchWidth}
+                placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
+              />
+              <Kbd theme={theme}>⌘K</Kbd>
+              <button
+                type="button"
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 7,
+                  background: "transparent",
+                  border: "1px solid transparent",
+                  color: theme.textMuted,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+              >
+                <CanvasIcon name="bell" size={15} />
+              </button>
+              <div
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 13,
+                  background: theme.accentBg,
+                  color: theme.accent,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  border: `1px solid ${theme.accentBorder}`,
+                }}
+              >
+                {avatarLabel}
+              </div>
+            </>
+          )}
           {topRight}
         </div>
       </header>
@@ -1141,118 +1147,8 @@ export function Card({
   );
 }
 
-export interface TableColumn<Row extends object> {
-  h: ReactNode;
-  k?: keyof Row & string;
-  w?: string | number;
-  mono?: boolean;
-  align?: CSSProperties["textAlign"];
-  r?: (row: Row, index: number) => ReactNode;
-}
-
-export interface TableProps<Row extends object> {
-  theme?: CanvasTheme;
-  columns: TableColumn<Row>[];
-  rows: readonly Row[];
-  dense?: boolean;
-  onRowSelect?: (row: Row, index: number) => void;
-}
-
-export function Table<Row extends object>({
-  theme: providedTheme,
-  columns,
-  rows,
-  dense = true,
-  onRowSelect,
-}: TableProps<Row>) {
-  const theme = resolveTheme(providedTheme);
-
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          fontSize: 12.5,
-          fontFamily: theme.fontFamily,
-        }}
-      >
-        <thead>
-          <tr style={{ borderBottom: `1px solid ${theme.border}` }}>
-            {columns.map((column, index) => (
-              <th
-                key={`head-${index}`}
-                style={{
-                  textAlign: column.align ?? "left",
-                  padding: dense ? "7px 12px" : "10px 12px",
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  color: theme.textMuted,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.4,
-                  background: theme.surfaceLo,
-                  whiteSpace: "nowrap",
-                  width: px(column.w),
-                  position: "sticky",
-                  top: 0,
-                }}
-              >
-                {column.h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => {
-            const keyedRow = row as Record<string, unknown>;
-            const selectable = onRowSelect !== undefined;
-            const rowSelectProps = selectable
-              ? { onClick: () => onRowSelect(row, rowIndex) }
-              : {};
-
-            return (
-              <tr
-                key={`row-${rowIndex}`}
-                {...rowSelectProps}
-                style={{
-                  borderBottom: `1px solid ${theme.border}`,
-                  cursor: selectable ? "pointer" : "default",
-                  background:
-                    "_selected" in keyedRow && keyedRow._selected
-                      ? theme.rowSelect
-                      : "transparent",
-                }}
-              >
-                {columns.map((column, columnIndex) => (
-                  <td
-                    key={`cell-${rowIndex}-${columnIndex}`}
-                    style={{
-                      padding: dense ? "7px 12px" : "10px 12px",
-                      textAlign: column.align ?? "left",
-                      fontSize: column.mono ? 11.5 : 12.5,
-                      fontFamily: column.mono
-                        ? theme.monoFamily
-                        : theme.fontFamily,
-                      color: theme.text,
-                      verticalAlign: "middle",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {column.r
-                      ? column.r(row, rowIndex)
-                      : column.k
-                        ? (keyedRow[column.k] as ReactNode)
-                        : null}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+// `Table` (CanvasTable) moved to ./table — a server-renderable module so
+// RSC pages can pass `r:` render-function columns without a client boundary.
 
 export interface BannerProps {
   theme?: CanvasTheme;

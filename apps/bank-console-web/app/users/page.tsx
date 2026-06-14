@@ -1,8 +1,288 @@
-import { PendingScreen } from "@/components/pending-screen";
-import { t } from "@/lib/translations";
+import type { CSSProperties } from "react";
+import Link from "next/link";
+import {
+  resolveBankDemoTenant,
+  resolveLocale,
+  type BankDemoTenant,
+} from "@/lib/demo-tenants";
+import { t, type Locale } from "@/lib/translations";
 
-export default function UsersPage() {
+type BankRole = "bank_program_admin" | "bank_ops_viewer" | "bank_finance";
+type UserStatus = "active" | "invited" | "suspended";
+type UserFilter = "all" | UserStatus;
+
+const CURRENT_ACTOR = {
+  display: "周敬文",
+  role: "bank_program_admin" as BankRole,
+};
+
+const USERS: Array<{
+  name: string;
+  email: string;
+  role: BankRole;
+  status: UserStatus;
+  lastActivity: string;
+}> = [
+  {
+    name: "周敬文",
+    email: "cw.chou@ctbcbank.com",
+    role: "bank_program_admin",
+    status: "active",
+    lastActivity: "2 分鐘前",
+  },
+  {
+    name: "黃怡安",
+    email: "hy.huang@ctbcbank.com",
+    role: "bank_ops_viewer",
+    status: "active",
+    lastActivity: "14 分鐘前",
+  },
+  {
+    name: "湯立群",
+    email: "tl.tang@ctbcbank.com",
+    role: "bank_finance",
+    status: "active",
+    lastActivity: "1 小時前",
+  },
+  {
+    name: "郭旻潔",
+    email: "mj.kuo@ctbcbank.com",
+    role: "bank_ops_viewer",
+    status: "invited",
+    lastActivity: "— 待接受邀請",
+  },
+  {
+    name: "葉承勳",
+    email: "cs.yeh@ctbcbank.com",
+    role: "bank_finance",
+    status: "suspended",
+    lastActivity: "2026-05-20",
+  },
+];
+
+const ROLE_CARDS: BankRole[] = [
+  "bank_program_admin",
+  "bank_ops_viewer",
+  "bank_finance",
+];
+
+const FILTERS: UserFilter[] = ["all", "active", "invited", "suspended"];
+
+function roleLabel(role: BankRole, locale: Locale) {
+  return t(`users.role.${role}`, locale);
+}
+
+function roleCode(role: BankRole, locale: Locale) {
+  return t(`users.roleCode.${role}`, locale);
+}
+
+function statusLabel(status: UserStatus, locale: Locale) {
+  return t(`users.status.${status}`, locale);
+}
+
+function filterLabel(filter: UserFilter, locale: Locale) {
+  return t(`users.filter.${filter}`, locale);
+}
+
+function getCount(filter: UserFilter) {
+  if (filter === "all") {
+    return USERS.length;
+  }
+
+  return USERS.filter((user) => user.status === filter).length;
+}
+
+function getActionLabel(status: UserStatus, locale: Locale) {
+  return status === "suspended"
+    ? t("users.action.reactivate", locale)
+    : t("users.action.suspend", locale);
+}
+
+function getActionHref(
+  filter: UserFilter,
+  bank: BankDemoTenant,
+  locale: Locale,
+) {
+  const params = new URLSearchParams({ bank: bank.code, locale });
+  if (filter !== "all") {
+    params.set("status", filter);
+  }
+  return `/users?${params.toString()}`;
+}
+
+function emailForTenant(email: string, tenant: BankDemoTenant) {
+  const [local] = email.split("@");
+  const domain =
+    tenant.code === "ctbc"
+      ? "ctbcbank.com"
+      : `${tenant.issuerCode.toLowerCase()}.demo`;
+  return `${local}@${domain}`;
+}
+
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{
+    bank?: string | string[];
+    locale?: string | string[];
+    status?: string;
+  }>;
+}) {
+  const params = await searchParams;
+  const locale = resolveLocale(params?.locale);
+  const tenant = resolveBankDemoTenant(params?.bank);
+  const issuerTokens = tenant.template.tokens.dark;
+  const activeFilter = FILTERS.includes(params?.status as UserFilter)
+    ? (params?.status as UserFilter)
+    : "all";
+  const canManageUsers = CURRENT_ACTOR.role === "bank_program_admin";
+  const visibleUsers =
+    activeFilter === "all"
+      ? USERS
+      : USERS.filter((user) => user.status === activeFilter);
+
+  const issuerVars = {
+    "--issuer-primary": issuerTokens.primary,
+    "--issuer-primary-dark": issuerTokens.primaryDark,
+    "--issuer-accent": issuerTokens.accent,
+    "--issuer-ink": issuerTokens.ink,
+    "--issuer-surface": issuerTokens.surface.bg,
+    "--issuer-border": issuerTokens.surface.border,
+  } as CSSProperties;
+
   return (
-    <PendingScreen title={t("users.title")} purpose={t("users.purpose")} />
+    <div className="page-shell bank-users-page" style={issuerVars}>
+      <section className="users-hero">
+        <div className="users-hero-copy">
+          <span className="eyebrow">{t("users.eyebrow", locale)}</span>
+          <h1>{t("users.title", locale)}</h1>
+          <p>{t("users.lead", locale)}</p>
+        </div>
+        <button
+          className="table-action-button is-primary"
+          disabled={!canManageUsers}
+          type="button"
+        >
+          {canManageUsers
+            ? t("users.invite", locale)
+            : t("users.action.locked", locale)}
+        </button>
+      </section>
+
+      <nav
+        aria-label={t("users.filterNav", locale)}
+        className="users-filter-tabs"
+      >
+        {FILTERS.map((filter) => {
+          const isActive = filter === activeFilter;
+
+          return (
+            <Link
+              aria-current={isActive ? "page" : undefined}
+              className={`users-filter-tab${isActive ? " is-active" : ""}`}
+              href={getActionHref(filter, tenant, locale)}
+              key={filter}
+            >
+              <span>{filterLabel(filter, locale)}</span>
+              <span className="users-filter-badge">{getCount(filter)}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <section className="users-role-grid">
+        {ROLE_CARDS.map((role) => (
+          <article className="role-card" key={role}>
+            <span className="surface-kicker">{roleCode(role, locale)}</span>
+            <strong>{roleLabel(role, locale)}</strong>
+            <p>{t(`users.roleCard.${role}`, locale)}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="surface-card users-table-card">
+        <div className="users-table-scroll">
+          <table className="users-table">
+            <thead>
+              <tr>
+                <th>{t("users.table.user", locale)}</th>
+                <th>{t("users.table.email", locale)}</th>
+                <th>{t("users.table.role", locale)}</th>
+                <th>{t("users.table.status", locale)}</th>
+                <th>{t("users.table.lastActivity", locale)}</th>
+                <th>{t("users.table.actions", locale)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleUsers.map((user) => {
+                const disableRoleChange =
+                  !canManageUsers || user.status === "suspended";
+                const disableLifecycleAction =
+                  !canManageUsers || user.status === "invited";
+
+                return (
+                  <tr key={user.email}>
+                    <td>
+                      <div className="user-cell">
+                        <span className="user-avatar">
+                          {user.name.slice(0, 1)}
+                        </span>
+                        <strong>{user.name}</strong>
+                      </div>
+                    </td>
+                    <td className="mono-cell">
+                      {emailForTenant(user.email, tenant)}
+                    </td>
+                    <td>
+                      <span className={`role-pill role-${user.role}`}>
+                        {roleLabel(user.role, locale)}
+                        <span className="role-pill-code">
+                          {roleCode(user.role, locale)}
+                        </span>
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`table-status status-${user.status}`}>
+                        {statusLabel(user.status, locale)}
+                      </span>
+                    </td>
+                    <td>{user.lastActivity}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          className="table-action-button"
+                          disabled={disableRoleChange}
+                          type="button"
+                        >
+                          {canManageUsers
+                            ? t("users.action.changeRole", locale)
+                            : t("users.action.locked", locale)}
+                        </button>
+                        <button
+                          className="table-action-button"
+                          disabled={disableLifecycleAction}
+                          type="button"
+                        >
+                          {canManageUsers
+                            ? getActionLabel(user.status, locale)
+                            : t("users.action.locked", locale)}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p className="users-footnote">
+        {t("users.auditFootnote", locale, {
+          actor: CURRENT_ACTOR.display,
+          role: roleLabel(CURRENT_ACTOR.role, locale),
+        })}
+      </p>
+    </div>
   );
 }
