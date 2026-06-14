@@ -3,7 +3,9 @@
 import { useEffect, useEffectEvent, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CanvasBtn, CanvasPill, buildCanvasTheme } from "@drts/ui-web";
+import { toIntlLocale } from "@/lib/formatters";
 import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -13,12 +15,7 @@ const th = buildCanvasTheme({
 
 const REFRESH_INTERVAL_MS = 30_000;
 
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
-function formatSnapshot(value: string | null) {
+function formatSnapshot(value: string | null, locale: Locale) {
   if (!value) {
     return null;
   }
@@ -28,7 +25,10 @@ function formatSnapshot(value: string | null) {
     return null;
   }
 
-  return dateTimeFormatter.format(parsed);
+  return new Intl.DateTimeFormat(toIntlLocale(locale), {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(parsed);
 }
 
 export function IntegrationGovernanceRefreshControl({
@@ -37,7 +37,7 @@ export function IntegrationGovernanceRefreshControl({
   computedAt: string | null;
 }) {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [isPending, startTransition] = useTransition();
 
   const refreshPage = useEffectEvent(() => {
@@ -70,9 +70,9 @@ export function IntegrationGovernanceRefreshControl({
         {t("integrationGovernance.refresh.tier")}
       </CanvasPill>
       <CanvasPill theme={th} tone="neutral">
-        {formatSnapshot(computedAt)
+        {formatSnapshot(computedAt, locale)
           ? t("integrationGovernance.refresh.snapshot", {
-              value: formatSnapshot(computedAt) as string,
+              value: formatSnapshot(computedAt, locale) as string,
             })
           : t("integrationGovernance.refresh.noSnapshot")}
       </CanvasPill>

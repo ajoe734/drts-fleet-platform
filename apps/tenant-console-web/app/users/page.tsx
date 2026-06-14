@@ -24,6 +24,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
+import { toIntlLocale } from "@/lib/formatters";
 import { getServerLocale } from "@/lib/server-locale";
 import { type Locale, t } from "@/lib/translations";
 
@@ -289,11 +290,6 @@ const hintCopyStyle: CSSProperties = {
 
 const numberFormatter = new Intl.NumberFormat("en");
 
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
 type SearchParams = Record<string, string | string[] | undefined>;
 
 type RoleFilter = "all" | string;
@@ -377,11 +373,14 @@ const STATUS_SORT_ORDER: Record<TenantUserRoleRecord["status"], number> = {
   suspended: 2,
 };
 
-function formatUpdated(value: string | null | undefined) {
+function formatUpdated(value: string | null | undefined, locale: Locale) {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return dateTimeFormatter.format(parsed);
+  return new Intl.DateTimeFormat(toIntlLocale(locale), {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(parsed);
 }
 
 function formatDurationMs(value: number | null | undefined) {
@@ -1124,19 +1123,19 @@ export default async function UsersPage({
       h: t("users.column.invitedAt", locale),
       w: 150,
       mono: true,
-      r: (row) => formatUpdated(row.invitedAt),
+      r: (row) => formatUpdated(row.invitedAt, locale),
     },
     {
       h: t("users.column.lastLogin", locale),
       w: 150,
       mono: true,
-      r: (row) => formatUpdated(row.lastLoginAt),
+      r: (row) => formatUpdated(row.lastLoginAt, locale),
     },
     {
       h: t("users.column.updated", locale),
       w: 150,
       mono: true,
-      r: (row) => formatUpdated(row.updatedAt),
+      r: (row) => formatUpdated(row.updatedAt, locale),
     },
     {
       h: t("users.column.actions", locale),
@@ -1182,7 +1181,7 @@ export default async function UsersPage({
             tone={getRefreshTone(backendRefreshMetadata)}
             icon="refresh"
             title={t("users.refresh.snapshotTitle", locale, {
-              value: formatUpdated(backendRefreshMetadata.generatedAt),
+              value: formatUpdated(backendRefreshMetadata.generatedAt, locale),
             })}
             body={t("users.refresh.body", locale, {
               tier: TENANT_REFRESH_TIER,
@@ -1271,7 +1270,9 @@ export default async function UsersPage({
             </div>
             <div style={hintCopyStyle}>
               {t("users.strip.roster.hint", locale, {
-                value: latestUpdated ? formatUpdated(latestUpdated) : "—",
+                value: latestUpdated
+                  ? formatUpdated(latestUpdated, locale)
+                  : "—",
               })}
             </div>
           </div>
@@ -1420,7 +1421,10 @@ export default async function UsersPage({
                   {
                     k: t("users.perms.dl.snapshotGenerated.k", locale),
                     v: backendRefreshMetadata
-                      ? formatUpdated(backendRefreshMetadata.generatedAt)
+                      ? formatUpdated(
+                          backendRefreshMetadata.generatedAt,
+                          locale,
+                        )
                       : t("users.perms.runtimeUnavailable", locale),
                     mono: true,
                   },

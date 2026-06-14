@@ -7,7 +7,7 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
-function toIntlLocale(locale: Locale) {
+export function toIntlLocale(locale: Locale) {
   return locale === "zh" ? "zh-TW" : "en";
 }
 
