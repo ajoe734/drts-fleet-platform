@@ -365,7 +365,9 @@ type InvoicesPageData = {
 };
 
 function toErrorMessage(error: unknown, locale: Locale) {
-  return error instanceof Error ? error.message : t("invoices.error.unknown", locale);
+  return error instanceof Error && error.message
+    ? t("invoices.error.requestFailed", locale)
+    : t("invoices.error.unknown", locale);
 }
 
 function toPeriodKey(value: string | null | undefined) {
@@ -454,7 +456,7 @@ function normalizeRuntimeAction(
     default:
       return {
         ...action,
-        label: action.action,
+        label: t("invoices.action.unavailableGeneric", locale),
       };
   }
 }
@@ -575,7 +577,7 @@ function getRefreshStateLabel(
     case "degraded":
       return t("invoices.refresh.state.degraded", locale);
     default:
-      return freshness;
+      return t("invoices.refresh.state.unknown", locale);
   }
 }
 
@@ -688,7 +690,7 @@ function formatStatusLabel(
     case "overdue":
       return t("invoices.status.overdue", locale);
     default:
-      return status;
+      return t("invoices.status.unknown", locale);
   }
 }
 
@@ -707,7 +709,25 @@ function formatActionLabel(action: ResourceActionDescriptor, locale: Locale) {
     case "open_billing":
       return t("invoices.action.openBilling", locale);
     default:
-      return action.action;
+      return t("invoices.action.unavailableGeneric", locale);
+  }
+}
+
+function getRefreshSourceLabel(
+  source: UiRefreshMetadata["source"],
+  locale: Locale,
+) {
+  switch (source) {
+    case "live":
+      return t("invoices.meta.sourceLive", locale);
+    case "cache":
+      return t("invoices.meta.sourceCache", locale);
+    case "sandbox":
+      return t("invoices.meta.sourceSandbox", locale);
+    case "static":
+      return t("invoices.meta.sourceStatic", locale);
+    default:
+      return t("invoices.meta.sourceUnknown", locale);
   }
 }
 
@@ -832,10 +852,6 @@ function getEmptyStateActionLabel(action: ResourceActionDescriptor, locale: Loca
 function describeEmptyStateAction(action: ResourceActionDescriptor, locale: Locale) {
   if (action.enabled) {
     return getEmptyStateActionLabel(action, locale);
-  }
-
-  if (action.disabledReasonCode) {
-    return `${getEmptyStateActionLabel(action, locale)} (${action.disabledReasonCode})`;
   }
 
   return t("invoices.action.disabled", locale, {
@@ -1176,7 +1192,9 @@ export default async function InvoicesPage({
                 theme={th}
                 tone="neutral"
               >
-                {t("invoices.meta.source", locale, { value: data.refresh.source })}
+                {t("invoices.meta.source", locale, {
+                  value: getRefreshSourceLabel(data.refresh.source, locale),
+                })}
               </CanvasPill>
             ) : null}
             <CanvasPill theme={th} tone="neutral">

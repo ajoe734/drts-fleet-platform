@@ -1130,6 +1130,11 @@ const en = {
   "invoices.pageLead":
     "Status and CTAs come from the backend read model. This screen only renders availableActions, EmptyReason, refresh tier, and cross-app deep links without inventing role permissions in the client.",
   "invoices.meta.source": "source {value}",
+  "invoices.meta.sourceLive": "live",
+  "invoices.meta.sourceCache": "cache",
+  "invoices.meta.sourceSandbox": "sandbox",
+  "invoices.meta.sourceStatic": "static",
+  "invoices.meta.sourceUnknown": "unknown",
   "invoices.meta.visible": "{count} visible",
   "invoices.meta.total": "{count} total",
   "invoices.meta.overdue": "{count} overdue",
@@ -1147,6 +1152,7 @@ const en = {
   "invoices.summary.amount.caption":
     "Finance users can validate the current slice before opening detail",
   "invoices.error.unknown": "Unknown tenant invoice error.",
+  "invoices.error.requestFailed": "Request failed.",
   "invoices.error.billingProfile": "Billing profile: {message}",
   "invoices.error.register": "Invoice register: {message}",
   "invoices.error.degradedTitle": "Invoice read model is degraded",
@@ -1158,6 +1164,7 @@ const en = {
   "invoices.refresh.state.fresh": "Fresh",
   "invoices.refresh.state.stale": "Stale",
   "invoices.refresh.state.degraded": "Degraded",
+  "invoices.refresh.state.unknown": "Unknown",
   "invoices.banner.freshnessTitle": "Snapshot freshness warning",
   "invoices.banner.freshnessBody":
     "The current content was generated at {generatedAt}. The refresh tier is {packetTier} / {runtimeTier}{staleAfter}. When data is not fresh, the page must state that clearly instead of pretending it is real time.",
@@ -1216,6 +1223,7 @@ const en = {
   "invoices.action.downloadArtifact": "Download signed artifact",
   "invoices.action.viewDetail": "View detail",
   "invoices.action.platformAudit": "Platform audit",
+  "invoices.action.unavailableGeneric": "Unavailable action",
   "invoices.action.disabled": "{label} disabled",
   "invoices.action.unavailable": "{label} unavailable",
   "invoices.action.expired": "{label} expired",
@@ -1254,6 +1262,7 @@ const en = {
   "invoices.status.issued": "Issued",
   "invoices.status.paid": "Paid",
   "invoices.status.overdue": "Overdue",
+  "invoices.status.unknown": "Unknown",
   "invoices.reason.notProvisioned": "Not provisioned",
   "invoices.reason.fetchFailed": "Fetch failed",
   "invoices.reason.permissionDenied": "Permission denied",
@@ -1321,6 +1330,7 @@ const en = {
   "billing.status.issued": "Issued",
   "billing.status.paid": "Paid",
   "billing.status.pending": "Pending",
+  "billing.status.unknown": "Unknown",
 
   // ── passengers (i18n-fullsweep 20260614) ──
 
@@ -2390,6 +2400,11 @@ const zh: Record<keyof typeof en, string> = {
   "invoices.pageLead":
     "狀態與 CTA 以 backend read model 為準。此頁僅呈現 availableActions、EmptyReason、refresh tier 與跨應用深層連結，不在 client 端自行推導角色權限。",
   "invoices.meta.source": "來源 {value}",
+  "invoices.meta.sourceLive": "即時",
+  "invoices.meta.sourceCache": "快取",
+  "invoices.meta.sourceSandbox": "沙箱",
+  "invoices.meta.sourceStatic": "靜態",
+  "invoices.meta.sourceUnknown": "未知",
   "invoices.meta.visible": "{count} 筆可見",
   "invoices.meta.total": "共 {count} 筆",
   "invoices.meta.overdue": "{count} 筆逾期",
@@ -2404,6 +2419,7 @@ const zh: Record<keyof typeof en, string> = {
   "invoices.summary.amount.label": "可見金額",
   "invoices.summary.amount.caption": "財務使用者可先核對目前切片，再開啟明細",
   "invoices.error.unknown": "未知的租戶發票錯誤。",
+  "invoices.error.requestFailed": "請求失敗。",
   "invoices.error.billingProfile": "帳務設定檔：{message}",
   "invoices.error.register": "發票清單：{message}",
   "invoices.error.degradedTitle": "發票讀取模型已降級",
@@ -2415,6 +2431,7 @@ const zh: Record<keyof typeof en, string> = {
   "invoices.refresh.state.fresh": "最新",
   "invoices.refresh.state.stale": "過期",
   "invoices.refresh.state.degraded": "降級",
+  "invoices.refresh.state.unknown": "未知",
   "invoices.banner.freshnessTitle": "快照新鮮度警告",
   "invoices.banner.freshnessBody":
     "目前內容產生於 {generatedAt}。refresh tier 為 {packetTier} / {runtimeTier}{staleAfter}。當資料不是 fresh 時，頁面必須明確提示，而不是假裝即時。",
@@ -2470,6 +2487,7 @@ const zh: Record<keyof typeof en, string> = {
   "invoices.action.downloadArtifact": "下載簽名檔",
   "invoices.action.viewDetail": "檢視詳情",
   "invoices.action.platformAudit": "平台稽核",
+  "invoices.action.unavailableGeneric": "不可用操作",
   "invoices.action.disabled": "{label}已停用",
   "invoices.action.unavailable": "{label}不可用",
   "invoices.action.expired": "{label}已過期",
@@ -2507,6 +2525,7 @@ const zh: Record<keyof typeof en, string> = {
   "invoices.status.issued": "已開立",
   "invoices.status.paid": "已付款",
   "invoices.status.overdue": "逾期",
+  "invoices.status.unknown": "未知",
   "invoices.reason.notProvisioned": "尚未設定",
   "invoices.reason.fetchFailed": "讀取失敗",
   "invoices.reason.permissionDenied": "權限不足",
@@ -2572,6 +2591,7 @@ const zh: Record<keyof typeof en, string> = {
   "billing.status.issued": "已開立",
   "billing.status.paid": "已付款",
   "billing.status.pending": "待處理",
+  "billing.status.unknown": "未知",
 
   // ── passengers (i18n-fullsweep 20260614) ──
 

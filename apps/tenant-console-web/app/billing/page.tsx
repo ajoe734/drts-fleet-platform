@@ -183,7 +183,7 @@ function getBillingStatusLabel(
     case "paid":
       return t("billing.status.paid", locale);
     default:
-      return status;
+      return t("billing.status.unknown", locale);
   }
 }
 
@@ -220,35 +220,19 @@ async function loadBillingData(
   const quota = quotaResult.status === "fulfilled" ? quotaResult.value : null;
 
   if (profileResult.status === "rejected") {
-    errors.push(
-      profileResult.reason instanceof Error
-        ? profileResult.reason.message
-        : t("billing.error.profile", locale),
-    );
+    errors.push(t("billing.error.profile", locale));
   }
 
   if (invoicesResult.status === "rejected") {
-    errors.push(
-      invoicesResult.reason instanceof Error
-        ? invoicesResult.reason.message
-        : t("billing.error.invoices", locale),
-    );
+    errors.push(t("billing.error.invoices", locale));
   }
 
   if (statementsResult.status === "rejected") {
-    errors.push(
-      statementsResult.reason instanceof Error
-        ? statementsResult.reason.message
-        : t("billing.error.statements", locale),
-    );
+    errors.push(t("billing.error.statements", locale));
   }
 
   if (quotaResult.status === "rejected") {
-    errors.push(
-      quotaResult.reason instanceof Error
-        ? quotaResult.reason.message
-        : t("billing.error.quota", locale),
-    );
+    errors.push(t("billing.error.quota", locale));
   }
 
   const generatedAt =
@@ -489,7 +473,6 @@ function ActionCta({
     <a
       href={href}
       style={actionAnchorStyle}
-      title={descriptor?.disabledReasonCode}
       {...(newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
     >
       <CanvasBtn theme={th} icon={icon} size="sm">
