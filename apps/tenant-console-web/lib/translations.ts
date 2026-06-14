@@ -3525,6 +3525,80 @@ const en = {
     "`availableActions.update_subscription` drives the submit CTA.",
 
   // ── featureFlags (i18n-fullsweep 20260614) ──
+  "featureFlags.header.title": "Feature flags · read-only",
+  "featureFlags.header.subtitle":
+    "Tenant-visible flags · full governance lives in Platform Admin · GET /api/tenant/feature-flags",
+  "featureFlags.header.governanceAction": "Governance settings ↗",
+  "featureFlags.link.platformAdminHistory":
+    "View {flagKey} change history in Platform Admin",
+  "featureFlags.link.platformAdminGovernance": "Open feature flag governance",
+  "featureFlags.banner.refresh.title": "Refresh tier T5: tenant slow (30s)",
+  "featureFlags.banner.refresh.body":
+    "This page refreshes on the 30-second tenant-slow cadence ({refreshTier}). Snapshot loaded at {generatedAt}.",
+  "featureFlags.banner.readOnly.title": "Read-only view · per Q-X16",
+  "featureFlags.banner.readOnly.body":
+    "This is the tenant-scoped read-only mirror of platform feature flag governance. Available actions stay limited to search and change-history review; any toggle or rollout change happens in Platform Admin.",
+  "featureFlags.banner.error.title":
+    "Some feature flag data could not be loaded",
+  "featureFlags.kpi.flags.label": "Flags",
+  "featureFlags.kpi.flags.total": "{total} total",
+  "featureFlags.kpi.flags.visible": "tenant visible",
+  "featureFlags.kpi.overrides.label": "Overrides",
+  "featureFlags.kpi.overrides.sub": "tenant_override",
+  "featureFlags.kpi.enabled.label": "Enabled",
+  "featureFlags.kpi.enabled.sub": "current value on",
+  "featureFlags.kpi.rollingOut.label": "Rolling out",
+  "featureFlags.kpi.rollingOut.sub": "partial rollout",
+  "featureFlags.search.placeholder": "Search by key…",
+  "featureFlags.search.aria": "Search feature flags by key",
+  "featureFlags.search.submit": "Search",
+  "featureFlags.filter.scope.all": "All",
+  "featureFlags.filter.scope.tenantOverride": "Tenant override",
+  "featureFlags.filter.scope.globalDefault": "Platform default",
+  "featureFlags.table.column.key": "KEY",
+  "featureFlags.table.column.current": "CURRENT",
+  "featureFlags.table.column.scope": "SCOPE",
+  "featureFlags.table.column.updatedBy": "LAST CHANGED BY",
+  "featureFlags.table.column.updatedAt": "AT",
+  "featureFlags.table.column.history": "HISTORY",
+  "featureFlags.table.historyLink": "History ↗",
+  "featureFlags.current.enabled": "enabled",
+  "featureFlags.current.disabled": "disabled",
+  "featureFlags.current.rollingOut": "rolling out",
+  "featureFlags.refreshTier.slow": "tenant slow",
+  "featureFlags.emptyReason.noData": "No data",
+  "featureFlags.emptyReason.notProvisioned": "Not provisioned",
+  "featureFlags.emptyReason.fetchFailed": "Fetch failed",
+  "featureFlags.emptyReason.permissionDenied": "Permission denied",
+  "featureFlags.emptyReason.externalUnavailable": "External unavailable",
+  "featureFlags.emptyReason.filteredEmpty": "No filter matches",
+  "featureFlags.emptyReason.driverNotEligible": "Driver not eligible",
+  "featureFlags.scope.tenantOverride": "tenant_override",
+  "featureFlags.scope.globalDefault": "global_default",
+  "featureFlags.value.empty": "—",
+  "featureFlags.error.loadFailed": "Feature flag list failed to load",
+  "featureFlags.empty.notProvisioned.title":
+    "No feature flags are provisioned for this tenant yet",
+  "featureFlags.empty.notProvisioned.body":
+    "Platform governance has not synchronized any flags into this tenant realm yet. Full governance stays in Platform Admin, and provisioned flags will appear here automatically in this read-only view.",
+  "featureFlags.empty.fetchFailed.title": "Feature flag list failed to load",
+  "featureFlags.empty.fetchFailed.body":
+    "The route is still available, but GET /api/tenant/feature-flags failed on this read. Refresh again after the backend dependency recovers.",
+  "featureFlags.empty.permissionDenied.title":
+    "This role cannot view feature flags",
+  "featureFlags.empty.permissionDenied.body":
+    "The page is visible, but the current tenant role does not have permission to read feature visibility. Switch to an account with view access.",
+  "featureFlags.empty.externalUnavailable.title":
+    "The upstream feature flag service is temporarily unavailable",
+  "featureFlags.empty.externalUnavailable.body":
+    "This read is degraded because one or more upstream governance services are unavailable or returned stale data.",
+  "featureFlags.empty.filteredEmpty.title":
+    "No flags match the current filters",
+  "featureFlags.empty.filteredEmpty.body":
+    "This tenant has visible feature flags, but the current search string or scope filter did not match any row. Clear filters or switch scopes.",
+  "featureFlags.empty.noData.title": "No visible feature flags right now",
+  "featureFlags.empty.noData.body":
+    "There is currently no visible feature flag data for this tenant realm.",
 
   // ── home (i18n-fullsweep 20260614) ──
 } as const;
@@ -6832,6 +6906,76 @@ const zh: Record<keyof typeof en, string> = {
     "`availableActions.update_subscription` 會決定送出按鈕狀態。",
 
   // ── featureFlags (i18n-fullsweep 20260614) ──
+  "featureFlags.header.title": "功能旗標 · 唯讀",
+  "featureFlags.header.subtitle":
+    "本租戶可見的功能旗標 · 完整治理在 Platform Admin · GET /api/tenant/feature-flags",
+  "featureFlags.header.governanceAction": "治理設定 ↗",
+  "featureFlags.link.platformAdminHistory":
+    "在 Platform Admin 查看 {flagKey} 變更紀錄",
+  "featureFlags.link.platformAdminGovernance": "前往功能旗標治理",
+  "featureFlags.banner.refresh.title": "重新整理層級 T5：tenant slow（30 秒）",
+  "featureFlags.banner.refresh.body":
+    "此頁採 30 秒 tenant-slow 週期更新（{refreshTier}）。快照載入時間 {generatedAt}。",
+  "featureFlags.banner.readOnly.title": "唯讀視圖 · 依 Q-X16",
+  "featureFlags.banner.readOnly.body":
+    "這是平台功能旗標治理在本租戶領域的唯讀鏡像。可用動作只有搜尋與檢視變更紀錄；任何開關或推行變更都在 Platform Admin 進行。",
+  "featureFlags.banner.error.title": "部分功能旗標資料無法載入",
+  "featureFlags.kpi.flags.label": "旗標",
+  "featureFlags.kpi.flags.total": "{total} 總數",
+  "featureFlags.kpi.flags.visible": "租戶可見",
+  "featureFlags.kpi.overrides.label": "覆寫",
+  "featureFlags.kpi.overrides.sub": "租戶覆寫",
+  "featureFlags.kpi.enabled.label": "啟用",
+  "featureFlags.kpi.enabled.sub": "目前值為開啟",
+  "featureFlags.kpi.rollingOut.label": "推行中",
+  "featureFlags.kpi.rollingOut.sub": "部分推行",
+  "featureFlags.search.placeholder": "以 key 搜尋…",
+  "featureFlags.search.aria": "以 key 搜尋功能旗標",
+  "featureFlags.search.submit": "搜尋",
+  "featureFlags.filter.scope.all": "全部",
+  "featureFlags.filter.scope.tenantOverride": "租戶覆寫",
+  "featureFlags.filter.scope.globalDefault": "平台預設",
+  "featureFlags.table.column.key": "鍵",
+  "featureFlags.table.column.current": "目前",
+  "featureFlags.table.column.scope": "範圍",
+  "featureFlags.table.column.updatedBy": "最後變更者",
+  "featureFlags.table.column.updatedAt": "時間",
+  "featureFlags.table.column.history": "歷史",
+  "featureFlags.table.historyLink": "紀錄 ↗",
+  "featureFlags.current.enabled": "已啟用",
+  "featureFlags.current.disabled": "已停用",
+  "featureFlags.current.rollingOut": "推行中",
+  "featureFlags.refreshTier.slow": "租戶慢速",
+  "featureFlags.emptyReason.noData": "無資料",
+  "featureFlags.emptyReason.notProvisioned": "尚未佈建",
+  "featureFlags.emptyReason.fetchFailed": "讀取失敗",
+  "featureFlags.emptyReason.permissionDenied": "權限不足",
+  "featureFlags.emptyReason.externalUnavailable": "上游不可用",
+  "featureFlags.emptyReason.filteredEmpty": "篩選無結果",
+  "featureFlags.emptyReason.driverNotEligible": "司機不符資格",
+  "featureFlags.scope.tenantOverride": "租戶覆寫",
+  "featureFlags.scope.globalDefault": "平台預設",
+  "featureFlags.value.empty": "—",
+  "featureFlags.error.loadFailed": "功能旗標清單載入失敗",
+  "featureFlags.empty.notProvisioned.title": "本租戶尚未佈建任何功能旗標",
+  "featureFlags.empty.notProvisioned.body":
+    "平台治理尚未把任何 flag 同步到這個租戶領域。完整治理仍在 Platform Admin，佈建後會自動出現於此唯讀視圖。",
+  "featureFlags.empty.fetchFailed.title": "功能旗標清單載入失敗",
+  "featureFlags.empty.fetchFailed.body":
+    "路由仍可用，但 GET /api/tenant/feature-flags 這次讀取失敗。待後端相依恢復後重新整理即可。",
+  "featureFlags.empty.permissionDenied.title": "目前角色無法檢視功能旗標",
+  "featureFlags.empty.permissionDenied.body":
+    "頁面可見，但目前的租戶角色沒有讀取功能旗標可見性的權限。請改用具備檢視權限的帳號。",
+  "featureFlags.empty.externalUnavailable.title":
+    "上游功能旗標服務暫時無法使用",
+  "featureFlags.empty.externalUnavailable.body":
+    "讀取被降級，因為一個或多個上游平台治理服務目前不可用或回傳過期資料。",
+  "featureFlags.empty.filteredEmpty.title": "沒有符合目前篩選的旗標",
+  "featureFlags.empty.filteredEmpty.body":
+    "本租戶有可見的功能旗標，但目前的搜尋字串或範圍篩選沒有命中任何一筆。清除篩選或改選其他範圍。",
+  "featureFlags.empty.noData.title": "目前沒有可見的功能旗標",
+  "featureFlags.empty.noData.body":
+    "這個租戶領域目前沒有任何 flag 對應的可見資料。",
 
   // ── home (i18n-fullsweep 20260614) ──
 };

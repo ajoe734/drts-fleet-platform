@@ -18,6 +18,8 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -46,13 +48,10 @@ const ROUTE_ACTIONS: readonly ResourceActionDescriptor[] = [
   { action: "view_change_history", enabled: true, riskLevel: "low" },
 ] as const;
 
-const SCOPE_FILTERS: readonly {
-  value: "all" | TenantFeatureFlagScope;
-  label: string;
-}[] = [
-  { value: "all", label: "全部" },
-  { value: "tenant_override", label: "租戶覆寫" },
-  { value: "global_default", label: "平台預設" },
+const SCOPE_FILTERS: readonly ("all" | TenantFeatureFlagScope)[] = [
+  "all",
+  "tenant_override",
+  "global_default",
 ] as const;
 
 // Q-X03: full feature-flag governance lives in platform-admin. Cross-app
@@ -68,7 +67,10 @@ function resolvePlatformAdminBase(): string {
   return trimmed || DEFAULT_PLATFORM_ADMIN_BASE;
 }
 
-function platformAdminFlagHistoryLink(flagKey: string): CrossAppResourceLink {
+function platformAdminFlagHistoryLink(
+  flagKey: string,
+  locale: Locale,
+): CrossAppResourceLink {
   return {
     targetApp: "platform-admin",
     route: flagKey
@@ -78,8 +80,8 @@ function platformAdminFlagHistoryLink(flagKey: string): CrossAppResourceLink {
     resourceId: flagKey,
     openMode: "new_tab",
     label: flagKey
-      ? `在 Platform Admin 查看 ${flagKey} 變更紀錄`
-      : "前往功能旗標治理",
+      ? t("featureFlags.link.platformAdminHistory", locale, { flagKey })
+      : t("featureFlags.link.platformAdminGovernance", locale),
   };
 }
 
@@ -235,22 +237,26 @@ const emptyStateBodyStyle: CSSProperties = {
   maxWidth: 460,
 };
 
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
-const numberFormatter = new Intl.NumberFormat("en");
-
-function formatChangedAt(value: string | null) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return dateTimeFormatter.format(parsed);
+function toIntlLocale(locale: Locale) {
+  return locale === "zh" ? "zh-Hant" : "en-US";
 }
 
-function formatCount(value: number) {
-  return numberFormatter.format(value);
+function formatChangedAt(value: string | null, locale: Locale) {
+  if (!value) return t("featureFlags.value.empty", locale);
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return t("featureFlags.value.empty", locale);
+  }
+  return new Intl.DateTimeFormat(toIntlLocale(locale), {
+    dateStyle: "short",
+    timeStyle: "short",
+  })
+    .format(parsed)
+    .replace(/[\u00a0\u202f\u2009]/g, " ");
+}
+
+function formatCount(value: number, locale: Locale) {
+  return new Intl.NumberFormat(toIntlLocale(locale)).format(value);
 }
 
 function parseEmptyReason(value: string | undefined): EmptyReason | null {
@@ -323,6 +329,7 @@ function compareFlags(a: TenantFeatureFlagRecord, b: TenantFeatureFlagRecord) {
 // error) instead of masking it with placeholder rows. `emptyReasonOverride` is
 // a QA-only `?emptyReason=` deep link for previewing each of the six states.
 async function loadFeatureFlagsData(
+  locale: Locale,
   query: string,
   scope: "all" | TenantFeatureFlagScope,
   emptyReasonOverride: EmptyReason | null,
@@ -343,7 +350,7 @@ async function loadFeatureFlagsData(
     const message =
       flagsResult.reason instanceof Error
         ? flagsResult.reason.message
-        : "功能旗標清單載入失敗";
+        : t("featureFlags.error.loadFailed", locale);
     errors.push(message);
     fetchErrorReason = classifyFetchError(message);
   }
@@ -387,7 +394,10 @@ async function loadFeatureFlagsData(
   };
 }
 
-function getEmptyStateCopy(reason: EmptyReason): {
+function getEmptyStateCopy(
+  reason: EmptyReason,
+  locale: Locale,
+): {
   tone: CanvasTone;
   title: string;
   body: string;
@@ -396,40 +406,40 @@ function getEmptyStateCopy(reason: EmptyReason): {
     case "not_provisioned":
       return {
         tone: "info",
-        title: "本租戶尚未佈建任何功能旗標",
-        body: "平台治理尚未把任何 flag 同步到這個租戶領域。完整治理仍在 Platform Admin，佈建後會自動出現於此唯讀視圖。",
+        title: t("featureFlags.empty.notProvisioned.title", locale),
+        body: t("featureFlags.empty.notProvisioned.body", locale),
       };
     case "fetch_failed":
       return {
         tone: "warn",
-        title: "功能旗標清單載入失敗",
-        body: "路由仍可用，但 GET /api/tenant/feature-flags 這次讀取失敗。待後端相依恢復後重新整理即可。",
+        title: t("featureFlags.empty.fetchFailed.title", locale),
+        body: t("featureFlags.empty.fetchFailed.body", locale),
       };
     case "permission_denied":
       return {
         tone: "danger",
-        title: "目前角色無法檢視功能旗標",
-        body: "頁面可見，但目前的租戶角色沒有讀取 feature visibility 的權限。請改用具備檢視權限的帳號。",
+        title: t("featureFlags.empty.permissionDenied.title", locale),
+        body: t("featureFlags.empty.permissionDenied.body", locale),
       };
     case "external_unavailable":
       return {
         tone: "warn",
-        title: "上游功能旗標服務暫時無法使用",
-        body: "讀取被降級，因為一個或多個上游平台治理服務目前不可用或回傳過期資料。",
+        title: t("featureFlags.empty.externalUnavailable.title", locale),
+        body: t("featureFlags.empty.externalUnavailable.body", locale),
       };
     case "filtered_empty":
       return {
         tone: "neutral",
-        title: "沒有符合目前篩選的旗標",
-        body: "本租戶有可見的功能旗標，但目前的搜尋字串或範圍篩選沒有命中任何一筆。清除篩選或改選其他範圍。",
+        title: t("featureFlags.empty.filteredEmpty.title", locale),
+        body: t("featureFlags.empty.filteredEmpty.body", locale),
       };
     case "driver_not_eligible":
     case "no_data":
     default:
       return {
         tone: "info",
-        title: "目前沒有可見的功能旗標",
-        body: "這個租戶領域目前沒有任何 flag 對應的可見資料。",
+        title: t("featureFlags.empty.noData.title", locale),
+        body: t("featureFlags.empty.noData.body", locale),
       };
   }
 }
@@ -438,8 +448,66 @@ function getScopeTone(scope: TenantFeatureFlagScope): CanvasTone {
   return scope === "tenant_override" ? "accent" : "neutral";
 }
 
-function getScopeLabel(scope: TenantFeatureFlagScope) {
-  return scope === "tenant_override" ? "tenant_override" : "global_default";
+function getScopeLabel(scope: TenantFeatureFlagScope, locale: Locale) {
+  return scope === "tenant_override"
+    ? t("featureFlags.scope.tenantOverride", locale)
+    : t("featureFlags.scope.globalDefault", locale);
+}
+
+function getScopeFilterLabel(
+  scope: "all" | TenantFeatureFlagScope,
+  locale: Locale,
+) {
+  switch (scope) {
+    case "tenant_override":
+      return t("featureFlags.filter.scope.tenantOverride", locale);
+    case "global_default":
+      return t("featureFlags.filter.scope.globalDefault", locale);
+    case "all":
+    default:
+      return t("featureFlags.filter.scope.all", locale);
+  }
+}
+
+function getCurrentValueLabel(enabled: boolean, locale: Locale) {
+  return enabled
+    ? t("featureFlags.current.enabled", locale)
+    : t("featureFlags.current.disabled", locale);
+}
+
+function getRolloutStatusLabel(locale: Locale) {
+  return t("featureFlags.current.rollingOut", locale);
+}
+
+function getRefreshTierLabel(
+  refreshTier: FeatureFlagsPageData["refreshTier"],
+  locale: Locale,
+) {
+  switch (refreshTier) {
+    case "slow":
+    default:
+      return t("featureFlags.refreshTier.slow", locale);
+  }
+}
+
+function getEmptyReasonLabel(reason: EmptyReason, locale: Locale) {
+  switch (reason) {
+    case "not_provisioned":
+      return t("featureFlags.emptyReason.notProvisioned", locale);
+    case "fetch_failed":
+      return t("featureFlags.emptyReason.fetchFailed", locale);
+    case "permission_denied":
+      return t("featureFlags.emptyReason.permissionDenied", locale);
+    case "external_unavailable":
+      return t("featureFlags.emptyReason.externalUnavailable", locale);
+    case "filtered_empty":
+      return t("featureFlags.emptyReason.filteredEmpty", locale);
+    case "driver_not_eligible":
+      return t("featureFlags.emptyReason.driverNotEligible", locale);
+    case "no_data":
+    default:
+      return t("featureFlags.emptyReason.noData", locale);
+  }
 }
 
 type FeatureFlagsPageProps = {
@@ -453,13 +521,19 @@ type FeatureFlagsPageProps = {
 export default async function FeatureFlagsPage({
   searchParams,
 }: FeatureFlagsPageProps) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const query = resolvedSearchParams?.q ?? "";
   const scope = parseScope(resolvedSearchParams?.scope);
   const emptyReasonOverride = parseEmptyReason(
     resolvedSearchParams?.emptyReason,
   );
-  const data = await loadFeatureFlagsData(query, scope, emptyReasonOverride);
+  const data = await loadFeatureFlagsData(
+    locale,
+    query,
+    scope,
+    emptyReasonOverride,
+  );
 
   const searchAction = data.availableActions.find(
     (item) => item.action === "search",
@@ -476,14 +550,14 @@ export default async function FeatureFlagsPage({
     (flag) => flag.rolloutStatus === "rolling_out",
   ).length;
 
-  const governanceLink = platformAdminFlagHistoryLink("");
+  const governanceLink = platformAdminFlagHistoryLink("", locale);
   const historyEnabled = historyAction?.enabled !== false;
 
   const columns: CanvasTableColumn<
     TenantFeatureFlagRecord & Record<string, unknown>
   >[] = [
     {
-      h: "鍵",
+      h: t("featureFlags.table.column.key", locale),
       w: 360,
       r: (row) => (
         <div style={keyCellStyle}>
@@ -495,58 +569,60 @@ export default async function FeatureFlagsPage({
       ),
     },
     {
-      h: "目前",
+      h: t("featureFlags.table.column.current", locale),
       w: 150,
       r: (row) => (
         <span style={currentCellStyle}>
           <CanvasPill theme={th} tone={row.enabled ? "success" : "neutral"} dot>
-            {row.enabled ? "enabled" : "disabled"}
+            {getCurrentValueLabel(row.enabled, locale)}
           </CanvasPill>
           {row.rolloutStatus === "rolling_out" ? (
             <CanvasPill theme={th} tone="warn">
-              rolling out
+              {getRolloutStatusLabel(locale)}
             </CanvasPill>
           ) : null}
         </span>
       ),
     },
     {
-      h: "範圍",
+      h: t("featureFlags.table.column.scope", locale),
       w: 150,
       r: (row) => (
         <CanvasPill theme={th} tone={getScopeTone(row.scope)}>
-          {getScopeLabel(row.scope)}
+          {getScopeLabel(row.scope, locale)}
         </CanvasPill>
       ),
     },
     {
-      h: "最後變更者",
+      h: t("featureFlags.table.column.updatedBy", locale),
       w: 180,
-      r: (row) => row.updatedBy ?? "—",
+      r: (row) => row.updatedBy ?? t("featureFlags.value.empty", locale),
     },
     {
-      h: "時間",
+      h: t("featureFlags.table.column.updatedAt", locale),
       w: 150,
       mono: true,
-      r: (row) => formatChangedAt(row.updatedAt),
+      r: (row) => formatChangedAt(row.updatedAt, locale),
     },
     {
-      h: "歷史",
+      h: t("featureFlags.table.column.history", locale),
       w: 90,
       align: "right",
       r: (row) =>
         historyEnabled ? (
           <a
-            href={crossAppHref(platformAdminFlagHistoryLink(row.key))}
+            href={crossAppHref(platformAdminFlagHistoryLink(row.key, locale))}
             target="_blank"
             rel="noreferrer"
             style={chipLinkStyle}
-            title={platformAdminFlagHistoryLink(row.key).label}
+            title={platformAdminFlagHistoryLink(row.key, locale).label}
           >
-            紀錄 ↗
+            {t("featureFlags.table.historyLink", locale)}
           </a>
         ) : (
-          <span style={{ color: th.textMuted, fontSize: 11.5 }}>—</span>
+          <span style={{ color: th.textMuted, fontSize: 11.5 }}>
+            {t("featureFlags.value.empty", locale)}
+          </span>
         ),
     },
   ];
@@ -555,8 +631,8 @@ export default async function FeatureFlagsPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="功能旗標 · read-only"
-        subtitle="本租戶可見的 flags · 完整治理在 Platform Admin · GET /api/tenant/feature-flags"
+        title={t("featureFlags.header.title", locale)}
+        subtitle={t("featureFlags.header.subtitle", locale)}
         actions={
           <a
             href={crossAppHref(governanceLink)}
@@ -570,7 +646,7 @@ export default async function FeatureFlagsPage({
                 : historyAction?.disabledReasonCode
             }
           >
-            治理設定 ↗
+            {t("featureFlags.header.governanceAction", locale)}
           </a>
         }
       />
@@ -580,18 +656,19 @@ export default async function FeatureFlagsPage({
           theme={th}
           tone="info"
           icon="clock"
-          title="重新整理層級 T5：tenant slow（30 秒）"
-          body={`此頁採 30 秒 tenant-slow 週期更新（${data.refreshTier}）。快照載入時間 ${formatChangedAt(
-            data.generatedAt,
-          )}。`}
+          title={t("featureFlags.banner.refresh.title", locale)}
+          body={t("featureFlags.banner.refresh.body", locale, {
+            refreshTier: getRefreshTierLabel(data.refreshTier, locale),
+            generatedAt: formatChangedAt(data.generatedAt, locale),
+          })}
         />
 
         <CanvasBanner
           theme={th}
           tone="accent"
           icon="flags"
-          title="唯讀視圖 · per Q-X16"
-          body="這是平台功能旗標治理在本租戶領域的唯讀鏡像。可用動作只有搜尋與檢視變更紀錄；任何開關／rollout 變更都在 Platform Admin 進行。"
+          title={t("featureFlags.banner.readOnly.title", locale)}
+          body={t("featureFlags.banner.readOnly.body", locale)}
         />
 
         {data.errors.length > 0 ? (
@@ -599,7 +676,7 @@ export default async function FeatureFlagsPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分功能旗標資料無法載入"
+            title={t("featureFlags.banner.error.title", locale)}
             body={data.errors.join(" · ")}
           />
         ) : null}
@@ -607,31 +684,33 @@ export default async function FeatureFlagsPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="旗標"
-            value={formatCount(data.flags.length)}
+            label={t("featureFlags.kpi.flags.label", locale)}
+            value={formatCount(data.flags.length, locale)}
             sub={
               data.totalCount !== data.flags.length
-                ? `${formatCount(data.totalCount)} 總數`
-                : "tenant visible"
+                ? t("featureFlags.kpi.flags.total", locale, {
+                    total: formatCount(data.totalCount, locale),
+                  })
+                : t("featureFlags.kpi.flags.visible", locale)
             }
           />
           <CanvasKPI
             theme={th}
-            label="覆寫"
-            value={formatCount(tenantOverrides)}
-            sub="tenant_override"
+            label={t("featureFlags.kpi.overrides.label", locale)}
+            value={formatCount(tenantOverrides, locale)}
+            sub={t("featureFlags.kpi.overrides.sub", locale)}
           />
           <CanvasKPI
             theme={th}
-            label="啟用"
-            value={formatCount(enabledCount)}
-            sub="current value on"
+            label={t("featureFlags.kpi.enabled.label", locale)}
+            value={formatCount(enabledCount, locale)}
+            sub={t("featureFlags.kpi.enabled.sub", locale)}
           />
           <CanvasKPI
             theme={th}
-            label="推行中"
-            value={formatCount(rollingOutCount)}
-            sub="partial rollout"
+            label={t("featureFlags.kpi.rollingOut.label", locale)}
+            value={formatCount(rollingOutCount, locale)}
+            sub={t("featureFlags.kpi.rollingOut.sub", locale)}
           />
         </div>
 
@@ -641,8 +720,8 @@ export default async function FeatureFlagsPage({
               type="search"
               name="q"
               defaultValue={data.query}
-              placeholder="以 key 搜尋…"
-              aria-label="以 key 搜尋功能旗標"
+              placeholder={t("featureFlags.search.placeholder", locale)}
+              aria-label={t("featureFlags.search.aria", locale)}
               style={searchInputStyle}
               disabled={searchAction?.enabled === false}
             />
@@ -659,29 +738,29 @@ export default async function FeatureFlagsPage({
               disabled={searchAction?.enabled === false}
               title={searchAction?.disabledReasonCode}
             >
-              搜尋
+              {t("featureFlags.search.submit", locale)}
             </button>
           </form>
 
           <div style={scopeFilterStyle}>
             {SCOPE_FILTERS.map((filter) => {
               const params = new URLSearchParams();
-              if (filter.value !== "all") {
-                params.set("scope", filter.value);
+              if (filter !== "all") {
+                params.set("scope", filter);
               }
               if (data.query) {
                 params.set("q", data.query);
               }
               const queryString = params.toString();
               const href = queryString ? `?${queryString}` : "/feature-flags";
-              const active = data.scope === filter.value;
+              const active = data.scope === filter;
               return (
                 <a
-                  key={filter.value}
+                  key={filter}
                   href={href}
                   style={active ? chipLinkActiveStyle : chipLinkStyle}
                 >
-                  {filter.label}
+                  {getScopeFilterLabel(filter, locale)}
                 </a>
               );
             })}
@@ -700,11 +779,14 @@ export default async function FeatureFlagsPage({
             />
           ) : (
             (() => {
-              const copy = getEmptyStateCopy(data.emptyReason ?? "no_data");
+              const copy = getEmptyStateCopy(
+                data.emptyReason ?? "no_data",
+                locale,
+              );
               return (
                 <div style={emptyStateWrapStyle}>
                   <CanvasPill theme={th} tone={copy.tone} dot>
-                    {data.emptyReason ?? "no_data"}
+                    {getEmptyReasonLabel(data.emptyReason ?? "no_data", locale)}
                   </CanvasPill>
                   <div style={emptyStateTitleStyle}>{copy.title}</div>
                   <div style={emptyStateBodyStyle}>{copy.body}</div>
