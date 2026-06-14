@@ -39,7 +39,12 @@ ADMIN_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/postgres"
 
 SUITES=("$@")
 if [[ ${#SUITES[@]} -eq 0 ]]; then
-  SUITES=(001 002 003 004 005 006 007 008 009 010 011 012 013 014 015)
+  # Auto-discover every E2E-NNN scenario present, so the gate adapts as scenarios
+  # are added/removed rather than drifting against a hardcoded list.
+  mapfile -t SUITES < <(
+    find "$ROOT_DIR/tests/e2e" -maxdepth 1 -name 'E2E-*.sh' -printf '%f\n' \
+      | sed -E 's/^E2E-([0-9]+).*/\1/' | sort -u
+  )
 fi
 
 API_PID=""
