@@ -96,6 +96,17 @@ WORKER_FAILURE_PATTERNS = (
     re.compile(r"\bInvalid authentication credentials\b", re.IGNORECASE),
     re.compile(r"^(?:reason|code|error|error_code|type):\s*['\"]?(?:token_invalidated|refresh_token_reused)\b", re.IGNORECASE),
     re.compile(r"^(?:Error:\s*)?(?:Your\s+)?authentication token has been invalidated\b", re.IGNORECASE),
+    # codex CLI revoked/expired session — surfaces only as runtime ERROR lines that
+    # the generic Claude-style 401 markers above never matched, so the lane was
+    # never classified auth and never auto-paused. Patterns are anchored to codex's
+    # actual error format (not bare "401 Unauthorized") so chair narratives that
+    # merely *mention* a 401 are not misread as a live failure.
+    # See fix/supervisor-lane-autopause-20260614.
+    re.compile(r"\bfailed to refresh token:\s*401\b", re.IGNORECASE),
+    re.compile(r"\bresponses_websocket\b.*\bHTTP error:\s*401\b", re.IGNORECASE),
+    re.compile(r"\brefresh_token_invalidated\b", re.IGNORECASE),
+    re.compile(r"\brefresh token was revoked\b", re.IGNORECASE),
+    re.compile(r"\baccess token could not be refreshed\b", re.IGNORECASE),
     re.compile(r'^Error:\s*Model\s+".+"\s+from --model flag is not available\.', re.IGNORECASE),
     re.compile(r"^402\b.*\byou have no quota\b", re.IGNORECASE),
     re.compile(r"^(?:error:\s*)?\b(?:you have no quota|no quota remaining|payment required)\b", re.IGNORECASE),
@@ -112,6 +123,7 @@ JSON_WORKER_FAILURE_PATTERN = re.compile(
     r"authentication_error|invalid authentication credentials|status:\s*401|"
     r"\[api error:\s*401\b|api error:\s*401\b|invalid access token|"
     r"token_invalidated|refresh_token_reused|authentication token has been invalidated|"
+    r"refresh_token_invalidated|refresh token was revoked|access token could not be refreshed|"
     r"ineligibletiererror|not eligible for gemini code assist|restricted_dasher_user",
     re.IGNORECASE,
 )
@@ -2416,6 +2428,10 @@ def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reas
         "token_invalidated",
         "refresh_token_reused",
         "authentication token has been invalidated",
+        # codex CLI revoked/expired session
+        "refresh_token_invalidated",
+        "refresh token was revoked",
+        "access token could not be refreshed",
         "forbidden",
         "permission denied",
         "ineligibletiererror",
@@ -2788,6 +2804,104 @@ def failure_streak_key(task_id: str, role: str) -> str:
 
 def failure_streak_registry(state: dict[str, Any]) -> dict[str, Any]:
     return state.setdefault("failure_streaks", {})
+
+
+def lane_failure_autopause_settings(config: dict[str, Any]) -> dict[str, Any]:
+    """Defense-in-depth: pause a whole lane whose workers keep dying terminally
+    across distinct tasks, even when the failure text isn't classified/authorized
+    for a provider pause (e.g. an unrecognized CLI auth format that only surfaces
+    as a premature exit). Catches "silently dying lane" magnets that the
+    availability-first scheduler would otherwise keep re-selecting."""
+    settings = dict((config.get("ready_dispatcher", {}) or {}).get("lane_failure_autopause", {}) or {})
+    settings.setdefault("enabled", True)
+    settings.setdefault("threshold", 3)          # distinct-task terminal failures
+    settings.setdefault("window_seconds", 900)   # rolling window
+    settings.setdefault("reset_seconds", 1800)   # capacity pause auto-expiry (self-correcting)
+    return settings
+
+
+def lane_failure_registry(state: dict[str, Any]) -> dict[str, Any]:
+    return state.setdefault("lane_failure_streaks", {})
+
+
+def record_lane_terminal_failure(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    agent_id: str,
+    task_id: str | None,
+) -> bool:
+    """Track per-lane distinct-task terminal failures in a rolling window.
+    Returns True when the lane crosses the auto-pause threshold."""
+    settings = lane_failure_autopause_settings(config)
+    if not settings.get("enabled", True):
+        return False
+    normalized = normalize_agent_id(agent_id) or str(agent_id or "").strip()
+    if not normalized:
+        return False
+    now = datetime.now(timezone.utc).timestamp()
+    window = float(settings.get("window_seconds", 900))
+    registry = lane_failure_registry(state)
+    entry = registry.get(normalized)
+    if not isinstance(entry, dict) or (now - float(entry.get("window_start") or 0)) > window:
+        entry = {"window_start": now, "tasks": []}
+    tasks = entry.setdefault("tasks", [])
+    tid = str(task_id or "").strip()
+    if tid and tid not in tasks:
+        tasks.append(tid)
+    elif not tid:
+        # no task id — count as an anonymous distinct failure slot
+        tasks.append(f"__anon_{len(tasks)}")
+    entry["count"] = len(tasks)
+    entry["last_failure_at"] = utc_now()
+    registry[normalized] = entry
+    return entry["count"] >= int(settings.get("threshold", 3))
+
+
+def clear_lane_failure(state: dict[str, Any], agent_id: str) -> None:
+    normalized = normalize_agent_id(agent_id) or str(agent_id or "").strip()
+    if normalized:
+        lane_failure_registry(state).pop(normalized, None)
+
+
+def maybe_autopause_unhealthy_lane(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    reason: str,
+) -> None:
+    """Lane-level safety net, independent of allow_provider_pause: if a lane racks
+    up enough distinct-task terminal (non-transient) failures, pause it so the
+    scheduler stops routing to a dead/broken lane (e.g. revoked auth token that
+    only 401s at worker runtime)."""
+    settings = lane_failure_autopause_settings(config)
+    if not settings.get("enabled", True):
+        return
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    normalized = normalize_agent_id(agent_id) or agent_id.strip()
+    if not normalized:
+        return
+    # Already paused (by classification or earlier) — reset the counter and stop.
+    if normalized in provider_pause_registry(state):
+        clear_lane_failure(state, normalized)
+        return
+    failure = classify_worker_failure(config, worker, reason)
+    if failure.get("transient"):
+        return  # transient (retryable) failures don't count toward lane health
+    if record_lane_terminal_failure(config, state, normalized, worker.get("task_id")):
+        threshold = int(settings.get("threshold", 3))
+        window = int(settings.get("window_seconds", 900))
+        pause_provider(
+            state,
+            normalized,
+            (
+                f"Auto-paused (lane health): {threshold}+ terminal worker failures across "
+                f"distinct tasks within {window}s — lane appears unhealthy (e.g. revoked auth "
+                f"that only 401s at runtime). Latest: {reason}"
+            ),
+            kind="capacity",
+            reset_seconds=int(settings.get("reset_seconds", 1800)),
+        )
+        clear_lane_failure(state, normalized)
 
 
 def chair_reassignment_guard_registry(state: dict[str, Any]) -> dict[str, Any]:
@@ -4110,6 +4224,12 @@ def finalize_terminal_worker_outcome(
     reason = resolve_terminal_worker_reason(worker, reason)
     if allow_provider_pause:
         maybe_pause_provider_for_terminal_failure(config, state, worker, reason)
+    # Lane-health safety net runs regardless of allow_provider_pause: an
+    # unclassified/unauthorized terminal failure (e.g. codex's revoked-token 401
+    # that surfaces only as a premature exit) still counts toward the lane's
+    # distinct-task failure streak so a dead lane gets paused instead of staying a
+    # zero-load magnet for re-dispatch.
+    maybe_autopause_unhealthy_lane(config, state, worker, reason)
     failure_kind, failure_summary = summarize_worker_failure(config, worker, reason)
     evidence_ref = record_worker_evidence(config, worker, reason)
     worker["last_error"] = failure_summary
@@ -4983,6 +5103,11 @@ def poll_workers(
                         PREMATURE_EXIT_REASON,
                         allow_provider_pause=True,
                     )
+            if worker.get("status") == "completed":
+                # A clean completion proves the lane is alive — reset its
+                # terminal-failure streak so the lane-health auto-pause only ever
+                # fires on genuinely dead lanes, not on intermittent blips.
+                clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
             changed = True
     return changed
 

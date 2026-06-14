@@ -7889,3 +7889,102 @@ class BreakFullDeadlockTests(unittest.TestCase):
             changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
         self.assertFalse(changed)
         probe.assert_not_called()
+
+
+class CodexRevokedTokenClassificationTests(unittest.TestCase):
+    """Fix ①: codex CLI revoked/expired-session 401s only surface as runtime
+    ERROR lines; before the fix they were classified as generic 'terminal' (not
+    'auth') so the lane never auto-paused."""
+
+    def _worker_for_log(self, content: str) -> dict[str, str]:
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
+        handle.write(content)
+        handle.flush()
+        handle.close()
+        self.addCleanup(Path(handle.name).unlink, missing_ok=True)
+        return {"log_path": handle.name, "provider": "codex2", "agent_id": "Codex2"}
+
+    def test_classifies_codex_revoked_refresh_token_as_auth(self) -> None:
+        for reason in (
+            "2026-06-14T14:31:58Z ERROR codex_api::endpoint::responses_websocket: "
+            "failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://chatgpt.com/x",
+            'Failed to refresh token: 401 Unauthorized: { "code": "refresh_token_invalidated" }',
+            "ERROR: Your access token could not be refreshed because your refresh token "
+            "was revoked. Please log out and sign in again.",
+        ):
+            with self.subTest(reason=reason):
+                result = supervisor.classify_worker_failure({}, {"provider": "codex2"}, reason)
+                self.assertEqual(result["kind"], "auth")
+                self.assertFalse(result["transient"])
+
+    def test_detects_codex_revoked_token_from_runtime_error_log(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "codex",
+                    "2026-06-14T14:31:56Z ERROR rmcp::transport::worker: worker quit",
+                    "2026-06-14T14:31:58Z ERROR codex_api::endpoint::responses_websocket: "
+                    "failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://chatgpt.com/x",
+                    "ERROR: Your access token could not be refreshed because your refresh "
+                    "token was revoked. Please log out and sign in again.",
+                ]
+            )
+            + "\n"
+        )
+        detected = supervisor.detect_worker_failure(worker)
+        self.assertIsNotNone(detected)
+        self.assertEqual(supervisor.classify_worker_failure({}, worker, detected)["kind"], "auth")
+
+
+class LaneFailureAutoPauseTests(unittest.TestCase):
+    """Fix ②: a lane whose workers keep dying terminally across distinct tasks
+    gets auto-paused (capacity), even when the failure text isn't classified as
+    auth — so the availability-first scheduler stops re-selecting a dead lane."""
+
+    def _worker(self, task_id: str) -> dict[str, Any]:
+        return {"agent_id": "Codex2", "provider": "codex2", "task_id": task_id}
+
+    def test_streak_counts_distinct_tasks_only(self) -> None:
+        state: dict[str, Any] = {}
+        # same task repeated must not inflate the streak
+        results = [supervisor.record_lane_terminal_failure({}, state, "Codex2", "T1") for _ in range(3)]
+        self.assertEqual(results, [False, False, False])
+        self.assertEqual(state["lane_failure_streaks"]["codex2"]["count"], 1)
+
+    def test_threshold_crossed_after_three_distinct_tasks(self) -> None:
+        state: dict[str, Any] = {}
+        results = [supervisor.record_lane_terminal_failure({}, state, "Codex2", t) for t in ("T1", "T2", "T3")]
+        self.assertEqual(results, [False, False, True])
+
+    def test_autopause_pauses_lane_on_streak(self) -> None:
+        state: dict[str, Any] = {}
+        for t in ("T1", "T2", "T3"):
+            supervisor.maybe_autopause_unhealthy_lane(
+                {}, state, self._worker(t), "Worker exited before the task reached a terminal status."
+            )
+        pauses = supervisor.provider_pause_registry(state)
+        self.assertIn("codex2", pauses)
+        self.assertEqual(pauses["codex2"]["kind"], "capacity")
+        # streak cleared after pausing
+        self.assertNotIn("codex2", state.get("lane_failure_streaks", {}))
+
+    def test_clean_completion_resets_streak(self) -> None:
+        state: dict[str, Any] = {}
+        supervisor.record_lane_terminal_failure({}, state, "Codex2", "T1")
+        supervisor.record_lane_terminal_failure({}, state, "Codex2", "T2")
+        supervisor.clear_lane_failure(state, "Codex2")
+        self.assertNotIn("codex2", state.get("lane_failure_streaks", {}))
+
+    def test_disabled_via_config(self) -> None:
+        cfg = {"ready_dispatcher": {"lane_failure_autopause": {"enabled": False}}}
+        state: dict[str, Any] = {}
+        for t in ("T1", "T2", "T3", "T4"):
+            supervisor.maybe_autopause_unhealthy_lane(cfg, state, self._worker(t), "terminal boom")
+        self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+
+    def test_transient_failures_do_not_count(self) -> None:
+        state: dict[str, Any] = {}
+        # 429 rate-limit is transient/capacity → must not trip the lane-health pause
+        for t in ("T1", "T2", "T3", "T4"):
+            supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker(t), "status: 429 rate limited")
+        self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
