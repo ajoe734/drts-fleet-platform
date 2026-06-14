@@ -42,17 +42,33 @@ settlement (`partner_referral` / `drts_pays_partner`).
 referral_channel entry resolves and exposes its active 15% percent revenue-share
 rule settling `partner_referral` / `drts_pays_partner`.
 
-**Known CRC-VERIFY gap (LEG 2+, gated):** `/partner/ingress/handoff` returns
-**500** in persistence mode even though the identity-link row is created
-(`resolveOrCreate` succeeds; the failure is in the downstream session/JWT
-construction). Until that is fixed, E2E-016 runs as a **non-release gated probe**:
-it verifies LEG 1, then logs `PENDING(CRC-VERIFY)` and exits 0 rather than failing
-the whole gate. Set `E2E_REFERRAL_ENFORCE=1` to make it hard-fail once the handoff
-is runtime-ready. The seeded settlement totals it will then assert: GMV 150000,
-partner share 22500 (15%), tripCount 2, activeRiders 2 for period 2026-06.
+**RESOLVED — handoff now runtime-verified.** The earlier `/partner/ingress/handoff`
+500 was a SQL bug in `PartnerUserIdentityLinkRepository.touchLastSeen`: parameter
+`$3` was used both as `timestamptz` (`last_seen_at = $3`) and as `text`
+(`to_jsonb($3::text)`), so Postgres deduced inconsistent types for `$3` and
+errored on every handoff. Fixed by casting the column assignments
+`$3::timestamptz`. A second issue was test-side: the partner referral portal reads
+require the **channel partner** identity (actorType=partner_api_key, realm=partner,
+matching tenantId/partnerId/partnerProgramId/partnerEntrySlug), not the handoff
+passenger bearer. E2E-016 LEG 3 now presents that identity.
 
-This confirms `CRC-VERIFY` / `CRC-FE-VERIFY` are genuinely incomplete — the CRC
-backend was built but never verified end-to-end in DB/runtime mode, so it carries
+E2E-016 is now a **hard scenario** (no longer gated): it verifies the full chain
+end to end — referral entry + 15% rule, durable s2s handoff binding, and the
+partner settlement reads asserting GMV 150000 / share 22500 / tripCount 2 /
+activeRiders 2 for 2026-06.
+
+## Separately discovered: E2E-008 is red on current dev (not fixed here)
+
+While running the suite, `E2E-008-partner-booking-cutover` fails on current dev for
+reasons unrelated to the referral channel: (a) `/auth/partner/bootstrap-session`
+now returns `access_token` (snake_case) while the scenario reads `.data.accessToken`
+(camelCase, no fallback); and (b) the partner-scope check was tightened to also
+enforce tenant, but the bank entry's `tenant_id` is now `tenant-demo-001` while the
+scenario sends the UUID `E2E_SEED_TENANT_ID`. This makes the ci-integ `e2e` gate red
+on dev for E2E-008 and needs a separate fix (mirror the E2E-016 LEG 3 identity
+pattern + tolerant casing).
+This confirmed `CRC-VERIFY` was genuinely incomplete — the CRC backend was built
+but never verified end-to-end in DB/runtime mode, so it carried
 both the migration collision and the handoff-500 breakage.
 
 ## 3. Hermetic runner — auto-discovery

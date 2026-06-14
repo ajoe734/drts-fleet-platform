@@ -18,6 +18,9 @@
 #   4. The partner-scoped referral statement exposes the seeded 2026-06 attribution:
 #      GMV 150000, partner share 22500 (15%), tripCount 2, activeRiders 2.
 #   5. usage / revenue / dashboard reads expose the same 2026-06 attribution.
+#
+# This is a hard scenario (no longer a gated probe): the referral handoff + portal
+# reads are runtime-verified end to end.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,6 +30,8 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 SCENARIO="E2E-016"
 ENTRY_SLUG="${E2E_REFERRAL_ENTRY_SLUG:-referral-demo-community}"
 PARTNER_ID="${E2E_REFERRAL_PARTNER_ID:-partner-referral-demo-001}"
+PARTNER_PROGRAM_ID="${E2E_REFERRAL_PARTNER_PROGRAM_ID:-program-referral-community}"
+TENANT_ID="${E2E_REFERRAL_TENANT_ID:-tenant-demo-001}"
 PERIOD="${E2E_REFERRAL_PERIOD:-2026-06}"
 PARTNER_USER_REF="${E2E_REFERRAL_PARTNER_USER_REF:-e2e-referral-user-${E2E_RUN_ID:-local}}"
 EXPECTED_GMV_MINOR=150000
@@ -40,21 +45,6 @@ switch_actor "platform_admin" "e2e-platform-admin-016"
 
 log_step "1.1 — GET /partner/entries/:slug (referral channel entry)"
 http_call GET "/partner/entries/${ENTRY_SLUG}"
-# Gated probe: the seeded referral_channel entry is not yet resolvable through the
-# persistence-mode API (only partner entries backed by an ingress-credential
-# bootstrap survive DB hydration). Until that CRC-VERIFY backend gap is closed,
-# downgrade to a non-release warning instead of failing the whole gate. Set
-# E2E_REFERRAL_ENFORCE=1 once the channel is runtime-wired to enforce it.
-if [[ "${RESP_STATUS:-}" != "200" ]]; then
-  log_warn "PENDING(CRC-VERIFY): referral_channel entry '${ENTRY_SLUG}' is not resolvable via the persistence-mode API (HTTP ${RESP_STATUS:-none})."
-  log_warn "The community-app referral channel is not yet wired for DB/runtime use; skipping E2E-016 as a non-release gated probe."
-  save_evidence "$SCENARIO" "pending" "referralEntryStatus" "${RESP_STATUS:-none}"
-  if [[ "${E2E_REFERRAL_ENFORCE:-0}" == "1" ]]; then
-    fail "E2E_REFERRAL_ENFORCE=1 and referral entry is not resolvable."
-  fi
-  log_ok "E2E-016 gated (PENDING) — referral channel backend not yet runtime-wired."
-  exit 0
-fi
 assert_status "200"
 ENTRY_TYPE=$(json_get_first ".data.partnerType" ".data.partner_type")
 [[ "$ENTRY_TYPE" == "referral_channel" ]] || \
@@ -96,18 +86,6 @@ log_step "2.2 — POST /partner/ingress/handoff (first bind)"
 HANDOFF_FIXTURE=$(mktemp /tmp/drts-e2e-016-handoff-XXXXXX.json)
 printf '%s\n' "{\"entrySlug\":\"${ENTRY_SLUG}\",\"apiKey\":\"${PARTNER_KEY}\",\"partnerUserRef\":\"${PARTNER_USER_REF}\",\"consentScope\":\"referral_attribution\"}" > "$HANDOFF_FIXTURE"
 http_call POST "/partner/ingress/handoff" "$HANDOFF_FIXTURE"
-# Gated probe (continued): the partner ingress handoff currently 500s in
-# persistence mode even though the identity link row is created — a known
-# CRC-VERIFY backend gap. Downgrade to a non-release warning until it is fixed.
-if [[ ! "${RESP_STATUS:-}" =~ ^(200|201)$ ]]; then
-  log_warn "PENDING(CRC-VERIFY): /partner/ingress/handoff returned HTTP ${RESP_STATUS:-none}; the referral s2s handoff is not yet runtime-ready."
-  save_evidence "$SCENARIO" "pending" "handoffStatus" "${RESP_STATUS:-none}"
-  if [[ "${E2E_REFERRAL_ENFORCE:-0}" == "1" ]]; then
-    fail "E2E_REFERRAL_ENFORCE=1 and partner ingress handoff is not 2xx."
-  fi
-  log_ok "E2E-016 gated (PENDING) — referral handoff backend not yet runtime-ready."
-  exit 0
-fi
 assert_status "200|201"
 HANDOFF_TOKEN=$(json_get_first ".data.accessToken" ".data.access_token")
 PASSENGER_ID_1=$(json_get_first ".data.drtsPassengerId" ".data.drts_passenger_id")
@@ -133,9 +111,13 @@ log_ok "Durable s2s identity link: ${PARTNER_USER_REF} → ${PASSENGER_ID_1}"
 
 # ── LEG 3 — Partner-scoped referral reads (using the handoff bearer session) ─────
 log_surface "Channel Partner — referral usage / revenue / settlement"
-export E2E_AUTH_BEARER_TOKEN="$HANDOFF_TOKEN"
-switch_actor "partner_api_key" "$PASSENGER_ID_1"
+# The referral portal reads require the CHANNEL PARTNER identity
+# (actorType=partner_api_key, realm=partner, partnerEntrySlug) — not the handoff
+# passenger bearer. Present it via bootstrap headers, mirroring E2E-008.
+switch_actor "partner_api_key" "referral-channel-partner-016" "$TENANT_ID"
+export E2E_REALM="partner"
 export E2E_PARTNER_ID="$PARTNER_ID"
+export E2E_PARTNER_PROGRAM_ID="$PARTNER_PROGRAM_ID"
 export E2E_PARTNER_ENTRY_SLUG="$ENTRY_SLUG"
 
 log_step "3.1 — GET /partner/referral/statements/:period (settlement evidence)"
@@ -188,7 +170,6 @@ echo "$RESP_BODY" | grep -q "$EXPECTED_GMV_MINOR" || \
 echo "$RESP_BODY" | grep -q "$EXPECTED_SHARE_MINOR" || \
   fail "Dashboard does not reflect share ${EXPECTED_SHARE_MINOR}: ${RESP_BODY}"
 
-export E2E_AUTH_BEARER_TOKEN=""
 echo ""
 log_ok "E2E-016 complete — third-party referral channel verified end to end for ${ENTRY_SLUG} (${PERIOD})."
 echo -e "Evidence log: ${EVIDENCE_FILE:-<none>}"
