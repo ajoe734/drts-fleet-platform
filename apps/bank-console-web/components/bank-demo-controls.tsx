@@ -173,12 +173,12 @@ export function BankDemoControls({
               >
                 {t("shell.switchAccount", locale)}
               </Link>
-              <Link
+              <a
                 className="bank-account-action is-danger"
-                href={hrefFor(pathname, searchParams, { signedOut: "1" })}
+                href={`/login?bank=${bank.code}&locale=${locale}&signedOut=1`}
               >
                 {t("shell.logout", locale)}
-              </Link>
+              </a>
             </>
           )}
         </div>

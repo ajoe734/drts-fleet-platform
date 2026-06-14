@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import {
   CanvasShell,
   ManagementThemeProvider,
@@ -33,6 +33,21 @@ const bankCanvasTheme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
+const SIGNED_OUT_COOKIE = "drts-bank-console-signed-out";
+
+function hasSignedOutCookie() {
+  return document.cookie
+    .split(";")
+    .some((cookie) => cookie.trim() === `${SIGNED_OUT_COOKIE}=1`);
+}
+
+function writeSignedOutCookie() {
+  document.cookie = `${SIGNED_OUT_COOKIE}=1; Path=/; Max-Age=3600; SameSite=Lax`;
+}
+
+function clearSignedOutCookie() {
+  document.cookie = `${SIGNED_OUT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
 
 export function BankShell({ children }: { children: ReactNode }) {
   return (
@@ -70,18 +85,76 @@ function SignedOutBoundary({
 }
 
 function BankShellContent({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const locale = resolveLocale(searchParams.get("locale"));
-  const bank = resolveBankDemoTenant(searchParams.get("bank"));
-  const signedOut = searchParams.get("signedOut") === "1";
-  const navEntries = buildBankNavEntries(locale, searchParams.toString());
+  const search = searchParams.toString();
+  const browserParams =
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search);
+  const locale = resolveLocale(
+    searchParams.get("locale") ?? browserParams?.get("locale"),
+  );
+  const bank = resolveBankDemoTenant(
+    searchParams.get("bank") ?? browserParams?.get("bank"),
+  );
+  const [cookieSignedOut, setCookieSignedOut] = useState(false);
+  const signedOutQuery = searchParams.get("signedOut") === "1";
+  const signedOut = signedOutQuery || cookieSignedOut;
+  const navEntries = buildBankNavEntries(locale, search);
   const activeItem = findNavItem(pathname, navEntries);
   const activeKey = activeItem?.key;
 
   useEffect(() => {
     document.documentElement.lang = getLocaleTag(locale);
   }, [locale]);
+
+  useEffect(() => {
+    if (pathname === "/login") {
+      if (signedOutQuery) {
+        writeSignedOutCookie();
+      } else {
+        clearSignedOutCookie();
+      }
+      setCookieSignedOut(false);
+      return;
+    }
+
+    function enforceSignedOutBoundary() {
+      if (!signedOutQuery && !hasSignedOutCookie()) {
+        setCookieSignedOut(false);
+        return;
+      }
+
+      writeSignedOutCookie();
+      setCookieSignedOut(true);
+      const next = new URLSearchParams(search);
+      next.set("bank", bank.code);
+      next.set("locale", locale);
+      next.set("signedOut", "1");
+      router.replace(`/login?${next.toString()}`);
+    }
+
+    enforceSignedOutBoundary();
+    window.addEventListener("pageshow", enforceSignedOutBoundary);
+    return () =>
+      window.removeEventListener("pageshow", enforceSignedOutBoundary);
+  }, [bank.code, locale, pathname, router, search, signedOutQuery]);
+
+  if (pathname === "/login" || signedOut) {
+    return (
+      <ManagementThemeProvider defaultDark defaultDensity="compact">
+        <main className="bank-runtime-shell bank-auth-runtime">
+          {signedOut && pathname !== "/login" ? (
+            <SignedOutBoundary bank={bank} locale={locale} />
+          ) : (
+            children
+          )}
+        </main>
+      </ManagementThemeProvider>
+    );
+  }
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
@@ -113,11 +186,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
           style={{ height: "100%" }}
           {...(activeKey ? { active: activeKey } : {})}
         >
-          {signedOut && pathname !== "/login" ? (
-            <SignedOutBoundary bank={bank} locale={locale} />
-          ) : (
-            children
-          )}
+          {children}
         </CanvasShell>
       </div>
     </ManagementThemeProvider>

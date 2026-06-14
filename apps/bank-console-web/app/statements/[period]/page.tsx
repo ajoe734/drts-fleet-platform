@@ -1,4 +1,3 @@
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { CanvasPill, DataTable, Td, Tr } from "@drts/ui-web";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
@@ -8,9 +7,9 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import { getStatementByPeriod, type StatementStatus } from "@/lib/statements";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref } from "@/lib/issuer-projection";
 import { t } from "@/lib/translations";
-
-const issuerBrand = BRAND_TEMPLATES.CTBC;
 
 const statementStatusTone: Record<
   StatementStatus,
@@ -54,11 +53,17 @@ function formatCurrency(amount: number) {
 
 export default async function StatementDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ period: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { period } = await params;
-  const statement = getStatementByPeriod(period);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const issuerBrand = tenant.template;
+  const statement = getStatementByPeriod(period, tenant, locale);
 
   if (!statement) {
     notFound();
@@ -90,7 +95,10 @@ export default async function StatementDetailPage({
       />
 
       <section className="statement-detail-topline">
-        <a className="statement-back-link" href="/statements">
+        <a
+          className="statement-back-link"
+          href={bankScopedHref("/statements", tenant, locale)}
+        >
           {t("statements.detail.back")}
         </a>
         <a className="statement-link" href={statement.signedArtifactHref}>
@@ -242,7 +250,10 @@ export default async function StatementDetailPage({
                 </a>
               </Td>
               <Td>
-                <a className="statement-link" href={trip.disputeHref}>
+                <a
+                  className="statement-link"
+                  href={bankScopedHref(trip.disputeHref, tenant, locale)}
+                >
                   {trip.disputed
                     ? t("statements.actions.disputed")
                     : t("statements.actions.reportDispute")}

@@ -1,3 +1,7 @@
+import type { BankDemoTenant } from "@/lib/demo-tenants";
+import { projectIssuerText } from "@/lib/issuer-projection";
+import type { Locale } from "@/lib/translations";
+
 export type StatementStatus = "published" | "paid" | "due";
 
 export interface StatementTripLine {
@@ -187,21 +191,30 @@ function maskReference(value: string) {
   return `${compact.slice(0, 2)}••••${compact.slice(-2)}`;
 }
 
-export const settlementStatements: SettlementStatement[] = RAW_STATEMENTS.map(
-  (statement) => {
+function buildSettlementStatements(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+): SettlementStatement[] {
+  return RAW_STATEMENTS.map((statement) => {
     const trips = statement.trips.map((trip) => ({
-      tripId: trip.tripId,
+      tripId: projectIssuerText(trip.tripId, tenant, locale),
       tripDate: trip.tripDate,
       orderNo: trip.orderNo,
       routeLabel: trip.routeLabel,
       fareAmount: trip.fareAmount,
       subsidisedAmount: trip.subsidisedAmount,
       paidAmount: trip.paidAmount,
-      benefitReferenceMasked: maskReference(trip.benefitReference),
+      benefitReferenceMasked: maskReference(
+        projectIssuerText(trip.benefitReference, tenant, locale),
+      ),
       cardholderReferenceMasked: maskReference(trip.cardholderReference),
       cardReferenceMasked: maskReference(trip.cardReference),
-      artifactDownloadHref: trip.artifactDownloadHref,
-      disputeHref: trip.disputeHref,
+      artifactDownloadHref: projectIssuerText(
+        trip.artifactDownloadHref,
+        tenant,
+        locale,
+      ),
+      disputeHref: projectIssuerText(trip.disputeHref, tenant, locale),
       disputed: trip.disputed,
     }));
 
@@ -220,8 +233,8 @@ export const settlementStatements: SettlementStatement[] = RAW_STATEMENTS.map(
 
     return {
       period: statement.period,
-      statementNo: statement.statementNo,
-      programLabel: statement.programLabel,
+      statementNo: projectIssuerText(statement.statementNo, tenant, locale),
+      programLabel: projectIssuerText(statement.programLabel, tenant, locale),
       issuedAt: statement.issuedAt,
       dueAt: statement.dueAt,
       status: statement.status,
@@ -230,19 +243,44 @@ export const settlementStatements: SettlementStatement[] = RAW_STATEMENTS.map(
       totalPaidAmount,
       totalIssuerPayableAmount: totalSubsidisedAmount,
       totalTrips: trips.length,
-      signedArtifactHref: statement.signedArtifactHref,
+      signedArtifactHref: projectIssuerText(
+        statement.signedArtifactHref,
+        tenant,
+        locale,
+      ),
       artifactExpired: statement.status === "due",
       trips,
     };
-  },
-);
+  });
+}
 
-export const statementPeriods = settlementStatements.map(
-  (statement) => statement.period,
-);
+export const settlementStatements: SettlementStatement[] =
+  buildSettlementStatements();
 
-export function filterStatements(filters: StatementFilters = {}) {
-  return settlementStatements.filter((statement) => {
+export const statementPeriods = getStatementPeriods();
+
+export function getSettlementStatements(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  return buildSettlementStatements(tenant, locale);
+}
+
+export function getStatementPeriods(
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  return buildSettlementStatements(tenant, locale).map(
+    (statement) => statement.period,
+  );
+}
+
+export function filterStatements(
+  filters: StatementFilters = {},
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  return buildSettlementStatements(tenant, locale).filter((statement) => {
     if (filters.status && statement.status !== filters.status) {
       return false;
     }
@@ -251,6 +289,12 @@ export function filterStatements(filters: StatementFilters = {}) {
   });
 }
 
-export function getStatementByPeriod(period: string) {
-  return settlementStatements.find((statement) => statement.period === period);
+export function getStatementByPeriod(
+  period: string,
+  tenant?: BankDemoTenant,
+  locale: Locale = "zh",
+) {
+  return buildSettlementStatements(tenant, locale).find(
+    (statement) => statement.period === period,
+  );
 }

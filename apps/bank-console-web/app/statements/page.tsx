@@ -1,4 +1,3 @@
-import { BRAND_TEMPLATES } from "@drts/ui-tokens";
 import { CanvasPill, DataTable, Td, Tr } from "@drts/ui-web";
 import type { CSSProperties } from "react";
 import {
@@ -8,12 +7,12 @@ import {
 } from "@/components/page-primitives";
 import {
   filterStatements,
-  settlementStatements,
+  getSettlementStatements,
   type StatementStatus,
 } from "@/lib/statements";
+import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { bankScopedHref } from "@/lib/issuer-projection";
 import { t } from "@/lib/translations";
-
-const issuerBrand = BRAND_TEMPLATES.CTBC;
 
 const statementStatusTone: Record<
   StatementStatus,
@@ -65,16 +64,22 @@ export default async function StatementsPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const locale = resolveLocale(resolvedSearchParams.locale);
+  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
+  const issuerBrand = tenant.template;
   const status = one(resolvedSearchParams.status) as
     | StatementStatus
     | undefined;
-  const statements = filterStatements({ ...(status ? { status } : {}) });
-  const publishedCount = settlementStatements.filter(
+  const allStatements = getSettlementStatements(tenant, locale);
+  const statements = filterStatements(
+    { ...(status ? { status } : {}) },
+    tenant,
+    locale,
+  );
+  const publishedCount = allStatements.filter(
     (item) => item.status === "published",
   ).length;
-  const dueCount = settlementStatements.filter(
-    (item) => item.status === "due",
-  ).length;
+  const dueCount = allStatements.filter((item) => item.status === "due").length;
   const totalIssuerPaid = statements.reduce(
     (sum, item) => sum + item.totalIssuerPayableAmount,
     0,
@@ -135,12 +140,17 @@ export default async function StatementsPage({
             <h3>{t("statements.filters.title")}</h3>
             <p>{t("statements.filters.description")}</p>
           </div>
-          <a className="filters-reset" href="/statements">
+          <a
+            className="filters-reset"
+            href={bankScopedHref("/statements", tenant, locale)}
+          >
             {t("statements.filters.reset")}
           </a>
         </div>
 
         <form className="statements-filter-form" method="get">
+          <input name="bank" type="hidden" value={tenant.code} />
+          <input name="locale" type="hidden" value={locale} />
           <label className="filter-field">
             <span>{t("statements.filters.status")}</span>
             <select name="status" defaultValue={status ?? ""}>
@@ -230,7 +240,11 @@ export default async function StatementsPage({
               <Td>
                 <a
                   className="statement-link"
-                  href={`/statements/${statement.period}`}
+                  href={bankScopedHref(
+                    `/statements/${statement.period}`,
+                    tenant,
+                    locale,
+                  )}
                 >
                   {t("statements.actions.viewDetail")}
                 </a>
