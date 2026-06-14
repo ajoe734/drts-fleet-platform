@@ -24,7 +24,11 @@ export default async function RootLayout({
   return (
     <html lang="zh-Hant">
       <body>
-        {isAuthBoundary ? children : <BankShell>{children}</BankShell>}
+        {isAuthBoundary ? (
+          <main className="bank-auth-runtime">{children}</main>
+        ) : (
+          <BankShell>{children}</BankShell>
+        )}
       </body>
     </html>
   );
