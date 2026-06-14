@@ -1,68 +1,42 @@
+"use client";
+
 import Link from "next/link";
-
-const ownership = [
-  {
-    label: "Source channel",
-    value: "Tenant booking",
-    note: "The trip was booked by a tenant on behalf of the rider; tenant retains mutation authority.",
-  },
-  {
-    label: "Visible to rider",
-    value: "Status, ETA, vehicle, lifecycle",
-    note: "All read paths are mirrored so the rider can follow the trip without owning mutation.",
-  },
-  {
-    label: "Hidden from rider",
-    value: "Cancel / reschedule / fare override",
-    note: "Mutating affordances live with the source channel and are not surfaced here.",
-  },
-];
-
-const ownershipMatrix = [
-  {
-    source: "Direct passenger",
-    mutate: "Rider",
-    view: "Rider",
-    note: "The standard `/trip` route. Cancel-safe authority sits with the rider.",
-  },
-  {
-    source: "Tenant booking",
-    mutate: "Tenant console",
-    view: "Rider (read-only)",
-    note: "This route. Rider sees status; tenant owns cancel and override.",
-  },
-  {
-    source: "Partner booking",
-    mutate: "Partner channel",
-    view: "Rider (read-only)",
-    note: "Mutation is delegated to the partner surface. Rider stays read-only.",
-  },
-  {
-    source: "Concierge booking",
-    mutate: "Concierge / call-point",
-    view: "Rider (read-only)",
-    note: "Mutation is held by the concierge surface (see SYS-UI-005).",
-  },
-];
+import { useTranslation } from "@/lib/i18n";
 
 export default function TripReadOnlyPage() {
+  const { t } = useTranslation();
+  const ownership = [
+    {
+      label: t("tripReadOnly.row1.label"),
+      value: t("tripReadOnly.row1.value"),
+      note: t("tripReadOnly.row1.note"),
+    },
+    {
+      label: t("tripReadOnly.row2.label"),
+      value: t("tripReadOnly.row2.value"),
+      note: t("tripReadOnly.row2.note"),
+    },
+    {
+      label: t("tripReadOnly.row3.label"),
+      value: t("tripReadOnly.row3.value"),
+      note: t("tripReadOnly.row3.note"),
+    },
+  ];
+  const ownershipMatrix = ["case1", "case2", "case3", "case4"] as const;
+
   return (
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-positive">
-          Read-only authority
+          {t("tripReadOnly.eyebrow")}
         </span>
-        <h1>This trip is read-only for the rider.</h1>
-        <p>
-          The booking is owned by another channel. The rider can follow the trip
-          but cannot cancel, reschedule, or override fare from this surface. The
-          mutating authority lives with the source channel.
-        </p>
+        <h1>{t("tripReadOnly.title")}</h1>
+        <p>{t("tripReadOnly.body")}</p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Ownership snapshot</span>
-        <h3>Authority breakdown</h3>
+        <span className="surface-kicker">{t("tripReadOnly.kicker")}</span>
+        <h3>{t("tripReadOnly.snapshotTitle")}</h3>
         <dl className="kv-grid">
           {ownership.map((row) => (
             <div className="kv-row" key={row.label}>
@@ -77,26 +51,26 @@ export default function TripReadOnlyPage() {
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Cross-channel matrix</span>
-        <h3>Where mutation lives by source channel</h3>
+        <span className="surface-kicker">{t("tripReadOnly.matrixKicker")}</span>
+        <h3>{t("tripReadOnly.matrixTitle")}</h3>
         <table className="matrix-table">
           <thead>
             <tr>
-              <th>Source channel</th>
-              <th>Mutation authority</th>
-              <th>Rider visibility</th>
-              <th>Notes</th>
+              <th>{t("tripReadOnly.table.source")}</th>
+              <th>{t("tripReadOnly.table.authority")}</th>
+              <th>{t("tripReadOnly.table.visibility")}</th>
+              <th>{t("tripReadOnly.table.notes")}</th>
             </tr>
           </thead>
           <tbody>
-            {ownershipMatrix.map((row) => (
-              <tr key={row.source}>
+            {ownershipMatrix.map((key) => (
+              <tr key={key}>
                 <td>
-                  <strong>{row.source}</strong>
+                  <strong>{t(`tripReadOnly.${key}.source`)}</strong>
                 </td>
-                <td>{row.mutate}</td>
-                <td>{row.view}</td>
-                <td>{row.note}</td>
+                <td>{t(`tripReadOnly.${key}.mutate`)}</td>
+                <td>{t(`tripReadOnly.${key}.view`)}</td>
+                <td>{t(`tripReadOnly.${key}.note`)}</td>
               </tr>
             ))}
           </tbody>
@@ -105,22 +79,14 @@ export default function TripReadOnlyPage() {
 
       <section className="callout-row">
         <article className="callout-card warning">
-          <strong>No fake mutation affordance</strong>
-          <p>
-            Cancel, reschedule, and override do not appear here even as disabled
-            buttons. Hiding them is intentional: surfacing a button the rider
-            cannot press would be misleading.
-          </p>
+          <strong>{t("tripReadOnly.callout.fake.title")}</strong>
+          <p>{t("tripReadOnly.callout.fake.body")}</p>
         </article>
         <article className="callout-card">
-          <strong>How the rider acts on this trip</strong>
-          <p>
-            The rider must reach back through the source channel — tenant,
-            partner, or concierge — to mutate the trip. Support escalation stays
-            available.
-          </p>
+          <strong>{t("tripReadOnly.callout.act.title")}</strong>
+          <p>{t("tripReadOnly.callout.act.body")}</p>
           <Link className="text-link" href="/unsupported">
-            Open unsupported / source-owned fallback
+            {t("tripReadOnly.callout.act.cta")}
           </Link>
         </article>
       </section>

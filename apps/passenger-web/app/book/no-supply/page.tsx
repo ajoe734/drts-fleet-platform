@@ -1,43 +1,41 @@
-import Link from "next/link";
+"use client";
 
-const supplyContext = [
-  {
-    label: "Pickup ETA window",
-    value: "no qualified driver under 30 min",
-    note: "The platform searched the configured radius and time window without a match.",
-  },
-  {
-    label: "Service area",
-    value: "in service",
-    note: "The drop-off is inside the supported area, so this is not an `unsupported` outcome.",
-  },
-  {
-    label: "Fallback options",
-    value: "schedule for later, retry, alternate channel",
-    note: "Each fallback is offered as an explicit affordance, not auto-applied.",
-  },
-];
+import Link from "next/link";
+import { useTranslation } from "@/lib/i18n";
 
 export default function BookingNoSupplyPage() {
+  const { t } = useTranslation();
+  const supplyContext = [
+    {
+      label: t("noSupply.row1.label"),
+      value: t("noSupply.row1.value"),
+      note: t("noSupply.row1.note"),
+    },
+    {
+      label: t("noSupply.row2.label"),
+      value: t("noSupply.row2.value"),
+      note: t("noSupply.row2.note"),
+    },
+    {
+      label: t("noSupply.row3.label"),
+      value: t("noSupply.row3.value"),
+      note: t("noSupply.row3.note"),
+    },
+  ];
+
   return (
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-negative">
-          No driver matched
+          {t("noSupply.eyebrow")}
         </span>
-        <h1>No supply is currently available for this request.</h1>
-        <p>
-          The request was not denied; the platform simply could not match a
-          qualified driver inside the configured radius and time window. The
-          rider keeps cancel-safe authority and is offered explicit fallbacks.
-        </p>
+        <h1>{t("noSupply.title")}</h1>
+        <p>{t("noSupply.body")}</p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">
-          Why this differs from `denied` and `unsupported`
-        </span>
-        <h3>Supply-side rather than policy-side</h3>
+        <span className="surface-kicker">{t("noSupply.kicker")}</span>
+        <h3>{t("noSupply.listTitle")}</h3>
         <dl className="kv-grid">
           {supplyContext.map((row) => (
             <div className="kv-row" key={row.label}>
@@ -53,29 +51,19 @@ export default function BookingNoSupplyPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Retry now</strong>
-          <p>
-            Riders may retry immediately; supply changes second-by-second and
-            the platform may match a driver shortly.
-          </p>
+          <strong>{t("noSupply.callout.retry.title")}</strong>
+          <p>{t("noSupply.callout.retry.body")}</p>
           <Link className="text-link" href="/book">
-            Re-submit the same request
+            {t("noSupply.callout.retry.cta")}
           </Link>
         </article>
         <article className="callout-card">
-          <strong>Schedule for later</strong>
-          <p>
-            Riders may convert the request into a scheduled reservation if the
-            program allows it. The reservation lane owns the actual booking type
-            swap.
-          </p>
+          <strong>{t("noSupply.callout.schedule.title")}</strong>
+          <p>{t("noSupply.callout.schedule.body")}</p>
         </article>
         <article className="callout-card warning">
-          <strong>No phantom matching</strong>
-          <p>
-            The route never claims a match that does not exist and never holds
-            the rider in a fake "searching forever" state without a deadline.
-          </p>
+          <strong>{t("noSupply.callout.match.title")}</strong>
+          <p>{t("noSupply.callout.match.body")}</p>
         </article>
       </section>
     </div>

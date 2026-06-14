@@ -1,47 +1,31 @@
-import Link from "next/link";
+"use client";
 
-const denialReasons = [
-  {
-    code: "policy.safety_hold",
-    body: "Active safety hold on the rider profile. Booking is blocked until the hold clears via support.",
-  },
-  {
-    code: "policy.fraud_review",
-    body: "Open fraud review on the rider's recent activity. The rider sees a non-blaming message and a support exit.",
-  },
-  {
-    code: "policy.unsupported_destination",
-    body: "Drop-off lies in a region the platform has explicitly blocked for non-credentialed riders.",
-  },
-];
+import Link from "next/link";
+import { useTranslation } from "@/lib/i18n";
 
 export default function BookingDeniedPage() {
+  const { t } = useTranslation();
+  const denialReasons = [
+    { code: "policy.safety_hold", body: t("denied.reason1") },
+    { code: "policy.fraud_review", body: t("denied.reason2") },
+    { code: "policy.unsupported_destination", body: t("denied.reason3") },
+  ];
+
   return (
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-negative">
-          Denied by policy
+          {t("denied.eyebrow")}
         </span>
-        <h1>Booking request was denied.</h1>
-        <p>
-          The platform rejected this request for a policy reason. The rider
-          surface intentionally does not show the underlying decision graph; it
-          shows the public-facing reason and the safe next steps.
-        </p>
+        <h1>{t("denied.title")}</h1>
+        <p>{t("denied.body")}</p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Reason class (sample)</span>
-        <h3>policy.safety_hold</h3>
-        <p>
-          Public-facing message: "We could not complete this request. Please
-          contact support to review your account before booking again."
-        </p>
-        <p className="surface-footnote">
-          Internal reason codes are not surfaced to the rider, but they are
-          stable enough for support to look up. The mapping table is owned by
-          the booking policy service, not by this UI.
-        </p>
+        <span className="surface-kicker">{t("denied.sampleKicker")}</span>
+        <h3>{t("denied.sampleTitle")}</h3>
+        <p>{t("denied.sampleBody")}</p>
+        <p className="surface-footnote">{t("denied.sampleNote")}</p>
       </section>
 
       <section className="content-grid">
@@ -55,30 +39,24 @@ export default function BookingDeniedPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Allowed next steps</strong>
-          <p>
-            Riders may contact support, retry after the policy reason clears, or
-            fall back to an unsupported channel acknowledgement.
-          </p>
+          <strong>{t("denied.callout.allowed.title")}</strong>
+          <p>{t("denied.callout.allowed.body")}</p>
           <Link className="text-link" href="/unsupported">
-            Open unsupported fallback
+            {t("denied.callout.allowed.cta")}
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>What the route does not do</strong>
-          <p>
-            It does not auto-retry, does not silently downgrade to a different
-            service level, and does not blame the rider for the denial.
-          </p>
+          <strong>{t("denied.callout.notdo.title")}</strong>
+          <p>{t("denied.callout.notdo.body")}</p>
         </article>
       </section>
 
       <section className="hero-actions">
         <Link className="primary-link" href="/auth">
-          Re-verify rider identity
+          {t("denied.cta.auth")}
         </Link>
         <Link className="secondary-link" href="/book">
-          Return to request entry
+          {t("denied.cta.book")}
         </Link>
       </section>
     </div>

@@ -1,34 +1,30 @@
+"use client";
+
 import Link from "next/link";
+import { useTranslation } from "@/lib/i18n";
 
 export default function UnauthenticatedPage() {
+  const { t } = useTranslation();
+
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow">Unauthenticated state</span>
-        <h1>Trip details stay locked until the rider clears bootstrap.</h1>
-        <p>
-          This route makes the fallback explicit for passengers who arrive
-          without a valid session, code, or trip-verification context.
-        </p>
+        <span className="eyebrow">{t("unauth.eyebrow")}</span>
+        <h1>{t("unauth.title")}</h1>
+        <p>{t("unauth.body")}</p>
       </section>
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Allowed next steps</strong>
-          <p>
-            Re-enter through auth, verify a reservation code, or contact support
-            through the future passenger support lane.
-          </p>
+          <strong>{t("unauth.callout.next.title")}</strong>
+          <p>{t("unauth.callout.next.body")}</p>
           <Link className="text-link" href="/auth">
-            Return to auth entry
+            {t("unauth.callout.next.cta")}
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>What this route does not do</strong>
-          <p>
-            It does not leak tenant-admin booking data, ops tooling, or partial
-            receipt artifacts to an unauthenticated rider.
-          </p>
+          <strong>{t("unauth.callout.notdo.title")}</strong>
+          <p>{t("unauth.callout.notdo.body")}</p>
         </article>
       </section>
     </div>

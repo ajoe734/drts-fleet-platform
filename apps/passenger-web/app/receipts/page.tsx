@@ -1,43 +1,40 @@
-import Link from "next/link";
+"use client";
 
-const receiptStates = [
-  {
-    title: "DRTS-issued receipt",
-    status: "Supported",
-    body: "Direct passenger trips can expose a platform-owned receipt artifact and trace metadata from this lane.",
-    href: "/trip/completed",
-    cta: "Preview completed-trip receipt",
-  },
-  {
-    title: "External receipt reference",
-    status: "Supported with ownership handoff",
-    body: "When the source channel owns billing, the rider sees who owns the receipt and where to continue instead of a fake download button.",
-    href: "/trip/read-only",
-    cta: "See read-only trip ownership",
-  },
-  {
-    title: "Receipt unavailable or unsupported",
-    status: "Explicitly handled",
-    body: "Phone-assisted, partner, or otherwise unsupported cases remain visible with a concrete explanation and support direction.",
-    href: "/unsupported",
-    cta: "Open unsupported fallback",
-  },
-];
+import Link from "next/link";
+import { useTranslation } from "@/lib/i18n";
 
 export default function ReceiptCenterPage() {
+  const { t } = useTranslation();
+  const receiptStates = [
+    {
+      title: t("receipts.card1.title"),
+      status: t("receipts.card1.status"),
+      body: t("receipts.card1.body"),
+      href: "/trip/completed",
+      cta: t("receipts.card1.cta"),
+    },
+    {
+      title: t("receipts.card2.title"),
+      status: t("receipts.card2.status"),
+      body: t("receipts.card2.body"),
+      href: "/trip/read-only",
+      cta: t("receipts.card2.cta"),
+    },
+    {
+      title: t("receipts.card3.title"),
+      status: t("receipts.card3.status"),
+      body: t("receipts.card3.body"),
+      href: "/unsupported",
+      cta: t("receipts.card3.cta"),
+    },
+  ];
+
   return (
     <div className="page-shell">
       <section className="hero-card hero-gradient">
-        <span className="eyebrow">Receipt center</span>
-        <h1>
-          The passenger receipt surface is now wired to concrete trip outcomes.
-        </h1>
-        <p>
-          This landing page establishes the receipt topology required by
-          `SYS-UI-003` and links each ownership class to the matching trip
-          outcome route from `SYS-UI-004`. Source-channel ownership stays
-          authoritative; this surface only mirrors it.
-        </p>
+        <span className="eyebrow">{t("receipts.eyebrow")}</span>
+        <h1>{t("receipts.title")}</h1>
+        <p>{t("receipts.body")}</p>
       </section>
 
       <section className="content-grid">
@@ -55,12 +52,8 @@ export default function ReceiptCenterPage() {
 
       <section className="callout-row">
         <article className="callout-card warning">
-          <strong>No invented delivery channel</strong>
-          <p>
-            The route intentionally avoids claiming new email or SMS receipt
-            delivery. Ownership and availability must stay aligned with the
-            upstream settlement and source-channel rules.
-          </p>
+          <strong>{t("receipts.callout.title")}</strong>
+          <p>{t("receipts.callout.body")}</p>
         </article>
       </section>
     </div>
