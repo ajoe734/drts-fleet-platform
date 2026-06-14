@@ -29,6 +29,7 @@ import {
   recalculateTenantSlaBookingsAction,
   updateTenantSlaProfileAction,
 } from "./actions";
+import { useTranslation } from "@/lib/i18n";
 
 type SlaActionKey = "update_sla_profile" | "recalculate_sla_bookings";
 
@@ -53,6 +54,11 @@ type SlaManagerProps = {
   view: TenantSlaProfileView | null;
   transportErrorMessage: string | null;
 };
+
+type Translator = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -268,44 +274,48 @@ const inputMetaStyle: CSSProperties = {
   color: th.textMuted,
 };
 
-const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
-  no_data: {
-    reason: "no_data",
-    title: "尚無 SLA 資料",
-    body: "租戶尚未寫入任何 SLA threshold。先建立初始 wait / arrival / completion 分鐘門檻。",
-    tone: "info",
-  },
-  not_provisioned: {
-    reason: "not_provisioned",
-    title: "SLA profile 尚未 provision",
-    body: "此租戶還沒有 SLA profile。完成初始設定後，整合治理頁才會把 SLA 標為 ready。",
-    tone: "warn",
-  },
-  fetch_failed: {
-    reason: "fetch_failed",
-    title: "SLA profile 讀取失敗",
-    body: "目前無法取得 SLA profile。重新整理後若仍失敗，請查看 audit / integration governance 追查 request。",
-    tone: "danger",
-  },
-  permission_denied: {
-    reason: "permission_denied",
-    title: "沒有權限變更 SLA",
-    body: "只有 tenant admin 可維護 SLA profile。若你是只讀角色，請聯絡租戶管理員代為更新。",
-    tone: "warn",
-  },
-  external_unavailable: {
-    reason: "external_unavailable",
-    title: "SLA 依賴服務暫時不可用",
-    body: "SLA profile 目前受外部計算或同步服務影響而不可用。請稍後重試並留意平台公告。",
-    tone: "danger",
-  },
-  filtered_empty: {
-    reason: "filtered_empty",
-    title: "目前篩選條件下沒有結果",
-    body: "目前檢視條件下沒有可顯示的 SLA profile。請清除外部篩選條件，或從整合就緒度重新進入本頁。",
-    tone: "info",
-  },
-};
+function getEmptyStateConfig(
+  t: Translator,
+): Record<TenantSlaEmptyReason, EmptyStateConfig> {
+  return {
+    no_data: {
+      reason: "no_data",
+      title: t("sla.empty.noData.title"),
+      body: t("sla.empty.noData.body"),
+      tone: "info",
+    },
+    not_provisioned: {
+      reason: "not_provisioned",
+      title: t("sla.empty.notProvisioned.title"),
+      body: t("sla.empty.notProvisioned.body"),
+      tone: "warn",
+    },
+    fetch_failed: {
+      reason: "fetch_failed",
+      title: t("sla.empty.fetchFailed.title"),
+      body: t("sla.empty.fetchFailed.body"),
+      tone: "danger",
+    },
+    permission_denied: {
+      reason: "permission_denied",
+      title: t("sla.empty.permissionDenied.title"),
+      body: t("sla.empty.permissionDenied.body"),
+      tone: "warn",
+    },
+    external_unavailable: {
+      reason: "external_unavailable",
+      title: t("sla.empty.externalUnavailable.title"),
+      body: t("sla.empty.externalUnavailable.body"),
+      tone: "danger",
+    },
+    filtered_empty: {
+      reason: "filtered_empty",
+      title: t("sla.empty.filteredEmpty.title"),
+      body: t("sla.empty.filteredEmpty.body"),
+      tone: "info",
+    },
+  };
+}
 
 const EMPTY_STATE_MONOGRAM: Record<TenantSlaEmptyReason, string> = {
   no_data: "ND",
@@ -340,17 +350,17 @@ function getAction(
   return actions.find((action) => action.action === expectedAction) ?? null;
 }
 
-function disabledReasonLabel(reason: string | undefined) {
-  if (!reason) return "無資料";
+function disabledReasonLabel(reason: string | undefined, t: Translator) {
+  if (!reason) return t("sla.action.missingData");
   return reason.replaceAll("_", " ");
 }
 
-function actionLabel(action: string) {
+function actionLabel(action: string, t: Translator) {
   switch (action) {
     case "update_sla_profile":
-      return "儲存設定";
+      return t("sla.action.update");
     case "recalculate_sla_bookings":
-      return "重算既有訂單";
+      return t("sla.action.recalculate");
     default:
       return action.replaceAll("_", " ");
   }
@@ -366,16 +376,6 @@ const REFRESH_TIER_CODE: Record<RefreshTier, string> = {
   manual: "T6",
 };
 
-const REFRESH_TIER_LABEL: Record<RefreshTier, string> = {
-  urgent: "即時推播 · 5s 後援輪詢",
-  fast: "3s 自動更新",
-  dispatch: "5s 自動更新",
-  medium: "15s 自動更新",
-  medium_slow: "30s 自動更新",
-  slow: "30s 自動更新",
-  manual: "手動更新",
-};
-
 const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
   urgent: 5000,
   fast: 3000,
@@ -386,9 +386,35 @@ const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
   manual: null,
 };
 
-function formatActionCaption(action: ResourceActionDescriptor) {
-  if (action.enabled) return `${actionLabel(action.action)} 可直接執行`;
-  return `${actionLabel(action.action)} 目前不可執行：${disabledReasonLabel(action.disabledReasonCode)}`;
+function getRefreshTierLabel(t: Translator, refreshTier: RefreshTier) {
+  switch (refreshTier) {
+    case "urgent":
+      return t("sla.refresh.urgent");
+    case "fast":
+      return t("sla.refresh.fast");
+    case "dispatch":
+      return t("sla.refresh.dispatch");
+    case "medium":
+      return t("sla.refresh.medium");
+    case "medium_slow":
+      return t("sla.refresh.mediumSlow");
+    case "slow":
+      return t("sla.refresh.slow");
+    case "manual":
+      return t("sla.refresh.manual");
+  }
+}
+
+function formatActionCaption(action: ResourceActionDescriptor, t: Translator) {
+  if (action.enabled) {
+    return t("sla.action.available", {
+      action: actionLabel(action.action, t),
+    });
+  }
+  return t("sla.action.unavailable", {
+    action: actionLabel(action.action, t),
+    reason: disabledReasonLabel(action.disabledReasonCode, t),
+  });
 }
 
 function resolveResourceHref(link: CrossAppResourceLink) {
@@ -450,6 +476,7 @@ function formatUpdatedByLine(
 function getRecalculationStatus(
   receiptState: ActionReceiptState | null,
   lastRecalculationAt: string | null,
+  t: Translator,
 ) {
   const receipt =
     receiptState?.actionKey === "recalculate_sla_bookings"
@@ -458,22 +485,28 @@ function getRecalculationStatus(
 
   if (receipt?.actionId && receipt.resourceType === "tenant_sla") {
     if (receipt.status === "accepted") {
-      return "queued";
+      return t("sla.recalculation.queued");
     }
     if (receipt.status === "completed") {
-      return "completed";
+      return t("sla.recalculation.completed");
     }
     if (receipt.status === "failed") {
-      return "failed";
+      return t("sla.recalculation.failed");
     }
   }
 
-  return lastRecalculationAt ? "history" : "idle";
+  return lastRecalculationAt
+    ? t("sla.recalculation.history")
+    : t("sla.summary.idle");
 }
 
-function getActiveEmptyState(emptyState: EmptyStateEnvelope | null) {
-  if (emptyState?.reason && emptyState.reason in EMPTY_STATE_CONFIG) {
-    return EMPTY_STATE_CONFIG[emptyState.reason as TenantSlaEmptyReason];
+function getActiveEmptyState(
+  emptyState: EmptyStateEnvelope | null,
+  t: Translator,
+) {
+  const emptyStateConfig = getEmptyStateConfig(t);
+  if (emptyState?.reason && emptyState.reason in emptyStateConfig) {
+    return emptyStateConfig[emptyState.reason as TenantSlaEmptyReason];
   }
   return null;
 }
@@ -557,17 +590,21 @@ function renderResourceLink(
 function parseThresholdValue(
   value: string,
   fieldLabel: string,
+  t: Translator,
 ): { ok: true; value: number } | { ok: false; message: string } {
   const trimmed = value.trim();
   if (!trimmed) {
-    return { ok: false, message: `${fieldLabel} 不能留白。` };
+    return {
+      ok: false,
+      message: t("sla.validation.required", { field: fieldLabel }),
+    };
   }
 
   const parsed = Number(trimmed);
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
     return {
       ok: false,
-      message: `${fieldLabel} 必須是大於等於 0 的整數分鐘。`,
+      message: t("sla.validation.integer", { field: fieldLabel }),
     };
   }
 
@@ -585,31 +622,35 @@ function resolveActionVariant(action: ResourceActionDescriptor | null) {
   return "secondary" as const;
 }
 
-function buildActionPrompt(action: ResourceActionDescriptor | null) {
+function buildActionPrompt(
+  action: ResourceActionDescriptor | null,
+  t: Translator,
+) {
   switch (action?.action) {
     case "update_sla_profile":
       return {
-        title: "確認更新 SLA Profile",
-        body: "Threshold 變更會影響新建立的訂單，以及之後重新計算的 SLA event。確認後會寫入 audit trail。",
-        confirmLabel: "確認儲存",
+        title: t("sla.modal.update.title"),
+        body: t("sla.modal.update.body"),
+        confirmLabel: t("sla.modal.update.confirm"),
       };
     case "recalculate_sla_bookings":
       return {
-        title: "確認重算既有訂單",
-        body: "此操作會對既有訂單送出 SLA 重算請求，receipt 會回傳 accepted/completed 狀態並可追蹤 audit。",
-        confirmLabel: "確認重算",
+        title: t("sla.modal.recalculate.title"),
+        body: t("sla.modal.recalculate.body"),
+        confirmLabel: t("sla.modal.recalculate.confirm"),
       };
     default:
       return {
-        title: "確認操作",
-        body: "此操作會留下 audit trail。",
-        confirmLabel: "確認",
+        title: t("sla.modal.default.title"),
+        body: t("sla.modal.default.body"),
+        confirmLabel: t("sla.modal.default.confirm"),
       };
   }
 }
 
 export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
   const router = useRouter();
+  const { t } = useTranslation();
   const profile = view?.profile ?? null;
   const updatedBy = view?.updatedBy ?? null;
   const lastRecalculationAt = view?.lastRecalculationAt ?? null;
@@ -646,7 +687,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
   const recalcAction = getAction(availableActions, "recalculate_sla_bookings");
   const nextAction = emptyState?.nextAction ?? null;
   const effectiveEmptyReason = getTenantSlaEmptyReason(emptyState?.reason);
-  const activeEmptyState = getActiveEmptyState(emptyState);
+  const activeEmptyState = getActiveEmptyState(emptyState, t);
   const showEditor =
     Boolean(profile) ||
     ((effectiveEmptyReason === "not_provisioned" ||
@@ -662,12 +703,14 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
       : pendingActionKey === "recalculate_sla_bookings"
         ? recalcAction
         : null;
-  const pendingActionPrompt = buildActionPrompt(pendingAction);
+  const pendingActionPrompt = buildActionPrompt(pendingAction, t);
   const recalculationStatus = getRecalculationStatus(
     receiptState,
     lastRecalculationAt,
+    t,
   );
-  const pendingRecalculation = recalculationStatus === "queued";
+  const pendingRecalculation =
+    recalculationStatus === t("sla.recalculation.queued");
   const receiptAuditHref =
     auditResourceLink && receiptState?.receipt.auditId
       ? withLinkSearchParams(auditResourceLink, [
@@ -676,32 +719,36 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
       : null;
   const summaryItems = [
     {
-      k: "updatedAt",
+      k: t("sla.summary.updatedAt"),
       v: formatDateTime(profile?.updatedAt),
       mono: true,
     },
     {
-      k: "updatedBy",
+      k: t("sla.summary.updatedBy"),
       v: updatedBy ?? "—",
       mono: true,
     },
     {
-      k: "profile state",
-      v: profile ? "configured" : (emptyState?.reason ?? "—"),
+      k: t("sla.summary.profileState"),
+      v: profile
+        ? t("sla.summary.profileConfigured")
+        : (emptyState?.reason ?? "—"),
       mono: true,
     },
     {
-      k: "recalculation state",
+      k: t("sla.summary.recalculationState"),
       v: recalculationStatus,
       mono: true,
     },
     {
-      k: "last recalculation",
-      v: lastRecalculationAt ? formatDateTime(lastRecalculationAt) : "idle",
+      k: t("sla.summary.lastRecalculation"),
+      v: lastRecalculationAt
+        ? formatDateTime(lastRecalculationAt)
+        : t("sla.summary.idle"),
       mono: true,
     },
     {
-      k: "refresh tier",
+      k: t("sla.summary.refreshTier"),
       v: refreshTier
         ? `${REFRESH_TIER_CODE[refreshTier]} / ${refreshTier}`
         : "—",
@@ -754,8 +801,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
     if (requiresReasonForAction(selectedAction) && !reason.trim()) {
       setActionError(
         actionKey === "update_sla_profile"
-          ? "更新 SLA profile 前必須填寫變更原因。"
-          : "重算既有訂單前必須填寫操作原因。",
+          ? t("sla.error.reasonRequiredUpdate")
+          : t("sla.error.reasonRequiredRecalculate"),
       );
       setReceiptState(null);
       return;
@@ -771,6 +818,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 const waitValue = parseThresholdValue(
                   waitThresholdMin,
                   "waitThresholdMin",
+                  t,
                 );
                 if (!waitValue.ok) {
                   throw new Error(waitValue.message);
@@ -779,6 +827,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 const arrivalValue = parseThresholdValue(
                   arrivalThresholdMin,
                   "arrivalThresholdMin",
+                  t,
                 );
                 if (!arrivalValue.ok) {
                   throw new Error(arrivalValue.message);
@@ -787,6 +836,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 const completionValue = parseThresholdValue(
                   completionThresholdMin,
                   "completionThresholdMin",
+                  t,
                 );
                 if (!completionValue.ok) {
                   throw new Error(completionValue.message);
@@ -809,8 +859,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           error instanceof Error
             ? error.message
             : actionKey === "update_sla_profile"
-              ? "SLA update failed."
-              : "SLA recalculation request failed.",
+              ? t("sla.error.updateFailed")
+              : t("sla.error.recalculateFailed"),
         );
       }
     });
@@ -871,15 +921,17 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           </div>
         </div>
         <div style={noteStyle}>
-          messageCode · {emptyState?.messageCode ?? "—"}
+          {t("sla.empty.messageCode")} · {emptyState?.messageCode ?? "—"}
         </div>
         {nextAction ? (
           <div style={emptyActionStyle}>
-            <div style={summaryLabelStyle}>recommended action</div>
-            <div style={summaryValueStyle}>
-              {actionLabel(nextAction.action)}
+            <div style={summaryLabelStyle}>
+              {t("sla.empty.recommendedAction")}
             </div>
-            <div style={noteStyle}>{formatActionCaption(nextAction)}</div>
+            <div style={summaryValueStyle}>
+              {actionLabel(nextAction.action, t)}
+            </div>
+            <div style={noteStyle}>{formatActionCaption(nextAction, t)}</div>
           </div>
         ) : null}
         <div style={linkRowStyle}>
@@ -912,8 +964,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
     <div>
       <CanvasPageHeader
         theme={th}
-        title="SLA 設定檔"
-        subtitle="wait · arrival · completion 三個門檻 · 單位 = 分鐘 (Q-TEN07)"
+        title={t("sla.header.title")}
+        subtitle={t("sla.header.subtitle")}
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <CanvasBtn
@@ -921,17 +973,17 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
               onClick={() => router.refresh()}
               disabled={isPending}
             >
-              重新整理
+              {t("sla.header.refresh")}
             </CanvasBtn>
             <CanvasPill theme={th} tone="accent">
-              refresh tier ·{" "}
+              {t("sla.header.refreshTier")} ·{" "}
               {refreshTier
                 ? `${REFRESH_TIER_CODE[refreshTier]} / ${refreshTier}`
                 : "—"}
             </CanvasPill>
             {refreshMetadataAvailable ? (
               <CanvasPill theme={th} tone={getRefreshTone(refreshMetadata)}>
-                freshness · {refreshMetadata!.dataFreshness}
+                {t("sla.header.freshness")} · {refreshMetadata!.dataFreshness}
               </CanvasPill>
             ) : null}
           </div>
@@ -943,7 +995,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           <CanvasBanner
             theme={th}
             tone="danger"
-            title="操作失敗"
+            title={t("sla.banner.actionError")}
             body={actionError}
           />
         ) : null}
@@ -952,17 +1004,18 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           <CanvasCard theme={th}>
             <div style={emptyStateStyle}>
               <CanvasPill theme={th} tone="danger">
-                transport_error
+                {t("sla.empty.transportTone")}
               </CanvasPill>
               <div style={{ display: "grid", gap: 10 }}>
                 <div style={{ fontSize: 22, fontWeight: 700 }}>
-                  SLA view 暫時無法載入
+                  {t("sla.empty.transportTitle")}
                 </div>
                 <div style={{ ...noteStyle, maxWidth: 560 }}>
-                  這是 transport/request failure，不屬於 Q-X15 的六種
-                  EmptyReason。 請重新整理，或改從整合就緒度與 audit 追查。
+                  {t("sla.empty.transportBody")}
                 </div>
-                <div style={noteStyle}>error · {transportErrorMessage}</div>
+                <div style={noteStyle}>
+                  {t("sla.empty.transportError")} · {transportErrorMessage}
+                </div>
               </div>
               <div style={linkRowStyle}>
                 {sameAppLinks.map((link) => (
@@ -991,11 +1044,13 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
         ) : null}
 
         {receiptState ? (
-          <CanvasCard theme={th} title="操作回執">
+          <CanvasCard theme={th} title={t("sla.receipt.title")}>
             <CanvasBanner
               theme={th}
               tone={getReceiptTone(receiptState.receipt)}
-              title={`status · ${receiptState.receipt.status}`}
+              title={t("sla.receipt.statusTitle", {
+                status: receiptState.receipt.status,
+              })}
               body={receiptState.receipt.message}
             />
             <div style={{ height: 12 }} />
@@ -1004,23 +1059,27 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
               cols={1}
               items={[
                 {
-                  k: "status",
+                  k: t("sla.receipt.status"),
                   v: receiptState.receipt.status,
                   mono: true,
                 },
-                { k: "action", v: receiptState.actionKey, mono: true },
                 {
-                  k: "actionId",
+                  k: t("sla.receipt.action"),
+                  v: receiptState.actionKey,
+                  mono: true,
+                },
+                {
+                  k: t("sla.receipt.actionId"),
                   v: receiptState.receipt.actionId,
                   mono: true,
                 },
                 {
-                  k: "auditId",
+                  k: t("sla.receipt.auditId"),
                   v: receiptState.receipt.auditId,
                   mono: true,
                 },
                 {
-                  k: "resource",
+                  k: t("sla.receipt.resource"),
                   v: receiptState.receipt.resourceId,
                   mono: true,
                 },
@@ -1037,12 +1096,13 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                   {isSameTabLink(auditResourceLink) ? " →" : " ↗"}
                 </>,
                 receiptAuditHref ?? undefined,
-                "View audit",
+                t("sla.receipt.viewAudit"),
               )
             ) : (
               <div style={noteStyle}>
-                本次 receipt 未附可用 audit deep link；auditId ·{" "}
-                {receiptState.receipt.auditId}
+                {t("sla.receipt.auditMissing", {
+                  auditId: receiptState.receipt.auditId,
+                })}
               </div>
             )}
           </CanvasCard>
@@ -1054,13 +1114,17 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
             tone={pendingRecalculation ? "warn" : "info"}
             title={
               pendingRecalculation
-                ? "既有訂單 SLA 重算已排入佇列"
-                : "最近一次既有訂單重算請求"
+                ? t("sla.banner.recalculationQueuedTitle")
+                : t("sla.banner.recalculationHistoryTitle")
             }
             body={
               pendingRecalculation
-                ? `本次重算請求已 accepted，auditId=${receiptState?.receipt.auditId ?? "—"}。既有訂單在背景重算完成前，仍保留建立時 snapshot。`
-                : `最近一次重算請求於 ${formatDateTime(lastRecalculationAt)} 送出。既有訂單會保留建立時 snapshot，直到該次重算將新的 SLA profile 套用完成。`
+                ? t("sla.banner.recalculationQueuedBody", {
+                    auditId: receiptState?.receipt.auditId ?? "—",
+                  })
+                : t("sla.banner.recalculationHistoryBody", {
+                    time: formatDateTime(lastRecalculationAt),
+                  })
             }
           />
         ) : null}
@@ -1069,10 +1133,22 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           <CanvasBanner
             theme={th}
             tone={getRefreshTone(refreshMetadata)}
-            title={`Refresh cadence · ${REFRESH_TIER_CODE[refreshTier!]} · ${REFRESH_TIER_LABEL[refreshTier!]}`}
-            body={`source=${refreshMetadata!.source} · generatedAt=${formatDateTime(
-              refreshMetadata!.generatedAt,
-            )} · staleAfterMs=${refreshMetadata!.staleAfterMs}${refreshDeadline ? ` · next resync ${formatDateTime(new Date(refreshDeadline).toISOString())}` : ""}`}
+            title={t("sla.banner.refreshTitle", {
+              code: REFRESH_TIER_CODE[refreshTier!],
+              label: getRefreshTierLabel(t, refreshTier!),
+            })}
+            body={t("sla.banner.refreshBody", {
+              source: refreshMetadata!.source,
+              generatedAt: formatDateTime(refreshMetadata!.generatedAt),
+              staleAfterMs: refreshMetadata!.staleAfterMs,
+              nextResync: refreshDeadline
+                ? t("sla.banner.refreshNextResync", {
+                    time: formatDateTime(
+                      new Date(refreshDeadline).toISOString(),
+                    ),
+                  })
+                : "",
+            })}
           />
         ) : null}
 
@@ -1080,8 +1156,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           <CanvasBanner
             theme={th}
             tone="danger"
-            title="不支援的空狀態原因"
-            body="Backend returned driver_not_eligible for a tenant SLA route. This page only accepts the six tenant-console empty reasons from Q-X15/Q-TEN02."
+            title={t("sla.banner.unsupportedEmptyTitle")}
+            body={t("sla.banner.unsupportedEmptyBody")}
           />
         ) : null}
 
@@ -1091,15 +1167,12 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
           <div style={sectionStackStyle}>
             {emptyStateCard}
             <div style={gridStyle}>
-              <CanvasCard
-                theme={th}
-                title="當前門檻 · waitThresholdMin / arrivalThresholdMin / completionThresholdMin"
-              >
+              <CanvasCard theme={th} title={t("sla.card.thresholds.title")}>
                 <CanvasBanner
                   theme={th}
                   tone="info"
-                  title="變更影響範圍 · Q-TEN07"
-                  body="Threshold changes affect new bookings and newly computed SLA events. Existing bookings keep SLA profile snapshot at creation unless explicitly recalculated by admin command."
+                  title={t("sla.card.thresholds.bannerTitle")}
+                  body={t("sla.card.thresholds.bannerBody")}
                 />
 
                 <div style={{ height: 14 }} />
@@ -1107,8 +1180,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 <div style={kpiGridStyle}>
                   <CanvasField
                     theme={th}
-                    label="waitThresholdMin · 等候門檻"
-                    hint="超過此分鐘數標記為 wait 違規"
+                    label={t("sla.field.wait.label")}
+                    hint={t("sla.field.wait.hint")}
                   >
                     <div style={inputShellStyle}>
                       <input
@@ -1120,18 +1193,18 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         style={nativeInputStyle}
                         aria-label="waitThresholdMin"
                         disabled={isPending || !updateAction?.enabled}
-                        placeholder="分鐘"
+                        placeholder={t("sla.field.placeholder")}
                       />
                       <div style={inputMetaStyle}>
-                        <span>單位</span>
-                        <span>分鐘</span>
+                        <span>{t("sla.field.unit")}</span>
+                        <span>{t("sla.field.minutes")}</span>
                       </div>
                     </div>
                   </CanvasField>
                   <CanvasField
                     theme={th}
-                    label="arrivalThresholdMin · 抵達門檻"
-                    hint="ETA 與實際抵達差異上限"
+                    label={t("sla.field.arrival.label")}
+                    hint={t("sla.field.arrival.hint")}
                   >
                     <div style={inputShellStyle}>
                       <input
@@ -1143,18 +1216,18 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         style={nativeInputStyle}
                         aria-label="arrivalThresholdMin"
                         disabled={isPending || !updateAction?.enabled}
-                        placeholder="分鐘"
+                        placeholder={t("sla.field.placeholder")}
                       />
                       <div style={inputMetaStyle}>
-                        <span>單位</span>
-                        <span>分鐘</span>
+                        <span>{t("sla.field.unit")}</span>
+                        <span>{t("sla.field.minutes")}</span>
                       </div>
                     </div>
                   </CanvasField>
                   <CanvasField
                     theme={th}
-                    label="completionThresholdMin · 完成門檻"
-                    hint="預估 vs 實際行車時間差異上限"
+                    label={t("sla.field.completion.label")}
+                    hint={t("sla.field.completion.hint")}
                   >
                     <div style={inputShellStyle}>
                       <input
@@ -1166,11 +1239,11 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         style={nativeInputStyle}
                         aria-label="completionThresholdMin"
                         disabled={isPending || !updateAction?.enabled}
-                        placeholder="分鐘"
+                        placeholder={t("sla.field.placeholder")}
                       />
                       <div style={inputMetaStyle}>
-                        <span>單位</span>
-                        <span>分鐘</span>
+                        <span>{t("sla.field.unit")}</span>
+                        <span>{t("sla.field.minutes")}</span>
                       </div>
                     </div>
                   </CanvasField>
@@ -1179,22 +1252,22 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 <div style={footerStyle}>
                   <div style={noteStyle}>
                     {updateAction || recalcAction
-                      ? "availableActions 決定 CTA 顯示；高風險動作會在確認視窗收集 reason，送出後刷新本頁與相關 deep links。"
-                      : "目前 API 沒有回傳可操作的 SLA 動作。"}
+                      ? t("sla.footer.actionsAvailable")
+                      : t("sla.footer.noActions")}
                     {nextAction ? (
                       <div style={actionHintStyle}>
                         <span>
-                          emptyState.nextAction ·{" "}
-                          {actionLabel(nextAction.action)}
+                          {t("sla.footer.nextAction")} ·{" "}
+                          {actionLabel(nextAction.action, t)}
                         </span>
-                        <span>{formatActionCaption(nextAction)}</span>
+                        <span>{formatActionCaption(nextAction, t)}</span>
                       </div>
                     ) : null}
                     {availableActions.length > 0 ? (
                       <div style={actionHintStyle}>
                         {availableActions.map((action) => (
                           <span key={action.action}>
-                            {formatActionCaption(action)}
+                            {formatActionCaption(action, t)}
                           </span>
                         ))}
                       </div>
@@ -1211,10 +1284,13 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         disabled={isPending || !recalcAction.enabled}
                       >
                         {recalcAction.enabled
-                          ? "重算既有訂單"
-                          : `重算既有訂單 · ${disabledReasonLabel(
-                              recalcAction.disabledReasonCode,
-                            )}`}
+                          ? t("sla.action.recalculate")
+                          : t("sla.button.recalculateDisabled", {
+                              reason: disabledReasonLabel(
+                                recalcAction.disabledReasonCode,
+                                t,
+                              ),
+                            })}
                       </CanvasBtn>
                     ) : null}
                     {updateAction ? (
@@ -1225,37 +1301,42 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                         disabled={isPending || !updateAction.enabled}
                       >
                         {updateAction.enabled
-                          ? "儲存設定"
-                          : `儲存設定 · ${disabledReasonLabel(
-                              updateAction.disabledReasonCode,
-                            )}`}
+                          ? t("sla.action.update")
+                          : t("sla.button.updateDisabled", {
+                              reason: disabledReasonLabel(
+                                updateAction.disabledReasonCode,
+                                t,
+                              ),
+                            })}
                       </CanvasBtn>
                     ) : null}
                   </div>
                 </div>
               </CanvasCard>
 
-              <CanvasCard theme={th} title="效益 · 上月 SLA 達成率">
+              <CanvasCard theme={th} title={t("sla.card.attainment.title")}>
                 <div style={summaryCardStyle}>
                   <CanvasDL theme={th} cols={1} items={summaryItems} />
-                  <div style={noteStyle}>
-                    設計稿右側卡片保留 SLA attainment 區塊位置；目前 contract
-                    僅提供 profile、refresh 與 recalculation
-                    metadata，故這裡只呈現已回傳欄位，不自行推估達成率。
-                  </div>
+                  <div style={noteStyle}>{t("sla.card.attainment.body")}</div>
                   <div style={summaryListStyle}>
                     <div>
-                      <div style={summaryLabelStyle}>provenance</div>
+                      <div style={summaryLabelStyle}>
+                        {t("sla.card.attainment.provenance")}
+                      </div>
                       <div style={summaryValueStyle}>
                         {formatUpdatedByLine(profile?.updatedAt, updatedBy)}
                       </div>
                     </div>
                     <div>
-                      <div style={summaryLabelStyle}>recalculation state</div>
+                      <div style={summaryLabelStyle}>
+                        {t("sla.card.attainment.recalculationState")}
+                      </div>
                       <div style={summaryValueStyle}>{recalculationStatus}</div>
                     </div>
                     <div>
-                      <div style={summaryLabelStyle}>cross-app links</div>
+                      <div style={summaryLabelStyle}>
+                        {t("sla.card.attainment.crossAppLinks")}
+                      </div>
                       <div style={{ ...summaryValueStyle, ...linkRowStyle }}>
                         {resourceLinks.length > 0 ? (
                           resourceLinks.map((link) =>
@@ -1273,12 +1354,9 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 </div>
               </CanvasCard>
             </div>
-            <CanvasCard theme={th} title="深連結與後續追蹤">
+            <CanvasCard theme={th} title={t("sla.card.followUp.title")}>
               <div style={summaryCardStyle}>
-                <div style={noteStyle}>
-                  下列 deep links 全數直接使用 SLA view `resourceLinks`
-                  metadata，不在前端額外拼接 route。
-                </div>
+                <div style={noteStyle}>{t("sla.card.followUp.body")}</div>
                 <div style={inlineLinkRowStyle}>
                   {sameAppLinks.map((link) =>
                     renderResourceLink(
@@ -1306,7 +1384,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 theme={th}
                 tone={pendingAction.riskLevel === "high" ? "danger" : "accent"}
               >
-                {pendingAction.riskLevel} risk
+                {t("sla.modal.risk", { risk: pendingAction.riskLevel })}
               </CanvasPill>
               <div style={{ fontSize: 22, fontWeight: 700 }}>
                 {pendingActionPrompt.title}
@@ -1316,8 +1394,8 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
             {pendingAction.requiresReason ? (
               <CanvasField
                 theme={th}
-                label="操作原因"
-                hint="此欄位為必填，提交後會寫入 audit trail。"
+                label={t("sla.modal.reasonLabel")}
+                hint={t("sla.modal.reasonHint")}
               >
                 <textarea
                   value={pendingReason}
@@ -1325,7 +1403,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                   style={nativeTextAreaStyle}
                   disabled={isPending}
                   aria-label="pending-action-reason"
-                  placeholder="請填寫原因，說明這次 threshold 變更或重算目的"
+                  placeholder={t("sla.modal.reasonPlaceholder")}
                 />
               </CanvasField>
             ) : null}
@@ -1335,7 +1413,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                 onClick={closeActionConfirm}
                 disabled={isPending}
               >
-                取消
+                {t("sla.modal.cancel")}
               </CanvasBtn>
               <CanvasBtn
                 theme={th}
