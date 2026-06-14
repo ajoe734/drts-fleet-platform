@@ -117,7 +117,7 @@ export class FeatureFlagRepository {
       const result = await this.databaseService!.query<FeatureFlagRow>(
         `INSERT INTO admin.feature_flags (flag_key, enabled, description, tenant_id, updated_at)
          VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT (flag_key, tenant_id)
+         ON CONFLICT (flag_key, tenant_id) WHERE tenant_id IS NOT NULL
          DO UPDATE SET enabled = $2, description = $3, updated_at = NOW()
          RETURNING flag_key, enabled, description, tenant_id, updated_at`,
         [key, enabled, description, tenantId],

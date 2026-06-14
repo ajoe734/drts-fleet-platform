@@ -778,14 +778,24 @@ export class OwnedMobilityService implements OnModuleInit {
       this.ownedMobilityRepository?.isEnabled() &&
       this.tenantPartnerService?.isPersistenceEnabled()
     ) {
-      return this.ownedMobilityRepository.withTransaction(async (tx) => {
-        const approvalRequest = await applyGovernance(tx);
-        await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-          orders: [this.cloneOrder(order)],
-          dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
+      return this.ownedMobilityRepository
+        .withTransaction(async (tx) => {
+          const approvalRequest = await applyGovernance(tx);
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [this.cloneOrder(order)],
+            dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
+          });
+          return finalizeCreation(previousApprovalState, approvalRequest, false);
+        })
+        .catch((error) => {
+          // The DB transaction rolls back persisted rows, but the in-memory
+          // governance state (quota ledger / approval requests) is mutated
+          // eagerly during reservation. Restore the pre-booking snapshot so a
+          // rejected booking (e.g. APPROVAL_NO_RESOLVABLE_APPROVERS or a quota
+          // hard block) leaves no residue in the in-memory read models.
+          this.restoreTenantGovernanceSnapshot(governanceSnapshot);
+          throw error;
         });
-        return finalizeCreation(previousApprovalState, approvalRequest, false);
-      });
     }
 
     return this.withRollback(
