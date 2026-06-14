@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import type { FlowRoute } from "@/lib/navigation";
+import { useTranslation } from "@/lib/i18n";
 
 export function FlowRouteCards({
   routes,
@@ -8,6 +11,8 @@ export function FlowRouteCards({
   routes: FlowRoute[];
   emphasizeKind?: FlowRoute["kind"];
 }) {
+  const { t } = useTranslation();
+
   return (
     <section className="content-grid">
       {routes.map((route) => {
@@ -26,7 +31,7 @@ export function FlowRouteCards({
             <h3>{route.label}</h3>
             <p>{route.body}</p>
             <span className="text-link route-link">
-              Open route → {route.href}
+              {t("common.route.openWithHref", { href: route.href })}
             </span>
           </Link>
         );
