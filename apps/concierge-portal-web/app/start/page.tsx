@@ -1,45 +1,46 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { SessionGuard } from "@/components/session-guard";
 import {
   conciergeDeskCatalog,
+  formatDeskHealth,
   formatDeskMode,
+  formatQueuePolicy,
+  formatRecordingAvailability,
+  localizeDeskRecord,
   resolveDeskAccess,
 } from "@/lib/desk-catalog";
-import { SessionGuard } from "@/components/session-guard";
+import { useTranslation } from "@/lib/i18n";
 import { useConciergePortal } from "@/lib/portal-state";
 
 export default function StartPage() {
   const router = useRouter();
   const { session, selectDesk } = useConciergePortal();
+  const { t } = useTranslation();
 
   return (
     <div className="page-shell">
       <SessionGuard>
         <section className="hero-card">
-          <span className="section-kicker">Fixed site selection</span>
-          <h1>Choose the desk that owns this assisted-entry session.</h1>
-          <p>
-            Every call point remains bound to a site. The picker makes health,
-            recording posture, queue policy, and role restrictions visible
-            before the operator touches a booking form.
-          </p>
+          <span className="section-kicker">{t("start.eyebrow")}</span>
+          <h1>{t("start.title")}</h1>
+          <p>{t("start.body")}</p>
         </section>
 
         <section className="grid-columns">
-          {conciergeDeskCatalog.map((desk) => {
+          {conciergeDeskCatalog.map((deskRecord) => {
+            const desk = localizeDeskRecord(deskRecord, t)!;
             const access = session
-              ? resolveDeskAccess(desk, session.mode)
+              ? resolveDeskAccess(deskRecord, session.mode, t)
               : { allowed: false as const };
-            const healthLabel =
-              desk.health === "healthy" ? "Healthy" : "Degraded";
 
             return (
               <article className="info-card" key={desk.deskId}>
                 <span className="section-kicker">
                   {desk.deskType === "concierge"
-                    ? "Concierge desk"
-                    : "Call point"}
+                    ? t("start.card.concierge")
+                    : t("start.card.callPoint")}
                 </span>
                 <h3>{desk.deskName}</h3>
                 <p>{desk.notes}</p>
@@ -51,28 +52,33 @@ export default function StartPage() {
                         : " chip-warning"
                     }`}
                   >
-                    {healthLabel}
+                    {formatDeskHealth(desk.health, t)}
                   </span>
-                  <span className="chip">{desk.queuePolicy}</span>
                   <span className="chip">
-                    {desk.allowedModes.map(formatDeskMode).join(" / ")}
+                    {formatQueuePolicy(desk.queuePolicy, t)}
+                  </span>
+                  <span className="chip">
+                    {desk.allowedModes
+                      .map((mode) => formatDeskMode(mode, t))
+                      .join(" / ")}
                   </span>
                 </div>
                 <div className="kv-grid">
                   <div className="kv-item">
-                    <strong>Site</strong>
+                    <strong>{t("start.kv.site")}</strong>
                     <p>{desk.siteName}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Zone</strong>
+                    <strong>{t("start.kv.zone")}</strong>
                     <p>{desk.zoneLabel}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Recording</strong>
+                    <strong>{t("start.kv.recording")}</strong>
                     <p>
-                      {desk.recordingAvailability === "ops_callback_only"
-                        ? "Ops callback only"
-                        : "Inline callback"}
+                      {formatRecordingAvailability(
+                        desk.recordingAvailability,
+                        t,
+                      )}
                     </p>
                   </div>
                 </div>
@@ -101,7 +107,7 @@ export default function StartPage() {
                     }}
                     type="button"
                   >
-                    Select {desk.deskName}
+                    {t("start.selectDesk", { deskName: desk.deskName })}
                   </button>
                 </div>
               </article>

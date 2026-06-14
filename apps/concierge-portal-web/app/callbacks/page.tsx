@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 import type { CallSessionRecord } from "@drts/contracts";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
+import {
+  formatCallStatus,
+  formatCallbackStatus,
+  formatDateTime,
+  formatRecordingState,
+} from "@/lib/formatters";
+import { useTranslation } from "@/lib/i18n";
 import { useConciergePortal } from "@/lib/portal-state";
-
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "Not set";
-}
 
 export default function CallbacksPage() {
   const { session, recordCallbackTask } = useConciergePortal();
+  const { locale, t } = useTranslation();
   const [sessions, setSessions] = useState<CallSessionRecord[]>([]);
   const [selectedCallId, setSelectedCallId] = useState("");
   const [dueAt, setDueAt] = useState("");
@@ -39,7 +43,7 @@ export default function CallbacksPage() {
       setError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to load callback sessions.",
+          : t("callbacks.error.load"),
       );
     } finally {
       setLoading(false);
@@ -78,7 +82,7 @@ export default function CallbacksPage() {
           setError(
             nextError instanceof Error
               ? nextError.message
-              : "Failed to load callback sessions.",
+              : t("callbacks.error.load"),
           );
         }
       } finally {
@@ -91,26 +95,24 @@ export default function CallbacksPage() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, t]);
 
   return (
     <div className="page-shell">
       <SessionGuard requireDesk>
         <section className="hero-card">
-          <span className="section-kicker">Callbacks</span>
-          <h1>Schedule and close follow-up work from recent desk sessions.</h1>
-          <p>
-            The concierge surface stops short of complaint-case management, but
-            it still materializes callback creation and callback completion for
-            desk-owned sessions.
-          </p>
+          <span className="section-kicker">{t("callbacks.eyebrow")}</span>
+          <h1>{t("callbacks.title")}</h1>
+          <p>{t("callbacks.body")}</p>
         </section>
 
         {error ? <section className="error-copy">{error}</section> : null}
 
         <section className="panel-card">
-          <span className="section-kicker">Create callback</span>
-          <h2>Attach follow-up to the active or recent desk session.</h2>
+          <span className="section-kicker">
+            {t("callbacks.create.eyebrow")}
+          </span>
+          <h2>{t("callbacks.create.title")}</h2>
           <form
             className="form-grid"
             onSubmit={async (event) => {
@@ -140,7 +142,7 @@ export default function CallbacksPage() {
                 setError(
                   nextError instanceof Error
                     ? nextError.message
-                    : "Failed to create the callback task.",
+                    : t("callbacks.error.create"),
                 );
               } finally {
                 setLoading(false);
@@ -148,23 +150,28 @@ export default function CallbacksPage() {
             }}
           >
             <div className="field-stack">
-              <label htmlFor="call-id">Desk session</label>
+              <label htmlFor="call-id">{t("callbacks.field.session")}</label>
               <select
                 id="call-id"
                 onChange={(event) => setSelectedCallId(event.target.value)}
                 value={selectedCallId}
               >
-                <option value="">Select a recent call session</option>
+                <option value="">
+                  {t("callbacks.field.sessionPlaceholder")}
+                </option>
                 {sessions.map((callSession) => (
                   <option key={callSession.callId} value={callSession.callId}>
-                    {callSession.callId} · {callSession.status} ·{" "}
-                    {callSession.linkedOrderId ?? "No order yet"}
+                    {t("callbacks.optionLabel", {
+                      callId: callSession.callId,
+                      status: formatCallStatus(callSession.status, t),
+                      order: callSession.linkedOrderId ?? t("common.noneYet"),
+                    })}
                   </option>
                 ))}
               </select>
             </div>
             <div className="field-stack">
-              <label htmlFor="callback-due">Due time</label>
+              <label htmlFor="callback-due">{t("callbacks.field.due")}</label>
               <input
                 id="callback-due"
                 onChange={(event) => setDueAt(event.target.value)}
@@ -173,7 +180,7 @@ export default function CallbacksPage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="callback-note">Callback note</label>
+              <label htmlFor="callback-note">{t("callbacks.field.note")}</label>
               <textarea
                 id="callback-note"
                 onChange={(event) => setNote(event.target.value)}
@@ -186,27 +193,29 @@ export default function CallbacksPage() {
                 disabled={loading}
                 type="submit"
               >
-                Create callback task
+                {t("callbacks.submit")}
               </button>
             </div>
           </form>
         </section>
 
         <section className="panel-card">
-          <span className="section-kicker">Recent session follow-up</span>
-          <h2>Desk callback state</h2>
-          {loading ? <p>Loading callback state.</p> : null}
+          <span className="section-kicker">
+            {t("callbacks.recent.eyebrow")}
+          </span>
+          <h2>{t("callbacks.recent.title")}</h2>
+          {loading ? <p>{t("callbacks.loading")}</p> : null}
           {!loading && sessions.length === 0 ? (
-            <p className="empty-state">
-              No desk sessions are stored in this browser session yet.
-            </p>
+            <p className="empty-state">{t("common.noRecentCallSessions")}</p>
           ) : null}
           <div className="list-stack">
             {sessions.map((callSession) => (
               <article className="detail-card" key={callSession.callId}>
                 <header>
                   <div>
-                    <span className="section-kicker">Call session</span>
+                    <span className="section-kicker">
+                      {t("callbacks.card.eyebrow")}
+                    </span>
                     <h3>{callSession.callId}</h3>
                   </div>
                   <span
@@ -218,25 +227,33 @@ export default function CallbacksPage() {
                           : ""
                     }`}
                   >
-                    {callSession.callbackTask?.status ?? "No callback"}
+                    {formatCallbackStatus(callSession.callbackTask?.status, t)}
                   </span>
                 </header>
                 <div className="kv-grid">
                   <div className="kv-item">
-                    <strong>Linked order</strong>
-                    <p>{callSession.linkedOrderId ?? "None yet"}</p>
+                    <strong>{t("callbacks.kv.order")}</strong>
+                    <p>{callSession.linkedOrderId ?? t("common.noneYet")}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Recording</strong>
-                    <p>{callSession.recordingState}</p>
+                    <strong>{t("callbacks.kv.recording")}</strong>
+                    <p>{formatRecordingState(callSession.recordingState, t)}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Callback due</strong>
-                    <p>{formatDateTime(callSession.callbackTask?.dueAt)}</p>
+                    <strong>{t("callbacks.kv.due")}</strong>
+                    <p>
+                      {formatDateTime(
+                        callSession.callbackTask?.dueAt,
+                        locale,
+                        t,
+                      )}
+                    </p>
                   </div>
                   <div className="kv-item">
-                    <strong>Callback note</strong>
-                    <p>{callSession.callbackTask?.note ?? "No note"}</p>
+                    <strong>{t("callbacks.kv.note")}</strong>
+                    <p>
+                      {callSession.callbackTask?.note ?? t("common.noNote")}
+                    </p>
                   </div>
                 </div>
                 {callSession.callbackTask?.status !== "completed" ? (
@@ -267,7 +284,7 @@ export default function CallbacksPage() {
                         setError(
                           nextError instanceof Error
                             ? nextError.message
-                            : "Failed to complete the callback task.",
+                            : t("callbacks.error.complete"),
                         );
                       } finally {
                         setLoading(false);
@@ -276,7 +293,7 @@ export default function CallbacksPage() {
                   >
                     <div className="field-stack">
                       <label htmlFor={`complete-note-${callSession.callId}`}>
-                        Completion note
+                        {t("callbacks.complete.label")}
                       </label>
                       <textarea
                         id={`complete-note-${callSession.callId}`}
@@ -292,7 +309,7 @@ export default function CallbacksPage() {
                         disabled={loading}
                         type="submit"
                       >
-                        Mark callback completed
+                        {t("callbacks.complete.submit")}
                       </button>
                     </div>
                   </form>

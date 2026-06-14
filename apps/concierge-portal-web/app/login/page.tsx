@@ -3,16 +3,18 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDeskMode } from "@/lib/desk-catalog";
+import { useTranslation } from "@/lib/i18n";
 import { useConciergePortal } from "@/lib/portal-state";
 
 export default function LoginPage() {
   const router = useRouter();
   const { session, signIn } = useConciergePortal();
+  const { t } = useTranslation();
   const [operatorName, setOperatorName] = useState(
-    session?.operatorName ?? "Lobby Desk Operator",
+    session?.operatorName ?? t("login.defaultName"),
   );
   const [operatorId, setOperatorId] = useState(
-    session?.operatorId ?? "CP-OPS-001",
+    session?.operatorId ?? t("login.defaultId"),
   );
   const [mode, setMode] = useState<
     "concierge_operator" | "call_point_operator"
@@ -21,19 +23,14 @@ export default function LoginPage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="section-kicker">Repo-local sign-in</span>
-        <h1>Bootstrap the assisted-entry operator locally.</h1>
-        <p>
-          Canonical PRD truth requires site-bound sign-in, but the repo does not
-          yet expose a dedicated call-point bootstrap session contract. This
-          route therefore creates a local desk session and scopes API access to
-          the narrow assisted-entry capabilities only.
-        </p>
+        <span className="section-kicker">{t("login.eyebrow")}</span>
+        <h1>{t("login.title")}</h1>
+        <p>{t("login.body")}</p>
       </section>
 
       <section className="panel-card">
-        <span className="section-kicker">Bootstrap form</span>
-        <h2>Choose the desk role before selecting a site.</h2>
+        <span className="section-kicker">{t("login.form.eyebrow")}</span>
+        <h2>{t("login.form.title")}</h2>
         <form
           className="form-grid"
           onSubmit={(event) => {
@@ -47,34 +44,29 @@ export default function LoginPage() {
           }}
         >
           <div className="field-stack">
-            <label htmlFor="operator-name">Operator display name</label>
+            <label htmlFor="operator-name">{t("login.field.name")}</label>
             <input
               id="operator-name"
               onChange={(event) => setOperatorName(event.target.value)}
               required
               value={operatorName}
             />
-            <p className="form-help">
-              Stored only in local browser state for the repo demo shell.
-            </p>
+            <p className="form-help">{t("login.help.name")}</p>
           </div>
 
           <div className="field-stack">
-            <label htmlFor="operator-id">Operator id</label>
+            <label htmlFor="operator-id">{t("login.field.id")}</label>
             <input
               id="operator-id"
               onChange={(event) => setOperatorId(event.target.value)}
               required
               value={operatorId}
             />
-            <p className="form-help">
-              Reused as the limited-scope `x-actor-id` when the portal talks to
-              callcenter and order APIs.
-            </p>
+            <p className="form-help">{t("login.help.id")}</p>
           </div>
 
           <div className="field-stack">
-            <label htmlFor="operator-mode">Desk lane</label>
+            <label htmlFor="operator-mode">{t("login.field.mode")}</label>
             <select
               id="operator-mode"
               onChange={(event) =>
@@ -87,20 +79,18 @@ export default function LoginPage() {
               value={mode}
             >
               <option value="concierge_operator">
-                {formatDeskMode("concierge_operator")}
+                {formatDeskMode("concierge_operator", t)}
               </option>
               <option value="call_point_operator">
-                {formatDeskMode("call_point_operator")}
+                {formatDeskMode("call_point_operator", t)}
               </option>
             </select>
-            <p className="form-help">
-              Desk selection enforces role mismatch through the denied route.
-            </p>
+            <p className="form-help">{t("login.help.mode")}</p>
           </div>
 
           <div className="inline-actions">
             <button className="primary-button" type="submit">
-              Continue to fixed site selector
+              {t("login.submit")}
             </button>
           </div>
         </form>
