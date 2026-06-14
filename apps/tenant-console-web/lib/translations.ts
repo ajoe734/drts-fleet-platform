@@ -1115,6 +1115,140 @@ const en = {
   // ── costCenters (i18n-fullsweep 20260614) ──
 
   // ── reports (i18n-fullsweep 20260614) ──
+  "reports.title": "Reports",
+  "reports.subtitle":
+    "Monthly usage · Cost-center split · SLA summary · Short-lived signed files",
+  "reports.action.refresh": "Refresh",
+  "reports.action.createJob": "Create job",
+  "reports.type.trip_summary": "Trip summary",
+  "reports.type.monthly_trip_report": "Monthly usage",
+  "reports.type.revenue_summary": "Cost-center split",
+  "reports.type.incident_register": "Incident register",
+  "reports.type.operational_overview": "Operations overview",
+  "reports.status.all": "All statuses",
+  "reports.status.queued": "Queued",
+  "reports.status.running": "Running",
+  "reports.status.completed": "Completed",
+  "reports.status.failed": "Failed",
+  "reports.status.expired": "Expired",
+  "reports.param.period": "Period {value}",
+  "reports.param.costCenter": "Cost center {value}",
+  "reports.param.passenger": "Passenger {value}",
+  "reports.param.tenant": "Tenant {value}",
+  "reports.param.defaultScope": "Default tenant scope",
+  "reports.empty.not_provisioned.title":
+    "Reporting is not provisioned for this tenant",
+  "reports.empty.not_provisioned.description":
+    "The route can open, but the backend has not yet provisioned reporting for this tenant. Use the cross-app governance links to confirm entitlements, file signing, and report readiness.",
+  "reports.empty.fetch_failed.title": "Unable to load report jobs",
+  "reports.empty.fetch_failed.description":
+    "The page frame is available, but the report job list failed to load. Refresh once the dependent service recovers.",
+  "reports.empty.permission_denied.title":
+    "This identity cannot operate tenant reports",
+  "reports.empty.permission_denied.description":
+    "Reports stay in navigation, but the current identity is not permitted to list or create report jobs for this tenant.",
+  "reports.empty.external_unavailable.title":
+    "Report dependency is temporarily unavailable",
+  "reports.empty.external_unavailable.description":
+    "The backend reporting service is currently degraded. Wait for the dependency to recover, then manually refresh the job list.",
+  "reports.empty.filtered_empty.title": "No jobs match the current filters",
+  "reports.empty.filtered_empty.description":
+    "This tenant has report history, but the current type, status, or period filter found no match. Clear the filters to see the full queue.",
+  "reports.empty.no_data.title": "No report jobs created yet",
+  "reports.empty.no_data.description":
+    "You can create the first tenant report job from this page. The backend owns the job lifecycle and provides a short-lived signed download URL once the file is ready.",
+  "reports.artifact.signed": "Signed file",
+  "reports.artifact.expired": "File expired",
+  "reports.artifact.notReady": "Not ready",
+  "reports.statusReason.failed":
+    "The backend recorded this job as failed; you can rerun it with the same parameters.",
+  "reports.statusReason.expired":
+    "The signed URL has expired; create a new job to produce a fresh file.",
+  "reports.crossApp.opsReporting":
+    "Open ops-console reporting to trace filing / revenue",
+  "reports.crossApp.platformAudit":
+    "Open platform-admin audit to govern produced files",
+  "reports.flash.actionFailed.title": "Report action failed",
+  "reports.flash.unknownError": "Unknown reporting error.",
+  "reports.flash.refreshSent.title": "Report list refresh submitted",
+  "reports.flash.refreshSent.description":
+    "This route is a T6 manual update; the page reloads the latest report job snapshot.",
+  "reports.flash.jobQueued.title": "Report job queued",
+  "reports.flash.jobQueued.description":
+    "Job {jobId} has been accepted. Refresh or wait for the backend to produce the signed file.",
+  "reports.flash.rerunQueued.title": "Failed report re-queued",
+  "reports.flash.rerunQueued.description":
+    "Replacement job {jobId} was accepted with the original type and scope.",
+  "reports.confirm.rerun": "Rerun report job {jobId} with the same parameters?",
+  "reports.col.job": "Job",
+  "reports.col.type": "Type",
+  "reports.col.parameters": "Parameters",
+  "reports.col.status": "Status",
+  "reports.col.created": "Created",
+  "reports.col.completed": "Completed",
+  "reports.col.format": "Format",
+  "reports.col.expires": "Expires",
+  "reports.col.file": "File",
+  "reports.col.actions": "Actions",
+  "reports.rowAction.download": "Download",
+  "reports.rowAction.rerun": "Rerun",
+  "reports.errorsBanner.title": "Report data could not be fully loaded",
+  "reports.errorsBanner.body":
+    "The route is still usable, but one or more report data sources failed.",
+  "reports.errorsBanner.count": "{count} issues",
+  "reports.t6.title": "Update tier T6: manual",
+  "reports.t6.body":
+    "This route does not auto-poll. Snapshot loaded at {time}; update tier stays {tier}.",
+  "reports.tier.manual": "manual",
+  "reports.crossAppBanner.title": "Cross-app report tracing stays explicit",
+  "reports.crossAppBanner.body":
+    "Tenant reports can connect to operational reporting or platform governance; per Q-X03, cross-app deep links open in a new tab.",
+  "reports.crossAppBanner.openOps": "Open Ops reporting",
+  "reports.crossAppBanner.openPlatformAudit": "Open platform audit",
+  "reports.crossAppBanner.tenantAudit": "Tenant audit",
+  "reports.kpi.jobs": "Jobs",
+  "reports.kpi.jobsSub": "Report job history",
+  "reports.kpi.active": "Queued / running",
+  "reports.kpi.activeSub": "Backend is producing files",
+  "reports.kpi.ready": "Ready",
+  "reports.kpi.readySub": "Signed download still valid",
+  "reports.kpi.failedExpired": "Failed / expired",
+  "reports.kpi.failedExpiredSub": "Needs rerun or regeneration",
+  "reports.queue.title": "Report queue",
+  "reports.queue.subtitle":
+    "Type, status, period, file TTL, and manual retry all follow the contract.",
+  "reports.filter.type": "Type filter",
+  "reports.filter.status": "Status filter",
+  "reports.filter.period": "Period filter",
+  "reports.filter.periodHint": "Matches the period embedded in job parameters.",
+  "reports.filter.allTypes": "All types",
+  "reports.filter.clear": "Clear filters",
+  "reports.create.title": "Create report job",
+  "reports.create.subtitle":
+    "Type, period, and scope parameters are sent straight to the backend queue.",
+  "reports.create.jobType": "Job type",
+  "reports.create.format": "Format",
+  "reports.create.period": "Period",
+  "reports.create.periodHint": "Monthly reports usually use YYYY-MM.",
+  "reports.create.costCenter": "Cost center",
+  "reports.create.costCenterHint":
+    "Optional scope refinement, e.g. CC-FIN-001.",
+  "reports.create.passenger": "Passenger",
+  "reports.create.passengerHint":
+    "Optional passenger drill-down for scoped export.",
+  "reports.create.submit": "Queue report",
+  "reports.create.submitting": "Submitting...",
+  "reports.create.refreshList": "Refresh list",
+  "reports.override.title": "Status overrides",
+  "reports.override.subtitle":
+    "Manual QA shortcuts for the six shared EmptyReason variants.",
+  "reports.override.liveData": "Live data",
+  "reports.deepLinks.title": "Cross-app deep links",
+  "reports.deepLinks.subtitle":
+    "Reports can route to file download, tenant audit, or external operational follow-up.",
+  "reports.deepLinks.auditReceipt":
+    "View the audit receipt for tenant-side report actions",
+  "reports.deepLinks.open": "Open",
 
   // ── rules (i18n-fullsweep 20260614) ──
 
@@ -2386,6 +2520,126 @@ const zh: Record<keyof typeof en, string> = {
   // ── costCenters (i18n-fullsweep 20260614) ──
 
   // ── reports (i18n-fullsweep 20260614) ──
+  "reports.title": "報表",
+  "reports.subtitle": "月用量 · 成本中心拆分 · SLA 摘要 · 短效簽名檔案",
+  "reports.action.refresh": "重新整理",
+  "reports.action.createJob": "建立工作",
+  "reports.type.trip_summary": "行程摘要",
+  "reports.type.monthly_trip_report": "月用量",
+  "reports.type.revenue_summary": "成本中心拆分",
+  "reports.type.incident_register": "事件登錄",
+  "reports.type.operational_overview": "維運總覽",
+  "reports.status.all": "所有狀態",
+  "reports.status.queued": "排隊中",
+  "reports.status.running": "執行中",
+  "reports.status.completed": "完成",
+  "reports.status.failed": "失敗",
+  "reports.status.expired": "已過期",
+  "reports.param.period": "期別 {value}",
+  "reports.param.costCenter": "成本中心 {value}",
+  "reports.param.passenger": "乘客 {value}",
+  "reports.param.tenant": "租戶 {value}",
+  "reports.param.defaultScope": "預設租戶範圍",
+  "reports.empty.not_provisioned.title": "此租戶尚未開通報表能力",
+  "reports.empty.not_provisioned.description":
+    "路由可以開啟，但後端尚未為此租戶開通報表能力。請透過跨應用治理連結確認權益、檔案簽章與報表就緒狀態。",
+  "reports.empty.fetch_failed.title": "無法載入報表工作",
+  "reports.empty.fetch_failed.description":
+    "頁面框架可用，但報表工作清單讀取失敗。待相依服務恢復後，請重新整理一次。",
+  "reports.empty.permission_denied.title": "目前身分無法操作租戶報表",
+  "reports.empty.permission_denied.description":
+    "報表仍保留在導覽中，但目前身分沒有列出或建立此租戶報表工作的權限。",
+  "reports.empty.external_unavailable.title": "報表相依服務暫時不可用",
+  "reports.empty.external_unavailable.description":
+    "後端報表服務目前降級。請等待相依服務恢復後，再手動刷新工作清單。",
+  "reports.empty.filtered_empty.title": "目前篩選沒有符合的工作",
+  "reports.empty.filtered_empty.description":
+    "此租戶有報表歷史，但目前類型、狀態或期別篩選沒有命中。清除篩選即可查看完整佇列。",
+  "reports.empty.no_data.title": "尚未建立任何報表工作",
+  "reports.empty.no_data.description":
+    "你可以從此頁建立第一個租戶報表工作。後端會負責工作生命週期，並在檔案完成後提供短效簽名下載網址。",
+  "reports.artifact.signed": "已簽名檔案",
+  "reports.artifact.expired": "檔案已過期",
+  "reports.artifact.notReady": "尚未就緒",
+  "reports.statusReason.failed": "後端紀錄此工作失敗，可用相同參數重新執行。",
+  "reports.statusReason.expired": "簽名網址已過期，請建立新工作產生新的檔案。",
+  "reports.crossApp.opsReporting": "開啟 ops-console 報表以追溯申報／營收",
+  "reports.crossApp.platformAudit": "開啟 platform-admin audit 以治理產出檔案",
+  "reports.flash.actionFailed.title": "報表操作失敗",
+  "reports.flash.unknownError": "未知報表錯誤。",
+  "reports.flash.refreshSent.title": "已送出報表清單刷新",
+  "reports.flash.refreshSent.description":
+    "此路由屬於 T6 手動更新；頁面會重新載入最新的報表作業快照。",
+  "reports.flash.jobQueued.title": "報表工作已排入佇列",
+  "reports.flash.jobQueued.description":
+    "工作 {jobId} 已受理。請刷新或等待後端產生簽名檔案。",
+  "reports.flash.rerunQueued.title": "失敗報表已重新排入佇列",
+  "reports.flash.rerunQueued.description":
+    "替代工作 {jobId} 已用原本類型與範圍受理。",
+  "reports.confirm.rerun": "要用相同參數重跑報表工作 {jobId} 嗎？",
+  "reports.col.job": "工作",
+  "reports.col.type": "類型",
+  "reports.col.parameters": "參數",
+  "reports.col.status": "狀態",
+  "reports.col.created": "建立",
+  "reports.col.completed": "完成",
+  "reports.col.format": "格式",
+  "reports.col.expires": "到期",
+  "reports.col.file": "檔案",
+  "reports.col.actions": "操作",
+  "reports.rowAction.download": "下載",
+  "reports.rowAction.rerun": "重跑",
+  "reports.errorsBanner.title": "報表資料無法完整載入",
+  "reports.errorsBanner.body": "路由仍可使用，但一個或多個報表讀取來源失敗。",
+  "reports.errorsBanner.count": "{count} 個問題",
+  "reports.t6.title": "更新層級 T6：手動",
+  "reports.t6.body":
+    "此路由不自動輪詢。快照載入於 {time}，更新層級維持 {tier}。",
+  "reports.tier.manual": "手動",
+  "reports.crossAppBanner.title": "跨應用報表追溯保持明確",
+  "reports.crossAppBanner.body":
+    "租戶報表可銜接營運報表或平台治理；依 Q-X03，跨應用深連結會在新分頁開啟。",
+  "reports.crossAppBanner.openOps": "開啟 Ops 報表",
+  "reports.crossAppBanner.openPlatformAudit": "開啟平台 audit",
+  "reports.crossAppBanner.tenantAudit": "租戶 audit",
+  "reports.kpi.jobs": "工作",
+  "reports.kpi.jobsSub": "報表工作歷史",
+  "reports.kpi.active": "排隊／執行中",
+  "reports.kpi.activeSub": "後端正在產出檔案",
+  "reports.kpi.ready": "就緒",
+  "reports.kpi.readySub": "簽名下載仍有效",
+  "reports.kpi.failedExpired": "失敗／過期",
+  "reports.kpi.failedExpiredSub": "需要重跑或重新產檔",
+  "reports.queue.title": "報表佇列",
+  "reports.queue.subtitle":
+    "類型、狀態、期別、檔案 TTL 與手動重試都以契約為依據。",
+  "reports.filter.type": "類型篩選",
+  "reports.filter.status": "狀態篩選",
+  "reports.filter.period": "期別篩選",
+  "reports.filter.periodHint": "對應工作參數中內嵌的期別。",
+  "reports.filter.allTypes": "所有類型",
+  "reports.filter.clear": "清除篩選",
+  "reports.create.title": "建立報表工作",
+  "reports.create.subtitle": "類型、期別與範圍參數直接送入後端佇列。",
+  "reports.create.jobType": "工作類型",
+  "reports.create.format": "格式",
+  "reports.create.period": "期別",
+  "reports.create.periodHint": "月報通常使用 YYYY-MM。",
+  "reports.create.costCenter": "成本中心",
+  "reports.create.costCenterHint": "選填的範圍細化，例如 CC-FIN-001。",
+  "reports.create.passenger": "乘客",
+  "reports.create.passengerHint": "選填的乘客下鑽，用於範圍匯出。",
+  "reports.create.submit": "排入報表佇列",
+  "reports.create.submitting": "送出中...",
+  "reports.create.refreshList": "重新整理清單",
+  "reports.override.title": "狀態覆蓋",
+  "reports.override.subtitle": "六種共用 EmptyReason 變體的手動 QA 捷徑。",
+  "reports.override.liveData": "即時資料",
+  "reports.deepLinks.title": "跨應用深層連結",
+  "reports.deepLinks.subtitle":
+    "報表可導向檔案下載、租戶 audit 或外部營運後續。",
+  "reports.deepLinks.auditReceipt": "查看租戶端報表操作的 audit 收據",
+  "reports.deepLinks.open": "開啟",
 
   // ── rules (i18n-fullsweep 20260614) ──
 
