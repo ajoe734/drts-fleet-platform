@@ -5,6 +5,7 @@ export const AUTH_ACTOR_TYPES = [
   "ops_user",
   "driver_user",
   "partner_api_key",
+  "referral_passenger",
 ] as const;
 
 export type AuthActorType = (typeof AUTH_ACTOR_TYPES)[number];

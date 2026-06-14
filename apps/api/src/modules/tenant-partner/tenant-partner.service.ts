@@ -22,6 +22,7 @@ import type {
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
+  CreatePartnerIngressHandoffCommand,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
   EscalateTenantBookingApprovalRequestCommand,
@@ -161,6 +162,7 @@ import {
   REFERENCE_TOKEN_ELIGIBILITY_ADAPTER_CODE,
   ReferenceTokenEligibilityAdapter,
 } from "./reference-token-eligibility.adapter";
+import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import {
   TenantPartnerRepository,
   type PersistTenantPartnerChanges,
@@ -244,6 +246,10 @@ type PartnerIngressCredentialBootstrap = {
 type PartnerIngressResolution = {
   partnerEntry: PartnerChannelEntryRecord;
   identity: IdentityContext;
+};
+
+type PartnerIngressHandoffResolution = PartnerIngressResolution & {
+  drtsPassengerId: string;
 };
 
 type PartnerEligibilityIdentity = Pick<
@@ -811,6 +817,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       new BankCardInlineEligibilityAdapter(),
       new ReferenceTokenEligibilityAdapter(),
     ],
+    @Optional()
+    private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
   ) {
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
@@ -4331,6 +4339,76 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return {
       partnerEntry: this.clonePartnerEntry(entry),
       identity,
+    };
+  }
+
+  async issuePartnerIngressHandoff(
+    command: CreatePartnerIngressHandoffCommand,
+    requestId?: string,
+  ): Promise<PartnerIngressHandoffResolution> {
+    const bootstrap = this.authenticatePartnerBootstrap(
+      {
+        entrySlug: command.entrySlug,
+        apiKey: command.apiKey,
+      },
+      requestId,
+    );
+    const partnerUserRef = command.partnerUserRef?.trim();
+    if (!partnerUserRef) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_USER_REF_REQUIRED",
+        "partnerUserRef is required for partner ingress handoff.",
+        {},
+      );
+    }
+
+    const now = new Date().toISOString();
+    const link = await this.partnerUserIdentityLinkRepository.resolveOrCreate({
+      entrySlug: bootstrap.partnerEntry.entrySlug,
+      partnerUserRef,
+      consentScope: command.consentScope ?? "passenger_identity_link",
+      now,
+    });
+    const observed =
+      (await this.partnerUserIdentityLinkRepository.touchLastSeen(
+        bootstrap.partnerEntry.entrySlug,
+        partnerUserRef,
+        now,
+      )) ?? link;
+
+    if (observed.status !== "active") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_USER_IDENTITY_REVOKED",
+        "The partner user identity link is no longer active.",
+        {
+          entrySlug: bootstrap.partnerEntry.entrySlug,
+          partnerUserRef,
+        },
+      );
+    }
+
+    return {
+      partnerEntry: bootstrap.partnerEntry,
+      drtsPassengerId: observed.drtsPassengerId,
+      identity: {
+        actorType: "referral_passenger",
+        actorId: observed.drtsPassengerId,
+        realm: "partner",
+        authMode: "bootstrap_headers",
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: ["partner:handoff"],
+        tenantId: bootstrap.identity.tenantId,
+        partnerId: bootstrap.identity.partnerId ?? null,
+        partnerProgramId: bootstrap.identity.partnerProgramId ?? null,
+        partnerEntrySlug: bootstrap.partnerEntry.entrySlug,
+        supportedExecutionModes: [
+          "discussion_planning",
+          "supervisor_managed_execution",
+        ],
+      },
     };
   }
 

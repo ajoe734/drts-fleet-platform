@@ -15,6 +15,7 @@ import type {
   AcknowledgeOpsApprovalRequestBreachCommand,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
+  CreatePartnerIngressHandoffCommand,
   IdentityContext,
   EscalateTenantBookingApprovalRequestCommand,
   IssuePartnerIngressCredentialCommand,
@@ -40,6 +41,7 @@ import type {
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  PartnerIngressHandoffSession,
   RecalculateTenantSlaBookingsCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
@@ -80,10 +82,23 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
-import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { JwtAuthService } from "../../common/auth/jwt-auth.service";
+import {
+  OPEN_ROUTE_RATE_LIMIT,
+  READ_HEAVY_RATE_LIMIT,
+} from "../../common/throttling/rate-limit.constants";
 import { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "./tenant-partner.service";
+
+type JwtExpiresIn = NonNullable<
+  Extract<
+    NonNullable<Parameters<JwtAuthService["sign"]>[1]>["expiresIn"],
+    string
+  >
+>;
+
+const PARTNER_INGRESS_HANDOFF_EXPIRES_IN: JwtExpiresIn = "15m";
 
 @Controller()
 export class TenantPartnerController {
@@ -91,6 +106,7 @@ export class TenantPartnerController {
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly billingSettlementService: BillingSettlementService,
     private readonly ownedMobilityService: OwnedMobilityService,
+    private readonly jwtAuthService: JwtAuthService,
   ) {}
 
   private requireTenantId(tenantId?: string) {
@@ -123,6 +139,31 @@ export class TenantPartnerController {
     return identity?.roles?.[0] ?? null;
   }
 
+  private signJwt(
+    identity: Parameters<JwtAuthService["sign"]>[0],
+    expiresIn: JwtExpiresIn,
+  ) {
+    try {
+      return this.jwtAuthService.sign(identity, { expiresIn });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("JWT_SECRET environment variable is not set")
+      ) {
+        throw new ApiRequestError(
+          503,
+          "JWT_NOT_CONFIGURED",
+          "JWT session issuance is not configured for this environment.",
+          {
+            requiredEnv: "JWT_SECRET",
+          },
+        );
+      }
+
+      throw error;
+    }
+  }
+
   @Get("tenant-partner/summary")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getSummary(@Headers("x-request-id") requestId?: string) {
@@ -136,6 +177,60 @@ export class TenantPartnerController {
     };
 
     return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/ingress/handoff")
+  async issuePartnerIngressHandoff(
+    @Body() command: CreatePartnerIngressHandoffCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolved = await this.tenantPartnerService.issuePartnerIngressHandoff(
+      command,
+      requestId,
+    );
+    const token = this.signJwt(
+      {
+        authMode: resolved.identity.authMode,
+        actorType: resolved.identity.actorType,
+        actorId: resolved.identity.actorId,
+        realm: resolved.identity.realm,
+        tenantId: resolved.identity.tenantId,
+        partnerId: resolved.identity.partnerId ?? null,
+        partnerProgramId: resolved.identity.partnerProgramId ?? null,
+        partnerEntrySlug: resolved.identity.partnerEntrySlug ?? null,
+        roleFamilies: resolved.identity.roleFamilies,
+        roles: resolved.identity.roles,
+        scopes: resolved.identity.scopes,
+        drtsPassengerId: resolved.drtsPassengerId,
+        requestId: requestId ?? null,
+      },
+      PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
+    );
+    const session: PartnerIngressHandoffSession = {
+      accessToken: token,
+      tokenType: "Bearer",
+      expiresIn: PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
+      partnerEntrySlug: resolved.partnerEntry.entrySlug,
+      drtsPassengerId: resolved.drtsPassengerId,
+      identity: {
+        actorType: "referral_passenger",
+        actorId: resolved.drtsPassengerId,
+        realm: "partner",
+        authMode: "jwt_bearer",
+        roleFamilies: ["partner"],
+        roles: [...resolved.identity.roles],
+        scopes: [...resolved.identity.scopes],
+        tenantId: resolved.identity.tenantId,
+        partnerId: resolved.identity.partnerId ?? null,
+        partnerProgramId: resolved.identity.partnerProgramId ?? null,
+        partnerEntrySlug: resolved.partnerEntry.entrySlug,
+        drtsPassengerId: resolved.drtsPassengerId,
+      },
+    };
+
+    return toApiSuccessEnvelope(session, requestId);
   }
 
   @Get("tenant/dashboard")

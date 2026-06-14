@@ -62,3 +62,32 @@ export interface PartnerUserIdentityLinkRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CreatePartnerIngressHandoffCommand {
+  entrySlug: string;
+  apiKey: string;
+  partnerUserRef: string;
+  consentScope?: PartnerUserIdentityConsentScope;
+}
+
+export interface PartnerIngressHandoffSession {
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresIn: string;
+  partnerEntrySlug: string;
+  drtsPassengerId: string;
+  identity: {
+    actorType: "referral_passenger";
+    actorId: string;
+    realm: "partner";
+    authMode: "jwt_bearer";
+    roleFamilies: ["partner"];
+    roles: string[];
+    scopes: string[];
+    tenantId: string | null;
+    partnerId: string | null;
+    partnerProgramId: string | null;
+    partnerEntrySlug: string;
+    drtsPassengerId: string;
+  };
+}

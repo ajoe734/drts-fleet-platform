@@ -225,7 +225,8 @@ export interface IdentityContext {
     | "tenant_admin"
     | "ops_user"
     | "driver_user"
-    | "partner_api_key";
+    | "partner_api_key"
+    | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
   authMode: "bootstrap_headers" | "jwt_bearer";
@@ -645,7 +646,8 @@ export interface AuditLogRecord {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
-    | "partner_api_key";
+    | "partner_api_key"
+    | "referral_passenger";
   tenantId: string | null;
   moduleName: string;
   actionName: string;
