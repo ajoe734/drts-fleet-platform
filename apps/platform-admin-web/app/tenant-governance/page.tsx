@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { t as translate, type Locale } from "@/lib/translations";
 import type {
   PlatformAdminTenantRecord,
   PlatformTenantGovernanceAlertFlag,
@@ -112,10 +113,8 @@ function formatPercent(value: number) {
   })}%`;
 }
 
-function formatMonthlyPlan(value: number, locale: string) {
-  return locale === "en"
-    ? `${formatCount(value)}/mo`
-    : `${formatCount(value)}/月`;
+function formatMonthlyPlan(value: number, locale: Locale) {
+  return translate("paMisc.monthlyPlan", locale, { count: formatCount(value) });
 }
 
 function getThresholdTone(value: number): CanvasTone {

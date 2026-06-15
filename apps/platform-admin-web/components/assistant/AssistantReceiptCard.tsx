@@ -13,6 +13,7 @@ import {
   assistantTheme,
   type AssistantReceipt,
 } from "./assistant-types";
+import { useTranslation } from "@/lib/i18n";
 
 const bodyStyle: CSSProperties = {
   display: "grid",
@@ -70,13 +71,17 @@ export function AssistantReceiptCard({
 }: {
   receipt: AssistantReceipt;
 }) {
+  const { t } = useTranslation();
   const resourceValue =
     receipt.resourceLabel ??
     [receipt.resourceType, receipt.resourceId].filter(Boolean).join(" · ") ??
     "";
 
   return (
-    <section style={assistantCardStyle} aria-label="Assistant action receipt">
+    <section
+      style={assistantCardStyle}
+      aria-label={t("paMisc.assistantReceiptLabel")}
+    >
       <div style={bodyStyle}>
         <div
           style={{
@@ -106,19 +111,19 @@ export function AssistantReceiptCard({
 
         <div style={gridStyle}>
           <div style={itemStyle}>
-            <div style={labelStyle}>Action ID</div>
+            <div style={labelStyle}>{t("paMisc.assistantActionId")}</div>
             <div style={assistantMonoTextStyle}>
               {valueOrFallback(receipt.actionId)}
             </div>
           </div>
           <div style={itemStyle}>
-            <div style={labelStyle}>Request ID</div>
+            <div style={labelStyle}>{t("paMisc.assistantRequestId")}</div>
             <div style={assistantMonoTextStyle}>
               {valueOrFallback(receipt.requestId)}
             </div>
           </div>
           <div style={itemStyle}>
-            <div style={labelStyle}>Audit ID</div>
+            <div style={labelStyle}>{t("paMisc.assistantAuditId")}</div>
             <div style={assistantMonoTextStyle}>
               {valueOrFallback(receipt.auditId)}
             </div>
@@ -152,7 +157,7 @@ export function AssistantReceiptCard({
                 fontSize: 12.5,
               }}
             >
-              View audit evidence
+              {t("paMisc.assistantViewAuditEvidence")}
             </Link>
           </div>
         ) : null}

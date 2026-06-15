@@ -57,7 +57,7 @@ const REFERRAL_PARTNER_TYPE = "referral_channel";
 type RateType = "percent" | "per_trip";
 
 export default function ReferralChannelsPage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [entries, setEntries] = useState<PartnerChannelEntryRecord[]>([]);
   const [rules, setRules] = useState<ReferralRevenueShareRule[]>([]);
@@ -168,7 +168,7 @@ export default function ReferralChannelsPage() {
   const saveRate = useCallback(async () => {
     const value = Number(form.value);
     if (!form.partnerEntrySlug.trim() || Number.isNaN(value) || value < 0) {
-      setError(locale === "en" ? "Enter a channel and a value >= 0." : "請填渠道與 >= 0 的數值。");
+      setError(t("paMisc.referralValueRequired"));
       return;
     }
     setSaving(true);
@@ -186,7 +186,7 @@ export default function ReferralChannelsPage() {
     } finally {
       setSaving(false);
     }
-  }, [client, form, load, locale]);
+  }, [client, form, load, t]);
 
   return (
     <div style={pageStackStyle}>

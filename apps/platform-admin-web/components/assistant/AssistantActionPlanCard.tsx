@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { CheckCircle2, Circle, Clock3, ShieldAlert } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantInsetStyle,
@@ -99,8 +100,12 @@ export function AssistantActionPlanCard({
 }: {
   plan: AssistantActionPlan;
 }) {
+  const { t } = useTranslation();
   return (
-    <section style={assistantCardStyle} aria-label="Assistant action plan">
+    <section
+      style={assistantCardStyle}
+      aria-label={t("paMisc.assistantActionPlanLabel")}
+    >
       <div style={bodyStyle}>
         <div style={headerStyle}>
           <div style={{ minWidth: 0 }}>
@@ -127,7 +132,7 @@ export function AssistantActionPlanCard({
             ) : null}
             {plan.rationale ? (
               <div style={metaItemStyle}>
-                <div style={labelStyle}>Why now</div>
+                <div style={labelStyle}>{t("paMisc.assistantWhyNow")}</div>
                 <div style={valueStyle}>{plan.rationale}</div>
               </div>
             ) : null}

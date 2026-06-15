@@ -216,7 +216,7 @@ export function TenantIdentityFields({
             }))
           }
           required
-          placeholder="Acme Mobility"
+          placeholder={t("paMisc.tenantNamePlaceholder")}
           style={formInputStyle}
         />
       </label>
@@ -394,7 +394,7 @@ export function IntegrationFields({
                 bootstrapAdminEmail: event.target.value,
               }))
             }
-            placeholder="admin@acme.example"
+            placeholder={t("paMisc.tenantBootstrapEmailPlaceholder")}
             style={formInputStyle}
           />
         </label>

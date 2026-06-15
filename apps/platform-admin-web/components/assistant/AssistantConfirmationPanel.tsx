@@ -12,6 +12,7 @@ import {
   assistantTheme,
   type AssistantConfirmationRequest,
 } from "./assistant-types";
+import { useTranslation } from "@/lib/i18n";
 
 const bodyStyle: CSSProperties = {
   display: "grid",
@@ -72,6 +73,7 @@ export function AssistantConfirmationPanel({
   onConfirm: (reason: string) => void | Promise<void>;
   onCancel?: () => void;
 }) {
+  const { t } = useTranslation();
   const reasonFieldId = useId();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +97,7 @@ export function AssistantConfirmationPanel({
   return (
     <section
       style={assistantCardStyle}
-      aria-label="Assistant confirmation panel"
+      aria-label={t("paMisc.assistantConfirmationLabel")}
     >
       <div style={bodyStyle}>
         <div
@@ -136,7 +138,7 @@ export function AssistantConfirmationPanel({
                 marginBottom: 4,
               }}
             >
-              Target resource
+              {t("paMisc.assistantTargetResource")}
             </div>
             <div style={{ color: assistantTheme.text, fontSize: 13.5 }}>
               {request.resourceLabel}

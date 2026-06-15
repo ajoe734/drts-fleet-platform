@@ -652,7 +652,10 @@ export function PlatformAssistantOverlay() {
             />
             <div ref={messagesEndRef} />
           </div>
-          <div style={promptRailStyle} aria-label="Assistant suggested prompts">
+          <div
+            style={promptRailStyle}
+            aria-label={t("paMisc.assistantSuggestedPrompts")}
+          >
             {suggestedPrompts.map((prompt) => (
               <button
                 key={prompt}
@@ -700,10 +703,7 @@ export function PlatformAssistantOverlay() {
           </form>
           <div style={panelFootnoteStyle}>
             <Bot size={13} />
-            <span>
-              Mock provider in dev. Actions still require governed backend
-              gates.
-            </span>
+            <span>{t("paMisc.assistantMockProviderNote")}</span>
           </div>
         </section>
       ) : null}

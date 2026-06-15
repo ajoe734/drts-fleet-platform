@@ -11,6 +11,7 @@ import {
   type AssistantViewState,
 } from "./assistant-types";
 import { CanvasPill as Pill } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 
 const busyStates: AssistantViewState[] = [
   "thinking",
@@ -56,6 +57,7 @@ export function AssistantComposer({
   placeholder?: string;
   submitLabel?: string;
 }) {
+  const { t } = useTranslation();
   const isBusy = busyStates.includes(state);
   const submitDisabled = disabled || isBusy || value.trim().length === 0;
 
@@ -83,7 +85,7 @@ export function AssistantComposer({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Sparkles size={16} color={assistantTheme.accent} />
             <strong style={{ color: assistantTheme.text, fontSize: 15.5 }}>
-              Platform Admin assistant
+              {t("paMisc.assistantComposerTitle")}
             </strong>
           </div>
           <Pill theme={assistantTheme} tone={assistantStatusTone(state)}>
