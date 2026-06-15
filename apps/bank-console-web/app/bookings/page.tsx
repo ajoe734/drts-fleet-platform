@@ -6,7 +6,12 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import {
+  getBankProgramSeedLabel,
+  getBankTenantName,
+  resolveBankDemoTenant,
+  resolveLocale,
+} from "@/lib/demo-tenants";
 import { getBankConsoleSession, bankConsoleHref } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import {
@@ -127,7 +132,8 @@ export default async function BookingsPage({
           <span className="bank-title-block">
             {t("bookings.title", locale)}
             <span className="issuer-chip">
-              {tenant.name[locale]} · {tenant.programSeed.premium[locale]}
+              {getBankTenantName(tenant, locale)} ·{" "}
+              {getBankProgramSeedLabel(tenant, "premium", locale)}
             </span>
           </span>
         }
@@ -137,7 +143,7 @@ export default async function BookingsPage({
       <section className="issuer-strip">
         <div>
           <span className="eyebrow">{t("bookings.scopeLabel", locale)}</span>
-          <strong>{tenant.name[locale]}</strong>
+          <strong>{getBankTenantName(tenant, locale)}</strong>
         </div>
         <div>
           <span className="eyebrow">{t("bookings.periodLabel", locale)}</span>

@@ -9,6 +9,8 @@ import {
 } from "@drts/ui-web";
 import { BankDemoControls } from "@/components/bank-demo-controls";
 import {
+  getBankTenantContext,
+  getBankTenantName,
   getLocaleTag,
   type BankDemoTenant,
   resolveBankDemoTenant,
@@ -58,7 +60,7 @@ function SignedOutBoundary({
         <h1>{t("authBoundary.title", locale)}</h1>
         <p>{t("authBoundary.body", locale)}</p>
         <div className="callout-panel is-warning">
-          <strong>{bank.name[locale]}</strong>
+          <strong>{getBankTenantName(bank, locale)}</strong>
           <span>{t("authBoundary.noData", locale)}</span>
         </div>
         <a className="bank-auth-boundary-cta" href={loginHref}>
@@ -93,7 +95,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
           brandSubLabel={BANK_CONSOLE_BRAND_SUB}
           brandMark="B"
           breadcrumb={[
-            bank.context[locale],
+            getBankTenantContext(bank, locale),
             activeItem?.label ?? t("shell.breadcrumb.home", locale),
           ]}
           env={BANK_CONSOLE_ENV}

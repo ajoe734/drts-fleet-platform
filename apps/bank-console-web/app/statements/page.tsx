@@ -5,7 +5,11 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import {
+  getBankTenantName,
+  resolveBankDemoTenant,
+  resolveLocale,
+} from "@/lib/demo-tenants";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import {
@@ -111,7 +115,8 @@ export default async function StatementsPage({
           <span className="bank-title-block">
             {t("statements.title", locale)}
             <span className="issuer-chip">
-              {tenant.name[locale]} · {t("statements.direction", locale)}
+              {getBankTenantName(tenant, locale)} ·{" "}
+              {t("statements.direction", locale)}
             </span>
           </span>
         }
