@@ -8,6 +8,7 @@ import {
   AIRPORT_VEHICLES,
   type AirportBank,
 } from "@/lib/airport-site-data";
+import { useTranslation } from "@/lib/i18n";
 import "./airport-transfer-site.css";
 
 // Faithful React port of the design canvas
@@ -44,6 +45,7 @@ export function AirportTransferSite({
   bank: AirportBank;
   mode?: Mode;
 }) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(1);
   const [dir, setDir] = useState<"out" | "in">("out");
   const [vehId, setVehId] = useState("sedan");
@@ -58,6 +60,20 @@ export function AirportTransferSite({
     bags: "2 件",
     phone: "0912-555-401",
   });
+
+  // Canonical terminal / luggage option values stay stable (Taiwanese place
+  // data); only the visible label is localized via the dictionary.
+  const terminalOptions: { value: string; key: string }[] = [
+    { value: "桃園 T1 · 第一航廈", key: "airport.terminal.t1" },
+    { value: "桃園 T2 · 第二航廈", key: "airport.terminal.t2" },
+    { value: "松山 TSA", key: "airport.terminal.tsa" },
+  ];
+  const bagOptions: { value: string; key: string }[] = [
+    { value: "1 件", key: "airport.bags.1" },
+    { value: "2 件", key: "airport.bags.2" },
+    { value: "3 件", key: "airport.bags.3" },
+    { value: "4 件以上", key: "airport.bags.4plus" },
+  ];
 
   const veh =
     AIRPORT_VEHICLES.find((v) => v.id === vehId) ?? AIRPORT_VEHICLES[0]!;
@@ -78,21 +94,32 @@ export function AirportTransferSite({
   } as CSSProperties;
 
   const panelTitles: Record<number, [string, string]> = {
-    1: ["驗證接送資格", "確認您的卡別權益"],
-    2: ["填寫行程資訊", "選擇航廈、時間與車型"],
-    3: ["確認權益與費用", "送出前請確認資訊"],
-    4: ["預約成功", "已收到您的預約"],
-    5: ["行程追蹤", "司機前往上車點"],
+    1: [t("airport.panel.1.title"), t("airport.panel.1.sub")],
+    2: [t("airport.panel.2.title"), t("airport.panel.2.sub")],
+    3: [t("airport.panel.3.title"), t("airport.panel.3.sub")],
+    4: [t("airport.panel.4.title"), t("airport.panel.4.sub")],
+    5: [t("airport.panel.5.title"), t("airport.panel.5.sub")],
   };
   const [panelTitle, panelSub] = panelTitles[step] ?? panelTitles[1]!;
 
   const confirmRows: [string, string][] = [
-    ["服務", "機場接送 · " + (out ? "出境去程" : "入境回程")],
-    ["航班 / 航廈", form.flight + " · " + form.terminal],
-    [out ? "上車地點" : "下車地點", form.addr],
-    [out ? "前往" : "出發", form.terminal.split(" ")[0] + " 機場"],
-    ["用車時間", form.date + " " + form.time],
-    ["車型 / 乘客", veh.name + " · " + form.phone],
+    [
+      t("airport.confirm.service"),
+      t("airport.nav.service") +
+        " · " +
+        (out ? t("airport.confirm.outbound") : t("airport.confirm.inbound")),
+    ],
+    [t("airport.confirm.flightTerminal"), form.flight + " · " + form.terminal],
+    [
+      out ? t("airport.confirm.pickup") : t("airport.confirm.dropoff"),
+      form.addr,
+    ],
+    [
+      out ? t("airport.confirm.to") : t("airport.confirm.from"),
+      form.terminal.split(" ")[0] + " " + t("airport.unit.airport"),
+    ],
+    [t("airport.confirm.time"), form.date + " " + form.time],
+    [t("airport.confirm.vehiclePassenger"), veh.name + " · " + form.phone],
   ];
 
   const site = (
@@ -107,14 +134,14 @@ export function AirportTransferSite({
               <span className="bs">{bank.nameEn}</span>
             </span>
             <span className="div" />
-            <span className="svc">機場接送</span>
+            <span className="svc">{t("airport.nav.service")}</span>
           </a>
           <nav className="nav-links">
-            <a href="#service">服務介紹</a>
-            <a href="#vehicles">車型</a>
-            <a href="#coverage">服務範圍</a>
-            <a href="#process">預約流程</a>
-            <a href="#faq">常見問題</a>
+            <a href="#service">{t("airport.nav.intro")}</a>
+            <a href="#vehicles">{t("airport.nav.vehicles")}</a>
+            <a href="#coverage">{t("airport.nav.coverage")}</a>
+            <a href="#process">{t("airport.nav.process")}</a>
+            <a href="#faq">{t("airport.nav.faq")}</a>
           </nav>
           <div className="nav-right">
             <span className="holder-chip">
@@ -122,7 +149,7 @@ export function AirportTransferSite({
               {bank.holder.name} · {bank.card}
             </span>
             <a href="#book" className="btn btn-primary">
-              立即預約
+              {t("airport.nav.book")}
             </a>
           </div>
         </div>
@@ -134,19 +161,19 @@ export function AirportTransferSite({
           <div className="hero-copy">
             <div className="eyebrow">
               <span className="ln" />
-              {bank.tier} · 機場接送禮遇
+              {bank.tier} · {t("airport.hero.privilege")}
             </div>
             <h1 className={bank.serif ? "serif" : undefined}>{bank.hero}</h1>
             <p className="lede">{bank.heroSub}</p>
             <div className="hero-cta">
               <a href="#book" className="btn btn-primary btn-lg">
-                立即預約接送{" "}
+                {t("airport.hero.bookCta")}{" "}
                 <span className="ar">
                   <Ic d="M5 12h14M13 6l6 6-6 6" s={17} sw={2.2} />
                 </span>
               </a>
               <a href="#book" className="btn btn-outline btn-lg">
-                查詢我的行程
+                {t("airport.hero.myTrips")}
               </a>
             </div>
             <div className="hero-perks">
@@ -163,8 +190,9 @@ export function AirportTransferSite({
                 s={15}
                 sw={2}
               />
-              接送服務由 <span className="op">智慧運輸科技</span> 營運 ·
-              專業認證司機與合格車隊
+              {t("airport.hero.trustLead")}{" "}
+              <span className="op">{t("airport.operator")}</span>{" "}
+              {t("airport.hero.trustTail")}
             </div>
           </div>
           <div className="hero-vis">
@@ -183,10 +211,12 @@ export function AirportTransferSite({
               </div>
             </div>
             <div className="quota-float">
-              <div className="ql">本年度免費接送剩餘</div>
+              <div className="ql">{t("airport.quota.remaining")}</div>
               <div className="qn">
                 <b>{rem}</b>
-                <span>/ {bank.quota.total} 趟</span>
+                <span>
+                  / {bank.quota.total} {t("airport.unit.trips")}
+                </span>
               </div>
               <div className="quota-bar">
                 <i
@@ -204,11 +234,9 @@ export function AirportTransferSite({
       <section id="service" className="blk">
         <div className="wrap">
           <div className="sec-head center">
-            <div className="sec-kicker">Why book with us</div>
-            <h2>禮賓級的機場接送，每個細節都被照顧</h2>
-            <p>
-              從預約到抵達，專業司機、即時追蹤與合併入帳，讓商旅與返家都從容。
-            </p>
+            <div className="sec-kicker">{t("airport.features.kicker")}</div>
+            <h2>{t("airport.features.title")}</h2>
+            <p>{t("airport.features.body")}</p>
           </div>
           <div className="feat-grid">
             {AIRPORT_FEATURES.map((f) => (
@@ -229,10 +257,8 @@ export function AirportTransferSite({
         <div className="wrap">
           <div className="sec-head">
             <div className="sec-kicker">Fleet</div>
-            <h2>依需求選擇車型</h2>
-            <p>
-              單人商旅到家庭出遊，皆有合適車型；部分卡別享商務車型免費升等。
-            </p>
+            <h2>{t("airport.vehicles.title")}</h2>
+            <p>{t("airport.vehicles.body")}</p>
           </div>
           <div className="veh-grid">
             {AIRPORT_VEHICLES.map((v) => (
@@ -260,11 +286,11 @@ export function AirportTransferSite({
                   <div className="en">{v.models}</div>
                   <div className="specs">
                     <div>
-                      <span>乘客</span>
+                      <span>{t("airport.spec.passengers")}</span>
                       <b>{v.seats}</b>
                     </div>
                     <div>
-                      <span>行李</span>
+                      <span>{t("airport.spec.luggage")}</span>
                       <b>{v.luggage}</b>
                     </div>
                   </div>
@@ -283,16 +309,16 @@ export function AirportTransferSite({
             <div>
               <div className="sec-head" style={{ marginBottom: 26 }}>
                 <div className="sec-kicker">Coverage</div>
-                <h2>服務範圍</h2>
-                <p>涵蓋雙北至中南部主要都會區，往返桃園、松山機場。</p>
+                <h2>{t("airport.coverage.title")}</h2>
+                <p>{t("airport.coverage.body")}</p>
               </div>
               <div className="cov-airports">
                 <div className="ap">
-                  <div className="t">主要機場 · AIRPORTS</div>
+                  <div className="t">{t("airport.coverage.airportsLabel")}</div>
                   <div className="n">{bank.airports[0]}</div>
                 </div>
                 <div className="ap">
-                  <div className="t">市區機場 · CITY</div>
+                  <div className="t">{t("airport.coverage.cityLabel")}</div>
                   <div className="n">{bank.airports[1]}</div>
                 </div>
               </div>
@@ -310,11 +336,11 @@ export function AirportTransferSite({
               </div>
             </div>
             <div className="cov-map">
-              <div className="mt">SERVICE AREA</div>
+              <div className="mt">{t("airport.coverage.mapTitle")}</div>
               <div className="mh">
-                北北基桃 · 竹苗 · 中彰 · 南高
+                {t("airport.coverage.mapHeadline")}
                 <br />
-                主要都會接送網
+                {t("airport.coverage.mapSub")}
               </div>
               <span className="pin" style={{ top: "24%", right: "30%" }} />
               <span className="pin" style={{ top: "40%", right: "36%" }} />
@@ -337,8 +363,8 @@ export function AirportTransferSite({
       <section id="process" className="blk alt">
         <div className="wrap">
           <div className="sec-head center">
-            <div className="sec-kicker">How it works</div>
-            <h2>五步驟完成預約</h2>
+            <div className="sec-kicker">{t("airport.process.kicker")}</div>
+            <h2>{t("airport.process.title")}</h2>
           </div>
           <div className="steps">
             {AIRPORT_STEPS.map((s) => (
@@ -357,20 +383,21 @@ export function AirportTransferSite({
         <div className="book-in">
           <div className="book-copy">
             <div className="sec-kicker" style={{ color: "var(--accent)" }}>
-              Online booking
+              {t("airport.book.kicker")}
             </div>
-            <h2 className={bank.serif ? "serif" : undefined}>線上即時預約</h2>
-            <p>{`以您的${bank.card}權益，三步驟完成機場接送預約，費用合併入帳、無須現場付款。`}</p>
+            <h2 className={bank.serif ? "serif" : undefined}>
+              {t("airport.book.title")}
+            </h2>
+            <p>{t("airport.book.intro", { card: bank.card })}</p>
             <div className="bperk">
-              <Ic d="M5 13l4 4L19 7" s={18} sw={2} />{" "}
-              權益內趟次完全免費，無須現場付款
+              <Ic d="M5 13l4 4L19 7" s={18} sw={2} /> {t("airport.book.perk1")}
             </div>
             <div className="bperk">
-              <Ic d="M12 6v6l4 2" s={18} sw={2} /> 即時配對司機，2 分鐘內回覆
+              <Ic d="M12 6v6l4 2" s={18} sw={2} /> {t("airport.book.perk2")}
             </div>
             <div className="bperk">
               <Ic d="M3 11l19-9-9 19-2-8z" s={18} sw={2} />{" "}
-              航班動態追蹤，延誤自動順延
+              {t("airport.book.perk3")}
             </div>
           </div>
 
@@ -399,7 +426,8 @@ export function AirportTransferSite({
                         {bank.nameZh} · {bank.card}
                       </div>
                       <div className="b">
-                        卡號末四碼 {bank.holder.last4} · {bank.holder.name}
+                        {t("airport.book.cardLast4")} {bank.holder.last4} ·{" "}
+                        {bank.holder.name}
                       </div>
                     </div>
                     <span className="ok">
@@ -408,29 +436,29 @@ export function AirportTransferSite({
                   </div>
                   <div className="summ">
                     <div className="sr">
-                      <span className="k">持卡身分</span>
+                      <span className="k">{t("airport.book.cardStatus")}</span>
                       <span className="v">{bank.tier}</span>
                     </div>
                     <div className="sr">
-                      <span className="k">本年度免費趟次</span>
+                      <span className="k">{t("airport.book.freeTrips")}</span>
                       <span className="v">
-                        {rem} / {bank.quota.total} 趟
+                        {rem} / {bank.quota.total} {t("airport.unit.trips")}
                       </span>
                     </div>
                     <div className="sr">
-                      <span className="k">服務範圍</span>
-                      <span className="v">雙北 · 桃竹 · 中彰 · 南高</span>
+                      <span className="k">{t("airport.nav.coverage")}</span>
+                      <span className="v">{t("airport.book.coverageValue")}</span>
                     </div>
                   </div>
                   <p className="fineprint">
-                    資格已依您的卡別自動帶入。首次使用將一次性確認服務授權同意。
+                    {t("airport.book.step1.fineprint")}
                   </p>
                   <div className="bfoot">
                     <button
                       className="btn btn-primary btn-block btn-lg"
                       onClick={() => goStep(2)}
                     >
-                      開始預約{" "}
+                      {t("airport.book.start")}{" "}
                       <span className="ar">
                         <Ic d="M5 12h14M13 6l6 6-6 6" s={16} sw={2.2} />
                       </span>
@@ -443,16 +471,17 @@ export function AirportTransferSite({
                 <div className="bstep">
                   <div className="seg">
                     <button aria-pressed={out} onClick={() => setDir("out")}>
-                      出境 · 去程接送
+                      {t("airport.book.dirOut")}
                     </button>
                     <button aria-pressed={!out} onClick={() => setDir("in")}>
-                      入境 · 回程接送
+                      {t("airport.book.dirIn")}
                     </button>
                   </div>
                   <div className="fgrid">
                     <div className="field">
                       <label>
-                        機場航廈 <span className="rq">*</span>
+                        {t("airport.field.terminal")}{" "}
+                        <span className="rq">*</span>
                       </label>
                       <select
                         className="inp"
@@ -461,14 +490,17 @@ export function AirportTransferSite({
                           setForm({ ...form, terminal: e.target.value })
                         }
                       >
-                        <option>桃園 T1 · 第一航廈</option>
-                        <option>桃園 T2 · 第二航廈</option>
-                        <option>松山 TSA</option>
+                        {terminalOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {t(o.key)}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="field">
                       <label>
-                        航班編號 <span className="rq">*</span>
+                        {t("airport.field.flightNo")}{" "}
+                        <span className="rq">*</span>
                       </label>
                       <input
                         className="inp"
@@ -480,7 +512,9 @@ export function AirportTransferSite({
                     </div>
                     <div className="field col2">
                       <label>
-                        {out ? "上車地點（市區）" : "下車地點（市區）"}{" "}
+                        {out
+                          ? t("airport.field.pickupCity")
+                          : t("airport.field.dropoffCity")}{" "}
                         <span className="rq">*</span>
                       </label>
                       <input
@@ -493,7 +527,7 @@ export function AirportTransferSite({
                     </div>
                     <div className="field">
                       <label>
-                        用車日期 <span className="rq">*</span>
+                        {t("airport.field.date")} <span className="rq">*</span>
                       </label>
                       <input
                         className="inp"
@@ -505,7 +539,7 @@ export function AirportTransferSite({
                     </div>
                     <div className="field">
                       <label>
-                        用車時間 <span className="rq">*</span>
+                        {t("airport.field.time")} <span className="rq">*</span>
                       </label>
                       <input
                         className="inp"
@@ -516,7 +550,7 @@ export function AirportTransferSite({
                       />
                     </div>
                     <div className="field">
-                      <label>行李件數</label>
+                      <label>{t("airport.field.bags")}</label>
                       <select
                         className="inp"
                         value={form.bags}
@@ -524,15 +558,16 @@ export function AirportTransferSite({
                           setForm({ ...form, bags: e.target.value })
                         }
                       >
-                        <option>1 件</option>
-                        <option>2 件</option>
-                        <option>3 件</option>
-                        <option>4 件以上</option>
+                        {bagOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {t(o.key)}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="field">
                       <label>
-                        乘客聯絡電話 <span className="rq">*</span>
+                        {t("airport.field.phone")} <span className="rq">*</span>
                       </label>
                       <input
                         className="inp"
@@ -545,7 +580,7 @@ export function AirportTransferSite({
                   </div>
                   <div className="field">
                     <label>
-                      選擇車型 <span className="rq">*</span>
+                      {t("airport.field.vehicle")} <span className="rq">*</span>
                     </label>
                     <div className="vehpick">
                       {AIRPORT_VEHICLES.map((v) => (
@@ -565,13 +600,13 @@ export function AirportTransferSite({
                       className="btn btn-outline"
                       onClick={() => goStep(1)}
                     >
-                      上一步
+                      {t("airport.btn.back")}
                     </button>
                     <button
                       className="btn btn-primary btn-block"
                       onClick={() => goStep(3)}
                     >
-                      前往確認{" "}
+                      {t("airport.btn.toConfirm")}{" "}
                       <span className="ar">
                         <Ic d="M5 12h14M13 6l6 6-6 6" s={16} sw={2.2} />
                       </span>
@@ -592,38 +627,41 @@ export function AirportTransferSite({
                   </div>
                   <div className="summ">
                     <div className="sr">
-                      <span className="k">基本費用</span>
+                      <span className="k">{t("airport.fee.base")}</span>
                       <span className="v">{nf(veh.fare)}</span>
                     </div>
                     <div className="sr">
-                      <span className="k">{bank.card} 禮遇扣抵</span>
+                      <span className="k">
+                        {bank.card} {t("airport.fee.benefitDiscount")}
+                      </span>
                       <span className="v">− {nf(veh.fare)}</span>
                     </div>
                     <div className="sr total">
-                      <span className="k">您將支付</span>
+                      <span className="k">{t("airport.fee.youPay")}</span>
                       <span className="v">
                         <span className="free-tag">
-                          <Ic d="M5 12l5 5L20 7" s={12} sw={3} /> 免費
+                          <Ic d="M5 12l5 5L20 7" s={12} sw={3} />{" "}
+                          {t("airport.fee.free")}
                         </span>
                       </span>
                     </div>
                   </div>
                   <p className="fineprint">
-                    送出後將依 {bank.nameZh}{" "}
-                    合作方案派車，並使用一趟免費權益。行程資訊會同步給合作方核銷；超出權益之加價將合併入信用卡帳單。
+                    {t("airport.book.step3.fineprintLead")} {bank.nameZh}{" "}
+                    {t("airport.book.step3.fineprintTail")}
                   </p>
                   <div className="bfoot">
                     <button
                       className="btn btn-outline"
                       onClick={() => goStep(2)}
                     >
-                      返回修改
+                      {t("airport.btn.backEdit")}
                     </button>
                     <button
                       className="btn btn-primary btn-block"
                       onClick={() => goStep(4)}
                     >
-                      確認送出預約
+                      {t("airport.btn.submit")}
                     </button>
                   </div>
                 </div>
@@ -647,21 +685,25 @@ export function AirportTransferSite({
                         <path d="M5 13l4 4L19 7" />
                       </svg>
                     </div>
-                    <h3>預約已建立</h3>
+                    <h3>{t("airport.success.title")}</h3>
                     <div className="bk">{bkId}</div>
                   </div>
                   <div className="summ">
                     <div className="sr">
-                      <span className="k">狀態</span>
-                      <span className="v">配對司機中</span>
+                      <span className="k">{t("airport.label.status")}</span>
+                      <span className="v">{t("airport.success.matching")}</span>
                     </div>
                     <div className="sr">
-                      <span className="k">預計回覆</span>
-                      <span className="v">2 分鐘內</span>
+                      <span className="k">{t("airport.success.eta")}</span>
+                      <span className="v">
+                        {t("airport.success.within2min")}
+                      </span>
                     </div>
                     <div className="sr">
-                      <span className="k">通知方式</span>
-                      <span className="v">簡訊 + App 推播</span>
+                      <span className="k">{t("airport.success.notify")}</span>
+                      <span className="v">
+                        {t("airport.success.notifyValue")}
+                      </span>
                     </div>
                   </div>
                   <div className="bfoot">
@@ -669,7 +711,7 @@ export function AirportTransferSite({
                       className="btn btn-primary btn-block btn-lg"
                       onClick={() => goStep(5)}
                     >
-                      追蹤行程
+                      {t("airport.btn.track")}
                     </button>
                   </div>
                 </div>
@@ -712,24 +754,26 @@ export function AirportTransferSite({
                     </svg>
                   </div>
                   <div className="track-row">
-                    <div className="av">陳</div>
+                    <div className="av">{t("airport.track.driverInitial")}</div>
                     <div className="ti">
-                      <div className="a">陳俊宏 · 4.86 ★</div>
+                      <div className="a">
+                        {t("airport.track.driverName")} · 4.86 ★
+                      </div>
                       <div className="b">{veh.carName}</div>
                     </div>
                     <div className="eta">
                       <b>8</b>
-                      <span>分鐘抵達</span>
+                      <span>{t("airport.track.minutesToArrival")}</span>
                     </div>
                   </div>
                   <div className="summ">
                     <div className="sr">
-                      <span className="k">距離</span>
+                      <span className="k">{t("airport.label.distance")}</span>
                       <span className="v">2.4 km</span>
                     </div>
                     <div className="sr">
-                      <span className="k">狀態</span>
-                      <span className="v">已派車 · 前往上車點</span>
+                      <span className="k">{t("airport.label.status")}</span>
+                      <span className="v">{t("airport.track.dispatched")}</span>
                     </div>
                   </div>
                   <div className="bfoot">
@@ -737,7 +781,7 @@ export function AirportTransferSite({
                       className="btn btn-outline"
                       onClick={() => goStep(1)}
                     >
-                      完成 · 返回
+                      {t("airport.btn.doneBack")}
                     </button>
                   </div>
                 </div>
@@ -752,7 +796,7 @@ export function AirportTransferSite({
         <div className="wrap">
           <div className="sec-head center">
             <div className="sec-kicker">FAQ</div>
-            <h2>常見問題</h2>
+            <h2>{t("airport.faq.title")}</h2>
           </div>
           <div className="faq">
             {AIRPORT_FAQ.map((f, i) => (
@@ -774,10 +818,16 @@ export function AirportTransferSite({
 
       {/* CTA band */}
       <section className="ctaband">
-        <h2 className={bank.serif ? "serif" : undefined}>準備好出發了嗎？</h2>
-        <p>以您的{bank.card}權益，預約一趟禮賓級機場接送。</p>
+        <h2 className={bank.serif ? "serif" : undefined}>
+          {t("airport.cta.title")}
+        </h2>
+        <p>
+          {t("airport.cta.bodyLead")}
+          {bank.card}
+          {t("airport.cta.bodyTail")}
+        </p>
         <a href="#book" className="btn btn-primary btn-lg">
-          立即預約接送
+          {t("airport.hero.bookCta")}
         </a>
       </section>
 
@@ -791,7 +841,7 @@ export function AirportTransferSite({
                 <span>
                   <span className="bn">{bank.nameZh}</span>
                   <br />
-                  <span className="bs">機場接送 · Airport Transfer</span>
+                  <span className="bs">{t("airport.footer.brandLine")}</span>
                 </span>
               </div>
               <p
@@ -802,36 +852,42 @@ export function AirportTransferSite({
                   margin: "18px 0 0",
                 }}
               >
-                本服務為{bank.nameZh}
-                提供之卡友禮遇，接送服務由智慧運輸科技營運。權益內容與趟次依各卡別公告為準。
+                {t("airport.footer.descLead")}
+                {bank.nameZh}
+                {t("airport.footer.descTail")}
               </p>
             </div>
             <div className="foot-cols">
               <div className="foot-col">
-                <div className="ct">服務</div>
-                <a href="#service">服務介紹</a>
-                <a href="#vehicles">車型介紹</a>
-                <a href="#coverage">服務範圍</a>
-                <a href="#book">線上預約</a>
+                <div className="ct">{t("airport.footer.colService")}</div>
+                <a href="#service">{t("airport.nav.intro")}</a>
+                <a href="#vehicles">{t("airport.footer.vehiclesIntro")}</a>
+                <a href="#coverage">{t("airport.nav.coverage")}</a>
+                <a href="#book">{t("airport.footer.onlineBooking")}</a>
               </div>
               <div className="foot-col">
-                <div className="ct">支援</div>
-                <a href="#faq">常見問題</a>
-                <div>客服專線 {bank.support}</div>
-                <div>24 小時服務</div>
+                <div className="ct">{t("airport.footer.colSupport")}</div>
+                <a href="#faq">{t("airport.nav.faq")}</a>
+                <div>
+                  {t("airport.footer.hotline")} {bank.support}
+                </div>
+                <div>{t("airport.footer.allDay")}</div>
               </div>
               <div className="foot-col">
-                <div className="ct">條款</div>
-                <a href="#terms">服務條款</a>
-                <a href="#privacy">隱私權政策</a>
-                <a href="#rules">權益使用規則</a>
+                <div className="ct">{t("airport.footer.colTerms")}</div>
+                <a href="#terms">{t("airport.footer.terms")}</a>
+                <a href="#privacy">{t("airport.footer.privacy")}</a>
+                <a href="#rules">{t("airport.footer.rules")}</a>
               </div>
             </div>
           </div>
           <div className="foot-bottom">
-            <span>© 2026 {bank.nameZh} · 接送服務由智慧運輸科技營運</span>
+            <span>
+              © 2026 {bank.nameZh} · {t("airport.footer.copyrightTail")}
+            </span>
             <span className="op">
-              Powered by <b>智慧運輸科技</b> Smart Transport Technology
+              {t("airport.footer.poweredBy")}{" "}
+              <b>{t("airport.operator")}</b> {t("airport.footer.operatorEn")}
             </span>
           </div>
         </div>
@@ -870,11 +926,14 @@ export function AirportTransferSite({
               </span>
             </div>
             <div className="appbar">
-              <button className="ab-btn" aria-label="返回">
+              <button className="ab-btn" aria-label={t("airport.embed.back")}>
                 <Ic d="M15 6l-6 6 6 6" s={18} sw={2.2} />
               </button>
               <div className="ab-t">
-                機場接送<small>{bank.nameZh} · 行動銀行</small>
+                {t("airport.nav.service")}
+                <small>
+                  {bank.nameZh} · {t("airport.embed.mobileBank")}
+                </small>
               </div>
               <div className="ab-host">
                 <Ic d="M7 11V7a5 5 0 0110 0v4" s={11} sw={2} />
@@ -883,9 +942,7 @@ export function AirportTransferSite({
             </div>
             <div className="webview">{site}</div>
           </div>
-          <div className="embed-hint">
-            網銀 APP 內嵌 webview · 同一份網頁，行動版自動排版
-          </div>
+          <div className="embed-hint">{t("airport.embed.hint")}</div>
         </div>
       </div>
     );
