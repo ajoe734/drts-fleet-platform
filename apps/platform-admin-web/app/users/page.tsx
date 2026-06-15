@@ -566,7 +566,7 @@ export default function UsersPage() {
                     value={formEmail}
                     onChange={(event) => setFormEmail(event.target.value)}
                     required
-                    placeholder="staff@platform.drts"
+                    placeholder={t("users.form.emailPlaceholder")}
                     style={controlStyle(theme)}
                   />
                 </CanvasField>

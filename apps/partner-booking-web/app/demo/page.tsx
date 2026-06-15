@@ -1,18 +1,21 @@
 import Link from "next/link";
 import { AIRPORT_BANKS, AIRPORT_BANK_ORDER } from "@/lib/airport-site-data";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "機場接送 Demo · 切換各銀行",
-  description: "Demo 切換入口：四家銀行的卡友機場接送官網與網銀 App 內嵌頁面。",
+  title: t("demo.metaTitle", undefined, "zh"),
+  description: t("demo.metaDescription", undefined, "zh"),
 };
 
 // Simple demo switcher so the four per-bank airport-transfer sites (and their
 // online-banking app embeds) can be opened quickly during a demo. This is a
 // demo harness, NOT a product feature — in production each bank has its own
 // separate site (there is no multi-bank master entry).
-export default function AirportDemoSwitcher() {
+export default async function AirportDemoSwitcher() {
+  const locale = await getServerLocale();
   return (
     <main
       style={{
@@ -36,7 +39,7 @@ export default function AirportDemoSwitcher() {
             marginBottom: 12,
           }}
         >
-          智慧運輸科技 · 卡友機場接送 · Demo
+          {t("demo.eyebrow", undefined, locale)}
         </div>
         <h1
           style={{
@@ -46,7 +49,7 @@ export default function AirportDemoSwitcher() {
             letterSpacing: "-0.01em",
           }}
         >
-          選擇銀行，預覽機場接送服務
+          {t("demo.title", undefined, locale)}
         </h1>
         <p
           style={{
@@ -57,9 +60,7 @@ export default function AirportDemoSwitcher() {
             maxWidth: "44em",
           }}
         >
-          每家銀行各自有獨立的卡友機場接送預約官網。下面是 demo
-          用的快速切換入口，可分別開啟「官方網站」與「網銀 App
-          內嵌頁面」兩種進入方式。
+          {t("demo.intro", undefined, locale)}
         </p>
 
         <div
@@ -106,8 +107,15 @@ export default function AirportDemoSwitcher() {
                       {b.nameZh}
                     </div>
                     <div style={{ fontSize: 12, color: "#9AA2B1" }}>
-                      {b.card} · 剩餘 {b.quota.total - b.quota.used}/
-                      {b.quota.total} 趟
+                      {t(
+                        "demo.cardQuota",
+                        {
+                          card: b.card,
+                          remaining: b.quota.total - b.quota.used,
+                          total: b.quota.total,
+                        },
+                        locale,
+                      )}
                     </div>
                   </div>
                 </div>
@@ -126,7 +134,7 @@ export default function AirportDemoSwitcher() {
                       background: b.co.primary,
                     }}
                   >
-                    官方網站
+                    {t("demo.officialSite", undefined, locale)}
                   </Link>
                   <Link
                     href={`/${id}/program/embed`}
@@ -142,7 +150,7 @@ export default function AirportDemoSwitcher() {
                       border: "1px solid rgba(255,255,255,.12)",
                     }}
                   >
-                    網銀 App 內嵌
+                    {t("demo.bankAppEmbed", undefined, locale)}
                   </Link>
                 </div>
               </div>
@@ -158,8 +166,7 @@ export default function AirportDemoSwitcher() {
             lineHeight: 1.6,
           }}
         >
-          說明：此切換頁僅供
-          demo。各銀行正式環境為各自獨立部署的網站，無多銀行總入口。接送服務由智慧運輸科技營運。
+          {t("demo.note", undefined, locale)}
         </p>
       </div>
     </main>

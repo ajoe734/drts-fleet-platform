@@ -1276,9 +1276,9 @@ export default function SwitchboardPage() {
                         fontWeight: 600,
                       }}
                     >
-                      {locale === "en" ? "Call" : "叫車"}{" "}
+                      {t("switchboard.placard.callLabel")}{" "}
                       {livePlacardSource?.callPhone ?? "—"} ·{" "}
-                      {locale === "en" ? "Complaint" : "客訴"}{" "}
+                      {t("switchboard.placard.complaintLabel")}{" "}
                       {livePlacardSource?.complaintPhone ?? "—"}
                     </div>
                     <div style={{ fontSize: 10.5 }}>
