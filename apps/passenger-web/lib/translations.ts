@@ -755,7 +755,7 @@ const zh: Record<keyof typeof en, string> = {
     "此殼層可顯示 DRTS 收據、外部收據參照或明確的不支援狀態，但不得自行發明新的電子郵件或簡訊送達通道。",
   "shell.footnote":
     "基線路由來自 SYS-UI-003。訂單請求、進行中行程、取消、完成與具名負向流程路由則由 SYS-UI-004 具體化。",
-  "shell.topbarEyebrow": "External Consumer Plane",
+  "shell.topbarEyebrow": "外部消費者層",
   "shell.topbarDefaultNote": "專供乘客查看狀態與收據的前台殼層。",
   "shell.metaTopology": "拓樸：apps/passenger-web",
   "shell.metaScope": "範圍：訂單 + 行程 + 負向路由",

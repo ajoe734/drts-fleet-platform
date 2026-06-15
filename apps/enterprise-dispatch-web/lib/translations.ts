@@ -431,7 +431,7 @@ const zh: Record<TranslationKey, string> = {
   "shell.footer.operatedBy": "接送服務由 {operator} 營運",
   "shell.embed.title": "企業派車",
   "shell.embed.subtitle": "{tenant} · 企業 App",
-  "shell.embed.status": "· embedded in {tenant} app",
+  "shell.embed.status": "· 內嵌於 {tenant} app",
   "home.title": "嗨，{name}，要去哪裡？",
   "home.subtitle":
     "{tenant} · 為自己或同事建立企業派車，費用走成本中心、超額需審批。",
@@ -450,7 +450,7 @@ const zh: Record<TranslationKey, string> = {
   "home.activeTrip.route": "行程",
   "home.activeTrip.eta": "ETA",
   "home.quickCreate.title": "快速建立",
-  "home.quickCreate.badge": "self-service",
+  "home.quickCreate.badge": "自助服務",
   "home.quickCreate.self": "為自己預約",
   "home.quickCreate.delegate": "為同事 / 訪客代訂",
   "home.quickCreate.help": "查看政策與支援",
@@ -506,7 +506,7 @@ const zh: Record<TranslationKey, string> = {
   "review.banner.body":
     "送出後可能先顯示 accepted + pending；不要把畫面上的已受理誤認成已完成派車。",
   "review.card.summary": "預約摘要",
-  "review.card.badge": "review",
+  "review.card.badge": "覆核",
   "review.summary.pickupDropoff": "上車 / 下車",
   "review.summary.time": "時間",
   "review.summary.costCenter": "成本中心",
@@ -663,7 +663,7 @@ const zh: Record<TranslationKey, string> = {
   "embed.handoffOk.detail.source": "來源",
   "embed.handoffOk.detail.sourceValue": "enterprise app webview",
   "embed.handoffOk.detail.session": "session",
-  "embed.handoffOk.detail.sessionValue": "tenant-scoped hand-off accepted",
+  "embed.handoffOk.detail.sessionValue": "已接受租戶範圍交接",
   "embed.handoffOk.detail.restriction": "限制",
   "embed.handoffOk.detail.restrictionValue": "不顯示 admin 或 ops 導覽",
   "embed.handoffOk.action.primary": "建立預約",
@@ -688,7 +688,7 @@ const zh: Record<TranslationKey, string> = {
   "embed.consentRequired.title": "需要確認企業授權範圍",
   "embed.consentRequired.subtitle":
     "這次內嵌啟動需要先確認成本中心或租戶資料使用範圍。",
-  "embed.consentRequired.detail.scope": "scope",
+  "embed.consentRequired.detail.scope": "範圍",
   "embed.consentRequired.detail.scopeValue":
     "乘客、成本中心、訂單紀錄",
   "embed.consentRequired.detail.purpose": "目的",
@@ -699,7 +699,7 @@ const zh: Record<TranslationKey, string> = {
   "embed.fallbackToWeb.title": "改走企業網站版完成操作",
   "embed.fallbackToWeb.subtitle":
     "目前 embed session 不完整，建議切回網站版以完成預約或查詢。",
-  "embed.fallbackToWeb.detail.reasonValue": "identity hand-off incomplete",
+  "embed.fallbackToWeb.detail.reasonValue": "身分交接未完成",
   "embed.fallbackToWeb.detail.priority": "優先",
   "embed.fallbackToWeb.detail.priorityValue": "保持企業身份與審批語意一致",
   "embed.fallbackToWeb.detail.nextValue": "切換到網站版後再繼續 booking flow",

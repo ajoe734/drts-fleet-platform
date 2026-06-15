@@ -493,7 +493,7 @@ const zh: Record<keyof typeof en, string> = {
   "common.recording": "錄音",
   "common.minutesShort": "{count} 分",
 
-  "guard.loading.eyebrow": "Bootstrap",
+  "guard.loading.eyebrow": "啟動",
   "guard.loading.title": "正在載入本地入口工作階段。",
   "guard.loading.body":
     "此路由會等待 repo 本地 assisted-entry bootstrap 完成，因為專屬 call-point 驗證仍未在 repo 內開放。",
@@ -515,7 +515,7 @@ const zh: Record<keyof typeof en, string> = {
   "home.primary.signedIn": "開啟代理建單",
   "home.primary.signedOut": "開始本地登入",
   "home.secondary": "檢視查詢介面",
-  "home.metric.bootstrap": "Bootstrap",
+  "home.metric.bootstrap": "啟動",
   "home.metric.bootstrapReady": "已就緒",
   "home.metric.bootstrapPending": "待完成",
   "home.metric.bootstrapBody": "{operatorName} 已以 {mode} 身分登入。",
@@ -553,9 +553,9 @@ const zh: Record<keyof typeof en, string> = {
   "home.negative.title": "Denied、Ineligible、Degraded 與錄音限制都保持明確。",
   "home.negative.body":
     "入口不會把失敗模式折疊成空白表單。每個 guardrail 都有一級路由，方便後續驗證 SYS-UI-006 與 SYS-UI-008 矩陣。",
-  "home.negative.denied": "Denied",
-  "home.negative.ineligible": "Ineligible",
-  "home.negative.degraded": "Degraded",
+  "home.negative.denied": "已拒絕",
+  "home.negative.ineligible": "不符資格",
+  "home.negative.degraded": "降級",
 
   "login.eyebrow": "Repo 本地登入",
   "login.title": "在本地建立 assisted-entry 操作員。",
@@ -579,7 +579,7 @@ const zh: Record<keyof typeof en, string> = {
   "start.body":
     "每個 call point 都必須綁定站點。選擇器會在操作員接觸建單表單前，先揭露健康狀態、錄音條件、排隊政策與角色限制。",
   "start.card.concierge": "禮賓櫃台",
-  "start.card.callPoint": "Call point",
+  "start.card.callPoint": "通話點",
   "start.kv.site": "站點",
   "start.kv.zone": "服務區域",
   "start.kv.recording": "錄音",
@@ -640,7 +640,7 @@ const zh: Record<keyof typeof en, string> = {
   "booking.posture.open": "開啟櫃台工作階段",
   "booking.posture.active": "櫃台工作階段進行中",
   "booking.posture.close": "關閉櫃台工作階段",
-  "booking.guardrails.eyebrow": "Guardrails",
+  "booking.guardrails.eyebrow": "防護準則",
   "booking.guardrails.title": "提交前會明確揭露負向路徑。",
   "booking.guardrails.body":
     "未授權的櫃台通道會導向 denied。不支援的產品或服務區域會導向 ineligible。降級櫃台會阻擋建單並轉向唯讀 fallback。錄音 callback 仍維持為 ops 專屬升級步驟。",
@@ -745,7 +745,7 @@ const zh: Record<keyof typeof en, string> = {
   "desk.product.airport_assist": "機場協助",
   "desk.product.medical_discharge": "出院接送",
   "desk.type.concierge": "禮賓",
-  "desk.type.call_point": "Call point",
+  "desk.type.call_point": "通話點",
   "desk.access.denied": "{deskName} 只允許 {allowedModes}。",
   "desk.eligibility.productDenied": "{deskName} 無法提交 {product} 申請。",
   "desk.eligibility.zoneDenied": "{deskName} 只涵蓋 {zoneLabel}。",

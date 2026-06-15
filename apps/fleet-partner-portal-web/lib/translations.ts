@@ -631,7 +631,7 @@ const zh: Dict = {
   "referral.table.gmv": "GMV",
   "referral.table.share": "分潤",
   "referral.table.statementId": "對帳單",
-  "referral.table.artifactId": "Artifact",
+  "referral.table.artifactId": "成品",
   "referral.statement.status.published": "已開立",
   "referral.statement.status.paid": "已付款",
   "referral.statement.status.due": "待付款",
