@@ -358,7 +358,7 @@ function ModalShell({
 }
 
 export default function SwitchboardPage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [publicInfo, setPublicInfo] = useState<PublicInfoVersionRecord[]>([]);
   const [placards, setPlacards] = useState<PlacardVersionRecord[]>([]);

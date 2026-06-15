@@ -36,7 +36,7 @@
  */
 
 import type { CrossAppResourceLink } from "@drts/contracts";
-import { getBilingualText, t as translate } from "../../lib/translations";
+import { getBilingualText } from "../../lib/translations";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createElement,

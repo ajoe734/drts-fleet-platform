@@ -11,7 +11,7 @@ import type { AssistantEntityRef } from "@/components/assistant/assistant-types"
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { getBilingualText, t as translate } from "@/lib/translations";
+import { getBilingualText } from "@/lib/translations";
 import {
   formatPlatformCodeLabel,
   getPlatformLabel,
