@@ -1020,6 +1020,15 @@ jobs:
     needs: [prepare, deploy]
     if: ${{ always() && needs.deploy.result == 'success' }}
     environment: dev
+    outputs:
+      api: ${{ steps.urls.outputs.api }}
+      platform_admin: ${{ steps.urls.outputs.platform_admin }}
+      ops_console: ${{ steps.urls.outputs.ops_console }}
+      fleet_partner_portal: ${{ steps.urls.outputs.fleet_partner_portal }}
+      tenant_console: ${{ steps.urls.outputs.tenant_console }}
+      bank_console: ${{ steps.urls.outputs.bank_console }}
+      partner_booking: ${{ steps.urls.outputs.partner_booking }}
+      enterprise_dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}
 
     steps:
       - name: Authenticate to GCP
@@ -1149,3 +1158,51 @@ jobs:
           echo "  passenger-web: ${{ steps.urls.outputs.passenger_web }}"
           echo "  partner-booking: ${{ steps.urls.outputs.partner_booking }}"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
+
+  ui-smoke:
+    name: Dev UI smoke (playwright vs deployed)
+    runs-on: ubuntu-latest
+    needs: [prepare, health-check]
+    if: ${{ always() && needs.health-check.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      # Post-deploy UI smoke: drives the deployed dev front-ends with a real browser
+      # across all business-line surfaces. URLs come from the health-check job's
+      # resolved Cloud Run service URLs. ops-console-parity is intentionally excluded
+      # (it depends on demo detail-route ids like DRV-001 that aren't guaranteed to be
+      # seeded on the deployed env); the cross-surface dev-runtime-matrix covers
+      # ops-console rendering already.
+      - name: Run UI smoke against deployed dev
+        env:
+          DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
+          DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ needs.health-check.outputs.platform_admin }}
+          DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
+          DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
+          DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
+          DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
+          DRTS_DEV_PARTNER_BOOKING_BASE_URL: ${{ needs.health-check.outputs.partner_booking }}
+          DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
+          ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
+        run: |
+          set -euo pipefail
+          pnpm exec playwright test --retries=1 --config playwright.dev-runtime-matrix.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.bank-console-depth.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.bank-console-auth.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.partner-booking-surfaces.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.enterprise-dispatch.config.ts
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-ui-smoke-playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
