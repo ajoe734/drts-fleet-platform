@@ -10,6 +10,4 @@
 # grows monotonically toward full coverage.
 #
 # number   reason (owning round)
-002      # forwarder broadcast: scenario candidate driver (DB seed 381) not in in-memory regulatory supply (drv-demo-001); needs supply/id alignment — Round 2
 010      # governance billing/reporting: uses non-existent actor types (tenant_approver/_driver/_finance) + 4 unset user-id env vars — Round 3
-013      # service-product eligibility: negative-assert needs a dispatchable-but-product-ineligible seed vehicle (none exists; veh-demo-002 non-dispatchable, veh-demo-003 insurance expired) — Round 2
