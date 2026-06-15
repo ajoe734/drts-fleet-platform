@@ -343,7 +343,7 @@ function programDemo(theme: PartnerProgramTheme, locale: Locale = "zh") {
       remaining,
       total,
       used: total - remaining,
-      riderName: translate("program.demo.travel.riderName", undefined, locale),
+      riderName: translate("program.demo.travel.rider", undefined, locale),
       pickup: translate("program.demo.travel.pickup", undefined, locale),
       pickupDetail: translate(
         "program.demo.travel.pickupDetail",
@@ -358,7 +358,7 @@ function programDemo(theme: PartnerProgramTheme, locale: Locale = "zh") {
       ),
       departureTime: "2026-06-28 14:20",
       bookingRef: "LION-TPE-0628",
-      driverName: translate("program.demo.travel.driverName", undefined, locale),
+      driverName: translate("program.demo.travel.driver", undefined, locale),
       vehicle: translate("program.demo.travel.vehicle", undefined, locale),
     };
   }
@@ -371,27 +371,19 @@ function programDemo(theme: PartnerProgramTheme, locale: Locale = "zh") {
     used: total - remaining,
     riderName: translate(
       theme.kind === "insurance"
-        ? "program.demo.insurance.riderName"
-        : "program.demo.card.riderName",
+        ? "program.demo.rider.insurance"
+        : "program.demo.rider.card",
       undefined,
       locale,
     ),
-    pickup: translate("program.demo.default.pickup", undefined, locale),
-    pickupDetail: translate(
-      "program.demo.default.pickupDetail",
-      undefined,
-      locale,
-    ),
-    dropoff: translate("program.demo.default.dropoff", undefined, locale),
-    dropoffDetail: translate(
-      "program.demo.default.dropoffDetail",
-      undefined,
-      locale,
-    ),
+    pickup: translate("program.demo.pickup", undefined, locale),
+    pickupDetail: translate("program.demo.pickupDetail", undefined, locale),
+    dropoff: translate("program.demo.dropoff", undefined, locale),
+    dropoffDetail: translate("program.demo.dropoffDetail", undefined, locale),
     departureTime: "2026-05-08 17:30",
     bookingRef: theme.issuerLabel.toUpperCase() + "-2026-0004",
-    driverName: translate("program.demo.default.driverName", undefined, locale),
-    vehicle: translate("program.demo.default.vehicle", undefined, locale),
+    driverName: translate("program.demo.driver", undefined, locale),
+    vehicle: translate("program.demo.vehicle", undefined, locale),
   };
 }
 

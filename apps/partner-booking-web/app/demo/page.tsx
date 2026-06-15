@@ -6,8 +6,8 @@ import { t } from "@/lib/translations";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: t("demo.metaTitle", undefined, "zh"),
-  description: t("demo.metaDescription", undefined, "zh"),
+  title: "機場接送 Demo · 切換各銀行",
+  description: "Demo 切換入口：四家銀行的卡友機場接送官網與網銀 App 內嵌頁面。",
 };
 
 // Simple demo switcher so the four per-bank airport-transfer sites (and their
@@ -60,7 +60,7 @@ export default async function AirportDemoSwitcher() {
             maxWidth: "44em",
           }}
         >
-          {t("demo.intro", undefined, locale)}
+          {t("demo.body", undefined, locale)}
         </p>
 
         <div
@@ -107,15 +107,9 @@ export default async function AirportDemoSwitcher() {
                       {b.nameZh}
                     </div>
                     <div style={{ fontSize: 12, color: "#9AA2B1" }}>
-                      {t(
-                        "demo.cardQuota",
-                        {
-                          card: b.card,
-                          remaining: b.quota.total - b.quota.used,
-                          total: b.quota.total,
-                        },
-                        locale,
-                      )}
+                      {b.card} · {t("demo.remainLabel", undefined, locale)}{" "}
+                      {b.quota.total - b.quota.used}/{b.quota.total}{" "}
+                      {t("airport.unit.trips", undefined, locale)}
                     </div>
                   </div>
                 </div>
@@ -150,7 +144,7 @@ export default async function AirportDemoSwitcher() {
                       border: "1px solid rgba(255,255,255,.12)",
                     }}
                   >
-                    {t("demo.bankAppEmbed", undefined, locale)}
+                    {t("demo.embed", undefined, locale)}
                   </Link>
                 </div>
               </div>
