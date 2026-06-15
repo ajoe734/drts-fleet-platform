@@ -182,6 +182,17 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     updatedAt: "2026-03-31T23:59:59.000Z",
     supplyLifecycle: createEmptySupplyLifecycle("2026-03-31T23:59:59.000Z"),
   },
+  {
+    vehicleId: "veh-demo-004",
+    plateNo: "ABC-1004",
+    operatingArea: "taichung-port",
+    supportedServiceBuckets: ["business_dispatch"],
+    dispatchableFlag: true,
+    exclusivityApproved: true,
+    insuranceStatus: "valid",
+    updatedAt: SEED_TIMESTAMP,
+    supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
+  },
 ];
 
 const DRIVER_SEED: DriverRegistryRecord[] = [
@@ -206,6 +217,13 @@ const DRIVER_SEED: DriverRegistryRecord[] = [
     workState: "available",
     licensesValid: false,
   }),
+  createSeedDriver({
+    driverId: "drv-demo-004",
+    name: "Driver Demo Four",
+    supportedServiceBuckets: ["business_dispatch"],
+    workState: "available",
+    licensesValid: true,
+  }),
 ];
 
 const CONTRACT_SEED: VehicleContractRecord[] = [
@@ -217,6 +235,23 @@ const CONTRACT_SEED: VehicleContractRecord[] = [
     contractType: "service_fleet_contract",
     operatingAreaId: "taichung-port",
     serviceScope: "standard_taxi",
+    startAt: "2026-01-01T00:00:00.000Z",
+    endAt: "2026-12-31T23:59:59.000Z",
+    status: "active",
+    lifecycleStatus: "active",
+    approvedBy: "platform-admin-demo-001",
+    approvedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    contractId: "contract-demo-004",
+    vehicleId: "veh-demo-004",
+    partnerId: "partner-demo-004",
+    partnerType: "enterprise_partner",
+    contractType: "service_fleet_contract",
+    operatingAreaId: "taichung-port",
+    serviceScope: "business_dispatch",
     startAt: "2026-01-01T00:00:00.000Z",
     endAt: "2026-12-31T23:59:59.000Z",
     status: "active",
@@ -257,6 +292,20 @@ const POLICY_SEED: InsurancePolicyRecord[] = [
     createdAt: "2025-01-01T00:00:00.000Z",
     updatedAt: "2026-03-31T23:59:59.000Z",
   },
+  {
+    policyId: "policy-demo-004",
+    vehicleId: "veh-demo-004",
+    policyNo: "POL-BIZ-0004",
+    insuranceType: "passenger_liability",
+    insurerName: "Demo Insurance",
+    coverageAmount: 3000000,
+    startAt: "2026-01-01T00:00:00.000Z",
+    endAt: "2026-12-31T23:59:59.000Z",
+    status: "active",
+    lifecycleStatus: "active",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
 ];
 
 const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
@@ -288,6 +337,20 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
     terminationReason: null,
     updatedAt: "2026-04-01T00:00:00.000Z",
   },
+  {
+    vehicleId: "veh-demo-004",
+    declarationStatus: "submitted",
+    declarationFileId: "file-demo-004",
+    reviewStatus: "approved",
+    lifecycleStatus: "active",
+    reviewerId: "platform-admin-demo-001",
+    reviewedAt: "2026-01-01T00:00:00.000Z",
+    exclusiveProviderName: "Acme Dispatch",
+    effectiveStart: "2026-01-01T00:00:00.000Z",
+    effectiveEnd: "2026-12-31T23:59:59.000Z",
+    terminationReason: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
 ];
 
 @Injectable()
@@ -313,6 +376,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
       vehicleId: "veh-demo-003",
       driverId: "drv-demo-003",
       etaMinutes: 13,
+    },
+    {
+      vehicleId: "veh-demo-004",
+      driverId: "drv-demo-004",
+      etaMinutes: 9,
     },
   ];
 
