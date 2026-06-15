@@ -4,7 +4,11 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import {
+  getBankTenantName,
+  resolveBankDemoTenant,
+  resolveLocale,
+} from "@/lib/demo-tenants";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { t, type Locale, type TranslationKey } from "@/lib/translations";
@@ -317,7 +321,7 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                 color: issuerBrand.primaryDark,
               }}
             >
-              {tenant.name[locale]}
+              {getBankTenantName(tenant, locale)}
             </span>
           </span>
         }
