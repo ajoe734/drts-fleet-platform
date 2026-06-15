@@ -148,3 +148,48 @@ both prove the ineligible taxi cannot be assigned.
 
 ### Deploy-gate state after Round 2
 `PASS(13)` hermetic; only **E2E-010** remains deferred (Round 3).
+
+## Round 3 — tenant-partner persistence bug + E2E-010 real-flow uplift (2026-06-15)
+
+### Product bug fixed: tenant-partner `loadState` was all-or-nothing
+**Root cause (genuine product defect, affects persistence/prod mode):**
+`TenantPartnerRepository.loadState()` hydrates ~18 JSONB-record tables in a single
+`Promise.all`. Several Phase-1 tables are intentionally *referenced-but-not-migrated*
+(e.g. `core.phase1_tenant_approval_rules`, `core.phase1_tenant_cost_centers`). A
+single missing relation rejected the whole `Promise.all`, so the module-init
+`catch` skipped **all** tenant-partner persistence and silently fell back to the
+in-memory seed — even for tables that DO exist and are populated (tenant user
+roles, etc.). Symptom: `GET /tenant/users` returned `0` items for the seeded tenant
+despite 4 rows in `admin.phase1_tenant_user_roles`.
+
+**Fix:** `loadState` now loads each table through a `loadRows` helper that degrades
+gracefully on a missing relation (Postgres `42P01`) — returning `{rows: []}` and
+logging a per-table warn — instead of aborting the entire load. Verified live:
+`GET /tenant/users` now returns the 4 seeded users (incl. tenant_admin 901); the
+missing `core.phase1_*` tables warn individually and the rest hydrate.
+
+This unblocks tenant governance reads broadly (users, cost centers, quotas) wherever
+persistence is enabled — not just E2E-010.
+
+### E2E-010 scenario uplift (still deferred — env-blocked lifecycle)
+- Removed ~160 lines of **stale duplicate "happy-path"** (Setup A/B/C + steps 1–6)
+  that used non-existent actor types (`tenant_approver`/`tenant_driver`/`tenant_finance`)
+  and three unset `:?`-required env vars — it hard-failed at line 124 before the
+  real, function-based flow (`discover_tenant_users` → `bootstrap_governance_fixtures`
+  → `approve_governed_booking` → … → `emit_verification_body_fields`) ever ran.
+- Fixed `discover_tenant_users` casing (`.roleCode`/`.userId` → snake fallback).
+
+With the loadState fix, E2E-010 now executes the **real** governance flow: it
+discovers tenant actors, creates the cost center / quota policy / approval rule,
+files the governed booking, and emits the FG-02 (quota), FG-03 (approval), FG-04
+(report), FG-05/06 (settlement/platform) verification-body fields against live data.
+It still exits non-zero in the headless hermetic env because the governed-booking
+**lifecycle cannot complete** — approval stays `pending` (the rule's
+`approverKind: cost_center.owner` needs the cost-center-owner identity to be
+resolvable, and dispatch/trip are not drivable headless). It therefore remains
+deferred from the deploy gate (reason updated in `gate-deferred.txt`), now as a
+real-flow scenario blocked on lifecycle completion rather than dead code.
+
+### Deploy-gate state after Round 3
+Gate unchanged at **PASS(13)**; the headline win is the tenant-partner persistence
+product fix. E2E-010 deferred with documented real-flow progress.
