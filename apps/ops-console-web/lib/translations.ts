@@ -4352,8 +4352,8 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.platformOps.metrics.adapters": "需關注的 adapter",
   "dashboard.platformOps.metrics.adaptersSub":
     "{healthy} 個健康 · {down} 個停擺 · 共 {total} 個",
-  "dashboard.platformOps.metrics.syncFailed": "Sync failed",
-  "dashboard.platformOps.metrics.acceptPending": "Accept pending",
+  "dashboard.platformOps.metrics.syncFailed": "同步失敗",
+  "dashboard.platformOps.metrics.acceptPending": "待接受",
   "dashboard.platformOps.metrics.manualFallback": "人工備援",
   "dashboard.platformOps.metrics.reconciliation": "對帳佇列",
   "dashboard.platformOps.signal.credential": "Credential",
@@ -5794,14 +5794,14 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.forwarded.routeLocked": "route locked",
   "dispatch.detail.forwarded.fareAuthority": "fare authority",
   "dispatch.detail.forwarded.settlement": "settlement",
-  "dispatch.detail.forwarded.syncState": "sync state",
+  "dispatch.detail.forwarded.syncState": "同步狀態",
   "dispatch.detail.forwarded.lastCallback": "last callback",
   "dispatch.detail.forwarded.reconciliation": "reconciliation",
   "dispatch.detail.forwarded.reconciliationValue":
     "{status} · {mismatchCount} 筆不符",
   "dispatch.detail.candidateGate.manualReview": "人工覆核",
   "dispatch.detail.candidateGate.serviceBucketGap": "service bucket gap",
-  "dispatch.detail.candidateGate.noLocation": "no location",
+  "dispatch.detail.candidateGate.noLocation": "無位置",
   "dispatch.detail.candidateGate.locationStale": "location stale",
   "dispatch.detail.candidateGate.ok": "ok",
   "dispatch.detail.activity.manualFareOverride.bodyWithReason":
@@ -5823,7 +5823,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.override.status.applied": "已套用",
   "dispatch.detail.override.status.notRequested": "未申請",
   "dispatch.detail.override.noManualOverride": "目前沒有手動 override",
-  "dispatch.detail.override.notNeeded": "not needed",
+  "dispatch.detail.override.notNeeded": "不需要",
   "dispatch.detail.override.nextAction.reviewerCanRelease":
     "可由 reviewer 放行",
   "dispatch.detail.override.nextAction.keepManualReview": "需維持人工覆核",
@@ -6091,7 +6091,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.smoke.state": "狀態",
   "dispatch.detail.smoke.eta": "ETA",
   "dispatch.detail.smoke.override": "例外覆核",
-  "dispatch.detail.smoke.sequence": "queued → broadcasting → assigned",
+  "dispatch.detail.smoke.sequence": "排隊中 → 廣播中 → 已指派",
   "dispatch.detail.smoke.activity": "派遣 smoke 活動紀錄",
   "dispatch.detail.smoke.highRiskCtaTitle": "高風險 CTA 已呈現",
   "dispatch.detail.smoke.highRiskCtaBody":
@@ -6544,7 +6544,7 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.detail.refresh.freshness.unknown": "未知",
   "incidents.detail.refresh.snapshot": "snapshot {time} UTC · {source}",
   "incidents.detail.refresh.snapshotUnavailable":
-    "snapshot -- · metadata unavailable",
+    "快照 -- · 中繼資料不可用",
   "incidents.hubTitle": "事故中心",
   "incidents.hubSubtitle":
     "安全 · 碰撞 · 財損 · 服務恢復 — driver SOS / dispatch exception 一律由 ops 接手",

@@ -257,6 +257,7 @@ const VEHICLE_LICENSE_BY_ID: Record<string, VehicleLicenseType> = {
   "veh-demo-001": "multi_purpose_taxi",
   "veh-demo-002": "taxi",
   "veh-demo-003": "taxi",
+  "veh-demo-004": "business_vehicle",
 };
 
 @Injectable()
@@ -416,12 +417,14 @@ export class VehicleEligibilityService implements OnModuleInit {
       return "taxi_realtime";
     }
 
-    if (order.businessDispatchSubtype === "enterprise_dispatch") {
-      return "enterprise_dispatch";
-    }
-
-    if (order.businessDispatchSubtype === "credit_card_airport_transfer") {
-      return "credit_card_airport_transfer";
+    // Every BusinessDispatchSubtype is itself a ServiceProductType (the contract
+    // keeps them name-aligned), so a business-dispatch order maps to the product
+    // of its subtype -- enterprise_dispatch, credit_card_airport_transfer,
+    // insurance_replacement_vehicle, travel_agency_transfer. Previously only the
+    // first two were mapped, so insurance / travel-agency orders threw
+    // SERVICE_PRODUCT_INACTIVE the moment dispatch eligibility was enforced.
+    if (order.businessDispatchSubtype) {
+      return order.businessDispatchSubtype;
     }
 
     throw new ApiRequestError(
