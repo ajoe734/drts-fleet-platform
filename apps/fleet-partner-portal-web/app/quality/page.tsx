@@ -41,9 +41,9 @@ export default async function FleetQualityPage() {
         >
           {metrics.map((q) => (
             <CanvasKPI
-              key={q.en}
+              key={q.key}
               theme={theme}
-              label={t(`quality.metric.${q.en}`, locale)}
+              label={t(`quality.metric.${q.key}`, locale)}
               value={q.v}
               delta={q.delta}
               deltaTone={

@@ -11,11 +11,6 @@
 
 import type { CanvasTone } from "@drts/ui-web";
 
-export type LocalizedText = {
-  zh: string;
-  en: string;
-};
-
 export type ServiceKey =
   | "realtime"
   | "business"
@@ -23,15 +18,14 @@ export type ServiceKey =
   | "insurance"
   | "travel";
 
-export const SVC_LABELS: Record<
-  ServiceKey,
-  { zh: string; en: string; tone: CanvasTone }
-> = {
-  realtime: { zh: "即時叫車", en: "Realtime", tone: "success" },
-  business: { zh: "商務派車", en: "Business dispatch", tone: "accent" },
-  airport: { zh: "機場接送", en: "Airport transfer", tone: "info" },
-  insurance: { zh: "保險代步", en: "Insurance replacement", tone: "warn" },
-  travel: { zh: "旅行社接送", en: "Travel partner", tone: "accent" },
+// Service-product display text lives in translations.ts (`service.<key>`); only
+// the per-service chip tone is carried here as design metadata.
+export const SVC_LABELS: Record<ServiceKey, { tone: CanvasTone }> = {
+  realtime: { tone: "success" },
+  business: { tone: "accent" },
+  airport: { tone: "info" },
+  insurance: { tone: "warn" },
+  travel: { tone: "accent" },
 };
 
 export const FLEET_SELF = {
@@ -279,9 +273,10 @@ export const FX_FLEET_TRIPS: FleetTrip[] = [
   },
 ];
 
+// `key` maps to a central `revenue.line.<key>` translation; the row carries no
+// inline copy of its own.
 export type StatementLine = {
-  zh: string;
-  en: string;
+  key: string;
   v: string;
   sign: "+" | "−";
   reimbursement?: string | null;
@@ -297,11 +292,11 @@ export const FX_FLEET_STATEMENT: {
   status: "pending_confirm",
   payable: "NT$ 642,000",
   lines: [
-    { zh: "逐趟分潤", en: "per_trip", v: "NT$ 598,400", sign: "+" },
-    { zh: "招募獎金", en: "recruitment", v: "NT$ 24,000", sign: "+" },
-    { zh: "管理費", en: "mgmt_fee", v: "NT$ 36,000", sign: "+" },
-    { zh: "績效獎金", en: "performance", v: "NT$ 12,000", sign: "+" },
-    { zh: "罰則 / 追回", en: "clawback", v: "NT$ 28,400", sign: "−" },
+    { key: "per_trip", v: "NT$ 598,400", sign: "+" },
+    { key: "recruitment", v: "NT$ 24,000", sign: "+" },
+    { key: "mgmt_fee", v: "NT$ 36,000", sign: "+" },
+    { key: "performance", v: "NT$ 12,000", sign: "+" },
+    { key: "clawback", v: "NT$ 28,400", sign: "−" },
   ],
 };
 
@@ -491,9 +486,10 @@ export const FX_FLEET_CASES: FleetCase[] = [
   },
 ];
 
+// `key` maps to a central `quality.metric.<key>` translation; the row carries
+// no inline copy of its own.
 export type FleetQuality = {
-  zh: string;
-  en: string;
+  key: string;
   v: string;
   tone: "success" | "warn" | "neutral";
   delta: string;
@@ -501,43 +497,37 @@ export type FleetQuality = {
 
 export const FX_FLEET_QUALITY: FleetQuality[] = [
   {
-    zh: "平均評分",
-    en: "avg_rating",
+    key: "avg_rating",
     v: "4.86",
     tone: "success",
     delta: "↑ 0.02",
   },
   {
-    zh: "完成率",
-    en: "completion_rate",
+    key: "completion_rate",
     v: "97.4%",
     tone: "success",
     delta: "↑ 0.6pp",
   },
   {
-    zh: "取消率",
-    en: "cancel_rate",
+    key: "cancel_rate",
     v: "1.8%",
     tone: "neutral",
     delta: "↓ 0.2pp",
   },
   {
-    zh: "未出現率",
-    en: "no_show_rate",
+    key: "no_show_rate",
     v: "0.8%",
     tone: "neutral",
     delta: "—",
   },
   {
-    zh: "申訴率",
-    en: "complaint_rate",
+    key: "complaint_rate",
     v: "0.12%",
     tone: "warn",
     delta: "↑ 0.01pp",
   },
   {
-    zh: "準點率",
-    en: "on_time_rate",
+    key: "on_time_rate",
     v: "94.2%",
     tone: "success",
     delta: "↑ 1.1pp",
@@ -571,44 +561,28 @@ export const FX_DASHBOARD_SUPPLEMENTAL: FleetDashboardSupplemental = {
   trainingCompletion: "92%",
 };
 
+// `titleKey` / `bodyKey` map to central `dashboard.attention.*` translations;
+// the banner carries no inline bilingual copy of its own.
 export type FleetAttentionBanner = {
   tone: "warn" | "danger";
-  title: LocalizedText;
-  body: LocalizedText;
+  titleKey: string;
+  bodyKey: string;
 };
 
 export const FX_DASHBOARD_ATTENTION: FleetAttentionBanner[] = [
   {
     tone: "warn",
-    title: {
-      zh: "吳鎮宇缺機場接送資格證",
-      en: "Wu Zhen-Yu is missing the airport transfer permit",
-    },
-    body: {
-      zh: "缺件期間無法接機場接送任務。請協助補件。",
-      en: "The driver cannot take airport-transfer work until the permit is restored.",
-    },
+    titleKey: "dashboard.attention.permit.title",
+    bodyKey: "dashboard.attention.permit.body",
   },
   {
     tone: "danger",
-    title: {
-      zh: "cmp_0908 司機行為申訴已逾 SLA",
-      en: "cmp_0908 driver-conduct complaint has breached SLA",
-    },
-    body: {
-      zh: "黃文豪言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。",
-      en: "A conduct complaint against Huang Wen-Hao escalated to fleet ownership. Respond within 24 hours.",
-    },
+    titleKey: "dashboard.attention.sla.title",
+    bodyKey: "dashboard.attention.sla.body",
   },
   {
     tone: "warn",
-    title: {
-      zh: "保險代步流程訓練完成率 55%",
-      en: "Insurance replacement training completion is 55%",
-    },
-    body: {
-      zh: "22 / 40 司機完成。未完成者無法接保險代步任務。",
-      en: "22 of 40 drivers have completed the flow. Incomplete drivers cannot take insurance-replacement work.",
-    },
+    titleKey: "dashboard.attention.training.title",
+    bodyKey: "dashboard.attention.training.body",
   },
 ];
