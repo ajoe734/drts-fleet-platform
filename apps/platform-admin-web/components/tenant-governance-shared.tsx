@@ -216,7 +216,7 @@ export function TenantIdentityFields({
             }))
           }
           required
-          placeholder="Acme Mobility"
+          placeholder={t("tenants.list.placeholder.name")}
           style={formInputStyle}
         />
       </label>
@@ -226,15 +226,15 @@ export function TenantIdentityFields({
           <input
             value={form.code}
             onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                code: event.target.value,
-              }))
-            }
-            required
-            placeholder="acme_dispatch"
-            style={formInputStyle}
-          />
+            setForm((current) => ({
+              ...current,
+              code: event.target.value,
+            }))
+          }
+          required
+          placeholder={t("tenants.list.placeholder.code")}
+          style={formInputStyle}
+        />
         </label>
       ) : null}
       {!hideStatus ? (
@@ -389,12 +389,12 @@ export function IntegrationFields({
           <input
             value={form.bootstrapAdminEmail}
             onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                bootstrapAdminEmail: event.target.value,
-              }))
-            }
-            placeholder="admin@acme.example"
+            setForm((current) => ({
+              ...current,
+              bootstrapAdminEmail: event.target.value,
+            }))
+          }
+            placeholder={t("tenants.list.placeholder.adminEmail")}
             style={formInputStyle}
           />
         </label>

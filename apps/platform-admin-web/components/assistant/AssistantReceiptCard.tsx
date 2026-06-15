@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { CheckCircle2, Clock3, OctagonAlert } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantInsetStyle,
@@ -70,13 +71,14 @@ export function AssistantReceiptCard({
 }: {
   receipt: AssistantReceipt;
 }) {
+  const { t } = useTranslation();
   const resourceValue =
     receipt.resourceLabel ??
     [receipt.resourceType, receipt.resourceId].filter(Boolean).join(" · ") ??
     "";
 
   return (
-    <section style={assistantCardStyle} aria-label="Assistant action receipt">
+    <section style={assistantCardStyle} aria-label={t("assistant.receipt.aria")}>
       <div style={bodyStyle}>
         <div
           style={{
@@ -90,7 +92,9 @@ export function AssistantReceiptCard({
           <div style={{ display: "grid", gap: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {receiptIcon(receipt.status)}
-              <h3 style={titleStyle}>{receipt.title ?? "Action receipt"}</h3>
+              <h3 style={titleStyle}>
+                {receipt.title ?? t("assistant.overlay.receiptTitle")}
+              </h3>
             </div>
             {receipt.message ? (
               <div style={assistantMutedTextStyle}>{receipt.message}</div>
@@ -106,25 +110,25 @@ export function AssistantReceiptCard({
 
         <div style={gridStyle}>
           <div style={itemStyle}>
-            <div style={labelStyle}>Action ID</div>
+            <div style={labelStyle}>{t("assistant.receipt.actionId")}</div>
             <div style={assistantMonoTextStyle}>
               {valueOrFallback(receipt.actionId)}
             </div>
           </div>
           <div style={itemStyle}>
-            <div style={labelStyle}>Request ID</div>
+            <div style={labelStyle}>{t("assistant.receipt.requestId")}</div>
             <div style={assistantMonoTextStyle}>
               {valueOrFallback(receipt.requestId)}
             </div>
           </div>
           <div style={itemStyle}>
-            <div style={labelStyle}>Audit ID</div>
+            <div style={labelStyle}>{t("assistant.receipt.auditId")}</div>
             <div style={assistantMonoTextStyle}>
               {valueOrFallback(receipt.auditId)}
             </div>
           </div>
           <div style={itemStyle}>
-            <div style={labelStyle}>Resource</div>
+            <div style={labelStyle}>{t("assistant.receipt.resource")}</div>
             <div
               style={{ ...assistantMonoTextStyle, color: assistantTheme.text }}
             >
@@ -132,7 +136,7 @@ export function AssistantReceiptCard({
             </div>
           </div>
           <div style={itemStyle}>
-            <div style={labelStyle}>Status</div>
+            <div style={labelStyle}>{t("assistant.receipt.status")}</div>
             <div style={{ color: assistantTheme.text, fontSize: 13 }}>
               {receipt.status}
             </div>
@@ -152,7 +156,7 @@ export function AssistantReceiptCard({
                 fontSize: 12.5,
               }}
             >
-              View audit evidence
+              {t("assistant.receipt.viewAuditEvidence")}
             </Link>
           </div>
         ) : null}

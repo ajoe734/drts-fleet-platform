@@ -1133,7 +1133,7 @@ export default async function FeatureFlagsPage({
             <div style={metaGridStyle}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 <Pill theme={theme} tone="accent">
-                  GET /api/ops/feature-flags
+                  {t("flags.boundary.endpointPill", locale)}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
                   {t("flags.boundary.availableActions", locale)}

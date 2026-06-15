@@ -8190,3 +8190,38 @@ class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
+    """RCA fix: fresh task worktrees must get node_modules (symlinked from the
+    canonical checkout) so workers can typecheck/build at closeout instead of
+    stranding `blocked` on a missing/slow per-worktree install."""
+
+    def _mk(self):
+        import shutil
+        root = Path(tempfile.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        (root / "node_modules").mkdir()
+        (root / "apps" / "foo").mkdir(parents=True); (root / "apps" / "foo" / "node_modules").mkdir()
+        (root / "packages" / "bar").mkdir(parents=True); (root / "packages" / "bar" / "node_modules").mkdir()
+        dest = Path(tempfile.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(dest, ignore_errors=True))
+        (dest / "apps" / "foo").mkdir(parents=True); (dest / "packages" / "bar").mkdir(parents=True)
+        return root, dest
+
+    def test_symlinks_root_and_workspace_node_modules(self):
+        root, dest = self._mk()
+        supervisor._provision_worktree_node_modules(root, dest)
+        self.assertTrue((dest / "node_modules").is_symlink())
+        self.assertEqual((dest / "node_modules").resolve(), (root / "node_modules").resolve())
+        self.assertTrue((dest / "apps" / "foo" / "node_modules").is_symlink())
+        self.assertTrue((dest / "packages" / "bar" / "node_modules").is_symlink())
+
+    def test_noop_on_canonical_root(self):
+        root, _ = self._mk()
+        supervisor._provision_worktree_node_modules(root, root)
+        self.assertFalse((root / "node_modules").is_symlink())
+
+    def test_does_not_clobber_existing_node_modules(self):
+        root, dest = self._mk()
+        (dest / "node_modules").mkdir()
+        supervisor._provision_worktree_node_modules(root, dest)
+        self.assertFalse((dest / "node_modules").is_symlink())

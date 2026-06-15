@@ -1,6 +1,6 @@
 import type { BankRole as HomeRole } from "@/lib/home-data";
 import type { BankDemoTenant, BankDemoTenantCode } from "@/lib/demo-tenants";
-import { t, type Locale } from "@/lib/translations";
+import { t, type Locale, type TranslationKey } from "@/lib/translations";
 
 export type BankConsoleRole =
   | "bank_program_admin"
@@ -9,7 +9,7 @@ export type BankConsoleRole =
 
 type ActorProfile = {
   emailLocal: string;
-  names: Record<BankDemoTenantCode, Record<Locale, string>>;
+  nameKeys: Record<BankDemoTenantCode, TranslationKey>;
 };
 
 const DEFAULT_ROLE: BankConsoleRole = "bank_program_admin";
@@ -27,26 +27,26 @@ const ROLE_ALIASES: Record<string, BankConsoleRole> = {
 const ACTOR_PROFILES: Record<BankConsoleRole, ActorProfile> = {
   bank_program_admin: {
     emailLocal: "program-admin",
-    names: {
-      ctbc: { zh: "周敬文", en: "Wen Chou" },
-      cathay: { zh: "林可欣", en: "K. Lin" },
-      fubon: { zh: "陳品妤", en: "P. Chen" },
+    nameKeys: {
+      ctbc: "session.actor.bank_program_admin.ctbc",
+      cathay: "session.actor.bank_program_admin.cathay",
+      fubon: "session.actor.bank_program_admin.fubon",
     },
   },
   bank_ops_viewer: {
     emailLocal: "ops-viewer",
-    names: {
-      ctbc: { zh: "黃怡安", en: "I. Huang" },
-      cathay: { zh: "吳柏翰", en: "B. Wu" },
-      fubon: { zh: "許若涵", en: "R. Hsu" },
+    nameKeys: {
+      ctbc: "session.actor.bank_ops_viewer.ctbc",
+      cathay: "session.actor.bank_ops_viewer.cathay",
+      fubon: "session.actor.bank_ops_viewer.fubon",
     },
   },
   bank_finance: {
     emailLocal: "finance",
-    names: {
-      ctbc: { zh: "湯立群", en: "L. Tang" },
-      cathay: { zh: "張雅婷", en: "Y. Chang" },
-      fubon: { zh: "李宗翰", en: "T. Lee" },
+    nameKeys: {
+      ctbc: "session.actor.bank_finance.ctbc",
+      cathay: "session.actor.bank_finance.cathay",
+      fubon: "session.actor.bank_finance.fubon",
     },
   },
 };
@@ -86,7 +86,7 @@ export function getBankConsoleSession(
 
   return {
     actorEmail: `${profile.emailLocal}@${emailDomain}`,
-    actorName: profile.names[bank.code][locale],
+    actorName: t(profile.nameKeys[bank.code], locale),
     role,
     roleCode: t(`users.roleCode.${role}`, locale),
     roleLabel: t(`users.role.${role}`, locale),

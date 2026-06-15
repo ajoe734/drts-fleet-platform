@@ -11,7 +11,7 @@ import type { AssistantEntityRef } from "@/components/assistant/assistant-types"
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { t as translate } from "@/lib/translations";
+import { getBilingualText } from "@/lib/translations";
 import {
   formatPlatformCodeLabel,
   getPlatformLabel,
@@ -1485,14 +1485,9 @@ export default function PaymentsPage() {
                 {
                   code: "payments_data_error",
                   severity: "warning" as const,
-                  message: {
-                    zh: translate("payments.warning.dataLoadError", "zh", {
-                      error,
-                    }),
-                    en: translate("payments.warning.dataLoadError", "en", {
-                      error,
-                    }),
-                  },
+                  message: getBilingualText("payments.warning.dataLoadError", {
+                    error,
+                  }),
                 },
               ]
             : []),
@@ -1501,14 +1496,9 @@ export default function PaymentsPage() {
                 {
                   code: "payments_reopen_rate_warning",
                   severity: "warning" as const,
-                  message: {
-                    zh: translate("payments.warning.reopenRate", "zh", {
-                      rate: reopenRate.toFixed(1),
-                    }),
-                    en: translate("payments.warning.reopenRate", "en", {
-                      rate: reopenRate.toFixed(1),
-                    }),
-                  },
+                  message: getBilingualText("payments.warning.reopenRate", {
+                    rate: reopenRate.toFixed(1),
+                  }),
                 },
               ]
             : []),

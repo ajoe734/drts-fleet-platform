@@ -1,8 +1,12 @@
 import type { CSSProperties } from "react";
 import { PageHero } from "@/components/page-primitives";
 import {
+  getBankProgramSeedLabel,
+  getBankTenantName,
+  getBankTenantShortName,
   resolveBankDemoTenant,
   resolveLocale,
+  type BankProgramSeed,
   type BankDemoTenant,
 } from "@/lib/demo-tenants";
 import { t, type Locale, type TranslationKey } from "@/lib/translations";
@@ -34,14 +38,8 @@ const PROGRAM_BASE = [
     seed: "premium",
     codeSuffix: "WE",
     period: "2026 Q2",
-    coverage: {
-      zh: "全球機場接或送 2 趟 / 季",
-      en: "Global airport pickup or drop-off · 2 trips / quarter",
-    },
-    benefits: {
-      zh: "VISA Infinite / 正附卡合併歸戶",
-      en: "VISA Infinite / household-level entitlement",
-    },
+    coverageKey: "programs.data.premiumQ2.coverage",
+    benefitsKey: "programs.data.premiumQ2.benefits",
     served: 1240,
     used: 1820,
     total: 2400,
@@ -56,14 +54,8 @@ const PROGRAM_BASE = [
     seed: "business",
     codeSuffix: "BIZ",
     period: "2026 Q2",
-    coverage: {
-      zh: "桃園 / 松山 / 高雄 接送",
-      en: "Taoyuan / Songshan / Kaohsiung transfer",
-    },
-    benefits: {
-      zh: "Mastercard World Elite / 年消費門檻",
-      en: "Mastercard World Elite / annual spend gate",
-    },
+    coverageKey: "programs.data.businessQ2.coverage",
+    benefitsKey: "programs.data.businessQ2.benefits",
     served: 860,
     used: 990,
     total: 1200,
@@ -78,14 +70,8 @@ const PROGRAM_BASE = [
     seed: "starter",
     codeSuffix: "NEW",
     period: "2026 H1",
-    coverage: {
-      zh: "國內指定機場送機 1 趟 / 半年",
-      en: "Domestic airport drop-off · 1 trip / half-year",
-    },
-    benefits: {
-      zh: "新戶核卡 90 日內啟用",
-      en: "New card activated within 90 days",
-    },
+    coverageKey: "programs.data.starterH1.coverage",
+    benefitsKey: "programs.data.starterH1.benefits",
     served: 430,
     used: 286,
     total: 900,
@@ -95,7 +81,22 @@ const PROGRAM_BASE = [
     policyKey: "programs.policy.newCard",
     exceptions: ["expiredEligibility", "missingReceipt"],
   },
-] as const;
+] as const satisfies ReadonlyArray<{
+  id: string;
+  seed: BankProgramSeed;
+  codeSuffix: string;
+  period: string;
+  coverageKey: TranslationKey;
+  benefitsKey: TranslationKey;
+  served: number;
+  used: number;
+  total: number;
+  trend: readonly number[];
+  trendLabelKey: TranslationKey;
+  exceptionCount: number;
+  policyKey: TranslationKey;
+  exceptions: readonly (keyof typeof EXCEPTION_KEYS)[];
+}>;
 
 const EXCEPTION_KEYS = {
   duplicateUsage: "programs.exception.duplicateUsage",
@@ -117,7 +118,7 @@ const EXCEPTION_REFERENCE_SUFFIXES = {
 
 function buildPrograms(tenant: BankDemoTenant, locale: Locale): DemoProgram[] {
   return PROGRAM_BASE.map((program) => {
-    const programName = tenant.programSeed[program.seed][locale];
+    const programName = getBankProgramSeedLabel(tenant, program.seed, locale);
     const code = `${tenant.issuerCode}-${program.codeSuffix}`;
 
     return {
@@ -125,9 +126,9 @@ function buildPrograms(tenant: BankDemoTenant, locale: Locale): DemoProgram[] {
       name: programName,
       code,
       period: program.period,
-      issuer: `${tenant.issuerCode} · ${tenant.name[locale]}`,
-      coverage: program.coverage[locale],
-      benefits: program.benefits[locale],
+      issuer: `${tenant.issuerCode} · ${getBankTenantName(tenant, locale)}`,
+      coverage: t(program.coverageKey, locale),
+      benefits: t(program.benefitsKey, locale),
       served: program.served,
       used: program.used,
       total: program.total,
@@ -139,10 +140,11 @@ function buildPrograms(tenant: BankDemoTenant, locale: Locale): DemoProgram[] {
         const [cardholder, benefit] = EXCEPTION_REFERENCE_SUFFIXES[exception];
         return {
           typeKey: EXCEPTION_KEYS[exception],
-          reference:
-            locale === "zh"
-              ? `卡友 ${tenant.issuerCode}-CH***${cardholder} · 權益 BR***${benefit}`
-              : `Cardholder ${tenant.issuerCode}-CH***${cardholder} · benefit BR***${benefit}`,
+          reference: t("programs.exception.reference", locale, {
+            issuer: tenant.issuerCode,
+            cardholder,
+            benefit,
+          }),
         };
       }),
     };
@@ -154,26 +156,17 @@ function buildTopExceptions(locale: Locale) {
     {
       key: "programs.exception.outOfWindow",
       count: 9,
-      detail:
-        locale === "zh"
-          ? "多發於凌晨航班改票後逾 24 小時重提"
-          : "Often caused by re-submission more than 24h after red-eye flight changes.",
+      detail: t("programs.exception.outOfWindow.detail", locale),
     },
     {
       key: "programs.exception.manualReview",
       count: 7,
-      detail:
-        locale === "zh"
-          ? "高單價接送與跨區加價需人工覆核"
-          : "High-value rides and cross-region surcharges require manual review.",
+      detail: t("programs.exception.manualReview.detail", locale),
     },
     {
       key: "programs.exception.flightChange",
       count: 6,
-      detail:
-        locale === "zh"
-          ? "航班異動後重派車產生 quota 回補延遲"
-          : "Flight-change redispatch can delay quota backfill.",
+      detail: t("programs.exception.flightChange.detail", locale),
     },
   ] as const satisfies ReadonlyArray<{
     key: TranslationKey;
@@ -285,7 +278,7 @@ export default async function ProgramsPage({
           </p>
           <h2>
             {t("programs.banner.title", locale, {
-              bank: tenant.shortName[locale],
+              bank: getBankTenantShortName(tenant, locale),
             })}
           </h2>
           <p>{t("programs.banner.body", locale)}</p>
@@ -294,7 +287,7 @@ export default async function ProgramsPage({
           <div>
             <dt>{t("programs.banner.issuer", locale)}</dt>
             <dd>
-              {tenant.issuerCode} · {tenant.name[locale]}
+              {tenant.issuerCode} · {getBankTenantName(tenant, locale)}
             </dd>
           </div>
           <div>

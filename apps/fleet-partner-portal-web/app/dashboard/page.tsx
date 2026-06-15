@@ -7,11 +7,7 @@ import {
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import { loadDashboard } from "@/lib/fleet-portal-data.server";
-import {
-  DataSourceNotice,
-  SvcChip,
-  pickLocalizedText,
-} from "@/lib/fleet-portal-ui";
+import { DataSourceNotice, SvcChip } from "@/lib/fleet-portal-ui";
 import { RecentTripsTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
@@ -147,12 +143,12 @@ export default async function FleetDashboardPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {dashboard.attention.map((banner) => (
                 <CanvasBanner
-                  key={banner.title.en}
+                  key={banner.titleKey}
                   theme={theme}
                   tone={banner.tone}
                   icon="warn"
-                  title={pickLocalizedText(locale, banner.title)}
-                  body={pickLocalizedText(locale, banner.body)}
+                  title={t(banner.titleKey, locale)}
+                  body={t(banner.bodyKey, locale)}
                 />
               ))}
             </div>

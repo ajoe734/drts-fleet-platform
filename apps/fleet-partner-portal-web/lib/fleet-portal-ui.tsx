@@ -1,10 +1,6 @@
 import type { CanvasTheme } from "@drts/ui-web";
 import { CanvasBanner, CanvasPill } from "@drts/ui-web";
-import {
-  SVC_LABELS,
-  type LocalizedText,
-  type ServiceKey,
-} from "./fleet-portal-fixtures";
+import { SVC_LABELS, type ServiceKey } from "./fleet-portal-fixtures";
 import { t, type Locale } from "./translations";
 
 // Shows the "design data" notice only when a view is rendering fixtures
@@ -26,10 +22,6 @@ export function DataSourceNotice({
 
 function humanizeCode(value: string) {
   return value.replace(/_/g, " ");
-}
-
-export function pickLocalizedText(locale: Locale, value: LocalizedText) {
-  return locale === "en" ? value.en : value.zh;
 }
 
 export function formatFleetCodeLabel(
@@ -55,14 +47,10 @@ export function SvcChip({
   locale: Locale;
   svc: ServiceKey;
 }) {
-  const s = SVC_LABELS[svc] ?? {
-    zh: svc,
-    en: svc,
-    tone: "neutral" as const,
-  };
+  const tone = SVC_LABELS[svc]?.tone ?? ("neutral" as const);
   return (
-    <CanvasPill theme={theme} tone={s.tone}>
-      {locale === "en" ? s.en : s.zh}
+    <CanvasPill theme={theme} tone={tone}>
+      {t(`service.${svc}`, locale)}
     </CanvasPill>
   );
 }

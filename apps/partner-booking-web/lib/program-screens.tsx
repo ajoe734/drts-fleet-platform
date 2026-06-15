@@ -159,232 +159,6 @@ type ProgramScreenCopy = {
 };
 export type PartnerProgramSurfaceKind = "site" | "embed";
 
-const PROGRAM_SCREEN_COPY: Record<
-  PartnerProgramScreenId,
-  Record<Locale, ProgramScreenCopy>
-> = {
-  landing: {
-    zh: { label: "入口", summary: "品牌入口 hero、額度餘額與服務選單。" },
-    en: {
-      label: "Landing",
-      summary: "Branded entry hero, benefit balance, and service menu.",
-    },
-  },
-  eligibility: {
-    zh: { label: "資格確認", summary: "首次使用的權益確認與授權同意。" },
-    en: {
-      label: "Eligibility",
-      summary: "First-use benefit confirmation and consent.",
-    },
-  },
-  insurance_policy: {
-    zh: { label: "保單驗證", summary: "保單未通過核驗，理賠代步仍維持封鎖。" },
-    en: {
-      label: "Policy check",
-      summary:
-        "Replacement mobility remains blocked until policy verification passes.",
-    },
-  },
-  insurance_replacement_vehicle: {
-    zh: {
-      label: "代步車權益",
-      summary: "代步車型或保障窗未核定，無法建立代步行程。",
-    },
-    en: {
-      label: "Replacement benefit",
-      summary: "Vehicle class or coverage window is not approved yet.",
-    },
-  },
-  insurance_roster: {
-    zh: {
-      label: "乘客名單",
-      summary: "理賠案件乘客名單未對齊，需先修正保險名單資料。",
-    },
-    en: {
-      label: "Passenger roster",
-      summary: "Insurance passenger roster must be corrected before booking.",
-    },
-  },
-  insurance_pending: {
-    zh: {
-      label: "理賠審核中",
-      summary: "理賠案件尚在審核流程，代步權益未開通。",
-    },
-    en: {
-      label: "Claim pending",
-      summary:
-        "The claim is still under review, so mobility benefit is not open.",
-    },
-  },
-  insurance_missing: {
-    zh: {
-      label: "查無案件",
-      summary: "保單或理賠參照查無對應案件，需重新確認資料。",
-    },
-    en: {
-      label: "Claim not found",
-      summary: "No matching policy or claim reference was found.",
-    },
-  },
-  insurance_expired: {
-    zh: {
-      label: "保障已逾期",
-      summary: "代步保障期間已結束，本案無法再建立新行程。",
-    },
-    en: {
-      label: "Coverage expired",
-      summary: "The replacement-vehicle coverage window has ended.",
-    },
-  },
-  insurance_cancelled: {
-    zh: {
-      label: "案件已結案",
-      summary: "理賠案件已取消或結清，代步權益同步關閉。",
-    },
-    en: {
-      label: "Claim closed",
-      summary:
-        "The claim is cancelled or settled, so mobility benefit is closed.",
-    },
-  },
-  review: {
-    zh: {
-      label: "下單前確認",
-      summary: "上下車、時間、服務與費用 / 額度彙整。",
-    },
-    en: {
-      label: "Review",
-      summary: "Pickup, drop-off, time, service, fee, and benefit summary.",
-    },
-  },
-  success: {
-    zh: { label: "預約成功", summary: "預約成立、訂單編號與後續指引。" },
-    en: {
-      label: "Booked",
-      summary: "Booking confirmation, reference number, and next steps.",
-    },
-  },
-  tracking: {
-    zh: { label: "行程追蹤", summary: "駕駛資訊、即時位置與行程明細。" },
-    en: {
-      label: "Tracking",
-      summary: "Driver details, live location, and trip information.",
-    },
-  },
-  error: {
-    zh: { label: "發生錯誤", summary: "可重試的錯誤狀態與客服入口。" },
-    en: {
-      label: "Error",
-      summary: "Retryable error state and support entry point.",
-    },
-  },
-  manual_review: {
-    zh: { label: "人工審查", summary: "資格送人工審查的等待狀態。" },
-    en: {
-      label: "Manual review",
-      summary: "Waiting state while eligibility is under manual review.",
-    },
-  },
-  embed_handoff: {
-    zh: {
-      label: translate("program.screen.embed_handoff.label", undefined, "zh"),
-      summary: translate(
-        "program.screen.embed_handoff.summary",
-        undefined,
-        "zh",
-      ),
-    },
-    en: {
-      label: translate("program.screen.embed_handoff.label", undefined, "en"),
-      summary: translate(
-        "program.screen.embed_handoff.summary",
-        undefined,
-        "en",
-      ),
-    },
-  },
-  embed_reauth: {
-    zh: {
-      label: translate("program.screen.embed_reauth.label", undefined, "zh"),
-      summary: translate(
-        "program.screen.embed_reauth.summary",
-        undefined,
-        "zh",
-      ),
-    },
-    en: {
-      label: translate("program.screen.embed_reauth.label", undefined, "en"),
-      summary: translate(
-        "program.screen.embed_reauth.summary",
-        undefined,
-        "en",
-      ),
-    },
-  },
-  embed_unsupported: {
-    zh: {
-      label: translate(
-        "program.screen.embed_unsupported.label",
-        undefined,
-        "zh",
-      ),
-      summary: translate(
-        "program.screen.embed_unsupported.summary",
-        undefined,
-        "zh",
-      ),
-    },
-    en: {
-      label: translate(
-        "program.screen.embed_unsupported.label",
-        undefined,
-        "en",
-      ),
-      summary: translate(
-        "program.screen.embed_unsupported.summary",
-        undefined,
-        "en",
-      ),
-    },
-  },
-  embed_consent: {
-    zh: {
-      label: translate("program.screen.embed_consent.label", undefined, "zh"),
-      summary: translate(
-        "program.screen.embed_consent.summary",
-        undefined,
-        "zh",
-      ),
-    },
-    en: {
-      label: translate("program.screen.embed_consent.label", undefined, "en"),
-      summary: translate(
-        "program.screen.embed_consent.summary",
-        undefined,
-        "en",
-      ),
-    },
-  },
-  embed_fallback: {
-    zh: {
-      label: translate("program.screen.embed_fallback.label", undefined, "zh"),
-      summary: translate(
-        "program.screen.embed_fallback.summary",
-        undefined,
-        "zh",
-      ),
-    },
-    en: {
-      label: translate("program.screen.embed_fallback.label", undefined, "en"),
-      summary: translate(
-        "program.screen.embed_fallback.summary",
-        undefined,
-        "en",
-      ),
-    },
-  },
-};
-
 const screenById = Object.fromEntries(
   PARTNER_PROGRAM_SCREENS.map((screen) => [screen.id, screen]),
 ) as Record<PartnerProgramScreenId, ProgramScreenMeta>;
@@ -463,7 +237,10 @@ function getProgramScreenCopy(
   screen: PartnerProgramScreenId,
   locale: Locale,
 ): ProgramScreenCopy {
-  return PROGRAM_SCREEN_COPY[screen][locale] ?? PROGRAM_SCREEN_COPY[screen].zh;
+  return {
+    label: translate(`program.screen.${screen}.label`, undefined, locale),
+    summary: translate(`program.screen.${screen}.summary`, undefined, locale),
+  };
 }
 
 /** Resolve a URL segment (e.g. `manual-review`) to a screen id. */
@@ -566,24 +343,23 @@ function programDemo(theme: PartnerProgramTheme, locale: Locale = "zh") {
       remaining,
       total,
       used: total - remaining,
-      riderName: locale === "zh" ? "林〇雄" : "Lin H.",
-      pickup:
-        locale === "zh" ? "桃園機場 第一航廈" : "Taoyuan Airport Terminal 1",
-      pickupDetail:
-        locale === "zh"
-          ? "入境大廳北側遊覽車上車處"
-          : "North coach pickup zone, arrivals hall",
-      dropoff:
-        locale === "zh"
-          ? "台北車站 -> 西門商旅"
-          : "Taipei Main Station -> Ximen hotel",
-      dropoffDetail:
-        locale === "zh" ? "第 1 批團體接駁" : "Batch 1 group shuttle",
+      riderName: translate("program.demo.travel.riderName", undefined, locale),
+      pickup: translate("program.demo.travel.pickup", undefined, locale),
+      pickupDetail: translate(
+        "program.demo.travel.pickupDetail",
+        undefined,
+        locale,
+      ),
+      dropoff: translate("program.demo.travel.dropoff", undefined, locale),
+      dropoffDetail: translate(
+        "program.demo.travel.dropoffDetail",
+        undefined,
+        locale,
+      ),
       departureTime: "2026-06-28 14:20",
       bookingRef: "LION-TPE-0628",
-      driverName: locale === "zh" ? "黃建宏" : "Huang J.",
-      vehicle:
-        locale === "zh" ? "中型巴士 · ARJ-9920" : "Medium bus · ARJ-9920",
+      driverName: translate("program.demo.travel.driverName", undefined, locale),
+      vehicle: translate("program.demo.travel.vehicle", undefined, locale),
     };
   }
 
@@ -593,30 +369,29 @@ function programDemo(theme: PartnerProgramTheme, locale: Locale = "zh") {
     remaining,
     total,
     used: total - remaining,
-    riderName:
-      locale === "zh"
-        ? theme.kind === "insurance"
-          ? "王〇華"
-          : "陳〇明"
-        : theme.kind === "insurance"
-          ? "Wang H."
-          : "Chen M.",
-    pickup:
-      locale === "zh"
-        ? "台北市信義區松仁路 100 號"
-        : "100 Songren Rd, Xinyi District, Taipei",
-    pickupDetail: locale === "zh" ? "1 樓大廳" : "Lobby, 1F",
-    dropoff:
-      locale === "zh" ? "桃園機場 第二航廈" : "Taoyuan Airport Terminal 2",
-    dropoffDetail:
-      locale === "zh" ? "出境大廳 7 號門" : "Departure Hall Gate 7",
+    riderName: translate(
+      theme.kind === "insurance"
+        ? "program.demo.insurance.riderName"
+        : "program.demo.card.riderName",
+      undefined,
+      locale,
+    ),
+    pickup: translate("program.demo.default.pickup", undefined, locale),
+    pickupDetail: translate(
+      "program.demo.default.pickupDetail",
+      undefined,
+      locale,
+    ),
+    dropoff: translate("program.demo.default.dropoff", undefined, locale),
+    dropoffDetail: translate(
+      "program.demo.default.dropoffDetail",
+      undefined,
+      locale,
+    ),
     departureTime: "2026-05-08 17:30",
     bookingRef: theme.issuerLabel.toUpperCase() + "-2026-0004",
-    driverName: locale === "zh" ? "陳俊宏" : "Chen J.",
-    vehicle:
-      locale === "zh"
-        ? "Toyota Prius alpha · ARJ-3120"
-        : "Toyota Prius alpha · ARJ-3120",
+    driverName: translate("program.demo.default.driverName", undefined, locale),
+    vehicle: translate("program.demo.default.vehicle", undefined, locale),
   };
 }
 

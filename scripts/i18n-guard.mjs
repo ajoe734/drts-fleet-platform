@@ -10,6 +10,12 @@ const APPS = [
   "apps/passenger-web",
   "apps/concierge-portal-web",
   "apps/tenant-console-web",
+  "apps/ops-console-web",
+  "apps/platform-admin-web",
+  "apps/enterprise-dispatch-web",
+  "apps/partner-booking-web",
+  "apps/fleet-partner-portal-web",
+  "apps/bank-console-web",
 ];
 const TARGET_DIRS = ["app", "components", "lib"];
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
@@ -19,6 +25,51 @@ const LATIN_PATTERN = /[A-Za-z]/;
 const LOCALE_TAG_PATTERN = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
 const MACHINE_TOKEN_PATTERN =
   /^(?:[A-Za-z_][\w./:-]*|\/[\w/-]+|[A-Z0-9_-]{2,}|Q-[A-Z0-9-]+)$/;
+const DEFAULT_BASELINE_PATH = path.join(ROOT, "i18n-guard-baseline.json");
+
+function parseArgs(argv) {
+  const options = {
+    baselinePath: DEFAULT_BASELINE_PATH,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    if (arg === "--baseline") {
+      const nextArg = argv[index + 1];
+      if (!nextArg) {
+        throw new Error("--baseline requires a file path.");
+      }
+      options.baselinePath = path.resolve(ROOT, nextArg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--help" || arg === "-h") {
+      console.log(`Usage: node scripts/i18n-guard.mjs [--baseline path]
+
+Scans all guarded web apps for inline user-facing copy.
+Known temporary exemptions live in ${path.relative(ROOT, DEFAULT_BASELINE_PATH)}.
+
+Baseline format:
+{
+  "version": 1,
+  "exemptions": [
+    {
+      "path": "apps/example-web/app/page.tsx",
+      "rules": ["jsx-text"],
+      "reason": "Fixture-backed demo surface pending remediation."
+    }
+  ]
+}`);
+      process.exit(0);
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return options;
+}
 
 function walkFiles(dirPath, files) {
   if (!fs.existsSync(dirPath)) {
@@ -260,21 +311,115 @@ function scanFile(filePath) {
   return violations;
 }
 
+function loadBaseline(baselinePath) {
+  if (!fs.existsSync(baselinePath)) {
+    return { exemptions: [], path: baselinePath };
+  }
+
+  const parsed = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Array.isArray(parsed.exemptions)
+  ) {
+    throw new Error(
+      `Invalid baseline file at ${path.relative(ROOT, baselinePath)}: expected { exemptions: [] }.`,
+    );
+  }
+
+  const exemptions = parsed.exemptions.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || typeof entry.path !== "string") {
+      throw new Error(
+        `Invalid baseline entry #${index + 1}: each exemption requires a string "path".`,
+      );
+    }
+
+    if (
+      entry.rules !== undefined &&
+      (!Array.isArray(entry.rules) ||
+        entry.rules.some((rule) => typeof rule !== "string"))
+    ) {
+      throw new Error(
+        `Invalid baseline entry for ${entry.path}: "rules" must be an array of strings.`,
+      );
+    }
+
+    if (typeof entry.reason !== "string" || !entry.reason.trim()) {
+      throw new Error(
+        `Invalid baseline entry for ${entry.path}: "reason" is required.`,
+      );
+    }
+
+    return {
+      path: entry.path,
+      rules: entry.rules ? new Set(entry.rules) : null,
+      reason: entry.reason.trim(),
+    };
+  });
+
+  return { exemptions, path: baselinePath };
+}
+
+function splitViolations(violations, baseline) {
+  const active = [];
+  const exempted = [];
+
+  for (const violation of violations) {
+    const match = baseline.exemptions.find((entry) => {
+      if (entry.path !== violation.file) {
+        return false;
+      }
+
+      return !entry.rules || entry.rules.has(violation.rule);
+    });
+
+    if (match) {
+      exempted.push({ ...violation, reason: match.reason });
+      continue;
+    }
+
+    active.push(violation);
+  }
+
+  return { active, exempted };
+}
+
+let options;
+
+try {
+  options = parseArgs(process.argv.slice(2));
+} catch (error) {
+  console.error(`i18n-guard: ${error.message}`);
+  process.exit(2);
+}
+
 const files = getFiles();
 const violations = files.flatMap((filePath) => scanFile(filePath));
 
-if (violations.length === 0) {
+let baseline;
+
+try {
+  baseline = loadBaseline(options.baselinePath);
+} catch (error) {
+  console.error(`i18n-guard: ${error.message}`);
+  process.exit(2);
+}
+
+const { active: activeViolations, exempted: exemptedViolations } =
+  splitViolations(violations, baseline);
+
+if (activeViolations.length === 0) {
   console.log(
-    `i18n-guard: OK (${files.length} files scanned across ${APPS.length} apps)`,
+    `i18n-guard: OK (${files.length} files scanned across ${APPS.length} apps, ${exemptedViolations.length} exemption(s) from ${path.relative(ROOT, baseline.path)})`,
   );
   process.exit(0);
 }
 
 console.error(
-  `i18n-guard: ${violations.length} violation(s) across ${files.length} files`,
+  `i18n-guard: ${activeViolations.length} violation(s) across ${files.length} files (${exemptedViolations.length} exempted)`,
 );
 
-for (const violation of violations) {
+for (const violation of activeViolations) {
   console.error(
     `${violation.file}:${violation.location} [${violation.rule}] ${violation.detail}`,
   );

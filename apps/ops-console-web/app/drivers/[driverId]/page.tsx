@@ -140,14 +140,6 @@ const REFRESH_TIER: RefreshTier = "medium";
 const REFRESH_STALE_AFTER_MS = 15_000;
 const STALE_LOCATION_THRESHOLD_MS = 5 * 60 * 1000;
 const REAUTH_THRESHOLD_MS = 72 * 60 * 60 * 1000;
-const DATE_TIME_LOCALE: Record<Locale, string> = {
-  en: "en-US",
-  zh: "zh-TW",
-};
-const LIST_SEPARATOR: Record<Locale, string> = {
-  en: ", ",
-  zh: "、",
-};
 
 const ACTIVE_DRIVER_TASK_STATUSES = new Set<DriverTaskRecord["status"]>([
   "pending_acceptance",
@@ -221,7 +213,7 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat(DATE_TIME_LOCALE[locale], {
+  return new Intl.DateTimeFormat(t("common.dateTimeLocale", locale), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -240,7 +232,7 @@ function formatList(locale: Locale, values: readonly string[]) {
   }
   return values
     .map((value) => formatOpsCodeLabel(locale, value))
-    .join(LIST_SEPARATOR[locale]);
+    .join(t("common.listSeparator", locale));
 }
 
 function taskDomainLabel(locale: Locale, domain: TaskRow["domain"]) {
@@ -600,7 +592,7 @@ function buildRefreshBannerBody(
   const sectionSummary =
     degradedSections.length > 0
       ? detailT(locale, "refresh.degradedSections", {
-          sections: degradedSections.join(LIST_SEPARATOR[locale]),
+          sections: degradedSections.join(t("common.listSeparator", locale)),
         })
       : detailT(locale, "refresh.allSectionsLoaded");
   const snapshotSummary = metadata.generatedAt
