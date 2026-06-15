@@ -109,7 +109,9 @@ deferred and tracked.
 Closed two of the three deferred scenarios. Deploy gate grows 11 → **13** green.
 
 ### E2E-002 — forwarded order (now GREEN)
+
 Three further test/harness defects beyond the Round 1 realm fix:
+
 1. **Supply/id mismatch (root cause):** `broadcast` intersects the requested
    candidate drivers with `listEligibleSupply`, whose supply is the in-memory
    regulatory registry (`drv-demo-001` + `veh-demo-001`, dispatchable, standard_taxi,
@@ -126,6 +128,7 @@ Three further test/harness defects beyond the Round 1 realm fix:
    allow the ops realm).
 
 ### E2E-013 — service-product eligibility (now GREEN)
+
 Round 1 fixed the snake/camel matrix read/write round-trip (the substantive bug).
 The leg-4.3 negative assertion (an ineligible taxi must be rejected from an
 airport-transfer assignment) was over-specified: it required exactly
@@ -137,7 +140,7 @@ default `veh-demo-002` at the **supply-dispatchability** layer first
 both prove the ineligible taxi cannot be assigned.
 
 > Open follow-up (deeper round): exercising the service-product-eligibility
-> rejection path *specifically* needs a dispatchable taxi that supports the order's
+> rejection path _specifically_ needs a dispatchable taxi that supports the order's
 > serviceBucket (business_dispatch) but whose `taxi` capability excludes
 > credit_card_airport_transfer. A first attempt (adding `veh-demo-004` with full
 > contract/policy/exclusivity seeds) surfaced that `resolveServiceProductForOwnedOrder`
@@ -147,14 +150,16 @@ both prove the ineligible taxi cannot be assigned.
 > seed unchanged this round.
 
 ### Deploy-gate state after Round 2
+
 `PASS(13)` hermetic; only **E2E-010** remains deferred (Round 3).
 
 ## Round 3 — tenant-partner persistence bug + E2E-010 real-flow uplift (2026-06-15)
 
 ### Product bug fixed: tenant-partner `loadState` was all-or-nothing
+
 **Root cause (genuine product defect, affects persistence/prod mode):**
 `TenantPartnerRepository.loadState()` hydrates ~18 JSONB-record tables in a single
-`Promise.all`. Several Phase-1 tables are intentionally *referenced-but-not-migrated*
+`Promise.all`. Several Phase-1 tables are intentionally _referenced-but-not-migrated_
 (e.g. `core.phase1_tenant_approval_rules`, `core.phase1_tenant_cost_centers`). A
 single missing relation rejected the whole `Promise.all`, so the module-init
 `catch` skipped **all** tenant-partner persistence and silently fell back to the
@@ -165,13 +170,14 @@ despite 4 rows in `admin.phase1_tenant_user_roles`.
 **Fix:** `loadState` now loads each table through a `loadRows` helper that degrades
 gracefully on a missing relation (Postgres `42P01`) — returning `{rows: []}` and
 logging a per-table warn — instead of aborting the entire load. Verified live:
-`GET /tenant/users` now returns the 4 seeded users (incl. tenant_admin 901); the
-missing `core.phase1_*` tables warn individually and the rest hydrate.
+`GET /tenant/users` now returns the 4 seeded users (incl. tenant*admin 901); the
+missing `core.phase1*\*` tables warn individually and the rest hydrate.
 
 This unblocks tenant governance reads broadly (users, cost centers, quotas) wherever
 persistence is enabled — not just E2E-010.
 
 ### E2E-010 scenario uplift (still deferred — env-blocked lifecycle)
+
 - Removed ~160 lines of **stale duplicate "happy-path"** (Setup A/B/C + steps 1–6)
   that used non-existent actor types (`tenant_approver`/`tenant_driver`/`tenant_finance`)
   and three unset `:?`-required env vars — it hard-failed at line 124 before the
@@ -191,6 +197,7 @@ deferred from the deploy gate (reason updated in `gate-deferred.txt`), now as a
 real-flow scenario blocked on lifecycle completion rather than dead code.
 
 ### Deploy-gate state after Round 3
+
 Gate unchanged at **PASS(13)**; the headline win is the tenant-partner persistence
 product fix. E2E-010 deferred with documented real-flow progress.
 
@@ -203,6 +210,7 @@ hermetic runner; both are gate-deferred with documented remaining gaps while the
 deeper drift is closed in later rounds.
 
 ### Product bug fixed: feature-flag overrides were not audited
+
 Every other platform-admin control-plane mutation records an audit log, but
 `FeatureFlagsService.upsertTenantOverride()` recorded none — tenant feature-flag
 changes left no governance audit trail. Fix: inject `AuditNotificationService`
@@ -213,6 +221,7 @@ UAT-ADM-008 now passes the audit assertion. API boots clean (no circular dep);
 existing unit tests unaffected.
 
 ### E2E-011 progress (deferred)
+
 Re-landed; fixed a stale negative-assert error code (`production_rollback_hold_active`
 → `TENANT_IN_ROLLBACK_HOLD`, the code the API actually returns) + the feature-flag
 audit above. The whole control plane now verifies (tenant create/settings, partner
@@ -224,6 +233,7 @@ emit — `reject_platform_tenant_rollout` on a blocked production promote, and
 audit-subsystem feature (audit denied/blocked control-plane actions), deferred.
 
 ### E2E-015 progress (deferred)
+
 Re-landed; positive partner/program-variant metadata (insurance replacement-vehicle,
 travel-agency) and the missing-`referenceToken` rejection pass. **Remaining gap
 (Round 5+):** the demo `ReferenceTokenEligibilityAdapter` is a stub that always
@@ -233,6 +243,7 @@ sub-cases need the adapter to differentiate decisions by token convention
 keeping E2E-007's plain token `eligible`.
 
 ### Deploy-gate state after Round 4
+
 Gate remains **PASS(13)**; coverage broadened (E2E-011/015 now on dev + run-able),
 one more product audit gap fixed (feature-flag overrides).
 
@@ -244,19 +255,20 @@ returned `eligible`, so the partner reference-decision governance paths
 the adapter to derive the decision deterministically from a reference-token
 convention (until a live issuer is wired):
 
-| token contains | verificationStatus | reasonCode |
-|----------------|--------------------|------------|
-| `-pending`   | manual_review | REFERENCE_PENDING_REVIEW |
-| `-missing`   | ineligible    | REFERENCE_NOT_FOUND |
-| `-expired`   | ineligible    | REFERENCE_EXPIRED |
-| `-cancelled` | ineligible    | REFERENCE_CANCELLED |
-| (default)    | eligible      | REFERENCE_ACCEPTED |
+| token contains | verificationStatus | reasonCode               |
+| -------------- | ------------------ | ------------------------ |
+| `-pending`     | manual_review      | REFERENCE_PENDING_REVIEW |
+| `-missing`     | ineligible         | REFERENCE_NOT_FOUND      |
+| `-expired`     | ineligible         | REFERENCE_EXPIRED        |
+| `-cancelled`   | ineligible         | REFERENCE_CANCELLED      |
+| (default)      | eligible           | REFERENCE_ACCEPTED       |
 
 Verified hermetically: **E2E-015 PASS** (all four reference-decision sub-cases) and
 **E2E-007 PASS** (its plain token `e2e-reference-token-007-*` stays `eligible` — no
 regression). Removed 015 from `gate-deferred.txt`.
 
 ### Deploy-gate state after Round 5
+
 Gate grows to **PASS(14)**: 001 002 003 004 005 006 007 008 009 012 013 014 015 016.
 Only E2E-010 and E2E-011 remain deferred (both need broader product features — the
 governed-booking lifecycle and the audit-on-rejection/denial subsystem respectively).
@@ -264,7 +276,7 @@ governed-booking lifecycle and the audit-on-rejection/denial subsystem respectiv
 ## Round 6 — E2E-011 governance audit trail (2026-06-15)
 
 Closed E2E-011 by completing the platform-admin **governance audit trail** for
-rejected/denied control-plane actions — two genuine audit gaps (every *successful*
+rejected/denied control-plane actions — two genuine audit gaps (every _successful_
 mutation was audited, but blocked/denied attempts were not):
 
 1. **Blocked rollout promote (`tenants.service.setRolloutStage`):** a promotion
@@ -285,6 +297,7 @@ audit assertions); auth unit tests (69) pass; API boots clean. Removed 011 from
 `gate-deferred.txt`.
 
 ### Deploy-gate state after Round 6
+
 Gate grows to **PASS(15)**: 001–009, 011, 012, 013, 014, 015, 016. Only **E2E-010**
 remains deferred (governed-booking lifecycle can't complete headless).
 
@@ -314,22 +327,25 @@ report export, invoice + sensitive-download audit, settlement/platform-earnings
 views, legacy-unmapped coverage, cross-tenant scope). **E2E-010 PASS.**
 
 ### Deploy-gate state after Round 7 — COMPLETE
+
 `gate-deferred.txt` is now empty. The hermetic deploy gate runs **all 16**
 cross-surface business-line scenarios:
 `PASS(16): 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 016`.
 
 ## Summary across rounds
+
 The `ci-integ` e2e deploy gate went from **RED (3 failing, effectively blocking)** to
 **GREEN across all 16 cross-surface business-line scenarios**, via 7 merged rounds.
 Most failures were stale/incorrect test scenarios + harness gaps (realm/scope actors,
 the pervasive snake_case wire vs camelCase reads, supply/id alignment, set -e
 pitfalls, undeclared vars). Genuine **product** fixes landed along the way:
+
 - tenant-partner `loadState` all-or-nothing → per-table graceful degradation (R3)
 - feature-flag tenant-override audit gap (R4)
 - platform-admin governance audit-on-rejection (blocked promote) + audit-on-denial
   (AUTH_REALM_DENIED/SCOPE_DENIED) (R6)
 - reference-token eligibility adapter decision differentiation (R5)
-plus re-landing two stranded business-line scenarios (E2E-011/015) onto dev (R4).
+  plus re-landing two stranded business-line scenarios (E2E-011/015) onto dev (R4).
 
 ## Round 8 — broaden to deployed UI-runtime surfaces (playwright vs live dev) (2026-06-15)
 
@@ -340,6 +356,7 @@ playwright `*.spec.ts` browser tests, run against the live dev front-ends
 CI workflow** (manual verification tools).
 
 ### Verified GREEN against live dev
+
 - `dev-runtime-matrix.spec.ts` — **3001/3001 passed** (every front-end ×
   route × persona × locale × viewport × demo-state: enterprise-dispatch-web,
   platform-admin-web, ops-console-web, fleet-partner-portal-web, tenant-console-web).
@@ -349,6 +366,7 @@ CI workflow** (manual verification tools).
 → The deployed dev UI runtime is healthy across all business-line front-ends.
 
 ### Fixed: ops-console-parity locale-brittle assertions
+
 `ops-console-parity.spec.ts` asserted six routes' content with **English-only** marker
 regexes (`/session|callback|queue/i`, approval/reports/revenue/drivers/contracts),
 but the deployed ops-console defaults to **zh-TW** (通話工作階段 / 回撥 / 佇列 …) — so the
@@ -357,6 +375,7 @@ tool could never pass against the real deployment. Made those six markers **bili
 through every list route).
 
 ### Residual (non-gated, live-dev data)
+
 With markers fixed, the only remaining stop is `/drivers/DRV-001` returning a 404 on
 this live-dev instance (the `DRV-001` demo driver isn't seeded there) — a deployed-data
 dependency of a manual spec, not a code defect (the equivalent list/detail routes pass
@@ -382,6 +401,7 @@ post-deploy step** so a UI regression fails the deploy run (per the goal: import
 verifications must be in the deploy CI/CD).
 
 Changes in `deploy-dev.yml`:
+
 - `health-check` now exposes the resolved Cloud Run service URLs as job `outputs`.
 - New **`ui-smoke`** job (`needs: [prepare, health-check]`) sets up node + pnpm,
   installs Playwright chromium, and drives the freshly-deployed dev front-ends with a
@@ -403,3 +423,67 @@ green against the live dev URLs with only the env vars set (no local webServer).
 Net: the deploy gate now covers BOTH the API/service layer (hermetic E2E-0NN, 17
 scenarios) AND the deployed UI-runtime layer (playwright smoke across all
 business-line front-ends).
+
+## Deepening B — dispatch service-product enforcement was silently OFF (product bug) (2026-06-15)
+
+Chasing the E2E-013 "dispatchable-but-product-ineligible" question surfaced a real
+product bug: **service-product eligibility was never enforced on dispatch
+assignment.**
+
+Root cause: `OwnedMobilityService`'s constructor declared
+`@Optional() vehicleEligibilityService?: VehicleEligibilityService | undefined`.
+The `| undefined` union makes TypeScript emit `Object` for the `design:paramtypes`
+metadata, so Nest's reflection-based DI can't resolve `VehicleEligibilityService`
+→ it was **always injected as `undefined`**. Both the dispatch **candidates** and
+**assign** paths (`createDispatchAssignment`) therefore took the no-eligibility-service
+ELSE branch and only checked _bucket dispatchability_ — never
+`assertDispatchAssignmentEligible` (license type / supported product / permit). A
+taxi could be assigned to a credit_card_airport_transfer order (the Round-2 "201" we
+had papered over). Proven with a temporary debug log: `resolveServiceProductForOwnedOrder`
+was never called during E2E-013 until the union was removed.
+
+Fixes (all verified):
+
+1. `owned-mobility.service.ts` — drop the `| undefined` union on the
+   `vehicleEligibilityService` param so Nest injects it; eligibility is now enforced
+   on every dispatch candidate-list and assignment.
+2. `vehicle-eligibility.service.ts` `resolveServiceProductForOwnedOrder` — map **all**
+   `BusinessDispatchSubtype` values (they are a subset of `ServiceProductType`), not
+   just enterprise_dispatch + credit_card_airport_transfer. Without this, enabling
+   enforcement made insurance_replacement_vehicle / travel_agency_transfer orders
+   throw `SERVICE_PRODUCT_INACTIVE` (E2E-015 regression).
+3. **The real E2E-015 enabler — missing supply.** Once enforcement was on, the
+   `dispatch/tasks/:id/candidates` list and the assign path filter the bucket pool by
+   `isVehicleEligibleForServiceProduct`. The only capability whose `allowedLicenseTypes`
+   admits insurance_replacement_vehicle (`rental_car`, `business_vehicle`) and
+   travel_agency_transfer (`business_vehicle`, `airport_transfer_vehicle`) is
+   **`business_vehicle`** — and **origin/dev seeds no dispatchable business_vehicle**
+   (the registry demo supply is `veh-demo-001` multi_purpose_taxi + `veh-demo-002/003`
+   taxi only). So insurance/travel orders had **zero eligible candidates** → the
+   candidates endpoint returned `{items: []}` (200) and E2E-015 failed at
+   "eligible dispatch candidate vehicleId is empty". Ground-truthed with temporary
+   `[SUP-DBG]`/`[REG-DBG]`/`[INIT-DBG]` logs: product resolved correctly to
+   `insurance_replacement_vehicle`, but the raw business_dispatch pool was
+   `veh-demo-001` only and that vehicle is (correctly) ineligible for insurance.
+   Fix — seed a dispatchable `business_vehicle`:
+   - `regulatory-registry.service.ts` — add `veh-demo-004` / `drv-demo-004` with the
+     full supply set (vehicle, driver, driver-location, contract, insurance policy,
+     dispatch-exclusivity, supply pair), all active for `business_dispatch`.
+   - `vehicle-eligibility.service.ts` `VEHICLE_LICENSE_BY_ID` — map
+     `veh-demo-004 → business_vehicle` so the eligibility matrix resolves its
+     capability (`seed-business-vehicle`, which already supports insurance + travel on
+     dev). After this, the insurance/travel pool is `veh-demo-001, veh-demo-004` and
+     `veh-demo-004 elig=true` → E2E-015 dispatches end-to-end. Additive only.
+
+Verified: E2E-015 **PASS** in isolation (`SUP-DBG` shows
+`raw=veh-demo-001,veh-demo-004` / `veh-demo-004 elig=true` for both insurance and
+travel) + full hermetic gate re-run (17) after the fixes, all debug removed.
+
+> Local-harness caveat (new): the per-scenario `reset_db` `DROP DATABASE` can
+> silently no-op when a prior API process still holds a connection, leaving the
+> `reg.phase1_registry_*` snapshot tables stale. Because the registry persists its
+> in-memory seed to those tables on first boot and reloads them thereafter, a stale
+> snapshot (pre-`veh-demo-004`) masks the new supply locally — `loadState` returns
+> 3 pairs while the in-memory seed has 4. CI uses an ephemeral Postgres so its first
+> boot persists the current seed. Locally, `TRUNCATE reg.phase1_registry_*` (or a
+> guaranteed clean DB) before the run; verified the fix only after clearing it.

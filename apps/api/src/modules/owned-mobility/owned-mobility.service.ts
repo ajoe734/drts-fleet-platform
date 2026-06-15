@@ -209,9 +209,7 @@ export class OwnedMobilityService implements OnModuleInit {
     // unit-test harnesses. e2e-svc-013 had inserted vehicleEligibilityService at
     // position 2, which silently shifted every positional arg in ~16 harnesses.
     @Optional()
-    private readonly vehicleEligibilityService?:
-      | VehicleEligibilityService
-      | undefined,
+    private readonly vehicleEligibilityService?: VehicleEligibilityService,
     @Optional()
     private readonly serviceProductService?: ServiceProductService,
   ) {
@@ -785,7 +783,11 @@ export class OwnedMobilityService implements OnModuleInit {
             orders: [this.cloneOrder(order)],
             dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
           });
-          return finalizeCreation(previousApprovalState, approvalRequest, false);
+          return finalizeCreation(
+            previousApprovalState,
+            approvalRequest,
+            false,
+          );
         })
         .catch((error) => {
           // The DB transaction rolls back persisted rows, but the in-memory
