@@ -154,7 +154,7 @@ test.describe("tenant console localization smoke", () => {
       },
       {
         route: "/rules",
-        include: ["Approval and quota", "Rule list"],
+        include: ["Approval & quota", "Rule precedence"],
         exclude: ["審批與配額", "規則清單", "建立或編輯規則"],
       },
       {
@@ -169,7 +169,7 @@ test.describe("tenant console localization smoke", () => {
       },
       {
         route: "/reports",
-        include: ["Reports", "Cross-app report traceability remains explicit"],
+        include: ["Reports", "Cross-app report tracing"],
         exclude: ["報表", "跨應用報表追溯保持明確", "建立工作"],
       },
       {
@@ -184,7 +184,7 @@ test.describe("tenant console localization smoke", () => {
       },
       {
         route: "/audit",
-        include: ["Audit · cross-actor", "Cross-actor visibility"],
+        include: ["Audit: cross-actor", "Cross-actor visibility"],
         exclude: ["稽核 · cross-actor", "跨 actor 可見性", "稽核回執"],
       },
     ] as const;
