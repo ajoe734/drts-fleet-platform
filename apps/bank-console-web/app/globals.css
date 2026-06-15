@@ -1515,6 +1515,43 @@ body {
   color: rgba(255, 255, 255, 0.72);
 }
 
+/* Programs — per-program cards + quota summary (design-canvas BK_Programs) */
+.programs-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.programs-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.programs-quota-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.programs-quota-cell .quota-track {
+  flex: 1;
+  margin: 0;
+}
+
+.programs-quota-cell span {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+@media (max-width: 900px) {
+  .programs-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .statement-link,
 .statement-back-link {
   color: var(--issuer-accent);
@@ -1770,6 +1807,17 @@ body {
   font-size: 12px;
   line-height: 1.55;
   color: rgba(255, 255, 255, 0.7);
+}
+
+.audit-realm-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 2px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .audit-label {

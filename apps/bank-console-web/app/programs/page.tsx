@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { PageHero } from "@/components/page-primitives";
 import {
   getBankProgramSeedLabel,
@@ -22,14 +22,9 @@ type DemoProgram = {
   served: number;
   used: number;
   total: number;
-  trend: readonly number[];
   trendLabelKey: TranslationKey;
   exceptionCount: number;
   policyKey: TranslationKey;
-  exceptions: Array<{
-    typeKey: TranslationKey;
-    reference: string;
-  }>;
 };
 
 const PROGRAM_BASE = [
@@ -43,11 +38,9 @@ const PROGRAM_BASE = [
     served: 1240,
     used: 1820,
     total: 2400,
-    trend: [60, 72, 74, 81, 88, 92],
     trendLabelKey: "programs.trend.rising",
     exceptionCount: 12,
     policyKey: "programs.policy.worldElite",
-    exceptions: ["flightChange", "outOfWindow"],
   },
   {
     id: "business-q2",
@@ -59,11 +52,9 @@ const PROGRAM_BASE = [
     served: 860,
     used: 990,
     total: 1200,
-    trend: [52, 58, 63, 69, 76, 83],
     trendLabelKey: "programs.trend.watch",
     exceptionCount: 7,
     policyKey: "programs.policy.business",
-    exceptions: ["manualReview", "duplicateUsage"],
   },
   {
     id: "starter-h1",
@@ -75,11 +66,9 @@ const PROGRAM_BASE = [
     served: 430,
     used: 286,
     total: 900,
-    trend: [18, 24, 29, 28, 31, 34],
     trendLabelKey: "programs.trend.steady",
     exceptionCount: 3,
     policyKey: "programs.policy.newCard",
-    exceptions: ["expiredEligibility", "missingReceipt"],
   },
 ] as const satisfies ReadonlyArray<{
   id: string;
@@ -91,88 +80,27 @@ const PROGRAM_BASE = [
   served: number;
   used: number;
   total: number;
-  trend: readonly number[];
   trendLabelKey: TranslationKey;
   exceptionCount: number;
   policyKey: TranslationKey;
-  exceptions: readonly (keyof typeof EXCEPTION_KEYS)[];
 }>;
 
-const EXCEPTION_KEYS = {
-  duplicateUsage: "programs.exception.duplicateUsage",
-  expiredEligibility: "programs.exception.expiredEligibility",
-  flightChange: "programs.exception.flightChange",
-  manualReview: "programs.exception.manualReview",
-  missingReceipt: "programs.exception.missingReceipt",
-  outOfWindow: "programs.exception.outOfWindow",
-} as const satisfies Record<string, TranslationKey>;
-
-const EXCEPTION_REFERENCE_SUFFIXES = {
-  duplicateUsage: ["320", "402"],
-  expiredEligibility: ["087", "090"],
-  flightChange: ["204", "771"],
-  manualReview: ["451", "553"],
-  missingReceipt: ["611", "264"],
-  outOfWindow: ["992", "118"],
-} as const;
-
 function buildPrograms(tenant: BankDemoTenant, locale: Locale): DemoProgram[] {
-  return PROGRAM_BASE.map((program) => {
-    const programName = getBankProgramSeedLabel(tenant, program.seed, locale);
-    const code = `${tenant.issuerCode}-${program.codeSuffix}`;
-
-    return {
-      id: `${tenant.code}-${program.id}`,
-      name: programName,
-      code,
-      period: program.period,
-      issuer: `${tenant.issuerCode} · ${getBankTenantName(tenant, locale)}`,
-      coverage: t(program.coverageKey, locale),
-      benefits: t(program.benefitsKey, locale),
-      served: program.served,
-      used: program.used,
-      total: program.total,
-      trend: program.trend,
-      trendLabelKey: program.trendLabelKey,
-      exceptionCount: program.exceptionCount,
-      policyKey: program.policyKey,
-      exceptions: program.exceptions.map((exception) => {
-        const [cardholder, benefit] = EXCEPTION_REFERENCE_SUFFIXES[exception];
-        return {
-          typeKey: EXCEPTION_KEYS[exception],
-          reference: t("programs.exception.reference", locale, {
-            issuer: tenant.issuerCode,
-            cardholder,
-            benefit,
-          }),
-        };
-      }),
-    };
-  });
-}
-
-function buildTopExceptions(locale: Locale) {
-  return [
-    {
-      key: "programs.exception.outOfWindow",
-      count: 9,
-      detail: t("programs.exception.outOfWindow.detail", locale),
-    },
-    {
-      key: "programs.exception.manualReview",
-      count: 7,
-      detail: t("programs.exception.manualReview.detail", locale),
-    },
-    {
-      key: "programs.exception.flightChange",
-      count: 6,
-      detail: t("programs.exception.flightChange.detail", locale),
-    },
-  ] as const satisfies ReadonlyArray<{
-    key: TranslationKey;
-    count: number;
-    detail: string;
-  }>;
+  return PROGRAM_BASE.map((program) => ({
+    id: `${tenant.code}-${program.id}`,
+    name: getBankProgramSeedLabel(tenant, program.seed, locale),
+    code: `${tenant.issuerCode}-${program.codeSuffix}`,
+    period: program.period,
+    issuer: `${tenant.issuerCode} · ${getBankTenantName(tenant, locale)}`,
+    coverage: t(program.coverageKey, locale),
+    benefits: t(program.benefitsKey, locale),
+    served: program.served,
+    used: program.used,
+    total: program.total,
+    trendLabelKey: program.trendLabelKey,
+    exceptionCount: program.exceptionCount,
+    policyKey: program.policyKey,
+  }));
 }
 
 function formatNumber(value: number, locale: Locale) {
@@ -187,45 +115,54 @@ function formatPeople(value: number, locale: Locale) {
   return `${formatNumber(value, locale)} ${t("programs.unit.person", locale)}`;
 }
 
-function formatPercent(value: number) {
-  return `${Math.round(value)}%`;
-}
-
 function getUsageRate(used: number, total: number) {
-  return total === 0 ? 0 : (used / total) * 100;
+  return total === 0 ? 0 : Math.round((used / total) * 100);
 }
 
-function getTrendPath(points: readonly number[]) {
-  const width = 132;
-  const height = 34;
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const range = Math.max(max - min, 1);
-
-  return points
-    .map((point, index) => {
-      const x = (index / (points.length - 1)) * width;
-      const y = height - ((point - min) / range) * height;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
+function QuotaBar({
+  used,
+  total,
+  locale,
+}: {
+  used: number;
+  total: number;
+  locale: Locale;
+}) {
+  const pct = getUsageRate(used, total);
+  const remaining = formatTrips(total - used, locale);
+  return (
+    <div className="quota-row">
+      <span className="quota-label">
+        {t("programs.card.quotaLabel", locale)}
+      </span>
+      <div className="quota-figures">
+        <span className="quota-used">{formatTrips(used, locale)}</span>
+        <span className="quota-total">
+          {t("programs.kpi.ofTotal", locale, {
+            total: formatTrips(total, locale),
+          })}
+        </span>
+        <span className="quota-pct">
+          {t("home.quota.used", locale, { pct })}
+        </span>
+      </div>
+      <div className="quota-track">
+        <div className="quota-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="quota-remaining">
+        {t("programs.table.remainingValue", locale, { remaining })}
+      </span>
+    </div>
+  );
 }
 
-function hexToRgbChannels(value: string) {
-  const normalized = value.replace("#", "");
-  const hex =
-    normalized.length === 3
-      ? normalized
-          .split("")
-          .map((segment) => `${segment}${segment}`)
-          .join("")
-      : normalized;
-
-  const red = Number.parseInt(hex.slice(0, 2), 16);
-  const green = Number.parseInt(hex.slice(2, 4), 16);
-  const blue = Number.parseInt(hex.slice(4, 6), 16);
-
-  return `${red}, ${green}, ${blue}`;
+function DlItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="dl-item">
+      <span className="dl-key">{label}</span>
+      <span className="dl-val">{value}</span>
+    </div>
+  );
 }
 
 export default async function ProgramsPage({
@@ -241,30 +178,21 @@ export default async function ProgramsPage({
   const tenant = resolveBankDemoTenant(params?.bank);
   const issuerBrand = tenant.template.tokens.dark;
   const programs = buildPrograms(tenant, locale);
-  const topExceptions = buildTopExceptions(locale);
-  const periodSummary = {
-    served: programs.reduce((sum, program) => sum + program.served, 0),
-    used: programs.reduce((sum, program) => sum + program.used, 0),
-    total: programs.reduce((sum, program) => sum + program.total, 0),
-  };
-  const remaining = periodSummary.total - periodSummary.used;
-  const usageRate = getUsageRate(periodSummary.used, periodSummary.total);
+
+  const issuerVars = {
+    "--issuer-primary": issuerBrand.primary,
+    "--issuer-primary-dark": issuerBrand.primaryDark,
+    "--issuer-accent": issuerBrand.accent,
+    "--issuer-ink": issuerBrand.ink,
+    "--issuer-surface": issuerBrand.surface.bg,
+    "--issuer-border": issuerBrand.surface.border,
+    "--issuer-panel-border": issuerBrand.theme.panelBorder,
+    "--issuer-accent-soft": issuerBrand.theme.accentSoft,
+    "--issuer-text-muted": issuerBrand.text.muted,
+  } as CSSProperties;
 
   return (
-    <div
-      className="page-shell programs-page"
-      style={
-        {
-          "--issuer-primary": issuerBrand.primary,
-          "--issuer-primary-dark": issuerBrand.primaryDark,
-          "--issuer-primary-rgb": hexToRgbChannels(issuerBrand.primary),
-          "--issuer-accent": issuerBrand.accent,
-          "--issuer-panel-border": issuerBrand.theme.panelBorder,
-          "--issuer-accent-soft": issuerBrand.theme.accentSoft,
-          "--issuer-text-muted": issuerBrand.text.muted,
-        } as CSSProperties
-      }
-    >
+    <div className="page-shell programs-page" style={issuerVars}>
       <PageHero
         eyebrow={t("programs.eyebrow", locale)}
         title={t("programs.title", locale)}
@@ -297,205 +225,128 @@ export default async function ProgramsPage({
         </dl>
       </section>
 
-      <section className="surface-grid programs-kpi-grid">
-        <article className="surface-card programs-kpi programs-kpi-primary">
-          <span className="surface-kicker">
-            {t("programs.kpi.primaryKicker", locale)}
-          </span>
-          <h3>{t("programs.kpi.quotaTitle", locale)}</h3>
-          <p>{t("programs.kpi.quotaBody", locale)}</p>
-          <div className="programs-kpi-value-row">
-            <strong>{formatTrips(periodSummary.used, locale)}</strong>
-            <span>
-              {t("programs.kpi.ofTotal", locale, {
-                total: formatTrips(periodSummary.total, locale),
-              })}
-            </span>
-          </div>
-          <div className="programs-meter" aria-hidden="true">
-            <div
-              className="programs-meter-fill"
-              style={{ width: `${Math.min(usageRate, 100)}%` }}
-            />
-          </div>
-          <div className="programs-kpi-split">
-            <span>{t("programs.kpi.remaining", locale)}</span>
-            <strong>{formatTrips(remaining, locale)}</strong>
-          </div>
-        </article>
-
-        <article className="surface-card programs-kpi">
-          <span className="surface-kicker">
-            {t("programs.kpi.secondaryKicker", locale)}
-          </span>
-          <h3>{t("programs.kpi.servedTitle", locale)}</h3>
-          <p>{t("programs.kpi.servedBody", locale)}</p>
-          <div className="programs-kpi-value-row">
-            <strong>{formatPeople(periodSummary.served, locale)}</strong>
-            <span>{t("programs.kpi.periodValue", locale)}</span>
-          </div>
-        </article>
-
-        <article className="surface-card programs-kpi">
-          <span className="surface-kicker">
-            {t("programs.kpi.secondaryKicker", locale)}
-          </span>
-          <h3>{t("programs.kpi.exceptionTitle", locale)}</h3>
-          <p>{t("programs.kpi.exceptionBody", locale)}</p>
-          <div className="programs-kpi-value-row">
-            <strong>
-              {topExceptions.reduce((sum, item) => sum + item.count, 0)}
-            </strong>
-            <span>{t("programs.kpi.exceptionValue", locale)}</span>
-          </div>
-        </article>
+      <section className="programs-card-grid">
+        {programs.map((program) => (
+          <article className="bank-card is-accent" key={program.id}>
+            <div className="bank-card-head">
+              <div>
+                <h3>{program.name}</h3>
+                <p>
+                  {program.code} · {program.period} · {program.issuer}
+                </p>
+              </div>
+              <div className="bank-card-actions">
+                <button className="table-action-button" type="button">
+                  {t("programs.action.drill", locale)}
+                </button>
+              </div>
+            </div>
+            <div className="bank-card-body">
+              <QuotaBar
+                used={program.used}
+                total={program.total}
+                locale={locale}
+              />
+              <div className="bank-dl cols-2">
+                <DlItem
+                  label={t("programs.table.headers.served", locale)}
+                  value={formatPeople(program.served, locale)}
+                />
+                <DlItem
+                  label={t("programs.table.headers.trend", locale)}
+                  value={t(program.trendLabelKey, locale)}
+                />
+                <DlItem
+                  label={t("programs.card.coverage", locale)}
+                  value={program.coverage}
+                />
+                <DlItem
+                  label={t("programs.card.benefits", locale)}
+                  value={program.benefits}
+                />
+                <DlItem
+                  label={t("programs.table.headers.exceptions", locale)}
+                  value={`${program.exceptionCount} ${t("programs.unit.case", locale)}`}
+                />
+                <DlItem
+                  label={t("programs.table.headers.policy", locale)}
+                  value={t(program.policyKey, locale)}
+                />
+              </div>
+              <div className="programs-card-actions">
+                <button
+                  className="table-action-button is-primary"
+                  type="button"
+                >
+                  {t("programs.action.editPolicy", locale)}
+                </button>
+                <button className="table-action-button" type="button">
+                  {t("programs.action.exportUsage", locale)}
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
       </section>
 
-      <section className="surface-card programs-table-card">
-        <div className="programs-section-head">
+      <section className="bank-card">
+        <div className="bank-card-head">
           <div>
-            <span className="surface-kicker">
-              {t("programs.table.kicker", locale)}
-            </span>
-            <h3>{t("programs.table.title", locale)}</h3>
+            <h3>{t("programs.summary.title", locale)}</h3>
+            <p>{t("programs.summary.subtitle", locale)}</p>
           </div>
-          <p>{t("programs.table.description", locale)}</p>
         </div>
-
-        <div className="programs-table">
-          <div className="programs-table-header">
-            <span>{t("programs.table.headers.program", locale)}</span>
-            <span>{t("programs.table.headers.coverage", locale)}</span>
-            <span>{t("programs.table.headers.served", locale)}</span>
-            <span>{t("programs.table.headers.quota", locale)}</span>
-            <span>{t("programs.table.headers.trend", locale)}</span>
-            <span>{t("programs.table.headers.exceptions", locale)}</span>
-            <span>{t("programs.table.headers.policy", locale)}</span>
+        <div className="bank-card-body">
+          <div className="bank-table-scroll">
+            <table className="bank-table">
+              <thead>
+                <tr>
+                  <th>{t("programs.summary.headers.program", locale)}</th>
+                  <th>{t("programs.summary.headers.code", locale)}</th>
+                  <th>{t("programs.summary.headers.served", locale)}</th>
+                  <th>{t("programs.summary.headers.used", locale)}</th>
+                  <th>{t("programs.summary.headers.total", locale)}</th>
+                  <th>{t("programs.summary.headers.remaining", locale)}</th>
+                  <th>{t("programs.summary.headers.rate", locale)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {programs.map((program) => {
+                  const pct = getUsageRate(program.used, program.total);
+                  return (
+                    <tr key={program.id}>
+                      <td>{program.name}</td>
+                      <td className="mono-cell">{program.code}</td>
+                      <td className="mono-cell">
+                        {formatNumber(program.served, locale)}
+                      </td>
+                      <td className="mono-cell">
+                        {formatNumber(program.used, locale)}
+                      </td>
+                      <td className="mono-cell">
+                        {formatNumber(program.total, locale)}
+                      </td>
+                      <td className="mono-cell">
+                        {formatNumber(program.total - program.used, locale)}
+                      </td>
+                      <td>
+                        <div className="programs-quota-cell">
+                          <div className="quota-track">
+                            <div
+                              className="quota-fill"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="mono-cell">{pct}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-
-          {programs.map((program) => {
-            const rate = getUsageRate(program.used, program.total);
-            const remainingTrips = program.total - program.used;
-
-            return (
-              <article key={program.id} className="programs-table-row">
-                <div className="programs-program-meta">
-                  <strong>{program.name}</strong>
-                  <span>
-                    {program.code} · {program.period}
-                  </span>
-                  <span>{program.issuer}</span>
-                </div>
-
-                <div className="programs-coverage">
-                  <strong>{program.coverage}</strong>
-                  <span>{program.benefits}</span>
-                </div>
-
-                <div className="programs-served">
-                  <strong>{formatPeople(program.served, locale)}</strong>
-                  <span>{t("programs.table.servedLabel", locale)}</span>
-                </div>
-
-                <div className="programs-quota">
-                  <div className="programs-quota-stats">
-                    <strong>{formatTrips(program.used, locale)}</strong>
-                    <span>
-                      {t("programs.kpi.ofTotal", locale, {
-                        total: formatTrips(program.total, locale),
-                      })}
-                    </span>
-                  </div>
-                  <div className="programs-meter" aria-hidden="true">
-                    <div
-                      className="programs-meter-fill"
-                      style={{ width: `${Math.min(rate, 100)}%` }}
-                    />
-                  </div>
-                  <span className="programs-remaining">
-                    {t("programs.table.remainingValue", locale, {
-                      remaining: formatTrips(remainingTrips, locale),
-                    })}
-                  </span>
-                </div>
-
-                <div className="programs-trend">
-                  <svg
-                    viewBox="0 0 132 34"
-                    role="img"
-                    aria-label={t(program.trendLabelKey, locale)}
-                  >
-                    <path d={getTrendPath(program.trend)} />
-                  </svg>
-                  <strong>{formatPercent(rate)}</strong>
-                  <span>{t(program.trendLabelKey, locale)}</span>
-                </div>
-
-                <div className="programs-exceptions">
-                  <strong>
-                    {program.exceptionCount} {t("programs.unit.case", locale)}
-                  </strong>
-                  <ul>
-                    {program.exceptions.map((exception) => (
-                      <li key={`${program.id}-${exception.reference}`}>
-                        <span>{t(exception.typeKey, locale)}</span>
-                        <code>{exception.reference}</code>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="programs-policy">
-                  <strong>{t("programs.table.policySummary", locale)}</strong>
-                  <p>{t(program.policyKey, locale)}</p>
-                </div>
-              </article>
-            );
-          })}
         </div>
-      </section>
-
-      <section className="surface-grid surface-grid-wide">
-        <article className="surface-card">
-          <span className="surface-kicker">
-            {t("programs.exceptions.kicker", locale)}
-          </span>
-          <h3>{t("programs.exceptions.title", locale)}</h3>
-          <p>{t("programs.exceptions.description", locale)}</p>
-          <ul className="programs-summary-list">
-            {topExceptions.map((item) => (
-              <li key={item.key}>
-                <strong>
-                  {t(item.key, locale)} · {item.count}{" "}
-                  {t("programs.unit.case", locale)}
-                </strong>
-                <span>{item.detail}</span>
-              </li>
-            ))}
-          </ul>
-        </article>
-
-        <article className="surface-card">
-          <span className="surface-kicker">
-            {t("programs.policy.kicker", locale)}
-          </span>
-          <h3>{t("programs.policy.title", locale)}</h3>
-          <p>{t("programs.policy.description", locale)}</p>
-          <ul className="programs-summary-list">
-            <li>
-              <strong>{t("programs.policy.rule1Title", locale)}</strong>
-              <span>{t("programs.policy.rule1Body", locale)}</span>
-            </li>
-            <li>
-              <strong>{t("programs.policy.rule2Title", locale)}</strong>
-              <span>{t("programs.policy.rule2Body", locale)}</span>
-            </li>
-            <li>
-              <strong>{t("programs.policy.rule3Title", locale)}</strong>
-              <span>{t("programs.policy.rule3Body", locale)}</span>
-            </li>
-          </ul>
-        </article>
       </section>
     </div>
   );
