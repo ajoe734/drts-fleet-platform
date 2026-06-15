@@ -12,7 +12,9 @@ import {
   type EnterpriseEmbedStateKind,
   type EnterpriseGateKind,
 } from "@/lib/enterprise-route-config";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
 const actionLinkStyle = {
   display: "inline-flex",
@@ -29,18 +31,23 @@ const actionLinkStyle = {
   textDecoration: "none",
 } as const;
 
-export function EnterpriseGatePage({ kind }: { kind: EnterpriseGateKind }) {
-  const gate = getEnterpriseGate(kind);
+export async function EnterpriseGatePage({
+  kind,
+}: {
+  kind: EnterpriseGateKind;
+}) {
+  const locale = await getServerLocale();
+  const gate = getEnterpriseGate(kind, locale);
 
   return (
     <div style={{ ...enterprisePageStyle, maxWidth: 920 }}>
       <EnterprisePageHeader title={gate.title} subtitle={gate.subtitle} />
       <EnterpriseBanner
         tone={gate.tone}
-        title="support-safe template"
-        body="所有 gate state 都應提供原因、影響、下一步與企業支援資訊。"
+        title={t("state.supportTemplate", undefined, locale)}
+        body={t("state.supportTemplateBody", undefined, locale)}
       />
-      <EnterpriseCard title="狀態詳情">
+      <EnterpriseCard title={t("state.details", undefined, locale)}>
         <EnterpriseDl cols={1} items={[...gate.details]} />
         <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
           {gate.actions.map((action) => (
@@ -54,12 +61,13 @@ export function EnterpriseGatePage({ kind }: { kind: EnterpriseGateKind }) {
   );
 }
 
-export function EnterpriseEmbedStatePage({
+export async function EnterpriseEmbedStatePage({
   kind,
 }: {
   kind: EnterpriseEmbedStateKind;
 }) {
-  const state = getEnterpriseEmbedState(kind);
+  const locale = await getServerLocale();
+  const state = getEnterpriseEmbedState(kind, locale);
   const embedTone =
     state.tone === "danger"
       ? "err"
@@ -74,15 +82,15 @@ export function EnterpriseEmbedStatePage({
       <EnterprisePageHeader title={state.title} subtitle={state.subtitle} sticky={false} />
       <EnterpriseEmbedShell host="hongshuo-workspace" state={embedTone}>
         <div style={{ padding: 16, display: "grid", gap: 16 }}>
-          <EnterpriseCard title="身分交付狀態">
+          <EnterpriseCard title={t("state.embedStatus", undefined, locale)}>
             <EnterpriseDl cols={1} items={[...state.details]} />
           </EnterpriseCard>
           <EnterpriseBanner
             tone={state.tone}
-            title="embed identity"
-            body="內嵌版沿用相同 booking 語意，但由 host app 負責 session hand-off，且不顯示後台導覽。"
+            title={t("state.embedBanner", undefined, locale)}
+            body={t("state.embedBannerBody", undefined, locale)}
           />
-          <EnterpriseCard title="下一步">
+          <EnterpriseCard title={t("state.next", undefined, locale)}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {state.actions.map((action) => (
                 <Link key={action.href} href={action.href} style={actionLinkStyle}>

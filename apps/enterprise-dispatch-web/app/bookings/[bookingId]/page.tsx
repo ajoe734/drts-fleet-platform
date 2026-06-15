@@ -8,11 +8,14 @@ import {
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import {
-  bookingStateMeta,
-  enterpriseTripProgress,
+  getBookingStateMeta,
+  getEnterpriseActionLabel,
   getEnterpriseBooking,
+  getEnterpriseTripProgress,
 } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
 export default async function BookingDetailPage({
   params,
@@ -20,7 +23,10 @@ export default async function BookingDetailPage({
   params: Promise<{ bookingId: string }>;
 }) {
   const { bookingId } = await params;
-  const booking = getEnterpriseBooking(bookingId);
+  const locale = await getServerLocale();
+  const booking = getEnterpriseBooking(bookingId, locale);
+  const bookingStateMeta = getBookingStateMeta(locale);
+  const progress = getEnterpriseTripProgress(locale);
 
   if (!booking) {
     return notFound();
@@ -29,8 +35,8 @@ export default async function BookingDetailPage({
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
-        title={`預約詳情 · ${booking.id}`}
-        subtitle="詳情頁以 availableActions 與 read-side projection 為主，不從狀態文字推導權限。"
+        title={t("detail.title", { id: booking.id }, locale)}
+        subtitle={t("detail.subtitle", undefined, locale)}
         actions={
           <EnterprisePill tone={bookingStateMeta[booking.state].tone}>
             {bookingStateMeta[booking.state].label}
@@ -45,44 +51,46 @@ export default async function BookingDetailPage({
           gridTemplateColumns: "minmax(0, 1.3fr) minmax(320px, 0.9fr)",
         }}
       >
-        <EnterpriseCard title="行程與權責">
+        <EnterpriseCard title={t("detail.card.trip", undefined, locale)}>
           <EnterpriseDl
             cols={2}
             items={[
-              { k: "乘客", v: booking.passenger },
+              { k: t("new.field.passenger", undefined, locale), v: booking.passenger },
               {
-                k: "下單人",
-                v: booking.self ? "本人" : `${booking.bookedBy} 代訂`,
+                k: t("detail.bookedBy", undefined, locale),
+                v: booking.self
+                  ? t("common.self", undefined, locale)
+                  : t("common.bookedByDelegate", { name: booking.bookedBy }, locale),
               },
-              { k: "上車 / 下車", v: `${booking.from} → ${booking.to}` },
-              { k: "時間", v: booking.window, mono: true },
-              { k: "成本中心", v: booking.costCenter, mono: true },
-              { k: "車型", v: booking.vehicle },
-              { k: "審批", v: booking.approval, mono: true },
+              { k: t("detail.pickupDropoff", undefined, locale), v: `${booking.from} → ${booking.to}` },
+              { k: t("detail.time", undefined, locale), v: booking.window, mono: true },
+              { k: t("detail.costCenter", undefined, locale), v: booking.costCenter, mono: true },
+              { k: t("detail.vehicle", undefined, locale), v: booking.vehicle },
+              { k: t("detail.approval", undefined, locale), v: booking.approval, mono: true },
               {
-                k: "機場情境",
+                k: t("detail.airport", undefined, locale),
                 v: booking.flight
                   ? `${booking.flight} · ${booking.terminal} · ${booking.luggage}`
-                  : "一般企業派車",
+                  : t("common.generalDispatch", undefined, locale),
               },
             ]}
           />
         </EnterpriseCard>
 
         <EnterpriseSection>
-          <EnterpriseCard title="可用操作">
+          <EnterpriseCard title={t("detail.card.actions", undefined, locale)}>
             <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
               {booking.availableActions.map((action) => (
                 <li key={action} style={{ color: enterpriseTheme.text, fontSize: 12.5 }}>
-                  {action}
+                  {getEnterpriseActionLabel(action, locale)}
                 </li>
               ))}
             </ul>
           </EnterpriseCard>
 
-          <EnterpriseCard title="進度 rail">
+          <EnterpriseCard title={t("detail.card.progress", undefined, locale)}>
             <div style={{ display: "grid", gap: 10 }}>
-              {enterpriseTripProgress.map((step, index) => (
+              {progress.map((step, index) => (
                 <div
                   key={step}
                   style={{
@@ -139,7 +147,7 @@ export default async function BookingDetailPage({
             textDecoration: "none",
           }}
         >
-          返回列表
+          {t("detail.back", undefined, locale)}
         </Link>
         {booking.receiptReady ? (
           <Link
@@ -159,7 +167,7 @@ export default async function BookingDetailPage({
               textDecoration: "none",
             }}
           >
-            查看收據
+            {t("detail.receipt", undefined, locale)}
           </Link>
         ) : null}
       </div>
