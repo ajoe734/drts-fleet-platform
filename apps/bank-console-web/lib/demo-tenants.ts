@@ -1,28 +1,21 @@
 import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
-import type { Locale } from "@/lib/translations";
+import { t, type Locale, type TranslationKey } from "@/lib/translations";
 
 export type BankDemoTenantCode = "ctbc" | "cathay" | "fubon";
-
-type LocalizedText = Record<Locale, string>;
+export type BankProgramSeed = "premium" | "business" | "starter";
 
 export type BankDemoTenant = {
   code: BankDemoTenantCode;
   issuerCode: string;
-  name: LocalizedText;
-  shortName: LocalizedText;
-  context: LocalizedText;
+  nameKey: TranslationKey;
+  shortNameKey: TranslationKey;
+  contextKey: TranslationKey;
   avatar: string;
-  actorName: string;
   actorEmail: string;
-  roleLabel: LocalizedText;
   roleCode: string;
   tenantId: string;
   template: PartnerBrandTemplate;
-  programSeed: {
-    premium: LocalizedText;
-    business: LocalizedText;
-    starter: LocalizedText;
-  };
+  programSeedKeys: Record<BankProgramSeed, TranslationKey>;
 };
 
 export const DEFAULT_BANK_DEMO_TENANT: BankDemoTenantCode = "ctbc";
@@ -31,64 +24,75 @@ export const BANK_DEMO_TENANTS: Record<BankDemoTenantCode, BankDemoTenant> = {
   ctbc: {
     code: "ctbc",
     issuerCode: "CTBC",
-    name: { zh: "中信銀行", en: "CTBC Bank" },
-    shortName: { zh: "中信", en: "CTBC" },
-    context: { zh: "中信銀行 · CTBC ISSUER", en: "CTBC Bank · issuer" },
+    nameKey: "tenant.ctbc.name",
+    shortNameKey: "tenant.ctbc.shortName",
+    contextKey: "tenant.ctbc.context",
     avatar: "周",
-    actorName: "周敬文",
     actorEmail: "cw.chou@ctbcbank.com",
-    roleLabel: { zh: "方案管理員", en: "Program admin" },
     roleCode: "bank_program_admin",
     tenantId: "tenant-ctbc-001",
     template: BRAND_TEMPLATES.CTBC,
-    programSeed: {
-      premium: { zh: "鼎極卡機場接送", en: "World Elite airport transfer" },
-      business: { zh: "商旅御璽卡禮遇", en: "Business Signature benefit" },
-      starter: { zh: "晶緻卡新戶禮遇", en: "New-card airport welcome" },
+    programSeedKeys: {
+      premium: "tenant.program.ctbc.premium",
+      business: "tenant.program.ctbc.business",
+      starter: "tenant.program.ctbc.starter",
     },
   },
   cathay: {
     code: "cathay",
     issuerCode: "CATHAY",
-    name: { zh: "國泰世華銀行", en: "Cathay United Bank" },
-    shortName: { zh: "國泰", en: "Cathay" },
-    context: {
-      zh: "國泰世華銀行 · CATHAY ISSUER",
-      en: "Cathay United Bank · issuer",
-    },
+    nameKey: "tenant.cathay.name",
+    shortNameKey: "tenant.cathay.shortName",
+    contextKey: "tenant.cathay.context",
     avatar: "國泰",
-    actorName: "林可欣",
     actorEmail: "kh.lin@cathaybk.com.tw",
-    roleLabel: { zh: "方案管理員", en: "Program admin" },
     roleCode: "bank_program_admin",
     tenantId: "tenant-cathay-001",
     template: BRAND_TEMPLATES.CATHAY,
-    programSeed: {
-      premium: { zh: "尊榮卡機場接送", en: "Prestige airport transfer" },
-      business: { zh: "商務御璽旅遊禮遇", en: "Business travel benefit" },
-      starter: { zh: "新戶旅遊接送禮遇", en: "New-card travel welcome" },
+    programSeedKeys: {
+      premium: "tenant.program.cathay.premium",
+      business: "tenant.program.cathay.business",
+      starter: "tenant.program.cathay.starter",
     },
   },
   fubon: {
     code: "fubon",
     issuerCode: "FUBON",
-    name: { zh: "富邦銀行", en: "Fubon Bank" },
-    shortName: { zh: "富邦", en: "Fubon" },
-    context: { zh: "富邦銀行 · FUBON ISSUER", en: "Fubon Bank · issuer" },
+    nameKey: "tenant.fubon.name",
+    shortNameKey: "tenant.fubon.shortName",
+    contextKey: "tenant.fubon.context",
     avatar: "富邦",
-    actorName: "陳品妤",
     actorEmail: "py.chen@fubon.com",
-    roleLabel: { zh: "方案管理員", en: "Program admin" },
     roleCode: "bank_program_admin",
     tenantId: "tenant-fubon-001",
     template: BRAND_TEMPLATES.FUBON,
-    programSeed: {
-      premium: { zh: "尊御卡機場接送", en: "Premier airport transfer" },
-      business: { zh: "商務鈦金卡接送禮遇", en: "Business titanium benefit" },
-      starter: { zh: "新戶核卡接送禮遇", en: "New-card mobility welcome" },
+    programSeedKeys: {
+      premium: "tenant.program.fubon.premium",
+      business: "tenant.program.fubon.business",
+      starter: "tenant.program.fubon.starter",
     },
   },
 };
+
+export function getBankTenantName(tenant: BankDemoTenant, locale: Locale) {
+  return t(tenant.nameKey, locale);
+}
+
+export function getBankTenantShortName(tenant: BankDemoTenant, locale: Locale) {
+  return t(tenant.shortNameKey, locale);
+}
+
+export function getBankTenantContext(tenant: BankDemoTenant, locale: Locale) {
+  return t(tenant.contextKey, locale);
+}
+
+export function getBankProgramSeedLabel(
+  tenant: BankDemoTenant,
+  seed: BankProgramSeed,
+  locale: Locale,
+) {
+  return t(tenant.programSeedKeys[seed], locale);
+}
 
 export function resolveBankDemoTenant(
   value: string | string[] | null | undefined,
