@@ -59,9 +59,12 @@ WINDOW_START=$(date -u -d "+26 hours" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
   || date -u -v+26H +"%Y-%m-%dT%H:%M:%SZ")
 WINDOW_END=$(date -u -d "+28 hours" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
   || date -u -v+28H +"%Y-%m-%dT%H:%M:%SZ")
-PERIOD_START=$(date -u +"%Y-%m-01T00:00:00Z")
-PERIOD_END=$(date -u -d "+32 days" +"%Y-%m-01T00:00:00Z" 2>/dev/null \
-  || date -u -v+32d +"%Y-%m-01T00:00:00Z")
+# Invoices require a CLOSED billing period that has settled trips. The demo
+# tenant's seeded completed trips land in 2026-03 (a closed month), so target it
+# explicitly rather than a relative month (the cutover booking itself is active
+# and intentionally not in this invoice). Override via E2E_008_INVOICE_PERIOD_*.
+PERIOD_START="${E2E_008_INVOICE_PERIOD_START:-2026-03-01T00:00:00Z}"
+PERIOD_END="${E2E_008_INVOICE_PERIOD_END:-2026-04-01T00:00:00Z}"
 BENEFIT_REFERENCE="benefit-e2e-cutover-$(date -u +%Y%m%d%H%M%S)"
 FLIGHT_NO="CI$(date -u +%H%M)"
 
@@ -130,8 +133,8 @@ log_surface "Partner Ingress — bootstrap and eligibility"
 log_step "2.1 — POST /auth/partner/bootstrap-session"
 http_call POST "/auth/partner/bootstrap-session" "$BOOTSTRAP_FIXTURE"
 assert_status "200|201"
-PARTNER_ENTRY_STATUS=$(json_get ".data.partnerEntry.status")
-if [[ -z "$(json_get ".data.accessToken")" ]]; then
+PARTNER_ENTRY_STATUS=$(json_get_first ".data.partnerEntry.status" ".data.partner_entry.status")
+if [[ -z "$(json_get_first ".data.accessToken" ".data.access_token")" ]]; then
   log_fail "Partner bootstrap session did not return an accessToken."
   log_fail "Body: ${RESP_BODY}"
   exit 1
@@ -140,7 +143,12 @@ chain_set "partner" "entrySlug" "$ENTRY_SLUG"
 save_evidence "$SCENARIO" "partner" "bootstrapEntryStatus" "${PARTNER_ENTRY_STATUS:-unknown}"
 log_ok "Partner bootstrap restored for ${ENTRY_SLUG}"
 
-switch_actor "partner_api_key" "partner-key-alpha-demo" "${E2E_SEED_TENANT_ID}"
+# The partner-scope guard matches the identity tenant against the entry's tenant,
+# so derive it from the bootstrap response rather than assuming the booking tenant.
+ENTRY_TENANT_ID=$(json_get_first ".data.partnerEntry.tenantId" ".data.partner_entry.tenant_id")
+ENTRY_TENANT_ID="${ENTRY_TENANT_ID:-$E2E_SEED_TENANT_ID}"
+
+switch_actor "partner_api_key" "partner-key-alpha-demo" "${ENTRY_TENANT_ID}"
 E2E_REALM="partner"
 E2E_PARTNER_ID="$PARTNER_ID"
 E2E_PARTNER_PROGRAM_ID="$PARTNER_PROGRAM_ID"
@@ -149,8 +157,8 @@ E2E_PARTNER_ENTRY_SLUG="$ENTRY_SLUG"
 log_step "2.2 — POST /partner/eligibility/verify"
 http_call POST "/partner/eligibility/verify" "$ELIGIBILITY_FIXTURE"
 assert_status "200|201"
-ELIGIBILITY_VERIFICATION_ID=$(json_get ".data.eligibilityVerificationId")
-ELIGIBILITY_STATUS=$(json_get ".data.verificationStatus")
+ELIGIBILITY_VERIFICATION_ID=$(json_get_first ".data.eligibilityVerificationId" ".data.eligibility_verification_id")
+ELIGIBILITY_STATUS=$(json_get_first ".data.verificationStatus" ".data.verification_status")
 if [[ -z "$ELIGIBILITY_VERIFICATION_ID" ]]; then
   log_fail "No eligibilityVerificationId in response."
   log_fail "Body: ${RESP_BODY}"
@@ -169,7 +177,7 @@ log_ok "Eligibility verified: ${ELIGIBILITY_VERIFICATION_ID}"
 log_step "2.3 — GET /partner/eligibility/:eligibilityVerificationId"
 http_call GET "/partner/eligibility/${ELIGIBILITY_VERIFICATION_ID}"
 assert_status "200"
-ELIGIBILITY_ENTRY=$(json_get ".data.partnerEntrySlug")
+ELIGIBILITY_ENTRY=$(json_get_first ".data.partnerEntrySlug" ".data.partner_entry_slug")
 if [[ "$ELIGIBILITY_ENTRY" != "$ENTRY_SLUG" ]]; then
   log_fail "Eligibility record entry mismatch: expected ${ENTRY_SLUG}, got '${ELIGIBILITY_ENTRY:-<empty>}'"
   exit 1
@@ -181,7 +189,7 @@ log_ok "Eligibility record read-back preserved partnerEntrySlug=${ELIGIBILITY_EN
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Tenant Booking Authority — partner-linked airport booking"
 
-switch_actor "tenant_admin" "e2e-tenant-admin-001" "${E2E_SEED_TENANT_ID}"
+switch_actor "tenant_admin" "e2e-tenant-admin-001" "${ENTRY_TENANT_ID}"
 
 jq \
   --arg ws "$WINDOW_START" \
@@ -217,9 +225,9 @@ log_step "3.2 — GET /tenant/bookings/:bookingId"
 http_call GET "/tenant/bookings/${BOOKING_ID}"
 assert_status "200"
 BOOKING_STATUS=$(json_get ".data.status")
-BOOKING_ENTRY=$(json_get ".data.partnerEntrySlug")
-BOOKING_ELIGIBILITY=$(json_get ".data.eligibilityVerificationId")
-BOOKING_ORDER_ID=$(json_get ".data.orderId")
+BOOKING_ENTRY=$(json_get_first ".data.partnerEntrySlug" ".data.partner_entry_slug")
+BOOKING_ELIGIBILITY=$(json_get_first ".data.eligibilityVerificationId" ".data.eligibility_verification_id")
+BOOKING_ORDER_ID=$(json_get_first ".data.orderId" ".data.order_id")
 if [[ "$BOOKING_ENTRY" != "$ENTRY_SLUG" ]]; then
   log_fail "Booking partnerEntrySlug mismatch: expected ${ENTRY_SLUG}, got '${BOOKING_ENTRY:-<empty>}'"
   exit 1
@@ -244,7 +252,7 @@ log_step "4.1 — GET /settlement/matrix"
 http_call GET "/settlement/matrix"
 assert_status "200"
 RECEIPT_OWNER=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.channelKey == "partner_airport") | .receiptOwner' \
+  '.data.items[] | select((.channelKey // .channel_key) == "partner_airport") | (.receiptOwner // .receipt_owner)' \
   2>/dev/null | head -1 || true)
 if [[ -z "$RECEIPT_OWNER" ]]; then
   log_fail "Could not resolve partner_airport receiptOwner from settlement matrix."
@@ -253,12 +261,15 @@ fi
 save_evidence "$SCENARIO" "finance" "receiptOwner" "$RECEIPT_OWNER"
 log_ok "Settlement matrix receiptOwner=${RECEIPT_OWNER}"
 
-switch_actor "tenant_admin" "e2e-tenant-admin-001" "${E2E_SEED_TENANT_ID}"
+switch_actor "tenant_admin" "e2e-tenant-admin-001" "${ENTRY_TENANT_ID}"
 
+# Rebuild the invoice command for the partner entry's tenant so the body tenantId
+# matches the x-tenant-id header (the partner booking lives in the entry's tenant).
+printf '%s\n' "{\"tenantId\":\"${ENTRY_TENANT_ID}\",\"periodStart\":\"${PERIOD_START}\",\"periodEnd\":\"${PERIOD_END}\"}" > "$INVOICE_FIXTURE"
 log_step "4.2 — POST /tenant/invoices/generate"
 http_call POST "/tenant/invoices/generate" "$INVOICE_FIXTURE"
 assert_status "200|201"
-INVOICE_ID=$(json_get ".data.invoiceId")
+INVOICE_ID=$(json_get_first ".data.invoiceId" ".data.invoice_id")
 if [[ -z "$INVOICE_ID" ]]; then
   log_fail "Invoice generation did not return invoiceId."
   log_fail "Body: ${RESP_BODY}"
