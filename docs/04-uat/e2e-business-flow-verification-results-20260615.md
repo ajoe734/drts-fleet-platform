@@ -374,3 +374,32 @@ specs into CI with a seeded target.
   runs the full cross-surface suite; dev `ci-integ` e2e job confirmed
   `PASS(17) FAIL(0)` on the integrated trunk (run 27523078944). Rounds 1–8 are all
   squash-merged to dev (PRs #719, #720, #722, #723, #724, #727, #729, #730).
+
+## Round 11 — wire the UI-runtime smoke into the deploy gate (2026-06-15)
+
+Round 8 verified the deployed UI surfaces manually; this round makes that a **gated
+post-deploy step** so a UI regression fails the deploy run (per the goal: important
+verifications must be in the deploy CI/CD).
+
+Changes in `deploy-dev.yml`:
+- `health-check` now exposes the resolved Cloud Run service URLs as job `outputs`.
+- New **`ui-smoke`** job (`needs: [prepare, health-check]`) sets up node + pnpm,
+  installs Playwright chromium, and drives the freshly-deployed dev front-ends with a
+  real browser via `DRTS_DEV_*_BASE_URL = health-check outputs`:
+  `dev-runtime-matrix` (all front-ends × route × persona × locale × viewport ×
+  demo-state), `bank-console-depth`, `bank-console-auth-boundary`,
+  `partner-booking-surfaces`, `enterprise-dispatch-surfaces` (`--retries=1` for
+  transient-network resilience; Playwright HTML report uploaded on failure).
+  `ops-console-parity` is intentionally excluded (depends on demo detail-route ids
+  like `DRV-001` that aren't guaranteed seeded on the deployed env; the matrix
+  already covers ops-console rendering).
+
+Also: `playwright.enterprise-dispatch.config.ts` made its `webServer` conditional
+(skip when `DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL`/`ENTERPRISE_DISPATCH_BASE_URL` is
+set), matching the bank-console / partner-booking configs, so the deployed-URL smoke
+doesn't try to build+serve a local app. Verified locally: all five smoke configs run
+green against the live dev URLs with only the env vars set (no local webServer).
+
+Net: the deploy gate now covers BOTH the API/service layer (hermetic E2E-0NN, 17
+scenarios) AND the deployed UI-runtime layer (playwright smoke across all
+business-line front-ends).
