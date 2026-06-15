@@ -193,3 +193,45 @@ real-flow scenario blocked on lifecycle completion rather than dead code.
 ### Deploy-gate state after Round 3
 Gate unchanged at **PASS(13)**; the headline win is the tenant-partner persistence
 product fix. E2E-010 deferred with documented real-flow progress.
+
+## Round 4 — re-land stranded E2E-011 + E2E-015; feature-flag audit gap fix (2026-06-15)
+
+Broadened coverage by re-landing two business-line scenarios that existed only on a
+stranded feature branch (never on dev): `E2E-011-platform-admin-control-plane.sh`
+and `E2E-015-partner-program-variants.sh`. Both now live on dev and run via the
+hermetic runner; both are gate-deferred with documented remaining gaps while their
+deeper drift is closed in later rounds.
+
+### Product bug fixed: feature-flag overrides were not audited
+Every other platform-admin control-plane mutation records an audit log, but
+`FeatureFlagsService.upsertTenantOverride()` recorded none — tenant feature-flag
+changes left no governance audit trail. Fix: inject `AuditNotificationService`
+(`@Optional`, via `AuditNotificationModule`) and emit an
+`upsert_tenant_feature_flag` audit (`resourceType: tenant_feature_flag`,
+`resourceId: <key>:<tenantId>`) on both the DB and in-memory paths. Verified: E2E-011
+UAT-ADM-008 now passes the audit assertion. API boots clean (no circular dep);
+existing unit tests unaffected.
+
+### E2E-011 progress (deferred)
+Re-landed; fixed a stale negative-assert error code (`production_rollback_hold_active`
+→ `TENANT_IN_ROLLBACK_HOLD`, the code the API actually returns) + the feature-flag
+audit above. The whole control plane now verifies (tenant create/settings, partner
+entry+credential, adapter health, maintenance, pricing publish, feature-flag
+override, rollout sandbox/pilot, rollback-hold). **Remaining gap (Round 5+):** the
+scenario asserts governance **audit-on-rejection/denial** that the API does not yet
+emit — `reject_platform_tenant_rollout` on a blocked production promote, and
+`AUTH_REALM_DENIED` audit rows for guard-denied non-admin attempts. That is a broader
+audit-subsystem feature (audit denied/blocked control-plane actions), deferred.
+
+### E2E-015 progress (deferred)
+Re-landed; positive partner/program-variant metadata (insurance replacement-vehicle,
+travel-agency) and the missing-`referenceToken` rejection pass. **Remaining gap
+(Round 5+):** the demo `ReferenceTokenEligibilityAdapter` is a stub that always
+returns `eligible`; the pending/missing/expired/cancelled reference-decision
+sub-cases need the adapter to differentiate decisions by token convention
+(`manual_review`/`ineligible` + REFERENCE_PENDING_REVIEW/NOT_FOUND/EXPIRED/CANCELLED),
+keeping E2E-007's plain token `eligible`.
+
+### Deploy-gate state after Round 4
+Gate remains **PASS(13)**; coverage broadened (E2E-011/015 now on dev + run-able),
+one more product audit gap fixed (feature-flag overrides).
