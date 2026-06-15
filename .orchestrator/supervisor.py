@@ -2789,6 +2789,10 @@ def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
         "default_max_sidecars",
         int(underutilization_settings(config).get("max_new_sidecars_per_wave", 2)),
     )
+    # Max depth of the auto-generated unblock/repair lineage. 1 = a first-class task
+    # may get one unblock child, but that child can never spawn its own repair
+    # (no -repair-repair). Raise only if you deliberately want deeper auto-chains.
+    settings.setdefault("max_unblock_lineage_depth", 1)
     return settings
 
 
@@ -5326,6 +5330,50 @@ def task_is_sidecar(task: dict[str, Any]) -> bool:
     return str(task.get("task_class") or "").strip().lower() == "sidecar"
 
 
+# Task classes the supervisor generates for itself (review packets, unblock/repair
+# tasks). These are governance *outputs* — they must never themselves become the
+# parent of a new governance task, or the pipeline self-reproduces
+# (parent -> parent-UNBLOCK -> parent-UNBLOCK-UNBLOCK ...). The old recursion guard
+# only checked `task_is_sidecar`, so `task_class="unblock"` tasks sailed past it.
+GOVERNANCE_TASK_CLASSES = {"sidecar", "unblock"}
+
+
+def is_governance_artifact(task: dict[str, Any] | None) -> bool:
+    """True when a task is an auto-generated governance artifact (sidecar/unblock/
+    repair/follow-up) rather than first-class product work.
+
+    Used as the recursion base case: governance artifacts do not get their own
+    governance children. Detects three independent markers so a generator that
+    sets any one of them is covered."""
+    if not isinstance(task, dict):
+        return False
+    if str(task.get("task_class") or "").strip().lower() in GOVERNANCE_TASK_CLASSES:
+        return True
+    if task.get("auto_generated"):
+        return True
+    if str(task.get("helper_parent") or "").strip():
+        return True
+    return False
+
+
+def governance_lineage_depth(task: dict[str, Any] | None, task_map: dict[str, dict[str, Any]]) -> int:
+    """Number of ancestors reachable via the `helper_parent` chain above `task`.
+
+    A first-class task has depth 0; its unblock child has depth 1; a
+    repair-of-the-repair would be depth 2. Cycle-safe (bounded by `seen`)."""
+    depth = 0
+    seen: set[str] = set()
+    current = task
+    while isinstance(current, dict):
+        parent_id = str(current.get("helper_parent") or "").strip()
+        if not parent_id or parent_id in seen:
+            break
+        seen.add(parent_id)
+        depth += 1
+        current = task_map.get(parent_id)
+    return depth
+
+
 def sidecar_statuses() -> set[str]:
     return {"backlog", "todo", "in_progress", "review", "review_approved", "blocked", "done"}
 
@@ -5491,7 +5539,7 @@ def build_catalog_sidecar_candidates(
         phase_match = str(template.get("parent_phase_match") or "").strip()
         activation_dependencies = [str(item).strip() for item in template.get("activation_dependencies", []) if str(item).strip()]
         for parent in status.get("tasks", []) or []:
-            if task_is_sidecar(parent):
+            if is_governance_artifact(parent):
                 continue
             parent_id = str(parent.get("id") or "").strip()
             if not parent_id:
@@ -5556,7 +5604,7 @@ def build_dynamic_sidecar_candidates(
     dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
     candidates: list[dict[str, Any]] = []
     for parent in status.get("tasks", []) or []:
-        if task_is_sidecar(parent):
+        if is_governance_artifact(parent):
             continue
         parent_id = str(parent.get("id") or "").strip()
         if not parent_id or str(parent.get("status") or "").lower() == "done":
@@ -7651,6 +7699,53 @@ def ensure_workspace_baseline_task_dispatch(
     return True
 
 
+def escalate_governance_recursion_for_human(
+    config: dict[str, Any],
+    state: dict[str, Any] | None,
+    parent: dict[str, Any],
+    chair_reason: str,
+) -> None:
+    """Record that a blocked governance artifact needs human attention instead of
+    auto-generating a deeper repair task.
+
+    The supervisor used to dig the auto-repair lineage deeper (X-UNBLOCK-UNBLOCK).
+    Now we stop, log, and surface the parent on a bounded escalation list so a human
+    (or the dashboard) can clear it. We never generate more auto-work here."""
+    parent_id = str(parent.get("id") or "").strip()
+    write_activity_log(
+        config,
+        {
+            "type": "governance_recursion_blocked",
+            "task_id": parent_id,
+            "message": (
+                f"Refused to auto-generate an unblock task for governance artifact {parent_id} "
+                f"(task_class={parent.get('task_class')!r}, helper_parent={parent.get('helper_parent')!r}); "
+                f"needs human triage. Chair reason: {chair_reason}"
+            ),
+        },
+    )
+    if state is None or not parent_id:
+        return
+    registry = state.setdefault("governance_escalations", {})
+    if not isinstance(registry, dict):
+        registry = {}
+        state["governance_escalations"] = registry
+    registry[parent_id] = {
+        "task_id": parent_id,
+        "task_class": str(parent.get("task_class") or ""),
+        "helper_parent": str(parent.get("helper_parent") or ""),
+        "reason": brief_reason_text(chair_reason, max_length=280),
+        "flagged_at": utc_now(),
+    }
+    # Keep the registry bounded — newest 50 escalations.
+    if len(registry) > 50:
+        for stale_key in sorted(
+            registry,
+            key=lambda key: str(registry.get(key, {}).get("flagged_at") or ""),
+        )[: len(registry) - 50]:
+            registry.pop(stale_key, None)
+
+
 def create_chair_unblock_task(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -7665,7 +7760,16 @@ def create_chair_unblock_task(
     status = load_status(config)
     task_map = task_index_from_status(config, status)
     parent = task_map.get(parent_id)
-    if parent is None or str(parent.get("status") or "").lower() != "blocked" or task_is_sidecar(parent):
+    if parent is None or str(parent.get("status") or "").lower() != "blocked":
+        return False
+    # Recursion base case: a blocked governance artifact (an unblock/repair task,
+    # a sidecar, or any auto-generated helper) must NOT spawn another governance
+    # child. Without this, a blocked `X-UNBLOCK` triages into `X-UNBLOCK-UNBLOCK`
+    # and the pipeline self-reproduces. Escalate to a human instead of digging the
+    # auto-repair lineage deeper. (`task_is_sidecar` alone missed task_class="unblock".)
+    max_depth = int(chair_review_settings(config).get("max_unblock_lineage_depth", 1))
+    if is_governance_artifact(parent) or governance_lineage_depth(parent, task_map) >= max_depth:
+        escalate_governance_recursion_for_human(config, state, parent, chair_reason)
         return False
     dependency_done_statuses = {
         str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
@@ -8439,6 +8543,23 @@ def dispatch_ready_tasks(
                         task[reviewer_field] = helper_claim_plan["new_reviewer"]
                         task["last_update"] = utc_now()
                         task["next"] = helper_message
+                        # Anti-flap: record a reassignment guard so this task cannot be
+                        # availability-stolen straight back off the lane it was just handed
+                        # to. Without this, claude/claude2/codex/codex2 ping-pong the same
+                        # task every tick, each cutting a fresh empty `{agent}/{task}` branch
+                        # off the same base SHA — the duplicate-branch thrash + stranded work.
+                        # The chair reassignment path already records this guard (see
+                        # create_chair_unblock flow); the proactive path was the gap. The
+                        # planner honours it at proactive_claim_plan_for_idle_agent's
+                        # chair_reassignment_guard_active() check.
+                        remember_chair_reassignment_guard(
+                            config,
+                            state,
+                            task_id=task_id,
+                            role=helper_claim_plan["claim_role"],
+                            from_agent=helper_claim_plan["handoff_from"],
+                            to_agent=helper_claim_plan["handoff_to"],
+                        )
                         claim_reason = helper_claim_plan["reason"]
                         event = build_dispatch_event(task, target_agent, claim_reason, task_map)
                         if event["key"] not in pending_event_keys and queue_delivery_event(config, event):

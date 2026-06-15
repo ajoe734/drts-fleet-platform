@@ -6884,7 +6884,7 @@ class ChairmanFlowTests(unittest.TestCase):
             task_map={"OPX-IN-001": task},
             idle_agent_name="Codex2",
             idle_agent_names=["Codex2"],
-            agent_loads={"Codex": [0], "Codex2": []},
+            agent_loads={"Codex": [0], "Codex2": [99]},
             helper_settings={
                 "enabled": True,
                 "task_statuses": ["todo", "in_progress", "review", "review_approved"],
@@ -7988,3 +7988,205 @@ class LaneFailureAutoPauseTests(unittest.TestCase):
         for t in ("T1", "T2", "T3", "T4"):
             supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker(t), "status: 429 rate limited")
         self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+
+
+class GovernanceRecursionGuardTests(unittest.TestCase):
+    """Stop the self-reproducing repair lineage (X -> X-UNBLOCK -> X-UNBLOCK-UNBLOCK).
+
+    Root cause: the unblock generator's recursion guard checked only
+    `task_is_sidecar(parent)`, but auto-generated unblock/repair tasks carry
+    `task_class="unblock"`, so they slipped past and triaged into ever-deeper
+    repair-of-the-repair tasks. The fix keys the base case on
+    `is_governance_artifact` + a lineage-depth cap, and escalates to a human
+    instead of digging deeper.
+    """
+
+    def test_is_governance_artifact_detects_each_marker(self) -> None:
+        self.assertTrue(supervisor.is_governance_artifact({"task_class": "unblock"}))
+        self.assertTrue(supervisor.is_governance_artifact({"task_class": "sidecar"}))
+        self.assertTrue(supervisor.is_governance_artifact({"auto_generated": True}))
+        self.assertTrue(supervisor.is_governance_artifact({"helper_parent": "X-001"}))
+        # First-class product work is not a governance artifact.
+        self.assertFalse(supervisor.is_governance_artifact({"id": "FEAT-001", "task_class": "execution"}))
+        self.assertFalse(supervisor.is_governance_artifact({"id": "FEAT-001"}))
+        self.assertFalse(supervisor.is_governance_artifact(None))
+
+    def test_governance_lineage_depth_counts_helper_parent_chain(self) -> None:
+        root = {"id": "X"}
+        child = {"id": "X-UNBLOCK", "helper_parent": "X"}
+        grandchild = {"id": "X-UNBLOCK-UNBLOCK", "helper_parent": "X-UNBLOCK"}
+        task_map = {"X": root, "X-UNBLOCK": child, "X-UNBLOCK-UNBLOCK": grandchild}
+        self.assertEqual(supervisor.governance_lineage_depth(root, task_map), 0)
+        self.assertEqual(supervisor.governance_lineage_depth(child, task_map), 1)
+        self.assertEqual(supervisor.governance_lineage_depth(grandchild, task_map), 2)
+
+    def test_governance_lineage_depth_is_cycle_safe(self) -> None:
+        a = {"id": "A", "helper_parent": "B"}
+        b = {"id": "B", "helper_parent": "A"}
+        task_map = {"A": a, "B": b}
+        # Must terminate (and not blow the stack) on a corrupt cyclic chain.
+        self.assertLessEqual(supervisor.governance_lineage_depth(a, task_map), 2)
+
+    def test_chair_review_default_caps_unblock_lineage_depth(self) -> None:
+        self.assertEqual(supervisor.chair_review_settings({})["max_unblock_lineage_depth"], 1)
+
+    def test_create_chair_unblock_task_refuses_governance_parent(self) -> None:
+        """A blocked unblock/repair task must NOT spawn a deeper repair child."""
+        parent = {
+            "id": "INVOICES-BILLING-UNBLOCK-HISTORY-REPAIR",
+            "status": "blocked",
+            "task_class": "unblock",
+            "helper_parent": "INVOICES-BILLING",
+            "owner": "Codex",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+        status = {"tasks": [parent]}
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        state: dict[str, Any] = {}
+        action = {"task_id": parent["id"], "reason": "history repair still blocked"}
+        with mock.patch.object(supervisor, "load_status", return_value=status), mock.patch.object(
+            supervisor, "write_activity_log"
+        ) as logged:
+            result = supervisor.create_chair_unblock_task(config, state, action, {})
+
+        self.assertFalse(result)
+        # Escalated to a human instead of recursing.
+        self.assertIn(parent["id"], state.get("governance_escalations", {}))
+        logged_types = [call.args[1].get("type") for call in logged.call_args_list if len(call.args) > 1]
+        self.assertIn("governance_recursion_blocked", logged_types)
+
+
+class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
+    """Stop the duplicate-empty-branch thrash without blocking the first claim.
+
+    A genuine availability-first claim (owner busy on a *different* task) is
+    productive and must still happen. The thrash is the *repeated* steal-back:
+    claude -> claude2 -> codex -> codex2, each tick cutting a fresh empty
+    `{agent}/{task}` branch off the same base SHA. The fix records a reassignment
+    guard the moment a proactive claim lands, so the planner refuses to steal the
+    task straight back off the lane it was just handed to (within
+    `reassignment_guard_seconds`). The chair path already did this; the proactive
+    path was the gap.
+    """
+
+    def _config(self):
+        # Mirrors test_dispatcher_availability_first_claims_in_progress_when_owner_is_busy
+        # (the productive-claim case) so we exercise the same path and assert the
+        # anti-flap guard is recorded as a side effect.
+        return {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["in_progress", "review", "review_approved", "todo"],
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+
+    def _state(self):
+        # Copilot is busy running BUSY-1; REG-100 is in_progress but unattended.
+        return {
+            "queue": {"events": {}},
+            "workers": {
+                "run-busy": {
+                    "run_id": "run-busy",
+                    "task_id": "BUSY-1",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+
+    def _status(self):
+        return {
+            "tasks": [
+                {"id": "BUSY-1", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+                {"id": "REG-100", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+            ]
+        }
+
+    def test_first_proactive_claim_records_antiflap_guard(self) -> None:
+        """The first availability claim still happens AND drops an anti-flap guard."""
+        config = self._config()
+        state = self._state()
+        status = self._status()
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        # First claim is preserved (regression guard for the productive case).
+        self.assertTrue(changed)
+        persist.assert_called_once()
+        self.assertEqual(persist.call_args.kwargs["task_id"], "REG-100")
+        # And an anti-flap guard now protects REG-100 on its new owner.
+        guard = state.get("chair_reassignment_guards", {}).get("REG-100:owner")
+        self.assertIsNotNone(guard)
+        self.assertEqual(guard["to"], persist.call_args.kwargs["new_owner"])
+
+    def test_recorded_guard_blocks_the_resteal(self) -> None:
+        """Once the guard exists, the planner refuses to steal the task back."""
+        task = {"id": "REG-100", "status": "in_progress", "owner": "Codex", "reviewer": "Claude", "depends_on": []}
+        # Guard from a prior claim: REG-100 was just handed to Codex.
+        state = {
+            "chair_reassignment_guards": {
+                "REG-100:owner": {
+                    "task_id": "REG-100",
+                    "role": "owner",
+                    "from": "Copilot",
+                    "to": "Codex",
+                    "expires_at": "2999-01-01T00:00:00Z",
+                }
+            }
+        }
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            {"agents": {"codex": {"display_name": "Codex", "provider": "codex"},
+                        "codex2": {"display_name": "Codex2", "provider": "codex2"}}},
+            task=task,
+            task_map={"REG-100": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            agent_loads={"Codex": [0], "Codex2": [99]},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["in_progress", "review", "review_approved", "todo"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "require_assigned_agent_busy": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+        self.assertIsNone(plan)
+
+
+if __name__ == "__main__":
+    unittest.main()
