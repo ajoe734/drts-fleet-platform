@@ -52,6 +52,18 @@ const en: Dict = {
   "dashboard.attention": "Needs your attention",
   "dashboard.attentionSub":
     "Missing docs → quality responsibility → training gaps",
+  "dashboard.attention.permit.title":
+    "Wu Zhen-Yu is missing the airport transfer permit",
+  "dashboard.attention.permit.body":
+    "The driver cannot take airport-transfer work until the permit is restored.",
+  "dashboard.attention.sla.title":
+    "cmp_0908 driver-conduct complaint has breached SLA",
+  "dashboard.attention.sla.body":
+    "A conduct complaint against Huang Wen-Hao escalated to fleet ownership. Respond within 24 hours.",
+  "dashboard.attention.training.title":
+    "Insurance replacement training completion is 55%",
+  "dashboard.attention.training.body":
+    "22 of 40 drivers have completed the flow. Incomplete drivers cannot take insurance-replacement work.",
   "dashboard.supply": "Supply by service product",
   "dashboard.supplySub": "Drivers eligible per service product",
   "dashboard.recentTrips": "Recent trips · top 5",
@@ -393,6 +405,14 @@ const zh: Dict = {
   "dashboard.recruit": "招募司機",
   "dashboard.attention": "需要您處理",
   "dashboard.attentionSub": "文件缺件 → 品質責任 → 訓練落後",
+  "dashboard.attention.permit.title": "吳鎮宇缺機場接送資格證",
+  "dashboard.attention.permit.body": "缺件期間無法接機場接送任務。請協助補件。",
+  "dashboard.attention.sla.title": "cmp_0908 司機行為申訴已逾 SLA",
+  "dashboard.attention.sla.body":
+    "黃文豪言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。",
+  "dashboard.attention.training.title": "保險代步流程訓練完成率 55%",
+  "dashboard.attention.training.body":
+    "22 / 40 司機完成。未完成者無法接保險代步任務。",
   "dashboard.supply": "服務別供給",
   "dashboard.supplySub": "各服務別可接單司機數",
   "dashboard.recentTrips": "近期趟次 · 前 5 筆",

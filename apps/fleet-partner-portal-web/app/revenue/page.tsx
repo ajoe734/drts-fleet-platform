@@ -61,7 +61,7 @@ export default async function FleetRevenuePage() {
           <div style={{ display: "flex", flexDirection: "column" }}>
             {s.lines.map((l) => (
               <div
-                key={l.en}
+                key={l.key}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -75,8 +75,8 @@ export default async function FleetRevenuePage() {
                   <BiLabel
                     theme={theme}
                     locale={locale}
-                    zh={t(`revenue.line.${l.en}`, "zh")}
-                    en={t(`revenue.line.${l.en}`, "en")}
+                    zh={t(`revenue.line.${l.key}`, "zh")}
+                    en={t(`revenue.line.${l.key}`, "en")}
                   />
                   {l.reimbursement && (
                     <div
