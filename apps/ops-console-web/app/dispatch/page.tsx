@@ -2806,7 +2806,7 @@ export default async function DispatchPage({
         actions={
           <>
             <Pill theme={theme} tone="accent">
-              T2 dispatch / 5s
+              {t("dispatch.page.refreshTierPill", locale)}
             </Pill>
             <Pill theme={theme} tone="neutral">
               {boardMeta.label}
@@ -3429,7 +3429,7 @@ export default async function DispatchPage({
                                 }}
                               >
                                 <Pill theme={theme} tone="warn" dot>
-                                  platform-admin ↗
+                                  {t("dispatch.page.platformAdminPill", locale)}
                                 </Pill>
                               </Link>
                             ) : null}
