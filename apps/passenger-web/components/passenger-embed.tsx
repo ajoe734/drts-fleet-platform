@@ -62,6 +62,62 @@ function toneStyle(theme: ReturnType<typeof buildEmbedTheme>, tone: string) {
   }
 }
 
+const EMBED_MONO = '"IBM Plex Mono", ui-monospace, SFMono-Regular, monospace';
+
+// Minimal inline-SVG glyphs for the embedded webview chrome / hero so the
+// passenger embed matches the canvas (passenger-embed-screens.jsx) without
+// pulling the management icon set into the public passenger bundle.
+const EMBED_GLYPHS: Record<string, string> = {
+  chevL: "M15 6l-6 6 6 6",
+  lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
+  check: "M5 12l4 4 10-10",
+  x: "M6 6l12 12 M18 6L6 18",
+  clock: "M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z",
+  ban: "M6 6l12 12 M12 21a9 9 0 100-18 9 9 0 000 18z",
+  ext: "M14 4h6v6 M20 4l-8 8 M18 13v6H5V6h6",
+  shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z",
+  bolt: "M13 3L5 13h6l-1 8 8-10h-6z",
+  info: "M12 8h.02 M11 12h1v5h1 M12 21a9 9 0 100-18 9 9 0 000 18z",
+};
+
+function EmbedGlyph({
+  name,
+  size = 14,
+  stroke = 2,
+}: {
+  name: string;
+  size?: number;
+  stroke?: number;
+}) {
+  const d = EMBED_GLYPHS[name] ?? EMBED_GLYPHS.info ?? "";
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={stroke}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      {d.split(" M").map((seg, index) => (
+        <path key={index} d={index === 0 ? seg : `M${seg}`} />
+      ))}
+    </svg>
+  );
+}
+
+function statusDotColor(
+  theme: ReturnType<typeof buildEmbedTheme>,
+  state: string,
+) {
+  if (state === "unsupported") return theme.dangerFg;
+  if (state === "reauth" || state === "fallback") return theme.warnFg;
+  return theme.successFg;
+}
+
 function EmbedShell({
   context,
   children,
@@ -75,6 +131,7 @@ function EmbedShell({
   const appName = context.strings.appName;
   const displayName = context.strings.displayName;
   const { t } = useTranslation();
+  const dotColor = statusDotColor(theme, context.state);
 
   return (
     <div
@@ -105,68 +162,130 @@ function EmbedShell({
             "0 20px 50px color-mix(in srgb, var(--embed-accent) 12%, transparent)",
         }}
       >
+        {/* iOS-style status bar (host device chrome) */}
         <div
           style={{
             background: theme.accent,
             color: "white",
-            padding: "14px 16px 12px",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "space-between",
+            padding: "10px 18px 6px",
+            fontSize: 12.5,
+            fontWeight: 600,
           }}
         >
-          <div
+          <span>9:41</span>
+          <span
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 12,
-              fontWeight: 700,
-            }}
-          >
-            <span>9:41</span>
-            <span>{t("embed.chrome.webview")}</span>
-          </div>
-          <div
-            style={{
-              display: "flex",
+              display: "inline-flex",
+              gap: 6,
               alignItems: "center",
-              gap: 12,
-              marginTop: 10,
+              opacity: 0.9,
             }}
           >
-            <div
-              style={{
-                width: 46,
-                height: 46,
-                borderRadius: 14,
-                background: "color-mix(in srgb, white 18%, transparent)",
-                display: "grid",
-                placeItems: "center",
-                fontSize: 22,
-                fontWeight: 800,
-              }}
-            >
-              {displayName.slice(0, 1)}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 800 }}>
-                {t("embed.chrome.title")}
-              </div>
-              <div style={{ fontSize: 11, opacity: 0.9 }}>
-                {appName} · {displayName}
-              </div>
-            </div>
-          </div>
+            <EmbedGlyph name="bolt" size={12} />
+            <EmbedGlyph name="shield" size={12} />
+          </span>
         </div>
 
+        {/* host app chrome: back affordance + title + entryHost lock chip */}
         <div
           style={{
-            padding: "8px 14px",
-            fontSize: 11,
+            background: theme.accent,
+            color: "white",
+            padding: "4px 12px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 15,
+              background: "color-mix(in srgb, white 16%, transparent)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <EmbedGlyph name="chevL" size={16} />
+          </span>
+          <div style={{ flex: 1, lineHeight: 1.2, minWidth: 0 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 700 }}>
+              {t("embed.chrome.title")}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                opacity: 0.8,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {appName} · {displayName}
+            </div>
+          </div>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 9.5,
+              fontFamily: EMBED_MONO,
+              opacity: 0.85,
+              background: "color-mix(in srgb, white 14%, transparent)",
+              padding: "4px 8px",
+              borderRadius: 999,
+              maxWidth: 150,
+            }}
+          >
+            <EmbedGlyph name="lock" size={10} />
+            <span
+              style={{
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {getEntryHost(context.entry)}
+            </span>
+          </span>
+        </div>
+
+        {/* webview surface badge */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 14px",
+            fontSize: 10.5,
             color: theme.neutralFg,
             background: theme.neutralBg,
             borderBottom: `1px solid ${theme.neutralBorder}`,
           }}
         >
-          embedded · /embed/{context.entry.entrySlug} ·{" "}
-          {getEntryHost(context.entry)}
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              background: dotColor,
+              flexShrink: 0,
+            }}
+          />
+          <span style={{ fontFamily: EMBED_MONO }}>
+            {t("embed.chrome.webview")}
+          </span>
+          <span style={{ opacity: 0.7 }}>
+            · embedded · /embed/{context.entry.entrySlug}
+          </span>
         </div>
 
         <div style={{ padding: 16, display: "grid", gap: 12 }}>{children}</div>
@@ -274,7 +393,7 @@ function ActionLink({
 function IdentityState({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
   const { t } = useTranslation();
-  const handoffRows = [
+  const handoffRows: Array<[string, string]> = [
     [t("embed.field.signature"), "valid"],
     [t("embed.field.identity"), embedResident.name],
     [t("embed.field.unit"), embedResident.unit],
@@ -286,6 +405,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       }),
       badge: t("embed.state.handoff.badge"),
       tone: "success",
+      icon: "check",
       footer: (
         <ActionLink
           href={buildHref(context, { screen: "book" })}
@@ -298,6 +418,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       title: t("embed.state.reauth.title"),
       badge: t("embed.state.reauth.badge"),
       tone: "warn",
+      icon: "clock",
       footer: (
         <>
           <ActionLink
@@ -319,6 +440,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       title: t("embed.state.unsupported.title"),
       badge: t("embed.state.unsupported.badge"),
       tone: "danger",
+      icon: "ban",
       footer: (
         <ActionLink
           href={buildHref(context, { state: "fallback" })}
@@ -331,6 +453,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       title: t("embed.state.consent.title"),
       badge: t("embed.state.consent.badge"),
       tone: "info",
+      icon: "shield",
       footer: (
         <>
           <ActionLink
@@ -350,6 +473,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       title: t("embed.state.fallback.title"),
       badge: t("embed.state.fallback.badge"),
       tone: "warn",
+      icon: "ext",
       footer: (
         <>
           <ActionLink
@@ -369,61 +493,120 @@ function IdentityState({ context }: { context: EmbedContext }) {
 
   const current = bodyByState[context.state];
   const tone = toneStyle(theme, current.tone);
+  const isHandoff = context.state === "handoff";
 
   return (
     <EmbedShell context={context} footer={current.footer}>
+      {/* hero: circular icon tile + title + posture pill (canvas PeHero) */}
       <div
         style={{
-          ...tone,
-          border: `1px solid ${tone.borderColor}`,
-          borderRadius: 999,
-          padding: "6px 10px",
-          width: "fit-content",
-          fontSize: 11,
-          fontWeight: 800,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 10,
+          padding: "10px 0 2px",
+          textAlign: "center",
         }}
       >
-        {current.badge}
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.25 }}>
-        {current.title}
-      </div>
-      <Card
-        title={t("embed.card.handoffSummary")}
-        subtitle={t("embed.card.handoffSubtitle")}
-      >
-        {handoffRows.map(([label, value]) => (
-          <div
-            key={label}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              fontSize: 13,
-            }}
-          >
-            <span>{label}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
         <div
           style={{
+            width: 58,
+            height: 58,
+            borderRadius: 29,
+            background: tone.background,
+            color: tone.color,
             display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            fontSize: 13,
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
-          <span>{t("embed.field.passengerId")}</span>
-          <strong>
-            {context.session?.drtsPassengerId || t("common.none")}
-          </strong>
+          <EmbedGlyph name={current.icon} size={28} stroke={2.2} />
         </div>
-      </Card>
+        <div style={{ fontSize: 20, fontWeight: 900, lineHeight: 1.25 }}>
+          {current.title}
+        </div>
+        <div
+          style={{
+            ...tone,
+            border: `1px solid ${tone.borderColor}`,
+            borderRadius: 999,
+            padding: "5px 12px",
+            fontSize: 11,
+            fontWeight: 800,
+          }}
+        >
+          {current.badge}
+        </div>
+      </div>
+
+      {isHandoff ? (
+        <Card
+          title={t("embed.card.handoffSummary")}
+          subtitle={t("embed.card.handoffSubtitle")}
+        >
+          {handoffRows.map(([label, value]) => (
+            <TokenRow
+              key={label}
+              ok
+              theme={theme}
+              label={label}
+              value={value}
+            />
+          ))}
+          <TokenRow
+            theme={theme}
+            ok
+            label={t("embed.field.passengerId")}
+            value={context.session?.drtsPassengerId || t("common.none")}
+          />
+        </Card>
+      ) : null}
+
       <Card>
         <div style={{ fontSize: 13, lineHeight: 1.6 }}>{current.message}</div>
       </Card>
     </EmbedShell>
+  );
+}
+
+function TokenRow({
+  theme,
+  ok,
+  label,
+  value,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  ok: boolean;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        fontSize: 13,
+      }}
+    >
+      <span
+        style={{
+          width: 19,
+          height: 19,
+          borderRadius: 10,
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: ok ? theme.successBg : theme.dangerBg,
+          color: ok ? theme.successFg : theme.dangerFg,
+        }}
+      >
+        <EmbedGlyph name={ok ? "check" : "x"} size={11} stroke={3} />
+      </span>
+      <span style={{ flex: 1 }}>{label}</span>
+      <strong style={{ fontFamily: EMBED_MONO, fontSize: 12 }}>{value}</strong>
+    </div>
   );
 }
 
