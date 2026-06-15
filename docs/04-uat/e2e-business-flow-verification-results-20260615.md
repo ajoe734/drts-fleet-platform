@@ -235,3 +235,28 @@ keeping E2E-007's plain token `eligible`.
 ### Deploy-gate state after Round 4
 Gate remains **PASS(13)**; coverage broadened (E2E-011/015 now on dev + run-able),
 one more product audit gap fixed (feature-flag overrides).
+
+## Round 5 — E2E-015 reference-token decision differentiation (2026-06-15)
+
+Closed E2E-015. The demo `ReferenceTokenEligibilityAdapter` was a stub that always
+returned `eligible`, so the partner reference-decision governance paths
+(pending-review / not-found / expired / cancelled) could not be exercised. Enhanced
+the adapter to derive the decision deterministically from a reference-token
+convention (until a live issuer is wired):
+
+| token contains | verificationStatus | reasonCode |
+|----------------|--------------------|------------|
+| `-pending`   | manual_review | REFERENCE_PENDING_REVIEW |
+| `-missing`   | ineligible    | REFERENCE_NOT_FOUND |
+| `-expired`   | ineligible    | REFERENCE_EXPIRED |
+| `-cancelled` | ineligible    | REFERENCE_CANCELLED |
+| (default)    | eligible      | REFERENCE_ACCEPTED |
+
+Verified hermetically: **E2E-015 PASS** (all four reference-decision sub-cases) and
+**E2E-007 PASS** (its plain token `e2e-reference-token-007-*` stays `eligible` — no
+regression). Removed 015 from `gate-deferred.txt`.
+
+### Deploy-gate state after Round 5
+Gate grows to **PASS(14)**: 001 002 003 004 005 006 007 008 009 012 013 014 015 016.
+Only E2E-010 and E2E-011 remain deferred (both need broader product features — the
+governed-booking lifecycle and the audit-on-rejection/denial subsystem respectively).

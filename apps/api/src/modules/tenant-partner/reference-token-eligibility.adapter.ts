@@ -36,10 +36,26 @@ export class ReferenceTokenEligibilityAdapter implements PartnerEligibilityAdapt
         : null;
     const hashSuffix = referenceTokenHash?.slice(-8) ?? "unknown";
 
+    // Demo issuer-reference lookup: a real issuer returns per-reference decisions.
+    // Until a live issuer is wired, derive the decision deterministically from a
+    // reference-token convention so the non-eligible governance paths
+    // (pending review / not found / expired / cancelled) are exercisable. Tokens
+    // without a decision marker resolve to "eligible" (the default happy path).
+    const rawToken = input.command.referenceToken?.trim().toLowerCase() ?? "";
+    const decision = rawToken.includes("-pending")
+      ? { verificationStatus: "manual_review" as const, verificationReasonCode: "REFERENCE_PENDING_REVIEW" }
+      : rawToken.includes("-missing")
+        ? { verificationStatus: "ineligible" as const, verificationReasonCode: "REFERENCE_NOT_FOUND" }
+        : rawToken.includes("-expired")
+          ? { verificationStatus: "ineligible" as const, verificationReasonCode: "REFERENCE_EXPIRED" }
+          : rawToken.includes("-cancelled")
+            ? { verificationStatus: "ineligible" as const, verificationReasonCode: "REFERENCE_CANCELLED" }
+            : { verificationStatus: "eligible" as const, verificationReasonCode: "REFERENCE_ACCEPTED" };
+
     return {
-      verificationStatus: "eligible",
+      verificationStatus: decision.verificationStatus,
       decisionSource: "issuer_reference_lookup",
-      verificationReasonCode: "REFERENCE_ACCEPTED",
+      verificationReasonCode: decision.verificationReasonCode,
       cardProgramCode:
         input.entry.programCode ??
         input.entry.bankCode ??
