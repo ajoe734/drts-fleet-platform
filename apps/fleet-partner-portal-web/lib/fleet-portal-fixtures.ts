@@ -11,11 +11,6 @@
 
 import type { CanvasTone } from "@drts/ui-web";
 
-export type LocalizedText = {
-  zh: string;
-  en: string;
-};
-
 export type ServiceKey =
   | "realtime"
   | "business"
@@ -23,15 +18,14 @@ export type ServiceKey =
   | "insurance"
   | "travel";
 
-export const SVC_LABELS: Record<
-  ServiceKey,
-  { zh: string; en: string; tone: CanvasTone }
-> = {
-  realtime: { zh: "即時叫車", en: "Realtime", tone: "success" },
-  business: { zh: "商務派車", en: "Business dispatch", tone: "accent" },
-  airport: { zh: "機場接送", en: "Airport transfer", tone: "info" },
-  insurance: { zh: "保險代步", en: "Insurance replacement", tone: "warn" },
-  travel: { zh: "旅行社接送", en: "Travel partner", tone: "accent" },
+// Tone-by-service for the service chips. The bilingual label for each service
+// lives in translations.ts under the `svc.*` keys and is resolved with t().
+export const SVC_TONES: Record<ServiceKey, CanvasTone> = {
+  realtime: "success",
+  business: "accent",
+  airport: "info",
+  insurance: "warn",
+  travel: "accent",
 };
 
 export const FLEET_SELF = {
@@ -280,7 +274,7 @@ export const FX_FLEET_TRIPS: FleetTrip[] = [
 ];
 
 export type StatementLine = {
-  zh: string;
+  // Translation key under `revenue.line.*`; resolved with t() at render.
   en: string;
   v: string;
   sign: "+" | "−";
@@ -297,11 +291,11 @@ export const FX_FLEET_STATEMENT: {
   status: "pending_confirm",
   payable: "NT$ 642,000",
   lines: [
-    { zh: "逐趟分潤", en: "per_trip", v: "NT$ 598,400", sign: "+" },
-    { zh: "招募獎金", en: "recruitment", v: "NT$ 24,000", sign: "+" },
-    { zh: "管理費", en: "mgmt_fee", v: "NT$ 36,000", sign: "+" },
-    { zh: "績效獎金", en: "performance", v: "NT$ 12,000", sign: "+" },
-    { zh: "罰則 / 追回", en: "clawback", v: "NT$ 28,400", sign: "−" },
+    { en: "per_trip", v: "NT$ 598,400", sign: "+" },
+    { en: "recruitment", v: "NT$ 24,000", sign: "+" },
+    { en: "mgmt_fee", v: "NT$ 36,000", sign: "+" },
+    { en: "performance", v: "NT$ 12,000", sign: "+" },
+    { en: "clawback", v: "NT$ 28,400", sign: "−" },
   ],
 };
 
@@ -492,7 +486,7 @@ export const FX_FLEET_CASES: FleetCase[] = [
 ];
 
 export type FleetQuality = {
-  zh: string;
+  // Translation key under `quality.metric.*`; resolved with t() at render.
   en: string;
   v: string;
   tone: "success" | "warn" | "neutral";
@@ -501,42 +495,36 @@ export type FleetQuality = {
 
 export const FX_FLEET_QUALITY: FleetQuality[] = [
   {
-    zh: "平均評分",
     en: "avg_rating",
     v: "4.86",
     tone: "success",
     delta: "↑ 0.02",
   },
   {
-    zh: "完成率",
     en: "completion_rate",
     v: "97.4%",
     tone: "success",
     delta: "↑ 0.6pp",
   },
   {
-    zh: "取消率",
     en: "cancel_rate",
     v: "1.8%",
     tone: "neutral",
     delta: "↓ 0.2pp",
   },
   {
-    zh: "未出現率",
     en: "no_show_rate",
     v: "0.8%",
     tone: "neutral",
     delta: "—",
   },
   {
-    zh: "申訴率",
     en: "complaint_rate",
     v: "0.12%",
     tone: "warn",
     delta: "↑ 0.01pp",
   },
   {
-    zh: "準點率",
     en: "on_time_rate",
     v: "94.2%",
     tone: "success",
@@ -573,42 +561,25 @@ export const FX_DASHBOARD_SUPPLEMENTAL: FleetDashboardSupplemental = {
 
 export type FleetAttentionBanner = {
   tone: "warn" | "danger";
-  title: LocalizedText;
-  body: LocalizedText;
+  // Translation keys under `dashboard.attention.*`; resolved with t().
+  titleKey: string;
+  bodyKey: string;
 };
 
 export const FX_DASHBOARD_ATTENTION: FleetAttentionBanner[] = [
   {
     tone: "warn",
-    title: {
-      zh: "吳鎮宇缺機場接送資格證",
-      en: "Wu Zhen-Yu is missing the airport transfer permit",
-    },
-    body: {
-      zh: "缺件期間無法接機場接送任務。請協助補件。",
-      en: "The driver cannot take airport-transfer work until the permit is restored.",
-    },
+    titleKey: "dashboard.attention.airportPermit.title",
+    bodyKey: "dashboard.attention.airportPermit.body",
   },
   {
     tone: "danger",
-    title: {
-      zh: "cmp_0908 司機行為申訴已逾 SLA",
-      en: "cmp_0908 driver-conduct complaint has breached SLA",
-    },
-    body: {
-      zh: "黃文豪言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。",
-      en: "A conduct complaint against Huang Wen-Hao escalated to fleet ownership. Respond within 24 hours.",
-    },
+    titleKey: "dashboard.attention.slaBreach.title",
+    bodyKey: "dashboard.attention.slaBreach.body",
   },
   {
     tone: "warn",
-    title: {
-      zh: "保險代步流程訓練完成率 55%",
-      en: "Insurance replacement training completion is 55%",
-    },
-    body: {
-      zh: "22 / 40 司機完成。未完成者無法接保險代步任務。",
-      en: "22 of 40 drivers have completed the flow. Incomplete drivers cannot take insurance-replacement work.",
-    },
+    titleKey: "dashboard.attention.insuranceTraining.title",
+    bodyKey: "dashboard.attention.insuranceTraining.body",
   },
 ];

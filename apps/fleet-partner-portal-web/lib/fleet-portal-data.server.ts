@@ -311,42 +311,36 @@ function mapQualityMetrics(
   );
   return [
     {
-      zh: "完成趟次",
       en: "completed_trips",
       v: record.totalCompletedTrips.toLocaleString("en-US"),
       tone: "success",
       delta: "—",
     },
     {
-      zh: "取消率",
       en: "cancel_rate",
       v: `${cancelRate.toFixed(1)}%`,
       tone: cancelRate > 5 ? "warn" : "neutral",
       delta: "—",
     },
     {
-      zh: "待證明趟次",
       en: "proof_pending",
       v: record.proofPendingTripCount.toLocaleString("en-US"),
       tone: record.proofPendingTripCount > 0 ? "warn" : "success",
       delta: "—",
     },
     {
-      zh: "在線司機",
       en: "online_drivers",
       v: onlineDriverCount.toLocaleString("en-US"),
       tone: "neutral",
       delta: "—",
     },
     {
-      zh: "證照失效司機",
       en: "license_invalid_drivers",
       v: record.licenseInvalidDriverCount.toLocaleString("en-US"),
       tone: record.licenseInvalidDriverCount > 0 ? "warn" : "success",
       delta: "—",
     },
     {
-      zh: "本期分潤",
       en: "share_amount",
       v: formatMoney(record.shareAmount),
       tone: "neutral",
@@ -399,15 +393,15 @@ export async function loadStatements(): Promise<StatementsView> {
 
 // --- revenue (derived from the latest statement) ----------------------------
 
-const REVENUE_FORMULA_LABELS: Record<string, { zh: string; en: string }> = {
-  percent_of_gross: { zh: "逐趟分潤", en: "per_trip" },
-  fixed_per_trip: { zh: "逐趟固定", en: "per_trip_fixed" },
-  monthly_fixed: { zh: "管理費", en: "mgmt_fee" },
-  tiered_bonus: { zh: "績效獎金", en: "performance" },
-  sponsor_funded_airport: {
-    zh: "卡友機場趟次分潤",
-    en: "sponsor_airport",
-  },
+// Maps a statement formula to its `revenue.line.*` translation key. The
+// bilingual label for each key lives in translations.ts and is resolved with
+// t() at render.
+const REVENUE_FORMULA_KEYS: Record<string, string> = {
+  percent_of_gross: "per_trip",
+  fixed_per_trip: "per_trip_fixed",
+  monthly_fixed: "mgmt_fee",
+  tiered_bonus: "performance",
+  sponsor_funded_airport: "sponsor_airport",
 };
 
 export interface RevenueView {
@@ -434,13 +428,9 @@ function mapStatementLines(
   }
   const currency = record.shareAmount.currency;
   return [...buckets.entries()].map(([formula, amountMinor]) => {
-    const label = REVENUE_FORMULA_LABELS[formula] ?? {
-      zh: formula,
-      en: formula,
-    };
+    const lineKey = REVENUE_FORMULA_KEYS[formula] ?? formula;
     return {
-      zh: label.zh,
-      en: label.en,
+      en: lineKey,
       v: formatMoney({ currency, amountMinor: Math.abs(amountMinor) }),
       sign: amountMinor < 0 ? "−" : "+",
       reimbursement:

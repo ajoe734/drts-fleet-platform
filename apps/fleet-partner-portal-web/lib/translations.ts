@@ -1,5 +1,6 @@
-// Central bilingual strings for the Fleet Partner Portal chrome and page
-// headers. Row-level data carries its own zh/en in the fixtures module.
+// Central bilingual strings for the Fleet Partner Portal chrome, page headers,
+// and row-level labels. Fixtures carry translation keys (not inline zh/en
+// copy); pages resolve them with t().
 // Follows the platform i18n rule: pages call t(), no inline locale ternaries.
 
 export type Locale = "zh" | "en";
@@ -52,6 +53,23 @@ const en: Dict = {
   "dashboard.attention": "Needs your attention",
   "dashboard.attentionSub":
     "Missing docs → quality responsibility → training gaps",
+  "dashboard.attention.airportPermit.title":
+    "Wu Zhen-Yu is missing the airport transfer permit",
+  "dashboard.attention.airportPermit.body":
+    "The driver cannot take airport-transfer work until the permit is restored.",
+  "dashboard.attention.slaBreach.title":
+    "cmp_0908 driver-conduct complaint has breached SLA",
+  "dashboard.attention.slaBreach.body":
+    "A conduct complaint against Huang Wen-Hao escalated to fleet ownership. Respond within 24 hours.",
+  "dashboard.attention.insuranceTraining.title":
+    "Insurance replacement training completion is 55%",
+  "dashboard.attention.insuranceTraining.body":
+    "22 of 40 drivers have completed the flow. Incomplete drivers cannot take insurance-replacement work.",
+  "svc.realtime": "Realtime",
+  "svc.business": "Business dispatch",
+  "svc.airport": "Airport transfer",
+  "svc.insurance": "Insurance replacement",
+  "svc.travel": "Travel partner",
   "dashboard.supply": "Supply by service product",
   "dashboard.supplySub": "Drivers eligible per service product",
   "dashboard.recentTrips": "Recent trips · top 5",
@@ -393,6 +411,20 @@ const zh: Dict = {
   "dashboard.recruit": "招募司機",
   "dashboard.attention": "需要您處理",
   "dashboard.attentionSub": "文件缺件 → 品質責任 → 訓練落後",
+  "dashboard.attention.airportPermit.title": "吳鎮宇缺機場接送資格證",
+  "dashboard.attention.airportPermit.body":
+    "缺件期間無法接機場接送任務。請協助補件。",
+  "dashboard.attention.slaBreach.title": "cmp_0908 司機行為申訴已逾 SLA",
+  "dashboard.attention.slaBreach.body":
+    "黃文豪言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。",
+  "dashboard.attention.insuranceTraining.title": "保險代步流程訓練完成率 55%",
+  "dashboard.attention.insuranceTraining.body":
+    "22 / 40 司機完成。未完成者無法接保險代步任務。",
+  "svc.realtime": "即時叫車",
+  "svc.business": "商務派車",
+  "svc.airport": "機場接送",
+  "svc.insurance": "保險代步",
+  "svc.travel": "旅行社接送",
   "dashboard.supply": "服務別供給",
   "dashboard.supplySub": "各服務別可接單司機數",
   "dashboard.recentTrips": "近期趟次 · 前 5 筆",
