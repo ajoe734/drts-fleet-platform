@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { EmbedContext } from "@/lib/embed-context";
+import type { EmbedContext, EmbedState } from "@/lib/embed-context";
 import { useTranslation } from "@/lib/i18n";
 import {
   embedReceipt,
@@ -495,6 +495,31 @@ function IdentityState({ context }: { context: EmbedContext }) {
   const tone = toneStyle(theme, current.tone);
   const isHandoff = context.state === "handoff";
 
+  // canvas PE_Reauth / PE_Unsupported show a status card with failed (x) token
+  // rows alongside the prose. Render the matching detection rows per state.
+  const detectionByState: Partial<
+    Record<EmbedState, { title: string; rows: Array<[string, string]> }>
+  > = {
+    reauth: {
+      title: t("embed.token.connState"),
+      rows: [
+        [t("embed.token.partnerSession"), t("embed.token.partnerSessionValue")],
+        [t("embed.token.handoffToken"), t("embed.token.handoffTokenValue")],
+      ],
+    },
+    unsupported: {
+      title: t("embed.token.detection"),
+      rows: [
+        [t("embed.token.originHost"), t("embed.token.originHostValue")],
+        [
+          t("embed.token.partnerSignature"),
+          t("embed.token.partnerSignatureValue"),
+        ],
+      ],
+    },
+  };
+  const detection = detectionByState[context.state];
+
   return (
     <EmbedShell context={context} footer={current.footer}>
       {/* hero: circular icon tile + title + posture pill (canvas PeHero) */}
@@ -565,6 +590,20 @@ function IdentityState({ context }: { context: EmbedContext }) {
       <Card>
         <div style={{ fontSize: 13, lineHeight: 1.6 }}>{current.message}</div>
       </Card>
+
+      {detection ? (
+        <Card title={detection.title}>
+          {detection.rows.map(([label, value]) => (
+            <TokenRow
+              key={label}
+              ok={false}
+              theme={theme}
+              label={label}
+              value={value}
+            />
+          ))}
+        </Card>
+      ) : null}
     </EmbedShell>
   );
 }
