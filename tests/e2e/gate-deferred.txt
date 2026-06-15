@@ -11,4 +11,3 @@
 #
 # number   reason (owning round)
 010      # governance billing/reporting: function-flow now runs for real (quota/approval/report verified) after the tenant-partner loadState resilience fix, but exits non-zero in the hermetic env because the governed-booking lifecycle cannot complete (cost_center.owner approval resolution + dispatch/trip not drivable headless) -- needs staging or further rework. See results doc.
-011      # platform-admin control plane: re-landed from a stranded feature branch; nearly all UAT-ADM steps pass (tenant create/settings, partner entry+credential, adapter health, maintenance, pricing publish, feature-flag override [now audited], rollout sandbox/pilot, rollback-hold). Remaining: governance audit-on-rejection/denial not yet emitted (reject_platform_tenant_rollout; AUTH_REALM_DENIED on guard-denied attempts) -- a broader audit subsystem feature. Round 5+.

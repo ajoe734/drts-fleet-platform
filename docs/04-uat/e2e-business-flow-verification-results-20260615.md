@@ -260,3 +260,30 @@ regression). Removed 015 from `gate-deferred.txt`.
 Gate grows to **PASS(14)**: 001 002 003 004 005 006 007 008 009 012 013 014 015 016.
 Only E2E-010 and E2E-011 remain deferred (both need broader product features — the
 governed-booking lifecycle and the audit-on-rejection/denial subsystem respectively).
+
+## Round 6 — E2E-011 governance audit trail (2026-06-15)
+
+Closed E2E-011 by completing the platform-admin **governance audit trail** for
+rejected/denied control-plane actions — two genuine audit gaps (every *successful*
+mutation was audited, but blocked/denied attempts were not):
+
+1. **Blocked rollout promote (`tenants.service.setRolloutStage`):** a promotion
+   blocked by `enforcePromotionGates` (e.g. rollback hold) threw without an audit.
+   Now wraps the gate in try/catch and emits a `reject_platform_tenant_rollout`
+   audit (with the gate's `errorCode` in `newValuesSummary`) before re-throwing.
+2. **Denied control-plane access (`bootstrap-auth.guard`):** an authenticated but
+   unauthorized identity (realm/scope mismatch) was rejected without an audit. The
+   global guard now records a denial audit on `AUTH_REALM_DENIED`/`AUTH_SCOPE_DENIED`
+   (only those codes; never masks the original error; `@Optional` audit dep). The
+   denied control-plane mutations get a semantic action name
+   (`reject_platform_tenant_create`, `reject_platform_pricing_publish`); other routes
+   use a generic `reject_authorization` marker. `errorCode` + `realm` recorded in
+   `newValuesSummary`.
+
+Verified: **E2E-011 PASS** (full UAT-ADM control plane incl. all rejected-attempt
+audit assertions); auth unit tests (69) pass; API boots clean. Removed 011 from
+`gate-deferred.txt`.
+
+### Deploy-gate state after Round 6
+Gate grows to **PASS(15)**: 001–009, 011, 012, 013, 014, 015, 016. Only **E2E-010**
+remains deferred (governed-booking lifecycle can't complete headless).
