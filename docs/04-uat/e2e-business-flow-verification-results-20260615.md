@@ -287,3 +287,46 @@ audit assertions); auth unit tests (69) pass; API boots clean. Removed 011 from
 ### Deploy-gate state after Round 6
 Gate grows to **PASS(15)**: 001–009, 011, 012, 013, 014, 015, 016. Only **E2E-010**
 remains deferred (governed-booking lifecycle can't complete headless).
+
+## Round 7 — E2E-010 governed-booking lifecycle (2026-06-15) — FULL COVERAGE
+
+Closed the **last** deferred scenario. The governed-booking lifecycle
+(booking → approval → dispatch → trip → invoice → audit → report) actually works
+end-to-end against the persistence-backed API — the scenario just had a chain of
+test-side defects (no product change needed for E2E-010 beyond Round 3's loadState
+fix that lets tenant users load):
+
+1. **Approver identity:** the rule is `approverKind: cost_center.owner`; the scenario
+   approved as an arbitrary tenant admin → stayed `pending`. Now approves as the
+   cost-center owner (`VB_OWNER_USER_ID`).
+2. **Casing:** `approvalRequestId` (approval-requests read) and `actionName` (FG-08
+   invoice-audit query) read camelCase against snake_case responses → snake fallback.
+3. **`set -euo pipefail` pitfall:** 14 trailing `[[ -n "$x" ]] && VAR=...` statements
+   returned non-zero when `$x` was empty; as a function's last command this made the
+   function return non-zero → the (non-conditional) caller tripped `set -e` and
+   aborted. Added `|| true`.
+4. **Undeclared array:** `emit_verification_body_fields` referenced `VB_FIELDS`
+   (unbound under `set -u`); the 13-key array is `REQUIRED_KEYS` — renamed the refs.
+
+With these, E2E-010 drives the full governed lifecycle and emits all 13
+verification-body fields (FG-01…FG-09 incl. quota continuity, approval snapshot,
+report export, invoice + sensitive-download audit, settlement/platform-earnings
+views, legacy-unmapped coverage, cross-tenant scope). **E2E-010 PASS.**
+
+### Deploy-gate state after Round 7 — COMPLETE
+`gate-deferred.txt` is now empty. The hermetic deploy gate runs **all 16**
+cross-surface business-line scenarios:
+`PASS(16): 001 002 003 004 005 006 007 008 009 010 011 012 013 014 015 016`.
+
+## Summary across rounds
+The `ci-integ` e2e deploy gate went from **RED (3 failing, effectively blocking)** to
+**GREEN across all 16 cross-surface business-line scenarios**, via 7 merged rounds.
+Most failures were stale/incorrect test scenarios + harness gaps (realm/scope actors,
+the pervasive snake_case wire vs camelCase reads, supply/id alignment, set -e
+pitfalls, undeclared vars). Genuine **product** fixes landed along the way:
+- tenant-partner `loadState` all-or-nothing → per-table graceful degradation (R3)
+- feature-flag tenant-override audit gap (R4)
+- platform-admin governance audit-on-rejection (blocked promote) + audit-on-denial
+  (AUTH_REALM_DENIED/SCOPE_DENIED) (R6)
+- reference-token eligibility adapter decision differentiation (R5)
+plus re-landing two stranded business-line scenarios (E2E-011/015) onto dev (R4).

@@ -10,4 +10,3 @@
 # grows monotonically toward full coverage.
 #
 # number   reason (owning round)
-010      # governance billing/reporting: function-flow now runs for real (quota/approval/report verified) after the tenant-partner loadState resilience fix, but exits non-zero in the hermetic env because the governed-booking lifecycle cannot complete (cost_center.owner approval resolution + dispatch/trip not drivable headless) -- needs staging or further rework. See results doc.

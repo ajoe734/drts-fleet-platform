@@ -210,12 +210,12 @@ get_vb_field_value() {
 
 emit_verification_body_fields() {
   log_step "Verification body — emit 13-field evidence snapshot (strict=${STRICT_VERIFICATION_BODY})"
-  if [[ "${#VB_FIELDS[@]}" -ne 13 ]]; then
-    log_fail "Verification-body field list drifted: expected 13 fields, got ${#VB_FIELDS[@]}"
+  if [[ "${#REQUIRED_KEYS[@]}" -ne 13 ]]; then
+    log_fail "Verification-body field list drifted: expected 13 fields, got ${#REQUIRED_KEYS[@]}"
     exit 1
   fi
-  save_evidence "$SCENARIO" "VERIFY" "fieldCount" "${#VB_FIELDS[@]}"
-  for field in "${VB_FIELDS[@]}"; do
+  save_evidence "$SCENARIO" "VERIFY" "fieldCount" "${#REQUIRED_KEYS[@]}"
+  for field in "${REQUIRED_KEYS[@]}"; do
     record_vb_field "$field" "$(get_vb_field_value "$field")"
   done
 
@@ -510,8 +510,8 @@ subcase_fg02_quota_continuity() {
     save_evidence "$SCENARIO" "FG-02" "ledgerEntryCount" "${ledger_count:-0}"
     record_field "FG-02" "quotaPeriodKey" "$ledger_period_key"
     record_field "FG-02" "quotaUsageDelta" "$ledger_usage_delta"
-    [[ -n "$ledger_period_key" ]] && VB_QUOTA_PERIOD_KEY="$ledger_period_key"
-    [[ -n "$ledger_usage_delta" ]] && VB_QUOTA_USAGE_DELTA="$ledger_usage_delta"
+    [[ -n "$ledger_period_key" ]] && VB_QUOTA_PERIOD_KEY="$ledger_period_key" || true
+    [[ -n "$ledger_usage_delta" ]] && VB_QUOTA_USAGE_DELTA="$ledger_usage_delta" || true
     if [[ "${ledger_count:-0}" -lt 1 ]]; then
       log_warn "Quota ledger has no entries for booking ${BOOKING_ID} after governed booking — recording as not-observed."
     else
@@ -533,7 +533,7 @@ subcase_fg03_approval_snapshot() {
   fi
 
   APPROVAL_REQUEST_ID=$(echo "$RESP_BODY" | jq -r \
-    '.data.items[0].approvalRequestId // empty' 2>/dev/null || true)
+    '.data.items[0].approvalRequestId // .data.items[0].approval_request_id // empty' 2>/dev/null || true)
   local approval_state evaluated_at decision
   approval_state=$(echo "$RESP_BODY" | jq -r '.data.items[0].state // .data.items[0].status // empty' 2>/dev/null || true)
   evaluated_at=$(echo "$RESP_BODY" | jq -r '.data.items[0].evaluatedAt // .data.items[0].evaluated_at // empty' 2>/dev/null || true)
@@ -544,7 +544,7 @@ subcase_fg03_approval_snapshot() {
   record_field "FG-03" "evaluatedAt" "$evaluated_at"
   record_field "FG-03" "decision" "$decision"
   VB_APPROVAL_REQUEST_ID="$APPROVAL_REQUEST_ID"
-  [[ -n "$approval_state" ]] && VB_APPROVAL_STATE="$approval_state"
+  [[ -n "$approval_state" ]] && VB_APPROVAL_STATE="$approval_state" || true
 }
 
 # ── 5. Approval gate — approve the governed booking before dispatch ──────────
@@ -559,7 +559,9 @@ approve_governed_booking() {
     log_warn "No approval request available; assuming booking was auto-approved."
     return 0
   fi
-  switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
+  # The approval rule uses approverKind=cost_center.owner: the resolvable
+  # approver is the cost-center owner, not an arbitrary tenant admin.
+  switch_actor "tenant_admin" "${VB_OWNER_USER_ID:-$TENANT_ADMIN_USER_ID}" "$E2E_SEED_TENANT_ID"
   local approve_fixture="${TMP_DIR}/approve.json"
   jq -n '{ reasonNote: "E2E-010 governance approve" }' > "$approve_fixture"
   http_call POST "/tenant/approval-requests/${APPROVAL_REQUEST_ID}/approve" "$approve_fixture"
@@ -576,7 +578,7 @@ approve_governed_booking() {
     local post_state
     post_state=$(json_get_first ".data.approvalState" ".data.approval_state")
     record_field "FG-03" "approvalStateAfterApprove" "$post_state"
-    [[ -n "$post_state" ]] && VB_APPROVAL_STATE="$post_state"
+    [[ -n "$post_state" ]] && VB_APPROVAL_STATE="$post_state" || true
   fi
 }
 
@@ -798,7 +800,7 @@ subcase_fg04_report_export() {
   record_field "FG-04" "reportPartnerProgramField" "${has_partner:-}"
   record_field "FG-04" "reportLegacyUnmappedField" "${has_legacy:-}"
   record_field "FG-04" "reportArtifactId" "${report_artifact_id:-}"
-  [[ -n "$report_artifact_id" ]] && VB_REPORT_ARTIFACT_ID="$report_artifact_id"
+  [[ -n "$report_artifact_id" ]] && VB_REPORT_ARTIFACT_ID="$report_artifact_id" || true
 }
 
 # ── 8. FG-01 / FG-08 — Invoice generation tied to governed orderId + audit ──
@@ -880,14 +882,14 @@ subcase_invoice_governance_and_audit() {
     record_field "FG-05" "linePartnerProgramId" "$program_id"
     record_field "FG-05" "lineEligibilityVerificationId" "$eligibility_verification_id"
     record_field "FG-06" "linePlatformEarningsRef" "$platform_earnings_ref"
-    [[ -n "$cc_code" ]] && VB_COST_CENTER_CODE="$cc_code"
-    [[ -n "$cc_name" ]] && VB_COST_CENTER_NAME="$cc_name"
-    [[ -n "$owner_user_id" ]] && VB_OWNER_USER_ID="$owner_user_id"
-    [[ -n "$approval_state" ]] && VB_APPROVAL_STATE="$approval_state"
-    [[ -n "$legacy_unmapped" ]] && VB_LEGACY_UNMAPPED="$legacy_unmapped"
-    [[ -n "$program_id" ]] && VB_PARTNER_PROGRAM_CODE="$program_id"
-    [[ -n "$eligibility_verification_id" ]] && VB_ELIGIBILITY_VERIFICATION_ID="$eligibility_verification_id"
-    [[ -n "$platform_earnings_ref" ]] && VB_PLATFORM_EARNINGS_REF="$platform_earnings_ref"
+    [[ -n "$cc_code" ]] && VB_COST_CENTER_CODE="$cc_code" || true
+    [[ -n "$cc_name" ]] && VB_COST_CENTER_NAME="$cc_name" || true
+    [[ -n "$owner_user_id" ]] && VB_OWNER_USER_ID="$owner_user_id" || true
+    [[ -n "$approval_state" ]] && VB_APPROVAL_STATE="$approval_state" || true
+    [[ -n "$legacy_unmapped" ]] && VB_LEGACY_UNMAPPED="$legacy_unmapped" || true
+    [[ -n "$program_id" ]] && VB_PARTNER_PROGRAM_CODE="$program_id" || true
+    [[ -n "$eligibility_verification_id" ]] && VB_ELIGIBILITY_VERIFICATION_ID="$eligibility_verification_id" || true
+    [[ -n "$platform_earnings_ref" ]] && VB_PLATFORM_EARNINGS_REF="$platform_earnings_ref" || true
   fi
 
   # FG-08 — invoice generation must emit an audit entry with resourceId =
@@ -906,7 +908,7 @@ subcase_invoice_governance_and_audit() {
     --arg invoiceId "$INVOICE_ID" \
     '.data.items[] |
        select(
-         .actionName == "generate_tenant_invoice"
+         ((.actionName // .action_name) == "generate_tenant_invoice")
          and ((.resourceId // .resource_id) == $invoiceId)
        ) | (.auditId // .audit_id)' \
     2>/dev/null | head -1 || true)
@@ -957,7 +959,7 @@ subcase_fg05_fg06_settlement_and_platform_earnings() {
   save_evidence "$SCENARIO" "FG-06" "platformItemCount" "${platform_item_count:-0}"
   record_field "FG-06" "platformCodes" "$platform_codes"
   record_field "FG-06" "platformEarningsRef" "$platform_earnings_ref"
-  [[ -n "$platform_earnings_ref" ]] && VB_PLATFORM_EARNINGS_REF="$platform_earnings_ref"
+  [[ -n "$platform_earnings_ref" ]] && VB_PLATFORM_EARNINGS_REF="$platform_earnings_ref" || true
 }
 
 # ── 10. FG-07 — Legacy unmapped cost center labelling ────────────────────────
