@@ -8,21 +8,15 @@ const EMBED_ALLOWED_ENTRY_HOSTS_ENV = "PASSENGER_WEB_EMBED_ALLOWED_HOSTS";
 
 function createBlockedResponse(
   decision: ReturnType<typeof buildEmbedSecurityDecision>,
-  request: NextRequest,
 ) {
-  const isEmbedRoute = request.nextUrl.pathname.startsWith("/embed/");
-  const response = isEmbedRoute
-    ? NextResponse.next()
-    : new NextResponse("Embedded access denied.", {
-        status: 403,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-          "Content-Type": "text/plain; charset=utf-8",
-        },
-      });
-
+  const response = new NextResponse("Embedded access denied.", {
+    status: 403,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+      "Content-Type": "text/plain; charset=utf-8",
+    },
+  });
   applyEmbedSecurityHeaders(response.headers, decision);
-
   return response;
 }
 
@@ -33,8 +27,13 @@ export function middleware(request: NextRequest) {
     requestUrl: request.nextUrl,
   });
 
-  if (decision.block) {
-    return createBlockedResponse(decision, request);
+  // The entry-host allowlist only governs the EMBEDDED surface (/embed/*).
+  // Standalone passenger routes are always served (with security headers) so the
+  // direct site stays reachable even when no embed allowlist is configured
+  // (e.g. dev / direct browsing). Only a blocked /embed/* request is denied.
+  const isEmbedRoute = request.nextUrl.pathname.startsWith("/embed/");
+  if (isEmbedRoute && decision.block) {
+    return createBlockedResponse(decision);
   }
 
   const response = NextResponse.next();
