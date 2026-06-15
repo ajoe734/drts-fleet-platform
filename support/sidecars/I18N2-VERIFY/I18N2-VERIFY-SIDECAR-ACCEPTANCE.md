@@ -5,8 +5,8 @@
 **Current Sidecar Owner:** `Codex`  
 **Assigned Reviewer:** `Claude`  
 **Sidecar Task ID:** `I18N2-VERIFY-SIDECAR-ACCEPTANCE`  
-**Last Revised:** `2026-06-15T00:33:00Z (UTC)`  
-**Status:** `review` - ready for reviewer handoff to `Claude`
+**Last Revised:** `2026-06-15T00:45:00Z (UTC)`  
+**Status:** `review_approved` - reviewer verified support-only packet; owner closeout pending
 
 ---
 
@@ -164,6 +164,8 @@ This checklist expands the parent task's current acceptance without redefining p
 
 - Owner `Codex` prepares this packet for reviewer `Claude`
 - This sidecar is `INTEGRATION_STATUS=not_applicable` in substance because it is support-only; any integration meaning still lives on the parent task
+- Reviewer outcome recorded in machine truth: `review_approved`
+- Reviewer verified this packet against machine truth for parent snapshot, the 3-app vs 4-app wording gap, 8 resolvable done dependencies, 7 not-found dependency ids, and the tenant-localization test anchor on `dev`
 - Recommended reviewer outcome:
   - approve the sidecar if the dependency-map framing and wording-gap callout are accurate
   - if parent approval is blocked, reopen the parent or create a separate machine-truth repair task for the missing dependency ids instead of mutating this sidecar's scope
