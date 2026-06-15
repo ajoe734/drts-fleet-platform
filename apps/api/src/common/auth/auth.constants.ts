@@ -140,7 +140,13 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "forwarder:read",
     "forwarder:write",
   ],
-  driver_user: ["owned:read", "driver:read", "driver:write", "dispatch:read"],
+  driver_user: [
+    "owned:read",
+    "driver:read",
+    "driver:write",
+    "dispatch:read",
+    "incident:write",
+  ],
   partner_api_key: [
     "partner:entries:read",
     "partner:eligibility:read",
