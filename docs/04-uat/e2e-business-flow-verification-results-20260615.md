@@ -362,3 +362,15 @@ this live-dev instance (the `DRV-001` demo driver isn't seeded there) — a depl
 dependency of a manual spec, not a code defect (the equivalent list/detail routes pass
 in the 3001-case matrix). Tracked for whoever seeds live-dev demo data / wires these
 specs into CI with a seeded target.
+
+## Round 9 — repo hygiene + integration confirmation (2026-06-15)
+
+- **Gitignore fix:** the per-variant Next build dirs `.next-assistant-on/` and
+  `.next-assistant-off/` (generated when the assistant playwright configs build the
+  apps) were NOT ignored (`.gitignore` only had `.next/`), so a `git add -A` after a
+  playwright run could sweep ~2000 build-artifact files into a commit. Added
+  `.next-*/` to `.gitignore` to cover these and any future build variants.
+- **Integration confirmation:** the hermetic deploy gate (`gate-deferred.txt` empty)
+  runs the full cross-surface suite; dev `ci-integ` e2e job confirmed
+  `PASS(17) FAIL(0)` on the integrated trunk (run 27523078944). Rounds 1–8 are all
+  squash-merged to dev (PRs #719, #720, #722, #723, #724, #727, #729, #730).

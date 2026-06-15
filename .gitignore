@@ -5,6 +5,7 @@ node_modules/
 # build output
 .turbo/
 .next/
+.next-*/
 dist/
 build/
 storybook-static/
