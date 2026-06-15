@@ -4,7 +4,7 @@
 **Parent Task:** `I18N2-VERIFY` — Final i18n full-sweep verification across the
 three web apps (passenger-web, concierge-portal-web, tenant-console-web)
 **Parent Owner:** `Codex`
-**Parent Reviewer:** `Claude2`
+**Parent Reviewer:** `Claude`
 **Sidecar Owner:** `Claude`
 **Sidecar Reviewer:** `Codex`
 **Generated:** `2026-06-15` (UTC)
@@ -18,12 +18,14 @@ phase. The parent adds a repository-wide i18n guard
 user-facing literals in tenant-console-web so that all three apps pass a
 single mechanical bilingual-coverage gate. The parent task is the canonical
 verification slice; this packet pins the machine-truth handoff record, the
-dependency closeout map, the file-level change shape, and an **independent
-re-run** of the parent's primary guard so the parent reviewer (`Claude2`) can
-audit the chain without re-deriving it from scratch.
+dependency closeout map, the file-level change shape, and an independent
+re-run of the parent's primary guard so the current parent reviewer (`Claude`)
+can audit the chain without re-deriving it from scratch.
 
-At packet generation time the parent task is **in `review`** — `Codex`
-handed it to `Claude2` at `2026-06-14T23:58:56Z`. Commit
+At packet refresh time the parent task is **in `review`** under reviewer
+`Claude`. The original owner handoff went to `Claude2` at
+`2026-06-14T23:58:56Z`, and machine truth later reassigned the reviewer to
+`Claude` at `2026-06-15T00:09:40Z` to unblock review. Commit
 `63e04de5a64e17d73fecb36d3cb23f0d0fc35120` is pushed to
 `origin/codex/i18n2-verify`. The slice is **not yet merged to `dev`**
 (`branch_pushed` integration level only). This packet does not approve, merge,
@@ -45,7 +47,7 @@ In scope (support artifact only):
 - pin the 15 machine-truth dependencies and their closeout state
 - enumerate the parent's verifiable anchors (commit, branch, changed files,
   guard script)
-- record an **independent reproduction** of the parent's primary guard result
+- record an independent reproduction of the parent's primary guard result
 - record the integration level (`branch_pushed`) so the reviewer does not
   mistake branch closeout for dev-deploy closeout
 
@@ -79,10 +81,10 @@ Out of scope (would violate sidecar guardrails):
 - live lifecycle fields (`status`, `next`, `last_update`) deferred to
   `ai-status.json`
 
-### Parent — `ai-status.json → I18N2-VERIFY` (snapshot @ `2026-06-14T23:58:56Z`)
+### Parent — `ai-status.json → I18N2-VERIFY` (snapshot @ `2026-06-15T00:09:40Z`)
 
 - owner=`Codex`
-- reviewer=`Claude2`
+- reviewer=`Claude`
 - status=`review`
 - phase=`i18n-fullsweep-20260614`
 - branch=`codex/i18n2-verify`
@@ -93,6 +95,8 @@ Out of scope (would violate sidecar guardrails):
   and `origin/codex/i18n2-verify` both point at `63e04de5a`)
 - integration level=`branch_pushed` — commit `63e04de5a` is **not** an ancestor
   of `dev` or `main` at packet time
+- reviewer reassignment note=`Claude2` → `Claude` after initial handoff; current
+  machine truth is authoritative
 
 ---
 
@@ -121,7 +125,7 @@ git history. Latest associated commit per dependency:
 | `I18N2-TC-FEATUREFLAGS` | `done` (Codex/Claude) | `161673462` anchor feature-flags i18n |
 | `I18N2-TC-HOME-SHARED` | `done` (Codex/Claude) | `9394972d4` finish shared-lib i18n (formatters + notification-canvas) |
 
-**Reviewer note:** the parent is a *cross-cutting* verification slice — its
+**Reviewer note:** the parent is a cross-cutting verification slice — its
 job is to prove the union of all 15 slices passes one mechanical gate, not to
 re-audit each slice's translation keys. Per-slice key-level review was already
 performed by each slice's own reviewer (column 2 above).
@@ -168,12 +172,13 @@ The parent's reported verification (from `ai-status.json.next`):
 > `node scripts/i18n-guard.mjs` OK (122 files across 3 apps). Commit
 > `63e04de5…` pushed to `origin/codex/i18n2-verify`.
 
-This packet independently re-ran the **primary guard** against the parent
-commit in a throwaway detached worktree (`git worktree add --detach <wt>
-63e04de5a`):
+This packet independently re-ran the primary guard against the parent
+commit in a throwaway detached worktree inside the repo so workspace
+dependencies remained resolvable:
 
 ```
-$ node scripts/i18n-guard.mjs
+$ git worktree add --detach .artifacts/<tmp-wt> 63e04de5a
+$ (cd .artifacts/<tmp-wt> && node scripts/i18n-guard.mjs)
 i18n-guard: OK (122 files scanned across 3 apps)
 EXIT=0
 ```
@@ -184,12 +189,12 @@ no canonical state was touched.
 
 Not independently re-run by this packet (heavier; per-app `node_modules`):
 the per-app `lint` / `typecheck` / `build` triplets. These remain
-**owner-reported** and are recommended for the parent reviewer to reproduce —
+owner-reported and are recommended for the parent reviewer to reproduce —
 see §6.
 
 ---
 
-## 6. Reviewer Checklist (for parent reviewer `Claude2`)
+## 6. Reviewer Checklist (for parent reviewer `Claude`)
 
 1. **Commit/push integrity** — confirm `origin/codex/i18n2-verify` == `63e04de5a`
    and that the diff matches §4 (`git show --stat 63e04de5a`). ✅ pre-verified
@@ -213,5 +218,5 @@ see §6.
 
 This support artifact is complete and handed to the sidecar reviewer (`Codex`).
 It makes no canonical-truth changes. Parent approval, merge to `dev`, and the
-parent `done` closeout remain with `Claude2` (parent reviewer) and `Codex`
+parent `done` closeout remain with `Claude` (parent reviewer) and `Codex`
 (parent owner) respectively.
