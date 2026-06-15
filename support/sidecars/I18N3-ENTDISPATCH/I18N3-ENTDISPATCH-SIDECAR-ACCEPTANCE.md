@@ -1,7 +1,7 @@
 # I18N3-ENTDISPATCH Sidecar Acceptance Packet
 
 > **Parent Task:** `I18N3-ENTDISPATCH`
-> **Parent Owner / Reviewer:** `Claude2` / `Gemini2`
+> **Parent Owner / Reviewer:** `Codex` / `Claude2`
 > **Sidecar Owner / Reviewer:** `Codex` / `Claude2`
 > **Helper Kind:** `acceptance_packet`
 > **Mutates Canonical:** `false`
@@ -96,7 +96,7 @@ The broader app surface also includes additional state pages and booking views t
 
 - Upstream blockers recorded in machine truth: `none`
 - Sidecar-only blockers: `none`
-- Parent task reviewer dependency: parent owner must eventually hand off concrete implementation evidence to `Gemini2`
+- Parent task reviewer dependency: parent owner must eventually hand off concrete implementation evidence to `Claude2`
 
 ---
 
