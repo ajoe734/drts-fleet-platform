@@ -1217,37 +1217,22 @@ async function loadSettingsData(locale: Locale): Promise<SettingsData> {
     audit: t("settings.tag.audit", locale),
   };
   const errors: string[] = [];
-  const tag = (label: string, reason: unknown) =>
-    `${label}: ${reason instanceof Error ? reason.message : t("settings.value.unknownError", locale)}`;
-  const missingRuntimeLabels: string[] = [];
-  const markRuntimeGap = (
-    label: string,
-    surface: { legacy: boolean; refresh: UiRefreshMetadata | null },
-  ) => {
-    if (surface.legacy || surface.refresh === null) {
-      missingRuntimeLabels.push(label);
-    }
-  };
+  const tag = (label: string) =>
+    t("settings.error.moduleLoadFailed", locale, { module: label });
 
-  if (identity.status === "rejected")
-    errors.push(tag(moduleLabels.identity, identity.reason));
+  if (identity.status === "rejected") errors.push(tag(moduleLabels.identity));
   if (billingProfile.status === "rejected")
-    errors.push(tag(moduleLabels.billing, billingProfile.reason));
+    errors.push(tag(moduleLabels.billing));
   if (preferences.status === "rejected")
-    errors.push(tag(moduleLabels.notifications, preferences.reason));
-  if (sla.status === "rejected") errors.push(tag(moduleLabels.sla, sla.reason));
+    errors.push(tag(moduleLabels.notifications));
+  if (sla.status === "rejected") errors.push(tag(moduleLabels.sla));
   if (governance.status === "rejected")
-    errors.push(tag(moduleLabels.governance, governance.reason));
-  if (quotaSummary.status === "rejected")
-    errors.push(tag(moduleLabels.quota, quotaSummary.reason));
-  if (users.status === "rejected")
-    errors.push(tag(moduleLabels.users, users.reason));
-  if (apiKeys.status === "rejected")
-    errors.push(tag(moduleLabels.apiKeys, apiKeys.reason));
-  if (webhooks.status === "rejected")
-    errors.push(tag(moduleLabels.webhooks, webhooks.reason));
-  if (auditLogs.status === "rejected")
-    errors.push(tag(moduleLabels.audit, auditLogs.reason));
+    errors.push(tag(moduleLabels.governance));
+  if (quotaSummary.status === "rejected") errors.push(tag(moduleLabels.quota));
+  if (users.status === "rejected") errors.push(tag(moduleLabels.users));
+  if (apiKeys.status === "rejected") errors.push(tag(moduleLabels.apiKeys));
+  if (webhooks.status === "rejected") errors.push(tag(moduleLabels.webhooks));
+  if (auditLogs.status === "rejected") errors.push(tag(moduleLabels.audit));
 
   const identityValue =
     identity.status === "fulfilled"
@@ -1293,23 +1278,6 @@ async function loadSettingsData(locale: Locale): Promise<SettingsData> {
     auditLogs.status === "fulfilled"
       ? parseListSurface<AuditLogRecord>(auditLogs.value.data)
       : parseListSurface<AuditLogRecord>(null);
-
-  markRuntimeGap(moduleLabels.identity, identityValue);
-  markRuntimeGap(moduleLabels.billing, billingValue);
-  markRuntimeGap(moduleLabels.notifications, preferenceValue);
-  markRuntimeGap(moduleLabels.sla, slaValue);
-  markRuntimeGap(moduleLabels.governance, governanceValue);
-  markRuntimeGap(moduleLabels.quota, quotaValue);
-  markRuntimeGap(moduleLabels.users, usersValue);
-  markRuntimeGap(moduleLabels.apiKeys, apiKeysValue);
-  markRuntimeGap(moduleLabels.webhooks, webhooksValue);
-  markRuntimeGap(moduleLabels.audit, auditLogsValue);
-
-  if (missingRuntimeLabels.length > 0) {
-    errors.push(
-      `legacy payload without UiRefreshMetadata: ${missingRuntimeLabels.join(" · ")}`,
-    );
-  }
 
   return {
     identity: identityValue,
@@ -1639,7 +1607,7 @@ export default async function SettingsPage() {
           } satisfies RuntimeChip)
         : ({
             label: surface.label,
-            value: "legacy",
+            value: t("settings.runtime.legacy", locale),
             mono: true,
           } satisfies RuntimeChip),
     ),

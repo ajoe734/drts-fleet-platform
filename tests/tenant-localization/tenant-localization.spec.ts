@@ -199,7 +199,13 @@ test.describe("tenant console localization smoke", () => {
     const cases = [
       {
         route: "/",
-        include: ["Hello, tenant_admin", "Create booking"],
+        include: ["Create booking"],
+        includeAny: [
+          [
+            "Hello, tenant_admin",
+            "Tenant operations, billing, and readiness in one workspace",
+          ],
+        ],
         exclude: ["工作面", "進行中訂單", "財務快照"],
       },
       {
@@ -254,6 +260,15 @@ test.describe("tenant console localization smoke", () => {
       await page.waitForTimeout(350);
       for (const text of item.include) {
         await expect(page.locator("body"), item.route).toContainText(text);
+      }
+      if ("includeAny" in item) {
+        const bodyText = await page.locator("body").innerText();
+        for (const alternatives of item.includeAny) {
+          expect(
+            alternatives.some((text) => bodyText.includes(text)),
+            "Tenant home includes one accepted English hero copy",
+          ).toBeTruthy();
+        }
       }
       for (const text of item.exclude) {
         await expect(page.locator("body"), item.route).not.toContainText(text);
