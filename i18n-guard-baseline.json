@@ -2,113 +2,74 @@
   "version": 1,
   "exemptions": [
     {
-      "path": "apps/enterprise-dispatch-web/app/bookings/[bookingId]/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise booking detail demo is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/bookings/new/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise booking creation flow is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/bookings/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise bookings index is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/bookings/review/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise booking review flow is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/bookings/submitted/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise booking submitted state is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/help/page.tsx",
-      "rules": ["jsx-copy-attribute"],
-      "reason": "Fixture-backed enterprise support page is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise home dashboard is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/receipts/[bookingId]/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise receipts detail is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/app/trip/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed enterprise trip monitor is pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/components/enterprise-booking-flow.tsx",
-      "rules": ["jsx-text"],
-      "reason": "Fixture-only booking flow explainer is pending dedicated remediation."
-    },
-    {
       "path": "apps/enterprise-dispatch-web/components/enterprise-shell.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture shell chrome and seeded actor labels are pending dedicated remediation."
-    },
-    {
-      "path": "apps/enterprise-dispatch-web/components/enterprise-state-page.tsx",
-      "rules": ["jsx-copy-attribute"],
-      "reason": "Fixture state template labels are pending dedicated remediation."
+      "rules": [
+        "jsx-text"
+      ],
+      "reason": "Demo operator display name (林宜君) is fixture/session data, not translatable UI copy."
     },
     {
       "path": "apps/ops-console-web/app/dispatch/page.tsx",
-      "rules": ["jsx-text"],
+      "rules": [
+        "jsx-text"
+      ],
       "reason": "Ops dispatch embeds machine-facing trace labels that still need central dictionary migration."
     },
     {
       "path": "apps/ops-console-web/app/drivers/[driverId]/page.tsx",
-      "rules": ["inline-bilingual-map"],
+      "rules": [
+        "inline-bilingual-map"
+      ],
       "reason": "Driver detail separators and locale tokens still use inline bilingual maps pending cleanup."
     },
     {
       "path": "apps/ops-console-web/app/feature-flags/page.tsx",
-      "rules": ["jsx-text"],
+      "rules": [
+        "jsx-text"
+      ],
       "reason": "Feature flag fixture API route label is still inline pending cleanup."
     },
     {
       "path": "apps/ops-console-web/lib/localized-labels.ts",
-      "rules": ["inline-bilingual-map"],
+      "rules": [
+        "inline-bilingual-map"
+      ],
       "reason": "Shared localized label map is awaiting migration into translations.ts."
     },
     {
-      "path": "apps/partner-booking-web/components/airport-transfer-site.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
-      "reason": "Fixture-backed airport transfer marketing shell is pending dedicated remediation."
-    },
-    {
       "path": "apps/platform-admin-web/app/fleet/page.tsx",
-      "rules": ["locale-ternary-copy"],
+      "rules": [
+        "locale-ternary-copy"
+      ],
       "reason": "Fleet governance screen still has a bounded set of locale ternaries pending final consolidation."
     },
     {
       "path": "apps/platform-admin-web/app/partners/[entrySlug]/page.tsx",
-      "rules": ["locale-ternary-copy"],
+      "rules": [
+        "locale-ternary-copy"
+      ],
       "reason": "Partner governance detail still has a bounded set of locale ternaries pending final consolidation."
     },
     {
       "path": "apps/platform-admin-web/app/partners/referral/page.tsx",
-      "rules": ["locale-ternary-copy"],
+      "rules": [
+        "locale-ternary-copy"
+      ],
       "reason": "Referral governance validation copy still uses a locale ternary pending final consolidation."
     },
     {
       "path": "apps/platform-admin-web/app/tenants/[tenantId]/page.tsx",
-      "rules": ["jsx-copy-attribute", "jsx-text"],
+      "rules": [
+        "jsx-copy-attribute",
+        "jsx-text"
+      ],
       "reason": "Tenant lifecycle detail page is pending dedicated remediation for remaining inline copy."
     },
     {
       "path": "apps/platform-admin-web/app/tenants/page.tsx",
-      "rules": ["locale-ternary-copy"],
+      "rules": [
+        "locale-ternary-copy"
+      ],
       "reason": "Tenant index quota badge still uses a locale ternary pending final consolidation."
     }
   ]
