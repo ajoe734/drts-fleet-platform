@@ -4,19 +4,17 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
-import type { PlatformAdapter } from "../../../../packages/contracts/src/platform-adapter-registry";
+import type { PlatformAdapter } from "@drts/contracts";
 import {
-  Banner,
-  Btn,
-  Card,
-  DL,
-  PageHeader,
-  Pill,
-} from "../../../../packages/ui-web/src/canvas-primitives";
-import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasPageHeader,
+  CanvasPill,
   buildCanvasTheme,
   type CanvasTone,
-} from "../../../../packages/ui-web/src/canvas-tokens";
+} from "@drts/ui-web";
 
 const theme = buildCanvasTheme({
   dark: true,
@@ -586,13 +584,13 @@ export default function AdapterRegistryPage() {
 
   return (
     <>
-      <PageHeader
+      <CanvasPageHeader
         theme={theme}
         title={copy.title}
         subtitle={copy.subtitle}
         sticky={false}
         actions={
-          <Btn
+          <CanvasBtn
             theme={theme}
             variant="primary"
             icon="plus"
@@ -604,12 +602,12 @@ export default function AdapterRegistryPage() {
             }
           >
             {copy.registerAction}
-          </Btn>
+          </CanvasBtn>
         }
       />
 
       <div style={pageBodyStyle}>
-        <Banner
+        <CanvasBanner
           theme={theme}
           tone="danger"
           icon="warn"
@@ -625,7 +623,7 @@ export default function AdapterRegistryPage() {
           }
           actions={
             bannerAdapter ? (
-              <Btn
+              <CanvasBtn
                 theme={theme}
                 variant="primary"
                 danger
@@ -635,7 +633,7 @@ export default function AdapterRegistryPage() {
                 }
               >
                 {copy.rotateNow}
-              </Btn>
+              </CanvasBtn>
             ) : undefined
           }
         />
@@ -648,17 +646,17 @@ export default function AdapterRegistryPage() {
         ) : null}
 
         {loading ? (
-          <Card theme={theme}>
+          <CanvasCard theme={theme}>
             <div style={emptyCardStyle}>{copy.loading}</div>
-          </Card>
+          </CanvasCard>
         ) : showUnavailableState ? (
-          <Card theme={theme}>
+          <CanvasCard theme={theme}>
             <div style={emptyCardStyle}>{copy.unavailable}</div>
-          </Card>
+          </CanvasCard>
         ) : sortedAdapters.length === 0 ? (
-          <Card theme={theme}>
+          <CanvasCard theme={theme}>
             <div style={emptyCardStyle}>{copy.empty}</div>
-          </Card>
+          </CanvasCard>
         ) : (
           <div style={cardGridStyle}>
             {sortedAdapters.map((adapter) => {
@@ -669,34 +667,34 @@ export default function AdapterRegistryPage() {
               const supportedActions = adapter.supportedActions;
 
               return (
-                <Card
+                <CanvasCard
                   key={adapter.id}
                   theme={theme}
                   title={
                     <span style={cardTitleStyle}>
                       {copy.adapterTitle(adapter)}
-                      <Pill theme={theme} tone={adapterKindTone(adapter)}>
+                      <CanvasPill theme={theme} tone={adapterKindTone(adapter)}>
                         {adapter.isForwarded
                           ? t("adapterRegistry.forwarderPill")
                           : formatPlatformCodeLabel(
                               locale as LabelLocale,
                               adapter.adapterType,
                             )}
-                      </Pill>
+                      </CanvasPill>
                     </span>
                   }
                   subtitle={copy.sourceValue(adapter)}
                   actions={
-                    <Pill
+                    <CanvasPill
                       theme={theme}
                       tone={healthTone(adapter.healthStatus.status)}
                       dot
                     >
                       {formatHealthLabel(copy, adapter.healthStatus.status)}
-                    </Pill>
+                    </CanvasPill>
                   }
                 >
-                  <DL
+                  <CanvasDL
                     theme={theme}
                     cols={3}
                     items={[
@@ -770,7 +768,7 @@ export default function AdapterRegistryPage() {
                     <div style={authorityColumnStyle}>
                       <p style={authorityLabelStyle}>{copy.authorityPa}</p>
                       <div style={actionRowStyle}>
-                        <Btn
+                        <CanvasBtn
                           theme={theme}
                           size="xs"
                           variant="secondary"
@@ -779,8 +777,8 @@ export default function AdapterRegistryPage() {
                           }
                         >
                           {copy.editConfig}
-                        </Btn>
-                        <Btn
+                        </CanvasBtn>
+                        <CanvasBtn
                           theme={theme}
                           size="xs"
                           variant="secondary"
@@ -790,8 +788,8 @@ export default function AdapterRegistryPage() {
                           }
                         >
                           {copy.editCredential}
-                        </Btn>
-                        <Btn
+                        </CanvasBtn>
+                        <CanvasBtn
                           theme={theme}
                           size="xs"
                           variant="secondary"
@@ -801,8 +799,8 @@ export default function AdapterRegistryPage() {
                           }
                         >
                           {copy.rotateCredential}
-                        </Btn>
-                        <Btn
+                        </CanvasBtn>
+                        <CanvasBtn
                           theme={theme}
                           size="xs"
                           variant="secondary"
@@ -813,11 +811,11 @@ export default function AdapterRegistryPage() {
                           {adapter.config.isEnabled
                             ? copy.disableAdapter
                             : copy.enableAdapter}
-                        </Btn>
+                        </CanvasBtn>
                       </div>
                       <p style={helperTextStyle}>{copy.governedActionInfo}</p>
                       <div style={tokenRowStyle}>
-                        <Pill
+                        <CanvasPill
                           theme={theme}
                           tone={credentialTone(adapter.credentialStatus)}
                         >
@@ -825,29 +823,29 @@ export default function AdapterRegistryPage() {
                             locale as LabelLocale,
                             adapter.credentialStatus,
                           )}
-                        </Pill>
-                        <Pill theme={theme} tone="neutral">
+                        </CanvasPill>
+                        <CanvasPill theme={theme} tone="neutral">
                           {formatPlatformCodeLabel(
                             locale as LabelLocale,
                             adapter.environment,
                           )}
-                        </Pill>
-                        <Pill theme={theme} tone="neutral">
+                        </CanvasPill>
+                        <CanvasPill theme={theme} tone="neutral">
                           {adapter.version}
-                        </Pill>
-                        <Pill
+                        </CanvasPill>
+                        <CanvasPill
                           theme={theme}
                           tone={booleanTone(adapter.config.isEnabled)}
                         >
                           {adapter.config.isEnabled
                             ? copy.enableAdapter
                             : copy.disableAdapter}
-                        </Pill>
+                        </CanvasPill>
                       </div>
                       <div style={tokenRowStyle}>
                         {featureFlags.length > 0 ? (
                           featureFlags.map(([key, value]) => (
-                            <Pill
+                            <CanvasPill
                               key={key}
                               theme={theme}
                               tone={value ? "success" : "neutral"}
@@ -856,12 +854,12 @@ export default function AdapterRegistryPage() {
                               {value
                                 ? t("adapterRegistry.featureFlag.on")
                                 : t("adapterRegistry.featureFlag.off")}
-                            </Pill>
+                            </CanvasPill>
                           ))
                         ) : (
-                          <Pill theme={theme} tone="neutral">
+                          <CanvasPill theme={theme} tone="neutral">
                             {copy.featureFlags}: {copy.notConfigured}
-                          </Pill>
+                          </CanvasPill>
                         )}
                       </div>
                     </div>
@@ -869,7 +867,7 @@ export default function AdapterRegistryPage() {
                     <div style={authorityColumnStyle}>
                       <p style={authorityLabelStyle}>{copy.authorityOps}</p>
                       <div style={actionRowStyle}>
-                        <Btn
+                        <CanvasBtn
                           theme={theme}
                           size="xs"
                           variant="ghost"
@@ -884,8 +882,8 @@ export default function AdapterRegistryPage() {
                           }
                         >
                           {copy.pauseTraffic}
-                        </Btn>
-                        <Btn
+                        </CanvasBtn>
+                        <CanvasBtn
                           theme={theme}
                           size="xs"
                           variant="ghost"
@@ -900,49 +898,49 @@ export default function AdapterRegistryPage() {
                           }
                         >
                           {copy.retryCallback}
-                        </Btn>
+                        </CanvasBtn>
                       </div>
                       <p style={helperTextStyle}>{copy.opsActionInfo}</p>
                       <div style={tokenRowStyle}>
                         {supportedActions.length > 0 ? (
                           supportedActions.map((action) => (
-                            <Pill
+                            <CanvasPill
                               key={action.name}
                               theme={theme}
                               tone="neutral"
                             >
                               {action.name}
-                            </Pill>
+                            </CanvasPill>
                           ))
                         ) : (
-                          <Pill theme={theme} tone="neutral">
+                          <CanvasPill theme={theme} tone="neutral">
                             {copy.supportedActions}: {copy.notConfigured}
-                          </Pill>
+                          </CanvasPill>
                         )}
                       </div>
                       <div style={tokenRowStyle}>
-                        <Pill
+                        <CanvasPill
                           theme={theme}
                           tone={healthTone(adapter.healthStatus.status)}
                         >
                           {formatHealthLabel(copy, adapter.healthStatus.status)}
-                        </Pill>
-                        <Pill theme={theme} tone="neutral">
+                        </CanvasPill>
+                        <CanvasPill theme={theme} tone="neutral">
                           {formatPlatformCodeLabel(
                             locale as LabelLocale,
                             adapter.rolloutStatus,
                           )}
-                        </Pill>
-                        <Pill theme={theme} tone="neutral">
+                        </CanvasPill>
+                        <CanvasPill theme={theme} tone="neutral">
                           {formatPlatformCodeLabel(
                             locale as LabelLocale,
                             adapter.rolloutStage,
                           )}
-                        </Pill>
+                        </CanvasPill>
                       </div>
                     </div>
                   </div>
-                </Card>
+                </CanvasCard>
               );
             })}
           </div>
