@@ -65,5 +65,7 @@ export function formatOpsCodeList(
     return "-";
   }
 
-  return values.map((value) => formatOpsCodeLabel(locale, value)).join(", ");
+  return values
+    .map((value) => formatOpsCodeLabel(locale, value))
+    .join(t("common.listSeparator", locale));
 }
