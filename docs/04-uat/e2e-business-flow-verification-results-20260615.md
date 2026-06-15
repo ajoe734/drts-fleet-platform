@@ -330,3 +330,35 @@ pitfalls, undeclared vars). Genuine **product** fixes landed along the way:
   (AUTH_REALM_DENIED/SCOPE_DENIED) (R6)
 - reference-token eligibility adapter decision differentiation (R5)
 plus re-landing two stranded business-line scenarios (E2E-011/015) onto dev (R4).
+
+## Round 8 — broaden to deployed UI-runtime surfaces (playwright vs live dev) (2026-06-15)
+
+The hermetic API-backed suite (E2E-0NN.sh) is the CI deploy gate and is 100% green.
+This round broadened to the **previously-unverified UI-runtime surface**: the
+playwright `*.spec.ts` browser tests, run against the live dev front-ends
+(`https://drts-dev-*-waji3fer3a-uc.a.run.app`). These specs are **not wired into any
+CI workflow** (manual verification tools).
+
+### Verified GREEN against live dev
+- `dev-runtime-matrix.spec.ts` — **3001/3001 passed** (every front-end ×
+  route × persona × locale × viewport × demo-state: enterprise-dispatch-web,
+  platform-admin-web, ops-console-web, fleet-partner-portal-web, tenant-console-web).
+- `bank-console-depth` (4), `bank-console-auth-boundary` (1),
+  `partner-booking-surfaces` (5), `enterprise-dispatch-surfaces` (3) — all passed.
+
+→ The deployed dev UI runtime is healthy across all business-line front-ends.
+
+### Fixed: ops-console-parity locale-brittle assertions
+`ops-console-parity.spec.ts` asserted six routes' content with **English-only** marker
+regexes (`/session|callback|queue/i`, approval/reports/revenue/drivers/contracts),
+but the deployed ops-console defaults to **zh-TW** (通話工作階段 / 回撥 / 佇列 …) — so the
+tool could never pass against the real deployment. Made those six markers **bilingual**
+(en + zh-TW). Validated: the run now progresses past all six (screenshots captured
+through every list route).
+
+### Residual (non-gated, live-dev data)
+With markers fixed, the only remaining stop is `/drivers/DRV-001` returning a 404 on
+this live-dev instance (the `DRV-001` demo driver isn't seeded there) — a deployed-data
+dependency of a manual spec, not a code defect (the equivalent list/detail routes pass
+in the 3001-case matrix). Tracked for whoever seeds live-dev demo data / wires these
+specs into CI with a seeded target.
