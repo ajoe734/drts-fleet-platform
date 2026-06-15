@@ -765,7 +765,7 @@ const zh = {
   "airport.hero.trustLead": "接送服務由",
   "airport.hero.trustTail": "營運 · 專業認證司機與合格車隊",
   "airport.quota.remaining": "本年度免費接送剩餘",
-  "airport.features.kicker": "Why book with us",
+  "airport.features.kicker": "為什麼選擇我們",
   "airport.features.title": "禮賓級的機場接送，每個細節都被照顧",
   "airport.features.body":
     "從預約到抵達，專業司機、即時追蹤與合併入帳，讓商旅與返家都從容。",
@@ -793,7 +793,7 @@ const zh = {
   "airport.panel.4.sub": "已收到您的預約",
   "airport.panel.5.title": "行程追蹤",
   "airport.panel.5.sub": "司機前往上車點",
-  "airport.book.kicker": "Online booking",
+  "airport.book.kicker": "線上預約",
   "airport.book.title": "線上即時預約",
   "airport.book.intro":
     "以您的{card}權益，三步驟完成機場接送預約，費用合併入帳、無須現場付款。",

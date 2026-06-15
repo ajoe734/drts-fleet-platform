@@ -4562,7 +4562,7 @@ const zh: Record<keyof typeof en, string> = {
     "路由本身正常，但目前篩選條件讓結果沒有任何 subsystem card。",
   "integrationGovernance.empty.filteredEmpty.action": "清除篩選",
   "integrationGovernance.empty.driverNotEligible.title":
-    "Driver-only empty reason",
+    "僅司機適用的空狀態原因",
   "integrationGovernance.empty.driverNotEligible.body":
     "此全域 empty reason 不應用來驅動租戶整合治理。",
   "integrationGovernance.empty.driverNotEligible.action": "回就緒度",
@@ -4626,7 +4626,7 @@ const zh: Record<keyof typeof en, string> = {
     "Reviewer 可透過 ?emptyReason=<reason> 從此路由預覽六種 tenant-relevant empty state。",
   "integrationGovernance.coverage.supported":
     "supported · no_data / not_provisioned / fetch_failed / permission_denied / external_unavailable / filtered_empty",
-  "integrationGovernance.refreshTier.title": "Refresh tier",
+  "integrationGovernance.refreshTier.title": "刷新層級",
   "integrationGovernance.refreshTier.emptyBody":
     "即使目前路由正在渲染 empty variant，此畫面仍維持 T5 tenant-slow cadence。",
   "integrationGovernance.refreshTier.snapshotBody":
@@ -5809,7 +5809,7 @@ const zh: Record<keyof typeof en, string> = {
   "apiKeys.empty.fetchFailed.title": "API 金鑰清單暫時無法讀取",
   "apiKeys.empty.fetchFailed.body":
     "畫面沒有收到 key inventory。請先重新整理，若持續失敗再檢查租戶 API 與稽核紀錄。",
-  "apiKeys.empty.fetchFailed.badge": "Fetch failed",
+  "apiKeys.empty.fetchFailed.badge": "讀取失敗",
   "apiKeys.empty.permissionDenied.title": "目前身分沒有管理 API 金鑰的權限",
   "apiKeys.empty.permissionDenied.body":
     "此租戶會話不是 `tc_admin` 或 `tc_integration_mgr`。你仍可透過其他模組追蹤整合狀態，但建立、輪替、撤銷都會保持停用。",
@@ -6527,12 +6527,12 @@ const zh: Record<keyof typeof en, string> = {
   "sla.action.unavailable": "{action} 目前不可執行：{reason}",
   "sla.summary.updatedAt": "updatedAt",
   "sla.summary.updatedBy": "updatedBy",
-  "sla.summary.profileState": "profile state",
+  "sla.summary.profileState": "設定檔狀態",
   "sla.summary.profileConfigured": "configured",
   "sla.summary.recalculationState": "recalculation state",
   "sla.summary.lastRecalculation": "last recalculation",
   "sla.summary.idle": "idle",
-  "sla.summary.refreshTier": "refresh tier",
+  "sla.summary.refreshTier": "刷新層級",
   "sla.refresh.urgent": "即時推播，5 秒後援輪詢",
   "sla.refresh.fast": "3 秒自動更新",
   "sla.refresh.dispatch": "5 秒自動更新",
@@ -6561,11 +6561,11 @@ const zh: Record<keyof typeof en, string> = {
   "sla.error.reasonRequiredRecalculate": "重算既有訂單前必須填寫操作原因。",
   "sla.error.updateFailed": "SLA 更新失敗。",
   "sla.error.recalculateFailed": "SLA 重算請求失敗。",
-  "sla.header.title": "SLA Profile",
+  "sla.header.title": "SLA 設定檔",
   "sla.header.subtitle":
     "wait、arrival、completion 三個門檻，單位為分鐘 (Q-TEN07)",
   "sla.header.refresh": "重新整理",
-  "sla.header.refreshTier": "refresh tier",
+  "sla.header.refreshTier": "刷新層級",
   "sla.header.freshness": "freshness",
   "sla.banner.actionError": "操作失敗",
   "sla.receipt.title": "操作回執",
@@ -7150,7 +7150,7 @@ const zh: Record<keyof typeof en, string> = {
   "addresses.kpi.geocoded.label": "GEOCODED",
   "addresses.kpi.geocoded.sub":
     "缺少座標會標記品質問題，避免新增訂單時猜測地理位置。",
-  "addresses.kpi.export.label": "EXPORT VIEW",
+  "addresses.kpi.export.label": "匯出檢視",
   "addresses.kpi.export.sub": "spec §9.6.4 的 export view 會輸出遮罩地址。",
   "addresses.filters.search": "搜尋",
   "addresses.filters.searchPlaceholder": "名稱 / 地址 / 標籤",
@@ -7285,7 +7285,7 @@ const zh: Record<keyof typeof en, string> = {
   "notifications.summary.title": "狀態概要",
   "notifications.summary.subtitle": "自動偵測 State variant",
   "notifications.summary.variant": "Variant",
-  "notifications.summary.refreshTier": "Refresh tier",
+  "notifications.summary.refreshTier": "刷新層級",
   "notifications.summary.specRef": "Spec ref",
   "notifications.summary.specRefValue": "§9.6.6（Q-TEN02）",
   "notifications.summary.risk": "Risk",
@@ -7312,8 +7312,8 @@ const zh: Record<keyof typeof en, string> = {
   "notifications.crossApp.webhookDeliveries.label": "Webhook 投遞詳細",
   "notifications.crossApp.webhookDeliveries.hint":
     "前往 platform admin 追查 webhook 投遞失敗（Q-X03）",
-  "notifications.crossApp.newTab": "new tab",
-  "notifications.crossApp.inApp": "in app",
+  "notifications.crossApp.newTab": "新分頁",
+  "notifications.crossApp.inApp": "應用內",
   "notifications.channel.email": "電子郵件",
   "notifications.channel.webhook": "WEBHOOK",
   "notifications.channel.ops_console": "TENANT CONSOLE",
@@ -7324,7 +7324,7 @@ const zh: Record<keyof typeof en, string> = {
   "notifications.refreshTier.slow.label": "Tenant slow",
   "notifications.refreshTier.slow.note": "30s 輪詢",
   "notifications.risk.medium.label": "Medium",
-  "notifications.risk.medium.pattern": "modal confirm + receipt",
+  "notifications.risk.medium.pattern": "彈窗確認 + 回執",
   "notifications.error.preferences": "通知偏好：{message}",
   "notifications.error.governance": "治理基線：{message}",
   "notifications.error.webhooks": "Webhook 端點：{message}",
@@ -7387,31 +7387,31 @@ const zh: Record<keyof typeof en, string> = {
   "notifications.empty.filteredEmpty.body":
     "目前的 channel / event 篩選沒有符合項目，請清除條件後再試。",
   "notifications.emptyReason.no_data.label": "尚無資料",
-  "notifications.emptyReason.no_data.pill": "NO DATA",
+  "notifications.emptyReason.no_data.pill": "無資料",
   "notifications.emptyReason.no_data.hint":
     "功能已就緒，目前沒有可顯示的資料。",
   "notifications.emptyReason.not_provisioned.label": "尚未設定",
-  "notifications.emptyReason.not_provisioned.pill": "NOT PROVISIONED",
+  "notifications.emptyReason.not_provisioned.pill": "未佈建",
   "notifications.emptyReason.not_provisioned.hint":
     "此功能或通道尚未為租戶啟用，需要先完成基線設定。",
   "notifications.emptyReason.fetch_failed.label": "讀取失敗",
-  "notifications.emptyReason.fetch_failed.pill": "FETCH FAILED",
+  "notifications.emptyReason.fetch_failed.pill": "讀取失敗",
   "notifications.emptyReason.fetch_failed.hint":
     "後端讀取發生錯誤，請稍後重試或檢查連線。",
   "notifications.emptyReason.permission_denied.label": "權限不足",
-  "notifications.emptyReason.permission_denied.pill": "PERMISSION DENIED",
+  "notifications.emptyReason.permission_denied.pill": "權限不足",
   "notifications.emptyReason.permission_denied.hint":
     "目前角色無法檢視此資料，請洽 tenant admin。",
   "notifications.emptyReason.external_unavailable.label": "外部服務異常",
-  "notifications.emptyReason.external_unavailable.pill": "EXTERNAL UNAVAILABLE",
+  "notifications.emptyReason.external_unavailable.pill": "外部不可用",
   "notifications.emptyReason.external_unavailable.hint":
     "相依的外部服務暫時無法使用，稍後會自動恢復。",
   "notifications.emptyReason.driver_not_eligible.label": "司機未符資格",
-  "notifications.emptyReason.driver_not_eligible.pill": "DRIVER NOT ELIGIBLE",
+  "notifications.emptyReason.driver_not_eligible.pill": "司機不適用",
   "notifications.emptyReason.driver_not_eligible.hint":
     "司機目前無法接收派遣（driver app 專用狀態）。",
   "notifications.emptyReason.filtered_empty.label": "篩選後為空",
-  "notifications.emptyReason.filtered_empty.pill": "FILTERED EMPTY",
+  "notifications.emptyReason.filtered_empty.pill": "篩選後為空",
   "notifications.emptyReason.filtered_empty.hint":
     "目前篩選條件下沒有符合的資料，調整條件即可。",
   "notifications.form.saving": "儲存中…",

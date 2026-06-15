@@ -521,7 +521,7 @@ const zh: Record<TranslationKey, string> = {
   "review.back": "返回編輯",
   "submitted.title": "已受理",
   "submitted.subtitle": "create command 已接受，接下來等待審批與派車結果。",
-  "submitted.badge": "accepted + pending",
+  "submitted.badge": "已接受 + 待處理",
   "submitted.banner.title": "不要重複送出",
   "submitted.banner.body":
     "這個畫面代表命令已進入後端流程，後續是否立即確認派車仍取決於審批與供應狀態。",
@@ -579,7 +579,7 @@ const zh: Record<TranslationKey, string> = {
   "receipt.banner.body":
     "可能尚未完成結算，或這個渠道不提供獨立 receipt。請改由企業報帳流程或客服支援處理。",
   "receipt.back": "返回預約詳情",
-  "state.supportTemplate": "support-safe template",
+  "state.supportTemplate": "支援安全範本",
   "state.supportTemplateBody":
     "所有 gate state 都應提供原因、影響、下一步與企業支援資訊。",
   "state.details": "狀態詳情",
@@ -589,7 +589,7 @@ const zh: Record<TranslationKey, string> = {
     "內嵌版沿用相同 booking 語意，但由 host app 負責 session hand-off，且不顯示後台導覽。",
   "state.next": "下一步",
   "bookingFlow.title": "網站版預約流程",
-  "bookingFlow.subtitle": "fixture flow: home → new → review → submitted",
+  "bookingFlow.subtitle": "範例流程：首頁 → 新建 → 確認 → 已送出",
   "bookingFlow.badge": "enterprise_dispatch",
   "bookingFlow.home": "首頁",
   "bookingFlow.new": "建立預約",
@@ -617,7 +617,7 @@ const zh: Record<TranslationKey, string> = {
   "gate.approvalPending.subtitle":
     "預約命令已被接受，但仍要等成本中心或主管核准。",
   "gate.approvalPending.detail.status": "狀態",
-  "gate.approvalPending.detail.statusValue": "accepted + pending",
+  "gate.approvalPending.detail.statusValue": "已接受 + 待處理",
   "gate.approvalPending.detail.authority": "責任",
   "gate.approvalPending.detail.authorityValue": "成本中心與審批結果以 backend 為準",
   "gate.approvalPending.detail.nextValue": "可先查看預約詳情，無需重複送出",
@@ -642,7 +642,7 @@ const zh: Record<TranslationKey, string> = {
   "gate.noSupply.title": "目前無法派車",
   "gate.noSupply.subtitle":
     "系統已接受需求，但在這個時段或區域沒有可供應車隊。",
-  "gate.noSupply.detail.statusValue": "request accepted, no fulfillment available",
+  "gate.noSupply.detail.statusValue": "請求已接受，目前無可用供給",
   "gate.noSupply.detail.impactValue": "不保證可即時補派",
   "gate.noSupply.detail.nextValue": "保留紀錄並由客服協助後續安排",
   "gate.noSupply.action.primary": "查看目前預約",
@@ -671,7 +671,7 @@ const zh: Record<TranslationKey, string> = {
   "embed.reauthRequired.title": "需要重新驗證",
   "embed.reauthRequired.subtitle":
     "內嵌 token 已逾時，必須回到企業 App 重新建立 session。",
-  "embed.reauthRequired.detail.reasonValue": "host token expired or stale",
+  "embed.reauthRequired.detail.reasonValue": "宿主權杖已過期或失效",
   "embed.reauthRequired.detail.impactValue": "不能讀取 tenant booking data",
   "embed.reauthRequired.detail.nextValue": "回到 host app 重新登入後再開啟",
   "embed.reauthRequired.action.primary": "返回企業 App",
@@ -680,7 +680,7 @@ const zh: Record<TranslationKey, string> = {
   "embed.unsupportedHost.subtitle":
     "偵測到的 host app 或網域不在允許清單內。",
   "embed.unsupportedHost.detail.reasonValue":
-    "wrong realm or unsupported host container",
+    "錯誤的 realm 或不支援的宿主容器",
   "embed.unsupportedHost.detail.impactValue": "為避免錯誤身份混用，系統不載入資料",
   "embed.unsupportedHost.detail.nextValue": "請從企業正式 App 或企業網站入口開啟",
   "embed.unsupportedHost.action.primary": "前往企業網站版",
@@ -690,7 +690,7 @@ const zh: Record<TranslationKey, string> = {
     "這次內嵌啟動需要先確認成本中心或租戶資料使用範圍。",
   "embed.consentRequired.detail.scope": "scope",
   "embed.consentRequired.detail.scopeValue":
-    "passenger, cost center, booking history",
+    "乘客、成本中心、訂單紀錄",
   "embed.consentRequired.detail.purpose": "目的",
   "embed.consentRequired.detail.purposeValue": "僅供企業派車前台使用",
   "embed.consentRequired.detail.nextValue": "確認後繼續建立或查詢預約",
