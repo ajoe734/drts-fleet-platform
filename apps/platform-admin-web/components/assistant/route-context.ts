@@ -36,7 +36,7 @@
  */
 
 import type { CrossAppResourceLink } from "@drts/contracts";
-import { t as translate } from "../../lib/translations";
+import { getBilingualText, t as translate } from "../../lib/translations";
 import { usePathname, useRouter } from "next/navigation";
 import {
   createElement,
@@ -65,10 +65,7 @@ import type {
 } from "./assistant-types";
 
 function localizedText(key: string) {
-  return {
-    zh: translate(key, "zh"),
-    en: translate(key, "en"),
-  };
+  return getBilingualText(key);
 }
 
 export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
