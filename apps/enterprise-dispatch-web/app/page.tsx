@@ -1,305 +1,390 @@
 import Link from "next/link";
 import {
-  EnterpriseBanner,
-  EnterpriseCard,
-  EnterpriseDl,
-  EnterpriseKpi,
-  EnterpriseKpiGrid,
-  EnterprisePageHeader,
-  EnterprisePill,
-  EnterpriseSection,
-} from "@/components/enterprise-primitives";
+  EBtnContent,
+  ECard,
+  EIcon,
+  EKpi,
+  EPill,
+  entBtnStyle,
+} from "@/components/ent-kit";
+import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import {
+  enterpriseQuotaSummary,
   getBookingStateMeta,
-  getEnterpriseBookingDraft,
   getEnterpriseBookings,
   getEnterpriseTenant,
+  getEnterpriseUser,
   getPolicyNotes,
 } from "@/lib/enterprise-fixtures";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
-import {
-  enterpriseCardGridStyle,
-  enterprisePageStyle,
-  enterpriseTheme,
-} from "@/lib/enterprise-theme";
-import { t } from "@/lib/translations";
+import { type TranslationKey, t as translate } from "@/lib/translations";
 
-const primaryLinkStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: `1px solid ${enterpriseTheme.accent}`,
-  background: enterpriseTheme.accent,
-  color: enterpriseTheme.surface,
-  fontSize: 12,
-  fontWeight: 500,
-  textDecoration: "none",
-} as const;
-
-const secondaryLinkStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: `1px solid ${enterpriseTheme.border}`,
-  background: enterpriseTheme.surface,
-  color: enterpriseTheme.text,
-  fontSize: 12,
-  fontWeight: 500,
-  textDecoration: "none",
-} as const;
-
-const ghostLinkStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: "1px solid transparent",
-  background: "transparent",
-  color: enterpriseTheme.textMuted,
-  fontSize: 12,
-  fontWeight: 500,
-  textDecoration: "none",
-} as const;
+const POLICY_ICONS = ["bolt", "building", "clock"] as const;
 
 export default async function HomePage() {
   const locale = await getServerLocale();
+  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
+    translate(key, params, locale);
   const bookings = getEnterpriseBookings(locale);
-  const bookingStateMeta = getBookingStateMeta(locale);
-  const draft = getEnterpriseBookingDraft(locale);
+  const stateMeta = getBookingStateMeta(locale);
+  const user = getEnterpriseUser(locale);
   const tenant = getEnterpriseTenant(locale);
   const policyNotes = getPolicyNotes(locale);
-  const activeTrip = bookings[0] ?? null;
+
+  const active = bookings.find(
+    (b) => b.state === "enroute" || b.state === "assigned",
+  );
+  const upcoming = bookings
+    .filter((b) =>
+      ["assigned", "enroute", "approval", "reserved"].includes(b.state),
+    )
+    .slice(0, 3);
 
   return (
-    <div style={enterprisePageStyle}>
-      <EnterprisePageHeader
-        title={t("home.title", { name: "林宜君" }, locale)}
-        subtitle={t("home.subtitle", { tenant: tenant.name }, locale)}
-        actions={
-          <Link href="/bookings/new" style={primaryLinkStyle}>
-            {t("home.cta.create", undefined, locale)}
-          </Link>
-        }
-      />
-
-      <EnterpriseKpiGrid>
-        <EnterpriseKpi
-          label={t("home.kpi.quota", undefined, locale)}
-          value="NT$ 35,800"
-          sub="NT$ 84,200 / 120,000"
-          hint="quota"
-        />
-        <EnterpriseKpi
-          label={t("home.kpi.approval", undefined, locale)}
-          value={t("home.kpi.approvalValue", undefined, locale)}
-          sub={t("home.kpi.approvalSub", undefined, locale)}
-          hint="approval"
-        />
-        <EnterpriseKpi
-          label={t("home.kpi.trips", undefined, locale)}
-          value={t("home.kpi.tripsValue", undefined, locale)}
-          delta="+6%"
-          deltaTone="up"
-          sub={tenant.department}
-          hint="trips"
-        />
-      </EnterpriseKpiGrid>
-
-      <div style={enterpriseCardGridStyle}>
-        <EnterpriseCard
-          title={t("home.activeTrip.title", undefined, locale)}
-          actions={
-            activeTrip ? (
-              <EnterprisePill tone={bookingStateMeta[activeTrip.state].tone}>
-                {bookingStateMeta[activeTrip.state].label}
-              </EnterprisePill>
-            ) : null
-          }
-        >
-          {activeTrip ? (
-            <>
-              <EnterpriseDl
-                cols={1}
-                items={[
-                  {
-                    k: t("home.activeTrip.passenger", undefined, locale),
-                    v: activeTrip.passenger,
-                  },
-                  {
-                    k: t("home.activeTrip.bookedBy", undefined, locale),
-                    v: t(
-                      "common.bookedByDelegate",
-                      { name: activeTrip.bookedBy },
-                      locale,
-                    ),
-                  },
-                  {
-                    k: t("home.activeTrip.route", undefined, locale),
-                    v: `${activeTrip.from} → ${activeTrip.to}`,
-                  },
-                  {
-                    k: t("home.activeTrip.eta", undefined, locale),
-                    v: t(
-                      "common.etaEstimate",
-                      { minutes: activeTrip.etaMinutes ?? "?" },
-                      locale,
-                    ),
-                    mono: true,
-                  },
-                ]}
-              />
-              <div style={{ marginTop: 12 }}>
-                <Link href="/trip" style={secondaryLinkStyle}>
-                  {t("home.activeTrip.cta", undefined, locale)}
-                </Link>
-              </div>
-            </>
-          ) : null}
-        </EnterpriseCard>
-
-        <EnterpriseCard
-          title={t("home.quickCreate.title", undefined, locale)}
-          actions={
-            <EnterprisePill tone="info">
-              {t("home.quickCreate.badge", undefined, locale)}
-            </EnterprisePill>
-          }
-        >
-          <div style={{ display: "grid", gap: 10 }}>
-            <Link href="/bookings/new" style={{ ...primaryLinkStyle, width: "100%" }}>
-              {t("home.quickCreate.self", undefined, locale)}
-            </Link>
-            <Link
-              href="/bookings/new"
-              style={{ ...secondaryLinkStyle, width: "100%" }}
-            >
-              {t("home.quickCreate.delegate", undefined, locale)}
-            </Link>
-            <Link href="/help" style={{ ...ghostLinkStyle, width: "100%" }}>
-              {t("home.quickCreate.help", undefined, locale)}
-            </Link>
+    <>
+      {/* greeting hero */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 20,
+          marginBottom: 22,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 13, color: t.muted, marginBottom: 6 }}>
+            {tr("home.greeting.line", { tenant: tenant.name, dept: user.dept })}
           </div>
-        </EnterpriseCard>
+          <h1
+            style={{
+              fontSize: 30,
+              fontWeight: 800,
+              letterSpacing: -0.6,
+              margin: 0,
+            }}
+          >
+            {tr("home.title", { name: user.name })}
+          </h1>
+          <p style={{ fontSize: 14.5, color: t.muted, margin: "8px 0 0" }}>
+            {tr("home.subtitle", { tenant: tenant.name })}
+          </p>
+        </div>
+        <Link
+          href="/bookings/new"
+          style={entBtnStyle(t, { variant: "primary", size: "lg" })}
+        >
+          <EBtnContent icon="plus" iconR="arrow" size="lg">
+            {tr("home.cta.create")}
+          </EBtnContent>
+        </Link>
       </div>
 
-      <EnterpriseSection>
-        <EnterpriseCard
-          title={t("home.upcoming.title", undefined, locale)}
-          actions={
-            <EnterprisePill tone="neutral">
-              {t("home.upcoming.count", { count: bookings.length }, locale)}
-            </EnterprisePill>
-          }
-        >
-          <div style={{ display: "grid", gap: 12 }}>
-            {bookings.map((booking, index) => (
-              <div
-                key={booking.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1.2fr 2fr 120px",
-                  gap: 12,
-                  alignItems: "center",
-                  paddingBottom: 12,
-                  borderBottom:
-                    index === bookings.length - 1
-                      ? "1px solid transparent"
-                      : `1px solid ${enterpriseTheme.border}`,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>
-                    {booking.passenger}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      color: enterpriseTheme.textMuted,
-                    }}
-                  >
-                    {booking.self
-                      ? t("home.upcoming.self", undefined, locale)
-                      : t(
-                          "common.bookedByDelegate",
-                          { name: booking.bookedBy },
-                          locale,
-                        )}
+      {/* KPI strip */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 14,
+          marginBottom: 16,
+        }}
+      >
+        <EKpi
+          t={t}
+          label={tr("home.kpi.quota")}
+          en="quota"
+          value={enterpriseQuotaSummary.rides}
+          sub={enterpriseQuotaSummary.amount}
+        />
+        <EKpi
+          t={t}
+          label={tr("home.kpi.approval")}
+          en="approval"
+          value={tr("home.kpi.approvalValue")}
+          sub={tr("home.kpi.approvalSub")}
+          tone="warn"
+        />
+        <EKpi
+          t={t}
+          label={tr("home.kpi.trips")}
+          en="trips"
+          value={tr("home.kpi.tripsValue")}
+          sub={tr("home.kpi.tripsSub")}
+        />
+      </div>
+
+      <div
+        style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {active && (
+            <ECard
+              t={t}
+              accent={t.primary}
+              title={tr("home.activeTrip.title")}
+              sub={tr("home.activeTrip.sub")}
+              actions={
+                <Link
+                  href="/trip"
+                  style={entBtnStyle(t, { variant: "soft", size: "sm" })}
+                >
+                  <EBtnContent iconR="arrow" size="sm">
+                    {tr("home.activeTrip.cta")}
+                  </EBtnContent>
+                </Link>
+              }
+            >
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <EntParty
+                    t={t}
+                    passenger={active.passenger}
+                    passengerLabel={tr("party.passenger")}
+                    compact
+                    subline={
+                      active.self ? (
+                        <div
+                          style={{ fontSize: 12, color: t.muted, marginTop: 1 }}
+                        >
+                          {tr("party.self")}
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: t.warn,
+                            marginTop: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                          }}
+                        >
+                          <EIcon name="users" size={13} />
+                          {tr("party.delegate", { name: active.bookedBy })}
+                        </div>
+                      )
+                    }
+                  />
+                  <div style={{ marginTop: 14 }}>
+                    <EntRoute
+                      t={t}
+                      from={active.from}
+                      to={active.to}
+                      win={active.window}
+                      airportLabel={
+                        active.flight
+                          ? `${active.flight} · ${active.terminal}`
+                          : undefined
+                      }
+                    />
                   </div>
                 </div>
-                <div style={{ fontSize: 12.5 }}>
-                  <div>{booking.from}</div>
-                  <div style={{ color: enterpriseTheme.textMuted }}>
-                    {booking.to}
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" }}>
+                <div
+                  style={{
+                    width: 150,
+                    background: t.surfaceLo,
+                    border: "1px solid " + t.line,
+                    borderRadius: 12,
+                    padding: 14,
+                    textAlign: "center",
+                    alignSelf: "flex-start",
+                  }}
+                >
+                  <EPill t={t} tone={stateMeta[active.state].tone} dot>
+                    {stateMeta[active.state].label}
+                  </EPill>
                   <div
                     style={{
-                      fontSize: 12,
-                      fontFamily: enterpriseTheme.monoFamily,
+                      fontSize: 30,
+                      fontWeight: 800,
+                      fontFamily: t.mono,
+                      color: t.primary,
+                      margin: "10px 0 0",
                     }}
                   >
-                    {booking.window}
+                    {active.etaMinutes ?? "—"}
                   </div>
-                  <div style={{ marginTop: 4 }}>
-                    <EnterprisePill tone={bookingStateMeta[booking.state].tone}>
-                      {bookingStateMeta[booking.state].label}
-                    </EnterprisePill>
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <Link
-                      href={`/bookings/${booking.id}`}
-                      style={{ ...ghostLinkStyle, paddingInline: 0 }}
-                    >
-                      {t("home.upcoming.detail", undefined, locale)}
-                    </Link>
+                  <div style={{ fontSize: 11, color: t.muted }}>
+                    {tr("home.activeTrip.etaSuffix")}
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
-        </EnterpriseCard>
+            </ECard>
+          )}
 
-        <EnterpriseCard
-          title={t("home.draft.title", undefined, locale)}
-          actions={<EnterprisePill tone="accent">review-first</EnterprisePill>}
-        >
-          <EnterpriseDl
-            cols={2}
-            items={[
-              { k: t("new.field.passenger", undefined, locale), v: draft.passenger },
-              { k: t("new.field.bookedBy", undefined, locale), v: draft.bookedBy },
-              {
-                k: t("review.summary.pickupDropoff", undefined, locale),
-                v: `${draft.pickup} → ${draft.dropoff}`,
-              },
-              { k: t("new.field.costCenter", undefined, locale), v: draft.costCenter, mono: true },
-            ]}
-          />
-          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-            <Link href="/bookings/review" style={primaryLinkStyle}>
-              {t("new.next.review", undefined, locale)}
-            </Link>
-            <Link href="/bookings/new" style={secondaryLinkStyle}>
-              {t("new.next.back", undefined, locale)}
-            </Link>
-          </div>
-        </EnterpriseCard>
+          <ECard
+            t={t}
+            title={tr("home.upcoming.title")}
+            sub={tr("home.upcoming.sub", { count: upcoming.length })}
+            pad={0}
+            actions={
+              <Link
+                href="/bookings"
+                style={entBtnStyle(t, { variant: "ghost", size: "sm" })}
+              >
+                <EBtnContent iconR="arrow" size="sm">
+                  {tr("home.upcoming.all")}
+                </EBtnContent>
+              </Link>
+            }
+          >
+            <div>
+              {upcoming.map((b, i) => (
+                <div
+                  key={b.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: "14px 18px",
+                    borderTop: i ? "1px solid " + t.lineSoft : "none",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 14,
+                      background: b.self ? t.primaryBg : t.surfaceLo,
+                      color: b.self ? t.primary : t.muted,
+                      border: "1px solid " + (b.self ? t.primaryBd : t.line),
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {b.passenger.slice(0, 1)}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 7 }}
+                    >
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                        {b.passenger}
+                      </span>
+                      {!b.self && (
+                        <span style={{ fontSize: 11, color: t.warn }}>
+                          ·{" "}
+                          {tr("home.upcoming.delegateShort", {
+                            name: b.bookedBy,
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: t.muted,
+                        marginTop: 1,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {b.from} → {b.to}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        fontFamily: t.mono,
+                        color: t.ink2,
+                      }}
+                    >
+                      {b.window}
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      <EPill t={t} tone={stateMeta[b.state].tone} dot>
+                        {stateMeta[b.state].label}
+                      </EPill>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ECard>
+        </div>
 
-        <EnterpriseBanner
-          tone="info"
-          title={t("home.draft.policy", undefined, locale)}
-          body={policyNotes.join("；")}
-        />
-      </EnterpriseSection>
-    </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <ECard t={t} title={tr("home.quickCreate.title")}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              <Link
+                href="/bookings/new"
+                style={entBtnStyle(t, { variant: "primary", block: true })}
+              >
+                <EBtnContent icon="plus">
+                  {tr("home.quickCreate.self")}
+                </EBtnContent>
+              </Link>
+              <Link
+                href="/bookings/new"
+                style={entBtnStyle(t, { variant: "default", block: true })}
+              >
+                <EBtnContent icon="users">
+                  {tr("home.quickCreate.delegate")}
+                </EBtnContent>
+              </Link>
+              <Link
+                href="/bookings/new"
+                style={entBtnStyle(t, { variant: "default", block: true })}
+              >
+                <EBtnContent icon="flag">
+                  {tr("home.quickCreate.airport")}
+                </EBtnContent>
+              </Link>
+            </div>
+          </ECard>
+
+          <ECard t={t} title={tr("home.policy.title")} sub="enterprise policy">
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              {policyNotes.map((note, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    fontSize: 12.5,
+                    color: t.ink2,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <span
+                    style={{ color: t.primary, flexShrink: 0, marginTop: 1 }}
+                  >
+                    <EIcon name={POLICY_ICONS[i] ?? "info"} size={15} />
+                  </span>
+                  {note}
+                </div>
+              ))}
+            </div>
+            <div
+              style={{
+                marginTop: 14,
+                paddingTop: 12,
+                borderTop: "1px solid " + t.lineSoft,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <EIcon name="phone" size={14} style={{ color: t.muted }} />
+              <span style={{ fontSize: 12, color: t.muted }}>
+                {translate(
+                  "state.supportLine",
+                  { phone: tenant.supportPhone },
+                  locale,
+                )}
+              </span>
+            </div>
+          </ECard>
+        </div>
+      </div>
+    </>
   );
 }
