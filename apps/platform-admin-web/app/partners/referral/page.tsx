@@ -31,9 +31,17 @@ import {
 // This surface adds the referral-only view (referral_channel entries) and the
 // net-new C2: revenue-share rate config wired to the BE-006 referral-rates API.
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
-const pageStackStyle = { display: "grid", gap: 16, padding: 24 } satisfies CSSProperties;
+const pageStackStyle = {
+  display: "grid",
+  gap: 16,
+  padding: 24,
+} satisfies CSSProperties;
 const formGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
@@ -50,7 +58,10 @@ const inputStyle: CSSProperties = {
   padding: "0 10px",
   fontSize: 13,
 };
-const linkStyle: CSSProperties = { color: theme.accent, textDecoration: "none" };
+const linkStyle: CSSProperties = {
+  color: theme.accent,
+  textDecoration: "none",
+};
 
 const REFERRAL_PARTNER_TYPE = "referral_channel";
 
@@ -96,7 +107,8 @@ export default function ReferralChannelsPage() {
           save: "Save rate",
           saving: "Saving…",
           openDetail: "Open entry detail / credentials",
-          empty: "No referral_channel entries yet — create one from the Partner entry page.",
+          empty:
+            "No referral_channel entries yet — create one from the Partner entry page.",
         }
       : {
           title: "Referral 渠道",
@@ -202,7 +214,12 @@ export default function ReferralChannelsPage() {
       />
 
       {error ? (
-        <CanvasBanner theme={theme} tone="danger" title={copy.errorTitle} body={error} />
+        <CanvasBanner
+          theme={theme}
+          tone="danger"
+          title={copy.errorTitle}
+          body={error}
+        />
       ) : null}
 
       <CanvasCard theme={theme} title={copy.channels} padding={0}>
@@ -214,7 +231,11 @@ export default function ReferralChannelsPage() {
               h: copy.colEntry,
               w: 240,
               r: (entry) => (
-                <Link href={`/partners/${entry.entrySlug}`} style={linkStyle} title={copy.openDetail}>
+                <Link
+                  href={`/partners/${entry.entrySlug}`}
+                  style={linkStyle}
+                  title={copy.openDetail}
+                >
                   {entry.displayName} · {entry.entrySlug}
                 </Link>
               ),
@@ -224,7 +245,16 @@ export default function ReferralChannelsPage() {
               h: copy.colStatus,
               w: 110,
               r: (entry) => (
-                <CanvasPill theme={theme} tone={entry.status === "active" ? "success" : entry.status === "revoked" ? "danger" : "neutral"}>
+                <CanvasPill
+                  theme={theme}
+                  tone={
+                    entry.status === "active"
+                      ? "success"
+                      : entry.status === "revoked"
+                        ? "danger"
+                        : "neutral"
+                  }
+                >
                   {entry.status}
                 </CanvasPill>
               ),
@@ -238,18 +268,26 @@ export default function ReferralChannelsPage() {
           ]}
         />
         {!loading && entries.length === 0 ? (
-          <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>{copy.empty}</div>
+          <div style={{ padding: 16, color: theme.textMuted, fontSize: 13 }}>
+            {copy.empty}
+          </div>
         ) : null}
       </CanvasCard>
 
-      <CanvasCard theme={theme} title={copy.rateTitle} subtitle={copy.rateSubtitle}>
+      <CanvasCard
+        theme={theme}
+        title={copy.rateTitle}
+        subtitle={copy.rateSubtitle}
+      >
         <div style={formGridStyle}>
           <CanvasField theme={theme} label={copy.slug} required>
             <input
               style={inputStyle}
               list="referral-entry-options"
               value={form.partnerEntrySlug}
-              onChange={(e) => setForm((c) => ({ ...c, partnerEntrySlug: e.target.value }))}
+              onChange={(e) =>
+                setForm((c) => ({ ...c, partnerEntrySlug: e.target.value }))
+              }
             />
             <datalist id="referral-entry-options">
               {entries.map((e) => (
@@ -261,7 +299,9 @@ export default function ReferralChannelsPage() {
             <select
               style={inputStyle}
               value={form.rateType}
-              onChange={(e) => setForm((c) => ({ ...c, rateType: e.target.value as RateType }))}
+              onChange={(e) =>
+                setForm((c) => ({ ...c, rateType: e.target.value as RateType }))
+              }
             >
               <option value="percent">percent</option>
               <option value="per_trip">per_trip</option>
@@ -272,17 +312,26 @@ export default function ReferralChannelsPage() {
               style={inputStyle}
               inputMode="numeric"
               value={form.value}
-              onChange={(e) => setForm((c) => ({ ...c, value: e.target.value }))}
+              onChange={(e) =>
+                setForm((c) => ({ ...c, value: e.target.value }))
+              }
             />
           </CanvasField>
           <CanvasField theme={theme} label={copy.currency}>
             <input
               style={inputStyle}
               value={form.currency}
-              onChange={(e) => setForm((c) => ({ ...c, currency: e.target.value }))}
+              onChange={(e) =>
+                setForm((c) => ({ ...c, currency: e.target.value }))
+              }
             />
           </CanvasField>
-          <CanvasBtn theme={theme} variant="primary" disabled={saving} onClick={() => void saveRate()}>
+          <CanvasBtn
+            theme={theme}
+            variant="primary"
+            disabled={saving}
+            onClick={() => void saveRate()}
+          >
             {saving ? copy.saving : copy.save}
           </CanvasBtn>
         </div>
@@ -293,7 +342,12 @@ export default function ReferralChannelsPage() {
             rows={rules}
             columns={[
               { h: copy.colEntry, k: "partnerEntrySlug", w: 220, mono: true },
-              { h: copy.colRate, w: 140, mono: true, r: (rule) => formatRate(rule) },
+              {
+                h: copy.colRate,
+                w: 140,
+                mono: true,
+                r: (rule) => formatRate(rule),
+              },
               { h: copy.colEffective, k: "effectiveFrom", w: 180, mono: true },
             ]}
           />

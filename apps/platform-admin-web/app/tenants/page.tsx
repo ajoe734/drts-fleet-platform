@@ -67,6 +67,7 @@ function isTenantFilter(value: string): value is TenantFilter {
 }
 
 const th = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });
@@ -291,10 +292,7 @@ function getGateLabel(
   return "pending";
 }
 
-function formatQuotaSummary(
-  locale: Locale,
-  tenant: PlatformAdminTenantRecord,
-) {
+function formatQuotaSummary(locale: Locale, tenant: PlatformAdminTenantRecord) {
   return translate("paMisc.monthlyPlan", locale, {
     count: formatLocaleNumber(locale, tenant.quotas.monthlyBookings),
   });

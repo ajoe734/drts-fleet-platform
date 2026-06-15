@@ -48,7 +48,11 @@ type RuleTableRow = FleetPartnerRevenueShareRuleRecord &
   Record<string, unknown>;
 type StatementTableRow = FleetPartnerStatementRecord & Record<string, unknown>;
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,

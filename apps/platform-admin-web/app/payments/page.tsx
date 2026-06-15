@@ -45,6 +45,7 @@ const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_FINANCE_ACTOR_ID = "finance.console";
 const REOPEN_WARN_THRESHOLD = 5;
 const PLATFORM_THEME = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });
@@ -1645,9 +1646,7 @@ export default function PaymentsPage() {
               key={filter.value}
               theme={theme}
               size="xs"
-              variant={
-                invoiceFilter === filter.value ? "primary" : "secondary"
-              }
+              variant={invoiceFilter === filter.value ? "primary" : "secondary"}
               onClick={() => setInvoiceFilter(filter.value)}
             >
               {filter.label}
@@ -2185,9 +2184,7 @@ export default function PaymentsPage() {
                     required
                   >
                     <textarea
-                      value={
-                        issueResolutionSummaries[modalIssue.issueId] ?? ""
-                      }
+                      value={issueResolutionSummaries[modalIssue.issueId] ?? ""}
                       onChange={(event) =>
                         setIssueResolutionSummaries((current) => ({
                           ...current,

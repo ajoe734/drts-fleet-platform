@@ -71,6 +71,7 @@ const HOME_SHORTCUT_ROUTES: ShortcutRoute[] = [
 ];
 
 const th = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });

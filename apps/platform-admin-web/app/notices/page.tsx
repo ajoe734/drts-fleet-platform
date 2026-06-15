@@ -33,7 +33,11 @@ import type {
   PlatformNoticeStatus,
 } from "@drts/contracts";
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
 const bodyStyle: React.CSSProperties = {
   padding: 24,

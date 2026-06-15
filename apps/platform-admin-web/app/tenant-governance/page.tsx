@@ -24,6 +24,7 @@ import {
 const PAGE_SIZE = 8;
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });

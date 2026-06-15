@@ -135,6 +135,7 @@ function normalizeLicenseTypes(value: unknown): VehicleLicenseType[] {
 }
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });

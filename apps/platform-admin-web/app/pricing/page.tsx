@@ -86,6 +86,7 @@ function isTabId(value: string | null): value is TabId {
 }
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });

@@ -52,7 +52,11 @@ type TranslateFn = (
   params?: Record<string, string | number>,
 ) => string;
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
 const pageBodyStyle = {
   padding: 24,

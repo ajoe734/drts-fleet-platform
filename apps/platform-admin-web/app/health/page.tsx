@@ -52,6 +52,7 @@ type AdapterInventoryRow = {
 } & Record<string, unknown>;
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });

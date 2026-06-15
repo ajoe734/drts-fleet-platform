@@ -43,6 +43,7 @@ const OPS_CONSOLE_ORIGIN =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.replace(/\/$/, "") ?? "";
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });
@@ -1585,9 +1586,7 @@ export default function FleetPage() {
             <CanvasBtn
               theme={theme}
               icon="filter"
-              onClick={() =>
-                window.alert(t("fleetUi.filterReserved"))
-              }
+              onClick={() => window.alert(t("fleetUi.filterReserved"))}
             >
               {t("fleetUi.filter")}
             </CanvasBtn>

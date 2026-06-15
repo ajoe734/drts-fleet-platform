@@ -66,7 +66,11 @@ type PlacardFormState = {
   artifactFileId: string;
 };
 
-const th = buildCanvasTheme({ surface: "platform", density: "compact" });
+const th = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
 const EMPTY_PUBLIC_INFO_FORM: CreatePublicInfoVersionCommand = {
   title: "",

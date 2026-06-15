@@ -126,7 +126,11 @@ const EDITABLE_FLAGS = [
   "active",
 ] as const;
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
 const pageBodyStyle = {
   padding: 24,

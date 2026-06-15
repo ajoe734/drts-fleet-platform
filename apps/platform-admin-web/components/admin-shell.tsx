@@ -33,6 +33,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { buildCanvasTheme } from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { t as translate, type Locale } from "@/lib/translations";
@@ -43,31 +44,7 @@ const SHELL_FONT =
 const SHELL_MONO =
   '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
-const theme = {
-  bg: "#F7F8FB",
-  surface: "#FFFFFF",
-  surfaceLo: "#F1F4F8",
-  border: "#E5E8EE",
-  borderStrong: "#C9D2DD",
-  text: "#0B1220",
-  textMuted: "#475569",
-  textDim: "#6B7280",
-  accent: "#4F46E5",
-  accentHi: "#6366F1",
-  accentBg: "#EEF2FF",
-  accentBorder: "#C7D2FE",
-  success: "#0F7B5A",
-  successBg: "#E5F4ED",
-  successBorder: "#A7D7C2",
-  warn: "#A8590B",
-  warnBg: "#FCEED6",
-  warnBorder: "#F0CC95",
-  danger: "#B42318",
-  dangerBg: "#FEE4E2",
-  dangerBorder: "#F8B3AC",
-  neutralBg: "#F1F4F8",
-  neutralBorder: "#CBD5E1",
-} as const;
+const theme = buildCanvasTheme({ surface: "platform", dark: true });
 
 type AdminShellProps = {
   children: ReactNode;
@@ -483,7 +460,10 @@ function Sidebar({
           </div>
         </div>
       </div>
-      <nav aria-label={labelFor(locale, "adminShell.nav.aria")} style={navStyle}>
+      <nav
+        aria-label={labelFor(locale, "adminShell.nav.aria")}
+        style={navStyle}
+      >
         {sections.map((section) => (
           <div key={section.key} style={{ display: "grid", gap: 1 }}>
             <div style={sectionTitleStyle}>
@@ -521,7 +501,10 @@ function RefreshTierBadge({ pathname }: { pathname: string }) {
 
 function SearchBox({ locale }: { locale: Locale }) {
   return (
-    <div aria-label={labelFor(locale, "adminShell.search.aria")} style={searchBoxStyle}>
+    <div
+      aria-label={labelFor(locale, "adminShell.search.aria")}
+      style={searchBoxStyle}
+    >
       <Search size={13} />
       <span style={searchTextStyle}>
         {labelFor(locale, "adminShell.search.placeholder")}

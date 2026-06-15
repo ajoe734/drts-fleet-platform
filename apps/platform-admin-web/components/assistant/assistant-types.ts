@@ -4,6 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { buildCanvasTheme } from "@drts/ui-web/canvas-tokens";
 
 export const assistantTheme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });

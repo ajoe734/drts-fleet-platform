@@ -38,7 +38,11 @@ import {
 type PartnerFilter = "all" | "active" | "inactive" | "revoked" | "attention";
 type PartnerTableRow = PartnerChannelEntryRecord & Record<string, unknown>;
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
 // Canvas PA_Partners body: page padding 24, single table-first card.
 const pageStackStyle = {

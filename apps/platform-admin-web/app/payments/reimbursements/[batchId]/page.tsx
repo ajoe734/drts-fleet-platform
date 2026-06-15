@@ -24,6 +24,7 @@ import {
 } from "@drts/ui-web";
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });

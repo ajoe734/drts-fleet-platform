@@ -40,6 +40,7 @@ type RoleRow = PlatformTenantBootstrapRoleDefault &
   };
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });
@@ -691,7 +692,11 @@ export default function TenantDetailPage() {
         <PageHeader
           theme={theme}
           title={t("tenantDetail.title")}
-          subtitle={tenantId ? `tenantId: ${tenantId}` : t("tenantDetail.subtitleFallback")}
+          subtitle={
+            tenantId
+              ? `tenantId: ${tenantId}`
+              : t("tenantDetail.subtitleFallback")
+          }
           actions={
             <Btn
               theme={theme}
@@ -719,9 +724,7 @@ export default function TenantDetailPage() {
               >
                 {t("tenantDetail.notFoundHeading")}
               </div>
-              <p style={mutedTextStyle}>
-                {t("tenantDetail.notFoundBody")}
-              </p>
+              <p style={mutedTextStyle}>{t("tenantDetail.notFoundBody")}</p>
             </div>
           </div>
         </div>

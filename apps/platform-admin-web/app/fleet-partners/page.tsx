@@ -28,7 +28,11 @@ import {
 type FleetPartnerFilter = "all" | "active" | "inactive";
 type FleetPartnerTableRow = FleetPartnerRecord & Record<string, unknown>;
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  dark: true,
+  surface: "platform",
+  density: "compact",
+});
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,

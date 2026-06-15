@@ -90,6 +90,7 @@ type RolloutFilterOption = {
 };
 
 const theme = buildCanvasTheme({
+  dark: true,
   surface: "platform",
   density: "compact",
 });
@@ -629,7 +630,9 @@ export default function FeatureFlagsPage() {
     confirmToggleBody: t("featureFlagsAdmin.confirmToggleBody"),
     confirmOverrideTitle: t("featureFlagsAdmin.confirmOverrideTitle"),
     confirmOverrideBody: t("featureFlagsAdmin.confirmOverrideBody"),
-    confirmRemoveOverrideTitle: t("featureFlagsAdmin.confirmRemoveOverrideTitle"),
+    confirmRemoveOverrideTitle: t(
+      "featureFlagsAdmin.confirmRemoveOverrideTitle",
+    ),
     confirmRemoveOverrideBody: t("featureFlagsAdmin.confirmRemoveOverrideBody"),
     reasonLabel: t("featureFlagsAdmin.reasonLabel"),
     reasonPlaceholder: t("featureFlagsAdmin.reasonPlaceholder"),
@@ -650,7 +653,9 @@ export default function FeatureFlagsPage() {
     noFlags: t("flags.empty"),
     loading: t("flags.loading"),
     scopeMeta: t("featureFlagsAdmin.scopeMeta"),
-    resultMeta: t("featureFlagsAdmin.resultMeta", { count: filteredRows.length }),
+    resultMeta: t("featureFlagsAdmin.resultMeta", {
+      count: filteredRows.length,
+    }),
     enabledMeta: t("featureFlagsAdmin.enabledMeta", { count: enabledCount }),
     disabledMeta: t("featureFlagsAdmin.disabledMeta", { count: disabledCount }),
     overrideMeta: t("featureFlagsAdmin.overrideMeta", { count: overrideCount }),
