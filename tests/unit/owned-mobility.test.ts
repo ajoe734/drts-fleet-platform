@@ -1213,6 +1213,12 @@ describe("owned mobility service", () => {
     regulatoryRegistryService.updateDriverWorkState("drv-demo-001", {
       workState: "offline",
     });
+    // drv-demo-004 (business_vehicle, business_dispatch) is also dispatchable
+    // supply; take it offline too so this scenario has no eligible candidate and
+    // exercises the redispatch-queue / exception_hold path.
+    regulatoryRegistryService.updateDriverWorkState("drv-demo-004", {
+      workState: "offline",
+    });
     const initialEscalationNotifications = auditService
       .listNotifications()
       .filter((notification) =>

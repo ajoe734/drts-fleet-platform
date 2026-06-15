@@ -226,25 +226,6 @@ const DRIVER_SEED: DriverRegistryRecord[] = [
   }),
 ];
 
-const DRIVER_LOCATION_SEED: DriverLocationSnapshot[] = [
-  {
-    driverId: "drv-demo-001",
-    lat: 24.147736,
-    lng: 120.673648,
-    accuracyM: 25,
-    recordedAt: SEED_TIMESTAMP,
-    updatedAt: SEED_TIMESTAMP,
-  },
-  {
-    driverId: "drv-demo-004",
-    lat: 24.149898,
-    lng: 120.675218,
-    accuracyM: 25,
-    recordedAt: SEED_TIMESTAMP,
-    updatedAt: SEED_TIMESTAMP,
-  },
-];
-
 const CONTRACT_SEED: VehicleContractRecord[] = [
   {
     contractId: "contract-demo-001",
@@ -378,12 +359,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
 
-  private latestDriverLocations = new Map<string, DriverLocationSnapshot>(
-    DRIVER_LOCATION_SEED.map((location) => [
-      location.driverId,
-      { ...location },
-    ]),
-  );
+  private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
 
   private supplyPairs: RegulatorySupplyPair[] = [
     {
@@ -440,11 +416,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       const latestDriverLocations =
         (await this.regulatoryRegistryRepository.listLatestDriverLocations?.()) ??
         [];
-      this.replaceLatestDriverLocations(
-        latestDriverLocations.length > 0
-          ? latestDriverLocations
-          : DRIVER_LOCATION_SEED,
-      );
+      this.replaceLatestDriverLocations(latestDriverLocations);
 
       const persistedState =
         await this.regulatoryRegistryRepository.loadState();
