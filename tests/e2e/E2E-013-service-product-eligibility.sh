@@ -126,15 +126,17 @@ http_call GET "/admin/vehicle-eligibility-matrix"
 assert_status "200"
 
 ORIGINAL_MATRIX_FILE=$(mktemp /tmp/drts-e2e-013-original-matrix-XXXXXX.json)
-echo "$RESP_BODY" | jq '{items: (.data.items // [])}' > "$ORIGINAL_MATRIX_FILE"
+echo "$RESP_BODY" | jq 'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); {items: ((.data.items // []) | map(camel))}' > "$ORIGINAL_MATRIX_FILE"
 
 MATRIX_FIXTURE=$(mktemp /tmp/drts-e2e-013-matrix-XXXXXX.json)
 jq \
   --arg now "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
   '
+  def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase));
   {
     items: (
       ((.data.items // [])
+        | map(camel)
         | map(select(.licenseType != "taxi" and .licenseType != "multi_purpose_taxi")))
       + [
         {
@@ -148,6 +150,10 @@ jq \
           taxiMeterRequired: true,
           fixedFareAllowed: false,
           platformForwardingAllowed: true,
+          conditionallyAllowed: false,
+          requiredDocuments: [],
+          trainingRequired: false,
+          permitRequired: false,
           active: true,
           effectiveFrom: $now,
           effectiveUntil: null,
@@ -170,6 +176,10 @@ jq \
           taxiMeterRequired: true,
           fixedFareAllowed: true,
           platformForwardingAllowed: true,
+          conditionallyAllowed: false,
+          requiredDocuments: [],
+          trainingRequired: false,
+          permitRequired: false,
           active: true,
           effectiveFrom: $now,
           effectiveUntil: null,
@@ -190,13 +200,13 @@ http_call GET "/admin/vehicle-eligibility-matrix"
 assert_status "200"
 
 TAXI_SUPPORTS_AIRPORT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
+  'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); .data.items[] | camel | select(.licenseType == "taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
   2>/dev/null | head -1 || true)
 MPT_SUPPORTS_AIRPORT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "multi_purpose_taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
+  'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); .data.items[] | camel | select(.licenseType == "multi_purpose_taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
   2>/dev/null | head -1 || true)
 MPT_AIRPORT_PERMIT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "multi_purpose_taxi") | (.airportPermit // false)' \
+  'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); .data.items[] | camel | select(.licenseType == "multi_purpose_taxi") | (.airportPermit // false)' \
   2>/dev/null | head -1 || true)
 
 if [[ "$TAXI_SUPPORTS_AIRPORT" != "null" && -n "$TAXI_SUPPORTS_AIRPORT" ]]; then

@@ -1,0 +1,15 @@
+# E2E scenarios temporarily EXCLUDED from the default (CI deploy-gate) hermetic run.
+#
+# These have a KNOWN, ROOT-CAUSED gap (see
+# docs/04-uat/e2e-business-flow-verification-results-20260615.md) and are being
+# fixed across the iterative verification rounds. They are NOT skipped silently:
+# the runner prints "[hermetic] deferred from gate" for each, and they still run
+# when named explicitly (e.g. ./tests/e2e/run-e2e-hermetic.sh 002).
+#
+# Remove a line as soon as its scenario passes hermetically, so the deploy gate
+# grows monotonically toward full coverage.
+#
+# number   reason (owning round)
+002      # forwarder broadcast: scenario candidate driver (DB seed 381) not in in-memory regulatory supply (drv-demo-001); needs supply/id alignment — Round 2
+010      # governance billing/reporting: uses non-existent actor types (tenant_approver/_driver/_finance) + 4 unset user-id env vars — Round 3
+013      # service-product eligibility: negative-assert needs a dispatchable-but-product-ineligible seed vehicle (none exists; veh-demo-002 non-dispatchable, veh-demo-003 insurance expired) — Round 2

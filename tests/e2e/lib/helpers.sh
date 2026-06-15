@@ -185,10 +185,24 @@ assert_status() {
   fi
 }
 
-# Extract a JSON field with jq; return empty string if missing
+# Extract a JSON field with jq; return empty string if missing.
+# The API serializes every response in snake_case (global SnakeCaseInterceptor),
+# while scenarios are often written with camelCase contract keys. To bridge that,
+# if the camelCase path yields nothing we retry with the snake_case-converted
+# path (e.g. .data.mirrorOrderId -> .data.mirror_order_id). Scenarios that
+# already use snake_case keys hit on the first try and are unaffected.
 json_get() {
   local field="$1"
-  echo "$RESP_BODY" | jq -r "${field} // empty" 2>/dev/null || true
+  local value
+  value=$(echo "$RESP_BODY" | jq -r "${field} // empty" 2>/dev/null || true)
+  if [[ -z "$value" ]]; then
+    local snake
+    snake=$(printf '%s' "$field" | sed -E 's/([a-z0-9])([A-Z])/\1_\L\2/g')
+    if [[ "$snake" != "$field" ]]; then
+      value=$(echo "$RESP_BODY" | jq -r "${snake} // empty" 2>/dev/null || true)
+    fi
+  fi
+  printf '%s' "$value"
 }
 
 # Extract the first non-empty JSON field from a list of jq expressions.

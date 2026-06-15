@@ -125,7 +125,7 @@ SECONDARY_MIRROR_ORDER_ID=""
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops Console — sandbox forwarded mirror creation"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "1.1 — POST /forwarder/orders/inbound (primary sandbox order)"
 http_call POST "/forwarder/orders/inbound" "$PRIMARY_INBOUND_FIXTURE"
@@ -237,7 +237,7 @@ fi
 save_evidence "$SCENARIO" "driver" "acceptOutcome" "$ACCEPT_OUTCOME"
 log_ok "Forwarded accept relay acknowledged with outcome=${ACCEPT_OUTCOME}"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "3.2 — POST /forwarder/orders/:orderId/sync-status (confirmed_by_platform)"
 http_call POST "/forwarder/orders/${PRIMARY_MIRROR_ORDER_ID}/sync-status" "$CONFIRMED_SYNC_FIXTURE"
@@ -261,7 +261,7 @@ if [[ "$PRIMARY_DRIVER_CONFIRMED_STATUS" != "confirmed_by_platform" ]]; then
 fi
 save_evidence "$SCENARIO" "driver" "primaryDriverConfirmedStatus" "$PRIMARY_DRIVER_CONFIRMED_STATUS"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "3.4 — POST /forwarder/orders/:orderId/sync-status (completed)"
 http_call POST "/forwarder/orders/${PRIMARY_MIRROR_ORDER_ID}/sync-status" "$COMPLETED_SYNC_FIXTURE"
@@ -293,7 +293,7 @@ log_ok "Primary forwarded task completed through sandbox status sync"
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops + Driver — sandbox cancellation path"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "4.1 — POST /forwarder/orders/inbound (secondary sandbox order)"
 http_call POST "/forwarder/orders/inbound" "$SECONDARY_INBOUND_FIXTURE"
@@ -340,7 +340,7 @@ if [[ "$SECONDARY_ACCEPT_OUTCOME" != "accept_pending" ]]; then
   exit 1
 fi
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "4.5 — POST /forwarder/orders/:orderId/sync-status (cancelled_by_platform)"
 http_call POST "/forwarder/orders/${SECONDARY_MIRROR_ORDER_ID}/sync-status" "$CANCELLED_SYNC_FIXTURE"
