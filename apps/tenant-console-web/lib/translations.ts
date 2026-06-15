@@ -3803,6 +3803,9 @@ const en = {
   "dashboard.callout.flagsUnavailable": "Feature flag details are unavailable, or no tenant-specific module flags are enabled.",
   "dashboard.callout.partialData": "Partial data warning",
   "dashboard.callout.partialDataSub": "Some dashboard sections fell back because the current authorization source did not answer all reads.",
+
+  // ── formatters (i18n-fullsweep 20260614 finish) ──
+  "formatters.notAvailable": "Not available",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -7369,6 +7372,9 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.callout.flagsUnavailable": "功能旗標明細目前無法取得，或沒有任何租戶專屬模組旗標啟用。",
   "dashboard.callout.partialData": "部分資料警告",
   "dashboard.callout.partialDataSub": "部分儀表板區塊已回退，因為目前的授權來源未回應所有讀取。",
+
+  // ── formatters (i18n-fullsweep 20260614 finish) ──
+  "formatters.notAvailable": "無資料",
 };
 
 export const translations = { en, zh } as const;
