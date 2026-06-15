@@ -3,19 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
-import { CanvasIcon, CanvasWindowChrome } from "@drts/ui-web";
+import { EAvatar, EIcon } from "@/components/ent-kit";
 import {
+  enterpriseQuotaSummary,
   enterpriseTenant,
   getEnterpriseUser,
 } from "@/lib/enterprise-fixtures";
-import { enterpriseTheme } from "@/lib/enterprise-theme";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { useTranslation } from "@/lib/i18n";
 
-export interface EnterpriseShellProps {
-  children: ReactNode;
-}
+const TENANT_MARK = "鴻";
 
 function isActive(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -23,108 +23,38 @@ function topLinkStyle(active: boolean): CSSProperties {
   return {
     display: "inline-flex",
     alignItems: "center",
-    padding: "8px 14px",
-    borderRadius: 10,
+    padding: "7px 13px",
+    borderRadius: 9,
     fontSize: 13.5,
     fontWeight: active ? 700 : 500,
-    color: active ? enterpriseTheme.accent : enterpriseTheme.text,
-    background: active ? enterpriseTheme.accentBg : "transparent",
+    color: active ? t.primary : t.ink2,
+    background: active ? t.primaryBg : "transparent",
     textDecoration: "none",
   };
 }
 
-function iconButtonStyle(): CSSProperties {
-  return {
-    width: 30,
-    height: 30,
-    borderRadius: 999,
-    border: `1px solid ${enterpriseTheme.border}`,
-    background: enterpriseTheme.surface,
-    color: enterpriseTheme.textMuted,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 0,
-  };
-}
-
-function UserChip() {
-  const { locale } = useTranslation();
+// ── workspace top nav (S1) ───────────────────────────────────────────────────
+export function EnterpriseShell({ children }: { children: ReactNode }) {
+  const { t: tr, locale } = useTranslation();
+  const pathname = usePathname() ?? "/";
+  const tenant = enterpriseTenant;
   const user = getEnterpriseUser(locale);
+  const quota = enterpriseQuotaSummary;
 
-  return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
-      <span
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 999,
-          background: enterpriseTheme.accentBg,
-          border: `1px solid ${enterpriseTheme.accentBorder}`,
-          color: enterpriseTheme.accent,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 11,
-          fontWeight: 700,
-        }}
-      >
-        林
-      </span>
-      <span style={{ lineHeight: 1.15 }}>
-        <span
-          style={{
-            display: "block",
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: enterpriseTheme.text,
-          }}
-        >
-          林宜君
-        </span>
-        <span
-          style={{
-            display: "block",
-            fontSize: 10.5,
-            color: enterpriseTheme.textMuted,
-          }}
-        >
-          {user.role}
-        </span>
-      </span>
-    </div>
-  );
-}
-
-export function EnterpriseShell({ children }: EnterpriseShellProps) {
-  const { t } = useTranslation();
-  const pathname = usePathname();
-  const tenantIdentity = {
-    mark: "鴻",
-    name: enterpriseTenant.name,
-    subtitle: t("shell.tenantSubtitle"),
-    operator: t("shell.operator"),
-  };
   const navItems = [
-    { key: "home", href: "/", label: t("shell.nav.home") },
-    { key: "bookings", href: "/bookings", label: t("shell.nav.bookings") },
-    { key: "trip", href: "/trip", label: t("shell.nav.trip") },
-    { key: "help", href: "/help", label: t("shell.nav.help") },
-  ] as const;
+    { key: "home", href: "/", label: tr("shell.nav.home") },
+    { key: "bookings", href: "/bookings", label: tr("shell.nav.bookings") },
+    { key: "trip", href: "/trip", label: tr("shell.nav.trip") },
+    { key: "help", href: "/help", label: tr("shell.nav.help") },
+  ];
 
   return (
     <div
       style={{
         minHeight: "100vh",
-        background: enterpriseTheme.bg,
-        color: enterpriseTheme.text,
-        fontFamily: enterpriseTheme.fontFamily,
+        background: t.bg,
+        color: t.ink,
+        fontFamily: t.sans,
       }}
     >
       <header
@@ -132,8 +62,8 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
           position: "sticky",
           top: 0,
           zIndex: 20,
-          borderBottom: `1px solid ${enterpriseTheme.border}`,
-          background: enterpriseTheme.surface,
+          borderBottom: `1px solid ${t.line}`,
+          background: t.dark ? "rgba(14,19,32,.86)" : "rgba(255,255,255,.86)",
           backdropFilter: "blur(12px)",
         }}
       >
@@ -141,11 +71,11 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
           style={{
             maxWidth: 1180,
             margin: "0 auto",
-            padding: "0 24px",
+            padding: "0 26px",
             minHeight: 60,
             display: "flex",
             alignItems: "center",
-            gap: 24,
+            gap: 26,
             flexWrap: "wrap",
           }}
         >
@@ -156,9 +86,9 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
               style={{
                 width: 34,
                 height: 34,
-                borderRadius: 10,
-                background: `linear-gradient(150deg, ${enterpriseTheme.accent}, ${enterpriseTheme.info})`,
-                color: enterpriseTheme.surface,
+                borderRadius: 9,
+                background: `linear-gradient(150deg, ${t.primary}, ${t.primaryHi})`,
+                color: "#fff",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -166,26 +96,18 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
                 fontWeight: 800,
               }}
             >
-              {tenantIdentity.mark}
+              {TENANT_MARK}
             </span>
             <span style={{ lineHeight: 1.15 }}>
               <span
-                style={{
-                  display: "block",
-                  fontSize: 14.5,
-                  fontWeight: 700,
-                }}
+                style={{ display: "block", fontSize: 14.5, fontWeight: 700 }}
               >
-                {tenantIdentity.name}
+                {tenant.name}
               </span>
               <span
-                style={{
-                  display: "block",
-                  fontSize: 10.5,
-                  color: enterpriseTheme.textMuted,
-                }}
+                style={{ display: "block", fontSize: 10.5, color: t.muted }}
               >
-                {tenantIdentity.subtitle}
+                {tr("shell.tenantSubtitle")}
               </span>
             </span>
           </div>
@@ -217,206 +139,313 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
                 gap: 7,
                 padding: "6px 12px",
                 borderRadius: 999,
-                border: `1px solid ${enterpriseTheme.border}`,
-                background: enterpriseTheme.surface,
+                border: `1px solid ${t.line}`,
+                background: t.surface,
                 fontSize: 12,
-                color: enterpriseTheme.text,
+                color: t.ink2,
               }}
             >
-              <CanvasIcon
-                name="clock"
-                size={13}
-                style={{ color: enterpriseTheme.accent }}
-              />
-              {t("shell.quota")}
-              <strong style={{ fontFamily: enterpriseTheme.monoFamily }}>
-                NT$ 31,000
-              </strong>
+              <EIcon name="bolt" size={13} style={{ color: t.primary }} />
+              {tr("shell.quota")}
+              <strong style={{ fontFamily: t.mono }}>{quota.rides}</strong>
             </span>
-            <button
-              type="button"
-              style={iconButtonStyle()}
-              title={t("shell.supportNotifications")}
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             >
-              <CanvasIcon name="bell" size={14} />
-            </button>
-            <UserChip />
+              <EAvatar t={t} name={user.name} size={30} />
+              <span style={{ lineHeight: 1.15 }}>
+                <span
+                  style={{ display: "block", fontSize: 12.5, fontWeight: 600 }}
+                >
+                  {user.name}
+                </span>
+                <span
+                  style={{ display: "block", fontSize: 10.5, color: t.muted }}
+                >
+                  {user.role}
+                </span>
+              </span>
+            </span>
           </div>
         </div>
       </header>
 
-      <main>{children}</main>
+      <main style={{ maxWidth: 1180, margin: "0 auto", padding: "26px" }}>
+        {children}
+      </main>
 
       <footer
         style={{
           maxWidth: 1180,
           margin: "0 auto",
-          padding: "8px 24px 36px",
+          padding: "8px 26px 40px",
           display: "flex",
           justifyContent: "space-between",
           gap: 16,
           flexWrap: "wrap",
           fontSize: 11,
-          color: enterpriseTheme.textDim,
+          color: t.faint,
         }}
       >
         <span>
-          © 2026 {tenantIdentity.name} · {t("shell.footer.product")}
+          © 2026 {tenant.name} · {tr("shell.footer.product")}
         </span>
         <span>
-          {t("shell.footer.operatedBy", { operator: tenantIdentity.operator })}
+          {tr("shell.footer.operatedBy", { operator: tr("shell.operator") })}
         </span>
       </footer>
     </div>
   );
 }
 
+// page header inside a web shell
+export function EntPageHead({
+  title,
+  sub,
+  back,
+  actions,
+  meta,
+}: {
+  title: ReactNode;
+  sub?: ReactNode;
+  back?: ReactNode;
+  actions?: ReactNode;
+  meta?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 16,
+        marginBottom: 20,
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        {back && (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 12,
+              color: t.muted,
+              marginBottom: 8,
+            }}
+          >
+            <EIcon
+              name="chevR"
+              size={13}
+              style={{ transform: "rotate(180deg)" }}
+            />
+            {back}
+          </div>
+        )}
+        <h1
+          style={{
+            fontSize: 25,
+            fontWeight: 800,
+            letterSpacing: -0.5,
+            margin: 0,
+            color: t.ink,
+          }}
+        >
+          {title}
+        </h1>
+        {sub && (
+          <p
+            style={{
+              fontSize: 14,
+              color: t.muted,
+              margin: "6px 0 0",
+              lineHeight: 1.5,
+            }}
+          >
+            {sub}
+          </p>
+        )}
+        {meta && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginTop: 12,
+            }}
+          >
+            {meta}
+          </div>
+        )}
+      </div>
+      {actions && (
+        <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>{actions}</div>
+      )}
+    </div>
+  );
+}
+
+// ── compact embed shell (S2) — fills the host webview viewport ────────────────
 export function EnterpriseEmbedShell({
   children,
   host = "hongshuo-workspace",
   state = "live",
+  footer,
 }: {
   children: ReactNode;
   host?: string;
   state?: "live" | "warn" | "err" | "neutral";
+  footer?: ReactNode;
 }) {
-  const { t } = useTranslation();
-  const tenantIdentity = {
-    name: enterpriseTenant.name,
-  };
-  const statusColor =
+  const { t: tr } = useTranslation();
+  const tenant = enterpriseTenant;
+  const dotC =
     state === "live"
-      ? enterpriseTheme.success
+      ? t.success
       : state === "warn"
-        ? enterpriseTheme.warn
+        ? t.warn
         : state === "err"
-          ? enterpriseTheme.danger
-          : enterpriseTheme.textMuted;
+          ? t.danger
+          : t.faint;
 
   return (
-    <CanvasWindowChrome
-      width="100%"
-      height={720}
-      outerPadding={20}
-      style={{ background: enterpriseTheme.bg }}
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: t.bg,
+        color: t.ink,
+        fontFamily: t.sans,
+      }}
     >
+      {/* host app status bar */}
       <div
         style={{
-          width: "100%",
-          height: "100%",
+          height: 44,
+          flexShrink: 0,
+          background: t.dark ? "#0B0F1A" : t.primaryHi,
+          color: "#fff",
           display: "flex",
-          flexDirection: "column",
-          background: enterpriseTheme.bg,
-          color: enterpriseTheme.text,
-          fontFamily: enterpriseTheme.fontFamily,
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          padding: "0 22px 6px",
+          fontSize: 12.5,
+          fontWeight: 600,
         }}
       >
-        <div
+        <span>9:41</span>
+        <span
           style={{
-            height: 44,
-            background: enterpriseTheme.info,
-            color: enterpriseTheme.surface,
-            padding: "0 20px 6px",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            fontSize: 12.5,
-            fontWeight: 600,
-          }}
-        >
-          <span>9:41</span>
-          <span
-            style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
-          >
-            <CanvasIcon name="clock" size={12} />
-            <CanvasIcon name="health" size={12} />
-          </span>
-        </div>
-
-        <div
-          style={{
-            background: enterpriseTheme.info,
-            color: enterpriseTheme.surface,
-            padding: "4px 12px 12px",
-            display: "flex",
+            display: "inline-flex",
+            gap: 5,
             alignItems: "center",
-            gap: 10,
+            opacity: 0.9,
           }}
         >
-          <button
-            type="button"
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 999,
-              background: enterpriseTheme.accentBg,
-              border: "none",
-              color: enterpriseTheme.surface,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-            }}
-          >
-            <CanvasIcon
-              name="chevR"
-              size={16}
-              style={{ transform: "rotate(180deg)" }}
-            />
-          </button>
-          <div style={{ flex: 1, lineHeight: 1.2 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700 }}>
-              {t("shell.embed.title")}
-            </div>
-            <div style={{ fontSize: 10, opacity: 0.74 }}>
-              {t("shell.embed.subtitle", { tenant: tenantIdentity.name })}
-            </div>
-          </div>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 9.5,
-              fontFamily: enterpriseTheme.monoFamily,
-              background: enterpriseTheme.accentBg,
-              padding: "4px 8px",
-              borderRadius: 999,
-            }}
-          >
-            <CanvasIcon name="health" size={10} />
-            {host}
-          </span>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "6px 14px",
-            background: enterpriseTheme.surface,
-            borderBottom: `1px solid ${enterpriseTheme.border}`,
-            fontSize: 10.5,
-            color: enterpriseTheme.textMuted,
-          }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 999,
-              background: statusColor,
-            }}
-          />
-          <span style={{ fontFamily: enterpriseTheme.monoFamily }}>
-            webview
-          </span>
-          <span>{t("shell.embed.status", { tenant: tenantIdentity.name })}</span>
-        </div>
-
-        <div style={{ flex: 1, overflow: "auto" }}>{children}</div>
+          <EIcon name="bolt" size={12} />
+          <EIcon name="shield" size={12} />
+        </span>
       </div>
-    </CanvasWindowChrome>
+
+      {/* host app chrome */}
+      <div
+        style={{
+          flexShrink: 0,
+          background: t.dark ? "#0B0F1A" : t.primaryHi,
+          color: "#fff",
+          padding: "4px 12px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <button
+          type="button"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            background: "rgba(255,255,255,.16)",
+            border: "none",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <EIcon
+            name="chevR"
+            size={16}
+            style={{ transform: "rotate(180deg)" }}
+          />
+        </button>
+        <div style={{ flex: 1, lineHeight: 1.2 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700 }}>
+            {tr("shell.embed.title")}
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.74 }}>
+            {tr("shell.embed.subtitle", { tenant: tenant.name })}
+          </div>
+        </div>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 9.5,
+            fontFamily: t.mono,
+            opacity: 0.75,
+            background: "rgba(255,255,255,.12)",
+            padding: "4px 8px",
+            borderRadius: 999,
+          }}
+        >
+          <EIcon name="lock" size={10} />
+          {host}
+        </span>
+      </div>
+
+      {/* webview surface badge */}
+      <div
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 14px",
+          background: t.surface,
+          borderBottom: `1px solid ${t.line}`,
+          fontSize: 10.5,
+          color: t.muted,
+        }}
+      >
+        <span
+          style={{ width: 6, height: 6, borderRadius: 3, background: dotC }}
+        />
+        <span style={{ fontFamily: t.mono }}>webview</span>
+        <span style={{ color: t.faint }}>
+          {tr("shell.embed.status", { tenant: tenant.name })}
+        </span>
+      </div>
+
+      <div style={{ flex: 1, overflow: "auto" }}>{children}</div>
+
+      {footer && (
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: `1px solid ${t.line}`,
+            background: t.surface,
+            padding: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 9,
+          }}
+        >
+          {footer}
+        </div>
+      )}
+    </div>
   );
 }
