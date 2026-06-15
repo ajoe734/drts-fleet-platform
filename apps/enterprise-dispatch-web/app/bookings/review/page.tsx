@@ -8,23 +8,29 @@ import {
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import {
-  enterpriseBookingDraft,
-  enterpriseReviewChecklist,
+  getEnterpriseBookingDraft,
+  getEnterpriseReviewChecklist,
 } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
-export default function ReviewBookingPage() {
+export default async function ReviewBookingPage() {
+  const locale = await getServerLocale();
+  const draft = getEnterpriseBookingDraft(locale);
+  const checklist = getEnterpriseReviewChecklist(locale);
+
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
-        title="確認權責"
-        subtitle="提交前最後確認 passenger、bookedBy、cost center、quota impact 與 approval posture。"
+        title={t("review.title", undefined, locale)}
+        subtitle={t("review.subtitle", undefined, locale)}
       />
 
       <EnterpriseBanner
         tone="warn"
-        title="這筆預約需要審批"
-        body="送出後可能先顯示 accepted + pending；不要把畫面上的已受理誤認成已完成派車。"
+        title={t("review.banner.title", undefined, locale)}
+        body={t("review.banner.body", undefined, locale)}
       />
 
       <div
@@ -35,37 +41,37 @@ export default function ReviewBookingPage() {
         }}
       >
         <EnterpriseCard
-          title="預約摘要"
-          actions={<EnterprisePill tone="accent">review</EnterprisePill>}
+          title={t("review.card.summary", undefined, locale)}
+          actions={<EnterprisePill tone="accent">{t("review.card.badge", undefined, locale)}</EnterprisePill>}
         >
           <EnterpriseDl
             cols={2}
             items={[
-              { k: "乘客", v: enterpriseBookingDraft.passenger },
-              { k: "下單人", v: enterpriseBookingDraft.bookedBy },
-              { k: "上車 / 下車", v: `${enterpriseBookingDraft.pickup} → ${enterpriseBookingDraft.dropoff}` },
-              { k: "時間", v: enterpriseBookingDraft.reservationWindow, mono: true },
-              { k: "成本中心", v: enterpriseBookingDraft.costCenter, mono: true },
-              { k: "現場聯絡", v: enterpriseBookingDraft.onsiteContact },
+              { k: t("new.field.passenger", undefined, locale), v: draft.passenger },
+              { k: t("new.field.bookedBy", undefined, locale), v: draft.bookedBy },
+              { k: t("review.summary.pickupDropoff", undefined, locale), v: `${draft.pickup} → ${draft.dropoff}` },
+              { k: t("review.summary.time", undefined, locale), v: draft.reservationWindow, mono: true },
+              { k: t("review.summary.costCenter", undefined, locale), v: draft.costCenter, mono: true },
+              { k: t("review.summary.contact", undefined, locale), v: draft.onsiteContact },
             ]}
           />
         </EnterpriseCard>
 
         <EnterpriseSection>
-          <EnterpriseCard title="審批與額度">
+          <EnterpriseCard title={t("review.card.approval", undefined, locale)}>
             <EnterpriseDl
               cols={1}
               items={[
-                { k: "審批 posture", v: enterpriseBookingDraft.approval },
-                { k: "額度影響", v: enterpriseBookingDraft.quotaImpact },
-                { k: "備註", v: enterpriseBookingDraft.notes },
+                { k: t("review.approval.posture", undefined, locale), v: draft.approval },
+                { k: t("review.approval.quotaImpact", undefined, locale), v: draft.quotaImpact },
+                { k: t("review.approval.notes", undefined, locale), v: draft.notes },
               ]}
             />
           </EnterpriseCard>
 
-          <EnterpriseCard title="送出前確認">
+          <EnterpriseCard title={t("review.card.checklist", undefined, locale)}>
             <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
-              {enterpriseReviewChecklist.map((item) => (
+              {checklist.map((item) => (
                 <li key={item} style={{ color: enterpriseTheme.text, fontSize: 12.5 }}>
                   {item}
                 </li>
@@ -75,7 +81,7 @@ export default function ReviewBookingPage() {
         </EnterpriseSection>
       </div>
 
-      <EnterpriseCard title="提交 booking command">
+      <EnterpriseCard title={t("review.card.submit", undefined, locale)}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link
             href="/bookings/submitted"
@@ -94,7 +100,7 @@ export default function ReviewBookingPage() {
               textDecoration: "none",
             }}
           >
-            送出預約
+            {t("review.submit", undefined, locale)}
           </Link>
           <Link
             href="/bookings/new"
@@ -113,7 +119,7 @@ export default function ReviewBookingPage() {
               textDecoration: "none",
             }}
           >
-            返回編輯
+            {t("review.back", undefined, locale)}
           </Link>
         </div>
       </EnterpriseCard>

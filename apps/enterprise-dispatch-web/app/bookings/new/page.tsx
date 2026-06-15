@@ -8,12 +8,14 @@ import {
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import {
-  enterpriseAddresses,
-  enterpriseBookingDraft,
-  enterpriseCostCenters,
-  enterprisePassengers,
+  getEnterpriseAddresses,
+  getEnterpriseBookingDraft,
+  getEnterpriseCostCenters,
+  getEnterprisePassengers,
 } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
 const cardGridStyle = {
   display: "grid",
@@ -21,17 +23,12 @@ const cardGridStyle = {
   gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.95fr)",
 } as const;
 
-const fieldStyle = {
-  display: "grid",
-  gap: 6,
-} as const;
-
+const fieldStyle = { display: "grid", gap: 6 } as const;
 const labelStyle = {
   fontSize: 12,
   fontWeight: 700,
   color: enterpriseTheme.textMuted,
 } as const;
-
 const valueStyle = {
   minHeight: 42,
   padding: "11px 12px",
@@ -41,7 +38,6 @@ const valueStyle = {
   color: enterpriseTheme.text,
   fontSize: 13,
 } as const;
-
 const actionLinkStyle = {
   display: "inline-flex",
   alignItems: "center",
@@ -54,12 +50,18 @@ const actionLinkStyle = {
   fontWeight: 600,
 } as const;
 
-export default function NewBookingPage() {
+export default async function NewBookingPage() {
+  const locale = await getServerLocale();
+  const draft = getEnterpriseBookingDraft(locale);
+  const passengers = getEnterprisePassengers(locale);
+  const addresses = getEnterpriseAddresses(locale);
+  const costCenters = getEnterpriseCostCenters(locale);
+
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
-        title="建立預約"
-        subtitle="先確認乘客、成本中心與企業情境，再進入 review page。"
+        title={t("new.title", undefined, locale)}
+        subtitle={t("new.subtitle", undefined, locale)}
         actions={
           <Link
             href="/bookings/review"
@@ -70,87 +72,75 @@ export default function NewBookingPage() {
               color: enterpriseTheme.surface,
             }}
           >
-            前往確認頁
+            {t("new.review", undefined, locale)}
           </Link>
         }
       />
 
       <EnterpriseBanner
         tone="info"
-        title="企業語意優先"
-        body="這裡先確認 passenger、bookedBy、cost center、quota 與 approval posture；機場欄位只在情境需要時出現。"
+        title={t("new.banner.title", undefined, locale)}
+        body={t("new.banner.body", undefined, locale)}
       />
 
       <div style={cardGridStyle}>
-        <EnterpriseCard title="預約內容">
+        <EnterpriseCard title={t("new.card.booking", undefined, locale)}>
           <div style={{ display: "grid", gap: 12 }}>
+            {[
+              ["new.field.passenger", draft.passenger],
+              ["new.field.bookedBy", draft.bookedBy],
+              ["new.field.pickup", draft.pickup],
+              ["new.field.dropoff", draft.dropoff],
+              ["new.field.window", draft.reservationWindow],
+              ["new.field.costCenter", draft.costCenter],
+            ].map(([key, value]) => (
+              <div key={key} style={fieldStyle}>
+                <span style={labelStyle}>{t(key as never, undefined, locale)}</span>
+                <div style={valueStyle}>{value}</div>
+              </div>
+            ))}
             <div style={fieldStyle}>
-              <span style={labelStyle}>乘客</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.passenger}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>下單人</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.bookedBy}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>上車地點</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.pickup}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>下車地點</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.dropoff}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>預約時段</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.reservationWindow}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>成本中心</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.costCenter}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>機場情境</span>
+              <span style={labelStyle}>{t("new.field.airport", undefined, locale)}</span>
               <div style={valueStyle}>
-                {enterpriseBookingDraft.flight} · {enterpriseBookingDraft.terminal}
-                · {enterpriseBookingDraft.luggage}
+                {draft.flight} · {draft.terminal} · {draft.luggage}
               </div>
             </div>
             <div style={fieldStyle}>
-              <span style={labelStyle}>現場聯絡</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.onsiteContact}</div>
+              <span style={labelStyle}>{t("new.field.contact", undefined, locale)}</span>
+              <div style={valueStyle}>{draft.onsiteContact}</div>
             </div>
           </div>
         </EnterpriseCard>
 
         <EnterpriseSection>
           <EnterpriseCard
-            title="政策預覽"
-            actions={<EnterprisePill tone="warn">approval</EnterprisePill>}
+            title={t("new.card.policy", undefined, locale)}
+            actions={<EnterprisePill tone="warn">{t("new.card.policyBadge", undefined, locale)}</EnterprisePill>}
           >
             <EnterpriseDl
               cols={1}
               items={[
-                { k: "審批結果", v: enterpriseBookingDraft.approval },
-                { k: "額度影響", v: enterpriseBookingDraft.quotaImpact },
-                { k: "車型", v: enterpriseBookingDraft.vehicle },
+                { k: t("new.policy.approval", undefined, locale), v: draft.approval },
+                { k: t("new.policy.quotaImpact", undefined, locale), v: draft.quotaImpact },
+                { k: t("new.policy.vehicle", undefined, locale), v: draft.vehicle },
               ]}
             />
           </EnterpriseCard>
 
-          <EnterpriseCard title="常用選項">
+          <EnterpriseCard title={t("new.card.saved", undefined, locale)}>
             <EnterpriseDl
               cols={1}
               items={[
-                { k: "乘客捷徑", v: enterprisePassengers.join(" / ") },
-                { k: "常用地址", v: enterpriseAddresses.slice(0, 2).join(" / ") },
-                { k: "成本中心", v: enterpriseCostCenters.join(" / ") },
+                { k: t("new.saved.passengers", undefined, locale), v: passengers.join(" / ") },
+                { k: t("new.saved.addresses", undefined, locale), v: addresses.slice(0, 2).join(" / ") },
+                { k: t("new.saved.costCenters", undefined, locale), v: costCenters.join(" / ") },
               ]}
             />
           </EnterpriseCard>
         </EnterpriseSection>
       </div>
 
-      <EnterpriseCard title="下一步">
+      <EnterpriseCard title={t("new.card.next", undefined, locale)}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link
             href="/bookings/review"
@@ -161,7 +151,7 @@ export default function NewBookingPage() {
               color: enterpriseTheme.surface,
             }}
           >
-            繼續到 review
+            {t("new.next.review", undefined, locale)}
           </Link>
           <Link
             href="/bookings"
@@ -172,7 +162,7 @@ export default function NewBookingPage() {
               color: enterpriseTheme.text,
             }}
           >
-            返回我的預約
+            {t("new.next.back", undefined, locale)}
           </Link>
         </div>
       </EnterpriseCard>

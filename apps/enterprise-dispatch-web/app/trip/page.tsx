@@ -7,13 +7,17 @@ import {
   EnterprisePill,
 } from "@/components/enterprise-primitives";
 import {
-  bookingStateMeta,
-  enterpriseBookings,
+  getBookingStateMeta,
+  getEnterpriseBookings,
 } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
-export default function TripPage() {
-  const trip = enterpriseBookings[0] ?? null;
+export default async function TripPage() {
+  const locale = await getServerLocale();
+  const trip = getEnterpriseBookings(locale)[0] ?? null;
+  const bookingStateMeta = getBookingStateMeta(locale);
 
   if (!trip) {
     return null;
@@ -22,8 +26,8 @@ export default function TripPage() {
   return (
     <div style={{ ...enterprisePageStyle, maxWidth: 880 }}>
       <EnterprisePageHeader
-        title="目前行程"
-        subtitle="最快回到目前用車狀態，ETA 為估計值。"
+        title={t("trip.title", undefined, locale)}
+        subtitle={t("trip.subtitle", undefined, locale)}
       />
 
       <EnterpriseCard
@@ -45,10 +49,10 @@ export default function TripPage() {
           <EnterpriseDl
             cols={1}
             items={[
-              { k: "上車", v: trip.from },
-              { k: "下車", v: trip.to },
-              { k: "時間", v: trip.window, mono: true },
-              { k: "費用歸屬", v: trip.costCenter, mono: true },
+              { k: t("trip.pickup", undefined, locale), v: trip.from },
+              { k: t("trip.dropoff", undefined, locale), v: trip.to },
+              { k: t("trip.time", undefined, locale), v: trip.window, mono: true },
+              { k: t("trip.costCenter", undefined, locale), v: trip.costCenter, mono: true },
             ]}
           />
           <div
@@ -70,23 +74,15 @@ export default function TripPage() {
             >
               {trip.etaMinutes}
             </div>
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 12,
-                color: enterpriseTheme.textMuted,
-              }}
-            >
-              分鐘 · 估計抵達
+            <div style={{ marginTop: 6, fontSize: 12, color: enterpriseTheme.textMuted }}>
+              {t("common.etaArrival", undefined, locale)}
             </div>
           </div>
         </div>
 
-        <div
-          style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}
-        >
-          <EnterpriseBtn variant="secondary">聯絡司機</EnterpriseBtn>
-          <EnterpriseBtn variant="secondary">企業客服</EnterpriseBtn>
+        <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+          <EnterpriseBtn variant="secondary">{t("trip.contactDriver", undefined, locale)}</EnterpriseBtn>
+          <EnterpriseBtn variant="secondary">{t("trip.contactSupport", undefined, locale)}</EnterpriseBtn>
           <Link
             href={`/bookings/${trip.id}`}
             style={{
@@ -104,7 +100,7 @@ export default function TripPage() {
               textDecoration: "none",
             }}
           >
-            預約詳情
+            {t("trip.detail", undefined, locale)}
           </Link>
         </div>
       </EnterpriseCard>

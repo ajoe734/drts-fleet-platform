@@ -7,7 +7,9 @@ import {
   EnterprisePageHeader,
 } from "@/components/enterprise-primitives";
 import { getEnterpriseBooking } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
 export default async function ReceiptPage({
   params,
@@ -15,7 +17,8 @@ export default async function ReceiptPage({
   params: Promise<{ bookingId: string }>;
 }) {
   const { bookingId } = await params;
-  const booking = getEnterpriseBooking(bookingId);
+  const locale = await getServerLocale();
+  const booking = getEnterpriseBooking(bookingId, locale);
 
   if (!booking) {
     return notFound();
@@ -24,27 +27,27 @@ export default async function ReceiptPage({
   return (
     <div style={{ ...enterprisePageStyle, maxWidth: 920 }}>
       <EnterprisePageHeader
-        title={`行程收據 · ${booking.id}`}
-        subtitle="收據只在支援的渠道與狀態下顯示。"
+        title={t("receipt.title", { id: booking.id }, locale)}
+        subtitle={t("receipt.subtitle", undefined, locale)}
       />
 
       {booking.receiptReady ? (
-        <EnterpriseCard title="收據摘要">
+        <EnterpriseCard title={t("receipt.card.summary", undefined, locale)}>
           <EnterpriseDl
             cols={2}
             items={[
-              { k: "乘客", v: booking.passenger },
-              { k: "成本中心", v: booking.costCenter, mono: true },
-              { k: "車資", v: booking.fare ?? "待結算", mono: true },
-              { k: "行程", v: `${booking.from} → ${booking.to}` },
+              { k: t("receipt.passenger", undefined, locale), v: booking.passenger },
+              { k: t("receipt.costCenter", undefined, locale), v: booking.costCenter, mono: true },
+              { k: t("receipt.fare", undefined, locale), v: booking.fare ?? t("common.notReady", undefined, locale), mono: true },
+              { k: t("receipt.route", undefined, locale), v: `${booking.from} → ${booking.to}` },
             ]}
           />
         </EnterpriseCard>
       ) : (
         <EnterpriseBanner
           tone="warn"
-          title="這筆行程目前沒有可下載收據"
-          body="可能尚未完成結算，或這個渠道不提供獨立 receipt。請改由企業報帳流程或客服支援處理。"
+          title={t("receipt.banner.title", undefined, locale)}
+          body={t("receipt.banner.body", undefined, locale)}
         />
       )}
 
@@ -65,7 +68,7 @@ export default async function ReceiptPage({
           textDecoration: "none",
         }}
       >
-        返回預約詳情
+        {t("receipt.back", undefined, locale)}
       </Link>
     </div>
   );

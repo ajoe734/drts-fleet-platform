@@ -4,12 +4,21 @@ import {
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import { enterpriseTheme } from "@/lib/enterprise-theme";
+import { useTranslation } from "@/lib/i18n";
 
 const bookingFlowSteps = [
-  { key: "home", label: "首頁", href: "/" },
-  { key: "new", label: "建立預約", href: "/bookings/new" },
-  { key: "review", label: "確認送出", href: "/bookings/review" },
-  { key: "submitted", label: "提交結果", href: "/bookings/submitted" },
+  { key: "home", labelKey: "bookingFlow.home", href: "/" },
+  { key: "new", labelKey: "bookingFlow.new", href: "/bookings/new" },
+  {
+    key: "review",
+    labelKey: "bookingFlow.review",
+    href: "/bookings/review",
+  },
+  {
+    key: "submitted",
+    labelKey: "bookingFlow.submitted",
+    href: "/bookings/submitted",
+  },
 ] as const;
 
 export type BookingFlowStepKey = (typeof bookingFlowSteps)[number]["key"];
@@ -37,6 +46,8 @@ export function EnterpriseBookingFlowStepper({
 }: {
   current: BookingFlowStepKey;
 }) {
+  const { t } = useTranslation();
+
   return (
     <EnterpriseSection
       style={{
@@ -55,14 +66,16 @@ export function EnterpriseBookingFlowStepper({
           gap: 12,
           flexWrap: "wrap",
         }}
-      >
+        >
         <div>
-          <div style={{ fontSize: 13, fontWeight: 700 }}>網站版預約流程</div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>
+            {t("bookingFlow.title")}
+          </div>
           <div style={{ fontSize: 11.5, color: enterpriseTheme.textMuted }}>
-            fixture flow: home → new → review → submitted
+            {t("bookingFlow.subtitle")}
           </div>
         </div>
-        <EnterprisePill tone="tenant">enterprise_dispatch</EnterprisePill>
+        <EnterprisePill tone="tenant">{t("bookingFlow.badge")}</EnterprisePill>
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -91,7 +104,7 @@ export function EnterpriseBookingFlowStepper({
               >
                 {index + 1}
               </span>
-              {step.label}
+              {t(step.labelKey)}
             </Link>
           );
         })}

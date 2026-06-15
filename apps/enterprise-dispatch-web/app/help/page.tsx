@@ -6,66 +6,73 @@ import {
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import {
-  enterpriseSupportFaq,
-  enterpriseTenant,
-  policyNotes,
+  getEnterpriseSupportFaq,
+  getEnterpriseTenant,
+  getPolicyNotes,
 } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
-export default function HelpPage() {
+export default async function HelpPage() {
+  const locale = await getServerLocale();
+  const policyNotes = getPolicyNotes(locale);
+  const faq = getEnterpriseSupportFaq(locale);
+  const tenant = getEnterpriseTenant(locale);
+
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
-        title="說明與支援"
-        subtitle="企業用車政策、常見問題與客服資訊。"
+        title={t("help.title", undefined, locale)}
+        subtitle={t("help.subtitle", undefined, locale)}
       />
 
       <EnterpriseBanner
         tone="info"
-        title="accepted + pending 為正常流程"
-        body="系統可能先回覆已受理，再於確認或審批完成後更新狀態；不需要重複送出。"
+        title={t("help.banner.title", undefined, locale)}
+        body={t("help.banner.body", undefined, locale)}
       />
 
       <EnterpriseSection>
-        <EnterpriseCard title="常見政策">
+        <EnterpriseCard title={t("help.policy.title", undefined, locale)}>
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
             {policyNotes.map((note) => (
-              <li
-                key={note}
-                style={{ fontSize: 12.5, color: enterpriseTheme.text }}
-              >
+              <li key={note} style={{ fontSize: 12.5, color: enterpriseTheme.text }}>
                 {note}
               </li>
             ))}
           </ul>
         </EnterpriseCard>
 
-        <EnterpriseCard title="支援聯絡">
+        <EnterpriseCard title={t("help.contact.title", undefined, locale)}>
           <EnterpriseDl
             cols={1}
             items={[
               {
-                k: "企業客服",
-                v: `${enterpriseTenant.supportPhone} · 24h`,
+                k: t("help.contact.phone", undefined, locale),
+                v: t("common.support24h", { phone: tenant.supportPhone }, locale),
                 mono: true,
               },
               {
-                k: "支援信箱",
-                v: enterpriseTenant.supportEmail,
+                k: t("help.contact.email", undefined, locale),
+                v: tenant.supportEmail,
                 mono: true,
               },
-              { k: "升級處理", v: "成本中心更正、報帳問題、人工支援" },
               {
-                k: "通道定位",
-                v: "本前台僅供員工 / 行政自助預約，不提供後台治理模組",
+                k: t("help.contact.escalation", undefined, locale),
+                v: t("help.contact.escalationValue", undefined, locale),
+              },
+              {
+                k: t("help.contact.channel", undefined, locale),
+                v: t("help.contact.channelValue", undefined, locale),
               },
             ]}
           />
         </EnterpriseCard>
 
-        <EnterpriseCard title="常見問題">
+        <EnterpriseCard title={t("help.faq.title", undefined, locale)}>
           <div style={{ display: "grid", gap: 12 }}>
-            {enterpriseSupportFaq.map((item) => (
+            {faq.map((item) => (
               <div key={item.q}>
                 <div style={{ fontSize: 12.5, fontWeight: 700 }}>{item.q}</div>
                 <div

@@ -10,19 +10,19 @@ import {
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import {
-  bookingStateMeta,
-  enterpriseBookingDraft,
-  enterpriseBookings,
-  enterpriseQuotaSummary,
-  enterpriseTenant,
-  enterpriseUser,
-  policyNotes,
+  getBookingStateMeta,
+  getEnterpriseBookingDraft,
+  getEnterpriseBookings,
+  getEnterpriseTenant,
+  getPolicyNotes,
 } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   enterpriseCardGridStyle,
   enterprisePageStyle,
   enterpriseTheme,
 } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
 const primaryLinkStyle = {
   display: "inline-flex",
@@ -69,51 +69,59 @@ const ghostLinkStyle = {
   textDecoration: "none",
 } as const;
 
-export default function HomePage() {
-  const activeTrip = enterpriseBookings[0] ?? null;
+export default async function HomePage() {
+  const locale = await getServerLocale();
+  const bookings = getEnterpriseBookings(locale);
+  const bookingStateMeta = getBookingStateMeta(locale);
+  const draft = getEnterpriseBookingDraft(locale);
+  const tenant = getEnterpriseTenant(locale);
+  const policyNotes = getPolicyNotes(locale);
+  const activeTrip = bookings[0] ?? null;
 
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
-        title={`嗨，${enterpriseUser.name}，要去哪裡？`}
-        subtitle={`${enterpriseTenant.name} · 為自己或同事建立企業派車，費用走成本中心、超額需審批。`}
+        title={t("home.title", { name: "林宜君" }, locale)}
+        subtitle={t("home.subtitle", { tenant: tenant.name }, locale)}
         actions={
           <Link href="/bookings/new" style={primaryLinkStyle}>
-            建立預約
+            {t("home.cta.create", undefined, locale)}
           </Link>
         }
       />
 
       <EnterpriseKpiGrid>
         <EnterpriseKpi
-          label="本月額度"
-          value={enterpriseQuotaSummary.availableAmount}
-          sub={enterpriseQuotaSummary.amount}
+          label={t("home.kpi.quota", undefined, locale)}
+          value="NT$ 35,800"
+          sub="NT$ 84,200 / 120,000"
           hint="quota"
         />
         <EnterpriseKpi
-          label="審批狀態"
-          value="1 件待審"
-          sub="EB-6ND812 · 等待主管核准"
+          label={t("home.kpi.approval", undefined, locale)}
+          value={t("home.kpi.approvalValue", undefined, locale)}
+          sub={t("home.kpi.approvalSub", undefined, locale)}
           hint="approval"
         />
         <EnterpriseKpi
-          label="本月已用車"
-          value="23 趟"
+          label={t("home.kpi.trips", undefined, locale)}
+          value={t("home.kpi.tripsValue", undefined, locale)}
           delta="+6%"
           deltaTone="up"
-          sub="產品部"
+          sub={tenant.department}
           hint="trips"
         />
       </EnterpriseKpiGrid>
 
       <div style={enterpriseCardGridStyle}>
         <EnterpriseCard
-          title="進行中的行程"
+          title={t("home.activeTrip.title", undefined, locale)}
           actions={
-            <EnterprisePill tone="success">
-              {bookingStateMeta.assigned.label}
-            </EnterprisePill>
+            activeTrip ? (
+              <EnterprisePill tone={bookingStateMeta[activeTrip.state].tone}>
+                {bookingStateMeta[activeTrip.state].label}
+              </EnterprisePill>
+            ) : null
           }
         >
           {activeTrip ? (
@@ -121,19 +129,36 @@ export default function HomePage() {
               <EnterpriseDl
                 cols={1}
                 items={[
-                  { k: "乘客", v: activeTrip.passenger },
-                  { k: "下單人", v: `${activeTrip.bookedBy} 代訂` },
-                  { k: "行程", v: `${activeTrip.from} → ${activeTrip.to}` },
                   {
-                    k: "ETA",
-                    v: `${activeTrip.etaMinutes ?? "?"} 分鐘 · 估計`,
+                    k: t("home.activeTrip.passenger", undefined, locale),
+                    v: activeTrip.passenger,
+                  },
+                  {
+                    k: t("home.activeTrip.bookedBy", undefined, locale),
+                    v: t(
+                      "common.bookedByDelegate",
+                      { name: activeTrip.bookedBy },
+                      locale,
+                    ),
+                  },
+                  {
+                    k: t("home.activeTrip.route", undefined, locale),
+                    v: `${activeTrip.from} → ${activeTrip.to}`,
+                  },
+                  {
+                    k: t("home.activeTrip.eta", undefined, locale),
+                    v: t(
+                      "common.etaEstimate",
+                      { minutes: activeTrip.etaMinutes ?? "?" },
+                      locale,
+                    ),
                     mono: true,
                   },
                 ]}
               />
               <div style={{ marginTop: 12 }}>
                 <Link href="/trip" style={secondaryLinkStyle}>
-                  查看目前行程
+                  {t("home.activeTrip.cta", undefined, locale)}
                 </Link>
               </div>
             </>
@@ -141,24 +166,25 @@ export default function HomePage() {
         </EnterpriseCard>
 
         <EnterpriseCard
-          title="快速建立"
-          actions={<EnterprisePill tone="info">self-service</EnterprisePill>}
+          title={t("home.quickCreate.title", undefined, locale)}
+          actions={
+            <EnterprisePill tone="info">
+              {t("home.quickCreate.badge", undefined, locale)}
+            </EnterprisePill>
+          }
         >
           <div style={{ display: "grid", gap: 10 }}>
-            <Link
-              href="/bookings/new"
-              style={{ ...primaryLinkStyle, width: "100%" }}
-            >
-              為自己預約
+            <Link href="/bookings/new" style={{ ...primaryLinkStyle, width: "100%" }}>
+              {t("home.quickCreate.self", undefined, locale)}
             </Link>
             <Link
               href="/bookings/new"
               style={{ ...secondaryLinkStyle, width: "100%" }}
             >
-              為同事 / 訪客代訂
+              {t("home.quickCreate.delegate", undefined, locale)}
             </Link>
             <Link href="/help" style={{ ...ghostLinkStyle, width: "100%" }}>
-              查看政策與支援
+              {t("home.quickCreate.help", undefined, locale)}
             </Link>
           </div>
         </EnterpriseCard>
@@ -166,15 +192,15 @@ export default function HomePage() {
 
       <EnterpriseSection>
         <EnterpriseCard
-          title="即將到來的預約"
+          title={t("home.upcoming.title", undefined, locale)}
           actions={
             <EnterprisePill tone="neutral">
-              {enterpriseBookings.length} 筆
+              {t("home.upcoming.count", { count: bookings.length }, locale)}
             </EnterprisePill>
           }
         >
           <div style={{ display: "grid", gap: 12 }}>
-            {enterpriseBookings.map((booking, index) => (
+            {bookings.map((booking, index) => (
               <div
                 key={booking.id}
                 style={{
@@ -184,7 +210,7 @@ export default function HomePage() {
                   alignItems: "center",
                   paddingBottom: 12,
                   borderBottom:
-                    index === enterpriseBookings.length - 1
+                    index === bookings.length - 1
                       ? "1px solid transparent"
                       : `1px solid ${enterpriseTheme.border}`,
                 }}
@@ -199,7 +225,13 @@ export default function HomePage() {
                       color: enterpriseTheme.textMuted,
                     }}
                   >
-                    {booking.self ? "本人預約" : `${booking.bookedBy} 代訂`}
+                    {booking.self
+                      ? t("home.upcoming.self", undefined, locale)
+                      : t(
+                          "common.bookedByDelegate",
+                          { name: booking.bookedBy },
+                          locale,
+                        )}
                   </div>
                 </div>
                 <div style={{ fontSize: 12.5 }}>
@@ -227,7 +259,7 @@ export default function HomePage() {
                       href={`/bookings/${booking.id}`}
                       style={{ ...ghostLinkStyle, paddingInline: 0 }}
                     >
-                      查看詳情
+                      {t("home.upcoming.detail", undefined, locale)}
                     </Link>
                   </div>
                 </div>
@@ -237,34 +269,35 @@ export default function HomePage() {
         </EnterpriseCard>
 
         <EnterpriseCard
-          title="下一筆預約草稿"
+          title={t("home.draft.title", undefined, locale)}
           actions={<EnterprisePill tone="accent">review-first</EnterprisePill>}
         >
           <EnterpriseDl
             cols={2}
             items={[
-              { k: "乘客", v: enterpriseBookingDraft.passenger },
-              { k: "下單人", v: enterpriseBookingDraft.bookedBy },
-              { k: "上車 / 下車", v: `${enterpriseBookingDraft.pickup} → ${enterpriseBookingDraft.dropoff}` },
-              { k: "成本中心", v: enterpriseBookingDraft.costCenter, mono: true },
+              { k: t("new.field.passenger", undefined, locale), v: draft.passenger },
+              { k: t("new.field.bookedBy", undefined, locale), v: draft.bookedBy },
+              {
+                k: t("review.summary.pickupDropoff", undefined, locale),
+                v: `${draft.pickup} → ${draft.dropoff}`,
+              },
+              { k: t("new.field.costCenter", undefined, locale), v: draft.costCenter, mono: true },
             ]}
           />
-          <div
-            style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}
-          >
+          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
             <Link href="/bookings/review" style={primaryLinkStyle}>
-              進入確認頁
+              {t("new.next.review", undefined, locale)}
             </Link>
             <Link href="/bookings/new" style={secondaryLinkStyle}>
-              回到表單
+              {t("new.next.back", undefined, locale)}
             </Link>
           </div>
         </EnterpriseCard>
 
         <EnterpriseBanner
           tone="info"
-          title="政策提醒"
-          body={`${policyNotes[0]}；${policyNotes[1]}；${policyNotes[2]}。`}
+          title={t("home.draft.policy", undefined, locale)}
+          body={policyNotes.join("；")}
         />
       </EnterpriseSection>
     </div>

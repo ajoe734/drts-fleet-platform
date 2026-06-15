@@ -9,29 +9,36 @@ import {
   EnterpriseSection,
 } from "@/components/enterprise-primitives";
 import {
-  bookingStateMeta,
-  enterpriseBookings,
-  policyNotes,
+  getBookingStateMeta,
+  getEnterpriseBookings,
+  getPolicyNotes,
 } from "@/lib/enterprise-fixtures";
+import { getServerLocale } from "@/lib/server-locale";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { t } from "@/lib/translations";
 
-export default function BookingsPage() {
+export default async function BookingsPage() {
+  const locale = await getServerLocale();
+  const bookings = getEnterpriseBookings(locale);
+  const bookingStateMeta = getBookingStateMeta(locale);
+  const policyNotes = getPolicyNotes(locale);
+
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
-        title="我的預約"
-        subtitle="前台歷史檢視與建立入口；不是派遣看板。"
-        actions={<EnterpriseBtn variant="primary">建立預約</EnterpriseBtn>}
+        title={t("bookings.title", undefined, locale)}
+        subtitle={t("bookings.subtitle", undefined, locale)}
+        actions={<EnterpriseBtn variant="primary">{t("bookings.create", undefined, locale)}</EnterpriseBtn>}
       />
 
       <EnterpriseBanner
         tone="info"
-        title="費用歸屬與審批優先"
-        body="預約送出後，狀態可能先顯示已受理或待審批；可用操作仍以 backend availableActions 為準。"
+        title={t("bookings.banner.title", undefined, locale)}
+        body={t("bookings.banner.body", undefined, locale)}
       />
 
       <EnterpriseSection>
-        {enterpriseBookings.map((booking) => (
+        {bookings.map((booking) => (
           <EnterpriseCard
             key={booking.id}
             title={`${booking.id} · ${booking.passenger}`}
@@ -45,14 +52,18 @@ export default function BookingsPage() {
               cols={2}
               items={[
                 {
-                  k: "乘客 / 下單人",
+                  k: t("bookings.card.passengerBooker", undefined, locale),
                   v: booking.self
-                    ? `${booking.passenger} / 本人`
-                    : `${booking.passenger} / ${booking.bookedBy} 代訂`,
+                    ? `${booking.passenger} / ${t("common.self", undefined, locale)}`
+                    : `${booking.passenger} / ${t(
+                        "common.bookedByDelegate",
+                        { name: booking.bookedBy },
+                        locale,
+                      )}`,
                 },
-                { k: "成本中心", v: booking.costCenter, mono: true },
-                { k: "行程", v: `${booking.from} → ${booking.to}` },
-                { k: "時間", v: booking.window, mono: true },
+                { k: t("bookings.card.costCenter", undefined, locale), v: booking.costCenter, mono: true },
+                { k: t("bookings.card.route", undefined, locale), v: `${booking.from} → ${booking.to}` },
+                { k: t("bookings.card.time", undefined, locale), v: booking.window, mono: true },
               ]}
             />
             <div style={{ marginTop: 12 }}>
@@ -73,19 +84,16 @@ export default function BookingsPage() {
                   textDecoration: "none",
                 }}
               >
-                查看詳情
+                {t("bookings.card.detail", undefined, locale)}
               </Link>
             </div>
           </EnterpriseCard>
         ))}
 
-        <EnterpriseCard title="建立預約前提醒">
+        <EnterpriseCard title={t("bookings.policy.title", undefined, locale)}>
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
             {policyNotes.map((note) => (
-              <li
-                key={note}
-                style={{ fontSize: 12.5, color: enterpriseTheme.text }}
-              >
+              <li key={note} style={{ fontSize: 12.5, color: enterpriseTheme.text }}>
                 {note}
               </li>
             ))}

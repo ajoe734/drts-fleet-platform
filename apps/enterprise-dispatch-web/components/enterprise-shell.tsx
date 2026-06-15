@@ -4,21 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { CanvasIcon, CanvasWindowChrome } from "@drts/ui-web";
+import {
+  enterpriseTenant,
+  getEnterpriseUser,
+} from "@/lib/enterprise-fixtures";
 import { enterpriseTheme } from "@/lib/enterprise-theme";
-
-const tenantIdentity = {
-  mark: "鴻",
-  name: "鴻碩科技",
-  subtitle: "企業派車",
-  operator: "智慧運輸科技 DRTS",
-};
-
-const navItems = [
-  { key: "home", href: "/", label: "首頁" },
-  { key: "bookings", href: "/bookings", label: "我的預約" },
-  { key: "trip", href: "/trip", label: "行程" },
-  { key: "help", href: "/help", label: "說明" },
-] as const;
+import { useTranslation } from "@/lib/i18n";
 
 export interface EnterpriseShellProps {
   children: ReactNode;
@@ -58,6 +49,9 @@ function iconButtonStyle(): CSSProperties {
 }
 
 function UserChip() {
+  const { locale } = useTranslation();
+  const user = getEnterpriseUser(locale);
+
   return (
     <div
       style={{
@@ -101,7 +95,7 @@ function UserChip() {
             color: enterpriseTheme.textMuted,
           }}
         >
-          行政祕書
+          {user.role}
         </span>
       </span>
     </div>
@@ -109,7 +103,20 @@ function UserChip() {
 }
 
 export function EnterpriseShell({ children }: EnterpriseShellProps) {
+  const { t } = useTranslation();
   const pathname = usePathname();
+  const tenantIdentity = {
+    mark: "鴻",
+    name: enterpriseTenant.name,
+    subtitle: t("shell.tenantSubtitle"),
+    operator: t("shell.operator"),
+  };
+  const navItems = [
+    { key: "home", href: "/", label: t("shell.nav.home") },
+    { key: "bookings", href: "/bookings", label: t("shell.nav.bookings") },
+    { key: "trip", href: "/trip", label: t("shell.nav.trip") },
+    { key: "help", href: "/help", label: t("shell.nav.help") },
+  ] as const;
 
   return (
     <div
@@ -221,12 +228,16 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
                 size={13}
                 style={{ color: enterpriseTheme.accent }}
               />
-              本月額度
+              {t("shell.quota")}
               <strong style={{ fontFamily: enterpriseTheme.monoFamily }}>
                 NT$ 31,000
               </strong>
             </span>
-            <button type="button" style={iconButtonStyle()} title="支援通知">
+            <button
+              type="button"
+              style={iconButtonStyle()}
+              title={t("shell.supportNotifications")}
+            >
               <CanvasIcon name="bell" size={14} />
             </button>
             <UserChip />
@@ -249,8 +260,12 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
           color: enterpriseTheme.textDim,
         }}
       >
-        <span>© 2026 {tenantIdentity.name} · 企業派車前台</span>
-        <span>接送服務由 {tenantIdentity.operator} 營運</span>
+        <span>
+          © 2026 {tenantIdentity.name} · {t("shell.footer.product")}
+        </span>
+        <span>
+          {t("shell.footer.operatedBy", { operator: tenantIdentity.operator })}
+        </span>
       </footer>
     </div>
   );
@@ -265,6 +280,10 @@ export function EnterpriseEmbedShell({
   host?: string;
   state?: "live" | "warn" | "err" | "neutral";
 }) {
+  const { t } = useTranslation();
+  const tenantIdentity = {
+    name: enterpriseTenant.name,
+  };
   const statusColor =
     state === "live"
       ? enterpriseTheme.success
@@ -346,9 +365,11 @@ export function EnterpriseEmbedShell({
             />
           </button>
           <div style={{ flex: 1, lineHeight: 1.2 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700 }}>企業派車</div>
+            <div style={{ fontSize: 14.5, fontWeight: 700 }}>
+              {t("shell.embed.title")}
+            </div>
             <div style={{ fontSize: 10, opacity: 0.74 }}>
-              {tenantIdentity.name} · 企業 App
+              {t("shell.embed.subtitle", { tenant: tenantIdentity.name })}
             </div>
           </div>
           <span
@@ -391,7 +412,7 @@ export function EnterpriseEmbedShell({
           <span style={{ fontFamily: enterpriseTheme.monoFamily }}>
             webview
           </span>
-          <span>· embedded in {tenantIdentity.name} app</span>
+          <span>{t("shell.embed.status", { tenant: tenantIdentity.name })}</span>
         </div>
 
         <div style={{ flex: 1, overflow: "auto" }}>{children}</div>
