@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { EAvatar, EIcon } from "@/components/ent-kit";
 import {
   enterpriseQuotaSummary,
@@ -10,7 +10,9 @@ import {
   getEnterpriseUser,
 } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
+import type { TranslationKey } from "@/lib/translations";
 
 const TENANT_MARK = "鴻";
 
@@ -34,8 +36,156 @@ function topLinkStyle(active: boolean): CSSProperties {
 }
 
 // ── workspace top nav (S1) ───────────────────────────────────────────────────
+
+type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+
+type EnterpriseTr = (
+  key: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+function normalizeHealthStatus(
+  value: unknown,
+  responseOk: boolean,
+): ApiHealthStatus {
+  if (!responseOk) {
+    return "degraded";
+  }
+
+  const normalized = String(value ?? "healthy").toLowerCase();
+  if (normalized === "down" || normalized === "unhealthy") {
+    return "down";
+  }
+  if (normalized === "degraded" || normalized === "warning") {
+    return "degraded";
+  }
+  return "healthy";
+}
+
+function useApiHealth() {
+  const [status, setStatus] = useState<ApiHealthStatus>("checking");
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const apiBaseUrl = getRuntimeApiBaseUrl().replace(/\/$/, "");
+
+    async function checkHealth() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/health`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const body = await response.json().catch(() => null);
+        setStatus(normalizeHealthStatus(body?.status, response.ok));
+      } catch {
+        if (!controller.signal.aborted) {
+          setStatus("down");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLastCheckedAt(new Date());
+        }
+      }
+    }
+
+    checkHealth();
+
+    return () => controller.abort();
+  }, []);
+
+  return { status, lastCheckedAt };
+}
+
+function formatCheckedAt(date: Date | null, locale: "en" | "zh") {
+  if (!date) {
+    return null;
+  }
+
+  return date.toLocaleTimeString(locale === "zh" ? "zh-TW" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function EnterpriseShellControls({
+  locale,
+  setLocale,
+  tr,
+}: {
+  locale: "en" | "zh";
+  setLocale: (locale: "en" | "zh") => void;
+  tr: EnterpriseTr;
+}) {
+  const { status, lastCheckedAt } = useApiHealth();
+  const statusCopy = {
+    checking: {
+      label: tr("shell.health.checking"),
+      fg: t.muted,
+      bg: t.surface,
+      border: t.line,
+    },
+    healthy: {
+      label: tr("shell.health.healthy"),
+      fg: t.success,
+      bg: "rgba(20,184,166,.12)",
+      border: "rgba(20,184,166,.28)",
+    },
+    degraded: {
+      label: tr("shell.health.degraded"),
+      fg: t.warn,
+      bg: "rgba(245,158,11,.12)",
+      border: "rgba(245,158,11,.32)",
+    },
+    down: {
+      label: tr("shell.health.down"),
+      fg: t.danger,
+      bg: "rgba(239,68,68,.12)",
+      border: "rgba(239,68,68,.32)",
+    },
+  } satisfies Record<
+    ApiHealthStatus,
+    { label: string; fg: string; bg: string; border: string }
+  >;
+  const current = statusCopy[status];
+  const checkedAt = formatCheckedAt(lastCheckedAt, locale);
+
+  return (
+    <div style={controlGroupStyle}>
+      <div
+        aria-label={current.label}
+        title={`${current.label}${
+          checkedAt ? ` · ${tr("shell.health.lastChecked")} ${checkedAt}` : ""
+        }`}
+        style={{
+          ...healthPillStyle,
+          color: current.fg,
+          background: current.bg,
+          borderColor: current.border,
+        }}
+      >
+        <span style={{ ...healthDotStyle, background: current.fg }} />
+        <span>{current.label}</span>
+      </div>
+      <button
+        type="button"
+        title={tr("shell.language.switch")}
+        aria-label={tr("shell.language.switch")}
+        style={languageButtonStyle}
+        onClick={() => setLocale(locale === "en" ? "zh" : "en")}
+      >
+        <span aria-hidden="true">{tr("shell.language.icon")}</span>
+        <span>
+          {locale === "en" ? tr("shell.language.zh") : tr("shell.language.en")}
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function EnterpriseShell({ children }: { children: ReactNode }) {
-  const { t: tr, locale } = useTranslation();
+  const { t: tr, locale, setLocale } = useTranslation();
   const pathname = usePathname() ?? "/";
   const tenant = enterpriseTenant;
   const user = getEnterpriseUser(locale);
@@ -51,7 +201,9 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
+        display: "flex",
+        flexDirection: "column",
         background: t.bg,
         color: t.ink,
         fontFamily: t.sans,
@@ -62,6 +214,7 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
           position: "sticky",
           top: 0,
           zIndex: 20,
+          flexShrink: 0,
           borderBottom: `1px solid ${t.line}`,
           background: t.dark ? "rgba(14,19,32,.86)" : "rgba(255,255,255,.86)",
           backdropFilter: "blur(12px)",
@@ -132,6 +285,11 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
               gap: 12,
             }}
           >
+            <EnterpriseShellControls
+              locale={locale}
+              setLocale={setLocale}
+              tr={tr}
+            />
             <span
               style={{
                 display: "inline-flex",
@@ -170,12 +328,22 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main style={{ maxWidth: 1180, margin: "0 auto", padding: "26px" }}>
+      <main
+        style={{
+          flex: 1,
+          width: "100%",
+          maxWidth: 1180,
+          margin: "0 auto",
+          padding: "26px",
+          boxSizing: "border-box",
+        }}
+      >
         {children}
       </main>
 
       <footer
         style={{
+          width: "100%",
           maxWidth: 1180,
           margin: "0 auto",
           padding: "8px 26px 40px",
@@ -185,6 +353,7 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
           flexWrap: "wrap",
           fontSize: 11,
           color: t.faint,
+          boxSizing: "border-box",
         }}
       >
         <span>
@@ -197,6 +366,47 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+const controlGroupStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+  minWidth: 0,
+};
+
+const healthPillStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  border: "1px solid",
+  borderRadius: 999,
+  padding: "6px 10px",
+  fontSize: 11,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+
+const healthDotStyle: CSSProperties = {
+  width: 6,
+  height: 6,
+  borderRadius: 999,
+  flexShrink: 0,
+};
+
+const languageButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  border: `1px solid ${t.line}`,
+  borderRadius: 999,
+  background: t.surface,
+  color: t.ink,
+  padding: "6px 10px",
+  fontSize: 11,
+  fontWeight: 800,
+  cursor: "pointer",
+};
 
 // page header inside a web shell
 export function EntPageHead({

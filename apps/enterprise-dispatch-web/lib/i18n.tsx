@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -51,16 +52,12 @@ export function LanguageProvider({
 
   const setLocale = useCallback(
     (next: Locale) => {
-      setLocaleState((current) => {
-        if (current === next) {
-          return current;
-        }
-
-        localStorage.setItem(ENTERPRISE_LOCALE_COOKIE, next);
-        document.cookie = `${ENTERPRISE_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
-        document.documentElement.lang = next === "zh" ? "zh-Hant" : "en";
+      setLocaleState(next);
+      localStorage.setItem(ENTERPRISE_LOCALE_COOKIE, next);
+      document.cookie = `${ENTERPRISE_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
+      document.documentElement.lang = next === "zh" ? "zh-Hant" : "en";
+      startTransition(() => {
         router.refresh();
-        return next;
       });
     },
     [router],
