@@ -40,12 +40,21 @@ export interface EnterpriseBooking {
 
 export const enterpriseTenant = {
   name: "鴻碩科技",
+  host: "go.hongshuo.com.tw",
+  appHost: "hongshuo-workspace",
   supportPhone: "0800-200-118",
   supportEmail: "dispatch-support@hongshuo.example",
 };
 
 export const enterpriseUser = {
   name: "林宜君",
+};
+
+// Demo driver/vehicle shown on active-trip and detail surfaces (proper nouns).
+export const enterpriseDriver = {
+  name: "張家豪 · 4.9 ★",
+  vehicle: "Toyota Alphard · ARJ-7720",
+  placard: "Sato 様",
 };
 
 const PASSENGER_KEYS = [
@@ -188,7 +197,7 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     onsiteContact: "fixture.contact.lin1180",
     availableActions: ["view"],
   },
-] ;
+];
 
 const BOOKING_STATE_TONES: Record<
   BookingState,
@@ -226,9 +235,21 @@ export function getEnterpriseTenant(locale: Locale) {
 export function getEnterpriseBookingDraft(locale: Locale) {
   return {
     ...enterpriseBookingDraft,
-    passenger: t(enterpriseBookingDraft.passenger as TranslationKey, undefined, locale),
-    pickup: t(enterpriseBookingDraft.pickup as TranslationKey, undefined, locale),
-    dropoff: t(enterpriseBookingDraft.dropoff as TranslationKey, undefined, locale),
+    passenger: t(
+      enterpriseBookingDraft.passenger as TranslationKey,
+      undefined,
+      locale,
+    ),
+    pickup: t(
+      enterpriseBookingDraft.pickup as TranslationKey,
+      undefined,
+      locale,
+    ),
+    dropoff: t(
+      enterpriseBookingDraft.dropoff as TranslationKey,
+      undefined,
+      locale,
+    ),
     costCenter: getEnterpriseCostCenterLabel(
       enterpriseBookingDraft.costCenterCode,
       locale,
@@ -247,7 +268,9 @@ export function getEnterpriseBookingDraft(locale: Locale) {
 }
 
 export function getEnterprisePassengers(locale: Locale) {
-  return PASSENGER_KEYS.map((passenger) => translateFixtureValue(passenger, locale));
+  return PASSENGER_KEYS.map((passenger) =>
+    translateFixtureValue(passenger, locale),
+  );
 }
 
 export function getEnterpriseCostCenters(locale: Locale) {
@@ -317,7 +340,9 @@ export function getEnterpriseBookings(locale: Locale): EnterpriseBooking[] {
   }));
 }
 
-export function getBookingStateMeta(locale: Locale): Record<
+export function getBookingStateMeta(
+  locale: Locale,
+): Record<
   BookingState,
   { label: string; tone: "success" | "warn" | "info" | "neutral" | "danger" }
 > {
@@ -386,7 +411,9 @@ function getEnterpriseCostCenterLabel(
     key ??
     COST_CENTER_KEYS.find(([costCenterCode]) => costCenterCode === code)?.[1];
 
-  return translationKey ? `${code} · ${t(translationKey, undefined, locale)}` : code;
+  return translationKey
+    ? `${code} · ${t(translationKey, undefined, locale)}`
+    : code;
 }
 
 function translateFixtureValue(value: string, locale: Locale) {

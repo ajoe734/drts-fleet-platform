@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  EnterpriseBanner,
-  EnterpriseCard,
-  EnterpriseDl,
-  EnterprisePageHeader,
-} from "@/components/enterprise-primitives";
+  EBanner,
+  EBtn,
+  EBtnContent,
+  ECard,
+  EIcon,
+  ERow,
+  entBtnStyle,
+} from "@/components/ent-kit";
+import { EntPageHead } from "@/components/enterprise-shell";
 import { getEnterpriseBooking } from "@/lib/enterprise-fixtures";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
-import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
-import { t } from "@/lib/translations";
+import { type TranslationKey, t as translate } from "@/lib/translations";
 
 export default async function ReceiptPage({
   params,
@@ -18,58 +22,102 @@ export default async function ReceiptPage({
 }) {
   const { bookingId } = await params;
   const locale = await getServerLocale();
+  const tr = (key: TranslationKey, params2?: Record<string, string | number>) =>
+    translate(key, params2, locale);
   const booking = getEnterpriseBooking(bookingId, locale);
-
   if (!booking) {
-    return notFound();
+    notFound();
   }
+  const fare = booking.fare ?? "NT$ 2,180";
 
   return (
-    <div style={{ ...enterprisePageStyle, maxWidth: 920 }}>
-      <EnterprisePageHeader
-        title={t("receipt.title", { id: booking.id }, locale)}
-        subtitle={t("receipt.subtitle", undefined, locale)}
+    <>
+      <EntPageHead
+        back={`${tr("receipt.back")} ${booking.id}`}
+        title={tr("receipt.title")}
+        sub={tr("receipt.subtitle")}
       />
-
-      {booking.receiptReady ? (
-        <EnterpriseCard title={t("receipt.card.summary", undefined, locale)}>
-          <EnterpriseDl
-            cols={2}
-            items={[
-              { k: t("receipt.passenger", undefined, locale), v: booking.passenger },
-              { k: t("receipt.costCenter", undefined, locale), v: booking.costCenter, mono: true },
-              { k: t("receipt.fare", undefined, locale), v: booking.fare ?? t("common.notReady", undefined, locale), mono: true },
-              { k: t("receipt.route", undefined, locale), v: `${booking.from} → ${booking.to}` },
-            ]}
+      <div style={{ maxWidth: 600, margin: "0 auto" }}>
+        <ECard t={t} accent={t.success}>
+          <div style={{ textAlign: "center", padding: "8px 0 6px" }}>
+            <div
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                margin: "0 auto 14px",
+                background: t.successBg,
+                color: t.success,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <EIcon name="check" size={28} stroke={2.4} />
+            </div>
+            <h2 style={{ fontSize: 19, fontWeight: 800, margin: "0 0 4px" }}>
+              {tr("receipt.completed")}
+            </h2>
+            <div style={{ fontSize: 12.5, color: t.muted, fontFamily: t.mono }}>
+              {booking.id}
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 16,
+              background: t.surfaceLo,
+              border: "1px solid " + t.line,
+              borderRadius: 12,
+              padding: "4px 16px",
+            }}
+          >
+            <ERow
+              t={t}
+              k={tr("receipt.passenger")}
+              v={`${booking.passenger} · ${booking.bookedBy}`}
+            />
+            <ERow
+              t={t}
+              k={tr("receipt.route")}
+              v={`${booking.from} → ${booking.to}`}
+            />
+            <ERow
+              t={t}
+              k={tr("receipt.card.summary")}
+              v={booking.window}
+              mono
+            />
+            <ERow t={t} k={tr("new.policy.vehicle")} v={booking.vehicle} />
+            <ERow
+              t={t}
+              k={tr("receipt.costCenter")}
+              v={booking.costCenter}
+              mono
+            />
+            <ERow t={t} k={tr("receipt.fare")} v={fare} strong last />
+          </div>
+          <EBanner
+            t={t}
+            tone="info"
+            icon="building"
+            style={{ marginTop: 14 }}
+            body={tr("receipt.banner.body")}
           />
-        </EnterpriseCard>
-      ) : (
-        <EnterpriseBanner
-          tone="warn"
-          title={t("receipt.banner.title", undefined, locale)}
-          body={t("receipt.banner.body", undefined, locale)}
-        />
-      )}
-
-      <Link
-        href={`/bookings/${booking.id}`}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: 34,
-          padding: "8px 12px",
-          borderRadius: 10,
-          background: enterpriseTheme.surface,
-          border: `1px solid ${enterpriseTheme.border}`,
-          color: enterpriseTheme.text,
-          fontSize: 12.5,
-          fontWeight: 600,
-          textDecoration: "none",
-        }}
-      >
-        {t("receipt.back", undefined, locale)}
-      </Link>
-    </div>
+          <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+            <Link
+              href="/bookings"
+              style={entBtnStyle(t, { variant: "default", block: true })}
+            >
+              <EBtnContent iconR="arrow">
+                {tr("receipt.backHistory")}
+              </EBtnContent>
+            </Link>
+            <EBtn t={t} variant="primary" block icon="download">
+              {tr("receipt.download")}
+            </EBtn>
+          </div>
+        </ECard>
+      </div>
+    </>
   );
 }

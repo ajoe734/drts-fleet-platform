@@ -1,128 +1,261 @@
 import Link from "next/link";
 import {
-  EnterpriseBanner,
-  EnterpriseCard,
-  EnterpriseDl,
-  EnterprisePageHeader,
-  EnterprisePill,
-  EnterpriseSection,
-} from "@/components/enterprise-primitives";
+  EBanner,
+  EBtnContent,
+  ECard,
+  EIcon,
+  EPill,
+  ERow,
+  EStepper,
+  entBtnStyle,
+} from "@/components/ent-kit";
+import { EntParty, EntRoute } from "@/components/ent-screen-bits";
+import { EntPageHead } from "@/components/enterprise-shell";
 import {
+  enterpriseDriver,
   getEnterpriseBookingDraft,
-  getEnterpriseReviewChecklist,
 } from "@/lib/enterprise-fixtures";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
-import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
-import { t } from "@/lib/translations";
+import { type TranslationKey, t as translate } from "@/lib/translations";
 
 export default async function ReviewBookingPage() {
   const locale = await getServerLocale();
+  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
+    translate(key, params, locale);
   const draft = getEnterpriseBookingDraft(locale);
-  const checklist = getEnterpriseReviewChecklist(locale);
 
   return (
-    <div style={enterprisePageStyle}>
-      <EnterprisePageHeader
-        title={t("review.title", undefined, locale)}
-        subtitle={t("review.subtitle", undefined, locale)}
+    <>
+      <EntPageHead
+        back={tr("review.back")}
+        title={tr("review.title")}
+        sub={tr("review.subtitle")}
       />
-
-      <EnterpriseBanner
-        tone="warn"
-        title={t("review.banner.title", undefined, locale)}
-        body={t("review.banner.body", undefined, locale)}
-      />
+      <div style={{ marginBottom: 20 }}>
+        <EStepper
+          t={t}
+          steps={[
+            tr("new.step.fill"),
+            tr("new.step.confirm"),
+            tr("new.step.submit"),
+          ]}
+          active={1}
+        />
+      </div>
 
       <div
         style={{
           display: "grid",
-          gap: 16,
-          gridTemplateColumns: "minmax(0, 1.3fr) minmax(320px, 0.9fr)",
+          gridTemplateColumns: "1fr 1.1fr",
+          gap: 18,
+          alignItems: "start",
         }}
       >
-        <EnterpriseCard
-          title={t("review.card.summary", undefined, locale)}
-          actions={<EnterprisePill tone="accent">{t("review.card.badge", undefined, locale)}</EnterprisePill>}
-        >
-          <EnterpriseDl
-            cols={2}
-            items={[
-              { k: t("new.field.passenger", undefined, locale), v: draft.passenger },
-              { k: t("new.field.bookedBy", undefined, locale), v: draft.bookedBy },
-              { k: t("review.summary.pickupDropoff", undefined, locale), v: `${draft.pickup} → ${draft.dropoff}` },
-              { k: t("review.summary.time", undefined, locale), v: draft.reservationWindow, mono: true },
-              { k: t("review.summary.costCenter", undefined, locale), v: draft.costCenter, mono: true },
-              { k: t("review.summary.contact", undefined, locale), v: draft.onsiteContact },
-            ]}
-          />
-        </EnterpriseCard>
-
-        <EnterpriseSection>
-          <EnterpriseCard title={t("review.card.approval", undefined, locale)}>
-            <EnterpriseDl
-              cols={1}
-              items={[
-                { k: t("review.approval.posture", undefined, locale), v: draft.approval },
-                { k: t("review.approval.quotaImpact", undefined, locale), v: draft.quotaImpact },
-                { k: t("review.approval.notes", undefined, locale), v: draft.notes },
-              ]}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <ECard
+            t={t}
+            accent={t.primary}
+            title={tr("review.card.approval")}
+            sub="cost ownership · approval"
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 14px",
+                background: t.primaryBg,
+                border: "1px solid " + t.primaryBd,
+                borderRadius: 12,
+                marginBottom: 14,
+              }}
+            >
+              <span style={{ color: t.primary }}>
+                <EIcon name="building" size={22} />
+              </span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  {draft.costCenter}
+                </div>
+                <div style={{ fontSize: 12, color: t.muted, marginTop: 1 }}>
+                  {tr("review.approval.costNote", {
+                    remain: "NT$ 31,000 / 60,000",
+                  })}
+                </div>
+              </div>
+              <EPill t={t} tone="success" dot>
+                {tr("new.check.valid")}
+              </EPill>
+            </div>
+            <ERow
+              t={t}
+              k={tr("new.check.fare")}
+              v={tr("new.check.fareValue")}
+              mono
             />
-          </EnterpriseCard>
+            <ERow
+              t={t}
+              k={tr("review.approval.quotaImpact")}
+              v={tr("review.approval.quotaImpactValue")}
+            />
+            <ERow
+              t={t}
+              k={tr("new.policy.approval")}
+              v={
+                <EPill t={t} tone="warn" dot>
+                  {tr("review.approval.needs")}
+                </EPill>
+              }
+              last
+            />
+            <div style={{ marginTop: 12 }}>
+              <EBanner
+                t={t}
+                tone="warn"
+                icon="shield"
+                title={tr("review.banner.title")}
+                body={tr("review.banner.body")}
+              />
+            </div>
+          </ECard>
 
-          <EnterpriseCard title={t("review.card.checklist", undefined, locale)}>
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
-              {checklist.map((item) => (
-                <li key={item} style={{ color: enterpriseTheme.text, fontSize: 12.5 }}>
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </EnterpriseCard>
-        </EnterpriseSection>
-      </div>
-
-      <EnterpriseCard title={t("review.card.submit", undefined, locale)}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link
-            href="/bookings/submitted"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              minHeight: 34,
-              padding: "8px 12px",
-              borderRadius: 10,
-              background: enterpriseTheme.accent,
-              border: `1px solid ${enterpriseTheme.accent}`,
-              color: enterpriseTheme.surface,
-              fontSize: 12.5,
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
+          <ECard
+            t={t}
+            title={tr("review.card.summary")}
+            sub="passenger vs booked by"
           >
-            {t("review.submit", undefined, locale)}
-          </Link>
-          <Link
-            href="/bookings/new"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              minHeight: 34,
-              padding: "8px 12px",
-              borderRadius: 10,
-              background: enterpriseTheme.surface,
-              border: `1px solid ${enterpriseTheme.border}`,
-              color: enterpriseTheme.text,
-              fontSize: 12.5,
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
-          >
-            {t("review.back", undefined, locale)}
-          </Link>
+            <EntParty
+              t={t}
+              passenger={draft.passenger}
+              passengerLabel={tr("party.passenger")}
+              subline={
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: t.warn,
+                    marginTop: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                >
+                  <EIcon name="users" size={13} />
+                  {tr("party.delegate", { name: draft.bookedBy })}
+                </div>
+              }
+            />
+            <div
+              style={{
+                marginTop: 14,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  background: t.surfaceLo,
+                  border: "1px solid " + t.line,
+                  borderRadius: 10,
+                  padding: 12,
+                }}
+              >
+                <div style={{ fontSize: 11, color: t.muted, marginBottom: 3 }}>
+                  {tr("review.summary.contact")}
+                </div>
+                <div
+                  style={{ fontSize: 13, fontWeight: 600, fontFamily: t.mono }}
+                >
+                  {draft.onsiteContact}
+                </div>
+              </div>
+              <div
+                style={{
+                  background: t.surfaceLo,
+                  border: "1px solid " + t.line,
+                  borderRadius: 10,
+                  padding: 12,
+                }}
+              >
+                <div style={{ fontSize: 11, color: t.muted, marginBottom: 3 }}>
+                  {tr("review.summary.placard")}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>
+                  {enterpriseDriver.placard}
+                </div>
+              </div>
+            </div>
+          </ECard>
         </div>
-      </EnterpriseCard>
-    </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <ECard t={t} title={tr("detail.card.trip")} sub="trip">
+            <EntRoute
+              t={t}
+              from={draft.pickup}
+              to={draft.dropoff}
+              win={draft.reservationWindow}
+              airportLabel={`${draft.flight} · ${draft.terminal}`}
+            />
+            <div style={{ marginTop: 16 }}>
+              <ERow t={t} k={tr("new.policy.vehicle")} v={draft.vehicle} />
+              <ERow t={t} k={tr("new.airport.luggage")} v={draft.luggage} />
+              <ERow t={t} k={tr("new.field.notes")} v={draft.notes} last />
+            </div>
+          </ECard>
+          <ECard t={t} title={tr("new.card.policy")} sub="policy">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 9,
+                  fontSize: 12.5,
+                  color: t.ink2,
+                  lineHeight: 1.5,
+                }}
+              >
+                <EIcon
+                  name="clock"
+                  size={15}
+                  style={{ color: t.muted, flexShrink: 0 }}
+                />
+                {tr("review.policy.cancel")}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 9,
+                  fontSize: 12.5,
+                  color: t.ink2,
+                  lineHeight: 1.5,
+                }}
+              >
+                <EIcon
+                  name="info"
+                  size={15}
+                  style={{ color: t.muted, flexShrink: 0 }}
+                />
+                {tr("review.policy.command")}
+              </div>
+            </div>
+          </ECard>
+          <div style={{ display: "flex", gap: 12 }}>
+            <Link
+              href="/bookings/new"
+              style={entBtnStyle(t, { variant: "default", block: true })}
+            >
+              <EBtnContent>{tr("review.back")}</EBtnContent>
+            </Link>
+            <Link
+              href="/bookings/submitted"
+              style={entBtnStyle(t, { variant: "primary", block: true })}
+            >
+              <EBtnContent icon="check">{tr("review.submit")}</EBtnContent>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
