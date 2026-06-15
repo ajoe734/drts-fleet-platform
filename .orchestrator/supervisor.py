@@ -1063,6 +1063,44 @@ def ensure_coordination_workspace(
     return destination.resolve(), None, base_branch, "created_coordination_worktree"
 
 
+def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> None:
+    """Symlink node_modules from the canonical checkout into a fresh task worktree.
+
+    Worktrees start empty of node_modules (gitignored) and nothing else provisioned
+    them, so a worker that didn't run a slow `pnpm install` itself failed tsc/next
+    build at closeout → task stranded `blocked`. pnpm's content-addressable store is
+    shared, so symlinks resolve correctly and cost nothing. Best-effort: never raises.
+    See fix/orchestrator-rca-worktree-nm-and-unblock-recursion.
+    """
+    try:
+        if destination.resolve() == repo_root.resolve():
+            return  # canonical fallback already has node_modules
+        src_root = repo_root / "node_modules"
+        if src_root.is_dir():
+            dst_root = destination / "node_modules"
+            if not dst_root.exists():
+                try:
+                    dst_root.symlink_to(src_root)
+                except OSError:
+                    pass
+        for parent in ("apps", "packages"):
+            base = repo_root / parent
+            if not base.is_dir():
+                continue
+            for pkg in base.iterdir():
+                src = pkg / "node_modules"
+                if not src.is_dir():
+                    continue
+                dst = destination / parent / pkg.name / "node_modules"
+                if dst.parent.is_dir() and not dst.exists():
+                    try:
+                        dst.symlink_to(src)
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+
 def ensure_execution_workspace(
     config: dict[str, Any],
     request: DeliveryRequest,
@@ -1115,6 +1153,7 @@ def ensure_execution_workspace(
             },
         )
         return repo_root, branch, base_branch, "fallback_canonical"
+    _provision_worktree_node_modules(repo_root, destination)
     return destination.resolve(), branch, base_branch, "created_worktree"
 
 
