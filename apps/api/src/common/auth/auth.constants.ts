@@ -133,6 +133,7 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "owned:write",
     "dispatch:read",
     "dispatch:write",
+    "driver:read",
     "billing:read",
     "billing:write",
     "reports:read",
