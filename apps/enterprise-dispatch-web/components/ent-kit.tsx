@@ -202,9 +202,9 @@ export function EBtnContent({
   size = "md",
 }: {
   children?: ReactNode;
-  icon?: string;
-  iconR?: string;
-  size?: EBtnSize;
+  icon?: string | undefined;
+  iconR?: string | undefined;
+  size?: EBtnSize | undefined;
 }) {
   const fs = size === "lg" ? 15 : size === "sm" ? 13 : size === "xs" ? 12 : 14;
   return (

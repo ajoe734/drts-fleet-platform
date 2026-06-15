@@ -313,7 +313,7 @@ export async function EnterpriseEmbedStatePage({
       <EnterpriseEmbedShell
         state="live"
         footer={
-          <LinkBtn href="/bookings/new" variant="primary" block>
+          <LinkBtn href="/embed/home" variant="primary" block>
             <EBtnContent iconR="arrow">{state.actions[0]?.label}</EBtnContent>
           </LinkBtn>
         }
@@ -491,7 +491,7 @@ export async function EnterpriseEmbedStatePage({
         state="live"
         footer={
           <>
-            <LinkBtn href="/bookings/new" variant="primary" block>
+            <LinkBtn href="/embed/home" variant="primary" block>
               <EBtnContent>{state.actions[0]?.label}</EBtnContent>
             </LinkBtn>
             <LinkBtn href="/" variant="ghost" block size="sm">
