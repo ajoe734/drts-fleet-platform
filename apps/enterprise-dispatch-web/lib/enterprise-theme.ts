@@ -133,8 +133,13 @@ export function buildEnt({
   };
 }
 
-// Single shared instance (light, comfy, brand accent) used across the app.
+// Single shared instance (light, comfy, brand accent) used across the S1 web app.
 export const enterpriseTheme: EntTheme = buildEnt();
+
+// Compact instance for the S2 App-embed surface (phone webview · denser chrome).
+export const enterpriseThemeCompact: EntTheme = buildEnt({
+  density: "compact",
+});
 
 export const enterprisePageStyle: CSSProperties = {
   display: "grid",
