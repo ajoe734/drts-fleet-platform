@@ -78,6 +78,27 @@ export const FX_REFERRAL_USAGE_PERIODS: ReferralUsagePeriod[] = [
     gmv: "NT$ 221,800",
     avgTripsPerUser: "3.1",
   },
+  {
+    period: "2026-03",
+    activeUsers: "201",
+    trips: "624",
+    gmv: "NT$ 186,400",
+    avgTripsPerUser: "3.1",
+  },
+  {
+    period: "2026-02",
+    activeUsers: "168",
+    trips: "503",
+    gmv: "NT$ 150,200",
+    avgTripsPerUser: "3.0",
+  },
+  {
+    period: "2026-01",
+    activeUsers: "142",
+    trips: "410",
+    gmv: "NT$ 122,500",
+    avgTripsPerUser: "2.9",
+  },
 ];
 
 export const FX_REFERRAL_USAGE_DAILY: ReferralUsageDailyRow[] = [
