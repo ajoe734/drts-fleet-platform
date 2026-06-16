@@ -1,7 +1,12 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, type ReactNode } from "react";
+import {
+  Suspense,
+  useEffect,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   CanvasShell,
   ManagementThemeProvider,
@@ -27,14 +32,45 @@ import {
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
 
-// Chrome uses the `tenant` realm tokens (teal) per the design canvas / SD
-// hand-off (VQ-1). The issuer appears only as tenant identity + screen-local
-// benefit/quota emphasis, never as a hand-picked per-issuer chrome palette.
+// Chrome uses the `bank` surface tokens — CTBC navy/gold — per the design
+// canvas (mgmt-tokens.jsx `bank` accent + BK_GOLD). The implementation
+// previously fell back to the `tenant` (teal) realm because no `bank` surface
+// existed; that is the colour mismatch this restores.
 const bankCanvasTheme = buildCanvasTheme({
-  surface: "tenant",
+  surface: "bank",
   dark: true,
   density: "compact",
 });
+
+// Design-canvas bank palette (mgmt-tokens.jsx `bank` + bank-data.jsx BK_GOLD).
+const BANK_NAVY = "#84A9E8";
+const BANK_NAVY_RGB = "132, 169, 232";
+const BANK_NAVY_DARK = "#13478F";
+const BANK_GOLD = "#A8771B";
+const BANK_SURFACE = "#0F1E3C";
+const BANK_BORDER = "#21376A";
+
+// CSS variables consumed by globals.css; set once on the shell wrapper so the
+// whole console (chrome + page bodies) renders CTBC navy with gold reserved for
+// benefit/quota emphasis — matching the canvas.
+const bankIssuerStyle = {
+  "--issuer-accent": BANK_NAVY,
+  "--issuer-accent-rgb": BANK_NAVY_RGB,
+  "--issuer-primary": BANK_NAVY,
+  "--issuer-primary-dark": BANK_NAVY_DARK,
+  "--issuer-accent-soft": "rgba(132, 169, 232, 0.12)",
+  "--issuer-border": BANK_BORDER,
+  "--issuer-panel-border": BANK_BORDER,
+  "--issuer-surface": BANK_SURFACE,
+  "--bank-navy": BANK_NAVY,
+  "--bank-navy-dark": BANK_NAVY_DARK,
+  "--bank-navy-rgb": BANK_NAVY_RGB,
+  "--bank-navy-soft": "rgba(132, 169, 232, 0.12)",
+  "--bank-surface": BANK_SURFACE,
+  "--bank-border": BANK_BORDER,
+  "--bank-gold": BANK_GOLD,
+  "--bank-gold-soft": "rgba(168, 119, 27, 0.14)",
+} as CSSProperties;
 
 export function BankShell({ children }: { children: ReactNode }) {
   return (
@@ -87,7 +123,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
-      <div className="bank-runtime-shell">
+      <div className="bank-runtime-shell" style={bankIssuerStyle}>
         <CanvasShell
           theme={bankCanvasTheme}
           nav={navEntries}
