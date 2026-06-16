@@ -154,6 +154,15 @@ export function validateInternalKey(
 @Injectable()
 export class InternalKeyMiddleware implements NestMiddleware {
   use(request: RequestLike, _response: unknown, next: () => void) {
+    // Non-prod escape hatch: when enforcement is explicitly disabled (dev, so
+    // every server-to-server surface — e.g. the passenger embed resolving its
+    // partner entry — works without depending on per-service key mounts), the
+    // internal-key gate is a no-op. Defaults to enforced; prod never sets the
+    // flag, so production stays locked down.
+    if (process.env.DRTS_INTERNAL_KEY_ENFORCED === "false") {
+      next();
+      return;
+    }
     validateInternalKey(request, process.env.DRTS_INTERNAL_KEY);
     next();
   }
