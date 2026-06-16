@@ -6,18 +6,18 @@ import { CanvasShell, type CanvasShellNavItem } from "@drts/ui-web";
 import { FleetPortalHealthFooter } from "@/components/fleet-portal-health-footer";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 
-export function FleetPortalShell({
-  fleetNav,
-  fleetBrandLabel,
-  fleetBrandSubLabel,
-  fleetBrandMark,
+export function ChannelPortalShell({
+  nav,
+  brandLabel,
+  brandSubLabel,
+  brandMark,
   searchPlaceholder,
   children,
 }: {
-  fleetNav: CanvasShellNavItem[];
-  fleetBrandLabel: ReactNode;
-  fleetBrandSubLabel: ReactNode;
-  fleetBrandMark: ReactNode;
+  nav: CanvasShellNavItem[];
+  brandLabel: ReactNode;
+  brandSubLabel: ReactNode;
+  brandMark: ReactNode;
   searchPlaceholder: string;
   children: ReactNode;
 }) {
@@ -27,14 +27,14 @@ export function FleetPortalShell({
   return (
     <CanvasShell
       theme={theme}
-      nav={fleetNav}
+      nav={nav}
       currentPath={pathname}
-      brandLabel={fleetBrandLabel}
-      brandSubLabel={fleetBrandSubLabel}
-      brandMark={fleetBrandMark}
+      brandLabel={brandLabel}
+      brandSubLabel={brandSubLabel}
+      brandMark={brandMark}
       searchPlaceholder={searchPlaceholder}
       env="production"
-      avatarLabel="CH"
+      avatarLabel="YU"
       sidebarFooter={<FleetPortalHealthFooter />}
       style={{ minHeight: "100dvh", height: "100dvh" }}
     >

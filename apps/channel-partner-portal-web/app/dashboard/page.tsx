@@ -12,7 +12,7 @@ import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
   loadReferralDashboard,
   loadReferralRevenue,
-} from "@/lib/fleet-portal-data.server";
+} from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";

@@ -39,7 +39,13 @@ export function ReferralUsagePeriodsTable({
       align: "right",
     },
     { h: t("table.trips"), k: "trips", w: 120, mono: true, align: "right" },
-    { h: t("referral.table.gmv"), k: "gmv", w: 160, mono: true, align: "right" },
+    {
+      h: t("referral.table.gmv"),
+      k: "gmv",
+      w: 160,
+      mono: true,
+      align: "right",
+    },
     {
       h: t("referral.usage.avgTripsPerUser"),
       k: "avgTripsPerUser",
@@ -68,7 +74,13 @@ export function ReferralUsageDailyTable({
       align: "right",
     },
     { h: t("table.trips"), k: "trips", w: 120, mono: true, align: "right" },
-    { h: t("referral.table.gmv"), k: "gmv", w: 160, mono: true, align: "right" },
+    {
+      h: t("referral.table.gmv"),
+      k: "gmv",
+      w: 160,
+      mono: true,
+      align: "right",
+    },
   ];
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
 }
@@ -86,7 +98,9 @@ export function ReferralTripLinesTable({
       k: "trip",
       w: 130,
       mono: true,
-      r: (r) => <span style={{ color: theme.accent, fontWeight: 600 }}>{r.trip}</span>,
+      r: (r) => (
+        <span style={{ color: theme.accent, fontWeight: 600 }}>{r.trip}</span>
+      ),
     },
     { h: t("table.date"), k: "date", w: 110, mono: true },
     { h: t("referral.table.route"), k: "route", w: 260 },
@@ -104,7 +118,9 @@ export function ReferralTripLinesTable({
       w: 120,
       mono: true,
       align: "right",
-      r: (r) => <span style={{ color: theme.accent, fontWeight: 600 }}>{r.share}</span>,
+      r: (r) => (
+        <span style={{ color: theme.accent, fontWeight: 600 }}>{r.share}</span>
+      ),
     },
   ];
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
@@ -124,7 +140,7 @@ export function ReferralStatementsTable({
       r: (r) => (
         <div>
           <Link
-            href={`/referral/statements/${encodeURIComponent(r.period)}`}
+            href={`/statements/${encodeURIComponent(r.period)}`}
             style={{
               color: theme.accent,
               fontWeight: 600,
@@ -134,7 +150,9 @@ export function ReferralStatementsTable({
           >
             {r.id}
           </Link>
-          <div style={{ fontSize: 11, color: theme.textDim }}>{r.artifactId}</div>
+          <div style={{ fontSize: 11, color: theme.textDim }}>
+            {r.artifactId}
+          </div>
         </div>
       ),
     },
@@ -147,14 +165,22 @@ export function ReferralStatementsTable({
       mono: true,
       align: "right",
     },
-    { h: t("referral.table.gmv"), k: "gmv", w: 150, mono: true, align: "right" },
+    {
+      h: t("referral.table.gmv"),
+      k: "gmv",
+      w: 150,
+      mono: true,
+      align: "right",
+    },
     {
       h: t("referral.statements.share"),
       k: "share",
       w: 160,
       mono: true,
       align: "right",
-      r: (r) => <span style={{ color: theme.accent, fontWeight: 700 }}>{r.share}</span>,
+      r: (r) => (
+        <span style={{ color: theme.accent, fontWeight: 700 }}>{r.share}</span>
+      ),
     },
     {
       h: t("table.status"),
@@ -171,8 +197,12 @@ export function ReferralStatementsTable({
       w: 130,
       r: (r) => (
         <Link
-          href={`/referral/statements/${encodeURIComponent(r.period)}`}
-          style={{ color: theme.accent, textDecoration: "none", fontWeight: 600 }}
+          href={`/statements/${encodeURIComponent(r.period)}`}
+          style={{
+            color: theme.accent,
+            textDecoration: "none",
+            fontWeight: 600,
+          }}
         >
           {t("referral.actions.viewDetail")}
         </Link>

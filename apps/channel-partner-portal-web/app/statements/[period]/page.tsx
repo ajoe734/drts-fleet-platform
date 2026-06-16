@@ -7,7 +7,7 @@ import {
   CanvasPill,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadReferralStatementDetail } from "@/lib/fleet-portal-data.server";
+import { loadReferralStatementDetail } from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { ReferralTripLinesTable } from "@/components/referral-tables";
 import { getServerLocale } from "@/lib/server-locale";

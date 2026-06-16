@@ -15,6 +15,7 @@ const APPS = [
   "apps/enterprise-dispatch-web",
   "apps/partner-booking-web",
   "apps/fleet-partner-portal-web",
+  "apps/channel-partner-portal-web",
   "apps/bank-console-web",
 ];
 const TARGET_DIRS = ["app", "components", "lib"];
