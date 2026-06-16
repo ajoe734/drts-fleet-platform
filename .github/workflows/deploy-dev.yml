@@ -1071,6 +1071,7 @@ jobs:
       partner_booking: ${{ steps.urls.outputs.partner_booking }}
       enterprise_dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
+      referral_embed: ${{ steps.urls.outputs.referral_embed }}
 
     steps:
       - name: Authenticate to GCP
@@ -1245,6 +1246,8 @@ jobs:
           DRTS_DEV_PARTNER_BOOKING_BASE_URL: ${{ needs.health-check.outputs.partner_booking }}
           DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
           ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
+          DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.channel_partner_portal }}
+          DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
         run: |
           set -euo pipefail
           pnpm exec playwright test --retries=1 --config playwright.dev-runtime-matrix.config.ts
@@ -1252,6 +1255,8 @@ jobs:
           pnpm exec playwright test --retries=1 --config playwright.bank-console-auth.config.ts
           pnpm exec playwright test --retries=1 --config playwright.partner-booking-surfaces.config.ts
           pnpm exec playwright test --retries=1 --config playwright.enterprise-dispatch.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.channel-partner-portal.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.referral-embed.config.ts
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
