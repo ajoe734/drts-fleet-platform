@@ -236,7 +236,7 @@ export default async function ProgramsPage({
                 </p>
               </div>
               <div className="bank-card-actions">
-                <button className="table-action-button" type="button">
+                <button className="table-action-button is-ghost" type="button">
                   {t("programs.action.drill", locale)}
                 </button>
               </div>
