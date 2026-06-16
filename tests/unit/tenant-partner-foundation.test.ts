@@ -177,14 +177,18 @@ describe("tenant partner foundation service", () => {
       "bank-demo-alpha-airport",
     );
 
-    // 3 active entries now: the 2 bank-airport flows + the referral-channel
-    // demo entry added for the community-app referral read APIs (CRC-BE-007).
-    expect(entries).toHaveLength(3);
+    // 6 active entries now: the 2 bank-airport flows + the referral-channel
+    // demo entry (CRC-BE-007) + the 3 canonical partner-booking route seeds
+    // (ctbc / fubon / lion) added by PARTNER-ENTRY-SEED-RECONCILE-20260616.
+    expect(entries).toHaveLength(6);
     expect(entries.map((entry) => entry.entrySlug)).toEqual(
       expect.arrayContaining([
         "bank-demo-alpha-airport",
         "bank-demo-beta-airport",
         "referral-demo-community",
+        "ctbc",
+        "fubon",
+        "lion",
       ]),
     );
     expect(alphaEntry).toMatchObject({
@@ -347,7 +351,7 @@ describe("tenant partner foundation service", () => {
     );
     await reloadedService.onModuleInit();
 
-    expect(store.snapshot().partnerEntries).toHaveLength(3);
+    expect(store.snapshot().partnerEntries).toHaveLength(6);
     expect(reloadedService.listPartnerEntries()).toEqual(
       firstService.listPartnerEntries(),
     );
@@ -1410,9 +1414,9 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     const filtered = service.listReferralRevenueShareRules(
       "referral-demo-community",
     );
-    expect(filtered.every((r) => r.partnerEntrySlug === "referral-demo-community")).toBe(
-      true,
-    );
+    expect(
+      filtered.every((r) => r.partnerEntrySlug === "referral-demo-community"),
+    ).toBe(true);
   });
 
   it("upserts a referral rate and writes an audit log", () => {
