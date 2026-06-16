@@ -179,6 +179,7 @@ export function BankDemoControls({
               <Link
                 className="bank-account-action is-danger"
                 href={hrefFor(pathname, searchParams, { signedOut: "1" })}
+                prefetch={false}
               >
                 {t("shell.logout", locale)}
               </Link>

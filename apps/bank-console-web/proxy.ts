@@ -26,7 +26,21 @@ function clearSignedOut(response: NextResponse) {
   return withNoStore(response);
 }
 
-function redirectToSignedOutLogin(request: NextRequest) {
+function isPrefetchRequest(request: NextRequest) {
+  const purpose = request.headers.get("purpose")?.toLowerCase();
+  const secPurpose = request.headers.get("sec-purpose")?.toLowerCase();
+
+  return (
+    request.headers.get("next-router-prefetch") === "1" ||
+    purpose === "prefetch" ||
+    secPurpose === "prefetch"
+  );
+}
+
+function redirectToSignedOutLogin(
+  request: NextRequest,
+  { persistCookie = true }: { persistCookie?: boolean } = {},
+) {
   const redirectUrl = request.nextUrl.clone();
   redirectUrl.pathname = LOGIN_PATH;
   redirectUrl.search = "";
@@ -42,13 +56,15 @@ function redirectToSignedOutLogin(request: NextRequest) {
   }
   redirectUrl.searchParams.set("signedOut", "1");
 
-  return setSignedOut(NextResponse.redirect(redirectUrl));
+  const response = NextResponse.redirect(redirectUrl);
+  return persistCookie ? setSignedOut(response) : withNoStore(response);
 }
 
 export function proxy(request: NextRequest) {
   const { nextUrl } = request;
   const isLoginPath = nextUrl.pathname === LOGIN_PATH;
   const isSignedOutRequest = nextUrl.searchParams.get("signedOut") === "1";
+  const isPrefetch = isPrefetchRequest(request);
   const isDemoSignInRequest =
     nextUrl.pathname === "/" && nextUrl.searchParams.has("role");
   const isSignedOutCookie =
@@ -60,9 +76,12 @@ export function proxy(request: NextRequest) {
 
   if (isSignedOutRequest) {
     if (isLoginPath) {
+      if (isPrefetch) {
+        return withNoStore(NextResponse.next());
+      }
       return setSignedOut(NextResponse.next());
     }
-    return redirectToSignedOutLogin(request);
+    return redirectToSignedOutLogin(request, { persistCookie: !isPrefetch });
   }
 
   if (isSignedOutCookie) {

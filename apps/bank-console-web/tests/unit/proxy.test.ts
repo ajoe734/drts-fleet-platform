@@ -2,12 +2,13 @@ import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { proxy } from "../../proxy";
 
-function requestFor(path: string, cookie?: string) {
-  if (!cookie) {
-    return new NextRequest(`https://bank-console.test${path}`);
-  }
+function requestFor(
+  path: string,
+  cookie?: string,
+  headers?: Record<string, string>,
+) {
   return new NextRequest(`https://bank-console.test${path}`, {
-    headers: { cookie },
+    headers: { ...headers, ...(cookie ? { cookie } : {}) },
   });
 }
 
@@ -87,5 +88,22 @@ describe("bank-console proxy auth boundary", () => {
     expect(response.headers.get("set-cookie")).toContain(
       "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
     );
+  });
+
+  it("does not persist sign-out state for router prefetch requests", () => {
+    const response = proxy(
+      requestFor(
+        "/users?bank=ctbc&locale=zh&role=bank_program_admin&signedOut=1",
+        undefined,
+        { "next-router-prefetch": "1" },
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
   });
 });
