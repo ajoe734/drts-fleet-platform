@@ -67,6 +67,7 @@ function toEmbedState(
   decision: EmbedSecurityDecision,
   session: PartnerIngressHandoffSession | null,
   issues: string[],
+  demo: boolean,
 ): EmbedState {
   if (requested === "reauth") return "reauth";
   if (requested === "consent") return "consent";
@@ -77,6 +78,11 @@ function toEmbedState(
   if (session && requested === "handoff") return "handoff";
   if (session && requested === "book") return "handoff";
   if (session) return "handoff";
+  // Demo mode (dev): no property-app backend issues a real hand-off token, so
+  // a direct open would always drop to the fallback-to-web screen — which is
+  // wrong here (there is no standalone passenger site). Land on the hand-off
+  // ride flow with demo identity instead, so the embed is reviewable directly.
+  if (demo) return "handoff";
   return "fallback";
 }
 
@@ -150,7 +156,8 @@ export async function resolveEmbedContext(input: {
     issues.push("fallback:missing_handoff_credentials");
   }
 
-  const state = toEmbedState(input.state, decision, session, issues);
+  const demoMode = process.env.PASSENGER_WEB_EMBED_DEMO === "true";
+  const state = toEmbedState(input.state, decision, session, issues, demoMode);
 
   return {
     entry,

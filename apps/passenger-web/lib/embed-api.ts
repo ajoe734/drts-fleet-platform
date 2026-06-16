@@ -9,6 +9,31 @@ import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
 
+// The authority API serialises responses in snake_case, but the embed reads the
+// records as the camelCase contract types (entry.displayName / entryHost /
+// themeAccent, session.drtsPassengerId …). Without conversion every field is
+// undefined — which surfaced as "undefined App", "unknown-host" and the wrong
+// brand accent. The platform-admin client has a global interceptor for this;
+// this minimal authority client needs the same normalisation.
+function snakeToCamelKey(key: string): string {
+  return key.replace(/_([a-z0-9])/g, (_match, ch: string) => ch.toUpperCase());
+}
+
+function deepCamelize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(deepCamelize);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, val]) => [
+        snakeToCamelKey(key),
+        deepCamelize(val),
+      ]),
+    );
+  }
+  return value;
+}
+
 type EmbedAuthorityError = Error & {
   status: number;
   code: string;
@@ -95,7 +120,7 @@ async function requestAuthority<T>(
     );
   }
 
-  return envelope.data;
+  return deepCamelize(envelope.data) as T;
 }
 
 export async function getPartnerEntry(entrySlug: string) {
