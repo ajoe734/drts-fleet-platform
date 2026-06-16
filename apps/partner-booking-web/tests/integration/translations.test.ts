@@ -29,6 +29,18 @@ describe("partner-booking i18n dictionary", () => {
     );
   });
 
+  it("exposes partner-entry provenance on the tenant shell for source-proof e2e", () => {
+    const tenantShell = readFileSync(
+      new URL("../../components/tenant-shell.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(tenantShell).toContain("data-partner-entry-source");
+    expect(tenantShell).toContain("data-partner-entry-request-id");
+    expect(tenantShell).toContain("data-partner-entry-timestamp");
+    expect(tenantShell).toContain("data-partner-entry-fallback-code");
+  });
+
   it("keeps English and zh-TW translation keys in lockstep", () => {
     const englishKeys = Object.keys(translations.en).sort();
     const zhKeys = Object.keys(translations.zh).sort();

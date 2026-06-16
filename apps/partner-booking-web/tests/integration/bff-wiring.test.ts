@@ -153,6 +153,16 @@ describe("partner-booking-web BFF wiring", () => {
     await expect(getPartnerRouteContext("ctbc")).resolves.toMatchObject({
       entry: activeEntry,
       inactive: false,
+      provenance: {
+        source: "authority",
+        requestId: "req-124",
+        timestamp: "2026-05-19T00:00:01.000Z",
+        entryUpdatedAt: activeEntry.updatedAt,
+        auditSource: "test",
+        auditRequestId: "req-001",
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
     });
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_URL}/api/partner/entries/ctbc`,
@@ -420,6 +430,16 @@ describe("partner-booking-web BFF wiring", () => {
         displayName: "Lion Group Transfer",
         slug: "lion",
       }),
+      provenance: {
+        source: "local_fallback",
+        requestId: null,
+        timestamp: null,
+        entryUpdatedAt: null,
+        auditSource: null,
+        auditRequestId: null,
+        fallbackCode: "PARTNER_AUTHORITY_REQUEST_FAILED",
+        fallbackStatus: 500,
+      },
     });
     expect(fetchMock).toHaveBeenCalledWith(
       API_URL + "/api/partner/entries/lion",

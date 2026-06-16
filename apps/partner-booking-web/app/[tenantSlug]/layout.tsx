@@ -41,12 +41,12 @@ export async function generateMetadata({
 export default async function TenantLayout({ children, params }: LayoutProps) {
   const { tenantSlug } = await params;
   try {
-    const { brand } = await getPartnerRouteContext(tenantSlug, {
+    const { brand, provenance } = await getPartnerRouteContext(tenantSlug, {
       allowInactive: true,
     });
     const locale = await getServerLocale();
     return (
-      <TenantShell brand={brand} locale={locale}>
+      <TenantShell brand={brand} locale={locale} provenance={provenance}>
         {children}
       </TenantShell>
     );

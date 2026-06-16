@@ -72,10 +72,22 @@ export type PartnerSessionRecord = {
   identity: IdentityContext;
 };
 
+export type PartnerRouteProvenance = {
+  source: "authority" | "local_fallback";
+  requestId: string | null;
+  timestamp: string | null;
+  entryUpdatedAt: string | null;
+  auditSource: string | null;
+  auditRequestId: string | null;
+  fallbackCode: string | null;
+  fallbackStatus: number | null;
+};
+
 export type PartnerRouteContext = {
   brand: PartnerBrandTemplate;
   entry: PartnerChannelEntryRecord | null;
   inactive: boolean;
+  provenance: PartnerRouteProvenance;
 };
 
 type PartnerEntryWireRecord = Partial<PartnerChannelEntryRecord> & {
@@ -231,10 +243,10 @@ function buildPartnerHeaders(
   };
 }
 
-async function requestAuthority<T>(
+async function requestAuthorityEnvelope<T>(
   path: string,
   init?: RequestInit,
-): Promise<T> {
+): Promise<ApiSuccessEnvelope<T>> {
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
@@ -280,6 +292,14 @@ async function requestAuthority<T>(
   }
 
   const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
+  return envelope;
+}
+
+async function requestAuthority<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const envelope = await requestAuthorityEnvelope<T>(path, init);
   return envelope.data;
 }
 
@@ -416,11 +436,24 @@ export async function getPartnerRouteContext(
   },
 ): Promise<PartnerRouteContext> {
   try {
-    const entry = await getPublicPartnerEntry(tenantSlug);
+    const envelope = await requestAuthorityEnvelope<PartnerChannelEntryRecord>(
+      "/api/partner/entries/" + encodeURIComponent(tenantSlug),
+    );
+    const entry = normalizePartnerEntry(envelope.data);
     return {
       brand: resolvePartnerBrand(entry),
       entry,
       inactive: false,
+      provenance: {
+        source: "authority",
+        requestId: envelope.meta.requestId,
+        timestamp: envelope.meta.timestamp,
+        entryUpdatedAt: entry.updatedAt || null,
+        auditSource: entry.auditMetadata.source,
+        auditRequestId: entry.auditMetadata.requestId,
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
     };
   } catch (error) {
     if (
@@ -431,6 +464,16 @@ export async function getPartnerRouteContext(
         brand: fallbackBrandTemplate(tenantSlug),
         entry: null,
         inactive: true,
+        provenance: {
+          source: "local_fallback",
+          requestId: null,
+          timestamp: null,
+          entryUpdatedAt: null,
+          auditSource: null,
+          auditRequestId: null,
+          fallbackCode: error.code,
+          fallbackStatus: error.status,
+        },
       };
     }
     throw error;
