@@ -1,12 +1,7 @@
 import Link from "next/link";
-import { getDeskById } from "@/lib/desk-catalog";
-
-const REASON_COPY: Record<string, string> = {
-  product_not_authorized:
-    "The requested service product is not authorized for this desk.",
-  service_area_mismatch:
-    "Pickup and drop-off fall outside the desk's authorized service area.",
-};
+import { getDeskById, localizeDeskRecord } from "@/lib/desk-catalog";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 function getQueryValue(value: string | string[] | undefined): string | null {
   return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
@@ -17,34 +12,39 @@ export default async function IneligiblePage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const locale = await getServerLocale();
   const query = await searchParams;
-  const deskId = getQueryValue(query.desk);
+  const desk = localizeDeskRecord(
+    getDeskById(getQueryValue(query.desk)),
+    (key, params) => t(key, locale, params),
+  );
   const reason = getQueryValue(query.reason) ?? "product_not_authorized";
-  const desk = getDeskById(deskId);
 
   return (
     <div className="page-shell">
       <section className="hero-card tone-warning">
-        <span className="section-kicker">Ineligible</span>
-        <h1>The request is outside the desk's authorized product or zone.</h1>
-        <p>
-          PRD truth requires call points to stay within authorized service area
-          and product scope. The portal makes that boundary visible before the
-          order touches the existing callcenter seam.
-        </p>
+        <span className="section-kicker">
+          {t("ineligible.eyebrow", locale)}
+        </span>
+        <h1>{t("ineligible.title", locale)}</h1>
+        <p>{t("ineligible.body", locale)}</p>
       </section>
 
       <section className="panel-card tone-warning">
-        <span className="section-kicker">Eligibility result</span>
-        <h2>{desk ? desk.deskName : "Desk eligibility guardrail"}</h2>
-        <p>{REASON_COPY[reason] ?? REASON_COPY.product_not_authorized}</p>
-        {desk ? <p>Authorized zone: {desk.zoneLabel}</p> : null}
+        <span className="section-kicker">
+          {t("ineligible.result.eyebrow", locale)}
+        </span>
+        <h2>{desk ? desk.deskName : t("ineligible.result.empty", locale)}</h2>
+        <p>{t(`ineligible.reason.${reason}`, locale)}</p>
+        {desk ? (
+          <p>{t("ineligible.zone", locale, { zoneLabel: desk.zoneLabel })}</p>
+        ) : null}
         <div className="inline-actions">
           <Link className="primary-link" href="/bookings/new">
-            Return to booking form
+            {t("common.returnToBooking", locale)}
           </Link>
           <Link className="secondary-link" href="/callbacks">
-            Offer callback instead
+            {t("common.offerCallback", locale)}
           </Link>
         </div>
       </section>

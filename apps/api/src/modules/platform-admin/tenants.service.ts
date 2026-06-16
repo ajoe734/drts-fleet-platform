@@ -565,7 +565,36 @@ export class TenantsService implements OnModuleInit {
     const oldRollout = { ...tenant.rollout };
     const nextStage = this.normalizeRolloutStage(command.stage);
 
-    this.enforcePromotionGates(tenant, nextStage);
+    try {
+      this.enforcePromotionGates(tenant, nextStage);
+    } catch (error) {
+      // A blocked promotion is a governance event: audit the rejected attempt
+      // (with the gate's error code) so the control-plane audit trail is complete.
+      const errorCode =
+        error instanceof ApiRequestError
+          ? ((error.getResponse() as { error?: { code?: string } })?.error
+              ?.code ?? "ROLLOUT_PROMOTION_BLOCKED")
+          : "ROLLOUT_PROMOTION_BLOCKED";
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "platform-admin",
+          actionName: "reject_platform_tenant_rollout",
+          resourceType: "platform_tenant",
+          resourceId: tenant.id,
+          newValuesSummary: {
+            attemptedStage: nextStage,
+            currentStage: oldRollout.stage,
+            status: tenant.status,
+            errorCode,
+          },
+        },
+        requestId,
+      );
+      throw error;
+    }
 
     tenant.rollout.stage = nextStage;
     tenant.rollout.lastPromotedAt = new Date().toISOString();

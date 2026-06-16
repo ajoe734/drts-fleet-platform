@@ -96,6 +96,17 @@ WORKER_FAILURE_PATTERNS = (
     re.compile(r"\bInvalid authentication credentials\b", re.IGNORECASE),
     re.compile(r"^(?:reason|code|error|error_code|type):\s*['\"]?(?:token_invalidated|refresh_token_reused)\b", re.IGNORECASE),
     re.compile(r"^(?:Error:\s*)?(?:Your\s+)?authentication token has been invalidated\b", re.IGNORECASE),
+    # codex CLI revoked/expired session — surfaces only as runtime ERROR lines that
+    # the generic Claude-style 401 markers above never matched, so the lane was
+    # never classified auth and never auto-paused. Patterns are anchored to codex's
+    # actual error format (not bare "401 Unauthorized") so chair narratives that
+    # merely *mention* a 401 are not misread as a live failure.
+    # See fix/supervisor-lane-autopause-20260614.
+    re.compile(r"\bfailed to refresh token:\s*401\b", re.IGNORECASE),
+    re.compile(r"\bresponses_websocket\b.*\bHTTP error:\s*401\b", re.IGNORECASE),
+    re.compile(r"\brefresh_token_invalidated\b", re.IGNORECASE),
+    re.compile(r"\brefresh token was revoked\b", re.IGNORECASE),
+    re.compile(r"\baccess token could not be refreshed\b", re.IGNORECASE),
     re.compile(r'^Error:\s*Model\s+".+"\s+from --model flag is not available\.', re.IGNORECASE),
     re.compile(r"^402\b.*\byou have no quota\b", re.IGNORECASE),
     re.compile(r"^(?:error:\s*)?\b(?:you have no quota|no quota remaining|payment required)\b", re.IGNORECASE),
@@ -112,6 +123,7 @@ JSON_WORKER_FAILURE_PATTERN = re.compile(
     r"authentication_error|invalid authentication credentials|status:\s*401|"
     r"\[api error:\s*401\b|api error:\s*401\b|invalid access token|"
     r"token_invalidated|refresh_token_reused|authentication token has been invalidated|"
+    r"refresh_token_invalidated|refresh token was revoked|access token could not be refreshed|"
     r"ineligibletiererror|not eligible for gemini code assist|restricted_dasher_user",
     re.IGNORECASE,
 )
@@ -1051,6 +1063,44 @@ def ensure_coordination_workspace(
     return destination.resolve(), None, base_branch, "created_coordination_worktree"
 
 
+def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> None:
+    """Symlink node_modules from the canonical checkout into a fresh task worktree.
+
+    Worktrees start empty of node_modules (gitignored) and nothing else provisioned
+    them, so a worker that didn't run a slow `pnpm install` itself failed tsc/next
+    build at closeout → task stranded `blocked`. pnpm's content-addressable store is
+    shared, so symlinks resolve correctly and cost nothing. Best-effort: never raises.
+    See fix/orchestrator-rca-worktree-nm-and-unblock-recursion.
+    """
+    try:
+        if destination.resolve() == repo_root.resolve():
+            return  # canonical fallback already has node_modules
+        src_root = repo_root / "node_modules"
+        if src_root.is_dir():
+            dst_root = destination / "node_modules"
+            if not dst_root.exists():
+                try:
+                    dst_root.symlink_to(src_root)
+                except OSError:
+                    pass
+        for parent in ("apps", "packages"):
+            base = repo_root / parent
+            if not base.is_dir():
+                continue
+            for pkg in base.iterdir():
+                src = pkg / "node_modules"
+                if not src.is_dir():
+                    continue
+                dst = destination / parent / pkg.name / "node_modules"
+                if dst.parent.is_dir() and not dst.exists():
+                    try:
+                        dst.symlink_to(src)
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+
+
 def ensure_execution_workspace(
     config: dict[str, Any],
     request: DeliveryRequest,
@@ -1103,6 +1153,7 @@ def ensure_execution_workspace(
             },
         )
         return repo_root, branch, base_branch, "fallback_canonical"
+    _provision_worktree_node_modules(repo_root, destination)
     return destination.resolve(), branch, base_branch, "created_worktree"
 
 
@@ -2416,6 +2467,10 @@ def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reas
         "token_invalidated",
         "refresh_token_reused",
         "authentication token has been invalidated",
+        # codex CLI revoked/expired session
+        "refresh_token_invalidated",
+        "refresh token was revoked",
+        "access token could not be refreshed",
         "forbidden",
         "permission denied",
         "ineligibletiererror",
@@ -2773,6 +2828,10 @@ def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
         "default_max_sidecars",
         int(underutilization_settings(config).get("max_new_sidecars_per_wave", 2)),
     )
+    # Max depth of the auto-generated unblock/repair lineage. 1 = a first-class task
+    # may get one unblock child, but that child can never spawn its own repair
+    # (no -repair-repair). Raise only if you deliberately want deeper auto-chains.
+    settings.setdefault("max_unblock_lineage_depth", 1)
     return settings
 
 
@@ -2788,6 +2847,104 @@ def failure_streak_key(task_id: str, role: str) -> str:
 
 def failure_streak_registry(state: dict[str, Any]) -> dict[str, Any]:
     return state.setdefault("failure_streaks", {})
+
+
+def lane_failure_autopause_settings(config: dict[str, Any]) -> dict[str, Any]:
+    """Defense-in-depth: pause a whole lane whose workers keep dying terminally
+    across distinct tasks, even when the failure text isn't classified/authorized
+    for a provider pause (e.g. an unrecognized CLI auth format that only surfaces
+    as a premature exit). Catches "silently dying lane" magnets that the
+    availability-first scheduler would otherwise keep re-selecting."""
+    settings = dict((config.get("ready_dispatcher", {}) or {}).get("lane_failure_autopause", {}) or {})
+    settings.setdefault("enabled", True)
+    settings.setdefault("threshold", 3)          # distinct-task terminal failures
+    settings.setdefault("window_seconds", 900)   # rolling window
+    settings.setdefault("reset_seconds", 1800)   # capacity pause auto-expiry (self-correcting)
+    return settings
+
+
+def lane_failure_registry(state: dict[str, Any]) -> dict[str, Any]:
+    return state.setdefault("lane_failure_streaks", {})
+
+
+def record_lane_terminal_failure(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    agent_id: str,
+    task_id: str | None,
+) -> bool:
+    """Track per-lane distinct-task terminal failures in a rolling window.
+    Returns True when the lane crosses the auto-pause threshold."""
+    settings = lane_failure_autopause_settings(config)
+    if not settings.get("enabled", True):
+        return False
+    normalized = normalize_agent_id(agent_id) or str(agent_id or "").strip()
+    if not normalized:
+        return False
+    now = datetime.now(timezone.utc).timestamp()
+    window = float(settings.get("window_seconds", 900))
+    registry = lane_failure_registry(state)
+    entry = registry.get(normalized)
+    if not isinstance(entry, dict) or (now - float(entry.get("window_start") or 0)) > window:
+        entry = {"window_start": now, "tasks": []}
+    tasks = entry.setdefault("tasks", [])
+    tid = str(task_id or "").strip()
+    if tid and tid not in tasks:
+        tasks.append(tid)
+    elif not tid:
+        # no task id — count as an anonymous distinct failure slot
+        tasks.append(f"__anon_{len(tasks)}")
+    entry["count"] = len(tasks)
+    entry["last_failure_at"] = utc_now()
+    registry[normalized] = entry
+    return entry["count"] >= int(settings.get("threshold", 3))
+
+
+def clear_lane_failure(state: dict[str, Any], agent_id: str) -> None:
+    normalized = normalize_agent_id(agent_id) or str(agent_id or "").strip()
+    if normalized:
+        lane_failure_registry(state).pop(normalized, None)
+
+
+def maybe_autopause_unhealthy_lane(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    reason: str,
+) -> None:
+    """Lane-level safety net, independent of allow_provider_pause: if a lane racks
+    up enough distinct-task terminal (non-transient) failures, pause it so the
+    scheduler stops routing to a dead/broken lane (e.g. revoked auth token that
+    only 401s at worker runtime)."""
+    settings = lane_failure_autopause_settings(config)
+    if not settings.get("enabled", True):
+        return
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    normalized = normalize_agent_id(agent_id) or agent_id.strip()
+    if not normalized:
+        return
+    # Already paused (by classification or earlier) — reset the counter and stop.
+    if normalized in provider_pause_registry(state):
+        clear_lane_failure(state, normalized)
+        return
+    failure = classify_worker_failure(config, worker, reason)
+    if failure.get("transient"):
+        return  # transient (retryable) failures don't count toward lane health
+    if record_lane_terminal_failure(config, state, normalized, worker.get("task_id")):
+        threshold = int(settings.get("threshold", 3))
+        window = int(settings.get("window_seconds", 900))
+        pause_provider(
+            state,
+            normalized,
+            (
+                f"Auto-paused (lane health): {threshold}+ terminal worker failures across "
+                f"distinct tasks within {window}s — lane appears unhealthy (e.g. revoked auth "
+                f"that only 401s at runtime). Latest: {reason}"
+            ),
+            kind="capacity",
+            reset_seconds=int(settings.get("reset_seconds", 1800)),
+        )
+        clear_lane_failure(state, normalized)
 
 
 def chair_reassignment_guard_registry(state: dict[str, Any]) -> dict[str, Any]:
@@ -4110,6 +4267,12 @@ def finalize_terminal_worker_outcome(
     reason = resolve_terminal_worker_reason(worker, reason)
     if allow_provider_pause:
         maybe_pause_provider_for_terminal_failure(config, state, worker, reason)
+    # Lane-health safety net runs regardless of allow_provider_pause: an
+    # unclassified/unauthorized terminal failure (e.g. codex's revoked-token 401
+    # that surfaces only as a premature exit) still counts toward the lane's
+    # distinct-task failure streak so a dead lane gets paused instead of staying a
+    # zero-load magnet for re-dispatch.
+    maybe_autopause_unhealthy_lane(config, state, worker, reason)
     failure_kind, failure_summary = summarize_worker_failure(config, worker, reason)
     evidence_ref = record_worker_evidence(config, worker, reason)
     worker["last_error"] = failure_summary
@@ -4983,6 +5146,11 @@ def poll_workers(
                         PREMATURE_EXIT_REASON,
                         allow_provider_pause=True,
                     )
+            if worker.get("status") == "completed":
+                # A clean completion proves the lane is alive — reset its
+                # terminal-failure streak so the lane-health auto-pause only ever
+                # fires on genuinely dead lanes, not on intermittent blips.
+                clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
             changed = True
     return changed
 
@@ -5201,6 +5369,50 @@ def task_is_sidecar(task: dict[str, Any]) -> bool:
     return str(task.get("task_class") or "").strip().lower() == "sidecar"
 
 
+# Task classes the supervisor generates for itself (review packets, unblock/repair
+# tasks). These are governance *outputs* — they must never themselves become the
+# parent of a new governance task, or the pipeline self-reproduces
+# (parent -> parent-UNBLOCK -> parent-UNBLOCK-UNBLOCK ...). The old recursion guard
+# only checked `task_is_sidecar`, so `task_class="unblock"` tasks sailed past it.
+GOVERNANCE_TASK_CLASSES = {"sidecar", "unblock"}
+
+
+def is_governance_artifact(task: dict[str, Any] | None) -> bool:
+    """True when a task is an auto-generated governance artifact (sidecar/unblock/
+    repair/follow-up) rather than first-class product work.
+
+    Used as the recursion base case: governance artifacts do not get their own
+    governance children. Detects three independent markers so a generator that
+    sets any one of them is covered."""
+    if not isinstance(task, dict):
+        return False
+    if str(task.get("task_class") or "").strip().lower() in GOVERNANCE_TASK_CLASSES:
+        return True
+    if task.get("auto_generated"):
+        return True
+    if str(task.get("helper_parent") or "").strip():
+        return True
+    return False
+
+
+def governance_lineage_depth(task: dict[str, Any] | None, task_map: dict[str, dict[str, Any]]) -> int:
+    """Number of ancestors reachable via the `helper_parent` chain above `task`.
+
+    A first-class task has depth 0; its unblock child has depth 1; a
+    repair-of-the-repair would be depth 2. Cycle-safe (bounded by `seen`)."""
+    depth = 0
+    seen: set[str] = set()
+    current = task
+    while isinstance(current, dict):
+        parent_id = str(current.get("helper_parent") or "").strip()
+        if not parent_id or parent_id in seen:
+            break
+        seen.add(parent_id)
+        depth += 1
+        current = task_map.get(parent_id)
+    return depth
+
+
 def sidecar_statuses() -> set[str]:
     return {"backlog", "todo", "in_progress", "review", "review_approved", "blocked", "done"}
 
@@ -5366,7 +5578,7 @@ def build_catalog_sidecar_candidates(
         phase_match = str(template.get("parent_phase_match") or "").strip()
         activation_dependencies = [str(item).strip() for item in template.get("activation_dependencies", []) if str(item).strip()]
         for parent in status.get("tasks", []) or []:
-            if task_is_sidecar(parent):
+            if is_governance_artifact(parent):
                 continue
             parent_id = str(parent.get("id") or "").strip()
             if not parent_id:
@@ -5431,7 +5643,7 @@ def build_dynamic_sidecar_candidates(
     dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
     candidates: list[dict[str, Any]] = []
     for parent in status.get("tasks", []) or []:
-        if task_is_sidecar(parent):
+        if is_governance_artifact(parent):
             continue
         parent_id = str(parent.get("id") or "").strip()
         if not parent_id or str(parent.get("status") or "").lower() == "done":
@@ -7526,6 +7738,53 @@ def ensure_workspace_baseline_task_dispatch(
     return True
 
 
+def escalate_governance_recursion_for_human(
+    config: dict[str, Any],
+    state: dict[str, Any] | None,
+    parent: dict[str, Any],
+    chair_reason: str,
+) -> None:
+    """Record that a blocked governance artifact needs human attention instead of
+    auto-generating a deeper repair task.
+
+    The supervisor used to dig the auto-repair lineage deeper (X-UNBLOCK-UNBLOCK).
+    Now we stop, log, and surface the parent on a bounded escalation list so a human
+    (or the dashboard) can clear it. We never generate more auto-work here."""
+    parent_id = str(parent.get("id") or "").strip()
+    write_activity_log(
+        config,
+        {
+            "type": "governance_recursion_blocked",
+            "task_id": parent_id,
+            "message": (
+                f"Refused to auto-generate an unblock task for governance artifact {parent_id} "
+                f"(task_class={parent.get('task_class')!r}, helper_parent={parent.get('helper_parent')!r}); "
+                f"needs human triage. Chair reason: {chair_reason}"
+            ),
+        },
+    )
+    if state is None or not parent_id:
+        return
+    registry = state.setdefault("governance_escalations", {})
+    if not isinstance(registry, dict):
+        registry = {}
+        state["governance_escalations"] = registry
+    registry[parent_id] = {
+        "task_id": parent_id,
+        "task_class": str(parent.get("task_class") or ""),
+        "helper_parent": str(parent.get("helper_parent") or ""),
+        "reason": brief_reason_text(chair_reason, max_length=280),
+        "flagged_at": utc_now(),
+    }
+    # Keep the registry bounded — newest 50 escalations.
+    if len(registry) > 50:
+        for stale_key in sorted(
+            registry,
+            key=lambda key: str(registry.get(key, {}).get("flagged_at") or ""),
+        )[: len(registry) - 50]:
+            registry.pop(stale_key, None)
+
+
 def create_chair_unblock_task(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -7540,7 +7799,16 @@ def create_chair_unblock_task(
     status = load_status(config)
     task_map = task_index_from_status(config, status)
     parent = task_map.get(parent_id)
-    if parent is None or str(parent.get("status") or "").lower() != "blocked" or task_is_sidecar(parent):
+    if parent is None or str(parent.get("status") or "").lower() != "blocked":
+        return False
+    # Recursion base case: a blocked governance artifact (an unblock/repair task,
+    # a sidecar, or any auto-generated helper) must NOT spawn another governance
+    # child. Without this, a blocked `X-UNBLOCK` triages into `X-UNBLOCK-UNBLOCK`
+    # and the pipeline self-reproduces. Escalate to a human instead of digging the
+    # auto-repair lineage deeper. (`task_is_sidecar` alone missed task_class="unblock".)
+    max_depth = int(chair_review_settings(config).get("max_unblock_lineage_depth", 1))
+    if is_governance_artifact(parent) or governance_lineage_depth(parent, task_map) >= max_depth:
+        escalate_governance_recursion_for_human(config, state, parent, chair_reason)
         return False
     dependency_done_statuses = {
         str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
@@ -8314,6 +8582,23 @@ def dispatch_ready_tasks(
                         task[reviewer_field] = helper_claim_plan["new_reviewer"]
                         task["last_update"] = utc_now()
                         task["next"] = helper_message
+                        # Anti-flap: record a reassignment guard so this task cannot be
+                        # availability-stolen straight back off the lane it was just handed
+                        # to. Without this, claude/claude2/codex/codex2 ping-pong the same
+                        # task every tick, each cutting a fresh empty `{agent}/{task}` branch
+                        # off the same base SHA — the duplicate-branch thrash + stranded work.
+                        # The chair reassignment path already records this guard (see
+                        # create_chair_unblock flow); the proactive path was the gap. The
+                        # planner honours it at proactive_claim_plan_for_idle_agent's
+                        # chair_reassignment_guard_active() check.
+                        remember_chair_reassignment_guard(
+                            config,
+                            state,
+                            task_id=task_id,
+                            role=helper_claim_plan["claim_role"],
+                            from_agent=helper_claim_plan["handoff_from"],
+                            to_agent=helper_claim_plan["handoff_to"],
+                        )
                         claim_reason = helper_claim_plan["reason"]
                         event = build_dispatch_event(task, target_agent, claim_reason, task_map)
                         if event["key"] not in pending_event_keys and queue_delivery_event(config, event):

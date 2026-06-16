@@ -35,6 +35,8 @@ import {
   DEMO_TENANT_ID,
   getTenantClient,
 } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { type Locale, t } from "@/lib/translations";
 import { SecretRevealCard } from "./secret-reveal-card";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +47,6 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
-const REFRESH_TIER_LABEL = "T5 Tenant slow · 30s";
 const OPS_CONSOLE_URL = process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? null;
 const PLATFORM_ADMIN_URL = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? null;
 const ROTATE_SECRET_RECEIPT_COOKIE = "tenant-webhook-rotate-receipt";
@@ -389,8 +390,10 @@ type RotateWebhookSecretResponse = {
   };
 };
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
+function toErrorMessage(error: unknown, locale: Locale) {
+  return error instanceof Error
+    ? error.message
+    : t("webhooks.error.unknown", locale);
 }
 
 function encodeRotateSecretReceipt(receipt: RotateSecretReceipt) {
@@ -500,21 +503,30 @@ function getEndpointStatusLabel(status: TenantWebhookEndpointStatus) {
   return "disabled";
 }
 
-function getEndpointLastActivity(endpoint: TenantWebhookEndpoint) {
+function getEndpointLastActivity(
+  endpoint: TenantWebhookEndpoint,
+  locale: Locale,
+) {
   const metadata = endpoint.runtimeMetadata;
   if (endpoint.status === "active" && metadata?.lastDeliveredAt) {
-    return `Delivered ${formatRelativeTime(metadata.lastDeliveredAt)}`;
+    return t("webhooks.lastActivity.delivered", locale, {
+      time: formatRelativeTime(metadata.lastDeliveredAt),
+    });
   }
   if (metadata?.lastAttemptAt) {
-    return `Attempt ${formatRelativeTime(metadata.lastAttemptAt)}`;
+    return t("webhooks.lastActivity.attempt", locale, {
+      time: formatRelativeTime(metadata.lastAttemptAt),
+    });
   }
   if (endpoint.status === "disabled" && metadata?.disabledAt) {
-    return `Disabled ${formatRelativeTime(metadata.disabledAt)}`;
+    return t("webhooks.lastActivity.disabled", locale, {
+      time: formatRelativeTime(metadata.disabledAt),
+    });
   }
   return formatDateTime(endpoint.updatedAt);
 }
 
-function getEndpointHealth(endpoint: TenantWebhookEndpoint) {
+function getEndpointHealth(endpoint: TenantWebhookEndpoint, locale: Locale) {
   const runtime = endpoint.runtimeMetadata;
   const failures = runtime?.failedDeliveryCount ?? 0;
   const deliveries = runtime?.deliveryCount ?? 0;
@@ -523,34 +535,43 @@ function getEndpointHealth(endpoint: TenantWebhookEndpoint) {
     return {
       label:
         runtime?.disableReason === "delivery_failed"
-          ? "disabled after failure cluster"
-          : "manually paused",
+          ? t("webhooks.health.disabledAfterFailureCluster", locale)
+          : t("webhooks.health.manuallyPaused", locale),
       tone: "warn" as CanvasTone,
     };
   }
 
   if (endpoint.status === "test_pending") {
     return {
-      label: "等待驗證流量",
+      label: t("webhooks.health.awaitingTestTraffic", locale),
       tone: "accent" as CanvasTone,
     };
   }
 
   if (failures > 0) {
     return {
-      label: `${failures} failed / ${deliveries} deliveries`,
+      label: t("webhooks.health.failedOfDeliveries", locale, {
+        failures,
+        deliveries,
+      }),
       tone: "danger" as CanvasTone,
     };
   }
 
   return {
-    label: deliveries > 0 ? `${deliveries} deliveries · healthy` : "healthy",
+    label:
+      deliveries > 0
+        ? t("webhooks.health.deliveriesHealthy", locale, { deliveries })
+        : t("webhooks.health.healthy", locale),
     tone: "success" as CanvasTone,
   };
 }
 
-function toEndpointRow(endpoint: TenantWebhookEndpoint): EndpointRow {
-  const health = getEndpointHealth(endpoint);
+function toEndpointRow(
+  endpoint: TenantWebhookEndpoint,
+  locale: Locale,
+): EndpointRow {
+  const health = getEndpointHealth(endpoint, locale);
   return {
     webhookId: endpoint.webhookId,
     url: endpoint.url,
@@ -560,7 +581,7 @@ function toEndpointRow(endpoint: TenantWebhookEndpoint): EndpointRow {
     secretLabel: `v${endpoint.secretVersion} · ${endpoint.secretPreview}`,
     healthLabel: health.label,
     healthTone: health.tone,
-    lastActivity: getEndpointLastActivity(endpoint),
+    lastActivity: getEndpointLastActivity(endpoint, locale),
   };
 }
 
@@ -577,16 +598,23 @@ function getDeliveryStatusTone(status: WebhookDeliveryRecord["status"]) {
   return "danger";
 }
 
-function toDeliveryRow(delivery: WebhookDeliveryRecord): DeliveryRow {
+function toDeliveryRow(
+  delivery: WebhookDeliveryRecord,
+  locale: Locale,
+): DeliveryRow {
   return {
     deliveryId: delivery.deliveryId,
     webhookId: delivery.webhookId,
     eventType: delivery.eventType,
     statusLabel:
-      delivery.status === "delivery_failed" ? "failed" : delivery.status,
+      delivery.status === "delivery_failed"
+        ? t("webhooks.delivery.failed", locale)
+        : delivery.status,
     statusTone: getDeliveryStatusTone(delivery.status),
     codeLabel:
-      delivery.httpStatus === null ? "timeout" : String(delivery.httpStatus),
+      delivery.httpStatus === null
+        ? t("webhooks.delivery.timeout", locale)
+        : String(delivery.httpStatus),
     codeTone: getDeliveryCodeTone(delivery.httpStatus),
     tries: delivery.attempt,
     at: formatDateTime(delivery.createdAt),
@@ -649,66 +677,69 @@ function detectEmptyReason(
   return filtered ? "filtered_empty" : "no_data";
 }
 
-function getEmptyStateCopy(reason: EmptyReason): EmptyStateCopy {
+function getEmptyStateCopy(
+  reason: EmptyReason,
+  locale: Locale,
+): EmptyStateCopy {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "Webhook engine 尚未開通",
-        body: "此租戶目前沒有啟用 delivery engine。依 Q-TEN08，畫面不會回填任何假 delivery log；請先完成平台側開通，再建立 endpoint。",
+        title: t("webhooks.empty.notProvisioned.title", locale),
+        body: t("webhooks.empty.notProvisioned.body", locale),
         tone: "warn",
       };
     case "permission_denied":
       return {
-        title: "目前身分沒有 webhook 權限",
-        body: "後端拒絕回傳此區塊資料。請改用具 `tc_admin` 或 `tc_integration_mgr` 權限的身分，或請平台/租戶管理員協助。",
+        title: t("webhooks.empty.permissionDenied.title", locale),
+        body: t("webhooks.empty.permissionDenied.body", locale),
         tone: "danger",
       };
     case "external_unavailable":
       return {
-        title: "Delivery engine 暫時不可用",
-        body: "後端或外部目的端暫時不可用，因此無法取得 webhook 可視資料。保留目前查詢條件，稍後手動 refresh 再試。",
+        title: t("webhooks.empty.externalUnavailable.title", locale),
+        body: t("webhooks.empty.externalUnavailable.body", locale),
         tone: "warn",
       };
     case "fetch_failed":
       return {
-        title: "資料抓取失敗",
-        body: "請檢查 API 可用性與目前環境 headers。這不是無資料狀態，而是 read model 讀取失敗。",
+        title: t("webhooks.empty.fetchFailed.title", locale),
+        body: t("webhooks.empty.fetchFailed.body", locale),
         tone: "danger",
       };
     case "filtered_empty":
       return {
-        title: "目前篩選條件下沒有結果",
-        body: "資料源仍可用，但現有 `status` 或 endpoint 篩選沒有命中任何項目。清除篩選即可回到完整檢視。",
+        title: t("webhooks.empty.filteredEmpty.title", locale),
+        body: t("webhooks.empty.filteredEmpty.body", locale),
         tone: "info",
       };
     case "no_data":
     default:
       return {
-        title: "尚未建立任何 endpoint",
-        body: "目前沒有 webhook endpoint，因此也不會有 delivery log。先建立第一個 endpoint，系統才會開始產生真實 delivery visibility。",
+        title: t("webhooks.empty.noData.title", locale),
+        body: t("webhooks.empty.noData.body", locale),
         tone: "info",
       };
   }
 }
 
-function getActionLabel(action: string) {
+function getActionLabel(action: string, locale: Locale) {
   switch (action) {
     case "payload_schema":
-      return "payload schema";
+      return t("webhooks.action.payloadSchema", locale);
     case "createWebhookEndpoint":
-      return "新增端點";
+      return t("webhooks.action.create", locale);
     case "updateWebhookEndpoint":
-      return "更新";
+      return t("webhooks.action.update", locale);
     case "disableWebhookEndpoint":
-      return "停用";
+      return t("webhooks.action.disable", locale);
     case "deleteWebhookEndpoint":
-      return "刪除";
+      return t("webhooks.action.delete", locale);
     case "rotateWebhookSecret":
-      return "rotate secret";
+      return t("webhooks.action.rotateSecret", locale);
     case "viewDeliveryLog":
-      return "delivery log";
+      return t("webhooks.action.viewDeliveryLog", locale);
     case "retryFailedDelivery":
-      return "retry failed";
+      return t("webhooks.action.retryFailed", locale);
     default:
       return action;
   }
@@ -804,6 +835,7 @@ function getDeliveryActionHref(
 
 function decoratePageActions(
   descriptors: ResourceActionDescriptor[],
+  locale: Locale,
 ): ActionDescriptor[] {
   return descriptors.flatMap((descriptor) => {
     const href = getPageActionHref(descriptor.action);
@@ -815,7 +847,7 @@ function decoratePageActions(
     return [
       {
         action: descriptor.action,
-        label: getActionLabel(descriptor.action),
+        label: getActionLabel(descriptor.action, locale),
         riskLevel: descriptor.riskLevel,
         enabled: descriptor.enabled,
         ...(descriptor.requiresReason !== undefined
@@ -833,6 +865,7 @@ function decoratePageActions(
 
 function decorateEndpointActions(
   descriptors: ResourceActionDescriptor[],
+  locale: Locale,
   options?: {
     webhookId?: string;
     status?: string;
@@ -848,7 +881,7 @@ function decorateEndpointActions(
     return [
       {
         action: descriptor.action,
-        label: getActionLabel(descriptor.action),
+        label: getActionLabel(descriptor.action, locale),
         riskLevel: descriptor.riskLevel,
         enabled: descriptor.enabled,
         ...(descriptor.requiresReason !== undefined
@@ -866,6 +899,7 @@ function decorateEndpointActions(
 
 function decorateDeliveryActions(
   descriptors: ResourceActionDescriptor[],
+  locale: Locale,
   options?: {
     webhookId?: string;
     deliveryId?: string;
@@ -892,7 +926,7 @@ function decorateDeliveryActions(
     return [
       {
         action: descriptor.action,
-        label: getActionLabel(descriptor.action),
+        label: getActionLabel(descriptor.action, locale),
         riskLevel: descriptor.riskLevel,
         enabled: descriptor.enabled,
         ...(descriptor.requiresReason !== undefined
@@ -911,40 +945,47 @@ function decorateDeliveryActions(
 
 function getPageActions(
   governanceActions: ResourceActionDescriptor[] | undefined,
+  locale: Locale,
 ): ActionDescriptor[] {
-  return decoratePageActions(governanceActions ?? []);
+  return decoratePageActions(governanceActions ?? [], locale);
 }
 
-function deriveActiveTab(options: {
-  mode: ViewMode;
-  selectedWebhookId?: string;
-  selectedDeliveryId?: string;
-}) {
-  if (options.mode === "rotate") return "Replay";
-  if (options.selectedDeliveryId) return "重播";
-  if (options.selectedWebhookId) return "投遞";
-  return "端點";
+function deriveActiveTab(
+  options: {
+    mode: ViewMode;
+    selectedWebhookId?: string;
+    selectedDeliveryId?: string;
+  },
+  locale: Locale,
+) {
+  if (options.mode === "rotate") return t("webhooks.tabLabel.replay", locale);
+  if (options.selectedDeliveryId) return t("webhooks.tabLabel.replay", locale);
+  if (options.selectedWebhookId)
+    return t("webhooks.tabLabel.deliveries", locale);
+  return t("webhooks.tabLabel.endpoints", locale);
 }
 
 function getEndpointActions(
   endpoint: TenantWebhookEndpoint,
+  locale: Locale,
   statusFilter = "all",
 ): ActionDescriptor[] {
-  return decorateEndpointActions(endpoint.availableActions ?? [], {
+  return decorateEndpointActions(endpoint.availableActions ?? [], locale, {
     webhookId: endpoint.webhookId,
     status: statusFilter,
   }).map((action) =>
     action.action === "disableWebhookEndpoint" && endpoint.status === "disabled"
-      ? { ...action, label: "已停用" }
+      ? { ...action, label: t("webhooks.action.disabled", locale) }
       : action,
   );
 }
 
 function getDeliveryActions(
   delivery: WebhookDeliveryRecord,
+  locale: Locale,
   statusFilter = "all",
 ): ActionDescriptor[] {
-  return decorateDeliveryActions(delivery.availableActions ?? [], {
+  return decorateDeliveryActions(delivery.availableActions ?? [], locale, {
     webhookId: delivery.webhookId,
     deliveryId: delivery.deliveryId,
     status: statusFilter,
@@ -1040,7 +1081,9 @@ function buildExternalLink(
   };
 }
 
-async function loadWebhooksPageData(): Promise<WebhooksPageData> {
+async function loadWebhooksPageData(
+  locale: Locale,
+): Promise<WebhooksPageData> {
   const client = getTenantClient();
   const [
     identityResult,
@@ -1085,27 +1128,27 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
         : [],
     endpointError:
       endpointsResult.status === "rejected"
-        ? toErrorMessage(endpointsResult.reason)
+        ? toErrorMessage(endpointsResult.reason, locale)
         : null,
     deliveryError:
       deliveriesResult.status === "rejected"
-        ? toErrorMessage(deliveriesResult.reason)
+        ? toErrorMessage(deliveriesResult.reason, locale)
         : null,
     governanceError:
       governanceResult.status === "rejected"
-        ? toErrorMessage(governanceResult.reason)
+        ? toErrorMessage(governanceResult.reason, locale)
         : null,
     readinessError:
       readinessResult.status === "rejected"
-        ? toErrorMessage(readinessResult.reason)
+        ? toErrorMessage(readinessResult.reason, locale)
         : null,
     identityError:
       identityResult.status === "rejected"
-        ? toErrorMessage(identityResult.reason)
+        ? toErrorMessage(identityResult.reason, locale)
         : null,
     notificationsError:
       notificationsResult.status === "rejected"
-        ? toErrorMessage(notificationsResult.reason)
+        ? toErrorMessage(notificationsResult.reason, locale)
         : null,
     loadedAt: new Date().toISOString(),
   };
@@ -1148,19 +1191,21 @@ function getReadinessBannerTone(
 function EventChecklist({
   baselineEvents,
   selectedEvents,
+  locale,
 }: {
   baselineEvents: string[];
   selectedEvents?: string[];
+  locale: Locale;
 }) {
   const selected = new Set(selectedEvents ?? []);
 
   if (baselineEvents.length === 0) {
     return (
-      <CanvasField theme={th} label="事件">
+      <CanvasField theme={th} label={t("webhooks.event.label", locale)}>
         <input
           name="extraEvents"
           defaultValue={(selectedEvents ?? []).join(", ")}
-          placeholder="booking.created, invoice.ready"
+          placeholder={t("webhooks.form.eventsPlaceholder", locale)}
           style={controlStyle}
         />
       </CanvasField>
@@ -1170,8 +1215,8 @@ function EventChecklist({
   return (
     <CanvasField
       theme={th}
-      label="基準事件"
-      hint="治理套件提供的 baseline webhook events。可同時勾選多個。"
+      label={t("webhooks.event.baselineLabel", locale)}
+      hint={t("webhooks.event.baselineHint", locale)}
     >
       <div style={checkboxWrapStyle}>
         {baselineEvents.map((eventType) => (
@@ -1242,11 +1287,12 @@ async function rotateWebhookSecretRequest(
 async function createWebhookAction(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const client = getTenantClient();
   const events = parseEvents(formData);
   try {
     if (events.length === 0) {
-      throw new Error("請至少選擇一個 event。");
+      throw new Error(t("webhooks.error.atLeastOneEvent", locale));
     }
 
     const command: CreateTenantWebhookEndpointCommand = {
@@ -1256,19 +1302,19 @@ async function createWebhookAction(formData: FormData) {
     };
 
     if (!command.url || !command.secret) {
-      throw new Error("Webhook URL 與 secret 為必填。");
+      throw new Error(t("webhooks.error.urlAndSecretRequired", locale));
     }
 
     await client.createWebhookEndpoint(command);
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?success=${encodeURIComponent(
-        "Endpoint 已建立，狀態為 test_pending。",
+        t("webhooks.success.endpointCreated", locale),
       )}`,
     );
   } catch (error) {
     redirect(
-      `/webhooks?mode=create&error=${encodeURIComponent(toErrorMessage(error))}`,
+      `/webhooks?mode=create&error=${encodeURIComponent(toErrorMessage(error, locale))}`,
     );
   }
 }
@@ -1276,13 +1322,14 @@ async function createWebhookAction(formData: FormData) {
 async function updateWebhookAction(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const client = getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
   const disableReason = String(formData.get("disableReason") ?? "").trim();
   const events = parseEvents(formData);
   try {
     if (!webhookId) {
-      throw new Error("缺少 webhookId。");
+      throw new Error(t("webhooks.error.missingWebhookId", locale));
     }
 
     const currentEndpoints = await client.listWebhooks();
@@ -1290,7 +1337,7 @@ async function updateWebhookAction(formData: FormData) {
       (endpoint) => endpoint.webhookId === webhookId,
     );
     if (!currentEndpoint) {
-      throw new Error("找不到目前的 webhook endpoint。");
+      throw new Error(t("webhooks.error.endpointNotFound", locale));
     }
 
     const command: UpdateTenantWebhookEndpointCommand = {
@@ -1302,7 +1349,7 @@ async function updateWebhookAction(formData: FormData) {
     };
 
     if (!command.url || !command.status || events.length === 0) {
-      throw new Error("URL、status 與至少一個 event 為必填。");
+      throw new Error(t("webhooks.error.urlStatusEventRequired", locale));
     }
     const disableAction = currentEndpoint.availableActions?.find(
       (action) => action.action === "disableWebhookEndpoint",
@@ -1312,12 +1359,10 @@ async function updateWebhookAction(formData: FormData) {
       currentEndpoint.status !== "disabled" &&
       !disableAction?.enabled
     ) {
-      throw new Error(
-        "此 endpoint 目前沒有 disableWebhookEndpoint action，不能透過 update flow 停用。",
-      );
+      throw new Error(t("webhooks.error.disableActionUnavailable", locale));
     }
     if (command.status === "disabled" && !disableReason) {
-      throw new Error("停用 endpoint 時必須填寫 reason。");
+      throw new Error(t("webhooks.error.disableReasonRequired", locale));
     }
 
     if (
@@ -1329,9 +1374,7 @@ async function updateWebhookAction(formData: FormData) {
       const eventsChanged = !sameEvents(events, currentEndpoint.events);
 
       if (urlChanged || eventsChanged) {
-        throw new Error(
-          "停用 flow 只允許執行 disableWebhookEndpoint；請先儲存 URL / events 變更，再單獨停用 endpoint。",
-        );
+        throw new Error(t("webhooks.error.disableFlowOnlyDisable", locale));
       }
 
       await client.disableWebhookEndpoint(webhookId, {
@@ -1343,13 +1386,13 @@ async function updateWebhookAction(formData: FormData) {
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&success=${encodeURIComponent(
-        "Endpoint 已更新。",
+        t("webhooks.success.endpointUpdated", locale),
       )}`,
     );
   } catch (error) {
     redirect(
       `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toErrorMessage(error, locale),
       )}`,
     );
   }
@@ -1358,26 +1401,31 @@ async function updateWebhookAction(formData: FormData) {
 async function deleteWebhookAction(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const client = getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
   const deleteReason = String(formData.get("deleteReason") ?? "").trim();
   try {
     if (!webhookId) {
-      throw new Error("缺少 webhookId。");
+      throw new Error(t("webhooks.error.missingWebhookId", locale));
     }
     if (!deleteReason) {
-      throw new Error("刪除 endpoint 時必須填寫 reason。");
+      throw new Error(t("webhooks.error.deleteReasonRequired", locale));
     }
     const command: DeleteTenantWebhookEndpointCommand = {
       reason: deleteReason,
     };
     await client.deleteWebhookEndpoint(webhookId, command);
     revalidatePath("/webhooks");
-    redirect(`/webhooks?success=${encodeURIComponent("Endpoint 已刪除。")}`);
+    redirect(
+      `/webhooks?success=${encodeURIComponent(
+        t("webhooks.success.endpointDeleted", locale),
+      )}`,
+    );
   } catch (error) {
     redirect(
       `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toErrorMessage(error, locale),
       )}`,
     );
   }
@@ -1386,6 +1434,7 @@ async function deleteWebhookAction(formData: FormData) {
 async function rotateWebhookSecretAction(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const webhookId = String(formData.get("webhookId") ?? "");
   const endpointUrl = String(formData.get("endpointUrl") ?? "").trim();
   const secret = String(formData.get("secret") ?? "").trim();
@@ -1393,7 +1442,7 @@ async function rotateWebhookSecretAction(formData: FormData) {
 
   try {
     if (!webhookId || !secret) {
-      throw new Error("webhookId 與新 secret 為必填。");
+      throw new Error(t("webhooks.error.webhookIdAndSecretRequired", locale));
     }
 
     const result = await rotateWebhookSecretRequest(webhookId, {
@@ -1427,13 +1476,13 @@ async function rotateWebhookSecretAction(formData: FormData) {
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&revealSecret=1&success=${encodeURIComponent(
-        "Secret 已旋轉。依治理規則，endpoint 會重新進入 test_pending，完整值只在本次畫面顯示。",
+        t("webhooks.success.secretRotated", locale),
       )}`,
     );
   } catch (error) {
     redirect(
       `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toErrorMessage(error, locale),
       )}`,
     );
   }
@@ -1442,26 +1491,27 @@ async function rotateWebhookSecretAction(formData: FormData) {
 async function retryFailedDeliveryAction(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const client = getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "").trim();
   const deliveryId = String(formData.get("deliveryId") ?? "").trim();
 
   try {
     if (!webhookId || !deliveryId) {
-      throw new Error("缺少 webhookId 或 deliveryId。");
+      throw new Error(t("webhooks.error.missingWebhookOrDelivery", locale));
     }
 
     await client.retryWebhookDelivery(webhookId, deliveryId);
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}&success=${encodeURIComponent(
-        "Failed delivery retry 已送出。",
+        t("webhooks.success.retrySubmitted", locale),
       )}`,
     );
   } catch (error) {
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toErrorMessage(error, locale),
       )}`,
     );
   }
@@ -1470,6 +1520,7 @@ async function retryFailedDeliveryAction(formData: FormData) {
 async function clearRotateSecretReceiptAction(formData: FormData) {
   "use server";
 
+  const locale = await getServerLocale();
   const webhookId = String(formData.get("webhookId") ?? "").trim();
   const cookieStore = await cookies();
   cookieStore.set(ROTATE_SECRET_RECEIPT_COOKIE, "", {
@@ -1482,10 +1533,10 @@ async function clearRotateSecretReceiptAction(formData: FormData) {
   redirect(
     webhookId
       ? `/webhooks?webhookId=${encodeURIComponent(webhookId)}&success=${encodeURIComponent(
-          "Secret receipt 已關閉。主列表恢復為 masked preview。",
+          t("webhooks.success.receiptClosed", locale),
         )}`
       : `/webhooks?success=${encodeURIComponent(
-          "Secret receipt 已關閉。主列表恢復為 masked preview。",
+          t("webhooks.success.receiptClosed", locale),
         )}`,
   );
 }
@@ -1495,11 +1546,13 @@ function EndpointForm({
   webhook,
   baselineEvents,
   endpointActions,
+  locale,
 }: {
   mode: ViewMode;
   webhook?: TenantWebhookEndpoint | null;
   baselineEvents: string[];
   endpointActions?: ActionDescriptor[];
+  locale: Locale;
 }) {
   const isCreate = mode === "create";
   const disableAction = findAction(
@@ -1519,11 +1572,15 @@ function EndpointForm({
   return (
     <CanvasCard
       theme={th}
-      title={isCreate ? "Create endpoint" : "Update endpoint"}
+      title={
+        isCreate
+          ? t("webhooks.form.createTitle", locale)
+          : t("webhooks.form.updateTitle", locale)
+      }
       subtitle={
         isCreate
-          ? "Create / update 屬於 medium action；新 endpoint 一律進入 test_pending。"
-          : "Disable / delete 是 high-risk 操作。UI 會強制填寫 reason 後才送出既有 backend contract。"
+          ? t("webhooks.form.createSubtitle", locale)
+          : t("webhooks.form.updateSubtitle", locale)
       }
     >
       <form
@@ -1534,34 +1591,34 @@ function EndpointForm({
           <input type="hidden" name="webhookId" value={webhook.webhookId} />
         ) : null}
         <div style={fieldRowStyle}>
-          <CanvasField theme={th} label="Webhook URL">
+          <CanvasField theme={th} label={t("webhooks.form.urlLabel", locale)}>
             <input
               name="url"
               defaultValue={webhook?.url ?? ""}
-              placeholder="https://partner.example.com/drts/webhooks"
+              placeholder={t("webhooks.form.urlPlaceholder", locale)}
               style={controlStyle}
             />
           </CanvasField>
           {isCreate ? (
             <CanvasField
               theme={th}
-              label="初始密鑰"
-              hint="Secret 會以 masked preview 存回 read model。"
+              label={t("webhooks.form.secretLabel", locale)}
+              hint={t("webhooks.form.secretHint", locale)}
             >
               <input
                 name="secret"
-                placeholder="whsec_..."
+                placeholder={t("webhooks.form.secretPlaceholder", locale)}
                 style={controlStyle}
               />
             </CanvasField>
           ) : (
             <CanvasField
               theme={th}
-              label="狀態"
+              label={t("webhooks.form.statusLabel", locale)}
               hint={
                 disableAction
-                  ? "變更 URL / events / active state 都會觸發 validation 流程。"
-                  : "變更 URL / events / active state 會觸發 validation；disable 狀態需由 backend 發布 disableWebhookEndpoint action 後才可進入。"
+                  ? t("webhooks.form.statusHintWithAction", locale)
+                  : t("webhooks.form.statusHintNoAction", locale)
               }
             >
               <select
@@ -1580,16 +1637,20 @@ function EndpointForm({
         </div>
         <EventChecklist
           baselineEvents={baselineEvents}
+          locale={locale}
           {...(webhook?.events ? { selectedEvents: webhook.events } : {})}
         />
         {baselineEvents.length > 0 ? (
-          <CanvasField theme={th} label="額外事件">
+          <CanvasField
+            theme={th}
+            label={t("webhooks.form.extraEventsLabel", locale)}
+          >
             <input
               name="extraEvents"
               defaultValue={(webhook?.events ?? [])
                 .filter((eventType) => !baselineEvents.includes(eventType))
                 .join(", ")}
-              placeholder="以逗號分隔的額外事件"
+              placeholder={t("webhooks.form.extraEventsPlaceholder", locale)}
               style={controlStyle}
             />
           </CanvasField>
@@ -1597,29 +1658,38 @@ function EndpointForm({
         {!isCreate && disableAction ? (
           <CanvasField
             theme={th}
-            label="停用原因"
+            label={t("webhooks.form.disableReasonLabel", locale)}
             hint={
               disableAction.enabled
-                ? "當 status 改為 disabled 時必填；符合 packet 的 high-risk reason gate。"
-                : `Disable action unavailable: ${disableAction.disabledReasonCode ?? "disabled_by_backend"}`
+                ? t("webhooks.form.disableReasonHintEnabled", locale)
+                : t("webhooks.form.disableUnavailableHint", locale, {
+                    reason:
+                      disableAction.disabledReasonCode ?? "disabled_by_backend",
+                  })
             }
           >
             <textarea
               name="disableReason"
               style={textareaStyle}
-              placeholder="接收端維護時段、連續失敗、安全凍結等"
+              placeholder={t("webhooks.form.disableReasonPlaceholder", locale)}
               disabled={!disableAction.enabled}
             />
           </CanvasField>
         ) : !isCreate ? (
           <CanvasField
             theme={th}
-            label="停用"
-            hint={`High-risk disable 目前未由 endpoint.availableActions[] 發布。Reason gate 保持關閉。${webhook?.status === "disabled" ? " 此 endpoint 已是 disabled，只能先回到 active/test_pending 後再等待 backend 重新發布 disable action。" : ` Disabled reason: ${disableUnavailableReason}.`}`}
+            label={t("webhooks.form.disableLabel", locale)}
+            hint={
+              webhook?.status === "disabled"
+                ? t("webhooks.form.disableUnavailableAlreadyDisabled", locale)
+                : t("webhooks.form.disableUnavailableReason", locale, {
+                    reason: disableUnavailableReason,
+                  })
+            }
           >
             <input
               readOnly
-              value="Disable action unavailable on this endpoint"
+              value={t("webhooks.form.disableUnavailableValue", locale)}
               style={controlStyle}
             />
           </CanvasField>
@@ -1632,10 +1702,12 @@ function EndpointForm({
               cursor: "pointer",
             }}
           >
-            {isCreate ? "建立 endpoint" : "儲存變更"}
+            {isCreate
+              ? t("webhooks.form.submitCreate", locale)
+              : t("webhooks.form.submitUpdate", locale)}
           </button>
           <Link href="/webhooks" style={getLinkButtonStyle({ size: "md" })}>
-            取消
+            {t("webhooks.form.cancel", locale)}
           </Link>
         </div>
       </form>
@@ -1643,13 +1715,9 @@ function EndpointForm({
         <div style={{ ...stackStyle, marginTop: 12 }}>
           <div id="high-risk" style={panelStyle}>
             <div style={{ color: th.text, fontWeight: 600 }}>
-              High-risk actions
+              {t("webhooks.form.highRiskTitle", locale)}
             </div>
-            <p style={mutedStyle}>
-              Delete 與 disable 依 packet 屬 high action；delete 送出前必須填
-              reason，disable 只有在 `disableWebhookEndpoint`
-              已發布時才可透過上方欄位提交。
-            </p>
+            <p style={mutedStyle}>{t("webhooks.form.highRiskBody", locale)}</p>
             <div style={buttonWrapStyle}>
               {deleteAction ? (
                 deleteAction.enabled ? (
@@ -1665,7 +1733,10 @@ function EndpointForm({
                     <textarea
                       name="deleteReason"
                       style={{ ...textareaStyle, minHeight: 72 }}
-                      placeholder="已下線的整合、重複端點、安全事件等"
+                      placeholder={t(
+                        "webhooks.form.deleteReasonPlaceholder",
+                        locale,
+                      )}
                     />
                     <button
                       type="submit"
@@ -1674,22 +1745,18 @@ function EndpointForm({
                         cursor: "pointer",
                       }}
                     >
-                      刪除 endpoint
+                      {t("webhooks.form.submitDelete", locale)}
                     </button>
                   </form>
                 ) : (
                   renderAction(deleteAction, `delete-${webhook.webhookId}`)
                 )
               ) : (
-                renderContractGap(
-                  "Delete CTA withheld until endpoint.availableActions[] publishes deleteWebhookEndpoint.",
-                )
+                renderContractGap(t("webhooks.form.deleteWithheld", locale))
               )}
               {rotateAction
                 ? renderAction(rotateAction, `rotate-${webhook.webhookId}`)
-                : renderContractGap(
-                    "Rotate CTA withheld until endpoint.availableActions[] publishes rotateWebhookSecret.",
-                  )}
+                : renderContractGap(t("webhooks.form.rotateWithheld", locale))}
             </div>
           </div>
         </div>
@@ -1698,21 +1765,33 @@ function EndpointForm({
   );
 }
 
-function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
+function RotateSecretForm({
+  webhook,
+  locale,
+}: {
+  webhook: TenantWebhookEndpoint;
+  locale: Locale;
+}) {
   return (
     <CanvasCard
       theme={th}
-      title="輪替 Webhook 密鑰"
-      subtitle="High-risk action。依 packet，secret rotation 後 endpoint 需要重新驗證。"
+      title={t("webhooks.rotate.title", locale)}
+      subtitle={t("webhooks.rotate.subtitle", locale)}
     >
       <form action={rotateWebhookSecretAction} style={formGridStyle}>
         <input type="hidden" name="webhookId" value={webhook.webhookId} />
         <input type="hidden" name="endpointUrl" value={webhook.url} />
         <div style={fieldRowStyle}>
-          <CanvasField theme={th} label="端點">
+          <CanvasField
+            theme={th}
+            label={t("webhooks.rotate.endpointLabel", locale)}
+          >
             <input value={webhook.url} readOnly style={controlStyle} />
           </CanvasField>
-          <CanvasField theme={th} label="目前預覽">
+          <CanvasField
+            theme={th}
+            label={t("webhooks.rotate.currentPreviewLabel", locale)}
+          >
             <input
               value={webhook.secretPreview}
               readOnly
@@ -1722,24 +1801,24 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
         </div>
         <CanvasField
           theme={th}
-          label="新密鑰"
-          hint="目前 rotate command 仍需提交新的 secret；送出後 UI 會立刻進入 plaintext-once receipt，提供 copy / download，再回到 masked preview。"
+          label={t("webhooks.rotate.newSecretLabel", locale)}
+          hint={t("webhooks.rotate.newSecretHint", locale)}
         >
           <input
             name="secret"
-            placeholder="whsec_new..."
+            placeholder={t("webhooks.rotate.newSecretPlaceholder", locale)}
             style={controlStyle}
           />
         </CanvasField>
         <CanvasField
           theme={th}
-          label="輪替原因"
-          hint="送出後會立即進入 plaintext-once receipt，提供 copy / download；主列表之後只保留 masked preview。"
+          label={t("webhooks.rotate.reasonLabel", locale)}
+          hint={t("webhooks.rotate.reasonHint", locale)}
         >
           <textarea
             name="rotationReason"
             style={textareaStyle}
-            placeholder="接收端金鑰外洩、計畫性憑證輪替等"
+            placeholder={t("webhooks.rotate.reasonPlaceholder", locale)}
           />
         </CanvasField>
         <div style={buttonWrapStyle}>
@@ -1750,10 +1829,10 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
               cursor: "pointer",
             }}
           >
-            旋轉 secret
+            {t("webhooks.rotate.submit", locale)}
           </button>
           <Link href="/webhooks" style={getLinkButtonStyle({ size: "md" })}>
-            取消
+            {t("webhooks.form.cancel", locale)}
           </Link>
         </div>
       </form>
@@ -1766,6 +1845,7 @@ export default async function WebhooksPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = (await searchParams) ?? {};
   const mode =
     (getSearchParam(resolvedSearchParams.mode) as ViewMode | undefined) ??
@@ -1785,7 +1865,7 @@ export default async function WebhooksPage({
     : null;
   const secretReceiptExpired = revealSecret && !rotateSecretReceipt;
 
-  const data = await loadWebhooksPageData();
+  const data = await loadWebhooksPageData(locale);
   const baselineEvents = data.governance?.baselineWebhookEvents ?? [];
   const filteredEndpoints = data.endpoints.filter((endpoint) =>
     statusFilter === "all" ? true : endpoint.status === statusFilter,
@@ -1816,13 +1896,13 @@ export default async function WebhooksPage({
         )
       : undefined) ?? null;
   const summary = summarizeDeliveries(scopedDeliveries);
-  const pageActions = getPageActions(data.governance?.availableActions);
+  const pageActions = getPageActions(data.governance?.availableActions, locale);
   const webhookReadiness = getWebhookReadiness(data.readiness);
   const selectedEndpointActions = selectedWebhook
-    ? getEndpointActions(selectedWebhook, statusFilter)
+    ? getEndpointActions(selectedWebhook, locale, statusFilter)
     : [];
   const selectedDeliveryActions = selectedDelivery
-    ? getDeliveryActions(selectedDelivery, statusFilter)
+    ? getDeliveryActions(selectedDelivery, locale, statusFilter)
     : [];
   const createAction = findAction(pageActions, "createWebhookEndpoint");
   const updateAction = findAction(
@@ -1843,11 +1923,14 @@ export default async function WebhooksPage({
     mode === "rotate" &&
     Boolean(selectedWebhook) &&
     (!rotateAction || !rotateAction.enabled);
-  const activeTab = deriveActiveTab({
-    mode,
-    ...(selectedWebhookId ? { selectedWebhookId } : {}),
-    ...(selectedDeliveryId ? { selectedDeliveryId } : {}),
-  });
+  const activeTab = deriveActiveTab(
+    {
+      mode,
+      ...(selectedWebhookId ? { selectedWebhookId } : {}),
+      ...(selectedDeliveryId ? { selectedDeliveryId } : {}),
+    },
+    locale,
+  );
   const engineInactive =
     (webhookReadiness?.status === "not_provisioned" ||
       endpointReason === "not_provisioned") &&
@@ -1863,14 +1946,14 @@ export default async function WebhooksPage({
     buildExternalLink(
       OPS_CONSOLE_URL,
       "/incidents?event=tenant.webhook.delivery_failed",
-      "Open ops triage",
-      "Cross-app deep link for operational triage when delivery failures need downstream intervention.",
+      t("webhooks.deepLinks.opsTriageLabel", locale),
+      t("webhooks.deepLinks.opsTriageDescription", locale),
     ),
     buildExternalLink(
       PLATFORM_ADMIN_URL,
       "/audit?resourceType=webhook_endpoint",
-      "View platform audit",
-      "Cross-app audit trail for secret rotation, endpoint lifecycle, and integration governance events.",
+      t("webhooks.deepLinks.platformAuditLabel", locale),
+      t("webhooks.deepLinks.platformAuditDescription", locale),
     ),
   ];
 
@@ -1887,7 +1970,7 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "事件",
+      h: t("webhooks.col.events", locale),
       w: 280,
       r: (row) => (
         <div style={chipWrapStyle}>
@@ -1900,7 +1983,7 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "狀態",
+      h: t("webhooks.col.status", locale),
       w: 120,
       r: (row) => (
         <CanvasPill theme={th} tone={row.statusTone} dot>
@@ -1909,13 +1992,13 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "密鑰",
+      h: t("webhooks.col.secret", locale),
       k: "secretLabel",
       w: 160,
       mono: true,
     },
     {
-      h: "健康",
+      h: t("webhooks.col.health", locale),
       w: 190,
       r: (row) => (
         <CanvasPill theme={th} tone={row.healthTone}>
@@ -1924,13 +2007,13 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "最近",
+      h: t("webhooks.col.recent", locale),
       k: "lastActivity",
       w: 180,
       mono: true,
     },
     {
-      h: "操作",
+      h: t("webhooks.col.actions", locale),
       w: 320,
       r: (row) => {
         const endpoint = filteredEndpoints.find(
@@ -1939,7 +2022,11 @@ export default async function WebhooksPage({
         if (!endpoint) {
           return null;
         }
-        const rowActions = getEndpointActions(endpoint, statusFilter).filter(
+        const rowActions = getEndpointActions(
+          endpoint,
+          locale,
+          statusFilter,
+        ).filter(
           (action) =>
             action.action === "viewDeliveryLog" ||
             action.action === "updateWebhookEndpoint" ||
@@ -1952,9 +2039,11 @@ export default async function WebhooksPage({
                   renderAction(action, `${row.webhookId}-${index}`),
                 )
               : endpoint.availableActions === undefined
-                ? renderContractGap("No published endpoint actions.")
+                ? renderContractGap(
+                    t("webhooks.endpoint.noPublishedActions", locale),
+                  )
                 : renderContractGap(
-                    "No supported endpoint actions published for this surface.",
+                    t("webhooks.endpoint.noSupportedActions", locale),
                   )}
           </div>
         );
@@ -1965,9 +2054,14 @@ export default async function WebhooksPage({
   const deliveryColumns: CanvasTableColumn<DeliveryRow>[] = [
     { h: "DLV", k: "deliveryId", w: 110, mono: true },
     { h: "WH", k: "webhookId", w: 100, mono: true },
-    { h: "事件", k: "eventType", w: 220, mono: true },
     {
-      h: "狀態",
+      h: t("webhooks.col.events", locale),
+      k: "eventType",
+      w: 220,
+      mono: true,
+    },
+    {
+      h: t("webhooks.col.status", locale),
       w: 120,
       r: (row) => (
         <CanvasPill theme={th} tone={row.statusTone}>
@@ -1976,7 +2070,7 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "代碼",
+      h: t("webhooks.col.code", locale),
       w: 90,
       align: "right",
       r: (row) => (
@@ -1985,10 +2079,16 @@ export default async function WebhooksPage({
         </CanvasPill>
       ),
     },
-    { h: "次數", k: "tries", w: 72, align: "right", mono: true },
-    { h: "時間", k: "at", mono: true },
     {
-      h: "操作",
+      h: t("webhooks.col.tries", locale),
+      k: "tries",
+      w: 72,
+      align: "right",
+      mono: true,
+    },
+    { h: t("webhooks.col.time", locale), k: "at", mono: true },
+    {
+      h: t("webhooks.col.actions", locale),
       w: 190,
       r: (row) => {
         const delivery = scopedDeliveries.find(
@@ -1997,7 +2097,7 @@ export default async function WebhooksPage({
         if (!delivery) {
           return null;
         }
-        const rowActions = getDeliveryActions(delivery, statusFilter);
+        const rowActions = getDeliveryActions(delivery, locale, statusFilter);
         return (
           <div style={buttonWrapStyle}>
             {rowActions.length > 0
@@ -2005,9 +2105,11 @@ export default async function WebhooksPage({
                   renderAction(action, `${row.deliveryId}-${index}`),
                 )
               : delivery.availableActions === undefined
-                ? renderContractGap("No published delivery actions.")
+                ? renderContractGap(
+                    t("webhooks.delivery.noPublishedActions", locale),
+                  )
                 : renderContractGap(
-                    "No supported delivery actions published for this surface.",
+                    t("webhooks.delivery.noSupportedActions", locale),
                   )}
           </div>
         );
@@ -2016,29 +2118,45 @@ export default async function WebhooksPage({
   ];
 
   const globalErrors = [
-    data.identityError ? `身分: ${data.identityError}` : null,
-    data.governanceError ? `治理: ${data.governanceError}` : null,
-    data.readinessError ? `readiness: ${data.readinessError}` : null,
-    data.notificationsError ? `通知: ${data.notificationsError}` : null,
+    data.identityError
+      ? t("webhooks.globalError.identity", locale, {
+          error: data.identityError,
+        })
+      : null,
+    data.governanceError
+      ? t("webhooks.globalError.governance", locale, {
+          error: data.governanceError,
+        })
+      : null,
+    data.readinessError
+      ? t("webhooks.globalError.readiness", locale, {
+          error: data.readinessError,
+        })
+      : null,
+    data.notificationsError
+      ? t("webhooks.globalError.notifications", locale, {
+          error: data.notificationsError,
+        })
+      : null,
   ].filter(Boolean) as string[];
 
   const endpointEmptyCopy = endpointReason
-    ? getEmptyStateCopy(endpointReason)
+    ? getEmptyStateCopy(endpointReason, locale)
     : null;
   const deliveryEmptyCopy = deliveryReason
-    ? getEmptyStateCopy(deliveryReason)
+    ? getEmptyStateCopy(deliveryReason, locale)
     : null;
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Webhook"
-        subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 是否啟用直接決定畫面 (Q-TEN08)"
+        title={t("webhooks.page.title", locale)}
+        subtitle={t("webhooks.page.subtitle", locale)}
         tabs={[
-          `Endpoints${data.endpoints.length > 0 ? ` · ${data.endpoints.length}` : ""}`,
-          "Deliveries",
-          "Replay",
+          `${t("webhooks.tabLabel.endpoints", locale)}${data.endpoints.length > 0 ? ` · ${data.endpoints.length}` : ""}`,
+          t("webhooks.tabLabel.deliveries", locale),
+          t("webhooks.tabLabel.replay", locale),
         ]}
         activeTab={activeTab}
         actions={
@@ -2054,42 +2172,56 @@ export default async function WebhooksPage({
         <div style={topMetaRowStyle}>
           <CanvasCard
             theme={th}
-            title="更新層級"
-            subtitle="`/webhooks` 屬 T5 Tenant slow。前端只提供手動 refresh；資料新鮮度以 backend contract 為準。"
+            title={t("webhooks.card.refreshTitle", locale)}
+            subtitle={t("webhooks.card.refreshSubtitle", locale)}
             actions={
               <Link href="/webhooks" style={getLinkButtonStyle()}>
-                Refresh now
+                {t("webhooks.refreshNow", locale)}
               </Link>
             }
           >
             <div style={metricGridStyle}>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>更新層級</span>
+                <span style={metricLabelStyle}>
+                  {t("webhooks.metric.refreshTier", locale)}
+                </span>
                 <span style={metricValueStyle}>T5</span>
-                <p style={mutedStyle}>{REFRESH_TIER_LABEL}</p>
+                <p style={mutedStyle}>
+                  {t("webhooks.metric.refreshTierLabel", locale)}
+                </p>
               </div>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>快照</span>
+                <span style={metricLabelStyle}>
+                  {t("webhooks.metric.snapshot", locale)}
+                </span>
                 <span style={{ ...metricValueStyle, fontSize: 18 }}>
                   {formatDateTime(
                     data.governance?.generatedAt ?? data.loadedAt,
                   )}
                 </span>
-                <p style={mutedStyle}>governance.generatedAt / page load</p>
+                <p style={mutedStyle}>
+                  {t("webhooks.metric.snapshotHint", locale)}
+                </p>
               </div>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>範圍</span>
+                <span style={metricLabelStyle}>
+                  {t("webhooks.metric.scope", locale)}
+                </span>
                 <span style={{ ...metricValueStyle, fontSize: 18 }}>
-                  {selectedWebhook ? "single endpoint" : "tenant-wide"}
+                  {selectedWebhook
+                    ? t("webhooks.metric.scopeSingle", locale)
+                    : t("webhooks.metric.scopeTenantWide", locale)}
                 </span>
                 <p style={mutedStyle}>
                   {selectedWebhook
                     ? selectedWebhook.url
-                    : "All endpoints + delivery visibility"}
+                    : t("webhooks.metric.scopeAllEndpoints", locale)}
                 </p>
               </div>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>就緒度</span>
+                <span style={metricLabelStyle}>
+                  {t("webhooks.metric.readiness", locale)}
+                </span>
                 <div>
                   <CanvasPill
                     theme={th}
@@ -2101,7 +2233,7 @@ export default async function WebhooksPage({
                 </div>
                 <p style={mutedStyle}>
                   {webhookReadiness?.detail ??
-                    "Integration readiness summary is not currently available."}
+                    t("webhooks.readiness.unavailable", locale)}
                 </p>
               </div>
             </div>
@@ -2109,26 +2241,29 @@ export default async function WebhooksPage({
 
           <CanvasCard
             theme={th}
-            title="治理政策"
-            subtitle="重試／驗證政策來自治理套件。"
+            title={t("webhooks.card.policyTitle", locale)}
+            subtitle={t("webhooks.card.policySubtitle", locale)}
           >
             <div style={stackStyle}>
               <div style={detailLineStyle}>
-                <span>測試事件</span>
+                <span>{t("webhooks.policy.testEvent", locale)}</span>
                 <span style={monoStyle}>
                   {data.governance?.webhookPolicy.testEventType ?? "—"}
                 </span>
               </div>
               <div style={detailLineStyle}>
-                <span>重試策略</span>
+                <span>{t("webhooks.policy.retryPolicy", locale)}</span>
                 <span style={monoStyle}>
                   {data.governance
-                    ? `${data.governance.webhookPolicy.retryPolicy.maxAttempts} attempts`
+                    ? t("webhooks.policy.retryAttempts", locale, {
+                        count:
+                          data.governance.webhookPolicy.retryPolicy.maxAttempts,
+                      })
                     : "—"}
                 </span>
               </div>
               <div style={detailLineStyle}>
-                <span>失敗通知</span>
+                <span>{t("webhooks.policy.failureNotification", locale)}</span>
                 <span style={monoStyle}>
                   {data.governance?.webhookPolicy
                     .deliveryFailureNotificationChannel ?? "—"}
@@ -2141,18 +2276,20 @@ export default async function WebhooksPage({
         <div id="payload-schema">
           <CanvasCard
             theme={th}
-            title="Payload 結構描述"
-            subtitle="標頭 CTA 目標。可見性仍來自 governance.availableActions[]。"
+            title={t("webhooks.card.payloadTitle", locale)}
+            subtitle={t("webhooks.card.payloadSubtitle", locale)}
           >
             <div style={stackStyle}>
               <div style={detailLineStyle}>
-                <span>測試事件</span>
+                <span>{t("webhooks.policy.testEvent", locale)}</span>
                 <span style={monoStyle}>
                   {data.governance?.webhookPolicy.testEventType ?? "—"}
                 </span>
               </div>
               <div style={{ display: "grid", gap: 8 }}>
-                <span style={metricLabelStyle}>baseline events</span>
+                <span style={metricLabelStyle}>
+                  {t("webhooks.payload.baselineEvents", locale)}
+                </span>
                 {baselineEvents.length > 0 ? (
                   <div style={chipWrapStyle}>
                     {baselineEvents.map((eventType) => (
@@ -2163,14 +2300,11 @@ export default async function WebhooksPage({
                   </div>
                 ) : (
                   <p style={mutedStyle}>
-                    Governance package 尚未提供 baseline event schema。
+                    {t("webhooks.payload.noBaseline", locale)}
                   </p>
                 )}
               </div>
-              <p style={mutedStyle}>
-                Endpoint create / update 必須沿用這組 event schema；UI
-                不自行發明 額外 payload 類型。
-              </p>
+              <p style={mutedStyle}>{t("webhooks.payload.note", locale)}</p>
             </div>
           </CanvasCard>
         </div>
@@ -2180,7 +2314,7 @@ export default async function WebhooksPage({
             theme={th}
             tone="success"
             icon="check"
-            title="操作完成"
+            title={t("webhooks.banner.successTitle", locale)}
             body={success}
           />
         ) : null}
@@ -2190,7 +2324,7 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="操作失敗"
+            title={t("webhooks.banner.errorTitle", locale)}
             body={error}
           />
         ) : null}
@@ -2200,22 +2334,22 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Rotate secret receipt 已失效"
-            body="完整 secret 只會顯示一次。若你已離開 receipt 流程，主列表只保留 masked preview。需要新值時請重新執行 rotate secret。"
+            title={t("webhooks.banner.receiptExpiredTitle", locale)}
+            body={t("webhooks.banner.receiptExpiredBody", locale)}
           />
         ) : null}
 
         {rotateSecretReceipt ? (
           <CanvasCard
             theme={th}
-            title="輪替密鑰回執"
-            subtitle="Webhook 密鑰輪替的一次性明文顯示。此步驟後讀取模型會回到遮罩預覽。"
+            title={t("webhooks.card.receiptTitle", locale)}
+            subtitle={t("webhooks.card.receiptSubtitle", locale)}
           >
             <SecretRevealCard
               theme={th}
-              title="完整 webhook secret 只在本次畫面顯示"
-              subtitle="一次性明文 · webhook 密鑰輪替"
-              body="請先複製或下載新的 secret，再完成後續 receiver 更新。離開後主列表只保留 masked preview。"
+              title={t("webhooks.receipt.title", locale)}
+              subtitle={t("webhooks.receipt.subtitle", locale)}
+              body={t("webhooks.receipt.body", locale)}
               endpointUrl={rotateSecretReceipt.endpointUrl}
               secret={rotateSecretReceipt.secret}
               secretPreview={rotateSecretReceipt.secretPreview}
@@ -2232,7 +2366,7 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分 supporting read models 無法載入"
+            title={t("webhooks.banner.partialReadModelsTitle", locale)}
             body={globalErrors.join(" · ")}
           />
         ) : null}
@@ -2244,10 +2378,12 @@ export default async function WebhooksPage({
             theme={th}
             tone={getReadinessBannerTone(webhookReadiness)}
             icon="info"
-            title={`Webhook readiness: ${webhookReadiness.status}`}
+            title={t("webhooks.banner.readinessTitle", locale, {
+              status: webhookReadiness.status,
+            })}
             body={
               webhookReadiness.detail ??
-              "Backend integration readiness reports this subsystem as not fully ready."
+              t("webhooks.banner.readinessBody", locale)
             }
           />
         ) : null}
@@ -2257,8 +2393,14 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="建立流程無法使用"
-            body={`頁面沒有收到可執行的 createWebhookEndpoint action。${createAction?.disabledReasonCode ? ` Disabled reason: ${createAction.disabledReasonCode}.` : " UI 不會補上 fallback create CTA。"}`}
+            title={t("webhooks.banner.createBlockedTitle", locale)}
+            body={
+              createAction?.disabledReasonCode
+                ? t("webhooks.banner.createBlockedBodyReason", locale, {
+                    reason: createAction.disabledReasonCode,
+                  })
+                : t("webhooks.banner.createBlockedBodyNoFallback", locale)
+            }
           />
         ) : null}
 
@@ -2267,8 +2409,8 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="編輯流程無法使用"
-            body="此 endpoint 未發布 updateWebhookEndpoint action，因此 UI 不會直接開啟編輯表單。"
+            title={t("webhooks.banner.editBlockedTitle", locale)}
+            body={t("webhooks.banner.editBlockedBody", locale)}
           />
         ) : null}
 
@@ -2277,16 +2419,16 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="輪替流程無法使用"
-            body="此 endpoint 未發布 rotateWebhookSecret action，因此 UI 不會直接開啟 rotate 表單。"
+            title={t("webhooks.banner.rotateBlockedTitle", locale)}
+            body={t("webhooks.banner.rotateBlockedBody", locale)}
           />
         ) : null}
 
         {engineInactive && endpointEmptyCopy ? (
           <CanvasCard
             theme={th}
-            title="Webhook 引擎"
-            subtitle="依 Q-TEN08 的頁面層空狀態。當真實引擎尚未 provision 時，路由不得暗示有假的端點或投遞資料。"
+            title={t("webhooks.card.engineTitle", locale)}
+            subtitle={t("webhooks.card.engineSubtitle", locale)}
           >
             <div style={pageEmptyWrapStyle}>
               <CanvasBanner
@@ -2305,26 +2447,28 @@ export default async function WebhooksPage({
                   href="/integration-governance"
                   style={getLinkButtonStyle({ primary: true })}
                 >
-                  Open integration governance
+                  {t("webhooks.engine.openGovernance", locale)}
                 </Link>
                 <Link href="/notifications" style={getLinkButtonStyle()}>
-                  Notification routing
+                  {t("webhooks.engine.notificationRouting", locale)}
                 </Link>
               </div>
-              <p style={mutedStyle}>
-                Cross-app operational triage remains available below, but the
-                primary page surface stays empty until provisioning is complete.
-              </p>
+              <p style={mutedStyle}>{t("webhooks.engine.note", locale)}</p>
             </div>
           </CanvasCard>
         ) : null}
 
         {!engineInactive ? (
           <div style={threeColumnStyle}>
-            <CanvasCard theme={th} title="端點狀態">
+            <CanvasCard
+              theme={th}
+              title={t("webhooks.card.endpointStatusTitle", locale)}
+            >
               <div style={metricGridStyle}>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>active</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.status.active", locale)}
+                  </span>
                   <span style={metricValueStyle}>
                     {
                       data.endpoints.filter(
@@ -2334,7 +2478,9 @@ export default async function WebhooksPage({
                   </span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>test_pending</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.status.testPending", locale)}
+                  </span>
                   <span style={metricValueStyle}>
                     {
                       data.endpoints.filter(
@@ -2344,7 +2490,9 @@ export default async function WebhooksPage({
                   </span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>failure cluster</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.status.failureCluster", locale)}
+                  </span>
                   <span style={metricValueStyle}>
                     {countFailureClusters(data.endpoints)}
                   </span>
@@ -2353,40 +2501,48 @@ export default async function WebhooksPage({
             </CanvasCard>
             <CanvasCard
               theme={th}
-              title="投遞健康"
+              title={t("webhooks.card.deliveryHealthTitle", locale)}
               subtitle={
                 selectedWebhook
-                  ? "Current endpoint view"
-                  : "Tenant-wide delivery snapshot"
+                  ? t("webhooks.card.deliveryHealthSubtitleSelected", locale)
+                  : t("webhooks.card.deliveryHealthSubtitleTenant", locale)
               }
             >
               <div style={metricGridStyle}>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>delivered</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.status.delivered", locale)}
+                  </span>
                   <span style={metricValueStyle}>{summary.delivered}</span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>queued</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.status.queued", locale)}
+                  </span>
                   <span style={metricValueStyle}>{summary.queued}</span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>failed</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.status.failed", locale)}
+                  </span>
                   <span style={metricValueStyle}>{summary.failed}</span>
                 </div>
               </div>
             </CanvasCard>
             <CanvasCard
               theme={th}
-              title="重播狀態"
-              subtitle="重試仍以契約驅動。UI 只呈現狀態，不會自行假造重播引擎。"
+              title={t("webhooks.card.replayStatusTitle", locale)}
+              subtitle={t("webhooks.card.replayStatusSubtitle", locale)}
             >
               <div style={replayGridStyle}>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>retryable failed</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.replay.retryableFailed", locale)}
+                  </span>
                   <span style={metricValueStyle}>
                     {
                       scopedDeliveries.filter((delivery) =>
-                        getDeliveryActions(delivery, statusFilter).some(
+                        getDeliveryActions(delivery, locale, statusFilter).some(
                           (action) =>
                             action.action === "retryFailedDelivery" &&
                             action.enabled,
@@ -2396,7 +2552,9 @@ export default async function WebhooksPage({
                   </span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>queued retries</span>
+                  <span style={metricLabelStyle}>
+                    {t("webhooks.replay.queuedRetries", locale)}
+                  </span>
                   <span style={metricValueStyle}>{summary.queued}</span>
                 </div>
               </div>
@@ -2419,6 +2577,7 @@ export default async function WebhooksPage({
             webhook={selectedWebhook}
             baselineEvents={baselineEvents}
             endpointActions={selectedEndpointActions}
+            locale={locale}
           />
         ) : null}
 
@@ -2428,15 +2587,17 @@ export default async function WebhooksPage({
         Boolean(
           findAction(selectedEndpointActions, "rotateWebhookSecret")?.enabled,
         ) ? (
-          <RotateSecretForm webhook={selectedWebhook} />
+          <RotateSecretForm webhook={selectedWebhook} locale={locale} />
         ) : null}
 
         {!engineInactive ? (
           <div style={twoColumnStyle}>
             <CanvasCard
               theme={th}
-              title={`端點 · ${filteredEndpoints.length} entries`}
-              subtitle="availableActions 以可見 CTA 呈現：啟用、附原因停用，絕不隱藏。"
+              title={t("webhooks.card.endpointListTitle", locale, {
+                count: filteredEndpoints.length,
+              })}
+              subtitle={t("webhooks.card.endpointListSubtitle", locale)}
               actions={
                 <div style={buttonWrapStyle}>
                   {["all", "active", "test_pending", "disabled"].map(
@@ -2474,7 +2635,7 @@ export default async function WebhooksPage({
                   {endpointReason === "filtered_empty" ? (
                     <div style={{ marginTop: 12 }}>
                       <Link href="/webhooks" style={getLinkButtonStyle()}>
-                        清除篩選
+                        {t("webhooks.filter.clear", locale)}
                       </Link>
                     </div>
                   ) : null}
@@ -2483,18 +2644,24 @@ export default async function WebhooksPage({
                 <CanvasTable<EndpointRow>
                   theme={th}
                   columns={endpointColumns}
-                  rows={filteredEndpoints.map(toEndpointRow)}
+                  rows={filteredEndpoints.map((endpoint) =>
+                    toEndpointRow(endpoint, locale),
+                  )}
                 />
               )}
             </CanvasCard>
 
             <CanvasCard
               theme={th}
-              title={selectedWebhook ? "Selected endpoint" : "Action matrix"}
+              title={
+                selectedWebhook
+                  ? t("webhooks.card.selectedEndpointTitle", locale)
+                  : t("webhooks.card.actionMatrixTitle", locale)
+              }
               subtitle={
                 selectedWebhook
-                  ? "Per-endpoint actions and contract notes"
-                  : "Pick an endpoint to inspect delivery scope or update actions."
+                  ? t("webhooks.card.selectedEndpointSubtitle", locale)
+                  : t("webhooks.card.actionMatrixSubtitle", locale)
               }
             >
               {selectedWebhook ? (
@@ -2521,14 +2688,11 @@ export default async function WebhooksPage({
                   </div>
                   {selectedWebhook.availableActions === undefined ? (
                     <p style={mutedStyle}>
-                      Backend 尚未在此 endpoint publish `availableActions[]`；
-                      UI 不再推導 fallback CTA。
+                      {t("webhooks.endpoint.noActionsPublished", locale)}
                     </p>
                   ) : null}
                   <p style={mutedStyle}>
-                    Endpoint 層保留 lifecycle actions；delivery-specific `retry
-                    failed` 會在下方 delivery rows / selected delivery detail 依
-                    `delivery.availableActions` 顯示。
+                    {t("webhooks.endpoint.lifecycleNote", locale)}
                   </p>
                 </div>
               ) : (
@@ -2537,20 +2701,13 @@ export default async function WebhooksPage({
                     theme={th}
                     tone="info"
                     icon="info"
-                    title="選擇一個端點"
-                    body="從左側列表點選 `delivery log` / `更新` / `rotate secret` 即可進入 per-endpoint flow。"
+                    title={t("webhooks.endpoint.selectTitle", locale)}
+                    body={t("webhooks.endpoint.selectBody", locale)}
                   />
                   <ul style={listStyle}>
-                    <li>Create / update 由真實 backend route 支援。</li>
-                    <li>
-                      Rotate secret 直接呼叫
-                      `/api/tenant/webhooks/:id/rotate-secret`。
-                    </li>
-                    <li>
-                      Delivery row 會直接反映 `retryFailedDelivery` 的
-                      enabled/disabled 狀態，並在 enabled 時直接提交 manual
-                      retry。
-                    </li>
+                    <li>{t("webhooks.endpoint.bullet1", locale)}</li>
+                    <li>{t("webhooks.endpoint.bullet2", locale)}</li>
+                    <li>{t("webhooks.endpoint.bullet3", locale)}</li>
                   </ul>
                 </div>
               )}
@@ -2562,16 +2719,22 @@ export default async function WebhooksPage({
           <div style={twoColumnStyle}>
             <CanvasCard
               theme={th}
-              title={selectedWebhook ? "Delivery log" : "近 24h 投遞"}
+              title={
+                selectedWebhook
+                  ? t("webhooks.card.deliveryLogTitle", locale)
+                  : t("webhooks.card.recentDeliveriesTitle", locale)
+              }
               subtitle={
                 selectedWebhook
-                  ? `${selectedWebhook.url} · real engine records only`
-                  : "Tenant-wide delivery stream · no mock replay rows"
+                  ? t("webhooks.card.deliveryLogSubtitleSelected", locale, {
+                      url: selectedWebhook.url,
+                    })
+                  : t("webhooks.card.deliveryLogSubtitleTenant", locale)
               }
               actions={
                 selectedWebhook ? (
                   <Link href="/webhooks" style={getLinkButtonStyle()}>
-                    Clear endpoint scope
+                    {t("webhooks.delivery.clearEndpointScope", locale)}
                   </Link>
                 ) : null
               }
@@ -2591,7 +2754,9 @@ export default async function WebhooksPage({
                 <CanvasTable<DeliveryRow>
                   theme={th}
                   columns={deliveryColumns}
-                  rows={scopedDeliveries.slice(0, 12).map(toDeliveryRow)}
+                  rows={scopedDeliveries
+                    .slice(0, 12)
+                    .map((delivery) => toDeliveryRow(delivery, locale))}
                   dense
                 />
               )}
@@ -2600,12 +2765,14 @@ export default async function WebhooksPage({
             <CanvasCard
               theme={th}
               title={
-                selectedDelivery ? "Selected delivery" : "Replay / signals"
+                selectedDelivery
+                  ? t("webhooks.card.selectedDeliveryTitle", locale)
+                  : t("webhooks.card.replaySignalsTitle", locale)
               }
               subtitle={
                 selectedDelivery
-                  ? "Per-delivery actions come from delivery.availableActions[]."
-                  : "Entry/exit per packet: notification deep link + integration governance + audit."
+                  ? t("webhooks.card.selectedDeliverySubtitle", locale)
+                  : t("webhooks.card.replaySignalsSubtitle", locale)
               }
             >
               <div style={stackStyle}>
@@ -2615,25 +2782,27 @@ export default async function WebhooksPage({
                       {selectedDelivery.eventType}
                     </div>
                     <div style={detailLineStyle}>
-                      <span>投遞</span>
+                      <span>{t("webhooks.delivery.deliveryLabel", locale)}</span>
                       <span style={monoStyle}>
                         {selectedDelivery.deliveryId}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>端點</span>
+                      <span>{t("webhooks.delivery.endpointLabel", locale)}</span>
                       <span style={monoStyle}>
                         {selectedDelivery.webhookId}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>簽章</span>
+                      <span>
+                        {t("webhooks.delivery.signatureLabel", locale)}
+                      </span>
                       <span style={monoStyle}>
                         {selectedDelivery.signature}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>嘗試</span>
+                      <span>{t("webhooks.delivery.attemptLabel", locale)}</span>
                       <span style={monoStyle}>{selectedDelivery.attempt}</span>
                     </div>
                     <div style={buttonWrapStyle}>
@@ -2648,25 +2817,22 @@ export default async function WebhooksPage({
                         }
                         style={getLinkButtonStyle()}
                       >
-                        Clear delivery scope
+                        {t("webhooks.delivery.clearDeliveryScope", locale)}
                       </Link>
                     </div>
                     <p style={mutedStyle}>
-                      Retry CTA 直接跟著 delivery read model 的
-                      `availableActions`；enabled 時會呼叫
-                      `/api/tenant/webhooks/:webhookId/deliveries/:deliveryId/retry`。
+                      {t("webhooks.delivery.retryNote", locale)}
                     </p>
                     {selectedDelivery.availableActions === undefined ? (
                       <p style={mutedStyle}>
-                        這筆 delivery 尚未發布 `availableActions[]`，因此不顯示
-                        fallback replay CTA。
+                        {t("webhooks.delivery.noFallbackReplay", locale)}
                       </p>
                     ) : null}
                   </div>
                 ) : null}
                 <div style={panelStyle}>
                   <div style={{ color: th.text, fontWeight: 600 }}>
-                    Notification feed
+                    {t("webhooks.feed.title", locale)}
                   </div>
                   {notifications.length > 0 ? (
                     notifications.map((notification) => (
@@ -2681,26 +2847,21 @@ export default async function WebhooksPage({
                       </div>
                     ))
                   ) : (
-                    <p style={mutedStyle}>
-                      目前 notification feed 沒有 webhook / delivery 相關項目。
-                    </p>
+                    <p style={mutedStyle}>{t("webhooks.feed.empty", locale)}</p>
                   )}
                   <Link href="/notifications" style={secondaryLinkStyle}>
-                    Open notification preferences
+                    {t("webhooks.feed.openPreferences", locale)}
                   </Link>
                 </div>
                 <div style={panelStyle}>
                   <div style={{ color: th.text, fontWeight: 600 }}>
-                    Replay notes
+                    {t("webhooks.replay.notesTitle", locale)}
                   </div>
                   <p style={mutedStyle}>
-                    本頁的 replay 只執行 backend 已公開的 retry posture。若
-                    `retryFailedDelivery` 尚未啟用，畫面會保留 disabled
-                    reason，而不會補出未授權的 replay CTA。
+                    {t("webhooks.replay.notesBody1", locale)}
                   </p>
                   <p style={mutedStyle}>
-                    需要跨系統排查時，請使用頁面底部的 deep links 前往 ops
-                    triage、governance 或 audit。
+                    {t("webhooks.replay.notesBody2", locale)}
                   </p>
                 </div>
               </div>
@@ -2710,19 +2871,19 @@ export default async function WebhooksPage({
 
         <CanvasCard
           theme={th}
-          title="跨應用深層連結"
-          subtitle="packet 要求的進入路徑：通知、整合就緒度、audit 與 ops 分流。"
+          title={t("webhooks.deepLinks.title", locale)}
+          subtitle={t("webhooks.deepLinks.subtitle", locale)}
         >
           <div style={stackStyle}>
             <div style={buttonWrapStyle}>
               <Link href="/notifications" style={getLinkButtonStyle()}>
-                Notification preferences
+                {t("webhooks.deepLinks.notificationPreferences", locale)}
               </Link>
               <Link href="/integration-governance" style={getLinkButtonStyle()}>
-                Integration governance
+                {t("webhooks.deepLinks.integrationGovernance", locale)}
               </Link>
               <Link href="/audit" style={getLinkButtonStyle()}>
-                Tenant audit trail
+                {t("webhooks.deepLinks.tenantAudit", locale)}
               </Link>
             </div>
             {externalLinks.map((link) => (
@@ -2742,10 +2903,7 @@ export default async function WebhooksPage({
                 <span style={subtleTextStyle}>{link.description}</span>
                 {!link.href ? (
                   <span style={subtleTextStyle}>
-                    Missing base URL env; configure
-                    `NEXT_PUBLIC_OPS_CONSOLE_URL` /
-                    `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab
-                    navigation.
+                    {t("webhooks.deepLinks.missingBaseUrl", locale)}
                   </span>
                 ) : null}
               </div>

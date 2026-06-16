@@ -7,6 +7,7 @@ import type {
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
 import { ApiKeyManager } from "./api-key-manager";
+import type { ApiKeyPageErrorCode } from "./constants";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ type ApiKeyPageData = {
   availableActions: ResourceActionDescriptor[];
   initialEmptyReason: EmptyReason | null;
   loadedAt: string;
-  errors: string[];
+  errors: ApiKeyPageErrorCode[];
 };
 
 function canManageApiKeys(identity: IdentityContext | null) {
@@ -134,7 +135,7 @@ function deriveInitialEmptyReason(input: {
 
 async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
   const client = getTenantClient();
-  const errors: string[] = [];
+  const errors: ApiKeyPageErrorCode[] = [];
 
   const [apiKeysResult, governanceResult, identityResult] =
     await Promise.allSettled([
@@ -151,27 +152,15 @@ async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
     identityResult.status === "fulfilled" ? identityResult.value : null;
 
   if (apiKeysResult.status === "rejected") {
-    errors.push(
-      apiKeysResult.reason instanceof Error
-        ? apiKeysResult.reason.message
-        : "Unable to load tenant API keys.",
-    );
+    errors.push("apiKeysLoadFailed");
   }
 
   if (governanceResult.status === "rejected") {
-    errors.push(
-      governanceResult.reason instanceof Error
-        ? governanceResult.reason.message
-        : "Unable to load integration governance policy.",
-    );
+    errors.push("governanceLoadFailed");
   }
 
   if (identityResult.status === "rejected") {
-    errors.push(
-      identityResult.reason instanceof Error
-        ? identityResult.reason.message
-        : "Unable to load tenant identity context.",
-    );
+    errors.push("identityLoadFailed");
   }
 
   return {

@@ -6,14 +6,6 @@ import { type Locale, t } from "./translations";
 
 const DEFAULT_LOCALE: Locale = "zh";
 
-function tx(
-  locale: Locale,
-  key: Parameters<typeof t>[0],
-  params?: Record<string, string | number>,
-) {
-  return t(key, params, locale);
-}
-
 export interface PartnerBookingDraftValues {
   pickupAddress: string;
   dropoffAddress: string;
@@ -138,14 +130,14 @@ export function getPartnerProgramLabel(
   subtype: BusinessDispatchSubtype,
   locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return tx(locale, `book.program.${subtype}`);
+  return t(`book.program.${subtype}`, undefined, locale);
 }
 
 export function getPartnerProgramCoverage(
   subtype: BusinessDispatchSubtype,
   locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return tx(locale, `book.coverage.${subtype}`);
+  return t(`book.coverage.${subtype}`, undefined, locale);
 }
 
 export function getPartnerProgramGate(params: {
@@ -171,7 +163,7 @@ export function getPartnerProgramGate(params: {
   ) {
     return {
       state: "blocked",
-      message: tx(locale, "book.eligibility.airport.message"),
+      message: t("book.eligibility.airport.message", undefined, locale),
       actionHref: `/${entry.entrySlug}/eligibility`,
     };
   }
@@ -184,7 +176,7 @@ export function getPartnerProgramGate(params: {
     ) {
       return {
         state: "inline_required",
-        message: tx(locale, "book.eligibility.insurance.message"),
+        message: t("book.eligibility.insurance.message", undefined, locale),
         actionHref: null,
       };
     }
@@ -197,14 +189,14 @@ export function getPartnerProgramGate(params: {
   ) {
     return {
       state: "inline_required",
-      message: tx(locale, "book.eligibility.travel.message"),
+      message: t("book.eligibility.travel.message", undefined, locale),
       actionHref: null,
     };
   }
 
   return {
     state: "ready",
-    message: tx(locale, "book.ready"),
+    message: t("book.ready", undefined, locale),
     actionHref: null,
   };
 }
@@ -215,9 +207,13 @@ function setRequiredError(
   labelKey: Parameters<typeof t>[0],
   locale: Locale,
 ) {
-  errors[field] = tx(locale, "error.required", {
-    label: tx(locale, labelKey),
-  });
+  errors[field] = t(
+    "error.required",
+    {
+      label: t(labelKey, undefined, locale),
+    },
+    locale,
+  );
 }
 
 export function getPartnerBookingFieldErrors(params: {
@@ -249,9 +245,11 @@ export function getPartnerBookingFieldErrors(params: {
       locale,
     );
   } else if (!isValidDateTime(draft.reservationWindowStart)) {
-    errors.reservationWindowStart = tx(locale, "error.datetime", {
-      label: tx(locale, "field.reservationWindowStart"),
-    });
+    errors.reservationWindowStart = t(
+      "error.datetime",
+      { label: t("field.reservationWindowStart", undefined, locale) },
+      locale,
+    );
   }
 
   if (!hasText(draft.reservationWindowEnd)) {
@@ -262,9 +260,11 @@ export function getPartnerBookingFieldErrors(params: {
       locale,
     );
   } else if (!isValidDateTime(draft.reservationWindowEnd)) {
-    errors.reservationWindowEnd = tx(locale, "error.datetime", {
-      label: tx(locale, "field.reservationWindowEnd"),
-    });
+    errors.reservationWindowEnd = t(
+      "error.datetime",
+      { label: t("field.reservationWindowEnd", undefined, locale) },
+      locale,
+    );
   }
 
   if (
@@ -273,7 +273,7 @@ export function getPartnerBookingFieldErrors(params: {
     new Date(draft.reservationWindowStart).getTime() >=
       new Date(draft.reservationWindowEnd).getTime()
   ) {
-    errors.reservationWindowEnd = tx(locale, "error.windowOrder");
+    errors.reservationWindowEnd = t("error.windowOrder", undefined, locale);
   }
 
   if (subtype === "credit_card_airport_transfer") {
@@ -325,9 +325,11 @@ export function getPartnerBookingFieldErrors(params: {
         locale,
       );
     } else if (!isValidDateTime(draft.replacementStart)) {
-      errors.replacementStart = tx(locale, "error.datetime", {
-        label: tx(locale, "field.replacementStart"),
-      });
+      errors.replacementStart = t(
+        "error.datetime",
+        { label: t("field.replacementStart", undefined, locale) },
+        locale,
+      );
     }
     if (!hasText(draft.replacementEnd)) {
       setRequiredError(
@@ -337,9 +339,11 @@ export function getPartnerBookingFieldErrors(params: {
         locale,
       );
     } else if (!isValidDateTime(draft.replacementEnd)) {
-      errors.replacementEnd = tx(locale, "error.datetime", {
-        label: tx(locale, "field.replacementEnd"),
-      });
+      errors.replacementEnd = t(
+        "error.datetime",
+        { label: t("field.replacementEnd", undefined, locale) },
+        locale,
+      );
     }
     if (
       isValidDateTime(draft.replacementStart) &&
@@ -347,7 +351,7 @@ export function getPartnerBookingFieldErrors(params: {
       new Date(draft.replacementStart).getTime() >=
         new Date(draft.replacementEnd).getTime()
     ) {
-      errors.replacementEnd = tx(locale, "error.periodOrder");
+      errors.replacementEnd = t("error.periodOrder", undefined, locale);
     }
   }
 
@@ -358,9 +362,11 @@ export function getPartnerBookingFieldErrors(params: {
     if (!hasText(draft.itineraryLink)) {
       setRequiredError(errors, "itineraryLink", "field.itineraryLink", locale);
     } else if (!isValidUrl(draft.itineraryLink)) {
-      errors.itineraryLink = tx(locale, "error.url", {
-        label: tx(locale, "field.itineraryLink"),
-      });
+      errors.itineraryLink = t(
+        "error.url",
+        { label: t("field.itineraryLink", undefined, locale) },
+        locale,
+      );
     }
     if (!hasText(draft.meetingPoint)) {
       setRequiredError(errors, "meetingPoint", "field.meetingPoint", locale);
@@ -376,18 +382,22 @@ export function getPartnerBookingFieldErrors(params: {
 
     const groupSize = parseInteger(draft.groupSize);
     if (groupSize == null || groupSize <= 0) {
-      errors.groupSize = tx(locale, "error.positiveInteger", {
-        label: tx(locale, "field.groupSize"),
-      });
+      errors.groupSize = t(
+        "error.positiveInteger",
+        { label: t("field.groupSize", undefined, locale) },
+        locale,
+      );
     }
   }
 
   if (hasText(draft.luggageCount)) {
     const luggageCount = parseInteger(draft.luggageCount);
     if (luggageCount == null) {
-      errors.luggageCount = tx(locale, "error.nonNegativeInteger", {
-        label: tx(locale, "field.luggageCount"),
-      });
+      errors.luggageCount = t(
+        "error.nonNegativeInteger",
+        { label: t("field.luggageCount", undefined, locale) },
+        locale,
+      );
     }
   }
 

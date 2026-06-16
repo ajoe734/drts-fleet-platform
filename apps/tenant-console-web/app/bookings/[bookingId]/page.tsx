@@ -11,7 +11,12 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
-import { CalloutBanner } from "@drts/ui-web";
+import {
+  buildCanvasTheme,
+  CalloutBanner,
+  CanvasCard,
+  CanvasPageHeader,
+} from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import {
   formatDateTime,
@@ -62,6 +67,12 @@ type DerivedBookingView = {
   readOnlyReasonCode: string | null;
   timelineStep: number;
 };
+
+const bdTheme = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
 
 type PageHeroProps = {
   eyebrow: string;
@@ -184,11 +195,11 @@ function getEmptyReasonCopy(
 
 function PageHero({ eyebrow, title, description }: PageHeroProps) {
   return (
-    <header className="surface-card detail-stack">
-      <span className="eyebrow-copy">{eyebrow}</span>
-      <h1 className="booking-hero-title">{title}</h1>
-      <p className="muted-copy">{description}</p>
-    </header>
+    <CanvasPageHeader
+      theme={bdTheme}
+      title={title}
+      subtitle={[eyebrow, description].filter(Boolean).join(" · ") || undefined}
+    />
   );
 }
 
@@ -199,14 +210,13 @@ function SurfaceCard({
   children,
 }: SurfaceCardProps) {
   return (
-    <section className="surface-card detail-stack">
-      <div className="detail-stack">
-        <span className="eyebrow-copy">{kicker}</span>
-        <h2>{title}</h2>
-        <p className="muted-copy">{description}</p>
-        {children}
-      </div>
-    </section>
+    <CanvasCard
+      theme={bdTheme}
+      title={title}
+      subtitle={[kicker, description].filter(Boolean).join(" · ") || undefined}
+    >
+      <div style={{ color: bdTheme.text }}>{children}</div>
+    </CanvasCard>
   );
 }
 
@@ -610,7 +620,7 @@ function renderEmptyState(
 ) {
   const copy = getEmptyReasonCopy(reason, locale);
   return (
-    <div className="page-shell">
+    <div className="detail-stack">
       <PageHero
         eyebrow={t("bookingDetail.hero.eyebrow", locale)}
         title={t("bookingDetail.hero.unavailableTitle", locale, {
@@ -752,7 +762,7 @@ export default async function BookingDetailPage({
     : "/cost-centers";
 
   return (
-    <div className="page-shell">
+    <div className="detail-stack">
       <PageHero
         eyebrow={t("bookingDetail.hero.eyebrow", locale)}
         title={

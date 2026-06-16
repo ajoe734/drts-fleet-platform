@@ -27,6 +27,8 @@ import { getTenantClient } from "@/lib/api-client";
 import { formatDateInput } from "@/lib/formatters";
 import { TENANT_PAGE_REFRESH_POLICIES } from "@/lib/page-refresh-policy";
 import { getRefreshTierDescriptor } from "@/lib/refresh-tier";
+import { getServerLocale } from "@/lib/server-locale";
+import { t, type Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -362,8 +364,10 @@ type InvoicesPageData = {
   emptyState: EmptyStateEnvelope | null;
 };
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知的租戶發票錯誤。";
+function toErrorMessage(error: unknown, locale: Locale) {
+  return error instanceof Error && error.message
+    ? t("invoices.error.requestFailed", locale)
+    : t("invoices.error.unknown", locale);
 }
 
 function toPeriodKey(value: string | null | undefined) {
@@ -426,42 +430,44 @@ function deriveInvoiceStatus(invoice: TenantInvoiceRecord) {
 
 function normalizeRuntimeAction(
   action: ResourceActionDescriptor,
+  locale: Locale,
 ): InvoiceActionView {
   switch (action.action) {
     case "download_artifact":
       return {
         ...action,
-        label: "下載簽名檔",
+        label: t("invoices.action.downloadArtifact", locale),
       };
     case "view_detail":
       return {
         ...action,
-        label: "檢視詳情",
+        label: t("invoices.action.viewDetail", locale),
       };
     case "open_billing":
       return {
         ...action,
-        label: "返回帳務概覽",
+        label: t("invoices.action.openBilling", locale),
       };
     case "open_platform_audit":
       return {
         ...action,
-        label: "平台稽核",
+        label: t("invoices.action.platformAudit", locale),
       };
     default:
       return {
         ...action,
-        label: action.action,
+        label: t("invoices.action.unavailableGeneric", locale),
       };
   }
 }
 
 function normalizeInvoice(
   invoice: TenantInvoiceRuntimeRecord,
+  locale: Locale,
 ): InvoiceViewRecord {
   const expiresAt = parseArtifactExpiry(invoice.artifactUrl);
   const normalizedActions = invoice.availableActions.map((action) =>
-    normalizeRuntimeAction(action),
+    normalizeRuntimeAction(action, locale),
   );
 
   return {
@@ -473,7 +479,7 @@ function normalizeInvoice(
   };
 }
 
-async function loadInvoicesData(): Promise<InvoicesPageData> {
+async function loadInvoicesData(locale: Locale): Promise<InvoicesPageData> {
   const client = getTenantClient();
   const [billingResult, invoicesResult] = await Promise.allSettled([
     client.getBillingProfile() as Promise<TenantBillingProfile>,
@@ -482,16 +488,24 @@ async function loadInvoicesData(): Promise<InvoicesPageData> {
 
   const invoices =
     invoicesResult.status === "fulfilled"
-      ? invoicesResult.value.items.map(normalizeInvoice)
+      ? invoicesResult.value.items.map((invoice) => normalizeInvoice(invoice, locale))
       : [];
   const errors: string[] = [];
   let emptyState: EmptyStateEnvelope | null = null;
 
   if (billingResult.status === "rejected") {
-    errors.push(`Billing profile: ${toErrorMessage(billingResult.reason)}`);
+    errors.push(
+      t("invoices.error.billingProfile", locale, {
+        message: toErrorMessage(billingResult.reason, locale),
+      }),
+    );
   }
   if (invoicesResult.status === "rejected") {
-    errors.push(`Invoice register: ${toErrorMessage(invoicesResult.reason)}`);
+    errors.push(
+      t("invoices.error.register", locale, {
+        message: toErrorMessage(invoicesResult.reason, locale),
+      }),
+    );
   }
 
   if (invoicesResult.status === "fulfilled") {
@@ -551,6 +565,40 @@ function getRefreshTone(refresh: UiRefreshMetadata): CanvasTone {
   return "info";
 }
 
+function getRefreshStateLabel(
+  freshness: UiRefreshMetadata["dataFreshness"],
+  locale: Locale,
+) {
+  switch (freshness) {
+    case "fresh":
+      return t("invoices.refresh.state.fresh", locale);
+    case "stale":
+      return t("invoices.refresh.state.stale", locale);
+    case "degraded":
+      return t("invoices.refresh.state.degraded", locale);
+    default:
+      return t("invoices.refresh.state.unknown", locale);
+  }
+}
+
+function getEmptyReasonLabel(reason: EmptyReason, locale: Locale) {
+  switch (reason) {
+    case "not_provisioned":
+      return t("invoices.reason.notProvisioned", locale);
+    case "fetch_failed":
+      return t("invoices.reason.fetchFailed", locale);
+    case "permission_denied":
+      return t("invoices.reason.permissionDenied", locale);
+    case "external_unavailable":
+      return t("invoices.reason.externalUnavailable", locale);
+    case "filtered_empty":
+      return t("invoices.reason.filteredEmpty", locale);
+    case "no_data":
+    default:
+      return t("invoices.reason.noData", locale);
+  }
+}
+
 function buildFilteredEmptyState(): EmptyStateEnvelope {
   return {
     reason: "filtered_empty",
@@ -563,112 +611,161 @@ function buildFilteredEmptyState(): EmptyStateEnvelope {
   };
 }
 
-function describeEmptyState(reason: EmptyReason) {
+function describeEmptyState(reason: EmptyReason, locale: Locale) {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "尚未完成帳務設定",
-        body: "租戶 billing profile 尚未準備好，先補齊 invoice title、稅籍與月結設定，再回到發票頁。",
+        title: t("invoices.empty.notProvisioned.title", locale),
+        body: t("invoices.empty.notProvisioned.body", locale),
         tone: "warn" as const,
       };
     case "fetch_failed":
       return {
-        title: "發票快照讀取失敗",
-        body: "本次載入沒有取得可信的 invoice register，頁面保留語境並要求使用者重試，而不是誤導成沒有資料。",
+        title: t("invoices.empty.fetchFailed.title", locale),
+        body: t("invoices.empty.fetchFailed.body", locale),
         tone: "danger" as const,
       };
     case "permission_denied":
       return {
-        title: "目前角色沒有發票可見權限",
-        body: "這不是 empty data。後端拒絕此角色查看 tenant invoice，需回到角色或權限設定處理。",
+        title: t("invoices.empty.permissionDenied.title", locale),
+        body: t("invoices.empty.permissionDenied.body", locale),
         tone: "neutral" as const,
       };
     case "external_unavailable":
       return {
-        title: "外部 artifact 服務暫時不可用",
-        body: "發票頁仍存在，但簽名下載或相關外部依賴無法提供完整結果，必須保留治理與稽核去向。",
+        title: t("invoices.empty.externalUnavailable.title", locale),
+        body: t("invoices.empty.externalUnavailable.body", locale),
         tone: "warn" as const,
       };
     case "filtered_empty":
       return {
-        title: "目前篩選條件沒有符合的發票",
-        body: "保留 status、period 與 invoice id 的查詢語境，並提供清楚的回復路徑，避免把搜尋失敗誤解為 tenant 沒有任何 invoice。",
+        title: t("invoices.empty.filteredEmpty.title", locale),
+        body: t("invoices.empty.filteredEmpty.body", locale),
         tone: "info" as const,
       };
     case "no_data":
     default:
       return {
-        title: "這個租戶目前還沒有發票",
-        body: "系統讀取正常，但目前 tenant scope 尚未產出任何 invoice record；使用者仍可回到帳務概覽或稽核確認月結狀態。",
+        title: t("invoices.empty.noData.title", locale),
+        body: t("invoices.empty.noData.body", locale),
         tone: "info" as const,
       };
   }
 }
 
-function getArtifactState(invoice: InvoiceViewRecord) {
+function getArtifactState(invoice: InvoiceViewRecord, locale: Locale) {
   if (!invoice.artifactUrl) {
     return {
-      label: "檔案缺失",
+      label: t("invoices.artifact.missing", locale),
       tone: "neutral" as const,
     };
   }
 
   if (invoice.expiresAt && isIsoPast(invoice.expiresAt)) {
     return {
-      label: "檔案已過期",
+      label: t("invoices.artifact.expired", locale),
       tone: "warn" as const,
     };
   }
 
   return {
-    label: "檔案就緒",
+    label: t("invoices.artifact.ready", locale),
     tone: "success" as const,
   };
 }
 
-function formatStatusLabel(status: InvoiceViewRecord["statusView"]) {
-  return status;
-}
-
-function formatActionLabel(action: ResourceActionDescriptor) {
-  switch (action.action) {
-    case "open_billing_setup":
-      return "前往帳務設定";
-    case "refresh_snapshot":
-      return "重新整理快照";
-    case "review_access":
-      return "檢查角色權限";
-    case "open_platform_audit":
-      return "前往平台稽核";
-    case "clear_filters":
-      return "清除篩選";
-    case "open_billing":
-      return "前往帳務概覽";
+function formatStatusLabel(
+  status: InvoiceViewRecord["statusView"] | StatusFilter,
+  locale: Locale,
+) {
+  switch (status) {
+    case "all":
+      return t("invoices.status.all", locale);
+    case "draft":
+      return t("invoices.status.draft", locale);
+    case "issued":
+      return t("invoices.status.issued", locale);
+    case "paid":
+      return t("invoices.status.paid", locale);
+    case "overdue":
+      return t("invoices.status.overdue", locale);
     default:
-      return action.action;
+      return t("invoices.status.unknown", locale);
   }
 }
 
-function formatRefreshWindow(staleAfterMs: number | null | undefined) {
+function formatActionLabel(action: ResourceActionDescriptor, locale: Locale) {
+  switch (action.action) {
+    case "open_billing_setup":
+      return t("invoices.action.openBillingSetup", locale);
+    case "refresh_snapshot":
+      return t("invoices.action.refreshSnapshot", locale);
+    case "review_access":
+      return t("invoices.action.reviewAccess", locale);
+    case "open_platform_audit":
+      return t("invoices.action.openPlatformAudit", locale);
+    case "clear_filters":
+      return t("invoices.action.clearFilters", locale);
+    case "open_billing":
+      return t("invoices.action.openBilling", locale);
+    default:
+      return t("invoices.action.unavailableGeneric", locale);
+  }
+}
+
+function getRefreshSourceLabel(
+  source: UiRefreshMetadata["source"],
+  locale: Locale,
+) {
+  switch (source) {
+    case "live":
+      return t("invoices.meta.sourceLive", locale);
+    case "cache":
+      return t("invoices.meta.sourceCache", locale);
+    case "sandbox":
+      return t("invoices.meta.sourceSandbox", locale);
+    case "static":
+      return t("invoices.meta.sourceStatic", locale);
+    default:
+      return t("invoices.meta.sourceUnknown", locale);
+  }
+}
+
+function formatRefreshWindow(
+  staleAfterMs: number | null | undefined,
+  locale: Locale,
+) {
   if (!staleAfterMs || staleAfterMs <= 0) return null;
 
   const totalSeconds = Math.round(staleAfterMs / 1000);
   if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
+    return t("invoices.refresh.staleAfterSeconds", locale, {
+      count: totalSeconds,
+    });
   }
 
   const totalMinutes = Math.round(totalSeconds / 60);
-  return `${totalMinutes}m`;
+  return t("invoices.refresh.staleAfterMinutes", locale, {
+    count: totalMinutes,
+  });
 }
 
 function formatRefreshTierBadge(
   policy: typeof INVOICES_REFRESH_POLICY,
   refreshWindow: string | null,
+  locale: Locale,
 ) {
   const refreshTier = getRefreshTierDescriptor(policy.runtimeTier);
-  return `${policy.packetTier} · ${policy.runtimeTier} · ${refreshTier.cadenceLabel}${
-    refreshWindow ? ` · staleAfter ${refreshWindow}` : ""
-  }`;
+  return t("invoices.refresh.badge", locale, {
+    packetTier: policy.packetTier,
+    runtimeTier: policy.runtimeTier,
+    cadenceLabel: refreshTier.cadenceLabel,
+    staleAfter: refreshWindow
+      ? t("invoices.refresh.staleAfterSuffix", locale, {
+          value: refreshWindow,
+        })
+      : "",
+  });
 }
 
 function buildInvoiceDetailHref(
@@ -733,40 +830,38 @@ function resolveEmptyStateActionHref(action: ResourceActionDescriptor) {
   }
 }
 
-function getEmptyStateActionLabel(action: ResourceActionDescriptor) {
+function getEmptyStateActionLabel(action: ResourceActionDescriptor, locale: Locale) {
   switch (action.action) {
     case "open_billing_setup":
-      return "前往帳務設定";
+      return t("invoices.action.openBillingSetup", locale);
     case "refresh_snapshot":
-      return "重新整理快照";
+      return t("invoices.action.refreshSnapshot", locale);
     case "review_access":
-      return "檢查角色權限";
+      return t("invoices.action.reviewAccess", locale);
     case "open_platform_audit":
-      return "前往平台稽核";
+      return t("invoices.action.openPlatformAudit", locale);
     case "clear_filters":
-      return "清除篩選";
+      return t("invoices.action.clearFilters", locale);
     case "open_billing":
-      return "前往帳務概覽";
+      return t("invoices.action.openBilling", locale);
     default:
-      return formatActionLabel(action);
+      return formatActionLabel(action, locale);
   }
 }
 
-function describeEmptyStateAction(action: ResourceActionDescriptor) {
+function describeEmptyStateAction(action: ResourceActionDescriptor, locale: Locale) {
   if (action.enabled) {
-    return getEmptyStateActionLabel(action);
+    return getEmptyStateActionLabel(action, locale);
   }
 
-  if (action.disabledReasonCode) {
-    return `${getEmptyStateActionLabel(action)} (${action.disabledReasonCode})`;
-  }
-
-  return `${getEmptyStateActionLabel(action)} 已停用`;
+  return t("invoices.action.disabled", locale, {
+    label: getEmptyStateActionLabel(action, locale),
+  });
 }
 
-function renderEmptyStateAction(action: ResourceActionDescriptor) {
+function renderEmptyStateAction(action: ResourceActionDescriptor, locale: Locale) {
   const href = resolveEmptyStateActionHref(action);
-  const label = describeEmptyStateAction(action);
+  const label = describeEmptyStateAction(action, locale);
 
   if (action.enabled && href) {
     return (
@@ -790,20 +885,21 @@ function renderEmptyStateAction(action: ResourceActionDescriptor) {
   );
 }
 
-function describeAction(action: InvoiceActionView) {
+function describeAction(action: InvoiceActionView, locale: Locale) {
   if (action.enabled) return action.label;
   if (action.disabledReasonCode === "artifact_missing") {
-    return `${action.label}不可用`;
+    return t("invoices.action.unavailable", locale, { label: action.label });
   }
   if (action.disabledReasonCode === "artifact_expired") {
-    return `${action.label}已過期`;
+    return t("invoices.action.expired", locale, { label: action.label });
   }
-  return `${action.label}已停用`;
+  return t("invoices.action.disabled", locale, { label: action.label });
 }
 
 function renderActionLink(
   action: InvoiceActionView,
   invoice: InvoiceViewRecord,
+  locale: Locale,
   filters?: Pick<InvoiceFilters, "query" | "period" | "status">,
 ) {
   const href = resolveInvoiceActionHref(invoice, action, filters);
@@ -827,7 +923,7 @@ function renderActionLink(
           borderColor: isExternal ? th.accent : th.border,
         }}
       >
-        {describeAction(action)}
+        {describeAction(action, locale)}
       </Link>
     );
   }
@@ -837,7 +933,7 @@ function renderActionLink(
       key={action.action}
       style={{ ...actionChipStyle, opacity: 0.52, cursor: "not-allowed" }}
     >
-      {describeAction(action)}
+      {describeAction(action, locale)}
     </span>
   );
 }
@@ -885,7 +981,8 @@ export default async function InvoicesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const data = await loadInvoicesData();
+  const locale = await getServerLocale();
+  const data = await loadInvoicesData(locale);
   const filters = parseFilters(await searchParams);
   const allInvoices = [...data.invoices].sort((left, right) =>
     right.periodEnd.localeCompare(left.periodEnd),
@@ -901,7 +998,7 @@ export default async function InvoicesPage({
   const filteredInvoices = allInvoices.filter((invoice) => {
     if (
       filters.status !== "all" &&
-      formatStatusLabel(invoice.statusView) !== filters.status
+      invoice.statusView !== filters.status
     ) {
       return false;
     }
@@ -931,12 +1028,13 @@ export default async function InvoicesPage({
       ? buildFilteredEmptyState()
       : data.emptyState;
   const emptyDescription = computedEmptyReason
-    ? describeEmptyState(computedEmptyReason)
+    ? describeEmptyState(computedEmptyReason, locale)
     : null;
-  const refreshWindow = formatRefreshWindow(data.refresh?.staleAfterMs);
+  const refreshWindow = formatRefreshWindow(data.refresh?.staleAfterMs, locale);
   const refreshTierBadge = formatRefreshTierBadge(
     INVOICES_REFRESH_POLICY,
     refreshWindow,
+    locale,
   );
 
   const selectedInvoice =
@@ -968,18 +1066,18 @@ export default async function InvoicesPage({
   // render functions (functions cannot cross the server→client boundary);
   // React elements stored as data serialize fine.
   const columns: CanvasTableColumn<InvoiceRow>[] = [
-    { h: "發票", w: 220, mono: true, k: "c_invoice" },
-    { h: "期別", w: 110, mono: true, k: "c_period" },
-    { h: "金額", w: 170, mono: true, align: "right", k: "c_amount" },
-    { h: "狀態", w: 110, k: "c_status" },
-    { h: "到期", w: 120, mono: true, k: "c_due" },
-    { h: "開立", w: 120, mono: true, k: "c_issued" },
-    { h: "檔案", w: 220, k: "c_artifact" },
-    { h: "操作", w: 210, k: "c_actions" },
+    { h: t("invoices.table.invoice", locale), w: 220, mono: true, k: "c_invoice" },
+    { h: t("invoices.table.period", locale), w: 110, mono: true, k: "c_period" },
+    { h: t("invoices.table.amount", locale), w: 170, mono: true, align: "right", k: "c_amount" },
+    { h: t("invoices.table.status", locale), w: 110, k: "c_status" },
+    { h: t("invoices.table.due", locale), w: 120, mono: true, k: "c_due" },
+    { h: t("invoices.table.issued", locale), w: 120, mono: true, k: "c_issued" },
+    { h: t("invoices.table.artifact", locale), w: 220, k: "c_artifact" },
+    { h: t("invoices.table.actions", locale), w: 210, k: "c_actions" },
   ];
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => {
     const row: InvoiceRow = { ...invoice };
-    const artifactState = getArtifactState(row);
+    const artifactState = getArtifactState(row, locale);
     return {
       ...row,
       c_invoice: (
@@ -999,7 +1097,7 @@ export default async function InvoicesPage({
       c_amount: formatCanvasMoney(row.amount),
       c_status: (
         <CanvasPill theme={th} tone={getStatusTone(row.statusView)} dot>
-          {formatStatusLabel(row.statusView)}
+          {formatStatusLabel(row.statusView, locale)}
         </CanvasPill>
       ),
       c_due: formatDateInput(row.dueDate) || "—",
@@ -1019,17 +1117,19 @@ export default async function InvoicesPage({
               {formatArtifactUrl(row.artifactUrl)}
             </Link>
           ) : (
-            <span style={monoHintStyle}>無檔案 URL</span>
+            <span style={monoHintStyle}>{t("invoices.artifact.none", locale)}</span>
           )}
           <span style={monoHintStyle}>
-            expiresAt {formatDateInput(row.expiresAt) || "—"}
+            {t("invoices.artifact.expiresAt", locale, {
+              value: formatDateInput(row.expiresAt) || "—",
+            })}
           </span>
         </div>
       ),
       c_actions: (
         <div style={actionRowStyle}>
           {row.availableActions.map((action) =>
-            renderActionLink(action, row, filters),
+            renderActionLink(action, row, locale, filters),
           )}
         </div>
       ),
@@ -1041,8 +1141,8 @@ export default async function InvoicesPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="發票"
-        subtitle="發票歷史 · 狀態 / 期別 / id 篩選 · 由 availableActions 驅動的 CTA"
+        title={t("invoices.title", locale)}
+        subtitle={t("invoices.subtitle", locale)}
         actions={
           <>
             <CanvasPill theme={th} tone="info">
@@ -1050,7 +1150,7 @@ export default async function InvoicesPage({
             </CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
-                {data.refresh.dataFreshness}
+                {getRefreshStateLabel(data.refresh.dataFreshness, locale)}
               </CanvasPill>
             ) : null}
             {selectedArtifactAction?.enabled && selectedArtifactHref ? (
@@ -1076,60 +1176,72 @@ export default async function InvoicesPage({
       <div style={pageStyle}>
         <div style={pageLeadStyle}>
           <div style={pageLeadCopyStyle}>
-            狀態與 CTA 以 backend read model 為準，頁面只負責呈現
-            `availableActions`、 `EmptyReason`、refresh tier 與 cross-app deep
-            links，不從 client 推導角色權限。
+            {t("invoices.pageLead", locale)}
           </div>
           <div style={pageLeadMetaStyle}>
             <CanvasPill theme={th} tone="info">
-              {formatRefreshTierBadge(INVOICES_REFRESH_POLICY, null)}
+              {formatRefreshTierBadge(INVOICES_REFRESH_POLICY, null, locale)}
             </CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
-                {data.refresh.dataFreshness}
+                {getRefreshStateLabel(data.refresh.dataFreshness, locale)}
               </CanvasPill>
             ) : null}
             {data.refresh ? (
               <CanvasPill
                 theme={th}
                 tone="neutral"
-              >{`source · ${data.refresh.source}`}</CanvasPill>
+              >
+                {t("invoices.meta.source", locale, {
+                  value: getRefreshSourceLabel(data.refresh.source, locale),
+                })}
+              </CanvasPill>
             ) : null}
             <CanvasPill theme={th} tone="neutral">
-              {`${filteredInvoices.length} visible`}
+              {t("invoices.meta.visible", locale, {
+                count: filteredInvoices.length,
+              })}
             </CanvasPill>
           </div>
         </div>
 
         <div style={summaryGridStyle}>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>可見發票</div>
+            <div style={summaryLabelStyle}>
+              {t("invoices.summary.visible.label", locale)}
+            </div>
             <div style={summaryValueStyle}>{filteredInvoices.length}</div>
             <div style={summaryCaptionStyle}>
-              current register slice after status, period, and id filters
+              {t("invoices.summary.visible.caption", locale)}
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>逾期</div>
+            <div style={summaryLabelStyle}>
+              {t("invoices.summary.overdue.label", locale)}
+            </div>
             <div style={summaryValueStyle}>{invoiceSummary.overdueCount}</div>
             <div style={summaryCaptionStyle}>
-              緊急狀態與一般 `issued` 維持區隔
+              {t("invoices.summary.overdue.caption", locale)}
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>已過期檔案</div>
+            <div style={summaryLabelStyle}>
+              {t("invoices.summary.expired.label", locale)}
+            </div>
             <div style={summaryValueStyle}>
               {invoiceSummary.expiredArtifacts}
             </div>
             <div style={summaryCaptionStyle}>
-              signed-download links may expire while invoice metadata remains
+              {t("invoices.summary.expired.caption", locale)}
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>可見金額</div>
+            <div style={summaryLabelStyle}>
+              {t("invoices.summary.amount.label", locale)}
+            </div>
             <div style={summaryValueStyle}>{invoiceSummary.totalAmount}</div>
             <div style={summaryCaptionStyle}>
-              finance users can validate the current slice before opening detail
+              {t("invoices.summary.amount.caption", locale)}
             </div>
           </div>
         </div>
@@ -1139,7 +1251,7 @@ export default async function InvoicesPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="發票讀取模型降級"
+            title={t("invoices.error.degradedTitle", locale)}
             body={data.errors.join(" / ")}
           />
         ) : null}
@@ -1149,22 +1261,25 @@ export default async function InvoicesPage({
             theme={th}
             tone={data.refresh.dataFreshness === "degraded" ? "danger" : "warn"}
             icon="warn"
-            title="快照鮮度警告"
-            body={`目前內容產生於 ${formatDateInput(
-              data.refresh.generatedAt,
-            )}，refresh tier 為 ${INVOICES_REFRESH_POLICY.packetTier} / ${
-              INVOICES_REFRESH_POLICY.runtimeTier
-            }${
-              refreshWindow ? `，staleAfter ${refreshWindow}` : ""
-            }。資料不是 fresh 時，頁面必須明確提示而不是假裝即時。`}
+            title={t("invoices.banner.freshnessTitle", locale)}
+            body={t("invoices.banner.freshnessBody", locale, {
+              generatedAt: formatDateInput(data.refresh.generatedAt) || "—",
+              packetTier: INVOICES_REFRESH_POLICY.packetTier,
+              runtimeTier: INVOICES_REFRESH_POLICY.runtimeTier,
+              staleAfter: refreshWindow
+                ? t("invoices.refresh.staleAfterSuffix", locale, {
+                    value: refreshWindow,
+                  })
+                : "",
+            })}
           />
         ) : null}
 
         <div style={pageGridStyle}>
           <CanvasCard
             theme={th}
-            title="發票清單"
-            subtitle="狀態 / 期別 / 發票 id 篩選 · 逾期與檔案過期狀態保持可見"
+            title={t("invoices.section.list", locale)}
+            subtitle={t("invoices.section.listSub", locale)}
             style={tableCardStyle}
           >
             <div style={registerCardBodyStyle}>
@@ -1177,20 +1292,20 @@ export default async function InvoicesPage({
 
                 <div style={fieldStackStyle}>
                   <label htmlFor="invoice-query" style={fieldLabelStyle}>
-                    Search by invoice id
+                    {t("invoices.filter.search", locale)}
                   </label>
                   <input
                     id="invoice-query"
                     name="q"
                     defaultValue={filters.query}
-                    placeholder="inv_2026_05_001"
+                    placeholder={t("invoices.filter.searchPlaceholder", locale)}
                     style={fieldControlStyle}
                   />
                 </div>
 
                 <div style={fieldStackStyle}>
                   <label htmlFor="invoice-status" style={fieldLabelStyle}>
-                    Status
+                    {t("invoices.filter.status", locale)}
                   </label>
                   <select
                     id="invoice-status"
@@ -1200,7 +1315,7 @@ export default async function InvoicesPage({
                   >
                     {STATUS_FILTERS.map((status) => (
                       <option key={status} value={status}>
-                        {status}
+                        {formatStatusLabel(status, locale)}
                       </option>
                     ))}
                   </select>
@@ -1208,7 +1323,7 @@ export default async function InvoicesPage({
 
                 <div style={fieldStackStyle}>
                   <label htmlFor="invoice-period" style={fieldLabelStyle}>
-                    Period
+                    {t("invoices.filter.period", locale)}
                   </label>
                   <select
                     id="invoice-period"
@@ -1216,7 +1331,7 @@ export default async function InvoicesPage({
                     defaultValue={filters.period}
                     style={fieldControlStyle}
                   >
-                    <option value="">all periods</option>
+                    <option value="">{t("invoices.filter.allPeriods", locale)}</option>
                     {periodOptions.map((period) => (
                       <option key={period} value={period}>
                         {period}
@@ -1227,23 +1342,27 @@ export default async function InvoicesPage({
 
                 <div style={filterActionsStyle}>
                   <button type="submit" style={primaryButtonStyle}>
-                    套用篩選
+                    {t("invoices.filter.apply", locale)}
                   </button>
                   <Link href="/invoices" style={inlineLinkStyle}>
-                    清除
+                    {t("invoices.filter.clear", locale)}
                   </Link>
                 </div>
               </form>
 
               <div style={registerMetaStyle}>
                 <CanvasPill theme={th} tone="neutral">
-                  {`${allInvoices.length} total`}
+                  {t("invoices.meta.total", locale, { count: allInvoices.length })}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="danger">
-                  {`${invoiceSummary.overdueCount} overdue`}
+                  {t("invoices.meta.overdue", locale, {
+                    count: invoiceSummary.overdueCount,
+                  })}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="warn">
-                  {`${invoiceSummary.expiredArtifacts} expired artifacts`}
+                  {t("invoices.meta.expiredArtifacts", locale, {
+                    count: invoiceSummary.expiredArtifacts,
+                  })}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="info">
                   {invoiceSummary.totalAmount}
@@ -1255,18 +1374,22 @@ export default async function InvoicesPage({
                   style={{ ...emptyStateWrapStyle, ...emptyReasonCardStyle }}
                 >
                   <CanvasPill theme={th} tone={emptyDescription.tone}>
-                    {emptyState.reason}
+                    {getEmptyReasonLabel(emptyState.reason, locale)}
                   </CanvasPill>
                   <div style={emptyTitleStyle}>{emptyDescription.title}</div>
                   <div style={helperTextStyle}>{emptyDescription.body}</div>
                   <div style={helperTextStyle}>
-                    messageCode: {emptyState.messageCode}
+                    {t("invoices.empty.messageCode", locale, {
+                      value: emptyState.messageCode,
+                    })}
                     {emptyState.nextAction
-                      ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
+                      ? ` · ${t("invoices.empty.nextAction", locale, {
+                          value: formatActionLabel(emptyState.nextAction, locale),
+                        })}`
                       : ""}
                   </div>
                   {emptyState.nextAction
-                    ? renderEmptyStateAction(emptyState.nextAction)
+                    ? renderEmptyStateAction(emptyState.nextAction, locale)
                     : null}
                 </div>
               ) : (
@@ -1284,8 +1407,8 @@ export default async function InvoicesPage({
               <>
                 <CanvasCard
                   theme={th}
-                  title="已選發票"
-                  subtitle="drawer/new route 未拆前，右側保留 packet 必備 detail"
+                  title={t("invoices.section.selected", locale)}
+                  subtitle={t("invoices.section.selectedSub", locale)}
                 >
                   <div style={sideStackStyle}>
                     <div>
@@ -1298,17 +1421,17 @@ export default async function InvoicesPage({
                           tone={getStatusTone(selectedInvoice.statusView)}
                           dot
                         >
-                          {formatStatusLabel(selectedInvoice.statusView)}
+                          {formatStatusLabel(selectedInvoice.statusView, locale)}
                         </CanvasPill>
                         {selectedInvoice.statusView === "overdue" ? (
                           <CanvasPill theme={th} tone="danger">
-                            overdue
+                            {t("invoices.status.overdue", locale)}
                           </CanvasPill>
                         ) : null}
                         {selectedInvoice.expiresAt &&
                         isIsoPast(selectedInvoice.expiresAt) ? (
                           <CanvasPill theme={th} tone="warn">
-                            artifact expired
+                            {t("invoices.selected.artifactExpired", locale)}
                           </CanvasPill>
                         ) : null}
                       </div>
@@ -1319,8 +1442,8 @@ export default async function InvoicesPage({
                         theme={th}
                         tone="warn"
                         icon="warn"
-                        title="逾期發票"
-                        body="已逾預設付款期，必須與一般 issued 狀態分開提示。"
+                        title={t("invoices.selected.overdue", locale)}
+                        body={t("invoices.selected.overdueBody", locale)}
                       />
                     ) : null}
 
@@ -1330,35 +1453,36 @@ export default async function InvoicesPage({
                         theme={th}
                         tone="danger"
                         icon="warn"
-                        title="檔案已過期"
-                        body="簽名下載連結已過期，仍需保留 invoice metadata 與治理去向。"
+                        title={t("invoices.selected.artifactExpired", locale)}
+                        body={t("invoices.selected.artifactExpiredBody", locale)}
                       />
                     ) : null}
 
                     <dl style={dlStyle}>
-                      <dt style={fieldLabelStyle}>帳務標題</dt>
+                      <dt style={fieldLabelStyle}>{t("invoices.selected.billingTitle", locale)}</dt>
                       <dd style={{ margin: 0 }}>
                         {data.billingProfile?.invoiceTitle || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>金額</dt>
+                      <dt style={fieldLabelStyle}>{t("invoices.selected.amount", locale)}</dt>
                       <dd style={{ margin: 0 }}>
                         {formatCanvasMoney(selectedInvoice.amount)}
                       </dd>
-                      <dt style={fieldLabelStyle}>期別</dt>
+                      <dt style={fieldLabelStyle}>{t("invoices.selected.period", locale)}</dt>
                       <dd style={{ margin: 0 }}>
-                        {`${formatDateInput(selectedInvoice.periodStart) || "—"} → ${
-                          formatDateInput(selectedInvoice.periodEnd) || "—"
-                        }`}
+                        {t("invoices.selected.periodValue", locale, {
+                          start: formatDateInput(selectedInvoice.periodStart) || "—",
+                          end: formatDateInput(selectedInvoice.periodEnd) || "—",
+                        })}
                       </dd>
-                      <dt style={fieldLabelStyle}>開立日</dt>
+                      <dt style={fieldLabelStyle}>{t("invoices.selected.issuedAt", locale)}</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.createdAt) || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>到期日</dt>
+                      <dt style={fieldLabelStyle}>{t("invoices.selected.dueDate", locale)}</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.dueDate) || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>檔案 URL</dt>
+                      <dt style={fieldLabelStyle}>{t("invoices.selected.artifactUrl", locale)}</dt>
                       <dd style={{ margin: 0, overflowWrap: "anywhere" }}>
                         {selectedInvoice.artifactUrl ? (
                           <Link
@@ -1373,23 +1497,23 @@ export default async function InvoicesPage({
                           "—"
                         )}
                       </dd>
-                      <dt style={fieldLabelStyle}>expiresAt</dt>
+                      <dt style={fieldLabelStyle}>{t("invoices.selected.expiresAt", locale)}</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.expiresAt) || "—"}
                       </dd>
                     </dl>
 
                     <div>
-                      <div style={fieldLabelStyle}>可用操作</div>
+                      <div style={fieldLabelStyle}>{t("invoices.selected.availableActions", locale)}</div>
                       <div style={actionRowStyle}>
                         {selectedInvoice.availableActions.map((action) =>
-                          renderActionLink(action, selectedInvoice, filters),
+                          renderActionLink(action, selectedInvoice, locale, filters),
                         )}
                       </div>
                     </div>
 
                     <div>
-                      <div style={fieldLabelStyle}>發票選擇器</div>
+                      <div style={fieldLabelStyle}>{t("invoices.selected.picker", locale)}</div>
                       <div style={actionRowStyle}>
                         {selectedInvoiceDetailHref &&
                         selectedInvoice.availableActions.some(
@@ -1400,7 +1524,7 @@ export default async function InvoicesPage({
                             href={selectedInvoiceDetailHref}
                             style={inlineLinkStyle}
                           >
-                            檢視詳情
+                            {t("invoices.selected.viewDetail", locale)}
                           </Link>
                         ) : null}
                         {filteredInvoices.slice(0, 6).map((invoice) => {
@@ -1430,19 +1554,19 @@ export default async function InvoicesPage({
 
                 <CanvasCard
                   theme={th}
-                  title="跨應用上下文"
-                  subtitle="深層連結與明細歸屬"
+                  title={t("invoices.section.crossApp", locale)}
+                  subtitle={t("invoices.section.crossAppSub", locale)}
                 >
                   <div style={sideStackStyle}>
                     <div>
-                      <div style={fieldLabelStyle}>深層連結</div>
+                      <div style={fieldLabelStyle}>{t("invoices.selected.deepLinks", locale)}</div>
                       <div style={lineListStyle}>
                         {selectedInvoice.deepLinks.map(renderDeepLink)}
                       </div>
                     </div>
 
                     <div>
-                      <div style={fieldLabelStyle}>明細項目</div>
+                      <div style={fieldLabelStyle}>{t("invoices.selected.lines", locale)}</div>
                       <div style={lineListStyle}>
                         {selectedInvoice.lines.map((line) => (
                           <div key={line.lineId} style={lineItemStyle}>
@@ -1450,9 +1574,10 @@ export default async function InvoicesPage({
                               {line.description}
                             </div>
                             <div style={helperTextStyle}>
-                              orderId:{" "}
                               <span style={{ fontFamily: th.monoFamily }}>
-                                {line.orderId}
+                                {t("invoices.selected.line.orderId", locale, {
+                                  value: line.orderId,
+                                })}
                               </span>
                               {line.costCenterCode
                                 ? ` · ${line.costCenterCode}`
@@ -1482,12 +1607,11 @@ export default async function InvoicesPage({
             ) : (
               <CanvasCard
                 theme={th}
-                title="發票上下文"
-                subtitle="選擇一筆發票以檢視明細、檔案狀態與深層連結"
+                title={t("invoices.section.context", locale)}
+                subtitle={t("invoices.section.contextSub", locale)}
               >
                 <div style={helperTextStyle}>
-                  發票詳情會在右側呈現。若目前是 empty
-                  state，右側保留為空，不假裝有 detail 資料。
+                  {t("invoices.section.contextBody", locale)}
                 </div>
               </CanvasCard>
             )}

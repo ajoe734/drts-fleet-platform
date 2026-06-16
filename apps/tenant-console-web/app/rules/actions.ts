@@ -19,6 +19,8 @@ import {
   type UpsertTenantQuotaPolicyCommand,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import type { RulesFlashPayload } from "./constants";
 
 type EditableConditionPayload = {
@@ -45,6 +47,11 @@ const TENANT_QUOTA_ENFORCEMENT_MODES: readonly TenantQuotaEnforcementMode[] = [
   "hard_block",
 ] as const;
 
+type RulesTranslator = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
+
 function readTrimmedString(
   formData: FormData,
   key: string,
@@ -61,6 +68,7 @@ function readTrimmedString(
 function readOptionalInteger(
   formData: FormData,
   key: string,
+  translate: RulesTranslator,
 ): number | undefined {
   const rawValue = readTrimmedString(formData, key);
   if (!rawValue) {
@@ -69,7 +77,11 @@ function readOptionalInteger(
 
   const parsed = Number(rawValue);
   if (!Number.isInteger(parsed)) {
-    throw new Error(`${key} must be an integer.`);
+    throw new Error(
+      translate("rules.action.error.integerRequired", {
+        field: key,
+      }),
+    );
   }
 
   return parsed;
@@ -78,6 +90,7 @@ function readOptionalInteger(
 function readOptionalIsoTimestamp(
   formData: FormData,
   key: string,
+  translate: RulesTranslator,
 ): string | undefined {
   const rawValue = readTrimmedString(formData, key);
   if (!rawValue) {
@@ -86,55 +99,90 @@ function readOptionalIsoTimestamp(
 
   const hasExplicitTimezone = /(?:[zZ]|[+-]\d{2}:\d{2})$/.test(rawValue);
   if (!hasExplicitTimezone) {
-    throw new Error(`${key} must include an explicit timezone offset or Z.`);
+    throw new Error(
+      translate("rules.action.error.timestampTimezoneRequired", {
+        field: key,
+      }),
+    );
   }
 
   const parsed = new Date(rawValue);
   if (Number.isNaN(parsed.getTime())) {
-    throw new Error(`${key} must be a valid ISO 8601 timestamp.`);
+    throw new Error(
+      translate("rules.action.error.timestampInvalid", {
+        field: key,
+      }),
+    );
   }
 
   return parsed.toISOString();
 }
 
-function readJsonField<T>(formData: FormData, key: string): T {
+function readJsonField<T>(
+  formData: FormData,
+  key: string,
+  translate: RulesTranslator,
+): T {
   const rawValue = readTrimmedString(formData, key);
   if (!rawValue) {
-    throw new Error(`${key} is required.`);
+    throw new Error(
+      translate("rules.action.error.requiredField", {
+        field: key,
+      }),
+    );
   }
 
   try {
     return JSON.parse(rawValue) as T;
   } catch {
-    throw new Error(`${key} must be valid JSON.`);
+    throw new Error(
+      translate("rules.action.error.jsonInvalid", {
+        field: key,
+      }),
+    );
   }
 }
 
-function assertApprovalAction(value: string): TenantApprovalRuleAction {
+function assertApprovalAction(
+  value: string,
+  translate: RulesTranslator,
+): TenantApprovalRuleAction {
   if (
     !TENANT_APPROVAL_RULE_ACTIONS.includes(value as TenantApprovalRuleAction)
   ) {
-    throw new Error(`Unsupported approval-rule action: ${value}`);
+    throw new Error(
+      translate("rules.action.error.unsupportedApprovalAction", { value }),
+    );
   }
 
   return value as TenantApprovalRuleAction;
 }
 
-function assertApprovalMode(value: string): TenantApprovalMode {
+function assertApprovalMode(
+  value: string,
+  translate: RulesTranslator,
+): TenantApprovalMode {
   if (!TENANT_APPROVAL_MODES.includes(value as TenantApprovalMode)) {
-    throw new Error(`Unsupported approval mode: ${value}`);
+    throw new Error(
+      translate("rules.action.error.unsupportedApprovalMode", { value }),
+    );
   }
 
   return value as TenantApprovalMode;
 }
 
-function assertConditionField(value: string): TenantApprovalRuleConditionField {
+function assertConditionField(
+  value: string,
+  translate: RulesTranslator,
+): TenantApprovalRuleConditionField {
   if (
     !TENANT_APPROVAL_RULE_CONDITION_FIELDS.includes(
       value as TenantApprovalRuleConditionField,
     )
   ) {
-    throw new Error(`Unsupported condition field: ${value}`);
+    throw new Error(
+      translate("rules.action.error.unsupportedConditionField", { value }),
+    );
   }
 
   return value as TenantApprovalRuleConditionField;
@@ -142,51 +190,74 @@ function assertConditionField(value: string): TenantApprovalRuleConditionField {
 
 function assertConditionOperator(
   value: string,
+  translate: RulesTranslator,
 ): TenantApprovalRuleConditionOperator {
   if (
     !TENANT_APPROVAL_RULE_CONDITION_OPERATORS.includes(
       value as TenantApprovalRuleConditionOperator,
     )
   ) {
-    throw new Error(`Unsupported condition operator: ${value}`);
+    throw new Error(
+      translate("rules.action.error.unsupportedConditionOperator", { value }),
+    );
   }
 
   return value as TenantApprovalRuleConditionOperator;
 }
 
-function assertPrincipalKind(value: string): TenantPrincipalRef["kind"] {
+function assertPrincipalKind(
+  value: string,
+  translate: RulesTranslator,
+): TenantPrincipalRef["kind"] {
   if (!TENANT_PRINCIPAL_KINDS.includes(value as TenantPrincipalRef["kind"])) {
-    throw new Error(`Unsupported approver kind: ${value}`);
+    throw new Error(
+      translate("rules.action.error.unsupportedApproverKind", { value }),
+    );
   }
 
   return value as TenantPrincipalRef["kind"];
 }
 
-function assertFallbackPolicy(value: string): TenantApprovalFallbackPolicy {
+function assertFallbackPolicy(
+  value: string,
+  translate: RulesTranslator,
+): TenantApprovalFallbackPolicy {
   if (
     !TENANT_APPROVAL_FALLBACK_POLICIES.includes(
       value as TenantApprovalFallbackPolicy,
     )
   ) {
-    throw new Error(`Unsupported fallback policy: ${value}`);
+    throw new Error(
+      translate("rules.action.error.unsupportedFallbackPolicy", { value }),
+    );
   }
 
   return value as TenantApprovalFallbackPolicy;
 }
 
-function assertQuotaEnforcementMode(value: string): TenantQuotaEnforcementMode {
+function assertQuotaEnforcementMode(
+  value: string,
+  translate: RulesTranslator,
+): TenantQuotaEnforcementMode {
   if (
     !TENANT_QUOTA_ENFORCEMENT_MODES.includes(
       value as TenantQuotaEnforcementMode,
     )
   ) {
-    throw new Error(`Unsupported quota enforcement mode: ${value}`);
+    throw new Error(
+      translate("rules.action.error.unsupportedQuotaEnforcementMode", {
+        value,
+      }),
+    );
   }
 
   return value as TenantQuotaEnforcementMode;
 }
 
-function parseConditionValue(item: EditableConditionPayload) {
+function parseConditionValue(
+  item: EditableConditionPayload,
+  translate: RulesTranslator,
+) {
   const rawValue = item.valueText?.trim() ?? "";
   const valueKind = item.valueKind ?? "text";
 
@@ -195,20 +266,24 @@ function parseConditionValue(item: EditableConditionPayload) {
   }
 
   if (rawValue.length === 0) {
-    throw new Error("Condition values cannot be empty.");
+    throw new Error(translate("rules.action.error.conditionValueRequired"));
   }
 
   switch (valueKind) {
     case "number": {
       const parsed = Number(rawValue);
       if (!Number.isFinite(parsed)) {
-        throw new Error(`Condition numeric value is invalid: ${rawValue}`);
+        throw new Error(
+          translate("rules.action.error.conditionNumberInvalid", {
+            value: rawValue,
+          }),
+        );
       }
       return parsed;
     }
     case "boolean":
       if (rawValue !== "true" && rawValue !== "false") {
-        throw new Error(`Condition boolean value must be true or false.`);
+        throw new Error(translate("rules.action.error.conditionBooleanInvalid"));
       }
       return rawValue === "true";
     case "list":
@@ -221,10 +296,14 @@ function parseConditionValue(item: EditableConditionPayload) {
   }
 }
 
-function readConditions(formData: FormData): TenantApprovalRuleCondition[] {
+function readConditions(
+  formData: FormData,
+  translate: RulesTranslator,
+): TenantApprovalRuleCondition[] {
   const items = readJsonField<EditableConditionPayload[]>(
     formData,
     "conditionsJson",
+    translate,
   );
 
   const conditions: TenantApprovalRuleCondition[] = [];
@@ -234,23 +313,27 @@ function readConditions(formData: FormData): TenantApprovalRuleCondition[] {
     }
 
     conditions.push({
-      field: assertConditionField(item.field),
-      op: assertConditionOperator(item.operator),
-      value: parseConditionValue(item),
+      field: assertConditionField(item.field, translate),
+      op: assertConditionOperator(item.operator, translate),
+      value: parseConditionValue(item, translate),
     });
   }
 
   if (conditions.length === 0) {
-    throw new Error("At least one approval-rule condition is required.");
+    throw new Error(translate("rules.action.error.conditionRequired"));
   }
 
   return conditions;
 }
 
-function readApprovers(formData: FormData): TenantPrincipalRef[] {
+function readApprovers(
+  formData: FormData,
+  translate: RulesTranslator,
+): TenantPrincipalRef[] {
   const items = readJsonField<EditableApproverPayload[]>(
     formData,
     "approversJson",
+    translate,
   );
 
   return items
@@ -260,7 +343,7 @@ function readApprovers(formData: FormData): TenantPrincipalRef[] {
       }
 
       const approver: TenantPrincipalRef = {
-        kind: assertPrincipalKind(item.kind),
+        kind: assertPrincipalKind(item.kind, translate),
       };
 
       if (item.userId?.trim()) {
@@ -281,41 +364,53 @@ function readApprovers(formData: FormData): TenantPrincipalRef[] {
     .filter((item): item is TenantPrincipalRef => item !== null);
 }
 
-function buildUpsertRuleCommand(formData: FormData): {
+function buildUpsertRuleCommandWithTranslator(
+  formData: FormData,
+  translate: RulesTranslator,
+): {
   command: UpsertTenantApprovalRuleCommand;
   ruleId: string | undefined;
 } {
   const ruleId = readTrimmedString(formData, "ruleId");
   const ruleName = readTrimmedString(formData, "ruleName");
-  const priority = readOptionalInteger(formData, "priority");
+  const priority = readOptionalInteger(formData, "priority", translate);
   const actionValue = readTrimmedString(formData, "action");
 
   if (!ruleName) {
-    throw new Error("Rule name is required.");
+    throw new Error(translate("rules.action.error.ruleNameRequired"));
   }
 
   if (priority === undefined) {
-    throw new Error("Priority is required.");
+    throw new Error(translate("rules.action.error.priorityRequired"));
   }
 
   if (!actionValue) {
-    throw new Error("Rule action is required.");
+    throw new Error(translate("rules.action.error.ruleActionRequired"));
   }
 
-  const action = assertApprovalAction(actionValue);
-  const approvers = readApprovers(formData);
+  const action = assertApprovalAction(actionValue, translate);
+  const approvers = readApprovers(formData, translate);
   const approvalModeValue = readTrimmedString(formData, "approvalMode");
   const fallbackPolicyValue = readTrimmedString(formData, "fallbackPolicy");
   const activeFlag = formData.get("activeFlag") === "on";
   const timeoutHoursOverride = readOptionalInteger(
     formData,
     "timeoutHoursOverride",
+    translate,
   );
-  const effectiveFrom = readOptionalIsoTimestamp(formData, "effectiveFrom");
-  const effectiveUntil = readOptionalIsoTimestamp(formData, "effectiveUntil");
+  const effectiveFrom = readOptionalIsoTimestamp(
+    formData,
+    "effectiveFrom",
+    translate,
+  );
+  const effectiveUntil = readOptionalIsoTimestamp(
+    formData,
+    "effectiveUntil",
+    translate,
+  );
 
   if (action === "require_approval" && approvers.length === 0) {
-    throw new Error("Approval rules require at least one approver descriptor.");
+    throw new Error(translate("rules.action.error.approverRequired"));
   }
 
   const command: UpsertTenantApprovalRuleCommand = {
@@ -324,20 +419,20 @@ function buildUpsertRuleCommand(formData: FormData): {
     priority,
     description: readTrimmedString(formData, "description") ?? null,
     activeFlag,
-    conditions: readConditions(formData),
+    conditions: readConditions(formData, translate),
     action,
     effectiveFrom: effectiveFrom ?? null,
     effectiveUntil: effectiveUntil ?? null,
     timeoutHoursOverride: timeoutHoursOverride ?? null,
     fallbackPolicyOverride: fallbackPolicyValue
-      ? assertFallbackPolicy(fallbackPolicyValue)
+      ? assertFallbackPolicy(fallbackPolicyValue, translate)
       : null,
     disabledReason: readTrimmedString(formData, "disabledReason") ?? null,
   };
 
   if (action === "require_approval") {
     command.approvalMode = approvalModeValue
-      ? assertApprovalMode(approvalModeValue)
+      ? assertApprovalMode(approvalModeValue, translate)
       : "any_of";
     command.approvers = approvers;
   } else {
@@ -351,25 +446,36 @@ function buildUpsertRuleCommand(formData: FormData): {
 export async function upsertApprovalRuleAction(
   formData: FormData,
 ): Promise<RulesFlashPayload> {
+  const locale = await getServerLocale();
+  const translate: RulesTranslator = (key, params) => t(key, locale, params);
   let payload: RulesFlashPayload;
 
   try {
-    const { command, ruleId } = buildUpsertRuleCommand(formData);
+    const { command, ruleId } = buildUpsertRuleCommandWithTranslator(
+      formData,
+      translate,
+    );
     const saved = await getTenantClient().upsertApprovalRule(command, ruleId);
 
     payload = {
       tone: "default",
-      title: ruleId ? "Rule updated" : "Rule created",
-      description: `${saved.ruleName ?? saved.name ?? saved.ruleId} is now persisted on the tenant approval-rule surface.`,
+      title: translate(
+        ruleId
+          ? "rules.action.success.ruleUpdatedTitle"
+          : "rules.action.success.ruleCreatedTitle",
+      ),
+      description: translate("rules.action.success.ruleSavedDescription", {
+        name: saved.ruleName ?? saved.name ?? saved.ruleId,
+      }),
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Rule could not be saved",
+      title: translate("rules.action.error.ruleSaveTitle"),
       description:
         error instanceof Error
           ? error.message
-          : "Unable to save tenant approval rule.",
+          : translate("rules.action.error.ruleSaveDescription"),
     };
   }
 
@@ -380,6 +486,8 @@ export async function upsertApprovalRuleAction(
 export async function disableApprovalRuleAction(
   formData: FormData,
 ): Promise<RulesFlashPayload> {
+  const locale = await getServerLocale();
+  const translate: RulesTranslator = (key, params) => t(key, locale, params);
   let payload: RulesFlashPayload;
 
   try {
@@ -388,28 +496,29 @@ export async function disableApprovalRuleAction(
     const disabledReason = readTrimmedString(formData, "disabledReason");
 
     if (!ruleId) {
-      throw new Error("Select a rule before disabling it.");
+      throw new Error(translate("rules.action.error.ruleSelectionRequired"));
     }
     if (!disabledReason) {
-      throw new Error(
-        "disabledReason is required before a rule can be paused.",
-      );
+      throw new Error(translate("rules.action.error.disabledReasonRequired"));
     }
 
     await getTenantClient().disableApprovalRule(ruleId);
     payload = {
       tone: "default",
-      title: "Rule disabled",
-      description: `${ruleName ?? ruleId} is now paused and will no longer participate in future evaluations. Reason: ${disabledReason}.`,
+      title: translate("rules.action.success.ruleDisabledTitle"),
+      description: translate("rules.action.success.ruleDisabledDescription", {
+        name: ruleName ?? ruleId,
+        reason: disabledReason,
+      }),
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Rule could not be disabled",
+      title: translate("rules.action.error.ruleDisableTitle"),
       description:
         error instanceof Error
           ? error.message
-          : "Unable to disable tenant approval rule.",
+          : translate("rules.action.error.ruleDisableDescription"),
     };
   }
 
@@ -420,12 +529,18 @@ export async function disableApprovalRuleAction(
 export async function reorderApprovalRulesAction(
   formData: FormData,
 ): Promise<RulesFlashPayload> {
+  const locale = await getServerLocale();
+  const translate: RulesTranslator = (key, params) => t(key, locale, params);
   let payload: RulesFlashPayload;
 
   try {
-    const orderedRuleIds = readJsonField<string[]>(formData, "orderedRuleIds");
+    const orderedRuleIds = readJsonField<string[]>(
+      formData,
+      "orderedRuleIds",
+      translate,
+    );
     if (orderedRuleIds.length === 0) {
-      throw new Error("A full ordered rule-id list is required.");
+      throw new Error(translate("rules.action.error.orderedRuleIdsRequired"));
     }
 
     await getTenantClient().reorderApprovalRules({
@@ -434,18 +549,17 @@ export async function reorderApprovalRulesAction(
 
     payload = {
       tone: "default",
-      title: "Rule order updated",
-      description:
-        "Priority order was normalized through the published tenant reorder command.",
+      title: translate("rules.action.success.ruleOrderUpdatedTitle"),
+      description: translate("rules.action.success.ruleOrderUpdatedDescription"),
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Rule order could not be updated",
+      title: translate("rules.action.error.ruleOrderUpdateTitle"),
       description:
         error instanceof Error
           ? error.message
-          : "Unable to reorder tenant approval rules.",
+          : translate("rules.action.error.ruleOrderUpdateDescription"),
     };
   }
 
@@ -456,6 +570,8 @@ export async function reorderApprovalRulesAction(
 export async function upsertTenantQuotaPolicyAction(
   formData: FormData,
 ): Promise<RulesFlashPayload> {
+  const locale = await getServerLocale();
+  const translate: RulesTranslator = (key, params) => t(key, locale, params);
   let payload: RulesFlashPayload;
 
   try {
@@ -463,39 +579,50 @@ export async function upsertTenantQuotaPolicyAction(
     const enforcementMode = readTrimmedString(formData, "enforcementMode");
 
     if (!currency) {
-      throw new Error("Quota currency is required.");
+      throw new Error(translate("rules.action.error.quotaCurrencyRequired"));
     }
 
     if (!enforcementMode) {
-      throw new Error("Quota enforcement mode is required.");
+      throw new Error(
+        translate("rules.action.error.quotaEnforcementModeRequired"),
+      );
     }
 
     const command: UpsertTenantQuotaPolicyCommand = {
       period: "monthly",
       limit: {
         bookingCountLimit:
-          readOptionalInteger(formData, "bookingCountLimit") ?? null,
+          readOptionalInteger(formData, "bookingCountLimit", translate) ?? null,
         amountMinorLimit:
-          readOptionalInteger(formData, "amountMinorLimit") ?? null,
+          readOptionalInteger(formData, "amountMinorLimit", translate) ?? null,
         currency: currency.toUpperCase(),
-        enforcementMode: assertQuotaEnforcementMode(enforcementMode),
+        enforcementMode: assertQuotaEnforcementMode(
+          enforcementMode,
+          translate,
+        ),
       },
     };
 
     const saved = await getTenantClient().upsertTenantQuotaPolicy(command);
     payload = {
       tone: "default",
-      title: "Quota policy updated",
-      description: `Monthly tenant quota now enforces ${saved.limit.enforcementMode} with ${saved.limit.currency} limits.`,
+      title: translate("rules.action.success.quotaPolicyUpdatedTitle"),
+      description: translate(
+        "rules.action.success.quotaPolicyUpdatedDescription",
+        {
+          mode: translate(`rules.enum.enforcementMode.${saved.limit.enforcementMode}`),
+          currency: saved.limit.currency,
+        },
+      ),
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Quota policy could not be updated",
+      title: translate("rules.action.error.quotaPolicyUpdateTitle"),
       description:
         error instanceof Error
           ? error.message
-          : "Unable to update tenant quota policy.",
+          : translate("rules.action.error.quotaPolicyUpdateDescription"),
     };
   }
 
@@ -506,19 +633,21 @@ export async function upsertTenantQuotaPolicyAction(
 export async function previewAndEvaluateApprovalRulesAction(
   formData: FormData,
 ): Promise<RulesFlashPayload> {
+  const locale = await getServerLocale();
+  const translate: RulesTranslator = (key, params) => t(key, locale, params);
   try {
     const reservationWindowStart = readOptionalIsoTimestamp(
       formData,
       "reservationWindowStart",
+      translate,
     );
 
     if (!reservationWindowStart) {
-      throw new Error(
-        "Dry-run evaluation requires reservationWindowStart with timezone.",
-      );
+      throw new Error(translate("rules.action.error.dryRunStartRequired"));
     }
 
-    const amountMinor = readOptionalInteger(formData, "amountMinor") ?? null;
+    const amountMinor =
+      readOptionalInteger(formData, "amountMinor", translate) ?? null;
     const costCenterCode = readTrimmedString(formData, "costCenterCode");
     const currency = readTrimmedString(formData, "currency") ?? "TWD";
     const client = getTenantClient();
@@ -559,8 +688,16 @@ export async function previewAndEvaluateApprovalRulesAction(
 
     return {
       tone: "default",
-      title: "Dry-run completed",
-      description: `Decision: ${evaluation.outcome?.decision ?? "unknown"} · matched ${evaluation.matchedRules.length} rule(s) · quota trigger ${preview.combinedTriggered}.`,
+      title: translate("rules.action.success.dryRunCompletedTitle"),
+      description: translate("rules.action.success.dryRunCompletedDescription", {
+        decision: translate(
+          `rules.enum.decision.${evaluation.outcome?.decision ?? "unknown"}`,
+        ),
+        count: evaluation.matchedRules.length,
+        trigger: translate(
+          `rules.enum.quotaTrigger.${preview.combinedTriggered}`,
+        ),
+      }),
       evaluation: {
         ...evaluation,
         quotaImpacts: evaluation.quotaImpacts ?? preview.impacts,
@@ -569,11 +706,11 @@ export async function previewAndEvaluateApprovalRulesAction(
   } catch (error) {
     return {
       tone: "warning",
-      title: "Dry-run could not be evaluated",
+      title: translate("rules.action.error.dryRunTitle"),
       description:
         error instanceof Error
           ? error.message
-          : "Unable to dry-run tenant approval rules.",
+          : translate("rules.action.error.dryRunDescription"),
     };
   }
 }

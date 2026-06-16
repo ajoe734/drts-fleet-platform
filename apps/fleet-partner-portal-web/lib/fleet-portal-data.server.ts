@@ -36,10 +36,7 @@ import type {
   Phase1ServiceBucket,
 } from "@drts/contracts";
 
-import {
-  getServerFleetPartnerClient,
-  getServerReferralPartnerClient,
-} from "./api-client.server";
+import { getServerFleetPartnerClient } from "./api-client.server";
 import {
   FX_DASHBOARD_ATTENTION,
   FX_DASHBOARD_SUPPLEMENTAL,
@@ -67,25 +64,6 @@ import {
   type ServiceKey,
   type StatementLine,
 } from "./fleet-portal-fixtures";
-import {
-  FX_REFERRAL_DASHBOARD,
-  FX_REFERRAL_STATEMENTS,
-  FX_REFERRAL_USAGE_DAILY,
-  FX_REFERRAL_USAGE_PERIODS,
-  type ReferralDashboardFixture,
-  type ReferralStatementLineView,
-  type ReferralStatementView,
-  type ReferralUsageDailyRow,
-  type ReferralUsagePeriod,
-} from "./referral-portal-fixtures";
-import type {
-  PartnerReferralDashboardRecord,
-  PartnerReferralRevenuePeriodRecord,
-  PartnerReferralUsagePeriodRecord,
-  ReferralStatementLineRecord,
-  ReferralStatementRecord,
-  ReferralStatementStatus,
-} from "./referral-portal-contracts";
 
 export type DataSource = "live" | "fallback";
 
@@ -107,20 +85,6 @@ function formatOptionalMoney(amount: MoneyAmount | null | undefined) {
     return null;
   }
   return formatMoney(amount);
-}
-
-function formatDecimalMoney(amount: MoneyAmount | null | undefined): string {
-  if (!amount) {
-    return "—";
-  }
-  const major = amount.amountMinor / 100;
-  const formatted = major.toLocaleString("en-US", {
-    minimumFractionDigits: Number.isInteger(major) ? 0 : 1,
-    maximumFractionDigits: 1,
-  });
-  return amount.currency === "TWD"
-    ? `NT$ ${formatted}`
-    : `${amount.currency} ${formatted}`;
 }
 
 // completedAt is an ISO timestamp; the trip table shows "MM-DD HH:mm".
@@ -311,43 +275,37 @@ function mapQualityMetrics(
   );
   return [
     {
-      zh: "完成趟次",
-      en: "completed_trips",
+      key: "completed_trips",
       v: record.totalCompletedTrips.toLocaleString("en-US"),
       tone: "success",
       delta: "—",
     },
     {
-      zh: "取消率",
-      en: "cancel_rate",
+      key: "cancel_rate",
       v: `${cancelRate.toFixed(1)}%`,
       tone: cancelRate > 5 ? "warn" : "neutral",
       delta: "—",
     },
     {
-      zh: "待證明趟次",
-      en: "proof_pending",
+      key: "proof_pending",
       v: record.proofPendingTripCount.toLocaleString("en-US"),
       tone: record.proofPendingTripCount > 0 ? "warn" : "success",
       delta: "—",
     },
     {
-      zh: "在線司機",
-      en: "online_drivers",
+      key: "online_drivers",
       v: onlineDriverCount.toLocaleString("en-US"),
       tone: "neutral",
       delta: "—",
     },
     {
-      zh: "證照失效司機",
-      en: "license_invalid_drivers",
+      key: "license_invalid_drivers",
       v: record.licenseInvalidDriverCount.toLocaleString("en-US"),
       tone: record.licenseInvalidDriverCount > 0 ? "warn" : "success",
       delta: "—",
     },
     {
-      zh: "本期分潤",
-      en: "share_amount",
+      key: "share_amount",
       v: formatMoney(record.shareAmount),
       tone: "neutral",
       delta: "—",
@@ -399,15 +357,14 @@ export async function loadStatements(): Promise<StatementsView> {
 
 // --- revenue (derived from the latest statement) ----------------------------
 
-const REVENUE_FORMULA_LABELS: Record<string, { zh: string; en: string }> = {
-  percent_of_gross: { zh: "逐趟分潤", en: "per_trip" },
-  fixed_per_trip: { zh: "逐趟固定", en: "per_trip_fixed" },
-  monthly_fixed: { zh: "管理費", en: "mgmt_fee" },
-  tiered_bonus: { zh: "績效獎金", en: "performance" },
-  sponsor_funded_airport: {
-    zh: "卡友機場趟次分潤",
-    en: "sponsor_airport",
-  },
+// Maps a backend formula bucket to its central `revenue.line.<key>` translation
+// key; display copy lives in translations.ts, not here.
+const REVENUE_FORMULA_KEYS: Record<string, string> = {
+  percent_of_gross: "per_trip",
+  fixed_per_trip: "per_trip_fixed",
+  monthly_fixed: "mgmt_fee",
+  tiered_bonus: "performance",
+  sponsor_funded_airport: "sponsor_airport",
 };
 
 export interface RevenueView {
@@ -434,13 +391,9 @@ function mapStatementLines(
   }
   const currency = record.shareAmount.currency;
   return [...buckets.entries()].map(([formula, amountMinor]) => {
-    const label = REVENUE_FORMULA_LABELS[formula] ?? {
-      zh: formula,
-      en: formula,
-    };
+    const key = REVENUE_FORMULA_KEYS[formula] ?? formula;
     return {
-      zh: label.zh,
-      en: label.en,
+      key,
       v: formatMoney({ currency, amountMinor: Math.abs(amountMinor) }),
       sign: amountMinor < 0 ? "−" : "+",
       reimbursement:
@@ -484,279 +437,6 @@ export async function loadRevenue(): Promise<RevenueView> {
     };
   } catch {
     return fallback;
-  }
-}
-
-// --- referral portal --------------------------------------------------------
-
-function mapReferralStatementStatus(
-  status: ReferralStatementStatus,
-): "published" | "paid" | "due" {
-  return status;
-}
-
-function formatStatementLineDate(iso: string) {
-  const match = iso.match(/^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2})/);
-  return match ? `${match[1]} ${match[2]}` : iso;
-}
-
-function maskReferralRider(tripId: string) {
-  const suffix = tripId.replace(/[^A-Z0-9]/gi, "").slice(-3).toUpperCase();
-  return `住戶 ••••${suffix || "REF"}`;
-}
-
-function inferReferralRoute(tripId: string) {
-  const routes = [
-    "社區 → 台北車站",
-    "社區 → 內湖科技園區",
-    "信義威秀 → 社區",
-    "社區 → 台北榮總",
-    "松山機場 → 社區",
-  ];
-  let sum = 0;
-  for (const char of tripId) {
-    sum += char.charCodeAt(0);
-  }
-  return routes[sum % routes.length] ?? "社區 → 台北車站";
-}
-
-function mapReferralLine(
-  line: ReferralStatementLineRecord,
-): ReferralStatementLineView {
-  return {
-    trip: line.tripId,
-    date: formatStatementLineDate(line.completedAt),
-    route: inferReferralRoute(line.tripId),
-    rider: maskReferralRider(line.tripId),
-    fare: formatMoney(line.fare),
-    share: formatDecimalMoney(line.shareAmount),
-  };
-}
-
-function mapReferralStatement(
-  record: ReferralStatementRecord,
-): ReferralStatementView {
-  return {
-    id: record.statementId,
-    period: record.period,
-    trips: record.totals.tripCount.toLocaleString("en-US"),
-    activeUsers: record.totals.activeRiderCount.toLocaleString("en-US"),
-    gmv: formatMoney(record.totals.gmv),
-    share: formatMoney(record.totals.shareTotal),
-    status: mapReferralStatementStatus(record.status),
-    issued: record.generatedAt.slice(0, 10),
-    artifactId: record.artifactRef.artifactId,
-    artifactHash: record.artifactRef.manifestHash,
-    direction: "DRTS → Partner",
-    lines: record.lines.map(mapReferralLine),
-  };
-}
-
-function buildReferralDailyUsage(
-  lines: ReferralStatementLineRecord[],
-): ReferralUsageDailyRow[] {
-  const grouped = new Map<
-    string,
-    { trips: number; gmvMinor: number; users: Set<string> }
-  >();
-
-  for (const line of lines) {
-    const day = line.completedAt.slice(0, 10);
-    const current = grouped.get(day) ?? {
-      trips: 0,
-      gmvMinor: 0,
-      users: new Set<string>(),
-    };
-    current.trips += 1;
-    current.gmvMinor += line.fare.amountMinor;
-    current.users.add(maskReferralRider(line.tripId));
-    grouped.set(day, current);
-  }
-
-  return [...grouped.entries()]
-    .sort((left, right) => right[0].localeCompare(left[0]))
-    .slice(0, 5)
-    .map(([day, value]) => ({
-      day,
-      users: value.users.size.toLocaleString("en-US"),
-      trips: value.trips.toLocaleString("en-US"),
-      gmv: formatMoney({ currency: "TWD", amountMinor: value.gmvMinor }),
-    }));
-}
-
-export interface ReferralDashboardView {
-  summary: ReferralDashboardFixture;
-  periods: ReferralUsagePeriod[];
-  source: DataSource;
-}
-
-function mapReferralDashboard(
-  summary: PartnerReferralDashboardRecord,
-): ReferralDashboardFixture {
-  return {
-    period: summary.period,
-    activeUsers: summary.activeUserCount.toLocaleString("en-US"),
-    trips: summary.tripCount.toLocaleString("en-US"),
-    gmv: formatMoney(summary.gmv),
-    estimatedShare: formatMoney(summary.estimatedShareAmount),
-    statementId: summary.statementId,
-    statementStatus: mapReferralStatementStatus(summary.statementStatus),
-    latestStatementPeriod: summary.latestStatementPeriod,
-    pendingStatementCount: summary.pendingStatementCount.toLocaleString("en-US"),
-  };
-}
-
-function mapReferralUsagePeriod(
-  item: PartnerReferralUsagePeriodRecord,
-): ReferralUsagePeriod {
-  const avg = item.activeUserCount > 0 ? item.tripCount / item.activeUserCount : 0;
-  return {
-    period: item.period,
-    activeUsers: item.activeUserCount.toLocaleString("en-US"),
-    trips: item.tripCount.toLocaleString("en-US"),
-    gmv: formatMoney(item.gmv),
-    avgTripsPerUser: avg.toFixed(1),
-  };
-}
-
-export async function loadReferralDashboard(): Promise<ReferralDashboardView> {
-  try {
-    const { client } = await getServerReferralPartnerClient();
-    const [summary, usageResponse] = await Promise.all([
-      client.get<PartnerReferralDashboardRecord>("/api/partner/referral/dashboard"),
-      client.get<{ items: PartnerReferralUsagePeriodRecord[] }>(
-        "/api/partner/referral/usage",
-      ),
-    ]);
-    return {
-      summary: mapReferralDashboard(summary),
-      periods: usageResponse.items.map(mapReferralUsagePeriod),
-      source: "live",
-    };
-  } catch {
-    return {
-      summary: FX_REFERRAL_DASHBOARD,
-      periods: FX_REFERRAL_USAGE_PERIODS,
-      source: "fallback",
-    };
-  }
-}
-
-export interface ReferralUsageView {
-  periods: ReferralUsagePeriod[];
-  dailyRows: ReferralUsageDailyRow[];
-  tripRows: ReferralStatementLineView[];
-  source: DataSource;
-}
-
-export async function loadReferralUsage(): Promise<ReferralUsageView> {
-  const fallback: ReferralUsageView = {
-    periods: FX_REFERRAL_USAGE_PERIODS,
-    dailyRows: FX_REFERRAL_USAGE_DAILY,
-    tripRows: FX_REFERRAL_STATEMENTS[0]?.lines ?? [],
-    source: "fallback",
-  };
-  try {
-    const { client } = await getServerReferralPartnerClient();
-    const [usageResponse, statementResponse] = await Promise.all([
-      client.get<{ items: PartnerReferralUsagePeriodRecord[] }>(
-        "/api/partner/referral/usage",
-      ),
-      client.get<{ items: ReferralStatementRecord[] }>(
-        "/api/partner/referral/statements",
-      ),
-    ]);
-    const periods = usageResponse.items.map(mapReferralUsagePeriod);
-    const currentStatement = statementResponse.items[0];
-    if (!currentStatement) {
-      return {
-        periods,
-        dailyRows: [],
-        tripRows: [],
-        source: "live",
-      };
-    }
-    const mappedStatement = mapReferralStatement(currentStatement);
-    return {
-      periods,
-      dailyRows: buildReferralDailyUsage(currentStatement.lines),
-      tripRows: mappedStatement.lines,
-      source: "live",
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-export interface ReferralRevenueView {
-  rows: PartnerReferralRevenuePeriodRecord[];
-  source: DataSource;
-}
-
-export async function loadReferralRevenue(): Promise<ReferralRevenueView> {
-  try {
-    const { client } = await getServerReferralPartnerClient();
-    const response = await client.get<{ items: PartnerReferralRevenuePeriodRecord[] }>(
-      "/api/partner/referral/revenue",
-    );
-    return {
-      rows: response.items,
-      source: "live",
-    };
-  } catch {
-    return {
-      rows: [],
-      source: "fallback",
-    };
-  }
-}
-
-export interface ReferralStatementsView {
-  rows: ReferralStatementView[];
-  source: DataSource;
-}
-
-export async function loadReferralStatements(): Promise<ReferralStatementsView> {
-  try {
-    const { client } = await getServerReferralPartnerClient();
-    const response = await client.get<{ items: ReferralStatementRecord[] }>(
-      "/api/partner/referral/statements",
-    );
-    return {
-      rows: response.items.map(mapReferralStatement),
-      source: "live",
-    };
-  } catch {
-    return {
-      rows: FX_REFERRAL_STATEMENTS,
-      source: "fallback",
-    };
-  }
-}
-
-export interface ReferralStatementDetailView {
-  statement: ReferralStatementView | null;
-  source: DataSource;
-}
-
-export async function loadReferralStatementDetail(
-  period: string,
-): Promise<ReferralStatementDetailView> {
-  try {
-    const { client } = await getServerReferralPartnerClient();
-    const statement = await client.get<ReferralStatementRecord>(
-      `/api/partner/referral/statements/${encodeURIComponent(period)}`,
-    );
-    return {
-      statement: mapReferralStatement(statement),
-      source: "live",
-    };
-  } catch {
-    return {
-      statement:
-        FX_REFERRAL_STATEMENTS.find((item) => item.period === period) ?? null,
-      source: "fallback",
-    };
   }
 }
 

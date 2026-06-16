@@ -2,99 +2,108 @@
 
 import Link from "next/link";
 import { OPS_CALLCENTER_URL } from "@/lib/api-client";
+import { formatDeskMode, localizeDeskRecord } from "@/lib/desk-catalog";
+import { useTranslation } from "@/lib/i18n";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 export default function HomePage() {
   const { ready, session } = useConciergePortal();
-  const desk = useSelectedDesk();
+  const { t } = useTranslation();
+  const desk = localizeDeskRecord(useSelectedDesk(), t);
 
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="section-kicker">Call Point / Concierge Portal</span>
-        <h1>
-          Site-bound assisted entry is now materialized as a real landing zone.
-        </h1>
-        <p>
-          This shell covers bootstrap sign-in, fixed-site selection, proxy
-          booking, order lookup, callback follow-up, and explicit guardrail
-          routes for denied, ineligible, degraded, and recording-unavailable
-          states.
-        </p>
+        <span className="section-kicker">{t("home.eyebrow")}</span>
+        <h1>{t("home.title")}</h1>
+        <p>{t("home.body")}</p>
         <div className="hero-actions">
           <Link
             className="primary-link"
             href={session ? "/bookings/new" : "/login"}
           >
-            {session ? "Open proxy booking" : "Start local sign-in"}
+            {session ? t("home.primary.signedIn") : t("home.primary.signedOut")}
           </Link>
           <Link className="secondary-link" href="/lookup">
-            Review lookup surface
+            {t("home.secondary")}
           </Link>
         </div>
       </section>
 
       <section className="metric-grid">
         <article className="metric-card">
-          <span className="section-kicker">Bootstrap</span>
-          <strong>{ready && session ? "Ready" : "Pending"}</strong>
+          <span className="section-kicker">{t("home.metric.bootstrap")}</span>
+          <strong>
+            {ready && session
+              ? t("home.metric.bootstrapReady")
+              : t("home.metric.bootstrapPending")}
+          </strong>
           <p>
             {session
-              ? `${session.operatorName} signed in as ${session.mode}.`
-              : "No repo-local assisted-entry bootstrap exists yet."}
+              ? t("home.metric.bootstrapBody", {
+                  operatorName: session.operatorName,
+                  mode: formatDeskMode(session.mode, t),
+                })
+              : t("home.metric.bootstrapEmpty")}
           </p>
         </article>
         <article className="metric-card">
-          <span className="section-kicker">Desk</span>
-          <strong>{desk ? desk.deskName : "Not selected"}</strong>
+          <span className="section-kicker">{t("home.metric.desk")}</span>
+          <strong>{desk ? desk.deskName : t("home.metric.deskEmpty")}</strong>
           <p>
             {desk
-              ? `${desk.siteName} · ${desk.zoneLabel}`
-              : "Phase 1 keeps fixed-site selection explicit before order entry."}
+              ? t("home.metric.deskBody", {
+                  siteName: desk.siteName,
+                  zoneLabel: desk.zoneLabel,
+                })
+              : t("home.metric.deskEmptyBody")}
           </p>
         </article>
         <article className="metric-card">
-          <span className="section-kicker">Recent activity</span>
-          <strong>{session?.recentOrderIds.length ?? 0} order(s)</strong>
+          <span className="section-kicker">{t("home.metric.activity")}</span>
+          <strong>
+            {t("home.metric.activityCount", {
+              count: session?.recentOrderIds.length ?? 0,
+            })}
+          </strong>
           <p>
             {session
-              ? `${session.recentCallIds.length} desk session(s), ${session.recentCallbackTaskIds.length} callback task(s).`
-              : "Recent order, callback, and session recall appears after bootstrap."}
+              ? t("home.metric.activityBody", {
+                  sessionCount: session.recentCallIds.length,
+                  callbackCount: session.recentCallbackTaskIds.length,
+                })
+              : t("home.metric.activityEmpty")}
           </p>
         </article>
       </section>
 
       <section className="grid-columns">
         <article className="panel-card">
-          <span className="section-kicker">Next action</span>
+          <span className="section-kicker">{t("home.next.eyebrow")}</span>
           <h2>
             {session
               ? desk
-                ? "Move into booking, lookup, or callback follow-up."
-                : "Select the fixed site before the desk opens."
-              : "Bootstrap the site-bound operator first."}
+                ? t("home.next.title.ready")
+                : t("home.next.title.pickDesk")
+              : t("home.next.title.signIn")}
           </h2>
-          <p>
-            The portal keeps the external desk flow narrow: it reuses callcenter
-            and order APIs, but it does not expose the full ops navigation or
-            complaint-case management surface.
-          </p>
+          <p>{t("home.next.body")}</p>
           <div className="inline-actions">
             {!session ? (
               <Link className="primary-link" href="/login">
-                Sign in locally
+                {t("home.next.cta.signIn")}
               </Link>
             ) : !desk ? (
               <Link className="primary-link" href="/start">
-                Choose fixed site
+                {t("home.next.cta.pickDesk")}
               </Link>
             ) : (
               <>
                 <Link className="primary-link" href="/bookings/new">
-                  Create proxy booking
+                  {t("home.next.cta.booking")}
                 </Link>
                 <Link className="secondary-link" href="/callbacks">
-                  Open callbacks
+                  {t("home.next.cta.callbacks")}
                 </Link>
               </>
             )}
@@ -102,13 +111,9 @@ export default function HomePage() {
         </article>
 
         <article className="panel-card">
-          <span className="section-kicker">Control-plane seam</span>
-          <h2>Ops callcenter remains the escalation authority.</h2>
-          <p>
-            Dedicated call-point auth and telephony callback binding are still
-            gated. The portal therefore keeps a direct handoff to ops for
-            recording review, complaint transfer, and wider dispatch control.
-          </p>
+          <span className="section-kicker">{t("home.seam.eyebrow")}</span>
+          <h2>{t("home.seam.title")}</h2>
+          <p>{t("home.seam.body")}</p>
           <div className="inline-actions">
             <a
               className="secondary-link"
@@ -116,10 +121,10 @@ export default function HomePage() {
               rel="noreferrer"
               target="_blank"
             >
-              Open ops callcenter
+              {t("common.openOpsCallcenter")}
             </a>
             <Link className="secondary-link" href="/recording-unavailable">
-              Review recording gate
+              {t("common.reviewRecordingGate")}
             </Link>
           </div>
         </article>
@@ -127,39 +132,29 @@ export default function HomePage() {
 
       <section className="grid-columns">
         <article className="info-card">
-          <span className="section-kicker">Positive flow</span>
-          <h3>Bootstrap → site select → booking → lookup</h3>
-          <p>
-            The happy path starts at local sign-in, moves through a fixed desk,
-            opens a desk session, and submits a phone-order style booking with
-            ETA and trace readback.
-          </p>
+          <span className="section-kicker">{t("home.positive.eyebrow")}</span>
+          <h3>{t("home.positive.title")}</h3>
+          <p>{t("home.positive.body")}</p>
           <div className="inline-actions">
             <Link className="secondary-link" href="/start">
-              View desk catalog
+              {t("common.viewDeskCatalog")}
             </Link>
           </div>
         </article>
 
         <article className="info-card tone-warning">
-          <span className="section-kicker">Negative states</span>
-          <h3>
-            Denied, ineligible, degraded, and recording gate stay explicit.
-          </h3>
-          <p>
-            The portal does not collapse failure modes into blank forms. Each
-            guardrail has a first-class route so SYS-UI-006 and SYS-UI-008 can
-            verify the matrix later.
-          </p>
+          <span className="section-kicker">{t("home.negative.eyebrow")}</span>
+          <h3>{t("home.negative.title")}</h3>
+          <p>{t("home.negative.body")}</p>
           <div className="inline-actions">
             <Link className="secondary-link" href="/denied">
-              Denied
+              {t("home.negative.denied")}
             </Link>
             <Link className="secondary-link" href="/ineligible">
-              Ineligible
+              {t("home.negative.ineligible")}
             </Link>
             <Link className="secondary-link" href="/degraded">
-              Degraded
+              {t("home.negative.degraded")}
             </Link>
           </div>
         </article>

@@ -1,181 +1,334 @@
 import Link from "next/link";
 import {
-  EnterpriseBanner,
-  EnterpriseCard,
-  EnterpriseDl,
-  EnterprisePageHeader,
-  EnterprisePill,
-  EnterpriseSection,
-} from "@/components/enterprise-primitives";
+  EBanner,
+  EBtnContent,
+  ECard,
+  EField,
+  EInput,
+  EPill,
+  ERow,
+  ESeg,
+  EStepper,
+  entBtnStyle,
+} from "@/components/ent-kit";
+import { EntPageHead } from "@/components/enterprise-shell";
 import {
-  enterpriseAddresses,
-  enterpriseBookingDraft,
-  enterpriseCostCenters,
-  enterprisePassengers,
+  getEnterpriseAddresses,
+  getEnterpriseBookingDraft,
+  getEnterprisePassengers,
 } from "@/lib/enterprise-fixtures";
-import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { getServerLocale } from "@/lib/server-locale";
+import { type TranslationKey, t as translate } from "@/lib/translations";
 
-const cardGridStyle = {
-  display: "grid",
-  gap: 16,
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.95fr)",
-} as const;
+export default async function NewBookingPage() {
+  const locale = await getServerLocale();
+  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
+    translate(key, params, locale);
+  const draft = getEnterpriseBookingDraft(locale);
+  const passengers = getEnterprisePassengers(locale);
+  const addresses = getEnterpriseAddresses(locale);
 
-const fieldStyle = {
-  display: "grid",
-  gap: 6,
-} as const;
-
-const labelStyle = {
-  fontSize: 12,
-  fontWeight: 700,
-  color: enterpriseTheme.textMuted,
-} as const;
-
-const valueStyle = {
-  minHeight: 42,
-  padding: "11px 12px",
-  borderRadius: 12,
-  border: `1px solid ${enterpriseTheme.border}`,
-  background: enterpriseTheme.surfaceLo,
-  color: enterpriseTheme.text,
-  fontSize: 13,
-} as const;
-
-const actionLinkStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 34,
-  padding: "8px 12px",
-  borderRadius: 10,
-  textDecoration: "none",
-  fontSize: 12.5,
-  fontWeight: 600,
-} as const;
-
-export default function NewBookingPage() {
   return (
-    <div style={enterprisePageStyle}>
-      <EnterprisePageHeader
-        title="建立預約"
-        subtitle="先確認乘客、成本中心與企業情境，再進入 review page。"
-        actions={
-          <Link
-            href="/bookings/review"
-            style={{
-              ...actionLinkStyle,
-              background: enterpriseTheme.accent,
-              border: `1px solid ${enterpriseTheme.accent}`,
-              color: enterpriseTheme.surface,
-            }}
-          >
-            前往確認頁
-          </Link>
-        }
+    <>
+      <EntPageHead
+        back={tr("new.next.back")}
+        title={tr("new.title")}
+        sub={tr("new.subtitle")}
       />
-
-      <EnterpriseBanner
-        tone="info"
-        title="企業語意優先"
-        body="這裡先確認 passenger、bookedBy、cost center、quota 與 approval posture；機場欄位只在情境需要時出現。"
-      />
-
-      <div style={cardGridStyle}>
-        <EnterpriseCard title="預約內容">
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>乘客</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.passenger}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>下單人</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.bookedBy}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>上車地點</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.pickup}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>下車地點</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.dropoff}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>預約時段</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.reservationWindow}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>成本中心</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.costCenter}</div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>機場情境</span>
-              <div style={valueStyle}>
-                {enterpriseBookingDraft.flight} · {enterpriseBookingDraft.terminal}
-                · {enterpriseBookingDraft.luggage}
-              </div>
-            </div>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>現場聯絡</span>
-              <div style={valueStyle}>{enterpriseBookingDraft.onsiteContact}</div>
-            </div>
-          </div>
-        </EnterpriseCard>
-
-        <EnterpriseSection>
-          <EnterpriseCard
-            title="政策預覽"
-            actions={<EnterprisePill tone="warn">approval</EnterprisePill>}
-          >
-            <EnterpriseDl
-              cols={1}
-              items={[
-                { k: "審批結果", v: enterpriseBookingDraft.approval },
-                { k: "額度影響", v: enterpriseBookingDraft.quotaImpact },
-                { k: "車型", v: enterpriseBookingDraft.vehicle },
-              ]}
-            />
-          </EnterpriseCard>
-
-          <EnterpriseCard title="常用選項">
-            <EnterpriseDl
-              cols={1}
-              items={[
-                { k: "乘客捷徑", v: enterprisePassengers.join(" / ") },
-                { k: "常用地址", v: enterpriseAddresses.slice(0, 2).join(" / ") },
-                { k: "成本中心", v: enterpriseCostCenters.join(" / ") },
-              ]}
-            />
-          </EnterpriseCard>
-        </EnterpriseSection>
+      <div style={{ marginBottom: 20 }}>
+        <EStepper
+          t={t}
+          steps={[
+            tr("new.step.fill"),
+            tr("new.step.confirm"),
+            tr("new.step.submit"),
+          ]}
+          active={0}
+        />
       </div>
 
-      <EnterpriseCard title="下一步">
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.55fr 1fr",
+          gap: 18,
+          alignItems: "start",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <ECard t={t} title={tr("new.field.passenger")} sub="passenger">
+            <ESeg
+              t={t}
+              full
+              value="other"
+              options={[
+                {
+                  value: "self",
+                  label: tr("new.passenger.self"),
+                  icon: "user",
+                },
+                {
+                  value: "other",
+                  label: tr("new.passenger.other"),
+                  icon: "users",
+                },
+              ]}
+            />
+            <div style={{ height: 14 }} />
+            <EField
+              t={t}
+              label={tr("new.passenger.choose")}
+              req
+              hint={tr("new.passenger.chooseHint")}
+            >
+              <EInput t={t} icon="search" value={draft.passenger} />
+            </EField>
+            <div
+              style={{
+                display: "flex",
+                gap: 7,
+                flexWrap: "wrap",
+                marginTop: 12,
+              }}
+            >
+              {passengers.map((p) => (
+                <span
+                  key={p}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 12,
+                    color: t.ink2,
+                    background: t.surfaceLo,
+                    border: "1px solid " + t.line,
+                    padding: "5px 10px",
+                    borderRadius: 999,
+                  }}
+                >
+                  {p}
+                </span>
+              ))}
+            </div>
+          </ECard>
+
+          <ECard
+            t={t}
+            title={tr("new.card.booking")}
+            sub="pickup · dropoff · window"
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 14,
+              }}
+            >
+              <EField t={t} label={tr("new.field.pickup")} req full>
+                <EInput t={t} icon="pin" value={draft.pickup} />
+              </EField>
+              <EField t={t} label={tr("new.field.dropoff")} req full>
+                <EInput t={t} icon="pin" value={draft.dropoff} />
+              </EField>
+              <EField t={t} label={tr("new.field.window")} req>
+                <EInput t={t} icon="cal" value={draft.reservationWindow} mono />
+              </EField>
+              <EField t={t} label={tr("new.field.contact")} req>
+                <EInput t={t} icon="phone" value="0912-880-114" mono />
+              </EField>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 7,
+                flexWrap: "wrap",
+                marginTop: 12,
+              }}
+            >
+              {addresses.map((a) => (
+                <span
+                  key={a}
+                  style={{
+                    fontSize: 11.5,
+                    color: t.muted,
+                    background: t.surfaceLo,
+                    border: "1px solid " + t.line,
+                    padding: "4px 9px",
+                    borderRadius: 999,
+                  }}
+                >
+                  {a}
+                </span>
+              ))}
+            </div>
+          </ECard>
+
+          <ECard
+            t={t}
+            title={
+              <span
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                {tr("new.field.airport")}
+                <EPill t={t} tone="neutral">
+                  {tr("new.airport.optional")}
+                </EPill>
+              </span>
+            }
+            sub={tr("new.airport.hint")}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 14,
+              }}
+            >
+              <EField t={t} label={tr("new.airport.direction")}>
+                <ESeg
+                  t={t}
+                  full
+                  value="in"
+                  options={[
+                    { value: "out", label: tr("new.airport.outbound") },
+                    { value: "in", label: tr("new.airport.inbound") },
+                  ]}
+                />
+              </EField>
+              <EField t={t} label={tr("new.airport.terminal")}>
+                <EInput t={t} value={draft.terminal} />
+              </EField>
+              <EField t={t} label={tr("new.airport.flight")}>
+                <EInput t={t} icon="flag" value={draft.flight} mono />
+              </EField>
+              <EField t={t} label={tr("new.airport.luggage")}>
+                <EInput t={t} value={draft.luggage} />
+              </EField>
+            </div>
+          </ECard>
+
+          <ECard
+            t={t}
+            title={tr("new.card.policy")}
+            sub="cost center · vehicle · notes"
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 14,
+              }}
+            >
+              <EField
+                t={t}
+                label={tr("new.field.costCenter")}
+                req
+                full
+                hint={tr("new.costCenter.hint")}
+              >
+                <EInput t={t} icon="building" value={draft.costCenter} />
+              </EField>
+              <EField t={t} label={tr("new.field.bookedBy")}>
+                <EInput t={t} icon="user" value={draft.bookedBy} />
+              </EField>
+              <EField t={t} label={tr("new.policy.vehicle")} full>
+                <ESeg
+                  t={t}
+                  full
+                  value="business"
+                  options={[
+                    { value: "sedan", label: tr("fixture.vehicle.standard") },
+                    {
+                      value: "business",
+                      label: tr("fixture.vehicle.business"),
+                    },
+                    { value: "van", label: tr("fixture.vehicle.van") },
+                  ]}
+                />
+              </EField>
+              <EField t={t} label={tr("new.field.notes")} full>
+                <EInput t={t} value={draft.notes} />
+              </EField>
+            </div>
+          </ECard>
+        </div>
+
+        <div
+          style={{
+            position: "sticky",
+            top: 76,
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}
+        >
+          <ECard t={t} title={tr("new.check.title")} sub="helper reads">
+            <ERow
+              t={t}
+              k={tr("new.field.costCenter")}
+              v={
+                <EPill t={t} tone="success" dot>
+                  {tr("new.check.valid")}
+                </EPill>
+              }
+            />
+            <ERow
+              t={t}
+              k={tr("new.check.quota")}
+              v="NT$ 31,000 / 60,000"
+              mono
+            />
+            <ERow
+              t={t}
+              k={tr("new.check.fare")}
+              v={tr("new.check.fareValue")}
+              mono
+            />
+            <ERow
+              t={t}
+              k={tr("new.check.impact")}
+              v={tr("new.check.impactValue")}
+            />
+            <ERow
+              t={t}
+              k={tr("new.policy.approval")}
+              v={
+                <EPill t={t} tone="success" dot>
+                  {tr("new.check.exempt")}
+                </EPill>
+              }
+              last
+            />
+            <div style={{ marginTop: 12 }}>
+              <EBanner
+                t={t}
+                tone="success"
+                icon="check"
+                body={tr("new.banner.body")}
+              />
+            </div>
+          </ECard>
           <Link
             href="/bookings/review"
-            style={{
-              ...actionLinkStyle,
-              background: enterpriseTheme.accent,
-              border: `1px solid ${enterpriseTheme.accent}`,
-              color: enterpriseTheme.surface,
-            }}
+            style={entBtnStyle(t, {
+              variant: "primary",
+              size: "lg",
+              block: true,
+            })}
           >
-            繼續到 review
+            <EBtnContent iconR="arrow" size="lg">
+              {tr("new.next.review")}
+            </EBtnContent>
           </Link>
           <Link
-            href="/bookings"
-            style={{
-              ...actionLinkStyle,
-              background: enterpriseTheme.surface,
-              border: `1px solid ${enterpriseTheme.border}`,
-              color: enterpriseTheme.text,
-            }}
+            href="/"
+            style={entBtnStyle(t, { variant: "ghost", block: true })}
           >
-            返回我的預約
+            <EBtnContent>{tr("new.next.cancel")}</EBtnContent>
           </Link>
         </div>
-      </EnterpriseCard>
-    </div>
+      </div>
+    </>
   );
 }

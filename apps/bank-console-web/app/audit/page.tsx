@@ -1,10 +1,15 @@
 import Link from "next/link";
+import { REALM_COLORS } from "@drts/ui-tokens";
 import {
   CalloutPanel,
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import {
+  getBankTenantName,
+  resolveBankDemoTenant,
+  resolveLocale,
+} from "@/lib/demo-tenants";
 import { bankConsoleHref, getBankConsoleSession } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { t, type Locale, type TranslationKey } from "@/lib/translations";
@@ -57,6 +62,38 @@ type AuditFilterState = {
   period: string;
   subject: string;
 };
+
+// Cross-actor realm coloring (design-canvas BK_Audit ActorRealmChip): the
+// system eligibility/gateway actor reads on the `system` plane; every issuer
+// staff actor sits on the bank's `tenant` plane, matching the console shell.
+type AuditRealm = "system" | "tenant";
+
+function resolveAuditRealm(actor: AuditActorCode): AuditRealm {
+  return actor === "system" ? "system" : "tenant";
+}
+
+function ActorRealmChip({
+  realm,
+  label,
+}: {
+  realm: AuditRealm;
+  label: string;
+}) {
+  const colors = REALM_COLORS[realm].dark;
+
+  return (
+    <span
+      className="audit-realm-chip"
+      style={{
+        color: colors.fg,
+        background: colors.bg,
+        borderColor: colors.border,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
 
 const auditTypeOptions: AuditEventType[] = [
   "eligibility_decision",
@@ -317,7 +354,7 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                 color: issuerBrand.primaryDark,
               }}
             >
-              {tenant.name[locale]}
+              {getBankTenantName(tenant, locale)}
             </span>
           </span>
         }
@@ -464,9 +501,10 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                       <span className="audit-label">
                         {t("audit.column.actor", locale)}
                       </span>
-                      <strong>
-                        {t(auditActorLabelKeys[record.actor], locale)}
-                      </strong>
+                      <ActorRealmChip
+                        realm={resolveAuditRealm(record.actor)}
+                        label={t(auditActorLabelKeys[record.actor], locale)}
+                      />
                       <p>{tenantDisplayText(record.actorHandle, tenant)}</p>
                     </div>
                     <div>

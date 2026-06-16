@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { OPS_CALLCENTER_URL } from "@/lib/api-client";
-import { getDeskById } from "@/lib/desk-catalog";
+import { getDeskById, localizeDeskRecord } from "@/lib/desk-catalog";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 function getQueryValue(value: string | string[] | undefined): string | null {
   return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
@@ -11,47 +13,49 @@ export default async function DegradedPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const desk = getDeskById(getQueryValue((await searchParams).desk));
+  const locale = await getServerLocale();
+  const desk = localizeDeskRecord(
+    getDeskById(getQueryValue((await searchParams).desk)),
+    (key, params) => t(key, locale, params),
+  );
 
   return (
     <div className="page-shell">
       <section className="hero-card tone-warning">
-        <span className="section-kicker">Degraded</span>
-        <h1>Desk remains visible, but booking creation is blocked.</h1>
-        <p>
-          A degraded portal state should not pretend the desk is healthy. This
-          route keeps read-only visibility and escalation instructions explicit
-          until the site lane recovers.
-        </p>
+        <span className="section-kicker">{t("degraded.eyebrow", locale)}</span>
+        <h1>{t("degraded.title", locale)}</h1>
+        <p>{t("degraded.body", locale)}</p>
       </section>
 
       <section className="detail-grid">
         <article className="panel-card tone-warning">
-          <span className="section-kicker">Desk health</span>
-          <h2>{desk ? desk.deskName : "Degraded desk"}</h2>
+          <span className="section-kicker">
+            {t("degraded.health.eyebrow", locale)}
+          </span>
+          <h2>{desk ? desk.deskName : t("degraded.health.empty", locale)}</h2>
           <p>
             {desk
-              ? `${desk.siteName} is deliberately marked degraded in the repo-local catalog.`
-              : "The selected desk is degraded or unavailable for create actions."}
+              ? t("degraded.health.body", locale, {
+                  siteName: desk.siteName,
+                })
+              : t("degraded.health.emptyBody", locale)}
           </p>
           <div className="inline-actions">
             <Link className="primary-link" href="/lookup">
-              Continue in read-only lookup
+              {t("degraded.health.lookup", locale)}
             </Link>
             <Link className="secondary-link" href="/callbacks">
-              Continue with callback follow-up
+              {t("degraded.health.callbacks", locale)}
             </Link>
           </div>
         </article>
 
         <article className="panel-card">
-          <span className="section-kicker">Escalation</span>
-          <h2>Ops control plane stays upstream.</h2>
-          <p>
-            When the desk is degraded, the assisted-entry shell stops at lookup
-            and callback handling. Broader remediation stays in the ops
-            callcenter / dispatch workspace.
-          </p>
+          <span className="section-kicker">
+            {t("degraded.escalation.eyebrow", locale)}
+          </span>
+          <h2>{t("degraded.escalation.title", locale)}</h2>
+          <p>{t("degraded.escalation.body", locale)}</p>
           <div className="inline-actions">
             <a
               className="secondary-link"
@@ -59,10 +63,10 @@ export default async function DegradedPage({
               rel="noreferrer"
               target="_blank"
             >
-              Open ops callcenter
+              {t("common.openOpsCallcenter", locale)}
             </a>
             <Link className="secondary-link" href="/start">
-              Choose another desk
+              {t("degraded.escalation.pickAnother", locale)}
             </Link>
           </div>
         </article>

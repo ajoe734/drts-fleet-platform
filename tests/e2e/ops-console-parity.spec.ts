@@ -40,7 +40,7 @@ const routeSpecs: RouteSpec[] = [
     key: "callcenter",
     path: "/callcenter",
     title: /客服中心|call center/i,
-    markers: [/session|callback|queue/i],
+    markers: [/session|callback|queue|通話工作階段|回撥|佇列/i],
     screenshot: "ops-callcenter.png",
   },
   {
@@ -75,21 +75,21 @@ const routeSpecs: RouteSpec[] = [
     key: "approval-requests",
     path: "/approval-requests",
     title: /審批|Approval/i,
-    markers: [/approval|override|queue/i],
+    markers: [/approval|override|queue|審批|核准|覆寫|佇列/i],
     screenshot: "ops-approval-requests.png",
   },
   {
     key: "reports",
     path: "/reports",
     title: /報表|Reports/i,
-    markers: [/report|filing|export/i],
+    markers: [/report|filing|export|報表|申報|匯出/i],
     screenshot: "ops-reports.png",
   },
   {
     key: "revenue",
     path: "/revenue",
     title: /收益|Revenue/i,
-    markers: [/revenue|mismatch|settlement/i],
+    markers: [/revenue|mismatch|settlement|收益|差異|結算/i],
     screenshot: "ops-revenue.png",
   },
   {
@@ -110,7 +110,7 @@ const routeSpecs: RouteSpec[] = [
     key: "drivers-list",
     path: "/drivers",
     title: /司機|Drivers/i,
-    markers: [/drivers|platform|registry/i],
+    markers: [/drivers|platform|registry|司機|平台|名冊|登錄/i],
     screenshot: "ops-drivers-list.png",
   },
   {
@@ -138,7 +138,7 @@ const routeSpecs: RouteSpec[] = [
     key: "contracts-list",
     path: "/contracts",
     title: /合約|Contracts/i,
-    markers: [/partner|contract|registry/i],
+    markers: [/partner|contract|registry|合作|契約|名冊|登錄/i],
     screenshot: "ops-contracts-list.png",
   },
   {

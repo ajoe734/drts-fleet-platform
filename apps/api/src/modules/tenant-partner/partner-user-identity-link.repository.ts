@@ -162,8 +162,8 @@ export class PartnerUserIdentityLinkRepository {
     const result = await this.databaseService!.query<JsonRecordRow>(
       `
         UPDATE admin.phase1_partner_user_identity_links
-        SET last_seen_at = $3,
-            updated_at = $3,
+        SET last_seen_at = $3::timestamptz,
+            updated_at = $3::timestamptz,
             record = jsonb_set(
               jsonb_set(record, '{lastSeenAt}', to_jsonb($3::text), true),
               '{updatedAt}',

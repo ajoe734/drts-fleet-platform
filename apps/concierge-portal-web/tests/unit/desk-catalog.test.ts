@@ -4,6 +4,10 @@ import {
   evaluateDeskEligibility,
   resolveDeskAccess,
 } from "../../lib/desk-catalog";
+import { t } from "../../lib/translations";
+
+const testTranslate = (key: string, params?: Record<string, string | number>) =>
+  t(key, "zh", params);
 
 describe("desk catalog", () => {
   it("denies a concierge operator from the clinic call-point desk", () => {
@@ -12,7 +16,9 @@ describe("desk catalog", () => {
     );
 
     expect(clinicDesk).toBeTruthy();
-    expect(resolveDeskAccess(clinicDesk!, "concierge_operator")).toMatchObject({
+    expect(
+      resolveDeskAccess(clinicDesk!, "concierge_operator", testTranslate),
+    ).toMatchObject({
       allowed: false,
       reasonCode: "mode_denied",
     });
@@ -30,6 +36,7 @@ describe("desk catalog", () => {
         "airport_assist",
         "台北市信義區市府路 1 號 1F",
         "台北市大安區仁愛路 4 段 12 號",
+        testTranslate,
       ),
     ).toMatchObject({
       state: "ineligible",
@@ -49,6 +56,7 @@ describe("desk catalog", () => {
         "medical_discharge",
         "新北市板橋區文化路 2 段 188 號",
         "新北市板橋區文化路 1 段 33 號",
+        testTranslate,
       ),
     ).toMatchObject({
       state: "eligible",

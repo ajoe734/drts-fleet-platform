@@ -1,3 +1,5 @@
+import type { Translator } from "./translations";
+
 export type ConciergeOperatorMode =
   | "concierge_operator"
   | "call_point_operator";
@@ -11,21 +13,58 @@ export type RequestedServiceProduct =
   | "airport_assist"
   | "medical_discharge";
 
+type DeskTranslationKey =
+  | "desk.acme.name"
+  | "desk.acme.site"
+  | "desk.acme.location"
+  | "desk.acme.zone"
+  | "desk.acme.escalation"
+  | "desk.acme.notes"
+  | "desk.t1.name"
+  | "desk.t1.site"
+  | "desk.t1.location"
+  | "desk.t1.zone"
+  | "desk.t1.escalation"
+  | "desk.t1.notes"
+  | "desk.riverside.name"
+  | "desk.riverside.site"
+  | "desk.riverside.location"
+  | "desk.riverside.zone"
+  | "desk.riverside.escalation"
+  | "desk.riverside.notes";
+
 export type DeskCatalogRecord = {
   deskId: string;
-  deskName: string;
+  deskNameKey: DeskTranslationKey;
   deskType: "concierge" | "call_point";
   siteId: string;
-  siteName: string;
-  location: string;
+  siteNameKey: DeskTranslationKey;
+  locationKey: DeskTranslationKey;
   phone: string;
-  zoneLabel: string;
+  zoneLabelKey: DeskTranslationKey;
   queuePolicy: "realtime" | "queue";
   health: DeskHealth;
   recordingAvailability: RecordingAvailability;
   allowedModes: ConciergeOperatorMode[];
   authorizedProducts: RequestedServiceProduct[];
   authorizedAddressKeywords: string[];
+  escalationLabelKey: DeskTranslationKey;
+  notesKey: DeskTranslationKey;
+};
+
+export type LocalizedDeskCatalogRecord = Omit<
+  DeskCatalogRecord,
+  | "deskNameKey"
+  | "siteNameKey"
+  | "locationKey"
+  | "zoneLabelKey"
+  | "escalationLabelKey"
+  | "notesKey"
+> & {
+  deskName: string;
+  siteName: string;
+  location: string;
+  zoneLabel: string;
   escalationLabel: string;
   notes: string;
 };
@@ -45,60 +84,85 @@ export type DeskEligibilityResult =
 export const conciergeDeskCatalog: DeskCatalogRecord[] = [
   {
     deskId: "acme-reception",
-    deskName: "Acme Lobby Desk",
+    deskNameKey: "desk.acme.name",
     deskType: "concierge",
     siteId: "10000000-0000-0000-0000-000000000311",
-    siteName: "Acme Tower",
-    location: "台北市信義區市府路 1 號 1F",
+    siteNameKey: "desk.acme.site",
+    locationKey: "desk.acme.location",
     phone: "02-5550-0111",
-    zoneLabel: "Xinyi / City Hall corridor",
+    zoneLabelKey: "desk.acme.zone",
     queuePolicy: "realtime",
     health: "healthy",
     recordingAvailability: "ops_callback_only",
     allowedModes: ["concierge_operator", "call_point_operator"],
     authorizedProducts: ["standard_taxi", "medical_discharge"],
-    authorizedAddressKeywords: ["信義", "市府", "忠孝", "仁愛", "大安"],
-    escalationLabel: "Ops callcenter / dispatch manager",
-    notes:
-      "Healthy desk with both concierge and call-point operators allowed. Recording callback still lands in ops.",
+    authorizedAddressKeywords: [
+      "信義",
+      "市府",
+      "忠孝",
+      "仁愛",
+      "大安",
+      "xinyi",
+      "city hall",
+      "ren'ai",
+      "renai",
+      "daan",
+    ],
+    escalationLabelKey: "desk.acme.escalation",
+    notesKey: "desk.acme.notes",
   },
   {
     deskId: "tpe-t1-lobby",
-    deskName: "T1 Concierge Pick-up Point",
+    deskNameKey: "desk.t1.name",
     deskType: "concierge",
     siteId: "10000000-0000-0000-0000-000000000312",
-    siteName: "Taoyuan Airport T1",
-    location: "桃園機場第一航廈 1F",
+    siteNameKey: "desk.t1.site",
+    locationKey: "desk.t1.location",
     phone: "03-390-0001",
-    zoneLabel: "Airport inner-loop",
+    zoneLabelKey: "desk.t1.zone",
     queuePolicy: "queue",
     health: "degraded",
     recordingAvailability: "ops_callback_only",
     allowedModes: ["concierge_operator"],
     authorizedProducts: ["standard_taxi", "airport_assist"],
-    authorizedAddressKeywords: ["機場", "航廈", "桃園", "南崁"],
-    escalationLabel: "Ops airport desk supervisor",
-    notes:
-      "Route is intentionally degraded to make the read-only fallback explicit for SYS-UI-005.",
+    authorizedAddressKeywords: [
+      "機場",
+      "航廈",
+      "桃園",
+      "南崁",
+      "airport",
+      "terminal",
+      "taoyuan",
+      "nankan",
+    ],
+    escalationLabelKey: "desk.t1.escalation",
+    notesKey: "desk.t1.notes",
   },
   {
     deskId: "riverside-clinic",
-    deskName: "Riverside Clinic Call Point",
+    deskNameKey: "desk.riverside.name",
     deskType: "call_point",
     siteId: "site-demo-riverside-clinic",
-    siteName: "Riverside Clinic",
-    location: "新北市板橋區文化路 2 段 188 號",
+    siteNameKey: "desk.riverside.site",
+    locationKey: "desk.riverside.location",
     phone: "02-7755-2200",
-    zoneLabel: "Boarding transfer / discharge only",
+    zoneLabelKey: "desk.riverside.zone",
     queuePolicy: "realtime",
     health: "healthy",
     recordingAvailability: "ops_callback_only",
     allowedModes: ["call_point_operator"],
     authorizedProducts: ["medical_discharge"],
-    authorizedAddressKeywords: ["板橋", "文化路", "新埔", "新北"],
-    escalationLabel: "Clinic transport coordinator",
-    notes:
-      "This desk is useful for denied and ineligible routing because it only allows call-point mode and discharge trips.",
+    authorizedAddressKeywords: [
+      "板橋",
+      "文化路",
+      "新埔",
+      "新北",
+      "banqiao",
+      "wenhua",
+      "new taipei",
+    ],
+    escalationLabelKey: "desk.riverside.escalation",
+    notesKey: "desk.riverside.notes",
   },
 ];
 
@@ -110,9 +174,58 @@ export function getDeskById(deskId: string | null | undefined) {
   return conciergeDeskCatalog.find((desk) => desk.deskId === deskId) ?? null;
 }
 
+export function localizeDeskRecord(
+  desk: DeskCatalogRecord | null | undefined,
+  t: Translator,
+): LocalizedDeskCatalogRecord | null {
+  if (!desk) {
+    return null;
+  }
+
+  return {
+    ...desk,
+    deskName: t(desk.deskNameKey),
+    siteName: t(desk.siteNameKey),
+    location: t(desk.locationKey),
+    zoneLabel: t(desk.zoneLabelKey),
+    escalationLabel: t(desk.escalationLabelKey),
+    notes: t(desk.notesKey),
+  };
+}
+
+export function formatDeskMode(mode: ConciergeOperatorMode, t: Translator) {
+  return t(`desk.mode.${mode}`);
+}
+
+export function formatDeskHealth(health: DeskHealth, t: Translator) {
+  return t(`desk.health.${health}`);
+}
+
+export function formatQueuePolicy(
+  queuePolicy: DeskCatalogRecord["queuePolicy"],
+  t: Translator,
+) {
+  return t(`desk.queue.${queuePolicy}`);
+}
+
+export function formatRecordingAvailability(
+  availability: RecordingAvailability,
+  t: Translator,
+) {
+  return t(`desk.recording.${availability}`);
+}
+
+export function formatRequestedProduct(
+  product: RequestedServiceProduct,
+  t: Translator,
+) {
+  return t(`desk.product.${product}`);
+}
+
 export function resolveDeskAccess(
   desk: DeskCatalogRecord,
   mode: ConciergeOperatorMode,
+  t: Translator,
 ): DeskAccessResult {
   if (desk.allowedModes.includes(mode)) {
     return { allowed: true };
@@ -121,7 +234,12 @@ export function resolveDeskAccess(
   return {
     allowed: false,
     reasonCode: "mode_denied",
-    message: `${desk.deskName} only allows ${desk.allowedModes.join(" / ")}.`,
+    message: t("desk.access.denied", {
+      deskName: t(desk.deskNameKey),
+      allowedModes: desk.allowedModes
+        .map((item) => formatDeskMode(item, t))
+        .join(" / "),
+    }),
   };
 }
 
@@ -130,12 +248,16 @@ export function evaluateDeskEligibility(
   requestedProduct: RequestedServiceProduct,
   pickupAddress: string,
   dropoffAddress: string,
+  t: Translator,
 ): DeskEligibilityResult {
   if (!desk.authorizedProducts.includes(requestedProduct)) {
     return {
       state: "ineligible",
       reasonCode: "product_not_authorized",
-      message: `${desk.deskName} cannot submit ${requestedProduct} requests.`,
+      message: t("desk.eligibility.productDenied", {
+        deskName: t(desk.deskNameKey),
+        product: formatRequestedProduct(requestedProduct, t),
+      }),
     };
   }
 
@@ -148,18 +270,17 @@ export function evaluateDeskEligibility(
     return {
       state: "ineligible",
       reasonCode: "service_area_mismatch",
-      message: `${desk.deskName} only covers ${desk.zoneLabel}.`,
+      message: t("desk.eligibility.zoneDenied", {
+        deskName: t(desk.deskNameKey),
+        zoneLabel: t(desk.zoneLabelKey),
+      }),
     };
   }
 
   return {
     state: "eligible",
-    message: `${desk.deskName} is authorized for this assisted-entry request.`,
+    message: t("desk.eligibility.allowed", {
+      deskName: t(desk.deskNameKey),
+    }),
   };
-}
-
-export function formatDeskMode(mode: ConciergeOperatorMode) {
-  return mode === "concierge_operator"
-    ? "Concierge operator"
-    : "Call-point operator";
 }

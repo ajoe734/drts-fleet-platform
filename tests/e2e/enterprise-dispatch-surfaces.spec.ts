@@ -31,20 +31,23 @@ const gateRoutes = [
 const embedRoutes = [
   {
     path: "/embed",
-    marker: /已接收企業 App 身分交付|tenant-scoped hand-off accepted/,
+    marker: /已透過企業 App 登入|handoff_ok|tenant_signature/,
   },
-  { path: "/embed/reauth-required", marker: /需要重新驗證|host token expired/ },
+  {
+    path: "/embed/reauth-required",
+    marker: /登入狀態已逾時|reauth_required|handoff_token/,
+  },
   {
     path: "/embed/unsupported-host",
-    marker: /這個開啟來源不受支援|unsupported host/,
+    marker: /無法在此環境開啟|unsupported_host|來源主機未授權/,
   },
   {
     path: "/embed/consent-required",
-    marker: /需要確認企業授權範圍|passenger, cost center, booking history/,
+    marker: /授權使用企業派車|consent_required|identity.read/,
   },
   {
     path: "/embed/fallback-to-web",
-    marker: /改走企業網站版完成操作|identity hand-off incomplete/,
+    marker: /未偵測到企業登入|fallback_to_web|企業 SSO/,
   },
 ] as const;
 
@@ -107,10 +110,8 @@ test.describe("enterprise dispatch surfaces", () => {
       await expect(page.locator("body"), route.path).toContainText(
         route.marker,
       );
-      await expect(page.locator("body"), route.path).toContainText(
-        "embed identity",
-      );
       await expect(page.locator("body"), route.path).toContainText("webview");
+      await expect(page.locator("body"), route.path).toContainText("內嵌於");
       await expect(page.getByRole("banner"), route.path).toHaveCount(0);
       await expect(page.locator("body"), route.path).not.toContainText(
         /我的預約\s+行程\s+說明|本月額度\s+NT\$ 31,000|後台治理模組/,

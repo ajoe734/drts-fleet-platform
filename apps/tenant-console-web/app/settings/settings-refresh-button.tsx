@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslation } from "@/lib/i18n";
 
 type SettingsRefreshButtonProps = {
   label: string;
@@ -20,6 +21,7 @@ export function SettingsRefreshButton({
   style,
 }: SettingsRefreshButtonProps) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [isPending, startTransition] = useTransition();
 
   return (
@@ -34,7 +36,7 @@ export function SettingsRefreshButton({
       }}
       style={style}
     >
-      <span>{isPending ? "Refreshing..." : label}</span>
+      <span>{isPending ? t("settings.refresh.refreshing") : label}</span>
       {surfaceLabel ? (
         <span style={{ fontSize: 10, opacity: 0.8 }}>{surfaceLabel}</span>
       ) : null}

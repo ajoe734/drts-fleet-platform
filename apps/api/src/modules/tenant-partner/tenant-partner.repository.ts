@@ -159,6 +159,34 @@ export class TenantPartnerRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  // Load a JSONB-record table for state hydration, degrading gracefully when the
+  // relation is absent. Phase-1 persistence is intentionally partial (several
+  // tables are referenced-but-not-migrated), so a single missing relation must
+  // NOT abort the entire tenant-partner load -- otherwise userRoles, cost
+  // centers, quotas, etc. silently fall back to in-memory seeds even though
+  // their tables exist and are populated.
+  private async loadRows(
+    text: string,
+  ): Promise<{ rows: JsonRecordRow[] }> {
+    try {
+      return await this.databaseService!.query<JsonRecordRow>(text);
+    } catch (error) {
+      const code =
+        error && typeof error === "object"
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code === "42P01") {
+        this.logger.warn(
+          `Tenant-partner load skipped a missing relation: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return { rows: [] };
+      }
+      throw error;
+    }
+  }
+
   async loadState(): Promise<TenantPartnerState> {
     if (!this.isEnabled()) {
       return {
@@ -203,126 +231,126 @@ export class TenantPartnerRepository {
       userRolesResult,
       apiKeysResult,
     ] = await Promise.all([
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_tenant_notification_preferences
           ORDER BY updated_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_tenant_webhook_endpoints
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_tenant_webhook_deliveries
           ORDER BY created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_tenant_sla_profiles
           ORDER BY updated_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_partner_channel_entries
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_partner_ingress_credentials
           ORDER BY created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_partner_eligibility_verifications
           ORDER BY verified_at DESC, updated_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_approval_rules
           ORDER BY tenant_id ASC, updated_at DESC, created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_approval_requests
           ORDER BY created_at DESC, approval_request_id DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_approval_decisions
           ORDER BY decided_at DESC, decision_id DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_passengers
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_addresses
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_cost_centers
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_quota_policies
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_quota_ledger
           ORDER BY created_at DESC, ledger_entry_id DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM core.phase1_tenant_quota_monthly_snapshots
           ORDER BY refreshed_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_tenant_user_roles
           ORDER BY updated_at DESC, invited_at DESC
         `,
       ),
-      this.databaseService!.query<JsonRecordRow>(
+      this.loadRows(
         `
           SELECT record
           FROM admin.phase1_tenant_api_keys

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { createBearerClient, type ApiClient } from "@drts/api-client";
 import type {
   ApiSuccessEnvelope,
@@ -30,6 +32,14 @@ type ApiErrorEnvelope = {
     retryable?: boolean;
   };
 };
+
+type ApiSuccessMetaWire = ApiSuccessEnvelope<unknown>["meta"] & {
+  request_id?: string | null;
+};
+
+function normalizeEnvelopeRequestId(meta: ApiSuccessMetaWire | undefined) {
+  return meta?.requestId ?? meta?.request_id ?? null;
+}
 
 function getServerAuthorityHeaders(): Record<string, string> {
   const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
@@ -72,10 +82,22 @@ export type PartnerSessionRecord = {
   identity: IdentityContext;
 };
 
+export type PartnerRouteProvenance = {
+  source: "authority" | "authority_cache" | "local_fallback";
+  requestId: string | null;
+  timestamp: string | null;
+  entryUpdatedAt: string | null;
+  auditSource: string | null;
+  auditRequestId: string | null;
+  fallbackCode: string | null;
+  fallbackStatus: number | null;
+};
+
 export type PartnerRouteContext = {
   brand: PartnerBrandTemplate;
   entry: PartnerChannelEntryRecord | null;
   inactive: boolean;
+  provenance: PartnerRouteProvenance;
 };
 
 type PartnerEntryWireRecord = Partial<PartnerChannelEntryRecord> & {
@@ -118,6 +140,57 @@ type PartnerAuditMetadataWireRecord = Partial<PartnerRecordAuditMetadata> & {
   request_id?: string | null;
   updated_by?: string | null;
 };
+
+type PartnerEntryAuthorityEnvelope = ApiSuccessEnvelope<
+  PartnerChannelEntryRecord | PartnerEntryWireRecord
+>;
+
+const PARTNER_ENTRY_AUTHORITY_CACHE_TTL_MS = 60_000;
+const partnerEntryAuthorityCache = new Map<
+  string,
+  {
+    envelope: PartnerEntryAuthorityEnvelope;
+    expiresAt: number;
+  }
+>();
+
+function getPartnerEntryAuthorityCacheKey(entrySlug: string) {
+  const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
+  const internalKeyHash = internalKey
+    ? createHash("sha256").update(internalKey).digest("hex").slice(0, 16)
+    : "no-internal-key";
+
+  return [API_URL, internalKeyHash, entrySlug.trim().toLowerCase()].join("|");
+}
+
+export function clearPartnerEntryAuthorityCacheForTests() {
+  partnerEntryAuthorityCache.clear();
+}
+
+async function requestPartnerEntryAuthorityEnvelope(
+  entrySlug: string,
+): Promise<{
+  cacheHit: boolean;
+  envelope: PartnerEntryAuthorityEnvelope;
+}> {
+  const cacheKey = getPartnerEntryAuthorityCacheKey(entrySlug);
+  const now = Date.now();
+  const cached = partnerEntryAuthorityCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return { cacheHit: true, envelope: cached.envelope };
+  }
+
+  const envelope = await requestAuthorityEnvelope<
+    PartnerChannelEntryRecord | PartnerEntryWireRecord
+  >("/api/partner/entries/" + encodeURIComponent(entrySlug));
+
+  partnerEntryAuthorityCache.set(cacheKey, {
+    envelope,
+    expiresAt: now + PARTNER_ENTRY_AUTHORITY_CACHE_TTL_MS,
+  });
+
+  return { cacheHit: false, envelope };
+}
 
 function normalizeBrandingMetadata(
   metadata: PartnerBrandingMetadataWireRecord | null | undefined,
@@ -202,6 +275,15 @@ function canUseLocalPartnerShellFallback(
     return publicShellFallbackAllowed;
   }
 
+  if (
+    publicShellFallbackAllowed &&
+    (error.retryable ||
+      error.status >= 500 ||
+      error.code === "PARTNER_AUTHORITY_REQUEST_FAILED")
+  ) {
+    return true;
+  }
+
   return (
     (error.code === "INTERNAL_KEY_REQUIRED" ||
       error.code === "INTERNAL_KEY_INVALID" ||
@@ -222,10 +304,10 @@ function buildPartnerHeaders(
   };
 }
 
-async function requestAuthority<T>(
+async function requestAuthorityEnvelope<T>(
   path: string,
   init?: RequestInit,
-): Promise<T> {
+): Promise<ApiSuccessEnvelope<T>> {
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
@@ -271,6 +353,14 @@ async function requestAuthority<T>(
   }
 
   const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
+  return envelope;
+}
+
+async function requestAuthority<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const envelope = await requestAuthorityEnvelope<T>(path, init);
   return envelope.data;
 }
 
@@ -407,11 +497,23 @@ export async function getPartnerRouteContext(
   },
 ): Promise<PartnerRouteContext> {
   try {
-    const entry = await getPublicPartnerEntry(tenantSlug);
+    const { cacheHit, envelope } =
+      await requestPartnerEntryAuthorityEnvelope(tenantSlug);
+    const entry = normalizePartnerEntry(envelope.data);
     return {
       brand: resolvePartnerBrand(entry),
       entry,
       inactive: false,
+      provenance: {
+        source: cacheHit ? "authority_cache" : "authority",
+        requestId: normalizeEnvelopeRequestId(envelope.meta),
+        timestamp: envelope.meta.timestamp,
+        entryUpdatedAt: entry.updatedAt || null,
+        auditSource: entry.auditMetadata.source,
+        auditRequestId: entry.auditMetadata.requestId,
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
     };
   } catch (error) {
     if (
@@ -422,6 +524,16 @@ export async function getPartnerRouteContext(
         brand: fallbackBrandTemplate(tenantSlug),
         entry: null,
         inactive: true,
+        provenance: {
+          source: "local_fallback",
+          requestId: null,
+          timestamp: null,
+          entryUpdatedAt: null,
+          auditSource: null,
+          auditRequestId: null,
+          fallbackCode: error.code,
+          fallbackStatus: error.status,
+        },
       };
     }
     throw error;

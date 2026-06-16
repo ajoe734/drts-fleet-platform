@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import type { UpsertTenantCostCenterCommand } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import type { CostCenterFlashPayload } from "./constants";
 
 function readTrimmedString(
@@ -35,6 +37,9 @@ export async function upsertCostCenterAction(
   formData: FormData,
 ): Promise<CostCenterFlashPayload> {
   let payload: CostCenterFlashPayload;
+  const locale = await getServerLocale();
+  const translate = (key: string, params?: Record<string, string | number>) =>
+    t(key, locale, params);
 
   try {
     const mode = readTrimmedString(formData, "mode") ?? "create";
@@ -42,10 +47,10 @@ export async function upsertCostCenterAction(
     const name = readTrimmedString(formData, "name");
 
     if (!code) {
-      throw new Error("成本中心代碼不可為空。");
+      throw new Error(translate("costCenters.flash.validation.codeRequired"));
     }
     if (!name) {
-      throw new Error("成本中心名稱不可為空。");
+      throw new Error(translate("costCenters.flash.validation.nameRequired"));
     }
 
     const description = readNullableString(formData, "description");
@@ -72,20 +77,23 @@ export async function upsertCostCenterAction(
       tone: "default",
       title:
         mode === "reactivate"
-          ? "Cost center reactivated"
+          ? translate("costCenters.flash.reactivate.title")
           : mode === "update"
-            ? "Cost center updated"
-            : "Cost center created",
-      description: `${saved.code} · ${saved.name} 已同步到租戶成本中心目錄。`,
+            ? translate("costCenters.flash.update.title")
+            : translate("costCenters.flash.create.title"),
+      description: translate("costCenters.flash.upsert.description", {
+        code: saved.code,
+        name: saved.name,
+      }),
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Cost center could not be saved",
+      title: translate("costCenters.flash.upsert.failureTitle"),
       description:
         error instanceof Error
           ? error.message
-          : "Unable to save tenant cost center.",
+          : translate("costCenters.flash.upsert.failureDescription"),
     };
   }
 
@@ -97,16 +105,19 @@ export async function disableCostCenterAction(
   formData: FormData,
 ): Promise<CostCenterFlashPayload> {
   let payload: CostCenterFlashPayload;
+  const locale = await getServerLocale();
+  const translate = (key: string, params?: Record<string, string | number>) =>
+    t(key, locale, params);
 
   try {
     const code = readTrimmedString(formData, "code");
     const reason = readTrimmedString(formData, "reason");
 
     if (!code) {
-      throw new Error("請先選擇要停用的成本中心。");
+      throw new Error(translate("costCenters.flash.validation.selectDisable"));
     }
     if (!reason) {
-      throw new Error("停用成本中心需要填寫原因。");
+      throw new Error(translate("costCenters.flash.validation.reasonRequired"));
     }
 
     const saved = await getTenantClient().disableCostCenter({
@@ -115,17 +126,19 @@ export async function disableCostCenterAction(
     });
     payload = {
       tone: "default",
-      title: "Cost center disabled",
-      description: `${saved.code} 已停用，後續建立叫車時不再接受此成本中心。`,
+      title: translate("costCenters.flash.disable.title"),
+      description: translate("costCenters.flash.disable.description", {
+        code: saved.code,
+      }),
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Cost center could not be disabled",
+      title: translate("costCenters.flash.disable.failureTitle"),
       description:
         error instanceof Error
           ? error.message
-          : "Unable to disable tenant cost center.",
+          : translate("costCenters.flash.disable.failureDescription"),
     };
   }
 
