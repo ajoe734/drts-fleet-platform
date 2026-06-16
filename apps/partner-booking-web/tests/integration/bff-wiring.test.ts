@@ -394,6 +394,47 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
+  it("lets public shells fallback when mounted authority returns a server error", async () => {
+    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(
+        {
+          error: {
+            code: "PARTNER_AUTHORITY_REQUEST_FAILED",
+            message: "Partner authority failed while resolving the entry.",
+            details: { entrySlug: "lion" },
+            retryable: false,
+          },
+        },
+        500,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("lion", { allowInactive: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "Lion Group Transfer",
+        slug: "lion",
+      }),
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      API_URL + "/api/partner/entries/lion",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-drts-internal-key": "dev-internal-key",
+        }),
+      }),
+    );
+    await expect(getPartnerRouteContext("lion")).rejects.toMatchObject({
+      code: "PARTNER_AUTHORITY_REQUEST_FAILED",
+      status: 500,
+    });
+  });
+
   it("lets public shells fallback on missing entries without swallowing inactive entries", async () => {
     const fetchMock = vi
       .fn()

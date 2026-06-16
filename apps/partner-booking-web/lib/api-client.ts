@@ -202,6 +202,15 @@ function canUseLocalPartnerShellFallback(
     return publicShellFallbackAllowed;
   }
 
+  if (
+    publicShellFallbackAllowed &&
+    (error.retryable ||
+      error.status >= 500 ||
+      error.code === "PARTNER_AUTHORITY_REQUEST_FAILED")
+  ) {
+    return true;
+  }
+
   return (
     (error.code === "INTERNAL_KEY_REQUIRED" ||
       error.code === "INTERNAL_KEY_INVALID" ||
