@@ -1,12 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import {
-  Suspense,
-  useEffect,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { Suspense, useEffect, type ReactNode } from "react";
 import {
   CanvasShell,
   ManagementThemeProvider,
@@ -32,61 +27,14 @@ import {
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
 
-// The dark canvas surface + `tenant` realm structure stay shared, but the
-// chrome accent (brand mark, active nav, highlights) follows the resolved
-// issuer brand so each bank — CTBC / Cathay / Taishin / DBS / Fubon — renders
-// in its own colour rather than a single shared teal.
-const BASE_BANK_THEME = buildCanvasTheme({
+// Chrome uses the `tenant` realm tokens (teal) per the design canvas / SD
+// hand-off (VQ-1). The issuer appears only as tenant identity + screen-local
+// benefit/quota emphasis, never as a hand-picked per-issuer chrome palette.
+const bankCanvasTheme = buildCanvasTheme({
   surface: "tenant",
   dark: true,
   density: "compact",
 });
-
-function buildIssuerCanvasTheme(bank: BankDemoTenant) {
-  const issuer = bank.template.tokens.dark;
-  return {
-    ...BASE_BANK_THEME,
-    accent: issuer.primary,
-    accentHi: issuer.accent,
-    accentBg: issuer.theme.accentSoft,
-    accentBorder: issuer.surface.border,
-  };
-}
-
-function hexToRgbChannels(hex: string) {
-  const value = hex.replace("#", "");
-  const full =
-    value.length === 3
-      ? value
-          .split("")
-          .map((channel) => `${channel}${channel}`)
-          .join("")
-      : value;
-  const red = Number.parseInt(full.slice(0, 2), 16);
-  const green = Number.parseInt(full.slice(2, 4), 16);
-  const blue = Number.parseInt(full.slice(4, 6), 16);
-  return `${red}, ${green}, ${blue}`;
-}
-
-// Per-issuer CSS variables, set once on the shell wrapper so every descendant
-// (chrome + all page bodies) inherits the resolved bank's palette instead of a
-// hard-coded teal. globals.css consumes these for accents, fills and borders.
-function buildIssuerStyleVars(bank: BankDemoTenant): CSSProperties {
-  const issuer = bank.template.tokens.dark;
-  return {
-    "--issuer-primary": issuer.primary,
-    "--issuer-primary-dark": issuer.primaryDark,
-    "--issuer-accent": issuer.accent,
-    "--issuer-accent-rgb": hexToRgbChannels(issuer.accent),
-    "--issuer-accent-soft": issuer.theme.accentSoft,
-    "--issuer-accent-strong": issuer.primary,
-    "--issuer-ink": issuer.ink,
-    "--issuer-surface": issuer.surface.bg,
-    "--issuer-border": issuer.surface.border,
-    "--issuer-panel-border": issuer.theme.panelBorder,
-    "--issuer-text-muted": issuer.text.muted,
-  } as CSSProperties;
-}
 
 export function BankShell({ children }: { children: ReactNode }) {
   return (
@@ -128,8 +76,6 @@ function BankShellContent({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   const locale = resolveLocale(searchParams.get("locale"));
   const bank = resolveBankDemoTenant(searchParams.get("bank"));
-  const bankCanvasTheme = buildIssuerCanvasTheme(bank);
-  const issuerStyle = buildIssuerStyleVars(bank);
   const signedOut = searchParams.get("signedOut") === "1";
   const navEntries = buildBankNavEntries(locale, searchParams.toString());
   const activeItem = findNavItem(pathname, navEntries);
@@ -141,7 +87,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
-      <div className="bank-runtime-shell" style={issuerStyle}>
+      <div className="bank-runtime-shell">
         <CanvasShell
           theme={bankCanvasTheme}
           nav={navEntries}
