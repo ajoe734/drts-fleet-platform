@@ -743,6 +743,117 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
       updatedBy: "system:seed",
     },
   },
+  {
+    partnerId: "partner-ctbc-card-001",
+    partnerCode: "ctbc",
+    partnerType: "bank_partner",
+    programId: "program-ctbc-world-elite",
+    programCode: "WORLD_ELITE",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "CTBC",
+    entrySlug: "ctbc",
+    displayName: "CTBC World Elite",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "bank_card_inline",
+    entryHost: "ride.ctbc.com.tw",
+    entryPath: "/ctbc/program/site",
+    themeAccent: "#0B2D5C",
+    brandingMetadata: {
+      displayName: "CTBC World Elite",
+      themeAccent: "#0B2D5C",
+      supportEmail: "world-elite@ctbc.example",
+      supportPhone: "0800-024-365",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-06-16T00:00:00.000Z",
+    updatedAt: "2026-06-16T00:00:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-ctbc",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
+    partnerId: "partner-fubon-claim-001",
+    partnerCode: "fubon",
+    partnerType: "bank_partner",
+    programId: "program-fubon-claim-mobility",
+    programCode: "CLAIM_MOBILITY",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "FUBON",
+    entrySlug: "fubon",
+    displayName: "Fubon Claim Mobility",
+    businessDispatchSubtype: "insurance_replacement_vehicle",
+    authMode: "partner_api_key",
+    eligibilityMode: "reference_required",
+    entryHost: "claim.fubon-ins.com.tw",
+    entryPath: "/fubon/program/site",
+    themeAccent: "#0E6E50",
+    brandingMetadata: {
+      displayName: "Fubon Claim Mobility",
+      themeAccent: "#0E6E50",
+      supportEmail: "claim-mobility@fubon.example",
+      supportPhone: "0800-073-588",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-06-16T00:05:00.000Z",
+    updatedAt: "2026-06-16T00:05:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-fubon",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
+  {
+    partnerId: "partner-lion-travel-001",
+    partnerCode: "lion",
+    partnerType: "bank_partner",
+    programId: "program-lion-group-transfer",
+    programCode: "GROUP_TRANSFER",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "LION",
+    entrySlug: "lion",
+    displayName: "Lion Group Transfer",
+    businessDispatchSubtype: "travel_agency_transfer",
+    authMode: "partner_api_key",
+    eligibilityMode: "reference_required",
+    entryHost: "booking.lion-travel.com.tw",
+    entryPath: "/lion/program/site",
+    themeAccent: "#B0420E",
+    brandingMetadata: {
+      displayName: "Lion Group Transfer",
+      themeAccent: "#B0420E",
+      supportEmail: "group-transfer@liontravel.example",
+      supportPhone: "0800-090-068",
+    },
+    eligibilityContract: null,
+    status: "active",
+    activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
+    createdAt: "2026-06-16T00:10:00.000Z",
+    updatedAt: "2026-06-16T00:10:00.000Z",
+    auditMetadata: {
+      source: "dev_seed_partner_booking_surface",
+      requestId: "seed-partner-booking-lion",
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
+  },
 ];
 
 const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBootstrap[] =
@@ -1006,6 +1117,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         partnerEntries.length > 0
           ? partnerEntries.map((entry) => this.clonePartnerEntry(entry))
           : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
+      this.reconcilePartnerEntrySeeds();
       this.partnerIngressCredentials =
         partnerIngressCredentials.length > 0
           ? partnerIngressCredentials.map((credential) =>
@@ -7639,6 +7751,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return entry;
+  }
+
+  private reconcilePartnerEntrySeeds() {
+    const existingSlugs = new Set(
+      this.partnerEntries.map((entry) => entry.entrySlug),
+    );
+    const missingSeedEntries = PARTNER_ENTRY_SEED.filter(
+      (seed) => !existingSlugs.has(seed.entrySlug),
+    ).map((seed) => this.clonePartnerEntry(seed));
+
+    if (missingSeedEntries.length === 0) {
+      return;
+    }
+
+    this.partnerEntries = [...this.partnerEntries, ...missingSeedEntries];
+    this.persistChanges(
+      {
+        partnerEntries: missingSeedEntries.map((entry) =>
+          this.clonePartnerEntry(entry),
+        ),
+      },
+      "module init partner entry seed reconciliation",
+    );
   }
 
   private normalizePartnerEntryAuthModes() {
