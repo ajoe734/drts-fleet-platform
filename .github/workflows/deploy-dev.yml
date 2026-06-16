@@ -817,7 +817,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,API_PORT=3001,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}"
+          env_vars="NODE_ENV=production,API_PORT=3001,DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}"
           if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
             env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
           fi
