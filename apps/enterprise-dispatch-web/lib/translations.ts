@@ -238,6 +238,10 @@ const en = {
   "gate.approvalPending.detail.authority": "Authority",
   "gate.approvalPending.detail.authorityValue":
     "Cost-center and approval outcomes remain source-of-truth in the backend",
+  "gate.approvalPending.detail.reasonValue":
+    "Booking accepted + pending cost-center or manager approval",
+  "gate.approvalPending.detail.impactValue":
+    "Dispatch is not finalized until the backend approval result resolves",
   "gate.approvalPending.detail.nextValue":
     "You can review booking details now without submitting again",
   "gate.approvalPending.action.primary": "View my bookings",
@@ -269,6 +273,8 @@ const en = {
     "The system accepted the request, but no fleet supply is available for this time or area.",
   "gate.noSupply.detail.statusValue":
     "request accepted, no fulfillment available",
+  "gate.noSupply.detail.reasonValue":
+    "Request accepted, but no fulfillment is available right now",
   "gate.noSupply.detail.impactValue": "Immediate fulfillment is not guaranteed",
   "gate.noSupply.detail.nextValue":
     "Keep the record and let support help arrange the follow-up",
@@ -279,6 +285,8 @@ const en = {
     "Some real-time data or booking commands may currently update more slowly.",
   "gate.degraded.detail.impactValue":
     "ETA, quota, or approval information may sync later than usual",
+  "gate.degraded.detail.reasonValue":
+    "Real-time data or booking command processing is delayed",
   "gate.degraded.detail.recommendation": "Recommendation",
   "gate.degraded.detail.recommendationValue":
     "Avoid submitting the same booking command twice",
@@ -791,6 +799,10 @@ const zh: Record<TranslationKey, string> = {
   "gate.approvalPending.detail.authority": "責任",
   "gate.approvalPending.detail.authorityValue":
     "成本中心與審批結果以 backend 為準",
+  "gate.approvalPending.detail.reasonValue":
+    "預約已接受 + 待處理，仍在等待成本中心或主管審批",
+  "gate.approvalPending.detail.impactValue":
+    "審批結果回寫前，尚不會進入最終派車",
   "gate.approvalPending.detail.nextValue": "可先查看預約詳情，無需重複送出",
   "gate.approvalPending.action.primary": "查看我的預約",
   "gate.approvalPending.action.secondary": "前往說明",
@@ -817,6 +829,7 @@ const zh: Record<TranslationKey, string> = {
   "gate.noSupply.subtitle":
     "系統已接受需求，但在這個時段或區域沒有可供應車隊。",
   "gate.noSupply.detail.statusValue": "請求已接受，目前無可用供給",
+  "gate.noSupply.detail.reasonValue": "需求已接受，但目前沒有可用車隊供給",
   "gate.noSupply.detail.impactValue": "不保證可即時補派",
   "gate.noSupply.detail.nextValue": "保留紀錄並由客服協助後續安排",
   "gate.noSupply.action.primary": "查看目前預約",
@@ -824,6 +837,7 @@ const zh: Record<TranslationKey, string> = {
   "gate.degraded.title": "服務暫時降級",
   "gate.degraded.subtitle": "部分即時資料或預約命令目前可能延遲更新。",
   "gate.degraded.detail.impactValue": "ETA、quota 或審批資訊可能晚於平常同步",
+  "gate.degraded.detail.reasonValue": "即時資料或預約命令處理目前延遲",
   "gate.degraded.detail.recommendation": "建議",
   "gate.degraded.detail.recommendationValue":
     "避免重複送出相同 booking command",

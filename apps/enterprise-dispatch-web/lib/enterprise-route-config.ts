@@ -16,11 +16,7 @@ export type EnterpriseEmbedStateKind =
   | "consent-required"
   | "fallback-to-web";
 
-export type EnterpriseGateTone =
-  | "info"
-  | "warn"
-  | "danger"
-  | "success";
+export type EnterpriseGateTone = "info" | "warn" | "danger" | "success";
 
 export function getEnterpriseGate(kind: EnterpriseGateKind, locale: Locale) {
   switch (kind) {
@@ -91,16 +87,12 @@ export function getEnterpriseGate(kind: EnterpriseGateKind, locale: Locale) {
         tone: "warn" as const,
         details: [
           {
-            k: t("gate.approvalPending.detail.status", undefined, locale),
-            v: t("gate.approvalPending.detail.statusValue", undefined, locale),
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.approvalPending.detail.reasonValue", undefined, locale),
           },
           {
-            k: t("gate.approvalPending.detail.authority", undefined, locale),
-            v: t(
-              "gate.approvalPending.detail.authorityValue",
-              undefined,
-              locale,
-            ),
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.approvalPending.detail.impactValue", undefined, locale),
           },
           {
             k: t("gate.authRequired.detail.next", undefined, locale),
@@ -193,8 +185,8 @@ export function getEnterpriseGate(kind: EnterpriseGateKind, locale: Locale) {
         tone: "danger" as const,
         details: [
           {
-            k: t("gate.approvalPending.detail.status", undefined, locale),
-            v: t("gate.noSupply.detail.statusValue", undefined, locale),
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.noSupply.detail.reasonValue", undefined, locale),
           },
           {
             k: t("gate.authRequired.detail.impact", undefined, locale),
@@ -223,16 +215,12 @@ export function getEnterpriseGate(kind: EnterpriseGateKind, locale: Locale) {
         tone: "info" as const,
         details: [
           {
-            k: t("gate.authRequired.detail.impact", undefined, locale),
-            v: t("gate.degraded.detail.impactValue", undefined, locale),
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.degraded.detail.reasonValue", undefined, locale),
           },
           {
-            k: t("gate.degraded.detail.recommendation", undefined, locale),
-            v: t(
-              "gate.degraded.detail.recommendationValue",
-              undefined,
-              locale,
-            ),
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.degraded.detail.impactValue", undefined, locale),
           },
           {
             k: t("gate.authRequired.detail.next", undefined, locale),
@@ -330,19 +318,11 @@ export function getEnterpriseEmbedState(
         details: [
           {
             k: t("gate.authRequired.detail.reason", undefined, locale),
-            v: t(
-              "embed.unsupportedHost.detail.reasonValue",
-              undefined,
-              locale,
-            ),
+            v: t("embed.unsupportedHost.detail.reasonValue", undefined, locale),
           },
           {
             k: t("gate.authRequired.detail.impact", undefined, locale),
-            v: t(
-              "embed.unsupportedHost.detail.impactValue",
-              undefined,
-              locale,
-            ),
+            v: t("embed.unsupportedHost.detail.impactValue", undefined, locale),
           },
           {
             k: t("gate.authRequired.detail.next", undefined, locale),
@@ -372,11 +352,7 @@ export function getEnterpriseEmbedState(
         details: [
           {
             k: t("embed.consentRequired.detail.scope", undefined, locale),
-            v: t(
-              "embed.consentRequired.detail.scopeValue",
-              undefined,
-              locale,
-            ),
+            v: t("embed.consentRequired.detail.scopeValue", undefined, locale),
           },
           {
             k: t("embed.consentRequired.detail.purpose", undefined, locale),
@@ -418,11 +394,7 @@ export function getEnterpriseEmbedState(
           },
           {
             k: t("embed.fallbackToWeb.detail.priority", undefined, locale),
-            v: t(
-              "embed.fallbackToWeb.detail.priorityValue",
-              undefined,
-              locale,
-            ),
+            v: t("embed.fallbackToWeb.detail.priorityValue", undefined, locale),
           },
           {
             k: t("gate.authRequired.detail.next", undefined, locale),
@@ -435,11 +407,7 @@ export function getEnterpriseEmbedState(
             href: "/",
           },
           {
-            label: t(
-              "embed.fallbackToWeb.action.secondary",
-              undefined,
-              locale,
-            ),
+            label: t("embed.fallbackToWeb.action.secondary", undefined, locale),
             href: "/embed",
           },
         ],
