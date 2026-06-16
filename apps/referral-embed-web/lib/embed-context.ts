@@ -120,7 +120,7 @@ export async function resolveEmbedContext(input: {
   }
 
   const decision = buildEmbedSecurityDecision({
-    allowedEntryHostsEnv: process.env.PASSENGER_WEB_EMBED_ALLOWED_HOSTS,
+    allowedEntryHostsEnv: process.env.REFERRAL_EMBED_ALLOWED_HOSTS,
     headers: new Headers(requestHeaders),
     requestUrl: url,
   });
@@ -156,7 +156,7 @@ export async function resolveEmbedContext(input: {
     issues.push("fallback:missing_handoff_credentials");
   }
 
-  const demoMode = process.env.PASSENGER_WEB_EMBED_DEMO === "true";
+  const demoMode = process.env.REFERRAL_EMBED_DEMO === "true";
   const state = toEmbedState(input.state, decision, session, issues, demoMode);
 
   return {

@@ -59,7 +59,7 @@ env:
   DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.DEV_GCP_TENANT_CONSOLE_SERVICE }}
   DEV_GCP_BANK_CONSOLE_SERVICE: ${{ vars.DEV_GCP_BANK_CONSOLE_SERVICE }}
-  DEV_GCP_PASSENGER_WEB_SERVICE: ${{ vars.DEV_GCP_PASSENGER_WEB_SERVICE }}
+  DEV_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.DEV_GCP_REFERRAL_EMBED_SERVICE }}
   DEV_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.DEV_GCP_PARTNER_BOOKING_SERVICE }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
@@ -99,7 +99,7 @@ env:
   WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
   WAJI_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.WAJI_GCP_TENANT_CONSOLE_SERVICE }}
   WAJI_GCP_BANK_CONSOLE_SERVICE: ${{ vars.WAJI_GCP_BANK_CONSOLE_SERVICE }}
-  WAJI_GCP_PASSENGER_WEB_SERVICE: ${{ vars.WAJI_GCP_PASSENGER_WEB_SERVICE }}
+  WAJI_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.WAJI_GCP_REFERRAL_EMBED_SERVICE }}
   WAJI_GCP_PARTNER_BOOKING_SERVICE: ${{ vars.WAJI_GCP_PARTNER_BOOKING_SERVICE }}
   WAJI_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.WAJI_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   WAJI_GCP_MIGRATION_JOB: ${{ vars.WAJI_GCP_MIGRATION_JOB }}
@@ -132,7 +132,7 @@ jobs:
       fleet_partner_portal_service: ${{ steps.resolve.outputs.fleet_partner_portal_service }}
       tenant_console_service: ${{ steps.resolve.outputs.tenant_console_service }}
       bank_console_service: ${{ steps.resolve.outputs.bank_console_service }}
-      passenger_web_service: ${{ steps.resolve.outputs.passenger_web_service }}
+      referral_embed_service: ${{ steps.resolve.outputs.referral_embed_service }}
       partner_booking_service: ${{ steps.resolve.outputs.partner_booking_service }}
       enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
@@ -347,7 +347,7 @@ jobs:
           fleet_partner_portal_service="$(pick "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-fleet-partner-portal-web")"
           tenant_console_service="$(pick "${DEV_GCP_TENANT_CONSOLE_SERVICE:-}" "" "drts-tenant-console-web")"
           bank_console_service="$(pick "${DEV_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-bank-console-web")"
-          passenger_web_service="$(pick "${DEV_GCP_PASSENGER_WEB_SERVICE:-}" "" "drts-passenger-web")"
+          referral_embed_service="$(pick "${DEV_GCP_REFERRAL_EMBED_SERVICE:-}" "" "drts-referral-embed-web")"
           partner_booking_service="$(pick "${DEV_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-partner-booking-web")"
           enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
@@ -395,7 +395,7 @@ jobs:
             fleet_partner_portal_service="$(pick "${WAJI_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-dev-fleet-partner-portal-web")"
             tenant_console_service="$(pick "${WAJI_GCP_TENANT_CONSOLE_SERVICE:-}" "" "drts-dev-tenant-console-web")"
             bank_console_service="$(pick "${WAJI_GCP_BANK_CONSOLE_SERVICE:-}" "" "drts-dev-bank-console-web")"
-            passenger_web_service="$(pick "${WAJI_GCP_PASSENGER_WEB_SERVICE:-}" "" "drts-dev-passenger-web")"
+            referral_embed_service="$(pick "${WAJI_GCP_REFERRAL_EMBED_SERVICE:-}" "" "drts-dev-referral-embed-web")"
             partner_booking_service="$(pick "${WAJI_GCP_PARTNER_BOOKING_SERVICE:-}" "" "drts-dev-partner-booking-web")"
             enterprise_dispatch_service="$(pick "${WAJI_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-dev-enterprise-dispatch-web")"
             channel_partner_portal_service="$(pick "${WAJI_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-dev-channel-partner-portal-web")"
@@ -501,7 +501,7 @@ jobs:
           emit fleet_partner_portal_service "$fleet_partner_portal_service"
           emit tenant_console_service "$tenant_console_service"
           emit bank_console_service "$bank_console_service"
-          emit passenger_web_service "$passenger_web_service"
+          emit referral_embed_service "$referral_embed_service"
           emit partner_booking_service "$partner_booking_service"
           emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit channel_partner_portal_service "$channel_partner_portal_service"
@@ -647,17 +647,17 @@ jobs:
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/bank-console-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/bank-console-web:cache,mode=max
 
-      - name: Build & push — passenger-web
+      - name: Build & push — referral-embed-web
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: apps/passenger-web/Dockerfile
+          file: apps/referral-embed-web/Dockerfile
           push: true
           tags: |
-            ${{ needs.prepare.outputs.registry }}/passenger-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/passenger-web:latest
-          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/passenger-web:cache,mode=max
+            ${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/referral-embed-web:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache,mode=max
 
       - name: Build & push — partner-booking-web
         uses: docker/build-push-action@v5
@@ -987,18 +987,18 @@ jobs:
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
-      - name: Deploy — passenger-web
+      - name: Deploy — referral-embed-web
         run: |
-          IMAGE="${{ needs.prepare.outputs.registry }}/passenger-web:${{ needs.build-push.outputs.image_tag }}"
+          IMAGE="${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ needs.build-push.outputs.image_tag }}"
 
-          gcloud run deploy "${{ needs.prepare.outputs.passenger_web_service }}" \
+          gcloud run deploy "${{ needs.prepare.outputs.referral_embed_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
-            --port 3005 \
+            --port 3014 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},PASSENGER_WEB_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,PASSENGER_WEB_EMBED_DEMO=true" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true" \
             --allow-unauthenticated \
             --min-instances 0 \
             --max-instances 2 \
@@ -1096,7 +1096,7 @@ jobs:
             "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             "${{ needs.prepare.outputs.tenant_console_service }}" \
             "${{ needs.prepare.outputs.bank_console_service }}" \
-            "${{ needs.prepare.outputs.passenger_web_service }}" \
+            "${{ needs.prepare.outputs.referral_embed_service }}" \
             "${{ needs.prepare.outputs.partner_booking_service }}" \
             "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             "${{ needs.prepare.outputs.channel_partner_portal_service }}"; do
@@ -1151,7 +1151,7 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
-          passenger_web_url="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_web_service }}" \
+          referral_embed_url="$(gcloud run services describe "${{ needs.prepare.outputs.referral_embed_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
@@ -1174,7 +1174,7 @@ jobs:
           echo "fleet_partner_portal=${fleet_partner_portal_url}" >> "$GITHUB_OUTPUT"
           echo "tenant_console=${tenant_console_url}" >> "$GITHUB_OUTPUT"
           echo "bank_console=${bank_console_url}" >> "$GITHUB_OUTPUT"
-          echo "passenger_web=${passenger_web_url}" >> "$GITHUB_OUTPUT"
+          echo "referral_embed=${referral_embed_url}" >> "$GITHUB_OUTPUT"
           echo "partner_booking=${partner_booking_url}" >> "$GITHUB_OUTPUT"
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
@@ -1187,7 +1187,7 @@ jobs:
           curl --fail --silent --show-error "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.tenant_console }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.bank_console }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.passenger_web }}" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.referral_embed }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.partner_booking }}/ctbc/program" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
@@ -1204,7 +1204,7 @@ jobs:
           echo "  fleet-partner-portal: ${{ steps.urls.outputs.fleet_partner_portal }}"
           echo "  tenant-console: ${{ steps.urls.outputs.tenant_console }}"
           echo "  bank-console: ${{ steps.urls.outputs.bank_console }}"
-          echo "  passenger-web: ${{ steps.urls.outputs.passenger_web }}"
+          echo "  referral-embed-web: ${{ steps.urls.outputs.referral_embed }}"
           echo "  partner-booking: ${{ steps.urls.outputs.partner_booking }}"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"

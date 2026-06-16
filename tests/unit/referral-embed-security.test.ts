@@ -5,9 +5,9 @@ import {
   buildEmbedSecurityDecision,
   hostToOrigins,
   parseAllowedEntryHosts,
-} from "../../apps/passenger-web/lib/embed-security";
+} from "../../apps/referral-embed-web/lib/embed-security";
 
-describe("passenger-web embed security", () => {
+describe("referral-embed embed security", () => {
   it("normalizes and deduplicates allowed entry hosts", () => {
     expect(
       parseAllowedEntryHosts(

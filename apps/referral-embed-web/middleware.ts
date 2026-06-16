@@ -4,7 +4,7 @@ import {
   buildEmbedSecurityDecision,
 } from "@/lib/embed-security";
 
-const EMBED_ALLOWED_ENTRY_HOSTS_ENV = "PASSENGER_WEB_EMBED_ALLOWED_HOSTS";
+const EMBED_ALLOWED_ENTRY_HOSTS_ENV = "REFERRAL_EMBED_ALLOWED_HOSTS";
 
 function createBlockedResponse(
   decision: ReturnType<typeof buildEmbedSecurityDecision>,

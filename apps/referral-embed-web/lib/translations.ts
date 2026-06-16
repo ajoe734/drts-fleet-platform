@@ -3,9 +3,9 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
-  "app.title": "Passenger Web",
+  "app.title": "Referral Embed",
   "app.description":
-    "Passenger-facing DRTS shell for booking status, receipts, trip history, embedded handoff, and explicit unsupported states.",
+    "Embedded DRTS ride-hailing surface for third-party referral channels (community / property-management apps): partner-scoped handoff, booking, trip status, and explicit unsupported states.",
   "common.language.switch": "Switch language",
   "common.language.en": "English",
   "common.language.zh": "Traditional Chinese",
@@ -744,9 +744,9 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
-  "app.title": "乘客前台",
+  "app.title": "轉介嵌入前台",
   "app.description":
-    "DRTS 乘客前台，涵蓋訂單狀態、收據、行程歷史、內嵌交接與明確的不支援狀態。",
+    "供第三方轉介渠道（社區／物業管理 App）內嵌的 DRTS 叫車前台：渠道身分交接、下單、行程狀態與明確的不支援狀態。",
   "common.language.switch": "切換語言",
   "common.language.en": "English",
   "common.language.zh": "繁體中文",
