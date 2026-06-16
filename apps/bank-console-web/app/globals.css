@@ -874,6 +874,7 @@ body {
   cursor: pointer;
 }
 
+/* medium-risk action — navy filled (design-canvas ActionButton `primary`) */
 .table-action-button.is-primary {
   border-color: color-mix(in srgb, var(--bank-border) 80%, transparent);
   background: linear-gradient(
@@ -881,6 +882,30 @@ body {
     color-mix(in srgb, var(--bank-navy-dark) 88%, black),
     color-mix(in srgb, var(--bank-navy) 72%, transparent)
   );
+}
+
+/* high-risk action — red filled (design-canvas ActionButton `danger`) */
+.table-action-button.is-danger {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: linear-gradient(135deg, #7f1d1d, #b42318);
+  color: #ffffff;
+}
+
+/* low-risk / informational action — quiet ghost (canvas `secondary` quiet) */
+.table-action-button.is-ghost {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* needs-a-reason marker dot (canvas requiresReason) */
+.table-action-button .needs-reason-dot {
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.6;
 }
 
 .table-action-button:disabled {
