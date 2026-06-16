@@ -134,3 +134,9 @@ jobs:
         run: pnpm run typecheck
       - name: Unit tests
         run: pnpm run test:unit
+      - name: API unit tests
+        # The root `test:unit` only covers tests/unit/**; the apps/api package
+        # owns ~591 of its own unit tests under apps/api/tests/unit/** that were
+        # previously run by nothing in CI (`turbo run test` is not invoked by any
+        # workflow). Gate them explicitly so API service regressions are caught.
+        run: pnpm --filter @drts/api test
