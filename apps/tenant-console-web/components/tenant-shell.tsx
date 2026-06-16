@@ -10,7 +10,6 @@ import {
 } from "react";
 import {
   CanvasShell,
-  CanvasWindowChrome,
   ManagementThemeProvider,
   buildCanvasTheme,
 } from "@drts/ui-web";
@@ -893,48 +892,32 @@ export function TenantShell({ children }: { children: ReactNode }) {
       <div
         style={{
           minHeight: "100dvh",
-          background:
-            "radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 22%), #060b13",
+          background: tenantCanvasTheme.bg,
         }}
       >
-        <CanvasWindowChrome
-          width="100%"
-          height="auto"
-          outerPadding={12}
+        <CanvasShell
+          theme={tenantCanvasTheme}
+          nav={navEntries}
+          brandLabel={TENANT_CONSOLE_BRAND}
+          brandSubLabel={t("shell.brand.sub")}
+          breadcrumb={[
+            t("shell.context"),
+            activeItem?.label ?? t("shell.breadcrumb.home"),
+          ]}
+          env={t("shell.env")}
+          versionLabel={TENANT_CONSOLE_VERSION}
+          searchPlaceholder={t("shell.search")}
+          searchWidth={280}
+          avatarLabel={locale === "en" ? "YA" : t("shell.identity.actor")}
           style={{ minHeight: "100dvh" }}
-          contentStyle={{
-            minHeight: "calc(100dvh - 24px)",
-            background: tenantCanvasTheme.bg,
-          }}
+          topRight={
+            <TenantShellControls locale={locale} setLocale={setLocale} t={t} />
+          }
+          {...(activeKey ? { active: activeKey } : {})}
         >
-          <CanvasShell
-            theme={tenantCanvasTheme}
-            nav={navEntries}
-            brandLabel={TENANT_CONSOLE_BRAND}
-            brandSubLabel={t("shell.brand.sub")}
-            breadcrumb={[
-              t("shell.context"),
-              activeItem?.label ?? t("shell.breadcrumb.home"),
-            ]}
-            env={t("shell.env")}
-            versionLabel={TENANT_CONSOLE_VERSION}
-            searchPlaceholder={t("shell.search")}
-            searchWidth={280}
-            avatarLabel={locale === "en" ? "YA" : t("shell.identity.actor")}
-            style={{ minHeight: "calc(100dvh - 24px)" }}
-            topRight={
-              <TenantShellControls
-                locale={locale}
-                setLocale={setLocale}
-                t={t}
-              />
-            }
-            {...(activeKey ? { active: activeKey } : {})}
-          >
-            <LegacyEnglishCopyBridge locale={locale} />
-            {children}
-          </CanvasShell>
-        </CanvasWindowChrome>
+          <LegacyEnglishCopyBridge locale={locale} />
+          {children}
+        </CanvasShell>
       </div>
     </ManagementThemeProvider>
   );
