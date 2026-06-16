@@ -265,6 +265,10 @@ describe("partner-booking-web BFF wiring", () => {
         slug: "bank-demo-alpha-airport",
         displayName: "Bank Demo Alpha Airport Transfer",
       }),
+      provenance: expect.objectContaining({
+        requestId: "req-127",
+        timestamp: "2026-06-12T00:00:01.000Z",
+      }),
     });
   });
 

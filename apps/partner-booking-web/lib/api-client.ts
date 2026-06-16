@@ -33,6 +33,14 @@ type ApiErrorEnvelope = {
   };
 };
 
+type ApiSuccessMetaWire = ApiSuccessEnvelope<unknown>["meta"] & {
+  request_id?: string | null;
+};
+
+function normalizeEnvelopeRequestId(meta: ApiSuccessMetaWire | undefined) {
+  return meta?.requestId ?? meta?.request_id ?? null;
+}
+
 function getServerAuthorityHeaders(): Record<string, string> {
   const internalKey = process.env.DRTS_INTERNAL_KEY?.trim();
   if (!internalKey) {
@@ -498,7 +506,7 @@ export async function getPartnerRouteContext(
       inactive: false,
       provenance: {
         source: cacheHit ? "authority_cache" : "authority",
-        requestId: envelope.meta.requestId,
+        requestId: normalizeEnvelopeRequestId(envelope.meta),
         timestamp: envelope.meta.timestamp,
         entryUpdatedAt: entry.updatedAt || null,
         auditSource: entry.auditMetadata.source,
