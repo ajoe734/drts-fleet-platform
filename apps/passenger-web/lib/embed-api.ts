@@ -44,6 +44,12 @@ async function requestAuthority<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
+        // Server-to-server authority calls (/api/partner/*) require the shared
+        // internal key in environments that enforce it. requestAuthority only
+        // ever runs server-side, so reading the secret here is safe.
+        ...(process.env.DRTS_INTERNAL_KEY
+          ? { "x-drts-internal-key": process.env.DRTS_INTERNAL_KEY }
+          : {}),
         ...(init?.headers ?? {}),
       },
     });
