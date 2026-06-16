@@ -973,7 +973,7 @@ jobs:
             --port 3005 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.web }}" \
             --set-env-vars "${{ steps.web_env.outputs.vars }},PASSENGER_WEB_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw" \
             --allow-unauthenticated \
             --min-instances 0 \
@@ -1169,7 +1169,12 @@ jobs:
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
