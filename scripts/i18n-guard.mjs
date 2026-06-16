@@ -7,7 +7,7 @@ import ts from "typescript";
 
 const ROOT = process.cwd();
 const APPS = [
-  "apps/passenger-web",
+  "apps/referral-embed-web",
   "apps/concierge-portal-web",
   "apps/tenant-console-web",
   "apps/ops-console-web",

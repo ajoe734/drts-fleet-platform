@@ -4,8 +4,8 @@ ARG NODE_VERSION=22-alpine
 FROM node:${NODE_VERSION} AS base
 
 LABEL org.opencontainers.image.source="drts-fleet-platform" \
-      org.opencontainers.image.title="drts-passenger-web" \
-      org.opencontainers.image.description="DRTS Phase 1 passenger web"
+      org.opencontainers.image.title="drts-referral-embed-web" \
+      org.opencontainers.image.description="DRTS Referral Embed Web"
 
 ENV CI=1 \
     HUSKY=0 \
@@ -20,26 +20,26 @@ WORKDIR /workspace
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY packages/ packages/
-COPY apps/passenger-web/package.json apps/passenger-web/
+COPY apps/referral-embed-web/package.json apps/referral-embed-web/
 
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 FROM deps AS build
-COPY apps/passenger-web/ apps/passenger-web/
+COPY apps/referral-embed-web/ apps/referral-embed-web/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/ui-tokens build && \
-    pnpm --filter @drts/passenger-web build
+    pnpm --filter @drts/referral-embed-web build
 
 FROM node:${NODE_VERSION} AS runtime
 ENV NODE_ENV=production \
-    PORT=3005
+    PORT=3014
 
 WORKDIR /app
 
-COPY --from=build /workspace/apps/passenger-web/.next/standalone ./
-COPY --from=build /workspace/apps/passenger-web/.next/static ./apps/passenger-web/.next/static
+COPY --from=build /workspace/apps/referral-embed-web/.next/standalone ./
+COPY --from=build /workspace/apps/referral-embed-web/.next/static ./apps/referral-embed-web/.next/static
 
-EXPOSE 3005
-CMD ["node", "apps/passenger-web/server.js"]
+EXPOSE 3014
+CMD ["node", "apps/referral-embed-web/server.js"]

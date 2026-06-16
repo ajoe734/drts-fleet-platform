@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { PassengerShell } from "@/components/passenger-shell";
 import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
@@ -26,9 +25,7 @@ export default async function RootLayout({
   return (
     <html lang={locale === "zh" ? "zh-Hant" : "en"}>
       <body>
-        <LanguageProvider defaultLocale={locale}>
-          <PassengerShell>{children}</PassengerShell>
-        </LanguageProvider>
+        <LanguageProvider defaultLocale={locale}>{children}</LanguageProvider>
       </body>
     </html>
   );

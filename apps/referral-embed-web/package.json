@@ -1,13 +1,13 @@
 {
-  "name": "@drts/passenger-web",
+  "name": "@drts/referral-embed-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "next build",
-    "dev": "next dev --hostname 0.0.0.0 --port 3005",
+    "dev": "next dev --hostname 0.0.0.0 --port 3014",
     "lint": "eslint . --max-warnings=0",
-    "start": "next start --port 3005",
+    "start": "next start --port 3014",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
