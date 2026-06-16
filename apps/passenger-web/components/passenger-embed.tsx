@@ -351,7 +351,7 @@ function ActionLink({
 }: {
   href: string;
   label: string;
-  tone?: "primary" | "ghost" | "danger";
+  tone?: "primary" | "ghost" | "danger" | "default";
 }) {
   const palette =
     tone === "ghost"
@@ -367,11 +367,19 @@ function ActionLink({
             color: "white",
             border: "1px solid var(--embed-danger-fg)",
           }
-        : {
-            background: "var(--embed-accent)",
-            color: "white",
-            border: "1px solid var(--embed-accent)",
-          };
+        : tone === "default"
+          ? {
+              background:
+                "color-mix(in srgb, var(--embed-neutral-fg) 7%, white)",
+              color: "var(--embed-neutral-fg)",
+              border:
+                "1px solid color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
+            }
+          : {
+              background: "var(--embed-accent)",
+              color: "white",
+              border: "1px solid var(--embed-accent)",
+            };
 
   return (
     <Link
@@ -387,6 +395,86 @@ function ActionLink({
     >
       {label}
     </Link>
+  );
+}
+
+type BannerTone =
+  | "primary"
+  | "success"
+  | "warn"
+  | "danger"
+  | "info"
+  | "neutral";
+
+function bannerPalette(
+  theme: ReturnType<typeof buildEmbedTheme>,
+  tone: BannerTone,
+) {
+  switch (tone) {
+    case "primary":
+      return { fg: theme.accent, bg: theme.accentSoft, bd: theme.accent };
+    case "success":
+      return {
+        fg: theme.successFg,
+        bg: theme.successBg,
+        bd: theme.successBorder,
+      };
+    case "warn":
+      return { fg: theme.warnFg, bg: theme.warnBg, bd: theme.warnBorder };
+    case "danger":
+      return { fg: theme.dangerFg, bg: theme.dangerBg, bd: theme.dangerBorder };
+    case "info":
+      return { fg: theme.infoFg, bg: theme.infoBg, bd: theme.infoBorder };
+    default:
+      return {
+        fg: theme.neutralFg,
+        bg: theme.neutralBg,
+        bd: theme.neutralBorder,
+      };
+  }
+}
+
+// Tone-coloured banner (canvas EBanner): tinted background + leading glyph,
+// so each state reads in its own colour instead of a flat white card.
+function EmbedBanner({
+  theme,
+  tone,
+  icon,
+  children,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  tone: BannerTone;
+  icon?: string;
+  children: ReactNode;
+}) {
+  const p = bannerPalette(theme, tone);
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 10,
+        padding: "12px 14px",
+        borderRadius: 14,
+        background: `color-mix(in srgb, ${p.bg} 78%, white)`,
+        border: `1px solid color-mix(in srgb, ${p.bd} 55%, transparent)`,
+        color: p.fg,
+      }}
+    >
+      {icon ? (
+        <span style={{ flexShrink: 0, marginTop: 1 }}>
+          <EmbedGlyph name={icon} size={16} stroke={2.2} />
+        </span>
+      ) : null}
+      <div
+        style={{
+          fontSize: 12.5,
+          lineHeight: 1.55,
+          color: "var(--embed-neutral-fg)",
+        }}
+      >
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -406,6 +494,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       badge: t("embed.state.handoff.badge"),
       tone: "success",
       icon: "check",
+      banner: { tone: "primary" as const, icon: "bolt" },
       footer: (
         <ActionLink
           href={buildHref(context, { screen: "book" })}
@@ -419,6 +508,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       badge: t("embed.state.reauth.badge"),
       tone: "warn",
       icon: "clock",
+      banner: { tone: "warn" as const, icon: "shield" },
       footer: (
         <>
           <ActionLink
@@ -441,6 +531,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       badge: t("embed.state.unsupported.badge"),
       tone: "danger",
       icon: "ban",
+      banner: { tone: "danger" as const, icon: "ban" },
       footer: (
         <ActionLink
           href={buildHref(context, { state: "fallback" })}
@@ -454,6 +545,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       badge: t("embed.state.consent.badge"),
       tone: "info",
       icon: "shield",
+      banner: { tone: "primary" as const, icon: "lock" },
       footer: (
         <>
           <ActionLink
@@ -474,6 +566,7 @@ function IdentityState({ context }: { context: EmbedContext }) {
       badge: t("embed.state.fallback.badge"),
       tone: "warn",
       icon: "ext",
+      banner: { tone: "neutral" as const, icon: "ext" },
       footer: (
         <>
           <ActionLink
@@ -587,9 +680,13 @@ function IdentityState({ context }: { context: EmbedContext }) {
         </Card>
       ) : null}
 
-      <Card>
-        <div style={{ fontSize: 13, lineHeight: 1.6 }}>{current.message}</div>
-      </Card>
+      <EmbedBanner
+        theme={theme}
+        tone={current.banner.tone}
+        icon={current.banner.icon}
+      >
+        {current.message}
+      </EmbedBanner>
 
       {detection ? (
         <Card title={detection.title}>
@@ -683,8 +780,77 @@ function FlowNav({ context }: { context: EmbedContext }) {
   );
 }
 
+// circular tone-coloured icon tile + title + optional posture pill (canvas PeHero)
+function StateHero({
+  theme,
+  tone,
+  icon,
+  title,
+  posture,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  tone: string;
+  icon: string;
+  title: string;
+  posture?: string;
+}) {
+  const t = toneStyle(theme, tone);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 9,
+        padding: "10px 0 2px",
+        textAlign: "center",
+      }}
+    >
+      <div
+        style={{
+          width: 58,
+          height: 58,
+          borderRadius: 29,
+          background: t.background,
+          color: t.color,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <EmbedGlyph name={icon} size={28} stroke={2.2} />
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.25 }}>
+        {title}
+      </div>
+      {posture ? (
+        <div
+          style={{
+            ...t,
+            border: `1px solid ${t.borderColor}`,
+            borderRadius: 999,
+            padding: "4px 11px",
+            fontSize: 11,
+            fontWeight: 800,
+          }}
+        >
+          {posture}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
+  denied: { tone: "danger", icon: "ban" },
+  ineligible: { tone: "warn", icon: "ban" },
+  nosupply: { tone: "warn", icon: "clock" },
+  degraded: { tone: "warn", icon: "info" },
+};
+
 function CompactFlow({ context }: { context: EmbedContext }) {
   const { t } = useTranslation();
+  const theme = buildEmbedTheme(context.accent);
 
   const footer = (() => {
     switch (context.screen) {
@@ -694,6 +860,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
             <ActionLink
               href={buildHref(context, { screen: "receipt" })}
               label={t("embed.field.contact")}
+              tone="default"
             />
             <ActionLink
               href={buildHref(context, { screen: "cancelled" })}
@@ -926,28 +1093,63 @@ function CompactFlow({ context }: { context: EmbedContext }) {
       ) : null}
 
       {context.screen === "completed" ? (
-        <Card title={t("embed.card.completed")} subtitle="completed">
-          <div>{t("embed.completed.body")}</div>
-        </Card>
+        <>
+          <StateHero
+            theme={theme}
+            tone="success"
+            icon="check"
+            title={t("embed.card.completed")}
+            posture="completed"
+          />
+          <EmbedBanner theme={theme} tone="success" icon="check">
+            {t("embed.completed.body")}
+          </EmbedBanner>
+        </>
       ) : null}
 
       {context.screen === "cancelled" ? (
-        <Card title={t("embed.card.cancelled")} subtitle="cancelled">
-          <div>{t("embed.cancelled.body")}</div>
-        </Card>
+        <>
+          <StateHero
+            theme={theme}
+            tone="info"
+            icon="x"
+            title={t("embed.card.cancelled")}
+            posture="cancelled"
+          />
+          <EmbedBanner theme={theme} tone="neutral" icon="x">
+            {t("embed.cancelled.body")}
+          </EmbedBanner>
+        </>
       ) : null}
 
       {(["nosupply", "ineligible", "denied", "degraded"] as const).includes(
         context.screen as "nosupply" | "ineligible" | "denied" | "degraded",
       ) ? (
-        <Card
-          title={t("embed.card.negative", { screen: context.screen })}
-          subtitle={context.strings.supportPhone}
-        >
-          <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+        <>
+          <StateHero
+            theme={theme}
+            tone={NEGATIVE_VISUAL[context.screen]?.tone ?? "warn"}
+            icon={NEGATIVE_VISUAL[context.screen]?.icon ?? "info"}
+            title={t("embed.card.negative", { screen: context.screen })}
+            posture={context.screen}
+          />
+          <EmbedBanner
+            theme={theme}
+            tone={NEGATIVE_VISUAL[context.screen]?.tone ?? "warn"}
+            icon={NEGATIVE_VISUAL[context.screen]?.icon ?? "info"}
+          >
             {t(`embed.negative.${context.screen}`)}
+          </EmbedBanner>
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: 11.5,
+              color: "var(--embed-neutral-fg)",
+            }}
+          >
+            {context.strings.supportPhone}
           </div>
-        </Card>
+        </>
       ) : null}
     </EmbedShell>
   );
