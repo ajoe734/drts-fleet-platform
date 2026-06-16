@@ -79,7 +79,7 @@ export default async function LoginPage({
           </span>
           <div className="login-account-grid">
             {ACCOUNT_PERSONAS.map((persona) => (
-              <Link
+              <a
                 className="login-account-card"
                 href={homeHref(activeBank.code, locale, persona.role)}
                 key={persona.key}
@@ -88,7 +88,7 @@ export default async function LoginPage({
                 <strong>{t(`login.${persona.key}`, locale)}</strong>
                 <small>{t("login.demoPersona", locale)}</small>
                 <em>{t("login.signIn", locale)}</em>
-              </Link>
+              </a>
             ))}
           </div>
         </article>

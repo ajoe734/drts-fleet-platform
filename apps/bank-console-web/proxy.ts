@@ -22,7 +22,11 @@ function setSignedOut(response: NextResponse) {
 }
 
 function clearSignedOut(response: NextResponse) {
-  response.cookies.delete(SIGNED_OUT_COOKIE);
+  response.cookies.set(SIGNED_OUT_COOKIE, "", {
+    ...signedOutCookieOptions,
+    expires: new Date(0),
+    maxAge: 0,
+  });
   return withNoStore(response);
 }
 
@@ -71,6 +75,9 @@ export function proxy(request: NextRequest) {
     request.cookies.get(SIGNED_OUT_COOKIE)?.value === "1";
 
   if (isDemoSignInRequest) {
+    if (isPrefetch) {
+      return redirectToSignedOutLogin(request, { persistCookie: false });
+    }
     return clearSignedOut(NextResponse.next());
   }
 

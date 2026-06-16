@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 import {
   API_URL,
+  clearPartnerEntryAuthorityCacheForTests,
   createPartnerBooking,
   getPartnerConfirmation,
   getPartnerReceipt,
@@ -123,6 +124,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("partner-booking-web BFF wiring", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    clearPartnerEntryAuthorityCacheForTests();
     delete process.env.DRTS_INTERNAL_KEY;
   });
 
@@ -167,6 +169,53 @@ describe("partner-booking-web BFF wiring", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_URL}/api/partner/entries/ctbc`,
       expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
+  it("reuses authority-backed route entry envelopes across render bursts", async () => {
+    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: activeEntry,
+        meta: {
+          requestId: "req-cache",
+          timestamp: "2026-05-19T00:00:03.000Z",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPartnerRouteContext("ctbc")).resolves.toMatchObject({
+      entry: activeEntry,
+      provenance: {
+        source: "authority",
+        requestId: "req-cache",
+        timestamp: "2026-05-19T00:00:03.000Z",
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
+    });
+    await expect(
+      getPartnerRouteContext("ctbc", { allowInactive: true }),
+    ).resolves.toMatchObject({
+      entry: activeEntry,
+      provenance: {
+        source: "authority_cache",
+        requestId: "req-cache",
+        timestamp: "2026-05-19T00:00:03.000Z",
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      API_URL + "/api/partner/entries/ctbc",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-drts-internal-key": "dev-internal-key",
+        }),
+      }),
     );
   });
 
