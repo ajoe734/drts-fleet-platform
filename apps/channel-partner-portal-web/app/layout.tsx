@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { FleetPortalShell } from "@/components/fleet-portal-shell";
-import { buildFleetPortalNav } from "@/lib/fleet-portal-nav";
-import { loadNavBadges } from "@/lib/fleet-portal-data.server";
+import { ChannelPortalShell } from "@/components/channel-portal-shell";
+import { buildReferralPortalNav } from "@/lib/referral-portal-nav";
 import { LanguageProvider } from "@/lib/i18n";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
 import { getServerLocale } from "@/lib/server-locale";
@@ -11,9 +10,9 @@ import { t } from "@/lib/translations";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Fleet Partner Portal",
+  title: "Channel Partner Portal",
   description:
-    "Partner-facing self-service portal for fleet partners: drivers, vehicles, trips, revenue share, statements, documents, training, cases, and quality metrics.",
+    "Self-service portal for referral channel partners (community / property-management apps): usage attribution, revenue share, and settlement statements.",
 };
 
 export const dynamic = "force-dynamic";
@@ -24,23 +23,22 @@ export default async function RootLayout({
   children: ReactNode;
 }) {
   const locale = await getServerLocale();
-  const badges = await loadNavBadges();
-  const fleetNav = buildFleetPortalNav(locale, badges);
+  const nav = buildReferralPortalNav(locale);
 
   return (
     <html lang={locale}>
       <body style={{ margin: 0, minHeight: "100dvh", overflow: "hidden" }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <FleetPortalShell
-            fleetNav={fleetNav}
-            fleetBrandLabel={t("app.name", locale)}
-            fleetBrandSubLabel={t("app.sub", locale)}
-            fleetBrandMark={t("app.brandMark", locale)}
+          <ChannelPortalShell
+            nav={nav}
+            brandLabel={t("referral.app.name", locale)}
+            brandSubLabel={t("referral.app.sub", locale)}
+            brandMark={t("referral.app.brandMark", locale)}
             searchPlaceholder={t("common.search", locale)}
           >
             {children}
-          </FleetPortalShell>
+          </ChannelPortalShell>
         </LanguageProvider>
       </body>
     </html>

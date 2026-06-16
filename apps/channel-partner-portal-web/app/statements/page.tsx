@@ -1,6 +1,6 @@
 import { CanvasCard, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadReferralStatements } from "@/lib/fleet-portal-data.server";
+import { loadReferralStatements } from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { ReferralStatementsTable } from "@/components/referral-tables";
 import { getServerLocale } from "@/lib/server-locale";
@@ -21,7 +21,12 @@ export default async function ReferralStatementsPage() {
         subtitle={t("referral.statements.subtitle", locale)}
       />
       <div
-        style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
       >
         <DataSourceNotice
           theme={theme}

@@ -1,6 +1,11 @@
-import { CanvasCard, CanvasKPI, CanvasPageHeader, CanvasPill } from "@drts/ui-web";
+import {
+  CanvasCard,
+  CanvasKPI,
+  CanvasPageHeader,
+  CanvasPill,
+} from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadReferralUsage } from "@/lib/fleet-portal-data.server";
+import { loadReferralUsage } from "@/lib/channel-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import {
   ReferralTripLinesTable,
@@ -26,7 +31,12 @@ export default async function ReferralUsagePage() {
         subtitle={t("referral.usage.subtitle", locale)}
       />
       <div
-        style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
       >
         <DataSourceNotice
           theme={theme}

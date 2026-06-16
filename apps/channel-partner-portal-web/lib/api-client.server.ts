@@ -1,54 +1,30 @@
-// Fleet-partner-scoped server api-client for the Fleet Partner Portal.
+// Referral-partner-scoped server api-client for the Channel Partner Portal.
 //
 // This is the data-source seam for the portal: every server component that
-// needs live data resolves a client through `getServerFleetPartnerClient()`
-// and calls the `listFleetPortal*` / `getFleetPortal*` methods on it. The
-// portal endpoints (`/api/fleet-partner/*`) are partner-realm self-service
-// routes that require an `x-fleet-partner-id` header plus a partner-realm
-// auth identity carrying the `billing:read` scope.
+// needs live data resolves a client through `getServerReferralPartnerClient()`
+// and calls the `/api/partner/referral/*` routes on it. Those are partner-realm
+// self-service routes that require the partner/entry-slug headers plus a
+// partner-realm auth identity carrying the `billing:read` scope.
 //
 // Auth model: the portal runs behind the same control-plane perimeter as the
 // other consoles (Google IAP in front of Cloud Run). We forward the
 // IAP-authenticated user email and, on Cloud Run, mint a metadata identity
-// token for the protected backend, mirroring the ops-console server client.
-// Unlike the ops/platform consoles, the issued identity is a *partner* realm
+// token for the protected backend. The issued identity is a *partner* realm
 // bootstrap identity (`partner_api_key` actor + `x-realm: partner`) so the
-// fleet-partner route policy accepts it.
+// referral route policy accepts it.
 
 import "server-only";
 
-import { ApiClient, createFleetPartnerPortalClient } from "@drts/api-client";
+import { ApiClient } from "@drts/api-client";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
 import { headers as nextHeaders } from "next/headers";
 
-import { FLEET_SELF } from "./fleet-portal-fixtures";
-
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
-const FLEET_PARTNER_ID_HEADER = "x-fleet-partner-id";
 // Self-service portals read billing/statement data scoped to one partner.
 const PORTAL_SCOPES = ["billing:read"];
 
 function resolveServerApiBaseUrl(): string {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
-}
-
-// The fleet partner identity is, in production, injected by the perimeter
-// (gateway maps the authenticated partner principal to its fleet-partner id).
-// We resolve it from the inbound request header first, then an explicit env
-// override for single-tenant deployments, and finally fall back to the design
-// example partner so local/dev rendering has a deterministic scope.
-function resolveFleetPartnerId(requestHeaders: Headers): string {
-  const fromHeader = requestHeaders.get(FLEET_PARTNER_ID_HEADER)?.trim();
-  if (fromHeader) {
-    return fromHeader;
-  }
-
-  const fromEnv = process.env.DRTS_FLEET_PARTNER_ID?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-
-  return FLEET_SELF.id;
 }
 
 async function mintMetadataIdentityToken(
@@ -78,29 +54,80 @@ async function mintMetadataIdentityToken(
   }
 }
 
-export interface ServerFleetPartnerClient {
+export interface ServerReferralPartnerClient {
   client: ApiClient;
-  fleetPartnerId: string;
+  partnerId: string;
+  partnerEntrySlug: string;
 }
 
-export async function getServerFleetPartnerClient(): Promise<ServerFleetPartnerClient> {
+function resolveHeaderOrEnv(
+  requestHeaders: Headers,
+  headerName: string,
+  envName: string,
+  fallback?: string,
+): string | null {
+  const fromHeader = requestHeaders.get(headerName)?.trim();
+  if (fromHeader) {
+    return fromHeader;
+  }
+
+  const fromEnv = process.env[envName]?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  return fallback ?? null;
+}
+
+export async function getServerReferralPartnerClient(): Promise<ServerReferralPartnerClient> {
   const apiUrl = resolveServerApiBaseUrl();
   const requestHeaders = await nextHeaders();
-  const fleetPartnerId = resolveFleetPartnerId(requestHeaders);
+  const partnerId =
+    resolveHeaderOrEnv(
+      requestHeaders,
+      "x-partner-id",
+      "DRTS_PARTNER_ID",
+      "partner-referral-demo-001",
+    ) ?? "partner-referral-demo-001";
+  const tenantId = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-tenant-id",
+    "DRTS_TENANT_ID",
+    "tenant-demo-001",
+  );
+  const partnerProgramId = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-partner-program-id",
+    "DRTS_PARTNER_PROGRAM_ID",
+    "program-referral-community",
+  );
+  const partnerEntrySlug = resolveHeaderOrEnv(
+    requestHeaders,
+    "x-partner-entry-slug",
+    "DRTS_PARTNER_ENTRY_SLUG",
+    "referral-demo-community",
+  );
 
-  // Partner-realm bootstrap identity. `createFleetPartnerPortalClient` already
-  // sets `x-fleet-partner-id` and `x-realm: partner`; we add the actor/scope
-  // headers the backend auth extractor reads for the partner realm.
   const defaultHeaders: Record<string, string> = {
     "x-actor-type": "partner_api_key",
-    "x-actor-id": fleetPartnerId,
-    "x-partner-id": fleetPartnerId,
+    "x-actor-id": partnerId,
+    "x-partner-id": partnerId,
     "x-roles": "partner",
     "x-role-families": "partner",
     "x-scopes": PORTAL_SCOPES.join(","),
+    "x-realm": "partner",
   };
 
-  // Forward the IAP-authenticated user (audit trail) when present.
+  if (tenantId) {
+    defaultHeaders["x-tenant-id"] = tenantId;
+  }
+  if (partnerProgramId) {
+    defaultHeaders["x-partner-program-id"] = partnerProgramId;
+  }
+  if (partnerEntrySlug) {
+    defaultHeaders["x-partner-entry-slug"] = partnerEntrySlug;
+  }
+
   const iapEmail = requestHeaders.get(CONTROL_PLANE_IAP_EMAIL_HEADER);
   if (iapEmail) {
     defaultHeaders[CONTROL_PLANE_IAP_EMAIL_HEADER] = iapEmail;
@@ -111,8 +138,6 @@ export async function getServerFleetPartnerClient(): Promise<ServerFleetPartnerC
     defaultHeaders["x-request-id"] = requestId;
   }
 
-  // Cloud Run-protected backend: mint a service identity token so the request
-  // passes the serverless IAM layer in front of the API.
   const protectedAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
   if (protectedAudience) {
     const metadataToken = await mintMetadataIdentityToken(protectedAudience);
@@ -128,11 +153,12 @@ export async function getServerFleetPartnerClient(): Promise<ServerFleetPartnerC
     }
   }
 
-  const client = createFleetPartnerPortalClient(
-    apiUrl,
-    fleetPartnerId,
-    defaultHeaders,
-  );
-
-  return { client, fleetPartnerId };
+  return {
+    client: new ApiClient({
+      baseUrl: apiUrl,
+      defaultHeaders,
+    }),
+    partnerId,
+    partnerEntrySlug: partnerEntrySlug ?? "referral-demo-community",
+  };
 }
