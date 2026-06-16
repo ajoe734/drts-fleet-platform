@@ -199,15 +199,18 @@ export const enterpriseBookings: EnterpriseBooking[] = [
   },
 ];
 
+// Tone mapping faithful to the design canvas (ent-data.jsx · ENT_STATE_META):
+// assigned=primary, reserved/approval=warn, enroute=info, completed=success,
+// cancelled=neutral, nosupply=danger — distinct colours per state, not a grey wash.
 const BOOKING_STATE_TONES: Record<
   BookingState,
-  "success" | "warn" | "info" | "neutral" | "danger"
+  "primary" | "success" | "warn" | "info" | "neutral" | "danger"
 > = {
-  assigned: "info",
+  assigned: "primary",
   approval: "warn",
-  reserved: "info",
-  enroute: "success",
-  completed: "neutral",
+  reserved: "warn",
+  enroute: "info",
+  completed: "success",
   cancelled: "neutral",
   nosupply: "danger",
 };
@@ -340,11 +343,12 @@ export function getEnterpriseBookings(locale: Locale): EnterpriseBooking[] {
   }));
 }
 
-export function getBookingStateMeta(
-  locale: Locale,
-): Record<
+export function getBookingStateMeta(locale: Locale): Record<
   BookingState,
-  { label: string; tone: "success" | "warn" | "info" | "neutral" | "danger" }
+  {
+    label: string;
+    tone: "primary" | "success" | "warn" | "info" | "neutral" | "danger";
+  }
 > {
   return {
     assigned: {
