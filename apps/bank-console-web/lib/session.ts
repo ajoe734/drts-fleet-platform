@@ -30,6 +30,8 @@ const ACTOR_PROFILES: Record<BankConsoleRole, ActorProfile> = {
     nameKeys: {
       ctbc: "session.actor.bank_program_admin.ctbc",
       cathay: "session.actor.bank_program_admin.cathay",
+      taishin: "session.actor.bank_program_admin.taishin",
+      dbs: "session.actor.bank_program_admin.dbs",
       fubon: "session.actor.bank_program_admin.fubon",
     },
   },
@@ -38,6 +40,8 @@ const ACTOR_PROFILES: Record<BankConsoleRole, ActorProfile> = {
     nameKeys: {
       ctbc: "session.actor.bank_ops_viewer.ctbc",
       cathay: "session.actor.bank_ops_viewer.cathay",
+      taishin: "session.actor.bank_ops_viewer.taishin",
+      dbs: "session.actor.bank_ops_viewer.dbs",
       fubon: "session.actor.bank_ops_viewer.fubon",
     },
   },
@@ -46,6 +50,8 @@ const ACTOR_PROFILES: Record<BankConsoleRole, ActorProfile> = {
     nameKeys: {
       ctbc: "session.actor.bank_finance.ctbc",
       cathay: "session.actor.bank_finance.cathay",
+      taishin: "session.actor.bank_finance.taishin",
+      dbs: "session.actor.bank_finance.dbs",
       fubon: "session.actor.bank_finance.fubon",
     },
   },

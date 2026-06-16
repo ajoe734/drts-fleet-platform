@@ -27,14 +27,26 @@ import {
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
 
-// Chrome uses the `tenant` realm tokens (teal) per the SD / screen-requirements
-// hand-off. The issuer (CTBC) appears only as tenant identity, never as a
-// hand-picked palette.
-const bankCanvasTheme = buildCanvasTheme({
+// The dark canvas surface + `tenant` realm structure stay shared, but the
+// chrome accent (brand mark, active nav, highlights) follows the resolved
+// issuer brand so each bank — CTBC / Cathay / Taishin / DBS / Fubon — renders
+// in its own colour rather than a single shared teal.
+const BASE_BANK_THEME = buildCanvasTheme({
   surface: "tenant",
   dark: true,
   density: "compact",
 });
+
+function buildIssuerCanvasTheme(bank: BankDemoTenant) {
+  const issuer = bank.template.tokens.dark;
+  return {
+    ...BASE_BANK_THEME,
+    accent: issuer.primary,
+    accentHi: issuer.accent,
+    accentBg: issuer.theme.accentSoft,
+    accentBorder: issuer.surface.border,
+  };
+}
 
 export function BankShell({ children }: { children: ReactNode }) {
   return (
@@ -76,6 +88,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   const locale = resolveLocale(searchParams.get("locale"));
   const bank = resolveBankDemoTenant(searchParams.get("bank"));
+  const bankCanvasTheme = buildIssuerCanvasTheme(bank);
   const signedOut = searchParams.get("signedOut") === "1";
   const navEntries = buildBankNavEntries(locale, searchParams.toString());
   const activeItem = findNavItem(pathname, navEntries);

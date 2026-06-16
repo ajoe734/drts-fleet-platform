@@ -1,7 +1,12 @@
 import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
 import { t, type Locale, type TranslationKey } from "@/lib/translations";
 
-export type BankDemoTenantCode = "ctbc" | "cathay" | "fubon";
+export type BankDemoTenantCode =
+  | "ctbc"
+  | "cathay"
+  | "taishin"
+  | "dbs"
+  | "fubon";
 export type BankProgramSeed = "premium" | "business" | "starter";
 
 export type BankDemoTenant = {
@@ -55,6 +60,40 @@ export const BANK_DEMO_TENANTS: Record<BankDemoTenantCode, BankDemoTenant> = {
       starter: "tenant.program.cathay.starter",
     },
   },
+  taishin: {
+    code: "taishin",
+    issuerCode: "TAISHIN",
+    nameKey: "tenant.taishin.name",
+    shortNameKey: "tenant.taishin.shortName",
+    contextKey: "tenant.taishin.context",
+    avatar: "台新",
+    actorEmail: "ys.wang@taishinbank.com.tw",
+    roleCode: "bank_program_admin",
+    tenantId: "tenant-taishin-001",
+    template: BRAND_TEMPLATES.TAISHIN,
+    programSeedKeys: {
+      premium: "tenant.program.taishin.premium",
+      business: "tenant.program.taishin.business",
+      starter: "tenant.program.taishin.starter",
+    },
+  },
+  dbs: {
+    code: "dbs",
+    issuerCode: "DBS",
+    nameKey: "tenant.dbs.name",
+    shortNameKey: "tenant.dbs.shortName",
+    contextKey: "tenant.dbs.context",
+    avatar: "星展",
+    actorEmail: "wt.koh@dbs.com",
+    roleCode: "bank_program_admin",
+    tenantId: "tenant-dbs-001",
+    template: BRAND_TEMPLATES.DBS,
+    programSeedKeys: {
+      premium: "tenant.program.dbs.premium",
+      business: "tenant.program.dbs.business",
+      starter: "tenant.program.dbs.starter",
+    },
+  },
   fubon: {
     code: "fubon",
     issuerCode: "FUBON",
@@ -100,8 +139,8 @@ export function resolveBankDemoTenant(
   const raw = Array.isArray(value) ? value[0] : value;
   const code = raw?.toLowerCase();
 
-  if (code === "cathay" || code === "fubon" || code === "ctbc") {
-    return BANK_DEMO_TENANTS[code];
+  if (code && code in BANK_DEMO_TENANTS) {
+    return BANK_DEMO_TENANTS[code as BankDemoTenantCode];
   }
 
   return BANK_DEMO_TENANTS[DEFAULT_BANK_DEMO_TENANT];
