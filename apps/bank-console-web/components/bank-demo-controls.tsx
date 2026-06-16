@@ -4,6 +4,8 @@ import Link from "next/link";
 import type { ReadonlyURLSearchParams } from "next/navigation";
 import {
   BANK_DEMO_TENANTS,
+  getBankTenantName,
+  getBankTenantShortName,
   type BankDemoTenant,
   type BankDemoTenantCode,
 } from "@/lib/demo-tenants";
@@ -88,7 +90,7 @@ export function BankDemoControls({
           <span className="bank-demo-menu-kicker">
             {t("shell.demoBank", locale)}
           </span>
-          <strong>{bank.shortName[locale]}</strong>
+          <strong>{getBankTenantShortName(bank, locale)}</strong>
         </summary>
         <div className="bank-demo-popover">
           <p>{t("shell.demoBankHint", locale)}</p>
@@ -102,7 +104,7 @@ export function BankDemoControls({
               })}
               key={tenant.code}
             >
-              <span>{tenant.name[locale]}</span>
+              <span>{getBankTenantName(tenant, locale)}</span>
               <small>{tenant.issuerCode}</small>
             </Link>
           ))}
@@ -177,6 +179,7 @@ export function BankDemoControls({
               <Link
                 className="bank-account-action is-danger"
                 href={hrefFor(pathname, searchParams, { signedOut: "1" })}
+                prefetch={false}
               >
                 {t("shell.logout", locale)}
               </Link>

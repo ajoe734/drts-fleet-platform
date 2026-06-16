@@ -1,3 +1,5 @@
+import { type Locale, t } from "@/lib/translations";
+
 export type EnterpriseGateKind =
   | "auth-required"
   | "suspended"
@@ -14,187 +16,419 @@ export type EnterpriseEmbedStateKind =
   | "consent-required"
   | "fallback-to-web";
 
+export type EnterpriseGateTone = "info" | "warn" | "danger" | "success";
+
+export function getEnterpriseGate(kind: EnterpriseGateKind, locale: Locale) {
+  switch (kind) {
+    case "auth-required":
+      return {
+        title: t("gate.authRequired.title", undefined, locale),
+        subtitle: t("gate.authRequired.subtitle", undefined, locale),
+        tone: "info" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.authRequired.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.authRequired.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("gate.authRequired.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("gate.authRequired.action.primary", undefined, locale),
+            href: "/",
+          },
+          {
+            label: t("gate.authRequired.action.secondary", undefined, locale),
+            href: "/help",
+          },
+        ],
+      };
+    case "suspended":
+      return {
+        title: t("gate.suspended.title", undefined, locale),
+        subtitle: t("gate.suspended.subtitle", undefined, locale),
+        tone: "warn" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.suspended.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.suspended.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("gate.suspended.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("gate.suspended.action.primary", undefined, locale),
+            href: "/help",
+          },
+          {
+            label: t("gate.suspended.action.secondary", undefined, locale),
+            href: "/",
+          },
+        ],
+      };
+    case "approval-pending":
+      return {
+        title: t("gate.approvalPending.title", undefined, locale),
+        subtitle: t("gate.approvalPending.subtitle", undefined, locale),
+        tone: "warn" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.approvalPending.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.approvalPending.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("gate.approvalPending.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("gate.approvalPending.action.primary", undefined, locale),
+            href: "/bookings",
+          },
+          {
+            label: t(
+              "gate.approvalPending.action.secondary",
+              undefined,
+              locale,
+            ),
+            href: "/help",
+          },
+        ],
+      };
+    case "approval-rejected":
+      return {
+        title: t("gate.approvalRejected.title", undefined, locale),
+        subtitle: t("gate.approvalRejected.subtitle", undefined, locale),
+        tone: "danger" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.approvalRejected.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.approvalRejected.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("gate.approvalRejected.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("gate.approvalRejected.action.primary", undefined, locale),
+            href: "/bookings/new",
+          },
+          {
+            label: t(
+              "gate.approvalRejected.action.secondary",
+              undefined,
+              locale,
+            ),
+            href: "/help",
+          },
+        ],
+      };
+    case "quota-blocked":
+      return {
+        title: t("gate.quotaBlocked.title", undefined, locale),
+        subtitle: t("gate.quotaBlocked.subtitle", undefined, locale),
+        tone: "warn" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.quotaBlocked.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.quotaBlocked.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("gate.quotaBlocked.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("gate.quotaBlocked.action.primary", undefined, locale),
+            href: "/bookings/new",
+          },
+          {
+            label: t("gate.quotaBlocked.action.secondary", undefined, locale),
+            href: "/help",
+          },
+        ],
+      };
+    case "no-supply":
+      return {
+        title: t("gate.noSupply.title", undefined, locale),
+        subtitle: t("gate.noSupply.subtitle", undefined, locale),
+        tone: "danger" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.noSupply.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.noSupply.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("gate.noSupply.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("gate.noSupply.action.primary", undefined, locale),
+            href: "/bookings",
+          },
+          {
+            label: t("gate.noSupply.action.secondary", undefined, locale),
+            href: "/help",
+          },
+        ],
+      };
+    case "degraded":
+      return {
+        title: t("gate.degraded.title", undefined, locale),
+        subtitle: t("gate.degraded.subtitle", undefined, locale),
+        tone: "info" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("gate.degraded.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("gate.degraded.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("gate.degraded.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("gate.degraded.action.primary", undefined, locale),
+            href: "/bookings",
+          },
+          {
+            label: t("gate.degraded.action.secondary", undefined, locale),
+            href: "/help",
+          },
+        ],
+      };
+  }
+}
+
+export function getEnterpriseEmbedState(
+  kind: EnterpriseEmbedStateKind,
+  locale: Locale,
+) {
+  switch (kind) {
+    case "handoff-ok":
+      return {
+        title: t("embed.handoffOk.title", undefined, locale),
+        subtitle: t("embed.handoffOk.subtitle", undefined, locale),
+        tone: "success" as const,
+        details: [
+          {
+            k: t("embed.handoffOk.detail.source", undefined, locale),
+            v: t("embed.handoffOk.detail.sourceValue", undefined, locale),
+          },
+          {
+            k: t("embed.handoffOk.detail.session", undefined, locale),
+            v: t("embed.handoffOk.detail.sessionValue", undefined, locale),
+          },
+          {
+            k: t("embed.handoffOk.detail.restriction", undefined, locale),
+            v: t("embed.handoffOk.detail.restrictionValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("embed.handoffOk.action.primary", undefined, locale),
+            href: "/bookings/new",
+          },
+          {
+            label: t("embed.handoffOk.action.secondary", undefined, locale),
+            href: "/",
+          },
+        ],
+      };
+    case "reauth-required":
+      return {
+        title: t("embed.reauthRequired.title", undefined, locale),
+        subtitle: t("embed.reauthRequired.subtitle", undefined, locale),
+        tone: "warn" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("embed.reauthRequired.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("embed.reauthRequired.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("embed.reauthRequired.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("embed.reauthRequired.action.primary", undefined, locale),
+            href: "/embed",
+          },
+          {
+            label: t(
+              "embed.reauthRequired.action.secondary",
+              undefined,
+              locale,
+            ),
+            href: "/",
+          },
+        ],
+      };
+    case "unsupported-host":
+      return {
+        title: t("embed.unsupportedHost.title", undefined, locale),
+        subtitle: t("embed.unsupportedHost.subtitle", undefined, locale),
+        tone: "danger" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("embed.unsupportedHost.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.impact", undefined, locale),
+            v: t("embed.unsupportedHost.detail.impactValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("embed.unsupportedHost.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("embed.unsupportedHost.action.primary", undefined, locale),
+            href: "/",
+          },
+          {
+            label: t(
+              "embed.unsupportedHost.action.secondary",
+              undefined,
+              locale,
+            ),
+            href: "/help",
+          },
+        ],
+      };
+    case "consent-required":
+      return {
+        title: t("embed.consentRequired.title", undefined, locale),
+        subtitle: t("embed.consentRequired.subtitle", undefined, locale),
+        tone: "info" as const,
+        details: [
+          {
+            k: t("embed.consentRequired.detail.scope", undefined, locale),
+            v: t("embed.consentRequired.detail.scopeValue", undefined, locale),
+          },
+          {
+            k: t("embed.consentRequired.detail.purpose", undefined, locale),
+            v: t(
+              "embed.consentRequired.detail.purposeValue",
+              undefined,
+              locale,
+            ),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("embed.consentRequired.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("embed.consentRequired.action.primary", undefined, locale),
+            href: "/bookings/new",
+          },
+          {
+            label: t(
+              "embed.consentRequired.action.secondary",
+              undefined,
+              locale,
+            ),
+            href: "/",
+          },
+        ],
+      };
+    case "fallback-to-web":
+      return {
+        title: t("embed.fallbackToWeb.title", undefined, locale),
+        subtitle: t("embed.fallbackToWeb.subtitle", undefined, locale),
+        tone: "warn" as const,
+        details: [
+          {
+            k: t("gate.authRequired.detail.reason", undefined, locale),
+            v: t("embed.fallbackToWeb.detail.reasonValue", undefined, locale),
+          },
+          {
+            k: t("embed.fallbackToWeb.detail.priority", undefined, locale),
+            v: t("embed.fallbackToWeb.detail.priorityValue", undefined, locale),
+          },
+          {
+            k: t("gate.authRequired.detail.next", undefined, locale),
+            v: t("embed.fallbackToWeb.detail.nextValue", undefined, locale),
+          },
+        ],
+        actions: [
+          {
+            label: t("embed.fallbackToWeb.action.primary", undefined, locale),
+            href: "/",
+          },
+          {
+            label: t("embed.fallbackToWeb.action.secondary", undefined, locale),
+            href: "/embed",
+          },
+        ],
+      };
+  }
+}
+
 export const enterpriseGateConfig = {
-  "auth-required": {
-    title: "需要重新登入",
-    subtitle: "目前沒有可用的企業登入 session，無法顯示員工預約資料。",
-    tone: "info",
-    details: [
-      { k: "原因", v: "企業 SSO session 遺失或已逾時" },
-      { k: "影響", v: "不能查看 booking、quota 與成本中心資料" },
-      { k: "下一步", v: "回到企業入口重新登入後再繼續" },
-    ],
-    actions: [
-      { label: "回到企業入口", href: "/" },
-      { label: "查看支援", href: "/help" },
-    ],
-  },
-  suspended: {
-    title: "目前沒有使用權限",
-    subtitle: "這個帳號或租戶設定暫時不能建立企業派車。",
-    tone: "warn",
-    details: [
-      { k: "原因", v: "租戶權限或員工資格未開通" },
-      { k: "影響", v: "不能建立新預約或查看敏感權責資料" },
-      { k: "下一步", v: "聯絡企業管理員或客服確認權限" },
-    ],
-    actions: [
-      { label: "聯絡企業客服", href: "/help" },
-      { label: "返回首頁", href: "/" },
-    ],
-  },
-  "approval-pending": {
-    title: "申請已送出，等待審批",
-    subtitle: "預約命令已被接受，但仍要等成本中心或主管核准。",
-    tone: "warn",
-    details: [
-      { k: "狀態", v: "accepted + pending" },
-      { k: "責任", v: "成本中心與審批結果以 backend 為準" },
-      { k: "下一步", v: "可先查看預約詳情，無需重複送出" },
-    ],
-    actions: [
-      { label: "查看我的預約", href: "/bookings" },
-      { label: "前往說明", href: "/help" },
-    ],
-  },
-  "approval-rejected": {
-    title: "審批未通過",
-    subtitle: "這筆企業派車未獲得必要的成本中心或主管同意。",
-    tone: "danger",
-    details: [
-      { k: "原因", v: "審批結果拒絕或政策不允許" },
-      { k: "影響", v: "本次預約不能繼續派車" },
-      { k: "下一步", v: "調整行程內容或改用其他成本中心後重送" },
-    ],
-    actions: [
-      { label: "重新建立預約", href: "/bookings/new" },
-      { label: "查看支援", href: "/help" },
-    ],
-  },
-  "quota-blocked": {
-    title: "額度或政策限制",
-    subtitle: "目前額度、政策規則或成本中心狀態不允許建立新單。",
-    tone: "warn",
-    details: [
-      { k: "原因", v: "quota summary 或 policy preview 顯示 blocked" },
-      { k: "影響", v: "不能提交 create command" },
-      { k: "下一步", v: "更換成本中心、調整預約條件或請管理方處理" },
-    ],
-    actions: [
-      { label: "回到建立預約", href: "/bookings/new" },
-      { label: "查看政策說明", href: "/help" },
-    ],
-  },
-  "no-supply": {
-    title: "目前無法派車",
-    subtitle: "系統已接受需求，但在這個時段或區域沒有可供應車隊。",
-    tone: "danger",
-    details: [
-      { k: "狀態", v: "request accepted, no fulfillment available" },
-      { k: "影響", v: "不保證可即時補派" },
-      { k: "下一步", v: "保留紀錄並由客服協助後續安排" },
-    ],
-    actions: [
-      { label: "查看目前預約", href: "/bookings" },
-      { label: "聯絡客服", href: "/help" },
-    ],
-  },
-  degraded: {
-    title: "服務暫時降級",
-    subtitle: "部分即時資料或預約命令目前可能延遲更新。",
-    tone: "info",
-    details: [
-      { k: "影響", v: "ETA、quota 或審批資訊可能晚於平常同步" },
-      { k: "建議", v: "避免重複送出相同 booking command" },
-      { k: "下一步", v: "若狀態持續未更新，請聯絡客服協助" },
-    ],
-    actions: [
-      { label: "查看我的預約", href: "/bookings" },
-      { label: "查看說明", href: "/help" },
-    ],
-  },
+  "auth-required": getEnterpriseGate("auth-required", "zh"),
+  suspended: getEnterpriseGate("suspended", "zh"),
+  "approval-pending": getEnterpriseGate("approval-pending", "zh"),
+  "approval-rejected": getEnterpriseGate("approval-rejected", "zh"),
+  "quota-blocked": getEnterpriseGate("quota-blocked", "zh"),
+  "no-supply": getEnterpriseGate("no-supply", "zh"),
+  degraded: getEnterpriseGate("degraded", "zh"),
 } as const;
 
 export const enterpriseEmbedStateConfig = {
-  "handoff-ok": {
-    title: "已接收企業 App 身分交付",
-    subtitle: "host app 已帶入 tenant-scoped session，可直接進入自助預約流程。",
-    tone: "success",
-    details: [
-      { k: "來源", v: "enterprise app webview" },
-      { k: "session", v: "tenant-scoped hand-off accepted" },
-      { k: "限制", v: "不顯示 admin 或 ops 導覽" },
-    ],
-    actions: [
-      { label: "建立預約", href: "/bookings/new" },
-      { label: "回到企業網站版", href: "/" },
-    ],
-  },
-  "reauth-required": {
-    title: "需要重新驗證",
-    subtitle: "內嵌 token 已逾時，必須回到企業 App 重新建立 session。",
-    tone: "warn",
-    details: [
-      { k: "原因", v: "host token expired or stale" },
-      { k: "影響", v: "不能讀取 tenant booking data" },
-      { k: "下一步", v: "回到 host app 重新登入後再開啟" },
-    ],
-    actions: [
-      { label: "返回企業 App", href: "/embed" },
-      { label: "改走企業網站版", href: "/" },
-    ],
-  },
-  "unsupported-host": {
-    title: "這個開啟來源不受支援",
-    subtitle: "偵測到的 host app 或網域不在允許清單內。",
-    tone: "danger",
-    details: [
-      { k: "原因", v: "wrong realm or unsupported host container" },
-      { k: "影響", v: "為避免錯誤身份混用，系統不載入資料" },
-      { k: "下一步", v: "請從企業正式 App 或企業網站入口開啟" },
-    ],
-    actions: [
-      { label: "前往企業網站版", href: "/" },
-      { label: "查看支援", href: "/help" },
-    ],
-  },
-  "consent-required": {
-    title: "需要確認企業授權範圍",
-    subtitle: "這次內嵌啟動需要先確認成本中心或租戶資料使用範圍。",
-    tone: "info",
-    details: [
-      { k: "scope", v: "passenger, cost center, booking history" },
-      { k: "目的", v: "僅供企業派車前台使用" },
-      { k: "下一步", v: "確認後繼續建立或查詢預約" },
-    ],
-    actions: [
-      { label: "同意並繼續", href: "/bookings/new" },
-      { label: "改走企業網站版", href: "/" },
-    ],
-  },
-  "fallback-to-web": {
-    title: "改走企業網站版完成操作",
-    subtitle: "目前 embed session 不完整，建議切回網站版以完成預約或查詢。",
-    tone: "warn",
-    details: [
-      { k: "原因", v: "identity hand-off incomplete" },
-      { k: "優先", v: "保持企業身份與審批語意一致" },
-      { k: "下一步", v: "切換到網站版後再繼續 booking flow" },
-    ],
-    actions: [
-      { label: "前往企業網站版", href: "/" },
-      { label: "返回 host app", href: "/embed" },
-    ],
-  },
+  "handoff-ok": getEnterpriseEmbedState("handoff-ok", "zh"),
+  "reauth-required": getEnterpriseEmbedState("reauth-required", "zh"),
+  "unsupported-host": getEnterpriseEmbedState("unsupported-host", "zh"),
+  "consent-required": getEnterpriseEmbedState("consent-required", "zh"),
+  "fallback-to-web": getEnterpriseEmbedState("fallback-to-web", "zh"),
 } as const;
-
-export type EnterpriseGateTone =
-  (typeof enterpriseGateConfig)[EnterpriseGateKind]["tone"];
-
-export function getEnterpriseGate(kind: EnterpriseGateKind) {
-  return enterpriseGateConfig[kind];
-}
-
-export function getEnterpriseEmbedState(kind: EnterpriseEmbedStateKind) {
-  return enterpriseEmbedStateConfig[kind];
-}

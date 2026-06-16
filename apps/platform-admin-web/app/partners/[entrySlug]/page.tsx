@@ -1675,33 +1675,29 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: locale === "en" ? "Contract ID" : "契約 ID",
+        k: t("partnerDetail.eligibility.contractId"),
         v: contract?.contractId ?? "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Adapter" : "Adapter",
+        k: t("partnerDetail.eligibility.adapter"),
         v: contract
           ? `${contract.adapterCode} · ${contract.adapterVersion}`
           : "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Adapter posture" : "Adapter posture",
+        k: t("partnerDetail.eligibility.adapterPosture"),
         v: contract?.adapterKind ?? "—",
       },
       {
-        k: locale === "en" ? "Fallback" : "Fallback",
+        k: t("partnerDetail.eligibility.fallback"),
         v: contract?.manualFallbackPolicy?.requiredOnTimeout
-          ? locale === "en"
-            ? "Ops queue required"
-            : "需進 ops queue"
-          : locale === "en"
-            ? "No timeout fallback"
-            : "無 timeout fallback",
+          ? t("partnerDetail.eligibility.opsQueueRequired")
+          : t("partnerDetail.eligibility.noTimeoutFallback"),
       },
     ];
-  }, [entry, locale]);
+  }, [entry, t]);
 
   const auditItems = useMemo(() => {
     if (!entry) {
@@ -1710,43 +1706,43 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: locale === "en" ? "Audit source" : "Audit 來源",
+        k: t("partnerDetail.audit.source"),
         v: entry.auditMetadata.source ?? "—",
       },
       {
-        k: locale === "en" ? "Request ID" : "Request ID",
+        k: t("partnerDetail.audit.requestId"),
         v: entry.auditMetadata.requestId ?? "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Created by" : "建立者",
+        k: t("partnerDetail.audit.createdBy"),
         v: entry.auditMetadata.createdBy ?? "—",
       },
       {
-        k: locale === "en" ? "Created at" : "建立時間",
+        k: t("partnerDetail.audit.createdAt"),
         v: formatDateTime(entry.createdAt),
         mono: true,
       },
       {
-        k: locale === "en" ? "Updated by" : "更新者",
+        k: t("partnerDetail.audit.updatedBy"),
         v: entry.auditMetadata.updatedBy ?? "—",
       },
       {
-        k: locale === "en" ? "Updated at" : "更新時間",
+        k: t("partnerDetail.audit.updatedAt"),
         v: formatDateTime(entry.updatedAt),
         mono: true,
       },
       {
-        k: locale === "en" ? "Revoked at" : "撤銷時間",
+        k: t("partnerDetail.audit.revokedAt"),
         v: entry.revokedAt ? formatDateTime(entry.revokedAt) : "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Revoke reason" : "撤銷原因",
+        k: t("partnerDetail.audit.revokeReason"),
         v: entry.revokeReason ?? "—",
       },
     ];
-  }, [entry, locale]);
+  }, [entry, t]);
 
   const credentialRows = useMemo<CredentialRow[]>(
     () =>
@@ -1974,12 +1970,8 @@ export default function PartnerDetailPage() {
         }}
       >
         {entry.activeFlag
-          ? locale === "en"
-            ? "Deactivate"
-            : "停用 entry"
-          : locale === "en"
-            ? "Activate"
-            : "啟用 entry"}
+          ? t("partnerDetail.action.deactivateEntry")
+          : t("partnerDetail.action.activateEntry")}
       </Btn>
       <Btn
         theme={theme}
@@ -2010,7 +2002,7 @@ export default function PartnerDetailPage() {
           setGovernanceReason("");
         }}
       >
-        {locale === "en" ? "Revoke entry" : "撤銷 entry"}
+        {t("partnerDetail.action.revokeEntry")}
       </Btn>
     </>
   );
@@ -2052,9 +2044,7 @@ export default function PartnerDetailPage() {
           <Banner
             theme={theme}
             tone="info"
-            title={
-              locale === "en" ? "Preview fixture mode" : "Preview fixture 模式"
-            }
+            title={t("partnerDetail.previewFixtureMode")}
             body={previewNotice}
           />
         ) : null}
@@ -2221,12 +2211,8 @@ export default function PartnerDetailPage() {
 
               <Card
                 theme={theme}
-                title={locale === "en" ? "Governance actions" : "治理動作"}
-                subtitle={
-                  locale === "en"
-                    ? "State transitions and high-risk lifecycle controls."
-                    : "集中執行狀態切換與高風險 lifecycle 控制。"
-                }
+                title={t("partnerDetail.governance.title")}
+                subtitle={t("partnerDetail.governance.subtitle")}
               >
                 <div style={{ display: "grid", gap: 12 }}>
                   <DL
@@ -2234,18 +2220,14 @@ export default function PartnerDetailPage() {
                     cols={1}
                     items={[
                       {
-                        k: locale === "en" ? "Status" : "狀態",
+                        k: t("partnerDetail.governance.status"),
                         v: formatPlatformCodeLabel(locale, entry.status),
                       },
                       {
-                        k: locale === "en" ? "Traffic posture" : "流量姿態",
+                        k: t("partnerDetail.governance.trafficPosture"),
                         v: entry.activeFlag
-                          ? locale === "en"
-                            ? "Entry can accept governed traffic"
-                            : "可承接平台治理流量"
-                          : locale === "en"
-                            ? "Entry remains blocked"
-                            : "仍維持封鎖",
+                          ? t("partnerDetail.governance.trafficAccept")
+                          : t("partnerDetail.governance.trafficBlocked"),
                       },
                     ]}
                   />
@@ -2262,12 +2244,8 @@ export default function PartnerDetailPage() {
                       }}
                     >
                       {entry.activeFlag
-                        ? locale === "en"
-                          ? "Deactivate"
-                          : "停用"
-                        : locale === "en"
-                          ? "Activate"
-                          : "啟用"}
+                        ? t("partnerDetail.governance.deactivate")
+                        : t("partnerDetail.governance.activate")}
                     </Btn>
                     <Btn
                       theme={theme}
@@ -2279,7 +2257,7 @@ export default function PartnerDetailPage() {
                         setGovernanceReason("");
                       }}
                     >
-                      {locale === "en" ? "Revoke entry" : "撤銷 entry"}
+                      {t("partnerDetail.action.revokeEntry")}
                     </Btn>
                   </div>
                 </div>
@@ -2381,22 +2359,14 @@ export default function PartnerDetailPage() {
                 />
                 <Card
                   theme={theme}
-                  title={
-                    locale === "en" ? "Webhook linkage" : "Webhook linkage"
-                  }
-                  subtitle={
-                    locale === "en"
-                      ? "Operational delivery remains masked here; only the governance binding is shown."
-                      : "此處只顯示治理綁定，不展開 operational delivery 細節。"
-                  }
+                  title={t("partnerDetail.auth.webhookLinkage")}
+                  subtitle={t("partnerDetail.auth.webhookSubtitle")}
                 >
                   <div style={linkCardStyle}>
                     <div style={linkRowStyle}>
                       <div>
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                          {locale === "en"
-                            ? "Request lineage"
-                            : "Request lineage"}
+                          {t("partnerDetail.auth.requestLineage")}
                         </div>
                         <div style={monoValueStyle}>
                           {entry.auditMetadata.requestId ?? "—"}
@@ -2407,25 +2377,21 @@ export default function PartnerDetailPage() {
                         tone={entry.auditMetadata.source ? "success" : "warn"}
                       >
                         {entry.auditMetadata.source
-                          ? locale === "en"
-                            ? "bound"
-                            : "已綁定"
-                          : locale === "en"
-                            ? "gap"
-                            : "缺口"}
+                          ? t("partnerDetail.auth.bound")
+                          : t("partnerDetail.auth.gap")}
                       </Pill>
                     </div>
                     <div style={linkRowStyle}>
                       <div>
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                          {locale === "en" ? "Audit source" : "Audit 來源"}
+                          {t("partnerDetail.audit.source")}
                         </div>
                         <div style={monoValueStyle}>
                           {entry.auditMetadata.source ?? "—"}
                         </div>
                       </div>
                       <Pill theme={theme} tone="info">
-                        {locale === "en" ? "platform-owned" : "平台治理"}
+                        {t("partnerDetail.auth.platformOwned")}
                       </Pill>
                     </div>
                   </div>
@@ -2526,13 +2492,9 @@ export default function PartnerDetailPage() {
                   title={copy.eligibilityBannerTitle}
                   body={
                     entry.eligibilityMode === "none"
-                      ? locale === "en"
-                        ? "No partner-side eligibility verification is required before fulfillment."
-                        : "此流程在 fulfill 前不要求 partner-side eligibility verification。"
+                      ? t("partnerDetail.eligibility.noVerification")
                       : entry.eligibilityContract?.contractId
-                        ? locale === "en"
-                          ? "Eligibility remains platform-governed and is backed by the linked contract snapshot."
-                          : "Eligibility 仍由平台治理，且已有對應 contract snapshot。"
+                        ? t("partnerDetail.eligibility.platformGoverned")
                         : copy.contractEmpty
                   }
                 />
@@ -2567,18 +2529,14 @@ export default function PartnerDetailPage() {
             </Card>
             <Card
               theme={theme}
-              title={locale === "en" ? "Adapter linkage" : "Adapter linkage"}
-              subtitle={
-                locale === "en"
-                  ? "Cross-link the contract snapshot to the platform adapter registry."
-                  : "將 contract snapshot 與平台 adapter registry 對照。"
-              }
+              title={t("partnerDetail.adapter.linkage")}
+              subtitle={t("partnerDetail.adapter.subtitle")}
             >
               <div style={linkCardStyle}>
                 <div style={linkRowStyle}>
                   <div>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                      {locale === "en" ? "Linked adapter" : "Linked adapter"}
+                      {t("partnerDetail.adapter.linkedAdapter")}
                     </div>
                     <div style={monoValueStyle}>
                       {entry.eligibilityContract
@@ -2600,17 +2558,13 @@ export default function PartnerDetailPage() {
                 <div style={linkRowStyle}>
                   <div>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                      {locale === "en" ? "Manual fallback" : "Manual fallback"}
+                      {t("partnerDetail.adapter.manualFallback")}
                     </div>
                     <div style={monoValueStyle}>
                       {entry.eligibilityContract?.manualFallbackPolicy
                         ?.requiredOnTimeout
-                        ? locale === "en"
-                          ? "ops_console required on timeout"
-                          : "timeout 時需進 ops_console"
-                        : locale === "en"
-                          ? "no timeout fallback"
-                          : "無 timeout fallback"}
+                        ? t("partnerDetail.adapter.opsConsoleRequired")
+                        : t("partnerDetail.adapter.noTimeoutFallback")}
                     </div>
                   </div>
                   <Pill
@@ -2620,12 +2574,8 @@ export default function PartnerDetailPage() {
                     }
                   >
                     {entry.eligibilityContract?.contractId
-                      ? locale === "en"
-                        ? "snapshot linked"
-                        : "snapshot 已綁定"
-                      : locale === "en"
-                        ? "missing snapshot"
-                        : "缺少 snapshot"}
+                      ? t("partnerDetail.adapter.snapshotLinked")
+                      : t("partnerDetail.adapter.snapshotMissing")}
                   </Pill>
                 </div>
               </div>
@@ -2716,12 +2666,10 @@ export default function PartnerDetailPage() {
                   <Banner
                     theme={theme}
                     tone="danger"
-                    title={locale === "en" ? "Entry revoked" : "Entry 已撤銷"}
+                    title={t("partnerDetail.audit.entryRevoked")}
                     body={
                       entry.revokeReason ??
-                      (locale === "en"
-                        ? "Traffic should remain blocked for this entry."
-                        : "此 entry 應持續維持流量封鎖。")
+                      t("partnerDetail.audit.entryRevokedBody")
                     }
                   />
                 ) : null}

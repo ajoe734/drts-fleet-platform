@@ -8,6 +8,8 @@ import type {
   TenantUserRoleRecord,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { CostCentersManager } from "./cost-centers-manager";
 
 export const dynamic = "force-dynamic";
@@ -45,8 +47,8 @@ function toArray<T>(value: unknown): T[] {
   return [];
 }
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
+function toErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function parseEmptyReason(
@@ -61,6 +63,9 @@ function parseEmptyReason(
 
 async function loadCostCentersData(): Promise<CostCentersPageData> {
   const client = getTenantClient();
+  const locale = await getServerLocale();
+  const translate = (key: string, params?: Record<string, string | number>) =>
+    t(key, locale, params);
   const errors: string[] = [];
   const [
     costCentersResult,
@@ -100,19 +105,54 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
       : [];
 
   if (costCentersResult.status === "rejected") {
-    errors.push(`成本中心目錄: ${toErrorMessage(costCentersResult.reason)}`);
+    errors.push(
+      translate("costCenters.error.costCenterDirectory", {
+        message: toErrorMessage(
+          costCentersResult.reason,
+          translate("costCenters.error.unknown"),
+        ),
+      }),
+    );
   }
   if (approvalRulesResult.status === "rejected") {
-    errors.push(`審批規則: ${toErrorMessage(approvalRulesResult.reason)}`);
+    errors.push(
+      translate("costCenters.error.approvalRules", {
+        message: toErrorMessage(
+          approvalRulesResult.reason,
+          translate("costCenters.error.unknown"),
+        ),
+      }),
+    );
   }
   if (usersResult.status === "rejected") {
-    errors.push(`租戶成員: ${toErrorMessage(usersResult.reason)}`);
+    errors.push(
+      translate("costCenters.error.tenantUsers", {
+        message: toErrorMessage(
+          usersResult.reason,
+          translate("costCenters.error.unknown"),
+        ),
+      }),
+    );
   }
   if (coverageResult.status === "rejected") {
-    errors.push(`coverage report: ${toErrorMessage(coverageResult.reason)}`);
+    errors.push(
+      translate("costCenters.error.coverageReport", {
+        message: toErrorMessage(
+          coverageResult.reason,
+          translate("costCenters.error.unknown"),
+        ),
+      }),
+    );
   }
   if (reportJobsResult.status === "rejected") {
-    errors.push(`報表作業: ${toErrorMessage(reportJobsResult.reason)}`);
+    errors.push(
+      translate("costCenters.error.reportJobs", {
+        message: toErrorMessage(
+          reportJobsResult.reason,
+          translate("costCenters.error.unknown"),
+        ),
+      }),
+    );
   }
 
   const quotaSummariesByCode: Partial<
@@ -132,7 +172,15 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
       if (result.status === "fulfilled") {
         quotaSummariesByCode[code] = result.value;
       } else {
-        errors.push(`${code} quota: ${toErrorMessage(result.reason)}`);
+        errors.push(
+          translate("costCenters.error.quota", {
+            code,
+            message: toErrorMessage(
+              result.reason,
+              translate("costCenters.error.unknown"),
+            ),
+          }),
+        );
       }
     });
   }

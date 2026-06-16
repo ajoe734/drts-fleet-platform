@@ -126,7 +126,10 @@ function getHeroLabel(period: PeriodKey, latestStatementMonth: string | null) {
     : "淨收入 · 本月";
 }
 
-function getHeroContext(period: PeriodKey, latestStatementMonth: string | null) {
+function getHeroContext(
+  period: PeriodKey,
+  latestStatementMonth: string | null,
+) {
   if (period === "month") {
     return latestStatementMonth ? `月結 ${latestStatementMonth}` : "本月月結";
   }
@@ -379,7 +382,8 @@ function StatementRow({
             { color: THEME.textMuted, fontFamily: THEME.fontFamily },
           ]}
         >
-          {statement.lines.length} 趟 · {formatDriverPayoutStatusLabel(statement.payoutStatus)}
+          {statement.lines.length} 趟 ·{" "}
+          {formatDriverPayoutStatusLabel(statement.payoutStatus)}
         </Text>
       </View>
 
@@ -425,7 +429,13 @@ export default function EarningsScreen() {
       ] = [
         client.getPlatformEarningsSummary(),
         client.getPlatformEarningsByPlatform(period),
-        client.listDriverStatements(),
+        // Driver statements come from a back-office route that is not exposed to
+        // the driver realm. Treat them as best-effort so a realm/permission
+        // rejection cannot blank the whole earnings dashboard - the
+        // platform-earnings summary and by-platform breakdown still render.
+        client
+          .listDriverStatements()
+          .catch(() => [] as DriverStatementRecord[]),
       ];
       const [summaryResponse, byPlatformResponse, statementRows] =
         await Promise.all(requests);
@@ -538,9 +548,7 @@ export default function EarningsScreen() {
           tone="info"
           title="收益儀表板暫停提供"
           body="此功能目前未啟用，請稍後再試或改從設定頁確認帳務通知。"
-          icon={
-            <Ionicons name="wallet-outline" size={16} color={THEME.info} />
-          }
+          icon={<Ionicons name="wallet-outline" size={16} color={THEME.info} />}
         />
       </Shell>
     );
@@ -601,9 +609,7 @@ export default function EarningsScreen() {
               theme={THEME}
               variant="secondary"
               size="sm"
-              icon={
-                <Ionicons name="refresh" size={13} color={THEME.text} />
-              }
+              icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
               onPress={() => void onRefresh()}
             >
               {driverStrings.common.retry}
@@ -615,9 +621,7 @@ export default function EarningsScreen() {
           tone="danger"
           title="收益資料同步失敗"
           body={error}
-          icon={
-            <Ionicons name="alert-circle" size={16} color={THEME.danger} />
-          }
+          icon={<Ionicons name="alert-circle" size={16} color={THEME.danger} />}
         />
       </Shell>
     );
@@ -634,9 +638,7 @@ export default function EarningsScreen() {
             theme={THEME}
             variant="ghost"
             size="xs"
-            icon={
-              <Ionicons name="refresh" size={13} color={THEME.textMuted} />
-            }
+            icon={<Ionicons name="refresh" size={13} color={THEME.textMuted} />}
             onPress={() => void onRefresh()}
             disabled={refreshing}
           >
@@ -651,7 +653,9 @@ export default function EarningsScreen() {
           tone="warn"
           title="資料可能不是最新"
           body={error}
-          icon={<Ionicons name="warning-outline" size={16} color={THEME.warn} />}
+          icon={
+            <Ionicons name="warning-outline" size={16} color={THEME.warn} />
+          }
         />
       ) : null}
 
@@ -714,7 +718,8 @@ export default function EarningsScreen() {
             style={[
               styles.heroContext,
               {
-                color: selectedPeriod === "month" ? THEME.accentHi : THEME.success,
+                color:
+                  selectedPeriod === "month" ? THEME.accentHi : THEME.success,
                 fontFamily: THEME.fontFamily,
               },
             ]}
@@ -852,9 +857,7 @@ export default function EarningsScreen() {
             tone="info"
             title="這段期間還沒有平台收益"
             body="切換到其他期間，或稍後再查看最新對帳彙整。"
-            icon={
-              <Ionicons name="cash-outline" size={16} color={THEME.info} />
-            }
+            icon={<Ionicons name="cash-outline" size={16} color={THEME.info} />}
           />
         )}
       </Card>

@@ -249,7 +249,7 @@ export default async function UsersPage({
                     <td>
                       <div className="row-actions">
                         <button
-                          className="table-action-button"
+                          className="table-action-button is-primary"
                           disabled={disableRoleChange}
                           type="button"
                         >
@@ -258,13 +258,19 @@ export default async function UsersPage({
                             : t("users.action.locked", locale)}
                         </button>
                         <button
-                          className="table-action-button"
+                          className="table-action-button is-danger"
                           disabled={disableLifecycleAction}
                           type="button"
                         >
                           {canManageUsers
                             ? getActionLabel(user.status, locale)
                             : t("users.action.locked", locale)}
+                          {canManageUsers && !disableLifecycleAction ? (
+                            <span
+                              aria-hidden="true"
+                              className="needs-reason-dot"
+                            />
+                          ) : null}
                         </button>
                       </div>
                     </td>

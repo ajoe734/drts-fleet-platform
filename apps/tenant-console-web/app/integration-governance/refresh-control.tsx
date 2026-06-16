@@ -3,6 +3,7 @@
 import { useEffect, useEffectEvent, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CanvasBtn, CanvasPill, buildCanvasTheme } from "@drts/ui-web";
+import { type Locale, t } from "@/lib/translations";
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -12,28 +13,28 @@ const th = buildCanvasTheme({
 
 const REFRESH_INTERVAL_MS = 30_000;
 
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
-function formatSnapshot(value: string | null) {
+function formatSnapshot(value: string | null, locale: Locale) {
   if (!value) {
-    return "尚未取得快照";
+    return t("integrationGovernance.refreshControl.snapshotPending", locale);
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return "尚未取得快照";
+    return t("integrationGovernance.refreshControl.snapshotPending", locale);
   }
 
-  return dateTimeFormatter.format(parsed);
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-Hant" : "en-US", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(parsed);
 }
 
 export function IntegrationGovernanceRefreshControl({
   computedAt,
+  locale,
 }: {
   computedAt: string | null;
+  locale: Locale;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -65,10 +66,12 @@ export function IntegrationGovernanceRefreshControl({
       }}
     >
       <CanvasPill theme={th} tone="info" dot>
-        T5 slow · 30s
+        {t("integrationGovernance.refreshControl.cadence", locale)}
       </CanvasPill>
       <CanvasPill theme={th} tone="neutral">
-        快照 {formatSnapshot(computedAt)}
+        {t("integrationGovernance.refreshControl.snapshot", locale, {
+          value: formatSnapshot(computedAt, locale),
+        })}
       </CanvasPill>
       <CanvasBtn
         theme={th}
@@ -78,7 +81,9 @@ export function IntegrationGovernanceRefreshControl({
         onClick={refreshPage}
         disabled={isPending}
       >
-        {isPending ? "更新中…" : "立即刷新"}
+        {isPending
+          ? t("integrationGovernance.refreshControl.refreshing", locale)
+          : t("integrationGovernance.refreshControl.refresh", locale)}
       </CanvasBtn>
     </div>
   );

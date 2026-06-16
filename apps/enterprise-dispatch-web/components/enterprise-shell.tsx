@@ -2,29 +2,22 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { CSSProperties, ReactNode } from "react";
-import { CanvasIcon, CanvasWindowChrome } from "@drts/ui-web";
-import { enterpriseTheme } from "@/lib/enterprise-theme";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { EAvatar, EIcon } from "@/components/ent-kit";
+import {
+  enterpriseQuotaSummary,
+  enterpriseTenant,
+  getEnterpriseUser,
+} from "@/lib/enterprise-fixtures";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
+import { useTranslation } from "@/lib/i18n";
+import type { TranslationKey } from "@/lib/translations";
 
-const tenantIdentity = {
-  mark: "鴻",
-  name: "鴻碩科技",
-  subtitle: "企業派車",
-  operator: "智慧運輸科技 DRTS",
-};
-
-const navItems = [
-  { key: "home", href: "/", label: "首頁" },
-  { key: "bookings", href: "/bookings", label: "我的預約" },
-  { key: "trip", href: "/trip", label: "行程" },
-  { key: "help", href: "/help", label: "說明" },
-] as const;
-
-export interface EnterpriseShellProps {
-  children: ReactNode;
-}
+const TENANT_MARK = "鴻";
 
 function isActive(pathname: string, href: string) {
+  if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -32,92 +25,188 @@ function topLinkStyle(active: boolean): CSSProperties {
   return {
     display: "inline-flex",
     alignItems: "center",
-    padding: "8px 14px",
-    borderRadius: 10,
+    padding: "7px 13px",
+    borderRadius: 9,
     fontSize: 13.5,
     fontWeight: active ? 700 : 500,
-    color: active ? enterpriseTheme.accent : enterpriseTheme.text,
-    background: active ? enterpriseTheme.accentBg : "transparent",
+    color: active ? t.primary : t.ink2,
+    background: active ? t.primaryBg : "transparent",
     textDecoration: "none",
   };
 }
 
-function iconButtonStyle(): CSSProperties {
-  return {
-    width: 30,
-    height: 30,
-    borderRadius: 999,
-    border: `1px solid ${enterpriseTheme.border}`,
-    background: enterpriseTheme.surface,
-    color: enterpriseTheme.textMuted,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 0,
-  };
+// ── workspace top nav (S1) ───────────────────────────────────────────────────
+
+type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+
+type EnterpriseTr = (
+  key: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
+
+function normalizeHealthStatus(
+  value: unknown,
+  responseOk: boolean,
+): ApiHealthStatus {
+  if (!responseOk) {
+    return "degraded";
+  }
+
+  const normalized = String(value ?? "healthy").toLowerCase();
+  if (normalized === "down" || normalized === "unhealthy") {
+    return "down";
+  }
+  if (normalized === "degraded" || normalized === "warning") {
+    return "degraded";
+  }
+  return "healthy";
 }
 
-function UserChip() {
+function useApiHealth() {
+  const [status, setStatus] = useState<ApiHealthStatus>("checking");
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const apiBaseUrl = getRuntimeApiBaseUrl().replace(/\/$/, "");
+
+    async function checkHealth() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/health`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const body = await response.json().catch(() => null);
+        setStatus(normalizeHealthStatus(body?.status, response.ok));
+      } catch {
+        if (!controller.signal.aborted) {
+          setStatus("down");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLastCheckedAt(new Date());
+        }
+      }
+    }
+
+    checkHealth();
+
+    return () => controller.abort();
+  }, []);
+
+  return { status, lastCheckedAt };
+}
+
+function formatCheckedAt(date: Date | null, locale: "en" | "zh") {
+  if (!date) {
+    return null;
+  }
+
+  return date.toLocaleTimeString(locale === "zh" ? "zh-TW" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function EnterpriseShellControls({
+  locale,
+  setLocale,
+  tr,
+}: {
+  locale: "en" | "zh";
+  setLocale: (locale: "en" | "zh") => void;
+  tr: EnterpriseTr;
+}) {
+  const { status, lastCheckedAt } = useApiHealth();
+  const statusCopy = {
+    checking: {
+      label: tr("shell.health.checking"),
+      fg: t.muted,
+      bg: t.surface,
+      border: t.line,
+    },
+    healthy: {
+      label: tr("shell.health.healthy"),
+      fg: t.success,
+      bg: "rgba(20,184,166,.12)",
+      border: "rgba(20,184,166,.28)",
+    },
+    degraded: {
+      label: tr("shell.health.degraded"),
+      fg: t.warn,
+      bg: "rgba(245,158,11,.12)",
+      border: "rgba(245,158,11,.32)",
+    },
+    down: {
+      label: tr("shell.health.down"),
+      fg: t.danger,
+      bg: "rgba(239,68,68,.12)",
+      border: "rgba(239,68,68,.32)",
+    },
+  } satisfies Record<
+    ApiHealthStatus,
+    { label: string; fg: string; bg: string; border: string }
+  >;
+  const current = statusCopy[status];
+  const checkedAt = formatCheckedAt(lastCheckedAt, locale);
+
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
-      <span
+    <div style={controlGroupStyle}>
+      <div
+        aria-label={current.label}
+        title={`${current.label}${
+          checkedAt ? ` · ${tr("shell.health.lastChecked")} ${checkedAt}` : ""
+        }`}
         style={{
-          width: 30,
-          height: 30,
-          borderRadius: 999,
-          background: enterpriseTheme.accentBg,
-          border: `1px solid ${enterpriseTheme.accentBorder}`,
-          color: enterpriseTheme.accent,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 11,
-          fontWeight: 700,
+          ...healthPillStyle,
+          color: current.fg,
+          background: current.bg,
+          borderColor: current.border,
         }}
       >
-        林
-      </span>
-      <span style={{ lineHeight: 1.15 }}>
-        <span
-          style={{
-            display: "block",
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: enterpriseTheme.text,
-          }}
-        >
-          林宜君
+        <span style={{ ...healthDotStyle, background: current.fg }} />
+        <span>{current.label}</span>
+      </div>
+      <button
+        type="button"
+        title={tr("shell.language.switch")}
+        aria-label={tr("shell.language.switch")}
+        style={languageButtonStyle}
+        onClick={() => setLocale(locale === "en" ? "zh" : "en")}
+      >
+        <span aria-hidden="true">{tr("shell.language.icon")}</span>
+        <span>
+          {locale === "en" ? tr("shell.language.zh") : tr("shell.language.en")}
         </span>
-        <span
-          style={{
-            display: "block",
-            fontSize: 10.5,
-            color: enterpriseTheme.textMuted,
-          }}
-        >
-          行政祕書
-        </span>
-      </span>
+      </button>
     </div>
   );
 }
 
-export function EnterpriseShell({ children }: EnterpriseShellProps) {
-  const pathname = usePathname();
+export function EnterpriseShell({ children }: { children: ReactNode }) {
+  const { t: tr, locale, setLocale } = useTranslation();
+  const pathname = usePathname() ?? "/";
+  const tenant = enterpriseTenant;
+  const user = getEnterpriseUser(locale);
+  const quota = enterpriseQuotaSummary;
+
+  const navItems = [
+    { key: "home", href: "/", label: tr("shell.nav.home") },
+    { key: "bookings", href: "/bookings", label: tr("shell.nav.bookings") },
+    { key: "trip", href: "/trip", label: tr("shell.nav.trip") },
+    { key: "help", href: "/help", label: tr("shell.nav.help") },
+  ];
 
   return (
     <div
       style={{
-        minHeight: "100vh",
-        background: enterpriseTheme.bg,
-        color: enterpriseTheme.text,
-        fontFamily: enterpriseTheme.fontFamily,
+        minHeight: "100dvh",
+        display: "flex",
+        flexDirection: "column",
+        background: t.bg,
+        color: t.ink,
+        fontFamily: t.sans,
       }}
     >
       <header
@@ -125,8 +214,9 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
           position: "sticky",
           top: 0,
           zIndex: 20,
-          borderBottom: `1px solid ${enterpriseTheme.border}`,
-          background: enterpriseTheme.surface,
+          flexShrink: 0,
+          borderBottom: `1px solid ${t.line}`,
+          background: t.dark ? "rgba(14,19,32,.86)" : "rgba(255,255,255,.86)",
           backdropFilter: "blur(12px)",
         }}
       >
@@ -134,11 +224,11 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
           style={{
             maxWidth: 1180,
             margin: "0 auto",
-            padding: "0 24px",
+            padding: "0 26px",
             minHeight: 60,
             display: "flex",
             alignItems: "center",
-            gap: 24,
+            gap: 26,
             flexWrap: "wrap",
           }}
         >
@@ -149,9 +239,9 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
               style={{
                 width: 34,
                 height: 34,
-                borderRadius: 10,
-                background: `linear-gradient(150deg, ${enterpriseTheme.accent}, ${enterpriseTheme.info})`,
-                color: enterpriseTheme.surface,
+                borderRadius: 9,
+                background: `linear-gradient(150deg, ${t.primary}, ${t.primaryHi})`,
+                color: "#fff",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -159,26 +249,18 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
                 fontWeight: 800,
               }}
             >
-              {tenantIdentity.mark}
+              {TENANT_MARK}
             </span>
             <span style={{ lineHeight: 1.15 }}>
               <span
-                style={{
-                  display: "block",
-                  fontSize: 14.5,
-                  fontWeight: 700,
-                }}
+                style={{ display: "block", fontSize: 14.5, fontWeight: 700 }}
               >
-                {tenantIdentity.name}
+                {tenant.name}
               </span>
               <span
-                style={{
-                  display: "block",
-                  fontSize: 10.5,
-                  color: enterpriseTheme.textMuted,
-                }}
+                style={{ display: "block", fontSize: 10.5, color: t.muted }}
               >
-                {tenantIdentity.subtitle}
+                {tr("shell.tenantSubtitle")}
               </span>
             </span>
           </div>
@@ -203,6 +285,11 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
               gap: 12,
             }}
           >
+            <EnterpriseShellControls
+              locale={locale}
+              setLocale={setLocale}
+              tr={tr}
+            />
             <span
               style={{
                 display: "inline-flex",
@@ -210,192 +297,365 @@ export function EnterpriseShell({ children }: EnterpriseShellProps) {
                 gap: 7,
                 padding: "6px 12px",
                 borderRadius: 999,
-                border: `1px solid ${enterpriseTheme.border}`,
-                background: enterpriseTheme.surface,
+                border: `1px solid ${t.line}`,
+                background: t.surface,
                 fontSize: 12,
-                color: enterpriseTheme.text,
+                color: t.ink2,
               }}
             >
-              <CanvasIcon
-                name="clock"
-                size={13}
-                style={{ color: enterpriseTheme.accent }}
-              />
-              本月額度
-              <strong style={{ fontFamily: enterpriseTheme.monoFamily }}>
-                NT$ 31,000
-              </strong>
+              <EIcon name="bolt" size={13} style={{ color: t.primary }} />
+              {tr("shell.quota")}
+              <strong style={{ fontFamily: t.mono }}>{quota.rides}</strong>
             </span>
-            <button type="button" style={iconButtonStyle()} title="支援通知">
-              <CanvasIcon name="bell" size={14} />
-            </button>
-            <UserChip />
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
+              <EAvatar t={t} name={user.name} size={30} />
+              <span style={{ lineHeight: 1.15 }}>
+                <span
+                  style={{ display: "block", fontSize: 12.5, fontWeight: 600 }}
+                >
+                  {user.name}
+                </span>
+                <span
+                  style={{ display: "block", fontSize: 10.5, color: t.muted }}
+                >
+                  {user.role}
+                </span>
+              </span>
+            </span>
           </div>
         </div>
       </header>
 
-      <main>{children}</main>
+      <main
+        style={{
+          flex: 1,
+          width: "100%",
+          maxWidth: 1180,
+          margin: "0 auto",
+          padding: "26px",
+          boxSizing: "border-box",
+        }}
+      >
+        {children}
+      </main>
 
       <footer
         style={{
+          width: "100%",
           maxWidth: 1180,
           margin: "0 auto",
-          padding: "8px 24px 36px",
+          padding: "8px 26px 40px",
           display: "flex",
           justifyContent: "space-between",
           gap: 16,
           flexWrap: "wrap",
           fontSize: 11,
-          color: enterpriseTheme.textDim,
+          color: t.faint,
+          boxSizing: "border-box",
         }}
       >
-        <span>© 2026 {tenantIdentity.name} · 企業派車前台</span>
-        <span>接送服務由 {tenantIdentity.operator} 營運</span>
+        <span>
+          © 2026 {tenant.name} · {tr("shell.footer.product")}
+        </span>
+        <span>
+          {tr("shell.footer.operatedBy", { operator: tr("shell.operator") })}
+        </span>
       </footer>
     </div>
   );
 }
 
+const controlGroupStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+  minWidth: 0,
+};
+
+const healthPillStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  border: "1px solid",
+  borderRadius: 999,
+  padding: "6px 10px",
+  fontSize: 11,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+
+const healthDotStyle: CSSProperties = {
+  width: 6,
+  height: 6,
+  borderRadius: 999,
+  flexShrink: 0,
+};
+
+const languageButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  border: `1px solid ${t.line}`,
+  borderRadius: 999,
+  background: t.surface,
+  color: t.ink,
+  padding: "6px 10px",
+  fontSize: 11,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+// page header inside a web shell
+export function EntPageHead({
+  title,
+  sub,
+  back,
+  actions,
+  meta,
+}: {
+  title: ReactNode;
+  sub?: ReactNode;
+  back?: ReactNode;
+  actions?: ReactNode;
+  meta?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 16,
+        marginBottom: 20,
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        {back && (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 12,
+              color: t.muted,
+              marginBottom: 8,
+            }}
+          >
+            <EIcon
+              name="chevR"
+              size={13}
+              style={{ transform: "rotate(180deg)" }}
+            />
+            {back}
+          </div>
+        )}
+        <h1
+          style={{
+            fontSize: 25,
+            fontWeight: 800,
+            letterSpacing: -0.5,
+            margin: 0,
+            color: t.ink,
+          }}
+        >
+          {title}
+        </h1>
+        {sub && (
+          <p
+            style={{
+              fontSize: 14,
+              color: t.muted,
+              margin: "6px 0 0",
+              lineHeight: 1.5,
+            }}
+          >
+            {sub}
+          </p>
+        )}
+        {meta && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginTop: 12,
+            }}
+          >
+            {meta}
+          </div>
+        )}
+      </div>
+      {actions && (
+        <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>{actions}</div>
+      )}
+    </div>
+  );
+}
+
+// ── compact embed shell (S2) — fills the host webview viewport ────────────────
 export function EnterpriseEmbedShell({
   children,
   host = "hongshuo-workspace",
   state = "live",
+  footer,
 }: {
   children: ReactNode;
   host?: string;
   state?: "live" | "warn" | "err" | "neutral";
+  footer?: ReactNode;
 }) {
-  const statusColor =
+  const { t: tr } = useTranslation();
+  const tenant = enterpriseTenant;
+  const dotC =
     state === "live"
-      ? enterpriseTheme.success
+      ? t.success
       : state === "warn"
-        ? enterpriseTheme.warn
+        ? t.warn
         : state === "err"
-          ? enterpriseTheme.danger
-          : enterpriseTheme.textMuted;
+          ? t.danger
+          : t.faint;
 
   return (
-    <CanvasWindowChrome
-      width="100%"
-      height={720}
-      outerPadding={20}
-      style={{ background: enterpriseTheme.bg }}
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        background: t.bg,
+        color: t.ink,
+        fontFamily: t.sans,
+      }}
     >
+      {/* host app status bar */}
       <div
         style={{
-          width: "100%",
-          height: "100%",
+          height: 44,
+          flexShrink: 0,
+          background: t.dark ? "#0B0F1A" : t.primaryHi,
+          color: "#fff",
           display: "flex",
-          flexDirection: "column",
-          background: enterpriseTheme.bg,
-          color: enterpriseTheme.text,
-          fontFamily: enterpriseTheme.fontFamily,
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          padding: "0 22px 6px",
+          fontSize: 12.5,
+          fontWeight: 600,
         }}
       >
-        <div
+        <span>9:41</span>
+        <span
           style={{
-            height: 44,
-            background: enterpriseTheme.info,
-            color: enterpriseTheme.surface,
-            padding: "0 20px 6px",
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            fontSize: 12.5,
-            fontWeight: 600,
-          }}
-        >
-          <span>9:41</span>
-          <span
-            style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
-          >
-            <CanvasIcon name="clock" size={12} />
-            <CanvasIcon name="health" size={12} />
-          </span>
-        </div>
-
-        <div
-          style={{
-            background: enterpriseTheme.info,
-            color: enterpriseTheme.surface,
-            padding: "4px 12px 12px",
-            display: "flex",
+            display: "inline-flex",
+            gap: 5,
             alignItems: "center",
-            gap: 10,
+            opacity: 0.9,
           }}
         >
-          <button
-            type="button"
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 999,
-              background: enterpriseTheme.accentBg,
-              border: "none",
-              color: enterpriseTheme.surface,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-            }}
-          >
-            <CanvasIcon
-              name="chevR"
-              size={16}
-              style={{ transform: "rotate(180deg)" }}
-            />
-          </button>
-          <div style={{ flex: 1, lineHeight: 1.2 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700 }}>企業派車</div>
-            <div style={{ fontSize: 10, opacity: 0.74 }}>
-              {tenantIdentity.name} · 企業 App
-            </div>
-          </div>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 9.5,
-              fontFamily: enterpriseTheme.monoFamily,
-              background: enterpriseTheme.accentBg,
-              padding: "4px 8px",
-              borderRadius: 999,
-            }}
-          >
-            <CanvasIcon name="health" size={10} />
-            {host}
-          </span>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "6px 14px",
-            background: enterpriseTheme.surface,
-            borderBottom: `1px solid ${enterpriseTheme.border}`,
-            fontSize: 10.5,
-            color: enterpriseTheme.textMuted,
-          }}
-        >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 999,
-              background: statusColor,
-            }}
-          />
-          <span style={{ fontFamily: enterpriseTheme.monoFamily }}>
-            webview
-          </span>
-          <span>· embedded in {tenantIdentity.name} app</span>
-        </div>
-
-        <div style={{ flex: 1, overflow: "auto" }}>{children}</div>
+          <EIcon name="bolt" size={12} />
+          <EIcon name="shield" size={12} />
+        </span>
       </div>
-    </CanvasWindowChrome>
+
+      {/* host app chrome */}
+      <div
+        style={{
+          flexShrink: 0,
+          background: t.dark ? "#0B0F1A" : t.primaryHi,
+          color: "#fff",
+          padding: "4px 12px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <button
+          type="button"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            background: "rgba(255,255,255,.16)",
+            border: "none",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <EIcon
+            name="chevR"
+            size={16}
+            style={{ transform: "rotate(180deg)" }}
+          />
+        </button>
+        <div style={{ flex: 1, lineHeight: 1.2 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700 }}>
+            {tr("shell.embed.title")}
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.74 }}>
+            {tr("shell.embed.subtitle", { tenant: tenant.name })}
+          </div>
+        </div>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 9.5,
+            fontFamily: t.mono,
+            opacity: 0.75,
+            background: "rgba(255,255,255,.12)",
+            padding: "4px 8px",
+            borderRadius: 999,
+          }}
+        >
+          <EIcon name="lock" size={10} />
+          {host}
+        </span>
+      </div>
+
+      {/* webview surface badge */}
+      <div
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 14px",
+          background: t.surface,
+          borderBottom: `1px solid ${t.line}`,
+          fontSize: 10.5,
+          color: t.muted,
+        }}
+      >
+        <span
+          style={{ width: 6, height: 6, borderRadius: 3, background: dotC }}
+        />
+        <span style={{ fontFamily: t.mono }}>webview</span>
+        <span style={{ color: t.faint }}>
+          {tr("shell.embed.status", { tenant: tenant.name })}
+        </span>
+      </div>
+
+      <div style={{ flex: 1, overflow: "auto" }}>{children}</div>
+
+      {footer && (
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: `1px solid ${t.line}`,
+            background: t.surface,
+            padding: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 9,
+          }}
+        >
+          {footer}
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,88 +1,148 @@
+import { EBanner, EBtn, ECard, EIcon } from "@/components/ent-kit";
+import { EntPageHead } from "@/components/enterprise-shell";
 import {
-  EnterpriseBanner,
-  EnterpriseCard,
-  EnterpriseDl,
-  EnterprisePageHeader,
-  EnterpriseSection,
-} from "@/components/enterprise-primitives";
-import {
-  enterpriseSupportFaq,
   enterpriseTenant,
-  policyNotes,
+  getEnterpriseSupportFaq,
 } from "@/lib/enterprise-fixtures";
-import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { getServerLocale } from "@/lib/server-locale";
+import { type TranslationKey, t as translate } from "@/lib/translations";
 
-export default function HelpPage() {
+const POLICY_ROWS: [string, TranslationKey][] = [
+  ["shield", "help.policy.approval"],
+  ["building", "help.policy.costCenter"],
+  ["clock", "help.policy.cancel"],
+  ["bolt", "help.policy.quota"],
+];
+
+export default async function HelpPage() {
+  const locale = await getServerLocale();
+  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
+    translate(key, params, locale);
+  const faqs = getEnterpriseSupportFaq(locale);
+
   return (
-    <div style={enterprisePageStyle}>
-      <EnterprisePageHeader
-        title="說明與支援"
-        subtitle="企業用車政策、常見問題與客服資訊。"
-      />
-
-      <EnterpriseBanner
-        tone="info"
-        title="accepted + pending 為正常流程"
-        body="系統可能先回覆已受理，再於確認或審批完成後更新狀態；不需要重複送出。"
-      />
-
-      <EnterpriseSection>
-        <EnterpriseCard title="常見政策">
-          <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
-            {policyNotes.map((note) => (
-              <li
-                key={note}
-                style={{ fontSize: 12.5, color: enterpriseTheme.text }}
+    <>
+      <EntPageHead title={tr("help.title")} sub={tr("help.subtitle")} />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.6fr 1fr",
+          gap: 18,
+          alignItems: "start",
+        }}
+      >
+        <ECard t={t} title={tr("help.faq.title")} sub="FAQ" pad={0}>
+          <div>
+            {faqs.map((f, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: "16px 18px",
+                  borderTop: i ? "1px solid " + t.lineSoft : "none",
+                }}
               >
-                {note}
-              </li>
-            ))}
-          </ul>
-        </EnterpriseCard>
-
-        <EnterpriseCard title="支援聯絡">
-          <EnterpriseDl
-            cols={1}
-            items={[
-              {
-                k: "企業客服",
-                v: `${enterpriseTenant.supportPhone} · 24h`,
-                mono: true,
-              },
-              {
-                k: "支援信箱",
-                v: enterpriseTenant.supportEmail,
-                mono: true,
-              },
-              { k: "升級處理", v: "成本中心更正、報帳問題、人工支援" },
-              {
-                k: "通道定位",
-                v: "本前台僅供員工 / 行政自助預約，不提供後台治理模組",
-              },
-            ]}
-          />
-        </EnterpriseCard>
-
-        <EnterpriseCard title="常見問題">
-          <div style={{ display: "grid", gap: 12 }}>
-            {enterpriseSupportFaq.map((item) => (
-              <div key={item.q}>
-                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{item.q}</div>
                 <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 12.5,
-                    color: enterpriseTheme.textMuted,
-                    lineHeight: 1.5,
-                  }}
+                  style={{ display: "flex", gap: 10, alignItems: "flex-start" }}
                 >
-                  {item.a}
+                  <EIcon
+                    name="info"
+                    size={16}
+                    style={{ color: t.primary, flexShrink: 0, marginTop: 2 }}
+                  />
+                  <div>
+                    <div
+                      style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}
+                    >
+                      {f.q}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        color: t.muted,
+                        lineHeight: 1.65,
+                      }}
+                    >
+                      {f.a}
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
-        </EnterpriseCard>
-      </EnterpriseSection>
-    </div>
+        </ECard>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <ECard t={t} title={tr("help.contact.title")}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                <span
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: t.primaryBg,
+                    color: t.primary,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <EIcon name="phone" size={18} />
+                </span>
+                <div>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      fontFamily: t.mono,
+                    }}
+                  >
+                    {enterpriseTenant.supportPhone}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: t.muted }}>
+                    {tr("help.contact.channelValue")}
+                  </div>
+                </div>
+              </div>
+              <EBtn t={t} variant="primary" block icon="phone">
+                {tr("help.contact.call")}
+              </EBtn>
+              <EBtn t={t} variant="default" block icon="brief">
+                {tr("help.contact.online")}
+              </EBtn>
+            </div>
+          </ECard>
+          <ECard t={t} title={tr("help.policy.title")}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {POLICY_ROWS.map(([icon, key], i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    gap: 9,
+                    fontSize: 12.5,
+                    color: t.ink2,
+                  }}
+                >
+                  <EIcon
+                    name={icon}
+                    size={15}
+                    style={{ color: t.muted, flexShrink: 0 }}
+                  />
+                  {tr(key)}
+                </div>
+              ))}
+            </div>
+          </ECard>
+          <EBanner
+            t={t}
+            tone="warn"
+            icon="alert"
+            title={tr("help.banner.title")}
+            body={tr("help.banner.body")}
+          />
+        </div>
+      </div>
+    </>
   );
 }

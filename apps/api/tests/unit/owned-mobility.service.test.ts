@@ -3157,17 +3157,20 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
   };
 
   it("stamps partnerEntrySlug from the handoff session identity onto the order", () => {
-    const service = createOwnedMobilityService();
-    const order = service.createPassengerOrder(baseCommand as any, {
-      partnerEntrySlug: "referral-demo-community",
-      partnerId: "partner-referral-demo-001",
-    } as any);
+    const { service } = createOwnedMobilityService();
+    const order = service.createPassengerOrder(
+      baseCommand as any,
+      {
+        partnerEntrySlug: "referral-demo-community",
+        partnerId: "partner-referral-demo-001",
+      } as any,
+    );
     expect(order.partnerEntrySlug).toBe("referral-demo-community");
     expect(order.partnerId).toBe("partner-referral-demo-001");
   });
 
   it("leaves partnerEntrySlug null for non-referral passenger rides", () => {
-    const service = createOwnedMobilityService();
+    const { service } = createOwnedMobilityService();
     const order = service.createPassengerOrder(baseCommand as any);
     expect(order.partnerEntrySlug).toBeNull();
     const order2 = service.createPassengerOrder(baseCommand as any, null);

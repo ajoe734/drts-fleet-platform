@@ -3,7 +3,8 @@ export type CanvasSurface =
   | "ops"
   | "tenant"
   | "partner"
-  | "enterprise";
+  | "enterprise"
+  | "bank";
 export type CanvasMode = "light" | "dark";
 export type CanvasDensity = "compact" | "comfy";
 
@@ -163,6 +164,20 @@ export const CANVAS_SURFACE_ACCENTS: Record<CanvasSurface, CanvasAccentScale> =
       darkBorder: "#27375C",
       name: "Enterprise Dispatch",
       tagline: "企業員工自助派車入口",
+    },
+    // Bank Console — 發卡行方案監管台 (issuer tenant; 中信 navy/gold brand)
+    // mirrors the design-canvas `bank` mgmt accent (mgmt-tokens.jsx).
+    bank: {
+      light: "#13478F",
+      lightHi: "#1C5FB0",
+      lightBg: "#EDF2FB",
+      lightBorder: "#C3D5EF",
+      dark: "#84A9E8",
+      darkHi: "#A9C5F2",
+      darkBg: "#0F1E3C",
+      darkBorder: "#21376A",
+      name: "Bank Console",
+      tagline: "發卡行方案監管台",
     },
   };
 

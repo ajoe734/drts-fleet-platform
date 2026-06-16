@@ -8,6 +8,13 @@ import type {
 } from "@drts/contracts";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
+import {
+  formatDateTime,
+  formatOrderStatus,
+  formatRecordingState,
+  formatTraceEventType,
+} from "@/lib/formatters";
+import { useTranslation } from "@/lib/i18n";
 import { useConciergePortal } from "@/lib/portal-state";
 
 type LookupRecord = {
@@ -16,16 +23,20 @@ type LookupRecord = {
   callSession: CallSessionRecord | null;
 };
 
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "Not set";
-}
-
-function LookupCard({ record }: { record: LookupRecord }) {
+function LookupCard({
+  record,
+  t,
+  locale,
+}: {
+  record: LookupRecord;
+  t: ReturnType<typeof useTranslation>["t"];
+  locale: ReturnType<typeof useTranslation>["locale"];
+}) {
   return (
     <article className="detail-card">
       <header>
         <div>
-          <span className="section-kicker">Order lookup</span>
+          <span className="section-kicker">{t("lookup.card.eyebrow")}</span>
           <h3>{record.order.orderNo}</h3>
         </div>
         <span
@@ -35,35 +46,37 @@ function LookupCard({ record }: { record: LookupRecord }) {
               : " chip-success"
           }`}
         >
-          {record.order.status}
+          {formatOrderStatus(record.order.status, t)}
         </span>
       </header>
       <div className="kv-grid">
         <div className="kv-item">
-          <strong>Passenger</strong>
+          <strong>{t("lookup.kv.passenger")}</strong>
           <p>{record.order.passenger.name}</p>
         </div>
         <div className="kv-item">
-          <strong>Pickup</strong>
+          <strong>{t("lookup.kv.pickup")}</strong>
           <p>{record.order.pickup.address}</p>
         </div>
         <div className="kv-item">
-          <strong>Drop-off</strong>
+          <strong>{t("lookup.kv.dropoff")}</strong>
           <p>{record.order.dropoff.address}</p>
         </div>
         <div className="kv-item">
-          <strong>Recording state</strong>
+          <strong>{t("lookup.kv.recording")}</strong>
           <p>
-            {record.callSession?.recordingState ?? "No linked call session"}
+            {record.callSession
+              ? formatRecordingState(record.callSession.recordingState, t)
+              : t("common.noLinkedCallSession")}
           </p>
         </div>
       </div>
       <ul className="trace-list">
         {record.trace.map((entry) => (
           <li key={entry.traceId}>
-            <strong>{entry.eventType}</strong>
+            <strong>{formatTraceEventType(entry.eventType, t)}</strong>
             <p>{entry.message}</p>
-            <p>{formatDateTime(entry.createdAt)}</p>
+            <p>{formatDateTime(entry.createdAt, locale, t)}</p>
           </li>
         ))}
       </ul>
@@ -73,6 +86,7 @@ function LookupCard({ record }: { record: LookupRecord }) {
 
 export default function LookupPage() {
   const { session } = useConciergePortal();
+  const { locale, t } = useTranslation();
   const [records, setRecords] = useState<LookupRecord[]>([]);
   const [manualOrderId, setManualOrderId] = useState("");
   const [manualRecord, setManualRecord] = useState<LookupRecord | null>(null);
@@ -114,7 +128,7 @@ export default function LookupPage() {
           setError(
             nextError instanceof Error
               ? nextError.message
-              : "Failed to load recent assisted-entry orders.",
+              : t("lookup.error.recent"),
           );
         }
       } finally {
@@ -127,28 +141,22 @@ export default function LookupPage() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, t]);
 
   return (
     <div className="page-shell">
       <SessionGuard requireDesk>
         <section className="hero-card">
-          <span className="section-kicker">Lookup</span>
-          <h1>Read back order state, dispatch trace, and recording posture.</h1>
-          <p>
-            The portal keeps lookup route-level and explicit. Recent assisted
-            orders are stored locally in the browser session, while the actual
-            order and call-session truth comes from existing backend APIs.
-          </p>
+          <span className="section-kicker">{t("lookup.eyebrow")}</span>
+          <h1>{t("lookup.title")}</h1>
+          <p>{t("lookup.body")}</p>
         </section>
 
         {error ? <section className="error-copy">{error}</section> : null}
 
         <section className="panel-card">
-          <span className="section-kicker">Manual lookup</span>
-          <h2>
-            Fetch a specific order id if it is not in the recent desk list.
-          </h2>
+          <span className="section-kicker">{t("lookup.manual.eyebrow")}</span>
+          <h2>{t("lookup.manual.title")}</h2>
           <form
             className="form-grid"
             onSubmit={async (event) => {
@@ -181,7 +189,7 @@ export default function LookupPage() {
                 setError(
                   nextError instanceof Error
                     ? nextError.message
-                    : "Manual order lookup failed.",
+                    : t("lookup.error.manual"),
                 );
               } finally {
                 setLoading(false);
@@ -189,11 +197,13 @@ export default function LookupPage() {
             }}
           >
             <div className="field-stack">
-              <label htmlFor="manual-order-id">Order id</label>
+              <label htmlFor="manual-order-id">
+                {t("lookup.manual.field")}
+              </label>
               <input
                 id="manual-order-id"
                 onChange={(event) => setManualOrderId(event.target.value)}
-                placeholder="Paste an order id"
+                placeholder={t("lookup.manual.placeholder")}
                 value={manualOrderId}
               />
             </div>
@@ -203,27 +213,31 @@ export default function LookupPage() {
                 disabled={loading}
                 type="submit"
               >
-                Lookup order
+                {t("lookup.manual.submit")}
               </button>
             </div>
           </form>
         </section>
 
-        {manualRecord ? <LookupCard record={manualRecord} /> : null}
+        {manualRecord ? (
+          <LookupCard locale={locale} record={manualRecord} t={t} />
+        ) : null}
 
         <section className="panel-card">
-          <span className="section-kicker">Recent assisted-entry orders</span>
-          <h2>Desk-local recall</h2>
-          {loading ? <p>Loading recent order state.</p> : null}
+          <span className="section-kicker">{t("lookup.recent.eyebrow")}</span>
+          <h2>{t("lookup.recent.title")}</h2>
+          {loading ? <p>{t("lookup.recent.loading")}</p> : null}
           {!loading && records.length === 0 ? (
-            <p className="empty-state">
-              No recent assisted-entry orders are stored in this browser session
-              yet. Create a booking first or use manual lookup.
-            </p>
+            <p className="empty-state">{t("common.noRecentOrders")}</p>
           ) : null}
           <div className="list-stack">
             {records.map((record) => (
-              <LookupCard key={record.order.orderId} record={record} />
+              <LookupCard
+                key={record.order.orderId}
+                locale={locale}
+                record={record}
+                t={t}
+              />
             ))}
           </div>
         </section>

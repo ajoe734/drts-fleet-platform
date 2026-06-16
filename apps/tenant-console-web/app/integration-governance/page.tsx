@@ -314,7 +314,9 @@ function getStatusLabel(
     case "not_provisioned":
       return t("integrationGovernance.status.notProvisioned", locale);
     default:
-      return String(status).replaceAll("_", " ");
+      return t("integrationGovernance.status.unknown", locale, {
+        status: String(status),
+      });
   }
 }
 
@@ -362,7 +364,32 @@ function getActionLabel(action: string, locale: Locale) {
     case "create_report_job":
       return t("integrationGovernance.action.createReport", locale);
     default:
-      return action.replaceAll("_", " ");
+      return t("integrationGovernance.action.unknown", locale, {
+        action,
+      });
+  }
+}
+
+function getEmptyReasonLabel(reason: EmptyReason, locale: Locale) {
+  switch (reason) {
+    case "no_data":
+      return t("integrationGovernance.emptyReason.noData", locale);
+    case "not_provisioned":
+      return t("integrationGovernance.emptyReason.notProvisioned", locale);
+    case "fetch_failed":
+      return t("integrationGovernance.emptyReason.fetchFailed", locale);
+    case "permission_denied":
+      return t("integrationGovernance.emptyReason.permissionDenied", locale);
+    case "external_unavailable":
+      return t("integrationGovernance.emptyReason.externalUnavailable", locale);
+    case "filtered_empty":
+      return t("integrationGovernance.emptyReason.filteredEmpty", locale);
+    case "driver_not_eligible":
+      return t("integrationGovernance.emptyReason.driverNotEligible", locale);
+    default:
+      return t("integrationGovernance.emptyReason.unknown", locale, {
+        reason,
+      });
   }
 }
 
@@ -404,7 +431,7 @@ function getActionAssistiveCopy(
     });
   }
   if (!action.enabled) {
-    return "無資料";
+    return t("integrationGovernance.action.noData", locale);
   }
   return undefined;
 }
@@ -657,7 +684,9 @@ function EmptyReasonPreviewCard({
             <div style={{ fontSize: 13, fontWeight: 600 }}>
               {t(meta.titleKey, locale)}
             </div>
-            <div style={{ ...monoStyle, ...subtleCopyStyle }}>{reason}</div>
+            <div style={{ ...monoStyle, ...subtleCopyStyle }}>
+              {getEmptyReasonLabel(reason, locale)}
+            </div>
           </div>
         </div>
         <p style={mutedCopyStyle}>{t(meta.bodyKey, locale)}</p>
@@ -1128,7 +1157,7 @@ export default async function IntegrationGovernancePage({
                         href={`?emptyReason=${reason}`}
                         style={linkStyle()}
                       >
-                        {reason}
+                        {getEmptyReasonLabel(reason, locale)}
                       </Link>
                     ))}
                   </div>

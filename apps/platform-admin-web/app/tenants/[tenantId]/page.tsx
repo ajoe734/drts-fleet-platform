@@ -341,7 +341,7 @@ export default function TenantDetailPage() {
     ? params.tenantId[0]
     : params?.tenantId;
   const client = usePlatformAdminClient();
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const [tenant, setTenant] = useState<PlatformAdminTenantRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -680,7 +680,7 @@ export default function TenantDetailPage() {
   if (loading) {
     return (
       <div style={pageBodyStyle}>
-        <div style={emptyStateStyle}>Loading tenant lifecycle workspace…</div>
+        <div style={emptyStateStyle}>{t("tenantDetail.loadingWorkspace")}</div>
       </div>
     );
   }
@@ -690,15 +690,15 @@ export default function TenantDetailPage() {
       <>
         <PageHeader
           theme={theme}
-          title="租戶詳情"
-          subtitle={tenantId ? `tenantId: ${tenantId}` : "Tenant detail"}
+          title={t("tenantDetail.title")}
+          subtitle={tenantId ? `tenantId: ${tenantId}` : t("tenantDetail.subtitleFallback")}
           actions={
             <Btn
               theme={theme}
               variant="secondary"
               onClick={() => window.location.assign("/tenants")}
             >
-              Back to tenants
+              {t("tenantDetail.backToTenants")}
             </Btn>
           }
         />
@@ -708,7 +708,7 @@ export default function TenantDetailPage() {
               theme={theme}
               tone="danger"
               icon="warn"
-              title="Unable to load tenant detail"
+              title={t("tenantDetail.unableToLoad")}
               body={error}
             />
           ) : null}
@@ -717,12 +717,10 @@ export default function TenantDetailPage() {
               <div
                 style={{ color: theme.text, fontWeight: 600, marginBottom: 8 }}
               >
-                Tenant not found
+                {t("tenantDetail.notFoundHeading")}
               </div>
               <p style={mutedTextStyle}>
-                The assigned route now resolves with a page body and no longer
-                falls through to a 404. Pick another tenant from the lifecycle
-                table.
+                {t("tenantDetail.notFoundBody")}
               </p>
             </div>
           </div>
@@ -758,7 +756,7 @@ export default function TenantDetailPage() {
               icon="ext"
               onClick={handleOpenTenantConsole}
             >
-              在 Tenant Console 開啟
+              {t("tenantDetail.openInTenantConsole")}
             </Btn>
             <Btn
               theme={theme}
@@ -767,7 +765,7 @@ export default function TenantDetailPage() {
               disabled={tenant.status === "rollback_hold"}
               onClick={() => setShowRollbackModal(true)}
             >
-              進入 rollback_hold
+              {t("tenantDetail.enterRollbackHold")}
             </Btn>
           </>
         }
@@ -779,7 +777,7 @@ export default function TenantDetailPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title="Tenant detail action failed"
+            title={t("tenantDetail.actionFailed")}
             body={error}
           />
         ) : null}
@@ -800,7 +798,7 @@ export default function TenantDetailPage() {
 
         <Card
           theme={theme}
-          title="Rollout 進度 · state machine"
+          title={t("tenantDetail.rolloutCardTitle")}
           subtitle={`cutover owner: ${tenant.rollout.cutoverOwner ?? "unassigned"} · rollback owner: ${tenant.rollout.rollbackOwner ?? "unassigned"} (linked user records · Q-ADM06)`}
         >
           <div style={stepperStyle}>
@@ -838,7 +836,7 @@ export default function TenantDetailPage() {
                   ? "ok"
                   : "warn"
               }
-              title="role acknowledgements"
+              title={t("tenantDetail.roleAcknowledgements")}
               body={`${acknowledgedRoles ?? 0}/${totalRoles} 角色已邀請並確認。`}
             />
             <Banner
@@ -856,7 +854,7 @@ export default function TenantDetailPage() {
         </Card>
 
         <div style={detailGridStyle}>
-          <Card theme={theme} title="Onboarding package">
+          <Card theme={theme} title={t("tenantDetail.onboardingPackage")}>
             <DL theme={theme} cols={2} items={onboardingItems} />
           </Card>
 
@@ -873,7 +871,7 @@ export default function TenantDetailPage() {
               />
             </Card>
 
-            <Card theme={theme} title="Tenant baseline">
+            <Card theme={theme} title={t("tenantDetail.tenantBaseline")}>
               <DL
                 theme={theme}
                 cols={1}
@@ -906,22 +904,22 @@ export default function TenantDetailPage() {
 
         <Card
           theme={theme}
-          title="Recent activity"
-          subtitle="Audit subset for rollout, onboarding, and role-invite decisions"
+          title={t("tenantDetail.recentActivity")}
+          subtitle={t("tenantDetail.recentActivitySubtitle")}
         >
           <div style={bannerGridStyle}>
             <Banner
               theme={theme}
               tone="info"
               icon="clock"
-              title="Tenant record updated"
+              title={t("tenantDetail.tenantRecordUpdated")}
               body={`${formatDateTime(tenant.updatedAt)} · ${tenant.code}`}
             />
             <Banner
               theme={theme}
               tone="info"
               icon="clock"
-              title="Tenant created"
+              title={t("tenantDetail.tenantCreated")}
               body={`${formatDateTime(tenant.createdAt)} · bootstrap package recorded`}
             />
             <Banner
@@ -966,7 +964,7 @@ export default function TenantDetailPage() {
                   id="rollback-hold-title"
                   style={{ color: theme.text, fontSize: 14, fontWeight: 600 }}
                 >
-                  Enter rollback_hold
+                  {t("tenantDetail.modalTitle")}
                 </div>
                 <div
                   style={{
@@ -975,8 +973,7 @@ export default function TenantDetailPage() {
                     marginTop: 2,
                   }}
                 >
-                  High-risk action. Reason is required before the command is
-                  sent.
+                  {t("tenantDetail.modalHighRiskNote")}
                 </div>
               </div>
               <Btn
@@ -1004,7 +1001,7 @@ export default function TenantDetailPage() {
                 <textarea
                   value={rollbackReason}
                   onChange={(event) => setRollbackReason(event.target.value)}
-                  placeholder="Describe the incident, rollout risk, or operator decision that requires rollback_hold."
+                  placeholder={t("tenantDetail.reasonPlaceholder")}
                   style={textareaStyle}
                 />
               </Field>

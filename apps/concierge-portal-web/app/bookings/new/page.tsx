@@ -13,9 +13,23 @@ import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
 import {
   evaluateDeskEligibility,
+  formatDeskHealth,
+  formatQueuePolicy,
+  formatRecordingAvailability,
+  formatRequestedProduct,
+  localizeDeskRecord,
   type RequestedServiceProduct,
   resolveDeskAccess,
 } from "@/lib/desk-catalog";
+import {
+  formatCallStatus,
+  formatComplianceFlag,
+  formatDateTime,
+  formatOrderStatus,
+  formatRecordingState,
+  formatTraceEventType,
+} from "@/lib/formatters";
+import { useTranslation } from "@/lib/i18n";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 type SubmissionSummary = {
@@ -24,12 +38,9 @@ type SubmissionSummary = {
   callbackTask: CallbackTaskRecord | null;
 };
 
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "Not set";
-}
-
 export default function ConciergeBookingCreatePage() {
   const router = useRouter();
+  const { locale, t } = useTranslation();
   const {
     session,
     recordCall,
@@ -37,22 +48,26 @@ export default function ConciergeBookingCreatePage() {
     recordOrder,
     recordCallbackTask,
   } = useConciergePortal();
-  const desk = useSelectedDesk();
-  const [passengerName, setPassengerName] = useState("陳旅客");
-  const [passengerPhone, setPassengerPhone] = useState("0911222333");
-  const [pickupAddress, setPickupAddress] = useState(
-    desk?.location ?? "台北市信義區市府路 1 號 1F",
+  const deskRecord = useSelectedDesk();
+  const desk = localizeDeskRecord(deskRecord, t);
+  const [passengerName, setPassengerName] = useState(
+    t("booking.defaultPassengerName"),
   );
-  const [dropoffAddress, setDropoffAddress] =
-    useState("台北市大安區仁愛路 4 段 12 號");
+  const [passengerPhone, setPassengerPhone] = useState(
+    t("booking.defaultPassengerPhone"),
+  );
+  const [pickupAddress, setPickupAddress] = useState(
+    desk?.location ?? t("booking.defaultPickup"),
+  );
+  const [dropoffAddress, setDropoffAddress] = useState(
+    t("booking.defaultDropoff"),
+  );
   const [requestedProduct, setRequestedProduct] =
     useState<RequestedServiceProduct>("standard_taxi");
   const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
   const [callbackDueAt, setCallbackDueAt] = useState("");
   const [callbackNote, setCallbackNote] = useState("");
-  const [notes, setNotes] = useState(
-    "Desk-created assisted-entry booking from the concierge portal.",
-  );
+  const [notes, setNotes] = useState(t("booking.defaultNotes"));
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentSession, setCurrentSession] =
@@ -60,7 +75,8 @@ export default function ConciergeBookingCreatePage() {
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
 
   useEffect(() => {
-    if (!session?.activeCallId) {
+    const activeCallId = session?.activeCallId;
+    if (!activeCallId) {
       setCurrentSession(null);
       return;
     }
@@ -70,7 +86,7 @@ export default function ConciergeBookingCreatePage() {
 
     void (async () => {
       try {
-        const nextSession = await client.getCallSession(session.activeCallId!);
+        const nextSession = await client.getCallSession(activeCallId);
         if (!cancelled) {
           setCurrentSession(nextSession);
         }
@@ -79,7 +95,7 @@ export default function ConciergeBookingCreatePage() {
           setError(
             nextError instanceof Error
               ? nextError.message
-              : "Failed to load the active desk session.",
+              : t("booking.error.loadSession"),
           );
         }
       }
@@ -88,7 +104,7 @@ export default function ConciergeBookingCreatePage() {
     return () => {
       cancelled = true;
     };
-  }, [session?.activeCallId, session?.mode, session?.operatorId]);
+  }, [session?.activeCallId, session?.mode, session?.operatorId, t]);
 
   useEffect(() => {
     if (desk?.location) {
@@ -107,27 +123,28 @@ export default function ConciergeBookingCreatePage() {
     <div className="page-shell">
       <SessionGuard requireDesk>
         <section className="hero-card">
-          <span className="section-kicker">Proxy booking</span>
-          <h1>
-            Open a desk session, create the booking, then read back the trace.
-          </h1>
-          <p>
-            This route reuses the callcenter order seam for assisted entry. Site
-            eligibility, denied access, degraded desks, and recording
-            unavailability are surfaced as first-class routes instead of silent
-            failures.
-          </p>
+          <span className="section-kicker">{t("booking.eyebrow")}</span>
+          <h1>{t("booking.title")}</h1>
+          <p>{t("booking.body")}</p>
         </section>
 
         {error ? <section className="error-copy">{error}</section> : null}
 
         <section className="detail-grid">
           <article className="panel-card">
-            <span className="section-kicker">Desk posture</span>
+            <span className="section-kicker">
+              {t("booking.posture.eyebrow")}
+            </span>
             <h2>{desk?.deskName}</h2>
             <p>
-              {desk?.siteName} · {desk?.zoneLabel} · queue policy{" "}
-              {desk?.queuePolicy}
+              {desk
+                ? `${desk.siteName} · ${desk.zoneLabel} · ${t(
+                    "booking.posture.queuePolicy",
+                    {
+                      policy: formatQueuePolicy(desk.queuePolicy, t),
+                    },
+                  )}`
+                : null}
             </p>
             <div className="badge-row">
               <span
@@ -135,12 +152,12 @@ export default function ConciergeBookingCreatePage() {
                   desk?.health === "healthy" ? " chip-success" : " chip-warning"
                 }`}
               >
-                {desk?.health === "healthy" ? "Healthy" : "Degraded"}
+                {desk ? formatDeskHealth(desk.health, t) : null}
               </span>
               <span className="chip">
-                {desk?.recordingAvailability === "ops_callback_only"
-                  ? "Ops callback only"
-                  : "Inline recording callback"}
+                {desk
+                  ? formatRecordingAvailability(desk.recordingAvailability, t)
+                  : null}
               </span>
             </div>
             <div className="inline-actions">
@@ -171,7 +188,7 @@ export default function ConciergeBookingCreatePage() {
                     setError(
                       nextError instanceof Error
                         ? nextError.message
-                        : "Failed to open the desk session.",
+                        : t("booking.error.openSession"),
                     );
                   } finally {
                     setBusyKey(null);
@@ -180,8 +197,8 @@ export default function ConciergeBookingCreatePage() {
                 type="button"
               >
                 {activeDeskSession
-                  ? "Desk session active"
-                  : "Open desk session"}
+                  ? t("booking.posture.active")
+                  : t("booking.posture.open")}
               </button>
               {activeDeskSession ? (
                 <button
@@ -208,7 +225,7 @@ export default function ConciergeBookingCreatePage() {
                       setError(
                         nextError instanceof Error
                           ? nextError.message
-                          : "Failed to close the desk session.",
+                          : t("booking.error.closeSession"),
                       );
                     } finally {
                       setBusyKey(null);
@@ -216,30 +233,34 @@ export default function ConciergeBookingCreatePage() {
                   }}
                   type="button"
                 >
-                  Close desk session
+                  {t("booking.posture.close")}
                 </button>
               ) : null}
             </div>
             {currentSession ? (
               <div className="kv-grid">
                 <div className="kv-item">
-                  <strong>Call id</strong>
+                  <strong>{t("booking.summary.callId")}</strong>
                   <p>{currentSession.callId}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>Status</strong>
-                  <p>{currentSession.status}</p>
+                  <strong>{t("booking.currentSession.status")}</strong>
+                  <p>{formatCallStatus(currentSession.status, t)}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>Recording</strong>
-                  <p>{currentSession.recordingState}</p>
+                  <strong>{t("common.recording")}</strong>
+                  <p>
+                    {formatRecordingState(currentSession.recordingState, t)}
+                  </p>
                 </div>
                 <div className="kv-item">
-                  <strong>Last ETA</strong>
+                  <strong>{t("booking.summary.eta")}</strong>
                   <p>
                     {currentSession.lastEtaQuotedMinutes
-                      ? `${currentSession.lastEtaQuotedMinutes} min`
-                      : "Not quoted"}
+                      ? t("common.minutesShort", {
+                          count: currentSession.lastEtaQuotedMinutes,
+                        })
+                      : t("common.notSet")}
                   </p>
                 </div>
               </div>
@@ -247,40 +268,37 @@ export default function ConciergeBookingCreatePage() {
           </article>
 
           <article className="panel-card">
-            <span className="section-kicker">Guardrails</span>
-            <h2>Negative paths are explicit before submission.</h2>
-            <p>
-              Unauthorized desk lanes route to denied. Unsupported product or
-              service area routes to ineligible. Degraded desks block create and
-              redirect to read-only fallback. Recording callback stays explicit
-              as an ops-only escalation step.
-            </p>
+            <span className="section-kicker">
+              {t("booking.guardrails.eyebrow")}
+            </span>
+            <h2>{t("booking.guardrails.title")}</h2>
+            <p>{t("booking.guardrails.body")}</p>
             <div className="inline-actions">
               <Link className="secondary-link" href="/denied">
-                Denied route
+                {t("booking.guardrails.denied")}
               </Link>
               <Link className="secondary-link" href="/ineligible">
-                Ineligible route
+                {t("booking.guardrails.ineligible")}
               </Link>
               <Link className="secondary-link" href="/recording-unavailable">
-                Recording gate
+                {t("booking.guardrails.recording")}
               </Link>
             </div>
           </article>
         </section>
 
         <section className="panel-card">
-          <span className="section-kicker">Create order</span>
-          <h2>Submit the proxy booking through the assisted-entry desk.</h2>
+          <span className="section-kicker">{t("booking.form.eyebrow")}</span>
+          <h2>{t("booking.form.title")}</h2>
           <form
             className="form-grid"
             onSubmit={async (event) => {
               event.preventDefault();
-              if (!session || !desk) {
+              if (!session || !deskRecord || !desk) {
                 return;
               }
 
-              const access = resolveDeskAccess(desk, session.mode);
+              const access = resolveDeskAccess(deskRecord, session.mode, t);
               if (!access.allowed) {
                 router.push(`/denied?desk=${desk.deskId}&mode=${session.mode}`);
                 return;
@@ -292,10 +310,11 @@ export default function ConciergeBookingCreatePage() {
               }
 
               const eligibility = evaluateDeskEligibility(
-                desk,
+                deskRecord,
                 requestedProduct,
                 pickupAddress,
                 dropoffAddress,
+                t,
               );
               if (eligibility.state === "ineligible") {
                 router.push(
@@ -379,7 +398,7 @@ export default function ConciergeBookingCreatePage() {
                 setError(
                   nextError instanceof Error
                     ? nextError.message
-                    : "Failed to create the assisted-entry booking.",
+                    : t("booking.error.submit"),
                 );
               } finally {
                 setBusyKey(null);
@@ -387,7 +406,9 @@ export default function ConciergeBookingCreatePage() {
             }}
           >
             <div className="field-stack">
-              <label htmlFor="passenger-name">Passenger name</label>
+              <label htmlFor="passenger-name">
+                {t("booking.field.passengerName")}
+              </label>
               <input
                 id="passenger-name"
                 onChange={(event) => setPassengerName(event.target.value)}
@@ -396,7 +417,9 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="passenger-phone">Passenger phone</label>
+              <label htmlFor="passenger-phone">
+                {t("booking.field.passengerPhone")}
+              </label>
               <input
                 id="passenger-phone"
                 onChange={(event) => setPassengerPhone(event.target.value)}
@@ -405,7 +428,9 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="requested-product">Requested product</label>
+              <label htmlFor="requested-product">
+                {t("booking.field.product")}
+              </label>
               <select
                 id="requested-product"
                 onChange={(event) =>
@@ -415,17 +440,20 @@ export default function ConciergeBookingCreatePage() {
                 }
                 value={requestedProduct}
               >
-                <option value="standard_taxi">standard_taxi</option>
-                <option value="airport_assist">airport_assist</option>
-                <option value="medical_discharge">medical_discharge</option>
+                <option value="standard_taxi">
+                  {formatRequestedProduct("standard_taxi", t)}
+                </option>
+                <option value="airport_assist">
+                  {formatRequestedProduct("airport_assist", t)}
+                </option>
+                <option value="medical_discharge">
+                  {formatRequestedProduct("medical_discharge", t)}
+                </option>
               </select>
-              <p className="form-help">
-                Portal validates authorized products before using the existing
-                callcenter order seam.
-              </p>
+              <p className="form-help">{t("booking.help.product")}</p>
             </div>
             <div className="field-stack">
-              <label htmlFor="quoted-eta">Quoted ETA minutes</label>
+              <label htmlFor="quoted-eta">{t("booking.field.eta")}</label>
               <input
                 id="quoted-eta"
                 min="1"
@@ -435,7 +463,9 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="pickup-address">Pickup address</label>
+              <label htmlFor="pickup-address">
+                {t("booking.field.pickup")}
+              </label>
               <textarea
                 id="pickup-address"
                 onChange={(event) => setPickupAddress(event.target.value)}
@@ -444,7 +474,9 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="dropoff-address">Drop-off address</label>
+              <label htmlFor="dropoff-address">
+                {t("booking.field.dropoff")}
+              </label>
               <textarea
                 id="dropoff-address"
                 onChange={(event) => setDropoffAddress(event.target.value)}
@@ -454,7 +486,7 @@ export default function ConciergeBookingCreatePage() {
             </div>
             <div className="field-stack">
               <label htmlFor="callback-due-at">
-                Optional callback due time
+                {t("booking.field.callbackDue")}
               </label>
               <input
                 id="callback-due-at"
@@ -464,7 +496,9 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="callback-note">Callback note</label>
+              <label htmlFor="callback-note">
+                {t("booking.field.callbackNote")}
+              </label>
               <textarea
                 id="callback-note"
                 onChange={(event) => setCallbackNote(event.target.value)}
@@ -472,7 +506,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="booking-notes">Desk notes</label>
+              <label htmlFor="booking-notes">{t("booking.field.notes")}</label>
               <textarea
                 id="booking-notes"
                 onChange={(event) => setNotes(event.target.value)}
@@ -486,7 +520,7 @@ export default function ConciergeBookingCreatePage() {
                 disabled={busyKey === "submit-order"}
                 type="submit"
               >
-                Submit assisted-entry booking
+                {t("booking.submit")}
               </button>
             </div>
           </form>
@@ -497,7 +531,9 @@ export default function ConciergeBookingCreatePage() {
             <article className="detail-card">
               <header>
                 <div>
-                  <span className="section-kicker">Submission accepted</span>
+                  <span className="section-kicker">
+                    {t("booking.summary.eyebrow")}
+                  </span>
                   <h3>{submission.order.orderNo}</h3>
                 </div>
                 <span
@@ -507,50 +543,64 @@ export default function ConciergeBookingCreatePage() {
                       : " chip-success"
                   }`}
                 >
-                  {submission.order.status}
+                  {formatOrderStatus(submission.order.status, t)}
                 </span>
               </header>
               <div className="kv-grid">
                 <div className="kv-item">
-                  <strong>Order id</strong>
+                  <strong>{t("booking.summary.orderId")}</strong>
                   <p>{submission.order.orderId}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>Call id</strong>
-                  <p>{submission.order.callId ?? "Not linked"}</p>
+                  <strong>{t("booking.summary.callId")}</strong>
+                  <p>{submission.order.callId ?? t("common.notSet")}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>ETA snapshot</strong>
+                  <strong>{t("booking.summary.eta")}</strong>
                   <p>
                     {submission.order.etaSnapshot
-                      ? `${submission.order.etaSnapshot.etaMinutes} min`
-                      : "Not available"}
+                      ? t("common.minutesShort", {
+                          count: submission.order.etaSnapshot.etaMinutes,
+                        })
+                      : t("common.notAvailable")}
                   </p>
                 </div>
                 <div className="kv-item">
-                  <strong>Recording posture</strong>
-                  <p>{submission.order.complianceFlags.join(", ")}</p>
+                  <strong>{t("booking.summary.recording")}</strong>
+                  <p>
+                    {submission.order.complianceFlags.length > 0
+                      ? submission.order.complianceFlags
+                          .map((flag) => formatComplianceFlag(flag, t))
+                          .join(", ")
+                      : t("common.none")}
+                  </p>
                 </div>
               </div>
               {submission.callbackTask ? (
                 <p>
-                  Callback task {submission.callbackTask.callbackTaskId} is due{" "}
-                  {formatDateTime(submission.callbackTask.dueAt)}.
+                  {t("booking.summary.callbackDue", {
+                    callbackTaskId: submission.callbackTask.callbackTaskId,
+                    dueAt: formatDateTime(
+                      submission.callbackTask.dueAt,
+                      locale,
+                      t,
+                    ),
+                  })}
                 </p>
               ) : null}
               <div className="inline-actions">
                 <Link className="secondary-link" href="/lookup">
-                  Open lookup surface
+                  {t("common.openLookup")}
                 </Link>
                 <Link className="secondary-link" href="/callbacks">
-                  Open callbacks
+                  {t("common.openCallbacks")}
                 </Link>
                 {desk?.recordingAvailability === "ops_callback_only" ? (
                   <Link
                     className="secondary-link"
                     href="/recording-unavailable"
                   >
-                    Review recording gate
+                    {t("common.reviewRecordingGate")}
                   </Link>
                 ) : null}
               </div>
@@ -559,16 +609,18 @@ export default function ConciergeBookingCreatePage() {
             <article className="detail-card">
               <header>
                 <div>
-                  <span className="section-kicker">Dispatch trace</span>
-                  <h3>Order lifecycle evidence</h3>
+                  <span className="section-kicker">
+                    {t("booking.trace.eyebrow")}
+                  </span>
+                  <h3>{t("booking.trace.title")}</h3>
                 </div>
               </header>
               <ul className="trace-list">
                 {submission.trace.map((entry) => (
                   <li key={entry.traceId}>
-                    <strong>{entry.eventType}</strong>
+                    <strong>{formatTraceEventType(entry.eventType, t)}</strong>
                     <p>{entry.message}</p>
-                    <p>{formatDateTime(entry.createdAt)}</p>
+                    <p>{formatDateTime(entry.createdAt, locale, t)}</p>
                   </li>
                 ))}
               </ul>

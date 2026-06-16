@@ -20,6 +20,9 @@ use `FBP-013D` for the final release / pilot / production decision read.
    expected result, severity (`P1-Critical` / `P2-Major` / `P3-Minor`).
 4. **All P1 items must pass before Phase 1 can ship.**
 5. Deferred items require sign-off from the supervisor that the deferral is acceptable.
+6. Before calling a row Pass because "the page has data," apply
+   `docs/04-uat/chain-first-e2e-testing-rules-20260616.md` and prove the
+   producing chain, each handoff, and the origin of the returned data.
 
 ## Classification Legend
 

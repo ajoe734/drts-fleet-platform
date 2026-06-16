@@ -6884,7 +6884,7 @@ class ChairmanFlowTests(unittest.TestCase):
             task_map={"OPX-IN-001": task},
             idle_agent_name="Codex2",
             idle_agent_names=["Codex2"],
-            agent_loads={"Codex": [0], "Codex2": []},
+            agent_loads={"Codex": [0], "Codex2": [99]},
             helper_settings={
                 "enabled": True,
                 "task_statuses": ["todo", "in_progress", "review", "review_approved"],
@@ -7889,3 +7889,339 @@ class BreakFullDeadlockTests(unittest.TestCase):
             changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
         self.assertFalse(changed)
         probe.assert_not_called()
+
+
+class CodexRevokedTokenClassificationTests(unittest.TestCase):
+    """Fix ①: codex CLI revoked/expired-session 401s only surface as runtime
+    ERROR lines; before the fix they were classified as generic 'terminal' (not
+    'auth') so the lane never auto-paused."""
+
+    def _worker_for_log(self, content: str) -> dict[str, str]:
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
+        handle.write(content)
+        handle.flush()
+        handle.close()
+        self.addCleanup(Path(handle.name).unlink, missing_ok=True)
+        return {"log_path": handle.name, "provider": "codex2", "agent_id": "Codex2"}
+
+    def test_classifies_codex_revoked_refresh_token_as_auth(self) -> None:
+        for reason in (
+            "2026-06-14T14:31:58Z ERROR codex_api::endpoint::responses_websocket: "
+            "failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://chatgpt.com/x",
+            'Failed to refresh token: 401 Unauthorized: { "code": "refresh_token_invalidated" }',
+            "ERROR: Your access token could not be refreshed because your refresh token "
+            "was revoked. Please log out and sign in again.",
+        ):
+            with self.subTest(reason=reason):
+                result = supervisor.classify_worker_failure({}, {"provider": "codex2"}, reason)
+                self.assertEqual(result["kind"], "auth")
+                self.assertFalse(result["transient"])
+
+    def test_detects_codex_revoked_token_from_runtime_error_log(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "codex",
+                    "2026-06-14T14:31:56Z ERROR rmcp::transport::worker: worker quit",
+                    "2026-06-14T14:31:58Z ERROR codex_api::endpoint::responses_websocket: "
+                    "failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://chatgpt.com/x",
+                    "ERROR: Your access token could not be refreshed because your refresh "
+                    "token was revoked. Please log out and sign in again.",
+                ]
+            )
+            + "\n"
+        )
+        detected = supervisor.detect_worker_failure(worker)
+        self.assertIsNotNone(detected)
+        self.assertEqual(supervisor.classify_worker_failure({}, worker, detected)["kind"], "auth")
+
+
+class LaneFailureAutoPauseTests(unittest.TestCase):
+    """Fix ②: a lane whose workers keep dying terminally across distinct tasks
+    gets auto-paused (capacity), even when the failure text isn't classified as
+    auth — so the availability-first scheduler stops re-selecting a dead lane."""
+
+    def _worker(self, task_id: str) -> dict[str, Any]:
+        return {"agent_id": "Codex2", "provider": "codex2", "task_id": task_id}
+
+    def test_streak_counts_distinct_tasks_only(self) -> None:
+        state: dict[str, Any] = {}
+        # same task repeated must not inflate the streak
+        results = [supervisor.record_lane_terminal_failure({}, state, "Codex2", "T1") for _ in range(3)]
+        self.assertEqual(results, [False, False, False])
+        self.assertEqual(state["lane_failure_streaks"]["codex2"]["count"], 1)
+
+    def test_threshold_crossed_after_three_distinct_tasks(self) -> None:
+        state: dict[str, Any] = {}
+        results = [supervisor.record_lane_terminal_failure({}, state, "Codex2", t) for t in ("T1", "T2", "T3")]
+        self.assertEqual(results, [False, False, True])
+
+    def test_autopause_pauses_lane_on_streak(self) -> None:
+        state: dict[str, Any] = {}
+        for t in ("T1", "T2", "T3"):
+            supervisor.maybe_autopause_unhealthy_lane(
+                {}, state, self._worker(t), "Worker exited before the task reached a terminal status."
+            )
+        pauses = supervisor.provider_pause_registry(state)
+        self.assertIn("codex2", pauses)
+        self.assertEqual(pauses["codex2"]["kind"], "capacity")
+        # streak cleared after pausing
+        self.assertNotIn("codex2", state.get("lane_failure_streaks", {}))
+
+    def test_clean_completion_resets_streak(self) -> None:
+        state: dict[str, Any] = {}
+        supervisor.record_lane_terminal_failure({}, state, "Codex2", "T1")
+        supervisor.record_lane_terminal_failure({}, state, "Codex2", "T2")
+        supervisor.clear_lane_failure(state, "Codex2")
+        self.assertNotIn("codex2", state.get("lane_failure_streaks", {}))
+
+    def test_disabled_via_config(self) -> None:
+        cfg = {"ready_dispatcher": {"lane_failure_autopause": {"enabled": False}}}
+        state: dict[str, Any] = {}
+        for t in ("T1", "T2", "T3", "T4"):
+            supervisor.maybe_autopause_unhealthy_lane(cfg, state, self._worker(t), "terminal boom")
+        self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+
+    def test_transient_failures_do_not_count(self) -> None:
+        state: dict[str, Any] = {}
+        # 429 rate-limit is transient/capacity → must not trip the lane-health pause
+        for t in ("T1", "T2", "T3", "T4"):
+            supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker(t), "status: 429 rate limited")
+        self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+
+
+class GovernanceRecursionGuardTests(unittest.TestCase):
+    """Stop the self-reproducing repair lineage (X -> X-UNBLOCK -> X-UNBLOCK-UNBLOCK).
+
+    Root cause: the unblock generator's recursion guard checked only
+    `task_is_sidecar(parent)`, but auto-generated unblock/repair tasks carry
+    `task_class="unblock"`, so they slipped past and triaged into ever-deeper
+    repair-of-the-repair tasks. The fix keys the base case on
+    `is_governance_artifact` + a lineage-depth cap, and escalates to a human
+    instead of digging deeper.
+    """
+
+    def test_is_governance_artifact_detects_each_marker(self) -> None:
+        self.assertTrue(supervisor.is_governance_artifact({"task_class": "unblock"}))
+        self.assertTrue(supervisor.is_governance_artifact({"task_class": "sidecar"}))
+        self.assertTrue(supervisor.is_governance_artifact({"auto_generated": True}))
+        self.assertTrue(supervisor.is_governance_artifact({"helper_parent": "X-001"}))
+        # First-class product work is not a governance artifact.
+        self.assertFalse(supervisor.is_governance_artifact({"id": "FEAT-001", "task_class": "execution"}))
+        self.assertFalse(supervisor.is_governance_artifact({"id": "FEAT-001"}))
+        self.assertFalse(supervisor.is_governance_artifact(None))
+
+    def test_governance_lineage_depth_counts_helper_parent_chain(self) -> None:
+        root = {"id": "X"}
+        child = {"id": "X-UNBLOCK", "helper_parent": "X"}
+        grandchild = {"id": "X-UNBLOCK-UNBLOCK", "helper_parent": "X-UNBLOCK"}
+        task_map = {"X": root, "X-UNBLOCK": child, "X-UNBLOCK-UNBLOCK": grandchild}
+        self.assertEqual(supervisor.governance_lineage_depth(root, task_map), 0)
+        self.assertEqual(supervisor.governance_lineage_depth(child, task_map), 1)
+        self.assertEqual(supervisor.governance_lineage_depth(grandchild, task_map), 2)
+
+    def test_governance_lineage_depth_is_cycle_safe(self) -> None:
+        a = {"id": "A", "helper_parent": "B"}
+        b = {"id": "B", "helper_parent": "A"}
+        task_map = {"A": a, "B": b}
+        # Must terminate (and not blow the stack) on a corrupt cyclic chain.
+        self.assertLessEqual(supervisor.governance_lineage_depth(a, task_map), 2)
+
+    def test_chair_review_default_caps_unblock_lineage_depth(self) -> None:
+        self.assertEqual(supervisor.chair_review_settings({})["max_unblock_lineage_depth"], 1)
+
+    def test_create_chair_unblock_task_refuses_governance_parent(self) -> None:
+        """A blocked unblock/repair task must NOT spawn a deeper repair child."""
+        parent = {
+            "id": "INVOICES-BILLING-UNBLOCK-HISTORY-REPAIR",
+            "status": "blocked",
+            "task_class": "unblock",
+            "helper_parent": "INVOICES-BILLING",
+            "owner": "Codex",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+        status = {"tasks": [parent]}
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        state: dict[str, Any] = {}
+        action = {"task_id": parent["id"], "reason": "history repair still blocked"}
+        with mock.patch.object(supervisor, "load_status", return_value=status), mock.patch.object(
+            supervisor, "write_activity_log"
+        ) as logged:
+            result = supervisor.create_chair_unblock_task(config, state, action, {})
+
+        self.assertFalse(result)
+        # Escalated to a human instead of recursing.
+        self.assertIn(parent["id"], state.get("governance_escalations", {}))
+        logged_types = [call.args[1].get("type") for call in logged.call_args_list if len(call.args) > 1]
+        self.assertIn("governance_recursion_blocked", logged_types)
+
+
+class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
+    """Stop the duplicate-empty-branch thrash without blocking the first claim.
+
+    A genuine availability-first claim (owner busy on a *different* task) is
+    productive and must still happen. The thrash is the *repeated* steal-back:
+    claude -> claude2 -> codex -> codex2, each tick cutting a fresh empty
+    `{agent}/{task}` branch off the same base SHA. The fix records a reassignment
+    guard the moment a proactive claim lands, so the planner refuses to steal the
+    task straight back off the lane it was just handed to (within
+    `reassignment_guard_seconds`). The chair path already did this; the proactive
+    path was the gap.
+    """
+
+    def _config(self):
+        # Mirrors test_dispatcher_availability_first_claims_in_progress_when_owner_is_busy
+        # (the productive-claim case) so we exercise the same path and assert the
+        # anti-flap guard is recorded as a side effect.
+        return {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["in_progress", "review", "review_approved", "todo"],
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+
+    def _state(self):
+        # Copilot is busy running BUSY-1; REG-100 is in_progress but unattended.
+        return {
+            "queue": {"events": {}},
+            "workers": {
+                "run-busy": {
+                    "run_id": "run-busy",
+                    "task_id": "BUSY-1",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+
+    def _status(self):
+        return {
+            "tasks": [
+                {"id": "BUSY-1", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+                {"id": "REG-100", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+            ]
+        }
+
+    def test_first_proactive_claim_records_antiflap_guard(self) -> None:
+        """The first availability claim still happens AND drops an anti-flap guard."""
+        config = self._config()
+        state = self._state()
+        status = self._status()
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        # First claim is preserved (regression guard for the productive case).
+        self.assertTrue(changed)
+        persist.assert_called_once()
+        self.assertEqual(persist.call_args.kwargs["task_id"], "REG-100")
+        # And an anti-flap guard now protects REG-100 on its new owner.
+        guard = state.get("chair_reassignment_guards", {}).get("REG-100:owner")
+        self.assertIsNotNone(guard)
+        self.assertEqual(guard["to"], persist.call_args.kwargs["new_owner"])
+
+    def test_recorded_guard_blocks_the_resteal(self) -> None:
+        """Once the guard exists, the planner refuses to steal the task back."""
+        task = {"id": "REG-100", "status": "in_progress", "owner": "Codex", "reviewer": "Claude", "depends_on": []}
+        # Guard from a prior claim: REG-100 was just handed to Codex.
+        state = {
+            "chair_reassignment_guards": {
+                "REG-100:owner": {
+                    "task_id": "REG-100",
+                    "role": "owner",
+                    "from": "Copilot",
+                    "to": "Codex",
+                    "expires_at": "2999-01-01T00:00:00Z",
+                }
+            }
+        }
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            {"agents": {"codex": {"display_name": "Codex", "provider": "codex"},
+                        "codex2": {"display_name": "Codex2", "provider": "codex2"}}},
+            task=task,
+            task_map={"REG-100": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            agent_loads={"Codex": [0], "Codex2": [99]},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["in_progress", "review", "review_approved", "todo"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "require_assigned_agent_busy": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+        self.assertIsNone(plan)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
+    """RCA fix: fresh task worktrees must get node_modules (symlinked from the
+    canonical checkout) so workers can typecheck/build at closeout instead of
+    stranding `blocked` on a missing/slow per-worktree install."""
+
+    def _mk(self):
+        import shutil
+        root = Path(tempfile.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        (root / "node_modules").mkdir()
+        (root / "apps" / "foo").mkdir(parents=True); (root / "apps" / "foo" / "node_modules").mkdir()
+        (root / "packages" / "bar").mkdir(parents=True); (root / "packages" / "bar" / "node_modules").mkdir()
+        dest = Path(tempfile.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(dest, ignore_errors=True))
+        (dest / "apps" / "foo").mkdir(parents=True); (dest / "packages" / "bar").mkdir(parents=True)
+        return root, dest
+
+    def test_symlinks_root_and_workspace_node_modules(self):
+        root, dest = self._mk()
+        supervisor._provision_worktree_node_modules(root, dest)
+        self.assertTrue((dest / "node_modules").is_symlink())
+        self.assertEqual((dest / "node_modules").resolve(), (root / "node_modules").resolve())
+        self.assertTrue((dest / "apps" / "foo" / "node_modules").is_symlink())
+        self.assertTrue((dest / "packages" / "bar" / "node_modules").is_symlink())
+
+    def test_noop_on_canonical_root(self):
+        root, _ = self._mk()
+        supervisor._provision_worktree_node_modules(root, root)
+        self.assertFalse((root / "node_modules").is_symlink())
+
+    def test_does_not_clobber_existing_node_modules(self):
+        root, dest = self._mk()
+        (dest / "node_modules").mkdir()
+        supervisor._provision_worktree_node_modules(root, dest)
+        self.assertFalse((dest / "node_modules").is_symlink())

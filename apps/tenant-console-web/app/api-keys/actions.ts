@@ -5,6 +5,22 @@ import { TENANT_API_KEY_ALLOWED_SCOPES } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
 import type { ApiKeyFlashPayload } from "./constants";
 
+class ApiKeyActionError extends Error {
+  constructor(
+    readonly code:
+      | "scopeRequired"
+      | "scopeUnsupported"
+      | "expiryTimezoneRequired"
+      | "expiryInvalid"
+      | "keyNameRequired"
+      | "apiKeySelectionRequired"
+      | "revocationReasonRequired",
+    readonly params?: Record<string, string | number>,
+  ) {
+    super(code);
+  }
+}
+
 function readTrimmedString(
   formData: FormData,
   key: string,
@@ -34,12 +50,12 @@ function readScopes(formData: FormData): string[] {
   const uniqueValues = [...new Set(values)];
 
   if (uniqueValues.length === 0) {
-    throw new Error("Select at least one published API key scope.");
+    throw new ApiKeyActionError("scopeRequired");
   }
 
   const invalidScope = uniqueValues.find((scope) => !isAllowedScope(scope));
   if (invalidScope) {
-    throw new Error(`Unsupported API key scope: ${invalidScope}`);
+    throw new ApiKeyActionError("scopeUnsupported", { scope: invalidScope });
   }
 
   return uniqueValues;
@@ -52,17 +68,51 @@ function buildOptionalExpiry(expiresAt: string | undefined) {
 
   const hasExplicitTimezone = /(?:[zZ]|[+-]\d{2}:\d{2})$/.test(expiresAt);
   if (!hasExplicitTimezone) {
-    throw new Error(
-      "Expiry must include an explicit timezone offset or Z suffix.",
-    );
+    throw new ApiKeyActionError("expiryTimezoneRequired");
   }
 
   const parsedExpiry = new Date(expiresAt);
   if (Number.isNaN(parsedExpiry.getTime())) {
-    throw new Error("Expiry must be a valid ISO 8601 timestamp.");
+    throw new ApiKeyActionError("expiryInvalid");
   }
 
   return { expiresAt: parsedExpiry.toISOString() };
+}
+
+function buildErrorPayload(
+  action: "issue" | "rotate" | "revoke",
+  error: unknown,
+): ApiKeyFlashPayload {
+  const titlePrefix = `apiKeys.flash.${action}Error.title` as const;
+  const genericDescriptionKey =
+    `apiKeys.flash.${action}Error.description.generic` as const;
+
+  if (error instanceof ApiKeyActionError) {
+    const descriptionKeyMap = {
+      scopeRequired: "apiKeys.flash.error.scopeRequired",
+      scopeUnsupported: "apiKeys.flash.error.scopeUnsupported",
+      expiryTimezoneRequired: "apiKeys.flash.error.expiryTimezoneRequired",
+      expiryInvalid: "apiKeys.flash.error.expiryInvalid",
+      keyNameRequired: "apiKeys.flash.error.keyNameRequired",
+      apiKeySelectionRequired: "apiKeys.flash.error.apiKeySelectionRequired",
+      revocationReasonRequired: "apiKeys.flash.error.revocationReasonRequired",
+    } as const;
+
+    return {
+      tone: "warning",
+      action,
+      titleKey: titlePrefix,
+      descriptionKey: descriptionKeyMap[error.code],
+      ...(error.params ? { descriptionParams: error.params } : {}),
+    };
+  }
+
+  return {
+    tone: "warning",
+    action,
+    titleKey: titlePrefix,
+    descriptionKey: genericDescriptionKey,
+  };
 }
 
 export async function issueTenantApiKeyAction(
@@ -73,7 +123,7 @@ export async function issueTenantApiKeyAction(
   try {
     const keyName = readTrimmedString(formData, "keyName");
     if (!keyName) {
-      throw new Error("API key label is required.");
+      throw new ApiKeyActionError("keyNameRequired");
     }
 
     const client = getTenantClient();
@@ -88,18 +138,13 @@ export async function issueTenantApiKeyAction(
       tone: "default",
       action: "issue",
       keyName: issued.apiKey.keyName,
-      title: "API key issued",
-      description: `${issued.apiKey.keyName} is now active. Save the plaintext value now because subsequent fetches only show the masked suffix.`,
+      titleKey: "apiKeys.flash.issueSuccess.title",
+      descriptionKey: "apiKeys.flash.issueSuccess.description",
+      descriptionParams: { keyName: issued.apiKey.keyName },
       plaintextKey: issued.plaintextKey,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to issue API key.";
-    payload = {
-      tone: "warning",
-      title: "API key could not be issued",
-      description: message,
-    };
+    payload = buildErrorPayload("issue", error);
   }
 
   revalidatePath("/api-keys");
@@ -116,7 +161,7 @@ export async function rotateTenantApiKeyAction(
     const keyName = readTrimmedString(formData, "keyName");
 
     if (!apiKeyId) {
-      throw new Error("API key selection is required for rotation.");
+      throw new ApiKeyActionError("apiKeySelectionRequired");
     }
 
     const client = getTenantClient();
@@ -131,18 +176,13 @@ export async function rotateTenantApiKeyAction(
       tone: "default",
       action: "rotate",
       keyName: issued.apiKey.keyName,
-      title: "API key rotated",
-      description: `${issued.apiKey.keyName} has a new plaintext value. The previously active credential is invalidated immediately.`,
+      titleKey: "apiKeys.flash.rotateSuccess.title",
+      descriptionKey: "apiKeys.flash.rotateSuccess.description",
+      descriptionParams: { keyName: issued.apiKey.keyName },
       plaintextKey: issued.plaintextKey,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to rotate API key.";
-    payload = {
-      tone: "warning",
-      title: "API key could not be rotated",
-      description: message,
-    };
+    payload = buildErrorPayload("rotate", error);
   }
 
   revalidatePath("/api-keys");
@@ -160,11 +200,11 @@ export async function revokeTenantApiKeyAction(
     const reason = readTrimmedString(formData, "reason");
 
     if (!apiKeyId) {
-      throw new Error("API key selection is required for revocation.");
+      throw new ApiKeyActionError("apiKeySelectionRequired");
     }
 
     if (!reason) {
-      throw new Error("Revocation reason is required.");
+      throw new ApiKeyActionError("revocationReasonRequired");
     }
 
     const client = getTenantClient();
@@ -174,17 +214,12 @@ export async function revokeTenantApiKeyAction(
       tone: "default",
       action: "revoke",
       keyName: keyName ?? apiKeyId,
-      title: "API key revoked",
-      description: `${keyName ?? apiKeyId} is now revoked and cannot authenticate again.`,
+      titleKey: "apiKeys.flash.revokeSuccess.title",
+      descriptionKey: "apiKeys.flash.revokeSuccess.description",
+      descriptionParams: { keyName: keyName ?? apiKeyId },
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to revoke API key.";
-    payload = {
-      tone: "warning",
-      title: "API key could not be revoked",
-      description: message,
-    };
+    payload = buildErrorPayload("revoke", error);
   }
 
   revalidatePath("/api-keys");

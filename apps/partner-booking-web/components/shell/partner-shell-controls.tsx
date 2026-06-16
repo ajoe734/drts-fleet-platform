@@ -113,7 +113,7 @@ export function PartnerShellControls() {
         aria-label={t("shell.language.switch")}
         onClick={() => setLocale(locale === "en" ? "zh" : "en")}
       >
-        <span aria-hidden="true">文/A</span>
+        <span aria-hidden="true">{t("shell.language.glyph")}</span>
         <span>
           {locale === "en" ? t("shell.language.zh") : t("shell.language.en")}
         </span>

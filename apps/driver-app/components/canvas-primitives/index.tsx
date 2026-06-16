@@ -104,6 +104,24 @@ function renderInlineText(
     return <Text style={style}>{String(value)}</Text>;
   }
 
+  // Mixed/array children (e.g. `<Pill>{label} {value}</Pill>` compiles to an
+  // array like [label, " ", value]) must still have their string/number parts
+  // wrapped in <Text>, otherwise RN throws
+  // "Text strings must be rendered within a <Text> component."
+  if (Array.isArray(value)) {
+    return value.map((item, index) =>
+      typeof item === "string" ||
+      typeof item === "number" ||
+      typeof item === "boolean" ? (
+        <Text key={index} style={style}>
+          {String(item)}
+        </Text>
+      ) : (
+        item
+      ),
+    );
+  }
+
   return value;
 }
 

@@ -360,6 +360,8 @@ export function PlatformAssistantOverlay() {
     requestFailedBody: t("assistant.overlay.requestFailedBody"),
     requestFailedTitle: t("assistant.overlay.requestFailedTitle"),
     requestFailedHint: t("assistant.overlay.requestFailedHint"),
+    promptRail: t("assistant.overlay.promptRail"),
+    devFootnote: t("assistant.overlay.devFootnote"),
   };
 
   const panelStyle: CSSProperties = isMobile
@@ -652,7 +654,7 @@ export function PlatformAssistantOverlay() {
             />
             <div ref={messagesEndRef} />
           </div>
-          <div style={promptRailStyle} aria-label="Assistant suggested prompts">
+          <div style={promptRailStyle} aria-label={copy.promptRail}>
             {suggestedPrompts.map((prompt) => (
               <button
                 key={prompt}
@@ -700,10 +702,7 @@ export function PlatformAssistantOverlay() {
           </form>
           <div style={panelFootnoteStyle}>
             <Bot size={13} />
-            <span>
-              Mock provider in dev. Actions still require governed backend
-              gates.
-            </span>
+            <span>{copy.devFootnote}</span>
           </div>
         </section>
       ) : null}

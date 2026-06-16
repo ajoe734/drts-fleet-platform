@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { StatusChip } from "@drts/ui-web";
-import type { BankDemoTenant } from "@/lib/demo-tenants";
+import { getBankTenantName, type BankDemoTenant } from "@/lib/demo-tenants";
 import type { ContractHealth } from "@/lib/contracts-data";
 import { t, type Locale } from "@/lib/translations";
 
@@ -29,7 +29,9 @@ export function IssuerBrandPill({
           background: `linear-gradient(135deg, ${issuerTokens.primary}, ${issuerTokens.accent})`,
         }}
       />
-      <span className="issuer-brand-pill__text">{tenant.name[locale]}</span>
+      <span className="issuer-brand-pill__text">
+        {getBankTenantName(tenant, locale)}
+      </span>
     </span>
   );
 }

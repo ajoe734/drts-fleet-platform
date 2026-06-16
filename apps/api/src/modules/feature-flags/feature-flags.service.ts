@@ -3,6 +3,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { FeatureFlag } from "@drts/contracts";
 
 import { FeatureFlagRepository } from "./feature-flag.repository";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 
 export interface FeatureFlagSeed {
   key: string;
@@ -20,6 +21,8 @@ export class FeatureFlagsService {
 
   constructor(
     @Optional() private readonly featureFlagRepository?: FeatureFlagRepository,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {
     this.seedDefaults();
   }
@@ -223,6 +226,26 @@ export class FeatureFlagsService {
     return flag?.enabled ?? false;
   }
 
+  private recordTenantOverrideAudit(
+    key: string,
+    tenantId: string,
+    enabled: boolean,
+    description: string,
+  ) {
+    // Tenant feature-flag overrides are governance-sensitive; mirror the audit
+    // trail every other platform-admin control-plane mutation already emits.
+    this.auditNotificationService?.recordAuditLog({
+      actorId: null,
+      actorType: "platform_admin",
+      tenantId,
+      moduleName: "feature-flags",
+      actionName: "upsert_tenant_feature_flag",
+      resourceType: "tenant_feature_flag",
+      resourceId: `${key}:${tenantId}`,
+      newValuesSummary: { key, tenantId, enabled, description },
+    });
+  }
+
   async upsertTenantOverride(
     key: string,
     tenantId: string,
@@ -234,12 +257,14 @@ export class FeatureFlagsService {
       description ?? globalFlag?.description ?? `Tenant override for ${key}`;
 
     if (this.getDb()) {
-      return this.featureFlagRepository!.upsertTenantOverride(
+      const persisted = await this.featureFlagRepository!.upsertTenantOverride(
         key,
         tenantId,
         enabled,
         desc,
       );
+      this.recordTenantOverrideAudit(key, tenantId, enabled, desc);
+      return persisted;
     }
     // In-memory fallback
     const updated: FeatureFlag = {
@@ -250,6 +275,7 @@ export class FeatureFlagsService {
       tenantId: tenantId,
     };
     this.inMemoryFlags.set(this.inMemoryOverrideKey(key, tenantId), updated);
+    this.recordTenantOverrideAudit(key, tenantId, enabled, desc);
     return updated;
   }
 }

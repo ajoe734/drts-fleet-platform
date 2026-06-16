@@ -312,6 +312,52 @@ describe("TenantPartnerService sensitive-data governance", () => {
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT;
   });
 
+  it("reconciles canonical partner-booking route seeds without duplicating persisted entries", async () => {
+    const existingSeedService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const persistedState = createEmptyRepositoryState();
+    persistedState.partnerEntries = [
+      existingSeedService.getPartnerEntry("bank-demo-alpha-airport"),
+    ];
+    const repository = createInMemoryTenantPartnerRepository(persistedState);
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.getPartnerEntry("ctbc")).toMatchObject({
+      entrySlug: "ctbc",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      auditMetadata: {
+        source: "dev_seed_partner_booking_surface",
+        requestId: "seed-partner-booking-ctbc",
+      },
+    });
+    expect(service.getPartnerEntry("fubon")).toMatchObject({
+      entrySlug: "fubon",
+      businessDispatchSubtype: "insurance_replacement_vehicle",
+    });
+    expect(service.getPartnerEntry("lion")).toMatchObject({
+      entrySlug: "lion",
+      businessDispatchSubtype: "travel_agency_transfer",
+    });
+
+    const persistedPartnerEntries = repository.persistChanges.mock.calls
+      .flatMap(([changes]) => changes.partnerEntries ?? [])
+      .map((entry) => entry.entrySlug);
+    expect(persistedPartnerEntries).toEqual(
+      expect.arrayContaining(["ctbc", "fubon", "lion"]),
+    );
+    expect(
+      persistedPartnerEntries.filter(
+        (entrySlug) => entrySlug === "bank-demo-alpha-airport",
+      ),
+    ).toHaveLength(0);
+  });
+
   it("loads partner ingress credentials from environment secrets", () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";
@@ -2199,7 +2245,13 @@ describe("TenantPartnerService tenant business ops views", () => {
     ]);
 
     const contracts = service.listTenantContracts("tenant-demo-001");
-    expect(contracts).toHaveLength(2);
+    expect(contracts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ programId: "program-airport-alpha" }),
+        expect.objectContaining({ programId: "program-airport-beta" }),
+        expect.objectContaining({ programId: "program-ctbc-world-elite" }),
+      ]),
+    );
 
     const airportAlpha = contracts.find(
       (contract) => contract.programId === "program-airport-alpha",

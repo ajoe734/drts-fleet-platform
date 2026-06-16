@@ -6,6 +6,8 @@ tenant, ops, driver, billing, and tenant-boundary evidence.
 Use it together with:
 
 - `docs/04-uat/fbp-014a-e2e-matrix.md` for the detailed scenario design
+- `docs/04-uat/chain-first-e2e-testing-rules-20260616.md` for the required
+  tester operating stance on read surfaces, empty results, and silent seams
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` for release-gate interpretation
 - `support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md` for the latest live staging rerun
 
@@ -18,6 +20,10 @@ It serves three purposes:
 1. prove cross-surface ID continuity for named workflow families
 2. make cross-tenant safety reviewable
 3. keep external-adapter and manual-only flows explicit instead of silently passing them
+
+Before marking any scenario as pass or fail, apply the chain-first rules in
+`docs/04-uat/chain-first-e2e-testing-rules-20260616.md`: prove the producing
+chain and each seam, not only the final read surface.
 
 ## Scenario Map
 

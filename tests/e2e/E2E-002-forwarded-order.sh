@@ -23,6 +23,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/helpers.sh"
 
 SCENARIO="E2E-002"
+
+# Forwarder broadcast intersects the requested candidates with the in-memory
+# regulatory supply (vehicleEligibilityService.listEligibleSupply). That supply
+# is keyed by the regulatory-registry demo drivers (drv-demo-001 + veh-demo-001,
+# dispatchable, standard_taxi, seeded location) -- NOT the DB-seeded driver id.
+# Drive the whole forwarded-order driver flow as that eligible supply driver so
+# broadcast finds a locally eligible candidate.
+E2E_SEED_DRIVER_ID="${E2E_FORWARDER_DRIVER_ID:-drv-demo-001}"
 FORWARDER_SANDBOX_PLATFORM="forwarder_sandbox"
 
 chain_init
@@ -125,7 +133,7 @@ SECONDARY_MIRROR_ORDER_ID=""
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops Console — sandbox forwarded mirror creation"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "1.1 — POST /forwarder/orders/inbound (primary sandbox order)"
 http_call POST "/forwarder/orders/inbound" "$PRIMARY_INBOUND_FIXTURE"
@@ -153,7 +161,7 @@ assert_status "200"
 
 PRIMARY_MIRROR_STATUS=$(echo "$RESP_BODY" | \
   jq -r --arg externalOrderId "$PRIMARY_EXTERNAL_ORDER_ID" \
-    '.data.items[] | select(.externalOrderId == $externalOrderId) | .status' \
+    'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); .data.items[] | camel | select(.externalOrderId == $externalOrderId) | .status' \
     2>/dev/null | head -1 || true)
 
 if [[ "$PRIMARY_MIRROR_STATUS" != "broadcasted" ]]; then
@@ -177,7 +185,7 @@ assert_status "200"
 
 FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
   jq -r --arg externalOrderId "$PRIMARY_EXTERNAL_ORDER_ID" \
-    '.data.items[] | select(.externalOrderId == $externalOrderId) | .taskId' \
+    'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); .data.items[] | camel | select(.externalOrderId == $externalOrderId) | .taskId' \
     2>/dev/null | head -1 || true)
 
 if [[ -z "$FORWARDED_TASK_ID" ]]; then
@@ -237,7 +245,7 @@ fi
 save_evidence "$SCENARIO" "driver" "acceptOutcome" "$ACCEPT_OUTCOME"
 log_ok "Forwarded accept relay acknowledged with outcome=${ACCEPT_OUTCOME}"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "3.2 — POST /forwarder/orders/:orderId/sync-status (confirmed_by_platform)"
 http_call POST "/forwarder/orders/${PRIMARY_MIRROR_ORDER_ID}/sync-status" "$CONFIRMED_SYNC_FIXTURE"
@@ -261,7 +269,7 @@ if [[ "$PRIMARY_DRIVER_CONFIRMED_STATUS" != "confirmed_by_platform" ]]; then
 fi
 save_evidence "$SCENARIO" "driver" "primaryDriverConfirmedStatus" "$PRIMARY_DRIVER_CONFIRMED_STATUS"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "3.4 — POST /forwarder/orders/:orderId/sync-status (completed)"
 http_call POST "/forwarder/orders/${PRIMARY_MIRROR_ORDER_ID}/sync-status" "$COMPLETED_SYNC_FIXTURE"
@@ -293,7 +301,7 @@ log_ok "Primary forwarded task completed through sandbox status sync"
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops + Driver — sandbox cancellation path"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "4.1 — POST /forwarder/orders/inbound (secondary sandbox order)"
 http_call POST "/forwarder/orders/inbound" "$SECONDARY_INBOUND_FIXTURE"
@@ -321,7 +329,7 @@ assert_status "200"
 
 SECONDARY_FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
   jq -r --arg externalOrderId "$SECONDARY_EXTERNAL_ORDER_ID" \
-    '.data.items[] | select(.externalOrderId == $externalOrderId) | .taskId' \
+    'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); .data.items[] | camel | select(.externalOrderId == $externalOrderId) | .taskId' \
     2>/dev/null | head -1 || true)
 
 if [[ -z "$SECONDARY_FORWARDED_TASK_ID" ]]; then
@@ -340,7 +348,7 @@ if [[ "$SECONDARY_ACCEPT_OUTCOME" != "accept_pending" ]]; then
   exit 1
 fi
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "4.5 — POST /forwarder/orders/:orderId/sync-status (cancelled_by_platform)"
 http_call POST "/forwarder/orders/${SECONDARY_MIRROR_ORDER_ID}/sync-status" "$CANCELLED_SYNC_FIXTURE"
@@ -370,7 +378,7 @@ log_ok "Secondary forwarded task cancelled by platform as expected"
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops + Finance — forwarded settlement row and no-owned-assignment guard"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "5.1 — GET /settlement/matrix"
 http_call GET "/settlement/matrix"

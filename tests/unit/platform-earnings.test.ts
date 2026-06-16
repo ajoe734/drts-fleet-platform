@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  PLATFORM_CODE_FORWARDER_SANDBOX,
   PLATFORM_CODE_GRAB,
   PLATFORM_CODE_LINE_TAXI,
   PLATFORM_CODE_UBER,
@@ -29,6 +30,13 @@ describe("platform earnings service", () => {
         subsidy: { currency: "TWD", amountMinor: 0 },
         netAmount: { currency: "TWD", amountMinor: 68000 },
       },
+      {
+        platformCode: PLATFORM_CODE_FORWARDER_SANDBOX,
+        grossEarning: { currency: "TWD", amountMinor: 30000 },
+        serviceFee: { currency: "TWD", amountMinor: 0 },
+        subsidy: { currency: "TWD", amountMinor: 0 },
+        netAmount: { currency: "TWD", amountMinor: 30000 },
+      },
     ]);
     expect(driverTwoBreakdown.items).toEqual([
       {
@@ -48,10 +56,10 @@ describe("platform earnings service", () => {
 
     expect(summary).toMatchObject({
       driverId: "drv-demo-001",
-      totalGross: { currency: "TWD", amountMinor: 200000 },
+      totalGross: { currency: "TWD", amountMinor: 230000 },
       totalServiceFee: { currency: "TWD", amountMinor: 30000 },
       totalSubsidy: { currency: "TWD", amountMinor: 5000 },
-      totalNet: { currency: "TWD", amountMinor: 175000 },
+      totalNet: { currency: "TWD", amountMinor: 205000 },
     });
   });
 

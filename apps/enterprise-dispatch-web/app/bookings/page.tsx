@@ -1,97 +1,172 @@
 import Link from "next/link";
 import {
-  EnterpriseBanner,
-  EnterpriseBtn,
-  EnterpriseCard,
-  EnterpriseDl,
-  EnterprisePageHeader,
-  EnterprisePill,
-  EnterpriseSection,
-} from "@/components/enterprise-primitives";
+  EBtnContent,
+  ECard,
+  EIcon,
+  EInput,
+  EPill,
+  ESeg,
+  entBtnStyle,
+} from "@/components/ent-kit";
+import { EntPageHead } from "@/components/enterprise-shell";
 import {
-  bookingStateMeta,
-  enterpriseBookings,
-  policyNotes,
+  getBookingStateMeta,
+  getEnterpriseBookings,
 } from "@/lib/enterprise-fixtures";
-import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { getServerLocale } from "@/lib/server-locale";
+import { type TranslationKey, t as translate } from "@/lib/translations";
 
-export default function BookingsPage() {
+const COLS = "110px 1.1fr 1.5fr 110px 130px 110px";
+
+export default async function BookingsHistoryPage() {
+  const locale = await getServerLocale();
+  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
+    translate(key, params, locale);
+  const bookings = getEnterpriseBookings(locale);
+  const stateMeta = getBookingStateMeta(locale);
+
   return (
-    <div style={enterprisePageStyle}>
-      <EnterprisePageHeader
-        title="我的預約"
-        subtitle="前台歷史檢視與建立入口；不是派遣看板。"
-        actions={<EnterpriseBtn variant="primary">建立預約</EnterpriseBtn>}
-      />
-
-      <EnterpriseBanner
-        tone="info"
-        title="費用歸屬與審批優先"
-        body="預約送出後，狀態可能先顯示已受理或待審批；可用操作仍以 backend availableActions 為準。"
-      />
-
-      <EnterpriseSection>
-        {enterpriseBookings.map((booking) => (
-          <EnterpriseCard
-            key={booking.id}
-            title={`${booking.id} · ${booking.passenger}`}
-            actions={
-              <EnterprisePill tone={bookingStateMeta[booking.state].tone}>
-                {bookingStateMeta[booking.state].label}
-              </EnterprisePill>
-            }
+    <>
+      <EntPageHead
+        title={tr("bookings.title")}
+        sub={tr("bookings.subtitle")}
+        actions={
+          <Link
+            href="/bookings/new"
+            style={entBtnStyle(t, { variant: "primary" })}
           >
-            <EnterpriseDl
-              cols={2}
-              items={[
-                {
-                  k: "乘客 / 下單人",
-                  v: booking.self
-                    ? `${booking.passenger} / 本人`
-                    : `${booking.passenger} / ${booking.bookedBy} 代訂`,
-                },
-                { k: "成本中心", v: booking.costCenter, mono: true },
-                { k: "行程", v: `${booking.from} → ${booking.to}` },
-                { k: "時間", v: booking.window, mono: true },
-              ]}
-            />
-            <div style={{ marginTop: 12 }}>
-              <Link
-                href={`/bookings/${booking.id}`}
+            <EBtnContent icon="plus">{tr("bookings.create")}</EBtnContent>
+          </Link>
+        }
+      />
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          marginBottom: 16,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
+        <ESeg
+          t={t}
+          value="all"
+          options={[
+            { value: "all", label: tr("bookings.filter.all") },
+            { value: "mine", label: tr("bookings.filter.mine") },
+            { value: "byme", label: tr("bookings.filter.byme") },
+          ]}
+        />
+        <div style={{ flex: 1 }} />
+        <EInput t={t} icon="search" placeholder={tr("bookings.search")} />
+      </div>
+      <ECard t={t} pad={0}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: COLS,
+            gap: 12,
+            padding: "11px 18px",
+            borderBottom: "1px solid " + t.line,
+            background: t.surfaceLo,
+            fontSize: 11,
+            fontWeight: 700,
+            color: t.muted,
+            letterSpacing: 0.3,
+          }}
+        >
+          <span>{tr("bookings.col.id")}</span>
+          <span>{tr("bookings.col.passenger")}</span>
+          <span>{tr("bookings.col.route")}</span>
+          <span>{tr("bookings.col.time")}</span>
+          <span>{tr("bookings.col.costCenter")}</span>
+          <span>{tr("bookings.col.state")}</span>
+        </div>
+        {bookings.map((b, i) => (
+          <Link
+            key={b.id}
+            href={`/bookings/${b.id}`}
+            style={{
+              display: "grid",
+              gridTemplateColumns: COLS,
+              gap: 12,
+              padding: "13px 18px",
+              borderTop: i ? "1px solid " + t.lineSoft : "none",
+              alignItems: "center",
+              textDecoration: "none",
+              color: "inherit",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: t.mono,
+                fontSize: 12,
+                color: t.primary,
+                fontWeight: 600,
+              }}
+            >
+              {b.id}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minHeight: 30,
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                  border: `1px solid ${enterpriseTheme.border}`,
-                  background: enterpriseTheme.surface,
-                  color: enterpriseTheme.text,
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: 600,
-                  textDecoration: "none",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
-                查看詳情
-              </Link>
+                {b.passenger}
+              </div>
+              <div style={{ fontSize: 11, color: b.self ? t.muted : t.warn }}>
+                {b.self
+                  ? tr("party.self")
+                  : tr("home.upcoming.delegateShort", { name: b.bookedBy })}
+              </div>
             </div>
-          </EnterpriseCard>
-        ))}
-
-        <EnterpriseCard title="建立預約前提醒">
-          <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
-            {policyNotes.map((note) => (
-              <li
-                key={note}
-                style={{ fontSize: 12.5, color: enterpriseTheme.text }}
+            <div style={{ fontSize: 12, color: t.ink2, minWidth: 0 }}>
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
               >
-                {note}
-              </li>
-            ))}
-          </ul>
-        </EnterpriseCard>
-      </EnterpriseSection>
-    </div>
+                {b.from}
+                <EIcon
+                  name="arrow"
+                  size={11}
+                  style={{ color: t.faint, flexShrink: 0 }}
+                />
+                {b.to}
+                {b.flight && (
+                  <EIcon
+                    name="flag"
+                    size={12}
+                    style={{ color: t.info, flexShrink: 0 }}
+                  />
+                )}
+              </span>
+            </div>
+            <span style={{ fontSize: 12, fontFamily: t.mono, color: t.ink2 }}>
+              {b.window}
+            </span>
+            <span
+              style={{ fontSize: 11.5, fontFamily: t.mono, color: t.muted }}
+            >
+              {b.costCenter}
+            </span>
+            <EPill t={t} tone={stateMeta[b.state].tone} dot>
+              {stateMeta[b.state].label}
+            </EPill>
+          </Link>
+        ))}
+      </ECard>
+    </>
   );
 }

@@ -1,13 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  EnterpriseBanner,
-  EnterpriseCard,
-  EnterpriseDl,
-  EnterprisePageHeader,
-} from "@/components/enterprise-primitives";
+  EBanner,
+  EBtn,
+  EBtnContent,
+  ECard,
+  EIcon,
+  ERow,
+  entBtnStyle,
+} from "@/components/ent-kit";
+import { EntPageHead } from "@/components/enterprise-shell";
 import { getEnterpriseBooking } from "@/lib/enterprise-fixtures";
-import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
+import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { getServerLocale } from "@/lib/server-locale";
+import { type TranslationKey, t as translate } from "@/lib/translations";
 
 export default async function ReceiptPage({
   params,
@@ -15,58 +21,103 @@ export default async function ReceiptPage({
   params: Promise<{ bookingId: string }>;
 }) {
   const { bookingId } = await params;
-  const booking = getEnterpriseBooking(bookingId);
-
+  const locale = await getServerLocale();
+  const tr = (key: TranslationKey, params2?: Record<string, string | number>) =>
+    translate(key, params2, locale);
+  const booking = getEnterpriseBooking(bookingId, locale);
   if (!booking) {
-    return notFound();
+    notFound();
   }
+  const fare = booking.fare ?? "NT$ 2,180";
 
   return (
-    <div style={{ ...enterprisePageStyle, maxWidth: 920 }}>
-      <EnterprisePageHeader
-        title={`行程收據 · ${booking.id}`}
-        subtitle="收據只在支援的渠道與狀態下顯示。"
+    <>
+      <EntPageHead
+        back={`${tr("receipt.back")} ${booking.id}`}
+        title={tr("receipt.title")}
+        sub={tr("receipt.subtitle")}
       />
-
-      {booking.receiptReady ? (
-        <EnterpriseCard title="收據摘要">
-          <EnterpriseDl
-            cols={2}
-            items={[
-              { k: "乘客", v: booking.passenger },
-              { k: "成本中心", v: booking.costCenter, mono: true },
-              { k: "車資", v: booking.fare ?? "待結算", mono: true },
-              { k: "行程", v: `${booking.from} → ${booking.to}` },
-            ]}
+      <div style={{ maxWidth: 600, margin: "0 auto" }}>
+        <ECard t={t} accent={t.success}>
+          <div style={{ textAlign: "center", padding: "8px 0 6px" }}>
+            <div
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                margin: "0 auto 14px",
+                background: t.successBg,
+                color: t.success,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <EIcon name="check" size={28} stroke={2.4} />
+            </div>
+            <h2 style={{ fontSize: 19, fontWeight: 800, margin: "0 0 4px" }}>
+              {tr("receipt.completed")}
+            </h2>
+            <div style={{ fontSize: 12.5, color: t.muted, fontFamily: t.mono }}>
+              {booking.id}
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 16,
+              background: t.surfaceLo,
+              border: "1px solid " + t.line,
+              borderRadius: 12,
+              padding: "4px 16px",
+            }}
+          >
+            <ERow
+              t={t}
+              k={tr("receipt.passenger")}
+              v={`${booking.passenger} · ${booking.bookedBy}`}
+            />
+            <ERow
+              t={t}
+              k={tr("receipt.route")}
+              v={`${booking.from} → ${booking.to}`}
+            />
+            <ERow
+              t={t}
+              k={tr("receipt.card.summary")}
+              v={booking.window}
+              mono
+            />
+            <ERow t={t} k={tr("new.policy.vehicle")} v={booking.vehicle} />
+            <ERow
+              t={t}
+              k={tr("receipt.costCenter")}
+              v={booking.costCenter}
+              mono
+            />
+            <ERow t={t} k={tr("receipt.fare")} v={fare} strong last />
+          </div>
+          <EBanner
+            t={t}
+            tone="info"
+            icon="building"
+            style={{ marginTop: 14 }}
+            body={tr("receipt.banner.body")}
           />
-        </EnterpriseCard>
-      ) : (
-        <EnterpriseBanner
-          tone="warn"
-          title="這筆行程目前沒有可下載收據"
-          body="可能尚未完成結算，或這個渠道不提供獨立 receipt。請改由企業報帳流程或客服支援處理。"
-        />
-      )}
-
-      <Link
-        href={`/bookings/${booking.id}`}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: 34,
-          padding: "8px 12px",
-          borderRadius: 10,
-          background: enterpriseTheme.surface,
-          border: `1px solid ${enterpriseTheme.border}`,
-          color: enterpriseTheme.text,
-          fontSize: 12.5,
-          fontWeight: 600,
-          textDecoration: "none",
-        }}
-      >
-        返回預約詳情
-      </Link>
-    </div>
+          <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+            <Link
+              href="/bookings"
+              style={entBtnStyle(t, { variant: "default", block: true })}
+            >
+              <EBtnContent iconR="arrow">
+                {tr("receipt.backHistory")}
+              </EBtnContent>
+            </Link>
+            <EBtn t={t} variant="primary" block icon="download">
+              {tr("receipt.download")}
+            </EBtn>
+          </div>
+        </ECard>
+      </div>
+    </>
   );
 }

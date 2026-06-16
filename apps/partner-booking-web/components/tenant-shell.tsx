@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { PartnerRouteProvenance } from "@/lib/api-client";
 import { getPartnerChromeVars, type PartnerBrand } from "@/lib/brand";
 import type { Locale } from "@/lib/translations";
 import {
@@ -10,6 +11,7 @@ type TenantShellProps = {
   brand: PartnerBrand;
   children: ReactNode;
   locale?: Locale;
+  provenance?: PartnerRouteProvenance;
 };
 
 const ENGLISH_BRAND_NAMES = {
@@ -64,12 +66,30 @@ export function TenantShell({
   brand,
   children,
   locale = "zh",
+  provenance,
 }: TenantShellProps) {
   const display = getBrandDisplay(brand, locale);
   return (
     <div
       className="min-h-dvh bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
       style={getPartnerChromeVars(brand)}
+      data-partner-entry-source={provenance?.source ?? "unknown"}
+      data-partner-entry-request-id={provenance?.requestId ?? undefined}
+      data-partner-entry-timestamp={provenance?.timestamp ?? undefined}
+      data-partner-entry-updated-at={provenance?.entryUpdatedAt ?? undefined}
+      data-partner-entry-audit-source={provenance?.auditSource ?? undefined}
+      data-partner-entry-audit-request-id={
+        provenance?.auditRequestId ?? undefined
+      }
+      data-partner-entry-fallback-code={
+        provenance?.fallbackCode ?? undefined
+      }
+      data-partner-entry-fallback-status={
+        provenance?.fallbackStatus === null ||
+        provenance?.fallbackStatus === undefined
+          ? undefined
+          : String(provenance.fallbackStatus)
+      }
     >
       <div className="mx-auto box-border flex min-h-dvh max-w-3xl flex-col gap-8 px-6 py-12">
         <header

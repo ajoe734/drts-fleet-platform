@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 import {
   API_URL,
+  clearPartnerEntryAuthorityCacheForTests,
   createPartnerBooking,
   getPartnerConfirmation,
   getPartnerReceipt,
@@ -123,6 +124,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("partner-booking-web BFF wiring", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    clearPartnerEntryAuthorityCacheForTests();
     delete process.env.DRTS_INTERNAL_KEY;
   });
 
@@ -153,10 +155,67 @@ describe("partner-booking-web BFF wiring", () => {
     await expect(getPartnerRouteContext("ctbc")).resolves.toMatchObject({
       entry: activeEntry,
       inactive: false,
+      provenance: {
+        source: "authority",
+        requestId: "req-124",
+        timestamp: "2026-05-19T00:00:01.000Z",
+        entryUpdatedAt: activeEntry.updatedAt,
+        auditSource: "test",
+        auditRequestId: "req-001",
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
     });
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_URL}/api/partner/entries/ctbc`,
       expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
+  it("reuses authority-backed route entry envelopes across render bursts", async () => {
+    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: activeEntry,
+        meta: {
+          requestId: "req-cache",
+          timestamp: "2026-05-19T00:00:03.000Z",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPartnerRouteContext("ctbc")).resolves.toMatchObject({
+      entry: activeEntry,
+      provenance: {
+        source: "authority",
+        requestId: "req-cache",
+        timestamp: "2026-05-19T00:00:03.000Z",
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
+    });
+    await expect(
+      getPartnerRouteContext("ctbc", { allowInactive: true }),
+    ).resolves.toMatchObject({
+      entry: activeEntry,
+      provenance: {
+        source: "authority_cache",
+        requestId: "req-cache",
+        timestamp: "2026-05-19T00:00:03.000Z",
+        fallbackCode: null,
+        fallbackStatus: null,
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      API_URL + "/api/partner/entries/ctbc",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-drts-internal-key": "dev-internal-key",
+        }),
+      }),
     );
   });
 
@@ -205,6 +264,10 @@ describe("partner-booking-web BFF wiring", () => {
       brand: expect.objectContaining({
         slug: "bank-demo-alpha-airport",
         displayName: "Bank Demo Alpha Airport Transfer",
+      }),
+      provenance: expect.objectContaining({
+        requestId: "req-127",
+        timestamp: "2026-06-12T00:00:01.000Z",
       }),
     });
   });
@@ -391,6 +454,57 @@ describe("partner-booking-web BFF wiring", () => {
     await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_UNAVAILABLE",
       status: 503,
+    });
+  });
+
+  it("lets public shells fallback when mounted authority returns a server error", async () => {
+    process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
+    const fetchMock = vi.fn().mockImplementation(() =>
+      jsonResponse(
+        {
+          error: {
+            code: "PARTNER_AUTHORITY_REQUEST_FAILED",
+            message: "Partner authority failed while resolving the entry.",
+            details: { entrySlug: "lion" },
+            retryable: false,
+          },
+        },
+        500,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("lion", { allowInactive: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "Lion Group Transfer",
+        slug: "lion",
+      }),
+      provenance: {
+        source: "local_fallback",
+        requestId: null,
+        timestamp: null,
+        entryUpdatedAt: null,
+        auditSource: null,
+        auditRequestId: null,
+        fallbackCode: "PARTNER_AUTHORITY_REQUEST_FAILED",
+        fallbackStatus: 500,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      API_URL + "/api/partner/entries/lion",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-drts-internal-key": "dev-internal-key",
+        }),
+      }),
+    );
+    await expect(getPartnerRouteContext("lion")).rejects.toMatchObject({
+      code: "PARTNER_AUTHORITY_REQUEST_FAILED",
+      status: 500,
     });
   });
 

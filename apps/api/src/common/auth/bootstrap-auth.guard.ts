@@ -8,6 +8,7 @@ import { Reflector } from "@nestjs/core";
 
 import { ApiRequestError } from "../api-envelope";
 import { DriverDeviceSessionService } from "../../modules/auth/driver-device-session.service";
+import { AuditNotificationService } from "../../modules/audit-notification/audit-notification.service";
 import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
@@ -106,6 +107,8 @@ export class BootstrapAuthGuard implements CanActivate {
     @Optional() private readonly jwtAuthService?: JwtAuthService,
     @Optional()
     private readonly driverDeviceSessionService?: DriverDeviceSessionService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -205,8 +208,13 @@ export class BootstrapAuthGuard implements CanActivate {
     }
 
     request.identity = identity;
-    this.assertRealmAllowed(identity, policy.allowedRealms, request);
-    this.assertScopesAllowed(identity, policy.requiredScopes, request);
+    try {
+      this.assertRealmAllowed(identity, policy.allowedRealms, request);
+      this.assertScopesAllowed(identity, policy.requiredScopes, request);
+    } catch (error) {
+      this.recordAuthorizationDenialAudit(identity, request, error);
+      throw error;
+    }
 
     return true;
   }
@@ -241,6 +249,65 @@ export class BootstrapAuthGuard implements CanActivate {
     });
     if (anonymousIdentity) {
       request.identity = anonymousIdentity;
+    }
+  }
+
+  // A realm/scope denial on an authenticated identity is a governance-relevant
+  // security event; record it so the audit trail covers rejected/denied
+  // control-plane attempts (not just successful mutations). Only AUTH_REALM_DENIED
+  // / AUTH_SCOPE_DENIED are audited; other failures propagate untouched.
+  private recordAuthorizationDenialAudit(
+    identity: BootstrapRequestIdentity,
+    request: AuthenticatedRequestLike,
+    error: unknown,
+  ) {
+    if (!this.auditNotificationService) {
+      return;
+    }
+    const code =
+      error instanceof ApiRequestError
+        ? ((error.getResponse() as { error?: { code?: string } })?.error?.code ??
+          null)
+        : null;
+    if (code !== "AUTH_REALM_DENIED" && code !== "AUTH_SCOPE_DENIED") {
+      return;
+    }
+    // The audit actorType union excludes driver_user; coerce that lone case.
+    const auditActorType =
+      identity.actorType === "driver_user" ? "system" : identity.actorType;
+    const method = (request.method ?? "GET").toUpperCase();
+    const rawPath = (request.originalUrl ?? request.url ?? "").split("?")[0] ?? "";
+    const routePath = rawPath
+      .replace(/^\/+/, "")
+      .replace(/^api\/+/, "")
+      .replace(/\/+$/, "");
+    // Map denied control-plane mutations to a semantic reject action so the
+    // governance audit trail names the operation that was blocked; other routes
+    // fall back to the generic marker.
+    const denialActionByRoute: Record<string, string> = {
+      "POST platform-admin/tenants": "reject_platform_tenant_create",
+      "POST platform-admin/pricing-rules": "reject_platform_pricing_publish",
+    };
+    const denialAction =
+      denialActionByRoute[`${method} ${routePath}`] ?? "reject_authorization";
+    try {
+      this.auditNotificationService.recordAuditLog({
+        actorId: identity.actorId ?? null,
+        actorType: auditActorType,
+        tenantId: identity.tenantId ?? null,
+        moduleName: "auth",
+        actionName: denialAction,
+        resourceType: "route",
+        resourceId: `${request.method ?? "GET"} ${
+          request.originalUrl ?? request.url ?? ""
+        }`,
+        newValuesSummary: {
+          errorCode: code,
+          realm: identity.realm,
+        },
+      });
+    } catch {
+      // never let audit recording mask the original authorization error
     }
   }
 

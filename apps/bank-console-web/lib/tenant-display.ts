@@ -1,5 +1,9 @@
 import type { CSSProperties } from "react";
-import type { BankDemoTenant } from "@/lib/demo-tenants";
+import {
+  getBankTenantName,
+  getBankTenantShortName,
+  type BankDemoTenant,
+} from "@/lib/demo-tenants";
 
 function issuerShortCode(tenant: BankDemoTenant) {
   return tenant.issuerCode.slice(0, 3).toUpperCase();
@@ -10,8 +14,8 @@ export function tenantDisplayText(
   tenant: BankDemoTenant,
 ): string {
   return value
-    .replaceAll("中信銀行", tenant.name.zh)
-    .replaceAll("中信", tenant.shortName.zh)
+    .replaceAll("中信銀行", getBankTenantName(tenant, "zh"))
+    .replaceAll("中信", getBankTenantShortName(tenant, "zh"))
     .replaceAll("CTBC", tenant.issuerCode)
     .replaceAll("ctbc", tenant.code)
     .replace(/\bCTB(?=[-_A-Z0-9])/g, issuerShortCode(tenant));

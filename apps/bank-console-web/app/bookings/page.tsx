@@ -6,7 +6,12 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import {
+  getBankProgramSeedLabel,
+  getBankTenantName,
+  resolveBankDemoTenant,
+  resolveLocale,
+} from "@/lib/demo-tenants";
 import { getBankConsoleSession, bankConsoleHref } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import {
@@ -48,6 +53,13 @@ const stateLabelKey: Record<
   completed: "bookings.state.completed",
   cancelled: "bookings.state.cancelled",
 };
+
+const STATE_TAB_ORDER: BookingState[] = [
+  "assigned",
+  "en_route",
+  "completed",
+  "cancelled",
+];
 
 function one(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -109,6 +121,28 @@ export default async function BookingsPage({
   ).length;
   const currentPeriod = filters.period ?? bookingPeriods[0] ?? "2026-06";
 
+  // Counts for the state tabs ignore the state filter but keep every other
+  // active filter, so each tab badge reflects the current scope.
+  const baseFilters = {
+    ...(programCode ? { programCode } : {}),
+    ...(direction ? { direction } : {}),
+    ...(period ? { period } : {}),
+    ...(cardholder ? { cardholder } : {}),
+  };
+  const scopedBookings = filterBookings(baseFilters);
+  const stateTabHref = (tabState?: BookingState) => {
+    const params = new URLSearchParams();
+    params.set("bank", baseQuery.bank);
+    params.set("locale", baseQuery.locale);
+    params.set("role", baseQuery.role);
+    if (programCode) params.set("program", programCode);
+    if (direction) params.set("direction", direction);
+    if (period) params.set("period", period);
+    if (cardholder) params.set("cardholder", cardholder);
+    if (tabState) params.set("state", tabState);
+    return `/bookings?${params.toString()}`;
+  };
+
   return (
     <div
       className="page-shell bank-bookings-page"
@@ -127,7 +161,8 @@ export default async function BookingsPage({
           <span className="bank-title-block">
             {t("bookings.title", locale)}
             <span className="issuer-chip">
-              {tenant.name[locale]} · {tenant.programSeed.premium[locale]}
+              {getBankTenantName(tenant, locale)} ·{" "}
+              {getBankProgramSeedLabel(tenant, "premium", locale)}
             </span>
           </span>
         }
@@ -137,7 +172,7 @@ export default async function BookingsPage({
       <section className="issuer-strip">
         <div>
           <span className="eyebrow">{t("bookings.scopeLabel", locale)}</span>
-          <strong>{tenant.name[locale]}</strong>
+          <strong>{getBankTenantName(tenant, locale)}</strong>
         </div>
         <div>
           <span className="eyebrow">{t("bookings.periodLabel", locale)}</span>
@@ -153,6 +188,40 @@ export default async function BookingsPage({
         title={t("bookings.readonlyTitle", locale)}
         description={t("bookings.readonlyBody", locale)}
       />
+
+      <nav
+        aria-label={t("bookings.filters.state", locale)}
+        className="users-filter-tabs"
+      >
+        <Link
+          aria-current={!state ? "page" : undefined}
+          className={`users-filter-tab${!state ? " is-active" : ""}`}
+          href={stateTabHref()}
+        >
+          <span>{t("common.all", locale)}</span>
+          <span className="users-filter-badge">{scopedBookings.length}</span>
+        </Link>
+        {STATE_TAB_ORDER.map((tabState) => {
+          const isActive = state === tabState;
+
+          return (
+            <Link
+              aria-current={isActive ? "page" : undefined}
+              className={`users-filter-tab${isActive ? " is-active" : ""}`}
+              href={stateTabHref(tabState)}
+              key={tabState}
+            >
+              <span>{t(stateLabelKey[tabState], locale)}</span>
+              <span className="users-filter-badge">
+                {
+                  scopedBookings.filter((item) => item.state === tabState)
+                    .length
+                }
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
 
       <section className="surface-card bookings-filter-card">
         <div className="bank-section-head">
@@ -200,24 +269,7 @@ export default async function BookingsPage({
             </select>
           </label>
 
-          <label className="filter-field">
-            <span>{t("bookings.filters.state", locale)}</span>
-            <select name="state" defaultValue={filters.state ?? ""}>
-              <option value="">{t("common.all", locale)}</option>
-              <option value="assigned">
-                {t(stateLabelKey.assigned, locale)}
-              </option>
-              <option value="en_route">
-                {t(stateLabelKey.en_route, locale)}
-              </option>
-              <option value="completed">
-                {t(stateLabelKey.completed, locale)}
-              </option>
-              <option value="cancelled">
-                {t(stateLabelKey.cancelled, locale)}
-              </option>
-            </select>
-          </label>
+          <input name="state" type="hidden" value={filters.state ?? ""} />
 
           <label className="filter-field">
             <span>{t("bookings.filters.period", locale)}</span>

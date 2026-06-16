@@ -19,6 +19,7 @@ import {
 } from "@/components/tenant-governance-shared";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { t as translate, type Locale } from "@/lib/translations";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   CreatePlatformTenantCommand,
@@ -290,10 +291,13 @@ function getGateLabel(
   return "pending";
 }
 
-function formatQuotaSummary(locale: string, tenant: PlatformAdminTenantRecord) {
-  return locale === "en"
-    ? `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}/mo`
-    : `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}/月`;
+function formatQuotaSummary(
+  locale: Locale,
+  tenant: PlatformAdminTenantRecord,
+) {
+  return translate("paMisc.monthlyPlan", locale, {
+    count: formatLocaleNumber(locale, tenant.quotas.monthlyBookings),
+  });
 }
 
 function formatShortDate(value: string) {

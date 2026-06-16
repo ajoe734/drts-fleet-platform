@@ -21,6 +21,8 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t, type Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -221,11 +223,11 @@ type PassengerFilters = {
 type PassengerEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 
 type EmptyStateView = {
-  title: string;
-  body: string;
+  titleKey: string;
+  bodyKey: string;
   accent: string;
   tone: CanvasTone;
-  ctaLabel?: string;
+  ctaLabelKey?: string;
   ctaHref?: string;
   usePrimaryAction?: boolean;
 };
@@ -245,65 +247,66 @@ type PassengerMetadata = Record<string, unknown> & {
 
 type PassengerDeepLink = {
   href: string;
-  label: string;
+  labelKey?: string;
+  label?: string;
   newTab: boolean;
   tone: CanvasTone;
 };
 
 const PASSENGER_TABS: PassengerTabDefinition[] = [
-  { key: "all", label: "全部" },
-  { key: "employee", label: "員工" },
-  { key: "visitor", label: "訪客" },
-  { key: "disabled", label: "停用" },
+  { key: "all", label: "passengers.tab.all" },
+  { key: "employee", label: "passengers.tab.employee" },
+  { key: "visitor", label: "passengers.tab.visitor" },
+  { key: "disabled", label: "passengers.tab.disabled" },
 ];
 
 const EMPTY_STATE_VIEWS: Record<PassengerEmptyReason, EmptyStateView> = {
   no_data: {
-    title: "還沒有乘客資料",
-    body: "這個租戶尚未建立常用乘客名冊。新增後即可在新建預訂流程直接帶入乘客資料。",
+    titleKey: "passengers.empty.noData.title",
+    bodyKey: "passengers.empty.noData.body",
     accent: "ND",
     tone: "info",
     usePrimaryAction: true,
   },
   not_provisioned: {
-    title: "乘客目錄尚未啟用",
-    body: "租戶資料維護流程尚未完成佈署或初始化，暫時無法建立名冊。",
+    titleKey: "passengers.empty.notProvisioned.title",
+    bodyKey: "passengers.empty.notProvisioned.body",
     accent: "NP",
     tone: "warn",
-    ctaLabel: "前往設定",
+    ctaLabelKey: "passengers.empty.notProvisioned.cta",
     ctaHref: "/settings",
   },
   fetch_failed: {
-    title: "乘客資料讀取失敗",
-    body: "頁面已載入，但本次無法完成 passenger directory 讀取。請稍後重新整理或查看 API 狀態。",
+    titleKey: "passengers.empty.fetchFailed.title",
+    bodyKey: "passengers.empty.fetchFailed.body",
     accent: "FF",
     tone: "danger",
   },
   permission_denied: {
-    title: "目前角色無法管理乘客",
-    body: "這個帳號缺少 passenger directory 存取權限。CTA 仍保留，但會以 disabled reason 呈現。",
+    titleKey: "passengers.empty.permissionDenied.title",
+    bodyKey: "passengers.empty.permissionDenied.body",
     accent: "PD",
     tone: "neutral",
     usePrimaryAction: true,
   },
   external_unavailable: {
-    title: "相依服務暫時不可用",
-    body: "租戶目錄依賴的外部整合目前不可用，因此無法回傳 passenger directory。",
+    titleKey: "passengers.empty.externalUnavailable.title",
+    bodyKey: "passengers.empty.externalUnavailable.body",
     accent: "EU",
     tone: "danger",
   },
   filtered_empty: {
-    title: "目前篩選沒有結果",
-    body: "放寬關鍵字、部門或切換 active/inactive 篩選後，即可回到完整乘客目錄。",
+    titleKey: "passengers.empty.filteredEmpty.title",
+    bodyKey: "passengers.empty.filteredEmpty.body",
     accent: "FE",
     tone: "accent",
-    ctaLabel: "清除篩選",
+    ctaLabelKey: "passengers.empty.filteredEmpty.cta",
     ctaHref: "/passengers",
   },
 };
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
+function toErrorMessage(error: unknown, locale: Locale) {
+  return error instanceof Error ? error.message : t("passengers.error.unknown", locale);
 }
 
 function parseDate(value: string | null | undefined) {
@@ -336,12 +339,20 @@ function getStateTone(activeFlag: boolean): CanvasTone {
   return activeFlag ? "success" : "neutral";
 }
 
-function getStateLabel(activeFlag: boolean) {
-  return activeFlag ? "active" : "deactivated";
+function getStateLabel(activeFlag: boolean, locale: Locale) {
+  return t(
+    activeFlag ? "passengers.state.active" : "passengers.state.deactivated",
+    locale,
+  );
 }
 
-function getKindLabel(passenger: TenantPassengerRecord) {
-  return isEmployeePassenger(passenger) ? "員工" : "訪客";
+function getKindLabel(passenger: TenantPassengerRecord, locale: Locale) {
+  return t(
+    isEmployeePassenger(passenger)
+      ? "passengers.kind.employee"
+      : "passengers.kind.visitor",
+    locale,
+  );
 }
 
 function comparePassengers(
@@ -465,18 +476,20 @@ function buildPassengersHref(
   return `/passengers${query ? `?${query}` : ""}`;
 }
 
-function getDisabledReasonLabel(code: string | undefined) {
+function getDisabledReasonLabel(code: string | undefined, locale: Locale) {
   switch (code) {
     case "already_deactivated":
-      return "已是停用狀態";
+      return t("passengers.disabledReason.alreadyDeactivated", locale);
     case "requires_tenant_admin":
-      return "僅 tenant admin 可執行";
+      return t("passengers.disabledReason.requiresTenantAdmin", locale);
     case "read_only_mode":
-      return "目前資源為唯讀";
+      return t("passengers.disabledReason.readOnlyMode", locale);
     case "not_wired_yet":
-      return "後端 mutation flow 尚未接入";
+      return t("passengers.disabledReason.notWiredYet", locale);
     default:
-      return code ? code.replaceAll("_", " ") : "目前不可用";
+      return code
+        ? t("passengers.disabledReason.code", locale, { code })
+        : t("passengers.disabledReason.default", locale);
   }
 }
 
@@ -599,6 +612,7 @@ function buildTabNodes(
   selectedTab: PassengerTabKey,
   filters: PassengerFilters,
   counts: Record<PassengerTabKey, number>,
+  locale: Locale,
 ) {
   const tabs = PASSENGER_TABS.map((tab) => {
     const params = new URLSearchParams();
@@ -625,7 +639,7 @@ function buildTabNodes(
 
     return (
       <Link key={tab.key} href={href} style={tabLinkStyle}>
-        {tab.label} · {counts[tab.key]}
+        {t(tab.label, locale)} · {counts[tab.key]}
       </Link>
     );
   });
@@ -701,7 +715,7 @@ function matchesFilters(
   return haystacks.some((value) => value.includes(needle));
 }
 
-async function loadPassengersData(): Promise<PassengerPageData> {
+async function loadPassengersData(locale: Locale): Promise<PassengerPageData> {
   const client = getTenantClient();
   const errors: string[] = [];
   const fetchedAt = new Date().toISOString();
@@ -715,7 +729,11 @@ async function loadPassengersData(): Promise<PassengerPageData> {
       : [];
 
   if (passengersResult.status === "rejected") {
-    errors.push(`乘客目錄: ${toErrorMessage(passengersResult.reason)}`);
+    errors.push(
+      t("passengers.error.directory", locale, {
+        message: toErrorMessage(passengersResult.reason, locale),
+      }),
+    );
   }
 
   return {
@@ -765,14 +783,15 @@ function resolveEmptyReason(params: {
 function toPassengerRow(
   passenger: RuntimePassengerRecord,
   duplicateNames: Set<string>,
+  locale: Locale,
 ): PassengerRow {
   return {
     ...passenger,
     duplicateName: duplicateNames.has(
       passenger.fullName.trim().toLocaleLowerCase("zh-Hant"),
     ),
-    kindLabel: getKindLabel(passenger),
-    stateLabel: getStateLabel(passenger.activeFlag),
+    kindLabel: getKindLabel(passenger, locale),
+    stateLabel: getStateLabel(passenger.activeFlag, locale),
     stateTone: getStateTone(passenger.activeFlag),
   };
 }
@@ -780,11 +799,12 @@ function toPassengerRow(
 function renderActionDescriptor(
   descriptor: ResourceActionDescriptor,
   label: string,
+  locale: Locale,
 ) {
   const helper = descriptor.requiresReason
-    ? `${label} · 需要理由`
+    ? t("passengers.action.requiresReason", locale, { label })
     : descriptor.riskLevel === "high"
-      ? `${label} · high risk`
+      ? t("passengers.action.highRisk", locale, { label })
       : label;
 
   if (descriptor.enabled) {
@@ -799,23 +819,25 @@ function renderActionDescriptor(
     <span
       key={descriptor.action}
       style={disabledActionStyle}
-      title={getDisabledReasonLabel(descriptor.disabledReasonCode)}
+      title={getDisabledReasonLabel(descriptor.disabledReasonCode, locale)}
     >
       {label}
     </span>
   );
 }
 
-function getActionLabel(action: string) {
+function getActionLabel(action: string, locale: Locale) {
   switch (action) {
     case "create":
-      return "新增";
+      return t("passengers.action.create", locale);
     case "edit":
-      return "編輯";
+      return t("passengers.action.edit", locale);
     case "deactivate":
-      return "軟停用";
+      return t("passengers.action.deactivate", locale);
     case "reactivate":
-      return "重新啟用";
+      return t("passengers.action.reactivate", locale);
+    case "view":
+      return t("passengers.action.view", locale);
     default:
       return action;
   }
@@ -824,6 +846,7 @@ function getActionLabel(action: string) {
 function renderEmptyState(
   reason: PassengerEmptyReason,
   primaryAction: ResourceActionDescriptor | null,
+  locale: Locale,
 ) {
   const view: EmptyStateView =
     EMPTY_STATE_VIEWS[reason] ?? EMPTY_STATE_VIEWS.fetch_failed!;
@@ -833,7 +856,7 @@ function renderEmptyState(
       <div style={emptyStateAccentStyle}>{view.accent}</div>
       <div>
         <div style={{ fontSize: 14, fontWeight: 700, color: th.text }}>
-          {view.title}
+          {t(view.titleKey, locale)}
         </div>
         <div
           style={{
@@ -844,21 +867,22 @@ function renderEmptyState(
             maxWidth: 520,
           }}
         >
-          {view.body}
+          {t(view.bodyKey, locale)}
         </div>
       </div>
-      {view.ctaHref && view.ctaLabel ? (
+      {view.ctaHref && view.ctaLabelKey ? (
         <Link href={view.ctaHref} style={linkButtonStyle}>
-          {view.ctaLabel}
+          {t(view.ctaLabelKey, locale)}
         </Link>
       ) : view.usePrimaryAction && primaryAction ? (
         renderActionDescriptor(
           primaryAction,
-          getActionLabel(primaryAction.action),
+          getActionLabel(primaryAction.action, locale),
+          locale,
         )
       ) : null}
       <CanvasPill theme={th} tone={view.tone}>
-        emptyReason: {reason}
+        {t("passengers.empty.reasonBadge", locale, { reason })}
       </CanvasPill>
     </div>
   );
@@ -911,35 +935,49 @@ function getRefreshTone(
 function getRefreshSummary(
   refreshMetadata: UiRefreshMetadata | null,
   fetchedAt: string,
+  locale: Locale,
 ) {
   if (!refreshMetadata) {
-    return `30s tenant slow tier · fallback ${formatUpdated(fetchedAt)}`;
+    return t("passengers.refresh.summaryFallback", locale, {
+      time: formatUpdated(fetchedAt),
+    });
   }
 
-  return `${refreshMetadata.dataFreshness} · ${formatUpdated(
-    refreshMetadata.generatedAt,
-  )} · ${refreshMetadata.source}`;
+  return t("passengers.refresh.summary", locale, {
+    freshness: t(
+      `passengers.refresh.freshness.${refreshMetadata.dataFreshness}`,
+      locale,
+    ),
+    time: formatUpdated(refreshMetadata.generatedAt),
+    source: t(`passengers.refresh.source.${refreshMetadata.source}`, locale),
+  });
 }
 
-function getRefreshTierLabel(refreshMetadata: UiRefreshMetadata | null) {
+function getRefreshTierLabel(
+  refreshMetadata: UiRefreshMetadata | null,
+  locale: Locale,
+) {
   if (!refreshMetadata) {
-    return "T5 · 30s fallback";
+    return t("passengers.refresh.tier.fallback", locale);
   }
 
   switch (refreshMetadata.source) {
     case "live":
-      return "T5 · live snapshot";
+      return t("passengers.refresh.tier.live", locale);
     case "cache":
-      return "T5 · cached snapshot";
+      return t("passengers.refresh.tier.cache", locale);
     case "sandbox":
-      return "T5 · sandbox snapshot";
+      return t("passengers.refresh.tier.sandbox", locale);
     case "static":
     default:
-      return "T5 · static snapshot";
+      return t("passengers.refresh.tier.static", locale);
   }
 }
 
-function getRefreshBannerCopy(refreshMetadata: UiRefreshMetadata | null) {
+function getRefreshBannerCopy(
+  refreshMetadata: UiRefreshMetadata | null,
+  locale: Locale,
+) {
   if (!refreshMetadata || refreshMetadata.dataFreshness === "fresh") {
     return null;
   }
@@ -948,21 +986,26 @@ function getRefreshBannerCopy(refreshMetadata: UiRefreshMetadata | null) {
     case "stale":
       return {
         tone: "warn" as const,
-        title: "Passenger directory snapshot 已過新鮮期",
-        body: `目前顯示的是 ${formatUpdated(refreshMetadata.generatedAt)} 產生的 ${refreshMetadata.source} snapshot；重新整理可拉回最新 T5 read model。`,
+        title: t("passengers.refresh.banner.stale.title", locale),
+        body: t("passengers.refresh.banner.stale.body", locale, {
+          time: formatUpdated(refreshMetadata.generatedAt),
+          source: t(`passengers.refresh.source.${refreshMetadata.source}`, locale),
+        }),
       };
     case "degraded":
       return {
         tone: "danger" as const,
-        title: "Passenger directory 正處於 degraded refresh",
-        body: `資料來源回報 degraded；目前以 ${refreshMetadata.source} snapshot 提供列表，請先避免依賴此頁進行時效敏感判斷。`,
+        title: t("passengers.refresh.banner.degraded.title", locale),
+        body: t("passengers.refresh.banner.degraded.body", locale, {
+          source: t(`passengers.refresh.source.${refreshMetadata.source}`, locale),
+        }),
       };
     case "unknown":
     default:
       return {
         tone: "info" as const,
-        title: "Passenger directory refresh 狀態未知",
-        body: "後端未提供可判定的新鮮度，頁面保留 T5 tier 與手動 refresh 供使用者重新取樣。",
+        title: t("passengers.refresh.banner.unknown.title", locale),
+        body: t("passengers.refresh.banner.unknown.body", locale),
       };
   }
 }
@@ -973,38 +1016,42 @@ function getRecordActions(passenger: RuntimePassengerRecord) {
   );
 }
 
-function getTargetAppLabel(targetApp: CrossAppResourceLink["targetApp"]) {
+function getTargetAppLabel(
+  targetApp: CrossAppResourceLink["targetApp"],
+  locale: Locale,
+) {
   switch (targetApp) {
     case "ops-console":
-      return "Ops Console";
+      return t("passengers.targetApp.opsConsole", locale);
     case "platform-admin":
-      return "Platform Admin";
+      return t("passengers.targetApp.platformAdmin", locale);
     case "tenant-console":
     default:
-      return "Tenant Console";
+      return t("passengers.targetApp.tenantConsole", locale);
   }
 }
 
 function toPassengerDeepLinks(
   passenger: RuntimePassengerRecord,
   refreshHref: string,
+  locale: Locale,
 ): PassengerDeepLink[] {
   const deepLinks: PassengerDeepLink[] = [
     {
       href: `/bookings/new?passengerId=${encodeURIComponent(passenger.passengerId)}`,
-      label: "前往新建預訂",
+      labelKey: "passengers.deepLink.newBooking",
       newTab: false,
       tone: "accent",
     },
     {
       href: `/audit?resourceType=tenant_passenger&resourceId=${encodeURIComponent(passenger.passengerId)}`,
-      label: "查看本租戶稽核",
+      labelKey: "passengers.deepLink.audit",
       newTab: false,
       tone: "info",
     },
     {
       href: refreshHref,
-      label: "重新整理目錄",
+      labelKey: "passengers.deepLink.refresh",
       newTab: false,
       tone: "neutral",
     },
@@ -1020,7 +1067,10 @@ function toPassengerDeepLinks(
   for (const link of metadataLinks) {
     deepLinks.push({
       href: link.route,
-      label: `${link.label} · ${getTargetAppLabel(link.targetApp)}`,
+      label: t("passengers.deepLink.crossApp", locale, {
+        label: link.label,
+        app: getTargetAppLabel(link.targetApp, locale),
+      }),
       newTab: link.openMode === "new_tab",
       tone: link.targetApp === "tenant-console" ? "info" : "accent",
     });
@@ -1035,15 +1085,18 @@ function toPassengerDeepLinks(
   );
 }
 
-function getQualityIssueLabel(issue: TenantPassengerQualityIssue) {
+function getQualityIssueLabel(
+  issue: TenantPassengerQualityIssue,
+  locale: Locale,
+) {
   switch (issue) {
     case "duplicate_employee_no":
-      return "duplicate employee no";
+      return t("passengers.quality.duplicateEmployeeNo", locale);
     case "missing_contact":
-      return "missing contact";
+      return t("passengers.quality.missingContact", locale);
     case "missing_employee_no":
     default:
-      return "missing employee no";
+      return t("passengers.quality.missingEmployeeNo", locale);
   }
 }
 
@@ -1052,19 +1105,20 @@ export default async function PassengersPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const locale = await getServerLocale();
   const resolvedSearchParams = (await searchParams) ?? {};
   const selectedTab = getSelectedTab(
     getSingleQueryValue(resolvedSearchParams.tab),
   );
   const filters = getFilters(resolvedSearchParams);
   const { passengers, errors, fetchedAt, refreshMetadata } =
-    await loadPassengersData();
+    await loadPassengersData(locale);
   const duplicateNames = findDuplicateNames(passengers);
   const filteredPassengers = passengers.filter((passenger) =>
     matchesFilters(passenger, filters, selectedTab),
   );
   const rows = filteredPassengers.map((passenger) =>
-    toPassengerRow(passenger, duplicateNames),
+    toPassengerRow(passenger, duplicateNames, locale),
   );
   const selectedPassenger =
     rows.find(
@@ -1089,7 +1143,7 @@ export default async function PassengersPage({
       matchesTab(passenger, "disabled"),
     ).length,
   } satisfies Record<PassengerTabKey, number>;
-  const { tabs, activeTab } = buildTabNodes(selectedTab, filters, counts);
+  const { tabs, activeTab } = buildTabNodes(selectedTab, filters, counts, locale);
   const activeCount = passengers.filter(
     (passenger) => passenger.activeFlag,
   ).length;
@@ -1105,15 +1159,15 @@ export default async function PassengersPage({
   });
   const refreshHref = buildPassengersHref(selectedTab, filters);
   const refreshTone = getRefreshTone(refreshMetadata, errors);
-  const refreshSummary = getRefreshSummary(refreshMetadata, fetchedAt);
-  const refreshTierLabel = getRefreshTierLabel(refreshMetadata);
-  const refreshBanner = getRefreshBannerCopy(refreshMetadata);
+  const refreshSummary = getRefreshSummary(refreshMetadata, fetchedAt, locale);
+  const refreshTierLabel = getRefreshTierLabel(refreshMetadata, locale);
+  const refreshBanner = getRefreshBannerCopy(refreshMetadata, locale);
 
   const columns: CanvasTableColumn<PassengerRow>[] = [
     {
-      h: "姓名",
+      h: t("passengers.column.name", locale),
       w: 190,
-      r: (row) => (
+      r: (row: PassengerRow) => (
         <div style={{ display: "grid", gap: 5 }}>
           <Link
             href={buildPassengersHref(selectedTab, filters, {
@@ -1132,7 +1186,7 @@ export default async function PassengersPage({
             </CanvasPill>
             {row.duplicateName ? (
               <CanvasPill theme={th} tone="warn">
-                duplicate name
+                {t("passengers.duplicateName", locale)}
               </CanvasPill>
             ) : null}
           </div>
@@ -1140,46 +1194,49 @@ export default async function PassengersPage({
       ),
     },
     {
-      h: "員工編號",
+      h: t("passengers.column.employeeNo", locale),
       w: 110,
       mono: true,
-      r: (row) => row.employeeNo ?? "—",
+      r: (row: PassengerRow) =>
+        row.employeeNo ?? t("passengers.value.empty", locale),
     },
     {
-      h: "部門",
+      h: t("passengers.column.department", locale),
       w: 150,
-      r: (row) => row.departmentName ?? "—",
+      r: (row: PassengerRow) =>
+        row.departmentName ?? t("passengers.value.empty", locale),
     },
     {
-      h: "手機",
+      h: t("passengers.column.mobile", locale),
       w: 140,
       mono: true,
-      r: (row) => row.mobile ?? "—",
+      r: (row: PassengerRow) =>
+        row.mobile ?? t("passengers.value.empty", locale),
     },
     {
-      h: "電子郵件",
+      h: t("passengers.column.email", locale),
       mono: true,
-      r: (row) => row.email ?? "—",
+      r: (row: PassengerRow) => row.email ?? t("passengers.value.empty", locale),
     },
     {
-      h: "狀態",
+      h: t("passengers.column.state", locale),
       w: 110,
-      r: (row) => (
+      r: (row: PassengerRow) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
           {row.stateLabel}
         </CanvasPill>
       ),
     },
     {
-      h: "更新",
+      h: t("passengers.column.updatedAt", locale),
       w: 150,
       mono: true,
-      r: (row) => formatUpdated(row.updatedAt),
+      r: (row: PassengerRow) => formatUpdated(row.updatedAt),
     },
     {
-      h: "操作",
+      h: t("passengers.column.actions", locale),
       w: 220,
-      r: (row) => (
+      r: (row: PassengerRow) => (
         <div style={tableActionCellStyle}>
           <Link
             href={buildPassengersHref(selectedTab, filters, {
@@ -1187,10 +1244,14 @@ export default async function PassengersPage({
             })}
             style={linkButtonStyle}
           >
-            檢視
+            {t("passengers.action.view", locale)}
           </Link>
           {getRecordActions(row).map((action) =>
-            renderActionDescriptor(action, getActionLabel(action.action)),
+            renderActionDescriptor(
+              action,
+              getActionLabel(action.action, locale),
+              locale,
+            ),
           )}
         </div>
       ),
@@ -1199,7 +1260,8 @@ export default async function PassengersPage({
 
   const selectedQualityIssues: TenantPassengerQualityIssue[] =
     selectedPassenger?.qualityIssues ?? [];
-  const selectedDepartment = selectedPassenger?.departmentName ?? "—";
+  const selectedDepartment =
+    selectedPassenger?.departmentName ?? t("passengers.value.empty", locale);
   const selectedEditableUntil = selectedPassenger?.editableUntil ?? null;
   const selectedConsentVersion =
     selectedPassenger?.metadata?.consentVersion ?? null;
@@ -1210,24 +1272,28 @@ export default async function PassengersPage({
       )
     : false;
   const selectedDeepLinks = selectedPassenger
-    ? toPassengerDeepLinks(selectedPassenger, refreshHref)
+    ? toPassengerDeepLinks(selectedPassenger, refreshHref, locale)
     : [];
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="乘客通訊錄"
-        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本 · soft deactivate"
+        title={t("passengers.header.title", locale)}
+        subtitle={t("passengers.header.subtitle", locale)}
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
           <div style={actionsWrapStyle}>
             <Link href={refreshHref} style={linkButtonStyle}>
-              重新整理
+              {t("passengers.action.refresh", locale)}
             </Link>
             {pageActions.map((action) =>
-              renderActionDescriptor(action, getActionLabel(action.action)),
+              renderActionDescriptor(
+                action,
+                getActionLabel(action.action, locale),
+                locale,
+              ),
             )}
           </div>
         }
@@ -1239,7 +1305,7 @@ export default async function PassengersPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分乘客資料無法載入"
+            title={t("passengers.banner.errors.title", locale)}
             body={errors.join(" · ")}
           />
         ) : null}
@@ -1249,8 +1315,8 @@ export default async function PassengersPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="偵測到重複姓名"
-            body="backend duplicate-name warning 已落在 passenger rows；請優先使用 employee no 或 mobile 區分同名乘客。"
+            title={t("passengers.banner.duplicate.title", locale)}
+            body={t("passengers.banner.duplicate.body", locale)}
           />
         ) : null}
 
@@ -1267,34 +1333,50 @@ export default async function PassengersPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="乘客"
+            label={t("passengers.kpi.total.label", locale)}
             value={String(passengers.length)}
-            sub={`${activeCount} active / ${inactiveCount} inactive`}
+            sub={t("passengers.kpi.total.sub", locale, {
+              active: activeCount,
+              inactive: inactiveCount,
+            })}
           />
           <CanvasKPI
             theme={th}
-            label="員工"
+            label={t("passengers.kpi.employee.label", locale)}
             value={String(employeeCount)}
-            sub={`${passengers.length - employeeCount} visitor`}
+            sub={t("passengers.kpi.employee.sub", locale, {
+              visitor: passengers.length - employeeCount,
+            })}
           />
           <CanvasKPI
             theme={th}
-            label="重新整理"
+            label={t("passengers.kpi.refresh.label", locale)}
             value="T5"
-            sub={`${refreshTierLabel} · ${refreshSummary}`}
+            sub={t("passengers.kpi.refresh.sub", locale, {
+              tier: refreshTierLabel,
+              summary: refreshSummary,
+            })}
           />
           <CanvasKPI
             theme={th}
-            label="已選"
-            value={selectedPassenger ? "ready" : "none"}
-            sub={selectedPassenger ? selectedPassenger.fullName : "pick a row"}
+            label={t("passengers.kpi.selected.label", locale)}
+            value={
+              selectedPassenger
+                ? t("passengers.kpi.selected.ready", locale)
+                : t("passengers.kpi.selected.none", locale)
+            }
+            sub={
+              selectedPassenger
+                ? selectedPassenger.fullName
+                : t("passengers.kpi.selected.pickRow", locale)
+            }
           />
         </div>
 
         <CanvasCard
           theme={th}
-          title="目錄篩選"
-          subtitle="依啟用狀態、部門篩選，並以姓名／員工編號／手機搜尋。"
+          title={t("passengers.filters.title", locale)}
+          subtitle={t("passengers.filters.subtitle", locale)}
         >
           <form action="/passengers" method="get" style={filterBarStyle}>
             {selectedTab !== "all" ? (
@@ -1308,22 +1390,28 @@ export default async function PassengersPage({
               />
             ) : null}
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>搜尋</span>
+              <span style={fieldLabelStyle}>
+                {t("passengers.filters.search", locale)}
+              </span>
               <input
                 defaultValue={filters.q}
                 name="q"
-                placeholder="姓名 / 工號 / 手機"
+                placeholder={t("passengers.filters.searchPlaceholder", locale)}
                 style={fieldStyle}
               />
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>部門</span>
+              <span style={fieldLabelStyle}>
+                {t("passengers.filters.department", locale)}
+              </span>
               <select
                 defaultValue={filters.department}
                 name="department"
                 style={fieldStyle}
               >
-                <option value="">全部部門</option>
+                <option value="">
+                  {t("passengers.filters.departmentAll", locale)}
+                </option>
                 {departmentOptions.map((department) => (
                   <option key={department} value={department}>
                     {department}
@@ -1332,19 +1420,27 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>狀態</span>
+              <span style={fieldLabelStyle}>
+                {t("passengers.filters.state", locale)}
+              </span>
               <select
                 defaultValue={filters.activeState}
                 name="state"
                 style={fieldStyle}
               >
-                <option value="all">全部狀態</option>
-                <option value="active">僅啟用</option>
-                <option value="inactive">僅停用</option>
+                <option value="all">{t("passengers.filters.stateAll", locale)}</option>
+                <option value="active">
+                  {t("passengers.filters.stateActive", locale)}
+                </option>
+                <option value="inactive">
+                  {t("passengers.filters.stateInactive", locale)}
+                </option>
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>更新層級</span>
+              <span style={fieldLabelStyle}>
+                {t("passengers.filters.refreshTier", locale)}
+              </span>
               <div
                 style={{
                   ...fieldStyle,
@@ -1355,16 +1451,19 @@ export default async function PassengersPage({
               >
                 <span>{refreshTierLabel}</span>
                 <CanvasPill theme={th} tone={refreshTone}>
-                  {refreshMetadata?.dataFreshness ?? "fallback"}
+                  {t(
+                    `passengers.refresh.freshness.${refreshMetadata?.dataFreshness ?? "fallback"}`,
+                    locale,
+                  )}
                 </CanvasPill>
               </div>
             </label>
             <div style={{ display: "flex", gap: 8 }}>
               <button style={fieldStyle} type="submit">
-                套用
+                {t("passengers.action.apply", locale)}
               </button>
               <Link href="/passengers" style={linkButtonStyle}>
-                清除
+                {t("passengers.action.clear", locale)}
               </Link>
             </div>
           </form>
@@ -1375,11 +1474,14 @@ export default async function PassengersPage({
             theme={th}
             padding={0}
             style={cardStyle}
-            title="乘客名冊"
-            subtitle={`${rows.length} visible row(s) · state ${filters.activeState}`}
+            title={t("passengers.list.title", locale)}
+            subtitle={t("passengers.list.subtitle", locale, {
+              count: rows.length,
+              state: t(`passengers.filters.stateValue.${filters.activeState}`, locale),
+            })}
           >
             {emptyReason ? (
-              renderEmptyState(emptyReason, primaryPageAction)
+              renderEmptyState(emptyReason, primaryPageAction, locale)
             ) : (
               <CanvasTable<PassengerRow>
                 theme={th}
@@ -1391,11 +1493,19 @@ export default async function PassengersPage({
 
           <CanvasCard
             theme={th}
-            title="乘客明細"
+            title={t("passengers.detail.title", locale)}
             subtitle={
               selectedPassenger
-                ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "active" : "deactivated"}`
-                : "Select a row to inspect actions, deep links, and quality warnings."
+                ? t("passengers.detail.subtitleSelected", locale, {
+                    name: selectedPassenger.fullName,
+                    state: t(
+                      selectedPassenger.activeFlag
+                        ? "passengers.state.active"
+                        : "passengers.state.deactivated",
+                      locale,
+                    ),
+                  })
+                : t("passengers.detail.subtitleEmpty", locale)
             }
             style={detailCardStyle}
           >
@@ -1407,14 +1517,19 @@ export default async function PassengersPage({
                     tone={selectedPassenger.activeFlag ? "success" : "neutral"}
                     dot
                   >
-                    {selectedPassenger.activeFlag ? "active" : "deactivated"}
+                    {t(
+                      selectedPassenger.activeFlag
+                        ? "passengers.state.active"
+                        : "passengers.state.deactivated",
+                      locale,
+                    )}
                   </CanvasPill>
                   <CanvasPill theme={th} tone="info">
-                    {getKindLabel(selectedPassenger)}
+                    {getKindLabel(selectedPassenger, locale)}
                   </CanvasPill>
                   {selectedPassengerDuplicate ? (
                     <CanvasPill theme={th} tone="warn">
-                      duplicate name
+                      {t("passengers.duplicateName", locale)}
                     </CanvasPill>
                   ) : null}
                 </div>
@@ -1424,41 +1539,41 @@ export default async function PassengersPage({
                   cols={1}
                   items={[
                     {
-                      k: "乘客 ID",
+                      k: t("passengers.detail.passengerId", locale),
                       v: selectedPassenger.passengerId,
                       mono: true,
                     },
                     {
-                      k: "工號",
-                      v: selectedPassenger.employeeNo ?? "—",
+                      k: t("passengers.detail.employeeNo", locale),
+                      v: selectedPassenger.employeeNo ?? t("passengers.value.empty", locale),
                       mono: true,
                     },
-                    { k: "部門", v: selectedDepartment },
+                    { k: t("passengers.detail.department", locale), v: selectedDepartment },
                     {
-                      k: "手機",
-                      v: selectedPassenger.mobile ?? "—",
-                      mono: true,
-                    },
-                    {
-                      k: "Email",
-                      v: selectedPassenger.email ?? "—",
+                      k: t("passengers.detail.mobile", locale),
+                      v: selectedPassenger.mobile ?? t("passengers.value.empty", locale),
                       mono: true,
                     },
                     {
-                      k: "editableUntil",
+                      k: t("passengers.detail.email", locale),
+                      v: selectedPassenger.email ?? t("passengers.value.empty", locale),
+                      mono: true,
+                    },
+                    {
+                      k: t("passengers.detail.editableUntil", locale),
                       v: formatUpdated(selectedEditableUntil),
                       mono: true,
                     },
                     {
-                      k: "consentVersion",
-                      v: selectedConsentVersion ?? "—",
+                      k: t("passengers.detail.consentVersion", locale),
+                      v: selectedConsentVersion ?? t("passengers.value.empty", locale),
                     },
                     {
-                      k: "readOnlyReason",
-                      v: selectedReadOnlyReason ?? "—",
+                      k: t("passengers.detail.readOnlyReason", locale),
+                      v: selectedReadOnlyReason ?? t("passengers.value.empty", locale),
                     },
                     {
-                      k: "updatedAt",
+                      k: t("passengers.detail.updatedAt", locale),
                       v: formatUpdated(selectedPassenger.updatedAt),
                       mono: true,
                     },
@@ -1467,31 +1582,28 @@ export default async function PassengersPage({
 
                 <div style={{ display: "grid", gap: 8 }}>
                   <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Available actions
+                    {t("passengers.detail.availableActions", locale)}
                   </div>
                   <div style={actionsWrapStyle}>
                     {selectedActions.map((action) =>
                       renderActionDescriptor(
                         action,
-                        getActionLabel(action.action),
+                        getActionLabel(action.action, locale),
+                        locale,
                       ),
                     )}
                   </div>
                   <div style={subtleTextStyle}>
-                    CTAs are driven from `availableActions` when present; this
-                    page falls back to spec-safe disabled affordances until the
-                    mutation route lands.
+                    {t("passengers.detail.actionsHelp", locale)}
                   </div>
                   <div style={helperTextStyle}>
-                    Q-TEN06: passenger deactivation is soft-only. Existing
-                    bookings retain their snapshot; inactive records disappear
-                    from pickers but stay visible in historical detail.
+                    {t("passengers.detail.softDeactivateHelp", locale)}
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gap: 8 }}>
                   <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Deep links
+                    {t("passengers.detail.deepLinks", locale)}
                   </div>
                   <div style={actionsWrapStyle}>
                     {selectedDeepLinks.map((link) => (
@@ -1502,19 +1614,18 @@ export default async function PassengersPage({
                         target={link.newTab ? "_blank" : undefined}
                         rel={link.newTab ? "noreferrer" : undefined}
                       >
-                        {link.label}
+                        {link.labelKey ? t(link.labelKey, locale) : link.label}
                       </Link>
                     ))}
                   </div>
                   <div style={helperTextStyle}>
-                    Cross-app deep links follow Q-X03 and open in a new tab when
-                    the target lives in Ops Console or Platform Admin.
+                    {t("passengers.detail.deepLinksHelp", locale)}
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gap: 8 }}>
                   <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Quality issues
+                    {t("passengers.detail.qualityIssues", locale)}
                   </div>
                   {selectedQualityIssues.length > 0 ? (
                     <div style={infoListStyle}>
@@ -1524,21 +1635,20 @@ export default async function PassengersPage({
                           theme={th}
                           tone={getQualityIssueTone(issue)}
                         >
-                          {getQualityIssueLabel(issue)}
+                          {getQualityIssueLabel(issue, locale)}
                         </CanvasPill>
                       ))}
                     </div>
                   ) : (
                     <div style={subtleTextStyle}>
-                      No current data-quality warning.
+                      {t("passengers.detail.noQualityIssues", locale)}
                     </div>
                   )}
                 </div>
               </div>
             ) : (
               <div style={subtleTextStyle}>
-                目前沒有可用 passenger row。若是新租戶，這會對應 `no_data`；
-                若是套了篩選，則會落在 `filtered_empty`。
+                {t("passengers.detail.noSelection", locale)}
               </div>
             )}
           </CanvasCard>

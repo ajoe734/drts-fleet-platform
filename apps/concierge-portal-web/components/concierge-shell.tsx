@@ -3,32 +3,32 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { conciergeNavItems, findConciergeNavItem } from "@/lib/navigation";
+import { useTranslation } from "@/lib/i18n";
+import { findConciergeNavItem, getConciergeNavItems } from "@/lib/navigation";
 import { formatScopeSummary } from "@/lib/api-client";
-import { formatDeskMode } from "@/lib/desk-catalog";
+import { formatDeskMode, localizeDeskRecord } from "@/lib/desk-catalog";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 export function ConciergeShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const activeItem = findConciergeNavItem(pathname);
+  const { setLocale, t } = useTranslation();
+  const navItems = getConciergeNavItems(t);
+  const activeItem = findConciergeNavItem(pathname, t);
   const { ready, session, signOut } = useConciergePortal();
-  const desk = useSelectedDesk();
+  const selectedDesk = localizeDeskRecord(useSelectedDesk(), t);
 
   return (
     <div className="portal-shell">
       <aside className="portal-sidebar">
         <div className="brand-stack">
-          <span className="brand-badge">Phase 1 assisted-entry surface</span>
-          <h1>Concierge Portal</h1>
-          <p>
-            Dedicated site-bound shell for call point and concierge operators,
-            kept separate from the full ops control plane.
-          </p>
+          <span className="brand-badge">{t("shell.brandBadge")}</span>
+          <h1>{t("shell.title")}</h1>
+          <p>{t("shell.description")}</p>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Concierge portal navigation">
-          {conciergeNavItems.map((item) => {
+        <nav className="sidebar-nav" aria-label={t("shell.navAria")}>
+          {navItems.map((item) => {
             const isActive = item.href === pathname;
 
             return (
@@ -45,46 +45,61 @@ export function ConciergeShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="sidebar-card">
-          <strong>Limited bootstrap scope</strong>
-          <p>
-            Current repo auth has no dedicated call-point actor type. This app
-            constrains the borrowed ops bootstrap to: {formatScopeSummary()}.
-          </p>
+          <strong>{t("shell.scopeTitle")}</strong>
+          <p>{t("shell.scopeBody", { scopes: formatScopeSummary() })}</p>
         </div>
 
-        <p className="sidebar-footnote">
-          Task artifact path is `apps/concierge-portal-web`; topology docs still
-          refer to the assisted-entry family. The support packet records that
-          naming seam explicitly.
-        </p>
+        <p className="sidebar-footnote">{t("shell.footnote")}</p>
       </aside>
 
       <main className="portal-main">
         <div className="portal-frame">
           <header className="portal-topbar">
             <div className="topbar-copy">
-              <span className="topbar-eyebrow">Assisted-Entry Plane</span>
-              <h2>{activeItem?.label ?? "Concierge Portal"}</h2>
-              <p>
-                {activeItem?.note ??
-                  "Proxy booking, lookup, and callback follow-up for site-bound desks."}
-              </p>
+              <span className="topbar-eyebrow">{t("shell.topbarEyebrow")}</span>
+              <h2>{activeItem?.label ?? t("shell.defaultTitle")}</h2>
+              <p>{activeItem?.note ?? t("shell.defaultNote")}</p>
             </div>
 
             <div className="topbar-stack">
+              <div className="badge-row" aria-label={t("shell.language")}>
+                <button
+                  aria-label={t("shell.language.toZh")}
+                  className="secondary-button"
+                  onClick={() => setLocale("zh")}
+                  type="button"
+                >
+                  {t("shell.language.zh")}
+                </button>
+                <button
+                  aria-label={t("shell.language.toEn")}
+                  className="secondary-button"
+                  onClick={() => setLocale("en")}
+                  type="button"
+                >
+                  {t("shell.language.en")}
+                </button>
+              </div>
+
               <div className="badge-row">
                 <span className="meta-pill">
                   {session
-                    ? `${formatDeskMode(session.mode)} · ${session.operatorName}`
-                    : "Bootstrap required"}
+                    ? t("shell.badge.session", {
+                        mode: formatDeskMode(session.mode, t),
+                        name: session.operatorName,
+                      })
+                    : t("shell.badge.bootstrapRequired")}
                 </span>
                 <span className="meta-pill">
-                  {desk
-                    ? `${desk.siteName} · ${desk.deskName}`
-                    : "No desk selected"}
+                  {selectedDesk
+                    ? t("shell.badge.desk", {
+                        siteName: selectedDesk.siteName,
+                        deskName: selectedDesk.deskName,
+                      })
+                    : t("shell.badge.noDesk")}
                 </span>
                 <span className="meta-pill">
-                  {ready ? "Repo-local session" : "Loading bootstrap"}
+                  {ready ? t("shell.badge.ready") : t("shell.badge.loading")}
                 </span>
               </div>
 
@@ -97,7 +112,7 @@ export function ConciergeShell({ children }: { children: ReactNode }) {
                   }}
                   type="button"
                 >
-                  Clear local session
+                  {t("shell.clearSession")}
                 </button>
               ) : null}
             </div>

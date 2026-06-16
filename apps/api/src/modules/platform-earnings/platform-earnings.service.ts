@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import {
+  PLATFORM_CODE_FORWARDER_SANDBOX,
   PLATFORM_CODE_GRAB,
   PLATFORM_CODE_LINE_TAXI,
   PLATFORM_CODE_UBER,
@@ -40,6 +41,14 @@ const PLATFORM_EARNINGS_SEED: PlatformEarningsSeedRecord[] = [
     serviceFeeMinor: 12000,
     subsidyMinor: 0,
     netMinor: 68000,
+  },
+  {
+    driverId: "drv-demo-001",
+    platformCode: PLATFORM_CODE_FORWARDER_SANDBOX,
+    grossMinor: 30000,
+    serviceFeeMinor: 0,
+    subsidyMinor: 0,
+    netMinor: 30000,
   },
   {
     driverId: "drv-demo-002",
@@ -113,13 +122,18 @@ export class PlatformEarningsService {
   }> {
     if (this.dbEnabled()) {
       const items = await this.repo!.aggregateByDriver(driverId);
-      return {
-        driverId,
-        items,
-        notes: [
-          "Aggregated from ops.phase1_platform_earnings_ledger when DB is configured.",
-        ],
-      };
+      if (items.length > 0) {
+        return {
+          driverId,
+          items,
+          notes: [
+            "Aggregated from ops.phase1_platform_earnings_ledger when DB is configured.",
+          ],
+        };
+      }
+      // Fall through to the in-memory demo fallback when the ledger has no rows
+      // for this driver (e.g. demo/string driver ids that never land in the
+      // UUID-keyed ledger), so seeded demo drivers still expose a breakdown.
     }
 
     const memoryDriverId = this.resolveMemoryDriverId(driverId);

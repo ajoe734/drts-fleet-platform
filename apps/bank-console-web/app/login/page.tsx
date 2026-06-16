@@ -1,6 +1,8 @@
 import Link from "next/link";
 import {
   BANK_DEMO_TENANTS,
+  getBankTenantName,
+  getBankTenantShortName,
   resolveBankDemoTenant,
   resolveLocale,
 } from "@/lib/demo-tenants";
@@ -64,7 +66,7 @@ export default async function LoginPage({
                 href={`/login?bank=${bank.code}&locale=${locale}`}
                 key={bank.code}
               >
-                <strong>{bank.name[locale]}</strong>
+                <strong>{getBankTenantName(bank, locale)}</strong>
                 <span>{bank.issuerCode}</span>
               </Link>
             ))}
@@ -77,16 +79,16 @@ export default async function LoginPage({
           </span>
           <div className="login-account-grid">
             {ACCOUNT_PERSONAS.map((persona) => (
-              <Link
+              <a
                 className="login-account-card"
                 href={homeHref(activeBank.code, locale, persona.role)}
                 key={persona.key}
               >
-                <span>{activeBank.shortName[locale]}</span>
+                <span>{getBankTenantShortName(activeBank, locale)}</span>
                 <strong>{t(`login.${persona.key}`, locale)}</strong>
                 <small>{t("login.demoPersona", locale)}</small>
                 <em>{t("login.signIn", locale)}</em>
-              </Link>
+              </a>
             ))}
           </div>
         </article>

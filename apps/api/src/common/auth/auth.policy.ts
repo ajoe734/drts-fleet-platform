@@ -335,6 +335,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "incidents" && upperMethod === "POST") {
+    return {
+      routeKey: "incidents:create",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Incident creation (incl. driver SOS, scoped to self)",
+    };
+  }
+
   if (routePath.startsWith("incidents")) {
     return {
       routeKey: `incidents:${upperMethod}`,

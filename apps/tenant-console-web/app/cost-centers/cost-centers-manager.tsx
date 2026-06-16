@@ -27,6 +27,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import { disableCostCenterAction, upsertCostCenterAction } from "./actions";
 import type { CostCenterFlashPayload } from "./constants";
 
@@ -79,6 +80,7 @@ type CostCenterRow = {
   approvalMeta: string;
   reportLabel: string;
   reportMeta: string;
+  reportJobCount: number;
   overQuota: boolean;
   availableActions: CostCenterAction[];
 } & Record<string, unknown>;
@@ -342,31 +344,11 @@ const sectionLabelStyle: CSSProperties = {
   color: th.textMuted,
 };
 
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
-const numberFormatter = new Intl.NumberFormat("en-US");
 const T5_REFRESH_INTERVAL_MS = 30_000;
-
-function getRefreshMetaLabel(lastRefreshAt: string | null) {
-  if (!lastRefreshAt) {
-    return "自動輪詢每 30 秒一次";
-  }
-  return `自動輪詢每 30 秒一次 · 最近請求 ${formatDateTime(lastRefreshAt)}`;
-}
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return dateTimeFormatter.format(parsed).replace(/[\u00a0\u202f\u2009]/g, " ");
-}
-
-function formatCount(value: number) {
-  return numberFormatter.format(value);
-}
+type TranslateFn = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
 
 function getConditionValues(condition: TenantApprovalRuleCondition) {
   if (Array.isArray(condition.values) && condition.values.length > 0) {
@@ -415,32 +397,38 @@ function getAmountThresholdMinor(rule: TenantApprovalRuleRecord) {
   return typeof thresholdValue === "number" ? thresholdValue : null;
 }
 
-function formatSubtypeLabel(value: string) {
+function formatSubtypeLabel(value: string, translate: TranslateFn) {
   const normalized = value.toLowerCase();
-  if (normalized.includes("airport")) return "機場";
-  if (normalized.includes("overnight")) return "跨夜";
+  if (normalized.includes("airport")) {
+    return translate("costCenters.approval.subtype.airport");
+  }
+  if (normalized.includes("overnight")) {
+    return translate("costCenters.approval.subtype.overnight");
+  }
   return value;
 }
 
 function describeApproval(
   code: string,
   rules: TenantApprovalRuleRecord[],
+  translate: TranslateFn,
+  formatCount: (value: number) => string,
 ): { label: string; meta: string } {
   const relevantRules = rules.filter((rule) =>
     ruleTargetsCostCenter(rule, code),
   );
   if (relevantRules.length === 0) {
     return {
-      label: "沿用租戶規則",
-      meta: "此成本中心沒有明確 code-targeted rule。",
+      label: translate("costCenters.approval.inherit.label"),
+      meta: translate("costCenters.approval.inherit.meta"),
     };
   }
 
   const primaryRule = relevantRules[0];
   if (!primaryRule) {
     return {
-      label: "沿用租戶規則",
-      meta: "沒有可用的審批規則摘要。",
+      label: translate("costCenters.approval.inherit.label"),
+      meta: translate("costCenters.approval.missingMeta"),
     };
   }
 
@@ -453,7 +441,9 @@ function describeApproval(
         )
         .flatMap((condition) => getConditionValues(condition))
         .map((value) =>
-          typeof value === "string" ? formatSubtypeLabel(value) : null,
+          typeof value === "string"
+            ? formatSubtypeLabel(value, translate)
+            : null,
         )
         .filter((value): value is string => Boolean(value)),
     ),
@@ -461,45 +451,59 @@ function describeApproval(
 
   if (subtypeLabels.length > 0) {
     return {
-      label: `${relevantRules.length} 條規則`,
-      meta: `${subtypeLabels.join(" / ")} 需核准`,
+      label: translate("costCenters.approval.ruleCount", {
+        count: relevantRules.length,
+      }),
+      meta: translate("costCenters.approval.subtypeMeta", {
+        subtypes: subtypeLabels.join(" / "),
+      }),
     };
   }
 
   const amountThresholdMinor = getAmountThresholdMinor(primaryRule);
   if (amountThresholdMinor !== null) {
     return {
-      label: `${relevantRules.length} 條規則`,
-      meta: `> NT$ ${numberFormatter.format(
-        Math.round(amountThresholdMinor / 100),
-      )} 需核准`,
+      label: translate("costCenters.approval.ruleCount", {
+        count: relevantRules.length,
+      }),
+      meta: translate("costCenters.approval.amountMeta", {
+        amount: formatCount(Math.round(amountThresholdMinor / 100)),
+      }),
     };
   }
 
   if (primaryRule.action === "warn") {
     return {
-      label: `${relevantRules.length} 條規則`,
-      meta: "超額警示，不阻擋建立。",
+      label: translate("costCenters.approval.ruleCount", {
+        count: relevantRules.length,
+      }),
+      meta: translate("costCenters.approval.warnMeta"),
     };
   }
 
   if (primaryRule.action === "block") {
     return {
-      label: `${relevantRules.length} 條規則`,
-      meta: "超額直接阻擋建立。",
+      label: translate("costCenters.approval.ruleCount", {
+        count: relevantRules.length,
+      }),
+      meta: translate("costCenters.approval.blockMeta"),
     };
   }
 
   if (ruleUsesCostCenterOwner(primaryRule, code)) {
     return {
-      label: `${relevantRules.length} 條規則`,
-      meta: "使用 cost_center_owner approver。",
+      label: translate("costCenters.approval.ruleCount", {
+        count: relevantRules.length,
+      }),
+      meta: translate("costCenters.approval.ownerMeta"),
     };
   }
 
   return {
-    label: `${relevantRules.length} 條規則`,
-    meta: "需要進一步查看 `/rules` 的命中條件。",
+    label: translate("costCenters.approval.ruleCount", {
+      count: relevantRules.length,
+    }),
+    meta: translate("costCenters.approval.fallbackMeta"),
   };
 }
 
@@ -519,14 +523,20 @@ function includesCostCenterValue(value: unknown, code: string): boolean {
   return false;
 }
 
-function describeReports(code: string, reportJobs: ReportJobRecord[]) {
+function describeReports(
+  code: string,
+  reportJobs: ReportJobRecord[],
+  translate: TranslateFn,
+  formatDateTime: (value: string | null | undefined) => string,
+) {
   const matches = reportJobs.filter((job) =>
     includesCostCenterValue(job.filters, code),
   );
   if (matches.length === 0) {
     return {
-      label: "可做成本中心切片",
-      meta: "至 `/reports` 以 cost center scope 建立新報表。",
+      count: 0,
+      label: translate("costCenters.report.available.label"),
+      meta: translate("costCenters.report.available.meta"),
     };
   }
 
@@ -535,53 +545,103 @@ function describeReports(code: string, reportJobs: ReportJobRecord[]) {
   )[0];
 
   return {
-    label: `${matches.length} 份報表作業`,
+    count: matches.length,
+    label: translate("costCenters.report.jobCount", { count: matches.length }),
     meta: latest
-      ? `${latest.jobType} · 最新 ${formatDateTime(latest.updatedAt)}`
-      : "已有歷史作業引用此成本中心。",
+      ? translate("costCenters.report.latestMeta", {
+          jobType: latest.jobType,
+          updatedAt: formatDateTime(latest.updatedAt),
+        })
+      : translate("costCenters.report.historyMeta"),
   };
 }
 
-function formatQuotaLabel(summary?: TenantCostCenterQuotaSummary) {
-  if (!summary) return "—";
-  if (summary.limit.bookingCountLimit === null) return "∞";
-  return `${formatCount(summary.limit.bookingCountLimit)} 趟 / 月`;
+function getEmptyReasonLabel(reason: EmptyReason, translate: TranslateFn) {
+  switch (reason) {
+    case "not_provisioned":
+      return translate("costCenters.emptyReason.notProvisioned");
+    case "fetch_failed":
+      return translate("costCenters.emptyReason.fetchFailed");
+    case "permission_denied":
+      return translate("costCenters.emptyReason.permissionDenied");
+    case "external_unavailable":
+      return translate("costCenters.emptyReason.externalUnavailable");
+    case "filtered_empty":
+      return translate("costCenters.emptyReason.filteredEmpty");
+    case "no_data":
+    default:
+      return translate("costCenters.emptyReason.noData");
+  }
 }
 
-function formatQuotaMeta(summary?: TenantCostCenterQuotaSummary) {
-  if (!summary) return "配額切片暫未同步";
+function formatQuotaLabel(
+  summary: TenantCostCenterQuotaSummary | undefined,
+  translate: TranslateFn,
+  formatCount: (value: number) => string,
+) {
+  if (!summary) return translate("costCenters.value.empty");
+  if (summary.limit.bookingCountLimit === null) {
+    return translate("costCenters.value.unlimited");
+  }
+  return translate("costCenters.quota.bookingCount", {
+    count: formatCount(summary.limit.bookingCountLimit),
+  });
+}
+
+function formatQuotaMeta(
+  summary: TenantCostCenterQuotaSummary | undefined,
+  translate: TranslateFn,
+  formatCount: (value: number) => string,
+) {
+  if (!summary) return translate("costCenters.quota.meta.pending");
   if (summary.inheritedFromTenant) {
-    return "沿用租戶配額規則";
+    return translate("costCenters.quota.meta.inherited");
   }
   if (summary.limit.amountMinorLimit !== null) {
-    return `${summary.limit.currency} ${formatCount(
-      Math.round(summary.limit.amountMinorLimit / 100),
-    )}`;
+    return translate("costCenters.quota.meta.amount", {
+      currency: summary.limit.currency,
+      amount: formatCount(Math.round(summary.limit.amountMinorLimit / 100)),
+    });
   }
-  return "成本中心直接覆寫";
+  return translate("costCenters.quota.meta.override");
 }
 
-function formatUsageLabel(summary?: TenantCostCenterQuotaSummary) {
-  if (!summary) return "—";
-  return `${formatCount(
-    summary.usage.confirmedBookingCount +
-      summary.usage.pendingReservedBookingCount,
-  )} 趟`;
+function formatUsageLabel(
+  summary: TenantCostCenterQuotaSummary | undefined,
+  translate: TranslateFn,
+  formatCount: (value: number) => string,
+) {
+  if (!summary) return translate("costCenters.value.empty");
+  return translate("costCenters.usage.label", {
+    count: formatCount(
+      summary.usage.confirmedBookingCount +
+        summary.usage.pendingReservedBookingCount,
+    ),
+  });
 }
 
-function formatUsageMeta(summary?: TenantCostCenterQuotaSummary) {
-  if (!summary) return "配額資料尚未同步";
+function formatUsageMeta(
+  summary: TenantCostCenterQuotaSummary | undefined,
+  translate: TranslateFn,
+  formatCount: (value: number) => string,
+) {
+  if (!summary) return translate("costCenters.usage.meta.pending");
   if (summary.usage.bookingCountRemaining !== null) {
-    return `${formatCount(summary.usage.bookingCountRemaining)} 趟剩餘 · ${summary.usage.remainingPercent ?? "—"}%`;
+    return translate("costCenters.usage.meta.remainingBookings", {
+      count: formatCount(summary.usage.bookingCountRemaining),
+      percent:
+        summary.usage.remainingPercent ?? translate("costCenters.value.empty"),
+    });
   }
   if (summary.usage.amountMinorRemaining !== null) {
-    return `${summary.limit.currency} ${formatCount(
-      Math.round(summary.usage.amountMinorRemaining / 100),
-    )} 剩餘`;
+    return translate("costCenters.usage.meta.remainingAmount", {
+      currency: summary.limit.currency,
+      amount: formatCount(Math.round(summary.usage.amountMinorRemaining / 100)),
+    });
   }
   return summary.inheritedFromTenant
-    ? "沿用租戶月配額"
-    : "此成本中心無硬性上限";
+    ? translate("costCenters.usage.meta.inherited")
+    : translate("costCenters.usage.meta.noLimit");
 }
 
 function getUsagePercent(summary?: TenantCostCenterQuotaSummary) {
@@ -621,7 +681,7 @@ function buildTopLevelAction(): CostCenterAction {
     action: "create",
     enabled: true,
     riskLevel: "medium",
-    label: "新增",
+    label: "",
     intent: "create",
   };
 }
@@ -657,16 +717,16 @@ function buildFallbackRowActions(
   ];
 }
 
-function toCostCenterActionLabel(action: string) {
+function toCostCenterActionLabel(action: string, translate: TranslateFn) {
   switch (action) {
     case "create":
-      return "新增";
+      return translate("costCenters.action.create");
     case "update":
-      return "更新";
+      return translate("costCenters.action.update");
     case "disable":
-      return "停用";
+      return translate("costCenters.action.disable");
     case "reactivate":
-      return "重新啟用";
+      return translate("costCenters.action.reactivate");
     default:
       return null;
   }
@@ -688,6 +748,7 @@ function buildRowActions(
   costCenter: TenantCostCenterRecord & {
     availableActions?: ResourceActionDescriptor[];
   },
+  translate: TranslateFn,
 ): CostCenterAction[] {
   const sourceActions =
     costCenter.availableActions && costCenter.availableActions.length > 0
@@ -698,7 +759,7 @@ function buildRowActions(
 
   sourceActions.forEach((action) => {
     const intent = toCostCenterActionIntent(action.action);
-    const label = toCostCenterActionLabel(action.action);
+    const label = toCostCenterActionLabel(action.action, translate);
     if (!intent || !label) {
       return;
     }
@@ -715,7 +776,8 @@ function buildRowActions(
     ? resolvedActions
     : buildFallbackRowActions(costCenter).map((action) => ({
         ...action,
-        label: toCostCenterActionLabel(action.action) ?? action.action,
+        label:
+          toCostCenterActionLabel(action.action, translate) ?? action.action,
         intent: toCostCenterActionIntent(action.action) ?? "update",
         code: costCenter.code,
       }));
@@ -725,29 +787,35 @@ function buildLinkedUserHref(userId: string) {
   return `/users?userId=${encodeURIComponent(userId)}`;
 }
 
-function buildStateMeta(row: CostCenterRow) {
+function buildStateMeta(row: CostCenterRow, translate: TranslateFn) {
   if (row.activeFlag) {
-    return "可用於新建立與額度歸因。";
+    return translate("costCenters.state.activeMeta");
   }
-  return row.disabledReason?.trim() || "停用後保留歷史歸因。";
+  return (
+    row.disabledReason?.trim() || translate("costCenters.state.disabledMeta")
+  );
 }
 
 function buildStateTone(row: CostCenterRow): CanvasTone {
   return row.activeFlag ? "success" : "neutral";
 }
 
-function buildStateLabel(row: CostCenterRow) {
-  return row.activeFlag ? "啟用" : "停用";
+function buildStateLabel(row: CostCenterRow, translate: TranslateFn) {
+  return row.activeFlag
+    ? translate("costCenters.state.active")
+    : translate("costCenters.state.disabled");
 }
 
-function getActionHelpText(action: CostCenterAction) {
+function getActionHelpText(action: CostCenterAction, translate: TranslateFn) {
   if (action.enabled) {
     if (action.intent === "disable" && action.requiresReason) {
-      return "需要填寫停用原因";
+      return translate("costCenters.action.disableReasonRequired");
     }
-    return `${action.riskLevel} 風險操作`;
+    return translate(`costCenters.risk.${action.riskLevel}`);
   }
-  return action.disabledReasonCode ?? "目前無法執行";
+  return (
+    action.disabledReasonCode ?? translate("costCenters.action.unavailable")
+  );
 }
 
 function buildDraft(
@@ -802,43 +870,43 @@ function resolveEmptyReason(
   return null;
 }
 
-function getEmptyCopy(reason: EmptyReason) {
+function getEmptyCopy(reason: EmptyReason, translate: TranslateFn) {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "治理模組尚未開通",
-        body: "租戶尚未完成成本中心治理初始設定。先建立第一個成本中心，之後才能穩定做 quota 與 approval linkage。",
+        title: translate("costCenters.empty.notProvisioned.title"),
+        body: translate("costCenters.empty.notProvisioned.body"),
         tone: "info" as CanvasTone,
       };
     case "fetch_failed":
       return {
-        title: "成本中心清單暫時載入失敗",
-        body: "頁面沒有拿到完整目錄。請重新整理；若持續失敗，改去 `/audit` 檢查最近治理寫入與 API 錯誤。",
+        title: translate("costCenters.empty.fetchFailed.title"),
+        body: translate("costCenters.empty.fetchFailed.body"),
         tone: "warn" as CanvasTone,
       };
     case "permission_denied":
       return {
-        title: "目前身分沒有治理權限",
-        body: "這個 actor 沒有可用的成本中心維護能力，因此不顯示可寫入的治理資料。",
+        title: translate("costCenters.empty.permissionDenied.title"),
+        body: translate("costCenters.empty.permissionDenied.body"),
         tone: "warn" as CanvasTone,
       };
     case "external_unavailable":
       return {
-        title: "外部依賴暫時不可用",
-        body: "配額或報表切片依賴的下游資料目前不穩定。可以先重整，或稍後再回來查看 attribution 與 quota posture。",
+        title: translate("costCenters.empty.externalUnavailable.title"),
+        body: translate("costCenters.empty.externalUnavailable.body"),
         tone: "warn" as CanvasTone,
       };
     case "filtered_empty":
       return {
-        title: "目前篩選條件沒有命中任何成本中心",
-        body: "清空搜尋文字、放寬 owner filter，或把 disabled rows 打開即可回到完整目錄。",
+        title: translate("costCenters.empty.filteredEmpty.title"),
+        body: translate("costCenters.empty.filteredEmpty.body"),
         tone: "neutral" as CanvasTone,
       };
     case "no_data":
     default:
       return {
-        title: "尚未建立任何成本中心",
-        body: "這是 `no_data` 狀態。先建立第一個成本中心，再把 quota 與 approval linkage 導回 `/rules`、報表 attribution 導回 `/reports`。",
+        title: translate("costCenters.empty.noData.title"),
+        body: translate("costCenters.empty.noData.body"),
         tone: "info" as CanvasTone,
       };
   }
@@ -855,6 +923,7 @@ export function CostCentersManager({
   initialEmptyReason,
 }: CostCentersManagerProps) {
   const router = useRouter();
+  const { locale, t } = useTranslation();
   const [flash, setFlash] = useState<CostCenterFlashPayload | null>(null);
   const [pending, startTransition] = useTransition();
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
@@ -872,6 +941,33 @@ export function CostCentersManager({
   const safeApprovalRules = Array.isArray(approvalRules) ? approvalRules : [];
   const safeReportJobs = Array.isArray(reportJobs) ? reportJobs : [];
 
+  function formatDateTime(value: string | null | undefined) {
+    if (!value) return t("costCenters.value.empty");
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return t("costCenters.value.empty");
+    return new Intl.DateTimeFormat(locale === "zh" ? "zh-Hant" : "en-US", {
+      dateStyle: "short",
+      timeStyle: "short",
+    })
+      .format(parsed)
+      .replace(/[\u00a0\u202f\u2009]/g, " ");
+  }
+
+  function formatCount(value: number) {
+    return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US").format(
+      value,
+    );
+  }
+
+  function getRefreshMetaLabel(lastRefreshAt: string | null) {
+    if (!lastRefreshAt) {
+      return t("costCenters.refresh.polling");
+    }
+    return t("costCenters.refresh.requestedAt", {
+      requestedAt: formatDateTime(lastRefreshAt),
+    });
+  }
+
   const topLevelAction = buildTopLevelAction();
   const activeUsers = safeUsers
     .filter((user) => user.status === "active")
@@ -888,8 +984,18 @@ export function CostCentersManager({
     })
     .map((costCenter) => {
       const quotaSummary = quotaSummariesByCode[costCenter.code];
-      const approval = describeApproval(costCenter.code, safeApprovalRules);
-      const reports = describeReports(costCenter.code, safeReportJobs);
+      const approval = describeApproval(
+        costCenter.code,
+        safeApprovalRules,
+        t,
+        formatCount,
+      );
+      const reports = describeReports(
+        costCenter.code,
+        safeReportJobs,
+        t,
+        formatDateTime,
+      );
       return {
         code: costCenter.code,
         name: costCenter.name,
@@ -898,17 +1004,18 @@ export function CostCentersManager({
         ownerUserId: costCenter.ownerUserId,
         activeFlag: costCenter.activeFlag,
         disabledReason: costCenter.disabledReason,
-        quotaLabel: formatQuotaLabel(quotaSummary),
-        quotaMeta: formatQuotaMeta(quotaSummary),
-        usageLabel: formatUsageLabel(quotaSummary),
-        usageMeta: formatUsageMeta(quotaSummary),
+        quotaLabel: formatQuotaLabel(quotaSummary, t, formatCount),
+        quotaMeta: formatQuotaMeta(quotaSummary, t, formatCount),
+        usageLabel: formatUsageLabel(quotaSummary, t, formatCount),
+        usageMeta: formatUsageMeta(quotaSummary, t, formatCount),
         usagePercent: getUsagePercent(quotaSummary),
         approvalLabel: approval.label,
         approvalMeta: approval.meta,
         reportLabel: reports.label,
         reportMeta: reports.meta,
+        reportJobCount: reports.count,
         overQuota: isOverQuota(quotaSummary),
-        availableActions: buildRowActions(costCenter),
+        availableActions: buildRowActions(costCenter, t),
       };
     });
 
@@ -939,9 +1046,8 @@ export function CostCentersManager({
   const activeCount = rows.filter((row) => row.activeFlag).length;
   const disabledCount = rows.length - activeCount;
   const overQuotaCount = rows.filter((row) => row.overQuota).length;
-  const attributedReportCount = rows.filter((row) =>
-    row.reportLabel.includes("報表作業"),
-  ).length;
+  const attributedReportCount = rows.filter((row) => row.reportJobCount > 0)
+    .length;
   const unresolvedSamples = coverageReport?.unresolvedSamples ?? [];
   const freshestQuotaAt = Object.values(quotaSummariesByCode)
     .filter(
@@ -1039,7 +1145,7 @@ export function CostCentersManager({
 
   const columns: CanvasTableColumn<CostCenterRow>[] = [
     {
-      h: "代碼",
+      h: t("costCenters.table.code"),
       k: "code",
       w: 124,
       mono: true,
@@ -1056,33 +1162,36 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "名稱",
+      h: t("costCenters.table.name"),
       w: 214,
       r: (row) => (
         <div style={titleStackStyle}>
           <span style={titlePrimaryStyle}>{row.name}</span>
           <span style={titleMetaStyle}>
-            {row.description ?? (row.activeFlag ? "未填描述" : "已停用")}
+            {row.description ??
+              (row.activeFlag
+                ? t("costCenters.table.descriptionMissing")
+                : t("costCenters.state.disabled"))}
           </span>
         </div>
       ),
     },
     {
-      h: "狀態",
+      h: t("costCenters.table.state"),
       w: 150,
       r: (row) => (
         <div style={titleStackStyle}>
           <span>
             <CanvasPill theme={th} tone={buildStateTone(row)}>
-              {buildStateLabel(row)}
+              {buildStateLabel(row, t)}
             </CanvasPill>
           </span>
-          <span style={titleMetaStyle}>{buildStateMeta(row)}</span>
+          <span style={titleMetaStyle}>{buildStateMeta(row, t)}</span>
         </div>
       ),
     },
     {
-      h: "負責人",
+      h: t("costCenters.table.owner"),
       w: 144,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1094,16 +1203,18 @@ export function CostCentersManager({
               {row.ownerName ?? row.ownerUserId}
             </Link>
           ) : (
-            <span style={titlePrimaryStyle}>{row.ownerName ?? "未指定"}</span>
+            <span style={titlePrimaryStyle}>
+              {row.ownerName ?? t("costCenters.owner.unassigned")}
+            </span>
           )}
           <span style={titleMetaStyle}>
-            {row.ownerUserId ?? "可改派租戶使用者"}
+            {row.ownerUserId ?? t("costCenters.owner.assignable")}
           </span>
         </div>
       ),
     },
     {
-      h: "配額",
+      h: t("costCenters.table.quota"),
       w: 138,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1115,7 +1226,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "使用",
+      h: t("costCenters.table.usage"),
       w: 188,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1139,7 +1250,9 @@ export function CostCentersManager({
               />
             </div>
             <span style={{ ...titleMetaStyle, ...monoStyle }}>
-              {row.usagePercent === null ? "—" : `${row.usagePercent}%`}
+              {row.usagePercent === null
+                ? t("costCenters.value.empty")
+                : `${row.usagePercent}%`}
             </span>
           </div>
           <span style={titleMetaStyle}>{row.usageMeta}</span>
@@ -1147,7 +1260,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "審批 / 報表",
+      h: t("costCenters.table.approvalReports"),
       w: 236,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1172,7 +1285,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "操作",
+      h: t("costCenters.table.actions"),
       w: 160,
       r: (row) => (
         <div style={actionColumnStyle}>
@@ -1182,7 +1295,7 @@ export function CostCentersManager({
               type="button"
               disabled={pending || !action.enabled}
               onClick={() => openAction(action)}
-              title={getActionHelpText(action)}
+              title={getActionHelpText(action, t)}
               style={{
                 ...(action.intent === "disable"
                   ? inlineDangerButtonStyle
@@ -1199,14 +1312,14 @@ export function CostCentersManager({
     },
   ];
 
-  const emptyCopy = emptyReason ? getEmptyCopy(emptyReason) : null;
+  const emptyCopy = emptyReason ? getEmptyCopy(emptyReason, t) : null;
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="成本中心"
-        subtitle="部門 · 月配額 · 預設審批規則 (Q-TEN11)"
+        title={t("costCenters.header.title")}
+        subtitle={t("costCenters.header.subtitle")}
         actions={
           <>
             <CanvasBtn
@@ -1218,7 +1331,7 @@ export function CostCentersManager({
                 router.refresh();
               }}
             >
-              重新整理
+              {t("costCenters.action.refresh")}
             </CanvasBtn>
             <CanvasBtn
               theme={th}
@@ -1228,7 +1341,7 @@ export function CostCentersManager({
               onClick={() => openAction(topLevelAction)}
               disabled={pending || !topLevelAction.enabled}
             >
-              {topLevelAction.label}
+              {t("costCenters.action.create")}
             </CanvasBtn>
           </>
         }
@@ -1250,7 +1363,7 @@ export function CostCentersManager({
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分治理切片未完整載入"
+            title={t("costCenters.banner.partialLoad.title")}
             body={errors.join(" · ")}
           />
         ) : null}
@@ -1259,54 +1372,73 @@ export function CostCentersManager({
           theme={th}
           tone="info"
           icon="warn"
-          title="T5 更新層級：成本中心目錄、額度、規則、報表每 30 秒輪詢"
-          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新額度更新 ${formatDateTime(freshestQuotaAt)} · 負責人連到 /users，簽核規則連到 /rules，報表歸因連到 /reports。`}
+          title={t("costCenters.banner.refresh.title")}
+          body={t("costCenters.banner.refresh.body", {
+            refreshMeta: getRefreshMetaLabel(lastRefreshAt),
+            latestQuotaAt: formatDateTime(freshestQuotaAt),
+          })}
         />
 
         <div style={topGridStyle}>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>成本中心</span>
+            <span style={kpiLabelStyle}>
+              {t("costCenters.kpi.total.label")}
+            </span>
             <span style={kpiValueStyle}>{formatCount(rows.length)}</span>
-            <span style={kpiMetaStyle}>目前租戶目錄總數</span>
+            <span style={kpiMetaStyle}>{t("costCenters.kpi.total.meta")}</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>啟用</span>
+            <span style={kpiLabelStyle}>
+              {t("costCenters.kpi.active.label")}
+            </span>
             <span style={kpiValueStyle}>{formatCount(activeCount)}</span>
-            <span style={kpiMetaStyle}>停用列可用獨立篩選顯示</span>
+            <span style={kpiMetaStyle}>{t("costCenters.kpi.active.meta")}</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>超過配額</span>
+            <span style={kpiLabelStyle}>
+              {t("costCenters.kpi.overQuota.label")}
+            </span>
             <span style={kpiValueStyle}>{formatCount(overQuotaCount)}</span>
-            <span style={kpiMetaStyle}>超額列以危險狀態標記</span>
+            <span style={kpiMetaStyle}>
+              {t("costCenters.kpi.overQuota.meta")}
+            </span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>歸屬報表</span>
+            <span style={kpiLabelStyle}>
+              {t("costCenters.kpi.reports.label")}
+            </span>
             <span style={kpiValueStyle}>
               {formatCount(attributedReportCount)}
             </span>
-            <span style={kpiMetaStyle}>已命中成本中心篩選的報表作業</span>
+            <span style={kpiMetaStyle}>
+              {t("costCenters.kpi.reports.meta")}
+            </span>
           </div>
         </div>
 
         <CanvasCard theme={th}>
           <div style={filterGridStyle}>
             <label>
-              <span style={fieldLabelStyle}>搜尋</span>
+              <span style={fieldLabelStyle}>
+                {t("costCenters.filter.search")}
+              </span>
               <input
                 style={nativeInputStyle}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜尋代碼、名稱、負責人"
+                placeholder={t("costCenters.filter.searchPlaceholder")}
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>負責人</span>
+              <span style={fieldLabelStyle}>
+                {t("costCenters.filter.owner")}
+              </span>
               <select
                 style={nativeInputStyle}
                 value={ownerFilter}
                 onChange={(event) => setOwnerFilter(event.target.value)}
               >
-                <option value="">全部 owner</option>
+                <option value="">{t("costCenters.filter.ownerAll")}</option>
                 {activeUsers.map((user) => (
                   <option key={user.userId} value={user.userId}>
                     {user.displayName}
@@ -1320,11 +1452,15 @@ export function CostCentersManager({
                 onChange={(event) => setShowDisabled(event.target.checked)}
                 type="checkbox"
               />
-              顯示 disabled 成本中心
+              {t("costCenters.filter.showDisabled")}
             </label>
             <div style={checkboxRowStyle}>
-              <span style={{ color: th.textMuted }}>空狀態原因預覽：</span>
-              <code style={monoStyle}>{initialEmptyReason ?? "auto"}</code>
+              <span style={{ color: th.textMuted }}>
+                {t("costCenters.filter.emptyPreview")}
+              </span>
+              <code style={monoStyle}>
+                {initialEmptyReason ?? t("costCenters.filter.emptyPreviewAuto")}
+              </code>
             </div>
           </div>
         </CanvasCard>
@@ -1335,7 +1471,7 @@ export function CostCentersManager({
               {emptyCopy ? (
                 <div style={emptyStateStyle}>
                   <CanvasPill theme={th} tone={emptyCopy.tone}>
-                    {emptyReason}
+                    {getEmptyReasonLabel(emptyReason ?? "no_data", t)}
                   </CanvasPill>
                   <div style={emptyTitleStyle}>{emptyCopy.title}</div>
                   <div style={emptyBodyStyle}>{emptyCopy.body}</div>
@@ -1348,7 +1484,7 @@ export function CostCentersManager({
                         router.refresh();
                       }}
                     >
-                      重新整理
+                      {t("costCenters.action.refresh")}
                     </CanvasBtn>
                     {(emptyReason === "no_data" ||
                       emptyReason === "not_provisioned") &&
@@ -1359,7 +1495,7 @@ export function CostCentersManager({
                         size="sm"
                         onClick={() => openAction(topLevelAction)}
                       >
-                        建立第一個成本中心
+                        {t("costCenters.empty.createFirst")}
                       </CanvasBtn>
                     ) : null}
                     {emptyReason === "filtered_empty" ? (
@@ -1372,7 +1508,7 @@ export function CostCentersManager({
                           setShowDisabled(true);
                         }}
                       >
-                        清空篩選
+                        {t("costCenters.action.clearFilters")}
                       </CanvasBtn>
                     ) : null}
                   </div>
@@ -1389,31 +1525,35 @@ export function CostCentersManager({
 
           <div style={sideLaneStyle}>
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>編輯器</div>
+              <div style={sectionLabelStyle}>
+                {t("costCenters.editor.title")}
+              </div>
               {mode === null ? (
                 <div style={textWrapStyle}>
-                  選擇新增、更新、停用或重新啟用，所有 CTA 都由本頁的
-                  `availableActions`
-                  描述陣列驅動，而不是直接把按鈕硬寫在表格外。
+                  {t("costCenters.editor.idleBody")}
                 </div>
               ) : mode === "disable" ? (
                 <div style={formGridStyle}>
-                  <CanvasField theme={th} label="停用原因">
+                  <CanvasField
+                    theme={th}
+                    label={t("costCenters.form.disableReason")}
+                  >
                     <textarea
                       style={nativeTextAreaStyle}
                       value={disableReason}
                       onChange={(event) => setDisableReason(event.target.value)}
-                      placeholder="例如：合併至新部門成本中心、停用舊代碼"
+                      placeholder={t(
+                        "costCenters.form.disableReasonPlaceholder",
+                      )}
                     />
                   </CanvasField>
                   <div style={formFooterStyle}>
                     <span style={formNoteStyle}>
-                      high-risk action 需要原因。停用後 row 仍保留並可透過
-                      disabled filter 查看。
+                      {t("costCenters.form.disableNote")}
                     </span>
                     <div style={actionRowStyle}>
                       <CanvasBtn theme={th} size="sm" onClick={closeEditor}>
-                        取消
+                        {t("costCenters.action.cancel")}
                       </CanvasBtn>
                       <button
                         type="button"
@@ -1425,7 +1565,7 @@ export function CostCentersManager({
                           opacity: pending ? 0.55 : 1,
                         }}
                       >
-                        確認停用
+                        {t("costCenters.action.confirmDisable")}
                       </button>
                     </div>
                   </div>
@@ -1433,38 +1573,44 @@ export function CostCentersManager({
               ) : (
                 <div style={formGridStyle}>
                   <input type="hidden" value={draft.code} />
-                  <CanvasField theme={th} label="代碼">
+                  <CanvasField theme={th} label={t("costCenters.form.code")}>
                     <input
                       style={nativeInputStyle}
                       value={draft.code}
                       onChange={(event) =>
                         updateDraft("code", event.target.value)
                       }
-                      placeholder="CC-FIN-04"
+                      placeholder={t("costCenters.form.codePlaceholder")}
                       disabled={mode !== "create"}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="名稱">
+                  <CanvasField theme={th} label={t("costCenters.form.name")}>
                     <input
                       style={nativeInputStyle}
                       value={draft.name}
                       onChange={(event) =>
                         updateDraft("name", event.target.value)
                       }
-                      placeholder="財務處"
+                      placeholder={t("costCenters.form.namePlaceholder")}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="說明">
+                  <CanvasField
+                    theme={th}
+                    label={t("costCenters.form.description")}
+                  >
                     <textarea
                       style={nativeTextAreaStyle}
                       value={draft.description}
                       onChange={(event) =>
                         updateDraft("description", event.target.value)
                       }
-                      placeholder="描述此成本中心主要歸屬的差旅與使用情境"
+                      placeholder={t("costCenters.form.descriptionPlaceholder")}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="負責租戶使用者">
+                  <CanvasField
+                    theme={th}
+                    label={t("costCenters.form.ownerUser")}
+                  >
                     <select
                       style={nativeInputStyle}
                       value={draft.ownerUserId}
@@ -1477,7 +1623,9 @@ export function CostCentersManager({
                         updateDraft("ownerName", user?.displayName ?? "");
                       }}
                     >
-                      <option value="">未指定</option>
+                      <option value="">
+                        {t("costCenters.owner.unassigned")}
+                      </option>
                       {activeUsers.map((user) => (
                         <option key={user.userId} value={user.userId}>
                           {user.displayName}
@@ -1493,15 +1641,15 @@ export function CostCentersManager({
                       }
                       type="checkbox"
                     />
-                    Active directory row
+                    {t("costCenters.form.activeRow")}
                   </label>
                   <div style={formFooterStyle}>
                     <span style={formNoteStyle}>
-                      medium-risk action 會直接送到 published upsert command。
+                      {t("costCenters.form.upsertNote")}
                     </span>
                     <div style={actionRowStyle}>
                       <CanvasBtn theme={th} size="sm" onClick={closeEditor}>
-                        取消
+                        {t("costCenters.action.cancel")}
                       </CanvasBtn>
                       <CanvasBtn
                         theme={th}
@@ -1519,10 +1667,10 @@ export function CostCentersManager({
                         }
                       >
                         {mode === "reactivate"
-                          ? "重新啟用"
+                          ? t("costCenters.action.reactivate")
                           : mode === "update"
-                            ? "儲存更新"
-                            : "建立成本中心"}
+                            ? t("costCenters.action.saveUpdate")
+                            : t("costCenters.action.createCenter")}
                       </CanvasBtn>
                     </div>
                   </div>
@@ -1531,59 +1679,75 @@ export function CostCentersManager({
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>跨應用深層連結</div>
+              <div style={sectionLabelStyle}>
+                {t("costCenters.links.title")}
+              </div>
               <ul style={listStyle}>
                 <li>
                   <Link href="/users" style={linkStyle}>
                     /users
                   </Link>{" "}
-                  追 owner tenant user、角色指派與 cost center ownership。
+                  {t("costCenters.links.users")}
                 </li>
                 <li>
                   <Link href="/rules" style={linkStyle}>
                     /rules
                   </Link>{" "}
-                  查看 code-targeted rule、owner-based approver 與 precedence。
+                  {t("costCenters.links.rules")}
                 </li>
                 <li>
                   <Link href="/reports" style={linkStyle}>
                     /reports
                   </Link>{" "}
-                  追查哪些報表 job 對成本中心做 period/scope attribution。
+                  {t("costCenters.links.reports")}
                 </li>
                 <li>
                   <Link href="/audit" style={linkStyle}>
                     /audit
                   </Link>{" "}
-                  驗證 `upsert_cost_center` / `disable_cost_center` 的治理軌跡。
+                  {t("costCenters.links.audit")}
                 </li>
               </ul>
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>涵蓋後續</div>
+              <div style={sectionLabelStyle}>
+                {t("costCenters.coverage.title")}
+              </div>
               <div style={titleStackStyle}>
                 <span style={titlePrimaryStyle}>
                   {coverageReport
-                    ? `${formatCount(coverageReport.unresolvedCount)} unresolved legacy values`
-                    : "尚未取得 coverage report"}
+                    ? t("costCenters.coverage.summary", {
+                        count: formatCount(coverageReport.unresolvedCount),
+                      })
+                    : t("costCenters.coverage.unavailable")}
                 </span>
                 <span style={titleMetaStyle}>
                   {coverageReport
-                    ? `resolved ${formatCount(coverageReport.resolvedCount)} / total ${formatCount(coverageReport.totalBookings)} · generated ${formatDateTime(coverageReport.generatedAt)}`
-                    : "這個切片用來判斷該建立新成本中心，還是擴充既有目錄。"}
+                    ? t("costCenters.coverage.meta", {
+                        resolved: formatCount(coverageReport.resolvedCount),
+                        total: formatCount(coverageReport.totalBookings),
+                        generatedAt: formatDateTime(coverageReport.generatedAt),
+                      })
+                    : t("costCenters.coverage.help")}
                 </span>
               </div>
               {unresolvedSamples.length > 0 ? (
                 <>
-                  <div style={sectionLabelStyle}>未解決樣本</div>
+                  <div style={sectionLabelStyle}>
+                    {t("costCenters.coverage.samplesTitle")}
+                  </div>
                   <ul style={listStyle}>
                     {unresolvedSamples.slice(0, 4).map((sample) => (
                       <li key={sample.rawCostCenter}>
                         <span style={monoStyle}>{sample.rawCostCenter}</span>
-                        {` · ${formatCount(sample.occurrences)} 筆`}
+                        {t("costCenters.coverage.sampleOccurrences", {
+                          count: formatCount(sample.occurrences),
+                        })}
                         {sample.suggestion
-                          ? ` · 建議 ${sample.suggestion}`
+                          ? t("costCenters.coverage.sampleSuggestion", {
+                              suggestion: sample.suggestion,
+                            })
                           : ""}
                       </li>
                     ))}
@@ -1593,14 +1757,17 @@ export function CostCentersManager({
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>停用可見性</div>
+              <div style={sectionLabelStyle}>
+                {t("costCenters.visibility.title")}
+              </div>
               <div style={titleStackStyle}>
                 <span style={titlePrimaryStyle}>
-                  {formatCount(disabledCount)} disabled rows
+                  {t("costCenters.visibility.summary", {
+                    count: formatCount(disabledCount),
+                  })}
                 </span>
                 <span style={titleMetaStyle}>
-                  packet 要求 disabled 成本中心可見且有獨立
-                  filter，不能直接從目錄消失。
+                  {t("costCenters.visibility.meta")}
                 </span>
               </div>
             </CanvasCard>

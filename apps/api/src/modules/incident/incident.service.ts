@@ -119,10 +119,20 @@ export class IncidentService implements OnModuleInit {
   }
 
   createIncident(
-    command: CreateIncidentCommand,
+    inputCommand: CreateIncidentCommand,
     requestId?: string,
     identity: BootstrapRequestIdentity | null = null,
   ) {
+    // A driver may only file incidents (incl. SOS) for themselves; never trust a
+    // client-supplied reportedBy / relatedDriverId from the driver realm.
+    const command =
+      identity?.realm === "driver" && identity.actorId
+        ? {
+            ...inputCommand,
+            reportedBy: identity.actorId,
+            relatedDriverId: identity.actorId,
+          }
+        : inputCommand;
     this.assertValidCategory(command.category);
     this.assertValidSeverity(command.severity);
     this.assertNonBlank(command.title, "title");

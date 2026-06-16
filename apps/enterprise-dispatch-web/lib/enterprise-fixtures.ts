@@ -1,3 +1,5 @@
+import { type Locale, type TranslationKey, t } from "@/lib/translations";
+
 export type BookingState =
   | "assigned"
   | "approval"
@@ -38,35 +40,41 @@ export interface EnterpriseBooking {
 
 export const enterpriseTenant = {
   name: "鴻碩科技",
-  department: "產品部",
+  host: "go.hongshuo.com.tw",
+  appHost: "hongshuo-workspace",
   supportPhone: "0800-200-118",
   supportEmail: "dispatch-support@hongshuo.example",
 };
 
 export const enterpriseUser = {
   name: "林宜君",
-  role: "行政祕書",
-  dept: "營運支援",
 };
 
-export const enterprisePassengers = [
+// Demo driver/vehicle shown on active-trip and detail surfaces (proper nouns).
+export const enterpriseDriver = {
+  name: "張家豪 · 4.9 ★",
+  vehicle: "Toyota Alphard · ARJ-7720",
+  placard: "Sato 様",
+};
+
+const PASSENGER_KEYS = [
   "林宜君",
   "林冠廷",
   "陳思妤",
-  "訪客 · Sato Kenji",
+  "fixture.passenger.guestSato",
 ] as const;
 
-export const enterpriseCostCenters = [
-  "CC-PRD-01 · 產品部一般差旅",
-  "CC-PRD-07 · 產品部客戶接待",
-  "CC-OPS-03 · 營運支援行政",
+const COST_CENTER_KEYS = [
+  ["CC-PRD-01", "fixture.costCenter.prd01"],
+  ["CC-PRD-07", "fixture.costCenter.prd07"],
+  ["CC-OPS-03", "fixture.costCenter.ops03"],
 ] as const;
 
-export const enterpriseAddresses = [
-  "台北總部 · 台北市信義區松高路 19 號",
-  "南港研發中心 · 台北市南港區三重路 19-2 號",
-  "桃園機場 T2 · 桃園市大園區航站南路 9 號",
-  "君悅酒店 · 台北市信義區松壽路 2 號",
+const ADDRESS_KEYS = [
+  "fixture.place.taipeiHqFull",
+  "fixture.place.nangangRdcFull",
+  "fixture.place.taoyuanT2Full",
+  "fixture.place.grandHyattFull",
 ] as const;
 
 export const enterpriseQuotaSummary = {
@@ -76,65 +84,31 @@ export const enterpriseQuotaSummary = {
 };
 
 export const enterpriseBookingDraft = {
-  passenger: "訪客 · Sato Kenji",
+  passenger: "fixture.passenger.guestSato",
   bookedBy: "林宜君",
-  pickup: "桃園機場 T2 · 桃園市大園區航站南路 9 號",
-  dropoff: "君悅酒店 · 台北市信義區松壽路 2 號",
+  pickup: "fixture.place.taoyuanT2Full",
+  dropoff: "fixture.place.grandHyattFull",
   reservationWindow: "06/13 15:20",
-  costCenter: "CC-PRD-07 · 產品部客戶接待",
-  approval: "超過 NT$ 1,500，需主管審批",
-  quotaImpact: "預估佔用 NT$ 1,980 與 1 趟額度",
-  vehicle: "商務車",
+  costCenterCode: "CC-PRD-07",
+  costCenter: "CC-PRD-07",
+  approval: "approval_required",
+  quotaImpact: "quota_impact",
+  vehicle: "business",
   flight: "JL809",
   terminal: "T1",
   luggage: "3 件",
-  onsiteContact: "周敏 · #1180",
-  notes: "外賓接待，需於接機大廳舉牌。",
+  onsiteContact: "fixture.contact.zhou",
+  notes: "guest_pickup_note",
 };
-
-export const enterpriseReviewChecklist = [
-  "乘客與下單人不同，現場聯絡與費用歸屬已分開顯示。",
-  "成本中心與 quota impact 已確認，提交後可能先進入 accepted + pending。",
-  "若主管審批尚未完成，booking detail 會以 availableActions 控制下一步。",
-] as const;
-
-export const enterpriseTripProgress = [
-  "預約已建立",
-  "主管已核准",
-  "已派車",
-  "司機前往上車點",
-  "行程完成",
-] as const;
-
-export const enterpriseSupportFaq = [
-  {
-    q: "為什麼送出後會先看到待審批？",
-    a: "企業派車採 command pattern，系統先接受請求，再等待審批或派車結果。",
-  },
-  {
-    q: "可以在前台直接改派司機嗎？",
-    a: "不行。前台只顯示 booking / trip 狀態，不做 dispatch 決策。",
-  },
-  {
-    q: "沒有收據的行程要怎麼處理？",
-    a: "若這個渠道未提供 receipt，請改由企業報帳或客服支援處理。",
-  },
-] as const;
-
-export const policyNotes = [
-  "單趟超過 NT$ 1,500 需部門主管審批。",
-  "所有用車須指定有效成本中心。",
-  "用車前 1 小時內取消計入額度。",
-] as const;
 
 export const enterpriseBookings: EnterpriseBooking[] = [
   {
     id: "EB-7K2E1D",
-    passenger: "訪客 · Sato Kenji",
+    passenger: "fixture.passenger.guestSato",
     bookedBy: "林宜君",
     self: false,
-    from: "桃園機場 T1 · 入境大廳",
-    to: "君悅酒店 · 信義區松壽路 2 號",
+    from: "fixture.place.taoyuanT1Arrival",
+    to: "fixture.place.grandHyattFull",
     window: "06/13 15:20",
     state: "enroute",
     costCenter: "CC-PRD-07",
@@ -145,7 +119,7 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     flight: "JL809",
     terminal: "T1",
     luggage: "3 件",
-    onsiteContact: "周敏 · #1180",
+    onsiteContact: "fixture.contact.zhou",
     availableActions: ["view", "track_trip", "contact_support"],
   },
   {
@@ -153,8 +127,8 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     passenger: "林冠廷",
     bookedBy: "林冠廷",
     self: true,
-    from: "台北總部",
-    to: "桃園機場 T2",
+    from: "fixture.place.taipeiHq",
+    to: "fixture.place.taoyuanT2",
     window: "06/14 07:30",
     state: "assigned",
     costCenter: "CC-PRD-01",
@@ -165,7 +139,7 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     flight: "BR198",
     terminal: "T2",
     luggage: "2 件",
-    onsiteContact: "林冠廷 · #2204",
+    onsiteContact: "fixture.contact.lin2204",
     availableActions: ["view", "cancel", "track_trip"],
   },
   {
@@ -173,8 +147,8 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     passenger: "陳思妤",
     bookedBy: "林宜君",
     self: false,
-    from: "南港研發中心",
-    to: "台北總部",
+    from: "fixture.place.nangangRdc",
+    to: "fixture.place.taipeiHq",
     window: "06/13 09:00",
     state: "approval",
     costCenter: "CC-PRD-01",
@@ -182,7 +156,7 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     vehicle: "一般轎車",
     approval: "pending",
     receiptReady: false,
-    onsiteContact: "陳思妤 · #2231",
+    onsiteContact: "fixture.contact.chen",
     availableActions: ["view", "contact_support"],
   },
   {
@@ -190,8 +164,8 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     passenger: "黃柏睿",
     bookedBy: "林宜君",
     self: false,
-    from: "台北總部",
-    to: "新竹科學園區",
+    from: "fixture.place.taipeiHq",
+    to: "fixture.place.hsinchuPark",
     window: "06/11 08:00",
     state: "completed",
     costCenter: "CC-PRD-07",
@@ -200,7 +174,7 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     approval: "approved",
     receiptReady: true,
     fare: "NT$ 2,180",
-    onsiteContact: "黃柏睿 · #3310",
+    onsiteContact: "fixture.contact.huang",
     availableActions: ["view", "view_receipt"],
   },
   {
@@ -208,8 +182,8 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     passenger: "林宜君",
     bookedBy: "林宜君",
     self: true,
-    from: "君悅酒店",
-    to: "桃園機場 T2",
+    from: "fixture.place.grandHyatt",
+    to: "fixture.place.taoyuanT2",
     window: "06/10 05:00",
     state: "cancelled",
     costCenter: "CC-PRD-01",
@@ -220,24 +194,234 @@ export const enterpriseBookings: EnterpriseBooking[] = [
     flight: "CI103",
     terminal: "T2",
     luggage: "1 件",
-    onsiteContact: "林宜君 · #1180",
+    onsiteContact: "fixture.contact.lin1180",
     availableActions: ["view"],
   },
 ];
 
-export const bookingStateMeta: Record<
+// Tone mapping faithful to the design canvas (ent-data.jsx · ENT_STATE_META):
+// assigned=primary, reserved/approval=warn, enroute=info, completed=success,
+// cancelled=neutral, nosupply=danger — distinct colours per state, not a grey wash.
+const BOOKING_STATE_TONES: Record<
   BookingState,
-  { label: string; tone: "success" | "warn" | "info" | "neutral" | "danger" }
+  "primary" | "success" | "warn" | "info" | "neutral" | "danger"
 > = {
-  assigned: { label: "已派車", tone: "info" },
-  approval: { label: "待審批", tone: "warn" },
-  reserved: { label: "已受理", tone: "info" },
-  enroute: { label: "前往上車", tone: "success" },
-  completed: { label: "已完成", tone: "neutral" },
-  cancelled: { label: "已取消", tone: "neutral" },
-  nosupply: { label: "無法派車", tone: "danger" },
+  assigned: "primary",
+  approval: "warn",
+  reserved: "warn",
+  enroute: "info",
+  completed: "success",
+  cancelled: "neutral",
+  nosupply: "danger",
 };
 
-export function getEnterpriseBooking(bookingId: string) {
-  return enterpriseBookings.find((booking) => booking.id === bookingId);
+const VEHICLE_TRANSLATION_KEYS = {
+  商務車: "fixture.vehicle.business",
+  一般轎車: "fixture.vehicle.standard",
+} as const;
+
+export function getEnterpriseUser(locale: Locale) {
+  return {
+    ...enterpriseUser,
+    role: t("fixture.user.role", undefined, locale),
+    dept: t("fixture.user.department", undefined, locale),
+  };
+}
+
+export function getEnterpriseTenant(locale: Locale) {
+  return {
+    ...enterpriseTenant,
+    department: t("fixture.tenant.department", undefined, locale),
+  };
+}
+
+export function getEnterpriseBookingDraft(locale: Locale) {
+  return {
+    ...enterpriseBookingDraft,
+    passenger: t(
+      enterpriseBookingDraft.passenger as TranslationKey,
+      undefined,
+      locale,
+    ),
+    pickup: t(
+      enterpriseBookingDraft.pickup as TranslationKey,
+      undefined,
+      locale,
+    ),
+    dropoff: t(
+      enterpriseBookingDraft.dropoff as TranslationKey,
+      undefined,
+      locale,
+    ),
+    costCenter: getEnterpriseCostCenterLabel(
+      enterpriseBookingDraft.costCenterCode,
+      locale,
+    ),
+    approval: t("fixture.bookingDraft.approval", undefined, locale),
+    quotaImpact: t("fixture.bookingDraft.quotaImpact", undefined, locale),
+    vehicle: t("fixture.vehicle.business", undefined, locale),
+    luggage: enterpriseBookingDraft.luggage,
+    onsiteContact: t(
+      enterpriseBookingDraft.onsiteContact as TranslationKey,
+      undefined,
+      locale,
+    ),
+    notes: t("fixture.bookingDraft.notes", undefined, locale),
+  };
+}
+
+export function getEnterprisePassengers(locale: Locale) {
+  return PASSENGER_KEYS.map((passenger) =>
+    translateFixtureValue(passenger, locale),
+  );
+}
+
+export function getEnterpriseCostCenters(locale: Locale) {
+  return COST_CENTER_KEYS.map(([code, key]) =>
+    getEnterpriseCostCenterLabel(code, locale, key),
+  );
+}
+
+export function getEnterpriseAddresses(locale: Locale) {
+  return ADDRESS_KEYS.map((key) => t(key, undefined, locale));
+}
+
+export function getPolicyNotes(locale: Locale) {
+  return [
+    t("fixture.policy.1", undefined, locale),
+    t("fixture.policy.2", undefined, locale),
+    t("fixture.policy.3", undefined, locale),
+  ];
+}
+
+export function getEnterpriseReviewChecklist(locale: Locale) {
+  return [
+    t("fixture.reviewChecklist.1", undefined, locale),
+    t("fixture.reviewChecklist.2", undefined, locale),
+    t("fixture.reviewChecklist.3", undefined, locale),
+  ];
+}
+
+export function getEnterpriseTripProgress(locale: Locale) {
+  return [
+    t("fixture.tripProgress.1", undefined, locale),
+    t("fixture.tripProgress.2", undefined, locale),
+    t("fixture.tripProgress.3", undefined, locale),
+    t("fixture.tripProgress.4", undefined, locale),
+    t("fixture.tripProgress.5", undefined, locale),
+  ];
+}
+
+export function getEnterpriseSupportFaq(locale: Locale) {
+  return [
+    {
+      q: t("fixture.supportFaq.1.q", undefined, locale),
+      a: t("fixture.supportFaq.1.a", undefined, locale),
+    },
+    {
+      q: t("fixture.supportFaq.2.q", undefined, locale),
+      a: t("fixture.supportFaq.2.a", undefined, locale),
+    },
+    {
+      q: t("fixture.supportFaq.3.q", undefined, locale),
+      a: t("fixture.supportFaq.3.a", undefined, locale),
+    },
+  ];
+}
+
+export function getEnterpriseBookings(locale: Locale): EnterpriseBooking[] {
+  return enterpriseBookings.map((booking) => ({
+    ...booking,
+    passenger: translateFixtureValue(booking.passenger, locale),
+    from: translateFixtureValue(booking.from, locale),
+    to: translateFixtureValue(booking.to, locale),
+    costCenter: getEnterpriseCostCenterLabel(booking.costCenter, locale),
+    vehicle: getEnterpriseVehicleLabel(booking.vehicle, locale),
+    ...(booking.onsiteContact
+      ? { onsiteContact: translateFixtureValue(booking.onsiteContact, locale) }
+      : {}),
+  }));
+}
+
+export function getBookingStateMeta(locale: Locale): Record<
+  BookingState,
+  {
+    label: string;
+    tone: "primary" | "success" | "warn" | "info" | "neutral" | "danger";
+  }
+> {
+  return {
+    assigned: {
+      label: t("fixture.bookingState.assigned", undefined, locale),
+      tone: BOOKING_STATE_TONES.assigned,
+    },
+    approval: {
+      label: t("fixture.bookingState.approval", undefined, locale),
+      tone: BOOKING_STATE_TONES.approval,
+    },
+    reserved: {
+      label: t("fixture.bookingState.reserved", undefined, locale),
+      tone: BOOKING_STATE_TONES.reserved,
+    },
+    enroute: {
+      label: t("fixture.bookingState.enroute", undefined, locale),
+      tone: BOOKING_STATE_TONES.enroute,
+    },
+    completed: {
+      label: t("fixture.bookingState.completed", undefined, locale),
+      tone: BOOKING_STATE_TONES.completed,
+    },
+    cancelled: {
+      label: t("fixture.bookingState.cancelled", undefined, locale),
+      tone: BOOKING_STATE_TONES.cancelled,
+    },
+    nosupply: {
+      label: t("fixture.bookingState.nosupply", undefined, locale),
+      tone: BOOKING_STATE_TONES.nosupply,
+    },
+  };
+}
+
+export function getEnterpriseActionLabel(
+  action: AvailableAction,
+  locale: Locale,
+) {
+  return t(`fixture.action.${action}` as const, undefined, locale);
+}
+
+export function getEnterpriseVehicleLabel(vehicle: string, locale: Locale) {
+  const key =
+    VEHICLE_TRANSLATION_KEYS[vehicle as keyof typeof VEHICLE_TRANSLATION_KEYS];
+  return key ? t(key, undefined, locale) : vehicle;
+}
+
+export function getEnterpriseBooking(bookingId: string, locale?: Locale) {
+  const booking = enterpriseBookings.find((item) => item.id === bookingId);
+  if (!booking) {
+    return undefined;
+  }
+
+  return locale
+    ? getEnterpriseBookings(locale).find((item) => item.id === bookingId)
+    : booking;
+}
+
+function getEnterpriseCostCenterLabel(
+  code: string,
+  locale: Locale,
+  key?: (typeof COST_CENTER_KEYS)[number][1],
+) {
+  const translationKey =
+    key ??
+    COST_CENTER_KEYS.find(([costCenterCode]) => costCenterCode === code)?.[1];
+
+  return translationKey
+    ? `${code} · ${t(translationKey, undefined, locale)}`
+    : code;
+}
+
+function translateFixtureValue(value: string, locale: Locale) {
+  return value.startsWith("fixture.")
+    ? t(value as TranslationKey, undefined, locale)
+    : value;
 }
