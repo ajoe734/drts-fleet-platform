@@ -834,13 +834,14 @@ export function CanvasActionButton({
   }
 
   const isHigh = descriptor.riskLevel === "high";
+  // Risk level drives the colour, matching the canvas ActionButton
+  // (mgmt-auth.jsx): high -> danger (red, applied via the `danger` prop below),
+  // medium -> primary (accent), low -> secondary (neutral outline). The previous
+  // mapping down-shifted every tier (medium -> secondary, low -> ghost), which
+  // stripped the accent off the bulk of action buttons and made dense action
+  // tables read as flat/monotone.
   const resolvedVariant =
-    variant ??
-    (isHigh
-      ? "primary"
-      : descriptor.riskLevel === "medium"
-        ? "secondary"
-        : "ghost");
+    variant ?? (descriptor.riskLevel === "medium" ? "primary" : "secondary");
 
   return (
     <Btn

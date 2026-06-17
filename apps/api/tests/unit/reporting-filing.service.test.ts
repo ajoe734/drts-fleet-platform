@@ -206,6 +206,97 @@ describe("ReportingFilingService sensitive-data governance", () => {
     });
   });
 
+  it("materializes tenant monthly trip report rows and tenant-scoped completion audit", async () => {
+    process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET =
+      "reporting-download-test-secret";
+
+    const auditNotificationService = new AuditNotificationService();
+    const service = new ReportingFilingService(auditNotificationService);
+    service.registerOrderFeedProvider(
+      () =>
+        [
+          createOrder({
+            orderId: "order-monthly-001",
+            orderNo: "O-MONTHLY-001",
+            orderSource: "web",
+            tenantId: "tenant-demo-001",
+            businessDispatchSubtype: "enterprise_dispatch",
+            bookingId: "booking-monthly-001",
+            costCenter: "CC-MONTHLY",
+            updatedAt: "2026-04-29T01:02:03.000Z",
+          }),
+        ] as never[],
+    );
+    service.registerCostCenterDirectoryProvider((tenantId) =>
+      tenantId === "tenant-demo-001"
+        ? ([
+            {
+              tenantId,
+              code: "CC-MONTHLY",
+              name: "Monthly owner center",
+              description: null,
+              ownerUserId: "tenant-admin-001",
+              ownerName: "Tenant Admin",
+              activeFlag: true,
+              disabledAt: null,
+              disabledReason: null,
+              createdAt: "2026-04-29T00:00:00.000Z",
+              updatedAt: "2026-04-29T00:00:00.000Z",
+            },
+          ] as never[])
+        : [],
+    );
+
+    const accepted = service.createReportJob(
+      {
+        jobType: "monthly_trip_report",
+        format: "json",
+        filters: {
+          orderId: "order-monthly-001",
+          userId: "tenant-admin-001",
+          costCenterCode: "CC-MONTHLY",
+          serviceProduct: "enterprise_dispatch",
+        },
+      },
+      "req-report-create-monthly-001",
+      "tenant-demo-001",
+    );
+    await flushBackgroundWork();
+
+    const detail = service.getReportJob(
+      accepted.jobId,
+      "req-report-open-monthly-001",
+      undefined,
+      "tenant-demo-001",
+    );
+    expect(detail.rows?.[0]).toMatchObject({
+      orderId: "order-monthly-001",
+      userId: "tenant-admin-001",
+      costCenterCode: "CC-MONTHLY",
+      serviceProduct: "enterprise_dispatch",
+      sourceMarker: "owned_mobility_order_feed",
+      costCenterSourceMarker: "tenant_partner_cost_center_directory",
+      sourceUpdatedAt: "2026-04-29T01:02:03.000Z",
+      producerRequestId: "req-report-create-monthly-001",
+    });
+
+    const completionAudit = auditNotificationService
+      .listAuditLogs()
+      .find(
+        (entry) =>
+          entry.actionName === "complete_report_job" &&
+          entry.resourceId === accepted.jobId,
+      );
+    expect(completionAudit).toMatchObject({
+      tenantId: "tenant-demo-001",
+      requestId: "req-report-create-monthly-001",
+    });
+    expect(completionAudit?.newValuesSummary).toMatchObject({
+      tenantId: "tenant-demo-001",
+      rowCount: 1,
+    });
+  });
+
   it("surfaces legal holds and deletion exceptions on report and filing evidence detail views", async () => {
     process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET =
       "reporting-download-test-secret";
