@@ -17,6 +17,7 @@ import type {
   ReportJobAccepted,
   ReportJobRecord,
   SettlementMatrixRecord,
+  TenantCostCenterRecord,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -51,9 +52,29 @@ type DispatchRecordingIndexRow = {
   exportedAt: string;
 };
 
+type TenantMonthlyTripReportRow = {
+  orderId: string;
+  orderNo: string;
+  tenantId: string | null;
+  userId: string | null;
+  costCenterCode: string | null;
+  serviceProduct: string;
+  businessDispatchSubtype: string | null;
+  bookingId: string | null;
+  status: OwnedOrderRecord["status"];
+  completedAt: string | null;
+  sourceMarker: "owned_mobility_order_feed";
+  costCenterSourceMarker: "tenant_partner_cost_center_directory" | null;
+  sourceUpdatedAt: string;
+  producerRequestId: string | null;
+  exportedAt: string;
+};
+
+type ReportJobRow = DispatchRecordingIndexRow | TenantMonthlyTripReportRow;
+
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows?: DispatchRecordingIndexRow[];
+  rows?: ReportJobRow[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
   evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
@@ -93,7 +114,7 @@ type FilingPackageDownloadMetadata = {
 
 type StoredReportJob = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows: DispatchRecordingIndexRow[];
+  rows: ReportJobRow[];
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
   settlementMatrix: SettlementMatrixRecord[];
 };
@@ -104,6 +125,9 @@ type StoredFilingPackage = FilingPackageRecord & {
 };
 
 type OrderFeedProvider = () => OwnedOrderRecord[];
+type CostCenterDirectoryProvider = (
+  tenantId: string,
+) => TenantCostCenterRecord[];
 
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
@@ -116,6 +140,8 @@ export class ReportingFilingService implements OnModuleInit {
   private readonly scheduledFilingPackageIds = new Set<string>();
 
   private orderFeedProvider: OrderFeedProvider = () => [];
+
+  private costCenterDirectoryProvider: CostCenterDirectoryProvider = () => [];
 
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
@@ -177,6 +203,10 @@ export class ReportingFilingService implements OnModuleInit {
     this.orderFeedProvider = provider;
   }
 
+  registerCostCenterDirectoryProvider(provider: CostCenterDirectoryProvider) {
+    this.costCenterDirectoryProvider = provider;
+  }
+
   createReportJob(
     command: CreateReportJobCommand,
     requestId?: string,
@@ -230,7 +260,7 @@ export class ReportingFilingService implements OnModuleInit {
       {
         actorId: null,
         actorType: "system",
-        tenantId: null,
+        tenantId: this.getReportJobTenantScopeId(job),
         moduleName: "reporting-filing",
         actionName: "create_report_job",
         resourceType: "report_job",
@@ -556,6 +586,9 @@ export class ReportingFilingService implements OnModuleInit {
     if (job.jobType === "dispatch_recording_index") {
       job.rows = this.buildDispatchRecordingIndexRows();
     }
+    if (job.jobType === "monthly_trip_report") {
+      job.rows = this.buildTenantMonthlyTripRows(job, requestId);
+    }
     if (job.jobType === "revenue_summary") {
       job.partnerRevenueRows = this.buildPartnerRevenueSummaryRows();
     }
@@ -584,7 +617,7 @@ export class ReportingFilingService implements OnModuleInit {
       {
         actorId: null,
         actorType: "system",
-        tenantId: null,
+        tenantId: this.getReportJobTenantScopeId(job),
         moduleName: "reporting-filing",
         actionName: "complete_report_job",
         resourceType: "report_job",
@@ -594,6 +627,7 @@ export class ReportingFilingService implements OnModuleInit {
           status: job.status,
           artifactId: job.artifact.artifactId,
           artifactExpiresAt: job.artifact.expiresAt,
+          tenantId: this.getReportJobTenantScopeId(job),
           rowCount: job.rows.length,
           partnerRevenueRowCount: job.partnerRevenueRows.length,
         },
@@ -619,7 +653,7 @@ export class ReportingFilingService implements OnModuleInit {
       {
         actorId: null,
         actorType: "system",
-        tenantId: null,
+        tenantId: this.getReportJobTenantScopeId(job),
         moduleName: "reporting-filing",
         actionName: "fail_report_job",
         resourceType: "report_job",
@@ -789,6 +823,91 @@ export class ReportingFilingService implements OnModuleInit {
         missingRecording:
           order.recordingId === null ||
           order.complianceFlags.includes("recording_pending"),
+        exportedAt,
+      }));
+  }
+
+  private buildTenantMonthlyTripRows(
+    job: StoredReportJob,
+    requestId?: string,
+  ): TenantMonthlyTripReportRow[] {
+    const exportedAt = new Date().toISOString();
+    const filterString = (camelKey: string, snakeKey: string) => {
+      const value = job.filters[camelKey] ?? job.filters[snakeKey];
+      return typeof value === "string" && value.trim() ? value.trim() : null;
+    };
+    const tenantId = filterString("tenantId", "tenant_id");
+    const orderId = filterString("orderId", "order_id");
+    const userId = filterString("userId", "user_id");
+    const costCenterCode = filterString("costCenterCode", "cost_center_code");
+    const serviceProduct = filterString("serviceProduct", "service_product");
+    const costCentersByTenant = new Map<
+      string,
+      Map<string, TenantCostCenterRecord>
+    >();
+    const lookupCostCenter = (order: OwnedOrderRecord) => {
+      if (!order.tenantId || !order.costCenter) {
+        return null;
+      }
+      let costCentersByCode = costCentersByTenant.get(order.tenantId);
+      if (!costCentersByCode) {
+        costCentersByCode = new Map(
+          this.costCenterDirectoryProvider(order.tenantId).map((costCenter) => [
+            costCenter.code.toUpperCase(),
+            costCenter,
+          ]),
+        );
+        costCentersByTenant.set(order.tenantId, costCentersByCode);
+      }
+      return costCentersByCode.get(order.costCenter.toUpperCase()) ?? null;
+    };
+
+    return this.orderFeedProvider()
+      .map((order) => {
+        const resolvedServiceProduct =
+          order.businessDispatchSubtype ?? "enterprise_dispatch";
+        const costCenter = lookupCostCenter(order);
+        return { order, resolvedServiceProduct, costCenter };
+      })
+      .filter(({ order, resolvedServiceProduct, costCenter }) => {
+        if (tenantId && order.tenantId !== tenantId) {
+          return false;
+        }
+        if (orderId && order.orderId !== orderId) {
+          return false;
+        }
+        if (
+          costCenterCode &&
+          (order.costCenter ?? "").toUpperCase() !==
+            costCenterCode.toUpperCase()
+        ) {
+          return false;
+        }
+        if (serviceProduct && resolvedServiceProduct !== serviceProduct) {
+          return false;
+        }
+        if (userId && costCenter?.ownerUserId !== userId) {
+          return false;
+        }
+        return true;
+      })
+      .map(({ order, resolvedServiceProduct, costCenter }) => ({
+        orderId: order.orderId,
+        orderNo: order.orderNo,
+        tenantId: order.tenantId,
+        userId: costCenter?.ownerUserId ?? null,
+        costCenterCode: order.costCenter,
+        serviceProduct: resolvedServiceProduct,
+        businessDispatchSubtype: order.businessDispatchSubtype,
+        bookingId: order.bookingId,
+        status: order.status,
+        completedAt: order.status === "completed" ? order.updatedAt : null,
+        sourceMarker: "owned_mobility_order_feed",
+        costCenterSourceMarker: costCenter
+          ? "tenant_partner_cost_center_directory"
+          : null,
+        sourceUpdatedAt: order.updatedAt,
+        producerRequestId: requestId ?? null,
         exportedAt,
       }));
   }
