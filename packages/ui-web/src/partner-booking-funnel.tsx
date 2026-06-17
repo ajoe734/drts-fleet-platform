@@ -880,6 +880,59 @@ function copyForLocale(locale: PartnerBookingLocale) {
   };
 }
 
+// Program kind drives the landing framing (design-canvas pb-screens PB_Landing +
+// followup A1/A2): credit-card = 趟次, insurance = 理賠額度, travel = 團體席次,
+// hotel = concierge. Derived from the brand so the shared funnel stops showing
+// the credit-card copy for every partner.
+type FunnelProgramKind = "card" | "insurance" | "travel" | "hotel";
+
+function funnelProgramKind(code: string): FunnelProgramKind {
+  if (code === "FUBON") return "insurance";
+  if (code === "LION") return "travel";
+  if (code === "GRAND") return "hotel";
+  return "card";
+}
+
+function programLandingCopy(
+  kind: FunnelProgramKind,
+  locale: PartnerBookingLocale,
+) {
+  const en = locale === "en";
+  const byKind = {
+    card: {
+      title: en ? "Concierge transfer" : "禮賓接送 Concierge",
+      subtitle: (p: string, n: number) =>
+        en
+          ? `${p} cardholder exclusive · ${n} included rides per year`
+          : `${p} 卡友專屬 · 全年免費 ${n} 趟`,
+      remaining: en ? "Annual rides remaining" : "本年度剩餘趟次",
+    },
+    insurance: {
+      title: en ? "Claim replacement mobility" : "理賠代步用車",
+      subtitle: (p: string) =>
+        en
+          ? `${p} · replacement vehicle during the claim period`
+          : `${p} · 車禍理賠期間代步服務`,
+      remaining: en ? "Replacement allowance remaining" : "理賠代步額度剩餘",
+    },
+    travel: {
+      title: en ? "Group transfer booking" : "團體接送預約",
+      subtitle: (p: string) =>
+        en
+          ? `${p} · tour airport / hotel transfer`
+          : `${p} · 旅行團機場 / 飯店接送`,
+      remaining: en ? "Group seats remaining" : "本團剩餘席次",
+    },
+    hotel: {
+      title: en ? "Concierge transfer" : "禮賓接送",
+      subtitle: (p: string) =>
+        en ? `${p} · hotel guest transfer` : `${p} · 飯店貴賓接送禮遇`,
+      remaining: en ? "Remaining this period" : "本期剩餘禮遇",
+    },
+  } as const;
+  return byKind[kind];
+}
+
 function PhoneHeader({
   brand,
   title,
@@ -1172,6 +1225,7 @@ export function PartnerBookingPhoneScreen({
 }) {
   const demo = metaForBrand(brand, locale);
   const copy = copyForLocale(locale);
+  const landing = programLandingCopy(funnelProgramKind(brand.code), locale);
   const serviceItems = serviceItemsForLocale(locale);
   const benefitWidth = `${
     (demo.remainingBenefits / demo.totalBenefits) * 100
@@ -1184,8 +1238,8 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title={copy.landingTitle}
-          subtitle={copy.landingSubtitle(brand.programName, demo.totalBenefits)}
+          title={landing.title}
+          subtitle={landing.subtitle(brand.programName, demo.totalBenefits)}
           trailing="EXCLUSIVE"
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
@@ -1238,7 +1292,7 @@ export function PartnerBookingPhoneScreen({
                 }}
               >
                 <span style={{ fontSize: "11px", color: "#56657f" }}>
-                  {copy.remainingTrips}
+                  {landing.remaining}
                 </span>
                 <span
                   style={{
