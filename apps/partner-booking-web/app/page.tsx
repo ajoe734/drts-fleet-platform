@@ -76,7 +76,13 @@ export default async function RootIndex() {
             {t("root.knownTenants", undefined, locale)}
           </h2>
           <ul className="mt-4 grid gap-3">
-            {brands.map((brand) => (
+            {brands.map((brand) => {
+              // Hotel (GRAND) and travel agency (LION) book through their own
+              // channel, not a standalone DRTS white-label website, so they
+              // expose no "website" entry.
+              const hasWebsite =
+                brand.code !== "GRAND" && brand.code !== "LION";
+              return (
               <li
                 key={brand.code}
                 className="rounded-xl border border-[color:var(--pbk-panel-border)] p-4"
@@ -92,20 +98,24 @@ export default async function RootIndex() {
                       {brand.hotline.phone}
                     </div>
                   </div>
-                  <Link
-                    href={`/${brand.slug}`}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--pbk-panel-border)] px-4 py-2 text-sm font-medium text-[color:var(--pbk-accent)] hover:bg-[color:var(--pbk-accent-soft)]"
-                  >
-                    {t("root.openTenant", { slug: brand.slug }, locale)}
-                  </Link>
+                  {hasWebsite ? (
+                    <Link
+                      href={`/${brand.slug}`}
+                      className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--pbk-panel-border)] px-4 py-2 text-sm font-medium text-[color:var(--pbk-accent)] hover:bg-[color:var(--pbk-accent-soft)]"
+                    >
+                      {t("root.openTenant", { slug: brand.slug }, locale)}
+                    </Link>
+                  ) : null}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Link
-                    href={`/${brand.slug}`}
-                    className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
-                  >
-                    {t("root.surface.website", undefined, locale)}
-                  </Link>
+                  {hasWebsite ? (
+                    <Link
+                      href={`/${brand.slug}`}
+                      className="inline-flex items-center rounded-lg bg-[color:var(--pbk-accent-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--pbk-accent)]"
+                    >
+                      {t("root.surface.website", undefined, locale)}
+                    </Link>
+                  ) : null}
                   {isPartnerProgramSurfaceBrand(brand) ? (
                     <Link
                       href={`/${brand.slug}/program/site`}
@@ -132,7 +142,8 @@ export default async function RootIndex() {
                   ) : null}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       </div>
