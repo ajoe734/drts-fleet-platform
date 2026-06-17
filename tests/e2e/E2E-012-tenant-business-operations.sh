@@ -20,8 +20,8 @@
 #     current repo tip or may still be absent on the deployed staging runtime;
 #     when present they must hard-pass, otherwise they are recorded as probes
 #     and invoice/statement evidence remains the runnable fallback
-#   - tenant report jobs preserve filters + artifact lifecycle, but do not yet
-#     emit a tenant-business row schema with all SD columns
+#   - tenant report jobs must preserve filters, emit tenant-business rows,
+#     and expose tenant-scoped completion audit evidence
 #
 # Therefore this shell uses a split gate:
 #   HARD FAIL
@@ -31,13 +31,13 @@
 #     - driver statement generation does not include the completed orderId
 #     - tenant invoice generation does not include the completed orderId
 #     - tenant report job cannot be queued/completed or loses filter binding
+#     - tenant report export does not include order/user/cost center/service product rows
+#     - tenant audit does not expose invoice and report completion side effects
 #   PROBE + RECORD
 #     - GET /tenant/dashboard when not yet deployed on the target env
 #     - GET /tenant/payables/summary when not yet deployed on the target env
 #     - GET /tenant/payables/line-items when not yet deployed on the target env
 #     - GET /tenant/statements when not yet deployed on the target env
-#     - row-level export fields (order/user/cost center/service product) until
-#       a dedicated tenant-business export schema lands
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -175,18 +175,33 @@ require_report_filter() {
   log_ok "Report filter preserved: ${key}=${actual}"
 }
 
-record_optional_report_field() {
+require_report_field_equals() {
+  local label="$1"
+  local jq_expr="$2"
+  local expected="$3"
+  local value
+  value=$(json_get "$jq_expr")
+  if [[ "$value" != "$expected" ]]; then
+    save_evidence "$SCENARIO" "report" "$label" "${value:-NOT_PRESENT}"
+    log_fail "Report evidence field ${label} expected '${expected}', got '${value:-<empty>}'"
+    exit 1
+  fi
+  save_evidence "$SCENARIO" "report" "$label" "$value"
+  log_ok "Report evidence field ${label}=${value}"
+}
+
+require_report_field_present() {
   local label="$1"
   local jq_expr="$2"
   local value
   value=$(json_get "$jq_expr")
   if [[ -z "$value" || "$value" == "null" ]]; then
     save_evidence "$SCENARIO" "report" "$label" "NOT_PRESENT"
-    log_warn "Report evidence field ${label} not present"
-  else
-    save_evidence "$SCENARIO" "report" "$label" "$value"
-    log_ok "Report evidence field ${label}=${value}"
+    log_fail "Report evidence field ${label} not present"
+    exit 1
   fi
+  save_evidence "$SCENARIO" "report" "$label" "$value"
+  log_ok "Report evidence field ${label}=${value}"
 }
 
 discover_tenant_user_ids() {
@@ -685,11 +700,14 @@ require_report_filter "userId" "$TENANT_ADMIN_USER_ID"
 require_report_filter "costCenterCode" "$CC_CODE"
 require_report_filter "serviceProduct" "enterprise_dispatch"
 
-record_optional_report_field "row.orderId" '.data.rows[0].orderId // .data.rows[0].order_id'
-record_optional_report_field "row.userId" '.data.rows[0].userId // .data.rows[0].user_id'
-record_optional_report_field "row.costCenterCode" '.data.rows[0].costCenterCode // .data.rows[0].cost_center_code'
-record_optional_report_field "row.serviceProduct" '.data.rows[0].serviceProduct // .data.rows[0].service_product'
-save_evidence "$SCENARIO" "report" "rowSchemaSupport" "tenant_business_operations rows are not yet populated by reporting-filing.service"
+require_report_field_equals "row.orderId" '.data.rows[0].orderId // .data.rows[0].order_id' "$ORDER_ID"
+require_report_field_equals "row.userId" '.data.rows[0].userId // .data.rows[0].user_id' "$TENANT_ADMIN_USER_ID"
+require_report_field_equals "row.costCenterCode" '.data.rows[0].costCenterCode // .data.rows[0].cost_center_code' "$CC_CODE"
+require_report_field_equals "row.serviceProduct" '.data.rows[0].serviceProduct // .data.rows[0].service_product' "enterprise_dispatch"
+require_report_field_equals "row.sourceMarker" '.data.rows[0].sourceMarker // .data.rows[0].source_marker' "owned_mobility_order_feed"
+require_report_field_equals "row.costCenterSourceMarker" '.data.rows[0].costCenterSourceMarker // .data.rows[0].cost_center_source_marker' "tenant_partner_cost_center_directory"
+require_report_field_present "row.sourceUpdatedAt" '.data.rows[0].sourceUpdatedAt // .data.rows[0].source_updated_at'
+require_report_field_present "row.producerRequestId" '.data.rows[0].producerRequestId // .data.rows[0].producer_request_id'
 
 log_surface "Audit evidence"
 http_call GET "/tenant/audit"
@@ -700,18 +718,21 @@ INVOICE_AUDIT_ID=$(echo "$RESP_BODY" | jq -r --arg invoiceId "$INVOICE_ID" \
 REPORT_AUDIT_ID=$(echo "$RESP_BODY" | jq -r --arg jobId "$REPORT_JOB_ID" \
   '.data.items[] | select((.resourceType // .resource_type) == "report_job" and (.resourceId // .resource_id) == $jobId and (.actionName // .action_name) == "complete_report_job") | (.auditId // .audit_id)' \
   2>/dev/null | head -1 || true)
-if [[ -n "$INVOICE_AUDIT_ID" ]]; then
-  save_evidence "$SCENARIO" "audit" "invoiceAuditId" "$INVOICE_AUDIT_ID"
-else
+if [[ -z "$INVOICE_AUDIT_ID" ]]; then
   save_evidence "$SCENARIO" "audit" "invoiceAuditId" "NOT_PRESENT"
-  log_warn "Invoice audit row not present"
+  log_fail "Invoice audit row not present"
+  exit 1
 fi
-if [[ -n "$REPORT_AUDIT_ID" ]]; then
-  save_evidence "$SCENARIO" "audit" "reportAuditId" "$REPORT_AUDIT_ID"
-else
+save_evidence "$SCENARIO" "audit" "invoiceAuditId" "$INVOICE_AUDIT_ID"
+log_ok "Invoice audit row present: ${INVOICE_AUDIT_ID}"
+
+if [[ -z "$REPORT_AUDIT_ID" ]]; then
   save_evidence "$SCENARIO" "audit" "reportAuditId" "NOT_PRESENT"
-  log_warn "Report audit row not present"
+  log_fail "Report audit row not present"
+  exit 1
 fi
+save_evidence "$SCENARIO" "audit" "reportAuditId" "$REPORT_AUDIT_ID"
+log_ok "Report audit row present: ${REPORT_AUDIT_ID}"
 
 log_step "Chain continuity assertions"
 assert_chain "tenant" "bookingId"
@@ -725,6 +746,5 @@ assert_chain "report" "jobId"
 print_chain_summary
 
 echo ""
-log_warn "E2E-012 still records report export row fields as soft evidence because monthly_trip_report artifacts preserve filters/artifacts but do not yet materialize tenant-business rows for order/user/cost center/service product. Dashboard/payables/statements hard-assert when deployed on the target env and otherwise remain recorded probes backed by driver-statement/invoice evidence."
 log_ok "E2E-012 complete — tenant booking → trip completion → payable/statement evidence → invoice → report chain passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"
