@@ -10,6 +10,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
 import { ReferralSettlementScaffoldService } from "../../src/modules/billing-settlement/referral-settlement.scaffold.service";
 import { settlementChannelKeyForTrip } from "../../src/modules/billing-settlement/settlement-matrix";
+import type { OwnedMobilityTripCompletedEvent } from "../../src/modules/owned-mobility/owned-mobility-events";
 
 function createService(forwarderIssues: ForwarderReconciliationIssue[] = []) {
   const auditNotificationService = new AuditNotificationService();
@@ -378,6 +379,63 @@ describe("BillingSettlementService settlement matrix", () => {
         "order-demo-033",
       ]),
     );
+  });
+
+  it("generates tenant invoices from in-memory completed enterprise dispatch trips", async () => {
+    const service = createService();
+    const tenantId = "tenant-live-enterprise-001";
+    const completedTrip = {
+      tenantId,
+      driverId: "drv-live-enterprise-001",
+      orderId: "order-live-enterprise-001",
+      completedAt: "2026-05-12T09:30:00Z",
+      grossEarning: { currency: "NTD", amountMinor: 98000 },
+      orderSource: "portal",
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: "enterprise_dispatch",
+      costCenterCode: "CC-FINANCE",
+      riderId: "rider-enterprise-001",
+      partnerId: null,
+      partnerProgramId: null,
+      partnerEntrySlug: null,
+      eligibilityVerificationId: null,
+      issuerAuthorizationRef: null,
+      benefitReference: null,
+      serviceProduct: "enterprise_dispatch",
+      tenantServiceProgramId: null,
+      sourcePlatform: "portal",
+    } satisfies OwnedMobilityTripCompletedEvent;
+
+    service.handleOwnedMobilityTripCompleted(completedTrip);
+
+    const invoice = await service.generateTenantInvoice(tenantId, {
+      tenantId,
+      periodStart: "2026-05-01T00:00:00.000Z",
+      periodEnd: "2026-05-31T23:59:59.000Z",
+    });
+
+    expect(invoice.lines).toHaveLength(1);
+    expect(invoice.amount.amountMinor).toBe(98000);
+    expect(invoice.lines[0]).toMatchObject({
+      orderId: "order-live-enterprise-001",
+      channelKey: "tenant_enterprise",
+      orderSource: "portal",
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: "enterprise_dispatch",
+      partnerId: null,
+      benefitReference: null,
+    });
+
+    const payableLines = await service.listTenantPayableLineItems(tenantId);
+    expect(payableLines).toEqual([
+      expect.objectContaining({
+        orderId: "order-live-enterprise-001",
+        serviceProduct: "enterprise_dispatch",
+        costCenterCode: "CC-FINANCE",
+        riderId: "rider-enterprise-001",
+        payableAmountMinor: 98000,
+      }),
+    ]);
   });
 
   it("reconciles live card-benefit settlement statements and discovers live-only periods", async () => {

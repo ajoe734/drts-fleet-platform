@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import type { CSSProperties, ReactNode } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import type {
   AuditLogRecord,
   CrossAppResourceLink,
@@ -1636,7 +1636,11 @@ export default async function VehicleDetailPage({
         subtitle={`${vehicle.plateNo} · ${getVehicleTypeLabel(locale, vehicle)} · ${vehicle.operatingArea}`}
         actions={
           <div style={actionRowStyle}>
-            {pageActions.map((action) => renderVehicleAction(action))}
+            {pageActions.map((action) => (
+              <Fragment key={action.descriptor.action}>
+                {renderVehicleAction(action)}
+              </Fragment>
+            ))}
           </div>
         }
       />

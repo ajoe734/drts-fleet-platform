@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import type {
   DriverStatementRecord,
   DriverTaskRecord,
@@ -1245,7 +1245,15 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   );
 
   function renderHeaderActions() {
-    return <>{pageActions.map(renderHeaderAction)}</>;
+    return (
+      <>
+        {pageActions.map((descriptor) => (
+          <Fragment key={descriptor.action}>
+            {renderHeaderAction(descriptor)}
+          </Fragment>
+        ))}
+      </>
+    );
   }
 
   function renderHeaderAction(descriptor: ResourceActionDescriptor) {
@@ -1998,9 +2006,11 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             flexWrap: "wrap",
           }}
         >
-          {row.availableActions.map((descriptor) =>
-            renderMismatchRowAction(row, descriptor),
-          )}
+          {row.availableActions.map((descriptor) => (
+            <Fragment key={`${row.jobId}-${descriptor.action}`}>
+              {renderMismatchRowAction(row, descriptor)}
+            </Fragment>
+          ))}
         </div>
       ),
     }));

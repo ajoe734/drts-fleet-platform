@@ -51,6 +51,13 @@ export default defineConfig({
   webServer: [
     {
       command:
+        "CONTROLLED_DOWNLOAD_SIGNING_SECRET=local-e2e-controlled-download-secret pnpm --filter @drts/api dev",
+      url: "http://127.0.0.1:3001/health",
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+    },
+    {
+      command:
         "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/ops-console-web && NEXT_PUBLIC_OPS_ASSISTANT_ENABLED=true pnpm exec next dev --hostname 127.0.0.1 --port 3202",
       url: "http://127.0.0.1:3202",
       reuseExistingServer: !process.env.CI,
