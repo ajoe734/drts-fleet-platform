@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
   AddressPayload,
@@ -77,6 +78,10 @@ import {
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
+import {
+  OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+  type OwnedMobilityTripCompletedEvent,
+} from "./owned-mobility-events";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { ServiceProductService } from "../service-product/service-product.service";
 import type { MessageEvent } from "@nestjs/common";
@@ -212,6 +217,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly vehicleEligibilityService?: VehicleEligibilityService,
     @Optional()
     private readonly serviceProductService?: ServiceProductService,
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -3527,6 +3534,7 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       assignmentId: assignment.assignmentId,
     });
+    this.publishCompletedTripSettlementEvent(order, task);
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
       order,
@@ -3535,6 +3543,50 @@ export class OwnedMobilityService implements OnModuleInit {
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneTask(task);
+  }
+
+  private publishCompletedTripSettlementEvent(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+  ) {
+    if (
+      !this.eventEmitter ||
+      !order.tenantId ||
+      order.serviceBucket !== "business_dispatch" ||
+      !order.businessDispatchSubtype ||
+      !task.completedAt
+    ) {
+      return;
+    }
+
+    const grossEarning = task.fare ??
+      order.quotedFare ?? {
+        currency: "NTD",
+        amountMinor: 0,
+      };
+    const payload: OwnedMobilityTripCompletedEvent = {
+      tenantId: order.tenantId,
+      driverId: task.driverId,
+      orderId: order.orderId,
+      completedAt: task.completedAt,
+      grossEarning: { ...grossEarning },
+      orderSource: order.orderSource,
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: order.businessDispatchSubtype,
+      costCenterCode: order.costCenter,
+      riderId: order.passenger.passengerId ?? null,
+      partnerId: order.partnerId,
+      partnerProgramId: order.partnerProgramId,
+      partnerEntrySlug: order.partnerEntrySlug,
+      eligibilityVerificationId: order.eligibilityVerificationId,
+      issuerAuthorizationRef: order.issuerAuthorizationRef,
+      benefitReference: order.benefitReference,
+      serviceProduct: order.businessDispatchSubtype,
+      tenantServiceProgramId: null,
+      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+    };
+
+    this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
   }
 
   private publishTenantOrderWebhook(
