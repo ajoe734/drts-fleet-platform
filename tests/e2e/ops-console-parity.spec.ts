@@ -40,7 +40,7 @@ const routeSpecs: RouteSpec[] = [
     key: "callcenter",
     path: "/callcenter",
     title: /客服中心|call center/i,
-    markers: [/session|callback|queue/i],
+    markers: [/session|通話工作階段/i, /callback|回撥/i, /queue|佇列/i],
     screenshot: "ops-callcenter.png",
   },
   {
@@ -115,8 +115,8 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "drivers-detail",
-    path: "/drivers/DRV-001",
-    title: /司機|Driver|DRV-001/i,
+    path: "/drivers/drv-demo-001",
+    title: /司機|Driver/i,
     markers: [/Manual override|suppression|platform|司機/i],
     screenshot: "ops-drivers-detail.png",
   },
@@ -129,8 +129,8 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "vehicles-detail",
-    path: "/vehicles/VEH-001",
-    title: /VEH-001|Vehicle|車輛/i,
+    path: "/vehicles/veh-demo-001",
+    title: /Vehicle|車輛/i,
     markers: [/audit|contract|maintenance|車輛/i],
     screenshot: "ops-vehicles-detail.png",
   },
@@ -143,8 +143,8 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "contracts-detail",
-    path: "/contracts/CTR-310",
-    title: /CTR-310|ops read-only|合約/i,
+    path: "/contracts/contract-demo-001",
+    title: /ops read-only|合約/i,
     markers: [/Operational terms|Version history|Platform Admin|合約/i],
     screenshot: "ops-contracts-detail.png",
   },

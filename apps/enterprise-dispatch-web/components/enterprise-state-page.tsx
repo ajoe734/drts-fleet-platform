@@ -6,6 +6,7 @@ import {
   EnterprisePageHeader,
 } from "@/components/enterprise-primitives";
 import { EnterpriseEmbedShell } from "@/components/enterprise-shell";
+import { enterpriseTenant } from "@/lib/enterprise-fixtures";
 import {
   getEnterpriseEmbedState,
   getEnterpriseGate,
@@ -49,6 +50,16 @@ export function EnterpriseGatePage({ kind }: { kind: EnterpriseGateKind }) {
             </Link>
           ))}
         </div>
+      </EnterpriseCard>
+      <EnterpriseCard title="企業支援">
+        <EnterpriseDl
+          cols={1}
+          items={[
+            { k: "客服電話", v: `${enterpriseTenant.supportPhone} · 24h` },
+            { k: "客服信箱", v: enterpriseTenant.supportEmail, mono: true },
+            { k: "支援範圍", v: "企業派車、審批、成本中心與內嵌身分交付" },
+          ]}
+        />
       </EnterpriseCard>
     </div>
   );

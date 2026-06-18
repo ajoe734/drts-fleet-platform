@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
 
 import type {
   AddReconciliationIssueCommentCommand,
@@ -66,6 +67,10 @@ import {
   type SettlementStatementStatus,
 } from "./settlement-statement.types";
 import { ForwarderService } from "../forwarder/forwarder.service";
+import {
+  OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
+  type OwnedMobilityTripCompletedEvent,
+} from "../owned-mobility/owned-mobility-events";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
@@ -316,12 +321,36 @@ export class BillingSettlementService implements OnModuleInit {
     platformFundedDiscount: { ...trip.platformFundedDiscount },
   }));
 
+  private readonly liveSettlementTrips = new Map<
+    string,
+    LiveSettlementTripRecord
+  >();
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     private readonly billingSettlementRepository?: BillingSettlementRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
   ) {}
+
+  @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
+  handleOwnedMobilityTripCompleted(event: OwnedMobilityTripCompletedEvent) {
+    if (
+      !event.tenantId ||
+      !event.driverId ||
+      !event.orderId ||
+      event.serviceBucket !== "business_dispatch" ||
+      !event.businessDispatchSubtype ||
+      Number.isNaN(new Date(event.completedAt).getTime())
+    ) {
+      return;
+    }
+
+    this.liveSettlementTrips.set(event.orderId, {
+      ...event,
+      grossEarning: { ...event.grossEarning },
+    });
+  }
 
   async onModuleInit() {
     if (!this.billingSettlementRepository) {
@@ -1769,6 +1798,17 @@ export class BillingSettlementService implements OnModuleInit {
         months.add(this.toPeriodMonth(trip.completedAt));
       }
     }
+    for (const trip of this.liveSettlementTrips.values()) {
+      if (
+        trip.tenantId === tenantId &&
+        settlementChannelKeyForTrip(trip) ===
+          SETTLEMENT_STATEMENT_CHANNEL_KEY &&
+        Boolean(trip.benefitReference) &&
+        Boolean(trip.issuerAuthorizationRef)
+      ) {
+        months.add(this.toPeriodMonth(trip.completedAt));
+      }
+    }
     // Live repository periods can exist without any matching seed trip; union
     // them in so GET /settlement-statements is not limited to seed memory.
     for (const periodMonth of await this.listLiveCardBenefitSettlementPeriods(
@@ -2013,8 +2053,19 @@ export class BillingSettlementService implements OnModuleInit {
     periodStart: string,
     periodEnd: string,
   ) {
+    const liveTripMap = new Map<string, LiveSettlementTripRecord>();
+    for (const trip of this.listInMemoryLiveSettlementTripsInPeriod(
+      periodStart,
+      periodEnd,
+      { tenantId },
+    )) {
+      liveTripMap.set(trip.orderId, trip);
+    }
+
     if (!this.billingSettlementRepository?.isEnabled()) {
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
 
     try {
@@ -2024,13 +2075,20 @@ export class BillingSettlementService implements OnModuleInit {
           periodStart,
           periodEnd,
         );
-      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
+      for (const trip of trips) {
+        liveTripMap.set(trip.orderId, trip);
+      }
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     } catch (error) {
       this.billingSettlementRepository.reportPersistenceFailure(
         error,
         "list_live_completed_tenant_trips",
       );
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
   }
 
@@ -2039,8 +2097,19 @@ export class BillingSettlementService implements OnModuleInit {
     periodEnd: string,
     driverId?: string,
   ) {
+    const liveTripMap = new Map<string, LiveSettlementTripRecord>();
+    for (const trip of this.listInMemoryLiveSettlementTripsInPeriod(
+      periodStart,
+      periodEnd,
+      driverId ? { driverId } : {},
+    )) {
+      liveTripMap.set(trip.orderId, trip);
+    }
+
     if (!this.billingSettlementRepository?.isEnabled()) {
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
 
     try {
@@ -2054,7 +2123,12 @@ export class BillingSettlementService implements OnModuleInit {
             periodStart,
             periodEnd,
           );
-      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
+      for (const trip of trips) {
+        liveTripMap.set(trip.orderId, trip);
+      }
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     } catch (error) {
       this.billingSettlementRepository.reportPersistenceFailure(
         error,
@@ -2062,8 +2136,30 @@ export class BillingSettlementService implements OnModuleInit {
           ? "list_live_driver_trips_in_period_for_driver"
           : "list_live_driver_trips_in_period",
       );
-      return [];
+      return [...liveTripMap.values()].map((trip) =>
+        this.mapLiveTripToSettlementSnapshot(trip),
+      );
     }
+  }
+
+  private listInMemoryLiveSettlementTripsInPeriod(
+    periodStart: string,
+    periodEnd: string,
+    filter: { tenantId?: string; driverId?: string } = {},
+  ) {
+    const start = new Date(periodStart).getTime();
+    const end = new Date(periodEnd).getTime();
+
+    return [...this.liveSettlementTrips.values()].filter((trip) => {
+      const completedAt = new Date(trip.completedAt).getTime();
+      return (
+        !Number.isNaN(completedAt) &&
+        completedAt >= start &&
+        completedAt <= end &&
+        (!filter.tenantId || trip.tenantId === filter.tenantId) &&
+        (!filter.driverId || trip.driverId === filter.driverId)
+      );
+    });
   }
 
   private async resolveTenantSettlementPeriodMonth(
@@ -2081,8 +2177,13 @@ export class BillingSettlementService implements OnModuleInit {
     const invoiceMonths = this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
       .map((invoice) => this.toPeriodMonth(invoice.periodStart));
+    const liveMonths = [...this.liveSettlementTrips.values()]
+      .filter((trip) => trip.tenantId === tenantId)
+      .map((trip) => this.toPeriodMonth(trip.completedAt));
 
-    const latestPeriodMonth = [...seededMonths, ...invoiceMonths].sort().at(-1);
+    const latestPeriodMonth = [...seededMonths, ...invoiceMonths, ...liveMonths]
+      .sort()
+      .at(-1);
     return latestPeriodMonth ?? this.toPeriodMonth(new Date().toISOString());
   }
 

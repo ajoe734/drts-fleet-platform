@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import type { CSSProperties, ReactNode } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import type {
   AttendanceRecord,
   CrossAppResourceLink,
@@ -1521,7 +1521,11 @@ export default async function DriverDetailPage({
         activeTab={tabs[0]}
         actions={
           <div style={actionRowStyle}>
-            {headerActions.map((action) => renderDriverAction(action, locale))}
+            {headerActions.map((action) => (
+              <Fragment key={action.descriptor.action}>
+                {renderDriverAction(action, locale)}
+              </Fragment>
+            ))}
             {renderDriverAction(refreshAction, locale)}
           </div>
         }

@@ -9,6 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3010",
     "test": "vitest run --config vitest.config.ts",
+    "test:e2e": "playwright test -c playwright.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

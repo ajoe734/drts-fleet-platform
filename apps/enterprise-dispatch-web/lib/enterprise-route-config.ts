@@ -123,7 +123,7 @@ export const enterpriseEmbedStateConfig = {
     details: [
       { k: "來源", v: "enterprise app webview" },
       { k: "session", v: "tenant-scoped hand-off accepted" },
-      { k: "限制", v: "不顯示 admin 或 ops 導覽" },
+      { k: "限制", v: "不顯示後台或調度導覽" },
     ],
     actions: [
       { label: "建立預約", href: "/bookings/new" },

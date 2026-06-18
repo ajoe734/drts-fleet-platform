@@ -9,6 +9,7 @@ import {
 import {
   bookingStateMeta,
   enterpriseBookings,
+  enterpriseTripProgress,
 } from "@/lib/enterprise-fixtures";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
 
@@ -34,6 +35,67 @@ export default function TripPage() {
           </EnterprisePill>
         }
       >
+        <div
+          aria-label="企業派車進度 rail"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))",
+            gap: 10,
+            marginBottom: 18,
+          }}
+        >
+          {enterpriseTripProgress.map((step, index) => {
+            const active = index <= 3;
+
+            return (
+              <div
+                key={step}
+                style={{
+                  display: "grid",
+                  gap: 7,
+                  justifyItems: "center",
+                  minWidth: 0,
+                  color: active
+                    ? enterpriseTheme.accent
+                    : enterpriseTheme.textMuted,
+                }}
+              >
+                <span
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 999,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: active
+                      ? enterpriseTheme.accentBg
+                      : enterpriseTheme.surfaceLo,
+                    border: `1px solid ${
+                      active
+                        ? enterpriseTheme.accentBorder
+                        : enterpriseTheme.border
+                    }`,
+                    fontSize: 11,
+                    fontWeight: 800,
+                  }}
+                >
+                  {index + 1}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    lineHeight: 1.35,
+                    textAlign: "center",
+                  }}
+                >
+                  {step}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
         <div
           style={{
             display: "grid",

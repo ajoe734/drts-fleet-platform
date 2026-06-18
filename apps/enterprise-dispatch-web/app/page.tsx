@@ -157,6 +157,12 @@ export default function HomePage() {
             >
               為同事 / 訪客代訂
             </Link>
+            <Link
+              href="/bookings/new?scenario=airport"
+              style={{ ...secondaryLinkStyle, width: "100%" }}
+            >
+              企業機場接送
+            </Link>
             <Link href="/help" style={{ ...ghostLinkStyle, width: "100%" }}>
               查看政策與支援
             </Link>

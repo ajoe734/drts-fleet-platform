@@ -21,4 +21,10 @@ Standalone Next.js app for the enterprise dispatch employee self-service surface
 - `pnpm --filter @drts/enterprise-dispatch-web typecheck`
 - `pnpm --filter @drts/enterprise-dispatch-web lint`
 - `pnpm --filter @drts/enterprise-dispatch-web test`
+- `pnpm --filter @drts/enterprise-dispatch-web test:e2e`
 - `pnpm --filter @drts/enterprise-dispatch-web build`
+
+## Validation Boundary
+
+- Website and app-embedded flows are validated by `tests/e2e/enterprise-dispatch-flow.spec.ts`.
+- Lovable prototypes are historical references only; this workspace app is the canonical implementation for enterprise dispatch self-service.

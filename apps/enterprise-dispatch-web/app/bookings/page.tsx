@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   EnterpriseBanner,
-  EnterpriseBtn,
   EnterpriseCard,
   EnterpriseDl,
   EnterprisePageHeader,
@@ -15,13 +14,32 @@ import {
 } from "@/lib/enterprise-fixtures";
 import { enterprisePageStyle, enterpriseTheme } from "@/lib/enterprise-theme";
 
+const primaryLinkStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 34,
+  padding: "8px 12px",
+  borderRadius: 10,
+  background: enterpriseTheme.accent,
+  border: `1px solid ${enterpriseTheme.accent}`,
+  color: enterpriseTheme.surface,
+  fontSize: 12.5,
+  fontWeight: 600,
+  textDecoration: "none",
+} as const;
+
 export default function BookingsPage() {
   return (
     <div style={enterprisePageStyle}>
       <EnterprisePageHeader
         title="我的預約"
         subtitle="前台歷史檢視與建立入口；不是派遣看板。"
-        actions={<EnterpriseBtn variant="primary">建立預約</EnterpriseBtn>}
+        actions={
+          <Link href="/bookings/new" style={primaryLinkStyle}>
+            建立預約
+          </Link>
+        }
       />
 
       <EnterpriseBanner
