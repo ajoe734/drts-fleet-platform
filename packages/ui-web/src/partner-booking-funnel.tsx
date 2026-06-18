@@ -893,44 +893,155 @@ function funnelProgramKind(code: string): FunnelProgramKind {
   return "card";
 }
 
-function programLandingCopy(
+type FunnelCopy = ReturnType<typeof copyForLocale>;
+
+// Per-program wording overrides merged over the (credit-card) base copy, so the
+// shared funnel reads in the right entitlement/identity framing for every
+// partner (followup A1/A2). Card returns no overrides. This covers wording
+// only — the airport-trip form/receipt content is design-team scope.
+function programVariant(
   kind: FunnelProgramKind,
   locale: PartnerBookingLocale,
-) {
+): Partial<FunnelCopy> {
+  if (kind === "card") {
+    return {};
+  }
   const en = locale === "en";
-  const byKind = {
-    card: {
-      title: en ? "Concierge transfer" : "禮賓接送 Concierge",
-      subtitle: (p: string, n: number) =>
-        en
-          ? `${p} cardholder exclusive · ${n} included rides per year`
-          : `${p} 卡友專屬 · 全年免費 ${n} 趟`,
-      remaining: en ? "Annual rides remaining" : "本年度剩餘趟次",
-    },
-    insurance: {
-      title: en ? "Claim replacement mobility" : "理賠代步用車",
-      subtitle: (p: string) =>
+
+  if (kind === "insurance") {
+    return {
+      landingTitle: en ? "Claim replacement mobility" : "理賠代步用車",
+      landingSubtitle: (p: string) =>
         en
           ? `${p} · replacement vehicle during the claim period`
           : `${p} · 車禍理賠期間代步服務`,
-      remaining: en ? "Replacement allowance remaining" : "理賠代步額度剩餘",
-    },
-    travel: {
-      title: en ? "Group transfer booking" : "團體接送預約",
-      subtitle: (p: string) =>
+      remainingTrips: en ? "Replacement allowance remaining" : "理賠代步額度剩餘",
+      benefitTermsTitle: en ? "Claim mobility terms" : "理賠代步條款",
+      benefitTermsBody: en
+        ? "Replacement-vehicle rides are covered by the approved claim; fares are settled with the insurer, with no on-site payment."
+        : "代步行程由核定理賠給付，費用由保險公司核銷，無須現場付款。",
+      viewTrips: en ? "View ride history" : "查看代步紀錄",
+      linkCardTitle: en ? "Link claim" : "連結理賠案件",
+      cardIdentity: en ? "Claimant" : "理賠申請人",
+      lastFour: en ? "Claim number" : "理賠案號",
+      annualIncludedTrips: en ? "Replacement allowance" : "理賠代步額度",
+      discount: en ? "After allowance" : "額度用完後",
+      discountValue: en ? "Self-paid" : "需自付",
+      consentItems: (sponsor: string) =>
+        en
+          ? [
+              "Use the claim case to create a DRTS account",
+              "Share trip details required for dispatch with DRTS",
+              `Agree to ${sponsor} x DRTS Claim Mobility Terms`,
+            ]
+          : [
+              "以理賠案件建立 DRTS 帳號",
+              "與 DRTS 共享派車必要資訊",
+              `同意《${sponsor} x DRTS 理賠代步服務條款》`,
+            ],
+      consentNote: en
+        ? "No policy or ID numbers beyond what eligibility requires are retained."
+        : "不會保留保單或身分證號等非必要欄位。",
+      annualBenefitRemaining: en
+        ? "Replacement allowance remaining"
+        : "理賠代步額度剩餘",
+      rideNumber: en ? "Replacement ride" : "代步行程",
+      tripsSubtitle: (used: number) =>
+        en ? `Claim period · ${used} used` : `理賠期間 · 已使用 ${used} 次`,
+      helpSubtitle: (p: string) => (en ? `${p} claim hotline` : `${p} 理賠專線`),
+      cardSuffix: en ? "Claim number" : "理賠案號",
+      benefit: en ? "Claim cover" : "理賠給付",
+      programBenefit: (p: string) => (en ? `${p} cover` : `${p} 理賠給付`),
+    };
+  }
+
+  if (kind === "travel") {
+    return {
+      landingTitle: en ? "Group transfer booking" : "團體接送預約",
+      landingSubtitle: (p: string) =>
         en
           ? `${p} · tour airport / hotel transfer`
           : `${p} · 旅行團機場 / 飯店接送`,
-      remaining: en ? "Group seats remaining" : "本團剩餘席次",
-    },
-    hotel: {
-      title: en ? "Concierge transfer" : "禮賓接送",
-      subtitle: (p: string) =>
-        en ? `${p} · hotel guest transfer` : `${p} · 飯店貴賓接送禮遇`,
-      remaining: en ? "Remaining this period" : "本期剩餘禮遇",
-    },
-  } as const;
-  return byKind[kind];
+      remainingTrips: en ? "Group seats remaining" : "本團剩餘席次",
+      benefitTermsTitle: en ? "Group transfer terms" : "團體接送條款",
+      benefitTermsBody: en
+        ? "Transfers are included in the tour package; seats are arranged by itinerary, with no on-site payment."
+        : "接送費用已含於團費，依行程安排席次，無須現場付款。",
+      viewTrips: en ? "View transfer history" : "查看接送紀錄",
+      linkCardTitle: en ? "Link group booking" : "連結團體訂單",
+      cardIdentity: en ? "Group contact" : "團體聯絡人",
+      lastFour: en ? "Group number" : "團號",
+      annualIncludedTrips: en ? "Group seats" : "團體席次",
+      discount: en ? "Extra seats" : "加購席次",
+      discountValue: en ? "Per itinerary" : "依行程",
+      consentItems: (sponsor: string) =>
+        en
+          ? [
+              "Use the group booking to create a DRTS account",
+              "Share trip details required for dispatch with DRTS",
+              `Agree to ${sponsor} x DRTS Group Transfer Terms`,
+            ]
+          : [
+              "以團體訂單建立 DRTS 帳號",
+              "與 DRTS 共享派車必要資訊",
+              `同意《${sponsor} x DRTS 團體接送服務條款》`,
+            ],
+      consentNote: en
+        ? "Only fields required for partner eligibility are retained."
+        : "只保留 partner eligibility 所需欄位。",
+      annualBenefitRemaining: en ? "Group seats remaining" : "本團剩餘席次",
+      rideNumber: en ? "Transfer segment" : "接送段次",
+      tripsSubtitle: (used: number) =>
+        en ? `This tour · ${used} used` : `本團 · 已使用 ${used} 段`,
+      helpSubtitle: (p: string) => (en ? `${p} group hotline` : `${p} 團體專線`),
+      cardSuffix: en ? "Group number" : "團號",
+      benefit: en ? "Group seat" : "團體席次",
+      programBenefit: (p: string) => (en ? `${p} seat` : `${p} 席次`),
+    };
+  }
+
+  // hotel — concierge
+  return {
+    landingTitle: en ? "Concierge transfer" : "禮賓接送",
+    landingSubtitle: (p: string) =>
+      en ? `${p} · hotel guest transfer` : `${p} · 飯店貴賓接送禮遇`,
+    remainingTrips: en ? "Remaining this period" : "本期剩餘禮遇",
+    benefitTermsTitle: en ? "Concierge terms" : "禮賓接送條款",
+    benefitTermsBody: en
+      ? "Transfers are a hotel guest privilege; charges, if any, are posted to the room folio."
+      : "接送為飯店貴賓禮遇，如有費用將計入房帳。",
+    viewTrips: en ? "View transfer history" : "查看接送紀錄",
+    linkCardTitle: en ? "Link membership" : "連結會員",
+    cardIdentity: en ? "Guest" : "貴賓",
+    lastFour: en ? "Membership no." : "會員編號",
+    annualIncludedTrips: en ? "Concierge benefit" : "禮賓禮遇",
+    discount: en ? "Beyond benefit" : "禮遇之外",
+    discountValue: en ? "Room folio" : "計入房帳",
+    consentItems: (sponsor: string) =>
+      en
+        ? [
+            "Use the membership to create a DRTS account",
+            "Share trip details required for dispatch with DRTS",
+            `Agree to ${sponsor} x DRTS Concierge Transfer Terms`,
+          ]
+        : [
+            "以會員身分建立 DRTS 帳號",
+            "與 DRTS 共享派車必要資訊",
+            `同意《${sponsor} x DRTS 禮賓接送服務條款》`,
+          ],
+    consentNote: en
+      ? "Only fields required for partner eligibility are retained."
+      : "只保留 partner eligibility 所需欄位。",
+    annualBenefitRemaining: en ? "Remaining this period" : "本期剩餘禮遇",
+    rideNumber: en ? "Transfer" : "接送",
+    tripsSubtitle: (used: number) =>
+      en ? `This period · ${used} used` : `本期 · 已使用 ${used} 次`,
+    helpSubtitle: (p: string) =>
+      en ? `${p} concierge desk` : `${p} 禮賓服務台`,
+    cardSuffix: en ? "Membership no." : "會員編號",
+    benefit: en ? "Concierge" : "禮遇",
+    programBenefit: (p: string) => (en ? `${p} concierge` : `${p} 禮遇`),
+  };
 }
 
 function PhoneHeader({
@@ -1224,8 +1335,10 @@ export function PartnerBookingPhoneScreen({
   locale?: PartnerBookingLocale;
 }) {
   const demo = metaForBrand(brand, locale);
-  const copy = copyForLocale(locale);
-  const landing = programLandingCopy(funnelProgramKind(brand.code), locale);
+  const copy = {
+    ...copyForLocale(locale),
+    ...programVariant(funnelProgramKind(brand.code), locale),
+  };
   const serviceItems = serviceItemsForLocale(locale);
   const benefitWidth = `${
     (demo.remainingBenefits / demo.totalBenefits) * 100
@@ -1238,8 +1351,8 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title={landing.title}
-          subtitle={landing.subtitle(brand.programName, demo.totalBenefits)}
+          title={copy.landingTitle}
+          subtitle={copy.landingSubtitle(brand.programName, demo.totalBenefits)}
           trailing="EXCLUSIVE"
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
@@ -1268,7 +1381,9 @@ export function PartnerBookingPhoneScreen({
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "13px", fontWeight: 700 }}>
-                  •••• •••• •••• {brand.cardArt.lastFour}
+                  {funnelProgramKind(brand.code) === "card"
+                    ? `•••• •••• •••• ${brand.cardArt.lastFour}`
+                    : `${copy.lastFour} ••${brand.cardArt.lastFour}`}
                 </div>
                 <div style={{ fontSize: "11px", color: "#56657f" }}>
                   {demo.riderName} · {brand.programName}
@@ -1292,7 +1407,7 @@ export function PartnerBookingPhoneScreen({
                 }}
               >
                 <span style={{ fontSize: "11px", color: "#56657f" }}>
-                  {landing.remaining}
+                  {copy.remainingTrips}
                 </span>
                 <span
                   style={{
@@ -2129,7 +2244,10 @@ export function PartnerBookingReferenceFunnel({
   locale?: PartnerBookingLocale;
 }) {
   const demo = metaForBrand(brand, locale);
-  const copy = copyForLocale(locale);
+  const copy = {
+    ...copyForLocale(locale),
+    ...programVariant(funnelProgramKind(brand.code), locale),
+  };
   const activeMeta = getPartnerBookingScreenMeta(activeScreen, locale);
   const localizedScreenMeta = screenMetaForLocale(locale);
 
@@ -2459,7 +2577,10 @@ export function PartnerBookingStateGate({
   persistentQuery?: string;
   locale?: PartnerBookingLocale;
 }) {
-  const copy = copyForLocale(locale);
+  const copy = {
+    ...copyForLocale(locale),
+    ...programVariant(funnelProgramKind(brand.code), locale),
+  };
   const meta = getPartnerBookingStateScreenMeta(state, locale);
 
   return (
