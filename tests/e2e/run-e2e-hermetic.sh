@@ -84,12 +84,17 @@ stop_api() {
 }
 
 reset_db() {
+  if ! command -v psql >/dev/null 2>&1; then
+    echo "[hermetic] psql command not found; cannot reset ${DB_NAME}." >&2
+    return 1
+  fi
+
   PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c \
     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}' AND pid<>pg_backend_pid();" >/dev/null 2>&1 || true
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${DB_NAME};" >/dev/null
-  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${DB_NAME};" >/dev/null
-  pnpm db:migrate >/dev/null 2>&1
-  pnpm db:seed >/dev/null 2>&1
+  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS ${DB_NAME};" >/dev/null || return 1
+  PGPASSWORD="$DB_PASS" psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${DB_NAME};" >/dev/null || return 1
+  pnpm db:migrate >/dev/null 2>&1 || return 1
+  pnpm db:seed >/dev/null 2>&1 || return 1
 }
 
 start_api() {
@@ -108,7 +113,7 @@ PASS=(); FAIL=()
 for s in "${SUITES[@]}"; do
   echo "──────── hermetic E2E-${s} ────────"
   stop_api
-  reset_db
+  if ! reset_db; then FAIL+=("$s"); continue; fi
   if ! start_api; then FAIL+=("$s"); continue; fi
   if ./tests/e2e/run-e2e.sh --suite "$s"; then PASS+=("$s"); else FAIL+=("$s"); fi
 done

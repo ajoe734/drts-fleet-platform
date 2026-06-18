@@ -1231,10 +1231,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       # Post-deploy UI smoke: drives the deployed dev front-ends with a real browser
       # across all business-line surfaces. URLs come from the health-check job's
-      # resolved Cloud Run service URLs. ops-console-parity is intentionally excluded
-      # (it depends on demo detail-route ids like DRV-001 that aren't guaranteed to be
-      # seeded on the deployed env); the cross-surface dev-runtime-matrix covers
-      # ops-console rendering already.
+      # resolved Cloud Run service URLs.
       - name: Run UI smoke against deployed dev
         env:
           DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
@@ -1253,6 +1250,9 @@ jobs:
           pnpm exec playwright test --retries=1 --config playwright.dev-runtime-matrix.config.ts
           pnpm exec playwright test --retries=1 --config playwright.bank-console-depth.config.ts
           pnpm exec playwright test --retries=1 --config playwright.bank-console-auth.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.ops-console-parity.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.ops-assistant.config.ts
+          pnpm exec playwright test --retries=1 --config playwright.fleet-partner-portal.config.ts
           pnpm exec playwright test --retries=1 --config playwright.partner-booking-surfaces.config.ts
           pnpm exec playwright test --retries=1 --config playwright.enterprise-dispatch.config.ts
           pnpm exec playwright test --retries=1 --config playwright.channel-partner-portal.config.ts
