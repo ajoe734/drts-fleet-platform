@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const baseUrl = process.env.OPS_CONSOLE_BASE_URL ?? "http://localhost:3003";
+const baseUrl =
+  process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
+  process.env.OPS_CONSOLE_BASE_URL ??
+  "http://localhost:3003";
 
 type RouteSpec = {
   key: string;
@@ -11,6 +14,12 @@ type RouteSpec = {
   hrefFrom?: {
     sourcePath: string;
     selector: string;
+    hrefPattern?: RegExp;
+  };
+  textFrom?: {
+    sourcePath: string;
+    pattern: RegExp;
+    pathPrefix: string;
   };
 };
 
@@ -115,10 +124,14 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "drivers-detail",
-    path: "/drivers/DRV-001",
-    title: /司機|Driver|DRV-001/i,
+    title: /司機|Driver|DRV-|drv-/i,
     markers: [/Manual override|suppression|platform|司機/i],
     screenshot: "ops-drivers-detail.png",
+    textFrom: {
+      sourcePath: "/drivers",
+      pattern: /\bdrv-[a-z0-9-]+\b/i,
+      pathPrefix: "/drivers/",
+    },
   },
   {
     key: "vehicles-list",
@@ -129,10 +142,14 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "vehicles-detail",
-    path: "/vehicles/VEH-001",
-    title: /VEH-001|Vehicle|車輛/i,
+    title: /VEH-|veh-|Vehicle|車輛/i,
     markers: [/audit|contract|maintenance|車輛/i],
     screenshot: "ops-vehicles-detail.png",
+    textFrom: {
+      sourcePath: "/vehicles",
+      pattern: /\b(?:VEH|veh)-[a-z0-9-]+\b/i,
+      pathPrefix: "/vehicles/",
+    },
   },
   {
     key: "contracts-list",
@@ -143,10 +160,14 @@ const routeSpecs: RouteSpec[] = [
   },
   {
     key: "contracts-detail",
-    path: "/contracts/CTR-310",
-    title: /CTR-310|ops read-only|合約/i,
+    title: /CTR-|contract-|ops read-only|合約/i,
     markers: [/Operational terms|Version history|Platform Admin|合約/i],
     screenshot: "ops-contracts-detail.png",
+    textFrom: {
+      sourcePath: "/contracts",
+      pattern: /\b(?:CTR|contract)-[a-z0-9-]+\b/i,
+      pathPrefix: "/contracts/",
+    },
   },
   {
     key: "feature-flags",
@@ -161,20 +182,40 @@ async function resolveRoutePath(page: Page, spec: RouteSpec) {
   if (spec.path) {
     return spec.path;
   }
-  if (!spec.hrefFrom) {
-    throw new Error(`No path or href source configured for ${spec.key}`);
+  if (spec.hrefFrom) {
+    await page.goto(`${baseUrl}${spec.hrefFrom.sourcePath}`, {
+      waitUntil: "domcontentloaded",
+    });
+    const hrefs = await page
+      .locator(spec.hrefFrom.selector)
+      .evaluateAll((links) =>
+        links
+          .map((link) => link.getAttribute("href"))
+          .filter((href): href is string => Boolean(href)),
+      );
+    const href = hrefs.find(
+      (candidate) =>
+        !spec.hrefFrom?.hrefPattern || spec.hrefFrom.hrefPattern.test(candidate),
+    );
+    if (!href) {
+      throw new Error(`Could not resolve href for ${spec.key}`);
+    }
+    return href;
   }
-  await page.goto(`${baseUrl}${spec.hrefFrom.sourcePath}`, {
-    waitUntil: "domcontentloaded",
-  });
-  const href = await page
-    .locator(spec.hrefFrom.selector)
-    .first()
-    .getAttribute("href");
-  if (!href) {
-    throw new Error(`Could not resolve href for ${spec.key}`);
+
+  if (spec.textFrom) {
+    await page.goto(`${baseUrl}${spec.textFrom.sourcePath}`, {
+      waitUntil: "domcontentloaded",
+    });
+    const bodyText = await page.locator("body").innerText();
+    const match = bodyText.match(spec.textFrom.pattern);
+    if (!match?.[0]) {
+      throw new Error(`Could not resolve text id for ${spec.key}`);
+    }
+    return `${spec.textFrom.pathPrefix}${encodeURIComponent(match[0])}`;
   }
-  return href;
+
+  throw new Error(`No path or route source configured for ${spec.key}`);
 }
 
 async function assertShell(page: Page) {

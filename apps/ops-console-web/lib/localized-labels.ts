@@ -57,6 +57,31 @@ export function formatOpsCodeLabel(
   return key in translations.en ? t(key, locale) : humanizeCode(value);
 }
 
+const OPS_ACTION_LABEL_KEYS: Record<string, string> = {
+  add_note: "complaints.action.addNote",
+  assign: "complaints.action.assign",
+  close: "complaints.action.close",
+  create: "complaints.action.create",
+  escalate_to_incident: "complaints.action.escalateToIncident",
+  export_view: "complaints.action.exportView",
+  mark_sla_breach: "complaints.action.markSlaBreach",
+  reopen: "complaints.action.reopen",
+  resolve: "complaints.action.resolve",
+};
+
+export function formatOpsActionLabel(
+  locale: Locale,
+  action: string | null | undefined,
+) {
+  if (!action) {
+    return getOpsLabel(locale, "unknown");
+  }
+
+  const normalized = action.trim().toLowerCase();
+  const key = OPS_ACTION_LABEL_KEYS[normalized];
+  return key ? t(key, locale) : formatOpsCodeLabel(locale, action);
+}
+
 export function formatOpsCodeList(
   locale: Locale,
   values: readonly string[] | null | undefined,

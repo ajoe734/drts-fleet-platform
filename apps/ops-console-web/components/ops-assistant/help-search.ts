@@ -1,6 +1,10 @@
 "use client";
 
 import type { ResourceActionDescriptor } from "@drts/contracts";
+import {
+  formatOpsActionLabel,
+  formatOpsCodeLabel,
+} from "@/lib/localized-labels";
 import { t, type Locale } from "@/lib/translations";
 import type {
   AssistantActionBridge,
@@ -57,9 +61,9 @@ function summarizeActions(
     .map((descriptor) => {
       const risk = descriptor.requiresReason
         ? t("opsAssistant.help.scope.riskRequiresReason", locale, {
-            riskLevel: descriptor.riskLevel,
+            riskLevel: formatOpsCodeLabel(locale, descriptor.riskLevel),
           })
-        : descriptor.riskLevel;
+        : formatOpsCodeLabel(locale, descriptor.riskLevel);
       const enabled = descriptor.enabled
         ? t("common.enabled", locale)
         : t("opsAssistant.help.scope.disabled", locale, {
@@ -68,7 +72,7 @@ function summarizeActions(
               t("opsAssistant.bridge.disabledFallback", locale),
           });
       return t("opsAssistant.help.scope.actionSummary", locale, {
-        action: descriptor.action,
+        action: formatOpsActionLabel(locale, descriptor.action),
         risk,
         availability: enabled,
       });

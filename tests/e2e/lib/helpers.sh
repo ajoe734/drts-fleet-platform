@@ -16,6 +16,9 @@ E2E_API_URL="${E2E_API_URL:-${SMOKE_API_URL:-http://localhost:3001}}"
 E2E_API_PATH_PREFIX="${E2E_API_PATH_PREFIX:-/api}"
 # Optional Cloud Run / ingress bearer token for private staging access.
 E2E_AUTH_BEARER_TOKEN="${E2E_AUTH_BEARER_TOKEN:-}"
+# Optional application bearer token. This uses x-drts-authorization so it does
+# not collide with Cloud Run / ingress Authorization headers.
+E2E_REQUEST_BEARER_TOKEN="${E2E_REQUEST_BEARER_TOKEN:-}"
 E2E_INTERNAL_KEY="${E2E_INTERNAL_KEY:-${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}}"
 
 # ── Bootstrap auth (overridden per surface leg via switch_actor) ───────────────
@@ -132,6 +135,10 @@ http_call() {
 
   if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
     curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
+
+  if [[ -n "$E2E_REQUEST_BEARER_TOKEN" ]]; then
+    curl_args+=(-H "x-drts-authorization: Bearer ${E2E_REQUEST_BEARER_TOKEN}")
   fi
 
   if [[ -n "$E2E_INTERNAL_KEY" ]]; then
