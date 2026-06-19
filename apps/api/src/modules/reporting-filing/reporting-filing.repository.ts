@@ -1,12 +1,14 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  DispatchDailyRecord,
   FilingPackageRecord,
   OwnedOrderRecord,
   PartnerRevenueSummaryRowRecord,
   ReportArtifactRecord,
   ReportJobRecord,
   SettlementMatrixRecord,
+  SixMonthOperationsSummary,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -43,7 +45,11 @@ type TenantMonthlyTripReportRow = {
   exportedAt: string;
 };
 
-type ReportJobRow = DispatchRecordingIndexRow | TenantMonthlyTripReportRow;
+type ReportJobRow =
+  | DispatchRecordingIndexRow
+  | TenantMonthlyTripReportRow
+  | DispatchDailyRecord
+  | SixMonthOperationsSummary;
 
 type ReportArtifactView = ReportArtifactRecord & {
   downloadMetadata: ControlledDownloadMetadata;

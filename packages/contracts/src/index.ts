@@ -11,6 +11,7 @@ import type {
 } from "./ui-runtime";
 
 export * from "./referral-channel";
+export * from "./supply-eligibility-reporting";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4192,7 +4193,9 @@ export const REGULATORY_REPORT_JOB_TYPES = [
 export const OPERATIONAL_REPORT_JOB_TYPES = [
   "trip_summary",
   "monthly_trip_report",
+  "daily_dispatch_record",
   "revenue_summary",
+  "six_month_operations_summary",
   "incident_register",
   "maintenance_overview",
 ] as const;

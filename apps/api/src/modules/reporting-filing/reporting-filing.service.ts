@@ -5,6 +5,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import type {
   AuditLogRecord,
   CreateReportJobCommand,
+  DispatchDailyRecord,
   EvidenceSubjectGovernanceRecord,
   FilingPackageAccepted,
   FilingPackageRecord,
@@ -17,6 +18,7 @@ import type {
   ReportJobAccepted,
   ReportJobRecord,
   SettlementMatrixRecord,
+  SixMonthOperationsSummary,
   TenantCostCenterRecord,
 } from "@drts/contracts";
 
@@ -28,6 +30,8 @@ import {
 } from "../../common/evidence-governance";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { DispatchDailyRecordBuilder } from "../reporting/dispatch-daily-record.builder";
+import { OperationsSummaryAggregator } from "../reporting/operations-summary-aggregator.service";
 import {
   ReportingFilingRepository,
   type PersistReportingFilingChanges,
@@ -70,7 +74,11 @@ type TenantMonthlyTripReportRow = {
   exportedAt: string;
 };
 
-type ReportJobRow = DispatchRecordingIndexRow | TenantMonthlyTripReportRow;
+type ReportJobRow =
+  | DispatchRecordingIndexRow
+  | TenantMonthlyTripReportRow
+  | DispatchDailyRecord
+  | SixMonthOperationsSummary;
 
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
@@ -157,6 +165,8 @@ export class ReportingFilingService implements OnModuleInit {
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
+    private readonly dispatchDailyRecordBuilder: DispatchDailyRecordBuilder,
+    private readonly operationsSummaryAggregator: OperationsSummaryAggregator,
     @Optional()
     private readonly reportingFilingRepository?: ReportingFilingRepository,
   ) {}
@@ -589,8 +599,14 @@ export class ReportingFilingService implements OnModuleInit {
     if (job.jobType === "monthly_trip_report") {
       job.rows = this.buildTenantMonthlyTripRows(job, requestId);
     }
+    if (job.jobType === "daily_dispatch_record") {
+      job.rows = this.dispatchDailyRecordBuilder.build(job.filters);
+    }
     if (job.jobType === "revenue_summary") {
       job.partnerRevenueRows = this.buildPartnerRevenueSummaryRows();
+    }
+    if (job.jobType === "six_month_operations_summary") {
+      job.rows = this.operationsSummaryAggregator.aggregate(job.filters);
     }
 
     const artifactPayload = {

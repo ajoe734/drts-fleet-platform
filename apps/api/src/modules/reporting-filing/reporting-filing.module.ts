@@ -1,6 +1,9 @@
 import { Module, OnModuleInit } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { DispatchDailyRecordBuilder } from "../reporting/dispatch-daily-record.builder";
+import { DispatchableSupplySnapshotService } from "../reporting/dispatchable-supply-snapshot.service";
+import { OperationsSummaryAggregator } from "../reporting/operations-summary-aggregator.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
@@ -18,7 +21,13 @@ import { ReportingFilingService } from "./reporting-filing.service";
     TenantPartnerModule,
   ],
   controllers: [ReportingFilingController],
-  providers: [ReportingFilingService, ReportingFilingRepository],
+  providers: [
+    ReportingFilingService,
+    ReportingFilingRepository,
+    DispatchDailyRecordBuilder,
+    DispatchableSupplySnapshotService,
+    OperationsSummaryAggregator,
+  ],
   exports: [ReportingFilingService],
 })
 export class ReportingFilingModule implements OnModuleInit {
