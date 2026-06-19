@@ -5,6 +5,11 @@ const baseUrl =
   process.env.OPS_CONSOLE_BASE_URL ??
   "http://localhost:3003";
 
+const sourceResolveAttempts = 8;
+const sourceResolveBackoffMs = 10_000;
+const retryableSourceFailurePattern =
+  /429|Too Many Requests|fetch_failed|無法載入|暫不可用/i;
+
 type RouteSpec = {
   key: string;
   path?: string;
@@ -195,7 +200,8 @@ async function resolveRoutePath(page: Page, spec: RouteSpec) {
       );
     const href = hrefs.find(
       (candidate) =>
-        !spec.hrefFrom?.hrefPattern || spec.hrefFrom.hrefPattern.test(candidate),
+        !spec.hrefFrom?.hrefPattern ||
+        spec.hrefFrom.hrefPattern.test(candidate),
     );
     if (!href) {
       throw new Error(`Could not resolve href for ${spec.key}`);
@@ -204,15 +210,35 @@ async function resolveRoutePath(page: Page, spec: RouteSpec) {
   }
 
   if (spec.textFrom) {
-    await page.goto(`${baseUrl}${spec.textFrom.sourcePath}`, {
-      waitUntil: "domcontentloaded",
-    });
-    const bodyText = await page.locator("body").innerText();
-    const match = bodyText.match(spec.textFrom.pattern);
-    if (!match?.[0]) {
-      throw new Error(`Could not resolve text id for ${spec.key}`);
+    let lastBodyText = "";
+    for (let attempt = 1; attempt <= sourceResolveAttempts; attempt += 1) {
+      await page.goto(`${baseUrl}${spec.textFrom.sourcePath}`, {
+        waitUntil: "domcontentloaded",
+      });
+      const bodyText = await page.locator("body").innerText();
+      const match = bodyText.match(spec.textFrom.pattern);
+      if (match?.[0]) {
+        return `${spec.textFrom.pathPrefix}${encodeURIComponent(match[0])}`;
+      }
+
+      lastBodyText = bodyText.replace(/\s+/g, " ").trim();
+      const canRetry =
+        retryableSourceFailurePattern.test(lastBodyText) &&
+        attempt < sourceResolveAttempts;
+      if (!canRetry) {
+        break;
+      }
+
+      // The source page is a read-model seam; retry only transient throttling,
+      // but still require a real upstream id before opening detail routes.
+      await page.waitForTimeout(sourceResolveBackoffMs);
     }
-    return `${spec.textFrom.pathPrefix}${encodeURIComponent(match[0])}`;
+    throw new Error(
+      `Could not resolve text id for ${spec.key}. Last source body: ${lastBodyText.slice(
+        0,
+        800,
+      )}`,
+    );
   }
 
   throw new Error(`No path or route source configured for ${spec.key}`);
