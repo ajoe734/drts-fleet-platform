@@ -1,3 +1,4 @@
+import type { EnterpriseDispatchBookingFixture } from "./dispatch-fixture-adapter";
 import { type Locale, type TranslationKey, t } from "@/lib/translations";
 
 export type BookingState =
@@ -39,6 +40,7 @@ export interface EnterpriseBooking {
 }
 
 export const enterpriseTenant = {
+  id: "10000000-0000-0000-0000-000000000201",
   name: "鴻碩科技",
   host: "go.hongshuo.com.tw",
   appHost: "hongshuo-workspace",
@@ -100,6 +102,45 @@ export const enterpriseBookingDraft = {
   onsiteContact: "fixture.contact.zhou",
   notes: "guest_pickup_note",
 };
+
+export function getEnterpriseBookingCommandFixture(
+  now = new Date(),
+): EnterpriseDispatchBookingFixture {
+  const reservationWindowStart = new Date(
+    now.getTime() + 70 * 60 * 1000,
+  ).toISOString();
+  const reservationWindowEnd = new Date(
+    now.getTime() + 100 * 60 * 1000,
+  ).toISOString();
+
+  return {
+    reservationWindowStart,
+    reservationWindowEnd,
+    pickupAddress: "桃園國際機場第一航廈",
+    pickupAddressName: "TPE Terminal 1 arrival hall",
+    pickupLat: 25.0803,
+    pickupLng: 121.2322,
+    dropoffAddress: "台北君悅酒店",
+    dropoffAddressName: "Grand Hyatt Taipei",
+    dropoffLat: 25.0355,
+    dropoffLng: 121.5623,
+    passengerName: "Sato Haruka",
+    passengerPhone: "+886912000118",
+    bookedByName: "Lin Yijun",
+    bookedByEmail: "lin.yijun@hongshuo.example",
+    onsiteContactName: "Zhou Airport Concierge",
+    onsiteContactPhone: "+886912000220",
+    costCenter: enterpriseBookingDraft.costCenterCode,
+    vehiclePreference: "business",
+    notes:
+      "Enterprise dispatch web submit fixture. Driver should hold Sato placard at arrival hall.",
+    flightNo: enterpriseBookingDraft.flight,
+    terminal: enterpriseBookingDraft.terminal,
+    luggageCount: 3,
+    signoffRequired: true,
+    direction: "pickup",
+  };
+}
 
 export const enterpriseBookings: EnterpriseBooking[] = [
   {

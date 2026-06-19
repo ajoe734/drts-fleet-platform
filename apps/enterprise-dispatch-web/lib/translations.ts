@@ -123,6 +123,8 @@ const en = {
   "review.card.checklist": "Pre-submit checklist",
   "review.card.submit": "Submit booking command",
   "review.submit": "Submit booking",
+  "review.submit.submitting": "Submitting to backend",
+  "review.submit.failed": "Submission failed",
   "review.back": "Back to edit",
   "submitted.title": "Accepted",
   "submitted.subtitle":
@@ -132,6 +134,13 @@ const en = {
   "submitted.banner.body":
     "This screen means the command is already in backend flow. Immediate dispatch confirmation still depends on approval and supply state.",
   "submitted.card.summary": "Submission summary",
+  "submitted.summary.bookingId": "Backend booking ID",
+  "submitted.summary.orderId": "Owned order ID",
+  "submitted.summary.status": "Backend status",
+  "submitted.summary.source": "Producer source",
+  "submitted.summary.backendProof": "Backend write confirmed",
+  "submitted.summary.missingBackend":
+    "No backend booking proof is present. Return to review and submit again instead of treating this as a completed booking.",
   "submitted.summary.estimatedResult":
     "Wait for manager approval before booking detail is created",
   "submitted.pending": "View pending approval state",
@@ -695,6 +704,8 @@ const zh: Record<TranslationKey, string> = {
   "review.card.checklist": "送出前確認",
   "review.card.submit": "提交 booking command",
   "review.submit": "送出預約",
+  "review.submit.submitting": "送到後端中",
+  "review.submit.failed": "送出失敗",
   "review.back": "返回編輯",
   "submitted.title": "已受理",
   "submitted.subtitle": "create command 已接受，接下來等待審批與派車結果。",
@@ -703,6 +714,13 @@ const zh: Record<TranslationKey, string> = {
   "submitted.banner.body":
     "這個畫面代表命令已進入後端流程，後續是否立即確認派車仍取決於審批與供應狀態。",
   "submitted.card.summary": "送出摘要",
+  "submitted.summary.bookingId": "後端 booking ID",
+  "submitted.summary.orderId": "Owned order ID",
+  "submitted.summary.status": "後端狀態",
+  "submitted.summary.source": "生產來源",
+  "submitted.summary.backendProof": "後端寫入已確認",
+  "submitted.summary.missingBackend":
+    "目前沒有後端 booking 證明；請回到確認頁重新送出，不要把這頁當成已完成預約。",
   "submitted.summary.estimatedResult": "等待主管審批後建立 booking detail",
   "submitted.pending": "查看待審批狀態",
   "submitted.bookings": "前往我的預約",

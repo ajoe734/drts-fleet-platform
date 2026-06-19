@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BookingSubmitButton } from "@/components/booking-submit-button";
 import {
   EBanner,
   EBtnContent,
@@ -247,12 +248,7 @@ export default async function ReviewBookingPage() {
             >
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
-            <Link
-              href="/bookings/submitted"
-              style={entBtnStyle(t, { variant: "primary", block: true })}
-            >
-              <EBtnContent icon="check">{tr("review.submit")}</EBtnContent>
-            </Link>
+            <BookingSubmitButton />
           </div>
         </div>
       </div>
