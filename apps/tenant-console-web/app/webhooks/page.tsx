@@ -1081,7 +1081,9 @@ function buildExternalLink(
   };
 }
 
-async function loadWebhooksPageData(locale: Locale): Promise<WebhooksPageData> {
+async function loadWebhooksPageData(
+  locale: Locale,
+): Promise<WebhooksPageData> {
   const client = getTenantClient();
   const [
     identityResult,
@@ -2780,17 +2782,13 @@ export default async function WebhooksPage({
                       {selectedDelivery.eventType}
                     </div>
                     <div style={detailLineStyle}>
-                      <span>
-                        {t("webhooks.delivery.deliveryLabel", locale)}
-                      </span>
+                      <span>{t("webhooks.delivery.deliveryLabel", locale)}</span>
                       <span style={monoStyle}>
                         {selectedDelivery.deliveryId}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>
-                        {t("webhooks.delivery.endpointLabel", locale)}
-                      </span>
+                      <span>{t("webhooks.delivery.endpointLabel", locale)}</span>
                       <span style={monoStyle}>
                         {selectedDelivery.webhookId}
                       </span>
