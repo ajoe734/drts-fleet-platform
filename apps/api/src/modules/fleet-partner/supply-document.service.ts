@@ -109,6 +109,13 @@ export class SupplyDocumentService {
     command: ConfirmSupplyDocumentUploadCommand,
     requestId?: string,
   ) {
+    const objectKey = command.objectKey.trim();
+    const originalFileName = command.originalFileName.trim();
+    const contentType = command.contentType.trim();
+    const checksumSha256 = command.checksumSha256.trim();
+    const effectiveFrom = command.effectiveFrom?.trim() || null;
+    const effectiveUntil = command.effectiveUntil?.trim() || null;
+
     const submission = this.supplySubmissionService.requireScopedSubmission(
       submissionId,
       fleetPartnerId,
@@ -118,19 +125,28 @@ export class SupplyDocumentService {
       submission,
       command.expectedRevisionNo,
     );
-    this.assertNonBlank(command.objectKey, "objectKey");
-    this.assertNonBlank(command.originalFileName, "originalFileName");
-    this.assertNonBlank(command.contentType, "contentType");
-    this.assertNonBlank(command.checksumSha256, "checksumSha256");
+    this.assertNonBlank(objectKey, "objectKey");
+    this.assertNonBlank(originalFileName, "originalFileName");
+    this.assertNonBlank(contentType, "contentType");
+    this.assertNonBlank(checksumSha256, "checksumSha256");
     this.assertPositiveInteger(command.fileSize, "fileSize");
-    if (command.effectiveFrom) {
-      this.assertDateOnly(command.effectiveFrom, "effectiveFrom");
+    this.assertSha256Checksum(checksumSha256);
+    if (effectiveFrom) {
+      this.assertDateOnly(effectiveFrom, "effectiveFrom");
     }
-    if (command.effectiveUntil) {
-      this.assertDateOnly(command.effectiveUntil, "effectiveUntil");
+    if (effectiveUntil) {
+      this.assertDateOnly(effectiveUntil, "effectiveUntil");
+    }
+    if (effectiveFrom && effectiveUntil && effectiveUntil < effectiveFrom) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "effectiveUntil must be on or after effectiveFrom.",
+        { effectiveFrom, effectiveUntil },
+      );
     }
 
-    const uploadIntent = this.pendingUploadIntents.get(command.objectKey);
+    const uploadIntent = this.pendingUploadIntents.get(objectKey);
     if (!uploadIntent || uploadIntent.submissionId !== submissionId) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -138,24 +154,29 @@ export class SupplyDocumentService {
         "The upload confirmation does not match an active pre-signed upload intent.",
         {
           submissionId,
-          objectKey: command.objectKey,
+          objectKey,
         },
       );
     }
-    this.assertUploadIntent(uploadIntent, fleetPartnerId, submissionId, command);
+    this.assertUploadIntent(uploadIntent, fleetPartnerId, submissionId, {
+      ...command,
+      objectKey,
+      originalFileName,
+      contentType,
+    });
 
     const document: SupplyDocumentRecord = {
       documentId: randomUUID(),
       fleetPartnerId,
       submissionId,
       documentType: command.documentType,
-      fileObjectKey: command.objectKey.trim(),
-      originalFileName: command.originalFileName.trim(),
-      contentType: command.contentType.trim(),
+      fileObjectKey: objectKey,
+      originalFileName,
+      contentType,
       fileSize: command.fileSize,
-      checksumSha256: command.checksumSha256.trim(),
-      effectiveFrom: command.effectiveFrom ?? null,
-      effectiveUntil: command.effectiveUntil ?? null,
+      checksumSha256,
+      effectiveFrom,
+      effectiveUntil,
       reviewStatus: "pending",
       reviewComment: null,
       uploadedBy: actorId,
@@ -169,7 +190,7 @@ export class SupplyDocumentService {
       [document],
       "confirm supply document upload",
     );
-    this.pendingUploadIntents.delete(command.objectKey);
+    this.pendingUploadIntents.delete(objectKey);
     this.supplySubmissionService.recordMutationAudit(
       {
         actorId,
@@ -341,6 +362,17 @@ export class SupplyDocumentService {
         "VALIDATION_ERROR",
         `${fieldName} must be a positive integer.`,
         { fieldName, value },
+      );
+    }
+  }
+
+  private assertSha256Checksum(value: string) {
+    if (!/^[a-fA-F0-9]{64}$/.test(value)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "checksumSha256 must be a 64-character hexadecimal SHA-256 digest.",
+        { fieldName: "checksumSha256" },
       );
     }
   }

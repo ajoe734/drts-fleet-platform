@@ -17,6 +17,11 @@ import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
+const VALID_CHECKSUM_A =
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const VALID_CHECKSUM_B =
+  "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+
 function createFixture() {
   const auditNotificationService = new AuditNotificationService();
   const driverProfileService = new DriverProfileService(
@@ -238,7 +243,7 @@ describe("FleetPartnerController portal routes", () => {
         originalFileName: "license.pdf",
         contentType: "application/pdf",
         fileSize: 1024,
-        checksumSha256: "abc123",
+        checksumSha256: VALID_CHECKSUM_A,
         effectiveFrom: "2026-01-01",
         effectiveUntil: "2027-12-31",
       },
@@ -269,7 +274,7 @@ describe("FleetPartnerController portal routes", () => {
         originalFileName: "registration.pdf",
         contentType: "application/pdf",
         fileSize: 2048,
-        checksumSha256: "def456",
+        checksumSha256: VALID_CHECKSUM_B,
         effectiveFrom: "2026-01-01",
         effectiveUntil: "2027-12-31",
       },
@@ -357,7 +362,7 @@ describe("FleetPartnerController portal routes", () => {
           originalFileName: "license.pdf",
           contentType: "application/pdf",
           fileSize: 1024,
-          checksumSha256: "abc123",
+          checksumSha256: VALID_CHECKSUM_A,
           effectiveFrom: "2026-01-01",
           effectiveUntil: "2027-12-31",
         },
@@ -427,7 +432,7 @@ describe("FleetPartnerController portal routes", () => {
           originalFileName: "license-v2.pdf",
           contentType: "image/png",
           fileSize: 1024,
-          checksumSha256: "abc123",
+          checksumSha256: VALID_CHECKSUM_A,
           effectiveFrom: "2026-01-01",
           effectiveUntil: "2027-12-31",
         },
@@ -451,6 +456,180 @@ describe("FleetPartnerController portal routes", () => {
               "originalFileName",
               "contentType",
             ],
+          },
+        },
+      });
+    }
+  });
+
+  it("accepts confirming a pre-signed upload when objectKey has surrounding whitespace", async () => {
+    const { controller } = createFixture();
+
+    const created = await controller.createDriverSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      {
+        name: "Driver Supply Demo",
+        mobile: "+886900999888",
+        professionalDriverLicenseNo: "PDL-9988",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "TX-9988",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+      "req-supply-create-driver-trimmed-key",
+    );
+    const submissionId = created.data.submission.submissionId;
+
+    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+      },
+      "req-supply-upload-trimmed-key",
+    );
+
+    const confirmed = await controller.confirmSupplyDocumentUpload(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        objectKey: `  ${uploadUrl.data.objectKey}  `,
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+        fileSize: 1024,
+        checksumSha256: VALID_CHECKSUM_A,
+        effectiveFrom: "2026-01-01",
+        effectiveUntil: "2027-12-31",
+      },
+      "req-supply-confirm-trimmed-key",
+    );
+
+    expect(confirmed.data.fileObjectKey).toBe(uploadUrl.data.objectKey);
+  });
+
+  it("rejects confirming a pre-signed upload with invalid checksum or effective range", async () => {
+    const { controller } = createFixture();
+
+    const created = await controller.createDriverSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      {
+        name: "Driver Supply Demo",
+        mobile: "+886900999888",
+        professionalDriverLicenseNo: "PDL-9988",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "TX-9988",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+      "req-supply-create-driver-invalid-metadata",
+    );
+    const submissionId = created.data.submission.submissionId;
+
+    const invalidChecksumUploadUrl = controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+      },
+      "req-supply-upload-invalid-checksum",
+    );
+
+    const invalidChecksumError = await controller
+      .confirmSupplyDocumentUpload(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          objectKey: invalidChecksumUploadUrl.data.objectKey,
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+          fileSize: 1024,
+          checksumSha256: "abc123",
+          effectiveFrom: "2026-01-01",
+          effectiveUntil: "2027-12-31",
+        },
+        "req-supply-confirm-invalid-checksum",
+      )
+      .catch((error: unknown) => error);
+    expect(invalidChecksumError).toBeInstanceOf(ApiRequestError);
+    try {
+      throw invalidChecksumError;
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          message:
+            "checksumSha256 must be a 64-character hexadecimal SHA-256 digest.",
+          details: {
+            fieldName: "checksumSha256",
+          },
+        },
+      });
+    }
+
+    const invalidRangeUploadUrl = controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+      },
+      "req-supply-upload-invalid-range",
+    );
+
+    const invalidRangeError = await controller
+      .confirmSupplyDocumentUpload(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          objectKey: invalidRangeUploadUrl.data.objectKey,
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+          fileSize: 1024,
+          checksumSha256:
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          effectiveFrom: "2027-12-31",
+          effectiveUntil: "2026-01-01",
+        },
+        "req-supply-confirm-invalid-range",
+      )
+      .catch((error: unknown) => error);
+    expect(invalidRangeError).toBeInstanceOf(ApiRequestError);
+    try {
+      throw invalidRangeError;
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "effectiveUntil must be on or after effectiveFrom.",
+          details: {
+            effectiveFrom: "2027-12-31",
+            effectiveUntil: "2026-01-01",
           },
         },
       });
