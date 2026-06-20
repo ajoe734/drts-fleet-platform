@@ -5,6 +5,7 @@
 **Parent Owner / Reviewer:** `Codex2` / `Codex`
 **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 **Generated:** `2026-06-20` (UTC)
+**Refreshed At:** `2026-06-20T06:01:00Z`
 **Snapshot Basis:** `scripts/ai-status.sh show`, `git show`, `git branch --contains`, `git merge-base --is-ancestor`, `git diff --check`, and commit-scoped `git grep`
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
@@ -97,16 +98,18 @@ Integration caveat:
 Reviewer caveat:
 
 - this sidecar worktree branch is `codex/mob-be-001-sidecar-review`
-- its current `HEAD` is `91570b400d5ed1f4b4b9a5bdb7cd08f7dcf9a55d`
+- its current `HEAD` is `3392e4e3ad48b54a96fcef4608b1cc30f17b7cd4`
+- `origin/codex/mob-be-001-sidecar-review` also points to
+  `3392e4e3ad48b54a96fcef4608b1cc30f17b7cd4`
 - `HEAD` is not the parent review commit, so audit the parent against
   `4b093cd23003ace8287962ad80e31f61ad7581fb`, not against this sidecar branch tip
 
 Artifact delivery note:
 
-- this file is already committed on the sidecar branch at
-  `91570b400d5ed1f4b4b9a5bdb7cd08f7dcf9a55d`
-- this refresh pass corrects stale machine-truth and verification narration before
-  reviewer handoff
+- the prior packet revision on the sidecar branch was committed at
+  `3392e4e3ad48b54a96fcef4608b1cc30f17b7cd4`
+- this refresh pass corrects stale machine-truth and branch-tip narration before
+  the owner re-hands the packet to the assigned reviewer
 
 ---
 
@@ -209,8 +212,8 @@ Reviewer should validate these points on `4b093cd23003ace8287962ad80e31f61ad7581
 
 ## 8. Handoff Notes For `Codex2`
 
-This sidecar packet is the support artifact being handed to the assigned reviewer
-with the sidecar status transition to `review`.
+This sidecar packet is the support artifact the owner should hand to the assigned
+reviewer when transitioning the sidecar from `in_progress` to `review`.
 
 Suggested review framing:
 
