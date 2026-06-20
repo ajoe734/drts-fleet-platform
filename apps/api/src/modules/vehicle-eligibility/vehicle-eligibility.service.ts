@@ -53,6 +53,12 @@ export type DriverEligibleProductRecord = {
   eligibleVehicleIds: string[];
 };
 
+export type ActiveServiceProductRecord = {
+  serviceProduct: ServiceProductType;
+  serviceBucket: Phase1ServiceBucket;
+  timing: ServiceTiming;
+};
+
 type EligibleSupplyContext = {
   destination?: {
     lat: number;
@@ -410,6 +416,23 @@ export class VehicleEligibilityService implements OnModuleInit {
         };
       })
       .filter((entry) => entry.eligibleVehicleIds.length > 0);
+  }
+
+  listActiveServiceProducts(): ActiveServiceProductRecord[] {
+    return this.listKnownServiceProducts()
+      .filter((entry) => entry.active)
+      .map((entry) => ({
+        serviceProduct: entry.serviceProduct,
+        serviceBucket: entry.serviceBucket,
+        timing: entry.timing,
+      }));
+  }
+
+  isVehicleEligibleForExactServiceProduct(
+    vehicleId: string,
+    serviceProduct: ServiceProductType,
+  ) {
+    return this.isVehicleEligibleForServiceProduct(vehicleId, serviceProduct);
   }
 
   resolveServiceProductForOwnedOrder(

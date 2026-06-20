@@ -5,6 +5,7 @@ import type {
   DispatchAssignmentRecord,
   DispatchDailyRecord,
   DispatchJobRecord,
+  DispatchableSupplySnapshotRecord,
   DispatchTraceLogRecord,
   DriverTaskRecord,
   OwnedOrderRecord,
@@ -44,6 +45,16 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+type DispatchableSupplySnapshotRow = {
+  snapshot_at: string;
+  business_area: string;
+  service_product_code: string;
+  dispatchable_vehicle_count: number;
+  available_driver_count: number;
+  source_health: DispatchableSupplySnapshotRecord["sourceHealth"];
+  generated_at: string;
+};
+
 export type DailyDispatchRecordQuery = {
   serviceDate?: string;
   serviceDateFrom?: string;
@@ -54,6 +65,15 @@ export type DailyDispatchRecordQuery = {
   partnerId?: string;
   serviceProductCode?: string;
   finalStatus?: string;
+};
+
+export type DispatchableSupplySnapshotQuery = {
+  snapshotAt?: string;
+  snapshotAtFrom?: string;
+  snapshotAtTo?: string;
+  businessArea?: string;
+  serviceProductCode?: string;
+  sourceHealth?: DispatchableSupplySnapshotRecord["sourceHealth"];
 };
 
 export type DispatchDailyRecordSource = {
@@ -165,6 +185,47 @@ export class ReportingRepository {
             record.redispatchCount,
             record.cancellationReason,
             record.complaintCount,
+            record.generatedAt,
+          ],
+        ),
+      ),
+    );
+  }
+
+  async upsertDispatchableSupplySnapshots(
+    records: readonly DispatchableSupplySnapshotRecord[],
+  ) {
+    if (!this.isEnabled() || records.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      records.map((record) =>
+        this.databaseService!.query(
+          `
+            INSERT INTO reporting.dispatchable_supply_snapshots (
+              snapshot_at,
+              business_area,
+              service_product_code,
+              dispatchable_vehicle_count,
+              available_driver_count,
+              source_health,
+              generated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (snapshot_at, business_area, service_product_code)
+            DO UPDATE SET
+              dispatchable_vehicle_count = EXCLUDED.dispatchable_vehicle_count,
+              available_driver_count = EXCLUDED.available_driver_count,
+              source_health = EXCLUDED.source_health,
+              generated_at = EXCLUDED.generated_at
+          `,
+          [
+            record.snapshotAt,
+            record.businessArea,
+            record.serviceProductCode,
+            record.dispatchableVehicleCount,
+            record.availableDriverCount,
+            record.sourceHealth,
             record.generatedAt,
           ],
         ),
@@ -355,6 +416,65 @@ export class ReportingRepository {
     return result.rows.map((row) => this.mapRow(row));
   }
 
+  async listDispatchableSupplySnapshots(
+    query: DispatchableSupplySnapshotQuery = {},
+  ): Promise<DispatchableSupplySnapshotRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const whereClauses: string[] = [];
+    const values: unknown[] = [];
+    const bind = (value: unknown) => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+
+    if (query.snapshotAt) {
+      whereClauses.push(`snapshot_at = ${bind(query.snapshotAt)}`);
+    } else {
+      if (query.snapshotAtFrom) {
+        whereClauses.push(`snapshot_at >= ${bind(query.snapshotAtFrom)}`);
+      }
+      if (query.snapshotAtTo) {
+        whereClauses.push(`snapshot_at <= ${bind(query.snapshotAtTo)}`);
+      }
+    }
+    if (query.businessArea) {
+      whereClauses.push(`business_area = ${bind(query.businessArea)}`);
+    }
+    if (query.serviceProductCode) {
+      whereClauses.push(
+        `service_product_code = ${bind(query.serviceProductCode)}`,
+      );
+    }
+    if (query.sourceHealth) {
+      whereClauses.push(`source_health = ${bind(query.sourceHealth)}`);
+    }
+
+    const where =
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const result =
+      await this.databaseService!.query<DispatchableSupplySnapshotRow>(
+        `
+          SELECT
+            snapshot_at,
+            business_area,
+            service_product_code,
+            dispatchable_vehicle_count,
+            available_driver_count,
+            source_health,
+            generated_at
+          FROM reporting.dispatchable_supply_snapshots
+          ${where}
+          ORDER BY snapshot_at DESC, business_area ASC, service_product_code ASC
+        `,
+        values,
+      );
+
+    return result.rows.map((row) => this.mapSnapshotRow(row));
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -388,6 +508,20 @@ export class ReportingRepository {
       redispatchCount: row.redispatch_count,
       cancellationReason: row.cancellation_reason,
       complaintCount: row.complaint_count,
+      generatedAt: row.generated_at,
+    };
+  }
+
+  private mapSnapshotRow(
+    row: DispatchableSupplySnapshotRow,
+  ): DispatchableSupplySnapshotRecord {
+    return {
+      snapshotAt: row.snapshot_at,
+      businessArea: row.business_area,
+      serviceProductCode: row.service_product_code,
+      dispatchableVehicleCount: row.dispatchable_vehicle_count,
+      availableDriverCount: row.available_driver_count,
+      sourceHealth: row.source_health,
       generatedAt: row.generated_at,
     };
   }

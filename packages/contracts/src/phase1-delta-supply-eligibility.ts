@@ -301,14 +301,6 @@ export interface DriverLocationHeartbeatAck {
   serverReceivedAt: string;
 }
 
-export interface DriverLocationHeartbeatBatchRequest {
-  items: DriverLocationHeartbeatEnvelope[];
-}
-
-export interface DriverLocationHeartbeatBatchResponse {
-  items: DriverLocationHeartbeatAck[];
-}
-
 // ---------------------------------------------------------------------------
 // §2.10 Reporting Types
 // ---------------------------------------------------------------------------
@@ -346,6 +338,27 @@ export interface DispatchDailyRecord {
   cancellationReason: string | null;
   complaintCount: number;
 
+  generatedAt: string;
+}
+
+export const DISPATCHABLE_SUPPLY_SNAPSHOT_SOURCE_HEALTH = [
+  "complete",
+  "location_missing",
+  "location_stale",
+  "location_low_accuracy",
+] as const;
+export type DispatchableSupplySnapshotSourceHealth =
+  (typeof DISPATCHABLE_SUPPLY_SNAPSHOT_SOURCE_HEALTH)[number];
+
+export interface DispatchableSupplySnapshotRecord {
+  snapshotAt: string;
+  businessArea: string;
+  serviceProductCode: string;
+
+  dispatchableVehicleCount: number;
+  availableDriverCount: number;
+
+  sourceHealth: DispatchableSupplySnapshotSourceHealth;
   generatedAt: string;
 }
 

@@ -12,6 +12,7 @@ import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { ReportingService } from "../../src/modules/reporting/reporting.service";
 import { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
+import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 function flushBackgroundWork() {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -22,10 +23,15 @@ function createHarness() {
   const auditNotificationService = new AuditNotificationService();
   const opsDispatchEventsService = new OpsDispatchEventsService(eventEmitter);
   const driverProfileService = new DriverProfileService(auditNotificationService);
+  const regulatoryRegistryRepository = {
+    isEnabled: () => true,
+    upsertDriverLocation: async () => true,
+  };
   const regulatoryRegistryService = new RegulatoryRegistryService(
     opsDispatchEventsService,
     auditNotificationService,
     driverProfileService,
+    regulatoryRegistryRepository as never,
   );
   const callcenterService = new CallcenterService(auditNotificationService);
   const ownedMobilityTaskEventsService = new OwnedMobilityTaskEventsService(
@@ -39,10 +45,15 @@ function createHarness() {
     opsDispatchEventsService,
   );
   const complaintService = new ComplaintService(auditNotificationService);
+  const vehicleEligibilityService = new VehicleEligibilityService(
+    regulatoryRegistryService,
+    auditNotificationService,
+  );
   const reportingService = new ReportingService(
     ownedMobilityService,
     complaintService,
     regulatoryRegistryService,
+    vehicleEligibilityService,
   );
   const reportingFilingService = new ReportingFilingService(
     auditNotificationService,
@@ -59,6 +70,7 @@ function createHarness() {
     complaintService,
     reportingService,
     reportingFilingService,
+    regulatoryRegistryService,
     cleanup: async () => {
       await ownedMobilityTaskEventsService.onModuleDestroy();
       await opsDispatchEventsService.onModuleDestroy();
@@ -81,6 +93,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       complaintService,
       reportingService,
       reportingFilingService,
+      regulatoryRegistryService,
       cleanup,
     } = createHarness();
     cleanups.push(cleanup);
@@ -268,6 +281,51 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
           orderId: redispatchedOrder.orderId,
           redispatchCount: 1,
           arrivedPickupAt: null,
+        }),
+      ]),
+    );
+  });
+
+  it("captures supply snapshots with coverage-sensitive source health", async () => {
+    const { reportingService, regulatoryRegistryService, cleanup } =
+      createHarness();
+    cleanups.push(cleanup);
+
+    await regulatoryRegistryService.recordDriverLocation({
+      driverId: "drv-demo-001",
+      lat: 24.2668,
+      lng: 120.6204,
+      accuracyM: 25,
+      recordedAt: "2026-06-20T01:04:40.000Z",
+    });
+    await regulatoryRegistryService.recordDriverLocation({
+      driverId: "drv-demo-004",
+      lat: 24.2668,
+      lng: 120.6204,
+      accuracyM: 150,
+      recordedAt: "2026-06-20T01:04:45.000Z",
+    });
+
+    const snapshot = await reportingService.captureDispatchableSupplySnapshot(
+      new Date("2026-06-20T01:05:00.000Z"),
+    );
+
+    expect(snapshot.snapshotAt).toBe("2026-06-20T01:05:00.000Z");
+    expect(snapshot.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          businessArea: "taichung-port",
+          serviceProductCode: "taxi_realtime",
+          dispatchableVehicleCount: 1,
+          availableDriverCount: 1,
+          sourceHealth: "complete",
+        }),
+        expect.objectContaining({
+          businessArea: "taichung-port",
+          serviceProductCode: "enterprise_dispatch",
+          dispatchableVehicleCount: 1,
+          availableDriverCount: 1,
+          sourceHealth: "location_low_accuracy",
         }),
       ]),
     );
