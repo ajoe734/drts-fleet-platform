@@ -248,7 +248,7 @@
       "file_inbox_path": ".llm-inbox/codex2.md"
     },
     "copilot": {
-      "display_name": "Copilot",
+      "display_name": "Copilot (legacy alias)",
       "provider": "copilot",
       "adapter": "copilot_local",
       "wake_template": ".orchestrator/templates/wakeup.txt",
