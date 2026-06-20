@@ -24,14 +24,6 @@ import {
 
 const READINESS_POLICY_VERSION = "phase1-delta-supply-readiness-2026-06-19";
 
-const CONTRACT_DOCUMENT_TYPES = new Set<
-  SupplyDocumentRecord["documentType"]
->([
-  "fleet_participation_contract",
-  "driver_management_contract",
-  "vehicle_management_contract",
-]);
-
 type ApprovedSubmissionArtifacts = {
   submission: SupplySubmissionRecord;
   driverDraft:
