@@ -71,8 +71,8 @@ function createFixture() {
     supplySubmissionRepository,
   );
   const supplyReadinessService = new SupplyReadinessService(
-    supplySubmissionService,
     fleetPartnerService,
+    regulatoryRegistryService,
   );
 
   return {
@@ -197,7 +197,7 @@ describe("FleetPartnerController portal routes", () => {
     ).rejects.toBeInstanceOf(ApiRequestError);
   });
 
-  it("supports draft, document, submit, and readiness APIs", async () => {
+  it("supports draft, document, submit, and canonical readiness APIs", async () => {
     const { controller } = createFixture();
 
     const created = await controller.createDriverSupplySubmission(
@@ -292,16 +292,54 @@ describe("FleetPartnerController portal routes", () => {
     );
     expect(submitted.data.submission.status).toBe("submitted");
 
+    expect(() =>
+      controller.getDriverSupplyReadiness(
+        "fleet-demo-001",
+        submissionId,
+        "req-supply-readiness-submission",
+      ),
+    ).toThrow(ApiRequestError);
+
+    const readinessList = controller.listSupplyReadiness(
+      "fleet-demo-001",
+      "req-supply-readiness-list",
+    );
+    expect(readinessList.data.items.map((item) => item.subjectId)).toEqual(
+      expect.arrayContaining([
+        "drv-demo-001",
+        "drv-demo-002",
+        "veh-demo-001",
+        "veh-demo-002",
+      ]),
+    );
+    expect(readinessList.data.items.map((item) => item.subjectId)).not.toContain(
+      submissionId,
+    );
+
     const readiness = controller.getDriverSupplyReadiness(
       "fleet-demo-001",
-      submissionId,
-      "req-supply-readiness",
+      "drv-demo-001",
+      "req-supply-readiness-driver",
     );
     expect(readiness.data).toMatchObject({
       subjectType: "driver",
-      subjectId: submissionId,
+      subjectId: "drv-demo-001",
       state: "ready",
     });
+
+    const vehicleReadiness = controller.getVehicleSupplyReadiness(
+      "fleet-demo-001",
+      "veh-demo-002",
+      "req-supply-readiness-vehicle",
+    );
+    expect(vehicleReadiness.data).toMatchObject({
+      subjectType: "vehicle",
+      subjectId: "veh-demo-002",
+      state: "not_ready",
+    });
+    expect(vehicleReadiness.data.reasonCodes).toEqual(
+      expect.arrayContaining(["CONTRACT_MISSING", "VEHICLE_DOCUMENT_MISSING"]),
+    );
   });
 
   it("rejects confirming a pre-signed upload after the intent expires", async () => {
