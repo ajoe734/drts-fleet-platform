@@ -6,8 +6,8 @@
 **Current Sidecar Owner:** `Codex`  
 **Assigned Reviewer:** `Claude`  
 **Parent Owner / Reviewer:** `Claude` / `Codex`  
-**Last Revised:** `2026-06-20T00:00:00Z (UTC)`  
-**Machine-Truth Snapshot:** parent `P1D-WP0` is `review_approved`; this sidecar is support-only and pending reviewer handoff.
+**Last Revised:** `2026-06-20T04:10:00Z (UTC)`  
+**Machine-Truth Snapshot:** parent `P1D-WP0` is `review_approved`; this sidecar is support-only, reviewer-approved, and ready for owner closeout.
 
 ---
 
@@ -172,9 +172,10 @@ AI_NAME=Claude scripts/ai-status.sh reopen P1D-WP0-SIDECAR-REVIEW "packet needs 
 
 - [x] Created support artifact only
 - [x] Did not edit canonical truth
-- [ ] Reviewer handoff recorded in machine truth
+- [x] Reviewer handoff recorded in machine truth
+- [x] Reviewer approval recorded in machine truth
 
-The final checkbox is completed when the owner runs the handoff command above.
+Reviewer handoff and approval are already recorded in machine truth. Remaining work is owner closeout (`done`) after task-scoped commit and non-force push evidence are confirmed.
 
 ---
 
