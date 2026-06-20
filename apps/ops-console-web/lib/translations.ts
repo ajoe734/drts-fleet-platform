@@ -4095,6 +4095,8 @@ const en = {
   "reports.ops.format": "Export format",
   "reports.ops.export.accepted":
     "Export job {jobId} queued. Track it in the Jobs tab for the signed download.",
+  "reports.ops.export.jsonDone":
+    "Exported {count} summary row(s) as JSON.",
   "reports.ops.regenerate.done": "Regenerated {count} record(s) at {time}.",
   "reports.ops.empty.daily":
     "No daily dispatch records for the selected filters.",
@@ -4112,9 +4114,14 @@ const en = {
   "reports.ops.coverageWarning.title": "Data incomplete",
   "reports.ops.coverageWarning.body":
     "Snapshot coverage is below 95% for at least one period. Treat the operations summary as provisional until coverage recovers (SA §7.4).",
+  "reports.ops.coverageWarning.bodyDaily":
+    "Arrival-event coverage is below 95% for the selected range. Some started trips are missing an arrived event (ARRIVAL_EVENT_MISSING); treat timing fields as provisional (SA §7.3).",
   "reports.ops.freshness.arrivalMissing":
     "{count} record(s) missing arrival event",
   "reports.ops.freshness.complete": "Arrival events complete",
+  "reports.ops.freshness.snapshotIncomplete":
+    "{count} supply snapshot(s) missing",
+  "reports.ops.freshness.snapshotComplete": "Snapshot source complete",
   "reports.ops.summary.window": "{from} → {to}",
   "reports.ops.summary.allAreas": "All business areas",
   "reports.ops.summary.allProducts": "All service products",
@@ -4140,6 +4147,7 @@ const en = {
   "reports.ops.col.product": "Product",
   "reports.ops.col.party": "Tenant / partner",
   "reports.ops.col.requested": "Requested",
+  "reports.ops.col.pickupDropoff": "Pickup / dropoff",
   "reports.ops.col.dispatch": "First dispatch",
   "reports.ops.col.assignment": "Assignment",
   "reports.ops.col.driverVehicle": "Driver / vehicle",
@@ -8026,6 +8034,7 @@ const zh: Record<keyof typeof en, string> = {
   "reports.ops.format": "匯出格式",
   "reports.ops.export.accepted":
     "匯出工作 {jobId} 已排入佇列，請至 Jobs 分頁取得簽章下載。",
+  "reports.ops.export.jsonDone": "已將 {count} 筆營運摘要匯出為 JSON。",
   "reports.ops.regenerate.done": "已於 {time} 重算 {count} 筆紀錄。",
   "reports.ops.empty.daily": "符合篩選條件的每日派遣紀錄為空。",
   "reports.ops.empty.summary": "所選區間沒有營運摘要資料。",
@@ -8041,8 +8050,12 @@ const zh: Record<keyof typeof en, string> = {
   "reports.ops.coverageWarning.title": "資料不完整",
   "reports.ops.coverageWarning.body":
     "至少一個期間的快照涵蓋率低於 95%。在涵蓋率回復前，營運摘要僅供暫時參考（SA §7.4）。",
+  "reports.ops.coverageWarning.bodyDaily":
+    "所選區間的抵達事件涵蓋率低於 95%。部分已開始的趟次缺少抵達事件（ARRIVAL_EVENT_MISSING），時間欄位僅供暫時參考（SA §7.3）。",
   "reports.ops.freshness.arrivalMissing": "{count} 筆紀錄缺少抵達事件",
   "reports.ops.freshness.complete": "抵達事件完整",
+  "reports.ops.freshness.snapshotIncomplete": "缺少 {count} 筆供給快照",
+  "reports.ops.freshness.snapshotComplete": "快照來源完整",
   "reports.ops.summary.window": "{from} → {to}",
   "reports.ops.summary.allAreas": "全部營運區",
   "reports.ops.summary.allProducts": "全部服務產品",
@@ -8068,6 +8081,7 @@ const zh: Record<keyof typeof en, string> = {
   "reports.ops.col.product": "產品",
   "reports.ops.col.party": "租戶／合作夥伴",
   "reports.ops.col.requested": "請求時間",
+  "reports.ops.col.pickupDropoff": "上車／下車",
   "reports.ops.col.dispatch": "首次派遣",
   "reports.ops.col.assignment": "指派",
   "reports.ops.col.driverVehicle": "司機／車輛",

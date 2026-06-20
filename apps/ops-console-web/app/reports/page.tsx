@@ -60,6 +60,12 @@ type OperationalReportType =
   | "daily_dispatch_record"
   | "six_month_operations_summary";
 
+// The six-month summary additionally offers a direct JSON export of the
+// previewed aggregate (SA §7.6). `json` is not a canonical `ReportOutputFormat`
+// (the background report-job pipeline only emits csv/xlsx/pdf/zip), so it is a
+// UI-only format handled client-side rather than through `createReportJob`.
+type OperationalExportFormat = ReportOutputFormat | "json";
+
 type DailyRecordRow = DispatchDailyRecord & Record<string, unknown>;
 
 const OPERATIONAL_ORDER_SOURCES = [
@@ -71,12 +77,14 @@ const OPERATIONAL_ORDER_SOURCES = [
   "third_party_platform",
 ] as const;
 
+// Export formats per operational report type (SA §7.6): daily record =
+// CSV / XLSX / PDF; six-month summary = PDF / CSV / JSON.
 const OPERATIONAL_EXPORT_FORMATS: Record<
   OperationalReportType,
-  ReportOutputFormat[]
+  OperationalExportFormat[]
 > = {
   daily_dispatch_record: ["csv", "xlsx", "pdf"],
-  six_month_operations_summary: ["pdf", "csv"],
+  six_month_operations_summary: ["pdf", "csv", "json"],
 };
 
 const COVERAGE_WARNING_THRESHOLD = 0.95;
@@ -697,6 +705,23 @@ function formatPercent(rate: number) {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
+// Trigger a client-side download of an in-memory payload as a pretty-printed
+// JSON file. Used for the six-month summary JSON export (SA §7.6), whose data
+// is already returned as JSON by the preview endpoint.
+function downloadJsonFile(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function OperationalReportsPanel() {
   const { t, locale } = useTranslation();
   const [reportType, setReportType] = useState<OperationalReportType>(
@@ -712,7 +737,7 @@ function OperationalReportsPanel() {
   const [status, setStatus] = useState("");
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
-  const [format, setFormat] = useState<ReportOutputFormat>("csv");
+  const [format, setFormat] = useState<OperationalExportFormat>("csv");
 
   const [dailyRows, setDailyRows] = useState<DispatchDailyRecord[] | null>(null);
   const [summaryRows, setSummaryRows] = useState<
@@ -826,10 +851,36 @@ function OperationalReportsPanel() {
         setError(null);
         setNotice(null);
         try {
+          // JSON export (summary only) is served directly from the preview
+          // payload rather than a background report job, since `json` is not a
+          // canonical report-job output format (SA §7.6).
+          if (!isDaily && format === "json") {
+            const query = buildSummaryQuery();
+            const rows =
+              await getOpsClient().previewSixMonthOperationsSummary(query);
+            downloadJsonFile(
+              `six-month-operations-summary-${new Date()
+                .toISOString()
+                .slice(0, 10)}.json`,
+              {
+                reportType,
+                query,
+                exportedAt: new Date().toISOString(),
+                rows,
+              },
+            );
+            setSummaryRows(rows);
+            setDailyRows(null);
+            setNotice(
+              t("reports.ops.export.jsonDone", { count: rows.length }),
+            );
+            return;
+          }
+
           const filters = buildExportFilters();
           const accepted = await getOpsClient().createReportJob({
             jobType: reportType,
-            format,
+            format: format as ReportOutputFormat,
             ...(filters && Object.keys(filters).length > 0 ? { filters } : {}),
           });
           setNotice(
@@ -846,11 +897,51 @@ function OperationalReportsPanel() {
   const arrivalMissingCount =
     dailyRows?.filter((row) => row.tripStartedAt && !row.arrivedPickupAt)
       .length ?? 0;
-  const coverageIncomplete = Boolean(
-    summaryRows?.some(
-      (row) => row.snapshotCoverageRate < COVERAGE_WARNING_THRESHOLD,
-    ),
-  );
+
+  // Daily data coverage = arrival-event coverage among trips that actually
+  // started. A null arrivedPickupAt on a started trip is the ARRIVAL_EVENT_MISSING
+  // gap (SA §7.3); the rate is null when no trips started (nothing to cover).
+  const dailyStartedTripCount =
+    dailyRows?.filter((row) => row.tripStartedAt).length ?? 0;
+  const dailyCoverageRate =
+    dailyStartedTripCount > 0
+      ? (dailyStartedTripCount - arrivalMissingCount) / dailyStartedTripCount
+      : null;
+
+  // Summary data coverage = worst snapshot coverage across previewed windows;
+  // source freshness is expressed as the count of missing supply snapshots
+  // (validSnapshotCount vs expectedSnapshotCount, SA §7.4).
+  const summaryCoverageRate =
+    summaryRows && summaryRows.length > 0
+      ? Math.min(...summaryRows.map((row) => row.snapshotCoverageRate))
+      : null;
+  const summarySnapshotsMissing =
+    summaryRows?.reduce(
+      (sum, row) =>
+        sum + Math.max(0, row.expectedSnapshotCount - row.validSnapshotCount),
+      0,
+    ) ?? 0;
+  const summaryGeneratedAt =
+    summaryRows && summaryRows.length > 0
+      ? summaryRows.reduce(
+          (latest, row) =>
+            row.generatedAt > latest ? row.generatedAt : latest,
+          summaryRows[0]!.generatedAt,
+        )
+      : null;
+
+  // Unified operational metadata contract (SA §7.4 / screen-requirements §5):
+  // both report types surface generatedAt · data coverage · source freshness ·
+  // report status.
+  const activeGeneratedAt = isDaily ? dailyGeneratedAt : summaryGeneratedAt;
+  const activeCoverageRate = isDaily ? dailyCoverageRate : summaryCoverageRate;
+  const activeRecordCount = isDaily
+    ? (dailyRows?.length ?? 0)
+    : (summaryRows?.length ?? 0);
+  const activeDataLoaded = isDaily ? dailyRows !== null : summaryRows !== null;
+  const coverageIncomplete =
+    activeCoverageRate !== null &&
+    activeCoverageRate < COVERAGE_WARNING_THRESHOLD;
 
   const dailyColumns: CanvasTableColumn<DailyRecordRow>[] = [
     {
@@ -901,6 +992,18 @@ function OperationalReportsPanel() {
           </span>
           <span style={rowMetaStyle}>
             {formatDateTime(locale, row.reservationTime)}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: t("reports.ops.col.pickupDropoff"),
+      w: 240,
+      r: (row) => (
+        <div style={rowStackStyle}>
+          <span style={rowTitleStyle}>{row.pickupAddressSnapshot}</span>
+          <span style={rowMetaStyle}>
+            {row.dropoffAddressSnapshot ?? t("common.dash")}
           </span>
         </div>
       ),
@@ -1196,7 +1299,7 @@ function OperationalReportsPanel() {
             <select
               value={format}
               onChange={(event) =>
-                setFormat(event.target.value as ReportOutputFormat)
+                setFormat(event.target.value as OperationalExportFormat)
               }
               style={nativeSelectStyle}
             >
@@ -1256,48 +1359,73 @@ function OperationalReportsPanel() {
           tone="warn"
           icon="warn"
           title={t("reports.ops.coverageWarning.title")}
-          body={t("reports.ops.coverageWarning.body")}
+          body={
+            isDaily
+              ? t("reports.ops.coverageWarning.bodyDaily")
+              : t("reports.ops.coverageWarning.body")
+          }
         />
       ) : null}
 
-      {isDaily && dailyRows ? (
-        <>
-          <div style={kpiGridStyle}>
-            <CanvasKPI
-              theme={th}
-              label={t("reports.ops.meta.generatedAt")}
-              value={formatDateTime(locale, dailyGeneratedAt)}
-              sub={t("reports.ops.meta.records", { count: dailyRows.length })}
-            />
-            <CanvasKPI
-              theme={th}
-              label={t("reports.ops.meta.freshness")}
-              value={
-                arrivalMissingCount > 0
+      {activeDataLoaded ? (
+        <div style={kpiGridStyle}>
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.generatedAt")}
+            value={formatDateTime(locale, activeGeneratedAt)}
+            sub={t("reports.ops.meta.records", { count: activeRecordCount })}
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.coverage")}
+            value={
+              activeCoverageRate === null
+                ? t("common.dash")
+                : formatPercent(activeCoverageRate)
+            }
+            sub={
+              coverageIncomplete
+                ? t("reports.ops.coverage.incomplete")
+                : t("reports.ops.coverage.complete")
+            }
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.freshness")}
+            value={
+              isDaily
+                ? arrivalMissingCount > 0
                   ? t("reports.ops.freshness.arrivalMissing", {
                       count: arrivalMissingCount,
                     })
                   : t("reports.ops.freshness.complete")
-              }
-            />
-            <CanvasKPI
+                : summarySnapshotsMissing > 0
+                  ? t("reports.ops.freshness.snapshotIncomplete", {
+                      count: summarySnapshotsMissing,
+                    })
+                  : t("reports.ops.freshness.snapshotComplete")
+            }
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("reports.ops.meta.status")}
+            value={t("reports.ops.status.preview")}
+          />
+        </div>
+      ) : null}
+
+      {isDaily && dailyRows ? (
+        <CanvasCard theme={th} padding={0}>
+          {dailyRows.length > 0 ? (
+            <CanvasTable<DailyRecordRow>
               theme={th}
-              label={t("reports.ops.meta.status")}
-              value={t("reports.ops.status.preview")}
+              columns={dailyColumns}
+              rows={dailyRows.map((row) => ({ ...row }))}
             />
-          </div>
-          <CanvasCard theme={th} padding={0}>
-            {dailyRows.length > 0 ? (
-              <CanvasTable<DailyRecordRow>
-                theme={th}
-                columns={dailyColumns}
-                rows={dailyRows.map((row) => ({ ...row }))}
-              />
-            ) : (
-              <div style={emptyStateStyle}>{t("reports.ops.empty.daily")}</div>
-            )}
-          </CanvasCard>
-        </>
+          ) : (
+            <div style={emptyStateStyle}>{t("reports.ops.empty.daily")}</div>
+          )}
+        </CanvasCard>
       ) : null}
 
       {!isDaily && summaryRows ? (
