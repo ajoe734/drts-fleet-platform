@@ -8,7 +8,7 @@ describe("DriverTelemetryController", () => {
       recordDriverLocationBatch: vi.fn(async () => ({
         items: [
           {
-            eventId: "evt-001",
+            eventId: "11111111-1111-4111-8111-111111111111",
             accepted: true,
             duplicate: false,
             currentLocationUpdated: true,
@@ -25,7 +25,7 @@ describe("DriverTelemetryController", () => {
       {
         items: [
           {
-            eventId: "evt-001",
+            eventId: "11111111-1111-4111-8111-111111111111",
             deviceId: "device-001",
             driverId: "drv-demo-001",
             vehicleId: null,
@@ -48,7 +48,7 @@ describe("DriverTelemetryController", () => {
     expect(regulatoryRegistryService.recordDriverLocationBatch).toHaveBeenCalledWith({
       items: [
         {
-          eventId: "evt-001",
+          eventId: "11111111-1111-4111-8111-111111111111",
           deviceId: "device-001",
           driverId: "drv-demo-001",
           vehicleId: null,
@@ -69,7 +69,7 @@ describe("DriverTelemetryController", () => {
       data: {
         items: [
           {
-            eventId: "evt-001",
+            eventId: "11111111-1111-4111-8111-111111111111",
             accepted: true,
             duplicate: false,
             currentLocationUpdated: true,

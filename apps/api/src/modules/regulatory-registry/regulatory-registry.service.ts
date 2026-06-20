@@ -55,6 +55,8 @@ const EARTH_RADIUS_KM = 6371;
 const AVERAGE_SPEED_KMH = 30;
 const SEED_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 const DRIVER_LOCATION_BATCH_LIMIT = 100;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type EtaDestination = {
   lat: number;
@@ -722,14 +724,16 @@ export class RegulatoryRegistryService implements OnModuleInit {
       );
     }
 
-    const acknowledgements: DriverLocationHeartbeatAck[] = [];
-    for (const event of command.items) {
-      const normalizedEvent = this.normalizeDriverLocationHeartbeatEvent(event);
-      const acknowledgement =
-        await this.requireLocationRepository().ingestDriverLocationHeartbeat(
-          normalizedEvent,
-        );
+    const normalizedEvents = command.items.map((event) =>
+      this.normalizeDriverLocationHeartbeatEvent(event),
+    );
+    const acknowledgements =
+      await this.requireLocationRepository().ingestDriverLocationHeartbeats(
+        normalizedEvents,
+      );
 
+    for (const [index, acknowledgement] of acknowledgements.entries()) {
+      const normalizedEvent = normalizedEvents[index]!;
       if (!acknowledgement.duplicate && acknowledgement.currentLocationUpdated) {
         this.setLatestDriverLocation({
           driverId: normalizedEvent.driverId,
@@ -752,7 +756,6 @@ export class RegulatoryRegistryService implements OnModuleInit {
         );
       }
 
-      acknowledgements.push(acknowledgement);
     }
 
     return { items: acknowledgements };
@@ -2192,6 +2195,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     event: DriverLocationHeartbeatEnvelope,
   ): DriverLocationHeartbeatEnvelope {
     this.assertNonBlank(event.eventId, "eventId");
+    this.assertUuid(event.eventId, "eventId");
     this.assertNonBlank(event.deviceId, "deviceId");
     this.assertNonBlank(event.driverId, "driverId");
     this.requireDriver(event.driverId.trim());
@@ -2245,6 +2249,19 @@ export class RegulatoryRegistryService implements OnModuleInit {
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",
         `${fieldName} is required.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+  }
+
+  private assertUuid(value: string, fieldName: string) {
+    if (!UUID_PATTERN.test(value.trim())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_INVALID",
+        `${fieldName} must be a valid UUID.`,
         {
           field: fieldName,
         },

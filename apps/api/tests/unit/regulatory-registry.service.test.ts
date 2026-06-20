@@ -6,6 +6,12 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
+const HEARTBEAT_EVENT_IDS = {
+  newer: "11111111-1111-4111-8111-111111111111",
+  duplicate: "22222222-2222-4222-8222-222222222222",
+  older: "33333333-3333-4333-8333-333333333333",
+};
+
 function createService() {
   const opsDispatchEventsService = {
     publishDriverLocationUpdated: vi.fn(),
@@ -18,6 +24,7 @@ function createService() {
   const regulatoryRegistryRepository = {
     isEnabled: vi.fn(() => false),
     ingestDriverLocationHeartbeat: vi.fn(),
+    ingestDriverLocationHeartbeats: vi.fn(),
     persistChanges: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
   };
@@ -292,7 +299,7 @@ describe("RegulatoryRegistryService", () => {
     await expect(
       service.recordDriverLocationBatch({
         items: Array.from({ length: 101 }, (_, index) => ({
-          eventId: `evt-${index}`,
+          eventId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
           deviceId: "device-001",
           driverId: "drv-demo-001",
           vehicleId: null,
@@ -324,33 +331,34 @@ describe("RegulatoryRegistryService", () => {
       createService();
 
     regulatoryRegistryRepository.isEnabled.mockReturnValue(true);
-    regulatoryRegistryRepository.ingestDriverLocationHeartbeat
-      .mockResolvedValueOnce({
-        eventId: "evt-newer-001",
+    regulatoryRegistryRepository.ingestDriverLocationHeartbeats.mockResolvedValue([
+      {
+        eventId: HEARTBEAT_EVENT_IDS.newer,
         accepted: true,
         duplicate: false,
         currentLocationUpdated: true,
         serverReceivedAt: "2026-06-20T00:00:05.000Z",
-      })
-      .mockResolvedValueOnce({
-        eventId: "evt-duplicate-002",
+      },
+      {
+        eventId: HEARTBEAT_EVENT_IDS.duplicate,
         accepted: true,
         duplicate: true,
         currentLocationUpdated: false,
         serverReceivedAt: "2026-06-20T00:00:06.000Z",
-      })
-      .mockResolvedValueOnce({
-        eventId: "evt-old-003",
+      },
+      {
+        eventId: HEARTBEAT_EVENT_IDS.older,
         accepted: true,
         duplicate: false,
         currentLocationUpdated: false,
         serverReceivedAt: "2026-06-20T00:00:07.000Z",
-      });
+      },
+    ]);
 
     const response = await service.recordDriverLocationBatch({
       items: [
         {
-          eventId: " evt-newer-001 ",
+          eventId: ` ${HEARTBEAT_EVENT_IDS.newer} `,
           deviceId: " device-001 ",
           driverId: " drv-demo-001 ",
           vehicleId: " veh-demo-001 ",
@@ -366,7 +374,7 @@ describe("RegulatoryRegistryService", () => {
           networkType: "wifi",
         },
         {
-          eventId: "evt-duplicate-002",
+          eventId: HEARTBEAT_EVENT_IDS.duplicate,
           deviceId: "device-001",
           driverId: "drv-demo-001",
           vehicleId: null,
@@ -382,7 +390,7 @@ describe("RegulatoryRegistryService", () => {
           networkType: "wifi",
         },
         {
-          eventId: "evt-old-003",
+          eventId: HEARTBEAT_EVENT_IDS.older,
           deviceId: "device-001",
           driverId: "drv-demo-001",
           vehicleId: null,
@@ -400,33 +408,40 @@ describe("RegulatoryRegistryService", () => {
       ],
     });
 
-    expect(regulatoryRegistryRepository.ingestDriverLocationHeartbeat).toHaveBeenNthCalledWith(
-      1,
+    expect(
+      regulatoryRegistryRepository.ingestDriverLocationHeartbeats,
+    ).toHaveBeenCalledWith([
       expect.objectContaining({
-        eventId: "evt-newer-001",
+        eventId: HEARTBEAT_EVENT_IDS.newer,
         deviceId: "device-001",
         driverId: "drv-demo-001",
         vehicleId: "veh-demo-001",
       }),
-    );
+      expect.objectContaining({
+        eventId: HEARTBEAT_EVENT_IDS.duplicate,
+      }),
+      expect.objectContaining({
+        eventId: HEARTBEAT_EVENT_IDS.older,
+      }),
+    ]);
     expect(response).toEqual({
       items: [
         {
-          eventId: "evt-newer-001",
+          eventId: HEARTBEAT_EVENT_IDS.newer,
           accepted: true,
           duplicate: false,
           currentLocationUpdated: true,
           serverReceivedAt: "2026-06-20T00:00:05.000Z",
         },
         {
-          eventId: "evt-duplicate-002",
+          eventId: HEARTBEAT_EVENT_IDS.duplicate,
           accepted: true,
           duplicate: true,
           currentLocationUpdated: false,
           serverReceivedAt: "2026-06-20T00:00:06.000Z",
         },
         {
-          eventId: "evt-old-003",
+          eventId: HEARTBEAT_EVENT_IDS.older,
           accepted: true,
           duplicate: false,
           currentLocationUpdated: false,
@@ -447,6 +462,108 @@ describe("RegulatoryRegistryService", () => {
     expect(
       opsDispatchEventsService.publishDriverLocationUpdated,
     ).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects malformed heartbeat UUIDs before hitting persistence", async () => {
+    const { service, regulatoryRegistryRepository } = createService();
+
+    regulatoryRegistryRepository.isEnabled.mockReturnValue(true);
+
+    await expect(
+      service.recordDriverLocationBatch({
+        items: [
+          {
+            eventId: "not-a-uuid",
+            deviceId: "device-001",
+            driverId: "drv-demo-001",
+            vehicleId: null,
+            taskId: null,
+            sequenceNo: 1,
+            recordedAt: "2026-06-20T00:00:00.000Z",
+            lat: 24.163,
+            lng: 120.647,
+            accuracyM: 5,
+            workState: "available",
+            appState: "foreground",
+            transportMode: "foreground",
+            networkType: "wifi",
+          },
+        ],
+      }),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "FIELD_INVALID",
+            details: expect.objectContaining({
+              field: "eventId",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(
+      regulatoryRegistryRepository.ingestDriverLocationHeartbeats,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("fails the whole batch before persistence if any item is invalid", async () => {
+    const { service, regulatoryRegistryRepository } = createService();
+
+    regulatoryRegistryRepository.isEnabled.mockReturnValue(true);
+
+    await expect(
+      service.recordDriverLocationBatch({
+        items: [
+          {
+            eventId: HEARTBEAT_EVENT_IDS.newer,
+            deviceId: "device-001",
+            driverId: "drv-demo-001",
+            vehicleId: null,
+            taskId: null,
+            sequenceNo: 1,
+            recordedAt: "2026-06-20T00:00:00.000Z",
+            lat: 24.163,
+            lng: 120.647,
+            accuracyM: 5,
+            workState: "available",
+            appState: "foreground",
+            transportMode: "foreground",
+            networkType: "wifi",
+          },
+          {
+            eventId: HEARTBEAT_EVENT_IDS.duplicate,
+            deviceId: "device-001",
+            driverId: "drv-demo-001",
+            vehicleId: null,
+            taskId: null,
+            sequenceNo: 2,
+            recordedAt: "invalid",
+            lat: 24.163,
+            lng: 120.647,
+            accuracyM: 5,
+            workState: "available",
+            appState: "foreground",
+            transportMode: "foreground",
+            networkType: "wifi",
+          },
+        ],
+      }),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "FIELD_INVALID",
+            details: expect.objectContaining({
+              field: "recordedAt",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(
+      regulatoryRegistryRepository.ingestDriverLocationHeartbeats,
+    ).not.toHaveBeenCalled();
   });
 
   it("removes suspended and retired drivers from dispatch eligibility", () => {
