@@ -1,6 +1,7 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type { PartnerType } from "./referral-channel";
+import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
 import type {
   CrossAppResourceLink,
   DriverMatchingSuppression,
