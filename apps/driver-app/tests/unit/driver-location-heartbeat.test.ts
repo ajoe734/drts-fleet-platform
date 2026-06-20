@@ -16,6 +16,7 @@ type TaskHandler = (body: {
 }) => Promise<void> | void;
 
 const recordDriverLocation = vi.fn();
+const recordDriverLocationBatch = vi.fn();
 const watchPositionAsync = vi.fn();
 const removeSubscription = vi.fn();
 const getForegroundPermissionsAsync = vi.fn();
@@ -27,6 +28,9 @@ const startLocationUpdatesAsync = vi.fn();
 const stopLocationUpdatesAsync = vi.fn();
 const getLastKnownPositionAsync = vi.fn();
 const getCurrentPositionAsync = vi.fn();
+const getItemAsync = vi.fn();
+const setItemAsync = vi.fn();
+const secureStoreState = new Map<string, string>();
 
 let watchCallback: LocationCallback | null = null;
 let taskHandler: TaskHandler | null = null;
@@ -35,8 +39,14 @@ let taskDefined = false;
 vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
     recordDriverLocation,
+    recordDriverLocationBatch,
   }),
   getDriverId: () => "driver-001",
+}));
+
+vi.mock("expo-secure-store", () => ({
+  getItemAsync,
+  setItemAsync,
 }));
 
 vi.mock("expo-location", () => ({
@@ -85,12 +95,19 @@ async function flushHeartbeatQueue() {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 beforeEach(() => {
   taskDefined = false;
   taskHandler = null;
   watchCallback = null;
+  secureStoreState.clear();
+  secureStoreState.set("drts.driver.heartbeatDeviceId", "heartbeat-device-001");
+  secureStoreState.set("drts.driver.heartbeatSequence", "0");
 
   vi.resetModules();
   vi.clearAllMocks();
@@ -110,6 +127,12 @@ beforeEach(() => {
   stopLocationUpdatesAsync.mockResolvedValue(undefined);
   getLastKnownPositionAsync.mockResolvedValue(null);
   getCurrentPositionAsync.mockResolvedValue(null);
+  getItemAsync.mockImplementation(async (key: string) =>
+    secureStoreState.get(key) ?? null,
+  );
+  setItemAsync.mockImplementation(async (key: string, value: string) => {
+    secureStoreState.set(key, value);
+  });
 });
 
 afterEach(async () => {
@@ -127,8 +150,9 @@ describe("driver location heartbeat transport", () => {
     heartbeatModule.subscribeToDriverLocationUpdates(listener);
 
     await heartbeatModule.syncDriverLocationHeartbeat({
-      taskId: "task-001",
       driverId: "driver-001",
+      taskId: "task-001",
+      workState: "on_trip",
     });
 
     expect(taskHandler).not.toBeNull();
@@ -143,7 +167,7 @@ describe("driver location heartbeat transport", () => {
       accuracyM: 8,
       recordedAt: new Date(1_000).toISOString(),
     });
-    expect(recordDriverLocation).not.toHaveBeenCalled();
+    expect(recordDriverLocationBatch).not.toHaveBeenCalled();
 
     await taskHandler?.({
       data: {
@@ -152,13 +176,20 @@ describe("driver location heartbeat transport", () => {
     });
     await flushHeartbeatQueue();
 
-    expect(recordDriverLocation).toHaveBeenCalledTimes(1);
-    expect(recordDriverLocation).toHaveBeenCalledWith({
-      driverId: "driver-001",
-      lat: 25.033,
-      lng: 121.5654,
-      accuracyM: 8,
-      recordedAt: new Date(16_000).toISOString(),
+    expect(recordDriverLocationBatch).toHaveBeenCalledTimes(1);
+    expect(recordDriverLocationBatch).toHaveBeenCalledWith({
+      items: [
+        expect.objectContaining({
+          driverId: "driver-001",
+          taskId: "task-001",
+          lat: 25.033,
+          lng: 121.5654,
+          accuracyM: 8,
+          recordedAt: new Date(16_000).toISOString(),
+          workState: "on_trip",
+          transportMode: "background",
+        }),
+      ],
     });
   });
 
@@ -169,8 +200,9 @@ describe("driver location heartbeat transport", () => {
     const heartbeatModule = await import("../../lib/driver-location-heartbeat");
 
     const result = await heartbeatModule.syncDriverLocationHeartbeat({
-      taskId: "task-001",
       driverId: "driver-001",
+      taskId: "task-001",
+      workState: "on_trip",
     });
 
     expect(result).toMatchObject({
@@ -188,20 +220,62 @@ describe("driver location heartbeat transport", () => {
     watchCallback?.(createLocation(16_500, 25.035, 121.5656));
     await flushHeartbeatQueue();
 
-    expect(recordDriverLocation).toHaveBeenCalledTimes(2);
-    expect(recordDriverLocation).toHaveBeenNthCalledWith(1, {
-      driverId: "driver-001",
-      lat: 25.033,
-      lng: 121.5654,
-      accuracyM: 8,
-      recordedAt: new Date(1_000).toISOString(),
+    expect(recordDriverLocationBatch).toHaveBeenCalledTimes(2);
+    expect(recordDriverLocationBatch).toHaveBeenNthCalledWith(1, {
+      items: [
+        expect.objectContaining({
+          driverId: "driver-001",
+          taskId: "task-001",
+          lat: 25.033,
+          lng: 121.5654,
+          accuracyM: 8,
+          recordedAt: new Date(1_000).toISOString(),
+          workState: "on_trip",
+          transportMode: "foreground",
+        }),
+      ],
     });
-    expect(recordDriverLocation).toHaveBeenNthCalledWith(2, {
-      driverId: "driver-001",
-      lat: 25.035,
-      lng: 121.5656,
-      accuracyM: 8,
-      recordedAt: new Date(16_500).toISOString(),
+    expect(recordDriverLocationBatch).toHaveBeenNthCalledWith(2, {
+      items: [
+        expect.objectContaining({
+          driverId: "driver-001",
+          taskId: "task-001",
+          lat: 25.034,
+          lng: 121.5655,
+          accuracyM: 8,
+          recordedAt: new Date(11_000).toISOString(),
+          workState: "on_trip",
+          transportMode: "foreground",
+        }),
+      ],
     });
+  });
+
+  it("uses the online-available cadence when no active task exists but the driver is on shift", async () => {
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    await heartbeatModule.syncDriverLocationHeartbeat({
+      driverId: "driver-001",
+      taskId: null,
+      workState: "available",
+    });
+
+    expect(watchPositionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distanceInterval: 100,
+        timeInterval: 30_000,
+      }),
+      expect.any(Function),
+    );
+    expect(startLocationUpdatesAsync).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        distanceInterval: 100,
+        timeInterval: 30_000,
+        foregroundService: expect.objectContaining({
+          notificationTitle: "Driver availability tracking active",
+        }),
+      }),
+    );
   });
 });

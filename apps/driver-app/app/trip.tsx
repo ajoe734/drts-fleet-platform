@@ -1272,8 +1272,9 @@ export default function TripScreen() {
         const result = await syncDriverLocationHeartbeat(
           taskDetail
             ? {
-                taskId: taskDetail.taskId,
                 driverId: taskDetail.driverId,
+                taskId: taskDetail.taskId,
+                workState: "on_trip",
               }
             : null,
         );

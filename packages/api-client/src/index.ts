@@ -72,6 +72,8 @@ import type {
   DriverArrivedPickupCommand,
   DriverDeviceProvisioningSession,
   DriverEtaResponse,
+  DriverLocationHeartbeatBatchRequest,
+  DriverLocationHeartbeatBatchResponse,
   DriverLocationSnapshot,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
@@ -2754,6 +2756,15 @@ export class ApiClient {
     return this.post<{ success: true }>(
       "/api/regulatory-registry/driver-location",
       { body: command },
+    );
+  }
+
+  async recordDriverLocationBatch(
+    request: DriverLocationHeartbeatBatchRequest,
+  ): Promise<DriverLocationHeartbeatBatchResponse> {
+    return this.post<DriverLocationHeartbeatBatchResponse>(
+      "/api/driver/location-heartbeats/batch",
+      { body: request },
     );
   }
 

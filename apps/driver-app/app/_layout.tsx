@@ -13,6 +13,7 @@ import { syncDriverIdentityBootstrap } from "@/lib/driver-identity-bootstrap";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
   getDriverClient,
+  getDriverId,
   getDriverIdentityIssue,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
@@ -55,9 +56,11 @@ function DriverHeartbeatBootstrap() {
         allowUnprovisionedRoute: allowUnprovisionedRoute(segmentsRef.current),
         cancelled: () => cancelled,
         getDriverIdentityIssue,
+        getDriverId,
         initializeDriverIdentity,
         isDriverIdentityProvisioned,
         listDriverTasks: () => getDriverClient().listDriverTasks(),
+        listShifts: () => getDriverClient().listShifts(getDriverId()),
         onWarning: (error) => {
           console.warn("Driver heartbeat bootstrap sync failed", error);
         },

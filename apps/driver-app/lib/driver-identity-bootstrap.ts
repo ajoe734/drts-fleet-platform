@@ -6,18 +6,25 @@ type DriverTaskLike = {
   status: string;
 };
 
+type ShiftLike = {
+  status: string;
+};
+
 type DriverHeartbeatAssignment = {
-  taskId: string;
   driverId: string;
+  taskId: string | null;
+  workState: "available" | "assigned" | "enroute" | "arrived" | "on_trip";
 } | null;
 
 type DriverIdentityBootstrapDeps = {
   allowUnprovisionedRoute?: boolean;
   cancelled?: () => boolean;
   getDriverIdentityIssue: () => string | null;
+  getDriverId: () => string;
   initializeDriverIdentity: () => Promise<void>;
   isDriverIdentityProvisioned: () => boolean;
   listDriverTasks: () => Promise<DriverTaskLike[]>;
+  listShifts: () => Promise<ShiftLike[]>;
   onWarning?: (error: unknown) => void;
   resetDriverAppToOnboarding: (router: DriverOnboardingRouter) => void;
   router: DriverOnboardingRouter;
@@ -29,6 +36,47 @@ type DriverIdentityBootstrapDeps = {
 export async function syncDriverIdentityBootstrap(
   deps: DriverIdentityBootstrapDeps,
 ): Promise<"synced" | "routed"> {
+  const resolveHeartbeatContext = (
+    tasks: DriverTaskLike[],
+    shifts: ShiftLike[],
+  ): DriverHeartbeatAssignment => {
+    const prioritizedTask =
+      tasks.find((task) => task.status === "on_trip") ??
+      tasks.find((task) => task.status === "arrived_pickup") ??
+      tasks.find((task) => task.status === "enroute_pickup") ??
+      tasks.find((task) => task.status === "accepted") ??
+      tasks.find((task) => task.status === "pending_acceptance") ??
+      null;
+
+    if (prioritizedTask) {
+      const workState =
+        prioritizedTask.status === "on_trip"
+          ? "on_trip"
+          : prioritizedTask.status === "arrived_pickup"
+            ? "arrived"
+            : prioritizedTask.status === "enroute_pickup"
+              ? "enroute"
+              : "assigned";
+
+      return {
+        driverId: prioritizedTask.driverId,
+        taskId: prioritizedTask.taskId,
+        workState,
+      };
+    }
+
+    const activeShift = shifts.find((shift) => shift.status === "active");
+    if (!activeShift) {
+      return null;
+    }
+
+    return {
+      driverId: deps.getDriverId(),
+      taskId: null,
+      workState: "available",
+    };
+  };
+
   const handleUnprovisionedIdentity = async (): Promise<
     "continue" | "hold" | "routed"
   > => {
@@ -62,15 +110,12 @@ export async function syncDriverIdentityBootstrap(
       return "synced";
     }
 
-    const activeTask = tasks.find((task) => task.status === "on_trip") ?? null;
-    await deps.syncDriverLocationHeartbeat(
-      activeTask
-        ? {
-            taskId: activeTask.taskId,
-            driverId: activeTask.driverId,
-          }
-        : null,
-    );
+    const shifts = await deps.listShifts();
+    if (deps.cancelled?.()) {
+      return "synced";
+    }
+
+    await deps.syncDriverLocationHeartbeat(resolveHeartbeatContext(tasks, shifts));
     return "synced";
   } catch (error) {
     const unprovisionedIdentityResult = await handleUnprovisionedIdentity();
