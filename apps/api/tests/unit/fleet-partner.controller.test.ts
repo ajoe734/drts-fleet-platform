@@ -1,5 +1,5 @@
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
@@ -9,6 +9,7 @@ import { CallcenterService } from "../../src/modules/callcenter/callcenter.servi
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { FleetPartnerController } from "../../src/modules/fleet-partner/fleet-partner.controller";
 import { FleetPartnerService } from "../../src/modules/fleet-partner/fleet-partner.service";
+import { SupplyReadinessService } from "../../src/modules/fleet-partner/supply-readiness.service";
 import { SupplyReviewService } from "../../src/modules/fleet-partner/supply-review.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
@@ -53,13 +54,43 @@ function createFixture() {
     regulatoryRegistryService,
   );
   const supplyReviewService = new SupplyReviewService();
+  const readinessService = {
+    listFleetPartnerReadiness: vi.fn().mockResolvedValue([
+      {
+        subjectType: "driver",
+        subjectId: "drv-demo-001",
+        state: "ready",
+        reasonCodes: [],
+        evaluatedAt: "2026-06-20T00:00:00.000Z",
+        policyVersion: "phase1-delta-supply-readiness-2026-06-19",
+      },
+    ]),
+    getDriverReadiness: vi.fn().mockResolvedValue({
+      subjectType: "driver",
+      subjectId: "drv-demo-001",
+      state: "ready",
+      reasonCodes: [],
+      evaluatedAt: "2026-06-20T00:00:00.000Z",
+      policyVersion: "phase1-delta-supply-readiness-2026-06-19",
+    }),
+    getVehicleReadiness: vi.fn().mockResolvedValue({
+      subjectType: "vehicle",
+      subjectId: "veh-demo-001",
+      state: "not_ready",
+      reasonCodes: ["VEHICLE_AFFILIATION_MISSING"],
+      evaluatedAt: "2026-06-20T00:00:00.000Z",
+      policyVersion: "phase1-delta-supply-readiness-2026-06-19",
+    }),
+  };
 
   return {
     controller: new FleetPartnerController(
       fleetPartnerService,
       supplyReviewService,
+      readinessService as unknown as SupplyReadinessService,
     ),
     service: fleetPartnerService,
+    readinessService,
   };
 }
 
@@ -226,5 +257,53 @@ describe("FleetPartnerController portal routes", () => {
         null,
       ),
     ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("returns fleet-partner readiness list and detail routes", async () => {
+    const { controller, readinessService } = createFixture();
+
+    const readinessList = await controller.listPortalReadiness(
+      "fleet-demo-001",
+      "req-readiness-list",
+    );
+    const driverReadiness = await controller.getPortalDriverReadiness(
+      "fleet-demo-001",
+      "drv-demo-001",
+      "req-readiness-driver",
+    );
+    const vehicleReadiness = await controller.getPortalVehicleReadiness(
+      "fleet-demo-001",
+      "veh-demo-001",
+      "req-readiness-vehicle",
+    );
+
+    expect(readinessService.listFleetPartnerReadiness).toHaveBeenCalledWith(
+      "fleet-demo-001",
+    );
+    expect(readinessService.getDriverReadiness).toHaveBeenCalledWith(
+      "fleet-demo-001",
+      "drv-demo-001",
+    );
+    expect(readinessService.getVehicleReadiness).toHaveBeenCalledWith(
+      "fleet-demo-001",
+      "veh-demo-001",
+    );
+
+    expect(readinessList.data.items[0]).toMatchObject({
+      subjectType: "driver",
+      subjectId: "drv-demo-001",
+      state: "ready",
+    });
+    expect(driverReadiness.data).toMatchObject({
+      subjectType: "driver",
+      subjectId: "drv-demo-001",
+      state: "ready",
+    });
+    expect(vehicleReadiness.data).toMatchObject({
+      subjectType: "vehicle",
+      subjectId: "veh-demo-001",
+      state: "not_ready",
+      reasonCodes: ["VEHICLE_AFFILIATION_MISSING"],
+    });
   });
 });
