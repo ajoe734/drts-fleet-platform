@@ -11,6 +11,10 @@ import {
   flushDriverLocationQueue,
   initializeDriverLocationOfflineQueue,
 } from "@/lib/driver-location-offline-queue";
+import {
+  clearTrackingSession,
+  recordTrackingHeartbeat,
+} from "@/lib/driver-tracking-recovery";
 
 const DRIVER_LOCATION_TASK_NAME = "drts-driver-location-heartbeat";
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -128,7 +132,7 @@ function queueHeartbeat(
   heartbeatQueue = heartbeatQueue
     .catch(() => undefined)
     .then(async () => {
-      await enqueueDriverLocationEvent({
+      const payload = await enqueueDriverLocationEvent({
         taskId: activeTaskId,
         recordedAt: update.recordedAt,
         lat: update.latitude,
@@ -141,6 +145,16 @@ function queueHeartbeat(
         transportMode: source,
         networkType: "unknown",
         preserveKeyEvent: options?.preserveKeyEvent ?? false,
+      });
+      // Persist the durable restart-recovery marker from the real fix we just
+      // recorded so a later restart can detect a tracking gap (MOB-APP-004).
+      await recordTrackingHeartbeat({
+        taskId: payload.taskId,
+        driverId: payload.driverId,
+        vehicleId: payload.vehicleId,
+        workState: payload.workState,
+        recordedAt: payload.recordedAt,
+        sequenceNo: payload.sequenceNo,
       });
       await flushDriverLocationQueue();
     })
@@ -309,6 +323,11 @@ export async function stopDriverLocationHeartbeat(): Promise<void> {
     await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME);
   }
 
+  // Drain any in-flight heartbeat write (e.g. the final state snapshot) before
+  // clearing the restart-recovery marker, so a clean stop never leaves an open
+  // session behind that a later restart would misread as a tracking gap.
+  await heartbeatQueue.catch(() => undefined);
+  await clearTrackingSession();
   await flushDriverLocationQueue();
 }
 
