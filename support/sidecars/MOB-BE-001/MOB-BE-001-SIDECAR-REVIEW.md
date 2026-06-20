@@ -5,7 +5,7 @@
 **Parent Owner / Reviewer:** `Codex2` / `Codex`
 **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 **Generated:** `2026-06-20` (UTC)
-**Refreshed At:** `2026-06-20T06:20:00Z`
+**Refreshed At:** `2026-06-20T06:13:04Z`
 **Snapshot Basis:** `scripts/ai-status.sh show`, `git show`, `git branch --contains`, `git merge-base --is-ancestor`, `git diff --check`, and commit-scoped `git grep`
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
@@ -39,22 +39,44 @@ Out of scope:
 
 ### 2.1 Sidecar row
 
-`scripts/ai-status.sh show MOB-BE-001-SIDECAR-REVIEW` at this refresh pass records:
+The reviewer-facing packet needs two separate machine-truth snapshots:
 
-- id=`MOB-BE-001-SIDECAR-REVIEW`
+1. the last handoff state that `Codex2` reviewed
+2. the current reopened owner state while this correction is being prepared
+
+Last reviewed handoff snapshot:
+
+- source=`ai-activity-log.jsonl`
+- handoff_at=`2026-06-20T06:10:44Z`
+- task_id=`MOB-BE-001-SIDECAR-REVIEW`
 - owner=`Codex`
 - reviewer=`Codex2`
+- status=`review`
+- handoff_commit=`104204da3d84d6af1132fe71c054cc2002e230c9`
+- handoff_message=`Handoff to Codex2: Refreshed support/sidecars/MOB-BE-001/MOB-BE-001-SIDECAR-REVIEW.md so the packet matches current machine truth, removes stale review_approved/closeout narration, and frames reviewer focus against parent commit 4b093cd23003ace8287962ad80e31f61ad7581fb. Verification: git diff --check. Commit: 104204da3d84d6af1132fe71c054cc2002e230c9 on origin/codex/mob-be-001-sidecar-review.`
+
+Review failure that triggered this refresh:
+
+- source=`ai-activity-log.jsonl`
+- reopened_at=`2026-06-20T06:11:46Z`
+- reopened_by=`Codex2`
+- reopen_reason=`support/sidecars/MOB-BE-001/MOB-BE-001-SIDECAR-REVIEW.md:42-57 still says the sidecar row is status=in_progress with next intended transition to reviewer handoff, but machine truth at review time is already status=review with last_update=2026-06-20T06:10:44Z.`
+
+Current owner refresh state:
+
+- source=`scripts/ai-status.sh show MOB-BE-001-SIDECAR-REVIEW`
 - status=`in_progress`
 - helper_parent=`MOB-BE-001`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
-- last_update=`2026-06-20T06:09:15Z`
+- last_update=`2026-06-20T06:12:19Z`
+- next=`Refreshing review packet to match the actual sidecar handoff/review timeline before resubmitting to Codex2.`
 
-Current owner note:
+Interpretation:
 
-- this sidecar remains in `in_progress` while the owner refreshes the support packet
-- no sidecar reviewer approval has been recorded yet in machine truth
-- the next intended transition is owner handoff to `Codex2` for packet review
+- the packet under review must describe the audited handoff snapshot as `review`
+- the owner's current `in_progress` state exists only because the reviewer reopened the sidecar for this packet correction
+- after this document refresh, the owner should hand the packet back to `Codex2` for a new `review` transition
 
 ### 2.2 Parent row
 
@@ -114,8 +136,11 @@ Artifact delivery note:
 
 - the prior packet refresh on the sidecar branch is commit
   `358b53e2e1cba67cb257095877ef0838c7a25b7d`
-- this refresh corrects the stale sidecar-row narration so the packet matches
-  the current machine-truth timeline before reviewer handoff
+- the most recent handoff packet revision under review is commit
+  `104204da3d84d6af1132fe71c054cc2002e230c9`
+- this refresh corrects the stale sidecar-row narration by separating the
+  `2026-06-20T06:10:44Z` review handoff snapshot from the later reopened
+  owner-refresh state
 
 ---
 
@@ -193,6 +218,9 @@ Evidence relevant to this review revision:
   overstated verification cleanliness. At this refresh point, local
   `git diff --check` returns no output, so there is no current trailing-whitespace
   failure in the sidecar worktree.
+- Prior review feedback on this sidecar packet was also correct that the earlier
+  version conflated the owner refresh state with the already-recorded `review`
+  handoff state. This revision fixes that timeline error explicitly.
 
 Additional unchanged guardrail still present in tests:
 
@@ -227,8 +255,10 @@ Suggested review framing:
 - audit the parent task against commit `4b093cd23003ace8287962ad80e31f61ad7581fb`
 - treat this packet as evidence compression only
 - do not infer parent correctness from the sidecar worktree `HEAD`
-- confirm the packet now matches current machine truth for both the sidecar and
-  the already-closed parent task
+- confirm the packet now distinguishes the audited `review` handoff snapshot at
+  `2026-06-20T06:10:44Z` from the later reopened owner state
+- confirm the packet still matches current machine truth for the already-closed
+  parent task
 - approve only the packet accuracy; parent implementation correctness is already
   recorded in the parent task closeout
 - once packet accuracy is confirmed, approve the sidecar task so the owner can
