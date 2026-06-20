@@ -1,4 +1,3 @@
-import type { DriverTaskRecord } from "@drts/contracts";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import type { TaskManagerTaskBody } from "expo-task-manager";
@@ -7,6 +6,22 @@ import { getDriverClient, getDriverId } from "@/lib/api-client";
 
 const DRIVER_LOCATION_TASK_NAME = "drts-driver-location-heartbeat";
 const HEARTBEAT_INTERVAL_MS = 15_000;
+const AVAILABILITY_HEARTBEAT_INTERVAL_MS = 30_000;
+const INCIDENT_HEARTBEAT_INTERVAL_MS = 5_000;
+
+export type DriverHeartbeatWorkState =
+  | "online_available"
+  | "assigned"
+  | "enroute_to_pickup"
+  | "arrived_pickup"
+  | "on_trip"
+  | "incident";
+
+export type DriverLocationHeartbeatProfile = {
+  driverId: string;
+  taskId: string | null;
+  workState: DriverHeartbeatWorkState;
+};
 
 type HeartbeatLocationUpdate = {
   latitude: number;
@@ -25,14 +40,23 @@ type HeartbeatSyncResult = {
 
 type HeartbeatTransportMode = "none" | "foreground" | "background";
 
+type HeartbeatCadence = {
+  timeIntervalMs: number;
+  distanceIntervalM: number;
+  foregroundServiceTitle: string;
+  foregroundServiceBody: string;
+  requiresBackgroundPermission: boolean;
+};
+
 const listeners = new Set<HeartbeatListener>();
 
-let activeTaskId: string | null = null;
+let activeHeartbeatProfile: DriverLocationHeartbeatProfile | null = null;
 let latestUpdate: HeartbeatLocationUpdate | null = null;
 let heartbeatQueue = Promise.resolve();
 let foregroundLocationSubscription: Location.LocationSubscription | null = null;
 let transportMode: HeartbeatTransportMode = "none";
 let lastHeartbeatQueuedAtMs: number | null = null;
+let activeHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
 
 function emitLocationUpdate(update: HeartbeatLocationUpdate) {
   latestUpdate = update;
@@ -74,7 +98,7 @@ function queueHeartbeat(
   const recordedAtMs = getHeartbeatRecordedAtMs(update);
   if (
     lastHeartbeatQueuedAtMs !== null &&
-    recordedAtMs - lastHeartbeatQueuedAtMs < HEARTBEAT_INTERVAL_MS
+    recordedAtMs - lastHeartbeatQueuedAtMs < activeHeartbeatIntervalMs
   ) {
     return;
   }
@@ -154,7 +178,9 @@ export function subscribeToDriverLocationUpdates(
   };
 }
 
-async function ensureLocationPermissions(): Promise<HeartbeatSyncResult> {
+async function ensureLocationPermissions(
+  cadence: HeartbeatCadence,
+): Promise<HeartbeatSyncResult> {
   const foregroundPermission =
     await Location.getForegroundPermissionsAsync().catch(() => null);
 
@@ -166,7 +192,7 @@ async function ensureLocationPermissions(): Promise<HeartbeatSyncResult> {
     return {
       status: "permission_denied",
       message:
-        "Foreground location access is required to start trip tracking and driver heartbeat updates.",
+        "Foreground location access is required to start driver location heartbeat updates.",
       latestUpdate,
     };
   }
@@ -179,6 +205,15 @@ async function ensureLocationPermissions(): Promise<HeartbeatSyncResult> {
     : (await Location.requestBackgroundPermissionsAsync()).granted;
 
   if (!backgroundGranted) {
+    if (cadence.requiresBackgroundPermission) {
+      return {
+        status: "permission_denied",
+        message:
+          "Background location is required before the driver can stay online and available for dispatch.",
+        latestUpdate,
+      };
+    }
+
     return {
       status: "active",
       message:
@@ -196,7 +231,7 @@ async function ensureLocationPermissions(): Promise<HeartbeatSyncResult> {
 
 async function seedLatestLocation() {
   const knownLocation = await Location.getLastKnownPositionAsync({
-    maxAge: HEARTBEAT_INTERVAL_MS,
+    maxAge: activeHeartbeatIntervalMs,
     requiredAccuracy: 100,
   }).catch(() => null);
 
@@ -215,9 +250,10 @@ async function seedLatestLocation() {
 }
 
 export async function stopDriverLocationHeartbeat(): Promise<void> {
-  activeTaskId = null;
+  activeHeartbeatProfile = null;
   transportMode = "none";
   lastHeartbeatQueuedAtMs = null;
+  activeHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
   stopForegroundLocationSubscription();
 
   const started = await Location.hasStartedLocationUpdatesAsync(
@@ -229,10 +265,63 @@ export async function stopDriverLocationHeartbeat(): Promise<void> {
   }
 }
 
+function getHeartbeatCadence(
+  profile: DriverLocationHeartbeatProfile,
+): HeartbeatCadence {
+  switch (profile.workState) {
+    case "online_available":
+      return {
+        timeIntervalMs: AVAILABILITY_HEARTBEAT_INTERVAL_MS,
+        distanceIntervalM: 100,
+        foregroundServiceTitle: "Driver availability active",
+        foregroundServiceBody:
+          "DRTS is sharing your location so dispatch can find nearby available drivers.",
+        requiresBackgroundPermission: true,
+      };
+    case "assigned":
+      return {
+        timeIntervalMs: HEARTBEAT_INTERVAL_MS,
+        distanceIntervalM: 25,
+        foregroundServiceTitle: "Driver assignment active",
+        foregroundServiceBody:
+          "DRTS is sharing your location while this assignment is in progress.",
+        requiresBackgroundPermission: false,
+      };
+    case "enroute_to_pickup":
+    case "on_trip":
+      return {
+        timeIntervalMs: 10_000,
+        distanceIntervalM: 25,
+        foregroundServiceTitle: "Trip tracking active",
+        foregroundServiceBody:
+          "DRTS is sending driver location heartbeats for the active trip.",
+        requiresBackgroundPermission: false,
+      };
+    case "arrived_pickup":
+      return {
+        timeIntervalMs: HEARTBEAT_INTERVAL_MS,
+        distanceIntervalM: 25,
+        foregroundServiceTitle: "Pickup tracking active",
+        foregroundServiceBody:
+          "DRTS is keeping the driver location fresh while pickup is in progress.",
+        requiresBackgroundPermission: false,
+      };
+    case "incident":
+      return {
+        timeIntervalMs: INCIDENT_HEARTBEAT_INTERVAL_MS,
+        distanceIntervalM: 10,
+        foregroundServiceTitle: "Emergency tracking active",
+        foregroundServiceBody:
+          "DRTS is sending higher-frequency driver location updates during the incident.",
+        requiresBackgroundPermission: false,
+      };
+  }
+}
+
 export async function syncDriverLocationHeartbeat(
-  task: Pick<DriverTaskRecord, "taskId" | "driverId"> | null,
+  profile: DriverLocationHeartbeatProfile | null,
 ): Promise<HeartbeatSyncResult> {
-  if (!task) {
+  if (!profile) {
     await stopDriverLocationHeartbeat();
     return {
       status: "idle",
@@ -241,7 +330,12 @@ export async function syncDriverLocationHeartbeat(
     };
   }
 
-  const permissionResult = await ensureLocationPermissions();
+  const previousProfile = activeHeartbeatProfile;
+  const previousTransportMode = transportMode;
+  const cadence = getHeartbeatCadence(profile);
+  activeHeartbeatIntervalMs = cadence.timeIntervalMs;
+
+  const permissionResult = await ensureLocationPermissions(cadence);
   if (permissionResult.status === "permission_denied") {
     transportMode = "none";
     stopForegroundLocationSubscription();
@@ -250,18 +344,24 @@ export async function syncDriverLocationHeartbeat(
 
   const nextTransportMode =
     permissionResult.message === null ? "background" : "foreground";
-  if (activeTaskId !== task.taskId || transportMode !== nextTransportMode) {
+  const profileChanged =
+    previousProfile?.taskId !== profile.taskId ||
+    previousProfile?.workState !== profile.workState;
+  if (
+    profileChanged ||
+    previousTransportMode !== nextTransportMode
+  ) {
     lastHeartbeatQueuedAtMs = null;
   }
-  activeTaskId = task.taskId;
+  activeHeartbeatProfile = profile;
   transportMode = nextTransportMode;
   stopForegroundLocationSubscription();
 
   foregroundLocationSubscription = await Location.watchPositionAsync(
     {
       accuracy: Location.Accuracy.Balanced,
-      distanceInterval: 25,
-      timeInterval: 10_000,
+      distanceInterval: cadence.distanceIntervalM,
+      timeInterval: cadence.timeIntervalMs,
     },
     (position) => {
       const update = toHeartbeatLocationUpdate(position);
@@ -274,19 +374,31 @@ export async function syncDriverLocationHeartbeat(
     DRIVER_LOCATION_TASK_NAME,
   ).catch(() => false);
 
-  if (permissionResult.message === null && !started) {
+  if (
+    permissionResult.message === null &&
+    started &&
+    (profileChanged || previousTransportMode !== nextTransportMode)
+  ) {
+    await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME).catch(
+      () => undefined,
+    );
+  }
+
+  if (
+    permissionResult.message === null &&
+    (!started || profileChanged || previousTransportMode !== nextTransportMode)
+  ) {
     await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME, {
       accuracy: Location.Accuracy.Balanced,
       activityType: Location.ActivityType.AutomotiveNavigation,
-      deferredUpdatesInterval: HEARTBEAT_INTERVAL_MS,
-      distanceInterval: 0,
+      deferredUpdatesInterval: cadence.timeIntervalMs,
+      distanceInterval: cadence.distanceIntervalM,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
-      timeInterval: HEARTBEAT_INTERVAL_MS,
+      timeInterval: cadence.timeIntervalMs,
       foregroundService: {
-        notificationTitle: "Trip tracking active",
-        notificationBody:
-          "DRTS is sending driver location heartbeats for the active trip.",
+        notificationTitle: cadence.foregroundServiceTitle,
+        notificationBody: cadence.foregroundServiceBody,
         killServiceOnDestroy: false,
       },
     });
@@ -308,5 +420,5 @@ export async function syncDriverLocationHeartbeat(
 }
 
 export function getActiveDriverHeartbeatTaskId(): string | null {
-  return activeTaskId;
+  return activeHeartbeatProfile?.taskId ?? null;
 }

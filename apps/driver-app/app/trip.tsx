@@ -218,6 +218,42 @@ function isForwardedTask(task: DriverTaskRecord | null): boolean {
   return task?.sourcePlatform != null;
 }
 
+function getHeartbeatProfileForTask(task: DriverTaskRecord | null) {
+  if (!task || isForwardedTask(task)) {
+    return null;
+  }
+
+  switch (task.status) {
+    case "pending_acceptance":
+    case "accepted":
+      return {
+        driverId: task.driverId,
+        taskId: task.taskId,
+        workState: "assigned" as const,
+      };
+    case "enroute_pickup":
+      return {
+        driverId: task.driverId,
+        taskId: task.taskId,
+        workState: "enroute_to_pickup" as const,
+      };
+    case "arrived_pickup":
+      return {
+        driverId: task.driverId,
+        taskId: task.taskId,
+        workState: "arrived_pickup" as const,
+      };
+    case "on_trip":
+      return {
+        driverId: task.driverId,
+        taskId: task.taskId,
+        workState: "on_trip" as const,
+      };
+    default:
+      return null;
+  }
+}
+
 function formatTripActionSuccessLabel(action: TripPrimaryActionKey): string {
   return driverTripActionSuccessLabels[action];
 }
@@ -870,6 +906,7 @@ export default function TripScreen() {
   );
   const isForwardedTrip = isForwardedTask(taskDetail);
   const isTripInProgress = !isForwardedTrip && taskDetail?.status === "on_trip";
+  const heartbeatProfile = getHeartbeatProfileForTask(taskDetail);
   const showTripMetrics = !isForwardedTrip && shouldShowTripMetrics(taskDetail);
   const completionBlockedByTracking =
     isTripInProgress && locationTrackingState !== "active";
@@ -1254,11 +1291,10 @@ export default function TripScreen() {
   }, [isTripInProgress, taskDetail?.taskId, taskDetail?.startedAt]);
 
   useEffect(() => {
-    if (!isTripInProgress) {
+    if (!heartbeatProfile) {
       lastTrackedCoordinateRef.current = null;
       setLocationTrackingState("idle");
       setLocationTrackingMessage(null);
-      void stopDriverLocationHeartbeat();
       return;
     }
 
@@ -1269,14 +1305,7 @@ export default function TripScreen() {
       setLocationTrackingMessage(null);
 
       try {
-        const result = await syncDriverLocationHeartbeat(
-          taskDetail
-            ? {
-                taskId: taskDetail.taskId,
-                driverId: taskDetail.driverId,
-              }
-            : null,
-        );
+        const result = await syncDriverLocationHeartbeat(heartbeatProfile);
 
         if (cancelled) {
           return;
@@ -1306,7 +1335,12 @@ export default function TripScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isTripInProgress, taskDetail?.taskId, trackingRetryKey]);
+  }, [
+    heartbeatProfile?.driverId,
+    heartbeatProfile?.taskId,
+    heartbeatProfile?.workState,
+    trackingRetryKey,
+  ]);
 
   useEffect(() => {
     if (!isTripInProgress) {

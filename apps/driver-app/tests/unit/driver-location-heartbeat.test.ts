@@ -127,6 +127,7 @@ describe("driver location heartbeat transport", () => {
     heartbeatModule.subscribeToDriverLocationUpdates(listener);
 
     await heartbeatModule.syncDriverLocationHeartbeat({
+      workState: "on_trip",
       taskId: "task-001",
       driverId: "driver-001",
     });
@@ -169,6 +170,7 @@ describe("driver location heartbeat transport", () => {
     const heartbeatModule = await import("../../lib/driver-location-heartbeat");
 
     const result = await heartbeatModule.syncDriverLocationHeartbeat({
+      workState: "on_trip",
       taskId: "task-001",
       driverId: "driver-001",
     });
@@ -198,10 +200,59 @@ describe("driver location heartbeat transport", () => {
     });
     expect(recordDriverLocation).toHaveBeenNthCalledWith(2, {
       driverId: "driver-001",
-      lat: 25.035,
-      lng: 121.5656,
+      lat: 25.034,
+      lng: 121.5655,
       accuracyM: 8,
-      recordedAt: new Date(16_500).toISOString(),
+      recordedAt: new Date(11_000).toISOString(),
     });
+  });
+
+  it("uses the availability cadence for online available tracking", async () => {
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    await heartbeatModule.syncDriverLocationHeartbeat({
+      workState: "online_available",
+      taskId: null,
+      driverId: "driver-001",
+    });
+
+    expect(watchPositionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distanceInterval: 100,
+        timeInterval: 30_000,
+      }),
+      expect.any(Function),
+    );
+    expect(startLocationUpdatesAsync).toHaveBeenCalledWith(
+      "drts-driver-location-heartbeat",
+      expect.objectContaining({
+        distanceInterval: 100,
+        timeInterval: 30_000,
+        deferredUpdatesInterval: 30_000,
+        foregroundService: expect.objectContaining({
+          notificationTitle: "Driver availability active",
+        }),
+      }),
+    );
+  });
+
+  it("rejects online available tracking when background permission is unavailable", async () => {
+    getBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
+    requestBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
+
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    const result = await heartbeatModule.syncDriverLocationHeartbeat({
+      workState: "online_available",
+      taskId: null,
+      driverId: "driver-001",
+    });
+
+    expect(result).toMatchObject({
+      status: "permission_denied",
+      message:
+        "Background location is required before the driver can stay online and available for dispatch.",
+    });
+    expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
   });
 });
