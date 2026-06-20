@@ -2277,7 +2277,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     const existing = this.latestDriverLocations.get(location.driverId);
     if (
       existing &&
-      Date.parse(existing.recordedAt) > Date.parse(location.recordedAt)
+      Date.parse(existing.recordedAt) >= Date.parse(location.recordedAt)
     ) {
       return false;
     }

@@ -434,7 +434,7 @@ export class RegulatoryRegistryRepository {
           accuracy_m = EXCLUDED.accuracy_m,
           recorded_at = EXCLUDED.recorded_at,
           updated_at = now()
-        WHERE ops.phase1_driver_locations.recorded_at <= EXCLUDED.recorded_at
+        WHERE ops.phase1_driver_locations.recorded_at < EXCLUDED.recorded_at
       `,
       [
         command.driverId,
@@ -495,7 +495,7 @@ export class RegulatoryRegistryRepository {
               SELECT 1
               FROM ops.phase1_driver_locations
               WHERE driver_id = $3
-                AND recorded_at > $7::timestamptz
+                AND recorded_at >= $7::timestamptz
             )
           )
           ON CONFLICT DO NOTHING
@@ -809,7 +809,7 @@ export class RegulatoryRegistryRepository {
           accuracy_m = EXCLUDED.accuracy_m,
           recorded_at = EXCLUDED.recorded_at,
           updated_at = now()
-        WHERE ops.phase1_driver_locations.recorded_at <= EXCLUDED.recorded_at
+        WHERE ops.phase1_driver_locations.recorded_at < EXCLUDED.recorded_at
       `,
       [
         command.driverId,
