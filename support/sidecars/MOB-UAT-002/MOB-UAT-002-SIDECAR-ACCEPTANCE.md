@@ -6,7 +6,7 @@
 **Assigned Reviewer:** `Claude`  
 **Parent Owner / Reviewer:** `Claude` / `Claude2`  
 **Generated:** `2026-06-20` (UTC)  
-**Snapshot Status:** Parent `MOB-UAT-002` is `blocked` in machine truth (`last_update: 2026-06-20T16:27:16Z`) because the real acceptance target is an iPhone/TestFlight/human-run evidence pack. This sidecar is support-only and does not change that posture.
+**Snapshot Status:** Parent `MOB-UAT-002` is `todo` in machine truth (`last_update: 2026-06-20T16:30:49Z`) after the history-repair helper resumed it. The remaining acceptance is still an iPhone/TestFlight/human-run evidence pack, so this sidecar is support-only and does not change that external real-device gate.
 
 > **Provenance.** The operator-fillable iOS scaffold already exists upstream as commit
 > `553492bc5` on branch `origin/claude/mob-uat-002`
@@ -29,8 +29,8 @@ evidence anchors、與 reviewer handoff wording。
   UAT slice.
 - Out of scope: editing `docs/05-ui/driver-app-ios-physical-device-uat-evidence-pack-20260620.md`,
   changing `apps/driver-app/*`, changing `docs/02-architecture/*` canonical truth,
-  claiming a real-device PASS, or clearing the parent task's `external_blocked`
-  condition.
+  claiming a real-device PASS, or clearing the parent task's outstanding external
+  real-device gate.
 
 ---
 
@@ -38,13 +38,14 @@ evidence anchors、與 reviewer handoff wording。
 
 ### 2.1 Machine-truth snapshot
 
-- Parent `MOB-UAT-002` is currently `blocked`, owner `Claude`, reviewer `Claude2`.
+- Parent `MOB-UAT-002` is currently `todo`, owner `Claude`, reviewer `Claude2`.
 - Parent acceptance remains:
   `iOS evidence pack produced on a real device (human/TestFlight); not auto-completable`.
 - Parent `next` already records the key fact pattern: upstream scaffold commit
-  `553492bc5` exists, but the remaining acceptance is a physical-device/human step.
-- This helper task `MOB-UAT-002-SIDECAR-ACCEPTANCE` is `in_progress`, owner `Codex`,
-  reviewer `Claude`, and is explicitly marked `mutates_canonical=false`.
+  `553492bc5` exists, and the remaining acceptance is still a physical-device/human
+  step even though the control-plane status is no longer `blocked`.
+- This helper task `MOB-UAT-002-SIDECAR-ACCEPTANCE` is currently in `review`, owner
+  `Codex`, reviewer `Claude`, and is explicitly marked `mutates_canonical=false`.
 
 ### 2.2 Dependency lookup note
 
@@ -134,7 +135,7 @@ of the reviewer's evidence chain.
 
 | Item | State | Why it matters |
 | --- | --- | --- |
-| Parent `MOB-UAT-002` | `blocked` | This sidecar must preserve the `external_blocked` posture rather than pretending the packet clears the real-device gate |
+| Parent `MOB-UAT-002` | `todo` | This sidecar must preserve the outstanding external real-device gate rather than pretending the packet clears it |
 | Upstream scaffold commit `553492bc5` | branch-only upstream context | The reviewer should treat the sidecar as an index/handoff packet for that scaffold, not as a substitute scaffold |
 | This helper task | support-only | The closeout target is a reviewer-approved packet, not a runtime or canonical-truth change |
 
@@ -145,7 +146,8 @@ of the reviewer's evidence chain.
 When `Claude` reviews this sidecar, prioritize the following:
 
 1. The packet must remain support-only. No claim of iOS PASS, no mutation of
-   canonical truth, and no change to the parent task's blocked posture.
+   canonical truth, and no change to the parent task's outstanding external
+   real-device gate.
 2. The dependency map must keep `MOB-APP-003` and `MOB-APP-004` as the formal
    upstream dependencies from the task brief, while accurately noting that their
    current machine-truth task slices are absent from this board snapshot.
@@ -158,7 +160,7 @@ When `Claude` reviews this sidecar, prioritize the following:
 
 Suggested approval wording:
 
-> `MOB-UAT-002 acceptance packet ready: it preserves the parent's external-blocked
+> `MOB-UAT-002 acceptance packet ready: it preserves the parent's outstanding
 > real-device posture, maps the formal dependencies MOB-APP-003 and MOB-APP-004 to
 > landed code/test anchors, and packages the iOS scaffold + scenario checklist for
 > reviewer/operator handoff without mutating canonical truth.`
@@ -175,13 +177,13 @@ Suggested reopen wording:
 ### Owner -> reviewer
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff MOB-UAT-002-SIDECAR-ACCEPTANCE Claude "MOB-UAT-002 acceptance packet is ready at support/sidecars/MOB-UAT-002/MOB-UAT-002-SIDECAR-ACCEPTANCE.md. It preserves the parent task's external-blocked real-device posture, maps MOB-APP-003 and MOB-APP-004 to landed code/test anchors, and packages the upstream iOS scaffold plus reviewer checklist without editing canonical truth."
+AI_NAME=Codex scripts/ai-status.sh handoff MOB-UAT-002-SIDECAR-ACCEPTANCE Claude "MOB-UAT-002 acceptance packet is ready at support/sidecars/MOB-UAT-002/MOB-UAT-002-SIDECAR-ACCEPTANCE.md. It preserves the parent task's outstanding external real-device gate, maps MOB-APP-003 and MOB-APP-004 to landed code/test anchors, and packages the upstream iOS scaffold plus reviewer checklist without editing canonical truth."
 ```
 
 ### Reviewer -> approve
 
 ```bash
-AI_NAME=Claude scripts/ai-status.sh approve MOB-UAT-002-SIDECAR-ACCEPTANCE "MOB-UAT-002 acceptance packet ready: parent remains external-blocked pending real-device iPhone/TestFlight evidence, while the support packet cleanly maps MOB-APP-003 and MOB-APP-004 to the iOS scaffold and reviewer checklist without mutating canonical truth."
+AI_NAME=Claude scripts/ai-status.sh approve MOB-UAT-002-SIDECAR-ACCEPTANCE "MOB-UAT-002 acceptance packet ready: parent still has an outstanding real-device iPhone/TestFlight evidence gate, while the support packet cleanly maps MOB-APP-003 and MOB-APP-004 to the iOS scaffold and reviewer checklist without mutating canonical truth."
 ```
 
 ### Owner closeout after review approval
