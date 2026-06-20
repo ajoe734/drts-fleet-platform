@@ -287,6 +287,14 @@ export interface DriverLocationHeartbeatAck {
   serverReceivedAt: string;
 }
 
+export interface DriverLocationHeartbeatBatchRequest {
+  items: DriverLocationHeartbeatEnvelope[];
+}
+
+export interface DriverLocationHeartbeatBatchResponse {
+  items: DriverLocationHeartbeatAck[];
+}
+
 // ---------------------------------------------------------------------------
 // §2.10 Reporting Types
 // ---------------------------------------------------------------------------

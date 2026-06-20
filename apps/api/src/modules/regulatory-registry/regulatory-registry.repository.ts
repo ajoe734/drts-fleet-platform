@@ -2,6 +2,8 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   DispatchExclusivityRecord,
+  DriverLocationHeartbeatAck,
+  DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
   DriverLocationSnapshot,
   DriverRegistryRecord,
@@ -47,6 +49,10 @@ type DriverLocationRow = {
   accuracy_m: number | string | null;
   recorded_at: Date | string;
   updated_at: Date | string;
+};
+
+type InsertedHeartbeatRow = {
+  received_at: Date | string;
 };
 
 @Injectable()
@@ -471,6 +477,147 @@ export class RegulatoryRegistryRepository {
       recordedAt: this.toIsoString(row.recorded_at),
       updatedAt: this.toIsoString(row.updated_at),
     }));
+  }
+
+  async ingestDriverLocationHeartbeat(
+    event: DriverLocationHeartbeatEnvelope,
+  ): Promise<DriverLocationHeartbeatAck> {
+    this.assertDatabaseEnabled("ingest driver location heartbeat");
+
+    const client = await this.databaseService!.connect();
+    const serverReceivedAt = new Date().toISOString();
+    const clockSkewMs = Date.parse(serverReceivedAt) - Date.parse(event.recordedAt);
+
+    try {
+      await client.query("BEGIN");
+
+      const currentLocation = await client.query<DriverLocationRow>(
+        `
+          SELECT
+            driver_id,
+            lat,
+            lng,
+            accuracy_m,
+            recorded_at,
+            updated_at
+          FROM ops.phase1_driver_locations
+          WHERE driver_id = $1
+          LIMIT 1
+        `,
+        [event.driverId],
+      );
+
+      const latestRecordedAt = currentLocation.rows[0]?.recorded_at;
+      const outOfOrder =
+        latestRecordedAt !== undefined &&
+        Date.parse(this.toIsoString(latestRecordedAt)) >=
+          Date.parse(event.recordedAt);
+
+      const insertEvent = await client.query<InsertedHeartbeatRow>(
+        `
+          INSERT INTO telemetry.driver_location_events (
+            event_id,
+            device_id,
+            driver_id,
+            vehicle_id,
+            task_id,
+            sequence_no,
+            recorded_at,
+            received_at,
+            lat,
+            lng,
+            accuracy_m,
+            work_state,
+            app_state,
+            transport_mode,
+            network_type,
+            clock_skew_ms,
+            out_of_order
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14, $15, $16, $17
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING received_at
+        `,
+        [
+          event.eventId,
+          event.deviceId,
+          event.driverId,
+          event.vehicleId,
+          event.taskId,
+          event.sequenceNo,
+          event.recordedAt,
+          serverReceivedAt,
+          event.lat,
+          event.lng,
+          event.accuracyM,
+          event.workState,
+          event.appState,
+          event.transportMode,
+          event.networkType,
+          Number.isFinite(clockSkewMs) ? clockSkewMs : null,
+          outOfOrder,
+        ],
+      );
+
+      if (insertEvent.rowCount === 0) {
+        await client.query("COMMIT");
+        return {
+          eventId: event.eventId,
+          accepted: true,
+          duplicate: true,
+          currentLocationUpdated: false,
+          serverReceivedAt,
+        };
+      }
+
+      const updateCurrentLocation = await client.query(
+        `
+          INSERT INTO ops.phase1_driver_locations (
+            driver_id,
+            lat,
+            lng,
+            accuracy_m,
+            recorded_at,
+            updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, now()
+          )
+          ON CONFLICT (driver_id) DO UPDATE SET
+            lat = EXCLUDED.lat,
+            lng = EXCLUDED.lng,
+            accuracy_m = EXCLUDED.accuracy_m,
+            recorded_at = EXCLUDED.recorded_at,
+            updated_at = now()
+          WHERE ops.phase1_driver_locations.recorded_at < EXCLUDED.recorded_at
+          RETURNING driver_id
+        `,
+        [
+          event.driverId,
+          event.lat,
+          event.lng,
+          event.accuracyM,
+          event.recordedAt,
+        ],
+      );
+
+      await client.query("COMMIT");
+      return {
+        eventId: event.eventId,
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: (updateCurrentLocation.rowCount ?? 0) > 0,
+        serverReceivedAt: this.toIsoString(
+          insertEvent.rows[0]?.received_at ?? serverReceivedAt,
+        ),
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

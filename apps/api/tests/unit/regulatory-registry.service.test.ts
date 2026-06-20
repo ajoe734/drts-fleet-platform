@@ -17,6 +17,7 @@ function createService() {
   );
   const regulatoryRegistryRepository = {
     isEnabled: vi.fn(() => false),
+    ingestDriverLocationHeartbeat: vi.fn(),
     persistChanges: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
   };
@@ -283,6 +284,169 @@ describe("RegulatoryRegistryService", () => {
       .listAuditLogs()
       .find((entry) => entry.actionName === "create_driver_master");
     expect(auditLog?.resourceId).toBe(created.driverId);
+  });
+
+  it("rejects location heartbeat batches larger than 100 items", async () => {
+    const { service } = createService();
+
+    await expect(
+      service.recordDriverLocationBatch({
+        items: Array.from({ length: 101 }, (_, index) => ({
+          eventId: `evt-${index}`,
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: null,
+          taskId: null,
+          sequenceNo: index,
+          recordedAt: "2026-06-20T00:00:00.000Z",
+          lat: 24.163,
+          lng: 120.647,
+          accuracyM: 5,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "wifi",
+        })),
+      }),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "BATCH_LIMIT_EXCEEDED",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("dedupes duplicate heartbeat events and only publishes newer current locations", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService();
+
+    regulatoryRegistryRepository.isEnabled.mockReturnValue(true);
+    regulatoryRegistryRepository.ingestDriverLocationHeartbeat
+      .mockResolvedValueOnce({
+        eventId: "evt-newer-001",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: true,
+        serverReceivedAt: "2026-06-20T00:00:05.000Z",
+      })
+      .mockResolvedValueOnce({
+        eventId: "evt-duplicate-002",
+        accepted: true,
+        duplicate: true,
+        currentLocationUpdated: false,
+        serverReceivedAt: "2026-06-20T00:00:06.000Z",
+      })
+      .mockResolvedValueOnce({
+        eventId: "evt-old-003",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: false,
+        serverReceivedAt: "2026-06-20T00:00:07.000Z",
+      });
+
+    const response = await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: " evt-newer-001 ",
+          deviceId: " device-001 ",
+          driverId: " drv-demo-001 ",
+          vehicleId: " veh-demo-001 ",
+          taskId: null,
+          sequenceNo: 1,
+          recordedAt: "2026-06-20T00:00:00.000Z",
+          lat: 24.163,
+          lng: 120.647,
+          accuracyM: 5,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "wifi",
+        },
+        {
+          eventId: "evt-duplicate-002",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: null,
+          taskId: null,
+          sequenceNo: 1,
+          recordedAt: "2026-06-20T00:00:00.000Z",
+          lat: 24.163,
+          lng: 120.647,
+          accuracyM: 5,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "wifi",
+        },
+        {
+          eventId: "evt-old-003",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: null,
+          taskId: null,
+          sequenceNo: 2,
+          recordedAt: "2026-06-19T23:59:00.000Z",
+          lat: 24.1,
+          lng: 120.6,
+          accuracyM: null,
+          workState: "available",
+          appState: "background",
+          transportMode: "background",
+          networkType: "cellular",
+        },
+      ],
+    });
+
+    expect(regulatoryRegistryRepository.ingestDriverLocationHeartbeat).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        eventId: "evt-newer-001",
+        deviceId: "device-001",
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+      }),
+    );
+    expect(response).toEqual({
+      items: [
+        {
+          eventId: "evt-newer-001",
+          accepted: true,
+          duplicate: false,
+          currentLocationUpdated: true,
+          serverReceivedAt: "2026-06-20T00:00:05.000Z",
+        },
+        {
+          eventId: "evt-duplicate-002",
+          accepted: true,
+          duplicate: true,
+          currentLocationUpdated: false,
+          serverReceivedAt: "2026-06-20T00:00:06.000Z",
+        },
+        {
+          eventId: "evt-old-003",
+          accepted: true,
+          duplicate: false,
+          currentLocationUpdated: false,
+          serverReceivedAt: "2026-06-20T00:00:07.000Z",
+        },
+      ],
+    });
+    expect(service.listLatestDriverLocations()).toEqual([
+      {
+        driverId: "drv-demo-001",
+        lat: 24.163,
+        lng: 120.647,
+        accuracyM: 5,
+        recordedAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:05.000Z",
+      },
+    ]);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("removes suspended and retired drivers from dispatch eligibility", () => {

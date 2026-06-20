@@ -17,6 +17,7 @@ import type {
   CreateDriverMasterCommand,
   CreateInsurancePolicyCommand,
   CreateVehicleContractCommand,
+  DriverLocationHeartbeatBatchRequest,
   DriverLocationHeartbeatCommand,
   InitiateVehicleOffboardingCommand,
   RejectExclusivityCommand,
@@ -358,5 +359,23 @@ export class RegulatoryRegistryController {
     }
 
     return numericValue;
+  }
+}
+
+@Controller("driver")
+export class DriverTelemetryController {
+  constructor(
+    private readonly regulatoryRegistryService: RegulatoryRegistryService,
+  ) {}
+
+  @Post("location-heartbeats/batch")
+  async recordDriverLocationBatch(
+    @Body() command: DriverLocationHeartbeatBatchRequest,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.recordDriverLocationBatch(command),
+      requestId,
+    );
   }
 }

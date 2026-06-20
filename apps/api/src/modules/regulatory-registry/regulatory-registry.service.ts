@@ -16,6 +16,10 @@ import type {
   DispatchExclusivityRecord,
   DriverEligibilityBlockReason,
   DriverEtaResponse,
+  DriverLocationHeartbeatAck,
+  DriverLocationHeartbeatBatchRequest,
+  DriverLocationHeartbeatBatchResponse,
+  DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
   DriverLocationSnapshot,
   DriverMasterLifecycleStatus,
@@ -50,6 +54,7 @@ import {
 const EARTH_RADIUS_KM = 6371;
 const AVERAGE_SPEED_KMH = 30;
 const SEED_TIMESTAMP = "2026-01-01T00:00:00.000Z";
+const DRIVER_LOCATION_BATCH_LIMIT = 100;
 
 type EtaDestination = {
   lat: number;
@@ -692,6 +697,65 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
 
     return { success: true };
+  }
+
+  async recordDriverLocationBatch(
+    command: DriverLocationHeartbeatBatchRequest,
+  ): Promise<DriverLocationHeartbeatBatchResponse> {
+    if (!command || !Array.isArray(command.items) || command.items.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_REQUIRED",
+        "items must contain at least one heartbeat event.",
+        { field: "items" },
+      );
+    }
+    if (command.items.length > DRIVER_LOCATION_BATCH_LIMIT) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BATCH_LIMIT_EXCEEDED",
+        `items must contain at most ${DRIVER_LOCATION_BATCH_LIMIT} heartbeat events.`,
+        {
+          field: "items",
+          limit: DRIVER_LOCATION_BATCH_LIMIT,
+        },
+      );
+    }
+
+    const acknowledgements: DriverLocationHeartbeatAck[] = [];
+    for (const event of command.items) {
+      const normalizedEvent = this.normalizeDriverLocationHeartbeatEvent(event);
+      const acknowledgement =
+        await this.requireLocationRepository().ingestDriverLocationHeartbeat(
+          normalizedEvent,
+        );
+
+      if (!acknowledgement.duplicate && acknowledgement.currentLocationUpdated) {
+        this.setLatestDriverLocation({
+          driverId: normalizedEvent.driverId,
+          lat: normalizedEvent.lat,
+          lng: normalizedEvent.lng,
+          accuracyM: normalizedEvent.accuracyM,
+          recordedAt: normalizedEvent.recordedAt,
+          updatedAt: acknowledgement.serverReceivedAt,
+        });
+        this.opsDispatchEventsService.publishDriverLocationUpdated(
+          {
+            driverId: normalizedEvent.driverId,
+            lat: normalizedEvent.lat,
+            lng: normalizedEvent.lng,
+            accuracyM: normalizedEvent.accuracyM,
+            recordedAt: normalizedEvent.recordedAt,
+            updatedAt: acknowledgement.serverReceivedAt,
+          },
+          undefined,
+        );
+      }
+
+      acknowledgements.push(acknowledgement);
+    }
+
+    return { items: acknowledgements };
   }
 
   async getDriverEta(
@@ -2124,6 +2188,57 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return new Date(parsed).toISOString();
   }
 
+  private normalizeDriverLocationHeartbeatEvent(
+    event: DriverLocationHeartbeatEnvelope,
+  ): DriverLocationHeartbeatEnvelope {
+    this.assertNonBlank(event.eventId, "eventId");
+    this.assertNonBlank(event.deviceId, "deviceId");
+    this.assertNonBlank(event.driverId, "driverId");
+    this.requireDriver(event.driverId.trim());
+    this.assertSequenceNo(event.sequenceNo, "sequenceNo");
+    this.assertCoordinate(event.lat, "lat", -90, 90);
+    this.assertCoordinate(event.lng, "lng", -180, 180);
+    this.assertNullableNonNegativeNumber(event.accuracyM, "accuracyM");
+
+    const workState = this.assertAllowedValue(
+      event.workState,
+      "workState",
+      ["offline", "available", "assigned", "enroute", "arrived", "on_trip", "incident"],
+    );
+    const appState = this.assertAllowedValue(
+      event.appState,
+      "appState",
+      ["foreground", "background"],
+    );
+    const transportMode = this.assertAllowedValue(
+      event.transportMode,
+      "transportMode",
+      ["foreground", "background"],
+    );
+    const networkType = this.assertAllowedValue(
+      event.networkType,
+      "networkType",
+      ["wifi", "cellular", "offline", "unknown"],
+    );
+
+    return {
+      eventId: event.eventId.trim(),
+      deviceId: event.deviceId.trim(),
+      driverId: event.driverId.trim(),
+      vehicleId: this.normalizeNullableText(event.vehicleId),
+      taskId: this.normalizeNullableText(event.taskId),
+      sequenceNo: event.sequenceNo,
+      recordedAt: this.normalizeHeartbeatRecordedAt(event.recordedAt),
+      lat: event.lat,
+      lng: event.lng,
+      accuracyM: event.accuracyM ?? null,
+      workState,
+      appState,
+      transportMode,
+      networkType,
+    };
+  }
+
   private assertNonBlank(value: string, fieldName: string) {
     if (!value.trim()) {
       throw new ApiRequestError(
@@ -2184,6 +2299,48 @@ export class RegulatoryRegistryService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private assertNullableNonNegativeNumber(
+    value: number | null,
+    fieldName: string,
+  ): void {
+    if (value === null) {
+      return;
+    }
+    this.assertOptionalNonNegativeNumber(value, fieldName);
+  }
+
+  private assertSequenceNo(value: number, fieldName: string): void {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_NUMBER",
+        `${fieldName} must be a non-negative safe integer.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+  }
+
+  private assertAllowedValue<T extends string>(
+    value: T,
+    fieldName: string,
+    allowedValues: readonly T[],
+  ): T {
+    if (!allowedValues.includes(value)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_INVALID",
+        `${fieldName} must be one of: ${allowedValues.join(", ")}.`,
+        {
+          field: fieldName,
+          allowedValues,
+        },
+      );
+    }
+    return value;
   }
 
   private assertTimeRange(startAt: string, endAt: string) {
