@@ -126,6 +126,19 @@ Do not force-push, rebase, or rename any existing shared branch.
 - The parent can resume immediately on its real branch instead of reopening the
   implementation on a fresh dev-derived helper branch.
 
+## Canonical Closeout Evidence
+
+- Helper audit branch:
+  `origin/codex2/mob-app-001-unblock-history-repair`
+- Initial audit commit on this branch:
+  `d6aaaa82524d4dd1636bde4112fbed192f8fde6a`
+- Canonical owner branch to resume:
+  `origin/codex2/mob-app-001 @ 2e0ebc11e983a26caf129fd80bc33e5c3d734b3e`
+- Parent unblock next step:
+  move back to owner worktree `codex2/mob-app-001`, preserve anchor
+  `2e0ebc11e`, and complete owner closeout/handoff there without rewriting any
+  shared branch history
+
 ## Verification Performed For This Repair
 
 - Read `AI_COLLABORATION_GUIDE.md`
