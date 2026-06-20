@@ -39,6 +39,7 @@ DISPATCH_FIXTURE=""
 NEGATIVE_ASSIGN_FIXTURE=""
 POSITIVE_ASSIGN_FIXTURE=""
 PRODUCT_FIXTURE=""
+PRODUCT_REACTIVATE_FIXTURE=""
 MATRIX_FIXTURE=""
 
 cleanup() {
@@ -48,6 +49,7 @@ cleanup() {
     "${NEGATIVE_ASSIGN_FIXTURE:-}" \
     "${POSITIVE_ASSIGN_FIXTURE:-}" \
     "${PRODUCT_FIXTURE:-}" \
+    "${PRODUCT_REACTIVATE_FIXTURE:-}" \
     "${MATRIX_FIXTURE:-}"
 
   if [[ "${MATRIX_RESTORE_NEEDED}" != "true" || -z "${ORIGINAL_MATRIX_FILE}" ]]; then
@@ -121,6 +123,38 @@ if [[ -z "$SERVICE_PRODUCT_ID" ]]; then
   exit 1
 fi
 
+# A persisted product may already exist but be marked inactive (e.g. via an
+# earlier override). An inactive runtime product makes the rest of the scenario
+# fail nondeterministically, so reactivate it before continuing. The wire
+# contract is snake_case but "active" is a single word, so the field name is
+# identical in both camelCase and snake_case responses; read it directly rather
+# than via jq `//`, which would collapse a legitimate `false`.
+SERVICE_PRODUCT_ACTIVE=$(echo "$RESP_BODY" | jq -r --arg id "$SERVICE_PRODUCT_ID" \
+  '.data.items[] | select((.serviceProductId // .service_product_id) == $id) | .active' \
+  2>/dev/null | head -1 || true)
+
+if [[ "$SERVICE_PRODUCT_ACTIVE" != "true" ]]; then
+  log_warn "Service product ${SERVICE_PRODUCT_ID} is inactive (active=${SERVICE_PRODUCT_ACTIVE:-<unknown>}); reactivating."
+  PRODUCT_REACTIVATE_FIXTURE=$(mktemp /tmp/drts-e2e-020-product-reactivate-XXXXXX.json)
+  printf '%s\n' '{"active":true}' > "$PRODUCT_REACTIVATE_FIXTURE"
+
+  log_step "1.4 — PUT /admin/service-products/${SERVICE_PRODUCT_ID} (reactivate inactive product)"
+  http_call PUT "/admin/service-products/${SERVICE_PRODUCT_ID}" "$PRODUCT_REACTIVATE_FIXTURE"
+  assert_status "200|201"
+
+  log_step "1.5 — GET /admin/service-products (verify reactivation)"
+  http_call GET "/admin/service-products"
+  assert_status "200"
+  SERVICE_PRODUCT_ACTIVE=$(echo "$RESP_BODY" | jq -r --arg id "$SERVICE_PRODUCT_ID" \
+    '.data.items[] | select((.serviceProductId // .service_product_id) == $id) | .active' \
+    2>/dev/null | head -1 || true)
+  if [[ "$SERVICE_PRODUCT_ACTIVE" != "true" ]]; then
+    log_fail "Service product ${SERVICE_PRODUCT_ID} still inactive after reactivation (active=${SERVICE_PRODUCT_ACTIVE:-<unknown>})"
+    exit 1
+  fi
+fi
+
+save_evidence "$SCENARIO" "platform_admin" "serviceProductActive" "$SERVICE_PRODUCT_ACTIVE"
 chain_set "platform_admin" "serviceProductId" "$SERVICE_PRODUCT_ID"
 save_evidence "$SCENARIO" "platform_admin" "serviceProductId" "$SERVICE_PRODUCT_ID"
 log_ok "Airport-transfer service product ready: ${SERVICE_PRODUCT_ID}"
