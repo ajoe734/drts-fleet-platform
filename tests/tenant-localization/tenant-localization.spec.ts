@@ -434,6 +434,56 @@ test.describe("enterprise dispatch localization smoke", () => {
     }
   });
 
+  test("zh enterprise card sublabels are localized on rendered routes", async ({
+    page,
+  }) => {
+    const cases = [
+      {
+        route: "/",
+        include: ["企業政策"],
+        exclude: ["enterprise policy"],
+      },
+      {
+        route: "/bookings/new",
+        include: ["上車 · 下車 · 時段", "成本中心 · 車型 · 備註", "即時檢核"],
+        exclude: [
+          "pickup · dropoff · window",
+          "cost center · vehicle · notes",
+          "helper reads",
+        ],
+      },
+      {
+        route: "/bookings/review",
+        include: ["費用歸屬 · 審批", "乘客 vs 下單人", "政策"],
+        exclude: ["cost ownership · approval", "passenger vs booked by"],
+      },
+      {
+        route: "/bookings/EB-7K2E1D",
+        include: ["跨角色時間線", "已指派"],
+        exclude: ["timeline · cross-actor"],
+      },
+      {
+        route: "/embed",
+        include: ["已簽署交付權杖"],
+        exclude: ["signed hand-off token"],
+      },
+    ] as const;
+
+    for (const item of cases) {
+      await gotoEnterpriseAndSettle(page, item.route);
+      await expect(page.locator("html"), item.route).toHaveAttribute(
+        "lang",
+        "zh-Hant",
+      );
+      for (const text of item.include) {
+        await expect(page.locator("body"), item.route).toContainText(text);
+      }
+      for (const text of item.exclude) {
+        await expect(page.locator("body"), item.route).not.toContainText(text);
+      }
+    }
+  });
+
   test("language toggle switches the enterprise shell through the shared cookie", async ({
     page,
   }) => {
