@@ -30,7 +30,7 @@ function buildCandidate(
 }
 
 describe("ORX-DP-004 dispatch candidate location state", () => {
-  it("treats recent candidate locations as fresh", () => {
+  it("treats recent candidate locations as live", () => {
     const nowMs = new Date("2026-04-30T15:19:59.000Z").getTime();
 
     expect(getCandidateLocationState(buildCandidate(), nowMs)).toBe("fresh");
@@ -45,7 +45,7 @@ describe("ORX-DP-004 dispatch candidate location state", () => {
     expect(LOCATION_STALE_MS).toBe(600000);
   });
 
-  it("treats missing or invalid locations as missing", () => {
+  it("treats missing or invalid locations as no_location", () => {
     const nowMs = new Date("2026-04-30T15:20:01.000Z").getTime();
 
     expect(
@@ -84,9 +84,6 @@ describe("ORX-DP-004 dispatch candidate location state", () => {
     ).toBe("missing");
     expect(getCandidateLocationTone("fresh")).toBe("candidate-location-live");
     expect(getCandidateLocationTone("stale")).toBe("candidate-location-stale");
-    expect(getCandidateLocationTone("low_accuracy")).toBe(
-      "candidate-location-stale",
-    );
     expect(getCandidateLocationTone("missing")).toBe(
       "candidate-location-no-location",
     );

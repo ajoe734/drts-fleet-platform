@@ -217,11 +217,7 @@ describe("owned mobility service", () => {
     const dispatchJob = ownedMobilityService.dispatchOrder(order.orderId, {
       mode: "auto",
     });
-    const candidates = await ownedMobilityService.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-
-    const candidate = candidates[0];
+    const candidate = (await ownedMobilityService.listDispatchCandidates(dispatchJob.dispatchJobId))[0];
 
     expect(dispatchJob.status).toBe("matching");
     expect(candidate).toBeDefined();
@@ -344,11 +340,7 @@ describe("owned mobility service", () => {
     const dispatchJob = ownedMobilityService.dispatchOrder(order.orderId, {
       mode: "auto",
     });
-    const candidates = await ownedMobilityService.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-
-    const candidate = candidates[0]!;
+    const candidate = (await ownedMobilityService.listDispatchCandidates(dispatchJob.dispatchJobId))[0]!;
     const assignment = ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,
@@ -424,11 +416,7 @@ describe("owned mobility service", () => {
     const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const candidates = await ownedMobilityService.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-
-    const candidate = candidates[0]!;
+    const candidate = (await ownedMobilityService.listDispatchCandidates(dispatchJob.dispatchJobId))[0]!;
     const assignment = ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,
@@ -683,11 +671,7 @@ describe("owned mobility service", () => {
     const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const candidates = await ownedMobilityService.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-
-    const candidate = candidates[0]!;
+    const candidate = (await ownedMobilityService.listDispatchCandidates(dispatchJob.dispatchJobId))[0]!;
     const assignment = ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,
@@ -920,11 +904,7 @@ describe("owned mobility service", () => {
     const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const candidates = await ownedMobilityService.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-
-    const candidate = candidates[0];
+    const candidate = (await ownedMobilityService.listDispatchCandidates(dispatchJob.dispatchJobId))[0];
     const assignment = ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate!.vehicleId,
@@ -1093,11 +1073,7 @@ describe("owned mobility service", () => {
           mode: "auto",
         },
       );
-      const candidates = await ownedMobilityService.listDispatchCandidates(
-        dispatchJob.dispatchJobId,
-      );
-
-      const candidate = candidates[0]!;
+      const candidate = (await ownedMobilityService.listDispatchCandidates(dispatchJob.dispatchJobId))[0]!;
       const assignment = ownedMobilityService.assignDispatch({
         dispatchJobId: dispatchJob.dispatchJobId,
         vehicleId: candidate.vehicleId,
@@ -1324,11 +1300,7 @@ describe("owned mobility service", () => {
     const dispatchJob = ownedMobilityService.dispatchOrder(order.orderId, {
       mode: "auto",
     });
-    const candidates = await ownedMobilityService.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-
-    const candidate = candidates[0]!;
+    const candidate = (await ownedMobilityService.listDispatchCandidates(dispatchJob.dispatchJobId))[0]!;
     const assignment = ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: candidate.vehicleId,

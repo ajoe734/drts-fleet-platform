@@ -41,10 +41,11 @@ export function getCandidateLocationTone(
     case "fresh":
       return "candidate-location-live";
     case "stale":
-      return "candidate-location-stale";
     case "low_accuracy":
       return "candidate-location-stale";
     case "missing":
+      return "candidate-location-no-location";
+    default:
       return "candidate-location-no-location";
   }
 }
