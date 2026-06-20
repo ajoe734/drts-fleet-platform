@@ -25,6 +25,14 @@ type DriverIdentityBootstrapDeps = {
   syncDriverLocationHeartbeat: (
     assignment: DriverHeartbeatAssignment,
   ) => Promise<unknown>;
+  /**
+   * Restart-recovery hook (MOB-APP-004). Runs after the active task is resolved
+   * but before tracking resumes, so any tracking gap is detected against the
+   * persisted marker before fresh fixes re-baseline it.
+   */
+  evaluateTrackingRecovery?: (input: {
+    activeAssignment: { taskId: string; driverId: string } | null;
+  }) => Promise<unknown>;
 };
 
 const ACTIVE_HEARTBEAT_TASK_STATUSES = new Set([
@@ -74,6 +82,13 @@ export async function syncDriverIdentityBootstrap(
     const activeTask =
       tasks.find((task) => ACTIVE_HEARTBEAT_TASK_STATUSES.has(task.status)) ??
       null;
+
+    await deps.evaluateTrackingRecovery?.({
+      activeAssignment: activeTask
+        ? { taskId: activeTask.taskId, driverId: activeTask.driverId }
+        : null,
+    });
+
     await deps.syncDriverLocationHeartbeat(
       activeTask
         ? {
