@@ -57,6 +57,7 @@ let foregroundLocationSubscription: Location.LocationSubscription | null = null;
 let transportMode: HeartbeatTransportMode = "none";
 let lastHeartbeatQueuedAtMs: number | null = null;
 let activeHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
+let lastHeartbeatSyncSignature: string | null = null;
 
 function emitLocationUpdate(update: HeartbeatLocationUpdate) {
   latestUpdate = update;
@@ -124,6 +125,18 @@ function queueHeartbeat(
 function stopForegroundLocationSubscription() {
   foregroundLocationSubscription?.remove();
   foregroundLocationSubscription = null;
+}
+
+function logHeartbeatTransition(
+  signature: string,
+  details: Record<string, string | number | boolean | null>,
+) {
+  if (lastHeartbeatSyncSignature === signature) {
+    return;
+  }
+
+  lastHeartbeatSyncSignature = signature;
+  console.info("Driver heartbeat transition", details);
 }
 
 if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
@@ -250,6 +263,15 @@ async function seedLatestLocation() {
 }
 
 export async function stopDriverLocationHeartbeat(): Promise<void> {
+  if (activeHeartbeatProfile) {
+    logHeartbeatTransition("stopped", {
+      workState: activeHeartbeatProfile.workState,
+      taskId: activeHeartbeatProfile.taskId,
+      transportMode: "none",
+      status: "idle",
+    });
+  }
+
   activeHeartbeatProfile = null;
   transportMode = "none";
   lastHeartbeatQueuedAtMs = null;
@@ -337,6 +359,23 @@ export async function syncDriverLocationHeartbeat(
 
   const permissionResult = await ensureLocationPermissions(cadence);
   if (permissionResult.status === "permission_denied") {
+    logHeartbeatTransition(
+      [
+        "permission_denied",
+        profile.workState,
+        profile.taskId ?? "none",
+        cadence.timeIntervalMs,
+        cadence.distanceIntervalM,
+      ].join("|"),
+      {
+        workState: profile.workState,
+        taskId: profile.taskId,
+        transportMode: "none",
+        status: permissionResult.status,
+        intervalMs: cadence.timeIntervalMs,
+        distanceM: cadence.distanceIntervalM,
+      },
+    );
     transportMode = "none";
     stopForegroundLocationSubscription();
     return permissionResult;
@@ -347,10 +386,7 @@ export async function syncDriverLocationHeartbeat(
   const profileChanged =
     previousProfile?.taskId !== profile.taskId ||
     previousProfile?.workState !== profile.workState;
-  if (
-    profileChanged ||
-    previousTransportMode !== nextTransportMode
-  ) {
+  if (profileChanged || previousTransportMode !== nextTransportMode) {
     lastHeartbeatQueuedAtMs = null;
   }
   activeHeartbeatProfile = profile;
@@ -411,6 +447,26 @@ export async function syncDriverLocationHeartbeat(
   }
 
   await seedLatestLocation();
+
+  logHeartbeatTransition(
+    [
+      "active",
+      profile.workState,
+      profile.taskId ?? "none",
+      nextTransportMode,
+      cadence.timeIntervalMs,
+      cadence.distanceIntervalM,
+    ].join("|"),
+    {
+      workState: profile.workState,
+      taskId: profile.taskId,
+      transportMode: nextTransportMode,
+      status: "active",
+      intervalMs: cadence.timeIntervalMs,
+      distanceM: cadence.distanceIntervalM,
+      requiresBackgroundPermission: cadence.requiresBackgroundPermission,
+    },
+  );
 
   return {
     status: "active",

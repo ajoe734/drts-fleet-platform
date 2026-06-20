@@ -15,8 +15,13 @@ import {
 import {
   getDriverClient,
   getDriverId,
+  getDriverIdentityIssue,
+  initializeDriverIdentity,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import { syncDriverIdentityBootstrap } from "@/lib/driver-identity-bootstrap";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import { syncDriverLocationHeartbeat } from "@/lib/driver-location-heartbeat";
 import {
   ActionButton,
   AppScreen,
@@ -345,6 +350,23 @@ export default function ShiftScreen() {
     }
   };
 
+  const resyncHeartbeatState = async () => {
+    await syncDriverIdentityBootstrap({
+      getDriverId,
+      getDriverIdentityIssue,
+      initializeDriverIdentity,
+      isDriverIdentityProvisioned,
+      listDriverShifts: () => getDriverClient().listShifts(getDriverId()),
+      listDriverTasks: () => getDriverClient().listDriverTasks(),
+      onWarning: (error) => {
+        console.warn("Shift heartbeat resync failed", error);
+      },
+      resetDriverAppToOnboarding,
+      router,
+      syncDriverLocationHeartbeat,
+    });
+  };
+
   if (!isProvisioned) {
     return (
       <AppScreen scrollable={false}>
@@ -383,6 +405,7 @@ export default function ShiftScreen() {
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
       setActiveShift(result);
+      await resyncHeartbeatState();
       setScreenError(null);
       setNow(Date.now());
       Alert.alert("成功", "已完成上線打卡。");
@@ -414,6 +437,7 @@ export default function ShiftScreen() {
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
       setActiveShift(null);
+      await resyncHeartbeatState();
       setScreenError(null);
       Alert.alert("成功", "已完成下線打卡。");
       setLocation("");
