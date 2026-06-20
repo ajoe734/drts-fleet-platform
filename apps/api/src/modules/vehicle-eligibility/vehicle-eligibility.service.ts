@@ -34,7 +34,9 @@ type ServiceProductDefinition = {
   defaultProofRequirements: string[];
 };
 
-type ResolvedVehicleCapability = VehicleEligibilityMatrixRecord & {
+export type RuntimeServiceProductDefinition = ServiceProductDefinition;
+
+export type RuntimeVehicleCapability = VehicleEligibilityMatrixRecord & {
   vehicleId: string;
 };
 
@@ -557,6 +559,29 @@ export class VehicleEligibilityService implements OnModuleInit {
     }
   }
 
+  getRuntimeServiceProductDefinition(
+    serviceProduct: ServiceProductType,
+  ): RuntimeServiceProductDefinition | null {
+    const definition = this.resolveServiceProductDefinition(serviceProduct);
+    return definition
+      ? {
+          ...definition,
+          allowedLicenseTypes: [...definition.allowedLicenseTypes],
+          defaultProofRequirements: [...definition.defaultProofRequirements],
+        }
+      : null;
+  }
+
+  resolveRuntimeVehicleCapability(
+    vehicleId: string,
+  ): RuntimeVehicleCapability | null {
+    try {
+      return { ...this.requireVehicleCapability(vehicleId) };
+    } catch {
+      return null;
+    }
+  }
+
   private isVehicleEligibleForServiceProduct(
     vehicleId: string,
     serviceProduct: ServiceProductType,
@@ -601,7 +626,7 @@ export class VehicleEligibilityService implements OnModuleInit {
 
   private requireVehicleCapability(
     vehicleId: string,
-  ): ResolvedVehicleCapability {
+  ): RuntimeVehicleCapability {
     const licenseType = VEHICLE_LICENSE_BY_ID[vehicleId];
     if (!licenseType) {
       throw new ApiRequestError(
