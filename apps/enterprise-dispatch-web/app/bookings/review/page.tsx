@@ -58,7 +58,7 @@ export default async function ReviewBookingPage() {
             t={t}
             accent={t.primary}
             title={tr("review.card.approval")}
-            sub="cost ownership · approval"
+            sub={tr("card.sub.costOwnershipApproval")}
           >
             <div
               style={{
@@ -124,7 +124,7 @@ export default async function ReviewBookingPage() {
           <ECard
             t={t}
             title={tr("review.card.summary")}
-            sub="passenger vs booked by"
+            sub={tr("card.sub.passengerVsBookedBy")}
           >
             <EntParty
               t={t}
@@ -191,7 +191,11 @@ export default async function ReviewBookingPage() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ECard t={t} title={tr("detail.card.trip")} sub="trip">
+          <ECard
+            t={t}
+            title={tr("detail.card.trip")}
+            sub={tr("card.sub.trip")}
+          >
             <EntRoute
               t={t}
               from={draft.pickup}
@@ -205,7 +209,11 @@ export default async function ReviewBookingPage() {
               <ERow t={t} k={tr("new.field.notes")} v={draft.notes} last />
             </div>
           </ECard>
-          <ECard t={t} title={tr("new.card.policy")} sub="policy">
+          <ECard
+            t={t}
+            title={tr("new.card.policy")}
+            sub={tr("card.sub.enterprisePolicy")}
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div
                 style={{
