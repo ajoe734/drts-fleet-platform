@@ -1,152 +1,195 @@
 import { Injectable } from "@nestjs/common";
 
 import type {
-  SupplyDocumentRecord,
+  DriverRegistryRecord,
   SupplyReadinessReasonCode,
   SupplyReadinessRecord,
-  SupplySubmissionRecord,
+  SupplyReadinessState,
+  VehicleRegistryRecord,
 } from "@drts/contracts";
 
+import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { FleetPartnerService } from "./fleet-partner.service";
-import { SupplySubmissionService } from "./supply-submission.service";
 
 @Injectable()
 export class SupplyReadinessService {
   constructor(
-    private readonly supplySubmissionService: SupplySubmissionService,
     private readonly fleetPartnerService: FleetPartnerService,
+    private readonly regulatoryRegistryService: RegulatoryRegistryService,
   ) {}
 
   listReadiness(fleetPartnerId: string) {
-    const submissions = this.supplySubmissionService
-      .listSubmissionsSnapshot()
-      .filter((submission) => submission.fleetPartnerId === fleetPartnerId)
-      .filter(
-        (submission) =>
-          submission.submissionType === "driver_onboarding" ||
-          submission.submissionType === "vehicle_onboarding",
+    const evaluatedAt = new Date().toISOString();
+    const driversById = new Map(
+      this.regulatoryRegistryService
+        .listDrivers()
+        .map((driver) => [driver.driverId, driver] as const),
+    );
+    const vehiclesById = new Map(
+      this.regulatoryRegistryService
+        .listVehicles()
+        .map((vehicle) => [vehicle.vehicleId, vehicle] as const),
+    );
+
+    const driverReadiness = this.fleetPartnerService
+      .listActiveFleetPartnerDriverIds(fleetPartnerId, evaluatedAt)
+      .map((driverId) => driversById.get(driverId))
+      .filter((driver): driver is DriverRegistryRecord => Boolean(driver))
+      .map((driver) => this.evaluateDriver(driver, fleetPartnerId, evaluatedAt));
+
+    const vehicleReadiness = this.fleetPartnerService
+      .listActiveFleetPartnerVehicleIds(fleetPartnerId, evaluatedAt)
+      .map((vehicleId) => vehiclesById.get(vehicleId))
+      .filter((vehicle): vehicle is VehicleRegistryRecord => Boolean(vehicle))
+      .map((vehicle) =>
+        this.evaluateVehicle(vehicle, fleetPartnerId, evaluatedAt),
       );
 
-    return submissions.map((submission) => this.evaluateSubmission(submission));
+    return [...driverReadiness, ...vehicleReadiness];
   }
 
   getDriverReadiness(fleetPartnerId: string, driverId: string) {
-    const submission = this.supplySubmissionService
-      .listSubmissionsSnapshot()
-      .find(
-        (candidate) =>
-          candidate.fleetPartnerId === fleetPartnerId &&
-          candidate.submissionType === "driver_onboarding" &&
-          candidate.subjectDriverId === driverId,
-      );
-    if (!submission) {
+    const evaluatedAt = new Date().toISOString();
+    const activeDriverIds = new Set(
+      this.fleetPartnerService.listActiveFleetPartnerDriverIds(
+        fleetPartnerId,
+        evaluatedAt,
+      ),
+    );
+    if (!activeDriverIds.has(driverId)) {
       return null;
     }
-    return this.evaluateSubmission(submission);
+    const driver = this.regulatoryRegistryService
+      .listDrivers()
+      .find((candidate) => candidate.driverId === driverId);
+    return driver
+      ? this.evaluateDriver(driver, fleetPartnerId, evaluatedAt)
+      : null;
   }
 
   getVehicleReadiness(fleetPartnerId: string, vehicleId: string) {
-    const submission = this.supplySubmissionService
-      .listSubmissionsSnapshot()
-      .find(
-        (candidate) =>
-          candidate.fleetPartnerId === fleetPartnerId &&
-          candidate.submissionType === "vehicle_onboarding" &&
-          candidate.subjectVehicleId === vehicleId,
-      );
-    if (!submission) {
+    const evaluatedAt = new Date().toISOString();
+    const activeVehicleIds = new Set(
+      this.fleetPartnerService.listActiveFleetPartnerVehicleIds(
+        fleetPartnerId,
+        evaluatedAt,
+      ),
+    );
+    if (!activeVehicleIds.has(vehicleId)) {
       return null;
     }
-    return this.evaluateSubmission(submission);
+    const vehicle = this.regulatoryRegistryService
+      .listVehicles()
+      .find((candidate) => candidate.vehicleId === vehicleId);
+    return vehicle
+      ? this.evaluateVehicle(vehicle, fleetPartnerId, evaluatedAt)
+      : null;
   }
 
-  private evaluateSubmission(
-    submission: SupplySubmissionRecord,
+  private evaluateDriver(
+    driver: DriverRegistryRecord,
+    fleetPartnerId: string,
+    evaluatedAt: string,
   ): SupplyReadinessRecord {
     const partner = this.fleetPartnerService.getFleetPartner(
-      submission.fleetPartnerId,
+      fleetPartnerId,
     );
-    const documents = this.supplySubmissionService.listDocumentsForSubmission(
-      submission.submissionId,
-    );
-    const reasonCodes: SupplyReadinessReasonCode[] = partner.active
-      ? submission.submissionType === "driver_onboarding"
-        ? this.evaluateDriverReasons(documents)
-        : this.evaluateVehicleReasons(documents)
-      : ["FLEET_PARTNER_INACTIVE"];
+    const reasonCodes: SupplyReadinessReasonCode[] = [];
+
+    if (!partner.active) {
+      reasonCodes.push("FLEET_PARTNER_INACTIVE");
+    }
+    if (!driver.licensesValid) {
+      reasonCodes.push("DRIVER_LICENSE_EXPIRED", "DRIVER_REGISTRATION_EXPIRED");
+    }
+    if (driver.lifecycleStatus === "suspended") {
+      reasonCodes.push("MANUALLY_SUSPENDED");
+    }
+    if (driver.supportedServiceBuckets.length === 0) {
+      reasonCodes.push("SERVICE_PRODUCT_NOT_SUPPORTED");
+    }
 
     return {
-      subjectType:
-        submission.submissionType === "driver_onboarding" ? "driver" : "vehicle",
-      subjectId:
-        submission.submissionType === "driver_onboarding"
-          ? submission.subjectDriverId ?? submission.submissionId
-          : submission.subjectVehicleId ?? submission.submissionId,
-      state: reasonCodes.length === 0 ? "ready" : "not_ready",
-      reasonCodes,
-      evaluatedAt: new Date().toISOString(),
+      subjectType: "driver",
+      subjectId: driver.driverId,
+      state: this.resolveState(reasonCodes),
+      reasonCodes: this.uniqueReasonCodes(reasonCodes),
+      evaluatedAt,
       policyVersion: "phase1-delta-supply-eligibility-20260619",
     };
   }
 
-  private evaluateDriverReasons(
-    documents: readonly SupplyDocumentRecord[],
-  ): SupplyReadinessReasonCode[] {
+  private evaluateVehicle(
+    vehicle: VehicleRegistryRecord,
+    fleetPartnerId: string,
+    evaluatedAt: string,
+  ): SupplyReadinessRecord {
+    const partner = this.fleetPartnerService.getFleetPartner(fleetPartnerId);
     const reasons: SupplyReadinessReasonCode[] = [];
-    const license = documents.find(
-      (document) => document.documentType === "professional_driver_license",
-    );
-    const registration = documents.find(
-      (document) => document.documentType === "taxi_driver_registration",
-    );
-    const today = new Date().toISOString().slice(0, 10);
 
-    if (!license) {
-      reasons.push("DRIVER_LICENSE_MISSING");
-    } else if (license.effectiveUntil && license.effectiveUntil < today) {
-      reasons.push("DRIVER_LICENSE_EXPIRED");
+    if (!partner.active) {
+      reasons.push("FLEET_PARTNER_INACTIVE");
     }
-
-    if (!registration) {
-      reasons.push("DRIVER_REGISTRATION_MISSING");
-    } else if (registration.effectiveUntil && registration.effectiveUntil < today) {
-      reasons.push("DRIVER_REGISTRATION_EXPIRED");
+    if (vehicle.supportedServiceBuckets.length === 0) {
+      reasons.push("SERVICE_PRODUCT_NOT_SUPPORTED");
     }
-
-    return reasons;
-  }
-
-  private evaluateVehicleReasons(
-    documents: readonly SupplyDocumentRecord[],
-  ): SupplyReadinessReasonCode[] {
-    const reasons: SupplyReadinessReasonCode[] = [];
-    const registration = documents.find(
-      (document) => document.documentType === "vehicle_registration",
-    );
-    const insurance = documents.find(
-      (document) => document.documentType === "insurance_policy",
-    );
-    const contract = documents.find(
-      (document) =>
-        document.documentType === "fleet_participation_contract" ||
-        document.documentType === "vehicle_management_contract",
-    );
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (!registration) {
+    for (const blockedReason of vehicle.supplyLifecycle.dispatch.blockedReasons) {
+      if (blockedReason.startsWith("contract_")) {
+        reasons.push(
+          blockedReason === "contract_missing"
+            ? "CONTRACT_MISSING"
+            : "CONTRACT_INACTIVE",
+        );
+        continue;
+      }
+      if (blockedReason.startsWith("insurance_")) {
+        reasons.push(
+          blockedReason === "insurance_missing" ||
+            blockedReason === "insurance_pending"
+            ? "INSURANCE_MISSING"
+            : "INSURANCE_EXPIRED",
+        );
+        continue;
+      }
+      if (blockedReason.startsWith("exclusivity_")) {
+        reasons.push("VEHICLE_AFFILIATION_MISSING");
+        continue;
+      }
+      if (
+        blockedReason === "manual_hold" ||
+        blockedReason === "offboarding_pending_debranding"
+      ) {
+        reasons.push("MANUALLY_SUSPENDED");
+      }
+    }
+    if (!vehicle.dispatchableFlag) {
       reasons.push("VEHICLE_DOCUMENT_MISSING");
     }
-    if (!insurance) {
-      reasons.push("INSURANCE_MISSING");
-    } else if (insurance.effectiveUntil && insurance.effectiveUntil < today) {
-      reasons.push("INSURANCE_EXPIRED");
-    }
-    if (!contract) {
-      reasons.push("CONTRACT_MISSING");
-    } else if (contract.effectiveUntil && contract.effectiveUntil < today) {
-      reasons.push("CONTRACT_INACTIVE");
-    }
 
-    return reasons;
+    return {
+      subjectType: "vehicle",
+      subjectId: vehicle.vehicleId,
+      state: this.resolveState(reasons),
+      reasonCodes: this.uniqueReasonCodes(reasons),
+      evaluatedAt,
+      policyVersion: "phase1-delta-supply-eligibility-20260619",
+    };
+  }
+
+  private resolveState(
+    reasonCodes: readonly SupplyReadinessReasonCode[],
+  ): SupplyReadinessState {
+    if (reasonCodes.length === 0) {
+      return "ready";
+    }
+    return reasonCodes.includes("MANUALLY_SUSPENDED")
+      ? "suspended"
+      : "not_ready";
+  }
+
+  private uniqueReasonCodes(
+    reasonCodes: readonly SupplyReadinessReasonCode[],
+  ): SupplyReadinessReasonCode[] {
+    return Array.from(new Set(reasonCodes));
   }
 }
