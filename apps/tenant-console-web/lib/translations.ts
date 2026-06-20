@@ -231,7 +231,7 @@ const en = {
     "Loading the current booking snapshot and refresh metadata.",
   "bookingDetail.loading.statusTitle": "Resolving editability",
   "bookingDetail.loading.statusDescription":
-    "Fetching availableActions, editableUntil, and approval state before the screen becomes interactive.",
+    "Fetching action descriptors, the edit deadline, and approval state before the screen becomes interactive.",
   "bookingDetail.empty.noData.title": "No booking data exists yet",
   "bookingDetail.empty.noData.body":
     "This tenant has booking access, but no booking record exists in the current workspace snapshot.",
@@ -290,7 +290,7 @@ const en = {
   "bookingDetail.status.kicker": "Status",
   "bookingDetail.status.title": "Editability and approval posture",
   "bookingDetail.status.description":
-    "Per Q-TEN05, editability is determined by action descriptors plus editableUntil, not guessed from the status label alone.",
+    "Per Q-TEN05, editability is determined by action descriptors plus the published edit deadline, not guessed from the status label alone.",
   "bookingDetail.status.editable": "Editable",
   "bookingDetail.status.readOnly": "Read only",
   "bookingDetail.status.bookingStatus": "Booking {status}",
@@ -1883,15 +1883,15 @@ const en = {
   "webhooks.engine.note":
     "Cross-app operational triage remains available below, but the primary page surface stays empty until provisioning is complete.",
   "webhooks.card.endpointStatusTitle": "Endpoint status",
-  "webhooks.status.active": "active",
-  "webhooks.status.testPending": "test_pending",
-  "webhooks.status.failureCluster": "failure cluster",
+  "webhooks.status.active": "Active",
+  "webhooks.status.testPending": "Test pending",
+  "webhooks.status.failureCluster": "Failure cluster",
   "webhooks.card.deliveryHealthTitle": "Delivery health",
   "webhooks.card.deliveryHealthSubtitleSelected": "Current endpoint view",
   "webhooks.card.deliveryHealthSubtitleTenant": "Tenant-wide delivery snapshot",
-  "webhooks.status.delivered": "delivered",
-  "webhooks.status.queued": "queued",
-  "webhooks.status.failed": "failed",
+  "webhooks.status.delivered": "Delivered",
+  "webhooks.status.queued": "Queued",
+  "webhooks.status.failed": "Failed",
   "webhooks.card.replayStatusTitle": "Replay status",
   "webhooks.card.replayStatusSubtitle":
     "Retries remain contract-driven. The UI only presents status and does not fabricate a replay engine.",
@@ -1901,6 +1901,10 @@ const en = {
   "webhooks.card.endpointListSubtitle":
     "availableActions are rendered as visible CTAs: enable, disable with reason, never hidden.",
   "webhooks.filter.clear": "Clear filter",
+  "webhooks.filter.status.all": "All",
+  "webhooks.filter.status.active": "Active",
+  "webhooks.filter.status.testPending": "Test pending",
+  "webhooks.filter.status.disabled": "Disabled",
   "webhooks.card.selectedEndpointTitle": "Selected endpoint",
   "webhooks.card.actionMatrixTitle": "Action matrix",
   "webhooks.card.selectedEndpointSubtitle":
@@ -4125,7 +4129,7 @@ const zh: Record<keyof typeof en, string> = {
     "載入目前訂單快照與更新中繼資料。",
   "bookingDetail.loading.statusTitle": "解析可編輯性",
   "bookingDetail.loading.statusDescription":
-    "在畫面可互動前，取得 availableActions、editableUntil 與審批狀態。",
+    "在畫面可互動前，取得動作描述子、可編輯截止時間與審批狀態。",
   "bookingDetail.empty.noData.title": "尚無訂單資料",
   "bookingDetail.empty.noData.body":
     "此租戶具備叫車存取權，但目前 workspace snapshot 尚無訂單紀錄。",
@@ -4178,7 +4182,7 @@ const zh: Record<keyof typeof en, string> = {
   "bookingDetail.status.kicker": "狀態",
   "bookingDetail.status.title": "可編輯性與審批狀態",
   "bookingDetail.status.description":
-    "依 Q-TEN05，可編輯性由動作描述子加上 editableUntil 決定，而非僅憑狀態標籤推測。",
+    "依 Q-TEN05，可編輯性由動作描述子加上已發布的可編輯截止時間決定，而非僅憑狀態標籤推測。",
   "bookingDetail.status.editable": "可編輯",
   "bookingDetail.status.readOnly": "唯讀",
   "bookingDetail.status.bookingStatus": "訂單 {status}",
@@ -4326,7 +4330,7 @@ const zh: Record<keyof typeof en, string> = {
     "取消已於 {time} 完成 · 可從租戶稽核路徑查看 audit。",
   "bookingCommand.panel.title": "允許的租戶操作",
   "bookingCommand.panel.description":
-    "此面板上的每個 CTA 都由 booking action descriptors 驅動；停用動作會保留並顯示原因，而不是直接消失。",
+    "此面板上的每個 CTA 都由訂單動作描述子驅動；停用動作會保留並顯示原因，而不是直接消失。",
   "bookingCommand.action.update": "更新訂單",
   "bookingCommand.action.cancel": "取消訂單",
   "bookingCommand.action.resubmitApproval": "重新送審",
@@ -5663,12 +5667,12 @@ const zh: Record<keyof typeof en, string> = {
     "頁面底部仍提供跨應用維運分流，但在開通完成前，主頁面會維持空白。",
   "webhooks.card.endpointStatusTitle": "端點狀態",
   "webhooks.status.active": "啟用中",
-  "webhooks.status.testPending": "test_pending",
-  "webhooks.status.failureCluster": "failure cluster",
+  "webhooks.status.testPending": "待測試",
+  "webhooks.status.failureCluster": "失敗群集",
   "webhooks.card.deliveryHealthTitle": "投遞健康",
   "webhooks.card.deliveryHealthSubtitleSelected": "目前 endpoint 檢視",
   "webhooks.card.deliveryHealthSubtitleTenant": "租戶範圍 delivery 快照",
-  "webhooks.status.delivered": "delivered",
+  "webhooks.status.delivered": "已投遞",
   "webhooks.status.queued": "排隊中",
   "webhooks.status.failed": "失敗",
   "webhooks.card.replayStatusTitle": "重播狀態",
@@ -5680,6 +5684,10 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.card.endpointListSubtitle":
     "availableActions 以可見 CTA 呈現：啟用、附原因停用，絕不隱藏。",
   "webhooks.filter.clear": "清除篩選",
+  "webhooks.filter.status.all": "全部",
+  "webhooks.filter.status.active": "啟用中",
+  "webhooks.filter.status.testPending": "待測試",
+  "webhooks.filter.status.disabled": "已停用",
   "webhooks.card.selectedEndpointTitle": "已選 endpoint",
   "webhooks.card.actionMatrixTitle": "Action 矩陣",
   "webhooks.card.selectedEndpointSubtitle":

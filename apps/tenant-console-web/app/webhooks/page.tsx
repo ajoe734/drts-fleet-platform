@@ -50,6 +50,13 @@ const th = buildCanvasTheme({
 const OPS_CONSOLE_URL = process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? null;
 const PLATFORM_ADMIN_URL = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? null;
 const ROTATE_SECRET_RECEIPT_COOKIE = "tenant-webhook-rotate-receipt";
+const WEBHOOK_STATUS_FILTERS = [
+  "all",
+  "active",
+  "test_pending",
+  "disabled",
+] as const;
+type WebhookStatusFilter = (typeof WEBHOOK_STATUS_FILTERS)[number];
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -497,10 +504,27 @@ function getEndpointStatusTone(
   return "warn";
 }
 
-function getEndpointStatusLabel(status: TenantWebhookEndpointStatus) {
-  if (status === "active") return "active";
-  if (status === "test_pending") return "test_pending";
-  return "disabled";
+function getEndpointStatusLabel(
+  status: TenantWebhookEndpointStatus,
+  locale: Locale,
+) {
+  if (status === "active") return t("webhooks.status.active", locale);
+  if (status === "test_pending") {
+    return t("webhooks.status.testPending", locale);
+  }
+  return t("webhooks.filter.status.disabled", locale);
+}
+
+function getWebhookStatusFilterLabel(
+  value: WebhookStatusFilter,
+  locale: Locale,
+) {
+  if (value === "all") return t("webhooks.filter.status.all", locale);
+  if (value === "active") return t("webhooks.filter.status.active", locale);
+  if (value === "test_pending") {
+    return t("webhooks.filter.status.testPending", locale);
+  }
+  return t("webhooks.filter.status.disabled", locale);
 }
 
 function getEndpointLastActivity(
@@ -576,7 +600,7 @@ function toEndpointRow(
     webhookId: endpoint.webhookId,
     url: endpoint.url,
     events: endpoint.events,
-    statusLabel: getEndpointStatusLabel(endpoint.status),
+    statusLabel: getEndpointStatusLabel(endpoint.status, locale),
     statusTone: getEndpointStatusTone(endpoint.status),
     secretLabel: `v${endpoint.secretVersion} · ${endpoint.secretPreview}`,
     healthLabel: health.label,
@@ -1081,9 +1105,7 @@ function buildExternalLink(
   };
 }
 
-async function loadWebhooksPageData(
-  locale: Locale,
-): Promise<WebhooksPageData> {
+async function loadWebhooksPageData(locale: Locale): Promise<WebhooksPageData> {
   const client = getTenantClient();
   const [
     identityResult,
@@ -1626,10 +1648,16 @@ function EndpointForm({
                 defaultValue={webhook?.status ?? "test_pending"}
                 style={controlStyle}
               >
-                <option value="active">active</option>
-                <option value="test_pending">test_pending</option>
+                <option value="active">
+                  {t("webhooks.filter.status.active", locale)}
+                </option>
+                <option value="test_pending">
+                  {t("webhooks.filter.status.testPending", locale)}
+                </option>
                 {canShowDisabledOption ? (
-                  <option value="disabled">disabled</option>
+                  <option value="disabled">
+                    {t("webhooks.filter.status.disabled", locale)}
+                  </option>
                 ) : null}
               </select>
             </CanvasField>
@@ -2600,25 +2628,23 @@ export default async function WebhooksPage({
               subtitle={t("webhooks.card.endpointListSubtitle", locale)}
               actions={
                 <div style={buttonWrapStyle}>
-                  {["all", "active", "test_pending", "disabled"].map(
-                    (value) => {
-                      const href =
-                        value === "all"
-                          ? "/webhooks"
-                          : `/webhooks?status=${encodeURIComponent(value)}`;
-                      return (
-                        <Link
-                          key={value}
-                          href={href}
-                          style={getLinkButtonStyle({
-                            primary: statusFilter === value,
-                          })}
-                        >
-                          {value}
-                        </Link>
-                      );
-                    },
-                  )}
+                  {WEBHOOK_STATUS_FILTERS.map((value) => {
+                    const href =
+                      value === "all"
+                        ? "/webhooks"
+                        : `/webhooks?status=${encodeURIComponent(value)}`;
+                    return (
+                      <Link
+                        key={value}
+                        href={href}
+                        style={getLinkButtonStyle({
+                          primary: statusFilter === value,
+                        })}
+                      >
+                        {getWebhookStatusFilterLabel(value, locale)}
+                      </Link>
+                    );
+                  })}
                 </div>
               }
               padding={0}
@@ -2782,13 +2808,17 @@ export default async function WebhooksPage({
                       {selectedDelivery.eventType}
                     </div>
                     <div style={detailLineStyle}>
-                      <span>{t("webhooks.delivery.deliveryLabel", locale)}</span>
+                      <span>
+                        {t("webhooks.delivery.deliveryLabel", locale)}
+                      </span>
                       <span style={monoStyle}>
                         {selectedDelivery.deliveryId}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>{t("webhooks.delivery.endpointLabel", locale)}</span>
+                      <span>
+                        {t("webhooks.delivery.endpointLabel", locale)}
+                      </span>
                       <span style={monoStyle}>
                         {selectedDelivery.webhookId}
                       </span>
