@@ -22,7 +22,181 @@ const VALID_CHECKSUM_A =
 const VALID_CHECKSUM_B =
   "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
+function createDurableSupplyDatabase() {
+  const submissions = new Map<string, Record<string, unknown>>();
+  const driverDrafts = new Map<string, Record<string, unknown>>();
+  const documents = new Map<string, Record<string, unknown>>();
+  const uploadIntents = new Map<string, Record<string, unknown>>();
+
+  return {
+    isEnabled: () => true,
+    async query(sql: string, values: readonly unknown[] = []) {
+      const text = String(sql);
+
+      if (text.includes("INSERT INTO fleet.supply_submissions")) {
+        submissions.set(String(values[0]), {
+          submission_id: values[0],
+          fleet_partner_id: values[1],
+          submission_type: values[2],
+          status: values[3],
+          revision_no: values[4],
+          subject_driver_id: values[5],
+          subject_vehicle_id: values[6],
+          submitted_by: values[7],
+          submitted_at: values[8],
+          review_started_by: values[9],
+          review_started_at: values[10],
+          reviewed_by: values[11],
+          reviewed_at: values[12],
+          review_reason_code: values[13],
+          review_comment: values[14],
+          canonical_driver_id: values[15],
+          canonical_vehicle_id: values[16],
+          canonical_contract_id: values[17],
+          canonical_policy_id: values[18],
+          created_at: values[19],
+          updated_at: values[20],
+        });
+        return { rows: [] };
+      }
+
+      if (text.includes("INSERT INTO fleet.driver_supply_drafts")) {
+        driverDrafts.set(String(values[0]), {
+          submission_id: values[0],
+          name: values[1],
+          mobile: values[2],
+          professional_driver_license_no: values[3],
+          professional_driver_license_expiry: values[4],
+          taxi_driver_registration_no: values[5],
+          taxi_driver_registration_area: values[6],
+          taxi_driver_registration_expiry: values[7],
+          supported_service_product_codes: JSON.parse(String(values[8])),
+          preferred_vehicle_submission_id: values[9],
+        });
+        return { rows: [] };
+      }
+
+      if (text.includes("INSERT INTO fleet.supply_documents")) {
+        documents.set(String(values[0]), {
+          document_id: values[0],
+          fleet_partner_id: values[1],
+          submission_id: values[2],
+          document_type: values[3],
+          file_object_key: values[4],
+          original_file_name: values[5],
+          content_type: values[6],
+          file_size: values[7],
+          checksum_sha256: values[8],
+          effective_from: values[9],
+          effective_until: values[10],
+          review_status: values[11],
+          review_comment: values[12],
+          uploaded_by: values[13],
+          uploaded_at: values[14],
+        });
+        return { rows: [] };
+      }
+
+      if (text.includes("INSERT INTO fleet.supply_document_upload_intents")) {
+        uploadIntents.set(String(values[0]), {
+          object_key: values[0],
+          submission_id: values[1],
+          fleet_partner_id: values[2],
+          document_type: values[3],
+          original_file_name: values[4],
+          content_type: values[5],
+          created_at: values[6],
+          expires_at: values[7],
+        });
+        return { rows: [] };
+      }
+
+      if (text.includes("DELETE FROM fleet.supply_document_upload_intents")) {
+        uploadIntents.delete(String(values[0]));
+        return { rows: [] };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.supply_submissions")
+      ) {
+        return { rows: Array.from(submissions.values()) };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.driver_supply_drafts")
+      ) {
+        return { rows: Array.from(driverDrafts.values()) };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.vehicle_supply_drafts")
+      ) {
+        return { rows: [] };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.supply_documents")
+      ) {
+        return { rows: Array.from(documents.values()) };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.supply_document_upload_intents") &&
+        text.includes("WHERE object_key = $1")
+      ) {
+        const row = uploadIntents.get(String(values[0]));
+        return { rows: row ? [row] : [] };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.supply_document_upload_intents")
+      ) {
+        return { rows: Array.from(uploadIntents.values()) };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.supply_review_events")
+      ) {
+        return { rows: [] };
+      }
+
+      if (
+        text.includes("SELECT *") &&
+        text.includes("FROM fleet.vehicle_fleet_affiliations")
+      ) {
+        return { rows: [] };
+      }
+
+      return { rows: [] };
+    },
+  };
+}
+
 function createFixture() {
+  return createFixtureFromRepository(new SupplySubmissionRepository());
+}
+
+async function createFixtureWithDatabase(databaseService: {
+  isEnabled(): boolean;
+  query(sql: string, values?: readonly unknown[]): Promise<{ rows: unknown[] }>;
+}) {
+  const fixture = createFixtureFromRepository(
+    new SupplySubmissionRepository(databaseService as never),
+  );
+  await fixture.supplySubmissionService.onModuleInit();
+  return fixture;
+}
+
+function createFixtureFromRepository(
+  supplySubmissionRepository: SupplySubmissionRepository,
+) {
   const auditNotificationService = new AuditNotificationService();
   const driverProfileService = new DriverProfileService(
     auditNotificationService,
@@ -60,7 +234,6 @@ function createFixture() {
     ownedMobilityService,
     regulatoryRegistryService,
   );
-  const supplySubmissionRepository = new SupplySubmissionRepository();
   const supplySubmissionService = new SupplySubmissionService(
     supplySubmissionRepository,
     regulatoryRegistryService,
@@ -85,6 +258,7 @@ function createFixture() {
     service: fleetPartnerService,
     supplyDocumentService,
     supplySubmissionRepository,
+    supplySubmissionService,
   };
 }
 
@@ -313,9 +487,9 @@ describe("FleetPartnerController portal routes", () => {
         "veh-demo-002",
       ]),
     );
-    expect(readinessList.data.items.map((item) => item.subjectId)).not.toContain(
-      submissionId,
-    );
+    expect(
+      readinessList.data.items.map((item) => item.subjectId),
+    ).not.toContain(submissionId);
 
     const readiness = controller.getDriverSupplyReadiness(
       "fleet-demo-001",
@@ -553,6 +727,70 @@ describe("FleetPartnerController portal routes", () => {
     expect(confirmed.data.fileObjectKey).toBe(uploadUrl.data.objectKey);
   });
 
+  it("confirms a pre-signed upload after service restart when intents are durably persisted", async () => {
+    const durableDatabase = createDurableSupplyDatabase();
+    const firstProcess = await createFixtureWithDatabase(durableDatabase);
+
+    const created = await firstProcess.controller.createDriverSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      {
+        name: "Driver Supply Demo",
+        mobile: "+886900999888",
+        professionalDriverLicenseNo: "PDL-9988",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "TX-9988",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+      "req-supply-create-driver-restart",
+    );
+    const submissionId = created.data.submission.submissionId;
+
+    const uploadUrl =
+      await firstProcess.controller.createSupplyDocumentUploadUrl(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+        },
+        "req-supply-upload-restart",
+      );
+
+    const restartedProcess = await createFixtureWithDatabase(durableDatabase);
+    const confirmed =
+      await restartedProcess.controller.confirmSupplyDocumentUpload(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          objectKey: uploadUrl.data.objectKey,
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+          fileSize: 1024,
+          checksumSha256: VALID_CHECKSUM_A,
+          effectiveFrom: "2026-01-01",
+          effectiveUntil: "2027-12-31",
+        },
+        "req-supply-confirm-restart",
+      );
+
+    expect(confirmed.data.fileObjectKey).toBe(uploadUrl.data.objectKey);
+    await expect(
+      restartedProcess.supplySubmissionRepository.findDocumentUploadIntent(
+        uploadUrl.data.objectKey,
+      ),
+    ).resolves.toBeNull();
+  });
+
   it("rejects confirming a pre-signed upload with invalid checksum or effective range", async () => {
     const { controller } = createFixture();
 
@@ -574,18 +812,19 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const invalidChecksumUploadUrl = await controller.createSupplyDocumentUploadUrl(
-      "fleet-demo-001",
-      "fleet-user-1",
-      submissionId,
-      {
-        expectedRevisionNo: 1,
-        documentType: "professional_driver_license",
-        originalFileName: "license.pdf",
-        contentType: "application/pdf",
-      },
-      "req-supply-upload-invalid-checksum",
-    );
+    const invalidChecksumUploadUrl =
+      await controller.createSupplyDocumentUploadUrl(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+        },
+        "req-supply-upload-invalid-checksum",
+      );
 
     const invalidChecksumError = await controller
       .confirmSupplyDocumentUpload(
@@ -622,18 +861,19 @@ describe("FleetPartnerController portal routes", () => {
       });
     }
 
-    const invalidRangeUploadUrl = await controller.createSupplyDocumentUploadUrl(
-      "fleet-demo-001",
-      "fleet-user-1",
-      submissionId,
-      {
-        expectedRevisionNo: 1,
-        documentType: "professional_driver_license",
-        originalFileName: "license.pdf",
-        contentType: "application/pdf",
-      },
-      "req-supply-upload-invalid-range",
-    );
+    const invalidRangeUploadUrl =
+      await controller.createSupplyDocumentUploadUrl(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+        },
+        "req-supply-upload-invalid-range",
+      );
 
     const invalidRangeError = await controller
       .confirmSupplyDocumentUpload(
