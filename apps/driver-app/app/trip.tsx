@@ -68,6 +68,11 @@ import {
   subscribeToDriverLocationUpdates,
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
+import {
+  formatTrackingGapNotice,
+  subscribeTrackingDiagnostic,
+  type TrackingDiagnosticState,
+} from "@/lib/driver-tracking-recovery";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatMoney } from "@/lib/money";
 import {
@@ -845,9 +850,8 @@ export default function TripScreen() {
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
   const [forwardedActionResult, setForwardedActionResult] =
     useState<ForwardedDriverActionResponse | null>(null);
-  const [taskViewDetail, setTaskViewDetail] = useState<UnifiedDriverTaskView | null>(
-    null,
-  );
+  const [taskViewDetail, setTaskViewDetail] =
+    useState<UnifiedDriverTaskView | null>(null);
   const [platformPresenceSummary, setPlatformPresenceSummary] =
     useState<PlatformPresenceSummary | null>(null);
   const [queuedCompletionTaskId, setQueuedCompletionTaskId] = useState<
@@ -864,6 +868,8 @@ export default function TripScreen() {
     string | null
   >(null);
   const [trackingRetryKey, setTrackingRetryKey] = useState(0);
+  const [trackingDiagnostic, setTrackingDiagnostic] =
+    useState<TrackingDiagnosticState | null>(null);
   const lastTrackedCoordinateRef = useRef<TripCoordinate | null>(null);
   const tripStartTimeRef = useRef<number | null>(null);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -970,12 +976,13 @@ export default function TripScreen() {
   const platformLabel = getPlatformDisplayLabel(taskDetail?.sourcePlatform);
   const activePresenceRecord =
     taskDetail?.sourcePlatform && platformPresenceSummary
-      ? platformPresenceSummary.presences.find(
+      ? (platformPresenceSummary.presences.find(
           (record) => record.platformCode === taskDetail.sourcePlatform,
-        ) ?? null
+        ) ?? null)
       : null;
   const sourcePlatformOffline = activePresenceRecord?.status === "offline";
-  const queuedCompletionForActiveTask = queuedCompletionTaskId === taskDetail?.taskId;
+  const queuedCompletionForActiveTask =
+    queuedCompletionTaskId === taskDetail?.taskId;
   const forwardedAcceptAllowed =
     tripExperienceState === "forwarded_offered" &&
     (taskViewDetail?.allowedActions.includes("accept") ?? true);
@@ -1011,6 +1018,13 @@ export default function TripScreen() {
     locationTrackingMessage,
     recordingActive,
   );
+  const trackingGapNotice =
+    !isForwardedTrip &&
+    trackingDiagnostic?.gap &&
+    (trackingDiagnostic.gap.lastTaskId == null ||
+      trackingDiagnostic.gap.lastTaskId === taskDetail?.taskId)
+      ? formatTrackingGapNotice(trackingDiagnostic.gap)
+      : null;
   const routeMetricDistance = showTripMetrics
     ? formatTripDistance(liveDistanceKm)
     : taskDetail?.actualDistanceKm != null
@@ -1060,14 +1074,14 @@ export default function TripScreen() {
                   ? disabledForwardedAcceptReason
                   : disabledForwardedRejectReason
                     ? disabledForwardedRejectReason
-                : forwardedOutcomeSummary
-                  ? (forwardedActionResult?.driverMessage ??
-                    forwardedOutcomeSummary.title)
-                  : tripExperienceState === "forwarded_offered"
-                    ? tripAuthorityBanner.description
-                    : primaryTripAction
-                      ? primaryTripAction.helperText
-                      : tripStatusPresentation.detail;
+                    : forwardedOutcomeSummary
+                      ? (forwardedActionResult?.driverMessage ??
+                        forwardedOutcomeSummary.title)
+                      : tripExperienceState === "forwarded_offered"
+                        ? tripAuthorityBanner.description
+                        : primaryTripAction
+                          ? primaryTripAction.helperText
+                          : tripStatusPresentation.detail;
   const completeActionDisabled =
     primaryTripAction?.action === "complete"
       ? shouldDisableCompleteTripAction({
@@ -1241,6 +1255,10 @@ export default function TripScreen() {
 
   useEffect(() => {
     void loadTrip(true);
+  }, []);
+
+  useEffect(() => {
+    return subscribeTrackingDiagnostic(setTrackingDiagnostic);
   }, []);
 
   useEffect(() => {
@@ -1935,6 +1953,9 @@ export default function TripScreen() {
             <Text style={styles.statusMetaText}>
               {trackingDescriptor.detail}
             </Text>
+            {trackingGapNotice ? (
+              <Text style={styles.statusMetaText}>{trackingGapNotice}</Text>
+            ) : null}
             {!isForwardedTrip &&
             isTripInProgress &&
             (locationTrackingState === "permission_denied" ||

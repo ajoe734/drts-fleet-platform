@@ -10,6 +10,7 @@ import {
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
 import { syncDriverIdentityBootstrap } from "@/lib/driver-identity-bootstrap";
+import { evaluateTrackingRecovery } from "@/lib/driver-tracking-recovery";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
   getDriverClient,
@@ -64,6 +65,7 @@ function DriverHeartbeatBootstrap() {
         resetDriverAppToOnboarding,
         router,
         syncDriverLocationHeartbeat,
+        evaluateTrackingRecovery,
       });
     };
 

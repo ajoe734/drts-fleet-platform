@@ -29,6 +29,8 @@ const getCurrentPositionAsync = vi.fn();
 const enqueueDriverLocationEvent = vi.fn();
 const flushDriverLocationQueue = vi.fn();
 const initializeDriverLocationOfflineQueue = vi.fn();
+const recordTrackingHeartbeat = vi.fn();
+const clearTrackingSession = vi.fn();
 
 let watchCallback: LocationCallback | null = null;
 let taskHandler: TaskHandler | null = null;
@@ -39,6 +41,33 @@ vi.mock("@/lib/driver-location-offline-queue", () => ({
   flushDriverLocationQueue,
   initializeDriverLocationOfflineQueue,
 }));
+
+vi.mock("@/lib/driver-tracking-recovery", () => ({
+  recordTrackingHeartbeat,
+  clearTrackingSession,
+}));
+
+function createEnvelope(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    eventId: "device-001:1",
+    deviceId: "device-001",
+    driverId: "driver-001",
+    vehicleId: null,
+    taskId: "task-001",
+    sequenceNo: 1,
+    recordedAt: new Date(16_000).toISOString(),
+    lat: 25.033,
+    lng: 121.5654,
+    accuracyM: 8,
+    workState: "on_trip",
+    appState: "background",
+    transportMode: "background",
+    networkType: "unknown",
+    ...overrides,
+  };
+}
 
 vi.mock("expo-location", () => ({
   Accuracy: {
@@ -102,9 +131,22 @@ beforeEach(() => {
       remove: removeSubscription,
     };
   });
-  enqueueDriverLocationEvent.mockResolvedValue(undefined);
+  enqueueDriverLocationEvent.mockImplementation(async (draft) =>
+    createEnvelope({
+      taskId: draft.taskId ?? null,
+      recordedAt: draft.recordedAt,
+      lat: draft.lat,
+      lng: draft.lng,
+      accuracyM: draft.accuracyM,
+      workState: draft.workState,
+      appState: draft.appState,
+      transportMode: draft.transportMode,
+    }),
+  );
   flushDriverLocationQueue.mockResolvedValue(undefined);
   initializeDriverLocationOfflineQueue.mockResolvedValue(undefined);
+  recordTrackingHeartbeat.mockResolvedValue(undefined);
+  clearTrackingSession.mockResolvedValue(undefined);
   getForegroundPermissionsAsync.mockResolvedValue({ granted: true });
   requestForegroundPermissionsAsync.mockResolvedValue({ granted: true });
   getBackgroundPermissionsAsync.mockResolvedValue({ granted: true });
@@ -222,5 +264,33 @@ describe("driver location heartbeat transport", () => {
       networkType: "unknown",
       preserveKeyEvent: false,
     });
+  });
+
+  it("persists the restart-recovery marker per heartbeat and clears it on a clean stop", async () => {
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    await heartbeatModule.syncDriverLocationHeartbeat({
+      taskId: "task-001",
+      driverId: "driver-001",
+    });
+
+    await taskHandler?.({
+      data: {
+        locations: [createLocation(16_000)],
+      },
+    });
+    await flushHeartbeatQueue();
+
+    expect(recordTrackingHeartbeat).toHaveBeenCalledWith({
+      taskId: "task-001",
+      driverId: "driver-001",
+      vehicleId: null,
+      workState: "on_trip",
+      recordedAt: new Date(16_000).toISOString(),
+      sequenceNo: 1,
+    });
+
+    await heartbeatModule.stopDriverLocationHeartbeat();
+    expect(clearTrackingSession).toHaveBeenCalledTimes(1);
   });
 });
