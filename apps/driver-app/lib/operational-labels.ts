@@ -101,10 +101,12 @@ type ServiceProductContext = {
   dispatchSemantics: DispatchSemantics | string | null;
 };
 
-export function readDriverServiceProductCode(
-  value: { serviceProductCode?: unknown } | null | undefined,
-) {
-  if (typeof value?.serviceProductCode !== "string") {
+export function readDriverServiceProductCode(value: unknown) {
+  if (!value || typeof value !== "object" || !("serviceProductCode" in value)) {
+    return null;
+  }
+
+  if (typeof value.serviceProductCode !== "string") {
     return null;
   }
 
