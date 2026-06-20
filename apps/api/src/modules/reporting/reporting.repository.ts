@@ -9,6 +9,7 @@ import type {
   DispatchTraceLogRecord,
   DriverTaskRecord,
   OwnedOrderRecord,
+  SixMonthOperationsSummary,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -55,6 +56,23 @@ type DispatchableSupplySnapshotRow = {
   generated_at: string;
 };
 
+type MonthlyOperationsSummaryRow = {
+  period_month: string;
+  business_area: string;
+  service_product_code: string;
+  demand_request_count: number;
+  actual_dispatch_count: number;
+  completed_trip_count: number;
+  cancelled_order_count: number;
+  average_dispatchable_vehicle_count: string | number;
+  valid_snapshot_count: number;
+  expected_snapshot_count: number;
+  snapshot_coverage_rate: string | number;
+  complaint_count: number;
+  complaints_by_category: Record<string, number> | string;
+  generated_at: string;
+};
+
 export type DailyDispatchRecordQuery = {
   serviceDate?: string;
   serviceDateFrom?: string;
@@ -74,6 +92,23 @@ export type DispatchableSupplySnapshotQuery = {
   businessArea?: string;
   serviceProductCode?: string;
   sourceHealth?: DispatchableSupplySnapshotRecord["sourceHealth"];
+};
+
+export type MonthlyOperationsSummaryRecord = Omit<
+  SixMonthOperationsSummary,
+  "from" | "to" | "businessArea" | "serviceProductCode"
+> & {
+  periodMonth: string;
+  businessArea: string;
+  serviceProductCode: string;
+};
+
+export type MonthlyOperationsSummaryQuery = {
+  periodMonth?: string;
+  periodMonthFrom?: string;
+  periodMonthTo?: string;
+  businessArea?: string;
+  serviceProductCode?: string;
 };
 
 export type DispatchDailyRecordSource = {
@@ -226,6 +261,72 @@ export class ReportingRepository {
             record.dispatchableVehicleCount,
             record.availableDriverCount,
             record.sourceHealth,
+            record.generatedAt,
+          ],
+        ),
+      ),
+    );
+  }
+
+  async upsertMonthlyOperationsSummaries(
+    records: readonly MonthlyOperationsSummaryRecord[],
+  ) {
+    if (!this.isEnabled() || records.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      records.map((record) =>
+        this.databaseService!.query(
+          `
+            INSERT INTO reporting.monthly_operations_summaries (
+              period_month,
+              business_area,
+              service_product_code,
+              demand_request_count,
+              actual_dispatch_count,
+              completed_trip_count,
+              cancelled_order_count,
+              average_dispatchable_vehicle_count,
+              valid_snapshot_count,
+              expected_snapshot_count,
+              snapshot_coverage_rate,
+              complaint_count,
+              complaints_by_category,
+              generated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+              $11, $12, $13::jsonb, $14
+            )
+            ON CONFLICT (period_month, business_area, service_product_code)
+            DO UPDATE SET
+              demand_request_count = EXCLUDED.demand_request_count,
+              actual_dispatch_count = EXCLUDED.actual_dispatch_count,
+              completed_trip_count = EXCLUDED.completed_trip_count,
+              cancelled_order_count = EXCLUDED.cancelled_order_count,
+              average_dispatchable_vehicle_count =
+                EXCLUDED.average_dispatchable_vehicle_count,
+              valid_snapshot_count = EXCLUDED.valid_snapshot_count,
+              expected_snapshot_count = EXCLUDED.expected_snapshot_count,
+              snapshot_coverage_rate = EXCLUDED.snapshot_coverage_rate,
+              complaint_count = EXCLUDED.complaint_count,
+              complaints_by_category = EXCLUDED.complaints_by_category,
+              generated_at = EXCLUDED.generated_at
+          `,
+          [
+            record.periodMonth,
+            record.businessArea,
+            record.serviceProductCode,
+            record.demandRequestCount,
+            record.actualDispatchCount,
+            record.completedTripCount,
+            record.cancelledOrderCount,
+            record.averageDispatchableVehicleCount,
+            record.validSnapshotCount,
+            record.expectedSnapshotCount,
+            record.snapshotCoverageRate,
+            record.complaintCount,
+            JSON.stringify(record.complaintsByCategory),
             record.generatedAt,
           ],
         ),
@@ -475,6 +576,69 @@ export class ReportingRepository {
     return result.rows.map((row) => this.mapSnapshotRow(row));
   }
 
+  async listMonthlyOperationsSummaries(
+    query: MonthlyOperationsSummaryQuery = {},
+  ): Promise<MonthlyOperationsSummaryRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const whereClauses: string[] = [];
+    const values: unknown[] = [];
+    const bind = (value: unknown) => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+
+    if (query.periodMonth) {
+      whereClauses.push(`period_month = ${bind(query.periodMonth)}`);
+    } else {
+      if (query.periodMonthFrom) {
+        whereClauses.push(`period_month >= ${bind(query.periodMonthFrom)}`);
+      }
+      if (query.periodMonthTo) {
+        whereClauses.push(`period_month <= ${bind(query.periodMonthTo)}`);
+      }
+    }
+    if (query.businessArea) {
+      whereClauses.push(`business_area = ${bind(query.businessArea)}`);
+    }
+    if (query.serviceProductCode) {
+      whereClauses.push(
+        `service_product_code = ${bind(query.serviceProductCode)}`,
+      );
+    }
+
+    const where =
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const result =
+      await this.databaseService!.query<MonthlyOperationsSummaryRow>(
+        `
+          SELECT
+            period_month,
+            business_area,
+            service_product_code,
+            demand_request_count,
+            actual_dispatch_count,
+            completed_trip_count,
+            cancelled_order_count,
+            average_dispatchable_vehicle_count,
+            valid_snapshot_count,
+            expected_snapshot_count,
+            snapshot_coverage_rate,
+            complaint_count,
+            complaints_by_category,
+            generated_at
+          FROM reporting.monthly_operations_summaries
+          ${where}
+          ORDER BY period_month DESC, business_area ASC, service_product_code ASC
+        `,
+        values,
+      );
+
+    return result.rows.map((row) => this.mapMonthlySummaryRow(row));
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -522,6 +686,34 @@ export class ReportingRepository {
       dispatchableVehicleCount: row.dispatchable_vehicle_count,
       availableDriverCount: row.available_driver_count,
       sourceHealth: row.source_health,
+      generatedAt: row.generated_at,
+    };
+  }
+
+  private mapMonthlySummaryRow(
+    row: MonthlyOperationsSummaryRow,
+  ): MonthlyOperationsSummaryRecord {
+    const complaintsByCategory =
+      typeof row.complaints_by_category === "string"
+        ? (JSON.parse(row.complaints_by_category) as Record<string, number>)
+        : row.complaints_by_category;
+
+    return {
+      periodMonth: row.period_month,
+      businessArea: row.business_area,
+      serviceProductCode: row.service_product_code,
+      demandRequestCount: row.demand_request_count,
+      actualDispatchCount: row.actual_dispatch_count,
+      completedTripCount: row.completed_trip_count,
+      cancelledOrderCount: row.cancelled_order_count,
+      averageDispatchableVehicleCount: Number(
+        row.average_dispatchable_vehicle_count,
+      ),
+      validSnapshotCount: row.valid_snapshot_count,
+      expectedSnapshotCount: row.expected_snapshot_count,
+      snapshotCoverageRate: Number(row.snapshot_coverage_rate),
+      complaintCount: row.complaint_count,
+      complaintsByCategory,
       generatedAt: row.generated_at,
     };
   }

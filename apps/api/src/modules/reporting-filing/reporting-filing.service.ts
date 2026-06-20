@@ -18,6 +18,7 @@ import type {
   ReportJobAccepted,
   ReportJobRecord,
   SettlementMatrixRecord,
+  SixMonthOperationsSummary,
   TenantCostCenterRecord,
 } from "@drts/contracts";
 
@@ -72,14 +73,15 @@ type TenantMonthlyTripReportRow = {
   exportedAt: string;
 };
 
-type ReportJobRow =
+type ReportingJobRow =
   | DispatchRecordingIndexRow
   | DispatchDailyRecord
+  | SixMonthOperationsSummary
   | TenantMonthlyTripReportRow;
 
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows?: ReportJobRow[];
+  rows?: ReportingJobRow[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
   evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
@@ -119,7 +121,7 @@ type FilingPackageDownloadMetadata = {
 
 type StoredReportJob = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows: ReportJobRow[];
+  rows: ReportingJobRow[];
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
   settlementMatrix: SettlementMatrixRecord[];
 };
@@ -136,6 +138,12 @@ type CostCenterDirectoryProvider = (
 type DailyDispatchRecordProvider = (
   filters: DailyDispatchRecordQuery,
 ) => Promise<DispatchDailyRecord[]> | DispatchDailyRecord[];
+type SixMonthOperationsSummaryProvider = (filters: {
+  from?: string;
+  to?: string;
+  businessArea?: string;
+  serviceProductCode?: string;
+}) => Promise<SixMonthOperationsSummary[]> | SixMonthOperationsSummary[];
 
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
@@ -152,6 +160,9 @@ export class ReportingFilingService implements OnModuleInit {
   private costCenterDirectoryProvider: CostCenterDirectoryProvider = () => [];
 
   private dailyDispatchRecordProvider: DailyDispatchRecordProvider = () => [];
+
+  private sixMonthOperationsSummaryProvider: SixMonthOperationsSummaryProvider =
+    () => [];
 
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
@@ -219,6 +230,12 @@ export class ReportingFilingService implements OnModuleInit {
 
   registerDailyDispatchRecordProvider(provider: DailyDispatchRecordProvider) {
     this.dailyDispatchRecordProvider = provider;
+  }
+
+  registerSixMonthOperationsSummaryProvider(
+    provider: SixMonthOperationsSummaryProvider,
+  ) {
+    this.sixMonthOperationsSummaryProvider = provider;
   }
 
   createReportJob(
@@ -603,6 +620,9 @@ export class ReportingFilingService implements OnModuleInit {
     if (job.jobType === "daily_dispatch_record") {
       job.rows = await this.buildDailyDispatchRecordRows(job);
     }
+    if (job.jobType === "six_month_operations_summary") {
+      job.rows = await this.buildSixMonthOperationsSummaryRows(job);
+    }
     if (job.jobType === "monthly_trip_report") {
       job.rows = this.buildTenantMonthlyTripRows(job, requestId);
     }
@@ -850,6 +870,15 @@ export class ReportingFilingService implements OnModuleInit {
     return rows.map((row) => ({ ...row }));
   }
 
+  private async buildSixMonthOperationsSummaryRows(job: StoredReportJob) {
+    const filters = this.extractSixMonthOperationsSummaryFilters(job.filters);
+    const rows = await this.sixMonthOperationsSummaryProvider(filters);
+    return rows.map((row) => ({
+      ...row,
+      complaintsByCategory: { ...row.complaintsByCategory },
+    }));
+  }
+
   private buildTenantMonthlyTripRows(
     job: StoredReportJob,
     requestId?: string,
@@ -979,6 +1008,40 @@ export class ReportingFilingService implements OnModuleInit {
     }
     if (finalStatus) {
       query.finalStatus = finalStatus;
+    }
+
+    return query;
+  }
+
+  private extractSixMonthOperationsSummaryFilters(
+    filters: Record<string, unknown>,
+  ) {
+    const readText = (key: string) => {
+      const value = filters[key];
+      return typeof value === "string" && value.trim() ? value.trim() : null;
+    };
+    const query: {
+      from?: string;
+      to?: string;
+      businessArea?: string;
+      serviceProductCode?: string;
+    } = {};
+    const from = readText("from");
+    const to = readText("to");
+    const businessArea = readText("businessArea");
+    const serviceProductCode = readText("serviceProductCode");
+
+    if (from) {
+      query.from = from;
+    }
+    if (to) {
+      query.to = to;
+    }
+    if (businessArea) {
+      query.businessArea = businessArea;
+    }
+    if (serviceProductCode) {
+      query.serviceProductCode = serviceProductCode;
     }
 
     return query;
