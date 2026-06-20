@@ -1,11 +1,11 @@
 # MOB-BE-001 Review Packet & Evidence Summary
 
-**Sidecar Kind:** `review_packet`  
-**Parent Task:** `MOB-BE-001`  
-**Parent Owner / Reviewer:** `Codex2` / `Codex`  
-**Sidecar Owner / Reviewer:** `Codex` / `Codex2`  
-**Generated:** `2026-06-20` (UTC)  
-**Snapshot Basis:** `scripts/ai-status.sh show`, `git show`, `git branch --contains`, and commit-scoped `git grep`  
+**Sidecar Kind:** `review_packet`
+**Parent Task:** `MOB-BE-001`
+**Parent Owner / Reviewer:** `Codex2` / `Codex`
+**Sidecar Owner / Reviewer:** `Codex` / `Codex2`
+**Generated:** `2026-06-20` (UTC)
+**Snapshot Basis:** `scripts/ai-status.sh show`, `git show`, `git branch --contains`, `git merge-base --is-ancestor`, `git diff --check`, and commit-scoped `git grep`
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
 This packet is support-only. It does not change canonical truth or parent implementation.
@@ -38,7 +38,7 @@ Out of scope:
 
 ### 2.1 Sidecar row
 
-`scripts/ai-status.sh show MOB-BE-001-SIDECAR-REVIEW` at this recovery pass records:
+`scripts/ai-status.sh show MOB-BE-001-SIDECAR-REVIEW` at this refresh pass records:
 
 - id=`MOB-BE-001-SIDECAR-REVIEW`
 - owner=`Codex`
@@ -55,17 +55,18 @@ Out of scope:
 - id=`MOB-BE-001`
 - owner=`Codex2`
 - reviewer=`Codex`
-- status=`review_approved`
+- status=`done`
 - title=`Batch heartbeat API + telemetry.driver_location_events`
-- last_update=`2026-06-20T05:46:16Z`
+- last_update=`2026-06-20T05:54:20Z`
 
 Recorded parent `next` summary:
 
-> Reviewed owner branch codex2/mob-be-001 at
-> 4b093cd23003ace8287962ad80e31f61ad7581fb. No blocking findings. Verified
-> stale current-location guard for legacy and batch paths plus regression tests
-> coverage. Re-ran: pnpm --filter @drts/api typecheck; pnpm --filter @drts/api
+> Owner finalized approved task. Closeout commit
+> 4b093cd23003ace8287962ad80e31f61ad7581fb is now reachable from origin/dev via
+> merge commit 8ed60a27a1bfab03ecee55216d038c02e28b6703. Verified after
+> integration with pnpm --filter @drts/api typecheck and pnpm --filter @drts/api
 > test -- regulatory-registry.service.test.ts driver-telemetry.controller.test.ts.
+> Integration status: merged_to_dev; no dev deployment claimed.
 
 ---
 
@@ -82,20 +83,30 @@ The parent review should be performed against commit:
   - `Verification: pnpm --filter @drts/api typecheck && pnpm --filter @drts/api test -- regulatory-registry.service.test.ts`
 
 `git branch --contains 4b093cd23003ace8287962ad80e31f61ad7581fb` shows the parent
-review commit lives on `codex2/mob-be-001`.
+review commit lives on `codex2/mob-be-001`, `origin/codex2/mob-be-001`, and
+`origin/dev`.
+
+Integration caveat:
+
+- `git merge-base --is-ancestor 4b093cd23003ace8287962ad80e31f61ad7581fb origin/dev`
+  returns success
+- the parent implementation is already merged into `origin/dev`
+- this packet therefore serves as a review-history and evidence-handoff artifact,
+  not as a gate on the parent runtime change
 
 Reviewer caveat:
 
 - this sidecar worktree branch is `codex/mob-be-001-sidecar-review`
-- its current `HEAD` is `eadba376d3e2a2c71bffea60150d6b0a8bd8939d`
+- its current `HEAD` is `91570b400d5ed1f4b4b9a5bdb7cd08f7dcf9a55d`
 - `HEAD` is not the parent review commit, so audit the parent against
   `4b093cd23003ace8287962ad80e31f61ad7581fb`, not against this sidecar branch tip
 
 Artifact delivery note:
 
-- this file existed only as an untracked worktree artifact before this recovery pass
-- the purpose of this slice is to commit and hand off that packet so reviewer access
-  matches machine-truth status
+- this file is already committed on the sidecar branch at
+  `91570b400d5ed1f4b4b9a5bdb7cd08f7dcf9a55d`
+- this refresh pass corrects stale machine-truth and verification narration before
+  reviewer handoff
 
 ---
 
@@ -160,12 +171,19 @@ Evidence relevant to this review revision:
 - The recorded verification matches the parent `next` field and commit trailer:
   - `pnpm --filter @drts/api typecheck`
   - `pnpm --filter @drts/api test -- regulatory-registry.service.test.ts`
+- The parent closeout later re-ran the broader targeted suite after integration:
+  - `pnpm --filter @drts/api typecheck`
+  - `pnpm --filter @drts/api test -- regulatory-registry.service.test.ts driver-telemetry.controller.test.ts`
 - The regression coverage added in this commit is targeted and sufficient for
   the bug being fixed:
   - legacy regression test at commit-scoped anchor
     `apps/api/tests/unit/regulatory-registry.service.test.ts:468`
   - out-of-order batch regression test at commit-scoped anchor
     `apps/api/tests/unit/regulatory-registry.service.test.ts:597`
+- Prior review feedback on this sidecar packet was correct that the older packet
+  overstated verification cleanliness. At this refresh point, local
+  `git diff --check` returns no output, so there is no current trailing-whitespace
+  failure in the sidecar worktree.
 
 Additional unchanged guardrail still present in tests:
 
@@ -191,13 +209,15 @@ Reviewer should validate these points on `4b093cd23003ace8287962ad80e31f61ad7581
 
 ## 8. Handoff Notes For `Codex2`
 
-This sidecar packet is ready to hand off to the assigned reviewer once the
-sidecar status is moved from `in_progress` to `review`.
+This sidecar packet is the support artifact being handed to the assigned reviewer
+with the sidecar status transition to `review`.
 
 Suggested review framing:
 
 - audit the parent task against commit `4b093cd23003ace8287962ad80e31f61ad7581fb`
 - treat this packet as evidence compression only
 - do not infer parent correctness from the sidecar worktree `HEAD`
-- if the parent passes, sidecar review can approve the packet as an accurate
-  reviewer handoff artifact
+- confirm the packet now matches current machine truth for both the sidecar and
+  the already-closed parent task
+- approve only the packet accuracy; parent implementation correctness is already
+  recorded in the parent task closeout
