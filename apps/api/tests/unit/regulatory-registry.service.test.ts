@@ -6,7 +6,20 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
-function createService() {
+function createService(
+  repositoryOverrides: Partial<{
+    isEnabled: ReturnType<typeof vi.fn>;
+    persistChanges: ReturnType<typeof vi.fn>;
+    reportPersistenceFailure: ReturnType<typeof vi.fn>;
+    upsertDriverLocation: ReturnType<typeof vi.fn>;
+    recordDriverLocationEvent: ReturnType<typeof vi.fn>;
+    findLatestDriverLocation: ReturnType<typeof vi.fn>;
+    findLatestDriverHeartbeatEvent: ReturnType<typeof vi.fn>;
+    findDriverHeartbeatEventByRecordedAt: ReturnType<typeof vi.fn>;
+    listLatestDriverLocations: ReturnType<typeof vi.fn>;
+    loadState: ReturnType<typeof vi.fn>;
+  }> = {},
+) {
   const opsDispatchEventsService = {
     publishDriverLocationUpdated: vi.fn(),
     publishSupplyLifecycleUpdated: vi.fn(),
@@ -19,6 +32,21 @@ function createService() {
     isEnabled: vi.fn(() => false),
     persistChanges: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
+    upsertDriverLocation: vi.fn(),
+    recordDriverLocationEvent: vi.fn(),
+    findLatestDriverLocation: vi.fn(),
+    findLatestDriverHeartbeatEvent: vi.fn(),
+    findDriverHeartbeatEventByRecordedAt: vi.fn(),
+    listLatestDriverLocations: vi.fn().mockResolvedValue([]),
+    loadState: vi.fn().mockResolvedValue({
+      vehicles: [],
+      drivers: [],
+      supplyPairs: [],
+      contracts: [],
+      policies: [],
+      exclusivities: [],
+    }),
+    ...repositoryOverrides,
   };
 
   const service = new RegulatoryRegistryService(
@@ -416,5 +444,753 @@ describe("RegulatoryRegistryService", () => {
         },
       },
     });
+  });
+
+  it("does not publish a legacy driver location update when the heartbeat is older than the stored snapshot", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        upsertDriverLocation: vi.fn().mockResolvedValue(false),
+      });
+
+    await expect(
+      service.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        recordedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(
+      regulatoryRegistryRepository.upsertDriverLocation,
+    ).toHaveBeenCalled();
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("does not let the legacy driver location endpoint regress the in-memory latest snapshot", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        upsertDriverLocation: vi.fn().mockResolvedValue(true),
+      });
+
+    await service.recordDriverLocation({
+      driverId: "drv-demo-001",
+      lat: 24.1477,
+      lng: 120.6736,
+      accuracyM: 6,
+      recordedAt: "2026-06-20T06:00:00.000Z",
+    });
+
+    await service.recordDriverLocation({
+      driverId: "drv-demo-001",
+      lat: 24.147,
+      lng: 120.67,
+      accuracyM: 9,
+      recordedAt: "2026-06-20T05:59:00.000Z",
+    });
+
+    expect(
+      regulatoryRegistryRepository.upsertDriverLocation,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+      }),
+    ]);
+  });
+
+  it("does not let the legacy driver location endpoint overwrite the latest snapshot at the same recordedAt", async () => {
+    const { service, opsDispatchEventsService } = createService({
+      isEnabled: vi.fn(() => true),
+      upsertDriverLocation: vi.fn().mockResolvedValue(true),
+    });
+
+    await service.recordDriverLocation({
+      driverId: "drv-demo-001",
+      lat: 24.1477,
+      lng: 120.6736,
+      accuracyM: 6,
+      recordedAt: "2026-06-20T06:00:00.000Z",
+    });
+
+    await expect(
+      service.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 24.1485,
+        lng: 120.6744,
+        accuracyM: 9,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+      }),
+    ]);
+  });
+
+  it("acknowledges duplicate heartbeats and only publishes newer current locations", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        recordDriverLocationEvent: vi
+          .fn()
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            duplicate: true,
+            currentLocationUpdated: false,
+            serverReceivedAt: "2026-06-20T06:00:00.000Z",
+          }),
+      });
+
+    const response = await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: "evt-001",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1001,
+          recordedAt: "2026-06-20T05:59:59.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+        {
+          eventId: "evt-001-replay",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1001,
+          recordedAt: "2026-06-20T05:59:59.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+      ],
+    });
+
+    expect(response).toEqual({
+      items: [
+        {
+          eventId: "evt-001",
+          accepted: true,
+          duplicate: false,
+          currentLocationUpdated: true,
+          serverReceivedAt: "2026-06-20T06:00:00.000Z",
+        },
+        {
+          eventId: "evt-001-replay",
+          accepted: true,
+          duplicate: true,
+          currentLocationUpdated: false,
+          serverReceivedAt: "2026-06-20T06:00:00.000Z",
+        },
+      ],
+    });
+    expect(
+      regulatoryRegistryRepository.recordDriverLocationEvent,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      {
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T05:59:59.000Z",
+        updatedAt: "2026-06-20T06:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("does not acknowledge an out-of-order batch heartbeat as a current location update", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        recordDriverLocationEvent: vi
+          .fn()
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:05.000Z",
+          }),
+      });
+
+    const response = await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: "evt-001",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1001,
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+        {
+          eventId: "evt-002",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1002,
+          recordedAt: "2026-06-20T05:59:00.000Z",
+          lat: 24.147,
+          lng: 120.67,
+          accuracyM: 9,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+      ],
+    });
+
+    expect(response.items).toEqual([
+      {
+        eventId: "evt-001",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: true,
+        serverReceivedAt: "2026-06-20T06:00:00.000Z",
+      },
+      {
+        eventId: "evt-002",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: false,
+        serverReceivedAt: "2026-06-20T06:00:05.000Z",
+      },
+    ]);
+    expect(
+      regulatoryRegistryRepository.recordDriverLocationEvent,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      {
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        updatedAt: "2026-06-20T06:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("does not acknowledge a same-recordedAt batch heartbeat as a current location update", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        recordDriverLocationEvent: vi
+          .fn()
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:05.000Z",
+          }),
+      });
+
+    const response = await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: "evt-001",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1001,
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+        {
+          eventId: "evt-002",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: "task-002",
+          sequenceNo: 1002,
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          lat: 24.148,
+          lng: 120.674,
+          accuracyM: 9,
+          workState: "assigned",
+          appState: "background",
+          transportMode: "background",
+          networkType: "wifi",
+        },
+      ],
+    });
+
+    expect(response.items).toEqual([
+      {
+        eventId: "evt-001",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: true,
+        serverReceivedAt: "2026-06-20T06:00:00.000Z",
+      },
+      {
+        eventId: "evt-002",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: false,
+        serverReceivedAt: "2026-06-20T06:00:05.000Z",
+      },
+    ]);
+    expect(
+      regulatoryRegistryRepository.recordDriverLocationEvent,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      {
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        updatedAt: "2026-06-20T06:00:00.000Z",
+      },
+    ]);
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        currentLocation: expect.objectContaining({
+          recordedAt: "2026-06-20T06:00:00.000Z",
+        }),
+        currentVehicleId: "veh-demo-001",
+        currentTaskId: null,
+        trackingState: "available",
+        appState: "foreground",
+        transportMode: "foreground",
+        networkType: "cellular",
+        lastEventId: "evt-002",
+        lastSequenceNo: 1002,
+        lastHeartbeatRecordedAt: "2026-06-20T06:00:00.000Z",
+        lastHeartbeatReceivedAt: "2026-06-20T06:00:05.000Z",
+        lastSuccessfulUploadAt: "2026-06-20T06:00:05.000Z",
+      }),
+    );
+  });
+
+  it("keeps lastHeartbeat metadata aligned to the latest upload when an older event arrives out of order", async () => {
+    const { service } = createService({
+      isEnabled: vi.fn(() => true),
+      recordDriverLocationEvent: vi
+        .fn()
+        .mockResolvedValueOnce({
+          duplicate: false,
+          currentLocationUpdated: true,
+          serverReceivedAt: "2026-06-20T06:00:00.000Z",
+        })
+        .mockResolvedValueOnce({
+          duplicate: false,
+          currentLocationUpdated: false,
+          serverReceivedAt: "2026-06-20T06:00:05.000Z",
+        }),
+    });
+
+    await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: "evt-newer",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: "task-newer",
+          sequenceNo: 2002,
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 8,
+          workState: "assigned",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+        {
+          eventId: "evt-older-uploaded-later",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 2003,
+          recordedAt: "2026-06-20T05:59:00.000Z",
+          lat: 24.147,
+          lng: 120.673,
+          accuracyM: 12,
+          workState: "available",
+          appState: "background",
+          transportMode: "background",
+          networkType: "wifi",
+        },
+      ],
+    });
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        currentLocation: expect.objectContaining({
+          recordedAt: "2026-06-20T06:00:00.000Z",
+        }),
+        currentTaskId: "task-newer",
+        trackingState: "assigned",
+        lastEventId: "evt-older-uploaded-later",
+        lastSequenceNo: 2003,
+        lastHeartbeatRecordedAt: "2026-06-20T05:59:00.000Z",
+        lastHeartbeatReceivedAt: "2026-06-20T06:00:05.000Z",
+        lastSuccessfulUploadAt: "2026-06-20T06:00:05.000Z",
+      }),
+    );
+  });
+
+  it("rejects heartbeat batches larger than 100 items", async () => {
+    const { service } = createService({
+      isEnabled: vi.fn(() => true),
+      recordDriverLocationEvent: vi.fn(),
+    });
+
+    await expect(
+      service.recordDriverLocationBatch({
+        items: Array.from({ length: 101 }, (_, index) => ({
+          eventId: `evt-${index}`,
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: null,
+          taskId: null,
+          sequenceNo: index,
+          recordedAt: "2026-06-20T05:59:59.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        })),
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: "BATCH_LIMIT_EXCEEDED",
+        }),
+      }),
+    });
+  });
+
+  it("classifies fresh tracking status from the latest current heartbeat context", async () => {
+    const { service } = createService({
+      isEnabled: vi.fn(() => true),
+      recordDriverLocationEvent: vi.fn().mockResolvedValue({
+        duplicate: false,
+        currentLocationUpdated: true,
+        serverReceivedAt: new Date().toISOString(),
+      }),
+    });
+
+    await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: "evt-fresh",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: "task-001",
+          sequenceNo: 2001,
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 8,
+          workState: "assigned",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+      ],
+    });
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        locationFreshness: "fresh",
+        currentVehicleId: "veh-demo-001",
+        currentTaskId: "task-001",
+        trackingState: "assigned",
+        lastEventId: "evt-fresh",
+        lastSequenceNo: 2001,
+      }),
+    );
+  });
+
+  it("classifies missing tracking status when the driver has no known location", async () => {
+    const { service } = createService();
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        locationFreshness: "missing",
+        currentLocation: null,
+        trackingState: null,
+        lastSuccessfulUploadAt: null,
+      }),
+    );
+  });
+
+  it("classifies stale and low-accuracy tracking status from persisted snapshots", async () => {
+    const staleUpdatedAt = new Date(Date.now() - 120_000).toISOString();
+    const { service, regulatoryRegistryRepository } = createService({
+      isEnabled: vi.fn(() => true),
+      findLatestDriverLocation: vi
+        .fn()
+        .mockResolvedValueOnce({
+          driverId: "drv-demo-001",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 12,
+          recordedAt: "2026-06-20T05:58:00.000Z",
+          updatedAt: staleUpdatedAt,
+        })
+        .mockResolvedValueOnce({
+          driverId: "drv-demo-001",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 150,
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          updatedAt: new Date().toISOString(),
+        }),
+      findDriverHeartbeatEventByRecordedAt: vi.fn().mockResolvedValue({
+        eventId: "evt-db",
+        deviceId: "device-db",
+        driverId: "drv-demo-001",
+        vehicleId: null,
+        taskId: null,
+        sequenceNo: 3001,
+        recordedAt: "2026-06-20T05:58:00.000Z",
+        receivedAt: staleUpdatedAt,
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 12,
+        workState: "available",
+        appState: "background",
+        transportMode: "background",
+        networkType: "cellular",
+      }),
+      findLatestDriverHeartbeatEvent: vi.fn().mockResolvedValue({
+        eventId: "evt-db",
+        deviceId: "device-db",
+        driverId: "drv-demo-001",
+        vehicleId: null,
+        taskId: null,
+        sequenceNo: 3001,
+        recordedAt: "2026-06-20T05:58:00.000Z",
+        receivedAt: staleUpdatedAt,
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 12,
+        workState: "available",
+        appState: "background",
+        transportMode: "background",
+        networkType: "cellular",
+      }),
+    });
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        locationFreshness: "stale",
+        lastEventId: "evt-db",
+      }),
+    );
+
+    regulatoryRegistryRepository.findDriverHeartbeatEventByRecordedAt.mockResolvedValueOnce(
+      {
+        eventId: "evt-db-2",
+        deviceId: "device-db",
+        driverId: "drv-demo-001",
+        vehicleId: null,
+        taskId: null,
+        sequenceNo: 3002,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        receivedAt: new Date().toISOString(),
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 150,
+        workState: "available",
+        appState: "background",
+        transportMode: "background",
+        networkType: "cellular",
+      },
+    );
+    regulatoryRegistryRepository.findLatestDriverHeartbeatEvent.mockResolvedValueOnce(
+      {
+        eventId: "evt-db-2",
+        deviceId: "device-db",
+        driverId: "drv-demo-001",
+        vehicleId: null,
+        taskId: null,
+        sequenceNo: 3002,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        receivedAt: new Date().toISOString(),
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 150,
+        workState: "available",
+        appState: "background",
+        transportMode: "background",
+        networkType: "cellular",
+      },
+    );
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        locationFreshness: "low_accuracy",
+        lastEventId: "evt-db-2",
+      }),
+    );
+  });
+  it("reconstructs current tracking context from the persisted current-location timestamp after restart", async () => {
+    const firstReceivedAt = "2026-06-20T06:00:00.000Z";
+    const secondReceivedAt = "2026-06-20T06:00:05.000Z";
+    const { service, regulatoryRegistryRepository } = createService({
+      isEnabled: vi.fn(() => true),
+      findLatestDriverLocation: vi.fn().mockResolvedValue({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        updatedAt: firstReceivedAt,
+      }),
+      findDriverHeartbeatEventByRecordedAt: vi.fn().mockResolvedValue({
+        eventId: "evt-001",
+        deviceId: "device-001",
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        taskId: null,
+        sequenceNo: 1001,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        receivedAt: firstReceivedAt,
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        workState: "available",
+        appState: "foreground",
+        transportMode: "foreground",
+        networkType: "cellular",
+      }),
+      findLatestDriverHeartbeatEvent: vi.fn().mockResolvedValue({
+        eventId: "evt-002",
+        deviceId: "device-001",
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        taskId: "task-002",
+        sequenceNo: 1002,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        receivedAt: secondReceivedAt,
+        lat: 24.148,
+        lng: 120.674,
+        accuracyM: 18,
+        workState: "assigned",
+        appState: "background",
+        transportMode: "background",
+        networkType: "wifi",
+      }),
+    });
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        currentTaskId: null,
+        trackingState: "available",
+        appState: "foreground",
+        transportMode: "foreground",
+        networkType: "cellular",
+        lastEventId: "evt-002",
+        lastSequenceNo: 1002,
+        lastHeartbeatReceivedAt: secondReceivedAt,
+      }),
+    );
+
+    expect(
+      regulatoryRegistryRepository.findDriverHeartbeatEventByRecordedAt,
+    ).toHaveBeenCalledWith(
+      "drv-demo-001",
+      "2026-06-20T06:00:00.000Z",
+      firstReceivedAt,
+    );
   });
 });
