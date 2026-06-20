@@ -27,6 +27,7 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { FleetPartnerService } from "./fleet-partner.service";
+import { SupplyReadinessService } from "./supply-readiness.service";
 import { SupplyReviewService } from "./supply-review.service";
 
 @Controller()
@@ -34,6 +35,7 @@ export class FleetPartnerController {
   constructor(
     private readonly fleetPartnerService: FleetPartnerService,
     private readonly supplyReviewService: SupplyReviewService,
+    private readonly supplyReadinessService: SupplyReadinessService,
   ) {}
 
   private requireFleetPartnerId(fleetPartnerId?: string) {
@@ -357,6 +359,51 @@ export class FleetPartnerController {
         this.fleetPartnerService.listPortalVehicles(
           this.requireFleetPartnerId(fleetPartnerId),
         ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/readiness")
+  async listPortalReadiness(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        await this.supplyReadinessService.listFleetPartnerReadiness(
+          this.requireFleetPartnerId(fleetPartnerId),
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/readiness/drivers/:driverId")
+  async getPortalDriverReadiness(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("driverId") driverId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplyReadinessService.getDriverReadiness(
+        this.requireFleetPartnerId(fleetPartnerId),
+        driverId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/readiness/vehicles/:vehicleId")
+  async getPortalVehicleReadiness(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Param("vehicleId") vehicleId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplyReadinessService.getVehicleReadiness(
+        this.requireFleetPartnerId(fleetPartnerId),
+        vehicleId,
       ),
       requestId,
     );
