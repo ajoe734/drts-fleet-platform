@@ -1,6 +1,14 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { DispatchDailyRecord } from "@drts/contracts";
+import type {
+  ComplaintCaseRecord,
+  DispatchAssignmentRecord,
+  DispatchDailyRecord,
+  DispatchJobRecord,
+  DispatchTraceLogRecord,
+  DriverTaskRecord,
+  OwnedOrderRecord,
+} from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 
@@ -32,6 +40,10 @@ type DispatchDailyRecordRow = {
   generated_at: string;
 };
 
+type JsonRecordRow = {
+  record: unknown;
+};
+
 export type DailyDispatchRecordQuery = {
   serviceDate?: string;
   serviceDateFrom?: string;
@@ -42,6 +54,15 @@ export type DailyDispatchRecordQuery = {
   partnerId?: string;
   serviceProductCode?: string;
   finalStatus?: string;
+};
+
+export type DispatchDailyRecordSource = {
+  orders: OwnedOrderRecord[];
+  dispatchJobs: DispatchJobRecord[];
+  dispatchAssignments: DispatchAssignmentRecord[];
+  driverTasks: DriverTaskRecord[];
+  dispatchTraceLogs: DispatchTraceLogRecord[];
+  complaintCases: ComplaintCaseRecord[];
 };
 
 @Injectable()
@@ -149,6 +170,104 @@ export class ReportingRepository {
         ),
       ),
     );
+  }
+
+  async loadDailyDispatchRecordSource(): Promise<DispatchDailyRecordSource> {
+    if (!this.isEnabled()) {
+      return {
+        orders: [],
+        dispatchJobs: [],
+        dispatchAssignments: [],
+        driverTasks: [],
+        dispatchTraceLogs: [],
+        complaintCases: [],
+      };
+    }
+
+    const [
+      ordersResult,
+      dispatchJobsResult,
+      dispatchAssignmentsResult,
+      driverTasksResult,
+      dispatchTraceLogsResult,
+      complaintCasesResult,
+    ] = await Promise.all([
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM ops.phase1_owned_orders
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM ops.phase1_dispatch_jobs
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM ops.phase1_dispatch_assignments
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM ops.phase1_driver_tasks
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM ops.phase1_dispatch_trace_logs
+          ORDER BY created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM crm.phase1_complaint_cases
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+    ]);
+
+    return {
+      orders: ordersResult.rows.map((row) =>
+        this.parseRecord<OwnedOrderRecord>(row.record, "ops.phase1_owned_orders"),
+      ),
+      dispatchJobs: dispatchJobsResult.rows.map((row) =>
+        this.parseRecord<DispatchJobRecord>(
+          row.record,
+          "ops.phase1_dispatch_jobs",
+        ),
+      ),
+      dispatchAssignments: dispatchAssignmentsResult.rows.map((row) =>
+        this.parseRecord<DispatchAssignmentRecord>(
+          row.record,
+          "ops.phase1_dispatch_assignments",
+        ),
+      ),
+      driverTasks: driverTasksResult.rows.map((row) =>
+        this.parseRecord<DriverTaskRecord>(row.record, "ops.phase1_driver_tasks"),
+      ),
+      dispatchTraceLogs: dispatchTraceLogsResult.rows.map((row) =>
+        this.parseRecord<DispatchTraceLogRecord>(
+          row.record,
+          "ops.phase1_dispatch_trace_logs",
+        ),
+      ),
+      complaintCases: complaintCasesResult.rows.map((row) =>
+        this.parseRecord<ComplaintCaseRecord>(
+          row.record,
+          "crm.phase1_complaint_cases",
+        ),
+      ),
+    };
   }
 
   async listDailyDispatchRecords(
@@ -271,5 +390,13 @@ export class ReportingRepository {
       complaintCount: row.complaint_count,
       generatedAt: row.generated_at,
     };
+  }
+
+  private parseRecord<T>(record: unknown, source: string): T {
+    if (!record || typeof record !== "object") {
+      throw new Error(`Invalid persisted record loaded from ${source}`);
+    }
+
+    return record as T;
   }
 }
