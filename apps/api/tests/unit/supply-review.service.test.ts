@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { SupplyReviewService } from "../../src/modules/fleet-partner/supply-review.service";
 
 describe("SupplyReviewService", () => {
@@ -71,7 +74,16 @@ describe("SupplyReviewService", () => {
   });
 
   it("approves an in-review submission for a different reviewer", async () => {
-    const service = new SupplyReviewService();
+    const registryService = new RegulatoryRegistryService(
+      {
+        publishDriverLocationUpdated: () => undefined,
+        publishSupplyLifecycleUpdated: () => undefined,
+      } as never,
+      new AuditNotificationService(),
+      new DriverProfileService(new AuditNotificationService()),
+      undefined,
+    );
+    const service = new SupplyReviewService(registryService);
 
     const updated = await service.approveSubmission(
       "sup-sub-demo-002",
@@ -90,6 +102,10 @@ describe("SupplyReviewService", () => {
       reviewedBy: "platform-reviewer-003",
       reviewReasonCode: "all_documents_valid",
       reviewComment: "Approval completed.",
+      canonicalDriverId: expect.stringMatching(/^drv_/),
+      canonicalVehicleId: expect.stringMatching(/^veh_/),
+      canonicalContractId: expect.stringMatching(/^contract_/),
+      canonicalPolicyId: expect.stringMatching(/^policy_/),
     });
   });
 });

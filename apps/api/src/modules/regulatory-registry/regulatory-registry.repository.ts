@@ -17,6 +17,13 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+export type RegulatoryRegistryQueryExecutor = {
+  query<T extends { [key: string]: unknown }>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[] }>;
+};
+
 export type RegulatorySupplyPair = {
   vehicleId: string;
   driverId: string;
@@ -211,11 +218,25 @@ export class RegulatoryRegistryRepository {
       return;
     }
 
+    await this.persistChangesWithExecutor(this.databaseService!, changes);
+  }
+
+  async persistChangesWithExecutor(
+    executor: RegulatoryRegistryQueryExecutor,
+    changes: PersistRegulatoryRegistryChanges,
+  ) {
+    await this.persistChangesInternal(executor, changes);
+  }
+
+  private async persistChangesInternal(
+    executor: RegulatoryRegistryQueryExecutor,
+    changes: PersistRegulatoryRegistryChanges,
+  ) {
     const writes: Promise<unknown>[] = [];
 
     for (const vehicle of changes.vehicles ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_vehicles (
               vehicle_id,
@@ -251,7 +272,7 @@ export class RegulatoryRegistryRepository {
 
     for (const driver of changes.drivers ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_drivers (
               driver_id,
@@ -284,7 +305,7 @@ export class RegulatoryRegistryRepository {
 
     for (const pair of changes.supplyPairs ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_supply_pairs (
               pair_id,
@@ -317,7 +338,7 @@ export class RegulatoryRegistryRepository {
 
     for (const contract of changes.contracts ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_contracts (
               contract_id,
@@ -350,7 +371,7 @@ export class RegulatoryRegistryRepository {
 
     for (const policy of changes.policies ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_policies (
               policy_id,
@@ -383,7 +404,7 @@ export class RegulatoryRegistryRepository {
 
     for (const exclusivity of changes.exclusivities ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO reg.phase1_registry_exclusivities (
               vehicle_id,

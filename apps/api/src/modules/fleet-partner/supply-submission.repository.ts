@@ -155,6 +155,12 @@ export type SupplySubmissionQueryExecutor = {
   ): Promise<QueryResult<T>>;
 };
 
+export type SubmissionApprovalArtifacts = {
+  driverDraft: DriverSupplyDraft | null;
+  vehicleDraft: VehicleSupplyDraft | null;
+  documents: SupplyDocumentRecord[];
+};
+
 export type TransitionSubmissionStatusParams = {
   submissionId: string;
   fleetPartnerId: string;
@@ -453,6 +459,58 @@ export class SupplySubmissionRepository {
         allowedCurrentStatuses: [...params.allowedCurrentStatuses],
       },
     );
+  }
+
+  async loadApprovalArtifacts(
+    executor: SupplySubmissionQueryExecutor,
+    submissionId: string,
+  ): Promise<SubmissionApprovalArtifacts> {
+    const [driverDraftResult, vehicleDraftResult, documentsResult] =
+      await Promise.all([
+        this.loadExecutorQuery<DriverSupplyDraftRow>(
+          executor,
+          "fleet.driver_supply_drafts",
+          `
+            SELECT *
+            FROM fleet.driver_supply_drafts
+            WHERE submission_id = $1
+            LIMIT 1
+          `,
+          [submissionId],
+        ),
+        this.loadExecutorQuery<VehicleSupplyDraftRow>(
+          executor,
+          "fleet.vehicle_supply_drafts",
+          `
+            SELECT *
+            FROM fleet.vehicle_supply_drafts
+            WHERE submission_id = $1
+            LIMIT 1
+          `,
+          [submissionId],
+        ),
+        this.loadExecutorQuery<SupplyDocumentRow>(
+          executor,
+          "fleet.supply_documents",
+          `
+            SELECT *
+            FROM fleet.supply_documents
+            WHERE submission_id = $1
+            ORDER BY uploaded_at DESC, document_id
+          `,
+          [submissionId],
+        ),
+      ]);
+
+    return {
+      driverDraft: driverDraftResult.rows[0]
+        ? this.mapDriverDraftRow(driverDraftResult.rows[0])
+        : null,
+      vehicleDraft: vehicleDraftResult.rows[0]
+        ? this.mapVehicleDraftRow(vehicleDraftResult.rows[0])
+        : null,
+      documents: documentsResult.rows.map((row) => this.mapDocumentRow(row)),
+    };
   }
 
   async assertVehiclePlateAvailable(
