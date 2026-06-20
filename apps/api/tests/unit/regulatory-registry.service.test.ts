@@ -465,6 +465,44 @@ describe("RegulatoryRegistryService", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("does not let the legacy driver location endpoint regress the in-memory latest snapshot", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        upsertDriverLocation: vi.fn().mockResolvedValue(true),
+      });
+
+    await service.recordDriverLocation({
+      driverId: "drv-demo-001",
+      lat: 24.1477,
+      lng: 120.6736,
+      accuracyM: 6,
+      recordedAt: "2026-06-20T06:00:00.000Z",
+    });
+
+    await service.recordDriverLocation({
+      driverId: "drv-demo-001",
+      lat: 24.147,
+      lng: 120.67,
+      accuracyM: 9,
+      recordedAt: "2026-06-20T05:59:00.000Z",
+    });
+
+    expect(regulatoryRegistryRepository.upsertDriverLocation).toHaveBeenCalledTimes(2);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+      }),
+    ]);
+  });
+
   it("acknowledges duplicate heartbeats and only publishes newer current locations", async () => {
     const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
       createService({
@@ -551,6 +589,95 @@ describe("RegulatoryRegistryService", () => {
         lng: 120.6736,
         accuracyM: 6,
         recordedAt: "2026-06-20T05:59:59.000Z",
+        updatedAt: "2026-06-20T06:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("does not acknowledge an out-of-order batch heartbeat as a current location update", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        recordDriverLocationEvent: vi
+          .fn()
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:05.000Z",
+          }),
+      });
+
+    const response = await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: "evt-001",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1001,
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+        {
+          eventId: "evt-002",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1002,
+          recordedAt: "2026-06-20T05:59:00.000Z",
+          lat: 24.147,
+          lng: 120.67,
+          accuracyM: 9,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+      ],
+    });
+
+    expect(response.items).toEqual([
+      {
+        eventId: "evt-001",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: true,
+        serverReceivedAt: "2026-06-20T06:00:00.000Z",
+      },
+      {
+        eventId: "evt-002",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: false,
+        serverReceivedAt: "2026-06-20T06:00:05.000Z",
+      },
+    ]);
+    expect(
+      regulatoryRegistryRepository.recordDriverLocationEvent,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      {
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T06:00:00.000Z",
         updatedAt: "2026-06-20T06:00:00.000Z",
       },
     ]);

@@ -675,17 +675,20 @@ export class RegulatoryRegistryService implements OnModuleInit {
           : { accuracyM: command.accuracyM }),
       });
 
-    if (currentLocationUpdated) {
-      const updatedAt = new Date().toISOString();
-      const latestLocation = {
+    if (
+      currentLocationUpdated &&
+      this.applyLatestDriverLocation({
         driverId,
         lat: command.lat,
         lng: command.lng,
         accuracyM: command.accuracyM ?? null,
         recordedAt,
-        updatedAt,
-      };
-      this.setLatestDriverLocation(latestLocation);
+        updatedAt: new Date().toISOString(),
+      })
+    ) {
+      const latestLocation = this.cloneDriverLocation(
+        this.latestDriverLocations.get(driverId)!,
+      );
       this.opsDispatchEventsService.publishDriverLocationUpdated(
         latestLocation,
         undefined,
@@ -740,8 +743,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
         heartbeat,
       );
 
-    if (persistedResult.currentLocationUpdated) {
-      this.setLatestDriverLocation({
+    const currentLocationUpdated =
+      persistedResult.currentLocationUpdated &&
+      this.applyLatestDriverLocation({
         driverId: heartbeat.driverId,
         lat: heartbeat.lat,
         lng: heartbeat.lng,
@@ -749,15 +753,13 @@ export class RegulatoryRegistryService implements OnModuleInit {
         recordedAt: heartbeat.recordedAt,
         updatedAt: persistedResult.serverReceivedAt,
       });
+
+    if (currentLocationUpdated) {
+      const latestLocation = this.cloneDriverLocation(
+        this.latestDriverLocations.get(heartbeat.driverId)!,
+      );
       this.opsDispatchEventsService.publishDriverLocationUpdated(
-        {
-          driverId: heartbeat.driverId,
-          lat: heartbeat.lat,
-          lng: heartbeat.lng,
-          accuracyM: heartbeat.accuracyM,
-          recordedAt: heartbeat.recordedAt,
-          updatedAt: persistedResult.serverReceivedAt,
-        },
+        latestLocation,
         undefined,
       );
     }
@@ -766,7 +768,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       eventId: heartbeat.eventId,
       accepted: true,
       duplicate: persistedResult.duplicate,
-      currentLocationUpdated: persistedResult.currentLocationUpdated,
+      currentLocationUpdated,
       serverReceivedAt: persistedResult.serverReceivedAt,
     };
   }
@@ -2182,6 +2184,19 @@ export class RegulatoryRegistryService implements OnModuleInit {
       location.driverId,
       this.cloneDriverLocation(location),
     );
+  }
+
+  private applyLatestDriverLocation(location: DriverLocationSnapshot): boolean {
+    const existing = this.latestDriverLocations.get(location.driverId);
+    if (
+      existing &&
+      Date.parse(existing.recordedAt) > Date.parse(location.recordedAt)
+    ) {
+      return false;
+    }
+
+    this.setLatestDriverLocation(location);
+    return true;
   }
 
   private resolveCandidateEta(
