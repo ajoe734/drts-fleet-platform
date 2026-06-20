@@ -93,6 +93,22 @@ read_submission() { # submission-id
   SUB_SUBMITTER=$(json_get '.data.submitted_by')
 }
 
+# Picks a submission_id from the current list response ($RESP_BODY), scoped to this
+# scenario's FLEET_PARTNER_ID and preferring a row already in the state the calling
+# leg expects. Selecting purely by type with [0] (the prior behaviour) is unsafe on a
+# shared stack: with multiple fleets it can stitch the review/approve legs to one fleet
+# and readiness to another, and with extra rows it can self-gate on an already-advanced
+# submission even when a valid seed exists later in the list. The fallback to the first
+# in-fleet row of that type keeps the per-leg state guards (and their GATED messaging)
+# meaningful when no row is in the preferred state.
+pick_submission() { # submission-type preferred-status
+  echo "$RESP_BODY" | jq -r --arg type "$1" --arg fleet "$FLEET_PARTNER_ID" --arg want "$2" '
+    [.data.items[]? | select(.submission_type == $type and .fleet_partner_id == $fleet)] as $pool
+    | (($pool | map(select(.status == $want)) | .[0].submission_id)
+       // ($pool | .[0].submission_id)
+       // empty)'
+}
+
 chain_init
 
 echo -e "\n${BOLD}════════════════════════════════════════════════════════${RESET}"
@@ -110,10 +126,10 @@ use_admin_actor
 http_call GET "/admin/supply-review/submissions"
 assert_status "200"
 
-DRIVER_SUB=$(echo "$RESP_BODY" | jq -r \
-  '[.data.items[]? | select(.submission_type=="driver_onboarding")][0].submission_id // empty')
-VEHICLE_SUB=$(echo "$RESP_BODY" | jq -r \
-  '[.data.items[]? | select(.submission_type=="vehicle_onboarding")][0].submission_id // empty')
+# Scope to this fleet and prefer the state each leg drives: the driver leg starts a
+# review from 'submitted', the vehicle leg approves from 'in_review'.
+DRIVER_SUB=$(pick_submission "driver_onboarding" "submitted")
+VEHICLE_SUB=$(pick_submission "vehicle_onboarding" "in_review")
 
 log_info "driver_onboarding submission: ${DRIVER_SUB:-<none>}"
 log_info "vehicle_onboarding submission: ${VEHICLE_SUB:-<none>}"
