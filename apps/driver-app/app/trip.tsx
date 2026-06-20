@@ -70,7 +70,10 @@ import {
 } from "@/lib/driver-location-heartbeat";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatMoney } from "@/lib/money";
-import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
+import {
+  formatDriverTaskServiceProductLabel,
+  formatDriverTaskStatusLabel,
+} from "@/lib/operational-labels";
 import {
   getTripExperienceState,
   getPrimaryTripAction,
@@ -1109,6 +1112,13 @@ export default function TripScreen() {
     : recordingActive
       ? "追蹤 · 開啟"
       : `追蹤 · ${trackingDescriptor.label}`;
+  const serviceProductLabel = formatDriverTaskServiceProductLabel({
+    serviceProductCode:
+      taskDetail?.serviceProductCode ?? orderDetail?.serviceProductCode ?? null,
+    serviceBucket: orderDetail?.serviceBucket ?? null,
+    businessDispatchSubtype: orderDetail?.businessDispatchSubtype ?? null,
+    dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
+  });
   const proofSummaryItems = [
     {
       label: "照片需求",
@@ -1884,6 +1894,9 @@ export default function TripScreen() {
                 tone={isForwardedTrip ? "info" : "accent"}
               >
                 {isForwardedTrip ? `平台 ${platformLabel}` : "自營派單"}
+              </Pill>
+              <Pill theme={driverCanvasTheme} tone="neutral">
+                {serviceProductLabel}
               </Pill>
               <Pill theme={driverCanvasTheme} tone="neutral">
                 {formatDriverTaskStatusLabel(taskDetail.status)}
