@@ -152,8 +152,9 @@ Concrete next step:
 - `2026-06-20T15:14:49Z` reviewer approval from `Codex2` confirmed the
   diagnosis, the pushed helper commit
   `7794d85a60bc3aa4038e95e4a054c7bbe5ecd84d`, and the parent next-step update.
-- This helper task closes out at branch level only with
-  `INTEGRATION_STATUS=branch_pushed`.
+- This helper task is support-only history triage, so closeout records
+  `INTEGRATION_STATUS=not_applicable` rather than a product-branch integration
+  state.
 - No PR, merge to `dev`, CI promotion, or dev deployment is part of this
   history-triage helper branch.
 
