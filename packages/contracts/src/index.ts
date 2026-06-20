@@ -1,6 +1,5 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
 import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
@@ -2524,30 +2523,17 @@ export interface DispatchCandidate {
   operatingArea: string;
   serviceBuckets: Phase1ServiceBucket[];
   etaMinutes: number;
-  currentLocation?: DriverLocationSnapshot | null;
-  serviceProductContext?: DispatchCandidateServiceProductContext;
-  eligibilityDecision?: EligibilityDecision;
-  hardReasonCodes?: string[];
-  softReasonCodes?: string[];
-  missingRequirements?: string[];
   locationState?: DispatchCandidateLocationState;
+  currentLocation?: DriverLocationSnapshot | null;
 }
 
 export const DISPATCH_CANDIDATE_LOCATION_STATES = [
-  "fresh",
+  "live",
   "stale",
-  "low_accuracy",
-  "missing",
+  "no_location",
 ] as const;
 export type DispatchCandidateLocationState =
   (typeof DISPATCH_CANDIDATE_LOCATION_STATES)[number];
-
-export interface DispatchCandidateServiceProductContext {
-  serviceProductId: string;
-  serviceProductCode: ServiceProductType;
-  policyVersion: string;
-  evaluatedAt: string;
-}
 
 export interface DispatchJobRecord {
   dispatchJobId: string;

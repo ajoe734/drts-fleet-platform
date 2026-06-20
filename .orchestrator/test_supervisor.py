@@ -737,8 +737,6 @@ class DiskGuardTests(unittest.TestCase):
                     "worktree_retention_days": 3,
                     "max_worktrees_removed_per_tick": 20,
                     "remove_dirty_worktrees": False,
-                    "archive_dirty_worktrees": False,
-                    "force_remove_dirty_worktrees_after_archive": False,
                 },
             )
 
@@ -746,74 +744,6 @@ class DiskGuardTests(unittest.TestCase):
             self.assertFalse(clean.exists())
             self.assertTrue(dirty.exists())
             self.assertTrue(active.exists())
-
-    def test_prunes_stale_dirty_worktree_after_archiving_changes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "repo"
-            archive_root = Path(tmpdir) / "archive"
-            root.mkdir()
-            self._init_repo(root)
-            base = root / ".artifacts/worktrees/auto"
-            dirty = base / "codex-old-dirty"
-            _git(root, "worktree", "add", "-b", "codex/old-dirty", str(dirty), "dev")
-            dirty_path = str(dirty.resolve())
-            (dirty / "scratch.txt").write_text("untracked work\n", encoding="utf-8")
-            old = time.time() - 4 * 86400
-            os.utime(dirty, (old, old))
-
-            result = supervisor.prune_stale_worker_worktrees(
-                self._repo_config(root),
-                {"workers": {}},
-                {
-                    "worktree_retention_days": 3,
-                    "max_worktrees_removed_per_tick": 20,
-                    "archive_root": str(archive_root),
-                },
-            )
-
-            self.assertEqual(result["removed"], 1)
-            self.assertEqual(result["archived"], 1)
-            self.assertFalse(dirty.exists())
-            bundles = sorted(archive_root.iterdir())
-            self.assertEqual(len(bundles), 1)
-            manifest = json.loads((bundles[0] / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["worktree_path"], dirty_path)
-            self.assertEqual((bundles[0] / "files" / "scratch.txt").read_text(encoding="utf-8"), "untracked work\n")
-
-    def test_releases_inactive_auto_worktrees_without_waiting_for_retention(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir) / "repo"
-            archive_root = Path(tmpdir) / "archive"
-            root.mkdir()
-            self._init_repo(root)
-            base = root / ".artifacts/worktrees/auto"
-            completed = base / "codex-completed"
-            running = base / "codex-running"
-            _git(root, "worktree", "add", "-b", "codex/completed", str(completed), "dev")
-            _git(root, "worktree", "add", "-b", "codex/running", str(running), "dev")
-            (completed / "scratch.txt").write_text("left behind\n", encoding="utf-8")
-
-            result = supervisor.release_inactive_worker_worktrees(
-                self._repo_config(root),
-                {
-                    "workers": {
-                        "completed-run": {
-                            "status": "completed",
-                            "workspace_root": str(completed),
-                        },
-                        "running-run": {
-                            "status": "running",
-                            "workspace_root": str(running),
-                        },
-                    }
-                },
-                {"archive_root": str(archive_root)},
-            )
-
-            self.assertEqual(result["removed"], 1)
-            self.assertEqual(result["archived"], 1)
-            self.assertFalse(completed.exists())
-            self.assertTrue(running.exists())
 
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):

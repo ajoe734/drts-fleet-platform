@@ -3,7 +3,6 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { VehicleEligibilityMatrixRecord } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
-import type { RuntimeEligibilityDecisionRecord } from "./runtime-eligibility.types";
 
 type JsonRecordRow = {
   record: unknown;
@@ -92,54 +91,6 @@ export class VehicleEligibilityRepository {
     } finally {
       client.release();
     }
-  }
-
-  async insertRuntimeEligibilityDecision(
-    record: RuntimeEligibilityDecisionRecord,
-  ) {
-    if (!this.isEnabled()) {
-      return;
-    }
-
-    await this.databaseService!.query(
-      `
-        INSERT INTO mobility.runtime_eligibility_decisions (
-          decision_id,
-          order_id,
-          dispatch_job_id,
-          driver_id,
-          vehicle_id,
-          service_product_id,
-          service_product_code,
-          policy_version,
-          decision,
-          hard_reason_codes,
-          soft_reason_codes,
-          missing_requirements,
-          location_state,
-          evaluated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9,
-          $10::jsonb, $11::jsonb, $12::jsonb, $13, $14
-        )
-      `,
-      [
-        record.decisionId,
-        record.orderId,
-        record.dispatchJobId,
-        record.driverId,
-        record.vehicleId,
-        record.serviceProductId,
-        record.serviceProductCode,
-        record.policyVersion,
-        record.decision,
-        JSON.stringify(record.hardReasonCodes),
-        JSON.stringify(record.softReasonCodes),
-        JSON.stringify(record.missingRequirements),
-        record.locationState,
-        record.evaluatedAt,
-      ],
-    );
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

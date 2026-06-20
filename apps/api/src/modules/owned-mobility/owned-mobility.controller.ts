@@ -443,17 +443,13 @@ export class OwnedMobilityController {
 
   @Get("dispatch/tasks/:dispatchJobId/candidates")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  async listDispatchCandidates(
+  listDispatchCandidates(
     @Param("dispatchJobId") dispatchJobId: string,
-    @Query("includeIneligible") includeIneligible?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: await this.ownedMobilityService.listDispatchCandidates(
-          dispatchJobId,
-          includeIneligible === "true",
-        ),
+        items: this.ownedMobilityService.listDispatchCandidates(dispatchJobId),
       },
       requestId,
     );

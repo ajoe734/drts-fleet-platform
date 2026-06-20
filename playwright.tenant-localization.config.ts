@@ -49,7 +49,7 @@ export default defineConfig({
     },
     {
       command:
-        "pnpm --filter @drts/ui-tokens build && cd apps/enterprise-dispatch-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3310",
+        "pnpm --filter @drts/ui-tokens build && cd apps/enterprise-dispatch-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --hostname 127.0.0.1 --port 3310",
       url: "http://127.0.0.1:3310",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,

@@ -286,7 +286,7 @@ describe("regulatory registry service", () => {
   });
 
   it("writes driver location heartbeats through the repository", async () => {
-    const upsertDriverLocation = vi.fn(async () => true);
+    const upsertDriverLocation = vi.fn(async () => undefined);
     const repository = {
       isEnabled: vi.fn(() => true),
       upsertDriverLocation,
@@ -316,7 +316,7 @@ describe("regulatory registry service", () => {
   it("rejects invalid heartbeat timestamps before persistence", async () => {
     const repository = {
       isEnabled: vi.fn(() => true),
-      upsertDriverLocation: vi.fn(async () => true),
+      upsertDriverLocation: vi.fn(async () => undefined),
     } as unknown as RegulatoryRegistryRepository;
     const regulatoryRegistryService =
       createRegulatoryRegistryService(repository);
@@ -334,7 +334,7 @@ describe("regulatory registry service", () => {
   it("rejects invalid heartbeat coordinates before persistence", async () => {
     const repository = {
       isEnabled: vi.fn(() => true),
-      upsertDriverLocation: vi.fn(async () => true),
+      upsertDriverLocation: vi.fn(async () => undefined),
     } as unknown as RegulatoryRegistryRepository;
     const regulatoryRegistryService =
       createRegulatoryRegistryService(repository);
@@ -438,7 +438,7 @@ describe("regulatory registry service", () => {
         exclusivities: [],
       })),
       listLatestDriverLocations: vi.fn(async () => []),
-      upsertDriverLocation: vi.fn(async () => true),
+      upsertDriverLocation: vi.fn(async () => undefined),
       persistChanges: vi.fn(async () => undefined),
       reportPersistenceFailure: vi.fn(),
     } as unknown as RegulatoryRegistryRepository;

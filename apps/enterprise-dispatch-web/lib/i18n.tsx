@@ -29,10 +29,6 @@ const LanguageContext = createContext<LanguageContextValue>({
   setLocale: () => {},
 });
 
-function setDocumentLang(locale: Locale) {
-  document.documentElement.lang = locale === "zh" ? "zh-Hant" : "en";
-}
-
 export function LanguageProvider({
   children,
   defaultLocale = "zh",
@@ -49,27 +45,19 @@ export function LanguageProvider({
     ) as Locale | null;
     if (stored && stored in translations) {
       setLocaleState(stored);
-      setDocumentLang(stored);
       return;
     }
     setLocaleState(defaultLocale);
-    setDocumentLang(defaultLocale);
   }, [defaultLocale]);
 
   const setLocale = useCallback(
     (next: Locale) => {
-      setLocaleState((current) => {
-        if (current === next) {
-          return current;
-        }
-
-        localStorage.setItem(ENTERPRISE_LOCALE_COOKIE, next);
-        document.cookie = `${ENTERPRISE_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
-        setDocumentLang(next);
-        startTransition(() => {
-          router.refresh();
-        });
-        return next;
+      setLocaleState(next);
+      localStorage.setItem(ENTERPRISE_LOCALE_COOKIE, next);
+      document.cookie = `${ENTERPRISE_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
+      document.documentElement.lang = next === "zh" ? "zh-Hant" : "en";
+      startTransition(() => {
+        router.refresh();
       });
     },
     [router],

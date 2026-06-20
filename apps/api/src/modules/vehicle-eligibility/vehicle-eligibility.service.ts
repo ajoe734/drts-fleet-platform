@@ -34,9 +34,7 @@ type ServiceProductDefinition = {
   defaultProofRequirements: string[];
 };
 
-export type RuntimeServiceProductDefinition = ServiceProductDefinition;
-
-export type RuntimeVehicleCapability = VehicleEligibilityMatrixRecord & {
+type ResolvedVehicleCapability = VehicleEligibilityMatrixRecord & {
   vehicleId: string;
 };
 
@@ -51,12 +49,6 @@ export type DriverEligibleProductRecord = {
   timing: ServiceTiming;
   defaultProofRequirements: string[];
   eligibleVehicleIds: string[];
-};
-
-export type ActiveServiceProductRecord = {
-  serviceProduct: ServiceProductType;
-  serviceBucket: Phase1ServiceBucket;
-  timing: ServiceTiming;
 };
 
 type EligibleSupplyContext = {
@@ -418,23 +410,6 @@ export class VehicleEligibilityService implements OnModuleInit {
       .filter((entry) => entry.eligibleVehicleIds.length > 0);
   }
 
-  listActiveServiceProducts(): ActiveServiceProductRecord[] {
-    return this.listKnownServiceProducts()
-      .filter((entry) => entry.active)
-      .map((entry) => ({
-        serviceProduct: entry.serviceProduct,
-        serviceBucket: entry.serviceBucket,
-        timing: entry.timing,
-      }));
-  }
-
-  isVehicleEligibleForExactServiceProduct(
-    vehicleId: string,
-    serviceProduct: ServiceProductType,
-  ) {
-    return this.isVehicleEligibleForServiceProduct(vehicleId, serviceProduct);
-  }
-
   resolveServiceProductForOwnedOrder(
     order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
   ): ServiceProductType {
@@ -582,29 +557,6 @@ export class VehicleEligibilityService implements OnModuleInit {
     }
   }
 
-  getRuntimeServiceProductDefinition(
-    serviceProduct: ServiceProductType,
-  ): RuntimeServiceProductDefinition | null {
-    const definition = this.resolveServiceProductDefinition(serviceProduct);
-    return definition
-      ? {
-          ...definition,
-          allowedLicenseTypes: [...definition.allowedLicenseTypes],
-          defaultProofRequirements: [...definition.defaultProofRequirements],
-        }
-      : null;
-  }
-
-  resolveRuntimeVehicleCapability(
-    vehicleId: string,
-  ): RuntimeVehicleCapability | null {
-    try {
-      return { ...this.requireVehicleCapability(vehicleId) };
-    } catch {
-      return null;
-    }
-  }
-
   private isVehicleEligibleForServiceProduct(
     vehicleId: string,
     serviceProduct: ServiceProductType,
@@ -649,7 +601,7 @@ export class VehicleEligibilityService implements OnModuleInit {
 
   private requireVehicleCapability(
     vehicleId: string,
-  ): RuntimeVehicleCapability {
+  ): ResolvedVehicleCapability {
     const licenseType = VEHICLE_LICENSE_BY_ID[vehicleId];
     if (!licenseType) {
       throw new ApiRequestError(

@@ -1,7 +1,6 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
-  DispatchDailyRecord,
   FilingPackageRecord,
   OwnedOrderRecord,
   PartnerRevenueSummaryRowRecord,
@@ -44,10 +43,7 @@ type TenantMonthlyTripReportRow = {
   exportedAt: string;
 };
 
-type ReportJobRow =
-  | DispatchRecordingIndexRow
-  | DispatchDailyRecord
-  | TenantMonthlyTripReportRow;
+type ReportJobRow = DispatchRecordingIndexRow | TenantMonthlyTripReportRow;
 
 type ReportArtifactView = ReportArtifactRecord & {
   downloadMetadata: ControlledDownloadMetadata;

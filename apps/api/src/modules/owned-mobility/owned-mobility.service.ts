@@ -78,7 +78,6 @@ import {
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
-import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityTripCompletedEvent,
@@ -118,14 +117,6 @@ type CallRecordingAttachmentEvent = {
   endedAt: string | null;
   agentId: string | null;
   requestId?: string;
-};
-
-export type OwnedMobilityReportingSnapshot = {
-  orders: OwnedOrderRecord[];
-  dispatchJobs: DispatchJobRecord[];
-  dispatchAssignments: DispatchAssignmentRecord[];
-  driverTasks: DriverTaskRecord[];
-  dispatchTraceLogs: DispatchTraceLogRecord[];
 };
 
 type CallRecordingStateChangeEvent = {
@@ -228,8 +219,6 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly serviceProductService?: ServiceProductService,
     @Optional()
     private readonly eventEmitter?: EventEmitter2,
-    @Optional()
-    private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -2367,17 +2356,10 @@ export class OwnedMobilityService implements OnModuleInit {
       .map((traceLog) => this.cloneTraceLog(traceLog));
   }
 
-  async listDispatchCandidates(
-    dispatchJobId: string,
-    includeIneligible = false,
-  ): Promise<DispatchCandidate[]> {
+  listDispatchCandidates(dispatchJobId: string): DispatchCandidate[] {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-    const candidates = await this.listDispatchCandidatesWithEligibility(
-      dispatchJob,
-      order,
-      includeIneligible,
-    );
+    const candidates = this.listEligibleDispatchCandidates(order);
     return candidates.map((candidate) => ({ ...candidate }));
   }
 
@@ -3075,20 +3057,6 @@ export class OwnedMobilityService implements OnModuleInit {
       }
       return clone;
     });
-  }
-
-  getReportingSnapshot(): OwnedMobilityReportingSnapshot {
-    return {
-      orders: this.listOrders(),
-      dispatchJobs: this.dispatchJobs.map((job) => ({ ...job })),
-      dispatchAssignments: this.dispatchAssignments.map((assignment) => ({
-        ...assignment,
-      })),
-      driverTasks: this.listDriverTasks(),
-      dispatchTraceLogs: this.dispatchTraceLogs.map((traceLog) =>
-        this.cloneTraceLog(traceLog),
-      ),
-    };
   }
 
   streamDriverTaskEvents(driverId: string): Observable<MessageEvent> {
@@ -5057,67 +5025,6 @@ export class OwnedMobilityService implements OnModuleInit {
           order.serviceBucket,
           destination,
         );
-  }
-
-  private async listDispatchCandidatesWithEligibility(
-    dispatchJob: DispatchJobRecord,
-    order: OwnedOrderRecord,
-    includeIneligible: boolean,
-  ): Promise<DispatchCandidate[]> {
-    if (!this.vehicleEligibilityService || !this.runtimeEligibilityEvaluator) {
-      return this.listEligibleDispatchCandidates(order);
-    }
-
-    const destination = this.resolvePickupEtaDestination(order);
-    const serviceProduct =
-      this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(order);
-    const candidates = this.regulatoryRegistryService.getEligibleCandidates(
-      order.serviceBucket,
-      destination,
-    );
-    const sourcePlatform = this.forwarderSourceMap.get(order.orderId) ?? null;
-
-    const evaluatedCandidates = await Promise.all(
-      candidates.map(async (candidate) => {
-        const decision = await this.runtimeEligibilityEvaluator!.evaluate({
-          orderId: order.orderId,
-          dispatchJobId: dispatchJob.dispatchJobId,
-          driverId: candidate.driverId,
-          vehicleId: candidate.vehicleId,
-          serviceProductCode: serviceProduct,
-          sourcePlatform,
-          currentLocation: candidate.currentLocation ?? null,
-        });
-
-        return {
-          ...candidate,
-          serviceProductContext: {
-            serviceProductId: decision.serviceProductId,
-            serviceProductCode: decision.serviceProductCode,
-            policyVersion: decision.policyVersion,
-            evaluatedAt: decision.evaluatedAt,
-          },
-          eligibilityDecision: decision.decision,
-          hardReasonCodes: [...decision.hardReasonCodes],
-          softReasonCodes: [...decision.softReasonCodes],
-          missingRequirements: [...decision.missingRequirements],
-          locationState: decision.locationState,
-        } satisfies DispatchCandidate;
-      }),
-    );
-
-    if (includeIneligible) {
-      return evaluatedCandidates;
-    }
-
-    const visibleCandidates = evaluatedCandidates.filter(
-      (candidate) => candidate.eligibilityDecision !== "ineligible",
-    );
-    if (visibleCandidates.length > 0) {
-      return visibleCandidates;
-    }
-
-    return evaluatedCandidates;
   }
 
   private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {

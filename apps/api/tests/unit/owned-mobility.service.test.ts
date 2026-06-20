@@ -40,9 +40,6 @@ function createOwnedMobilityService(options?: {
   enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
   serviceProductOverrides?: Record<string, unknown>;
-  runtimeEligibilityEvaluator?: {
-    evaluate: ReturnType<typeof vi.fn>;
-  };
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
@@ -118,8 +115,6 @@ function createOwnedMobilityService(options?: {
     options?.tenantPartnerService,
     vehicleEligibilityService,
     serviceProductService,
-    undefined,
-    options?.runtimeEligibilityEvaluator as never,
   );
 
   return {
@@ -286,9 +281,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
     const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
 
-    await expect(
-      service.listDispatchCandidates(dispatchJob.dispatchJobId),
-    ).resolves.toEqual([
+    expect(service.listDispatchCandidates(dispatchJob.dispatchJobId)).toEqual([
       expect.objectContaining({
         driverId: "driver-nearby",
         etaMinutes: 3,
@@ -301,149 +294,6 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       }),
     ]);
   });
-
-  it("decorates candidate decisions and hides ineligible rows by default", async () => {
-    const runtimeEligibilityEvaluator = {
-      evaluate: vi
-        .fn()
-        .mockResolvedValueOnce({
-          serviceProductId: "svc-enterprise",
-          serviceProductCode: "enterprise_dispatch",
-          policyVersion:
-            "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-1@2026-06-20T00:00:00.000Z",
-          decision: "conditionally_eligible",
-          hardReasonCodes: [],
-          softReasonCodes: ["STALE_LOCATION"],
-          missingRequirements: ["photo"],
-          locationState: "stale",
-          evaluatedAt: "2026-06-20T12:00:00.000Z",
-        })
-        .mockResolvedValueOnce({
-          serviceProductId: "svc-enterprise",
-          serviceProductCode: "enterprise_dispatch",
-          policyVersion:
-            "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-2@2026-06-20T00:00:00.000Z",
-          decision: "ineligible",
-          hardReasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
-          softReasonCodes: [],
-          missingRequirements: [],
-          locationState: "fresh",
-          evaluatedAt: "2026-06-20T12:00:01.000Z",
-        }),
-    };
-    const { service } = createOwnedMobilityService({
-      enableVehicleEligibility: true,
-      candidates: [
-        {
-          driverId: "drv-eligible",
-          vehicleId: "veh-demo-001",
-          etaMinutes: 5,
-          operatingArea: "taipei",
-          serviceBuckets: ["business_dispatch"],
-        },
-        {
-          driverId: "drv-ineligible",
-          vehicleId: "veh-demo-002",
-          etaMinutes: 8,
-          operatingArea: "taipei",
-          serviceBuckets: ["business_dispatch"],
-        },
-      ],
-      runtimeEligibilityEvaluator,
-    });
-    const booking = await service.createTenantBooking(
-      {
-        businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
-        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
-        dropoff: { address: "Airport" },
-        passenger: { name: "Rider", phone: "0912000000" },
-      },
-      "tenant-demo-001",
-    );
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
-
-    const candidates = await service.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-
-    expect(candidates).toEqual([
-      expect.objectContaining({
-        driverId: "drv-eligible",
-        eligibilityDecision: "conditionally_eligible",
-        softReasonCodes: ["STALE_LOCATION"],
-        missingRequirements: ["photo"],
-        locationState: "stale",
-        serviceProductContext: {
-          serviceProductId: "svc-enterprise",
-          serviceProductCode: "enterprise_dispatch",
-          policyVersion:
-            "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-1@2026-06-20T00:00:00.000Z",
-          evaluatedAt: "2026-06-20T12:00:00.000Z",
-        },
-      }),
-    ]);
-    expect(runtimeEligibilityEvaluator.evaluate).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back to decorated ineligible rows instead of returning a bare empty list", async () => {
-    const runtimeEligibilityEvaluator = {
-      evaluate: vi.fn().mockResolvedValue({
-        serviceProductId: "svc-enterprise",
-        serviceProductCode: "enterprise_dispatch",
-        policyVersion:
-          "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-2@2026-06-20T00:00:00.000Z",
-        decision: "ineligible",
-        hardReasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
-        softReasonCodes: [],
-        missingRequirements: [],
-        locationState: "fresh",
-        evaluatedAt: "2026-06-20T12:00:01.000Z",
-      }),
-    };
-    const { service } = createOwnedMobilityService({
-      enableVehicleEligibility: true,
-      candidates: [
-        {
-          driverId: "drv-ineligible",
-          vehicleId: "veh-demo-002",
-          etaMinutes: 8,
-          operatingArea: "taipei",
-          serviceBuckets: ["business_dispatch"],
-        },
-      ],
-      runtimeEligibilityEvaluator,
-    });
-    const booking = await service.createTenantBooking(
-      {
-        businessDispatchSubtype: "enterprise_dispatch",
-        reservationWindowStart: "2026-06-20T13:00:00.000Z",
-        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
-        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
-        dropoff: { address: "Airport" },
-        passenger: { name: "Rider", phone: "0912000000" },
-      },
-      "tenant-demo-001",
-    );
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
-
-    const fallbackCandidates = await service.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-    );
-    const allCandidates = await service.listDispatchCandidates(
-      dispatchJob.dispatchJobId,
-      true,
-    );
-
-    expect(fallbackCandidates).toHaveLength(1);
-    expect(fallbackCandidates[0]?.eligibilityDecision).toBe("ineligible");
-    expect(allCandidates).toHaveLength(1);
-    expect(allCandidates[0]?.hardReasonCodes).toEqual([
-      "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
-    ]);
-  });
-
   it("resolves tenant booking passenger and addresses from governed master data", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
