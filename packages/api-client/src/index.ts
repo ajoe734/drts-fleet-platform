@@ -1722,7 +1722,7 @@ export class ApiClient {
   async listDailyDispatchRecords(
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecord[]> {
-    const suffix = buildReportQuery(query);
+    const suffix = buildReportQuery(query as Record<string, string | undefined>);
     return this.getList<DispatchDailyRecord>(
       `/api/reports/daily-dispatch-records${suffix}`,
     );
@@ -1740,7 +1740,7 @@ export class ApiClient {
   async previewSixMonthOperationsSummary(
     query: OperationsSummaryPreviewQuery = {},
   ): Promise<SixMonthOperationsSummary[]> {
-    const suffix = buildReportQuery(query);
+    const suffix = buildReportQuery(query as Record<string, string | undefined>);
     return this.getList<SixMonthOperationsSummary>(
       `/api/reports/operations-summary/preview${suffix}`,
     );
