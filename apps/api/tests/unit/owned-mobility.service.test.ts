@@ -2461,6 +2461,101 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("restores the active assignment when reassign eligibility changes before reassignment completes", async () => {
+    let backupVehicleDispatchable = true;
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      repository,
+      getVehicleDispatchability: (vehicleId: string) =>
+        vehicleId === "vehicle-001" ? true : backupVehicleDispatchable,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "A" },
+      dropoff: { address: "B" },
+      passenger: { name: "Test", phone: "0911111111" },
+    });
+    const dispatchResult = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const firstAssignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    repository.persistChanges.mockClear();
+    repository.persistOrderWorkflow.mockClear();
+    backupVehicleDispatchable = false;
+
+    await expect(
+      service.reassignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId: "vehicle-002",
+        driverId: "driver-002",
+        reasonCode: "operator_reassign",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+        },
+      },
+    });
+
+    const snapshot = service.getReportingSnapshot();
+    expect(
+      snapshot.dispatchAssignments.filter(
+        (assignment) => assignment.dispatchJobId === dispatchResult.dispatchJobId,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        assignmentId: firstAssignment.assignmentId,
+        status: "assigned",
+        vehicleId: "vehicle-001",
+        driverId: "driver-001",
+      }),
+    ]);
+    expect(
+      snapshot.driverTasks.filter(
+        (task) => task.dispatchJobId === dispatchResult.dispatchJobId,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        taskId: firstAssignment.taskId,
+        status: "pending_acceptance",
+        vehicleId: "vehicle-001",
+        driverId: "driver-001",
+      }),
+    ]);
+    expect(service.listDispatchTrace(order.orderId)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "dispatch.reassigned",
+        }),
+      ]),
+    );
+    expect(repository.persistChanges).not.toHaveBeenCalled();
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
+  });
+
   it("keeps redispatch distinct from reassign by opening a new dispatch job", () => {
     const candidates = [
       {

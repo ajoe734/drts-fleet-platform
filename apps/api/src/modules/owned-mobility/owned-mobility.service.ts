@@ -153,6 +153,16 @@ type DispatchAssignmentBundle = {
   traceLogs: DispatchTraceLogRecord[];
 };
 
+type DispatchAssignmentResult = {
+  assignmentId: string;
+  status: DispatchAssignmentRecord["status"];
+  taskId: string;
+};
+
+type CreateDispatchAssignmentOptions = {
+  dispatchAttemptSequence?: number;
+};
+
 const BOOKING_RULES: Record<
   NonNullable<OwnedOrderRecord["businessDispatchSubtype"]>,
   {
@@ -2462,25 +2472,18 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    activeAssignment.status = "cancelled";
-    activeAssignment.updatedAt = now;
-    if (activeTask) {
-      activeTask.status = "cancelled";
-      activeTask.completedAt = now;
-    }
-
+    const reassignAttemptSequence =
+      this.nextAttemptSequence(dispatchJob.dispatchJobId);
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
       orderId: order.orderId,
-      sequence: this.nextAttemptSequence(dispatchJob.dispatchJobId),
+      sequence: reassignAttemptSequence,
       outcome: "reassigned",
       reasonCode: command.reasonCode,
       createdAt: now,
     };
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
-
-    const traceLog = this.appendTrace(order.orderId, "dispatch.reassigned", {
+    const traceLog = this.buildTraceLog(order.orderId, "dispatch.reassigned", {
       dispatchJobId: dispatchJob.dispatchJobId,
       previousAssignmentId: activeAssignment.assignmentId,
       previousTaskId: activeTask?.taskId ?? null,
@@ -2492,53 +2495,71 @@ export class OwnedMobilityService implements OnModuleInit {
       reasonNote: command.reasonNote ?? null,
     });
 
-    this.persistChanges(
-      {
-        dispatchAssignments: [activeAssignment],
-        ...(activeTask ? { driverTasks: [activeTask] } : {}),
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: [traceLog],
-      },
-      "reassign_dispatch",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: order.tenantId,
-        moduleName: "dispatch",
-        actionName: "reassign_dispatch",
-        resourceType: "dispatch_assignment",
-        resourceId: activeAssignment.assignmentId,
-        oldValuesSummary: {
-          vehicleId: activeAssignment.vehicleId,
-          driverId: activeAssignment.driverId,
-        },
-        newValuesSummary: {
-          dispatchJobId: dispatchJob.dispatchJobId,
-          vehicleId: command.vehicleId,
-          driverId: command.driverId,
-          reasonCode: command.reasonCode,
-          reasonNote: command.reasonNote ?? null,
-        },
-      },
-      requestId,
-    );
-
-    if (activeTask) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
-        activeTask,
+    return this.afterMaybePromise(
+      this.createDispatchAssignment(
+        dispatchJob,
         order,
+        command.vehicleId,
+        command.driverId,
         requestId,
-      );
-    }
+        {
+          dispatchAttemptSequence: reassignAttemptSequence + 1,
+        },
+      ),
+      (result) => {
+        activeAssignment.status = "cancelled";
+        activeAssignment.updatedAt = now;
+        if (activeTask) {
+          activeTask.status = "cancelled";
+          activeTask.completedAt = now;
+        }
 
-    return this.createDispatchAssignment(
-      dispatchJob,
-      order,
-      command.vehicleId,
-      command.driverId,
-      requestId,
+        this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+        this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+
+        this.persistChanges(
+          {
+            dispatchAssignments: [activeAssignment],
+            ...(activeTask ? { driverTasks: [activeTask] } : {}),
+            dispatchAttempts: [dispatchAttempt],
+            dispatchTraceLogs: [traceLog],
+          },
+          "reassign_dispatch",
+        );
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: order.tenantId,
+            moduleName: "dispatch",
+            actionName: "reassign_dispatch",
+            resourceType: "dispatch_assignment",
+            resourceId: activeAssignment.assignmentId,
+            oldValuesSummary: {
+              vehicleId: activeAssignment.vehicleId,
+              driverId: activeAssignment.driverId,
+            },
+            newValuesSummary: {
+              dispatchJobId: dispatchJob.dispatchJobId,
+              vehicleId: command.vehicleId,
+              driverId: command.driverId,
+              reasonCode: command.reasonCode,
+              reasonNote: command.reasonNote ?? null,
+            },
+          },
+          requestId,
+        );
+
+        if (activeTask) {
+          this.ownedMobilityTaskEventsService.publishTaskCancelled(
+            activeTask,
+            order,
+            requestId,
+          );
+        }
+
+        return result;
+      },
     );
   }
 
@@ -2548,7 +2569,8 @@ export class OwnedMobilityService implements OnModuleInit {
     vehicleId: string,
     driverId: string,
     requestId?: string,
-  ): any {
+    options?: CreateDispatchAssignmentOptions,
+  ): MaybePromise<DispatchAssignmentResult> {
     if (this.ownedMobilityRepository?.isEnabled()) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
@@ -2557,6 +2579,7 @@ export class OwnedMobilityService implements OnModuleInit {
             order,
             vehicleId,
             driverId,
+            options,
           );
           this.assertAssignmentEligibilityRecheck(
             bundle.order,
@@ -2588,7 +2611,13 @@ export class OwnedMobilityService implements OnModuleInit {
       driverId,
     );
     return this.applyDispatchAssignmentBundle(
-      this.buildDispatchAssignmentBundle(dispatchJob, order, vehicleId, driverId),
+      this.buildDispatchAssignmentBundle(
+        dispatchJob,
+        order,
+        vehicleId,
+        driverId,
+        options,
+      ),
       requestId,
     );
   }
@@ -4419,6 +4448,7 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     vehicleId: string,
     driverId: string,
+    options?: CreateDispatchAssignmentOptions,
   ): DispatchAssignmentBundle {
     const now = new Date().toISOString();
     const nextOrder = this.cloneOrder(order);
@@ -4466,7 +4496,9 @@ export class OwnedMobilityService implements OnModuleInit {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
       orderId: order.orderId,
-      sequence: this.nextAttemptSequence(dispatchJob.dispatchJobId),
+      sequence:
+        options?.dispatchAttemptSequence ??
+        this.nextAttemptSequence(dispatchJob.dispatchJobId),
       outcome: "assigned",
       reasonCode: null,
       createdAt: now,
@@ -4514,7 +4546,7 @@ export class OwnedMobilityService implements OnModuleInit {
     bundle: DispatchAssignmentBundle,
     requestId?: string,
     persistChanges = true,
-  ) {
+  ): DispatchAssignmentResult {
     this.orders = [
       bundle.order,
       ...this.orders.filter((order) => order.orderId !== bundle.order.orderId),
