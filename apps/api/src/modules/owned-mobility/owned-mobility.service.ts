@@ -5079,7 +5079,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const evaluatedCandidates = await Promise.all(
       candidates.map(async (candidate) => {
-        const decision = await this.runtimeEligibilityEvaluator.evaluate({
+        const decision = await this.runtimeEligibilityEvaluator!.evaluate({
           orderId: order.orderId,
           dispatchJobId: dispatchJob.dispatchJobId,
           driverId: candidate.driverId,
