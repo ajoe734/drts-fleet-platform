@@ -1,13 +1,13 @@
 # P1D-VERIFY — Phase-1-Delta Wave Verification Report — 2026-06-20
 
 **Task:** `P1D-VERIFY`
-**Owner:** `Claude2`
+**Owner:** `Codex`
 **Reviewer:** `Claude`
 **Phase:** `phase1-delta-supply-eligibility-mobile-reporting-20260619`
 **Authority:** SD §13 Definition of Done
 ([`phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.md`](../02-architecture/phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.md))
-**Verified at:** `origin/dev` tip `69fcf74f4` (`MOB-UAT-001: Android physical-device UAT evidence pack`)
-**Overall read:** `static gates GREEN (typecheck/build/i18n); one collateral E2E+migration regression found and remediated on the verify branch; E2E live-green is environment-gated in this worktree`
+**Verified at:** `origin/dev` tip `7ca26192a` (`P1D-VERIFY: wave verification report + restore E2E-021/V0035 collateral`)
+**Overall read:** `static gates GREEN on current dev; E2E-021/V0035 restoration is now merged to dev; live E2E remains environment-gated in this worktree`
 
 > **Path note.** The task brief lists `docs/05-ui/` as the artifact home, which is
 > the design-handoff corpus. This wave-verification report is filed there to honour
@@ -19,24 +19,27 @@
 ## 1. Executive Summary
 
 The Phase-1-delta supply / eligibility / mobile-telemetry / reporting wave is
-**substantially green** at `origin/dev` tip `69fcf74f4`:
+**substantially green** at `origin/dev` tip `7ca26192a`:
 
 - typecheck + build for `@drts/api`, `@drts/ops-console-web`, `@drts/driver-app`
-  all pass (ran in this worktree).
+  all pass on current dev (re-ran in this worktree via the official filtered
+  `turbo` entrypoints). `@drts/driver-app` build invokes `expo prebuild`; the
+  generated iOS asset churn was reverted after verification so it does not
+  pollute the task diff.
 - i18n-guard reports **0 violations with an empty baseline** (true-fix
   verification, no exemptions relied upon).
-- All four wave E2E scenarios are syntactically valid; `E2E-019` is an intended
-  gate-deferral, `E2E-020`/`E2E-022` are on dev, and `E2E-021` was found
-  **deleted from dev by an out-of-scope orchestrator chore** and has been
-  restored on the verify branch (see §4 + §6).
+- All four wave E2E scenarios are syntactically valid and present on current
+  dev; `E2E-019` remains an intended gate-deferral and `E2E-020`/`021`/`022`
+  are present on `origin/dev`.
 
-**One blocking regression** was found and remediated: commit `fbc744877`
+**One blocking regression** was found and is now remediated on current dev:
+commit `fbc744877`
 (`#823`, `ORCH-DROP-COPILOT-20260620`, "drop copilot lane from dispatch
 sequence") collaterally deleted `tests/e2e/E2E-021-driver-heartbeat-replay.sh`
 **and** `infra/migrations/V0035__driver_location_event_id_text.sql`, both of
 which `MOB-QA-001 (#824)` had just restored. The migration deletion is a real
-runtime regression (see §4.3). Both files are restored on `claude2/p1d-verify`
-and need merge to `dev`.
+runtime regression (see §4.3). Both files are now restored on `origin/dev` by
+`7ca26192a`.
 
 ---
 
@@ -44,16 +47,21 @@ and need merge to `dev`.
 
 Environment note: this isolated task worktree required `CI=true pnpm install
 --frozen-lockfile` to hydrate `node_modules` before the toolchain resolved
-(`@types/node`, `react`, JSX lib). After install, all gates were re-run.
+(`@types/node`, `react`, JSX lib). The current-owner re-verification on
+`origin/dev` tip `7ca26192a` used the official filtered root entrypoints:
+`pnpm build --force --filter=@drts/api --filter=@drts/ops-console-web --filter=@drts/driver-app`
+and
+`pnpm typecheck --force --filter=@drts/api --filter=@drts/ops-console-web --filter=@drts/driver-app`.
+Those runs executed the package-local scripts mapped below.
 
 | Gate                        | Command                                                  | Result                                                                 |
 | --------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| api typecheck               | `pnpm --filter @drts/api typecheck`                      | **PASS** (exit 0, 0 `error TS`)                                        |
-| ops-console typecheck       | `pnpm --filter @drts/ops-console-web typecheck`          | **PASS** (exit 0, 0 `error TS`)                                        |
-| driver-app typecheck        | `pnpm --filter @drts/driver-app typecheck`               | **PASS** (exit 0, 0 `error TS`)                                        |
-| api build                   | `pnpm --filter @drts/api build`                          | **PASS** (`@drts/contracts` build + `tsc -p tsconfig.json`, exit 0)    |
-| ops-console build           | `pnpm --filter @drts/ops-console-web build`              | **PASS** (`next build --webpack` → "✓ Compiled successfully in 15.5s") |
-| driver-app build            | `pnpm --filter @drts/driver-app build`                   | **PASS** (`tsc --noEmit`, exit 0)                                      |
+| api typecheck               | `pnpm --filter @drts/api typecheck`                      | **PASS** (executed via filtered `turbo`, exit 0, 0 `error TS`)                                      |
+| ops-console typecheck       | `pnpm --filter @drts/ops-console-web typecheck`          | **PASS** (executed via filtered `turbo`, exit 0, 0 `error TS`)                                      |
+| driver-app typecheck        | `pnpm --filter @drts/driver-app typecheck`               | **PASS** (executed via filtered `turbo`, exit 0, 0 `error TS`)                                      |
+| api build                   | `pnpm --filter @drts/api build`                          | **PASS** (executed via filtered `turbo`; package script builds `@drts/contracts` then `tsc`)       |
+| ops-console build           | `pnpm --filter @drts/ops-console-web build`              | **PASS** (executed via filtered `turbo`; `next build --webpack` green on current dev)               |
+| driver-app build            | `pnpm --filter @drts/driver-app build`                   | **PASS** (`expo prebuild` + `tsc --noEmit`; generated iOS asset churn reverted after verification) |
 | i18n-guard (empty baseline) | `node scripts/i18n-guard.mjs --baseline /tmp/empty.json` | **PASS** — `OK (376 files scanned across 10 apps, 0 exemption(s))`     |
 
 The i18n-guard run used `{"version":1,"exemptions":[]}` as the baseline, so the
@@ -67,7 +75,7 @@ The i18n-guard run used `{"version":1,"exemptions":[]}` as the baseline, so the
 | ------------------------------------------------ | ------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `E2E-019-fleet-supply-onboarding.sh`             | yes                                         | OK        | **gate-deferred** (tracked): fleet-partner self-service write API is an unbuilt scaffold; review/approve/provisioning/readiness legs proven in-memory, write+read-model-seam legs reported not silently passed (`tests/e2e/gate-deferred.txt`, owner SUP-QA) |
 | `E2E-020-service-product-runtime-eligibility.sh` | yes                                         | OK        | airport-transfer negative eligibility (DoD #5)                                                                                                                                                                                                               |
-| `E2E-021-driver-heartbeat-replay.sh`             | **NO — deleted, restored on verify branch** | OK        | heartbeat dedupe / out-of-order / replay durability (DoD #7)                                                                                                                                                                                                 |
+| `E2E-021-driver-heartbeat-replay.sh`             | yes (`7ca26192a`)                           | OK        | heartbeat dedupe / out-of-order / replay durability (DoD #7)                                                                                                                                                                                                 |
 | `E2E-022-operations-reporting.sh`                | yes                                         | OK        | daily dispatch record + six-month summary (DoD #9/#10)                                                                                                                                                                                                       |
 
 **E2E live-run is environment-gated in this worktree** and was not executed:
@@ -114,9 +122,10 @@ the `E2E-021` script and `V0035` migration were deleted and **never re-added**.
 
 ### 4.2 `E2E-021` absence
 
-Confirmed: `git ls-tree origin/dev tests/e2e/` returns 0 matches for `E2E-021`.
-The wave acceptance ("E2E-019/020/021/022 green") and SD §13 DoD #11 ("所有新增
-E2E 經綠") cannot hold while the file is absent from dev.
+Historical confirmation at pre-restore `origin/dev` tip `69fcf74f4`:
+`git ls-tree 69fcf74f4 tests/e2e/` returned 0 matches for `E2E-021`. That
+absence is why the restore landed in `7ca26192a`; current `origin/dev` now
+contains the file again.
 
 ### 4.3 `V0035` absence is a real runtime regression
 
@@ -139,15 +148,15 @@ cosmetic.
 
 ### 4.4 Remediation
 
-Both files restored from the authoritative `MOB-QA-001` commit `752a9611e` onto
-`claude2/p1d-verify`:
+Both files were restored from the authoritative `MOB-QA-001` commit
+`752a9611e` and are now present on `origin/dev` via `7ca26192a`:
 
 - `tests/e2e/E2E-021-driver-heartbeat-replay.sh` (`bash -n` clean)
 - `infra/migrations/V0035__driver_location_event_id_text.sql` (orders correctly
   after `V0034`; idempotent ALTER on an empty column)
 
-**Integration owed:** this restoration must merge to `dev` for the wave to be
-whole. Until merged, `INTEGRATION_STATUS=branch_pushed`.
+**Integration status:** restoration is now merged to `dev`
+(`INTEGRATION_STATUS=merged_to_dev`).
 
 ---
 
@@ -161,22 +170,18 @@ whole. Until merged, `INTEGRATION_STATUS=branch_pushed`.
 | 4   | exact service product 從 intake 到 task 不丟失              | ELIG-BE-004/005, ELIG-MOB-001, ELIG-FE-001   | candidate eligibility decoration + driver exact-product surface; `E2E-013`/`E2E-020`                                                                                                                                                                                                   |
 | 5   | 機場接送資格負向測試確實生效                                | ELIG-QA-001                                  | `E2E-020-service-product-runtime-eligibility.sh` present + valid                                                                                                                                                                                                                       |
 | 6   | Android 與 iOS 真機各有 evidence pack                       | MOB-UAT-001                                  | Android **repo-backed static evidence complete**, signed-build on-device execution **externally gated** (`BLOCKED + STATIC EVIDENCE`); iOS parity declared (`UIBackgroundModes`), on-device likewise externally gated. Pack status `provisional`.                                      |
-| 7   | Heartbeat 斷線後可 durable replay                           | MOB-APP-001, MOB-BE-002, MOB-QA-001          | code on dev; **`E2E-021` + `V0035` were deleted from dev (§4) and restored on verify branch**                                                                                                                                                                                          |
+| 7   | Heartbeat 斷線後可 durable replay                           | MOB-APP-001, MOB-BE-002, MOB-QA-001          | code on dev; `E2E-021` + `V0035` restored on current `origin/dev` via `7ca26192a`; live hermetic rerun remains environment-gated here                                                                                                                                                 |
 | 8   | Ops 可看 stale/gap/eligibility reason                       | MOB-OPS-001, ELIG-FE-001                     | ops-console driver tracking + location-state reconcile + eligibility panel (build green)                                                                                                                                                                                               |
 | 9   | 每日派遣紀錄可固定重建與下載                                | REP-OPS-001, REP-QA-001                      | ops operational reports UI + `E2E-022` present + valid                                                                                                                                                                                                                                 |
 | 10  | 半年摘要口徑、coverage 與客訴統計正確                       | REP-OPS-001, REP-QA-001                      | six-month summary report UI + `E2E-022` coverage                                                                                                                                                                                                                                       |
-| 11  | 所有新增 E2E 經綠                                           | SUP/ELIG/MOB/REP-QA                          | **CAVEAT** — `E2E-019` intended gate-deferral; `E2E-021` was absent from dev (now restored); `020/022` present. Live hermetic green is environment-gated here (§3).                                                                                                                    |
+| 11  | 所有新增 E2E 經綠                                           | SUP/ELIG/MOB/REP-QA                          | **CAVEAT** — `E2E-019` intended gate-deferral; `E2E-020`/`021`/`022` are present + valid on current dev. Fresh live hermetic green is environment-gated here (§3).                                                                                                                   |
 | 12  | CTI 不在本次 completion claim 內                            | —                                            | confirmed: SD §14 forbids vendor pre-embed; no CTI claimed in this wave                                                                                                                                                                                                                |
 
 ---
 
 ## 6. Residual / Blocker List
 
-1. **[BLOCKER — remediated on branch, merge owed]** `E2E-021` + `V0035` deleted
-   from `dev` by `fbc744877` (`#823 ORCH-DROP-COPILOT-20260620`). Restored on
-   `claude2/p1d-verify`; needs merge to `dev`. Root cause: an orchestrator
-   "drop copilot lane" chore carried a stale 3337-line revert.
-2. **[PROCESS]** `fbc744877` is an out-of-scope chore that mass-reverted
+1. **[PROCESS]** `fbc744877` is an out-of-scope chore that mass-reverted
    supply/ops/mobile code; later commits re-landed most of it piecemeal, but the
    board has no single record reconciling what `#823` removed vs. what was
    re-added. Recommend a follow-up audit that `#823`'s remaining net deletions
@@ -185,11 +190,11 @@ whole. Until merged, `INTEGRATION_STATUS=branch_pushed`.
    `supply-document.service.ts` 15-line stubs match the documented "unbuilt
    scaffold" deferral; `supply-readiness.service.ts` 602 lines and ops drivers
    page 1922 lines were re-landed full.)
-3. **[ENV]** Live E2E hermetic gate not runnable in this isolated worktree
+2. **[ENV]** Live E2E hermetic gate not runnable in this isolated worktree
    (no host `psql`; compose-unmanaged postgres; shared DB safety; no
    harvestable API secrets). Re-run on a gate host with `psql` + an isolated DB
    to convert §3's "present + valid" into a fresh live green.
-4. **[EXTERNAL]** MOB-UAT-001 on-device execution (Android signed build + iOS)
+3. **[EXTERNAL]** MOB-UAT-001 on-device execution (Android signed build + iOS)
    remains externally gated; pack is `provisional` static-evidence-complete.
    This is the expected DoD #6 posture, tracked, not a wave blocker.
 
@@ -212,9 +217,10 @@ no production canvas yet):
 ## 8. Verdict
 
 - Static gates (typecheck/build/i18n): **GREEN**.
-- E2E scripts: **present + valid** after restoring the `E2E-021` regression;
+- E2E scripts: **present + valid** on current `origin/dev`;
   live hermetic green is environment-gated here and owned by the deploy gate.
 - SD §13 DoD: **10/12 fully evidenced**, #1 partial (self-service write API
-  deferred), #11 caveated (`E2E-019` deferral + `E2E-021` restore merge owed).
-- One blocking regression found and remediated on branch; **merge to `dev`
-  owed** before the wave is whole.
+  deferred), #11 caveated (`E2E-019` deferral + no fresh hermetic rerun from
+  this worktree).
+- The previously blocking `E2E-021`/`V0035` regression is now restored on
+  current `origin/dev`.
