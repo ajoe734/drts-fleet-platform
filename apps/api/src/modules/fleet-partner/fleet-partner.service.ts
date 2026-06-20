@@ -518,46 +518,6 @@ export class FleetPartnerService implements OnModuleInit {
       });
   }
 
-  listActiveFleetPartnerDriverIds(
-    fleetPartnerId: string,
-    effectiveAt = new Date().toISOString(),
-  ) {
-    this.requireFleetPartner(fleetPartnerId);
-    return Array.from(
-      new Set(
-        this.driverAffiliations
-          .filter(
-            (affiliation) =>
-              affiliation.fleetPartnerId === fleetPartnerId &&
-              this.isAffiliationActive(
-                affiliation.effectiveFrom,
-                affiliation.effectiveUntil,
-                effectiveAt,
-              ),
-          )
-          .map((affiliation) => affiliation.driverId),
-      ),
-    ).sort((left, right) => left.localeCompare(right));
-  }
-
-  listActiveFleetPartnerVehicleIds(
-    fleetPartnerId: string,
-    effectiveAt = new Date().toISOString(),
-  ) {
-    const activeDriverIds = new Set(
-      this.listActiveFleetPartnerDriverIds(fleetPartnerId, effectiveAt),
-    );
-
-    return Array.from(
-      new Set(
-        this.regulatoryRegistryService
-          .listSupplyPairs()
-          .filter((pair) => activeDriverIds.has(pair.driverId))
-          .map((pair) => pair.vehicleId),
-      ),
-    ).sort((left, right) => left.localeCompare(right));
-  }
-
   listPortalVehicles(
     fleetPartnerId: string,
   ): FleetPartnerPortalVehicleRecord[] {
@@ -997,12 +957,12 @@ export class FleetPartnerService implements OnModuleInit {
         ) {
           return false;
         }
+        if (affiliation.effectiveFrom > completedAt) {
+          return false;
+        }
         if (
-          !this.isAffiliationActive(
-            affiliation.effectiveFrom,
-            affiliation.effectiveUntil,
-            completedAt,
-          )
+          affiliation.effectiveUntil &&
+          affiliation.effectiveUntil < completedAt
         ) {
           return false;
         }
@@ -1011,20 +971,6 @@ export class FleetPartnerService implements OnModuleInit {
       .sort((left, right) =>
         right.effectiveFrom.localeCompare(left.effectiveFrom),
       )[0];
-  }
-
-  private isAffiliationActive(
-    effectiveFrom: string,
-    effectiveUntil: string | null,
-    effectiveAt: string,
-  ) {
-    if (effectiveFrom > effectiveAt) {
-      return false;
-    }
-    if (effectiveUntil && effectiveUntil < effectiveAt) {
-      return false;
-    }
-    return true;
   }
 
   private matchRevenueShareRule(
