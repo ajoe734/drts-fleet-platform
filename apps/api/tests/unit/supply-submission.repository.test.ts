@@ -196,6 +196,20 @@ describe("supply submission repository", () => {
           },
         ],
       })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            object_key: createUploadIntent().objectKey,
+            submission_id: createUploadIntent().submissionId,
+            fleet_partner_id: createUploadIntent().fleetPartnerId,
+            document_type: createUploadIntent().documentType,
+            original_file_name: createUploadIntent().originalFileName,
+            content_type: createUploadIntent().contentType,
+            created_at: createUploadIntent().createdAt,
+            expires_at: createUploadIntent().expiresAt,
+          },
+        ],
+      })
       .mockRejectedValueOnce(
         Object.assign(new Error("missing review events"), { code: "42P01" }),
       )
@@ -226,6 +240,7 @@ describe("supply submission repository", () => {
     expect(state.driverDrafts).toHaveLength(1);
     expect(state.vehicleDrafts).toEqual([]);
     expect(state.documents).toHaveLength(1);
+    expect(state.documentUploadIntents).toHaveLength(1);
     expect(state.reviewEvents).toEqual([]);
     expect(state.vehicleAffiliations).toHaveLength(1);
   });
@@ -328,6 +343,28 @@ describe("supply submission repository", () => {
     await expect(
       repository.findDocumentUploadIntent(createUploadIntent().objectKey),
     ).resolves.toEqual(createUploadIntent());
+  });
+
+  it("tracks document upload intents in the in-memory fallback state", async () => {
+    const repository = new SupplySubmissionRepository();
+
+    await repository.saveDocumentUploadIntent(createUploadIntent());
+
+    await expect(
+      repository.findDocumentUploadIntent(createUploadIntent().objectKey),
+    ).resolves.toEqual(createUploadIntent());
+    await expect(repository.loadState()).resolves.toMatchObject({
+      documentUploadIntents: [createUploadIntent()],
+    });
+
+    await repository.deleteDocumentUploadIntent(createUploadIntent().objectKey);
+
+    await expect(
+      repository.findDocumentUploadIntent(createUploadIntent().objectKey),
+    ).resolves.toBeNull();
+    await expect(repository.loadState()).resolves.toMatchObject({
+      documentUploadIntents: [],
+    });
   });
 
   it("persists dependent supply tables only after supply_submissions completes", async () => {

@@ -16,12 +16,8 @@ import type {
   DeleteSupplyDocumentCommand,
 } from "./supply-submission.types";
 
-type PendingDocumentUploadIntent = SupplyDocumentUploadIntentRecord;
-
 @Injectable()
 export class SupplyDocumentService {
-  private readonly pendingUploadIntents = new Map<string, PendingDocumentUploadIntent>();
-
   constructor(
     private readonly supplySubmissionService: SupplySubmissionService,
     private readonly supplySubmissionRepository: SupplySubmissionRepository,
@@ -55,7 +51,7 @@ export class SupplyDocumentService {
     ].join("/");
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
-    const uploadIntent: PendingDocumentUploadIntent = {
+    const uploadIntent = {
       submissionId,
       fleetPartnerId,
       documentType: command.documentType,
@@ -280,7 +276,7 @@ export class SupplyDocumentService {
   }
 
   private async assertUploadIntent(
-    uploadIntent: PendingDocumentUploadIntent,
+    uploadIntent: SupplyDocumentUploadIntentRecord,
     fleetPartnerId: string,
     submissionId: string,
     command: ConfirmSupplyDocumentUploadCommand,
@@ -383,29 +379,15 @@ export class SupplyDocumentService {
     }
   }
 
-  private async storeUploadIntent(intent: PendingDocumentUploadIntent) {
-    if (!this.supplySubmissionRepository.isEnabled()) {
-      this.pendingUploadIntents.set(intent.objectKey, intent);
-      return;
-    }
-
+  private async storeUploadIntent(intent: SupplyDocumentUploadIntentRecord) {
     await this.supplySubmissionRepository.saveDocumentUploadIntent(intent);
   }
 
   private async loadUploadIntent(objectKey: string) {
-    if (!this.supplySubmissionRepository.isEnabled()) {
-      return this.pendingUploadIntents.get(objectKey) ?? null;
-    }
-
     return this.supplySubmissionRepository.findDocumentUploadIntent(objectKey);
   }
 
   private async clearUploadIntent(objectKey: string) {
-    if (!this.supplySubmissionRepository.isEnabled()) {
-      this.pendingUploadIntents.delete(objectKey);
-      return;
-    }
-
     await this.supplySubmissionRepository.deleteDocumentUploadIntent(objectKey);
   }
 }

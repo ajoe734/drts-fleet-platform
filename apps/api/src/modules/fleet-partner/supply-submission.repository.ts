@@ -146,6 +146,7 @@ export type SupplySubmissionPersistenceState = {
   driverDrafts: DriverSupplyDraft[];
   vehicleDrafts: VehicleSupplyDraft[];
   documents: SupplyDocumentRecord[];
+  documentUploadIntents: SupplyDocumentUploadIntentRecord[];
   reviewEvents: SupplyReviewEventRecord[];
   vehicleAffiliations: VehicleFleetAffiliationRecord[];
 };
@@ -202,6 +203,10 @@ type MissingRelationFallback = { rows: [] };
 @Injectable()
 export class SupplySubmissionRepository {
   private readonly logger = new Logger(SupplySubmissionRepository.name);
+  private readonly documentUploadIntents = new Map<
+    string,
+    SupplyDocumentUploadIntentRecord
+  >();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -219,6 +224,7 @@ export class SupplySubmissionRepository {
       driverDraftsResult,
       vehicleDraftsResult,
       documentsResult,
+      documentUploadIntentsResult,
       reviewEventsResult,
       vehicleAffiliationsResult,
     ] = await Promise.all([
@@ -254,6 +260,14 @@ export class SupplySubmissionRepository {
           ORDER BY uploaded_at DESC, document_id
         `,
       ),
+      this.loadQuery<SupplyDocumentUploadIntentRow>(
+        "fleet.supply_document_upload_intents",
+        `
+          SELECT *
+          FROM fleet.supply_document_upload_intents
+          ORDER BY created_at DESC, object_key
+        `,
+      ),
       this.loadQuery<SupplyReviewEventRow>(
         "fleet.supply_review_events",
         `
@@ -283,6 +297,9 @@ export class SupplySubmissionRepository {
         this.mapVehicleDraftRow(row),
       ),
       documents: documentsResult.rows.map((row) => this.mapDocumentRow(row)),
+      documentUploadIntents: documentUploadIntentsResult.rows.map((row) =>
+        this.mapDocumentUploadIntentRow(row),
+      ),
       reviewEvents: reviewEventsResult.rows.map((row) =>
         this.mapReviewEventRow(row),
       ),
@@ -549,6 +566,7 @@ export class SupplySubmissionRepository {
 
   async saveDocumentUploadIntent(intent: SupplyDocumentUploadIntentRecord) {
     if (!this.isEnabled()) {
+      this.documentUploadIntents.set(intent.objectKey, { ...intent });
       return;
     }
 
@@ -590,7 +608,8 @@ export class SupplySubmissionRepository {
 
   async findDocumentUploadIntent(objectKey: string) {
     if (!this.isEnabled()) {
-      return null;
+      const intent = this.documentUploadIntents.get(objectKey);
+      return intent ? { ...intent } : null;
     }
 
     const result = await this.databaseService!.query<SupplyDocumentUploadIntentRow>(
@@ -608,6 +627,7 @@ export class SupplySubmissionRepository {
 
   async deleteDocumentUploadIntent(objectKey: string) {
     if (!this.isEnabled()) {
+      this.documentUploadIntents.delete(objectKey);
       return;
     }
 
@@ -633,6 +653,9 @@ export class SupplySubmissionRepository {
       driverDrafts: [],
       vehicleDrafts: [],
       documents: [],
+      documentUploadIntents: Array.from(this.documentUploadIntents.values()).map(
+        (intent) => ({ ...intent }),
+      ),
       reviewEvents: [],
       vehicleAffiliations: [],
     };

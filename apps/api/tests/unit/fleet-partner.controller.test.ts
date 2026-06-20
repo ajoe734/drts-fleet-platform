@@ -84,6 +84,7 @@ function createFixture() {
     ),
     service: fleetPartnerService,
     supplyDocumentService,
+    supplySubmissionRepository,
   };
 }
 
@@ -343,7 +344,7 @@ describe("FleetPartnerController portal routes", () => {
   });
 
   it("rejects confirming a pre-signed upload after the intent expires", async () => {
-    const { controller, supplyDocumentService } = createFixture();
+    const { controller, supplySubmissionRepository } = createFixture();
 
     const created = await controller.createDriverSupplySubmission(
       "fleet-demo-001",
@@ -376,14 +377,11 @@ describe("FleetPartnerController portal routes", () => {
       "req-supply-upload-expired",
     );
 
-    const pendingUploadIntents = (
-      supplyDocumentService as unknown as {
-        pendingUploadIntents: Map<string, Record<string, string>>;
-      }
-    ).pendingUploadIntents;
-    const intent = pendingUploadIntents.get(uploadUrl.data.objectKey);
+    const intent = await supplySubmissionRepository.findDocumentUploadIntent(
+      uploadUrl.data.objectKey,
+    );
     expect(intent).toBeDefined();
-    pendingUploadIntents.set(uploadUrl.data.objectKey, {
+    await supplySubmissionRepository.saveDocumentUploadIntent({
       ...intent!,
       expiresAt: "2020-01-01T00:00:00.000Z",
     });
