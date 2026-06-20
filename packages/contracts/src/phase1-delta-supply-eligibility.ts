@@ -247,6 +247,20 @@ export interface RuntimeEligibilityDecisionRecord {
   evaluatedAt: string;
 }
 
+export interface DispatchCandidateEligibilityDecoration {
+  serviceProductContext: {
+    serviceProductId: string;
+    serviceProductCode: string;
+    policyVersion: string;
+    evaluatedAt: string;
+  };
+  eligibilityDecision: EligibilityDecision;
+  hardReasonCodes: string[];
+  softReasonCodes: string[];
+  missingRequirements: string[];
+  locationState: "fresh" | "stale" | "low_accuracy" | "missing";
+}
+
 // ---------------------------------------------------------------------------
 // §2.9 Mobile Heartbeat
 // ---------------------------------------------------------------------------

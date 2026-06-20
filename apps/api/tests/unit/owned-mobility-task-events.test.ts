@@ -284,7 +284,7 @@ describe("owned mobility task events", () => {
     });
   });
 
-  it("passes pickup coordinates into candidate lookup and stores the live ETA snapshot", () => {
+  it("passes pickup coordinates into candidate lookup and stores the live ETA snapshot", async () => {
     const regulatoryRegistryService = {
       getEligibleCandidates: vi.fn(() => [
         {
@@ -328,7 +328,7 @@ describe("owned mobility task events", () => {
       passenger: { name: "Rider One", phone: "0912000000" },
     });
     const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
-    const candidates = service.listDispatchCandidates(
+    const candidates = await service.listDispatchCandidates(
       dispatchJob.dispatchJobId,
     );
     const storedDispatchJob = service.listDispatchJobs()[0];

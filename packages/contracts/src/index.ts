@@ -2523,17 +2523,30 @@ export interface DispatchCandidate {
   operatingArea: string;
   serviceBuckets: Phase1ServiceBucket[];
   etaMinutes: number;
-  locationState?: DispatchCandidateLocationState;
   currentLocation?: DriverLocationSnapshot | null;
+  serviceProductContext?: DispatchCandidateServiceProductContext;
+  eligibilityDecision?: EligibilityDecision;
+  hardReasonCodes?: string[];
+  softReasonCodes?: string[];
+  missingRequirements?: string[];
+  locationState?: DispatchCandidateLocationState;
 }
 
 export const DISPATCH_CANDIDATE_LOCATION_STATES = [
-  "live",
+  "fresh",
   "stale",
-  "no_location",
+  "low_accuracy",
+  "missing",
 ] as const;
 export type DispatchCandidateLocationState =
   (typeof DISPATCH_CANDIDATE_LOCATION_STATES)[number];
+
+export interface DispatchCandidateServiceProductContext {
+  serviceProductId: string;
+  serviceProductCode: ServiceProductType;
+  policyVersion: string;
+  evaluatedAt: string;
+}
 
 export interface DispatchJobRecord {
   dispatchJobId: string;
