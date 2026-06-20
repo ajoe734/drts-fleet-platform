@@ -15,7 +15,6 @@ type TaskHandler = (body: {
   error?: { message: string };
 }) => Promise<void> | void;
 
-const recordDriverLocation = vi.fn();
 const watchPositionAsync = vi.fn();
 const removeSubscription = vi.fn();
 const getForegroundPermissionsAsync = vi.fn();
@@ -27,16 +26,18 @@ const startLocationUpdatesAsync = vi.fn();
 const stopLocationUpdatesAsync = vi.fn();
 const getLastKnownPositionAsync = vi.fn();
 const getCurrentPositionAsync = vi.fn();
+const enqueueDriverLocationEvent = vi.fn();
+const flushDriverLocationQueue = vi.fn();
+const initializeDriverLocationOfflineQueue = vi.fn();
 
 let watchCallback: LocationCallback | null = null;
 let taskHandler: TaskHandler | null = null;
 let taskDefined = false;
 
-vi.mock("@/lib/api-client", () => ({
-  getDriverClient: () => ({
-    recordDriverLocation,
-  }),
-  getDriverId: () => "driver-001",
+vi.mock("@/lib/driver-location-offline-queue", () => ({
+  enqueueDriverLocationEvent,
+  flushDriverLocationQueue,
+  initializeDriverLocationOfflineQueue,
 }));
 
 vi.mock("expo-location", () => ({
@@ -101,6 +102,9 @@ beforeEach(() => {
       remove: removeSubscription,
     };
   });
+  enqueueDriverLocationEvent.mockResolvedValue(undefined);
+  flushDriverLocationQueue.mockResolvedValue(undefined);
+  initializeDriverLocationOfflineQueue.mockResolvedValue(undefined);
   getForegroundPermissionsAsync.mockResolvedValue({ granted: true });
   requestForegroundPermissionsAsync.mockResolvedValue({ granted: true });
   getBackgroundPermissionsAsync.mockResolvedValue({ granted: true });
@@ -143,7 +147,7 @@ describe("driver location heartbeat transport", () => {
       accuracyM: 8,
       recordedAt: new Date(1_000).toISOString(),
     });
-    expect(recordDriverLocation).not.toHaveBeenCalled();
+    expect(enqueueDriverLocationEvent).not.toHaveBeenCalled();
 
     await taskHandler?.({
       data: {
@@ -152,13 +156,18 @@ describe("driver location heartbeat transport", () => {
     });
     await flushHeartbeatQueue();
 
-    expect(recordDriverLocation).toHaveBeenCalledTimes(1);
-    expect(recordDriverLocation).toHaveBeenCalledWith({
-      driverId: "driver-001",
+    expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(1);
+    expect(enqueueDriverLocationEvent).toHaveBeenCalledWith({
+      taskId: "task-001",
       lat: 25.033,
       lng: 121.5654,
-      accuracyM: 8,
       recordedAt: new Date(16_000).toISOString(),
+      accuracyM: 8,
+      workState: "on_trip",
+      appState: "background",
+      transportMode: "background",
+      networkType: "unknown",
+      preserveKeyEvent: false,
     });
   });
 
@@ -188,20 +197,30 @@ describe("driver location heartbeat transport", () => {
     watchCallback?.(createLocation(16_500, 25.035, 121.5656));
     await flushHeartbeatQueue();
 
-    expect(recordDriverLocation).toHaveBeenCalledTimes(2);
-    expect(recordDriverLocation).toHaveBeenNthCalledWith(1, {
-      driverId: "driver-001",
+    expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(2);
+    expect(enqueueDriverLocationEvent).toHaveBeenNthCalledWith(1, {
+      taskId: "task-001",
       lat: 25.033,
       lng: 121.5654,
-      accuracyM: 8,
       recordedAt: new Date(1_000).toISOString(),
+      accuracyM: 8,
+      workState: "on_trip",
+      appState: "foreground",
+      transportMode: "foreground",
+      networkType: "unknown",
+      preserveKeyEvent: false,
     });
-    expect(recordDriverLocation).toHaveBeenNthCalledWith(2, {
-      driverId: "driver-001",
+    expect(enqueueDriverLocationEvent).toHaveBeenNthCalledWith(2, {
+      taskId: "task-001",
       lat: 25.035,
       lng: 121.5656,
-      accuracyM: 8,
       recordedAt: new Date(16_500).toISOString(),
+      accuracyM: 8,
+      workState: "on_trip",
+      appState: "foreground",
+      transportMode: "foreground",
+      networkType: "unknown",
+      preserveKeyEvent: false,
     });
   });
 });
