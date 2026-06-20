@@ -890,9 +890,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
       <div
-        data-testid="tenant-console-shell"
         style={{
-          height: "100dvh",
           minHeight: "100dvh",
           background: tenantCanvasTheme.bg,
         }}
@@ -911,7 +909,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
           searchPlaceholder={t("shell.search")}
           searchWidth={280}
           avatarLabel={locale === "en" ? "YA" : t("shell.identity.actor")}
-          style={{ height: "100dvh", minHeight: "100dvh" }}
+          style={{ minHeight: "100dvh" }}
           topRight={
             <TenantShellControls locale={locale} setLocale={setLocale} t={t} />
           }

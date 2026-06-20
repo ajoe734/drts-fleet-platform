@@ -1469,7 +1469,7 @@ export function DispatchWorkflow({
         continue;
       }
       candidateSupplyPoints += 1;
-      if (freshness === "stale" || freshness === "low_accuracy") {
+      if (freshness === "stale") {
         staleCandidatePoints += 1;
       }
       spatialPoints.push({
@@ -2144,10 +2144,7 @@ export function DispatchWorkflow({
                   <button
                     key={point.key}
                     className={`spatial-point ${pointStyle.className} ${
-                      point.freshness === "stale" ||
-                      point.freshness === "low_accuracy"
-                        ? "spatial-point-stale"
-                        : ""
+                      point.freshness === "stale" ? "spatial-point-stale" : ""
                     }`}
                     style={coords}
                     title={`${point.label} · ${point.subtitle ?? ""}`}
@@ -2568,7 +2565,6 @@ export function DispatchWorkflow({
                         {(
                           [
                             "stale",
-                            "low_accuracy",
                             "missing",
                           ] as DispatchCandidateLocationState[]
                         ).map((locationState) => {
@@ -3213,7 +3209,6 @@ export function DispatchWorkflow({
                               {(
                                 [
                                   "stale",
-                                  "low_accuracy",
                                   "missing",
                                 ] as DispatchCandidateLocationState[]
                               ).map((locationState) => {
