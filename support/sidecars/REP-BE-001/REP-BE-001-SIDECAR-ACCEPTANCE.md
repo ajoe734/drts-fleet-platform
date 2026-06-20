@@ -6,7 +6,7 @@
 **Sidecar Owner / Reviewer:** `Codex` / `Codex2`  
 **Parent Owner / Reviewer At Snapshot:** `Codex` / `Claude`  
 **Packet Date:** `2026-06-20` (UTC)  
-**Status Snapshot:** `in_progress` for this sidecar; support-only artifact, no canonical truth or runtime implementation changes
+**Status Snapshot:** `review_approved` for this sidecar as of `2026-06-20T05:26:49Z`; support-only artifact, no canonical truth or runtime implementation changes
 
 This packet converts the current machine-truth brief for `REP-BE-001` into a reviewer-facing acceptance checklist and dependency map. It is limited to support material. The canonical implementation under review is parent closeout commit `0fd0c710c69149e64d1530ba9f3d906680f3d166` (`REP-BE-001: build dispatch daily records from event history`), while upstream dependency `P1D-WP0` is already recorded as `done` on `origin/dev` at `43a34659572402b8b5aeafc58a1312c9d3afe1d1`.
 
@@ -33,12 +33,13 @@ Out of scope:
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress`
+- status=`review_approved`
 - depends_on=`[P1D-WP0]`
 - helper_parent=`REP-BE-001`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
 - artifact=`support/sidecars/REP-BE-001/REP-BE-001-SIDECAR-ACCEPTANCE.md`
+- latest approval wording matches the machine-truth `next` field captured at `2026-06-20T05:26:49Z`
 
 ### 2.2 Parent task
 
@@ -202,4 +203,5 @@ No runtime checks were run for this sidecar itself because it is support-only an
 
 ## 10. Change Log
 
+- `2026-06-20` — refreshed the sidecar status snapshot for owner closeout so the packet now matches machine truth at `review_approved` and records that the approval wording in `next` is the active reviewer-facing conclusion.
 - `2026-06-20` — refreshed the acceptance packet to align with the current shared machine truth after review failure: formal dependency pinned to `P1D-WP0` on `origin/dev`, parent review pinned to commit `0fd0c710c`, SD/SA source anchors added for table shape and arrival-null rule, and reviewer handoff wording updated so the packet can be re-submitted with concrete evidence.
