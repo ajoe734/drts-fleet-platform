@@ -7,8 +7,12 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { SupplyDocumentService } from "../../src/modules/fleet-partner/supply-document.service";
+import { SupplyReadinessService } from "../../src/modules/fleet-partner/supply-readiness.service";
 import { FleetPartnerController } from "../../src/modules/fleet-partner/fleet-partner.controller";
 import { FleetPartnerService } from "../../src/modules/fleet-partner/fleet-partner.service";
+import { SupplySubmissionRepository } from "../../src/modules/fleet-partner/supply-submission.repository";
+import { SupplySubmissionService } from "../../src/modules/fleet-partner/supply-submission.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
@@ -51,9 +55,28 @@ function createFixture() {
     ownedMobilityService,
     regulatoryRegistryService,
   );
+  const supplySubmissionRepository = new SupplySubmissionRepository();
+  const supplySubmissionService = new SupplySubmissionService(
+    supplySubmissionRepository,
+    regulatoryRegistryService,
+    auditNotificationService,
+  );
+  const supplyDocumentService = new SupplyDocumentService(
+    supplySubmissionService,
+    supplySubmissionRepository,
+  );
+  const supplyReadinessService = new SupplyReadinessService(
+    supplySubmissionService,
+    fleetPartnerService,
+  );
 
   return {
-    controller: new FleetPartnerController(fleetPartnerService),
+    controller: new FleetPartnerController(
+      fleetPartnerService,
+      supplySubmissionService,
+      supplyDocumentService,
+      supplyReadinessService,
+    ),
     service: fleetPartnerService,
   };
 }
@@ -166,5 +189,112 @@ describe("FleetPartnerController portal routes", () => {
     await expect(
       controller.getPortalDashboard(undefined, "2026-03"),
     ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("supports draft, document, submit, and readiness APIs", async () => {
+    const { controller } = createFixture();
+
+    const created = await controller.createDriverSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      {
+        name: "Driver Supply Demo",
+        mobile: "+886900999888",
+        professionalDriverLicenseNo: "PDL-9988",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "TX-9988",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+      "req-supply-create-driver",
+    );
+    const submissionId = created.data.submission.submissionId;
+
+    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+      },
+      "req-supply-upload-1",
+    );
+    expect(uploadUrl.data.objectKey).toContain(submissionId);
+
+    const firstDocument = await controller.confirmSupplyDocumentUpload(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        objectKey: uploadUrl.data.objectKey,
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+        fileSize: 1024,
+        checksumSha256: "abc123",
+        effectiveFrom: "2026-01-01",
+        effectiveUntil: "2027-12-31",
+      },
+      "req-supply-confirm-1",
+    );
+    expect(firstDocument.data.documentType).toBe("professional_driver_license");
+
+    const secondUploadUrl = controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 2,
+        documentType: "taxi_driver_registration",
+        originalFileName: "registration.pdf",
+        contentType: "application/pdf",
+      },
+      "req-supply-upload-2",
+    );
+    await controller.confirmSupplyDocumentUpload(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 2,
+        documentType: "taxi_driver_registration",
+        objectKey: secondUploadUrl.data.objectKey,
+        originalFileName: "registration.pdf",
+        contentType: "application/pdf",
+        fileSize: 2048,
+        checksumSha256: "def456",
+        effectiveFrom: "2026-01-01",
+        effectiveUntil: "2027-12-31",
+      },
+      "req-supply-confirm-2",
+    );
+
+    const submitted = await controller.submitSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 3,
+      },
+      "req-supply-submit",
+    );
+    expect(submitted.data.submission.status).toBe("submitted");
+
+    const readiness = controller.getDriverSupplyReadiness(
+      "fleet-demo-001",
+      submissionId,
+      "req-supply-readiness",
+    );
+    expect(readiness.data).toMatchObject({
+      subjectType: "driver",
+      subjectId: submissionId,
+      state: "ready",
+    });
   });
 });
