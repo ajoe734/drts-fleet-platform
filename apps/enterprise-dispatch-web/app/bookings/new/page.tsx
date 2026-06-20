@@ -57,7 +57,11 @@ export default async function NewBookingPage() {
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ECard t={t} title={tr("new.field.passenger")} sub="passenger">
+          <ECard
+            t={t}
+            title={tr("new.field.passenger")}
+            sub={tr("card.sub.passenger")}
+          >
             <ESeg
               t={t}
               full
@@ -116,7 +120,7 @@ export default async function NewBookingPage() {
           <ECard
             t={t}
             title={tr("new.card.booking")}
-            sub="pickup · dropoff · window"
+            sub={tr("card.sub.pickupDropoffWindow")}
           >
             <div
               style={{
@@ -211,7 +215,7 @@ export default async function NewBookingPage() {
           <ECard
             t={t}
             title={tr("new.card.policy")}
-            sub="cost center · vehicle · notes"
+            sub={tr("card.sub.costVehicleNotes")}
           >
             <div
               style={{
@@ -263,7 +267,11 @@ export default async function NewBookingPage() {
             gap: 14,
           }}
         >
-          <ECard t={t} title={tr("new.check.title")} sub="helper reads">
+          <ECard
+            t={t}
+            title={tr("new.check.title")}
+            sub={tr("card.sub.helperReads")}
+          >
             <ERow
               t={t}
               k={tr("new.field.costCenter")}
