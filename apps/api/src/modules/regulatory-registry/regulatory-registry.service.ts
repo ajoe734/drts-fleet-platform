@@ -21,7 +21,9 @@ import type {
   DriverLocationHeartbeatBatchResponse,
   DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
+  DriverLocationFreshness,
   DriverLocationSnapshot,
+  DriverTrackingStatus,
   DriverMasterLifecycleStatus,
   DriverRegistryRecord,
   InitiateVehicleOffboardingCommand,
@@ -47,6 +49,7 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import {
   RegulatoryRegistryRepository,
+  type DriverHeartbeatEventSnapshot,
   type PersistRegulatoryRegistryChanges,
   type RegulatorySupplyPair,
 } from "./regulatory-registry.repository";
@@ -59,6 +62,8 @@ type EtaDestination = {
   lat: number;
   lng: number;
 };
+
+type DriverHeartbeatContext = DriverHeartbeatEventSnapshot;
 
 function createSeedDriver(
   input: Pick<
@@ -364,6 +369,24 @@ export class RegulatoryRegistryService implements OnModuleInit {
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
 
   private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
+
+  private latestDriverHeartbeatUploads = new Map<
+    string,
+    Pick<
+      DriverHeartbeatContext,
+      | "eventId"
+      | "deviceId"
+      | "driverId"
+      | "sequenceNo"
+      | "recordedAt"
+      | "receivedAt"
+    >
+  >();
+
+  private currentDriverHeartbeatContexts = new Map<
+    string,
+    DriverHeartbeatContext
+  >();
 
   private supplyPairs: RegulatorySupplyPair[] = [
     {
@@ -754,6 +777,22 @@ export class RegulatoryRegistryService implements OnModuleInit {
         updatedAt: persistedResult.serverReceivedAt,
       });
 
+    this.setLatestDriverHeartbeatUpload({
+      eventId: heartbeat.eventId,
+      deviceId: heartbeat.deviceId,
+      driverId: heartbeat.driverId,
+      sequenceNo: heartbeat.sequenceNo,
+      recordedAt: heartbeat.recordedAt,
+      receivedAt: persistedResult.serverReceivedAt,
+    });
+
+    if (currentLocationUpdated) {
+      this.setCurrentDriverHeartbeatContext({
+        ...heartbeat,
+        receivedAt: persistedResult.serverReceivedAt,
+      });
+    }
+
     if (currentLocationUpdated) {
       const latestLocation = this.cloneDriverLocation(
         this.latestDriverLocations.get(heartbeat.driverId)!,
@@ -770,6 +809,54 @@ export class RegulatoryRegistryService implements OnModuleInit {
       duplicate: persistedResult.duplicate,
       currentLocationUpdated,
       serverReceivedAt: persistedResult.serverReceivedAt,
+    };
+  }
+
+  async getDriverTrackingStatus(
+    driverId: string,
+  ): Promise<DriverTrackingStatus> {
+    const normalizedDriverId = driverId.trim();
+    this.assertNonBlank(normalizedDriverId, "driverId");
+    this.requireDriver(normalizedDriverId);
+
+    const currentLocation =
+      await this.resolveLatestDriverLocation(normalizedDriverId);
+    const currentContext =
+      (await this.resolveCurrentDriverHeartbeatContext(
+        normalizedDriverId,
+        currentLocation,
+      )) ?? null;
+    const latestUpload =
+      this.latestDriverHeartbeatUploads.get(normalizedDriverId) ??
+      (await this.regulatoryRegistryRepository?.findLatestDriverHeartbeatEvent?.(
+        normalizedDriverId,
+      )) ??
+      null;
+
+    return {
+      driverId: normalizedDriverId,
+      locationFreshness: this.classifyDriverLocationFreshness(currentLocation),
+      currentLocation: currentLocation
+        ? this.cloneDriverLocation(currentLocation)
+        : null,
+      currentVehicleId: currentContext?.vehicleId ?? null,
+      currentTaskId: currentContext?.taskId ?? null,
+      trackingState: currentContext?.workState ?? null,
+      appState: currentContext?.appState ?? null,
+      transportMode: currentContext?.transportMode ?? null,
+      networkType: currentContext?.networkType ?? null,
+      lastEventId: latestUpload?.eventId ?? null,
+      lastDeviceId: latestUpload?.deviceId ?? null,
+      lastSequenceNo: latestUpload?.sequenceNo ?? null,
+      lastHeartbeatRecordedAt:
+        currentContext?.recordedAt ??
+        currentLocation?.recordedAt ??
+        latestUpload?.recordedAt ??
+        null,
+      lastHeartbeatReceivedAt:
+        latestUpload?.receivedAt ?? currentLocation?.updatedAt ?? null,
+      lastSuccessfulUploadAt:
+        latestUpload?.receivedAt ?? currentLocation?.updatedAt ?? null,
     };
   }
 
@@ -2197,6 +2284,99 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
     this.setLatestDriverLocation(location);
     return true;
+  }
+
+  private setLatestDriverHeartbeatUpload(
+    upload: Pick<
+      DriverHeartbeatContext,
+      | "eventId"
+      | "deviceId"
+      | "driverId"
+      | "sequenceNo"
+      | "recordedAt"
+      | "receivedAt"
+    >,
+  ): void {
+    const existing = this.latestDriverHeartbeatUploads.get(upload.driverId);
+    if (
+      existing &&
+      Date.parse(existing.receivedAt) > Date.parse(upload.receivedAt)
+    ) {
+      return;
+    }
+
+    this.latestDriverHeartbeatUploads.set(upload.driverId, { ...upload });
+  }
+
+  private setCurrentDriverHeartbeatContext(
+    context: DriverHeartbeatContext,
+  ): void {
+    const existing = this.currentDriverHeartbeatContexts.get(context.driverId);
+    if (
+      existing &&
+      Date.parse(existing.recordedAt) > Date.parse(context.recordedAt)
+    ) {
+      return;
+    }
+
+    this.currentDriverHeartbeatContexts.set(context.driverId, { ...context });
+  }
+
+  private async resolveLatestDriverLocation(
+    driverId: string,
+  ): Promise<DriverLocationSnapshot | null> {
+    const inMemory = this.latestDriverLocations.get(driverId);
+    if (inMemory) {
+      return this.cloneDriverLocation(inMemory);
+    }
+
+    return (
+      (await this.regulatoryRegistryRepository?.findLatestDriverLocation?.(
+        driverId,
+      )) ?? null
+    );
+  }
+
+  private async resolveCurrentDriverHeartbeatContext(
+    driverId: string,
+    currentLocation: DriverLocationSnapshot | null,
+  ): Promise<DriverHeartbeatContext | null> {
+    const inMemory = this.currentDriverHeartbeatContexts.get(driverId);
+    if (
+      inMemory &&
+      (!currentLocation || inMemory.recordedAt === currentLocation.recordedAt)
+    ) {
+      return { ...inMemory };
+    }
+
+    if (!currentLocation) {
+      return null;
+    }
+
+    const persisted =
+      await this.regulatoryRegistryRepository?.findDriverHeartbeatEventByRecordedAt?.(
+        driverId,
+        currentLocation.recordedAt,
+      );
+    return persisted ? { ...persisted } : null;
+  }
+
+  private classifyDriverLocationFreshness(
+    location: DriverLocationSnapshot | null,
+  ): DriverLocationFreshness {
+    if (!location) {
+      return "missing";
+    }
+
+    if (Date.now() - Date.parse(location.updatedAt) > 90_000) {
+      return "stale";
+    }
+
+    if (location.accuracyM !== null && location.accuracyM > 100) {
+      return "low_accuracy";
+    }
+
+    return "fresh";
   }
 
   private resolveCandidateEta(
