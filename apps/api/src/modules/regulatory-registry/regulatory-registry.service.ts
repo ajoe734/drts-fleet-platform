@@ -832,6 +832,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
         normalizedDriverId,
       )) ??
       null;
+    const lastHeartbeat = latestUpload ?? currentContext;
 
     return {
       driverId: normalizedDriverId,
@@ -845,18 +846,17 @@ export class RegulatoryRegistryService implements OnModuleInit {
       appState: currentContext?.appState ?? null,
       transportMode: currentContext?.transportMode ?? null,
       networkType: currentContext?.networkType ?? null,
-      lastEventId: latestUpload?.eventId ?? null,
-      lastDeviceId: latestUpload?.deviceId ?? null,
-      lastSequenceNo: latestUpload?.sequenceNo ?? null,
+      lastEventId: lastHeartbeat?.eventId ?? null,
+      lastDeviceId: lastHeartbeat?.deviceId ?? null,
+      lastSequenceNo: lastHeartbeat?.sequenceNo ?? null,
       lastHeartbeatRecordedAt:
-        currentContext?.recordedAt ??
+        lastHeartbeat?.recordedAt ??
         currentLocation?.recordedAt ??
-        latestUpload?.recordedAt ??
         null,
       lastHeartbeatReceivedAt:
-        latestUpload?.receivedAt ?? currentLocation?.updatedAt ?? null,
+        lastHeartbeat?.receivedAt ?? currentLocation?.updatedAt ?? null,
       lastSuccessfulUploadAt:
-        latestUpload?.receivedAt ?? currentLocation?.updatedAt ?? null,
+        lastHeartbeat?.receivedAt ?? currentLocation?.updatedAt ?? null,
     };
   }
 
