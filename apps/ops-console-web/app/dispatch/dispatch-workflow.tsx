@@ -16,6 +16,7 @@ import type {
   DispatchCandidateLocationState,
   DispatchJobRecord,
   DispatchTraceLogRecord,
+  EligibilityDecision,
   OpsDispatchStreamEventEnvelope,
   OverrideRequestRecord,
   OwnedOrderRecord,
@@ -91,6 +92,10 @@ interface ActionDraft {
   overrideType: "release_to_dispatch" | "cancel_order";
   approvalNote: string;
   rejectionReason: string;
+}
+
+interface EligibilityConflict {
+  reasonCodes: string[];
 }
 
 interface DispatchActivityEntry {
@@ -354,6 +359,48 @@ function getComplianceTone(state: string): string {
     default:
       return "bg-slate-100 text-slate-700";
   }
+}
+
+const ELIGIBILITY_DECISION_LABEL_KEYS: Record<EligibilityDecision, string> = {
+  eligible: "dispatch.workflow.eligibility.decision.eligible",
+  conditionally_eligible:
+    "dispatch.workflow.eligibility.decision.conditionally_eligible",
+  ineligible: "dispatch.workflow.eligibility.decision.ineligible",
+};
+
+function getEligibilityTone(decision: EligibilityDecision | undefined): string {
+  switch (decision) {
+    case "eligible":
+      return "bg-green-100 text-green-800";
+    case "conditionally_eligible":
+      return "bg-amber-100 text-amber-800";
+    case "ineligible":
+      return "bg-rose-100 text-rose-800";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+// The api-client surfaces non-2xx responses as `Error("API error 409: <body>")`.
+// The assignment-time recheck 409 embeds the latest reason codes in the error
+// envelope details, so we recover them to drive the reselect prompt.
+function extractEligibilityConflictReasons(message: string): string[] {
+  const jsonStart = message.indexOf("{");
+  if (jsonStart === -1) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(message.slice(jsonStart)) as {
+      error?: { details?: { reasonCodes?: unknown } };
+    };
+    const reasons = parsed.error?.details?.reasonCodes;
+    if (Array.isArray(reasons)) {
+      return reasons.filter((reason): reason is string => typeof reason === "string");
+    }
+  } catch {
+    // Body was not JSON-shaped; fall through to no recovered reasons.
+  }
+  return [];
 }
 
 function buildActionDraft(
@@ -729,6 +776,10 @@ export function DispatchWorkflow({
   const [selectedCandidate, setSelectedCandidate] = useState<
     Record<string, string>
   >({});
+  const [includeIneligible, setIncludeIneligible] = useState(false);
+  const [eligibilityConflict, setEligibilityConflict] = useState<
+    Record<string, EligibilityConflict | undefined>
+  >({});
   const [actionDrafts, setActionDrafts] = useState<
     Record<string, ActionDraft | undefined>
   >({});
@@ -826,7 +877,7 @@ export function DispatchWorkflow({
     missingJobIds.slice(0, AUTO_LOAD_CANDIDATE_LIMIT).forEach((jobId) => {
       autoLoadedCandidateJobsRef.current.add(jobId);
       void client
-        .listDispatchCandidates(jobId)
+        .listDispatchCandidates(jobId, { includeIneligible })
         .then((items) => {
           setCandidates((current) => ({ ...current, [jobId]: items }));
         })
@@ -834,7 +885,14 @@ export function DispatchWorkflow({
           autoLoadedCandidateJobsRef.current.delete(jobId);
         });
     });
-  }, [candidates, client, liveOrders, orderJobMap]);
+  }, [candidates, client, liveOrders, orderJobMap, includeIneligible]);
+
+  // Toggling includeIneligible changes the eligibility set the API returns, so
+  // drop cached candidates and let the auto-loader refetch with the new flag.
+  useEffect(() => {
+    autoLoadedCandidateJobsRef.current.clear();
+    setCandidates({});
+  }, [includeIneligible]);
 
   const reloadDispatchState = async () => {
     const [nextOrders, nextDispatchJobs] = await Promise.all([
@@ -1141,7 +1199,9 @@ export function DispatchWorkflow({
     try {
       setLoading(jobId);
       setError(null);
-      const items = await client.listDispatchCandidates(jobId);
+      const items = await client.listDispatchCandidates(jobId, {
+        includeIneligible,
+      });
       setCandidates((prev) => ({ ...prev, [jobId]: items }));
     } catch (e) {
       setError(
@@ -1154,7 +1214,11 @@ export function DispatchWorkflow({
     }
   };
 
-  const runAction = async (target: string, action: () => Promise<void>) => {
+  const runAction = async (
+    target: string,
+    action: () => Promise<void>,
+    onError?: (error: unknown) => boolean,
+  ) => {
     try {
       setLoading(target);
       setError(null);
@@ -1165,6 +1229,9 @@ export function DispatchWorkflow({
       }
       return true;
     } catch (e) {
+      if (onError?.(e)) {
+        return false;
+      }
       setError(
         e instanceof Error ? e.message : t("dispatch.workflow.actionFailed"),
       );
@@ -1181,13 +1248,39 @@ export function DispatchWorkflow({
     const [vehicleId, driverId] = candidateKey.split("|");
     if (!vehicleId || !driverId) return;
 
-    await runAction(jobId, async () => {
-      await client.assignDispatch({
-        dispatchJobId: jobId,
-        vehicleId,
-        driverId,
-      });
-    });
+    const succeeded = await runAction(
+      jobId,
+      async () => {
+        await client.assignDispatch({
+          dispatchJobId: jobId,
+          vehicleId,
+          driverId,
+        });
+      },
+      (assignError) => {
+        const message =
+          assignError instanceof Error ? assignError.message : "";
+        if (!message.includes("ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT")) {
+          return false;
+        }
+        // Assignment-time recheck rejected the pick: never hard-assign. Drop the
+        // stale selection, surface the latest reasons, and refetch candidates so
+        // the dispatcher must reselect against current eligibility.
+        setSelectedCandidate((prev) => ({ ...prev, [jobId]: "" }));
+        setEligibilityConflict((prev) => ({
+          ...prev,
+          [jobId]: {
+            reasonCodes: extractEligibilityConflictReasons(message),
+          },
+        }));
+        void fetchCandidates(jobId);
+        return true;
+      },
+    );
+
+    if (succeeded) {
+      setEligibilityConflict((prev) => ({ ...prev, [jobId]: undefined }));
+    }
   };
 
   const handleReassign = async (jobId: string) => {
@@ -2547,156 +2640,356 @@ export function DispatchWorkflow({
                   }
                 >
                   {selectedJob ? (
-                    selectedCandidates.length > 0 ? (
-                      <>
-                        <div className="detail-inline-summary">
-                          <span className="cell-title">
-                            {t("dispatch.workflow.candidateCount", {
-                              count: selectedCandidates.length,
-                            })}
+                    <>
+                      <div className="candidate-eligibility-toolbar">
+                        <label className="candidate-include-toggle">
+                          <input
+                            type="checkbox"
+                            checked={includeIneligible}
+                            onChange={(event) =>
+                              setIncludeIneligible(event.target.checked)
+                            }
+                          />
+                          <span>
+                            {t(
+                              "dispatch.workflow.eligibility.includeIneligible",
+                            )}
                           </span>
-                          <span className="cell-subcopy">
-                            {selectedCandidateValue
-                              ? t(
-                                  "dispatch.workflow.detail.selectedCandidateReady",
-                                )
-                              : t(
-                                  "dispatch.workflow.detail.selectCandidateHint",
-                                )}
-                          </span>
-                        </div>
-                        {(
-                          [
-                            "stale",
-                            "low_accuracy",
-                            "missing",
-                          ] as DispatchCandidateLocationState[]
-                        ).map((locationState) => {
-                          const count = selectedCandidates.filter(
-                            (candidate) =>
-                              getCandidateLocationState(candidate) ===
-                              locationState,
-                          ).length;
-                          if (count === 0) {
-                            return null;
-                          }
-                          return (
-                            <div
-                              key={locationState}
-                              className={`candidate-location-note ${getCandidateLocationTone(
-                                locationState,
-                              )}`}
-                            >
-                              {t("dispatch.workflow.candidateLocationSummary", {
-                                count,
-                                state: t(
-                                  `dispatch.workflow.candidateLocation.${locationState}`,
-                                ).toLowerCase(),
-                              })}
+                        </label>
+                        <span className="cell-subcopy">
+                          {t(
+                            "dispatch.workflow.eligibility.includeIneligibleHint",
+                          )}
+                        </span>
+                      </div>
+                      {eligibilityConflict[selectedJob.dispatchJobId] ? (
+                        <div className="candidate-eligibility-conflict">
+                          <div className="cell-title">
+                            {t(
+                              "dispatch.workflow.eligibility.conflictTitle",
+                            )}
+                          </div>
+                          <div className="cell-subcopy">
+                            {t("dispatch.workflow.eligibility.conflictHint")}
+                          </div>
+                          {eligibilityConflict[selectedJob.dispatchJobId]!
+                            .reasonCodes.length > 0 ? (
+                            <div className="candidate-reason-list">
+                              {eligibilityConflict[
+                                selectedJob.dispatchJobId
+                              ]!.reasonCodes.map((code) => (
+                                <span
+                                  key={code}
+                                  className="candidate-reason-chip candidate-reason-hard"
+                                >
+                                  {formatOpsCodeLabel(locale, code)}
+                                </span>
+                              ))}
                             </div>
-                          );
-                        })}
-                        <div className="candidate-table-shell">
-                          <table className="candidate-table">
-                            <thead>
-                              <tr>
-                                <th>{t("dispatch.workflow.col.candidates")}</th>
-                                <th>{t("dispatch.workflow.col.eta")}</th>
-                                <th>
-                                  {t("dispatch.workflow.detail.locationStatus")}
-                                </th>
-                                <th>{t("dispatch.workflow.col.actions")}</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {selectedCandidates.map((candidate) => {
-                                const candidateValue = `${candidate.vehicleId}|${candidate.driverId}`;
-                                const locationState =
-                                  getCandidateLocationState(candidate);
-                                const isCandidateSelected =
-                                  selectedCandidateValue === candidateValue;
-                                return (
-                                  <tr
-                                    key={`${candidate.vehicleId}:${candidate.driverId}`}
-                                    className={
-                                      isCandidateSelected
-                                        ? "candidate-row-selected"
-                                        : undefined
-                                    }
-                                  >
-                                    <td>
-                                      <div className="candidate-cell-stack">
-                                        <div className="cell-title">
-                                          {candidate.vehicleId} ·{" "}
-                                          {candidate.driverId}
-                                        </div>
-                                        <div className="cell-subcopy">
-                                          {candidate.operatingArea}
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td>
-                                      <span className="cell-title">
-                                        {candidate.etaMinutes}m
-                                      </span>
-                                    </td>
-                                    <td>
-                                      <span
-                                        className={`candidate-location-note ${getCandidateLocationTone(
-                                          locationState,
-                                        )}`}
-                                      >
-                                        {t(
-                                          `dispatch.workflow.candidateLocation.${locationState}`,
-                                        )}
-                                      </span>
-                                    </td>
-                                    <td>
-                                      <button
-                                        className={
-                                          isCandidateSelected
-                                            ? "btn btn-primary"
-                                            : "btn"
-                                        }
-                                        type="button"
-                                        onClick={() =>
-                                          setSelectedCandidate((prev) => ({
-                                            ...prev,
-                                            [selectedJob.dispatchJobId]:
-                                              candidateValue,
-                                          }))
-                                        }
-                                      >
-                                        {isCandidateSelected
-                                          ? t(
-                                              "dispatch.workflow.detail.selectedCandidate",
-                                            )
-                                          : t(
-                                              "dispatch.workflow.detail.chooseCandidate",
-                                            )}
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                          ) : null}
                         </div>
-                      </>
-                    ) : (
-                      <button
-                        className="btn btn-primary"
-                        type="button"
-                        onClick={() =>
-                          fetchCandidates(selectedJob.dispatchJobId)
-                        }
-                        disabled={loading === selectedJob.dispatchJobId}
-                      >
-                        {loading === selectedJob.dispatchJobId
-                          ? t("common.loading")
-                          : t("dispatch.workflow.viewCandidates")}
-                      </button>
-                    )
+                      ) : null}
+                      {selectedCandidates.length > 0 ? (
+                        <>
+                          <div className="detail-inline-summary">
+                            <span className="cell-title">
+                              {t("dispatch.workflow.candidateCount", {
+                                count: selectedCandidates.length,
+                              })}
+                            </span>
+                            <span className="cell-subcopy">
+                              {selectedCandidateValue
+                                ? t(
+                                    "dispatch.workflow.detail.selectedCandidateReady",
+                                  )
+                                : t(
+                                    "dispatch.workflow.detail.selectCandidateHint",
+                                  )}
+                            </span>
+                          </div>
+                          {(
+                            [
+                              "stale",
+                              "low_accuracy",
+                              "missing",
+                            ] as DispatchCandidateLocationState[]
+                          ).map((locationState) => {
+                            const count = selectedCandidates.filter(
+                              (candidate) =>
+                                getCandidateLocationState(candidate) ===
+                                locationState,
+                            ).length;
+                            if (count === 0) {
+                              return null;
+                            }
+                            return (
+                              <div
+                                key={locationState}
+                                className={`candidate-location-note ${getCandidateLocationTone(
+                                  locationState,
+                                )}`}
+                              >
+                                {t(
+                                  "dispatch.workflow.candidateLocationSummary",
+                                  {
+                                    count,
+                                    state: t(
+                                      `dispatch.workflow.candidateLocation.${locationState}`,
+                                    ).toLowerCase(),
+                                  },
+                                )}
+                              </div>
+                            );
+                          })}
+                          <div className="candidate-table-shell">
+                            <table className="candidate-table">
+                              <thead>
+                                <tr>
+                                  <th>
+                                    {t("dispatch.workflow.col.candidates")}
+                                  </th>
+                                  <th>{t("dispatch.workflow.col.eta")}</th>
+                                  <th>
+                                    {t(
+                                      "dispatch.workflow.eligibility.col.eligibility",
+                                    )}
+                                  </th>
+                                  <th>
+                                    {t(
+                                      "dispatch.workflow.detail.locationStatus",
+                                    )}
+                                  </th>
+                                  <th>
+                                    {t("dispatch.workflow.col.actions")}
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {selectedCandidates.map((candidate) => {
+                                  const candidateValue = `${candidate.vehicleId}|${candidate.driverId}`;
+                                  const locationState =
+                                    getCandidateLocationState(candidate);
+                                  const isCandidateSelected =
+                                    selectedCandidateValue === candidateValue;
+                                  const isIneligible =
+                                    candidate.eligibilityDecision ===
+                                    "ineligible";
+                                  return (
+                                    <tr
+                                      key={`${candidate.vehicleId}:${candidate.driverId}`}
+                                      className={
+                                        isCandidateSelected
+                                          ? "candidate-row-selected"
+                                          : undefined
+                                      }
+                                    >
+                                      <td>
+                                        <div className="candidate-cell-stack">
+                                          <div className="cell-title">
+                                            {candidate.vehicleId} ·{" "}
+                                            {candidate.driverId}
+                                          </div>
+                                          <div className="cell-subcopy">
+                                            {candidate.operatingArea}
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td>
+                                        <span className="cell-title">
+                                          {candidate.etaMinutes}m
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <div className="candidate-cell-stack">
+                                          <span
+                                            className={`queue-badge ${getEligibilityTone(
+                                              candidate.eligibilityDecision,
+                                            )}`}
+                                          >
+                                            {candidate.eligibilityDecision
+                                              ? t(
+                                                  ELIGIBILITY_DECISION_LABEL_KEYS[
+                                                    candidate
+                                                      .eligibilityDecision
+                                                  ],
+                                                )
+                                              : t(
+                                                  "dispatch.workflow.eligibility.decision.unknown",
+                                                )}
+                                          </span>
+                                          {candidate.serviceProductContext ? (
+                                            <div className="cell-subcopy">
+                                              {formatOpsCodeLabel(
+                                                locale,
+                                                candidate
+                                                  .serviceProductContext
+                                                  .serviceProductCode,
+                                              )}
+                                              {" · "}
+                                              {t(
+                                                "dispatch.workflow.eligibility.policyVersion",
+                                                {
+                                                  version:
+                                                    candidate
+                                                      .serviceProductContext
+                                                      .policyVersion,
+                                                },
+                                              )}
+                                            </div>
+                                          ) : null}
+                                          {candidate.hardReasonCodes &&
+                                          candidate.hardReasonCodes.length >
+                                            0 ? (
+                                            <div className="candidate-reason-group">
+                                              <span className="candidate-reason-label">
+                                                {t(
+                                                  "dispatch.workflow.eligibility.hardReasons",
+                                                )}
+                                              </span>
+                                              <div className="candidate-reason-list">
+                                                {candidate.hardReasonCodes.map(
+                                                  (code) => (
+                                                    <span
+                                                      key={code}
+                                                      className="candidate-reason-chip candidate-reason-hard"
+                                                    >
+                                                      {formatOpsCodeLabel(
+                                                        locale,
+                                                        code,
+                                                      )}
+                                                    </span>
+                                                  ),
+                                                )}
+                                              </div>
+                                            </div>
+                                          ) : null}
+                                          {candidate.softReasonCodes &&
+                                          candidate.softReasonCodes.length >
+                                            0 ? (
+                                            <div className="candidate-reason-group">
+                                              <span className="candidate-reason-label">
+                                                {t(
+                                                  "dispatch.workflow.eligibility.softReasons",
+                                                )}
+                                              </span>
+                                              <div className="candidate-reason-list">
+                                                {candidate.softReasonCodes.map(
+                                                  (code) => (
+                                                    <span
+                                                      key={code}
+                                                      className="candidate-reason-chip candidate-reason-soft"
+                                                    >
+                                                      {formatOpsCodeLabel(
+                                                        locale,
+                                                        code,
+                                                      )}
+                                                    </span>
+                                                  ),
+                                                )}
+                                              </div>
+                                            </div>
+                                          ) : null}
+                                          {candidate.missingRequirements &&
+                                          candidate.missingRequirements
+                                            .length > 0 ? (
+                                            <div className="candidate-reason-group">
+                                              <span className="candidate-reason-label">
+                                                {t(
+                                                  "dispatch.workflow.eligibility.missingRequirements",
+                                                )}
+                                              </span>
+                                              <div className="candidate-reason-list">
+                                                {candidate.missingRequirements.map(
+                                                  (code) => (
+                                                    <span
+                                                      key={code}
+                                                      className="candidate-reason-chip candidate-reason-missing"
+                                                    >
+                                                      {formatOpsCodeLabel(
+                                                        locale,
+                                                        code,
+                                                      )}
+                                                    </span>
+                                                  ),
+                                                )}
+                                              </div>
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      </td>
+                                      <td>
+                                        <span
+                                          className={`candidate-location-note ${getCandidateLocationTone(
+                                            locationState,
+                                          )}`}
+                                        >
+                                          {t(
+                                            `dispatch.workflow.candidateLocation.${locationState}`,
+                                          )}
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <button
+                                          className={
+                                            isCandidateSelected
+                                              ? "btn btn-primary"
+                                              : "btn"
+                                          }
+                                          type="button"
+                                          disabled={isIneligible}
+                                          title={
+                                            isIneligible
+                                              ? t(
+                                                  "dispatch.workflow.eligibility.ineligibleSelectBlocked",
+                                                )
+                                              : undefined
+                                          }
+                                          onClick={() =>
+                                            setSelectedCandidate((prev) => ({
+                                              ...prev,
+                                              [selectedJob.dispatchJobId]:
+                                                candidateValue,
+                                            }))
+                                          }
+                                        >
+                                          {isCandidateSelected
+                                            ? t(
+                                                "dispatch.workflow.detail.selectedCandidate",
+                                              )
+                                            : t(
+                                                "dispatch.workflow.detail.chooseCandidate",
+                                              )}
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="candidate-no-supply-note">
+                            {t(
+                              "dispatch.workflow.eligibility.noEligibleSupply",
+                            )}
+                          </div>
+                          <button
+                            className="btn btn-primary"
+                            type="button"
+                            onClick={() =>
+                              fetchCandidates(selectedJob.dispatchJobId)
+                            }
+                            disabled={loading === selectedJob.dispatchJobId}
+                          >
+                            {loading === selectedJob.dispatchJobId
+                              ? t("common.loading")
+                              : t("dispatch.workflow.viewCandidates")}
+                          </button>
+                        </>
+                      )}
+                    </>
                   ) : (
                     <div className="cell-subcopy">
                       {t("dispatch.workflow.awaitingJob")}
@@ -3199,6 +3492,16 @@ export function DispatchWorkflow({
                                   >
                                     {candidate.vehicleId} / {candidate.driverId}{" "}
                                     · {candidate.etaMinutes}m ·{" "}
+                                    {candidate.eligibilityDecision
+                                      ? t(
+                                          ELIGIBILITY_DECISION_LABEL_KEYS[
+                                            candidate.eligibilityDecision
+                                          ],
+                                        )
+                                      : t(
+                                          "dispatch.workflow.eligibility.decision.unknown",
+                                        )}{" "}
+                                    ·{" "}
                                     {t(
                                       `dispatch.workflow.candidateLocation.${getCandidateLocationState(candidate)}`,
                                     )}
@@ -3837,6 +4140,74 @@ export function DispatchWorkflow({
         .candidate-location-no-location {
           background: #e2e8f0;
           color: #334155;
+        }
+        .candidate-eligibility-toolbar {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 0.5rem 0.85rem;
+          margin-bottom: 0.65rem;
+        }
+        .candidate-include-toggle {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: #334155;
+          cursor: pointer;
+        }
+        .candidate-eligibility-conflict {
+          display: grid;
+          gap: 0.3rem;
+          padding: 0.65rem 0.75rem;
+          margin-bottom: 0.65rem;
+          border: 1px solid #fecaca;
+          border-radius: 0.75rem;
+          background: #fef2f2;
+        }
+        .candidate-no-supply-note {
+          padding: 0.65rem 0.75rem;
+          margin-bottom: 0.65rem;
+          border: 1px solid #fed7aa;
+          border-radius: 0.75rem;
+          background: #fff7ed;
+          color: #9a3412;
+          font-size: 0.85rem;
+        }
+        .candidate-reason-group {
+          display: grid;
+          gap: 0.25rem;
+        }
+        .candidate-reason-label {
+          font-size: 0.72rem;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: #64748b;
+        }
+        .candidate-reason-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.3rem;
+        }
+        .candidate-reason-chip {
+          display: inline-block;
+          padding: 0.15rem 0.5rem;
+          border-radius: 999px;
+          font-size: 0.74rem;
+          font-weight: 600;
+        }
+        .candidate-reason-hard {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+        .candidate-reason-soft {
+          background: #fef3c7;
+          color: #92400e;
+        }
+        .candidate-reason-missing {
+          background: #e0e7ff;
+          color: #3730a3;
         }
         .queue-badge {
           display: inline-block;
