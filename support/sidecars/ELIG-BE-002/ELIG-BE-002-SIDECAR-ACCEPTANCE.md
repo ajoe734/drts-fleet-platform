@@ -3,10 +3,10 @@
 **Sidecar Kind:** `acceptance_packet`  
 **Parent Task:** `ELIG-BE-002` — exact service product propagation across order / dispatch / task  
 **Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Claude2`  
+**Sidecar Reviewer:** `Claude`
 **Parent Owner / Reviewer (machine-truth snapshot):** `Codex` / `Codex2`  
 **Generated:** `2026-06-20` (UTC)  
-**Snapshot Status:** parent `ELIG-BE-002` is already `done` in machine truth as of `2026-06-20T05:17:21Z`, with closeout commit `a4ab66bad89cffbeecf7406f7505a75726421ef6` (`closeout(ELIG-BE-002): finalize exact service product propagation`) and `integration_status=merged_to_dev`. This sidecar is support-only and does not reopen or mutate the parent slice.
+**Snapshot Status:** parent `ELIG-BE-002` is already `done` in machine truth as of `2026-06-20T05:17:21Z`, with closeout commit `a4ab66bad89cffbeecf7406f7505a75726421ef6` (`closeout(ELIG-BE-002): finalize exact service product propagation`) and `integration_status=merged_to_dev`. Reviewer approval for this sidecar packet is already recorded in `review_notes_zh`; owner closeout is limited to task-scoped commit / push / `done` evidence. This sidecar is support-only and does not reopen or mutate the parent slice.
 
 This packet exists so a reviewer or downstream owner can quickly re-verify what `ELIG-BE-002` closed: exact service-product identity and eligibility-policy version are preserved through booking/order creation, dispatch-job creation, assignment creation, and driver-task materialization, without broad-bucket downgrade or silent fallback to guessed `business_dispatch` semantics.
 
@@ -38,14 +38,15 @@ Out of scope:
 `ai-status.json -> ELIG-BE-002-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex`
-- reviewer=`Claude2`
-- status=`in_progress` at packet generation time
+- reviewer=`Claude` (reassigned from `Claude2` before owner closeout to preserve owner/reviewer separation)
+- lifecycle note: reviewer approval is already recorded in `review_notes_zh`; the remaining owner work is closeout evidence only
 - depends_on=`[P1D-WP0]`
 - artifacts=`support/sidecars/ELIG-BE-002/ELIG-BE-002-SIDECAR-ACCEPTANCE.md`
 - acceptance:
   - `Create support artifacts only`
   - `Do not edit canonical truth`
   - `Hand off the packet to the assigned reviewer`
+- review note summary: the approval verifies the packet matches parent closeout commit `a4ab66bad`, keeps `P1D-WP0` as the only formal dependency, and stays support-only with no canonical/runtime changes
 
 ### 2.2 Parent task
 
@@ -188,7 +189,7 @@ This checklist restates the parent machine-truth acceptance without changing it.
 
 ---
 
-## 7. Reviewer Focus (`Claude2`)
+## 7. Reviewer Focus (`Claude`)
 
 Review this sidecar against the following questions:
 
@@ -208,24 +209,24 @@ Suggested reopen wording:
 
 ---
 
-## 8. Handoff Commands
+## 8. Lifecycle Commands
 
 Owner -> reviewer:
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff ELIG-BE-002-SIDECAR-ACCEPTANCE Claude2 "ELIG-BE-002 acceptance packet is ready at support/sidecars/ELIG-BE-002/ELIG-BE-002-SIDECAR-ACCEPTANCE.md. It keeps P1D-WP0 as the sole formal dependency, anchors the exact-product propagation requirements to the landed owned-mobility service / repository / contracts / test seams, and remains support-only with no canonical-truth or runtime changes."
+AI_NAME=Codex scripts/ai-status.sh handoff ELIG-BE-002-SIDECAR-ACCEPTANCE Claude "ELIG-BE-002 acceptance packet is ready at support/sidecars/ELIG-BE-002/ELIG-BE-002-SIDECAR-ACCEPTANCE.md. It keeps P1D-WP0 as the sole formal dependency, anchors the exact-product propagation requirements to the landed owned-mobility service / repository / contracts / test seams, and remains support-only with no canonical-truth or runtime changes."
 ```
 
 Reviewer approve:
 
 ```bash
-AI_NAME=Claude2 scripts/ai-status.sh approve ELIG-BE-002-SIDECAR-ACCEPTANCE "ELIG-BE-002 acceptance packet is ready: it keeps P1D-WP0 as the only formal dependency, maps the SD exact-product requirements to the landed owned-mobility propagation seams, and stays support-only without changing canonical truth."
+AI_NAME=Claude scripts/ai-status.sh approve ELIG-BE-002-SIDECAR-ACCEPTANCE "ELIG-BE-002 acceptance packet is ready: it keeps P1D-WP0 as the only formal dependency, maps the SD exact-product requirements to the landed owned-mobility propagation seams, and stays support-only without changing canonical truth."
 ```
 
 Reviewer reopen:
 
 ```bash
-AI_NAME=Claude2 scripts/ai-status.sh reopen ELIG-BE-002-SIDECAR-ACCEPTANCE "packet needs revision: [specify dependency drift / anchor mismatch / acceptance mismatch / scope violation]"
+AI_NAME=Claude scripts/ai-status.sh reopen ELIG-BE-002-SIDECAR-ACCEPTANCE "packet needs revision: [specify dependency drift / anchor mismatch / acceptance mismatch / scope violation]"
 ```
 
 ---
