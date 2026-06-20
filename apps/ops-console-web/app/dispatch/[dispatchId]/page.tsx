@@ -441,14 +441,17 @@ function getCandidateGate(
 
   if (locationState === "missing") {
     return {
-      label: tr(locale, "dispatch.workflow.candidateLocation.no_location"),
+      label: tr(locale, "dispatch.workflow.candidateLocation.missing"),
       tone: "warn" as const,
     };
   }
 
-  if (locationState === "stale") {
+  if (locationState === "stale" || locationState === "low_accuracy") {
     return {
-      label: tr(locale, "dispatch.detail.gate.locationStale"),
+      label:
+        locationState === "low_accuracy"
+          ? tr(locale, "dispatch.workflow.candidateLocation.low_accuracy")
+          : tr(locale, "dispatch.detail.gate.locationStale"),
       tone: "warn" as const,
     };
   }
@@ -481,7 +484,7 @@ function getCandidateScore(
     score -= 0.18;
   }
 
-  if (locationState === "stale") {
+  if (locationState === "stale" || locationState === "low_accuracy") {
     score -= 0.06;
   }
 
