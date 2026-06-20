@@ -54,11 +54,11 @@
     <key>NSCameraUsageDescription</key>
     <string>Allow DRTS Driver App to access your camera so you can capture delivery proof images.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Allow DRTS Driver App to keep using your location for active-trip heartbeat updates even when the app is backgrounded.</string>
+    <string>Allow DRTS Driver App to keep using your location while you stay online for dispatch availability or active-trip heartbeat updates, even when the app is backgrounded.</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Allow DRTS Driver App to access your location while a trip is active so it can calculate trip distance and duration.</string>
+    <string>Allow DRTS Driver App to access your location while you are online for dispatch or actively serving a trip.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Allow DRTS Driver App to access your photos so you can attach delivery proof images.</string>
     <key>NSUserActivityTypes</key>
