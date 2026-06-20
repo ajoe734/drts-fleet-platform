@@ -4,6 +4,7 @@ import type {
   DriverPayoutStatus,
   DriverTaskStatus,
   Phase1ServiceBucket,
+  ServiceProductType,
 } from "@drts/contracts";
 
 export type DriverLocale = "en" | "zh";
@@ -70,6 +71,92 @@ const TASK_TYPE_LABELS: Record<string, LocalizedText> = {
   standard_taxi: { en: "Platform Dispatch", zh: "平台派單" },
   business_dispatch: { en: "Enterprise Dispatch", zh: "企業派遣" },
 };
+
+const SERVICE_PRODUCT_LABELS: Record<ServiceProductType, LocalizedText> = {
+  taxi_realtime: { en: "Taxi Realtime", zh: "計程車即時叫車" },
+  taxi_reservation: { en: "Taxi Reservation", zh: "計程車預約" },
+  enterprise_dispatch: { en: "Enterprise Dispatch", zh: "企業派遣" },
+  credit_card_airport_transfer: {
+    en: "Airport Transfer",
+    zh: "機場接送",
+  },
+  insurance_replacement_vehicle: {
+    en: "Insurance Replacement Vehicle",
+    zh: "保險代步",
+  },
+  travel_agency_transfer: {
+    en: "Travel Agency Transfer",
+    zh: "旅行社接送",
+  },
+  third_party_forwarded_order: {
+    en: "Third-party Forwarded Order",
+    zh: "第三方平台轉派單",
+  },
+};
+
+type ServiceProductContext = {
+  serviceProductCode?: ServiceProductType | string | null;
+  serviceBucket: Phase1ServiceBucket | string | null;
+  businessDispatchSubtype: BusinessDispatchSubtype | string | null;
+  dispatchSemantics: DispatchSemantics | string | null;
+};
+
+export function readDriverServiceProductCode(value: unknown) {
+  if (!value || typeof value !== "object" || !("serviceProductCode" in value)) {
+    return null;
+  }
+
+  if (typeof value.serviceProductCode !== "string") {
+    return null;
+  }
+
+  return value.serviceProductCode.trim() ? value.serviceProductCode : null;
+}
+
+export function resolveDriverServiceProductCode({
+  serviceProductCode,
+  serviceBucket,
+  businessDispatchSubtype,
+  dispatchSemantics,
+}: ServiceProductContext): ServiceProductType | null {
+  if (
+    serviceProductCode &&
+    serviceProductCode in SERVICE_PRODUCT_LABELS
+  ) {
+    return serviceProductCode as ServiceProductType;
+  }
+
+  if (dispatchSemantics === "forwarder_broadcast") {
+    return "third_party_forwarded_order";
+  }
+
+  if (
+    businessDispatchSubtype &&
+    businessDispatchSubtype in SERVICE_PRODUCT_LABELS
+  ) {
+    return businessDispatchSubtype as ServiceProductType;
+  }
+
+  if (serviceBucket === "standard_taxi") {
+    return dispatchSemantics === "reservation"
+      ? "taxi_reservation"
+      : "taxi_realtime";
+  }
+
+  return null;
+}
+
+export function formatDriverServiceProductLabel(
+  context: ServiceProductContext,
+  locale: DriverLocale = "zh",
+) {
+  const code = resolveDriverServiceProductCode(context);
+  if (!code) {
+    return locale === "zh" ? "產品待同步" : "Service Product Pending";
+  }
+
+  return `${SERVICE_PRODUCT_LABELS[code][locale]} · ${code}`;
+}
 
 export function formatDriverTaskTypeLabel(
   {

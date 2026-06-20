@@ -975,9 +975,11 @@ export class ApiClient {
 
   async listDispatchCandidates(
     dispatchJobId: string,
+    options?: { includeIneligible?: boolean },
   ): Promise<DispatchCandidate[]> {
+    const query = options?.includeIneligible ? "?includeIneligible=true" : "";
     const res = await this.get<ListEnvelope<DispatchCandidate>>(
-      `/api/dispatch/tasks/${dispatchJobId}/candidates`,
+      `/api/dispatch/tasks/${dispatchJobId}/candidates${query}`,
     );
     return res.items ?? [];
   }

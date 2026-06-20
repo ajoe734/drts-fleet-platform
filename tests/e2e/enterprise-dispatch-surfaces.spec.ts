@@ -1,7 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-const enterpriseTenantId = "10000000-0000-0000-0000-000000000201";
+const enterpriseTenantId =
+  process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID ??
+  "10000000-0000-0000-0000-000000000201";
 const enterpriseCostCenterCode = "CC-PRD-07";
+const tenantConsoleBaseURL =
+  process.env.DRTS_DEV_TENANT_CONSOLE_BASE_URL ??
+  process.env.TENANT_CONSOLE_BASE_URL;
 
 function tenantHeaders(requestId: string) {
   return {
@@ -133,8 +138,10 @@ test.describe("enterprise dispatch surfaces", () => {
   }) => {
     const apiBaseURL = process.env.DRTS_DEV_API_BASE_URL;
     test.skip(
-      !apiBaseURL || !process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL,
-      "requires deployed enterprise web and API URLs",
+      !apiBaseURL ||
+        !process.env.DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL ||
+        !tenantConsoleBaseURL,
+      "requires deployed enterprise web, tenant console, and API URLs",
     );
 
     const setupResponse = await request.post(
@@ -160,8 +167,33 @@ test.describe("enterprise dispatch surfaces", () => {
     expect(field(setupData, "code", "code")).toBe(enterpriseCostCenterCode);
 
     await page.goto("/bookings/review", { waitUntil: "domcontentloaded" });
-    await page.getByTestId("enterprise-booking-submit").click();
-    await expect(page).toHaveURL(/\/bookings\/submitted\?.*bookingId=booking-/);
+    const submitButton = page.getByTestId("enterprise-booking-submit");
+    await expect(submitButton).toHaveAttribute("data-ready", "true");
+    await expect(submitButton).toBeEnabled();
+
+    const bookingResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/control-plane-proxy/api/tenant/bookings") &&
+        response.request().method() === "POST",
+      { timeout: 30000 },
+    );
+    await submitButton.click();
+
+    const bookingResponse = await bookingResponsePromise;
+    const bookingResponseBody = await bookingResponse.text();
+    expect(
+      bookingResponse.ok(),
+      "booking submit POST must hit the proxy and return proof: " +
+        bookingResponse.status() +
+        " " +
+        bookingResponseBody,
+    ).toBeTruthy();
+    await expect(page).toHaveURL(
+      /\/bookings\/submitted\?.*bookingId=booking-/,
+      {
+        timeout: 30000,
+      },
+    );
 
     const submittedUrl = new URL(page.url());
     const bookingId = submittedUrl.searchParams.get("bookingId");
@@ -202,6 +234,35 @@ test.describe("enterprise dispatch surfaces", () => {
     ).toBe("enterprise_dispatch");
     expect(field(readBackData, "costCenter", "cost_center")).toBe(
       enterpriseCostCenterCode,
+    );
+
+    const tenantConsoleDetailUrl = new URL(
+      "/bookings/" + encodeURIComponent(bookingId!),
+      tenantConsoleBaseURL!,
+    );
+    const tenantConsoleResponse = await page.goto(
+      tenantConsoleDetailUrl.toString(),
+      { waitUntil: "domcontentloaded" },
+    );
+    expect(
+      Boolean(tenantConsoleResponse?.ok()) ||
+        tenantConsoleResponse?.status() === 304,
+      "tenant-console detail should open the enterprise-produced booking",
+    ).toBeTruthy();
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
+    await expect(page.locator("body")).toContainText(bookingId!);
+    await expect(page.locator("body")).toContainText(orderId!);
+    await expect(page.locator("body")).toContainText("enterprise_dispatch");
+    await expect(page.locator("body")).toContainText(enterpriseCostCenterCode);
+    await expect(page.locator("body")).toContainText(/行程摘要|Trip summary/);
+    await expect(page.locator("body")).toContainText(
+      /可編輯截止|Editable until/,
+    );
+    await expect(page.locator("body")).not.toContainText(
+      /editableUntil|readOnlyReasonCode/,
+    );
+    await expect(page.locator("body")).not.toContainText(
+      /No booking data exists yet|No booking data|fetch_failed|not_found/i,
     );
   });
 

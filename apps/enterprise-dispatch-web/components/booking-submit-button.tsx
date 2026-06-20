@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { EBtnContent, entBtnStyle } from "@/components/ent-kit";
 import {
   enterpriseTenant,
@@ -14,11 +14,12 @@ import { useTranslation } from "@/lib/i18n";
 export function BookingSubmitButton() {
   const router = useRouter();
   const { t: tr } = useTranslation();
+  const [isHydrated, setIsHydrated] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submitBooking() {
-    if (isSubmitting) {
+    if (!isHydrated || isSubmitting) {
       return;
     }
 
@@ -49,17 +50,24 @@ export function BookingSubmitButton() {
     }
   }
 
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
+
+  const isDisabled = !isHydrated || isSubmitting;
+
   return (
     <div style={{ flex: 1 }}>
       <button
         type="button"
         data-testid="enterprise-booking-submit"
-        disabled={isSubmitting}
+        data-ready={isHydrated ? "true" : "false"}
+        disabled={isDisabled}
         onClick={submitBooking}
         style={entBtnStyle(theme, {
           variant: "primary",
           block: true,
-          disabled: isSubmitting,
+          disabled: isDisabled,
         })}
       >
         <EBtnContent icon="check">

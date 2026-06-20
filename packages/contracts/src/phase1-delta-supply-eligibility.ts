@@ -58,12 +58,6 @@ export interface SupplySubmissionRecord {
   updatedAt: string;
 }
 
-export interface SupplyReviewActionCommand {
-  expectedRevisionNo: number;
-  reasonCode: string;
-  comment?: string | null;
-}
-
 // ---------------------------------------------------------------------------
 // §2.2 Driver Submission
 // ---------------------------------------------------------------------------
@@ -253,6 +247,20 @@ export interface RuntimeEligibilityDecisionRecord {
   evaluatedAt: string;
 }
 
+export interface DispatchCandidateEligibilityDecoration {
+  serviceProductContext: {
+    serviceProductId: string;
+    serviceProductCode: string;
+    policyVersion: string;
+    evaluatedAt: string;
+  };
+  eligibilityDecision: EligibilityDecision;
+  hardReasonCodes: string[];
+  softReasonCodes: string[];
+  missingRequirements: string[];
+  locationState: "fresh" | "stale" | "low_accuracy" | "missing";
+}
+
 // ---------------------------------------------------------------------------
 // §2.9 Mobile Heartbeat
 // ---------------------------------------------------------------------------
@@ -293,6 +301,45 @@ export interface DriverLocationHeartbeatAck {
   serverReceivedAt: string;
 }
 
+export interface DriverLocationHeartbeatBatchRequest {
+  items: DriverLocationHeartbeatEnvelope[];
+}
+
+export interface DriverLocationHeartbeatBatchResponse {
+  items: DriverLocationHeartbeatAck[];
+}
+
+export type DriverLocationFreshness =
+  | "fresh"
+  | "stale"
+  | "low_accuracy"
+  | "missing";
+
+export interface DriverTrackingStatus {
+  driverId: string;
+  locationFreshness: DriverLocationFreshness;
+  currentLocation: {
+    driverId: string;
+    lat: number;
+    lng: number;
+    accuracyM: number | null;
+    recordedAt: string;
+    updatedAt: string;
+  } | null;
+  currentVehicleId: string | null;
+  currentTaskId: string | null;
+  trackingState: DriverLocationHeartbeatEnvelope["workState"] | null;
+  appState: DriverLocationHeartbeatEnvelope["appState"] | null;
+  transportMode: DriverLocationHeartbeatEnvelope["transportMode"] | null;
+  networkType: DriverLocationHeartbeatEnvelope["networkType"] | null;
+  lastEventId: string | null;
+  lastDeviceId: string | null;
+  lastSequenceNo: number | null;
+  lastHeartbeatRecordedAt: string | null;
+  lastHeartbeatReceivedAt: string | null;
+  lastSuccessfulUploadAt: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // §2.10 Reporting Types
 // ---------------------------------------------------------------------------
@@ -330,6 +377,27 @@ export interface DispatchDailyRecord {
   cancellationReason: string | null;
   complaintCount: number;
 
+  generatedAt: string;
+}
+
+export const DISPATCHABLE_SUPPLY_SNAPSHOT_SOURCE_HEALTH = [
+  "complete",
+  "location_missing",
+  "location_stale",
+  "location_low_accuracy",
+] as const;
+export type DispatchableSupplySnapshotSourceHealth =
+  (typeof DISPATCHABLE_SUPPLY_SNAPSHOT_SOURCE_HEALTH)[number];
+
+export interface DispatchableSupplySnapshotRecord {
+  snapshotAt: string;
+  businessArea: string;
+  serviceProductCode: string;
+
+  dispatchableVehicleCount: number;
+  availableDriverCount: number;
+
+  sourceHealth: DispatchableSupplySnapshotSourceHealth;
   generatedAt: string;
 }
 

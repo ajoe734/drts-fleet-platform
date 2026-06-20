@@ -20,4 +20,15 @@ describe("tenant console i18n dictionary", () => {
       zhEntries.find((entry) => "key" in entry && entry.key === "home"),
     ).toMatchObject({ label: "首頁" });
   });
+
+  it("localizes webhook status and booking detail labels", () => {
+    expect(t("webhooks.status.active", "en")).toBe("Active");
+    expect(t("webhooks.status.testPending", "en")).toBe("Test pending");
+    expect(t("webhooks.status.disabled", "en")).toBe("Disabled");
+    expect(t("webhooks.status.active", "zh")).toBe("啟用中");
+    expect(t("webhooks.status.testPending", "zh")).toBe("待測試");
+    expect(t("webhooks.status.disabled", "zh")).toBe("已停用");
+    expect(t("bookingDetail.label.editableUntil", "en")).toBe("Editable until");
+    expect(t("bookingDetail.label.readOnlyReason", "zh")).toBe("唯讀原因");
+  });
 });

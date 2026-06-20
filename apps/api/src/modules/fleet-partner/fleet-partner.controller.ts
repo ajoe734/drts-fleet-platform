@@ -14,27 +14,20 @@ import type {
   CreateDriverFleetAffiliationCommand,
   CreateFleetPartnerCommand,
   CreateFleetPartnerRevenueShareRuleCommand,
-  SupplyReviewActionCommand,
   UpdateFleetPartnerCommand,
   UpdateFleetPartnerRevenueShareRuleCommand,
 } from "@drts/contracts";
 
-import type { BootstrapRequestIdentity } from "../../common/auth";
-import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import {
   ApiRequestError,
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { FleetPartnerService } from "./fleet-partner.service";
-import { SupplyReviewService } from "./supply-review.service";
 
 @Controller()
 export class FleetPartnerController {
-  constructor(
-    private readonly fleetPartnerService: FleetPartnerService,
-    private readonly supplyReviewService: SupplyReviewService,
-  ) {}
+  constructor(private readonly fleetPartnerService: FleetPartnerService) {}
 
   private requireFleetPartnerId(fleetPartnerId?: string) {
     const normalizedFleetPartnerId = fleetPartnerId?.trim();
@@ -49,118 +42,10 @@ export class FleetPartnerController {
     return normalizedFleetPartnerId;
   }
 
-  private requireReviewerActorId(identity: BootstrapRequestIdentity | null) {
-    const actorId = identity?.actorId?.trim();
-    if (!actorId) {
-      throw new ApiRequestError(
-        400,
-        "ACTOR_ID_REQUIRED",
-        "x-actor-id header is required for supply review endpoints.",
-      );
-    }
-
-    return actorId;
-  }
-
   @Get("admin/fleet-partners")
   listFleetPartners(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       toApiListData(this.fleetPartnerService.listFleetPartners()),
-      requestId,
-    );
-  }
-
-  @Get("admin/supply-review/submissions")
-  @RequireRealms("platform", "ops")
-  async listSupplyReviewSubmissions(
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      toApiListData(await this.supplyReviewService.listSubmissions()),
-      requestId,
-    );
-  }
-
-  @Get("admin/supply-review/submissions/:submissionId")
-  @RequireRealms("platform", "ops")
-  async getSupplyReviewSubmission(
-    @Param("submissionId") submissionId: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.supplyReviewService.getSubmission(submissionId),
-      requestId,
-    );
-  }
-
-  @Post("admin/supply-review/submissions/:submissionId/start")
-  @RequireRealms("platform", "ops")
-  async startSupplyReview(
-    @Param("submissionId") submissionId: string,
-    @Body() command: SupplyReviewActionCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.supplyReviewService.startSubmissionReview(
-        submissionId,
-        command,
-        this.requireReviewerActorId(identity),
-      ),
-      requestId,
-    );
-  }
-
-  @Post("admin/supply-review/submissions/:submissionId/request-revision")
-  @RequireRealms("platform", "ops")
-  async requestSupplyRevision(
-    @Param("submissionId") submissionId: string,
-    @Body() command: SupplyReviewActionCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.supplyReviewService.requestRevision(
-        submissionId,
-        command,
-        this.requireReviewerActorId(identity),
-      ),
-      requestId,
-    );
-  }
-
-  @Post("admin/supply-review/submissions/:submissionId/approve")
-  @RequireRealms("platform", "ops")
-  async approveSupplySubmission(
-    @Param("submissionId") submissionId: string,
-    @Body() command: SupplyReviewActionCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.supplyReviewService.approveSubmission(
-        submissionId,
-        command,
-        this.requireReviewerActorId(identity),
-      ),
-      requestId,
-    );
-  }
-
-  @Post("admin/supply-review/submissions/:submissionId/reject")
-  @RequireRealms("platform", "ops")
-  async rejectSupplySubmission(
-    @Param("submissionId") submissionId: string,
-    @Body() command: SupplyReviewActionCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.supplyReviewService.rejectSubmission(
-        submissionId,
-        command,
-        this.requireReviewerActorId(identity),
-      ),
       requestId,
     );
   }

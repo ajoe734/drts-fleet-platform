@@ -1890,9 +1890,10 @@ const en = {
   "dispatch.detail.refresh.availableActionsHint":
     "CTAs come from availableActions",
   "dispatch.detail.refresh.tier": "T2 · 5s",
-  "dispatch.workflow.candidateLocation.live": "Live location",
+  "dispatch.workflow.candidateLocation.fresh": "Fresh location",
   "dispatch.workflow.candidateLocation.stale": "Stale location",
-  "dispatch.workflow.candidateLocation.no_location": "No location",
+  "dispatch.workflow.candidateLocation.low_accuracy": "Low accuracy location",
+  "dispatch.workflow.candidateLocation.missing": "No location",
   "dispatch.workflow.candidateLocationSummary":
     "{count} candidate(s) are currently {state}.",
   "dispatch.workflow.loadCandidatesFailed": "Failed to fetch candidates",
@@ -5859,9 +5860,10 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.refresh.tier": "T2 · 5s",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
   "dispatch.workflow.refreshFailed": "重新整理派車看板失敗",
-  "dispatch.workflow.candidateLocation.live": "即時位置",
-  "dispatch.workflow.candidateLocation.stale": "過舊位置",
-  "dispatch.workflow.candidateLocation.no_location": "無位置",
+  "dispatch.workflow.candidateLocation.fresh": "位置最新",
+  "dispatch.workflow.candidateLocation.stale": "位置過舊",
+  "dispatch.workflow.candidateLocation.low_accuracy": "定位精度偏低",
+  "dispatch.workflow.candidateLocation.missing": "無位置",
   "dispatch.workflow.candidateLocationSummary":
     "目前有 {count} 位候選人屬於 {state}。",
   "dispatch.workflow.actionFailed": "派車操作失敗",

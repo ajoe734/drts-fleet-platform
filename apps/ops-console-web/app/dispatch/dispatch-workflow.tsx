@@ -1464,12 +1464,12 @@ export function DispatchWorkflow({
 
     for (const candidate of candidates[job.dispatchJobId] ?? []) {
       const freshness = getCandidateLocationState(candidate);
-      if (freshness === "no_location" || !candidate.currentLocation) {
+      if (freshness === "missing" || !candidate.currentLocation) {
         noLocationCandidateCount += 1;
         continue;
       }
       candidateSupplyPoints += 1;
-      if (freshness === "stale") {
+      if (freshness === "stale" || freshness === "low_accuracy") {
         staleCandidatePoints += 1;
       }
       spatialPoints.push({
@@ -2144,7 +2144,10 @@ export function DispatchWorkflow({
                   <button
                     key={point.key}
                     className={`spatial-point ${pointStyle.className} ${
-                      point.freshness === "stale" ? "spatial-point-stale" : ""
+                      point.freshness === "stale" ||
+                      point.freshness === "low_accuracy"
+                        ? "spatial-point-stale"
+                        : ""
                     }`}
                     style={coords}
                     title={`${point.label} · ${point.subtitle ?? ""}`}
@@ -2565,7 +2568,8 @@ export function DispatchWorkflow({
                         {(
                           [
                             "stale",
-                            "no_location",
+                            "low_accuracy",
+                            "missing",
                           ] as DispatchCandidateLocationState[]
                         ).map((locationState) => {
                           const count = selectedCandidates.filter(
@@ -3209,7 +3213,8 @@ export function DispatchWorkflow({
                               {(
                                 [
                                   "stale",
-                                  "no_location",
+                                  "low_accuracy",
+                                  "missing",
                                 ] as DispatchCandidateLocationState[]
                               ).map((locationState) => {
                                 const count = jobCandidates.filter(

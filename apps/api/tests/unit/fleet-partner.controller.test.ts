@@ -9,7 +9,6 @@ import { CallcenterService } from "../../src/modules/callcenter/callcenter.servi
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { FleetPartnerController } from "../../src/modules/fleet-partner/fleet-partner.controller";
 import { FleetPartnerService } from "../../src/modules/fleet-partner/fleet-partner.service";
-import { SupplyReviewService } from "../../src/modules/fleet-partner/supply-review.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
@@ -52,13 +51,9 @@ function createFixture() {
     ownedMobilityService,
     regulatoryRegistryService,
   );
-  const supplyReviewService = new SupplyReviewService();
 
   return {
-    controller: new FleetPartnerController(
-      fleetPartnerService,
-      supplyReviewService,
-    ),
+    controller: new FleetPartnerController(fleetPartnerService),
     service: fleetPartnerService,
   };
 }
@@ -170,61 +165,6 @@ describe("FleetPartnerController portal routes", () => {
 
     await expect(
       controller.getPortalDashboard(undefined, "2026-03"),
-    ).rejects.toBeInstanceOf(ApiRequestError);
-  });
-
-  it("supports supply review action routes and admin listing", async () => {
-    const { controller } = createFixture();
-    const identity = {
-      actorType: "platform_admin",
-      actorId: "platform-reviewer-001",
-      realm: "platform",
-      authMode: "bootstrap_headers",
-      roleFamilies: ["platform"],
-      roles: [],
-      scopes: [],
-      tenantId: null,
-      requestId: "req-bootstrap-review-001",
-    } as const;
-
-    const listEnvelope = await controller.listSupplyReviewSubmissions(
-      "req-supply-review-list",
-    );
-    expect(listEnvelope.data.items.map((item) => item.submissionId)).toContain(
-      "sup-sub-demo-001",
-    );
-
-    const startEnvelope = await controller.startSupplyReview(
-      "sup-sub-demo-001",
-      {
-        expectedRevisionNo: 1,
-        reasonCode: "manual_screening",
-        comment: "Begin document review.",
-      },
-      identity,
-      "req-supply-review-start",
-    );
-
-    expect(startEnvelope.data).toMatchObject({
-      submissionId: "sup-sub-demo-001",
-      status: "in_review",
-      reviewStartedBy: "platform-reviewer-001",
-    });
-  });
-
-  it("requires x-actor-id for supply review action routes", async () => {
-    const { controller } = createFixture();
-
-    await expect(
-      controller.approveSupplySubmission(
-        "sup-sub-demo-002",
-        {
-          expectedRevisionNo: 2,
-          reasonCode: "all_documents_valid",
-          comment: "Ready to approve.",
-        },
-        null,
-      ),
     ).rejects.toBeInstanceOf(ApiRequestError);
   });
 });
