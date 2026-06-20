@@ -21,6 +21,7 @@ import type {
   DispatchAssignmentRecord,
   DispatchAttemptRecord,
   DispatchCandidate,
+  DispatchCandidateServiceProductContext,
   DispatchQueueEntryReason,
   DispatchQueueFamily,
   DispatchJobRecord,
@@ -142,6 +143,11 @@ type CallRecordingStateChangeEvent = {
 };
 
 type MaybePromise<T> = T | Promise<T>;
+type DispatchAssignmentResult = {
+  assignmentId: string;
+  status: DispatchAssignmentRecord["status"];
+  taskId: string;
+};
 
 const BOOKING_RULES: Record<
   NonNullable<OwnedOrderRecord["businessDispatchSubtype"]>,
@@ -2398,7 +2404,10 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(command: AssignDispatchCommand, requestId?: string) {
+  assignDispatch(
+    command: AssignDispatchCommand,
+    requestId?: string,
+  ): DispatchAssignmentResult {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2411,7 +2420,10 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  reassignDispatch(command: ReassignDispatchCommand, requestId?: string) {
+  reassignDispatch(
+    command: ReassignDispatchCommand,
+    requestId?: string,
+  ): DispatchAssignmentResult {
     if (!command.reasonCode.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2564,46 +2576,41 @@ export class OwnedMobilityService implements OnModuleInit {
     vehicleId: string,
     driverId: string,
     requestId?: string,
-  ) {
-    if (this.vehicleEligibilityService) {
-      this.vehicleEligibilityService.assertDispatchAssignmentEligible(
-        order,
-        vehicleId,
-        driverId,
-      );
-    } else {
-      if (
-        !this.regulatoryRegistryService.getVehicleDispatchability(
-          vehicleId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "VEHICLE_NOT_DISPATCHABLE",
-          "Vehicle is not eligible for dispatch.",
-          {
-            vehicleId,
-          },
-        );
-      }
-
-      if (
-        !this.regulatoryRegistryService.getDriverAvailability(
-          driverId,
-          order.serviceBucket,
-        )
-      ) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "DRIVER_NOT_AVAILABLE",
-          "Driver is not eligible for dispatch.",
-          {
-            driverId,
-          },
-        );
-      }
-    }
+  ): DispatchAssignmentResult {
+    const originalOrder = this.cloneOrder(order);
+    const originalDispatchJob = { ...dispatchJob };
+    const originalDispatchAssignments = this.dispatchAssignments.map(
+      (assignment) => ({ ...assignment }),
+    );
+    const originalDriverTasks = this.driverTasks.map((task) =>
+      this.cloneTask(task),
+    );
+    const originalDispatchAttempts = this.dispatchAttempts.map((attempt) => ({
+      ...attempt,
+    }));
+    const originalDispatchTraceLogs = this.dispatchTraceLogs.map((traceLog) =>
+      this.cloneTraceLog(traceLog),
+    );
+    const rollback = () => {
+      this.restoreOrderSnapshot(originalOrder);
+      this.dispatchJobs = [
+        { ...originalDispatchJob },
+        ...this.dispatchJobs.filter(
+          (candidate) => candidate.dispatchJobId !== originalDispatchJob.dispatchJobId,
+        ),
+      ];
+      this.dispatchAssignments = originalDispatchAssignments;
+      this.driverTasks = originalDriverTasks;
+      this.dispatchAttempts = originalDispatchAttempts;
+      this.dispatchTraceLogs = originalDispatchTraceLogs;
+    };
+    const assignmentEligibility = this.evaluateAssignmentEligibility(
+      dispatchJob,
+      order,
+      vehicleId,
+      driverId,
+      requestId,
+    );
 
     const now = new Date().toISOString();
     const taskId = randomUUID();
@@ -2629,6 +2636,12 @@ export class OwnedMobilityService implements OnModuleInit {
       assignmentId: assignment.assignmentId,
       driverId,
       vehicleId,
+      ...(assignmentEligibility.serviceProductContext
+        ? {
+            serviceProductContext:
+              assignmentEligibility.serviceProductContext,
+          }
+        : {}),
       sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
       routeProvided: false,
       waypoints: [],
@@ -2706,32 +2719,168 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchJobs: [dispatchJob],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: traceLogs,
-      },
-      "assign_dispatch",
-    );
-    this.ownedMobilityTaskEventsService.publishTaskAssigned(
-      task,
-      order,
-      requestId,
-    );
-    this.opsDispatchEventsService?.publishDispatchJobUpdated(
-      order.orderId,
-      dispatchJob,
-      requestId,
-    );
-
-    return {
+    const persistPayload = {
+      orders: [order],
+      dispatchJobs: [dispatchJob],
+      dispatchAssignments: [assignment],
+      driverTasks: [task],
+      dispatchAttempts: [dispatchAttempt],
+      dispatchTraceLogs: traceLogs,
+    } satisfies Parameters<OwnedMobilityService["persistChanges"]>[0];
+    const result: DispatchAssignmentResult = {
       assignmentId: assignment.assignmentId,
       status: assignment.status,
       taskId,
+    };
+
+    const finalize = () => {
+      this.ownedMobilityTaskEventsService.publishTaskAssigned(
+        task,
+        order,
+        requestId,
+      );
+      this.opsDispatchEventsService?.publishDispatchJobUpdated(
+        order.orderId,
+        dispatchJob,
+        requestId,
+      );
+      return result;
+    };
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      return this.withRollback(
+        () =>
+          this.ownedMobilityRepository!.withTransaction(async (tx) => {
+            await this.ownedMobilityRepository!.persistOrderWorkflow(
+              tx,
+              persistPayload,
+            );
+            return result;
+          }).then(() => finalize()),
+        rollback,
+      ) as DispatchAssignmentResult;
+    }
+
+    this.persistChanges(persistPayload, "assign_dispatch");
+    return finalize();
+  }
+
+  private evaluateAssignmentEligibility(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
+    vehicleId: string,
+    driverId: string,
+    requestId?: string,
+  ): {
+    serviceProductContext?: DispatchCandidateServiceProductContext;
+  } {
+    if (this.vehicleEligibilityService && this.runtimeEligibilityEvaluator) {
+      const serviceProduct =
+        this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(order);
+      const evaluation = this.runtimeEligibilityEvaluator.evaluateSync({
+        orderId: order.orderId,
+        dispatchJobId: dispatchJob.dispatchJobId,
+        driverId,
+        vehicleId,
+        serviceProductCode: serviceProduct,
+        sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
+        ...(requestId ? { requestId } : {}),
+      });
+      const serviceProductContext = {
+        serviceProductId: evaluation.serviceProductId,
+        serviceProductCode: evaluation.serviceProductCode,
+        policyVersion: evaluation.policyVersion,
+        evaluatedAt: evaluation.evaluatedAt,
+      } satisfies DispatchCandidateServiceProductContext;
+
+      if (evaluation.decision !== "eligible") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+          "Eligibility changed before assignment completed.",
+          {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            orderId: order.orderId,
+            driverId,
+            vehicleId,
+            eligibilityDecision: evaluation.decision,
+            hardReasonCodes: evaluation.hardReasonCodes,
+            softReasonCodes: evaluation.softReasonCodes,
+            missingRequirements: evaluation.missingRequirements,
+            locationState: evaluation.locationState,
+            serviceProductContext,
+          },
+        );
+      }
+
+      return { serviceProductContext };
+    }
+
+    if (this.vehicleEligibilityService) {
+      this.vehicleEligibilityService.assertDispatchAssignmentEligible(
+        order,
+        vehicleId,
+        driverId,
+      );
+      const serviceProductContext = this.buildTaskServiceProductContext(order);
+      return serviceProductContext ? { serviceProductContext } : {};
+    }
+
+    if (
+      !this.regulatoryRegistryService.getVehicleDispatchability(
+        vehicleId,
+        order.serviceBucket,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VEHICLE_NOT_DISPATCHABLE",
+        "Vehicle is not eligible for dispatch.",
+        {
+          vehicleId,
+        },
+      );
+    }
+
+    if (
+      !this.regulatoryRegistryService.getDriverAvailability(
+        driverId,
+        order.serviceBucket,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "DRIVER_NOT_AVAILABLE",
+        "Driver is not eligible for dispatch.",
+        {
+          driverId,
+        },
+      );
+    }
+
+    return {};
+  }
+
+  private buildTaskServiceProductContext(
+    order: OwnedOrderRecord,
+  ): DispatchCandidateServiceProductContext | undefined {
+    if (!this.vehicleEligibilityService || !this.serviceProductService) {
+      return undefined;
+    }
+
+    const serviceProduct =
+      this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(order);
+    const runtimeProduct =
+      this.serviceProductService.getRuntimeServiceProductByType(serviceProduct);
+    if (!runtimeProduct) {
+      return undefined;
+    }
+
+    return {
+      serviceProductId: runtimeProduct.serviceProductId,
+      serviceProductCode: runtimeProduct.serviceProductType,
+      policyVersion: `service:${runtimeProduct.serviceProductId}@${runtimeProduct.updatedAt}`,
+      evaluatedAt: new Date().toISOString(),
     };
   }
 

@@ -2664,6 +2664,7 @@ export interface DriverTaskRecord {
   assignmentId: string;
   driverId: string;
   vehicleId: string;
+  serviceProductContext?: DispatchCandidateServiceProductContext;
   sourcePlatform: string | null;
   routeProvided: boolean;
   waypoints: WaypointRecord[];

@@ -66,6 +66,14 @@ export class RuntimeEligibilityEvaluator {
   async evaluate(
     command: EvaluateRuntimeEligibilityCommand,
   ): Promise<EvaluateRuntimeEligibilityResult> {
+    const result = this.evaluateSync(command);
+    await this.persist(result);
+    return result;
+  }
+
+  evaluateSync(
+    command: EvaluateRuntimeEligibilityCommand,
+  ): EvaluateRuntimeEligibilityResult {
     const context =
       command.resolvedContext ??
       this.eligibilityContextResolver.resolve(command);
@@ -143,7 +151,6 @@ export class RuntimeEligibilityEvaluator {
       softOverrideApplied,
     };
 
-    await this.persist(result);
     this.recordAudit(
       {
         actorId: null,
