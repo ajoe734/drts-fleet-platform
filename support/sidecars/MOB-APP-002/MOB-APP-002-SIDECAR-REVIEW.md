@@ -3,7 +3,7 @@
 This document is the parallel review-support packet for `MOB-APP-002`
 ("Driver App: durable SQLite offline queue"). It does not change canonical
 truth, does not touch the parent runtime branch, and only packages reviewer
-evidence for the assigned sidecar reviewer (`Claude2`).
+evidence for the assigned sidecar reviewer (`Claude`).
 
 Anchors used here:
 
@@ -20,7 +20,7 @@ Anchors used here:
 - **Parent Task:** `MOB-APP-002`
 - **Helper Kind:** `review_packet`
 - **Owner:** `Codex`
-- **Reviewer:** `Claude2`
+- **Reviewer:** `Claude`
 - **Mutates Canonical:** `false`
 - **Artifact:** `support/sidecars/MOB-APP-002/MOB-APP-002-SIDECAR-REVIEW.md`
 
@@ -76,11 +76,17 @@ Important lifecycle notes from `ai-activity-log.jsonl`:
 | Field | Value |
 | --- | --- |
 | Owner | `Codex` |
-| Reviewer | `Claude2` |
+| Reviewer | `Claude` |
 | Status at authoring | `in_progress` |
 | Task class | `sidecar` |
 | Helper kind | `review_packet` |
 | Mutates canonical | `false` |
+
+Current control-plane nuance:
+
+- At `2026-06-20T11:37:07Z` the sidecar reviewer was reassigned from
+  `Claude2` to `Claude` so the in-progress review packet could hand off to a
+  healthy reviewer distinct from owner `Codex`.
 
 ## §3 Parent Branch Surface
 
@@ -193,7 +199,7 @@ Targeted unit cases on the parent branch:
   - `routes suspended drivers back to onboarding after foreground refresh fails`
   - `syncs the active trip heartbeat when the driver session remains valid`
 
-## §6 Reviewer Focus For `Claude2`
+## §6 Reviewer Focus For `Claude`
 
 Use this packet to accelerate closeout, not to reopen the parent design.
 
@@ -219,7 +225,7 @@ Use this packet to accelerate closeout, not to reopen the parent design.
 When this support packet is ready to hand off:
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff MOB-APP-002-SIDECAR-REVIEW Claude2 "Prepared support/sidecars/MOB-APP-002/MOB-APP-002-SIDECAR-REVIEW.md as a reviewer-facing packet for parent task MOB-APP-002. It captures the parent review_approved machine-truth state, the real branch surface on origin/codex/mob-app-002, spec-to-implementation evidence for the durable SQLite queue, the recorded validation commands/results, current branch divergence against origin/dev, and Claude's two non-blocking review notes. Support artifact only; no canonical truth or runtime files changed."
+AI_NAME=Codex scripts/ai-status.sh handoff MOB-APP-002-SIDECAR-REVIEW Claude "Prepared support/sidecars/MOB-APP-002/MOB-APP-002-SIDECAR-REVIEW.md as a reviewer-facing packet for parent task MOB-APP-002. It captures the parent review_approved machine-truth state, the real branch surface on origin/codex/mob-app-002, spec-to-implementation evidence for the durable SQLite queue, the recorded validation commands/results, current branch divergence against origin/dev, and Claude's two non-blocking review notes. Support artifact only; no canonical truth or runtime files changed."
 ```
 
 ## §8 Sidecar Verification
