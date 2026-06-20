@@ -436,6 +436,10 @@ def worktree_cleanup_settings(config: dict[str, Any], overrides: dict[str, Any] 
     settings.setdefault("max_copied_files_per_archive", 200)
     settings.setdefault("max_copied_file_bytes", 2 * 1024 * 1024)
     settings.setdefault("max_copied_bytes_per_archive", 20 * 1024 * 1024)
+    # Bound the dirty-worktree archive so it cannot grow without limit and fill
+    # the disk (which would trip the disk guard and block ALL dispatch).
+    settings.setdefault("archive_retention_days", 1.0)
+    settings.setdefault("archive_max_total_bytes", 2 * 1024 * 1024 * 1024)
     return settings
 
 
@@ -517,6 +521,70 @@ def _worktree_archive_root(settings: dict[str, Any]) -> Path:
     if not root.is_absolute():
         root = Path(tempfile.gettempdir()) / root
     return root.resolve()
+
+
+def _prune_worktree_archive(settings: dict[str, Any]) -> dict[str, Any]:
+    """Keep the dirty-worktree archive bounded.
+
+    Each disk-guard cleanup archives dirty worktrees into a timestamped subdir
+    under the archive root, but nothing ever removed those subdirs, so the
+    archive grew without limit (observed at 90GB) and eventually filled the
+    disk — which trips the disk guard and blocks ALL dispatch. The archived
+    snapshots are only a best-effort recovery aid (the real work lives on the
+    pushed branches/PRs), so we cap them by age then by total size.
+    """
+    root = _worktree_archive_root(settings)
+    if not root.exists():
+        return {"removed": 0, "freed_bytes": 0}
+    retention_days = max(0.0, float(settings.get("archive_retention_days", 1.0) or 0.0))
+    max_total_bytes = max(0, int(settings.get("archive_max_total_bytes", 2 * 1024 * 1024 * 1024) or 0))
+
+    def _dir_size(path: Path) -> int:
+        total = 0
+        for dirpath, _dirs, files in os.walk(path):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, name))
+                except OSError:
+                    pass
+        return total
+
+    entries: list[tuple[Path, float, int]] = []
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return {"removed": 0, "freed_bytes": 0}
+    for child in children:
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            continue
+        entries.append((child, mtime, _dir_size(child)))
+
+    removed = 0
+    freed = 0
+    now = time.time()
+    cutoff = now - retention_days * 86400.0
+    survivors: list[tuple[Path, float, int]] = []
+    for child, mtime, size in entries:
+        if retention_days > 0 and mtime < cutoff:
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+            freed += size
+        else:
+            survivors.append((child, mtime, size))
+
+    if max_total_bytes > 0:
+        total = sum(size for _child, _mtime, size in survivors)
+        survivors.sort(key=lambda item: item[1])  # oldest first
+        for child, _mtime, size in survivors:
+            if total <= max_total_bytes:
+                break
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+            freed += size
+            total -= size
+    return {"removed": removed, "freed_bytes": freed}
 
 
 def _worktree_changed_paths_for_archive(worktree: Path) -> list[str]:
@@ -851,6 +919,11 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
     cleanup_result: dict[str, Any] | None = None
     if _disk_guard_should_cleanup(record, settings, snapshot):
         cleanup_result = prune_stale_worker_worktrees(config, state, settings)
+        # Cleanup archives dirty worktrees; keep that archive bounded so it does
+        # not itself fill the disk and perpetuate the dispatch block.
+        archive_prune = _prune_worktree_archive(worktree_cleanup_settings(config))
+        if int(archive_prune.get("removed") or 0) > 0:
+            record["last_archive_prune"] = archive_prune
         record["last_cleanup_at"] = utc_now()
         record["last_cleanup"] = cleanup_result
         changed = True
