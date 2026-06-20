@@ -5,6 +5,7 @@ import { Fragment, type CSSProperties, type ReactNode } from "react";
 import type {
   AttendanceRecord,
   CrossAppResourceLink,
+  DriverLocationSnapshot,
   DriverMatchingSuppression,
   DriverRegistryRecord,
   DriverStatementRecord,
@@ -129,41 +130,6 @@ type IncidentRow = Record<string, unknown> & {
   incident: IncidentRecord;
 };
 
-type DriverTrackingFreshness = "fresh" | "stale" | "low_accuracy" | "missing";
-
-type DriverTrackingStatus = {
-  driverId: string;
-  locationFreshness: DriverTrackingFreshness;
-  currentLocation: {
-    driverId: string;
-    lat: number;
-    lng: number;
-    accuracyM: number | null;
-    recordedAt: string;
-    updatedAt: string;
-  } | null;
-  currentVehicleId: string | null;
-  currentTaskId: string | null;
-  trackingState:
-    | "offline"
-    | "available"
-    | "assigned"
-    | "enroute"
-    | "arrived"
-    | "on_trip"
-    | "incident"
-    | null;
-  appState: "foreground" | "background" | null;
-  transportMode: "foreground" | "background" | null;
-  networkType: "wifi" | "cellular" | "offline" | "unknown" | null;
-  lastEventId: string | null;
-  lastDeviceId: string | null;
-  lastSequenceNo: number | null;
-  lastHeartbeatRecordedAt: string | null;
-  lastHeartbeatReceivedAt: string | null;
-  lastSuccessfulUploadAt: string | null;
-};
-
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
@@ -172,11 +138,8 @@ const theme = buildCanvasTheme({
 
 const REFRESH_TIER: RefreshTier = "medium";
 const REFRESH_STALE_AFTER_MS = 15_000;
+const STALE_LOCATION_THRESHOLD_MS = 5 * 60 * 1000;
 const REAUTH_THRESHOLD_MS = 72 * 60 * 60 * 1000;
-const TRACKING_QUEUE_LAG_WARN_MS = 60 * 1000;
-const TRACKING_QUEUE_LAG_DANGER_MS = 5 * 60 * 1000;
-const TRACKING_GAP_WARN_MS = 90 * 1000;
-const TRACKING_GAP_DANGER_MS = 5 * 60 * 1000;
 
 const ACTIVE_DRIVER_TASK_STATUSES = new Set<DriverTaskRecord["status"]>([
   "pending_acceptance",
@@ -746,153 +709,13 @@ function platformDisplayName(
   return PLATFORM_CODE_REGISTRY[platformCode]?.displayName ?? platformCode;
 }
 
-function parseTimestamp(value: string | null | undefined) {
-  if (!value) return null;
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function formatElapsedMs(valueMs: number | null) {
-  if (valueMs == null) {
-    return "—";
-  }
-
-  const totalSeconds = Math.max(0, Math.floor(valueMs / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
-}
-
-function trackingFreshnessTone(
-  freshness: DriverTrackingStatus["locationFreshness"],
-): CanvasTone {
-  switch (freshness) {
-    case "fresh":
-      return "success";
-    case "low_accuracy":
-      return "warn";
-    case "stale":
-    case "missing":
-      return "danger";
-    default:
-      return "neutral";
-  }
-}
-
-function computeUploadQueueLagMs(status: DriverTrackingStatus) {
-  const recordedAt = parseTimestamp(status.lastHeartbeatRecordedAt);
-  const uploadedAt = parseTimestamp(status.lastSuccessfulUploadAt);
-  if (recordedAt == null || uploadedAt == null) {
-    return null;
-  }
-  return Math.max(0, uploadedAt - recordedAt);
-}
-
-function uploadQueueTone(lagMs: number | null): CanvasTone {
-  if (lagMs == null) return "neutral";
-  if (lagMs >= TRACKING_QUEUE_LAG_DANGER_MS) return "danger";
-  if (lagMs >= TRACKING_QUEUE_LAG_WARN_MS) return "warn";
-  return "success";
-}
-
-function computeTrackingGapMs(status: DriverTrackingStatus) {
-  const uploadedAt = parseTimestamp(status.lastSuccessfulUploadAt);
-  if (uploadedAt == null) {
-    return null;
-  }
-  return Math.max(0, Date.now() - uploadedAt);
-}
-
-function trackingGapTone(status: DriverTrackingStatus): CanvasTone {
-  const gapMs = computeTrackingGapMs(status);
-  if (gapMs == null) return "danger";
-  if (status.locationFreshness === "low_accuracy") return "warn";
-  if (
-    status.locationFreshness === "missing" ||
-    gapMs >= TRACKING_GAP_DANGER_MS
-  ) {
-    return "danger";
-  }
-  if (
-    status.locationFreshness === "stale" ||
-    gapMs >= TRACKING_GAP_WARN_MS
-  ) {
-    return "warn";
-  }
-  return "success";
-}
-
-function toneBorderColor(tone: CanvasTone) {
-  switch (tone) {
-    case "success":
-      return theme.success;
-    case "warn":
-      return theme.warn;
-    case "danger":
-      return theme.danger;
-    case "accent":
-      return theme.accent;
-    case "info":
-      return theme.info;
-    default:
-      return theme.border;
-  }
-}
-
-function renderTrackingMetric(
-  title: string,
-  value: ReactNode,
-  tone: CanvasTone,
-  detail?: ReactNode,
-) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gap: "6px",
-        padding: "12px",
-        borderRadius: "10px",
-        border: `1px solid ${toneBorderColor(tone)}`,
-        background: theme.surface,
-      }}
-    >
-      <div
-        style={{
-          fontSize: "11px",
-          color: theme.textDim,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        {title}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: "8px",
-        }}
-      >
-        {typeof value === "string" || typeof value === "number" ? (
-          <span style={{ fontSize: "14px", fontWeight: 600 }}>{value}</span>
-        ) : (
-          value
-        )}
-      </div>
-      {detail ? (
-        <div style={{ fontSize: "12px", color: theme.textMuted }}>{detail}</div>
-      ) : null}
-    </div>
-  );
+function isLocationStale(
+  snapshot: DriverLocationSnapshot | undefined,
+): boolean {
+  if (!snapshot) return true;
+  const recorded = new Date(snapshot.recordedAt).getTime();
+  if (!Number.isFinite(recorded)) return true;
+  return Date.now() - recorded > STALE_LOCATION_THRESHOLD_MS;
 }
 
 function tokenExpirySoon(presence: PlatformPresenceRecord): boolean {
@@ -915,7 +738,7 @@ export default async function DriverDetailPage({
 
   const [
     driversResult,
-    trackingResult,
+    locationsResult,
     presenceResult,
     forwardedResult,
     statementsResult,
@@ -929,12 +752,9 @@ export default async function DriverDetailPage({
       [],
       locale,
     ),
-    loadWithError<DriverTrackingStatus | null>(
-      () =>
-        client.get<DriverTrackingStatus>(
-          `/api/ops/drivers/${encodeURIComponent(driverId)}/tracking-status`,
-        ),
-      null,
+    loadWithError<DriverLocationSnapshot[]>(
+      () => client.listDriverLocations(),
+      [],
       locale,
     ),
     loadWithError<PlatformPresenceSummary | null>(
@@ -1008,14 +828,10 @@ export default async function DriverDetailPage({
     ]),
   );
 
-  const trackingStatus = trackingResult.data;
-  const locationSnapshot = trackingStatus?.currentLocation ?? null;
-  const trackingGapMs = trackingStatus
-    ? computeTrackingGapMs(trackingStatus)
-    : null;
-  const uploadQueueLagMs = trackingStatus
-    ? computeUploadQueueLagMs(trackingStatus)
-    : null;
+  const locationSnapshot = locationsResult.data.find(
+    (snapshot) => snapshot.driverId === driverId,
+  );
+  const locationStale = isLocationStale(locationSnapshot);
 
   const driverForwardedOrders = forwardedResult.data.filter(
     (order) =>
@@ -1103,7 +919,7 @@ export default async function DriverDetailPage({
     shiftsResult.error || attendanceResult.error
       ? detailT(locale, "section.shifts")
       : null,
-    trackingResult.error ? detailT(locale, "section.location") : null,
+    locationsResult.error ? detailT(locale, "section.location") : null,
   ].filter((entry): entry is string => Boolean(entry));
 
   const refreshMetadata =
@@ -2025,230 +1841,78 @@ export default async function DriverDetailPage({
 
             <Card
               theme={theme}
-              title={detailT(locale, "card.trackingDiagnosticsTitle")}
-              subtitle={
-                trackingStatus
-                  ? detailT(locale, "card.trackingDiagnosticsSubtitle", {
-                      freshness: formatOpsCodeLabel(
-                        locale,
-                        trackingStatus.locationFreshness,
-                      ),
-                      gap: formatElapsedMs(trackingGapMs),
-                    })
-                  : undefined
-              }
+              title={detailT(locale, "card.locationStatusTitle")}
             >
-              {trackingResult.error || !trackingStatus ? (
-                renderEmptyState(
-                  locale,
-                  classifyErrorReason(trackingResult.error ?? "missing"),
-                  trackingResult.error ?? detailT(locale, "tracking.noSnapshot"),
-                )
-              ) : (
-                <div style={{ display: "grid", gap: "12px" }}>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
-                      gap: "10px",
-                    }}
-                  >
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.freshness"),
-                      <Pill
-                        theme={theme}
-                        tone={trackingFreshnessTone(
-                          trackingStatus.locationFreshness,
-                        )}
-                        dot
-                      >
-                        {formatOpsCodeLabel(
-                          locale,
-                          trackingStatus.locationFreshness,
-                        )}
-                      </Pill>,
-                      trackingFreshnessTone(trackingStatus.locationFreshness),
-                      locationSnapshot
-                        ? detailT(locale, "tracking.currentLocationAt", {
-                            value: formatDateTime(
-                              locale,
-                              locationSnapshot.recordedAt,
-                            ),
-                          })
-                        : detailT(locale, "tracking.noCurrentLocation"),
-                    )}
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.lastUpload"),
-                      formatDateTime(
-                        locale,
-                        trackingStatus.lastSuccessfulUploadAt,
-                      ),
-                      trackingGapTone(trackingStatus),
-                      detailT(locale, "tracking.serverReceivedAt", {
-                        value: formatDateTime(
-                          locale,
-                          trackingStatus.lastHeartbeatReceivedAt,
-                        ),
-                      }),
-                    )}
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.queue"),
-                      detailT(
-                        locale,
-                        uploadQueueLagMs == null
-                          ? "tracking.queueUnknown"
-                          : uploadQueueLagMs >= TRACKING_QUEUE_LAG_DANGER_MS
-                            ? "tracking.queueDelayed"
-                            : uploadQueueLagMs >= TRACKING_QUEUE_LAG_WARN_MS
-                              ? "tracking.queueBuffered"
-                              : "tracking.queueHealthy",
-                      ),
-                      uploadQueueTone(uploadQueueLagMs),
-                      detailT(locale, "tracking.queueLagDetail", {
-                        value: formatElapsedMs(uploadQueueLagMs),
-                      }),
-                    )}
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.gap"),
-                      detailT(
-                        locale,
-                        trackingGapTone(trackingStatus) === "success"
-                          ? "tracking.gapHealthy"
-                          : "tracking.gapDetected",
-                      ),
-                      trackingGapTone(trackingStatus),
-                      detailT(locale, "tracking.gapDetail", {
-                        value: formatElapsedMs(trackingGapMs),
-                      }),
-                    )}
-                  </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
-                      gap: "10px",
-                    }}
-                  >
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.state"),
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          flexWrap: "wrap",
-                          gap: "6px",
-                        }}
-                      >
-                        <Pill theme={theme} tone="accent" dot>
-                          {formatOpsCodeLabel(
-                            locale,
-                            trackingStatus.trackingState ?? "missing",
-                          )}
-                        </Pill>
-                        <Pill theme={theme} tone="neutral">
-                          {formatOpsCodeLabel(
-                            locale,
-                            trackingStatus.appState ?? "unknown",
-                          )}
-                        </Pill>
-                        <Pill theme={theme} tone="neutral">
-                          {formatOpsCodeLabel(
-                            locale,
-                            trackingStatus.networkType ?? "unknown",
-                          )}
-                        </Pill>
-                      </span>,
-                      "accent",
-                      detailT(locale, "tracking.transportMode", {
-                        value: formatOpsCodeLabel(
-                          locale,
-                          trackingStatus.transportMode ?? "unknown",
-                        ),
-                      }),
-                    )}
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.sequence"),
-                      <span style={monoStyle}>
-                        {trackingStatus.lastSequenceNo ?? "—"}
-                      </span>,
-                      "info",
-                      [
-                        trackingStatus.lastEventId ?? "—",
-                        trackingStatus.lastDeviceId ?? "—",
-                      ].join(" · "),
-                    )}
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.assignmentContext"),
-                      <span style={monoStyle}>
-                        {trackingStatus.currentTaskId ?? "—"}
-                      </span>,
-                      trackingStatus.currentTaskId ? "accent" : "neutral",
-                      detailT(locale, "tracking.vehicleContext", {
-                        value: trackingStatus.currentVehicleId ?? "—",
-                      }),
-                    )}
-                    {renderTrackingMetric(
-                      detailT(locale, "tracking.location"),
-                      locationSnapshot ? (
-                        <span style={monoStyle}>
-                          {locationSnapshot.lat.toFixed(5)},{" "}
-                          {locationSnapshot.lng.toFixed(5)}
-                        </span>
-                      ) : (
-                        detailT(locale, "tracking.noCurrentLocation")
-                      ),
-                      locationSnapshot ? "info" : "neutral",
-                      locationSnapshot
-                        ? detailT(locale, "tracking.locationAccuracy", {
-                            value:
-                              locationSnapshot.accuracyM == null
-                                ? "—"
-                                : `${locationSnapshot.accuracyM}m`,
-                          })
-                        : undefined,
-                    )}
-                  </div>
-
-                  {driver.eligibilityBlockedReasons.length > 0 ? (
-                    <div style={{ color: theme.textMuted, fontSize: "12px" }}>
-                      <strong>{detailT(locale, "eligibilityBlocked")}:</strong>{" "}
-                      {formatList(locale, driver.eligibilityBlockedReasons)}
-                    </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: "8px",
+                  fontSize: "12.5px",
+                  color: theme.text,
+                }}
+              >
+                <div
+                  style={{ display: "flex", gap: "8px", alignItems: "center" }}
+                >
+                  <CanvasIcon name="pin" size={14} />
+                  <span>
+                    {locationsResult.error
+                      ? detailT(locale, "location.unknown")
+                      : !locationSnapshot
+                        ? detailT(locale, "location.noSample")
+                        : locationStale
+                          ? detailT(locale, "location.stale")
+                          : detailT(locale, "location.live")}
+                  </span>
+                  {locationSnapshot ? (
+                    <Pill
+                      theme={theme}
+                      tone={locationStale ? "warn" : "success"}
+                      dot
+                    >
+                      {formatDateTime(locale, locationSnapshot.recordedAt)}
+                    </Pill>
                   ) : null}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                    {renderDriverAction(
-                      {
-                        descriptor: {
-                          action: "open_registry",
-                          enabled: true,
-                          riskLevel: "low",
-                        },
-                        label: detailT(locale, "action.backToDrivers"),
-                        icon: "arrow",
-                        href: "/drivers",
-                        variant: "ghost",
-                      },
-                      locale,
-                    )}
-                    {renderDriverAction(
-                      {
-                        descriptor: {
-                          action: "open_dispatch",
-                          enabled: true,
-                          riskLevel: "low",
-                        },
-                        label: detailT(locale, "action.openDispatch"),
-                        icon: "ext",
-                        href: "/dispatch",
-                        variant: "ghost",
-                      },
-                      locale,
-                    )}
-                  </div>
                 </div>
-              )}
+                {driver.eligibilityBlockedReasons.length > 0 ? (
+                  <div style={{ color: theme.textMuted }}>
+                    <strong>
+                      {detailT(locale, "eligibilityBlocked")}:
+                    </strong>{" "}
+                    {formatList(locale, driver.eligibilityBlockedReasons)}
+                  </div>
+                ) : null}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {renderDriverAction(
+                    {
+                      descriptor: {
+                        action: "open_registry",
+                        enabled: true,
+                        riskLevel: "low",
+                      },
+                      label: detailT(locale, "action.backToDrivers"),
+                      icon: "arrow",
+                      href: "/drivers",
+                      variant: "ghost",
+                    },
+                    locale,
+                  )}
+                  {renderDriverAction(
+                    {
+                      descriptor: {
+                        action: "open_dispatch",
+                        enabled: true,
+                        riskLevel: "low",
+                      },
+                      label: detailT(locale, "action.openDispatch"),
+                      icon: "ext",
+                      href: "/dispatch",
+                      variant: "ghost",
+                    },
+                    locale,
+                  )}
+                </div>
+              </div>
             </Card>
           </div>
         </div>
