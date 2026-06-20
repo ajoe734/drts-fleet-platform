@@ -310,7 +310,7 @@ export function EmbedNew({ locale }: { locale: Locale }) {
           t={tc}
           pad={15}
           title={tr("new.field.passenger")}
-          sub={tr("card.sub.passenger")}
+          sub="passenger"
         >
           <EField t={tc} label={tr("new.passenger.choose")} req>
             <EInput t={tc} icon="search" value={draft.passenger} />
@@ -320,7 +320,7 @@ export function EmbedNew({ locale }: { locale: Locale }) {
           t={tc}
           pad={15}
           title={tr("new.card.booking")}
-          sub={tr("card.sub.pickupDropoff")}
+          sub="pickup · dropoff"
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <EField t={tc} label={tr("new.field.pickup")} req>
@@ -349,7 +349,7 @@ export function EmbedNew({ locale }: { locale: Locale }) {
           t={tc}
           pad={15}
           title={tr("new.field.costCenter")}
-          sub={tr("card.sub.costCenter")}
+          sub="cost center"
         >
           <EInput t={tc} icon="building" value={draft.costCenter} />
         </ECard>
@@ -386,7 +386,7 @@ export function EmbedReview({ locale }: { locale: Locale }) {
           pad={15}
           accent={tc.primary}
           title={tr("review.card.approval")}
-          sub={tr("card.sub.costApproval")}
+          sub="cost · approval"
         >
           <div
             style={{
@@ -437,7 +437,7 @@ export function EmbedReview({ locale }: { locale: Locale }) {
           t={tc}
           pad={15}
           title={tr("review.card.summary")}
-          sub={tr("card.sub.passengerVsBooker")}
+          sub="passenger vs booked by"
         >
           <EntParty
             t={tc}
@@ -683,12 +683,7 @@ export function EmbedDetail({
             </EPill>
           </div>
         </div>
-        <ECard
-          t={tc}
-          pad={15}
-          title={tr("detail.card.trip")}
-          sub={tr("card.sub.trip")}
-        >
+        <ECard t={tc} pad={15} title={tr("detail.card.trip")} sub="trip">
           <EntRoute
             t={tc}
             from={booking.from}
@@ -705,7 +700,7 @@ export function EmbedDetail({
           t={tc}
           pad={15}
           title={tr("detail.card.cost")}
-          sub={tr("card.sub.costApproval")}
+          sub="cost · approval"
         >
           <ERow t={tc} k={tr("new.field.costCenter")} v={booking.costCenter} />
           <ERow

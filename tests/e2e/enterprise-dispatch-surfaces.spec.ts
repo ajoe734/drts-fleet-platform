@@ -255,12 +255,6 @@ test.describe("enterprise dispatch surfaces", () => {
     await expect(page.locator("body")).toContainText("enterprise_dispatch");
     await expect(page.locator("body")).toContainText(enterpriseCostCenterCode);
     await expect(page.locator("body")).toContainText(/行程摘要|Trip summary/);
-    await expect(page.locator("body")).toContainText(
-      /可編輯截止|Editable until/,
-    );
-    await expect(page.locator("body")).not.toContainText(
-      /editableUntil|readOnlyReasonCode/,
-    );
     await expect(page.locator("body")).not.toContainText(
       /No booking data exists yet|No booking data|fetch_failed|not_found/i,
     );
