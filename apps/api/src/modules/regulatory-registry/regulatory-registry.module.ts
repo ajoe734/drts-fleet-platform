@@ -6,13 +6,18 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { DriverProfileModule } from "../driver-profile/driver-profile.module";
 
 import { DriverHeartbeatController } from "./driver-heartbeat.controller";
+import { OpsDriverTrackingController } from "./ops-driver-tracking.controller";
 import { RegulatoryRegistryController } from "./regulatory-registry.controller";
 import { RegulatoryRegistryRepository } from "./regulatory-registry.repository";
 import { RegulatoryRegistryService } from "./regulatory-registry.service";
 
 @Module({
   imports: [DatabaseModule, AuditNotificationModule, DriverProfileModule],
-  controllers: [RegulatoryRegistryController, DriverHeartbeatController],
+  controllers: [
+    RegulatoryRegistryController,
+    DriverHeartbeatController,
+    OpsDriverTrackingController,
+  ],
   providers: [
     RegulatoryRegistryService,
     RegulatoryRegistryRepository,

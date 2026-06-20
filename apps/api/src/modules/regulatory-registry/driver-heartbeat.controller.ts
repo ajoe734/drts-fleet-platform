@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
 
 import type { DriverLocationHeartbeatBatchRequest } from "@drts/contracts";
 
@@ -18,6 +18,17 @@ export class DriverHeartbeatController {
   ) {
     return toApiSuccessEnvelope(
       await this.regulatoryRegistryService.recordDriverLocationBatch(request),
+      requestId,
+    );
+  }
+
+  @Get("tracking-status")
+  async getTrackingStatus(
+    @Query("driverId") driverId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.getDriverTrackingStatus(driverId),
       requestId,
     );
   }
