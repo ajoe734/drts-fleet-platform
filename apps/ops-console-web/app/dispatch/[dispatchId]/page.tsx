@@ -439,7 +439,7 @@ function getCandidateGate(
     };
   }
 
-  if (locationState === "no_location") {
+  if (locationState === "missing") {
     return {
       label: tr(locale, "dispatch.workflow.candidateLocation.no_location"),
       tone: "warn" as const,
@@ -485,7 +485,7 @@ function getCandidateScore(
     score -= 0.06;
   }
 
-  if (locationState === "no_location") {
+  if (locationState === "missing") {
     score -= 0.12;
   }
 
@@ -2162,7 +2162,7 @@ async function renderOwnedWorkspace({
     (row) => row.driver?.dispatchEligible,
   ).length;
   const liveCandidateCount = sortedCandidates.filter(
-    (candidate) => getCandidateLocationState(candidate) === "live",
+    (candidate) => getCandidateLocationState(candidate) === "fresh",
   ).length;
   const activityEntries = buildActivityEntries(
     locale,
