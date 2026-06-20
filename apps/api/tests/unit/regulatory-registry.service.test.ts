@@ -1117,7 +1117,6 @@ describe("RegulatoryRegistryService", () => {
       }),
     );
   });
-
   it("reconstructs current tracking context from the persisted current-location timestamp after restart", async () => {
     const firstReceivedAt = "2026-06-20T06:00:00.000Z";
     const secondReceivedAt = "2026-06-20T06:00:05.000Z";
