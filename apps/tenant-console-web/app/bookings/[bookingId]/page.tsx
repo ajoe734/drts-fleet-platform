@@ -885,11 +885,11 @@ export default async function BookingDetailPage({
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>{t("bookingDetail.label.editableUntil", locale)}</dt>
+                <dt>editableUntil</dt>
                 <dd>{formatDateTime(bookingView.editableUntil, locale)}</dd>
               </div>
               <div>
-                <dt>{t("bookingDetail.label.readOnlyReason", locale)}</dt>
+                <dt>readOnlyReasonCode</dt>
                 <dd>
                   {bookingView.readOnlyReasonCode ??
                     t("bookingDetail.value.none", locale)}

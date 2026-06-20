@@ -1624,16 +1624,10 @@ function EndpointForm({
                 defaultValue={webhook?.status ?? "test_pending"}
                 style={controlStyle}
               >
-                <option value="active">
-                  {t("webhooks.status.active", locale)}
-                </option>
-                <option value="test_pending">
-                  {t("webhooks.status.testPending", locale)}
-                </option>
+                <option value="active">active</option>
+                <option value="test_pending">test_pending</option>
                 {canShowDisabledOption ? (
-                  <option value="disabled">
-                    {t("webhooks.status.disabled", locale)}
-                  </option>
+                  <option value="disabled">disabled</option>
                 ) : null}
               </select>
             </CanvasField>
