@@ -3,7 +3,10 @@ import { Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
 import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
 import { RequireRealms } from "../../common/auth";
 import { ReportingService } from "./reporting.service";
-import type { DailyDispatchRecordQuery } from "./reporting.repository";
+import type {
+  DailyDispatchRecordQuery,
+  DispatchableSupplySnapshotQuery,
+} from "./reporting.repository";
 
 @Controller()
 export class ReportingController {
@@ -28,6 +31,31 @@ export class ReportingController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const items = await this.reportingService.listDailyDispatchRecords(query);
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("reports/dispatchable-supply-snapshots/rebuild")
+  @RequireRealms("platform", "ops")
+  async rebuildDispatchableSupplySnapshots(
+    @Body("snapshotAt") snapshotAt: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.reportingService.captureDispatchableSupplySnapshot(
+        snapshotAt ? new Date(snapshotAt) : new Date(),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("reports/dispatchable-supply-snapshots")
+  @RequireRealms("platform", "ops")
+  async listDispatchableSupplySnapshots(
+    @Query() query: DispatchableSupplySnapshotQuery,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items =
+      await this.reportingService.listDispatchableSupplySnapshots(query);
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 }
