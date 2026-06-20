@@ -39,6 +39,9 @@ export class ReportingFilingModule implements OnModuleInit {
     this.reportingFilingService.registerDailyDispatchRecordProvider((filters) =>
       this.reportingService.listDailyDispatchRecords(filters),
     );
+    this.reportingFilingService.registerSixMonthOperationsSummaryProvider(
+      (filters) => this.reportingService.previewSixMonthOperationsSummary(filters),
+    );
     this.reportingFilingService.registerCostCenterDirectoryProvider((tenantId) =>
       this.tenantPartnerService.listCostCenters(tenantId),
     );

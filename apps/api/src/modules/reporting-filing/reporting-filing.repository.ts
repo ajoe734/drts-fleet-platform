@@ -8,6 +8,7 @@ import type {
   ReportArtifactRecord,
   ReportJobRecord,
   SettlementMatrixRecord,
+  SixMonthOperationsSummary,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -47,6 +48,7 @@ type TenantMonthlyTripReportRow = {
 type ReportJobRow =
   | DispatchRecordingIndexRow
   | DispatchDailyRecord
+  | SixMonthOperationsSummary
   | TenantMonthlyTripReportRow;
 
 type ReportArtifactView = ReportArtifactRecord & {

@@ -137,8 +137,10 @@ function createService(sourceOverrides: Record<string, unknown> = {}) {
     isEnabled: vi.fn(() => true),
     listDailyDispatchRecords: vi.fn(async () => []),
     listDispatchableSupplySnapshots: vi.fn(async () => []),
+    listMonthlyOperationsSummaries: vi.fn(async () => []),
     upsertDailyDispatchRecords: vi.fn(async () => undefined),
     upsertDispatchableSupplySnapshots: vi.fn(async () => undefined),
+    upsertMonthlyOperationsSummaries: vi.fn(async () => undefined),
     loadDailyDispatchRecordSource: vi.fn(async () => source),
     reportPersistenceFailure: vi.fn(),
   };
@@ -298,6 +300,79 @@ describe("ReportingService", () => {
         availableDriverCount: 0,
         sourceHealth: "location_low_accuracy",
       }),
+    ]);
+  });
+
+  it("builds six-month summaries from monthly aggregates with weighted snapshot coverage", async () => {
+    const { service, reportingRepository } = createService();
+    vi.spyOn(service, "rebuildMonthlyOperationsSummaries").mockResolvedValue({
+      rebuiltCount: 2,
+      generatedAt: "2026-06-20T00:00:00.000Z",
+      records: [],
+    });
+    reportingRepository.listMonthlyOperationsSummaries.mockResolvedValue([
+      {
+        periodMonth: "2026-01",
+        businessArea: "taipei",
+        serviceProductCode: "taxi_realtime",
+        demandRequestCount: 3,
+        actualDispatchCount: 2,
+        completedTripCount: 1,
+        cancelledOrderCount: 1,
+        averageDispatchableVehicleCount: 4,
+        validSnapshotCount: 2,
+        expectedSnapshotCount: 10,
+        snapshotCoverageRate: 0.2,
+        complaintCount: 1,
+        complaintsByCategory: { late_arrival: 1 },
+        generatedAt: "2026-02-01T00:00:00.000Z",
+      },
+      {
+        periodMonth: "2026-02",
+        businessArea: "taipei",
+        serviceProductCode: "taxi_realtime",
+        demandRequestCount: 5,
+        actualDispatchCount: 4,
+        completedTripCount: 3,
+        cancelledOrderCount: 2,
+        averageDispatchableVehicleCount: 10,
+        validSnapshotCount: 1,
+        expectedSnapshotCount: 5,
+        snapshotCoverageRate: 0.2,
+        complaintCount: 2,
+        complaintsByCategory: { no_show: 2 },
+        generatedAt: "2026-03-01T00:00:00.000Z",
+      },
+    ]);
+
+    const summary = await service.previewSixMonthOperationsSummary({
+      from: "2026-01-01",
+      to: "2026-02-28",
+      businessArea: "taipei",
+      serviceProductCode: "taxi_realtime",
+    });
+
+    expect(summary).toEqual([
+      {
+        from: "2026-01-01",
+        to: "2026-02-28",
+        businessArea: "taipei",
+        serviceProductCode: "taxi_realtime",
+        demandRequestCount: 8,
+        actualDispatchCount: 6,
+        completedTripCount: 4,
+        cancelledOrderCount: 3,
+        averageDispatchableVehicleCount: 6,
+        validSnapshotCount: 3,
+        expectedSnapshotCount: 15,
+        snapshotCoverageRate: 0.2,
+        complaintCount: 3,
+        complaintsByCategory: {
+          late_arrival: 1,
+          no_show: 2,
+        },
+        generatedAt: "2026-03-01T00:00:00.000Z",
+      },
     ]);
   });
 });
