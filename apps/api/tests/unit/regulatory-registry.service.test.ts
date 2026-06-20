@@ -6,7 +6,18 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
-function createService() {
+function createService(
+  repositoryOverrides: Partial<{
+    isEnabled: ReturnType<typeof vi.fn>;
+    persistChanges: ReturnType<typeof vi.fn>;
+    reportPersistenceFailure: ReturnType<typeof vi.fn>;
+    upsertDriverLocation: ReturnType<typeof vi.fn>;
+    recordDriverLocationEvent: ReturnType<typeof vi.fn>;
+    findLatestDriverLocation: ReturnType<typeof vi.fn>;
+    listLatestDriverLocations: ReturnType<typeof vi.fn>;
+    loadState: ReturnType<typeof vi.fn>;
+  }> = {},
+) {
   const opsDispatchEventsService = {
     publishDriverLocationUpdated: vi.fn(),
     publishSupplyLifecycleUpdated: vi.fn(),
@@ -19,6 +30,19 @@ function createService() {
     isEnabled: vi.fn(() => false),
     persistChanges: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
+    upsertDriverLocation: vi.fn(),
+    recordDriverLocationEvent: vi.fn(),
+    findLatestDriverLocation: vi.fn(),
+    listLatestDriverLocations: vi.fn().mockResolvedValue([]),
+    loadState: vi.fn().mockResolvedValue({
+      vehicles: [],
+      drivers: [],
+      supplyPairs: [],
+      contracts: [],
+      policies: [],
+      exclusivities: [],
+    }),
+    ...repositoryOverrides,
   };
 
   const service = new RegulatoryRegistryService(
@@ -415,6 +439,154 @@ describe("RegulatoryRegistryService", () => {
           blockedReasons: expect.arrayContaining(["exclusivity_rejected"]),
         },
       },
+    });
+  });
+
+  it("does not publish a legacy driver location update when the heartbeat is older than the stored snapshot", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        upsertDriverLocation: vi.fn().mockResolvedValue(false),
+      });
+
+    await expect(
+      service.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        recordedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(regulatoryRegistryRepository.upsertDriverLocation).toHaveBeenCalled();
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges duplicate heartbeats and only publishes newer current locations", async () => {
+    const { service, opsDispatchEventsService, regulatoryRegistryRepository } =
+      createService({
+        isEnabled: vi.fn(() => true),
+        recordDriverLocationEvent: vi
+          .fn()
+          .mockResolvedValueOnce({
+            duplicate: false,
+            currentLocationUpdated: true,
+            serverReceivedAt: "2026-06-20T06:00:00.000Z",
+          })
+          .mockResolvedValueOnce({
+            duplicate: true,
+            currentLocationUpdated: false,
+            serverReceivedAt: "2026-06-20T06:00:00.000Z",
+          }),
+      });
+
+    const response = await service.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: "evt-001",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1001,
+          recordedAt: "2026-06-20T05:59:59.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+        {
+          eventId: "evt-001-replay",
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          taskId: null,
+          sequenceNo: 1001,
+          recordedAt: "2026-06-20T05:59:59.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        },
+      ],
+    });
+
+    expect(response).toEqual({
+      items: [
+        {
+          eventId: "evt-001",
+          accepted: true,
+          duplicate: false,
+          currentLocationUpdated: true,
+          serverReceivedAt: "2026-06-20T06:00:00.000Z",
+        },
+        {
+          eventId: "evt-001-replay",
+          accepted: true,
+          duplicate: true,
+          currentLocationUpdated: false,
+          serverReceivedAt: "2026-06-20T06:00:00.000Z",
+        },
+      ],
+    });
+    expect(
+      regulatoryRegistryRepository.recordDriverLocationEvent,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      opsDispatchEventsService.publishDriverLocationUpdated,
+    ).toHaveBeenCalledTimes(1);
+    expect(service.listLatestDriverLocations()).toEqual([
+      {
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 6,
+        recordedAt: "2026-06-20T05:59:59.000Z",
+        updatedAt: "2026-06-20T06:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("rejects heartbeat batches larger than 100 items", async () => {
+    const { service } = createService({
+      isEnabled: vi.fn(() => true),
+      recordDriverLocationEvent: vi.fn(),
+    });
+
+    await expect(
+      service.recordDriverLocationBatch({
+        items: Array.from({ length: 101 }, (_, index) => ({
+          eventId: `evt-${index}`,
+          deviceId: "device-001",
+          driverId: "drv-demo-001",
+          vehicleId: null,
+          taskId: null,
+          sequenceNo: index,
+          recordedAt: "2026-06-20T05:59:59.000Z",
+          lat: 24.1477,
+          lng: 120.6736,
+          accuracyM: 6,
+          workState: "available",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "cellular",
+        })),
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: "BATCH_LIMIT_EXCEEDED",
+        }),
+      }),
     });
   });
 });

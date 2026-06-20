@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   DispatchExclusivityRecord,
+  DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
   DriverLocationSnapshot,
   DriverRegistryRecord,
@@ -47,6 +48,16 @@ type DriverLocationRow = {
   accuracy_m: number | string | null;
   recorded_at: Date | string;
   updated_at: Date | string;
+};
+
+type DriverLocationEventRow = {
+  received_at: Date | string;
+};
+
+export type RecordDriverLocationEventResult = {
+  duplicate: boolean;
+  currentLocationUpdated: boolean;
+  serverReceivedAt: string;
 };
 
 @Injectable()
@@ -370,10 +381,10 @@ export class RegulatoryRegistryRepository {
 
   async upsertDriverLocation(
     command: DriverLocationHeartbeatCommand,
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.assertDatabaseEnabled("upsert driver location");
 
-    await this.databaseService!.query(
+    const result = await this.databaseService!.query(
       `
         INSERT INTO ops.phase1_driver_locations (
           driver_id,
@@ -391,6 +402,7 @@ export class RegulatoryRegistryRepository {
           accuracy_m = EXCLUDED.accuracy_m,
           recorded_at = EXCLUDED.recorded_at,
           updated_at = now()
+        WHERE ops.phase1_driver_locations.recorded_at <= EXCLUDED.recorded_at
       `,
       [
         command.driverId,
@@ -400,6 +412,131 @@ export class RegulatoryRegistryRepository {
         command.recordedAt ?? new Date().toISOString(),
       ],
     );
+
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async recordDriverLocationEvent(
+    event: DriverLocationHeartbeatEnvelope,
+  ): Promise<RecordDriverLocationEventResult> {
+    this.assertDatabaseEnabled("record driver location event");
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+
+      const insertResult = await client.query<DriverLocationEventRow>(
+        `
+          INSERT INTO telemetry.driver_location_events (
+            event_id,
+            device_id,
+            driver_id,
+            vehicle_id,
+            task_id,
+            sequence_no,
+            recorded_at,
+            lat,
+            lng,
+            accuracy_m,
+            work_state,
+            app_state,
+            transport_mode,
+            network_type,
+            out_of_order
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14,
+            EXISTS (
+              SELECT 1
+              FROM ops.phase1_driver_locations
+              WHERE driver_id = $3
+                AND recorded_at > $7::timestamptz
+            )
+          )
+          ON CONFLICT (device_id, sequence_no) DO NOTHING
+          RETURNING received_at
+        `,
+        [
+          event.eventId,
+          event.deviceId,
+          event.driverId,
+          event.vehicleId,
+          event.taskId,
+          event.sequenceNo,
+          event.recordedAt,
+          event.lat,
+          event.lng,
+          event.accuracyM,
+          event.workState,
+          event.appState,
+          event.transportMode,
+          event.networkType,
+        ],
+      );
+
+      const inserted = (insertResult.rowCount ?? 0) > 0;
+      let serverReceivedAt: string;
+      let currentLocationUpdated = false;
+
+      if (inserted) {
+        const insertedRow = insertResult.rows[0];
+        if (!insertedRow) {
+          throw new Error(
+            "Driver location event insert did not return received_at.",
+          );
+        }
+        serverReceivedAt = this.toIsoString(insertedRow.received_at);
+        currentLocationUpdated = await this.updateCurrentDriverLocation(
+          client,
+          {
+            driverId: event.driverId,
+            lat: event.lat,
+            lng: event.lng,
+            recordedAt: event.recordedAt,
+            ...(event.accuracyM === null ? {} : { accuracyM: event.accuracyM }),
+          },
+        );
+      } else {
+        const existingResult = await client.query<DriverLocationEventRow>(
+          `
+            SELECT received_at
+            FROM telemetry.driver_location_events
+            WHERE device_id = $1
+              AND sequence_no = $2
+            LIMIT 1
+          `,
+          [event.deviceId, event.sequenceNo],
+        );
+        serverReceivedAt = this.toIsoString(
+          existingResult.rows[0]?.received_at ?? new Date(),
+        );
+      }
+
+      await client.query("COMMIT");
+      return {
+        duplicate: !inserted,
+        currentLocationUpdated,
+        serverReceivedAt,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findLatestDriverLocation(
@@ -511,5 +648,46 @@ export class RegulatoryRegistryRepository {
     return value instanceof Date
       ? value.toISOString()
       : new Date(value).toISOString();
+  }
+
+  private async updateCurrentDriverLocation(
+    client: {
+      query<T extends { [key: string]: unknown }>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<{ rowCount: number | null; rows: T[] }>;
+    },
+    command: DriverLocationHeartbeatCommand,
+  ): Promise<boolean> {
+    const result = await client.query(
+      `
+        INSERT INTO ops.phase1_driver_locations (
+          driver_id,
+          lat,
+          lng,
+          accuracy_m,
+          recorded_at,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, now()
+        )
+        ON CONFLICT (driver_id) DO UPDATE SET
+          lat = EXCLUDED.lat,
+          lng = EXCLUDED.lng,
+          accuracy_m = EXCLUDED.accuracy_m,
+          recorded_at = EXCLUDED.recorded_at,
+          updated_at = now()
+        WHERE ops.phase1_driver_locations.recorded_at <= EXCLUDED.recorded_at
+      `,
+      [
+        command.driverId,
+        command.lat,
+        command.lng,
+        command.accuracyM ?? null,
+        command.recordedAt ?? new Date().toISOString(),
+      ],
+    );
+
+    return (result.rowCount ?? 0) > 0;
   }
 }
