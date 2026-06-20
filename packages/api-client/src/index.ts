@@ -268,6 +268,8 @@ import type {
   ForwarderReconciliationIssue,
   InviteTenantRoleCommand,
   AcknowledgeTenantRoleCommand,
+  DispatchDailyRecord,
+  SixMonthOperationsSummary,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -284,6 +286,61 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   body?: unknown;
   signal?: AbortSignal;
+}
+
+/**
+ * Filters for the daily dispatch record operational report
+ * (`GET /api/reports/daily-dispatch-records`, SD §2.10 / SA §7.7).
+ */
+export interface DailyDispatchRecordQuery {
+  serviceDate?: string;
+  serviceDateFrom?: string;
+  serviceDateTo?: string;
+  orderId?: string;
+  orderSource?: string;
+  tenantId?: string;
+  partnerId?: string;
+  serviceProductCode?: string;
+  finalStatus?: string;
+}
+
+/**
+ * Filters for the six-month operations summary preview
+ * (`GET /api/reports/operations-summary/preview`, SD §3.5 / SA §7.4).
+ */
+export interface OperationsSummaryPreviewQuery {
+  from?: string;
+  to?: string;
+  periodMonth?: string;
+  periodMonthFrom?: string;
+  periodMonthTo?: string;
+  businessArea?: string;
+  serviceProductCode?: string;
+}
+
+export interface DailyDispatchRecordRebuildResult {
+  rebuiltCount: number;
+  generatedAt: string;
+  records: DispatchDailyRecord[];
+}
+
+export interface MonthlyOperationsSummaryRebuildResult {
+  rebuiltCount: number;
+  generatedAt: string;
+}
+
+/** Serialize a report filter object into a `?a=b&c=d` query suffix. */
+function buildReportQuery(
+  query: Record<string, string | undefined>,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (typeof value === "string" && value.trim()) {
+      params.set(key, value.trim());
+    }
+  }
+  const serialized = params.toString();
+  return serialized ? `?${serialized}` : "";
 }
 
 interface ListEnvelope<T> {
@@ -1659,6 +1716,44 @@ export class ApiClient {
   ): Promise<FilingPackageDetailRecord> {
     return this.get<FilingPackageDetailRecord>(
       `/api/filing-packages/${packageId}`,
+    );
+  }
+
+  // ── Operational reports (Phase 1 delta SD §2.10 / §3.5) ──
+
+  async listDailyDispatchRecords(
+    query: DailyDispatchRecordQuery = {},
+  ): Promise<DispatchDailyRecord[]> {
+    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    return this.getList<DispatchDailyRecord>(
+      `/api/reports/daily-dispatch-records${suffix}`,
+    );
+  }
+
+  async rebuildDailyDispatchRecords(
+    query: DailyDispatchRecordQuery = {},
+  ): Promise<DailyDispatchRecordRebuildResult> {
+    return this.post<DailyDispatchRecordRebuildResult>(
+      "/api/reports/daily-dispatch-records/rebuild",
+      { body: query },
+    );
+  }
+
+  async previewSixMonthOperationsSummary(
+    query: OperationsSummaryPreviewQuery = {},
+  ): Promise<SixMonthOperationsSummary[]> {
+    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    return this.getList<SixMonthOperationsSummary>(
+      `/api/reports/operations-summary/preview${suffix}`,
+    );
+  }
+
+  async rebuildMonthlyOperationsSummaries(
+    query: OperationsSummaryPreviewQuery = {},
+  ): Promise<MonthlyOperationsSummaryRebuildResult> {
+    return this.post<MonthlyOperationsSummaryRebuildResult>(
+      "/api/reports/monthly-operations-summaries/rebuild",
+      { body: query },
     );
   }
 
