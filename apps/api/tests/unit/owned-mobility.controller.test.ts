@@ -101,4 +101,56 @@ describe("OwnedMobilityController tenant booking routes", () => {
       true,
     );
   });
+
+  it("awaits dispatch assignment before wrapping the API envelope", async () => {
+    const service = {
+      assignDispatch: vi.fn().mockResolvedValue({
+        assignmentId: "assign-e2e-001",
+        taskId: "task-e2e-001",
+        status: "assigned",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = await controller.assignDispatch(
+      {} as never,
+      "req-e2e-assign",
+    );
+
+    expect(response.data).toMatchObject({
+      assignmentId: "assign-e2e-001",
+      taskId: "task-e2e-001",
+      status: "assigned",
+    });
+    expect(service.assignDispatch).toHaveBeenCalledWith(
+      {},
+      "req-e2e-assign",
+    );
+  });
+
+  it("awaits dispatch reassignment before wrapping the API envelope", async () => {
+    const service = {
+      reassignDispatch: vi.fn().mockResolvedValue({
+        assignmentId: "assign-e2e-002",
+        taskId: "task-e2e-002",
+        status: "assigned",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = await controller.reassignDispatch(
+      {} as never,
+      "req-e2e-reassign",
+    );
+
+    expect(response.data).toMatchObject({
+      assignmentId: "assign-e2e-002",
+      taskId: "task-e2e-002",
+      status: "assigned",
+    });
+    expect(service.reassignDispatch).toHaveBeenCalledWith(
+      {},
+      "req-e2e-reassign",
+    );
+  });
 });

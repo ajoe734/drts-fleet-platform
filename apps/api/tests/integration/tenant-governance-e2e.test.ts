@@ -512,14 +512,14 @@ describe("tenant governance e2e integration", () => {
       { mode: "auto" },
       "req-e2e-dispatch-001",
     );
-    const assignment = ownedMobilityService.assignDispatch(
+    const assignment = await Promise.resolve(ownedMobilityService.assignDispatch(
       {
         dispatchJobId: dispatchJob.dispatchJobId,
         vehicleId: "vehicle-001",
         driverId: "driver-001",
       },
       "req-e2e-assign-001",
-    );
+    ));
     ownedMobilityService.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
@@ -843,11 +843,11 @@ describe("tenant governance e2e integration", () => {
         mode: "auto",
       },
     );
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await Promise.resolve(ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     ownedMobilityService.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });

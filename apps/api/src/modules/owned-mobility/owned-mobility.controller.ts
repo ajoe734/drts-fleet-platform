@@ -460,23 +460,31 @@ export class OwnedMobilityController {
   }
 
   @Post("dispatch/assign")
-  assignDispatch(
+  async assignDispatch(
     @Body() command: AssignDispatchCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const result = await this.ownedMobilityService.assignDispatch(
+      command,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.assignDispatch(command, requestId),
+      result,
       requestId,
     );
   }
 
   @Post("dispatch/reassign")
-  reassignDispatch(
+  async reassignDispatch(
     @Body() command: ReassignDispatchCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const result = await this.ownedMobilityService.reassignDispatch(
+      command,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.reassignDispatch(command, requestId),
+      result,
       requestId,
     );
   }

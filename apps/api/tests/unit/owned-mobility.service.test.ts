@@ -42,6 +42,7 @@ function createOwnedMobilityService(options?: {
   serviceProductOverrides?: Record<string, unknown>;
   runtimeEligibilityEvaluator?: {
     evaluate: ReturnType<typeof vi.fn>;
+    evaluateSync?: ReturnType<typeof vi.fn>;
   };
 }) {
   const regulatoryRegistryService = {
@@ -127,6 +128,10 @@ function createOwnedMobilityService(options?: {
     regulatoryRegistryService,
     auditNotificationService,
   };
+}
+
+async function resolveMaybePromise<T>(value: T | Promise<T>): Promise<T> {
+  return value;
 }
 
 describe("OwnedMobilityService queue and reservation orchestration", () => {
@@ -1138,7 +1143,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("rejects manual fare override after a fixed-price order is completed", () => {
+  it("rejects manual fare override after a fixed-price order is completed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const { service } = createOwnedMobilityService({
@@ -1168,11 +1173,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
@@ -1373,7 +1378,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("resolves exception hold by releasing order to dispatch", () => {
+  it("resolves exception hold by releasing order to dispatch", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const { service } = createOwnedMobilityService({
@@ -1917,7 +1922,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(order.status).toBe("exception_hold");
   });
 
-  it("allows dispatch assignment after release_to_dispatch without invalid hold transitions", () => {
+  it("allows dispatch assignment after release_to_dispatch without invalid hold transitions", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const candidates = [
@@ -1967,11 +1972,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
     expect(redispatchResult.status).toBe("reserved");
 
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: redispatchResult.dispatchJobId,
       vehicleId: "vehicle-009",
       driverId: "driver-009",
-    });
+    }));
     const order = service.getOrder(booking.orderId);
 
     expect(assignment.status).toBe("assigned");
@@ -2209,7 +2214,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("releases reservation hold on assignment and traces it", () => {
+  it("releases reservation hold on assignment and traces it", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const candidates = [
@@ -2240,11 +2245,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
     expect(dispatchResult.status).toBe("reserved");
 
-    const assignResult = service.assignDispatch({
+    const assignResult = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     expect(assignResult.status).toBe("assigned");
 
     const orderAfterAssign = service.getOrder(booking.orderId);
@@ -2263,7 +2268,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("keeps reassign distinct from redispatch by rotating assignment inside the same dispatch job", () => {
+  it("keeps reassign distinct from redispatch by rotating assignment inside the same dispatch job", async () => {
     const candidates = [
       {
         driverId: "driver-001",
@@ -2285,19 +2290,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(order.orderId, {
       mode: "auto",
     });
-    const firstAssignment = service.assignDispatch({
+    const firstAssignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
 
-    const reassignResult = service.reassignDispatch({
+    const reassignResult = await resolveMaybePromise(service.reassignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-002",
       driverId: "driver-002",
       reasonCode: "operator_reassign",
       reasonNote: "Closer vehicle picked by ops",
-    });
+    }));
 
     expect(reassignResult.assignmentId).not.toBe(firstAssignment.assignmentId);
     const trace = service.listDispatchTrace(order.orderId);
@@ -2340,7 +2345,124 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("keeps redispatch distinct from reassign by opening a new dispatch job", () => {
+  it("restores the active assignment when reassign eligibility changes before reassignment", async () => {
+    const runtimeEligibilityEvaluator = {
+      evaluate: vi.fn(),
+      evaluateSync: vi
+        .fn()
+        .mockReturnValueOnce({
+          serviceProductId: "svc-enterprise",
+          serviceProductCode: "enterprise_dispatch",
+          policyVersion: "policy-v1",
+          decision: "eligible",
+          hardReasonCodes: [],
+          softReasonCodes: [],
+          missingRequirements: [],
+          locationState: "fresh",
+          evaluatedAt: "2026-06-20T12:00:00.000Z",
+        })
+        .mockReturnValueOnce({
+          serviceProductId: "svc-enterprise",
+          serviceProductCode: "enterprise_dispatch",
+          policyVersion: "policy-v2",
+          decision: "ineligible",
+          hardReasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
+          softReasonCodes: [],
+          missingRequirements: [],
+          locationState: "fresh",
+          evaluatedAt: "2026-06-20T12:00:05.000Z",
+        }),
+    };
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      runtimeEligibilityEvaluator,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-20T13:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const firstAssignment = await resolveMaybePromise(service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    }));
+
+    try {
+      await resolveMaybePromise(
+        service.reassignDispatch({
+          dispatchJobId: dispatchResult.dispatchJobId,
+          vehicleId: "vehicle-002",
+          driverId: "driver-002",
+          reasonCode: "operator_reassign",
+        }),
+      );
+      throw new Error("Expected reassignment to fail");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+          details: expect.objectContaining({
+            driverId: "driver-002",
+            vehicleId: "vehicle-002",
+          }),
+        },
+      });
+    }
+
+    const snapshot = service.getReportingSnapshot();
+    const assignmentRecords = snapshot.dispatchAssignments.filter(
+      (assignment) => assignment.dispatchJobId === dispatchResult.dispatchJobId,
+    );
+    const taskRecords = snapshot.driverTasks.filter(
+      (task) => task.orderId === booking.orderId,
+    );
+
+    expect(assignmentRecords).toEqual([
+      expect.objectContaining({
+        assignmentId: firstAssignment.assignmentId,
+        status: "assigned",
+        driverId: "driver-001",
+        vehicleId: "vehicle-001",
+      }),
+    ]);
+    expect(taskRecords).toEqual([
+      expect.objectContaining({
+        taskId: firstAssignment.taskId,
+        status: "pending_acceptance",
+        driverId: "driver-001",
+        vehicleId: "vehicle-001",
+      }),
+    ]);
+    expect(snapshot.dispatchTraceLogs).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "dispatch.reassigned",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps redispatch distinct from reassign by opening a new dispatch job", async () => {
     const candidates = [
       {
         driverId: "driver-001",
@@ -2360,11 +2482,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const firstDispatch = service.dispatchOrder(order.orderId, {
       mode: "auto",
     });
-    const firstAssignment = service.assignDispatch({
+    const firstAssignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: firstDispatch.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
 
     const secondDispatch = service.redispatchOrder(order.orderId, {
       reasonCode: "operator_redispatch",
@@ -2440,7 +2562,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
-  it("moves trips into proof_pending when signoff is missing", () => {
+  it("moves trips into proof_pending when signoff is missing", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -2469,11 +2591,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
@@ -2520,7 +2642,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("returns EXPENSE_PROOF_REQUIRED and preserves partial proof evidence", () => {
+  it("returns EXPENSE_PROOF_REQUIRED and preserves partial proof evidence", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -2549,11 +2671,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
@@ -2601,7 +2723,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("replays duplicate completion requests idempotently when the request id matches", () => {
+  it("replays duplicate completion requests idempotently when the request id matches", async () => {
     const tenantPartnerService = {
       previewBookingQuotaImpact: vi.fn(() => ({
         impacts: [],
@@ -2646,11 +2768,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
@@ -2704,7 +2826,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ).toHaveLength(1);
   });
 
-  it("rejects duplicate completion requests after the trip is already completed", () => {
+  it("rejects duplicate completion requests after the trip is already completed", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -2732,11 +2854,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
@@ -2800,7 +2922,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("replays proof-pending completion requests idempotently when the request id matches", () => {
+  it("replays proof-pending completion requests idempotently when the request id matches", async () => {
     const { service, auditNotificationService } = createOwnedMobilityService({
       candidates: [
         {
@@ -2829,11 +2951,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
     service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T12:05:00.000Z",
     });
@@ -3245,7 +3367,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     ).toThrowError(ApiRequestError);
   });
 
-  it("tracks dispatch attempt count through multiple reject-redispatch cycles", () => {
+  it("tracks dispatch attempt count through multiple reject-redispatch cycles", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -3274,11 +3396,11 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(job).toBeDefined();
 
     // Assign and then reject
-    const assignment = service.assignDispatch({
+    const assignment = await resolveMaybePromise(service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "vehicle-1",
       driverId: "driver-1",
-    });
+    }));
     const task = service.getDriverTask(assignment.taskId);
     service.rejectDriverTask(task.taskId, {
       reasonCode: "driver_rejected",

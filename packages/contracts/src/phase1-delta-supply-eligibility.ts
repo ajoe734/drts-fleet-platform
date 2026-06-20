@@ -267,13 +267,6 @@ export interface DispatchCandidateEligibilityDecoration {
   locationState: "fresh" | "stale" | "low_accuracy" | "missing";
 }
 
-export interface DriverTaskServiceProductContext {
-  serviceProductId: string;
-  serviceProductCode: string;
-  policyVersion: string;
-  evaluatedAt: string;
-}
-
 // ---------------------------------------------------------------------------
 // §2.9 Mobile Heartbeat
 // ---------------------------------------------------------------------------

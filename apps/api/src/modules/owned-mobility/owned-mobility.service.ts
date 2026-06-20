@@ -2407,23 +2407,31 @@ export class OwnedMobilityService implements OnModuleInit {
   assignDispatch(
     command: AssignDispatchCommand,
     requestId?: string,
-  ): DispatchAssignmentResult {
+  ): MaybePromise<DispatchAssignmentResult> {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-
-    return this.createDispatchAssignment(
+    const rollback = this.createDispatchAssignmentRollbackSnapshot(
       dispatchJob,
       order,
-      command.vehicleId,
-      command.driverId,
-      requestId,
+    );
+
+    return this.withRollback(
+      () =>
+        this.createDispatchAssignment(
+          dispatchJob,
+          order,
+          command.vehicleId,
+          command.driverId,
+          requestId,
+        ),
+      rollback,
     );
   }
 
   reassignDispatch(
     command: ReassignDispatchCommand,
     requestId?: string,
-  ): DispatchAssignmentResult {
+  ): MaybePromise<DispatchAssignmentResult> {
     if (!command.reasonCode.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2434,6 +2442,10 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
+    const rollback = this.createDispatchAssignmentRollbackSnapshot(
+      dispatchJob,
+      order,
+    );
 
     if (
       !this.regulatoryRegistryService.getVehicleDispatchability(
@@ -2484,89 +2496,96 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
-    const activeTask = this.driverTasks.find(
-      (task) =>
-        task.assignmentId === activeAssignment.assignmentId &&
-        !["completed", "cancelled", "rejected"].includes(task.status),
-    );
-    const now = new Date().toISOString();
-    activeAssignment.status = "cancelled";
-    activeAssignment.updatedAt = now;
-    if (activeTask) {
-      activeTask.status = "cancelled";
-      activeTask.completedAt = now;
-    }
+    return this.withRollback(
+      () => {
+        const activeTask = this.driverTasks.find(
+          (task) =>
+            task.assignmentId === activeAssignment.assignmentId &&
+            !["completed", "cancelled", "rejected"].includes(task.status),
+        );
+        const previousVehicleId = activeAssignment.vehicleId;
+        const previousDriverId = activeAssignment.driverId;
+        const now = new Date().toISOString();
+        activeAssignment.status = "cancelled";
+        activeAssignment.updatedAt = now;
+        if (activeTask) {
+          activeTask.status = "cancelled";
+          activeTask.completedAt = now;
+        }
 
-    const dispatchAttempt: DispatchAttemptRecord = {
-      attemptId: randomUUID(),
-      dispatchJobId: dispatchJob.dispatchJobId,
-      orderId: order.orderId,
-      sequence: this.nextAttemptSequence(dispatchJob.dispatchJobId),
-      outcome: "reassigned",
-      reasonCode: command.reasonCode,
-      createdAt: now,
-    };
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
-
-    const traceLog = this.appendTrace(order.orderId, "dispatch.reassigned", {
-      dispatchJobId: dispatchJob.dispatchJobId,
-      previousAssignmentId: activeAssignment.assignmentId,
-      previousTaskId: activeTask?.taskId ?? null,
-      previousVehicleId: activeAssignment.vehicleId,
-      previousDriverId: activeAssignment.driverId,
-      nextVehicleId: command.vehicleId,
-      nextDriverId: command.driverId,
-      reasonCode: command.reasonCode,
-      reasonNote: command.reasonNote ?? null,
-    });
-
-    this.persistChanges(
-      {
-        dispatchAssignments: [activeAssignment],
-        ...(activeTask ? { driverTasks: [activeTask] } : {}),
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: [traceLog],
-      },
-      "reassign_dispatch",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: order.tenantId,
-        moduleName: "dispatch",
-        actionName: "reassign_dispatch",
-        resourceType: "dispatch_assignment",
-        resourceId: activeAssignment.assignmentId,
-        oldValuesSummary: {
-          vehicleId: activeAssignment.vehicleId,
-          driverId: activeAssignment.driverId,
-        },
-        newValuesSummary: {
+        const dispatchAttempt: DispatchAttemptRecord = {
+          attemptId: randomUUID(),
           dispatchJobId: dispatchJob.dispatchJobId,
-          vehicleId: command.vehicleId,
-          driverId: command.driverId,
+          orderId: order.orderId,
+          sequence: this.nextAttemptSequence(dispatchJob.dispatchJobId),
+          outcome: "reassigned",
+          reasonCode: command.reasonCode,
+          createdAt: now,
+        };
+        this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+
+        const traceLog = this.appendTrace(order.orderId, "dispatch.reassigned", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          previousAssignmentId: activeAssignment.assignmentId,
+          previousTaskId: activeTask?.taskId ?? null,
+          previousVehicleId,
+          previousDriverId,
+          nextVehicleId: command.vehicleId,
+          nextDriverId: command.driverId,
           reasonCode: command.reasonCode,
           reasonNote: command.reasonNote ?? null,
-        },
+        });
+
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: order.tenantId,
+            moduleName: "dispatch",
+            actionName: "reassign_dispatch",
+            resourceType: "dispatch_assignment",
+            resourceId: activeAssignment.assignmentId,
+            oldValuesSummary: {
+              vehicleId: previousVehicleId,
+              driverId: previousDriverId,
+            },
+            newValuesSummary: {
+              dispatchJobId: dispatchJob.dispatchJobId,
+              vehicleId: command.vehicleId,
+              driverId: command.driverId,
+              reasonCode: command.reasonCode,
+              reasonNote: command.reasonNote ?? null,
+            },
+          },
+          requestId,
+        );
+
+        return this.createDispatchAssignment(
+          dispatchJob,
+          order,
+          command.vehicleId,
+          command.driverId,
+          requestId,
+          {
+            extraPersistPayload: {
+              dispatchAssignments: [activeAssignment],
+              ...(activeTask ? { driverTasks: [activeTask] } : {}),
+              dispatchAttempts: [dispatchAttempt],
+              dispatchTraceLogs: [traceLog],
+            },
+            afterPersist: () => {
+              if (activeTask) {
+                this.ownedMobilityTaskEventsService.publishTaskCancelled(
+                  activeTask,
+                  order,
+                  requestId,
+                );
+              }
+            },
+          },
+        );
       },
-      requestId,
-    );
-
-    if (activeTask) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
-        activeTask,
-        order,
-        requestId,
-      );
-    }
-
-    return this.createDispatchAssignment(
-      dispatchJob,
-      order,
-      command.vehicleId,
-      command.driverId,
-      requestId,
+      rollback,
     );
   }
 
@@ -2576,34 +2595,11 @@ export class OwnedMobilityService implements OnModuleInit {
     vehicleId: string,
     driverId: string,
     requestId?: string,
-  ): DispatchAssignmentResult {
-    const originalOrder = this.cloneOrder(order);
-    const originalDispatchJob = { ...dispatchJob };
-    const originalDispatchAssignments = this.dispatchAssignments.map(
-      (assignment) => ({ ...assignment }),
-    );
-    const originalDriverTasks = this.driverTasks.map((task) =>
-      this.cloneTask(task),
-    );
-    const originalDispatchAttempts = this.dispatchAttempts.map((attempt) => ({
-      ...attempt,
-    }));
-    const originalDispatchTraceLogs = this.dispatchTraceLogs.map((traceLog) =>
-      this.cloneTraceLog(traceLog),
-    );
-    const rollback = () => {
-      this.restoreOrderSnapshot(originalOrder);
-      this.dispatchJobs = [
-        { ...originalDispatchJob },
-        ...this.dispatchJobs.filter(
-          (candidate) => candidate.dispatchJobId !== originalDispatchJob.dispatchJobId,
-        ),
-      ];
-      this.dispatchAssignments = originalDispatchAssignments;
-      this.driverTasks = originalDriverTasks;
-      this.dispatchAttempts = originalDispatchAttempts;
-      this.dispatchTraceLogs = originalDispatchTraceLogs;
-    };
+    options?: {
+      extraPersistPayload?: Parameters<OwnedMobilityService["persistChanges"]>[0];
+      afterPersist?: () => void;
+    },
+  ): MaybePromise<DispatchAssignmentResult> {
     const assignmentEligibility = this.evaluateAssignmentEligibility(
       dispatchJob,
       order,
@@ -2719,14 +2715,17 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    const persistPayload = {
-      orders: [order],
-      dispatchJobs: [dispatchJob],
-      dispatchAssignments: [assignment],
-      driverTasks: [task],
-      dispatchAttempts: [dispatchAttempt],
-      dispatchTraceLogs: traceLogs,
-    } satisfies Parameters<OwnedMobilityService["persistChanges"]>[0];
+    const persistPayload = this.mergePersistPayload(
+      {
+        orders: [order],
+        dispatchJobs: [dispatchJob],
+        dispatchAssignments: [assignment],
+        driverTasks: [task],
+        dispatchAttempts: [dispatchAttempt],
+        dispatchTraceLogs: traceLogs,
+      },
+      options?.extraPersistPayload,
+    );
     const result: DispatchAssignmentResult = {
       assignmentId: assignment.assignmentId,
       status: assignment.status,
@@ -2734,6 +2733,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
 
     const finalize = () => {
+      options?.afterPersist?.();
       this.ownedMobilityTaskEventsService.publishTaskAssigned(
         task,
         order,
@@ -2748,21 +2748,80 @@ export class OwnedMobilityService implements OnModuleInit {
     };
 
     if (this.ownedMobilityRepository?.isEnabled()) {
-      return this.withRollback(
-        () =>
-          this.ownedMobilityRepository!.withTransaction(async (tx) => {
-            await this.ownedMobilityRepository!.persistOrderWorkflow(
-              tx,
-              persistPayload,
-            );
-            return result;
-          }).then(() => finalize()),
-        rollback,
-      ) as DispatchAssignmentResult;
+      return this.ownedMobilityRepository
+        .withTransaction(async (tx) => {
+          await this.ownedMobilityRepository!.persistOrderWorkflow(
+            tx,
+            persistPayload,
+          );
+          return result;
+        })
+        .then(() => finalize());
     }
 
     this.persistChanges(persistPayload, "assign_dispatch");
     return finalize();
+  }
+
+  private createDispatchAssignmentRollbackSnapshot(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
+  ) {
+    const originalOrder = this.cloneOrder(order);
+    const originalDispatchJob = { ...dispatchJob };
+    const originalDispatchAssignments = this.dispatchAssignments.map(
+      (assignment) => ({ ...assignment }),
+    );
+    const originalDriverTasks = this.driverTasks.map((task) =>
+      this.cloneTask(task),
+    );
+    const originalDispatchAttempts = this.dispatchAttempts.map((attempt) => ({
+      ...attempt,
+    }));
+    const originalDispatchTraceLogs = this.dispatchTraceLogs.map((traceLog) =>
+      this.cloneTraceLog(traceLog),
+    );
+
+    return () => {
+      this.restoreOrderSnapshot(originalOrder);
+      this.dispatchJobs = [
+        { ...originalDispatchJob },
+        ...this.dispatchJobs.filter(
+          (candidate) => candidate.dispatchJobId !== originalDispatchJob.dispatchJobId,
+        ),
+      ];
+      this.dispatchAssignments = originalDispatchAssignments;
+      this.driverTasks = originalDriverTasks;
+      this.dispatchAttempts = originalDispatchAttempts;
+      this.dispatchTraceLogs = originalDispatchTraceLogs;
+    };
+  }
+
+  private mergePersistPayload(
+    base: Parameters<OwnedMobilityService["persistChanges"]>[0],
+    extra?: Parameters<OwnedMobilityService["persistChanges"]>[0],
+  ): Parameters<OwnedMobilityService["persistChanges"]>[0] {
+    if (!extra) {
+      return base;
+    }
+
+    return {
+      orders: [...(base.orders ?? []), ...(extra.orders ?? [])],
+      dispatchJobs: [...(base.dispatchJobs ?? []), ...(extra.dispatchJobs ?? [])],
+      dispatchAttempts: [
+        ...(base.dispatchAttempts ?? []),
+        ...(extra.dispatchAttempts ?? []),
+      ],
+      dispatchAssignments: [
+        ...(base.dispatchAssignments ?? []),
+        ...(extra.dispatchAssignments ?? []),
+      ],
+      driverTasks: [...(base.driverTasks ?? []), ...(extra.driverTasks ?? [])],
+      dispatchTraceLogs: [
+        ...(base.dispatchTraceLogs ?? []),
+        ...(extra.dispatchTraceLogs ?? []),
+      ],
+    };
   }
 
   private evaluateAssignmentEligibility(

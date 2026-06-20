@@ -93,11 +93,11 @@ describe("owned mobility task events", () => {
     });
     const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
 
-    service.assignDispatch({
+    await Promise.resolve(service.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       driverId: "driver-001",
       vehicleId: "vehicle-001",
-    });
+    }));
 
     const event = await streamPromise;
 

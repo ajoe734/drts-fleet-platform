@@ -290,11 +290,11 @@ describe("INT-ELIG-002 assignment rechecks", () => {
     const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await Promise.resolve(ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: "veh-demo-001",
       driverId: "drv-demo-001",
-    });
+    }));
 
     const task = ownedMobilityService.getDriverTask(assignment.taskId);
     expect(task.serviceProductContext).toMatchObject({

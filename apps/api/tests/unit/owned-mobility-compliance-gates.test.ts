@@ -337,7 +337,7 @@ describe("OwnedMobilityService compliance gates", () => {
     });
   });
 
-  it("shows proof-required trips as pending until driver submits evidence", () => {
+  it("shows proof-required trips as pending until driver submits evidence", async () => {
     const service = createService();
 
     service.createTenantBooking(
@@ -356,11 +356,11 @@ describe("OwnedMobilityService compliance gates", () => {
     const order = service.listOrders()[0];
     service.dispatchOrder(order.orderId, { mode: "auto" });
     const dispatchJob = service.listDispatchJobs()[0];
-    service.assignDispatch({
+    await Promise.resolve(service.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
 
     const task = service.listDriverTasks()[0];
     const proofGate = task.complianceGates?.find(
@@ -381,7 +381,7 @@ describe("OwnedMobilityService compliance gates", () => {
     );
   });
 
-  it("shows partial proof bundles as submitted while remaining proof stays blocked", () => {
+  it("shows partial proof bundles as submitted while remaining proof stays blocked", async () => {
     const service = createService();
 
     service.createTenantBooking(
@@ -401,11 +401,11 @@ describe("OwnedMobilityService compliance gates", () => {
     const order = service.listOrders()[0];
     service.dispatchOrder(order.orderId, { mode: "auto" });
     const dispatchJob = service.listDispatchJobs()[0];
-    const assignment = service.assignDispatch({
+    const assignment = await Promise.resolve(service.assignDispatch({
       dispatchJobId: dispatchJob.dispatchJobId,
       vehicleId: "vehicle-001",
       driverId: "driver-001",
-    });
+    }));
 
     service.acceptDriverTask(assignment.taskId, {
       acceptedAt: "2026-04-29T10:01:00.000Z",
