@@ -136,7 +136,9 @@ function createService(sourceOverrides: Record<string, unknown> = {}) {
   const reportingRepository = {
     isEnabled: vi.fn(() => true),
     listDailyDispatchRecords: vi.fn(async () => []),
+    listDispatchableSupplySnapshots: vi.fn(async () => []),
     upsertDailyDispatchRecords: vi.fn(async () => undefined),
+    upsertDispatchableSupplySnapshots: vi.fn(async () => undefined),
     loadDailyDispatchRecordSource: vi.fn(async () => source),
     reportPersistenceFailure: vi.fn(),
   };
@@ -153,8 +155,46 @@ function createService(sourceOverrides: Record<string, unknown> = {}) {
       {
         vehicleId: "vehicle-001",
         plateNo: "ABC-1001",
+        operatingArea: "taipei",
+        supportedServiceBuckets: ["standard_taxi"],
+        supplyLifecycle: {
+          dispatch: { eligible: true },
+        },
       },
     ]),
+    listDrivers: vi.fn(() => [
+      {
+        driverId: "driver-001",
+        dispatchEligible: true,
+        supportedServiceBuckets: ["standard_taxi"],
+      },
+    ]),
+    listSupplyPairs: vi.fn(() => [
+      {
+        vehicleId: "vehicle-001",
+        driverId: "driver-001",
+      },
+    ]),
+    listLatestDriverLocations: vi.fn(() => [
+      {
+        driverId: "driver-001",
+        lat: 25.0,
+        lng: 121.5,
+        accuracyM: 30,
+        recordedAt: "2026-06-20T01:04:30.000Z",
+        updatedAt: "2026-06-20T01:04:35.000Z",
+      },
+    ]),
+  };
+  const vehicleEligibilityService = {
+    listActiveServiceProducts: vi.fn(() => [
+      {
+        serviceProduct: "taxi_realtime",
+        serviceBucket: "standard_taxi",
+        timing: "realtime",
+      },
+    ]),
+    isVehicleEligibleForExactServiceProduct: vi.fn(() => true),
   };
 
   return {
@@ -162,9 +202,12 @@ function createService(sourceOverrides: Record<string, unknown> = {}) {
       ownedMobilityService as never,
       complaintService as never,
       regulatoryRegistryService as never,
+      vehicleEligibilityService as never,
       reportingRepository as never,
     ),
     reportingRepository,
+    regulatoryRegistryService,
+    vehicleEligibilityService,
   };
 }
 
@@ -206,5 +249,55 @@ describe("ReportingService", () => {
       tripStartedAt: "2026-06-20T01:15:00.000Z",
       tripCompletedAt: "2026-06-20T01:40:00.000Z",
     });
+  });
+
+  it("captures dispatchable supply snapshots on 5-minute boundaries with complete source health", async () => {
+    const { service, reportingRepository, vehicleEligibilityService } =
+      createService();
+
+    const result = await service.captureDispatchableSupplySnapshot(
+      new Date("2026-06-20T01:06:41.000Z"),
+    );
+
+    expect(result.snapshotAt).toBe("2026-06-20T01:05:00.000Z");
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        businessArea: "taipei",
+        serviceProductCode: "taxi_realtime",
+        dispatchableVehicleCount: 1,
+        availableDriverCount: 1,
+        sourceHealth: "complete",
+      }),
+    ]);
+    expect(
+      reportingRepository.upsertDispatchableSupplySnapshots,
+    ).toHaveBeenCalledTimes(1);
+    expect(vehicleEligibilityService.listActiveServiceProducts).toHaveBeenCalled();
+  });
+
+  it("marks snapshot source health when eligible supply lacks a fresh location", async () => {
+    const { service, regulatoryRegistryService } = createService();
+    vi.spyOn(regulatoryRegistryService, "listLatestDriverLocations").mockReturnValue([
+      {
+        driverId: "driver-001",
+        lat: 25.0,
+        lng: 121.5,
+        accuracyM: 120,
+        recordedAt: "2026-06-20T01:04:30.000Z",
+        updatedAt: "2026-06-20T01:04:35.000Z",
+      },
+    ]);
+
+    const result = await service.captureDispatchableSupplySnapshot(
+      new Date("2026-06-20T01:05:00.000Z"),
+    );
+
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        dispatchableVehicleCount: 0,
+        availableDriverCount: 0,
+        sourceHealth: "location_low_accuracy",
+      }),
+    ]);
   });
 });

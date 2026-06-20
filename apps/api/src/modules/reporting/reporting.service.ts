@@ -1,20 +1,34 @@
-import { Injectable, Optional } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import type {
   DispatchAssignmentRecord,
   DispatchDailyRecord,
   DispatchJobRecord,
+  DispatchableSupplySnapshotRecord,
   DispatchTraceLogRecord,
+  DriverLocationSnapshot,
+  DriverRegistryRecord,
   DriverTaskRecord,
   OwnedOrderRecord,
+  Phase1ServiceBucket,
+  ServiceProductType,
+  VehicleRegistryRecord,
 } from "@drts/contracts";
 
 import { ComplaintService } from "../complaint/complaint.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import {
   ReportingRepository,
   type DailyDispatchRecordQuery,
+  type DispatchableSupplySnapshotQuery,
   type DispatchDailyRecordSource,
 } from "./reporting.repository";
 
@@ -24,16 +38,48 @@ type DispatchDailyRecordRebuildResult = {
   records: DispatchDailyRecord[];
 };
 
+type DispatchableSupplySnapshotCaptureResult = {
+  snapshotAt: string;
+  generatedAt: string;
+  records: DispatchableSupplySnapshotRecord[];
+};
+
+type SnapshotEligibilityPair = {
+  vehicleId: string;
+  driverId: string;
+  businessArea: string;
+  serviceProductCode: ServiceProductType;
+  locationState: DispatchableSupplySnapshotRecord["sourceHealth"];
+};
+
+const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
+const LOCATION_FRESHNESS_WINDOW_MS = 90 * 1000;
+const LOCATION_ACCURACY_THRESHOLD_METERS = 100;
+
 @Injectable()
-export class ReportingService {
+export class ReportingService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(ReportingService.name);
   private dailyDispatchRecords: DispatchDailyRecord[] = [];
+  private dispatchableSupplySnapshots: DispatchableSupplySnapshotRecord[] = [];
+  private snapshotScheduleDelay: ReturnType<typeof setTimeout> | null = null;
+  private snapshotScheduleInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly ownedMobilityService: OwnedMobilityService,
     private readonly complaintService: ComplaintService,
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
+    @Optional()
+    private readonly vehicleEligibilityService?: VehicleEligibilityService,
     @Optional() private readonly reportingRepository?: ReportingRepository,
   ) {}
+
+  onModuleInit() {
+    this.startDispatchableSupplySnapshotScheduler();
+  }
+
+  onModuleDestroy() {
+    this.clearDispatchableSupplySnapshotScheduler();
+  }
 
   async rebuildDailyDispatchRecords(
     query: DailyDispatchRecordQuery = {},
@@ -134,6 +180,71 @@ export class ReportingService {
       .sort((left, right) =>
         right.requestedAt.localeCompare(left.requestedAt) ||
         right.orderId.localeCompare(left.orderId),
+      );
+  }
+
+  async captureDispatchableSupplySnapshot(
+    capturedAt = new Date(),
+  ): Promise<DispatchableSupplySnapshotCaptureResult> {
+    const snapshotAt = this.floorToSnapshotBoundary(capturedAt).toISOString();
+    const generatedAt = new Date().toISOString();
+    const records = this.buildDispatchableSupplySnapshots(
+      snapshotAt,
+      generatedAt,
+    );
+
+    if (this.reportingRepository?.isEnabled()) {
+      try {
+        await this.reportingRepository.upsertDispatchableSupplySnapshots(records);
+      } catch (error) {
+        this.reportingRepository.reportPersistenceFailure(
+          error,
+          "upsert dispatchable supply snapshots",
+        );
+      }
+    } else {
+      this.dispatchableSupplySnapshots = this.mergeDispatchableSupplySnapshots(
+        this.dispatchableSupplySnapshots,
+        records,
+      );
+    }
+
+    return {
+      snapshotAt,
+      generatedAt,
+      records: records.map((record) => ({ ...record })),
+    };
+  }
+
+  async listDispatchableSupplySnapshots(
+    query: DispatchableSupplySnapshotQuery = {},
+  ): Promise<DispatchableSupplySnapshotRecord[]> {
+    if (this.reportingRepository?.isEnabled()) {
+      try {
+        const records =
+          await this.reportingRepository.listDispatchableSupplySnapshots(query);
+        if (records.length > 0) {
+          return records;
+        }
+      } catch (error) {
+        this.reportingRepository.reportPersistenceFailure(
+          error,
+          "list dispatchable supply snapshots",
+        );
+      }
+    }
+
+    if (this.dispatchableSupplySnapshots.length === 0) {
+      await this.captureDispatchableSupplySnapshot();
+    }
+
+    return this.dispatchableSupplySnapshots
+      .filter((record) => this.matchesSnapshotQuery(record, query))
+      .map((record) => ({ ...record }))
+      .sort((left, right) =>
+        right.snapshotAt.localeCompare(left.snapshotAt) ||
+        left.businessArea.localeCompare(right.businessArea) ||
+        left.serviceProductCode.localeCompare(right.serviceProductCode),
       );
   }
 
@@ -280,6 +391,174 @@ export class ReportingService {
     }
   }
 
+  private buildDispatchableSupplySnapshots(
+    snapshotAt: string,
+    generatedAt: string,
+  ): DispatchableSupplySnapshotRecord[] {
+    if (!this.vehicleEligibilityService) {
+      return [];
+    }
+
+    const vehiclesById = new Map(
+      this.regulatoryRegistryService
+        .listVehicles()
+        .map((vehicle) => [vehicle.vehicleId, vehicle] as const),
+    );
+    const driversById = new Map(
+      this.regulatoryRegistryService
+        .listDrivers()
+        .map((driver) => [driver.driverId, driver] as const),
+    );
+    const locationsByDriverId = new Map(
+      this.regulatoryRegistryService
+        .listLatestDriverLocations()
+        .map((location) => [location.driverId, location] as const),
+    );
+    const supplyPairs = this.regulatoryRegistryService.listSupplyPairs();
+    const activeProducts = this.vehicleEligibilityService.listActiveServiceProducts();
+    const businessAreas = [
+      ...new Set(
+        Array.from(vehiclesById.values())
+          .map((vehicle) => vehicle.operatingArea)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ].sort((left, right) => left.localeCompare(right));
+
+    if (businessAreas.length === 0 || activeProducts.length === 0) {
+      return [];
+    }
+
+    const pairs = activeProducts.flatMap((product) =>
+      supplyPairs
+        .map((pair) =>
+          this.buildSnapshotEligibilityPair(
+            pair.vehicleId,
+            pair.driverId,
+            product.serviceProduct,
+            product.serviceBucket,
+            vehiclesById,
+            driversById,
+            locationsByDriverId,
+            snapshotAt,
+          ),
+        )
+        .filter((pair): pair is SnapshotEligibilityPair => pair !== null),
+    );
+
+    return businessAreas.flatMap((businessArea) =>
+      activeProducts.map((product) => {
+        const areaProductPairs = pairs.filter(
+          (pair) =>
+            pair.businessArea === businessArea &&
+            pair.serviceProductCode === product.serviceProduct,
+        );
+        const freshPairs = areaProductPairs.filter(
+          (pair) => pair.locationState === "complete",
+        );
+
+        return {
+          snapshotAt,
+          businessArea,
+          serviceProductCode: product.serviceProduct,
+          dispatchableVehicleCount: new Set(
+            freshPairs.map((pair) => pair.vehicleId),
+          ).size,
+          availableDriverCount: new Set(
+            freshPairs.map((pair) => pair.driverId),
+          ).size,
+          sourceHealth: this.resolveSnapshotSourceHealth(areaProductPairs),
+          generatedAt,
+        };
+      }),
+    );
+  }
+
+  private buildSnapshotEligibilityPair(
+    vehicleId: string,
+    driverId: string,
+    serviceProductCode: ServiceProductType,
+    serviceBucket: Phase1ServiceBucket,
+    vehiclesById: ReadonlyMap<string, VehicleRegistryRecord>,
+    driversById: ReadonlyMap<string, DriverRegistryRecord>,
+    locationsByDriverId: ReadonlyMap<string, DriverLocationSnapshot>,
+    snapshotAt: string,
+  ): SnapshotEligibilityPair | null {
+    const vehicle = vehiclesById.get(vehicleId);
+    const driver = driversById.get(driverId);
+    if (!vehicle || !driver) {
+      return null;
+    }
+
+    if (
+      !vehicle.supplyLifecycle.dispatch.eligible ||
+      !vehicle.supportedServiceBuckets.includes(serviceBucket)
+    ) {
+      return null;
+    }
+    if (
+      !driver.dispatchEligible ||
+      !driver.supportedServiceBuckets.includes(serviceBucket)
+    ) {
+      return null;
+    }
+    if (
+      !this.vehicleEligibilityService?.isVehicleEligibleForExactServiceProduct(
+        vehicle.vehicleId,
+        serviceProductCode,
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      vehicleId: vehicle.vehicleId,
+      driverId: driver.driverId,
+      businessArea: vehicle.operatingArea,
+      serviceProductCode,
+      locationState: this.classifySnapshotLocationHealth(
+        locationsByDriverId.get(driver.driverId) ?? null,
+        snapshotAt,
+      ),
+    };
+  }
+
+  private classifySnapshotLocationHealth(
+    location: DriverLocationSnapshot | null,
+    snapshotAt: string,
+  ): DispatchableSupplySnapshotRecord["sourceHealth"] {
+    if (!location) {
+      return "location_missing";
+    }
+    if (
+      location.accuracyM !== null &&
+      location.accuracyM > LOCATION_ACCURACY_THRESHOLD_METERS
+    ) {
+      return "location_low_accuracy";
+    }
+    if (
+      Date.parse(snapshotAt) - Date.parse(location.recordedAt) >
+      LOCATION_FRESHNESS_WINDOW_MS
+    ) {
+      return "location_stale";
+    }
+    return "complete";
+  }
+
+  private resolveSnapshotSourceHealth(
+    pairs: readonly SnapshotEligibilityPair[],
+  ): DispatchableSupplySnapshotRecord["sourceHealth"] {
+    if (pairs.some((pair) => pair.locationState === "location_missing")) {
+      return "location_missing";
+    }
+    if (pairs.some((pair) => pair.locationState === "location_stale")) {
+      return "location_stale";
+    }
+    if (pairs.some((pair) => pair.locationState === "location_low_accuracy")) {
+      return "location_low_accuracy";
+    }
+    return "complete";
+  }
+
   private matchesQuery(
     record: DispatchDailyRecord,
     query: DailyDispatchRecordQuery,
@@ -302,6 +581,24 @@ export class ReportingService {
     );
   }
 
+  private matchesSnapshotQuery(
+    record: DispatchableSupplySnapshotRecord,
+    query: DispatchableSupplySnapshotQuery,
+  ) {
+    const afterFrom =
+      !query.snapshotAtFrom || record.snapshotAt >= query.snapshotAtFrom;
+    const beforeTo = !query.snapshotAtTo || record.snapshotAt <= query.snapshotAtTo;
+    return (
+      (!query.snapshotAt || record.snapshotAt === query.snapshotAt) &&
+      afterFrom &&
+      beforeTo &&
+      (!query.businessArea || record.businessArea === query.businessArea) &&
+      (!query.serviceProductCode ||
+        record.serviceProductCode === query.serviceProductCode) &&
+      (!query.sourceHealth || record.sourceHealth === query.sourceHealth)
+    );
+  }
+
   private mergeRecords(
     existing: readonly DispatchDailyRecord[],
     next: readonly DispatchDailyRecord[],
@@ -314,6 +611,76 @@ export class ReportingService {
       merged.set(`${record.serviceDate}:${record.orderId}`, { ...record });
     }
     return Array.from(merged.values());
+  }
+
+  private mergeDispatchableSupplySnapshots(
+    existing: readonly DispatchableSupplySnapshotRecord[],
+    next: readonly DispatchableSupplySnapshotRecord[],
+  ) {
+    const merged = new Map<string, DispatchableSupplySnapshotRecord>();
+    for (const record of existing) {
+      merged.set(
+        `${record.snapshotAt}:${record.businessArea}:${record.serviceProductCode}`,
+        { ...record },
+      );
+    }
+    for (const record of next) {
+      merged.set(
+        `${record.snapshotAt}:${record.businessArea}:${record.serviceProductCode}`,
+        { ...record },
+      );
+    }
+    return Array.from(merged.values());
+  }
+
+  private floorToSnapshotBoundary(value: Date) {
+    const floored = new Date(value);
+    floored.setUTCSeconds(0, 0);
+    floored.setUTCMinutes(
+      floored.getUTCMinutes() - (floored.getUTCMinutes() % 5),
+    );
+    return floored;
+  }
+
+  private startDispatchableSupplySnapshotScheduler() {
+    if (!this.vehicleEligibilityService) {
+      return;
+    }
+
+    this.clearDispatchableSupplySnapshotScheduler();
+    const now = Date.now();
+    const nextBoundary =
+      Math.floor(now / SNAPSHOT_INTERVAL_MS) * SNAPSHOT_INTERVAL_MS +
+      SNAPSHOT_INTERVAL_MS;
+    const delayMs = Math.max(nextBoundary - now, 0);
+    this.snapshotScheduleDelay = setTimeout(() => {
+      void this.runScheduledDispatchableSupplySnapshot();
+      this.snapshotScheduleInterval = setInterval(() => {
+        void this.runScheduledDispatchableSupplySnapshot();
+      }, SNAPSHOT_INTERVAL_MS);
+    }, delayMs);
+  }
+
+  private clearDispatchableSupplySnapshotScheduler() {
+    if (this.snapshotScheduleDelay) {
+      clearTimeout(this.snapshotScheduleDelay);
+      this.snapshotScheduleDelay = null;
+    }
+    if (this.snapshotScheduleInterval) {
+      clearInterval(this.snapshotScheduleInterval);
+      this.snapshotScheduleInterval = null;
+    }
+  }
+
+  private async runScheduledDispatchableSupplySnapshot() {
+    try {
+      await this.captureDispatchableSupplySnapshot(new Date());
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Dispatchable supply snapshot scheduler skipped: ${detail}`,
+      );
+    }
   }
 
   private resolveEventTimestamp(
