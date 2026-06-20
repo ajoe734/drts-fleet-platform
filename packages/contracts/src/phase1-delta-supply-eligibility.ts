@@ -58,6 +58,12 @@ export interface SupplySubmissionRecord {
   updatedAt: string;
 }
 
+export interface SupplyReviewActionCommand {
+  expectedRevisionNo: number;
+  reasonCode: string;
+  comment?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // §2.2 Driver Submission
 // ---------------------------------------------------------------------------
