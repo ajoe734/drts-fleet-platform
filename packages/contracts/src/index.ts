@@ -4195,6 +4195,9 @@ export const OPERATIONAL_REPORT_JOB_TYPES = [
   "revenue_summary",
   "incident_register",
   "maintenance_overview",
+  // Phase 1 delta (SD §1.6): daily dispatch record + six-month operations summary.
+  "daily_dispatch_record",
+  "six_month_operations_summary",
 ] as const;
 
 export const REPORT_JOB_TYPES = [
@@ -5502,3 +5505,4 @@ export interface ActionIntent {
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
 export * from "./ui-runtime";
+export * from "./phase1-delta-supply-eligibility";
