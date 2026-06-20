@@ -78,8 +78,9 @@ real-device UAT requirement recorded in machine truth.
 - there is no second branch or worktree with task stem `mob-uat-002`
   pointing at unrelated content
 - the assigned helper branch
-  `codex/mob-uat-002-unblock-history-repair @ ee37168950e191e643f9a4b6ebc725eea18effb4`
-  is clean and currently matches `origin/dev`
+  `codex/mob-uat-002-unblock-history-repair @ 7794d85a60bc3aa4038e95e4a054c7bbe5ecd84d`
+  tracks `origin/codex/mob-uat-002-unblock-history-repair` and contains only
+  this helper task's audit evidence commit
 
 ### Machine-truth evidence
 
@@ -145,6 +146,16 @@ Concrete next step:
   redirected into unnecessary replay work
 - using a fresh worktree for the eventual human evidence pass avoids future
   contamination without changing current history
+
+## Owner Closeout
+
+- `2026-06-20T15:14:49Z` reviewer approval from `Codex2` confirmed the
+  diagnosis, the pushed helper commit
+  `7794d85a60bc3aa4038e95e4a054c7bbe5ecd84d`, and the parent next-step update.
+- This helper task closes out at branch level only with
+  `INTEGRATION_STATUS=branch_pushed`.
+- No PR, merge to `dev`, CI promotion, or dev deployment is part of this
+  history-triage helper branch.
 
 ## Verification Performed
 
