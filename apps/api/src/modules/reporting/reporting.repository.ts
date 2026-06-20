@@ -400,7 +400,10 @@ export class ReportingRepository {
 
     return {
       orders: ordersResult.rows.map((row) =>
-        this.parseRecord<OwnedOrderRecord>(row.record, "ops.phase1_owned_orders"),
+        this.parseRecord<OwnedOrderRecord>(
+          row.record,
+          "ops.phase1_owned_orders",
+        ),
       ),
       dispatchJobs: dispatchJobsResult.rows.map((row) =>
         this.parseRecord<DispatchJobRecord>(
@@ -415,7 +418,10 @@ export class ReportingRepository {
         ),
       ),
       driverTasks: driverTasksResult.rows.map((row) =>
-        this.parseRecord<DriverTaskRecord>(row.record, "ops.phase1_driver_tasks"),
+        this.parseRecord<DriverTaskRecord>(
+          row.record,
+          "ops.phase1_driver_tasks",
+        ),
       ),
       dispatchTraceLogs: dispatchTraceLogsResult.rows.map((row) =>
         this.parseRecord<DispatchTraceLogRecord>(
@@ -655,24 +661,24 @@ export class ReportingRepository {
       tenantId: row.tenant_id,
       partnerId: row.partner_id,
       serviceProductCode: row.service_product_code,
-      requestedAt: row.requested_at,
-      reservationTime: row.reservation_time,
+      requestedAt: this.toIsoString(row.requested_at),
+      reservationTime: this.toOptionalIsoString(row.reservation_time),
       pickupAddressSnapshot: row.pickup_address_snapshot,
       dropoffAddressSnapshot: row.dropoff_address_snapshot,
-      firstDispatchAt: row.first_dispatch_at,
-      firstAssignedAt: row.first_assigned_at,
+      firstDispatchAt: this.toOptionalIsoString(row.first_dispatch_at),
+      firstAssignedAt: this.toOptionalIsoString(row.first_assigned_at),
       finalDriverId: row.final_driver_id,
       finalVehicleId: row.final_vehicle_id,
       finalPlateNo: row.final_plate_no,
       etaSecondsAtAssignment: row.eta_seconds_at_assignment,
-      arrivedPickupAt: row.arrived_pickup_at,
-      tripStartedAt: row.trip_started_at,
-      tripCompletedAt: row.trip_completed_at,
+      arrivedPickupAt: this.toOptionalIsoString(row.arrived_pickup_at),
+      tripStartedAt: this.toOptionalIsoString(row.trip_started_at),
+      tripCompletedAt: this.toOptionalIsoString(row.trip_completed_at),
       finalStatus: row.final_status,
       redispatchCount: row.redispatch_count,
       cancellationReason: row.cancellation_reason,
       complaintCount: row.complaint_count,
-      generatedAt: row.generated_at,
+      generatedAt: this.toIsoString(row.generated_at),
     };
   }
 
@@ -680,13 +686,13 @@ export class ReportingRepository {
     row: DispatchableSupplySnapshotRow,
   ): DispatchableSupplySnapshotRecord {
     return {
-      snapshotAt: row.snapshot_at,
+      snapshotAt: this.toIsoString(row.snapshot_at),
       businessArea: row.business_area,
       serviceProductCode: row.service_product_code,
       dispatchableVehicleCount: row.dispatchable_vehicle_count,
       availableDriverCount: row.available_driver_count,
       sourceHealth: row.source_health,
-      generatedAt: row.generated_at,
+      generatedAt: this.toIsoString(row.generated_at),
     };
   }
 
@@ -714,8 +720,20 @@ export class ReportingRepository {
       snapshotCoverageRate: Number(row.snapshot_coverage_rate),
       complaintCount: row.complaint_count,
       complaintsByCategory,
-      generatedAt: row.generated_at,
+      generatedAt: this.toIsoString(row.generated_at),
     };
+  }
+
+  private toIsoString(value: string | Date): string {
+    return value instanceof Date ? value.toISOString() : value;
+  }
+
+  private toOptionalIsoString(value: string | Date | null): string | null {
+    if (value === null) {
+      return null;
+    }
+
+    return this.toIsoString(value);
   }
 
   private parseRecord<T>(record: unknown, source: string): T {

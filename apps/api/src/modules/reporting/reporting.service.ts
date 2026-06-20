@@ -72,7 +72,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   private dispatchableSupplySnapshots: DispatchableSupplySnapshotRecord[] = [];
   private monthlyOperationsSummaries: MonthlyOperationsSummaryRecord[] = [];
   private snapshotScheduleDelay: ReturnType<typeof setTimeout> | null = null;
-  private snapshotScheduleInterval: ReturnType<typeof setInterval> | null = null;
+  private snapshotScheduleInterval: ReturnType<typeof setInterval> | null =
+    null;
 
   constructor(
     private readonly ownedMobilityService: OwnedMobilityService,
@@ -126,9 +127,10 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         ),
       )
       .filter((record) => this.matchesQuery(record, query))
-      .sort((left, right) =>
-        right.requestedAt.localeCompare(left.requestedAt) ||
-        right.orderId.localeCompare(left.orderId),
+      .sort(
+        (left, right) =>
+          right.requestedAt.localeCompare(left.requestedAt) ||
+          right.orderId.localeCompare(left.orderId),
       );
 
     if (this.reportingRepository?.isEnabled()) {
@@ -159,9 +161,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   ): Promise<DispatchDailyRecord[]> {
     if (this.reportingRepository?.isEnabled()) {
       try {
-        const records = await this.reportingRepository.listDailyDispatchRecords(
-          query,
-        );
+        const records =
+          await this.reportingRepository.listDailyDispatchRecords(query);
         if (records.length > 0) {
           return records;
         }
@@ -187,9 +188,10 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     return this.dailyDispatchRecords
       .filter((record) => this.matchesQuery(record, query))
       .map((record) => ({ ...record }))
-      .sort((left, right) =>
-        right.requestedAt.localeCompare(left.requestedAt) ||
-        right.orderId.localeCompare(left.orderId),
+      .sort(
+        (left, right) =>
+          right.requestedAt.localeCompare(left.requestedAt) ||
+          right.orderId.localeCompare(left.orderId),
       );
   }
 
@@ -205,7 +207,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
 
     if (this.reportingRepository?.isEnabled()) {
       try {
-        await this.reportingRepository.upsertDispatchableSupplySnapshots(records);
+        await this.reportingRepository.upsertDispatchableSupplySnapshots(
+          records,
+        );
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
@@ -218,6 +222,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         records,
       );
     }
+
+    this.dispatchableSupplySnapshots = this.mergeDispatchableSupplySnapshots(
+      this.dispatchableSupplySnapshots,
+      records,
+    );
 
     return {
       snapshotAt,
@@ -251,10 +260,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     return this.dispatchableSupplySnapshots
       .filter((record) => this.matchesSnapshotQuery(record, query))
       .map((record) => ({ ...record }))
-      .sort((left, right) =>
-        right.snapshotAt.localeCompare(left.snapshotAt) ||
-        left.businessArea.localeCompare(right.businessArea) ||
-        left.serviceProductCode.localeCompare(right.serviceProductCode),
+      .sort(
+        (left, right) =>
+          right.snapshotAt.localeCompare(left.snapshotAt) ||
+          left.businessArea.localeCompare(right.businessArea) ||
+          left.serviceProductCode.localeCompare(right.serviceProductCode),
       );
   }
 
@@ -263,6 +273,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   ): Promise<MonthlyOperationsSummaryRebuildResult> {
     const generatedAt = new Date().toISOString();
     const source = await this.loadDailyDispatchRecordSource();
+    const snapshots = await this.loadDispatchableSupplySnapshots();
     const periods = this.resolveRequestedMonths(query);
     const vehicleAreaById = new Map(
       this.regulatoryRegistryService
@@ -275,11 +286,14 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       vehicleAreaById,
       generatedAt,
       query,
+      snapshots,
     );
 
     if (this.reportingRepository?.isEnabled()) {
       try {
-        await this.reportingRepository.upsertMonthlyOperationsSummaries(records);
+        await this.reportingRepository.upsertMonthlyOperationsSummaries(
+          records,
+        );
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
@@ -331,10 +345,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         ...record,
         complaintsByCategory: { ...record.complaintsByCategory },
       }))
-      .sort((left, right) =>
-        right.periodMonth.localeCompare(left.periodMonth) ||
-        left.businessArea.localeCompare(right.businessArea) ||
-        left.serviceProductCode.localeCompare(right.serviceProductCode),
+      .sort(
+        (left, right) =>
+          right.periodMonth.localeCompare(left.periodMonth) ||
+          left.businessArea.localeCompare(right.businessArea) ||
+          left.serviceProductCode.localeCompare(right.serviceProductCode),
       );
   }
 
@@ -344,9 +359,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       to?: string;
     } = {},
   ): Promise<SixMonthOperationsSummary[]> {
-    const { periodMonthFrom, periodMonthTo } = this.resolveSummaryMonthBounds(
-      query,
-    );
+    const { periodMonthFrom, periodMonthTo } =
+      this.resolveSummaryMonthBounds(query);
     const monthlyQuery: MonthlyOperationsSummaryQuery = {
       periodMonthFrom,
       periodMonthTo,
@@ -425,11 +439,12 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
             : 0,
         complaintsByCategory: { ...summary.complaintsByCategory },
       }))
-      .sort((left, right) =>
-        (left.businessArea ?? "").localeCompare(right.businessArea ?? "") ||
-        (left.serviceProductCode ?? "").localeCompare(
-          right.serviceProductCode ?? "",
-        ),
+      .sort(
+        (left, right) =>
+          (left.businessArea ?? "").localeCompare(right.businessArea ?? "") ||
+          (left.serviceProductCode ?? "").localeCompare(
+            right.serviceProductCode ?? "",
+          ),
       );
   }
 
@@ -452,7 +467,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     const orderTasks = driverTasks
       .filter((task) => task.orderId === order.orderId)
       .sort((left, right) => {
-        const leftAt = left.completedAt ?? left.startedAt ?? left.acceptedAt ?? "";
+        const leftAt =
+          left.completedAt ?? left.startedAt ?? left.acceptedAt ?? "";
         const rightAt =
           right.completedAt ?? right.startedAt ?? right.acceptedAt ?? "";
         return leftAt.localeCompare(rightAt);
@@ -504,22 +520,20 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         finalTask?.arrivedPickupAt ?? null,
         finalTask?.taskId,
       ),
-      tripStartedAt:
-        this.resolveEventTimestamp(
-          sortedOrderTraceLogs,
-          "driver.started_trip",
-          finalTask?.startedAt ?? null,
-          finalTask?.taskId,
-          true,
-        ),
-      tripCompletedAt:
-        this.resolveEventTimestamp(
-          sortedOrderTraceLogs,
-          "driver.completed_trip",
-          finalTask?.completedAt ?? null,
-          finalTask?.taskId,
-          true,
-        ),
+      tripStartedAt: this.resolveEventTimestamp(
+        sortedOrderTraceLogs,
+        "driver.started_trip",
+        finalTask?.startedAt ?? null,
+        finalTask?.taskId,
+        true,
+      ),
+      tripCompletedAt: this.resolveEventTimestamp(
+        sortedOrderTraceLogs,
+        "driver.completed_trip",
+        finalTask?.completedAt ?? null,
+        finalTask?.taskId,
+        true,
+      ),
       finalStatus: order.status,
       redispatchCount: orderTraceLogs.filter(
         (traceLog) => traceLog.eventType === "dispatch.redispatch_required",
@@ -614,7 +628,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         .map((location) => [location.driverId, location] as const),
     );
     const supplyPairs = this.regulatoryRegistryService.listSupplyPairs();
-    const activeProducts = this.vehicleEligibilityService.listActiveServiceProducts();
+    const activeProducts =
+      this.vehicleEligibilityService.listActiveServiceProducts();
     const businessAreas = [
       ...new Set(
         Array.from(vehiclesById.values())
@@ -662,9 +677,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
           dispatchableVehicleCount: new Set(
             freshPairs.map((pair) => pair.vehicleId),
           ).size,
-          availableDriverCount: new Set(
-            freshPairs.map((pair) => pair.driverId),
-          ).size,
+          availableDriverCount: new Set(freshPairs.map((pair) => pair.driverId))
+            .size,
           sourceHealth: this.resolveSnapshotSourceHealth(areaProductPairs),
           generatedAt,
         };
@@ -786,7 +800,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   ) {
     const afterFrom =
       !query.snapshotAtFrom || record.snapshotAt >= query.snapshotAtFrom;
-    const beforeTo = !query.snapshotAtTo || record.snapshotAt <= query.snapshotAtTo;
+    const beforeTo =
+      !query.snapshotAtTo || record.snapshotAt <= query.snapshotAtTo;
     return (
       (!query.snapshotAt || record.snapshotAt === query.snapshotAt) &&
       afterFrom &&
@@ -882,6 +897,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     vehicleAreaById: ReadonlyMap<string, string>,
     generatedAt: string,
     query: MonthlyOperationsSummaryQuery,
+    snapshots: readonly DispatchableSupplySnapshotRecord[],
   ): MonthlyOperationsSummaryRecord[] {
     const vehiclePlateById = new Map(
       this.regulatoryRegistryService
@@ -991,7 +1007,6 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const snapshots = this.readDispatchableSupplySnapshots();
     for (const snapshot of snapshots) {
       const periodMonth = snapshot.snapshotAt.slice(0, 7);
       if (!periods.includes(periodMonth)) {
@@ -1058,10 +1073,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
             : 0,
         complaintsByCategory: { ...group.complaintsByCategory },
       }))
-      .sort((left, right) =>
-        left.periodMonth.localeCompare(right.periodMonth) ||
-        left.businessArea.localeCompare(right.businessArea) ||
-        left.serviceProductCode.localeCompare(right.serviceProductCode),
+      .sort(
+        (left, right) =>
+          left.periodMonth.localeCompare(right.periodMonth) ||
+          left.businessArea.localeCompare(right.businessArea) ||
+          left.serviceProductCode.localeCompare(right.serviceProductCode),
       );
   }
 
@@ -1092,7 +1108,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
 
     const today = new Date();
     const latest = today.toISOString().slice(0, 7);
-    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 5, 1))
+    const start = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 5, 1),
+    )
       .toISOString()
       .slice(0, 7);
     return {
@@ -1150,6 +1168,32 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     return this.dispatchableSupplySnapshots.filter((record) =>
       this.matchesSnapshotQuery(record, query),
     );
+  }
+
+  private async loadDispatchableSupplySnapshots(
+    query: DispatchableSupplySnapshotQuery = {},
+  ) {
+    if (this.reportingRepository?.isEnabled()) {
+      try {
+        const records =
+          await this.reportingRepository.listDispatchableSupplySnapshots(query);
+        if (records.length > 0) {
+          this.dispatchableSupplySnapshots =
+            this.mergeDispatchableSupplySnapshots(
+              this.dispatchableSupplySnapshots,
+              records,
+            );
+          return records;
+        }
+      } catch (error) {
+        this.reportingRepository.reportPersistenceFailure(
+          error,
+          "load dispatchable supply snapshots",
+        );
+      }
+    }
+
+    return this.readDispatchableSupplySnapshots(query);
   }
 
   private roundTo(value: number, digits: number) {
