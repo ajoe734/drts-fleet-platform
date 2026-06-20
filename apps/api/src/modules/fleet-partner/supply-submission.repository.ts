@@ -505,6 +505,26 @@ export class SupplySubmissionRepository {
     };
   }
 
+  async deleteDocument(
+    documentId: string,
+    submissionId: string,
+    fleetPartnerId: string,
+  ) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        DELETE FROM fleet.supply_documents
+        WHERE document_id = $1
+          AND submission_id = $2
+          AND fleet_partner_id = $3
+      `,
+      [documentId, submissionId, fleetPartnerId],
+    );
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
