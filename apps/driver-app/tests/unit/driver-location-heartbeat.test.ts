@@ -190,11 +190,14 @@ describe("driver location heartbeat transport", () => {
     expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
     expect(watchCallback).not.toBeNull();
 
+    // Stationary coordinates isolate the on_trip time throttle (15s): the
+    // second fire is dropped, the third clears the interval. (A moving driver
+    // would also emit on the 25m distance trigger — see the cadence tests.)
     watchCallback?.(createLocation(1_000));
     await flushHeartbeatQueue();
-    watchCallback?.(createLocation(11_000, 25.034, 121.5655));
+    watchCallback?.(createLocation(11_000));
     await flushHeartbeatQueue();
-    watchCallback?.(createLocation(16_500, 25.035, 121.5656));
+    watchCallback?.(createLocation(16_500));
     await flushHeartbeatQueue();
 
     expect(enqueueDriverLocationEvent).toHaveBeenCalledTimes(2);
@@ -212,8 +215,8 @@ describe("driver location heartbeat transport", () => {
     });
     expect(enqueueDriverLocationEvent).toHaveBeenNthCalledWith(2, {
       taskId: "task-001",
-      lat: 25.035,
-      lng: 121.5656,
+      lat: 25.033,
+      lng: 121.5654,
       recordedAt: new Date(16_500).toISOString(),
       accuracyM: 8,
       workState: "on_trip",
@@ -222,5 +225,73 @@ describe("driver location heartbeat transport", () => {
       networkType: "unknown",
       preserveKeyEvent: false,
     });
+  });
+});
+
+describe("driver online_available continuous tracking", () => {
+  it("emits background heartbeats at the 30s / 100m online_available cadence", async () => {
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    const result = await heartbeatModule.syncDriverOnlineAvailableHeartbeat();
+
+    expect(result.status).toBe("active");
+    expect(heartbeatModule.getActiveDriverHeartbeatWorkState()).toBe(
+      "available",
+    );
+    expect(heartbeatModule.getActiveDriverHeartbeatTaskId()).toBeNull();
+    expect(startLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    expect(taskHandler).not.toBeNull();
+
+    // t=1s emits immediately.
+    await taskHandler?.({ data: { locations: [createLocation(1_000)] } });
+    await flushHeartbeatQueue();
+    // t=21s dropped (< 30s later, no 100m move).
+    await taskHandler?.({ data: { locations: [createLocation(21_000)] } });
+    await flushHeartbeatQueue();
+    // t=31s clears the 30s interval.
+    await taskHandler?.({ data: { locations: [createLocation(31_000)] } });
+    await flushHeartbeatQueue();
+    // t=36s is only 5s later but moved ~167m (> 100m): distance trigger emits.
+    await taskHandler?.({
+      data: { locations: [createLocation(36_000, 25.0345, 121.5654)] },
+    });
+    await flushHeartbeatQueue();
+
+    const availabilityCalls = enqueueDriverLocationEvent.mock.calls.filter(
+      ([event]) => !event.preserveKeyEvent,
+    );
+    expect(availabilityCalls).toHaveLength(3);
+    expect(availabilityCalls[0][0]).toMatchObject({
+      taskId: null,
+      lat: 25.033,
+      lng: 121.5654,
+      recordedAt: new Date(1_000).toISOString(),
+      workState: "available",
+      appState: "background",
+      transportMode: "background",
+    });
+    expect(availabilityCalls[1][0]).toMatchObject({
+      recordedAt: new Date(31_000).toISOString(),
+      workState: "available",
+    });
+    expect(availabilityCalls[2][0]).toMatchObject({
+      lat: 25.0345,
+      recordedAt: new Date(36_000).toISOString(),
+      workState: "available",
+    });
+  });
+
+  it("blocks online_available when background permission is denied", async () => {
+    getBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
+    requestBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
+
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    const result = await heartbeatModule.syncDriverOnlineAvailableHeartbeat();
+
+    expect(result.status).toBe("permission_denied");
+    expect(result.reason).toBe("BACKGROUND_LOCATION_REQUIRED");
+    expect(heartbeatModule.getActiveDriverHeartbeatWorkState()).toBeNull();
+    expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,11 @@ import {
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import {
+  getActiveDriverHeartbeatWorkState,
+  stopDriverLocationHeartbeat,
+  syncDriverOnlineAvailableHeartbeat,
+} from "@/lib/driver-location-heartbeat";
+import {
   ActionButton,
   AppScreen,
   AuthorityBanner,
@@ -306,6 +311,31 @@ export default function ShiftScreen() {
       });
   }, [isProvisioned]);
 
+  // online_available continuous tracking (MOB-APP-001 / SA §6.2): an active
+  // shift means the driver is on duty and available for dispatch, so emit
+  // background location at the online_available cadence. An active trip owns its
+  // own tracking, so never override it here.
+  const syncShiftAvailabilityTracking = async (shift: ShiftRecord | null) => {
+    try {
+      const workState = getActiveDriverHeartbeatWorkState();
+      if (!shift) {
+        if (workState === "available") {
+          await stopDriverLocationHeartbeat();
+        }
+        return null;
+      }
+
+      if (workState && workState !== "available") {
+        return null;
+      }
+
+      return await syncDriverOnlineAvailableHeartbeat();
+    } catch {
+      // Best-effort: availability tracking must not block the shift UI.
+      return null;
+    }
+  };
+
   const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
     if (!isProvisioned) {
       return;
@@ -333,6 +363,7 @@ export default function ShiftScreen() {
       ]);
       const active = shifts.find((shift) => shift.status === "active");
       setActiveShift(active ?? null);
+      void syncShiftAvailabilityTracking(active ?? null);
       setPresenceSummary(platformPresenceResult.summary);
       setPresenceError(platformPresenceResult.error);
       setScreenError(null);
@@ -385,7 +416,18 @@ export default function ShiftScreen() {
       setActiveShift(result);
       setScreenError(null);
       setNow(Date.now());
-      Alert.alert("成功", "已完成上線打卡。");
+      const tracking = await syncShiftAvailabilityTracking(result);
+      if (
+        tracking?.status === "permission_denied" &&
+        tracking.reason === "BACKGROUND_LOCATION_REQUIRED"
+      ) {
+        Alert.alert(
+          "需要背景定位",
+          "已完成上線打卡，但尚未取得背景定位權限，系統無法將你列入可派遣司機。請於系統設定開啟「永遠允許」定位。",
+        );
+      } else {
+        Alert.alert("成功", "已完成上線打卡。");
+      }
       setVehicleId("");
       setLocation("");
       setOdometer("");
@@ -415,6 +457,7 @@ export default function ShiftScreen() {
       });
       setActiveShift(null);
       setScreenError(null);
+      await syncShiftAvailabilityTracking(null);
       Alert.alert("成功", "已完成下線打卡。");
       setLocation("");
       setOdometer("");
