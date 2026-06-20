@@ -205,6 +205,10 @@ async function getOrCreateDeviceId(): Promise<string> {
   return deviceId;
 }
 
+export async function getDriverDeviceId(): Promise<string> {
+  return getOrCreateDeviceId();
+}
+
 async function clearStoredSession() {
   provisionedSession = null;
   await SecureStore.deleteItemAsync(DRIVER_SESSION_KEY);

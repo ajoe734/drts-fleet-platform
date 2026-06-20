@@ -222,6 +222,14 @@ function isForwardedTask(task: DriverTaskRecord | null): boolean {
   return task?.sourcePlatform != null;
 }
 
+const HEARTBEAT_TRACKED_TASK_STATUSES = new Set([
+  "accepted",
+  "enroute_pickup",
+  "arrived_pickup",
+  "on_trip",
+  "proof_pending",
+]);
+
 function formatTripActionSuccessLabel(action: TripPrimaryActionKey): string {
   return driverTripActionSuccessLabels[action];
 }
@@ -873,6 +881,9 @@ export default function TripScreen() {
     0,
   );
   const isForwardedTrip = isForwardedTask(taskDetail);
+  const shouldTrackTripHeartbeat =
+    !isForwardedTrip &&
+    HEARTBEAT_TRACKED_TASK_STATUSES.has(taskDetail?.status ?? "");
   const isTripInProgress = !isForwardedTrip && taskDetail?.status === "on_trip";
   const showTripMetrics = !isForwardedTrip && shouldShowTripMetrics(taskDetail);
   const completionBlockedByTracking =
@@ -1264,7 +1275,7 @@ export default function TripScreen() {
   }, [isTripInProgress, taskDetail?.taskId, taskDetail?.startedAt]);
 
   useEffect(() => {
-    if (!isTripInProgress) {
+    if (!shouldTrackTripHeartbeat) {
       lastTrackedCoordinateRef.current = null;
       setLocationTrackingState("idle");
       setLocationTrackingMessage(null);
@@ -1284,6 +1295,7 @@ export default function TripScreen() {
             ? {
                 taskId: taskDetail.taskId,
                 driverId: taskDetail.driverId,
+                status: taskDetail.status,
               }
             : null,
         );
@@ -1316,7 +1328,13 @@ export default function TripScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isTripInProgress, taskDetail?.taskId, trackingRetryKey]);
+  }, [
+    shouldTrackTripHeartbeat,
+    taskDetail?.driverId,
+    taskDetail?.status,
+    taskDetail?.taskId,
+    trackingRetryKey,
+  ]);
 
   useEffect(() => {
     if (!isTripInProgress) {
