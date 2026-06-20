@@ -15,6 +15,7 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import {
   ReportingRepository,
   type DailyDispatchRecordQuery,
+  type DispatchDailyRecordSource,
 } from "./reporting.repository";
 
 type DispatchDailyRecordRebuildResult = {
@@ -38,14 +39,14 @@ export class ReportingService {
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecordRebuildResult> {
     const generatedAt = new Date().toISOString();
-    const snapshot = this.ownedMobilityService.getReportingSnapshot();
+    const source = await this.loadDailyDispatchRecordSource();
     const vehiclePlateById = new Map(
       this.regulatoryRegistryService
         .listVehicles()
         .map((vehicle) => [vehicle.vehicleId, vehicle.plateNo] as const),
     );
     const complaintCountByOrderId = new Map<string, number>();
-    for (const complaintCase of this.complaintService.listComplaintCases()) {
+    for (const complaintCase of source.complaintCases) {
       if (!complaintCase.relatedOrderId) {
         continue;
       }
@@ -55,14 +56,14 @@ export class ReportingService {
       );
     }
 
-    const records = snapshot.orders
+    const records = source.orders
       .map((order) =>
         this.buildDispatchDailyRecord(
           order,
-          snapshot.dispatchJobs,
-          snapshot.dispatchAssignments,
-          snapshot.driverTasks,
-          snapshot.dispatchTraceLogs,
+          source.dispatchJobs,
+          source.dispatchAssignments,
+          source.driverTasks,
+          source.dispatchTraceLogs,
           vehiclePlateById,
           complaintCountByOrderId,
           generatedAt,
@@ -116,8 +117,15 @@ export class ReportingService {
       }
     }
 
+    let rebuiltRecords: DispatchDailyRecord[] | null = null;
     if (this.dailyDispatchRecords.length === 0) {
-      await this.rebuildDailyDispatchRecords(query);
+      rebuiltRecords = (
+        await this.rebuildDailyDispatchRecords(query)
+      ).records.map((record) => ({ ...record }));
+    }
+
+    if (rebuiltRecords) {
+      return rebuiltRecords;
     }
 
     return this.dailyDispatchRecords
@@ -156,6 +164,9 @@ export class ReportingService {
     const orderTraceLogs = dispatchTraceLogs.filter(
       (traceLog) => traceLog.orderId === order.orderId,
     );
+    const sortedOrderTraceLogs = orderTraceLogs
+      .slice()
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 
     const firstDispatch = orderDispatchJobs[0] ?? null;
     const firstAssignment = orderAssignments[0] ?? null;
@@ -192,9 +203,28 @@ export class ReportingService {
       etaSecondsAtAssignment: firstDispatch?.latestEtaMinutes
         ? firstDispatch.latestEtaMinutes * 60
         : null,
-      arrivedPickupAt: finalTask?.arrivedPickupAt ?? null,
-      tripStartedAt: finalTask?.startedAt ?? null,
-      tripCompletedAt: finalTask?.completedAt ?? null,
+      arrivedPickupAt: this.resolveEventTimestamp(
+        sortedOrderTraceLogs,
+        "driver.arrived_pickup",
+        finalTask?.arrivedPickupAt ?? null,
+        finalTask?.taskId,
+      ),
+      tripStartedAt:
+        this.resolveEventTimestamp(
+          sortedOrderTraceLogs,
+          "driver.started_trip",
+          finalTask?.startedAt ?? null,
+          finalTask?.taskId,
+          true,
+        ),
+      tripCompletedAt:
+        this.resolveEventTimestamp(
+          sortedOrderTraceLogs,
+          "driver.completed_trip",
+          finalTask?.completedAt ?? null,
+          finalTask?.taskId,
+          true,
+        ),
       finalStatus: order.status,
       redispatchCount: orderTraceLogs.filter(
         (traceLog) => traceLog.eventType === "dispatch.redispatch_required",
@@ -207,6 +237,29 @@ export class ReportingService {
 
   private resolveServiceDate(order: OwnedOrderRecord) {
     return (order.reservationWindowStart ?? order.createdAt).slice(0, 10);
+  }
+
+  private async loadDailyDispatchRecordSource(): Promise<DispatchDailyRecordSource> {
+    if (this.reportingRepository?.isEnabled()) {
+      try {
+        return await this.reportingRepository.loadDailyDispatchRecordSource();
+      } catch (error) {
+        this.reportingRepository.reportPersistenceFailure(
+          error,
+          "load dispatch daily record source",
+        );
+      }
+    }
+
+    const snapshot = this.ownedMobilityService.getReportingSnapshot();
+    return {
+      orders: snapshot.orders,
+      dispatchJobs: snapshot.dispatchJobs,
+      dispatchAssignments: snapshot.dispatchAssignments,
+      driverTasks: snapshot.driverTasks,
+      dispatchTraceLogs: snapshot.dispatchTraceLogs,
+      complaintCases: this.complaintService.listComplaintCases(),
+    };
   }
 
   private normalizeOrderSource(order: OwnedOrderRecord) {
@@ -261,5 +314,28 @@ export class ReportingService {
       merged.set(`${record.serviceDate}:${record.orderId}`, { ...record });
     }
     return Array.from(merged.values());
+  }
+
+  private resolveEventTimestamp(
+    traceLogs: readonly DispatchTraceLogRecord[],
+    eventType: string,
+    timestamp: string | null,
+    taskId?: string,
+    allowSnapshotFallback = false,
+  ) {
+    const matchingLog =
+      traceLogs.find(
+        (traceLog) =>
+          traceLog.eventType === eventType &&
+          (taskId === undefined ||
+            traceLog.details?.taskId === taskId ||
+            traceLog.details?.taskId === undefined),
+      ) ?? null;
+
+    if (matchingLog) {
+      return timestamp ?? matchingLog.createdAt;
+    }
+
+    return allowSnapshotFallback ? timestamp : null;
   }
 }
