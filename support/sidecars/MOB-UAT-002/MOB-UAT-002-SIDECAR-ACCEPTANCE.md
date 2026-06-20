@@ -44,8 +44,12 @@ evidence anchors、與 reviewer handoff wording。
 - Parent `next` already records the key fact pattern: upstream scaffold commit
   `553492bc5` exists, and the remaining acceptance is still a physical-device/human
   step even though the control-plane status is no longer `blocked`.
-- This helper task `MOB-UAT-002-SIDECAR-ACCEPTANCE` is currently in `review`, owner
-  `Codex`, reviewer `Claude`, and is explicitly marked `mutates_canonical=false`.
+- This helper task `MOB-UAT-002-SIDECAR-ACCEPTANCE` is `review_approved`
+  (`last_update: 2026-06-20T16:33:27Z`), owner `Codex`, reviewer `Claude`, and is
+  explicitly marked `mutates_canonical=false`.
+- Review notes already confirm the intended posture: support-only packet,
+  dependency/anchor checks match repo facts, and the parent remains externally
+  gated on honest real-device iPhone/TestFlight evidence.
 
 ### 2.2 Dependency lookup note
 
@@ -85,7 +89,7 @@ in the current status board slice.
 | --- | --- | --- |
 | `Create support artifacts only` | `PASS` | This sidecar adds only `support/sidecars/MOB-UAT-002/MOB-UAT-002-SIDECAR-ACCEPTANCE.md`. |
 | `Do not edit canonical truth` | `PASS` | No `docs/02-architecture/*`, `docs/05-ui/*`, runtime, or registry files are changed by this helper. |
-| `Hand off the packet to the assigned reviewer` | `READY` | Owner handoff is the final workflow step after artifact validation and branch update. |
+| `Hand off the packet to the assigned reviewer` | `PASS` | Reviewer handoff and approval are already recorded; the remaining step is owner closeout with commit/push evidence. |
 
 ### 3.2 Parent acceptance framing
 
