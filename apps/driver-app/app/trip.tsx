@@ -73,6 +73,7 @@ import { formatMoney } from "@/lib/money";
 import {
   formatDriverServiceProductLabel,
   formatDriverTaskStatusLabel,
+  readDriverServiceProductCode,
 } from "@/lib/operational-labels";
 import {
   getTripExperienceState,
@@ -1019,7 +1020,7 @@ export default function TripScreen() {
         ? "固定車資"
         : "金額待確認";
   const serviceProductLabel = formatDriverServiceProductLabel({
-    serviceProductCode: orderDetail?.serviceProductCode ?? null,
+    serviceProductCode: readDriverServiceProductCode(orderDetail),
     serviceBucket: orderDetail?.serviceBucket ?? null,
     businessDispatchSubtype: orderDetail?.businessDispatchSubtype ?? null,
     dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
