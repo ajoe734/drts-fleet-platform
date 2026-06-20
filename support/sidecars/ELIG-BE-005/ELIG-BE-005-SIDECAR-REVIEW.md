@@ -167,3 +167,29 @@ low-risk notes; F5 verified clean. Contract change is additive and needs no
 migration. Recommend rebase onto current `origin/dev` before the §11.6 merge gate.
 
 `INTEGRATION_STATUS: not_applicable` (support-only review packet; no runtime change).
+
+---
+
+## 7. Codex reviewer validation (2026-06-20)
+
+- Validation was run against detached parent commit `984d80185`.
+- Environment repair required one dependency relink step before validation:
+  `CI=true pnpm install --frozen-lockfile`.
+- `cd apps/api && pnpm exec vitest run tests/unit/owned-mobility.service.test.ts tests/integration/int-elig-002-assignment-recheck.test.ts`
+  passed: `2` files, `59` tests.
+- `pnpm --filter @drts/api typecheck` passed.
+- Manual diff review reconfirmed **F2**: `reassignDispatch()` persists the
+  cancellation path before `createDispatchAssignment()` runs
+  `assertAssignmentEligibilityRecheck()`, so a failed reassign can leave the
+  order with no active replacement and changes the observable error semantics
+  from the previous `400` pre-check behavior to a post-cancel `409`.
+- The `409 ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT` envelope shape is exercised in
+  both `tests/unit/owned-mobility.service.test.ts` and
+  `tests/integration/int-elig-002-assignment-recheck.test.ts`.
+- Not revalidated in this sidecar pass:
+  DB-backed reload proof for `DriverTaskRecord.serviceProductCode`, and a fresh
+  rebase/merge conflict pass against current `origin/dev`.
+
+**Reviewer disposition:** approve this sidecar packet as accurate and sufficient
+for parent-task review. Do **not** treat this as parent-branch approval; parent
+review should request a fix or explicit product acceptance for **F2**.
