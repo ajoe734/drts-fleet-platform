@@ -5,7 +5,10 @@ import { HttpStatus, Injectable } from "@nestjs/common";
 import type { SupplyDocumentRecord } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
-import { SupplySubmissionRepository } from "./supply-submission.repository";
+import {
+  SupplySubmissionRepository,
+  type SupplyDocumentUploadIntentRecord,
+} from "./supply-submission.repository";
 import { SupplySubmissionService } from "./supply-submission.service";
 import type {
   ConfirmSupplyDocumentUploadCommand,
@@ -13,16 +16,7 @@ import type {
   DeleteSupplyDocumentCommand,
 } from "./supply-submission.types";
 
-type PendingDocumentUploadIntent = {
-  submissionId: string;
-  fleetPartnerId: string;
-  documentType: SupplyDocumentRecord["documentType"];
-  objectKey: string;
-  originalFileName: string;
-  contentType: string;
-  createdAt: string;
-  expiresAt: string;
-};
+type PendingDocumentUploadIntent = SupplyDocumentUploadIntentRecord;
 
 @Injectable()
 export class SupplyDocumentService {
@@ -33,7 +27,7 @@ export class SupplyDocumentService {
     private readonly supplySubmissionRepository: SupplySubmissionRepository,
   ) {}
 
-  createUploadUrl(
+  async createUploadUrl(
     fleetPartnerId: string,
     submissionId: string,
     actorId: string,
@@ -61,7 +55,7 @@ export class SupplyDocumentService {
     ].join("/");
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
-    this.pendingUploadIntents.set(objectKey, {
+    const uploadIntent: PendingDocumentUploadIntent = {
       submissionId,
       fleetPartnerId,
       documentType: command.documentType,
@@ -70,7 +64,8 @@ export class SupplyDocumentService {
       contentType: command.contentType.trim(),
       createdAt: now.toISOString(),
       expiresAt,
-    });
+    };
+    await this.storeUploadIntent(uploadIntent);
 
     this.supplySubmissionService.recordMutationAudit(
       {
@@ -146,7 +141,7 @@ export class SupplyDocumentService {
       );
     }
 
-    const uploadIntent = this.pendingUploadIntents.get(objectKey);
+    const uploadIntent = await this.loadUploadIntent(objectKey);
     if (!uploadIntent || uploadIntent.submissionId !== submissionId) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -158,7 +153,7 @@ export class SupplyDocumentService {
         },
       );
     }
-    this.assertUploadIntent(uploadIntent, fleetPartnerId, submissionId, {
+    await this.assertUploadIntent(uploadIntent, fleetPartnerId, submissionId, {
       ...command,
       objectKey,
       originalFileName,
@@ -190,7 +185,7 @@ export class SupplyDocumentService {
       [document],
       "confirm supply document upload",
     );
-    this.pendingUploadIntents.delete(objectKey);
+    await this.clearUploadIntent(objectKey);
     this.supplySubmissionService.recordMutationAudit(
       {
         actorId,
@@ -284,7 +279,7 @@ export class SupplyDocumentService {
     return fileName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-");
   }
 
-  private assertUploadIntent(
+  private async assertUploadIntent(
     uploadIntent: PendingDocumentUploadIntent,
     fleetPartnerId: string,
     submissionId: string,
@@ -307,7 +302,7 @@ export class SupplyDocumentService {
     }
 
     if (new Date(uploadIntent.expiresAt).getTime() <= Date.now()) {
-      this.pendingUploadIntents.delete(command.objectKey);
+      await this.clearUploadIntent(command.objectKey);
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "UPLOAD_URL_INVALID",
@@ -386,5 +381,31 @@ export class SupplyDocumentService {
         { fieldName },
       );
     }
+  }
+
+  private async storeUploadIntent(intent: PendingDocumentUploadIntent) {
+    if (!this.supplySubmissionRepository.isEnabled()) {
+      this.pendingUploadIntents.set(intent.objectKey, intent);
+      return;
+    }
+
+    await this.supplySubmissionRepository.saveDocumentUploadIntent(intent);
+  }
+
+  private async loadUploadIntent(objectKey: string) {
+    if (!this.supplySubmissionRepository.isEnabled()) {
+      return this.pendingUploadIntents.get(objectKey) ?? null;
+    }
+
+    return this.supplySubmissionRepository.findDocumentUploadIntent(objectKey);
+  }
+
+  private async clearUploadIntent(objectKey: string) {
+    if (!this.supplySubmissionRepository.isEnabled()) {
+      this.pendingUploadIntents.delete(objectKey);
+      return;
+    }
+
+    await this.supplySubmissionRepository.deleteDocumentUploadIntent(objectKey);
   }
 }

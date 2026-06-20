@@ -218,7 +218,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+    const uploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -251,7 +251,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     expect(firstDocument.data.documentType).toBe("professional_driver_license");
 
-    const secondUploadUrl = controller.createSupplyDocumentUploadUrl(
+    const secondUploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -363,7 +363,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+    const uploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -445,7 +445,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+    const uploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -521,7 +521,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+    const uploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -576,7 +576,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const invalidChecksumUploadUrl = controller.createSupplyDocumentUploadUrl(
+    const invalidChecksumUploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -624,7 +624,7 @@ describe("FleetPartnerController portal routes", () => {
       });
     }
 
-    const invalidRangeUploadUrl = controller.createSupplyDocumentUploadUrl(
+    const invalidRangeUploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,

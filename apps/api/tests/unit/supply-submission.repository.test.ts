@@ -8,7 +8,10 @@ import type {
   VehicleSupplyDraft,
 } from "@drts/contracts";
 
-import { SupplySubmissionRepository } from "../../src/modules/fleet-partner/supply-submission.repository";
+import {
+  SupplySubmissionRepository,
+  type SupplyDocumentUploadIntentRecord,
+} from "../../src/modules/fleet-partner/supply-submission.repository";
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -125,6 +128,23 @@ function createVehicleAffiliation(
     sourceSubmissionId: "a40ec48e-9ed0-4b6a-a5db-0bdb9ca859f3",
     createdAt: "2026-06-20T02:00:00.000Z",
     updatedAt: "2026-06-20T02:05:00.000Z",
+    ...overrides,
+  };
+}
+
+function createUploadIntent(
+  overrides: Partial<SupplyDocumentUploadIntentRecord> = {},
+): SupplyDocumentUploadIntentRecord {
+  return {
+    objectKey:
+      "fleet-partner/fleet-demo-001/supply-submissions/a40ec48e-9ed0-4b6a-a5db-0bdb9ca859f3/license.pdf",
+    submissionId: "a40ec48e-9ed0-4b6a-a5db-0bdb9ca859f3",
+    fleetPartnerId: "fleet-demo-001",
+    documentType: "vehicle_registration",
+    originalFileName: "vehicle-registration.pdf",
+    contentType: "application/pdf",
+    createdAt: "2026-06-20T01:10:00.000Z",
+    expiresAt: "2026-06-20T01:25:00.000Z",
     ...overrides,
   };
 }
@@ -258,6 +278,56 @@ describe("supply submission repository", () => {
         (sql) => sql.includes("INSERT INTO fleet.vehicle_fleet_affiliations"),
       ),
     ).toBe(true);
+  });
+
+  it("stores and deletes durable document upload intents", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new SupplySubmissionRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await repository.saveDocumentUploadIntent(createUploadIntent());
+    await repository.deleteDocumentUploadIntent(createUploadIntent().objectKey);
+
+    const sqlTexts = query.mock.calls.map(([sql]) => String(sql));
+    expect(
+      sqlTexts.some(
+        (sql) =>
+          sql.includes("INSERT INTO fleet.supply_document_upload_intents"),
+      ),
+    ).toBe(true);
+    expect(
+      sqlTexts.some(
+        (sql) =>
+          sql.includes("DELETE FROM fleet.supply_document_upload_intents"),
+      ),
+    ).toBe(true);
+  });
+
+  it("loads a durable document upload intent by object key", async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [
+        {
+          object_key: createUploadIntent().objectKey,
+          submission_id: createUploadIntent().submissionId,
+          fleet_partner_id: createUploadIntent().fleetPartnerId,
+          document_type: createUploadIntent().documentType,
+          original_file_name: createUploadIntent().originalFileName,
+          content_type: createUploadIntent().contentType,
+          created_at: createUploadIntent().createdAt,
+          expires_at: createUploadIntent().expiresAt,
+        },
+      ],
+    });
+    const repository = new SupplySubmissionRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.findDocumentUploadIntent(createUploadIntent().objectKey),
+    ).resolves.toEqual(createUploadIntent());
   });
 
   it("persists dependent supply tables only after supply_submissions completes", async () => {

@@ -412,7 +412,7 @@ export class FleetPartnerController {
   }
 
   @Post("fleet-partner/supply-submissions/:submissionId/documents/upload-url")
-  createSupplyDocumentUploadUrl(
+  async createSupplyDocumentUploadUrl(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
     @Headers("x-actor-id") actorId: string | undefined,
     @Param("submissionId") submissionId: string,
@@ -420,7 +420,7 @@ export class FleetPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.supplyDocumentService.createUploadUrl(
+      await this.supplyDocumentService.createUploadUrl(
         this.requireFleetPartnerId(fleetPartnerId),
         submissionId,
         this.actorId(actorId),

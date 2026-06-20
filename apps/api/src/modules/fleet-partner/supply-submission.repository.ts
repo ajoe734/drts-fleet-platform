@@ -84,6 +84,17 @@ type SupplyDocumentRow = {
   uploaded_at: string | Date;
 };
 
+type SupplyDocumentUploadIntentRow = {
+  object_key: string;
+  submission_id: string;
+  fleet_partner_id: string;
+  document_type: SupplyDocumentRecord["documentType"];
+  original_file_name: string;
+  content_type: string;
+  created_at: string | Date;
+  expires_at: string | Date;
+};
+
 type SupplyReviewEventRow = {
   event_id: string;
   submission_id: string;
@@ -137,6 +148,17 @@ export type SupplySubmissionPersistenceState = {
   documents: SupplyDocumentRecord[];
   reviewEvents: SupplyReviewEventRecord[];
   vehicleAffiliations: VehicleFleetAffiliationRecord[];
+};
+
+export type SupplyDocumentUploadIntentRecord = {
+  objectKey: string;
+  submissionId: string;
+  fleetPartnerId: string;
+  documentType: SupplyDocumentRecord["documentType"];
+  originalFileName: string;
+  contentType: string;
+  createdAt: string;
+  expiresAt: string;
 };
 
 export type PersistSupplySubmissionChanges = {
@@ -522,6 +544,79 @@ export class SupplySubmissionRepository {
           AND fleet_partner_id = $3
       `,
       [documentId, submissionId, fleetPartnerId],
+    );
+  }
+
+  async saveDocumentUploadIntent(intent: SupplyDocumentUploadIntentRecord) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        INSERT INTO fleet.supply_document_upload_intents (
+          object_key,
+          submission_id,
+          fleet_partner_id,
+          document_type,
+          original_file_name,
+          content_type,
+          created_at,
+          expires_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8
+        )
+        ON CONFLICT (object_key) DO UPDATE SET
+          submission_id = EXCLUDED.submission_id,
+          fleet_partner_id = EXCLUDED.fleet_partner_id,
+          document_type = EXCLUDED.document_type,
+          original_file_name = EXCLUDED.original_file_name,
+          content_type = EXCLUDED.content_type,
+          created_at = EXCLUDED.created_at,
+          expires_at = EXCLUDED.expires_at
+      `,
+      [
+        intent.objectKey,
+        intent.submissionId,
+        intent.fleetPartnerId,
+        intent.documentType,
+        intent.originalFileName,
+        intent.contentType,
+        intent.createdAt,
+        intent.expiresAt,
+      ],
+    );
+  }
+
+  async findDocumentUploadIntent(objectKey: string) {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<SupplyDocumentUploadIntentRow>(
+      `
+        SELECT *
+        FROM fleet.supply_document_upload_intents
+        WHERE object_key = $1
+      `,
+      [objectKey],
+    );
+
+    const row = result.rows[0];
+    return row ? this.mapDocumentUploadIntentRow(row) : null;
+  }
+
+  async deleteDocumentUploadIntent(objectKey: string) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        DELETE FROM fleet.supply_document_upload_intents
+        WHERE object_key = $1
+      `,
+      [objectKey],
     );
   }
 
@@ -1020,6 +1115,21 @@ export class SupplySubmissionRepository {
       reviewComment: row.review_comment,
       uploadedBy: row.uploaded_by,
       uploadedAt: this.requireIsoString(row.uploaded_at),
+    };
+  }
+
+  private mapDocumentUploadIntentRow(
+    row: SupplyDocumentUploadIntentRow,
+  ): SupplyDocumentUploadIntentRecord {
+    return {
+      objectKey: row.object_key,
+      submissionId: row.submission_id,
+      fleetPartnerId: row.fleet_partner_id,
+      documentType: row.document_type,
+      originalFileName: row.original_file_name,
+      contentType: row.content_type,
+      createdAt: this.requireIsoString(row.created_at),
+      expiresAt: this.requireIsoString(row.expires_at),
     };
   }
 
