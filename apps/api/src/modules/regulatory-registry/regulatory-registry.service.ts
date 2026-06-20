@@ -16,8 +16,14 @@ import type {
   DispatchExclusivityRecord,
   DriverEligibilityBlockReason,
   DriverEtaResponse,
+  DriverLocationHeartbeatAck,
+  DriverLocationHeartbeatBatchRequest,
+  DriverLocationHeartbeatBatchResponse,
+  DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
+  DriverLocationFreshness,
   DriverLocationSnapshot,
+  DriverTrackingStatus,
   DriverMasterLifecycleStatus,
   DriverRegistryRecord,
   InitiateVehicleOffboardingCommand,
@@ -43,6 +49,7 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import {
   RegulatoryRegistryRepository,
+  type DriverHeartbeatEventSnapshot,
   type PersistRegulatoryRegistryChanges,
   type RegulatorySupplyPair,
 } from "./regulatory-registry.repository";
@@ -55,6 +62,8 @@ type EtaDestination = {
   lat: number;
   lng: number;
 };
+
+type DriverHeartbeatContext = DriverHeartbeatEventSnapshot;
 
 function createSeedDriver(
   input: Pick<
@@ -361,6 +370,24 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
 
+  private latestDriverHeartbeatUploads = new Map<
+    string,
+    Pick<
+      DriverHeartbeatContext,
+      | "eventId"
+      | "deviceId"
+      | "driverId"
+      | "sequenceNo"
+      | "recordedAt"
+      | "receivedAt"
+    >
+  >();
+
+  private currentDriverHeartbeatContexts = new Map<
+    string,
+    DriverHeartbeatContext
+  >();
+
   private supplyPairs: RegulatorySupplyPair[] = [
     {
       vehicleId: "veh-demo-001",
@@ -660,38 +687,220 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
     this.requireDriver(driverId);
 
-    await this.requireLocationRepository().upsertDriverLocation({
-      driverId,
-      lat: command.lat,
-      lng: command.lng,
-      recordedAt,
-      ...(command.accuracyM === undefined
-        ? {}
-        : { accuracyM: command.accuracyM }),
-    });
+    const currentLocationUpdated =
+      await this.requireLocationRepository().upsertDriverLocation({
+        driverId,
+        lat: command.lat,
+        lng: command.lng,
+        recordedAt,
+        ...(command.accuracyM === undefined
+          ? {}
+          : { accuracyM: command.accuracyM }),
+      });
 
-    const updatedAt = new Date().toISOString();
-    this.setLatestDriverLocation({
-      driverId,
-      lat: command.lat,
-      lng: command.lng,
-      accuracyM: command.accuracyM ?? null,
-      recordedAt,
-      updatedAt,
-    });
-    this.opsDispatchEventsService.publishDriverLocationUpdated(
-      {
+    if (
+      currentLocationUpdated &&
+      this.applyLatestDriverLocation({
         driverId,
         lat: command.lat,
         lng: command.lng,
         accuracyM: command.accuracyM ?? null,
         recordedAt,
-        updatedAt,
-      },
-      undefined,
-    );
+        updatedAt: new Date().toISOString(),
+      })
+    ) {
+      const latestLocation = this.cloneDriverLocation(
+        this.latestDriverLocations.get(driverId)!,
+      );
+      this.opsDispatchEventsService.publishDriverLocationUpdated(
+        latestLocation,
+        undefined,
+      );
+    }
 
     return { success: true };
+  }
+
+  async recordDriverLocationBatch(
+    request: DriverLocationHeartbeatBatchRequest,
+  ): Promise<DriverLocationHeartbeatBatchResponse> {
+    if (!request || !Array.isArray(request.items)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_REQUIRED",
+        "items is required.",
+        {
+          field: "items",
+        },
+      );
+    }
+
+    if (request.items.length > 100) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BATCH_LIMIT_EXCEEDED",
+        "A heartbeat batch can contain at most 100 items.",
+        {
+          field: "items",
+          maxItems: 100,
+          received: request.items.length,
+        },
+      );
+    }
+
+    const items: DriverLocationHeartbeatAck[] = [];
+    for (const item of request.items) {
+      items.push(await this.recordBatchHeartbeatItem(item));
+    }
+
+    return { items };
+  }
+
+  private async recordBatchHeartbeatItem(
+    item: DriverLocationHeartbeatEnvelope,
+  ): Promise<DriverLocationHeartbeatAck> {
+    const heartbeat = this.normalizeHeartbeatEnvelope(item);
+
+    const persistedResult =
+      await this.requireLocationRepository().recordDriverLocationEvent(
+        heartbeat,
+      );
+
+    const currentLocationUpdated =
+      persistedResult.currentLocationUpdated &&
+      this.applyLatestDriverLocation({
+        driverId: heartbeat.driverId,
+        lat: heartbeat.lat,
+        lng: heartbeat.lng,
+        accuracyM: heartbeat.accuracyM,
+        recordedAt: heartbeat.recordedAt,
+        updatedAt: persistedResult.serverReceivedAt,
+      });
+
+    this.setLatestDriverHeartbeatUpload({
+      eventId: heartbeat.eventId,
+      deviceId: heartbeat.deviceId,
+      driverId: heartbeat.driverId,
+      sequenceNo: heartbeat.sequenceNo,
+      recordedAt: heartbeat.recordedAt,
+      receivedAt: persistedResult.serverReceivedAt,
+    });
+
+    if (currentLocationUpdated) {
+      this.setCurrentDriverHeartbeatContext({
+        ...heartbeat,
+        receivedAt: persistedResult.serverReceivedAt,
+      });
+    }
+
+    if (currentLocationUpdated) {
+      const latestLocation = this.cloneDriverLocation(
+        this.latestDriverLocations.get(heartbeat.driverId)!,
+      );
+      this.opsDispatchEventsService.publishDriverLocationUpdated(
+        latestLocation,
+        undefined,
+      );
+    }
+
+    return {
+      eventId: heartbeat.eventId,
+      accepted: true,
+      duplicate: persistedResult.duplicate,
+      currentLocationUpdated,
+      serverReceivedAt: persistedResult.serverReceivedAt,
+    };
+  }
+
+  async getDriverTrackingStatus(
+    driverId: string,
+  ): Promise<DriverTrackingStatus> {
+    const normalizedDriverId = driverId.trim();
+    this.assertNonBlank(normalizedDriverId, "driverId");
+    this.requireDriver(normalizedDriverId);
+
+    const currentLocation =
+      await this.resolveLatestDriverLocation(normalizedDriverId);
+    const currentContext =
+      (await this.resolveCurrentDriverHeartbeatContext(
+        normalizedDriverId,
+        currentLocation,
+      )) ?? null;
+    const latestUpload =
+      this.latestDriverHeartbeatUploads.get(normalizedDriverId) ??
+      (await this.regulatoryRegistryRepository?.findLatestDriverHeartbeatEvent?.(
+        normalizedDriverId,
+      )) ??
+      null;
+    const lastHeartbeat = latestUpload ?? currentContext;
+
+    return {
+      driverId: normalizedDriverId,
+      locationFreshness: this.classifyDriverLocationFreshness(currentLocation),
+      currentLocation: currentLocation
+        ? this.cloneDriverLocation(currentLocation)
+        : null,
+      currentVehicleId: currentContext?.vehicleId ?? null,
+      currentTaskId: currentContext?.taskId ?? null,
+      trackingState: currentContext?.workState ?? null,
+      appState: currentContext?.appState ?? null,
+      transportMode: currentContext?.transportMode ?? null,
+      networkType: currentContext?.networkType ?? null,
+      lastEventId: lastHeartbeat?.eventId ?? null,
+      lastDeviceId: lastHeartbeat?.deviceId ?? null,
+      lastSequenceNo: lastHeartbeat?.sequenceNo ?? null,
+      lastHeartbeatRecordedAt:
+        lastHeartbeat?.recordedAt ??
+        currentLocation?.recordedAt ??
+        null,
+      lastHeartbeatReceivedAt:
+        lastHeartbeat?.receivedAt ?? currentLocation?.updatedAt ?? null,
+      lastSuccessfulUploadAt:
+        lastHeartbeat?.receivedAt ?? currentLocation?.updatedAt ?? null,
+    };
+  }
+
+  private normalizeHeartbeatEnvelope(
+    item: DriverLocationHeartbeatEnvelope,
+  ): DriverLocationHeartbeatEnvelope {
+    const eventId = item.eventId.trim();
+    const deviceId = item.deviceId.trim();
+    const driverId = item.driverId.trim();
+    this.assertNonBlank(eventId, "eventId");
+    this.assertNonBlank(deviceId, "deviceId");
+    this.assertNonBlank(driverId, "driverId");
+    this.assertSequenceNo(item.sequenceNo, "sequenceNo");
+    this.assertCoordinate(item.lat, "lat", -90, 90);
+    this.assertCoordinate(item.lng, "lng", -180, 180);
+    this.assertOptionalNonNegativeNumber(item.accuracyM ?? undefined, "accuracyM");
+    this.assertAllowedValue(
+      item.workState,
+      "workState",
+      ["offline", "available", "assigned", "enroute", "arrived", "on_trip", "incident"],
+    );
+    this.assertAllowedValue(item.appState, "appState", ["foreground", "background"]);
+    this.assertAllowedValue(item.transportMode, "transportMode", [
+      "foreground",
+      "background",
+    ]);
+    this.assertAllowedValue(item.networkType, "networkType", [
+      "wifi",
+      "cellular",
+      "offline",
+      "unknown",
+    ]);
+
+    this.requireDriver(driverId);
+
+    return {
+      ...item,
+      eventId,
+      deviceId,
+      driverId,
+      vehicleId: this.normalizeNullableText(item.vehicleId),
+      taskId: this.normalizeNullableText(item.taskId),
+      recordedAt: this.normalizeHeartbeatRecordedAt(item.recordedAt),
+    };
   }
 
   async getDriverEta(
@@ -2064,6 +2273,112 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
   }
 
+  private applyLatestDriverLocation(location: DriverLocationSnapshot): boolean {
+    const existing = this.latestDriverLocations.get(location.driverId);
+    if (
+      existing &&
+      Date.parse(existing.recordedAt) >= Date.parse(location.recordedAt)
+    ) {
+      return false;
+    }
+
+    this.setLatestDriverLocation(location);
+    return true;
+  }
+
+  private setLatestDriverHeartbeatUpload(
+    upload: Pick<
+      DriverHeartbeatContext,
+      | "eventId"
+      | "deviceId"
+      | "driverId"
+      | "sequenceNo"
+      | "recordedAt"
+      | "receivedAt"
+    >,
+  ): void {
+    const existing = this.latestDriverHeartbeatUploads.get(upload.driverId);
+    if (
+      existing &&
+      Date.parse(existing.receivedAt) > Date.parse(upload.receivedAt)
+    ) {
+      return;
+    }
+
+    this.latestDriverHeartbeatUploads.set(upload.driverId, { ...upload });
+  }
+
+  private setCurrentDriverHeartbeatContext(
+    context: DriverHeartbeatContext,
+  ): void {
+    const existing = this.currentDriverHeartbeatContexts.get(context.driverId);
+    if (
+      existing &&
+      Date.parse(existing.recordedAt) > Date.parse(context.recordedAt)
+    ) {
+      return;
+    }
+
+    this.currentDriverHeartbeatContexts.set(context.driverId, { ...context });
+  }
+
+  private async resolveLatestDriverLocation(
+    driverId: string,
+  ): Promise<DriverLocationSnapshot | null> {
+    const inMemory = this.latestDriverLocations.get(driverId);
+    if (inMemory) {
+      return this.cloneDriverLocation(inMemory);
+    }
+
+    return (
+      (await this.regulatoryRegistryRepository?.findLatestDriverLocation?.(
+        driverId,
+      )) ?? null
+    );
+  }
+
+  private async resolveCurrentDriverHeartbeatContext(
+    driverId: string,
+    currentLocation: DriverLocationSnapshot | null,
+  ): Promise<DriverHeartbeatContext | null> {
+    const inMemory = this.currentDriverHeartbeatContexts.get(driverId);
+    if (
+      inMemory &&
+      (!currentLocation || inMemory.recordedAt === currentLocation.recordedAt)
+    ) {
+      return { ...inMemory };
+    }
+
+    if (!currentLocation) {
+      return null;
+    }
+
+    const persisted =
+      await this.regulatoryRegistryRepository?.findDriverHeartbeatEventByRecordedAt?.(
+        driverId,
+        currentLocation.recordedAt,
+      );
+    return persisted ? { ...persisted } : null;
+  }
+
+  private classifyDriverLocationFreshness(
+    location: DriverLocationSnapshot | null,
+  ): DriverLocationFreshness {
+    if (!location) {
+      return "missing";
+    }
+
+    if (Date.now() - Date.parse(location.updatedAt) > 90_000) {
+      return "stale";
+    }
+
+    if (location.accuracyM !== null && location.accuracyM > 100) {
+      return "low_accuracy";
+    }
+
+    return "fresh";
+  }
+
   private resolveCandidateEta(
     pair: RegulatorySupplyPair,
     driverId: string,
@@ -2181,6 +2496,37 @@ export class RegulatoryRegistryService implements OnModuleInit {
         `${fieldName} must be a non-negative finite number.`,
         {
           field: fieldName,
+        },
+      );
+    }
+  }
+
+  private assertSequenceNo(value: number, fieldName: string): void {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_NUMBER",
+        `${fieldName} must be a non-negative safe integer.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+  }
+
+  private assertAllowedValue(
+    value: string,
+    fieldName: string,
+    allowedValues: readonly string[],
+  ): void {
+    if (!allowedValues.includes(value)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_INVALID",
+        `${fieldName} must be one of: ${allowedValues.join(", ")}.`,
+        {
+          field: fieldName,
+          allowedValues,
         },
       );
     }
