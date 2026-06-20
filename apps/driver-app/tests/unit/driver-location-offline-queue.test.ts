@@ -24,6 +24,10 @@ vi.mock("@/lib/api-client", () => ({
   recoverDriverSessionFromApiError,
 }));
 
+vi.mock("expo-sqlite", () => ({
+  openDatabaseAsync: vi.fn(),
+}));
+
 type QueueStatus =
   | "pending"
   | "sending"
@@ -166,6 +170,44 @@ class MemoryQueueStore {
   }
 }
 
+function createStoredRow(
+  sequenceNo: number,
+  overrides?: Partial<QueueEventRow>,
+): QueueEventRow {
+  const payload: DriverLocationHeartbeatEnvelope = {
+    eventId: `device-001:${sequenceNo}`,
+    deviceId: "device-001",
+    driverId: "driver-001",
+    vehicleId: null,
+    taskId: "task-001",
+    sequenceNo,
+    recordedAt: "2026-06-20T08:00:00.000Z",
+    lat: 25.03,
+    lng: 121.56,
+    accuracyM: 8,
+    workState: "on_trip",
+    appState: "foreground",
+    transportMode: "foreground",
+    networkType: "unknown",
+  };
+
+  return {
+    eventId: payload.eventId,
+    sequenceNo,
+    status: "pending",
+    recordedAt: payload.recordedAt,
+    workState: payload.workState,
+    minuteBucket: "2026-06-20T08:00",
+    retryCount: 0,
+    isIncident: false,
+    isKeyEvent: false,
+    payload,
+    nextAttemptAt: null,
+    lastError: null,
+    ...overrides,
+  };
+}
+
 describe("driver location offline queue", () => {
   let now = new Date("2026-06-20T08:00:00.000Z");
   let store: MemoryQueueStore;
@@ -201,35 +243,32 @@ describe("driver location offline queue", () => {
 
   it("replays persisted rows in sequence order after a restart reset", async () => {
     const queueModule = await import("../../lib/driver-location-offline-queue");
-    recordDriverLocationBatch.mockImplementation(() => new Promise(() => {}));
+    await store.enqueue(
+      createStoredRow(1, {
+        status: "sending",
+        workState: "assigned",
+        recordedAt: "2026-06-20T08:00:05.000Z",
+        payload: {
+          ...createStoredRow(1).payload,
+          recordedAt: "2026-06-20T08:00:05.000Z",
+          workState: "assigned",
+        },
+      }),
+    );
+    await store.enqueue(
+      createStoredRow(2, {
+        recordedAt: "2026-06-20T08:00:04.000Z",
+        payload: {
+          ...createStoredRow(2).payload,
+          recordedAt: "2026-06-20T08:00:04.000Z",
+        },
+      }),
+    );
 
-    await queueModule.enqueueDriverLocationEvent({
-      taskId: "task-001",
-      recordedAt: "2026-06-20T08:00:05.000Z",
-      lat: 25.03,
-      lng: 121.56,
-      accuracyM: 8,
-      workState: "assigned",
-      appState: "foreground",
-      transportMode: "foreground",
-      networkType: "unknown",
-      preserveKeyEvent: true,
-    });
-    await queueModule.enqueueDriverLocationEvent({
-      taskId: "task-001",
-      recordedAt: "2026-06-20T08:00:04.000Z",
-      lat: 25.031,
-      lng: 121.561,
-      accuracyM: 8,
-      workState: "on_trip",
-      appState: "foreground",
-      transportMode: "foreground",
-      networkType: "unknown",
-      preserveKeyEvent: true,
-    });
     await queueModule.__resetDriverLocationOfflineQueueForTests();
     queueModule.__setDriverLocationQueueStoreFactoryForTests(() => store);
     queueModule.__setDriverLocationQueueNowProviderForTests(() => now);
+    recordDriverLocationBatch.mockClear();
     recordDriverLocationBatch.mockImplementation(async (request) => ({
       items: request.items.map((item) => ({
         eventId: item.eventId,
@@ -249,24 +288,33 @@ describe("driver location offline queue", () => {
 
   it("applies exponential backoff to retryable failures before replaying", async () => {
     const queueModule = await import("../../lib/driver-location-offline-queue");
-    recordDriverLocationBatch.mockImplementation(() => new Promise(() => {}));
-
-    await queueModule.enqueueDriverLocationEvent({
-      taskId: "task-001",
-      recordedAt: "2026-06-20T08:00:10.000Z",
-      lat: 25.03,
-      lng: 121.56,
-      accuracyM: 8,
-      workState: "on_trip",
-      appState: "background",
-      transportMode: "background",
-      networkType: "unknown",
-    });
+    await store.enqueue(
+      createStoredRow(1, {
+        recordedAt: "2026-06-20T08:00:10.000Z",
+        payload: {
+          ...createStoredRow(1).payload,
+          recordedAt: "2026-06-20T08:00:10.000Z",
+          appState: "background",
+          transportMode: "background",
+        },
+      }),
+    );
 
     await queueModule.__resetDriverLocationOfflineQueueForTests();
     queueModule.__setDriverLocationQueueStoreFactoryForTests(() => store);
     queueModule.__setDriverLocationQueueNowProviderForTests(() => now);
-    recordDriverLocationBatch.mockRejectedValueOnce(new Error("API error 503: unavailable"));
+    recordDriverLocationBatch.mockClear();
+    recordDriverLocationBatch
+      .mockRejectedValueOnce(new Error("API error 503: unavailable"))
+      .mockImplementation(async (request) => ({
+        items: request.items.map((item) => ({
+          eventId: item.eventId,
+          accepted: true,
+          duplicate: false,
+          currentLocationUpdated: true,
+          serverReceivedAt: now.toISOString(),
+        })),
+      }));
     await queueModule.flushDriverLocationQueue();
 
     expect(store.snapshot()[0]).toMatchObject({
