@@ -10,10 +10,13 @@ import {
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { EligibilityContextResolver } from "../../src/modules/vehicle-eligibility/eligibility-context-resolver.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { RuntimeEligibilityEvaluator } from "../../src/modules/vehicle-eligibility/runtime-eligibility-evaluator.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
+import { VehicleEligibilityRepository } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.repository";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
@@ -40,7 +43,10 @@ function createOwnedMobilityService(options?: {
   enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
   serviceProductOverrides?: Record<string, unknown>;
+  latestLocationUpdatedAt?: string | null;
 }) {
+  const locationUpdatedAt =
+    options?.latestLocationUpdatedAt ?? new Date().toISOString();
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
       (
@@ -55,6 +61,177 @@ function createOwnedMobilityService(options?: {
       () => options?.vehicleDispatchable ?? true,
     ),
     getDriverAvailability: vi.fn(() => true),
+    listDrivers: vi.fn(() => [
+      {
+        driverId: "drv-demo-001",
+        name: "Driver Demo One",
+        supportedServiceBuckets: ["standard_taxi", "business_dispatch"],
+        workState: "available",
+        licensesValid: true,
+        lifecycleStatus: "active",
+        eligibilityBlockedReasons: [],
+        dispatchEligible: true,
+        createdAt: locationUpdatedAt,
+        updatedAt: locationUpdatedAt,
+        activatedAt: locationUpdatedAt,
+        suspendedAt: null,
+        retiredAt: null,
+        profileUpdatedAt: locationUpdatedAt,
+        deviceBindings: [],
+      },
+      {
+        driverId: "driver-001",
+        name: "Driver One",
+        supportedServiceBuckets: ["business_dispatch", "standard_taxi"],
+        workState: "available",
+        licensesValid: true,
+        lifecycleStatus: "active",
+        eligibilityBlockedReasons: [],
+        dispatchEligible: true,
+        createdAt: locationUpdatedAt,
+        updatedAt: locationUpdatedAt,
+        activatedAt: locationUpdatedAt,
+        suspendedAt: null,
+        retiredAt: null,
+        profileUpdatedAt: locationUpdatedAt,
+        deviceBindings: [],
+      },
+      {
+        driverId: "driver-nearby",
+        name: "Driver Nearby",
+        supportedServiceBuckets: ["standard_taxi"],
+        workState: "available",
+        licensesValid: true,
+        lifecycleStatus: "active",
+        eligibilityBlockedReasons: [],
+        dispatchEligible: true,
+        createdAt: locationUpdatedAt,
+        updatedAt: locationUpdatedAt,
+        activatedAt: locationUpdatedAt,
+        suspendedAt: null,
+        retiredAt: null,
+        profileUpdatedAt: locationUpdatedAt,
+        deviceBindings: [],
+      },
+      {
+        driverId: "driver-fallback",
+        name: "Driver Fallback",
+        supportedServiceBuckets: ["standard_taxi"],
+        workState: "available",
+        licensesValid: true,
+        lifecycleStatus: "active",
+        eligibilityBlockedReasons: [],
+        dispatchEligible: true,
+        createdAt: locationUpdatedAt,
+        updatedAt: locationUpdatedAt,
+        activatedAt: locationUpdatedAt,
+        suspendedAt: null,
+        retiredAt: null,
+        profileUpdatedAt: locationUpdatedAt,
+        deviceBindings: [],
+      },
+    ]),
+    listVehicles: vi.fn(() => [
+      {
+        vehicleId: "veh-demo-001",
+        plateNo: "ABC-1001",
+        operatingArea: "taichung-port",
+        supportedServiceBuckets: ["standard_taxi", "business_dispatch"],
+        dispatchableFlag: true,
+        exclusivityApproved: true,
+        insuranceStatus: "valid",
+        updatedAt: locationUpdatedAt,
+        supplyLifecycle: {
+          contract: { ready: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          insurance: { ready: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          exclusivity: { ready: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          dispatch: { eligible: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          offboarding: {
+            status: "none",
+            reason: null,
+            requestedAt: null,
+            effectiveAt: null,
+            completedAt: null,
+            requestedBy: null,
+            debrandingRequired: false,
+            debrandingStatus: "not_required",
+            debrandingDueAt: null,
+            debrandingCompletedAt: null,
+            debrandingTicketId: null,
+            notes: null,
+          },
+          lastTrace: null,
+        },
+      },
+      {
+        vehicleId: "veh-demo-002",
+        plateNo: "ABC-1002",
+        operatingArea: "taichung-port",
+        supportedServiceBuckets: ["standard_taxi"],
+        dispatchableFlag: true,
+        exclusivityApproved: true,
+        insuranceStatus: "valid",
+        updatedAt: locationUpdatedAt,
+        supplyLifecycle: {
+          contract: { ready: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          insurance: { ready: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          exclusivity: { ready: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          dispatch: { eligible: true, blockedReasons: [], evaluatedAt: locationUpdatedAt },
+          offboarding: {
+            status: "none",
+            reason: null,
+            requestedAt: null,
+            effectiveAt: null,
+            completedAt: null,
+            requestedBy: null,
+            debrandingRequired: false,
+            debrandingStatus: "not_required",
+            debrandingDueAt: null,
+            debrandingCompletedAt: null,
+            debrandingTicketId: null,
+            notes: null,
+          },
+          lastTrace: null,
+        },
+      },
+    ]),
+    listLatestDriverLocations: vi.fn(() =>
+      locationUpdatedAt
+        ? [
+            {
+              driverId: "drv-demo-001",
+              lat: 25.04,
+              lng: 121.56,
+              accuracyM: 20,
+              recordedAt: locationUpdatedAt,
+              updatedAt: locationUpdatedAt,
+            },
+            {
+              driverId: "driver-001",
+              lat: 25.04,
+              lng: 121.56,
+              accuracyM: 20,
+              recordedAt: locationUpdatedAt,
+              updatedAt: locationUpdatedAt,
+            },
+            {
+              driverId: "driver-nearby",
+              lat: 25.0478,
+              lng: 121.5319,
+              accuracyM: 15,
+              recordedAt: locationUpdatedAt,
+              updatedAt: locationUpdatedAt,
+            },
+            {
+              driverId: "driver-fallback",
+              lat: 25.05,
+              lng: 121.53,
+              accuracyM: 20,
+              recordedAt: locationUpdatedAt,
+              updatedAt: locationUpdatedAt,
+            },
+          ]
+        : []),
   };
   const auditNotificationService = {
     recordNotification: vi.fn(),
@@ -104,6 +281,22 @@ function createOwnedMobilityService(options?: {
         serviceProductService,
       )
     : undefined;
+  const vehicleEligibilityRepository = {
+    saveRuntimeDecision: vi.fn().mockResolvedValue(undefined),
+    reportPersistenceFailure: vi.fn(),
+  };
+  const runtimeEligibilityEvaluator =
+    options?.enableVehicleEligibility && vehicleEligibilityService
+      ? new RuntimeEligibilityEvaluator(
+          new EligibilityContextResolver(
+            regulatoryRegistryService as never,
+            vehicleEligibilityService,
+            serviceProductService,
+          ),
+          vehicleEligibilityRepository as never as VehicleEligibilityRepository,
+          auditNotificationService as never,
+        )
+      : undefined;
 
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
@@ -115,6 +308,7 @@ function createOwnedMobilityService(options?: {
     options?.tenantPartnerService,
     vehicleEligibilityService,
     serviceProductService,
+    runtimeEligibilityEvaluator,
   );
 
   return {
@@ -226,10 +420,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     } catch (error) {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
-          code: "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
           details: {
             vehicleId: "veh-demo-002",
-            serviceProduct: "enterprise_dispatch",
+            decision: "ineligible",
           },
         },
       });
@@ -380,6 +574,65 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       serviceProductVersion: "2026-06-01T00:00:00.000Z",
       eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
     });
+  });
+
+  it("rechecks runtime eligibility before assignment and rejects stale conditional supply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-20T00:02:30.000Z"));
+
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      latestLocationUpdatedAt: "2026-06-20T00:00:00.000Z",
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "taichung-port",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-20T01:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T02:00:00.000Z",
+        pickup: { address: "台中高鐵站" },
+        dropoff: { address: "台中工業區" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatch = service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    expect(() =>
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.assignDispatch({
+        dispatchJobId: dispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+          details: {
+            decision: "conditionally_eligible",
+            softReasonCodes: ["STALE_LOCATION"],
+            locationState: "stale",
+          },
+        },
+      });
+    }
   });
 
   it("resolves tenant booking passenger and addresses from governed master data", async () => {

@@ -19,7 +19,7 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import { ServiceProductService } from "../service-product/service-product.service";
 import { VehicleEligibilityRepository } from "./vehicle-eligibility.repository";
 
-type ServiceProductDefinition = {
+export type ServiceProductDefinition = {
   serviceProduct: ServiceProductType;
   displayName: string;
   timing: ServiceTiming;
@@ -34,7 +34,7 @@ type ServiceProductDefinition = {
   defaultProofRequirements: string[];
 };
 
-type ResolvedVehicleCapability = VehicleEligibilityMatrixRecord & {
+export type ResolvedVehicleCapability = VehicleEligibilityMatrixRecord & {
   vehicleId: string;
 };
 
@@ -424,6 +424,16 @@ export class VehicleEligibilityService implements OnModuleInit {
     return latestUpdatedAt;
   }
 
+  getServiceProductRuntimeDefinition(serviceProduct: ServiceProductType) {
+    return this.cloneServiceProductDefinition(
+      this.requireActiveServiceProduct(serviceProduct),
+    );
+  }
+
+  getVehicleCapabilitySnapshot(vehicleId: string) {
+    return this.cloneVehicleCapability(this.requireVehicleCapability(vehicleId));
+  }
+
   resolveServiceProductForOwnedOrder(
     order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
   ): ServiceProductType {
@@ -700,6 +710,22 @@ export class VehicleEligibilityService implements OnModuleInit {
       meterRequired: runtimeProduct.meterRequired,
       fixedFareAllowed: runtimeProduct.fixedFareAllowed,
       defaultProofRequirements: [...runtimeProduct.defaultProofRequirements],
+    };
+  }
+
+  private cloneServiceProductDefinition(definition: ServiceProductDefinition) {
+    return {
+      ...definition,
+      allowedLicenseTypes: [...definition.allowedLicenseTypes],
+      defaultProofRequirements: [...definition.defaultProofRequirements],
+    };
+  }
+
+  private cloneVehicleCapability(capability: ResolvedVehicleCapability) {
+    return {
+      ...capability,
+      supportedProducts: [...capability.supportedProducts],
+      requiredDocuments: [...capability.requiredDocuments],
     };
   }
 

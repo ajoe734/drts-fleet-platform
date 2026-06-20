@@ -1,6 +1,9 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { VehicleEligibilityMatrixRecord } from "@drts/contracts";
+import type {
+  RuntimeEligibilityDecisionRecord,
+  VehicleEligibilityMatrixRecord,
+} from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 
@@ -91,6 +94,53 @@ export class VehicleEligibilityRepository {
     } finally {
       client.release();
     }
+  }
+
+  async saveRuntimeDecision(decision: RuntimeEligibilityDecisionRecord) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        INSERT INTO mobility.runtime_eligibility_decisions (
+          decision_id,
+          order_id,
+          dispatch_job_id,
+          driver_id,
+          vehicle_id,
+          service_product_id,
+          service_product_code,
+          policy_version,
+          decision,
+          hard_reason_codes,
+          soft_reason_codes,
+          missing_requirements,
+          location_state,
+          evaluated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, $10::jsonb,
+          $11::jsonb, $12::jsonb, $13, $14
+        )
+      `,
+      [
+        decision.decisionId,
+        decision.orderId,
+        decision.dispatchJobId,
+        decision.driverId,
+        decision.vehicleId,
+        decision.serviceProductId,
+        decision.serviceProductCode,
+        decision.policyVersion,
+        decision.decision,
+        JSON.stringify(decision.hardReasonCodes),
+        JSON.stringify(decision.softReasonCodes),
+        JSON.stringify(decision.missingRequirements),
+        decision.locationState,
+        decision.evaluatedAt,
+      ],
+    );
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

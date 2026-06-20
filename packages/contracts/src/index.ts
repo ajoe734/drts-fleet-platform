@@ -2535,14 +2535,19 @@ export interface DispatchCandidate {
   serviceProductCode?: ServiceProductType | null;
   serviceProductVersion?: string | null;
   eligibilityPolicyVersion?: string | null;
+  eligibilityDecision?: "eligible" | "conditionally_eligible" | "ineligible";
+  hardReasonCodes?: string[];
+  softReasonCodes?: string[];
+  missingRequirements?: string[];
   locationState?: DispatchCandidateLocationState;
   currentLocation?: DriverLocationSnapshot | null;
 }
 
 export const DISPATCH_CANDIDATE_LOCATION_STATES = [
-  "live",
+  "fresh",
   "stale",
-  "no_location",
+  "low_accuracy",
+  "missing",
 ] as const;
 export type DispatchCandidateLocationState =
   (typeof DISPATCH_CANDIDATE_LOCATION_STATES)[number];

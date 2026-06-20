@@ -78,6 +78,7 @@ import {
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
@@ -223,6 +224,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly vehicleEligibilityService?: VehicleEligibilityService,
     @Optional()
     private readonly serviceProductService?: ServiceProductService,
+    @Optional()
+    private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
     @Optional()
     private readonly eventEmitter?: EventEmitter2,
   ) {
@@ -2394,7 +2397,10 @@ export class OwnedMobilityService implements OnModuleInit {
   listDispatchCandidates(dispatchJobId: string): DispatchCandidate[] {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-    const candidates = this.listEligibleDispatchCandidates(order);
+    const candidates = this.listEligibleDispatchCandidates(
+      order,
+      dispatchJob.dispatchJobId,
+    );
     return candidates.map((candidate) => ({ ...candidate }));
   }
 
@@ -2406,7 +2412,10 @@ export class OwnedMobilityService implements OnModuleInit {
       return { ...dispatchJob };
     }
 
-    const liveCandidates = this.listEligibleDispatchCandidates(order);
+    const liveCandidates = this.listEligibleDispatchCandidates(
+      order,
+      dispatchJob.dispatchJobId,
+    );
 
     return {
       ...dispatchJob,
@@ -2583,6 +2592,13 @@ export class OwnedMobilityService implements OnModuleInit {
     requestId?: string,
   ) {
     if (this.vehicleEligibilityService) {
+      this.runtimeEligibilityEvaluator?.assertAssignmentEligible(
+        order,
+        dispatchJob.dispatchJobId,
+        driverId,
+        vehicleId,
+        this.resolveOrderSourcePlatform(order),
+      );
       this.vehicleEligibilityService.assertDispatchAssignmentEligible(
         order,
         vehicleId,
@@ -5075,9 +5091,13 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
+  private listEligibleDispatchCandidates(
+    order: OwnedOrderRecord,
+    dispatchJobId = `preview-${order.orderId}`,
+  ) {
     const destination = this.resolvePickupEtaDestination(order);
     const exactProduct = this.resolveExactServiceProductSnapshotForOrder(order);
+    const sourcePlatform = this.resolveOrderSourcePlatform(order);
     const candidates = this.vehicleEligibilityService
       ? this.vehicleEligibilityService.listEligibleSupply(
           this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
@@ -5089,14 +5109,39 @@ export class OwnedMobilityService implements OnModuleInit {
           order.serviceBucket,
           destination,
         );
+    const evaluatedCandidates = this.runtimeEligibilityEvaluator
+      ? this.runtimeEligibilityEvaluator.evaluateOrderCandidates(
+          {
+            orderId: order.orderId,
+            orderSource: order.orderSource,
+            serviceProductCode: exactProduct.serviceProductCode,
+            serviceProductId: exactProduct.serviceProductId,
+            serviceProductVersion: exactProduct.serviceProductVersion,
+            eligibilityPolicyVersion: exactProduct.eligibilityPolicyVersion,
+            serviceBucket: order.serviceBucket,
+            dispatchSemantics: order.dispatchSemantics,
+          },
+          dispatchJobId,
+          candidates,
+          sourcePlatform,
+        )
+      : candidates;
 
-    return candidates.map((candidate) => ({
-      ...candidate,
-      serviceProductId: exactProduct.serviceProductId,
-      serviceProductCode: exactProduct.serviceProductCode,
-      serviceProductVersion: exactProduct.serviceProductVersion,
-      eligibilityPolicyVersion: exactProduct.eligibilityPolicyVersion,
-    }));
+    return evaluatedCandidates
+      .filter(
+        (candidate) =>
+          !("eligibilityDecision" in candidate) ||
+          candidate.eligibilityDecision !== "ineligible",
+      )
+      .map((candidate) => ({
+        ...candidate,
+        serviceProductId: exactProduct.serviceProductId,
+        serviceProductCode: exactProduct.serviceProductCode,
+        serviceProductVersion: exactProduct.serviceProductVersion,
+        eligibilityPolicyVersion:
+          candidate.eligibilityPolicyVersion ??
+          exactProduct.eligibilityPolicyVersion,
+      }));
   }
 
   private resolveExactServiceProductSnapshotForOrder(
@@ -5163,6 +5208,12 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     return null;
+  }
+
+  private resolveOrderSourcePlatform(
+    order: Pick<OwnedOrderRecord, "orderId">,
+  ) {
+    return this.forwarderSourceMap.get(order.orderId) ?? null;
   }
 
   private findLatestTaskForOrder(orderId: string) {
