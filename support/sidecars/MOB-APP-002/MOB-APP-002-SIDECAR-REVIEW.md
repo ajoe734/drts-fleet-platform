@@ -3,11 +3,13 @@
 This document is the parallel review-support packet for `MOB-APP-002`
 ("Driver App: durable SQLite offline queue"). It does not change canonical
 truth, does not touch the parent runtime branch, and only packages reviewer
-evidence for the assigned sidecar reviewer (`Claude`).
+evidence for the assigned sidecar reviewer (`Claude`) plus owner closeout
+evidence for the reassigned finisher (`Codex2`).
 
 Anchors used here:
 
-- `AI_NAME=Codex scripts/ai-status.sh show MOB-APP-002`
+- `AI_NAME=Codex2 scripts/ai-status.sh show MOB-APP-002-SIDECAR-REVIEW`
+- `AI_NAME=Codex2 scripts/ai-status.sh show MOB-APP-002`
 - targeted `ai-activity-log.jsonl` entries for `MOB-APP-002`
 - `docs/02-architecture/phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.md`
 - `docs/02-architecture/phase1_delta_sa_supply_eligibility_mobile_reporting_20260619.md`
@@ -19,7 +21,7 @@ Anchors used here:
 - **Task ID:** `MOB-APP-002-SIDECAR-REVIEW`
 - **Parent Task:** `MOB-APP-002`
 - **Helper Kind:** `review_packet`
-- **Owner:** `Codex`
+- **Owner:** `Codex2`
 - **Reviewer:** `Claude`
 - **Mutates Canonical:** `false`
 - **Artifact:** `support/sidecars/MOB-APP-002/MOB-APP-002-SIDECAR-REVIEW.md`
@@ -75,9 +77,9 @@ Important lifecycle notes from `ai-activity-log.jsonl`:
 
 | Field | Value |
 | --- | --- |
-| Owner | `Codex` |
+| Owner | `Codex2` |
 | Reviewer | `Claude` |
-| Status at authoring | `in_progress` |
+| Status at closeout refresh | `review_approved` |
 | Task class | `sidecar` |
 | Helper kind | `review_packet` |
 | Mutates canonical | `false` |
@@ -87,6 +89,9 @@ Current control-plane nuance:
 - At `2026-06-20T11:37:07Z` the sidecar reviewer was reassigned from
   `Claude2` to `Claude` so the in-progress review packet could hand off to a
   healthy reviewer distinct from owner `Codex`.
+- At `2026-06-20T11:42:07Z` the packet was approved for closeout, and the
+  machine-truth owner is now `Codex2`; this refresh keeps the support artifact
+  aligned with that approved end state without changing parent runtime truth.
 
 ## §3 Parent Branch Surface
 
@@ -207,12 +212,12 @@ Use this packet to accelerate closeout, not to reopen the parent design.
    hygiene and closeout correctness, not functional redesign.
 2. Review the parent branch surface with triple-dot diff, not only
    `git show --stat 577d19c99`, because the branch contains two commits.
-3. Re-check branch divergence before formal `done`.
-   - As inspected from this sidecar worktree on `2026-06-20`, `git rev-list --left-right --count origin/dev...origin/codex/mob-app-002` returned `12 2`.
-   - That means the branch is currently `12` commits behind `origin/dev` and
-     `2` commits ahead.
-   - If you are finalizing the parent task, refresh/rebase evidence before the
-     final machine-truth `done`.
+3. Treat the recorded branch-divergence numbers as time-bound evidence only.
+   - At packet authoring, `git rev-list --left-right --count origin/dev...origin/codex/mob-app-002`
+     returned `12 2`.
+   - The sidecar approval note later marked those counts as a non-blocking
+     snapshot and confirmed the parent lane had already advanced through the
+     expected rebase/closeout path.
 4. Keep the reviewer-approved non-blocking notes visible:
    - HTTP `429` is still classified as permanent rather than retryable.
    - Real SQLite SQL is not executed directly under Vitest.
@@ -220,22 +225,26 @@ Use this packet to accelerate closeout, not to reopen the parent design.
    fresh install on the parent branch proves otherwise; the stored review note
    explicitly called it cosmetic.
 
-## §7 Suggested Sidecar Handoff Payload
+## §7 Closeout Note
 
-When this support packet is ready to hand off:
+This sidecar slice is already reviewer-approved. Owner closeout for
+`MOB-APP-002-SIDECAR-REVIEW` should therefore:
 
-```bash
-AI_NAME=Codex scripts/ai-status.sh handoff MOB-APP-002-SIDECAR-REVIEW Claude "Prepared support/sidecars/MOB-APP-002/MOB-APP-002-SIDECAR-REVIEW.md as a reviewer-facing packet for parent task MOB-APP-002. It captures the parent review_approved machine-truth state, the real branch surface on origin/codex/mob-app-002, spec-to-implementation evidence for the durable SQLite queue, the recorded validation commands/results, current branch divergence against origin/dev, and Claude's two non-blocking review notes. Support artifact only; no canonical truth or runtime files changed."
-```
+- keep the diff scoped to `support/sidecars/MOB-APP-002/MOB-APP-002-SIDECAR-REVIEW.md`
+- create a task-scoped closeout commit on `codex2/mob-app-002-sidecar-review`
+- push that branch with a normal non-force push
+- finalize machine truth with `INTEGRATION_STATUS=not_applicable`, because
+  this support packet has no deploy target and does not publish runtime code
 
 ## §8 Sidecar Verification
 
-Checks performed while preparing this packet:
+Checks performed while preparing and closing out this packet:
 
-- `AI_NAME=Codex scripts/ai-status.sh show MOB-APP-002`
+- `AI_NAME=Codex2 scripts/ai-status.sh show MOB-APP-002-SIDECAR-REVIEW`
+- `AI_NAME=Codex2 scripts/ai-status.sh show MOB-APP-002`
 - targeted `git show`, `git log`, `git diff ...` inspection against
   `origin/codex/mob-app-002`
-- targeted `ai-activity-log.jsonl` review for the parent handoff, approval, and
-  owner reassignment events
+- `git log --all -- support/sidecars/MOB-APP-002/MOB-APP-002-SIDECAR-REVIEW.md`
+- `git status --short`
 - confirmed this sidecar slice only creates/updates support material under
   `support/sidecars/MOB-APP-002/`
