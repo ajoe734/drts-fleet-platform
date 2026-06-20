@@ -185,6 +185,22 @@ the polluted owner branch and not on this helper branch.
 - the helper branch can hold the history-repair report without pretending to be
   the canonical delivery rail
 
+## Closeout Evidence
+
+- task-scoped remote helper branch now exists:
+  `origin/codex/mob-app-002-unblock-history-repair`
+- task-scoped draft PR now exists:
+  `#833 https://github.com/ajoe734/drts-fleet-platform/pull/833`
+- parent machine truth was reopened on `2026-06-20T12:01:42Z`:
+  `MOB-APP-002` moved back to `in_progress` with next step pointing at
+  `origin/codex/mob-app-002-linearized @ e13f163c9` and PR `#832`
+- canonical clean replay rail remains:
+  `origin/codex/mob-app-002-linearized @ e13f163c9d3d6f74fd55c945069bd646ff0038de`
+  with PR `#832 https://github.com/ajoe734/drts-fleet-platform/pull/832`
+- polluted rail remains preserved for audit:
+  `origin/codex/mob-app-002 @ 644c1d048aa232e23f5d0f2222c3fd21febefae0`
+  with closed PR `#829 https://github.com/ajoe734/drts-fleet-platform/pull/829`
+
 ## Verification Performed
 
 - read `AI_COLLABORATION_GUIDE.md`
