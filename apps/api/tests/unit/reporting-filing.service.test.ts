@@ -269,7 +269,11 @@ describe("ReportingFilingService sensitive-data governance", () => {
       undefined,
       "tenant-demo-001",
     );
-    expect(detail.rows?.[0]).toMatchObject({
+    const firstRow = detail.rows?.[0];
+    if (!firstRow || !("orderId" in firstRow)) {
+      throw new Error("Expected tenant monthly trip report row");
+    }
+    expect(firstRow).toMatchObject({
       orderId: "order-monthly-001",
       userId: "tenant-admin-001",
       costCenterCode: "CC-MONTHLY",
