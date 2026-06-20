@@ -2357,6 +2357,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       await this.regulatoryRegistryRepository?.findDriverHeartbeatEventByRecordedAt?.(
         driverId,
         currentLocation.recordedAt,
+        currentLocation.updatedAt,
       );
     return persisted ? { ...persisted } : null;
   }

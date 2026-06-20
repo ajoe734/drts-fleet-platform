@@ -128,20 +128,27 @@ class InMemoryHeartbeatRepository {
   async findDriverHeartbeatEventByRecordedAt(
     driverId: string,
     recordedAt: string,
+    receivedAt?: string,
   ): Promise<StoredHeartbeatEvent | null> {
     const event = this.heartbeatEvents
-      .filter(
-        (candidate) =>
-          candidate.driverId === driverId && candidate.recordedAt === recordedAt,
-      )
+      .filter((candidate) => {
+        if (
+          candidate.driverId !== driverId ||
+          candidate.recordedAt !== recordedAt
+        ) {
+          return false;
+        }
+
+        return receivedAt === undefined || candidate.receivedAt === receivedAt;
+      })
       .sort((left, right) => {
         const receivedDiff =
-          Date.parse(right.receivedAt) - Date.parse(left.receivedAt);
+          Date.parse(left.receivedAt) - Date.parse(right.receivedAt);
         if (receivedDiff !== 0) {
           return receivedDiff;
         }
 
-        return right.sequenceNo - left.sequenceNo;
+        return left.sequenceNo - right.sequenceNo;
       })[0];
 
     return event ? { ...event } : null;
@@ -377,5 +384,76 @@ describe("INT-MOB-001 batch heartbeat idempotency", () => {
     } finally {
       await app.close();
     }
+  });
+
+  it("reconstructs current tracking context after restart from the persisted current-location write", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-20T06:00:05.000Z"));
+
+    const repository = new InMemoryHeartbeatRepository();
+    const firstWrite = await repository.recordDriverLocationEvent({
+      eventId: "evt-001",
+      deviceId: "device-001",
+      driverId: "drv-demo-001",
+      vehicleId: "veh-demo-001",
+      taskId: null,
+      sequenceNo: 1001,
+      recordedAt: "2026-06-20T06:00:00.000Z",
+      lat: 24.1477,
+      lng: 120.6736,
+      accuracyM: 8,
+      workState: "available",
+      appState: "foreground",
+      transportMode: "foreground",
+      networkType: "cellular",
+    });
+    expect(firstWrite.currentLocationUpdated).toBe(true);
+
+    vi.setSystemTime(new Date("2026-06-20T06:00:06.000Z"));
+
+    const secondWrite = await repository.recordDriverLocationEvent({
+      eventId: "evt-002",
+      deviceId: "device-001",
+      driverId: "drv-demo-001",
+      vehicleId: "veh-demo-001",
+      taskId: "task-002",
+      sequenceNo: 1002,
+      recordedAt: "2026-06-20T06:00:00.000Z",
+      lat: 24.148,
+      lng: 120.674,
+      accuracyM: 18,
+      workState: "assigned",
+      appState: "background",
+      transportMode: "background",
+      networkType: "wifi",
+    });
+    expect(secondWrite.currentLocationUpdated).toBe(false);
+
+    const service = new RegulatoryRegistryService(
+      opsDispatchEventsService as never,
+      new AuditNotificationService(),
+      new DriverProfileService(new AuditNotificationService()),
+      repository as never,
+    );
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        currentLocation: expect.objectContaining({
+          recordedAt: "2026-06-20T06:00:00.000Z",
+          updatedAt: firstWrite.serverReceivedAt,
+        }),
+        currentTaskId: null,
+        trackingState: "available",
+        appState: "foreground",
+        transportMode: "foreground",
+        networkType: "cellular",
+        lastEventId: "evt-002",
+        lastSequenceNo: 1002,
+        lastHeartbeatRecordedAt: "2026-06-20T06:00:00.000Z",
+        lastHeartbeatReceivedAt: secondWrite.serverReceivedAt,
+      }),
+    );
   });
 });

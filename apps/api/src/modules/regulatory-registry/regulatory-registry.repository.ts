@@ -680,6 +680,7 @@ export class RegulatoryRegistryRepository {
   async findDriverHeartbeatEventByRecordedAt(
     driverId: string,
     recordedAt: string,
+    receivedAt?: string,
   ): Promise<DriverHeartbeatEventSnapshot | null> {
     this.assertDatabaseEnabled("find driver heartbeat event by recordedAt");
 
@@ -704,10 +705,18 @@ export class RegulatoryRegistryRepository {
         FROM telemetry.driver_location_events
         WHERE driver_id = $1
           AND recorded_at = $2::timestamptz
-        ORDER BY received_at DESC, sequence_no DESC
+          AND ($3::timestamptz IS NULL OR received_at = $3::timestamptz)
+        ORDER BY
+          CASE
+            WHEN $3::timestamptz IS NOT NULL AND received_at = $3::timestamptz
+              THEN 0
+            ELSE 1
+          END,
+          received_at ASC,
+          sequence_no ASC
         LIMIT 1
       `,
-      [driverId, recordedAt],
+      [driverId, recordedAt, receivedAt ?? null],
     );
 
     return this.toHeartbeatEventSnapshot(result.rows[0] ?? null);

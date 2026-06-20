@@ -1117,4 +1117,77 @@ describe("RegulatoryRegistryService", () => {
       }),
     );
   });
+
+  it("reconstructs current tracking context from the persisted current-location timestamp after restart", async () => {
+    const firstReceivedAt = "2026-06-20T06:00:00.000Z";
+    const secondReceivedAt = "2026-06-20T06:00:05.000Z";
+    const { service, regulatoryRegistryRepository } = createService({
+      isEnabled: vi.fn(() => true),
+      findLatestDriverLocation: vi.fn().mockResolvedValue({
+        driverId: "drv-demo-001",
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        updatedAt: firstReceivedAt,
+      }),
+      findDriverHeartbeatEventByRecordedAt: vi.fn().mockResolvedValue({
+        eventId: "evt-001",
+        deviceId: "device-001",
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        taskId: null,
+        sequenceNo: 1001,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        receivedAt: firstReceivedAt,
+        lat: 24.1477,
+        lng: 120.6736,
+        accuracyM: 8,
+        workState: "available",
+        appState: "foreground",
+        transportMode: "foreground",
+        networkType: "cellular",
+      }),
+      findLatestDriverHeartbeatEvent: vi.fn().mockResolvedValue({
+        eventId: "evt-002",
+        deviceId: "device-001",
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        taskId: "task-002",
+        sequenceNo: 1002,
+        recordedAt: "2026-06-20T06:00:00.000Z",
+        receivedAt: secondReceivedAt,
+        lat: 24.148,
+        lng: 120.674,
+        accuracyM: 18,
+        workState: "assigned",
+        appState: "background",
+        transportMode: "background",
+        networkType: "wifi",
+      }),
+    });
+
+    await expect(
+      service.getDriverTrackingStatus("drv-demo-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        currentTaskId: null,
+        trackingState: "available",
+        appState: "foreground",
+        transportMode: "foreground",
+        networkType: "cellular",
+        lastEventId: "evt-002",
+        lastSequenceNo: 1002,
+        lastHeartbeatReceivedAt: secondReceivedAt,
+      }),
+    );
+
+    expect(
+      regulatoryRegistryRepository.findDriverHeartbeatEventByRecordedAt,
+    ).toHaveBeenCalledWith(
+      "drv-demo-001",
+      "2026-06-20T06:00:00.000Z",
+      firstReceivedAt,
+    );
+  });
 });
