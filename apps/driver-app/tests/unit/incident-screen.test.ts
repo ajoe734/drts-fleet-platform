@@ -6,9 +6,14 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   isFeatureEnabled: vi.fn(),
   listUnifiedDriverTasks: vi.fn(),
+  listShifts: vi.fn(),
   listDriverTasks: vi.fn(),
   createIncident: vi.fn(),
   updateIncident: vi.fn(),
+  syncDriverLocationHeartbeat: vi.fn(),
+  syncDriverIdentityBootstrap: vi.fn(),
+  getActiveDriverHeartbeatTaskId: vi.fn(),
+  initializeDriverIdentity: vi.fn(),
   localSearchParams: {} as Record<string, string | undefined>,
 }));
 
@@ -73,13 +78,30 @@ vi.mock("@/components/ui/StatusChip", () => ({
 }));
 
 vi.mock("@/lib/api-client", () => ({
+  getDriverId: () => "driver-001",
   getDriverClient: () => ({
     isFeatureEnabled: mocks.isFeatureEnabled,
     listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
+    listShifts: mocks.listShifts,
     listDriverTasks: mocks.listDriverTasks,
     createIncident: mocks.createIncident,
     updateIncident: mocks.updateIncident,
   }),
+  initializeDriverIdentity: mocks.initializeDriverIdentity,
+  isDriverIdentityProvisioned: () => true,
+}));
+
+vi.mock("@/lib/driver-location-heartbeat", () => ({
+  getActiveDriverHeartbeatTaskId: mocks.getActiveDriverHeartbeatTaskId,
+  syncDriverLocationHeartbeat: mocks.syncDriverLocationHeartbeat,
+}));
+
+vi.mock("@/lib/driver-identity-bootstrap", () => ({
+  syncDriverIdentityBootstrap: mocks.syncDriverIdentityBootstrap,
+}));
+
+vi.mock("@/lib/driver-identity-routing", () => ({
+  resetDriverAppToOnboarding: vi.fn(),
 }));
 
 import IncidentScreen from "../../app/incident";
@@ -108,12 +130,50 @@ describe("IncidentScreen", () => {
     mocks.replace.mockReset();
     mocks.isFeatureEnabled.mockReset().mockResolvedValue(true);
     mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.listShifts.mockReset().mockResolvedValue([]);
     mocks.listDriverTasks.mockReset().mockResolvedValue([]);
     mocks.createIncident
       .mockReset()
       .mockResolvedValue({ incidentId: "INC-001" });
     mocks.updateIncident.mockReset().mockResolvedValue(undefined);
+    mocks.syncDriverLocationHeartbeat.mockReset().mockResolvedValue({
+      status: "active",
+      message: null,
+      latestUpdate: null,
+    });
+    mocks.syncDriverIdentityBootstrap.mockReset().mockResolvedValue("synced");
+    mocks.getActiveDriverHeartbeatTaskId.mockReset().mockReturnValue(
+      "task-incident-001",
+    );
+    mocks.initializeDriverIdentity.mockReset().mockResolvedValue(undefined);
     mocks.localSearchParams = {};
+  });
+
+  it("switches to incident heartbeat cadence while the SOS screen is mounted", async () => {
+    let renderer: any;
+
+    await act(async () => {
+      renderer = create(React.createElement(IncidentScreen));
+      await flushEffects();
+    });
+
+    expect(mocks.syncDriverLocationHeartbeat).toHaveBeenCalledWith({
+      driverId: "driver-001",
+      taskId: "task-incident-001",
+      workState: "incident",
+    });
+
+    await act(async () => {
+      renderer.unmount();
+      await flushEffects();
+    });
+
+    expect(mocks.syncDriverIdentityBootstrap).toHaveBeenCalled();
+    expect(
+      mocks.syncDriverIdentityBootstrap.mock.calls.at(-1)?.[0],
+    ).toMatchObject({
+      syncDriverLocationHeartbeat: mocks.syncDriverLocationHeartbeat,
+    });
   });
 
   it("requires a 2-second long press before creating a critical SOS incident", async () => {

@@ -33,6 +33,17 @@ import {
 } from "@/lib/driver-workspace-cockpit";
 import { getDriverClient } from "@/lib/api-client";
 import {
+  getDriverId,
+  initializeDriverIdentity,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
+import { syncDriverIdentityBootstrap } from "@/lib/driver-identity-bootstrap";
+import {
+  getActiveDriverHeartbeatTaskId,
+  syncDriverLocationHeartbeat,
+} from "@/lib/driver-location-heartbeat";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import {
   driverForwardedTaskStatusLabels,
   driverIncidentSituations,
   driverStrings,
@@ -456,6 +467,38 @@ export default function IncidentScreen() {
       .then((enabled) => setIncidentsEnabled(enabled))
       .catch(() => setIncidentsEnabled(true));
   }, []);
+
+  useEffect(() => {
+    const driverId = getDriverId();
+    if (!driverId) {
+      return;
+    }
+
+    void syncDriverLocationHeartbeat({
+      driverId,
+      taskId: getActiveDriverHeartbeatTaskId(),
+      workState: "incident",
+    }).catch((error) => {
+      console.warn("Incident heartbeat activation failed", error);
+    });
+
+    return () => {
+      void syncDriverIdentityBootstrap({
+        getDriverId,
+        getDriverIdentityIssue: () => null,
+        initializeDriverIdentity,
+        isDriverIdentityProvisioned,
+        listDriverShifts: () => getDriverClient().listShifts(getDriverId()),
+        listDriverTasks: () => getDriverClient().listDriverTasks(),
+        onWarning: (error) => {
+          console.warn("Incident heartbeat restore failed", error);
+        },
+        resetDriverAppToOnboarding,
+        router,
+        syncDriverLocationHeartbeat,
+      });
+    };
+  }, [router]);
 
   const loadIncidentContext = async (manual = false) => {
     if (manual) {
