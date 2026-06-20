@@ -74,12 +74,13 @@ describe("SupplyReviewService", () => {
   });
 
   it("approves an in-review submission for a different reviewer", async () => {
+    const auditNotificationService = new AuditNotificationService();
     const registryService = new RegulatoryRegistryService(
       {
         publishDriverLocationUpdated: () => undefined,
         publishSupplyLifecycleUpdated: () => undefined,
       } as never,
-      new AuditNotificationService(),
+      auditNotificationService,
       new DriverProfileService(new AuditNotificationService()),
       undefined,
     );
@@ -107,5 +108,24 @@ describe("SupplyReviewService", () => {
       canonicalContractId: expect.stringMatching(/^contract_/),
       canonicalPolicyId: expect.stringMatching(/^policy_/),
     });
+
+    await expect(service.listVehicleAffiliations()).resolves.toEqual([
+      expect.objectContaining({
+        vehicleId: updated.canonicalVehicleId,
+        fleetPartnerId: "fleet-demo-001",
+        affiliationType: "contracted_under",
+        effectiveFrom: "2026-06-20T00:00:00.000Z",
+        effectiveUntil: "2027-06-19T23:59:59.000Z",
+        sourceSubmissionId: "sup-sub-demo-002",
+        status: "active",
+      }),
+    ]);
+    expect(
+      auditNotificationService
+        .getAuditLogsSnapshot()
+        .some(
+          (entry) => entry.actionName === "create_vehicle_fleet_affiliation",
+        ),
+    ).toBe(true);
   });
 });

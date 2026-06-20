@@ -1193,4 +1193,109 @@ describe("RegulatoryRegistryService", () => {
       firstReceivedAt,
     );
   });
+
+  it("maps vehicle affiliation types from approved submission evidence", async () => {
+    const { service } = createService();
+
+    const managed = await service.provisionFromSubmission(null, {
+      submission: {
+        submissionId: "sup-sub-vehicle-aff-001",
+        fleetPartnerId: "fleet-demo-001",
+        submissionType: "vehicle_affiliation",
+        status: "in_review",
+        revisionNo: 2,
+        subjectDriverId: null,
+        subjectVehicleId: "veh-demo-001",
+        submittedBy: "fleet-user-2",
+        submittedAt: "2026-06-20T00:10:00.000Z",
+        reviewStartedBy: "platform-admin-demo-001",
+        reviewStartedAt: "2026-06-20T00:15:00.000Z",
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewReasonCode: null,
+        reviewComment: null,
+        canonicalDriverId: null,
+        canonicalVehicleId: null,
+        canonicalContractId: null,
+        canonicalPolicyId: null,
+        createdAt: "2026-06-20T00:10:00.000Z",
+        updatedAt: "2026-06-20T00:15:00.000Z",
+      },
+      driverDraft: null,
+      vehicleDraft: null,
+      documents: [
+        {
+          documentId: "sup-doc-vehicle-mgmt-001",
+          fleetPartnerId: "fleet-demo-001",
+          submissionId: "sup-sub-vehicle-aff-001",
+          documentType: "vehicle_management_contract",
+          fileObjectKey: "files/vehicle-management.pdf",
+          originalFileName: "vehicle-management.pdf",
+          contentType: "application/pdf",
+          fileSize: 1024,
+          checksumSha256: "vehicle-mgmt-001",
+          effectiveFrom: "2026-07-01",
+          effectiveUntil: "2026-12-31",
+          reviewStatus: "approved",
+          reviewComment: null,
+          uploadedBy: "fleet-user-2",
+          uploadedAt: "2026-06-20T00:12:00.000Z",
+        },
+      ],
+      approvedAt: "2026-06-20T01:00:00.000Z",
+      reviewerId: "platform-reviewer-003",
+    });
+
+    expect(managed.vehicleAffiliation).toMatchObject({
+      vehicleId: "veh-demo-001",
+      fleetPartnerId: "fleet-demo-001",
+      affiliationType: "managed_by",
+      effectiveFrom: "2026-07-01T00:00:00.000Z",
+      effectiveUntil: "2026-12-31T23:59:59.000Z",
+      sourceSubmissionId: "sup-sub-vehicle-aff-001",
+      status: "active",
+    });
+
+    const { service: fallbackService } = createService();
+    const owned = await fallbackService.provisionFromSubmission(null, {
+      submission: {
+        submissionId: "sup-sub-vehicle-aff-002",
+        fleetPartnerId: "fleet-demo-001",
+        submissionType: "vehicle_affiliation",
+        status: "in_review",
+        revisionNo: 2,
+        subjectDriverId: null,
+        subjectVehicleId: "veh-demo-001",
+        submittedBy: "fleet-user-2",
+        submittedAt: "2026-06-20T00:10:00.000Z",
+        reviewStartedBy: "platform-admin-demo-001",
+        reviewStartedAt: "2026-06-20T00:15:00.000Z",
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewReasonCode: null,
+        reviewComment: null,
+        canonicalDriverId: null,
+        canonicalVehicleId: null,
+        canonicalContractId: null,
+        canonicalPolicyId: null,
+        createdAt: "2026-06-20T00:10:00.000Z",
+        updatedAt: "2026-06-20T00:15:00.000Z",
+      },
+      driverDraft: null,
+      vehicleDraft: null,
+      documents: [],
+      approvedAt: "2026-06-20T01:00:00.000Z",
+      reviewerId: "platform-reviewer-003",
+    });
+
+    expect(owned.vehicleAffiliation).toMatchObject({
+      vehicleId: "veh-demo-001",
+      fleetPartnerId: "fleet-demo-001",
+      affiliationType: "owned_by",
+      effectiveFrom: "2026-06-20T01:00:00.000Z",
+      effectiveUntil: null,
+      sourceSubmissionId: "sup-sub-vehicle-aff-002",
+      status: "active",
+    });
+  });
 });
