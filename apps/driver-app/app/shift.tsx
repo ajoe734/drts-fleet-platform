@@ -18,6 +18,10 @@ import {
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import {
+  stopDriverLocationHeartbeat,
+  syncDriverLocationHeartbeat,
+} from "@/lib/driver-location-heartbeat";
+import {
   ActionButton,
   AppScreen,
   AuthorityBanner,
@@ -382,6 +386,11 @@ export default function ShiftScreen() {
         location: location.trim() || undefined,
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
+      await syncDriverLocationHeartbeat({
+        driverId,
+        taskId: null,
+        workState: "available",
+      });
       setActiveShift(result);
       setScreenError(null);
       setNow(Date.now());
@@ -413,6 +422,7 @@ export default function ShiftScreen() {
         location: location.trim() || undefined,
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
+      await stopDriverLocationHeartbeat();
       setActiveShift(null);
       setScreenError(null);
       Alert.alert("成功", "已完成下線打卡。");

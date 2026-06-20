@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { syncDriverIdentityBootstrap } from "../../lib/driver-identity-bootstrap";
+import {
+  resolveHeartbeatContext,
+  syncDriverIdentityBootstrap,
+} from "../../lib/driver-identity-bootstrap";
 
 function createRouter() {
   return {
@@ -11,6 +14,62 @@ function createRouter() {
 }
 
 describe("syncDriverIdentityBootstrap", () => {
+  it("prioritizes active-task states in dispatch order before falling back to shift availability", () => {
+    expect(
+      resolveHeartbeatContext(
+        [
+          {
+            taskId: "task-accepted",
+            driverId: "driver-001",
+            status: "accepted",
+          },
+          {
+            taskId: "task-enroute",
+            driverId: "driver-001",
+            status: "enroute_pickup",
+          },
+          {
+            taskId: "task-trip",
+            driverId: "driver-001",
+            status: "on_trip",
+          },
+        ],
+        [{ status: "active" }],
+        "driver-001",
+      ),
+    ).toEqual({
+      driverId: "driver-001",
+      taskId: "task-trip",
+      workState: "on_trip",
+    });
+
+    expect(
+      resolveHeartbeatContext(
+        [
+          {
+            taskId: "task-arrived",
+            driverId: "driver-001",
+            status: "arrived_pickup",
+          },
+        ],
+        [{ status: "active" }],
+        "driver-001",
+      ),
+    ).toEqual({
+      driverId: "driver-001",
+      taskId: "task-arrived",
+      workState: "arrived",
+    });
+
+    expect(
+      resolveHeartbeatContext([], [{ status: "active" }], "driver-001"),
+    ).toEqual({
+      driverId: "driver-001",
+      taskId: null,
+      workState: "available",
+    });
+  });
+
   it("routes fresh unprovisioned deep links back to onboarding before loading tasks", async () => {
     const syncDriverLocationHeartbeat = vi.fn().mockResolvedValue(undefined);
     const resetDriverAppToOnboarding = vi.fn();

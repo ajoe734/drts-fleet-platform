@@ -279,6 +279,53 @@ describe("driver location heartbeat transport", () => {
     );
   });
 
+  it.each([
+    {
+      workState: "assigned" as const,
+      distanceInterval: 25,
+      timeInterval: 15_000,
+    },
+    {
+      workState: "enroute" as const,
+      distanceInterval: 25,
+      timeInterval: 10_000,
+    },
+    {
+      workState: "arrived" as const,
+      distanceInterval: 0,
+      timeInterval: 15_000,
+    },
+  ])(
+    "uses the spec cadence for $workState active-task tracking",
+    async ({ workState, distanceInterval, timeInterval }) => {
+      const heartbeatModule = await import(
+        "../../lib/driver-location-heartbeat"
+      );
+
+      await heartbeatModule.syncDriverLocationHeartbeat({
+        driverId: "driver-001",
+        taskId: "task-001",
+        workState,
+      });
+
+      expect(watchPositionAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          distanceInterval,
+          timeInterval,
+        }),
+        expect.any(Function),
+      );
+      expect(startLocationUpdatesAsync).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          distanceInterval,
+          timeInterval,
+          deferredUpdatesInterval: timeInterval,
+        }),
+      );
+    },
+  );
+
   it("uses the incident cadence for high-frequency emergency tracking", async () => {
     const heartbeatModule = await import("../../lib/driver-location-heartbeat");
 

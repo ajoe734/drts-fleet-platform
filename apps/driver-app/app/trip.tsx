@@ -48,6 +48,7 @@ import {
 import {
   acceptForwardedDriverOffer,
   getDriverClient,
+  getDriverId,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
   rejectForwardedDriverOffer,
@@ -68,6 +69,7 @@ import {
   subscribeToDriverLocationUpdates,
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
+import { resolveHeartbeatContext } from "@/lib/driver-identity-bootstrap";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatMoney } from "@/lib/money";
 import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
@@ -121,6 +123,49 @@ function ActionButton({
       {label}
     </Btn>
   );
+}
+
+function resolveTaskHeartbeatContext(task: DriverTaskRecord | null) {
+  if (!task) {
+    return null;
+  }
+
+  return resolveHeartbeatContext([task], [], task.driverId);
+}
+
+function resolveHeartbeatContextForAction(
+  task: DriverTaskRecord,
+  action: Exclude<TripPrimaryActionKey, "complete">,
+) {
+  if (action === "accept") {
+    return {
+      driverId: task.driverId,
+      taskId: task.taskId,
+      workState: "assigned" as const,
+    };
+  }
+
+  if (action === "depart") {
+    return {
+      driverId: task.driverId,
+      taskId: task.taskId,
+      workState: "enroute" as const,
+    };
+  }
+
+  if (action === "arrived") {
+    return {
+      driverId: task.driverId,
+      taskId: task.taskId,
+      workState: "arrived" as const,
+    };
+  }
+
+  return {
+    driverId: task.driverId,
+    taskId: task.taskId,
+    workState: "on_trip" as const,
+  };
 }
 
 function RouteMetricChip({
@@ -870,6 +915,9 @@ export default function TripScreen() {
   );
   const isForwardedTrip = isForwardedTask(taskDetail);
   const isTripInProgress = !isForwardedTrip && taskDetail?.status === "on_trip";
+  const taskHeartbeatContext = isForwardedTrip
+    ? null
+    : resolveTaskHeartbeatContext(taskDetail);
   const showTripMetrics = !isForwardedTrip && shouldShowTripMetrics(taskDetail);
   const completionBlockedByTracking =
     isTripInProgress && locationTrackingState !== "active";
@@ -1254,7 +1302,7 @@ export default function TripScreen() {
   }, [isTripInProgress, taskDetail?.taskId, taskDetail?.startedAt]);
 
   useEffect(() => {
-    if (!isTripInProgress) {
+    if (!taskHeartbeatContext) {
       lastTrackedCoordinateRef.current = null;
       setLocationTrackingState("idle");
       setLocationTrackingMessage(null);
@@ -1270,13 +1318,7 @@ export default function TripScreen() {
 
       try {
         const result = await syncDriverLocationHeartbeat(
-          taskDetail
-            ? {
-                driverId: taskDetail.driverId,
-                taskId: taskDetail.taskId,
-                workState: "on_trip",
-              }
-            : null,
+          taskHeartbeatContext,
         );
 
         if (cancelled) {
@@ -1307,7 +1349,12 @@ export default function TripScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isTripInProgress, taskDetail?.taskId, trackingRetryKey]);
+  }, [
+    taskHeartbeatContext?.driverId,
+    taskHeartbeatContext?.taskId,
+    taskHeartbeatContext?.workState,
+    trackingRetryKey,
+  ]);
 
   useEffect(() => {
     if (!isTripInProgress) {
@@ -1507,12 +1554,37 @@ export default function TripScreen() {
       }
 
       if (action === "complete") {
-        await stopDriverLocationHeartbeat();
+        const shifts = await client.listShifts(getDriverId());
+        const activeShift = shifts.find((shift) => shift.status === "active");
+
+        if (activeShift) {
+          const availableHeartbeat = await syncDriverLocationHeartbeat({
+            driverId: getDriverId(),
+            taskId: null,
+            workState: "available",
+          });
+          setLocationTrackingState(availableHeartbeat.status);
+          setLocationTrackingMessage(availableHeartbeat.message);
+        } else {
+          await stopDriverLocationHeartbeat();
+          setLocationTrackingState("idle");
+          setLocationTrackingMessage(null);
+        }
+
         clearDurationTicker();
-        setLocationTrackingState("idle");
-        setLocationTrackingMessage(null);
         resetCompletionDraft();
         lastTrackedCoordinateRef.current = null;
+      } else {
+        const heartbeatResult = await syncDriverLocationHeartbeat(
+          resolveHeartbeatContextForAction(taskDetail, action),
+        );
+        setLocationTrackingState(heartbeatResult.status);
+        setLocationTrackingMessage(heartbeatResult.message);
+      }
+
+      if (action === "complete") {
+        setLiveDistanceKm(0);
+        setLiveDurationSec(0);
       }
 
       Alert.alert(
