@@ -4,6 +4,7 @@ import { DatabaseModule } from "../../common/db";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
+import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { FleetPartnerController } from "./fleet-partner.controller";
 import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
@@ -19,6 +20,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
     BillingSettlementModule,
     OwnedMobilityModule,
     RegulatoryRegistryModule,
+    VehicleEligibilityModule,
   ],
   controllers: [FleetPartnerController],
   providers: [
