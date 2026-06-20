@@ -5,7 +5,7 @@
 **Parent Owner / Reviewer:** `Codex2` / `Codex`
 **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 **Generated:** `2026-06-20` (UTC)
-**Refreshed At:** `2026-06-20T06:05:30Z`
+**Refreshed At:** `2026-06-20T06:20:00Z`
 **Snapshot Basis:** `scripts/ai-status.sh show`, `git show`, `git branch --contains`, `git merge-base --is-ancestor`, `git diff --check`, and commit-scoped `git grep`
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
@@ -48,15 +48,13 @@ Out of scope:
 - helper_parent=`MOB-BE-001`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
-- last_update=`2026-06-20T06:05:13Z`
+- last_update=`2026-06-20T06:09:15Z`
 
-Closeout note:
+Current owner note:
 
-- this dispatch arrived with the sidecar already in `review_approved`
-- the owner then recorded a finalization `progress` note while preparing the
-  task-scoped closeout commit and push evidence
-- treat the sidecar as a support-only closeout slice whose reviewer approval was
-  already established before this last packet refresh
+- this sidecar remains in `in_progress` while the owner refreshes the support packet
+- no sidecar reviewer approval has been recorded yet in machine truth
+- the next intended transition is owner handoff to `Codex2` for packet review
 
 ### 2.2 Parent row
 
@@ -107,18 +105,17 @@ Integration caveat:
 Reviewer caveat:
 
 - this sidecar worktree branch is `codex/mob-be-001-sidecar-review`
-- its current `HEAD` is `3392e4e3ad48b54a96fcef4608b1cc30f17b7cd4`
-- `origin/codex/mob-be-001-sidecar-review` also points to
-  `3392e4e3ad48b54a96fcef4608b1cc30f17b7cd4`
-- `HEAD` is not the parent review commit, so audit the parent against
-  `4b093cd23003ace8287962ad80e31f61ad7581fb`, not against this sidecar branch tip
+- the sidecar branch tip is only the packet carrier and is intentionally
+  different from the parent review commit
+- audit the parent against `4b093cd23003ace8287962ad80e31f61ad7581fb`, not
+  against the sidecar branch tip
 
 Artifact delivery note:
 
 - the prior packet refresh on the sidecar branch is commit
-  `49a21b0c6a7aa6f87a52b6e01d2e1fbd0cbfccd2`
-- this closeout refresh corrects the remaining stale sidecar-row narration so
-  the packet matches the current machine-truth timeline before finalization
+  `358b53e2e1cba67cb257095877ef0838c7a25b7d`
+- this refresh corrects the stale sidecar-row narration so the packet matches
+  the current machine-truth timeline before reviewer handoff
 
 ---
 
@@ -221,9 +218,9 @@ Reviewer should validate these points on `4b093cd23003ace8287962ad80e31f61ad7581
 
 ## 8. Handoff Notes For `Codex2`
 
-This sidecar packet remains the support artifact for the assigned reviewer.
+This sidecar packet is the support artifact to hand off to the assigned reviewer.
 The parent implementation is already closed on `origin/dev`; the only remaining
-purpose here is to keep the review packet accurate during sidecar closeout.
+purpose here is to keep the review packet accurate for sidecar review.
 
 Suggested review framing:
 
@@ -234,5 +231,5 @@ Suggested review framing:
   the already-closed parent task
 - approve only the packet accuracy; parent implementation correctness is already
   recorded in the parent task closeout
-- if the reviewer loop is reopened for procedural reasons, use this refreshed
-  packet as the reviewer handoff basis
+- once packet accuracy is confirmed, approve the sidecar task so the owner can
+  perform final machine-truth closeout
