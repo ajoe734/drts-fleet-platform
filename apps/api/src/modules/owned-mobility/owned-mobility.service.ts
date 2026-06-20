@@ -119,6 +119,14 @@ type CallRecordingAttachmentEvent = {
   requestId?: string;
 };
 
+export type OwnedMobilityReportingSnapshot = {
+  orders: OwnedOrderRecord[];
+  dispatchJobs: DispatchJobRecord[];
+  dispatchAssignments: DispatchAssignmentRecord[];
+  driverTasks: DriverTaskRecord[];
+  dispatchTraceLogs: DispatchTraceLogRecord[];
+};
+
 type CallRecordingStateChangeEvent = {
   callId: string;
   linkedOrderId: string;
@@ -3057,6 +3065,20 @@ export class OwnedMobilityService implements OnModuleInit {
       }
       return clone;
     });
+  }
+
+  getReportingSnapshot(): OwnedMobilityReportingSnapshot {
+    return {
+      orders: this.listOrders(),
+      dispatchJobs: this.dispatchJobs.map((job) => ({ ...job })),
+      dispatchAssignments: this.dispatchAssignments.map((assignment) => ({
+        ...assignment,
+      })),
+      driverTasks: this.listDriverTasks(),
+      dispatchTraceLogs: this.dispatchTraceLogs.map((traceLog) =>
+        this.cloneTraceLog(traceLog),
+      ),
+    };
   }
 
   streamDriverTaskEvents(driverId: string): Observable<MessageEvent> {
