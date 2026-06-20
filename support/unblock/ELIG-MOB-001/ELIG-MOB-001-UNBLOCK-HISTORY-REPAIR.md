@@ -49,6 +49,16 @@ This means the parent is blocked by:
   - failed `Commit trailers`
   - failed `Smoke acceptance`
 
+### Helper task branch / PR evidence
+
+- current owner rail:
+  `origin/codex2/elig-mob-001-unblock-history-repair @ d0c1b93cdf9a9e3c085dab5d56be0552112c3d55`
+- helper PR `#796`
+  <https://github.com/ajoe734/drts-fleet-platform/pull/796>
+  targets `codex2/elig-mob-001-unblock-history-repair -> dev`
+- this helper rail exists only to carry the unblock diagnosis and the
+  non-destructive re-land plan; it does not mutate the parent task branch
+
 ### Trailer-gate failure evidence
 
 - `scripts/git/check_commit_trailers.py` accepts only:
@@ -166,5 +176,7 @@ The concrete next step for parent `ELIG-MOB-001` is:
   - `git diff 113180eb6..eadba376d -- packages/contracts/src/index.ts`
   - `git blame -L 2348,2354 origin/dev -- packages/contracts/src/index.ts`
 - Inspected GitHub evidence:
-  - `gh pr view 794 --json number,title,state,headRefName,baseRefName,url,commits,statusCheckRollup`
-  - `gh run view 27861532302 --log-failed`
+- `gh pr view 794 --json number,title,state,headRefName,baseRefName,url,commits,statusCheckRollup`
+- `gh run view 27861532302 --log-failed`
+- `git push -u origin codex2/elig-mob-001-unblock-history-repair`
+- `gh pr create --base dev --head codex2/elig-mob-001-unblock-history-repair`
