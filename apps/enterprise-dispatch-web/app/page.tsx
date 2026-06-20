@@ -341,7 +341,11 @@ export default async function HomePage() {
             </div>
           </ECard>
 
-          <ECard t={t} title={tr("home.policy.title")} sub="enterprise policy">
+          <ECard
+            t={t}
+            title={tr("home.policy.title")}
+            sub={tr("card.sub.enterprisePolicy")}
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
               {policyNotes.map((note, i) => (
                 <div
