@@ -235,7 +235,12 @@ function createOwnedMobilityService(options?: {
   };
   const auditNotificationService = {
     recordNotification: vi.fn(),
-    recordAuditLog: vi.fn(),
+    recordAuditLog: vi.fn((input) => ({
+      auditId: "audit-test-001",
+      createdAt: locationUpdatedAt ?? new Date().toISOString(),
+      requestId: input?.requestId ?? null,
+      ...input,
+    })),
   };
   const serviceProductService = new ServiceProductService(
     auditNotificationService as never,
@@ -576,7 +581,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("rechecks runtime eligibility before assignment and rejects stale conditional supply", async () => {
+  it("rechecks runtime eligibility before assignment and rejects stale conditional supply without override", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-20T00:02:30.000Z"));
 
@@ -633,6 +638,70 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         },
       });
     }
+  });
+
+  it("allows stale conditional supply assignment when a soft override is provided", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-20T00:02:30.000Z"));
+
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      latestLocationUpdatedAt: "2026-06-20T00:00:00.000Z",
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "taichung-port",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-20T01:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T02:00:00.000Z",
+        pickup: { address: "台中高鐵站" },
+        dropoff: { address: "台中工業區" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatch = service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "drv-demo-001",
+      softEligibilityOverride: {
+        reason: "Dispatcher confirmed supply by phone while location refreshed",
+        actorId: "ops-001",
+        actorType: "ops_user",
+      },
+    });
+
+    expect(assignment).toMatchObject({
+      status: "assigned",
+    });
+    expect(assignment.assignmentId).toBeTruthy();
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "ops-001",
+        actorType: "ops_user",
+        moduleName: "vehicle_eligibility",
+        actionName: "override_soft_eligibility",
+        resourceType: "dispatch_job",
+        resourceId: dispatch.dispatchJobId,
+        newValuesSummary: expect.objectContaining({
+          decision: "conditionally_eligible",
+          reason: "Dispatcher confirmed supply by phone while location refreshed",
+          softReasonCodes: ["STALE_LOCATION"],
+          locationState: "stale",
+        }),
+      }),
+    );
   });
 
   it("resolves tenant booking passenger and addresses from governed master data", async () => {

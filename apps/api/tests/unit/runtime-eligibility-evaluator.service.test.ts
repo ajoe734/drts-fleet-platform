@@ -280,4 +280,38 @@ describe("RuntimeEligibilityEvaluator", () => {
     expect(decision.locationState).toBe("stale");
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledTimes(1);
   });
+
+  it("allows assignment recheck to pass for conditional supply when a soft override is provided", () => {
+    const { evaluator } = createEvaluator({
+      latestLocationUpdatedAt: "2026-06-20T00:00:00.000Z",
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-20T00:02:30.000Z"));
+
+    const decision = evaluator.assertAssignmentEligible(
+      {
+        orderId: "order-stale",
+        orderSource: "ops",
+        serviceProductCode: "enterprise_dispatch",
+        serviceProductId: "seed-enterprise-dispatch",
+        serviceProductVersion: "2026-06-01T00:00:00.000Z",
+        eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
+        serviceBucket: "business_dispatch",
+        dispatchSemantics: "reservation",
+      },
+      "dispatch-stale",
+      "drv-demo-001",
+      "veh-demo-001",
+      undefined,
+      {
+        reason: "Ops accepted stale GPS during radio handoff",
+        actorId: "ops-001",
+        actorType: "ops_user",
+      },
+    );
+
+    expect(decision.eligibilityDecision).toBe("conditionally_eligible");
+    expect(decision.softReasonCodes).toContain("STALE_LOCATION");
+  });
 });

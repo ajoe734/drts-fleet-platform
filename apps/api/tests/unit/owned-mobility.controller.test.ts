@@ -68,4 +68,38 @@ describe("OwnedMobilityController tenant booking routes", () => {
       "req-e2e-update",
     );
   });
+
+  it("passes assign soft eligibility override payload through to the service", () => {
+    const service = {
+      assignDispatch: vi.fn().mockReturnValue({
+        assignmentId: "assign-001",
+        dispatchJobId: "dispatch-001",
+        driverId: "drv-001",
+        vehicleId: "veh-001",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const command = {
+      dispatchJobId: "dispatch-001",
+      driverId: "drv-001",
+      vehicleId: "veh-001",
+      softEligibilityOverride: {
+        reason: "Dispatcher confirmed manual fallback",
+        actorId: "ops-001",
+        actorType: "ops_user" as const,
+      },
+    };
+
+    const response = controller.assignDispatch(command, "req-assign-001");
+
+    expect(response.data).toMatchObject({
+      assignmentId: "assign-001",
+      dispatchJobId: "dispatch-001",
+    });
+    expect(service.assignDispatch).toHaveBeenCalledWith(
+      command,
+      "req-assign-001",
+    );
+  });
 });

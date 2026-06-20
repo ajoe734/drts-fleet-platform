@@ -2266,10 +2266,17 @@ export interface DispatchOrderCommand {
   mode: "auto";
 }
 
+export interface SoftEligibilityOverrideCommand {
+  reason: string;
+  actorId: string;
+  actorType: "platform_admin" | "ops_user";
+}
+
 export interface AssignDispatchCommand {
   dispatchJobId: string;
   vehicleId: string;
   driverId: string;
+  softEligibilityOverride?: SoftEligibilityOverrideCommand;
 }
 
 export interface ReassignDispatchCommand {
@@ -2278,6 +2285,7 @@ export interface ReassignDispatchCommand {
   driverId: string;
   reasonCode: string;
   reasonNote?: string;
+  softEligibilityOverride?: SoftEligibilityOverrideCommand;
 }
 
 export interface RedispatchOrderCommand {

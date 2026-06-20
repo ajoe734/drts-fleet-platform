@@ -6,6 +6,8 @@ import type {
   DispatchCandidate,
   OwnedOrderRecord,
   RuntimeEligibilityDecisionRecord,
+  ServiceProductType,
+  SoftEligibilityOverrideCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -86,6 +88,7 @@ export class RuntimeEligibilityEvaluator {
     driverId: string,
     vehicleId: string,
     sourcePlatform?: string | null,
+    softEligibilityOverride?: SoftEligibilityOverrideCommand,
   ) {
     const evaluated = this.evaluateOrderCandidates(
       order,
@@ -102,7 +105,7 @@ export class RuntimeEligibilityEvaluator {
       sourcePlatform,
     )[0];
 
-    if (!evaluated || evaluated.eligibilityDecision !== "eligible") {
+    if (!evaluated) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
@@ -110,25 +113,56 @@ export class RuntimeEligibilityEvaluator {
         {
           driverId,
           vehicleId,
-          decision: evaluated?.eligibilityDecision ?? "ineligible",
-          hardReasonCodes: evaluated?.hardReasonCodes ?? [],
-          softReasonCodes: evaluated?.softReasonCodes ?? [],
-          missingRequirements: evaluated?.missingRequirements ?? [],
-          locationState: evaluated?.locationState ?? "missing",
+          decision: "ineligible",
+          hardReasonCodes: [],
+          softReasonCodes: [],
+          missingRequirements: [],
+          locationState: "missing",
         },
       );
     }
+
+    if (evaluated.eligibilityDecision === "eligible") {
+      return evaluated;
+    }
+
+    if (
+      evaluated.eligibilityDecision === "conditionally_eligible" &&
+      softEligibilityOverride
+    ) {
+      return evaluated;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+      "The candidate is no longer fully eligible for assignment.",
+      {
+        driverId,
+        vehicleId,
+        decision: evaluated.eligibilityDecision,
+        hardReasonCodes: evaluated.hardReasonCodes,
+        softReasonCodes: evaluated.softReasonCodes,
+        missingRequirements: evaluated.missingRequirements,
+        locationState: evaluated.locationState,
+      },
+    );
   }
 
   private evaluateCandidate(
     candidate: DispatchCandidate,
-    order: Pick<OwnedOrderRecord, "orderId" | "dispatchSemantics">,
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "dispatchSemantics" | "eligibilityPolicyVersion"
+    >,
     dispatchJobId: string,
     context: EligibilityResolvedContext,
   ): RuntimeEvaluatedCandidate {
     const hardReasonCodes: string[] = [];
     const softReasonCodes: string[] = [];
     const missingRequirements = new Set<string>();
+    const serviceProductCode =
+      context.serviceProductContext.serviceProductCode as ServiceProductType;
 
     if (
       !context.driver.dispatchEligible ||
@@ -152,7 +186,7 @@ export class RuntimeEligibilityEvaluator {
 
     if (
       !context.capability.supportedProducts.includes(
-        context.serviceProductContext.serviceProductCode,
+        serviceProductCode,
       )
     ) {
       hardReasonCodes.push("VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT");
@@ -249,7 +283,7 @@ export class RuntimeEligibilityEvaluator {
       driverId: candidate.driverId,
       vehicleId: candidate.vehicleId,
       serviceProductId: context.serviceProductContext.serviceProductId,
-      serviceProductCode: context.serviceProductContext.serviceProductCode,
+      serviceProductCode,
       policyVersion:
         order.eligibilityPolicyVersion ?? context.capability.updatedAt,
       decision,
@@ -265,7 +299,7 @@ export class RuntimeEligibilityEvaluator {
     return {
       ...candidate,
       serviceProductId: context.serviceProductContext.serviceProductId,
-      serviceProductCode: context.serviceProductContext.serviceProductCode,
+      serviceProductCode,
       serviceProductVersion:
         context.serviceProductContext.serviceProductVersion,
       eligibilityPolicyVersion: decisionRecord.policyVersion,
@@ -292,7 +326,6 @@ export class RuntimeEligibilityEvaluator {
       actionName: "evaluate_runtime_eligibility",
       resourceType: "dispatch_job",
       resourceId: decisionRecord.dispatchJobId,
-      oldValuesSummary: undefined,
       newValuesSummary: {
         decisionId: decisionRecord.decisionId,
         orderId: decisionRecord.orderId,

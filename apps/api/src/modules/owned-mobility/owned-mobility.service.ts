@@ -55,6 +55,7 @@ import type {
   ReservationHoldStatus,
   ResolveExceptionHoldCommand,
   ServiceProductType,
+  SoftEligibilityOverrideCommand,
   TenantApprovalEvaluationInputSnapshot,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
@@ -2427,12 +2428,16 @@ export class OwnedMobilityService implements OnModuleInit {
   assignDispatch(command: AssignDispatchCommand, requestId?: string) {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
+    const softEligibilityOverride = this.normalizeSoftEligibilityOverride(
+      command.softEligibilityOverride,
+    );
 
     return this.createDispatchAssignment(
       dispatchJob,
       order,
       command.vehicleId,
       command.driverId,
+      softEligibilityOverride,
       requestId,
     );
   }
@@ -2580,6 +2585,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       command.vehicleId,
       command.driverId,
+      this.normalizeSoftEligibilityOverride(command.softEligibilityOverride),
       requestId,
     );
   }
@@ -2589,16 +2595,21 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     vehicleId: string,
     driverId: string,
+    softEligibilityOverride?: SoftEligibilityOverrideCommand,
     requestId?: string,
   ) {
+    const runtimeEligibilityDecision = this.runtimeEligibilityEvaluator
+      ? this.runtimeEligibilityEvaluator.assertAssignmentEligible(
+          order,
+          dispatchJob.dispatchJobId,
+          driverId,
+          vehicleId,
+          this.resolveOrderSourcePlatform(order),
+          softEligibilityOverride,
+        )
+      : undefined;
+
     if (this.vehicleEligibilityService) {
-      this.runtimeEligibilityEvaluator?.assertAssignmentEligible(
-        order,
-        dispatchJob.dispatchJobId,
-        driverId,
-        vehicleId,
-        this.resolveOrderSourcePlatform(order),
-      );
       this.vehicleEligibilityService.assertDispatchAssignmentEligible(
         order,
         vehicleId,
@@ -2731,6 +2742,47 @@ export class OwnedMobilityService implements OnModuleInit {
         driverId,
       }),
     );
+    if (
+      runtimeEligibilityDecision?.eligibilityDecision ===
+        "conditionally_eligible" &&
+      softEligibilityOverride
+    ) {
+      const overrideAudit = this.auditNotificationService.recordAuditLog({
+        actorId: softEligibilityOverride.actorId,
+        actorType: softEligibilityOverride.actorType,
+        tenantId: order.tenantId,
+        moduleName: "vehicle_eligibility",
+        actionName: "override_soft_eligibility",
+        resourceType: "dispatch_job",
+        resourceId: dispatchJob.dispatchJobId,
+        newValuesSummary: {
+          orderId: order.orderId,
+          assignmentId: assignment.assignmentId,
+          vehicleId,
+          driverId,
+          reason: softEligibilityOverride.reason,
+          decision: runtimeEligibilityDecision.eligibilityDecision,
+          softReasonCodes: [...runtimeEligibilityDecision.softReasonCodes],
+          missingRequirements: [
+            ...runtimeEligibilityDecision.missingRequirements,
+          ],
+          locationState: runtimeEligibilityDecision.locationState,
+        },
+        ...(requestId ? { requestId } : {}),
+      });
+      traceLogs.push(
+        this.appendTrace(order.orderId, "eligibility.soft_override", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          assignmentId: assignment.assignmentId,
+          auditId: overrideAudit.auditId,
+          actorId: softEligibilityOverride.actorId,
+          actorType: softEligibilityOverride.actorType,
+          reason: softEligibilityOverride.reason,
+          softReasonCodes: [...runtimeEligibilityDecision.softReasonCodes],
+          locationState: runtimeEligibilityDecision.locationState,
+        }),
+      );
+    }
     this.auditNotificationService.recordNotification({
       tenantId: order.tenantId,
       channel: "driver_task",
@@ -4614,6 +4666,43 @@ export class OwnedMobilityService implements OnModuleInit {
     this.auditNotificationService.recordAuditLog(auditInput);
   }
 
+  private normalizeSoftEligibilityOverride(
+    override?: SoftEligibilityOverrideCommand,
+  ) {
+    if (!override) {
+      return undefined;
+    }
+
+    const reason = this.requireNonBlankText(
+      override.reason,
+      "softEligibilityOverride.reason",
+    );
+    const actorId = this.requireNonBlankText(
+      override.actorId,
+      "softEligibilityOverride.actorId",
+    );
+
+    if (
+      override.actorType !== "ops_user" &&
+      override.actorType !== "platform_admin"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_SOFT_ELIGIBILITY_OVERRIDE_ACTOR",
+        "Soft eligibility override actorType must be ops_user or platform_admin.",
+        {
+          actorType: override.actorType,
+        },
+      );
+    }
+
+    return {
+      reason,
+      actorId,
+      actorType: override.actorType,
+    } satisfies SoftEligibilityOverrideCommand;
+  }
+
   private recordReservationEscalationNotifications(
     order: OwnedOrderRecord,
     dispatchJobId: string,
@@ -5139,7 +5228,9 @@ export class OwnedMobilityService implements OnModuleInit {
         serviceProductCode: exactProduct.serviceProductCode,
         serviceProductVersion: exactProduct.serviceProductVersion,
         eligibilityPolicyVersion:
-          candidate.eligibilityPolicyVersion ??
+          ("eligibilityPolicyVersion" in candidate
+            ? candidate.eligibilityPolicyVersion
+            : undefined) ??
           exactProduct.eligibilityPolicyVersion,
       }));
   }
