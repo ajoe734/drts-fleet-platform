@@ -70,7 +70,11 @@ import {
 } from "@/lib/driver-location-heartbeat";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatMoney } from "@/lib/money";
-import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
+import {
+  formatDriverTaskServiceProductLabel,
+  formatDriverTaskStatusLabel,
+  readServiceProductCode,
+} from "@/lib/operational-labels";
 import {
   getTripExperienceState,
   getPrimaryTripAction,
@@ -833,9 +837,8 @@ export default function TripScreen() {
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
   const [forwardedActionResult, setForwardedActionResult] =
     useState<ForwardedDriverActionResponse | null>(null);
-  const [taskViewDetail, setTaskViewDetail] = useState<UnifiedDriverTaskView | null>(
-    null,
-  );
+  const [taskViewDetail, setTaskViewDetail] =
+    useState<UnifiedDriverTaskView | null>(null);
   const [platformPresenceSummary, setPlatformPresenceSummary] =
     useState<PlatformPresenceSummary | null>(null);
   const [queuedCompletionTaskId, setQueuedCompletionTaskId] = useState<
@@ -955,12 +958,13 @@ export default function TripScreen() {
   const platformLabel = getPlatformDisplayLabel(taskDetail?.sourcePlatform);
   const activePresenceRecord =
     taskDetail?.sourcePlatform && platformPresenceSummary
-      ? platformPresenceSummary.presences.find(
+      ? (platformPresenceSummary.presences.find(
           (record) => record.platformCode === taskDetail.sourcePlatform,
-        ) ?? null
+        ) ?? null)
       : null;
   const sourcePlatformOffline = activePresenceRecord?.status === "offline";
-  const queuedCompletionForActiveTask = queuedCompletionTaskId === taskDetail?.taskId;
+  const queuedCompletionForActiveTask =
+    queuedCompletionTaskId === taskDetail?.taskId;
   const forwardedAcceptAllowed =
     tripExperienceState === "forwarded_offered" &&
     (taskViewDetail?.allowedActions.includes("accept") ?? true);
@@ -1039,14 +1043,14 @@ export default function TripScreen() {
                   ? disabledForwardedAcceptReason
                   : disabledForwardedRejectReason
                     ? disabledForwardedRejectReason
-                : forwardedOutcomeSummary
-                  ? (forwardedActionResult?.driverMessage ??
-                    forwardedOutcomeSummary.title)
-                  : tripExperienceState === "forwarded_offered"
-                    ? tripAuthorityBanner.description
-                    : primaryTripAction
-                      ? primaryTripAction.helperText
-                      : tripStatusPresentation.detail;
+                    : forwardedOutcomeSummary
+                      ? (forwardedActionResult?.driverMessage ??
+                        forwardedOutcomeSummary.title)
+                      : tripExperienceState === "forwarded_offered"
+                        ? tripAuthorityBanner.description
+                        : primaryTripAction
+                          ? primaryTripAction.helperText
+                          : tripStatusPresentation.detail;
   const completeActionDisabled =
     primaryTripAction?.action === "complete"
       ? shouldDisableCompleteTripAction({
@@ -1109,6 +1113,13 @@ export default function TripScreen() {
     : recordingActive
       ? "追蹤 · 開啟"
       : `追蹤 · ${trackingDescriptor.label}`;
+  const serviceProductLabel = formatDriverTaskServiceProductLabel({
+    serviceProductCode:
+      readServiceProductCode(taskDetail) ?? readServiceProductCode(orderDetail),
+    serviceBucket: orderDetail?.serviceBucket ?? null,
+    businessDispatchSubtype: orderDetail?.businessDispatchSubtype ?? null,
+    dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
+  });
   const proofSummaryItems = [
     {
       label: "照片需求",
@@ -1884,6 +1895,9 @@ export default function TripScreen() {
                 tone={isForwardedTrip ? "info" : "accent"}
               >
                 {isForwardedTrip ? `平台 ${platformLabel}` : "自營派單"}
+              </Pill>
+              <Pill theme={driverCanvasTheme} tone="neutral">
+                {serviceProductLabel}
               </Pill>
               <Pill theme={driverCanvasTheme} tone="neutral">
                 {formatDriverTaskStatusLabel(taskDetail.status)}

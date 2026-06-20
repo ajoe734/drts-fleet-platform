@@ -4,11 +4,17 @@ import type {
   DriverPayoutStatus,
   DriverTaskStatus,
   Phase1ServiceBucket,
+  ServiceProductType,
 } from "@drts/contracts";
 
 export type DriverLocale = "en" | "zh";
 
 type LocalizedText = { en: string; zh: string };
+type ServiceProductCarrier = { serviceProductCode?: string | null };
+
+export function t(copy: LocalizedText, locale: DriverLocale = "zh"): string {
+  return copy[locale];
+}
 
 const DRIVER_TASK_STATUS_LABELS: Record<DriverTaskStatus, LocalizedText> = {
   pending_acceptance: { en: "Pending Acceptance", zh: "待接受" },
@@ -40,7 +46,7 @@ export function formatDriverTaskStatusLabel(
   locale: DriverLocale = "zh",
 ) {
   if (!status) {
-    return UNKNOWN_STATUS[locale];
+    return t(UNKNOWN_STATUS, locale);
   }
 
   return (
@@ -54,7 +60,7 @@ export function formatDriverPayoutStatusLabel(
   locale: DriverLocale = "zh",
 ) {
   if (!status) {
-    return UNKNOWN_STATUS[locale];
+    return t(UNKNOWN_STATUS, locale);
   }
 
   return (
@@ -84,24 +90,61 @@ export function formatDriverTaskTypeLabel(
   locale: DriverLocale = "zh",
 ) {
   if (businessDispatchSubtype === "enterprise_dispatch") {
-    return TASK_TYPE_LABELS.enterprise_dispatch[locale];
+    return t(TASK_TYPE_LABELS.enterprise_dispatch, locale);
   }
 
   if (businessDispatchSubtype === "credit_card_airport_transfer") {
-    return TASK_TYPE_LABELS.credit_card_airport_transfer[locale];
+    return t(TASK_TYPE_LABELS.credit_card_airport_transfer, locale);
   }
 
   if (dispatchSemantics === "forwarder_broadcast") {
-    return TASK_TYPE_LABELS.forwarder_broadcast[locale];
+    return t(TASK_TYPE_LABELS.forwarder_broadcast, locale);
   }
 
   if (serviceBucket === "standard_taxi") {
-    return TASK_TYPE_LABELS.standard_taxi[locale];
+    return t(TASK_TYPE_LABELS.standard_taxi, locale);
   }
 
   if (serviceBucket === "business_dispatch") {
-    return TASK_TYPE_LABELS.business_dispatch[locale];
+    return t(TASK_TYPE_LABELS.business_dispatch, locale);
   }
 
-  return TASK_TYPE_LABELS.standard_taxi[locale];
+  return t(TASK_TYPE_LABELS.standard_taxi, locale);
+}
+
+export function formatDriverTaskServiceProductLabel(
+  {
+    serviceProductCode,
+    serviceBucket,
+    businessDispatchSubtype,
+    dispatchSemantics,
+  }: {
+    serviceProductCode: ServiceProductType | string | null | undefined;
+    serviceBucket: Phase1ServiceBucket | string | null;
+    businessDispatchSubtype: BusinessDispatchSubtype | string | null;
+    dispatchSemantics: DispatchSemantics | string | null;
+  },
+  locale: DriverLocale = "zh",
+) {
+  if (typeof serviceProductCode === "string" && serviceProductCode.trim()) {
+    return serviceProductCode.trim();
+  }
+
+  return formatDriverTaskTypeLabel(
+    {
+      serviceBucket,
+      businessDispatchSubtype,
+      dispatchSemantics,
+    },
+    locale,
+  );
+}
+
+export function readServiceProductCode(value: unknown): string | null {
+  if (!value || typeof value !== "object" || !("serviceProductCode" in value)) {
+    return null;
+  }
+
+  const code = (value as ServiceProductCarrier).serviceProductCode;
+  return typeof code === "string" && code.trim() ? code.trim() : null;
 }
