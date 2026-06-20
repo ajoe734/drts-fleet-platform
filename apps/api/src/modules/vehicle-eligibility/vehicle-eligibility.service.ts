@@ -410,20 +410,6 @@ export class VehicleEligibilityService implements OnModuleInit {
       .filter((entry) => entry.eligibleVehicleIds.length > 0);
   }
 
-  getPolicyVersion(serviceProduct?: ServiceProductType) {
-    const effectiveMatrix = this.getEffectiveMatrix().filter(
-      (entry) =>
-        serviceProduct === undefined ||
-        entry.supportedProducts.includes(serviceProduct),
-    );
-    const latestUpdatedAt = effectiveMatrix.reduce<string>(
-      (latest, entry) => (entry.updatedAt > latest ? entry.updatedAt : latest),
-      SEED_TIMESTAMP,
-    );
-
-    return latestUpdatedAt;
-  }
-
   resolveServiceProductForOwnedOrder(
     order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
   ): ServiceProductType {

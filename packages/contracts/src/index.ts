@@ -2345,10 +2345,6 @@ export interface OwnedOrderRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
-  serviceProductId?: string | null;
-  serviceProductCode?: ServiceProductType | null;
-  serviceProductVersion?: string | null;
-  eligibilityPolicyVersion?: string | null;
   serviceBucket: Phase1ServiceBucket;
   dispatchSemantics: DispatchSemantics;
   businessDispatchSubtype: BusinessDispatchSubtype | null;
@@ -2421,10 +2417,6 @@ export interface BookingRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
-  serviceProductId?: string | null;
-  serviceProductCode?: ServiceProductType | null;
-  serviceProductVersion?: string | null;
-  eligibilityPolicyVersion?: string | null;
   status: BookingStatus;
   serviceBucket: "business_dispatch";
   businessDispatchSubtype: BusinessDispatchSubtype;
@@ -2531,10 +2523,6 @@ export interface DispatchCandidate {
   operatingArea: string;
   serviceBuckets: Phase1ServiceBucket[];
   etaMinutes: number;
-  serviceProductId?: string | null;
-  serviceProductCode?: ServiceProductType | null;
-  serviceProductVersion?: string | null;
-  eligibilityPolicyVersion?: string | null;
   locationState?: DispatchCandidateLocationState;
   currentLocation?: DriverLocationSnapshot | null;
 }
@@ -2550,10 +2538,6 @@ export type DispatchCandidateLocationState =
 export interface DispatchJobRecord {
   dispatchJobId: string;
   orderId: string;
-  serviceProductId?: string | null;
-  serviceProductCode?: ServiceProductType | null;
-  serviceProductVersion?: string | null;
-  eligibilityPolicyVersion?: string | null;
   status: DispatchJobStatus;
   mode: "auto";
   latestEtaMinutes: number | null;
@@ -2638,10 +2622,6 @@ export interface DispatchAssignmentRecord {
   dispatchJobId: string;
   orderId: string;
   taskId: string;
-  serviceProductId?: string | null;
-  serviceProductCode?: ServiceProductType | null;
-  serviceProductVersion?: string | null;
-  eligibilityPolicyVersion?: string | null;
   vehicleId: string;
   driverId: string;
   assignmentType: "metered" | "fixed_price";
@@ -2668,10 +2648,6 @@ export interface DriverTaskRecord {
   orderId: string;
   dispatchJobId: string;
   assignmentId: string;
-  serviceProductId?: string | null;
-  serviceProductCode?: ServiceProductType | null;
-  serviceProductVersion?: string | null;
-  eligibilityPolicyVersion?: string | null;
   driverId: string;
   vehicleId: string;
   sourcePlatform: string | null;
