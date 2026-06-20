@@ -32,7 +32,9 @@ import type {
   Phase1ServiceBucket,
   RejectExclusivityCommand,
   SupplyDispatchBlockReason,
+  SupplyDocumentRecord,
   SupplyLifecycleTraceRecord,
+  SupplySubmissionRecord,
   SubmitExclusivityReviewCommand,
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverWorkStateCommand,
@@ -40,7 +42,9 @@ import type {
   VehicleContractLifecycleStatus,
   VehicleContractRecord,
   VehicleRegistryRecord,
+  VehicleSupplyDraft,
   VehicleSupplyLifecycleRecord,
+  DriverSupplyDraft,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -49,6 +53,7 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import {
   RegulatoryRegistryRepository,
+  type RegulatoryRegistryQueryExecutor,
   type DriverHeartbeatEventSnapshot,
   type PersistRegulatoryRegistryChanges,
   type RegulatorySupplyPair,
@@ -64,6 +69,22 @@ type EtaDestination = {
 };
 
 type DriverHeartbeatContext = DriverHeartbeatEventSnapshot;
+
+type ProvisionFromSubmissionCommand = {
+  submission: SupplySubmissionRecord;
+  driverDraft: DriverSupplyDraft | null;
+  vehicleDraft: VehicleSupplyDraft | null;
+  documents: SupplyDocumentRecord[];
+  approvedAt: string;
+  reviewerId: string;
+};
+
+export type ProvisionedCanonicalRecordIds = {
+  canonicalDriverId: string | null;
+  canonicalVehicleId: string | null;
+  canonicalContractId: string | null;
+  canonicalPolicyId: string | null;
+};
 
 function createSeedDriver(
   input: Pick<
@@ -536,6 +557,97 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return Array.from(this.latestDriverLocations.values()).map((location) =>
       this.cloneDriverLocation(location),
     );
+  }
+
+  async provisionFromSubmission(
+    executor: RegulatoryRegistryQueryExecutor | null,
+    command: ProvisionFromSubmissionCommand,
+  ): Promise<ProvisionedCanonicalRecordIds> {
+    const current = command.submission;
+    if (
+      current.canonicalDriverId ||
+      current.canonicalVehicleId ||
+      current.canonicalContractId ||
+      current.canonicalPolicyId
+    ) {
+      return {
+        canonicalDriverId: current.canonicalDriverId,
+        canonicalVehicleId: current.canonicalVehicleId,
+        canonicalContractId: current.canonicalContractId,
+        canonicalPolicyId: current.canonicalPolicyId,
+      };
+    }
+
+    const changes: PersistRegulatoryRegistryChanges = {};
+    const canonicalDriver = command.driverDraft
+      ? this.provisionDriverFromDraft(command.driverDraft, command.approvedAt)
+      : null;
+    if (canonicalDriver) {
+      changes.drivers = [this.cloneDriver(canonicalDriver)];
+    }
+
+    const canonicalVehicle = command.vehicleDraft
+      ? this.provisionVehicleFromDraft(command.vehicleDraft, command.approvedAt)
+      : null;
+    if (canonicalVehicle) {
+      changes.vehicles = [this.cloneVehicle(canonicalVehicle)];
+    }
+
+    const contract = canonicalVehicle
+      ? this.provisionContractFromDocuments(
+          canonicalVehicle.vehicleId,
+          command,
+          command.approvedAt,
+        )
+      : null;
+    if (contract) {
+      changes.contracts = [this.cloneContract(contract)];
+    }
+
+    const policy = canonicalVehicle
+      ? this.provisionPolicyFromDocuments(
+          canonicalVehicle.vehicleId,
+          command,
+          command.approvedAt,
+        )
+      : null;
+    if (policy) {
+      changes.policies = [this.clonePolicy(policy)];
+    }
+
+    if (canonicalVehicle) {
+      const reconciledVehicle = this.reconcileVehicleLifecycle(
+        canonicalVehicle.vehicleId,
+        {
+          entityType: "vehicle",
+          message: "Vehicle canonical state provisioned from approved submission.",
+          occurredAt: command.approvedAt,
+          relatedEntityId: current.submissionId,
+          emitEvent: false,
+          persistContext: null,
+          touchUpdatedAt: true,
+        },
+      );
+      changes.vehicles = [this.cloneVehicle(reconciledVehicle)];
+    }
+
+    if (Object.keys(changes).length > 0) {
+      if (executor && this.regulatoryRegistryRepository?.isEnabled()) {
+        await this.regulatoryRegistryRepository.persistChangesWithExecutor(
+          executor,
+          changes,
+        );
+      } else {
+        this.persistChanges(changes, "provision_from_submission");
+      }
+    }
+
+    return {
+      canonicalDriverId: canonicalDriver?.driverId ?? null,
+      canonicalVehicleId: canonicalVehicle?.vehicleId ?? null,
+      canonicalContractId: contract?.contractId ?? null,
+      canonicalPolicyId: policy?.policyId ?? null,
+    };
   }
 
   createDriver(command: CreateDriverMasterCommand, requestId?: string) {
@@ -1679,6 +1791,163 @@ export class RegulatoryRegistryService implements OnModuleInit {
         options.persistContext,
       );
     }
+  }
+
+  private provisionDriverFromDraft(
+    draft: DriverSupplyDraft,
+    approvedAt: string,
+  ): DriverRegistryRecord {
+    const driverId = `drv_${randomUUID()}`;
+    const created = this.decorateDriver({
+      driverId,
+      name: draft.name.trim(),
+      supportedServiceBuckets: this.mapServiceBuckets(
+        draft.supportedServiceProductCodes,
+      ),
+      workState: "available",
+      licensesValid: true,
+      lifecycleStatus: "active",
+      eligibilityBlockedReasons: [],
+      dispatchEligible: false,
+      createdAt: approvedAt,
+      updatedAt: approvedAt,
+      activatedAt: approvedAt,
+      suspendedAt: null,
+      retiredAt: null,
+      profileUpdatedAt: approvedAt,
+      deviceBindings: [],
+    });
+
+    this.drivers = [this.cloneDriver(created), ...this.drivers];
+    return created;
+  }
+
+  private provisionVehicleFromDraft(
+    draft: VehicleSupplyDraft,
+    approvedAt: string,
+  ): VehicleRegistryRecord {
+    const created: VehicleRegistryRecord = {
+      vehicleId: `veh_${randomUUID()}`,
+      plateNo: draft.plateNo.trim(),
+      operatingArea: draft.businessArea.trim(),
+      supportedServiceBuckets: this.mapServiceBuckets(
+        draft.supportedServiceProductCodes,
+      ),
+      dispatchableFlag: false,
+      exclusivityApproved: false,
+      insuranceStatus: "expired",
+      updatedAt: approvedAt,
+      supplyLifecycle: createEmptySupplyLifecycle(approvedAt),
+    };
+
+    this.vehicles = [this.cloneVehicle(created), ...this.vehicles];
+    return created;
+  }
+
+  private provisionContractFromDocuments(
+    vehicleId: string,
+    command: ProvisionFromSubmissionCommand,
+    approvedAt: string,
+  ): VehicleContractRecord | null {
+    const contractDocument = command.documents.find((document) =>
+      [
+        "fleet_participation_contract",
+        "driver_management_contract",
+        "vehicle_management_contract",
+      ].includes(document.documentType),
+    );
+    if (!contractDocument) {
+      return null;
+    }
+
+    const contract: VehicleContractRecord = this.applyContractLifecycle(
+      {
+        contractId: `contract_${randomUUID()}`,
+        vehicleId,
+        partnerId: command.submission.fleetPartnerId,
+        partnerType: "fleet_partner",
+        contractType: contractDocument.documentType,
+        operatingAreaId: command.vehicleDraft?.businessArea ?? null,
+        serviceScope: this.mapServiceBuckets(
+          command.vehicleDraft?.supportedServiceProductCodes ??
+            command.driverDraft?.supportedServiceProductCodes ??
+            [],
+        ).join(","),
+        startAt:
+          this.dateOnlyToIso(contractDocument.effectiveFrom) ?? approvedAt,
+        endAt:
+          this.dateOnlyToInclusiveIso(contractDocument.effectiveUntil) ??
+          "2099-12-31T23:59:59.000Z",
+        status: "active",
+        lifecycleStatus: "draft",
+        approvedBy: command.reviewerId,
+        approvedAt,
+        createdAt: approvedAt,
+        updatedAt: approvedAt,
+      },
+      approvedAt,
+    );
+
+    this.contracts = [this.cloneContract(contract), ...this.contracts];
+    return contract;
+  }
+
+  private provisionPolicyFromDocuments(
+    vehicleId: string,
+    command: ProvisionFromSubmissionCommand,
+    approvedAt: string,
+  ): InsurancePolicyRecord | null {
+    const policyDocument = command.documents.find(
+      (document) => document.documentType === "insurance_policy",
+    );
+    if (!policyDocument) {
+      return null;
+    }
+
+    const policy: InsurancePolicyRecord = this.applyPolicyLifecycle(
+      {
+        policyId: `policy_${randomUUID()}`,
+        vehicleId,
+        policyNo: policyDocument.documentId,
+        insuranceType: "passenger_liability",
+        insurerName: "submission_provisioned",
+        coverageAmount: 0,
+        startAt: this.dateOnlyToIso(policyDocument.effectiveFrom) ?? approvedAt,
+        endAt:
+          this.dateOnlyToInclusiveIso(policyDocument.effectiveUntil) ??
+          "2099-12-31T23:59:59.000Z",
+        status: "active",
+        lifecycleStatus: "pending",
+        createdAt: approvedAt,
+        updatedAt: approvedAt,
+      },
+      approvedAt,
+    );
+
+    this.policies = [this.clonePolicy(policy), ...this.policies];
+    return policy;
+  }
+
+  private mapServiceBuckets(
+    serviceProductCodes: readonly string[],
+  ): Phase1ServiceBucket[] {
+    if (
+      serviceProductCodes.some((code) =>
+        /business|airport|premium|dispatch/i.test(code),
+      )
+    ) {
+      return ["business_dispatch"];
+    }
+
+    return ["standard_taxi"];
+  }
+
+  private dateOnlyToIso(value: string | null): string | null {
+    return value ? `${value}T00:00:00.000Z` : null;
+  }
+
+  private dateOnlyToInclusiveIso(value: string | null): string | null {
+    return value ? `${value}T23:59:59.000Z` : null;
   }
 
   private reconcileVehicleLifecycle(

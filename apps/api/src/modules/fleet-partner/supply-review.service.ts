@@ -3,13 +3,18 @@ import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  DriverSupplyDraft,
+  SupplyDocumentRecord,
   SupplyReviewActionCommand,
   SupplySubmissionRecord,
   SupplySubmissionStatus,
+  VehicleSupplyDraft,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
+  type SubmissionApprovalArtifacts,
   SupplySubmissionRepository,
   type SupplyReviewEventRecord,
 } from "./supply-submission.repository";
@@ -63,6 +68,76 @@ const REVIEW_SUBMISSION_SEED: SupplySubmissionRecord[] = [
   },
 ];
 
+const REVIEW_DRIVER_DRAFTS_SEED: DriverSupplyDraft[] = [
+  {
+    submissionId: "sup-sub-demo-002",
+    name: "Demo Driver Two",
+    mobile: "0912000002",
+    professionalDriverLicenseNo: "PDL-DEMO-002",
+    professionalDriverLicenseExpiry: "2027-12-31",
+    taxiDriverRegistrationNo: "TAXI-DEMO-002",
+    taxiDriverRegistrationArea: "taipei",
+    taxiDriverRegistrationExpiry: "2027-12-31",
+    supportedServiceProductCodes: ["standard_taxi"],
+    preferredVehicleSubmissionId: null,
+  },
+];
+
+const REVIEW_VEHICLE_DRAFTS_SEED: VehicleSupplyDraft[] = [
+  {
+    submissionId: "sup-sub-demo-002",
+    plateNo: "SUP-2002",
+    licenseType: "taxi",
+    brand: "Toyota",
+    model: "Camry",
+    modelYear: 2024,
+    seatCount: 4,
+    luggageCapacity: 2,
+    businessArea: "taipei",
+    supportedServiceProductCodes: ["standard_taxi"],
+    airportTransferEligible: false,
+    fixedFareAllowed: true,
+    currentDriverSubmissionId: null,
+  },
+];
+
+const REVIEW_DOCUMENTS_SEED: SupplyDocumentRecord[] = [
+  {
+    documentId: "sup-doc-ins-002",
+    fleetPartnerId: "fleet-demo-001",
+    submissionId: "sup-sub-demo-002",
+    documentType: "insurance_policy",
+    fileObjectKey: "files/ins-002.pdf",
+    originalFileName: "insurance.pdf",
+    contentType: "application/pdf",
+    fileSize: 1024,
+    checksumSha256: "ins-002",
+    effectiveFrom: "2026-06-20",
+    effectiveUntil: "2027-06-19",
+    reviewStatus: "approved",
+    reviewComment: null,
+    uploadedBy: "fleet-user-2",
+    uploadedAt: "2026-06-20T00:12:00.000Z",
+  },
+  {
+    documentId: "sup-doc-contract-002",
+    fleetPartnerId: "fleet-demo-001",
+    submissionId: "sup-sub-demo-002",
+    documentType: "fleet_participation_contract",
+    fileObjectKey: "files/contract-002.pdf",
+    originalFileName: "contract.pdf",
+    contentType: "application/pdf",
+    fileSize: 1024,
+    checksumSha256: "contract-002",
+    effectiveFrom: "2026-06-20",
+    effectiveUntil: "2027-06-19",
+    reviewStatus: "approved",
+    reviewComment: null,
+    uploadedBy: "fleet-user-2",
+    uploadedAt: "2026-06-20T00:13:00.000Z",
+  },
+];
+
 type SubmissionTransitionConfig = {
   nextStatus: SupplySubmissionStatus;
   eventType: SupplyReviewEventRecord["eventType"];
@@ -75,8 +150,15 @@ export class SupplyReviewService implements OnModuleInit {
     ...submission,
   }));
   private reviewEvents: SupplyReviewEventRecord[] = [];
+  private driverDrafts = REVIEW_DRIVER_DRAFTS_SEED.map((draft) => ({ ...draft }));
+  private vehicleDrafts = REVIEW_VEHICLE_DRAFTS_SEED.map((draft) => ({
+    ...draft,
+  }));
+  private documents = REVIEW_DOCUMENTS_SEED.map((document) => ({ ...document }));
 
   constructor(
+    @Optional()
+    private readonly regulatoryRegistryService?: RegulatoryRegistryService,
     @Optional()
     private readonly supplySubmissionRepository?: SupplySubmissionRepository,
   ) {}
@@ -93,6 +175,9 @@ export class SupplyReviewService implements OnModuleInit {
           ...submission,
         }));
       }
+      this.driverDrafts = state.driverDrafts.map((draft) => ({ ...draft }));
+      this.vehicleDrafts = state.vehicleDrafts.map((draft) => ({ ...draft }));
+      this.documents = state.documents.map((document) => ({ ...document }));
       this.reviewEvents = state.reviewEvents.map((event) => ({ ...event }));
     } catch (error) {
       this.supplySubmissionRepository.reportPersistenceFailure(
@@ -189,6 +274,23 @@ export class SupplyReviewService implements OnModuleInit {
             this.assertReviewerNotSubmitter(current, reviewerId);
           }
 
+          const approvalArtifacts =
+            config.nextStatus === "approved"
+              ? await this.supplySubmissionRepository!.loadApprovalArtifacts(
+                  executor,
+                  current.submissionId,
+                )
+              : null;
+          const canonical =
+            config.nextStatus === "approved"
+              ? await this.provisionCanonicalRecords(
+                  executor,
+                  current,
+                  approvalArtifacts,
+                  reviewerId,
+                )
+              : null;
+
           const now = new Date().toISOString();
           const transitionParams = {
             submissionId: current.submissionId,
@@ -207,6 +309,7 @@ export class SupplyReviewService implements OnModuleInit {
                   reviewedBy: reviewerId,
                   reviewedAt: now,
                 }),
+            ...(canonical ?? {}),
           };
           const updated =
             await this.supplySubmissionRepository!.transitionSubmissionStatus(
@@ -243,6 +346,19 @@ export class SupplyReviewService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
+    const approvalArtifacts =
+      config.nextStatus === "approved"
+        ? this.loadInMemoryApprovalArtifacts(current.submissionId)
+        : null;
+    const canonical =
+      config.nextStatus === "approved"
+        ? await this.provisionCanonicalRecords(
+            null,
+            current,
+            approvalArtifacts,
+            reviewerId,
+          )
+        : null;
     const updated: SupplySubmissionRecord = {
       ...current,
       status: config.nextStatus,
@@ -250,6 +366,7 @@ export class SupplyReviewService implements OnModuleInit {
       reviewReasonCode: normalizedCommand.reasonCode,
       reviewComment: normalizedCommand.comment,
       updatedAt: now,
+      ...(canonical ?? {}),
     };
     if (config.eventType === "review_started") {
       updated.reviewStartedBy = reviewerId;
@@ -275,6 +392,45 @@ export class SupplyReviewService implements OnModuleInit {
     ];
 
     return { ...updated };
+  }
+
+  private loadInMemoryApprovalArtifacts(
+    submissionId: string,
+  ): SubmissionApprovalArtifacts {
+    return {
+      driverDraft:
+        this.driverDrafts.find((draft) => draft.submissionId === submissionId) ??
+        null,
+      vehicleDraft:
+        this.vehicleDrafts.find((draft) => draft.submissionId === submissionId) ??
+        null,
+      documents: this.documents.filter(
+        (document) => document.submissionId === submissionId,
+      ),
+    };
+  }
+
+  private async provisionCanonicalRecords(
+    executor: { query<T>(text: string, values?: readonly unknown[]): Promise<T> } | null,
+    submission: SupplySubmissionRecord,
+    artifacts: SubmissionApprovalArtifacts | null,
+    reviewerId: string,
+  ) {
+    if (!artifacts || !this.regulatoryRegistryService) {
+      return null;
+    }
+
+    return this.regulatoryRegistryService.provisionFromSubmission(
+      executor as never,
+      {
+        submission,
+        driverDraft: artifacts.driverDraft,
+        vehicleDraft: artifacts.vehicleDraft,
+        documents: artifacts.documents,
+        approvedAt: new Date().toISOString(),
+        reviewerId,
+      },
+    );
   }
 
   private async findSubmission(submissionId: string) {
