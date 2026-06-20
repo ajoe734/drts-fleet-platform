@@ -894,7 +894,7 @@ jobs:
             api_origin="${{ steps.api_url.outputs.url }}"
           fi
 
-          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201"
+          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy"
 
           if [[ -n "${DEV_IAP_CLIENT_ID:-}" ]]; then
             env_vars="${env_vars},DRTS_API_AUTH_AUDIENCE=${DEV_IAP_CLIENT_ID}"
