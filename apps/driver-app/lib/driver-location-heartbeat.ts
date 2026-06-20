@@ -1,12 +1,26 @@
-import type { DriverTaskRecord } from "@drts/contracts";
+import type {
+  DriverLocationHeartbeatEnvelope,
+  DriverTaskRecord,
+} from "@drts/contracts";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import type { TaskManagerTaskBody } from "expo-task-manager";
 
-import { getDriverClient, getDriverId } from "@/lib/api-client";
+import {
+  enqueueDriverLocationEvent,
+  flushDriverLocationQueue,
+  initializeDriverLocationOfflineQueue,
+} from "@/lib/driver-location-offline-queue";
 
 const DRIVER_LOCATION_TASK_NAME = "drts-driver-location-heartbeat";
 const HEARTBEAT_INTERVAL_MS = 15_000;
+const TRACKED_TASK_STATUSES = new Set([
+  "accepted",
+  "enroute_pickup",
+  "arrived_pickup",
+  "on_trip",
+  "proof_pending",
+]);
 
 type HeartbeatLocationUpdate = {
   latitude: number;
@@ -24,10 +38,14 @@ type HeartbeatSyncResult = {
 };
 
 type HeartbeatTransportMode = "none" | "foreground" | "background";
+type HeartbeatAssignment = Pick<DriverTaskRecord, "taskId" | "driverId"> & {
+  status?: string | null;
+};
 
 const listeners = new Set<HeartbeatListener>();
 
 let activeTaskId: string | null = null;
+let activeTaskStatus: string | null = null;
 let latestUpdate: HeartbeatLocationUpdate | null = null;
 let heartbeatQueue = Promise.resolve();
 let foregroundLocationSubscription: Location.LocationSubscription | null = null;
@@ -63,16 +81,43 @@ function getHeartbeatRecordedAtMs(update: HeartbeatLocationUpdate): number {
   return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
+function resolveHeartbeatWorkState(
+  taskStatus: string | null,
+): DriverLocationHeartbeatEnvelope["workState"] {
+  switch (taskStatus) {
+    case "accepted":
+      return "assigned";
+    case "enroute_pickup":
+      return "enroute";
+    case "arrived_pickup":
+      return "arrived";
+    case "on_trip":
+    case "proof_pending":
+      return "on_trip";
+    default:
+      return "available";
+  }
+}
+
+function shouldTrackTask(taskStatus: string | null | undefined): boolean {
+  return taskStatus != null && TRACKED_TASK_STATUSES.has(taskStatus);
+}
+
 function queueHeartbeat(
   update: HeartbeatLocationUpdate,
   source: Exclude<HeartbeatTransportMode, "none">,
+  options?: {
+    preserveKeyEvent?: boolean;
+    workStateOverride?: DriverLocationHeartbeatEnvelope["workState"];
+  },
 ) {
-  if (transportMode !== source) {
+  if (!options?.preserveKeyEvent && transportMode !== source) {
     return;
   }
 
   const recordedAtMs = getHeartbeatRecordedAtMs(update);
   if (
+    !options?.preserveKeyEvent &&
     lastHeartbeatQueuedAtMs !== null &&
     recordedAtMs - lastHeartbeatQueuedAtMs < HEARTBEAT_INTERVAL_MS
   ) {
@@ -83,18 +128,45 @@ function queueHeartbeat(
   heartbeatQueue = heartbeatQueue
     .catch(() => undefined)
     .then(async () => {
-      const client = getDriverClient();
-      await client.recordDriverLocation({
-        driverId: getDriverId(),
+      await enqueueDriverLocationEvent({
+        taskId: activeTaskId,
+        recordedAt: update.recordedAt,
         lat: update.latitude,
         lng: update.longitude,
-        accuracyM: update.accuracyM ?? undefined,
-        recordedAt: update.recordedAt,
+        accuracyM: update.accuracyM,
+        workState:
+          options?.workStateOverride ??
+          resolveHeartbeatWorkState(activeTaskStatus),
+        appState: source === "background" ? "background" : "foreground",
+        transportMode: source,
+        networkType: "unknown",
+        preserveKeyEvent: options?.preserveKeyEvent ?? false,
       });
+      await flushDriverLocationQueue();
     })
     .catch((error: unknown) => {
-      console.error("Driver location heartbeat failed", error);
+      console.error("Driver location heartbeat queueing failed", error);
     });
+}
+
+function queueStateSnapshot(
+  nextTaskStatus: string | null,
+  source: Exclude<HeartbeatTransportMode, "none">,
+) {
+  if (!latestUpdate) {
+    return;
+  }
+
+  const previousWorkState = resolveHeartbeatWorkState(activeTaskStatus);
+  const nextWorkState = resolveHeartbeatWorkState(nextTaskStatus);
+  if (previousWorkState === nextWorkState) {
+    return;
+  }
+
+  queueHeartbeat(latestUpdate, source, {
+    preserveKeyEvent: true,
+    workStateOverride: nextWorkState,
+  });
 }
 
 function stopForegroundLocationSubscription() {
@@ -133,6 +205,7 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
 }
 
 export function initializeDriverLocationHeartbeat() {
+  void initializeDriverLocationOfflineQueue();
   return DRIVER_LOCATION_TASK_NAME;
 }
 
@@ -215,7 +288,15 @@ async function seedLatestLocation() {
 }
 
 export async function stopDriverLocationHeartbeat(): Promise<void> {
+  if (transportMode !== "none") {
+    queueStateSnapshot(
+      null,
+      transportMode === "background" ? "background" : "foreground",
+    );
+  }
+
   activeTaskId = null;
+  activeTaskStatus = null;
   transportMode = "none";
   lastHeartbeatQueuedAtMs = null;
   stopForegroundLocationSubscription();
@@ -227,12 +308,15 @@ export async function stopDriverLocationHeartbeat(): Promise<void> {
   if (started) {
     await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK_NAME);
   }
+
+  await flushDriverLocationQueue();
 }
 
 export async function syncDriverLocationHeartbeat(
-  task: Pick<DriverTaskRecord, "taskId" | "driverId"> | null,
+  task: HeartbeatAssignment | null,
 ): Promise<HeartbeatSyncResult> {
-  if (!task) {
+  const nextTaskStatus = task?.status?.trim() || (task ? "on_trip" : null);
+  if (!task || !shouldTrackTask(nextTaskStatus)) {
     await stopDriverLocationHeartbeat();
     return {
       status: "idle",
@@ -240,6 +324,8 @@ export async function syncDriverLocationHeartbeat(
       latestUpdate,
     };
   }
+
+  await initializeDriverLocationOfflineQueue();
 
   const permissionResult = await ensureLocationPermissions();
   if (permissionResult.status === "permission_denied") {
@@ -250,10 +336,16 @@ export async function syncDriverLocationHeartbeat(
 
   const nextTransportMode =
     permissionResult.message === null ? "background" : "foreground";
-  if (activeTaskId !== task.taskId || transportMode !== nextTransportMode) {
+  const taskChanged =
+    activeTaskId !== task.taskId || activeTaskStatus !== nextTaskStatus;
+  if (taskChanged || transportMode !== nextTransportMode) {
     lastHeartbeatQueuedAtMs = null;
   }
+  if (taskChanged && transportMode !== "none") {
+    queueStateSnapshot(nextTaskStatus, transportMode);
+  }
   activeTaskId = task.taskId;
+  activeTaskStatus = nextTaskStatus;
   transportMode = nextTransportMode;
   stopForegroundLocationSubscription();
 
@@ -299,6 +391,11 @@ export async function syncDriverLocationHeartbeat(
   }
 
   await seedLatestLocation();
+  if (taskChanged && latestUpdate) {
+    queueHeartbeat(latestUpdate, nextTransportMode, {
+      preserveKeyEvent: true,
+    });
+  }
 
   return {
     status: "active",

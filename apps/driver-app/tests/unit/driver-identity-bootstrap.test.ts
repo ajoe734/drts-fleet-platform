@@ -131,6 +131,7 @@ describe("syncDriverIdentityBootstrap", () => {
     expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith({
       taskId: "task-001",
       driverId: "driver-001",
+      status: "on_trip",
     });
     expect(resetDriverAppToOnboarding).not.toHaveBeenCalled();
   });
