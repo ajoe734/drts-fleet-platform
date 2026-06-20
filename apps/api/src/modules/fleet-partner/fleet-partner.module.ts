@@ -7,6 +7,10 @@ import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-regi
 import { FleetPartnerController } from "./fleet-partner.controller";
 import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
+import { SupplyDocumentService } from "./supply-document.service";
+import { SupplyReadinessService } from "./supply-readiness.service";
+import { SupplyReviewService } from "./supply-review.service";
+import { SupplySubmissionService } from "./supply-submission.service";
 
 @Module({
   imports: [
@@ -16,7 +20,20 @@ import { FleetPartnerService } from "./fleet-partner.service";
     RegulatoryRegistryModule,
   ],
   controllers: [FleetPartnerController],
-  providers: [FleetPartnerService, FleetPartnerRepository],
-  exports: [FleetPartnerService],
+  providers: [
+    FleetPartnerService,
+    FleetPartnerRepository,
+    SupplySubmissionService,
+    SupplyReviewService,
+    SupplyReadinessService,
+    SupplyDocumentService,
+  ],
+  exports: [
+    FleetPartnerService,
+    SupplySubmissionService,
+    SupplyReviewService,
+    SupplyReadinessService,
+    SupplyDocumentService,
+  ],
 })
 export class FleetPartnerModule {}
