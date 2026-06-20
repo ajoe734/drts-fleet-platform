@@ -42,9 +42,10 @@ type QueueEventRow = {
 
 type QueueEventDraft = Omit<
   DriverLocationHeartbeatEnvelope,
-  "deviceId" | "driverId" | "eventId" | "sequenceNo"
+  "deviceId" | "driverId" | "eventId" | "sequenceNo" | "vehicleId"
 > & {
   preserveKeyEvent?: boolean;
+  vehicleId?: string | null;
 };
 
 type QueueStore = {
@@ -333,6 +334,7 @@ export async function enqueueDriverLocationEvent(
 
   const payload: DriverLocationHeartbeatEnvelope = {
     ...draft,
+    vehicleId: draft.vehicleId ?? null,
     deviceId,
     driverId,
     eventId,
