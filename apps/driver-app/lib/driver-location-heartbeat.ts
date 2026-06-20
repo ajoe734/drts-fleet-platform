@@ -1,10 +1,14 @@
+import * as SecureStore from "expo-secure-store";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import type { TaskManagerTaskBody } from "expo-task-manager";
+import type { DriverWorkState } from "@drts/contracts";
 
-import { getDriverClient, getDriverId } from "@/lib/api-client";
+import { getDriverClient, getDriverDeviceId } from "@/lib/api-client";
 
 const DRIVER_LOCATION_TASK_NAME = "drts-driver-location-heartbeat";
+const DRIVER_LOCATION_BATCH_API_PATH = "/api/driver/location-heartbeats/batch";
+const DRIVER_LOCATION_SEQUENCE_KEY = "drts.driver.locationHeartbeatSequence";
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const AVAILABILITY_HEARTBEAT_INTERVAL_MS = 30_000;
 const INCIDENT_HEARTBEAT_INTERVAL_MS = 5_000;
@@ -48,6 +52,36 @@ type HeartbeatCadence = {
   requiresBackgroundPermission: boolean;
 };
 
+type DriverLocationHeartbeatEnvelope = {
+  eventId: string;
+  deviceId: string;
+  driverId: string;
+  vehicleId: string | null;
+  taskId: string | null;
+  sequenceNo: number;
+  recordedAt: string;
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  workState:
+    | "offline"
+    | "available"
+    | "assigned"
+    | "enroute"
+    | "arrived"
+    | "on_trip"
+    | "incident";
+  appState: "foreground" | "background";
+  transportMode: "foreground" | "background";
+  networkType: "wifi" | "cellular" | "offline" | "unknown";
+};
+
+type DriverLocationHeartbeatBatchResponse = {
+  items: Array<{
+    accepted: boolean;
+  }>;
+};
+
 const listeners = new Set<HeartbeatListener>();
 
 let activeHeartbeatProfile: DriverLocationHeartbeatProfile | null = null;
@@ -58,6 +92,179 @@ let transportMode: HeartbeatTransportMode = "none";
 let lastHeartbeatQueuedAtMs: number | null = null;
 let activeHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
 let lastHeartbeatSyncSignature: string | null = null;
+let lastDriverWorkState: DriverWorkState | null = null;
+let driverWorkStateQueue = Promise.resolve();
+let batchHeartbeatAvailable: boolean | null = null;
+let nextHeartbeatSequenceNoValue = 1;
+let heartbeatSequenceInitialized = false;
+let heartbeatSequenceInitPromise: Promise<void> | null = null;
+let heartbeatSequenceQueue = Promise.resolve();
+
+function createHeartbeatEventId(): string {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return `drvloc-${globalThis.crypto.randomUUID()}`;
+  }
+
+  return `drvloc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function mapEnvelopeWorkState(
+  workState: DriverHeartbeatWorkState,
+): DriverLocationHeartbeatEnvelope["workState"] {
+  switch (workState) {
+    case "online_available":
+      return "available";
+    case "assigned":
+      return "assigned";
+    case "enroute_to_pickup":
+      return "enroute";
+    case "arrived_pickup":
+      return "arrived";
+    case "on_trip":
+      return "on_trip";
+    case "incident":
+      return "incident";
+  }
+}
+
+function mapDriverWorkState(
+  workState: DriverHeartbeatWorkState | "offline",
+): DriverWorkState {
+  switch (workState) {
+    case "online_available":
+      return "available";
+    case "assigned":
+      return "reserved";
+    case "enroute_to_pickup":
+      return "enroute";
+    case "arrived_pickup":
+      return "arrived";
+    case "on_trip":
+      return "on_trip";
+    case "incident":
+      return "incident_hold";
+    case "offline":
+      return "offline";
+  }
+}
+
+function isMissingBatchHeartbeatApiError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /^API error (404|405):/i.test(error.message.trim())
+  );
+}
+
+async function ensureHeartbeatSequenceInitialized() {
+  if (heartbeatSequenceInitialized) {
+    return;
+  }
+  if (!heartbeatSequenceInitPromise) {
+    heartbeatSequenceInitPromise = SecureStore.getItemAsync(
+      DRIVER_LOCATION_SEQUENCE_KEY,
+    )
+      .then((rawValue) => {
+        const parsed = rawValue ? Number.parseInt(rawValue, 10) : 0;
+        nextHeartbeatSequenceNoValue =
+          Number.isSafeInteger(parsed) && parsed > 0 ? parsed + 1 : 1;
+      })
+      .catch(() => {
+        nextHeartbeatSequenceNoValue = 1;
+      })
+      .finally(() => {
+        heartbeatSequenceInitialized = true;
+      });
+  }
+
+  await heartbeatSequenceInitPromise;
+}
+
+async function getNextHeartbeatSequenceNo(): Promise<number> {
+  await ensureHeartbeatSequenceInitialized();
+
+  let reservedSequenceNo = nextHeartbeatSequenceNoValue;
+  heartbeatSequenceQueue = heartbeatSequenceQueue
+    .catch(() => undefined)
+    .then(async () => {
+      reservedSequenceNo = nextHeartbeatSequenceNoValue;
+      nextHeartbeatSequenceNoValue += 1;
+      await SecureStore.setItemAsync(
+        DRIVER_LOCATION_SEQUENCE_KEY,
+        String(reservedSequenceNo),
+      ).catch(() => undefined);
+    });
+
+  await heartbeatSequenceQueue;
+  return reservedSequenceNo;
+}
+
+function queueDriverWorkStateSync(
+  driverId: string,
+  workState: DriverHeartbeatWorkState | "offline",
+) {
+  const nextWorkState = mapDriverWorkState(workState);
+  if (lastDriverWorkState === nextWorkState) {
+    return;
+  }
+
+  driverWorkStateQueue = driverWorkStateQueue
+    .catch(() => undefined)
+    .then(async () => {
+      if (lastDriverWorkState === nextWorkState) {
+        return;
+      }
+
+      await getDriverClient().updateDriverWorkState(driverId, {
+        workState: nextWorkState,
+      });
+      lastDriverWorkState = nextWorkState;
+    })
+    .catch((error: unknown) => {
+      console.warn("Driver work state sync failed", error);
+    });
+}
+
+async function recordBatchHeartbeat(
+  profile: DriverLocationHeartbeatProfile,
+  update: HeartbeatLocationUpdate,
+  source: Exclude<HeartbeatTransportMode, "none">,
+) {
+  const event: DriverLocationHeartbeatEnvelope = {
+    eventId: createHeartbeatEventId(),
+    deviceId: await getDriverDeviceId(),
+    driverId: profile.driverId,
+    vehicleId: null,
+    taskId: profile.taskId,
+    sequenceNo: await getNextHeartbeatSequenceNo(),
+    recordedAt: update.recordedAt,
+    lat: update.latitude,
+    lng: update.longitude,
+    accuracyM: update.accuracyM,
+    workState: mapEnvelopeWorkState(profile.workState),
+    appState: source,
+    transportMode: source,
+    networkType: "unknown",
+  };
+
+  const response = await getDriverClient().post<DriverLocationHeartbeatBatchResponse>(
+    DRIVER_LOCATION_BATCH_API_PATH,
+    {
+      body: {
+        items: [event],
+      },
+    },
+  );
+
+  const ack = response.items[0];
+  if (!ack?.accepted) {
+    throw new Error(
+      `Driver location heartbeat was rejected for event ${event.eventId}.`,
+    );
+  }
+}
 
 function emitLocationUpdate(update: HeartbeatLocationUpdate) {
   latestUpdate = update;
@@ -90,6 +297,7 @@ function getHeartbeatRecordedAtMs(update: HeartbeatLocationUpdate): number {
 
 function queueHeartbeat(
   update: HeartbeatLocationUpdate,
+  profile: DriverLocationHeartbeatProfile,
   source: Exclude<HeartbeatTransportMode, "none">,
 ) {
   if (transportMode !== source) {
@@ -108,9 +316,22 @@ function queueHeartbeat(
   heartbeatQueue = heartbeatQueue
     .catch(() => undefined)
     .then(async () => {
-      const client = getDriverClient();
-      await client.recordDriverLocation({
-        driverId: getDriverId(),
+      if (batchHeartbeatAvailable !== false) {
+        try {
+          await recordBatchHeartbeat(profile, update, source);
+          batchHeartbeatAvailable = true;
+          return;
+        } catch (error: unknown) {
+          if (!isMissingBatchHeartbeatApiError(error)) {
+            throw error;
+          }
+
+          batchHeartbeatAvailable = false;
+        }
+      }
+
+      await getDriverClient().recordDriverLocation({
+        driverId: profile.driverId,
         lat: update.latitude,
         lng: update.longitude,
         accuracyM: update.accuracyM ?? undefined,
@@ -164,7 +385,11 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK_NAME)) {
         taskLocations[taskLocations.length - 1],
       );
       emitLocationUpdate(update);
-      queueHeartbeat(update, "background");
+      const profile = activeHeartbeatProfile;
+      if (!profile) {
+        return;
+      }
+      queueHeartbeat(update, profile, "background");
     },
   );
 }
@@ -263,6 +488,7 @@ async function seedLatestLocation() {
 }
 
 export async function stopDriverLocationHeartbeat(): Promise<void> {
+  const previousProfile = activeHeartbeatProfile;
   if (activeHeartbeatProfile) {
     logHeartbeatTransition("stopped", {
       workState: activeHeartbeatProfile.workState,
@@ -277,6 +503,9 @@ export async function stopDriverLocationHeartbeat(): Promise<void> {
   lastHeartbeatQueuedAtMs = null;
   activeHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
   stopForegroundLocationSubscription();
+  if (previousProfile) {
+    queueDriverWorkStateSync(previousProfile.driverId, "offline");
+  }
 
   const started = await Location.hasStartedLocationUpdatesAsync(
     DRIVER_LOCATION_TASK_NAME,
@@ -359,6 +588,9 @@ export async function syncDriverLocationHeartbeat(
 
   const permissionResult = await ensureLocationPermissions(cadence);
   if (permissionResult.status === "permission_denied") {
+    if (profile.workState === "online_available") {
+      queueDriverWorkStateSync(profile.driverId, "offline");
+    }
     logHeartbeatTransition(
       [
         "permission_denied",
@@ -392,6 +624,7 @@ export async function syncDriverLocationHeartbeat(
   activeHeartbeatProfile = profile;
   transportMode = nextTransportMode;
   stopForegroundLocationSubscription();
+  queueDriverWorkStateSync(profile.driverId, profile.workState);
 
   foregroundLocationSubscription = await Location.watchPositionAsync(
     {
@@ -402,7 +635,7 @@ export async function syncDriverLocationHeartbeat(
     (position) => {
       const update = toHeartbeatLocationUpdate(position);
       emitLocationUpdate(update);
-      queueHeartbeat(update, "foreground");
+      queueHeartbeat(update, profile, "foreground");
     },
   );
 

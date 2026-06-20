@@ -15,7 +15,9 @@ type TaskHandler = (body: {
   error?: { message: string };
 }) => Promise<void> | void;
 
+const post = vi.fn();
 const recordDriverLocation = vi.fn();
+const updateDriverWorkState = vi.fn();
 const watchPositionAsync = vi.fn();
 const removeSubscription = vi.fn();
 const getForegroundPermissionsAsync = vi.fn();
@@ -27,16 +29,21 @@ const startLocationUpdatesAsync = vi.fn();
 const stopLocationUpdatesAsync = vi.fn();
 const getLastKnownPositionAsync = vi.fn();
 const getCurrentPositionAsync = vi.fn();
+const getItemAsync = vi.fn();
+const setItemAsync = vi.fn();
 
 let watchCallback: LocationCallback | null = null;
 let taskHandler: TaskHandler | null = null;
 let taskDefined = false;
+let secureStoreValues = new Map<string, string>();
 
 vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
+    post,
     recordDriverLocation,
+    updateDriverWorkState,
   }),
-  getDriverId: () => "driver-001",
+  getDriverDeviceId: async () => "device-001",
 }));
 
 vi.mock("expo-location", () => ({
@@ -56,6 +63,11 @@ vi.mock("expo-location", () => ({
   getLastKnownPositionAsync,
   getCurrentPositionAsync,
   watchPositionAsync,
+}));
+
+vi.mock("expo-secure-store", () => ({
+  getItemAsync,
+  setItemAsync,
 }));
 
 vi.mock("expo-task-manager", () => ({
@@ -82,15 +94,17 @@ function createLocation(
 }
 
 async function flushHeartbeatQueue() {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 10; index += 1) {
+    await Promise.resolve();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 beforeEach(() => {
   taskDefined = false;
   taskHandler = null;
   watchCallback = null;
+  secureStoreValues = new Map();
 
   vi.resetModules();
   vi.clearAllMocks();
@@ -110,6 +124,24 @@ beforeEach(() => {
   stopLocationUpdatesAsync.mockResolvedValue(undefined);
   getLastKnownPositionAsync.mockResolvedValue(null);
   getCurrentPositionAsync.mockResolvedValue(null);
+  post.mockResolvedValue({
+    items: [
+      {
+        eventId: "evt-001",
+        accepted: true,
+        duplicate: false,
+        currentLocationUpdated: true,
+        serverReceivedAt: "2026-06-20T12:00:00.000Z",
+      },
+    ],
+  });
+  updateDriverWorkState.mockResolvedValue(undefined);
+  getItemAsync.mockImplementation(async (key: string) => {
+    return secureStoreValues.get(key) ?? null;
+  });
+  setItemAsync.mockImplementation(async (key: string, value: string) => {
+    secureStoreValues.set(key, value);
+  });
 });
 
 afterEach(async () => {
@@ -129,6 +161,7 @@ describe("driver location heartbeat transport", () => {
       taskId: null,
       driverId: "driver-001",
     });
+    await flushHeartbeatQueue();
 
     expect(infoSpy).toHaveBeenCalledWith(
       "Driver heartbeat transition",
@@ -141,6 +174,9 @@ describe("driver location heartbeat transport", () => {
         distanceM: 100,
       }),
     );
+    expect(updateDriverWorkState).toHaveBeenCalledWith("driver-001", {
+      workState: "available",
+    });
   });
 
   it("keeps foreground updates for trip metrics while background transport owns heartbeats", async () => {
@@ -176,14 +212,28 @@ describe("driver location heartbeat transport", () => {
     });
     await flushHeartbeatQueue();
 
-    expect(recordDriverLocation).toHaveBeenCalledTimes(1);
-    expect(recordDriverLocation).toHaveBeenCalledWith({
-      driverId: "driver-001",
-      lat: 25.033,
-      lng: 121.5654,
-      accuracyM: 8,
-      recordedAt: new Date(16_000).toISOString(),
-    });
+    expect(post).toHaveBeenCalledWith(
+      "/api/driver/location-heartbeats/batch",
+      expect.objectContaining({
+        body: {
+          items: [
+            expect.objectContaining({
+              driverId: "driver-001",
+              deviceId: "device-001",
+              sequenceNo: 1,
+              workState: "on_trip",
+              taskId: "task-001",
+              appState: "background",
+              transportMode: "background",
+              networkType: "unknown",
+              lat: 25.033,
+              lng: 121.5654,
+            }),
+          ],
+        },
+      }),
+    );
+    expect(recordDriverLocation).not.toHaveBeenCalled();
   });
 
   it("uses a throttled foreground fallback when background permission is unavailable", async () => {
@@ -213,21 +263,46 @@ describe("driver location heartbeat transport", () => {
     watchCallback?.(createLocation(16_500, 25.035, 121.5656));
     await flushHeartbeatQueue();
 
-    expect(recordDriverLocation).toHaveBeenCalledTimes(2);
-    expect(recordDriverLocation).toHaveBeenNthCalledWith(1, {
-      driverId: "driver-001",
-      lat: 25.033,
-      lng: 121.5654,
-      accuracyM: 8,
-      recordedAt: new Date(1_000).toISOString(),
-    });
-    expect(recordDriverLocation).toHaveBeenNthCalledWith(2, {
-      driverId: "driver-001",
-      lat: 25.034,
-      lng: 121.5655,
-      accuracyM: 8,
-      recordedAt: new Date(11_000).toISOString(),
-    });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenNthCalledWith(
+      1,
+      "/api/driver/location-heartbeats/batch",
+      expect.objectContaining({
+        body: {
+          items: [
+            expect.objectContaining({
+              sequenceNo: 1,
+              taskId: "task-001",
+              workState: "on_trip",
+              appState: "foreground",
+              transportMode: "foreground",
+              lat: 25.033,
+              lng: 121.5654,
+            }),
+          ],
+        },
+      }),
+    );
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      "/api/driver/location-heartbeats/batch",
+      expect.objectContaining({
+        body: {
+          items: [
+            expect.objectContaining({
+              sequenceNo: 2,
+              taskId: "task-001",
+              workState: "on_trip",
+              appState: "foreground",
+              transportMode: "foreground",
+              lat: 25.034,
+              lng: 121.5655,
+            }),
+          ],
+        },
+      }),
+    );
+    expect(recordDriverLocation).not.toHaveBeenCalled();
   });
 
   it("uses the availability cadence for online available tracking", async () => {
@@ -259,6 +334,35 @@ describe("driver location heartbeat transport", () => {
     );
   });
 
+  it("falls back to the legacy single-heartbeat endpoint when batch ingestion is unavailable", async () => {
+    post.mockRejectedValueOnce(
+      new Error('API error 404: {"error":{"message":"Not Found"}}'),
+    );
+
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    await heartbeatModule.syncDriverLocationHeartbeat({
+      workState: "online_available",
+      taskId: null,
+      driverId: "driver-001",
+    });
+
+    await taskHandler?.({
+      data: {
+        locations: [createLocation(31_000)],
+      },
+    });
+    await flushHeartbeatQueue();
+
+    expect(recordDriverLocation).toHaveBeenCalledWith({
+      driverId: "driver-001",
+      lat: 25.033,
+      lng: 121.5654,
+      accuracyM: 8,
+      recordedAt: new Date(31_000).toISOString(),
+    });
+  });
+
   it("rejects online available tracking when background permission is unavailable", async () => {
     getBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
     requestBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
@@ -270,6 +374,7 @@ describe("driver location heartbeat transport", () => {
       taskId: null,
       driverId: "driver-001",
     });
+    await flushHeartbeatQueue();
 
     expect(result).toMatchObject({
       status: "permission_denied",
@@ -277,6 +382,9 @@ describe("driver location heartbeat transport", () => {
         "Background location is required before the driver can stay online and available for dispatch.",
     });
     expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
+    expect(updateDriverWorkState).toHaveBeenCalledWith("driver-001", {
+      workState: "offline",
+    });
   });
 
   it("uses the incident cadence for emergency tracking", async () => {
@@ -318,5 +426,12 @@ describe("driver location heartbeat transport", () => {
         distanceM: 10,
       }),
     );
+
+    await heartbeatModule.stopDriverLocationHeartbeat();
+    await flushHeartbeatQueue();
+
+    expect(updateDriverWorkState).toHaveBeenCalledWith("driver-001", {
+      workState: "offline",
+    });
   });
 });
