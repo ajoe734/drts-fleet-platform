@@ -286,6 +286,13 @@ export class SupplySubmissionRepository {
       ),
     ]);
 
+    const documentUploadIntents = documentUploadIntentsResult.rows.map((row) =>
+      this.mapDocumentUploadIntentRow(row),
+    );
+    for (const intent of documentUploadIntents) {
+      this.documentUploadIntents.set(intent.objectKey, { ...intent });
+    }
+
     return {
       submissions: submissionsResult.rows.map((row) =>
         this.mapSubmissionRow(row),
@@ -297,9 +304,7 @@ export class SupplySubmissionRepository {
         this.mapVehicleDraftRow(row),
       ),
       documents: documentsResult.rows.map((row) => this.mapDocumentRow(row)),
-      documentUploadIntents: documentUploadIntentsResult.rows.map((row) =>
-        this.mapDocumentUploadIntentRow(row),
-      ),
+      documentUploadIntents,
       reviewEvents: reviewEventsResult.rows.map((row) =>
         this.mapReviewEventRow(row),
       ),
@@ -565,45 +570,56 @@ export class SupplySubmissionRepository {
   }
 
   async saveDocumentUploadIntent(intent: SupplyDocumentUploadIntentRecord) {
+    this.documentUploadIntents.set(intent.objectKey, { ...intent });
     if (!this.isEnabled()) {
-      this.documentUploadIntents.set(intent.objectKey, { ...intent });
       return;
     }
 
-    await this.databaseService!.query(
-      `
-        INSERT INTO fleet.supply_document_upload_intents (
-          object_key,
-          submission_id,
-          fleet_partner_id,
-          document_type,
-          original_file_name,
-          content_type,
-          created_at,
-          expires_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8
-        )
-        ON CONFLICT (object_key) DO UPDATE SET
-          submission_id = EXCLUDED.submission_id,
-          fleet_partner_id = EXCLUDED.fleet_partner_id,
-          document_type = EXCLUDED.document_type,
-          original_file_name = EXCLUDED.original_file_name,
-          content_type = EXCLUDED.content_type,
-          created_at = EXCLUDED.created_at,
-          expires_at = EXCLUDED.expires_at
-      `,
-      [
-        intent.objectKey,
-        intent.submissionId,
-        intent.fleetPartnerId,
-        intent.documentType,
-        intent.originalFileName,
-        intent.contentType,
-        intent.createdAt,
-        intent.expiresAt,
-      ],
-    );
+    try {
+      await this.databaseService!.query(
+        `
+          INSERT INTO fleet.supply_document_upload_intents (
+            object_key,
+            submission_id,
+            fleet_partner_id,
+            document_type,
+            original_file_name,
+            content_type,
+            created_at,
+            expires_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8
+          )
+          ON CONFLICT (object_key) DO UPDATE SET
+            submission_id = EXCLUDED.submission_id,
+            fleet_partner_id = EXCLUDED.fleet_partner_id,
+            document_type = EXCLUDED.document_type,
+            original_file_name = EXCLUDED.original_file_name,
+            content_type = EXCLUDED.content_type,
+            created_at = EXCLUDED.created_at,
+            expires_at = EXCLUDED.expires_at
+        `,
+        [
+          intent.objectKey,
+          intent.submissionId,
+          intent.fleetPartnerId,
+          intent.documentType,
+          intent.originalFileName,
+          intent.contentType,
+          intent.createdAt,
+          intent.expiresAt,
+        ],
+      );
+    } catch (error) {
+      if (this.isMissingRelationError(error)) {
+        this.reportPersistenceFailure(
+          error,
+          "save supply document upload intent",
+        );
+        return;
+      }
+      throw error;
+    }
   }
 
   async findDocumentUploadIntent(objectKey: string) {
@@ -612,32 +628,63 @@ export class SupplySubmissionRepository {
       return intent ? { ...intent } : null;
     }
 
-    const result = await this.databaseService!.query<SupplyDocumentUploadIntentRow>(
-      `
-        SELECT *
-        FROM fleet.supply_document_upload_intents
-        WHERE object_key = $1
-      `,
-      [objectKey],
-    );
+    try {
+      const result =
+        await this.databaseService!.query<SupplyDocumentUploadIntentRow>(
+          `
+            SELECT *
+            FROM fleet.supply_document_upload_intents
+            WHERE object_key = $1
+          `,
+          [objectKey],
+        );
 
-    const row = result.rows[0];
-    return row ? this.mapDocumentUploadIntentRow(row) : null;
+      const row = result.rows[0];
+      if (!row) {
+        const fallbackIntent = this.documentUploadIntents.get(objectKey);
+        return fallbackIntent ? { ...fallbackIntent } : null;
+      }
+
+      const intent = this.mapDocumentUploadIntentRow(row);
+      this.documentUploadIntents.set(intent.objectKey, { ...intent });
+      return intent;
+    } catch (error) {
+      if (this.isMissingRelationError(error)) {
+        this.reportPersistenceFailure(
+          error,
+          "find supply document upload intent",
+        );
+        const intent = this.documentUploadIntents.get(objectKey);
+        return intent ? { ...intent } : null;
+      }
+      throw error;
+    }
   }
 
   async deleteDocumentUploadIntent(objectKey: string) {
+    this.documentUploadIntents.delete(objectKey);
     if (!this.isEnabled()) {
-      this.documentUploadIntents.delete(objectKey);
       return;
     }
 
-    await this.databaseService!.query(
-      `
-        DELETE FROM fleet.supply_document_upload_intents
-        WHERE object_key = $1
-      `,
-      [objectKey],
-    );
+    try {
+      await this.databaseService!.query(
+        `
+          DELETE FROM fleet.supply_document_upload_intents
+          WHERE object_key = $1
+        `,
+        [objectKey],
+      );
+    } catch (error) {
+      if (this.isMissingRelationError(error)) {
+        this.reportPersistenceFailure(
+          error,
+          "delete supply document upload intent",
+        );
+        return;
+      }
+      throw error;
+    }
   }
 
   reportPersistenceFailure(error: unknown, context: string) {
@@ -678,11 +725,7 @@ export class SupplySubmissionRepository {
     try {
       return await executor.query<T>(text, values);
     } catch (error) {
-      const code =
-        error && typeof error === "object"
-          ? (error as { code?: string }).code
-          : undefined;
-      if (code === "42P01") {
+      if (this.isMissingRelationError(error)) {
         this.logger.warn(
           `Supply submission load skipped a missing relation ${relationName}: ${
             error instanceof Error ? error.message : String(error)
@@ -692,6 +735,14 @@ export class SupplySubmissionRepository {
       }
       throw error;
     }
+  }
+
+  private isMissingRelationError(error: unknown) {
+    return (
+      !!error &&
+      typeof error === "object" &&
+      (error as { code?: string }).code === "42P01"
+    );
   }
 
   private async persistChangesWithExecutor(

@@ -367,6 +367,80 @@ describe("supply submission repository", () => {
     });
   });
 
+  it("falls back to the repository intent cache when the durable intent relation is missing", async () => {
+    const query = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing upload intents"), { code: "42P01" }),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing upload intents"), { code: "42P01" }),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing upload intents"), { code: "42P01" }),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing upload intents"), { code: "42P01" }),
+      );
+    const repository = new SupplySubmissionRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(
+      repository.saveDocumentUploadIntent(createUploadIntent()),
+    ).resolves.toBeUndefined();
+    await expect(
+      repository.findDocumentUploadIntent(createUploadIntent().objectKey),
+    ).resolves.toEqual(createUploadIntent());
+
+    await expect(
+      repository.deleteDocumentUploadIntent(createUploadIntent().objectKey),
+    ).resolves.toBeUndefined();
+    await expect(
+      repository.findDocumentUploadIntent(createUploadIntent().objectKey),
+    ).resolves.toBeNull();
+  });
+
+  it("hydrates repository upload intent fallback state from durable load results", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            object_key: createUploadIntent().objectKey,
+            submission_id: createUploadIntent().submissionId,
+            fleet_partner_id: createUploadIntent().fleetPartnerId,
+            document_type: createUploadIntent().documentType,
+            original_file_name: createUploadIntent().originalFileName,
+            content_type: createUploadIntent().contentType,
+            created_at: createUploadIntent().createdAt,
+            expires_at: createUploadIntent().expiresAt,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing upload intents"), { code: "42P01" }),
+      );
+    const repository = new SupplySubmissionRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await expect(repository.loadState()).resolves.toMatchObject({
+      documentUploadIntents: [createUploadIntent()],
+    });
+    await expect(
+      repository.findDocumentUploadIntent(createUploadIntent().objectKey),
+    ).resolves.toEqual(createUploadIntent());
+  });
+
   it("persists dependent supply tables only after supply_submissions completes", async () => {
     const submissionInsert = createDeferred<{ rows: [] }>();
     const seenSql: string[] = [];
