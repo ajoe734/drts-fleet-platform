@@ -428,18 +428,40 @@ export default function ShiftScreen() {
   };
 
   if (!isProvisioned) {
+    // Both DEVICE_NOT_BOUND and IDENTITY_INVALID clear provisioning, so an
+    // unprovisioned session can mean either an unbound device or an
+    // invalidated/suspended identity. Surface the specific gate reason — its
+    // copy and resolution action (e.g. "重新綁定裝置" for a revoked identity vs
+    // "前往配置裝置" for an unbound device) — instead of a single generic
+    // "device not configured" message, per SD §6.4 / SA §6.3. (MOB-APP-003.)
+    const gateReason =
+      gate?.reasons.find(
+        (reason) => reason.check === "identity" || reason.check === "device",
+      ) ?? null;
+
     return (
       <AppScreen scrollable={false}>
         <PageHeader
           title={driverStrings.shift.title}
-          subtitle="需要完成裝置配置"
+          subtitle={gateReason?.title ?? "需要完成裝置配置"}
         />
         <EmptyState
-          title="尚未完成裝置配置"
-          description="完成裝置綁定後，才能查看班表與進行上下線打卡。"
-          icon="lock-closed-outline"
-          actionTitle="前往配置裝置"
-          onAction={() => router.push("/onboarding")}
+          title={gateReason?.title ?? "尚未完成裝置配置"}
+          description={
+            gateReason?.description ??
+            "完成裝置綁定後，才能查看班表與進行上下線打卡。"
+          }
+          icon={
+            gateReason?.check === "identity"
+              ? "alert-circle-outline"
+              : "lock-closed-outline"
+          }
+          actionTitle={gateReason?.actionLabel ?? "前往配置裝置"}
+          onAction={() =>
+            gateReason
+              ? void handleGateResolution(gateReason)
+              : router.push("/onboarding")
+          }
           style={styles.fillState}
         />
       </AppScreen>
