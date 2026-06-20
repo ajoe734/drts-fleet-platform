@@ -6,13 +6,14 @@ import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry
 import { SupplyReviewService } from "../../src/modules/fleet-partner/supply-review.service";
 
 describe("INT-SUP-001 approve submission provisions registry", () => {
-  it("creates canonical driver, vehicle, contract, and policy during approval", async () => {
+  it("creates canonical driver, vehicle, contract, policy, and vehicle affiliation during approval", async () => {
+    const auditNotificationService = new AuditNotificationService();
     const registry = new RegulatoryRegistryService(
       {
         publishDriverLocationUpdated: () => undefined,
         publishSupplyLifecycleUpdated: () => undefined,
       } as never,
-      new AuditNotificationService(),
+      auditNotificationService,
       new DriverProfileService(new AuditNotificationService()),
       undefined,
     );
@@ -53,6 +54,25 @@ describe("INT-SUP-001 approve submission provisions registry", () => {
       registry
         .listPolicies()
         .some((policy) => policy.policyId === approved.canonicalPolicyId),
+    ).toBe(true);
+
+    await expect(service.listVehicleAffiliations()).resolves.toEqual([
+      expect.objectContaining({
+        vehicleId: approved.canonicalVehicleId,
+        fleetPartnerId: "fleet-demo-001",
+        affiliationType: "contracted_under",
+        effectiveFrom: "2026-06-20T00:00:00.000Z",
+        effectiveUntil: "2027-06-19T23:59:59.000Z",
+        sourceSubmissionId: "sup-sub-demo-002",
+        status: "active",
+      }),
+    ]);
+    expect(
+      auditNotificationService
+        .getAuditLogsSnapshot()
+        .some(
+          (entry) => entry.actionName === "create_vehicle_fleet_affiliation",
+        ),
     ).toBe(true);
   });
 });

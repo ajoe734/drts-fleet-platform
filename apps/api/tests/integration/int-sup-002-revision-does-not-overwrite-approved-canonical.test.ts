@@ -72,12 +72,13 @@ describe("INT-SUP-002 revision does not overwrite approved canonical", () => {
       reviewerId: "platform-reviewer-003",
     });
 
-    expect(canonical).toEqual({
+    expect(canonical).toMatchObject({
       canonicalDriverId: "drv-existing-001",
       canonicalVehicleId: "veh-existing-001",
       canonicalContractId: "contract-existing-001",
       canonicalPolicyId: "policy-existing-001",
     });
+    expect(canonical.vehicleAffiliation).toBeNull();
     expect(
       registry.listDrivers().some((driver) => driver.driverId === "drv-existing-001"),
     ).toBe(false);

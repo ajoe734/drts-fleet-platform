@@ -41,6 +41,8 @@ import type {
   UpdateVehicleComplianceCommand,
   VehicleContractLifecycleStatus,
   VehicleContractRecord,
+  VehicleFleetAffiliationRecord,
+  VehicleFleetAffiliationType,
   VehicleRegistryRecord,
   VehicleSupplyDraft,
   VehicleSupplyLifecycleRecord,
@@ -84,6 +86,10 @@ export type ProvisionedCanonicalRecordIds = {
   canonicalVehicleId: string | null;
   canonicalContractId: string | null;
   canonicalPolicyId: string | null;
+};
+
+export type SubmissionProvisioningResult = ProvisionedCanonicalRecordIds & {
+  vehicleAffiliation: VehicleFleetAffiliationRecord | null;
 };
 
 function createSeedDriver(
@@ -562,7 +568,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
   async provisionFromSubmission(
     executor: RegulatoryRegistryQueryExecutor | null,
     command: ProvisionFromSubmissionCommand,
-  ): Promise<ProvisionedCanonicalRecordIds> {
+  ): Promise<SubmissionProvisioningResult> {
     const current = command.submission;
     if (
       current.canonicalDriverId ||
@@ -575,6 +581,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
         canonicalVehicleId: current.canonicalVehicleId,
         canonicalContractId: current.canonicalContractId,
         canonicalPolicyId: current.canonicalPolicyId,
+        vehicleAffiliation: null,
       };
     }
 
@@ -615,9 +622,26 @@ export class RegulatoryRegistryService implements OnModuleInit {
       changes.policies = [this.clonePolicy(policy)];
     }
 
-    if (canonicalVehicle) {
+    const resolvedCanonicalDriverId =
+      canonicalDriver?.driverId ?? current.subjectDriverId ?? null;
+    const resolvedCanonicalVehicleId =
+      canonicalVehicle?.vehicleId ?? current.subjectVehicleId ?? null;
+    const vehicleAffiliation = resolvedCanonicalVehicleId
+      ? this.createVehicleFleetAffiliation(
+          resolvedCanonicalVehicleId,
+          command,
+          command.approvedAt,
+        )
+      : null;
+
+    if (
+      resolvedCanonicalVehicleId &&
+      this.vehicles.some(
+        (candidate) => candidate.vehicleId === resolvedCanonicalVehicleId,
+      )
+    ) {
       const reconciledVehicle = this.reconcileVehicleLifecycle(
-        canonicalVehicle.vehicleId,
+        resolvedCanonicalVehicleId,
         {
           entityType: "vehicle",
           message: "Vehicle canonical state provisioned from approved submission.",
@@ -643,11 +667,34 @@ export class RegulatoryRegistryService implements OnModuleInit {
     }
 
     return {
-      canonicalDriverId: canonicalDriver?.driverId ?? null,
-      canonicalVehicleId: canonicalVehicle?.vehicleId ?? null,
+      canonicalDriverId: resolvedCanonicalDriverId,
+      canonicalVehicleId: resolvedCanonicalVehicleId,
       canonicalContractId: contract?.contractId ?? null,
       canonicalPolicyId: policy?.policyId ?? null,
+      vehicleAffiliation,
     };
+  }
+
+  recordVehicleFleetAffiliationCreated(
+    affiliation: VehicleFleetAffiliationRecord,
+    reviewerId: string,
+    requestId?: string,
+  ) {
+    this.recordAudit(
+      {
+        actorId: reviewerId,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "create_vehicle_fleet_affiliation",
+        resourceType: "vehicle_fleet_affiliation",
+        resourceId: affiliation.affiliationId,
+        newValuesSummary: this.buildVehicleFleetAffiliationAuditSummary(
+          affiliation,
+        ),
+      },
+      requestId,
+    );
   }
 
   createDriver(command: CreateDriverMasterCommand, requestId?: string) {
@@ -1928,6 +1975,64 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return policy;
   }
 
+  private createVehicleFleetAffiliation(
+    vehicleId: string,
+    command: ProvisionFromSubmissionCommand,
+    approvedAt: string,
+  ): VehicleFleetAffiliationRecord {
+    const basisDocument =
+      this.selectVehicleAffiliationBasisDocument(command.documents);
+
+    return {
+      affiliationId: randomUUID(),
+      vehicleId,
+      fleetPartnerId: command.submission.fleetPartnerId,
+      affiliationType: this.mapVehicleAffiliationType(
+        basisDocument?.documentType ?? null,
+      ),
+      effectiveFrom:
+        this.dateOnlyToIso(basisDocument?.effectiveFrom ?? null) ?? approvedAt,
+      effectiveUntil:
+        this.dateOnlyToInclusiveIso(basisDocument?.effectiveUntil ?? null),
+      status: "active",
+      sourceSubmissionId: command.submission.submissionId,
+      createdAt: approvedAt,
+      updatedAt: approvedAt,
+    };
+  }
+
+  private selectVehicleAffiliationBasisDocument(
+    documents: readonly SupplyDocumentRecord[],
+  ): SupplyDocumentRecord | null {
+    return (
+      documents.find(
+        (document) => document.documentType === "vehicle_management_contract",
+      ) ??
+      documents.find(
+        (document) => document.documentType === "driver_management_contract",
+      ) ??
+      documents.find(
+        (document) => document.documentType === "fleet_participation_contract",
+      ) ??
+      null
+    );
+  }
+
+  private mapVehicleAffiliationType(
+    documentType: SupplyDocumentRecord["documentType"] | null,
+  ): VehicleFleetAffiliationType {
+    if (
+      documentType === "vehicle_management_contract" ||
+      documentType === "driver_management_contract"
+    ) {
+      return "managed_by";
+    }
+    if (documentType === "fleet_participation_contract") {
+      return "contracted_under";
+    }
+    return "owned_by";
+  }
+
   private mapServiceBuckets(
     serviceProductCodes: readonly string[],
   ): Phase1ServiceBucket[] {
@@ -1948,6 +2053,20 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   private dateOnlyToInclusiveIso(value: string | null): string | null {
     return value ? `${value}T23:59:59.000Z` : null;
+  }
+
+  private buildVehicleFleetAffiliationAuditSummary(
+    affiliation: VehicleFleetAffiliationRecord,
+  ) {
+    return {
+      vehicleId: affiliation.vehicleId,
+      fleetPartnerId: affiliation.fleetPartnerId,
+      affiliationType: affiliation.affiliationType,
+      effectiveFrom: affiliation.effectiveFrom,
+      effectiveUntil: affiliation.effectiveUntil,
+      status: affiliation.status,
+      sourceSubmissionId: affiliation.sourceSubmissionId,
+    };
   }
 
   private reconcileVehicleLifecycle(

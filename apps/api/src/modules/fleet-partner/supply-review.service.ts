@@ -8,6 +8,7 @@ import type {
   SupplyReviewActionCommand,
   SupplySubmissionRecord,
   SupplySubmissionStatus,
+  VehicleFleetAffiliationRecord,
   VehicleSupplyDraft,
 } from "@drts/contracts";
 
@@ -155,6 +156,7 @@ export class SupplyReviewService implements OnModuleInit {
     ...draft,
   }));
   private documents = REVIEW_DOCUMENTS_SEED.map((document) => ({ ...document }));
+  private vehicleAffiliations: VehicleFleetAffiliationRecord[] = [];
 
   constructor(
     @Optional()
@@ -179,6 +181,9 @@ export class SupplyReviewService implements OnModuleInit {
       this.vehicleDrafts = state.vehicleDrafts.map((draft) => ({ ...draft }));
       this.documents = state.documents.map((document) => ({ ...document }));
       this.reviewEvents = state.reviewEvents.map((event) => ({ ...event }));
+      this.vehicleAffiliations = state.vehicleAffiliations.map(
+        (affiliation) => ({ ...affiliation }),
+      );
     } catch (error) {
       this.supplySubmissionRepository.reportPersistenceFailure(
         error,
@@ -199,6 +204,17 @@ export class SupplyReviewService implements OnModuleInit {
   async getSubmission(submissionId: string) {
     const submission = await this.findSubmission(submissionId);
     return { ...submission };
+  }
+
+  async listVehicleAffiliations() {
+    if (this.supplySubmissionRepository?.isEnabled()) {
+      const state = await this.supplySubmissionRepository.loadState();
+      return state.vehicleAffiliations.map((affiliation) => ({
+        ...affiliation,
+      }));
+    }
+
+    return this.vehicleAffiliations.map((affiliation) => ({ ...affiliation }));
   }
 
   async startSubmissionReview(
@@ -259,7 +275,7 @@ export class SupplyReviewService implements OnModuleInit {
     const reviewerId = this.requireActorId(reviewerActorId);
 
     if (this.supplySubmissionRepository?.isEnabled()) {
-      return this.supplySubmissionRepository.withTransaction(
+      const result = await this.supplySubmissionRepository.withTransaction(
         async (executor) => {
           const current = await this.supplySubmissionRepository!.lockSubmission(
             executor,
@@ -290,6 +306,14 @@ export class SupplyReviewService implements OnModuleInit {
                   reviewerId,
                 )
               : null;
+          const transitionCanonical = canonical
+            ? {
+                canonicalDriverId: canonical.canonicalDriverId,
+                canonicalVehicleId: canonical.canonicalVehicleId,
+                canonicalContractId: canonical.canonicalContractId,
+                canonicalPolicyId: canonical.canonicalPolicyId,
+              }
+            : null;
 
           const now = new Date().toISOString();
           const transitionParams = {
@@ -309,7 +333,7 @@ export class SupplyReviewService implements OnModuleInit {
                   reviewedBy: reviewerId,
                   reviewedAt: now,
                 }),
-            ...(canonical ?? {}),
+            ...(transitionCanonical ?? {}),
           };
           const updated =
             await this.supplySubmissionRepository!.transitionSubmissionStatus(
@@ -330,12 +354,27 @@ export class SupplyReviewService implements OnModuleInit {
                   now,
                 ),
               ],
+              ...(canonical?.vehicleAffiliation
+                ? {
+                    vehicleAffiliations: [canonical.vehicleAffiliation],
+                  }
+                : {}),
             },
           );
-
-          return updated;
+          return {
+            updated,
+            vehicleAffiliation: canonical?.vehicleAffiliation ?? null,
+          };
         },
       );
+      if (result.vehicleAffiliation) {
+        this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
+          result.vehicleAffiliation,
+          reviewerId,
+        );
+      }
+
+      return result.updated;
     }
 
     const current = await this.findSubmission(submissionId);
@@ -359,6 +398,14 @@ export class SupplyReviewService implements OnModuleInit {
             reviewerId,
           )
         : null;
+    const transitionCanonical = canonical
+      ? {
+          canonicalDriverId: canonical.canonicalDriverId,
+          canonicalVehicleId: canonical.canonicalVehicleId,
+          canonicalContractId: canonical.canonicalContractId,
+          canonicalPolicyId: canonical.canonicalPolicyId,
+        }
+      : null;
     const updated: SupplySubmissionRecord = {
       ...current,
       status: config.nextStatus,
@@ -366,7 +413,7 @@ export class SupplyReviewService implements OnModuleInit {
       reviewReasonCode: normalizedCommand.reasonCode,
       reviewComment: normalizedCommand.comment,
       updatedAt: now,
-      ...(canonical ?? {}),
+      ...(transitionCanonical ?? {}),
     };
     if (config.eventType === "review_started") {
       updated.reviewStartedBy = reviewerId;
@@ -390,6 +437,16 @@ export class SupplyReviewService implements OnModuleInit {
       ),
       ...this.reviewEvents,
     ];
+    if (canonical?.vehicleAffiliation) {
+      this.vehicleAffiliations = [
+        { ...canonical.vehicleAffiliation },
+        ...this.vehicleAffiliations,
+      ];
+      this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
+        canonical.vehicleAffiliation,
+        reviewerId,
+      );
+    }
 
     return { ...updated };
   }
