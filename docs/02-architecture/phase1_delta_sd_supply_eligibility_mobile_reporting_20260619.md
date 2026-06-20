@@ -1000,7 +1000,7 @@ CREATE INDEX idx_eligibility_dispatch
 
 ```sql
 CREATE TABLE telemetry.driver_location_events (
-  event_id uuid PRIMARY KEY,
+  event_id text PRIMARY KEY,
   device_id text NOT NULL,
   driver_id text NOT NULL,
   vehicle_id text NULL,

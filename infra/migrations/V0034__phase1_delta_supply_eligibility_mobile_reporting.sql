@@ -247,7 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_eligibility_dispatch
 -- §4.9 Mobile Heartbeat Events -------------------------------------------
 
 CREATE TABLE IF NOT EXISTS telemetry.driver_location_events (
-  event_id uuid PRIMARY KEY,
+  event_id text PRIMARY KEY,
   device_id text NOT NULL,
   driver_id text NOT NULL,
   vehicle_id text NULL,
