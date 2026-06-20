@@ -2648,6 +2648,7 @@ export interface DriverTaskRecord {
   orderId: string;
   dispatchJobId: string;
   assignmentId: string;
+  serviceProductCode?: ServiceProductType | null;
   driverId: string;
   vehicleId: string;
   sourcePlatform: string | null;

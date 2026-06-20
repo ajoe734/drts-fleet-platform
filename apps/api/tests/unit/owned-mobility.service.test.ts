@@ -33,13 +33,29 @@ function createOwnedMobilityService(options?: {
     driverId: string;
     vehicleId: string;
     etaMinutes: number;
-    operatingArea: string;
-    serviceBuckets: string[];
-  }>;
+      operatingArea: string;
+      serviceBuckets: string[];
+    }>;
   vehicleDispatchable?: boolean;
+  getVehicleDispatchability?: (
+    vehicleId: string,
+    serviceBucket: string,
+  ) => boolean;
+  driverAvailable?: boolean;
+  getDriverAvailability?: (
+    driverId: string,
+    serviceBucket: string,
+  ) => boolean;
   enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
   serviceProductOverrides?: Record<string, unknown>;
+  repository?: {
+    isEnabled: () => boolean;
+    persistChanges: (...args: any[]) => Promise<unknown>;
+    persistOrderWorkflow: (...args: any[]) => Promise<unknown>;
+    withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
+    reportPersistenceFailure: (...args: any[]) => void;
+  };
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
@@ -52,9 +68,16 @@ function createOwnedMobilityService(options?: {
         [],
     ),
     getVehicleDispatchability: vi.fn(
-      () => options?.vehicleDispatchable ?? true,
+      (vehicleId: string, serviceBucket: string) =>
+        options?.getVehicleDispatchability?.(vehicleId, serviceBucket) ??
+        options?.vehicleDispatchable ??
+        true,
     ),
-    getDriverAvailability: vi.fn(() => true),
+    getDriverAvailability: vi.fn((driverId: string, serviceBucket: string) =>
+      options?.getDriverAvailability?.(driverId, serviceBucket) ??
+      options?.driverAvailable ??
+      true,
+    ),
   };
   const auditNotificationService = {
     recordNotification: vi.fn(),
@@ -111,7 +134,7 @@ function createOwnedMobilityService(options?: {
     callcenterService as never,
     taskEventsService,
     opsDispatchEventsService,
-    undefined,
+    options?.repository as never,
     options?.tenantPartnerService,
     vehicleEligibilityService,
     serviceProductService,
@@ -178,7 +201,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("rejects enterprise-dispatch assignment when the vehicle is not eligible for the service product", async () => {
+  it("returns ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT when assignment recheck fails", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -226,14 +249,112 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     } catch (error) {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
-          code: "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
           details: {
+            dispatchJobId: dispatchJob.dispatchJobId,
             vehicleId: "veh-demo-002",
-            serviceProduct: "enterprise_dispatch",
+            driverId: "drv-demo-001",
+            serviceProductCode: "enterprise_dispatch",
+            reasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
           },
         },
       });
     }
+  });
+
+  it("persists exact service product on the driver task created by assignment", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    expect(service.getDriverTask(assignment.taskId)).toMatchObject({
+      taskId: assignment.taskId,
+      serviceProductCode: "credit_card_airport_transfer",
+    });
+  });
+
+  it("uses repository transactions for assignment-time recheck when persistence is enabled", async () => {
+    let vehicleDispatchable = true;
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 4,
+          operatingArea: "north",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+      repository,
+      getVehicleDispatchability: () => vehicleDispatchable,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+    const dispatchResult = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    vehicleDispatchable = false;
+
+    await expect(
+      service.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId: "vehicle-001",
+        driverId: "driver-001",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+          details: {
+            reasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
+          },
+        },
+      },
+    });
+    expect(repository.withTransaction).toHaveBeenCalledTimes(1);
+    expect(repository.persistOrderWorkflow).not.toHaveBeenCalled();
   });
 
   it("keeps owned-mobility dispatch candidates order-specific when vehicle eligibility is enabled", async () => {
