@@ -5,7 +5,7 @@
 **Parent Owner / Reviewer:** `Codex2` / `Codex`
 **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 **Generated:** `2026-06-20` (UTC)
-**Refreshed At:** `2026-06-20T06:01:00Z`
+**Refreshed At:** `2026-06-20T06:05:30Z`
 **Snapshot Basis:** `scripts/ai-status.sh show`, `git show`, `git branch --contains`, `git merge-base --is-ancestor`, `git diff --check`, and commit-scoped `git grep`
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
@@ -48,6 +48,15 @@ Out of scope:
 - helper_parent=`MOB-BE-001`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
+- last_update=`2026-06-20T06:05:13Z`
+
+Closeout note:
+
+- this dispatch arrived with the sidecar already in `review_approved`
+- the owner then recorded a finalization `progress` note while preparing the
+  task-scoped closeout commit and push evidence
+- treat the sidecar as a support-only closeout slice whose reviewer approval was
+  already established before this last packet refresh
 
 ### 2.2 Parent row
 
@@ -106,10 +115,10 @@ Reviewer caveat:
 
 Artifact delivery note:
 
-- the prior packet revision on the sidecar branch was committed at
-  `3392e4e3ad48b54a96fcef4608b1cc30f17b7cd4`
-- this refresh pass corrects stale machine-truth and branch-tip narration before
-  the owner re-hands the packet to the assigned reviewer
+- the prior packet refresh on the sidecar branch is commit
+  `49a21b0c6a7aa6f87a52b6e01d2e1fbd0cbfccd2`
+- this closeout refresh corrects the remaining stale sidecar-row narration so
+  the packet matches the current machine-truth timeline before finalization
 
 ---
 
@@ -212,8 +221,9 @@ Reviewer should validate these points on `4b093cd23003ace8287962ad80e31f61ad7581
 
 ## 8. Handoff Notes For `Codex2`
 
-This sidecar packet is the support artifact the owner should hand to the assigned
-reviewer when transitioning the sidecar from `in_progress` to `review`.
+This sidecar packet remains the support artifact for the assigned reviewer.
+The parent implementation is already closed on `origin/dev`; the only remaining
+purpose here is to keep the review packet accurate during sidecar closeout.
 
 Suggested review framing:
 
@@ -224,3 +234,5 @@ Suggested review framing:
   the already-closed parent task
 - approve only the packet accuracy; parent implementation correctness is already
   recorded in the parent task closeout
+- if the reviewer loop is reopened for procedural reasons, use this refreshed
+  packet as the reviewer handoff basis
