@@ -16,10 +16,6 @@ import type {
   DispatchExclusivityRecord,
   DriverEligibilityBlockReason,
   DriverEtaResponse,
-  DriverLocationHeartbeatAck,
-  DriverLocationHeartbeatBatchRequest,
-  DriverLocationHeartbeatBatchResponse,
-  DriverLocationHeartbeatEnvelope,
   DriverLocationHeartbeatCommand,
   DriverLocationSnapshot,
   DriverMasterLifecycleStatus,
@@ -664,156 +660,38 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
     this.requireDriver(driverId);
 
-    const currentLocationUpdated =
-      await this.requireLocationRepository().upsertDriverLocation({
-        driverId,
-        lat: command.lat,
-        lng: command.lng,
-        recordedAt,
-        ...(command.accuracyM === undefined
-          ? {}
-          : { accuracyM: command.accuracyM }),
-      });
+    await this.requireLocationRepository().upsertDriverLocation({
+      driverId,
+      lat: command.lat,
+      lng: command.lng,
+      recordedAt,
+      ...(command.accuracyM === undefined
+        ? {}
+        : { accuracyM: command.accuracyM }),
+    });
 
-    if (
-      currentLocationUpdated &&
-      this.applyLatestDriverLocation({
+    const updatedAt = new Date().toISOString();
+    this.setLatestDriverLocation({
+      driverId,
+      lat: command.lat,
+      lng: command.lng,
+      accuracyM: command.accuracyM ?? null,
+      recordedAt,
+      updatedAt,
+    });
+    this.opsDispatchEventsService.publishDriverLocationUpdated(
+      {
         driverId,
         lat: command.lat,
         lng: command.lng,
         accuracyM: command.accuracyM ?? null,
         recordedAt,
-        updatedAt: new Date().toISOString(),
-      })
-    ) {
-      const latestLocation = this.cloneDriverLocation(
-        this.latestDriverLocations.get(driverId)!,
-      );
-      this.opsDispatchEventsService.publishDriverLocationUpdated(
-        latestLocation,
-        undefined,
-      );
-    }
+        updatedAt,
+      },
+      undefined,
+    );
 
     return { success: true };
-  }
-
-  async recordDriverLocationBatch(
-    request: DriverLocationHeartbeatBatchRequest,
-  ): Promise<DriverLocationHeartbeatBatchResponse> {
-    if (!request || !Array.isArray(request.items)) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "FIELD_REQUIRED",
-        "items is required.",
-        {
-          field: "items",
-        },
-      );
-    }
-
-    if (request.items.length > 100) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "BATCH_LIMIT_EXCEEDED",
-        "A heartbeat batch can contain at most 100 items.",
-        {
-          field: "items",
-          maxItems: 100,
-          received: request.items.length,
-        },
-      );
-    }
-
-    const items: DriverLocationHeartbeatAck[] = [];
-    for (const item of request.items) {
-      items.push(await this.recordBatchHeartbeatItem(item));
-    }
-
-    return { items };
-  }
-
-  private async recordBatchHeartbeatItem(
-    item: DriverLocationHeartbeatEnvelope,
-  ): Promise<DriverLocationHeartbeatAck> {
-    const heartbeat = this.normalizeHeartbeatEnvelope(item);
-
-    const persistedResult =
-      await this.requireLocationRepository().recordDriverLocationEvent(
-        heartbeat,
-      );
-
-    const currentLocationUpdated =
-      persistedResult.currentLocationUpdated &&
-      this.applyLatestDriverLocation({
-        driverId: heartbeat.driverId,
-        lat: heartbeat.lat,
-        lng: heartbeat.lng,
-        accuracyM: heartbeat.accuracyM,
-        recordedAt: heartbeat.recordedAt,
-        updatedAt: persistedResult.serverReceivedAt,
-      });
-
-    if (currentLocationUpdated) {
-      const latestLocation = this.cloneDriverLocation(
-        this.latestDriverLocations.get(heartbeat.driverId)!,
-      );
-      this.opsDispatchEventsService.publishDriverLocationUpdated(
-        latestLocation,
-        undefined,
-      );
-    }
-
-    return {
-      eventId: heartbeat.eventId,
-      accepted: true,
-      duplicate: persistedResult.duplicate,
-      currentLocationUpdated,
-      serverReceivedAt: persistedResult.serverReceivedAt,
-    };
-  }
-
-  private normalizeHeartbeatEnvelope(
-    item: DriverLocationHeartbeatEnvelope,
-  ): DriverLocationHeartbeatEnvelope {
-    const eventId = item.eventId.trim();
-    const deviceId = item.deviceId.trim();
-    const driverId = item.driverId.trim();
-    this.assertNonBlank(eventId, "eventId");
-    this.assertNonBlank(deviceId, "deviceId");
-    this.assertNonBlank(driverId, "driverId");
-    this.assertSequenceNo(item.sequenceNo, "sequenceNo");
-    this.assertCoordinate(item.lat, "lat", -90, 90);
-    this.assertCoordinate(item.lng, "lng", -180, 180);
-    this.assertOptionalNonNegativeNumber(item.accuracyM ?? undefined, "accuracyM");
-    this.assertAllowedValue(
-      item.workState,
-      "workState",
-      ["offline", "available", "assigned", "enroute", "arrived", "on_trip", "incident"],
-    );
-    this.assertAllowedValue(item.appState, "appState", ["foreground", "background"]);
-    this.assertAllowedValue(item.transportMode, "transportMode", [
-      "foreground",
-      "background",
-    ]);
-    this.assertAllowedValue(item.networkType, "networkType", [
-      "wifi",
-      "cellular",
-      "offline",
-      "unknown",
-    ]);
-
-    this.requireDriver(driverId);
-
-    return {
-      ...item,
-      eventId,
-      deviceId,
-      driverId,
-      vehicleId: this.normalizeNullableText(item.vehicleId),
-      taskId: this.normalizeNullableText(item.taskId),
-      recordedAt: this.normalizeHeartbeatRecordedAt(item.recordedAt),
-    };
   }
 
   async getDriverEta(
@@ -2186,19 +2064,6 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
   }
 
-  private applyLatestDriverLocation(location: DriverLocationSnapshot): boolean {
-    const existing = this.latestDriverLocations.get(location.driverId);
-    if (
-      existing &&
-      Date.parse(existing.recordedAt) > Date.parse(location.recordedAt)
-    ) {
-      return false;
-    }
-
-    this.setLatestDriverLocation(location);
-    return true;
-  }
-
   private resolveCandidateEta(
     pair: RegulatorySupplyPair,
     driverId: string,
@@ -2316,37 +2181,6 @@ export class RegulatoryRegistryService implements OnModuleInit {
         `${fieldName} must be a non-negative finite number.`,
         {
           field: fieldName,
-        },
-      );
-    }
-  }
-
-  private assertSequenceNo(value: number, fieldName: string): void {
-    if (!Number.isSafeInteger(value) || value < 0) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "INVALID_NUMBER",
-        `${fieldName} must be a non-negative safe integer.`,
-        {
-          field: fieldName,
-        },
-      );
-    }
-  }
-
-  private assertAllowedValue(
-    value: string,
-    fieldName: string,
-    allowedValues: readonly string[],
-  ): void {
-    if (!allowedValues.includes(value)) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "FIELD_INVALID",
-        `${fieldName} must be one of: ${allowedValues.join(", ")}.`,
-        {
-          field: fieldName,
-          allowedValues,
         },
       );
     }
