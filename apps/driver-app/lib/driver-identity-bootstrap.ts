@@ -40,6 +40,7 @@ function resolveHeartbeatProfile(
   shifts: DriverShiftLike[],
   driverId: string,
 ) {
+  const relevantTasks = tasks.filter((task) => task.driverId === driverId);
   const priorityStatuses = [
     "on_trip",
     "arrived_pickup",
@@ -49,7 +50,7 @@ function resolveHeartbeatProfile(
   ] as const;
 
   for (const status of priorityStatuses) {
-    const task = tasks.find((candidate) => candidate.status === status);
+    const task = relevantTasks.find((candidate) => candidate.status === status);
     if (!task) {
       continue;
     }

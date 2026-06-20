@@ -187,4 +187,42 @@ describe("syncDriverIdentityBootstrap", () => {
     });
     expect(resetDriverAppToOnboarding).not.toHaveBeenCalled();
   });
+
+  it("ignores active tasks that belong to a different driver", async () => {
+    const syncDriverLocationHeartbeat = vi.fn().mockResolvedValue(undefined);
+    const resetDriverAppToOnboarding = vi.fn();
+    const listDriverTasks = vi.fn().mockResolvedValue([
+      {
+        taskId: "task-other-001",
+        driverId: "driver-foreign",
+        status: "on_trip",
+      },
+    ]);
+    const listDriverShifts = vi.fn().mockResolvedValue([
+      {
+        shiftId: "shift-001",
+        status: "active",
+      },
+    ]);
+
+    const result = await syncDriverIdentityBootstrap({
+      getDriverId: () => "driver-001",
+      getDriverIdentityIssue: () => null,
+      initializeDriverIdentity: async () => {},
+      isDriverIdentityProvisioned: () => true,
+      listDriverShifts,
+      listDriverTasks,
+      resetDriverAppToOnboarding,
+      router: createRouter(),
+      syncDriverLocationHeartbeat,
+    });
+
+    expect(result).toBe("synced");
+    expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith({
+      driverId: "driver-001",
+      taskId: null,
+      workState: "online_available",
+    });
+    expect(resetDriverAppToOnboarding).not.toHaveBeenCalled();
+  });
 });
