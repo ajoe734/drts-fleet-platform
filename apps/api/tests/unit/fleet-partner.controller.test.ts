@@ -78,6 +78,7 @@ function createFixture() {
       supplyReadinessService,
     ),
     service: fleetPartnerService,
+    supplyDocumentService,
   };
 }
 
@@ -296,5 +297,163 @@ describe("FleetPartnerController portal routes", () => {
       subjectId: submissionId,
       state: "ready",
     });
+  });
+
+  it("rejects confirming a pre-signed upload after the intent expires", async () => {
+    const { controller, supplyDocumentService } = createFixture();
+
+    const created = await controller.createDriverSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      {
+        name: "Driver Supply Demo",
+        mobile: "+886900999888",
+        professionalDriverLicenseNo: "PDL-9988",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "TX-9988",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+      "req-supply-create-driver-expired",
+    );
+    const submissionId = created.data.submission.submissionId;
+
+    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+      },
+      "req-supply-upload-expired",
+    );
+
+    const pendingUploadIntents = (
+      supplyDocumentService as unknown as {
+        pendingUploadIntents: Map<string, Record<string, string>>;
+      }
+    ).pendingUploadIntents;
+    const intent = pendingUploadIntents.get(uploadUrl.data.objectKey);
+    expect(intent).toBeDefined();
+    pendingUploadIntents.set(uploadUrl.data.objectKey, {
+      ...intent!,
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    });
+
+    const expiredError = await controller
+      .confirmSupplyDocumentUpload(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          objectKey: uploadUrl.data.objectKey,
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+          fileSize: 1024,
+          checksumSha256: "abc123",
+          effectiveFrom: "2026-01-01",
+          effectiveUntil: "2027-12-31",
+        },
+        "req-supply-confirm-expired",
+      )
+      .catch((error: unknown) => error);
+    expect(expiredError).toBeInstanceOf(ApiRequestError);
+    try {
+      throw expiredError;
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "UPLOAD_URL_INVALID",
+          message: "The pre-signed upload intent has expired.",
+          details: {
+            submissionId,
+            objectKey: uploadUrl.data.objectKey,
+          },
+        },
+      });
+    }
+  });
+
+  it("rejects confirming a pre-signed upload with mismatched metadata", async () => {
+    const { controller } = createFixture();
+
+    const created = await controller.createDriverSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      {
+        name: "Driver Supply Demo",
+        mobile: "+886900999888",
+        professionalDriverLicenseNo: "PDL-9988",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "TX-9988",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+      "req-supply-create-driver-mismatch",
+    );
+    const submissionId = created.data.submission.submissionId;
+
+    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      submissionId,
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        originalFileName: "license.pdf",
+        contentType: "application/pdf",
+      },
+      "req-supply-upload-mismatch",
+    );
+
+    const mismatchError = await controller
+      .confirmSupplyDocumentUpload(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "taxi_driver_registration",
+          objectKey: uploadUrl.data.objectKey,
+          originalFileName: "license-v2.pdf",
+          contentType: "image/png",
+          fileSize: 1024,
+          checksumSha256: "abc123",
+          effectiveFrom: "2026-01-01",
+          effectiveUntil: "2027-12-31",
+        },
+        "req-supply-confirm-mismatch",
+      )
+      .catch((error: unknown) => error);
+    expect(mismatchError).toBeInstanceOf(ApiRequestError);
+    try {
+      throw mismatchError;
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "UPLOAD_URL_INVALID",
+          message:
+            "The upload confirmation metadata does not match the issued pre-signed upload intent.",
+          details: {
+            submissionId,
+            objectKey: uploadUrl.data.objectKey,
+            mismatchedFields: [
+              "documentType",
+              "originalFileName",
+              "contentType",
+            ],
+          },
+        },
+      });
+    }
   });
 });

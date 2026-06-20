@@ -142,6 +142,7 @@ export class SupplyDocumentService {
         },
       );
     }
+    this.assertUploadIntent(uploadIntent, fleetPartnerId, submissionId, command);
 
     const document: SupplyDocumentRecord = {
       documentId: randomUUID(),
@@ -260,6 +261,66 @@ export class SupplyDocumentService {
 
   private sanitizeFileName(fileName: string) {
     return fileName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-");
+  }
+
+  private assertUploadIntent(
+    uploadIntent: PendingDocumentUploadIntent,
+    fleetPartnerId: string,
+    submissionId: string,
+    command: ConfirmSupplyDocumentUploadCommand,
+  ) {
+    if (
+      uploadIntent.fleetPartnerId !== fleetPartnerId ||
+      uploadIntent.submissionId !== submissionId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "UPLOAD_URL_INVALID",
+        "The upload confirmation does not match an active pre-signed upload intent.",
+        {
+          submissionId,
+          fleetPartnerId,
+          objectKey: command.objectKey,
+        },
+      );
+    }
+
+    if (new Date(uploadIntent.expiresAt).getTime() <= Date.now()) {
+      this.pendingUploadIntents.delete(command.objectKey);
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "UPLOAD_URL_INVALID",
+        "The pre-signed upload intent has expired.",
+        {
+          submissionId,
+          objectKey: command.objectKey,
+          expiresAt: uploadIntent.expiresAt,
+        },
+      );
+    }
+
+    const mismatchedFields: string[] = [];
+    if (uploadIntent.documentType !== command.documentType) {
+      mismatchedFields.push("documentType");
+    }
+    if (uploadIntent.originalFileName !== command.originalFileName.trim()) {
+      mismatchedFields.push("originalFileName");
+    }
+    if (uploadIntent.contentType !== command.contentType.trim()) {
+      mismatchedFields.push("contentType");
+    }
+    if (mismatchedFields.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "UPLOAD_URL_INVALID",
+        "The upload confirmation metadata does not match the issued pre-signed upload intent.",
+        {
+          submissionId,
+          objectKey: command.objectKey,
+          mismatchedFields,
+        },
+      );
+    }
   }
 
   private assertNonBlank(value: string, fieldName: string) {
