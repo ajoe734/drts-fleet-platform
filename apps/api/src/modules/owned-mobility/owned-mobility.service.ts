@@ -3615,7 +3615,8 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: null,
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -5064,13 +5065,16 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     includeIneligible: boolean,
   ): Promise<DispatchCandidate[]> {
-    if (!this.vehicleEligibilityService || !this.runtimeEligibilityEvaluator) {
+    const vehicleEligibilityService = this.vehicleEligibilityService;
+    const runtimeEligibilityEvaluator = this.runtimeEligibilityEvaluator;
+
+    if (!vehicleEligibilityService || !runtimeEligibilityEvaluator) {
       return this.listEligibleDispatchCandidates(order);
     }
 
     const destination = this.resolvePickupEtaDestination(order);
     const serviceProduct =
-      this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(order);
+      vehicleEligibilityService.resolveServiceProductForOwnedOrder(order);
     const candidates = this.regulatoryRegistryService.getEligibleCandidates(
       order.serviceBucket,
       destination,
@@ -5079,7 +5083,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const evaluatedCandidates = await Promise.all(
       candidates.map(async (candidate) => {
-        const decision = await this.runtimeEligibilityEvaluator.evaluate({
+        const decision = await runtimeEligibilityEvaluator.evaluate({
           orderId: order.orderId,
           dispatchJobId: dispatchJob.dispatchJobId,
           driverId: candidate.driverId,
