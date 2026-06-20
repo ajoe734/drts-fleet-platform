@@ -1464,7 +1464,7 @@ export function DispatchWorkflow({
 
     for (const candidate of candidates[job.dispatchJobId] ?? []) {
       const freshness = getCandidateLocationState(candidate);
-      if (freshness === "no_location" || !candidate.currentLocation) {
+      if (freshness === "missing" || !candidate.currentLocation) {
         noLocationCandidateCount += 1;
         continue;
       }

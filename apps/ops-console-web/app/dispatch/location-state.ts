@@ -27,10 +27,10 @@ export function getCandidateLocationState(
     return candidate.locationState;
   }
   if (!candidate.currentLocation) {
-    return "no_location";
+    return "missing";
   }
   return isFreshLocation(candidate.currentLocation.recordedAt, nowMs)
-    ? "live"
+    ? "fresh"
     : "stale";
 }
 
@@ -38,11 +38,12 @@ export function getCandidateLocationTone(
   locationState: DispatchCandidateLocationState,
 ): string {
   switch (locationState) {
-    case "live":
+    case "fresh":
       return "candidate-location-live";
     case "stale":
+    case "low_accuracy":
       return "candidate-location-stale";
-    case "no_location":
+    case "missing":
       return "candidate-location-no-location";
     default:
       return "candidate-location-no-location";
