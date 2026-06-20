@@ -160,8 +160,33 @@ test.describe("enterprise dispatch surfaces", () => {
     expect(field(setupData, "code", "code")).toBe(enterpriseCostCenterCode);
 
     await page.goto("/bookings/review", { waitUntil: "domcontentloaded" });
-    await page.getByTestId("enterprise-booking-submit").click();
-    await expect(page).toHaveURL(/\/bookings\/submitted\?.*bookingId=booking-/);
+    const submitButton = page.getByTestId("enterprise-booking-submit");
+    await expect(submitButton).toHaveAttribute("data-ready", "true");
+    await expect(submitButton).toBeEnabled();
+
+    const bookingResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/control-plane-proxy/api/tenant/bookings") &&
+        response.request().method() === "POST",
+      { timeout: 30000 },
+    );
+    await submitButton.click();
+
+    const bookingResponse = await bookingResponsePromise;
+    const bookingResponseBody = await bookingResponse.text();
+    expect(
+      bookingResponse.ok(),
+      "booking submit POST must hit the proxy and return proof: " +
+        bookingResponse.status() +
+        " " +
+        bookingResponseBody,
+    ).toBeTruthy();
+    await expect(page).toHaveURL(
+      /\/bookings\/submitted\?.*bookingId=booking-/,
+      {
+        timeout: 30000,
+      },
+    );
 
     const submittedUrl = new URL(page.url());
     const bookingId = submittedUrl.searchParams.get("bookingId");
