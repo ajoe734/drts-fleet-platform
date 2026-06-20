@@ -54,6 +54,7 @@ import type {
   RedispatchOrderCommand,
   ReservationHoldStatus,
   ResolveExceptionHoldCommand,
+  ServiceProductType,
   TenantApprovalEvaluationInputSnapshot,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
@@ -91,6 +92,10 @@ type TenantBookingResult = {
   orderId: string;
   bookingId: string;
   serviceBucket: "business_dispatch";
+  serviceProductId: string;
+  serviceProductCode: ServiceProductType;
+  serviceProductVersion: string;
+  eligibilityPolicyVersion: string;
   businessDispatchSubtype: NonNullable<
     OwnedOrderRecord["businessDispatchSubtype"]
   >;
@@ -174,6 +179,7 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
   amountMinor: 150000,
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
+const DEFAULT_EXACT_PRODUCT_VERSION = "2026-06-01T00:00:00.000Z";
 
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
@@ -283,6 +289,9 @@ export class OwnedMobilityService implements OnModuleInit {
       etaMinutes: 8,
       calculatedAt: now,
     };
+    const exactProduct = this.resolveExactServiceProductSnapshot(
+      "taxi_realtime",
+    );
     // CRC-BE-003: attribute referral-channel passenger rides. The handoff
     // session (CRC-BE-002) carries partnerEntrySlug on the identity; stamp it
     // onto the order so owned-mobility → billing-settlement referral settlement
@@ -300,6 +309,10 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
+      serviceProductId: exactProduct.serviceProductId,
+      serviceProductCode: exactProduct.serviceProductCode,
+      serviceProductVersion: exactProduct.serviceProductVersion,
+      eligibilityPolicyVersion: exactProduct.eligibilityPolicyVersion,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -416,6 +429,9 @@ export class OwnedMobilityService implements OnModuleInit {
     const recordingId = command.recordingId?.trim() || null;
 
     const now = new Date().toISOString();
+    const exactProduct = this.resolveExactServiceProductSnapshot(
+      "taxi_realtime",
+    );
     const order: OwnedOrderRecord = {
       orderId: randomUUID(),
       orderNo: this.nextOrderNo(),
@@ -427,6 +443,10 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug: null,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
+      serviceProductId: exactProduct.serviceProductId,
+      serviceProductCode: exactProduct.serviceProductCode,
+      serviceProductVersion: exactProduct.serviceProductVersion,
+      eligibilityPolicyVersion: exactProduct.eligibilityPolicyVersion,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -594,6 +614,9 @@ export class OwnedMobilityService implements OnModuleInit {
       command.reservationWindowStart,
     );
     const reservationHoldId = randomUUID();
+    const exactProduct = this.resolveExactServiceProductSnapshot(
+      command.businessDispatchSubtype,
+    );
     const order: OwnedOrderRecord = {
       orderId,
       orderNo: this.nextOrderNo(),
@@ -606,6 +629,10 @@ export class OwnedMobilityService implements OnModuleInit {
       eligibilityVerificationId:
         partnerContext?.eligibilityVerificationId ?? null,
       issuerAuthorizationRef: partnerContext?.issuerAuthorizationRef ?? null,
+      serviceProductId: exactProduct.serviceProductId,
+      serviceProductCode: exactProduct.serviceProductCode,
+      serviceProductVersion: exactProduct.serviceProductVersion,
+      eligibilityPolicyVersion: exactProduct.eligibilityPolicyVersion,
       serviceBucket: "business_dispatch",
       dispatchSemantics: "reservation",
       businessDispatchSubtype: command.businessDispatchSubtype,
@@ -751,6 +778,10 @@ export class OwnedMobilityService implements OnModuleInit {
         orderId,
         bookingId,
         serviceBucket: "business_dispatch",
+        serviceProductId: order.serviceProductId!,
+        serviceProductCode: order.serviceProductCode!,
+        serviceProductVersion: order.serviceProductVersion!,
+        eligibilityPolicyVersion: order.eligibilityPolicyVersion!,
         businessDispatchSubtype: order.businessDispatchSubtype!,
         dispatchSemantics: "reservation",
         status: order.status,
@@ -1496,6 +1527,10 @@ export class OwnedMobilityService implements OnModuleInit {
     const dispatchJob: DispatchJobRecord = {
       dispatchJobId: randomUUID(),
       orderId,
+      serviceProductId: order.serviceProductId ?? null,
+      serviceProductCode: order.serviceProductCode ?? null,
+      serviceProductVersion: order.serviceProductVersion ?? null,
+      eligibilityPolicyVersion: order.eligibilityPolicyVersion ?? null,
       status:
         candidates.length > 0
           ? isReservation
@@ -2594,6 +2629,18 @@ export class OwnedMobilityService implements OnModuleInit {
       dispatchJobId: dispatchJob.dispatchJobId,
       orderId: order.orderId,
       taskId,
+      serviceProductId:
+        dispatchJob.serviceProductId ?? order.serviceProductId ?? null,
+      serviceProductCode:
+        dispatchJob.serviceProductCode ?? order.serviceProductCode ?? null,
+      serviceProductVersion:
+        dispatchJob.serviceProductVersion ??
+        order.serviceProductVersion ??
+        null,
+      eligibilityPolicyVersion:
+        dispatchJob.eligibilityPolicyVersion ??
+        order.eligibilityPolicyVersion ??
+        null,
       vehicleId,
       driverId,
       assignmentType: order.fixedPrice ? "fixed_price" : "metered",
@@ -2609,6 +2656,10 @@ export class OwnedMobilityService implements OnModuleInit {
       orderId: order.orderId,
       dispatchJobId: dispatchJob.dispatchJobId,
       assignmentId: assignment.assignmentId,
+      serviceProductId: assignment.serviceProductId ?? null,
+      serviceProductCode: assignment.serviceProductCode ?? null,
+      serviceProductVersion: assignment.serviceProductVersion ?? null,
+      eligibilityPolicyVersion: assignment.eligibilityPolicyVersion ?? null,
       driverId,
       vehicleId,
       sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
@@ -2714,6 +2765,10 @@ export class OwnedMobilityService implements OnModuleInit {
       assignmentId: assignment.assignmentId,
       status: assignment.status,
       taskId,
+      serviceProductId: assignment.serviceProductId,
+      serviceProductCode: assignment.serviceProductCode,
+      serviceProductVersion: assignment.serviceProductVersion,
+      eligibilityPolicyVersion: assignment.eligibilityPolicyVersion,
     };
   }
 
@@ -3582,6 +3637,10 @@ export class OwnedMobilityService implements OnModuleInit {
       issuerAuthorizationRef: order.issuerAuthorizationRef,
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
+      serviceProductId: order.serviceProductId ?? null,
+      serviceProductCode: order.serviceProductCode ?? null,
+      serviceProductVersion: order.serviceProductVersion ?? null,
+      eligibilityPolicyVersion: order.eligibilityPolicyVersion ?? null,
       tenantServiceProgramId: null,
       sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
     };
@@ -4859,6 +4918,10 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug: order.partnerEntrySlug,
       eligibilityVerificationId: order.eligibilityVerificationId,
       issuerAuthorizationRef: order.issuerAuthorizationRef,
+      serviceProductId: order.serviceProductId ?? null,
+      serviceProductCode: order.serviceProductCode ?? null,
+      serviceProductVersion: order.serviceProductVersion ?? null,
+      eligibilityPolicyVersion: order.eligibilityPolicyVersion ?? null,
       status:
         order.status === "cancelled"
           ? "cancelled"
@@ -5014,7 +5077,8 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
     const destination = this.resolvePickupEtaDestination(order);
-    return this.vehicleEligibilityService
+    const exactProduct = this.resolveExactServiceProductSnapshotForOrder(order);
+    const candidates = this.vehicleEligibilityService
       ? this.vehicleEligibilityService.listEligibleSupply(
           this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
             order,
@@ -5025,6 +5089,66 @@ export class OwnedMobilityService implements OnModuleInit {
           order.serviceBucket,
           destination,
         );
+
+    return candidates.map((candidate) => ({
+      ...candidate,
+      serviceProductId: exactProduct.serviceProductId,
+      serviceProductCode: exactProduct.serviceProductCode,
+      serviceProductVersion: exactProduct.serviceProductVersion,
+      eligibilityPolicyVersion: exactProduct.eligibilityPolicyVersion,
+    }));
+  }
+
+  private resolveExactServiceProductSnapshotForOrder(
+    order: Pick<
+      OwnedOrderRecord,
+      | "serviceBucket"
+      | "businessDispatchSubtype"
+      | "serviceProductId"
+      | "serviceProductCode"
+      | "serviceProductVersion"
+      | "eligibilityPolicyVersion"
+    >,
+  ) {
+    if (
+      order.serviceProductId &&
+      order.serviceProductCode &&
+      order.serviceProductVersion &&
+      order.eligibilityPolicyVersion
+    ) {
+      return {
+        serviceProductId: order.serviceProductId,
+        serviceProductCode: order.serviceProductCode,
+        serviceProductVersion: order.serviceProductVersion,
+        eligibilityPolicyVersion: order.eligibilityPolicyVersion,
+      };
+    }
+
+    return this.resolveExactServiceProductSnapshot(
+      order.serviceBucket === "standard_taxi"
+        ? "taxi_realtime"
+        : order.businessDispatchSubtype ?? "enterprise_dispatch",
+    );
+  }
+
+  private resolveExactServiceProductSnapshot(
+    serviceProductCode: ServiceProductType,
+  ) {
+    const runtimeServiceProduct =
+      this.serviceProductService?.getRuntimeServiceProductByType(
+        serviceProductCode,
+      ) ?? null;
+
+    return {
+      serviceProductId:
+        runtimeServiceProduct?.serviceProductId ?? serviceProductCode,
+      serviceProductCode,
+      serviceProductVersion:
+        runtimeServiceProduct?.updatedAt ?? DEFAULT_EXACT_PRODUCT_VERSION,
+      eligibilityPolicyVersion:
+        this.vehicleEligibilityService?.getPolicyVersion(serviceProductCode) ??
+        DEFAULT_EXACT_PRODUCT_VERSION,
+    };
   }
 
   private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {

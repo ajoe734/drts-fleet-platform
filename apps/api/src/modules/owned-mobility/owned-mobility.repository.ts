@@ -215,18 +215,26 @@ export class OwnedMobilityRepository {
               status,
               order_source,
               service_bucket,
+              service_product_id,
+              service_product_code,
+              service_product_version,
+              eligibility_policy_version,
               dispatch_semantics,
               created_at,
               updated_at,
               record
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb
             )
             ON CONFLICT (order_id) DO UPDATE SET
               order_no = EXCLUDED.order_no,
               status = EXCLUDED.status,
               order_source = EXCLUDED.order_source,
               service_bucket = EXCLUDED.service_bucket,
+              service_product_id = EXCLUDED.service_product_id,
+              service_product_code = EXCLUDED.service_product_code,
+              service_product_version = EXCLUDED.service_product_version,
+              eligibility_policy_version = EXCLUDED.eligibility_policy_version,
               dispatch_semantics = EXCLUDED.dispatch_semantics,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
@@ -238,6 +246,10 @@ export class OwnedMobilityRepository {
             order.status,
             order.orderSource,
             order.serviceBucket,
+            order.serviceProductId ?? null,
+            order.serviceProductCode ?? null,
+            order.serviceProductVersion ?? null,
+            order.eligibilityPolicyVersion ?? null,
             order.dispatchSemantics,
             order.createdAt,
             order.updatedAt,
@@ -255,15 +267,23 @@ export class OwnedMobilityRepository {
               dispatch_job_id,
               order_id,
               status,
+              service_product_id,
+              service_product_code,
+              service_product_version,
+              eligibility_policy_version,
               created_at,
               updated_at,
               record
             ) VALUES (
-              $1, $2, $3, $4, $5, $6::jsonb
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
             )
             ON CONFLICT (dispatch_job_id) DO UPDATE SET
               order_id = EXCLUDED.order_id,
               status = EXCLUDED.status,
+              service_product_id = EXCLUDED.service_product_id,
+              service_product_code = EXCLUDED.service_product_code,
+              service_product_version = EXCLUDED.service_product_version,
+              eligibility_policy_version = EXCLUDED.eligibility_policy_version,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
@@ -272,6 +292,10 @@ export class OwnedMobilityRepository {
             job.dispatchJobId,
             job.orderId,
             job.status,
+            job.serviceProductId ?? null,
+            job.serviceProductCode ?? null,
+            job.serviceProductVersion ?? null,
+            job.eligibilityPolicyVersion ?? null,
             job.createdAt,
             job.updatedAt,
             JSON.stringify(job),
@@ -365,17 +389,25 @@ export class OwnedMobilityRepository {
               dispatch_job_id,
               assignment_id,
               status,
+              service_product_id,
+              service_product_code,
+              service_product_version,
+              eligibility_policy_version,
               created_at,
               updated_at,
               record
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8::jsonb
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb
             )
             ON CONFLICT (task_id) DO UPDATE SET
               order_id = EXCLUDED.order_id,
               dispatch_job_id = EXCLUDED.dispatch_job_id,
               assignment_id = EXCLUDED.assignment_id,
               status = EXCLUDED.status,
+              service_product_id = EXCLUDED.service_product_id,
+              service_product_code = EXCLUDED.service_product_code,
+              service_product_version = EXCLUDED.service_product_version,
+              eligibility_policy_version = EXCLUDED.eligibility_policy_version,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
@@ -386,6 +418,10 @@ export class OwnedMobilityRepository {
             task.dispatchJobId,
             task.assignmentId,
             task.status,
+            task.serviceProductId ?? null,
+            task.serviceProductCode ?? null,
+            task.serviceProductVersion ?? null,
+            task.eligibilityPolicyVersion ?? null,
             this.resolveTaskCreatedAt(task),
             this.resolveTaskUpdatedAt(task),
             JSON.stringify(task),

@@ -294,6 +294,94 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       }),
     ]);
   });
+
+  it("propagates exact service product metadata from booking through dispatch and task", async () => {
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        direction: "pickup",
+        flightNo: "CI-100",
+        pickup: { address: "Taoyuan Airport T1" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+      },
+      "tenant-demo-001",
+    );
+
+    const bookingRecord = service.getTenantBooking(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    const order = service.getOrder(booking.orderId);
+    const dispatch = service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const dispatchJob = service
+      .listDispatchJobs()
+      .find((job) => job.dispatchJobId === dispatch.dispatchJobId);
+    const candidates = service.listDispatchCandidates(dispatch.dispatchJobId);
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatch.dispatchJobId,
+      vehicleId: "veh-demo-001",
+      driverId: "driver-001",
+    });
+    const task = service.getDriverTask(assignment.taskId);
+
+    expect(order).toMatchObject({
+      serviceProductId: "seed-credit-card-airport-transfer",
+      serviceProductCode: "credit_card_airport_transfer",
+      serviceProductVersion: "2026-06-01T00:00:00.000Z",
+      eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
+    });
+    expect(bookingRecord).toMatchObject({
+      serviceProductId: "seed-credit-card-airport-transfer",
+      serviceProductCode: "credit_card_airport_transfer",
+      serviceProductVersion: "2026-06-01T00:00:00.000Z",
+      eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
+    });
+    expect(dispatchJob).toMatchObject({
+      serviceProductId: "seed-credit-card-airport-transfer",
+      serviceProductCode: "credit_card_airport_transfer",
+      serviceProductVersion: "2026-06-01T00:00:00.000Z",
+      eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
+    });
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        driverId: "driver-001",
+        vehicleId: "veh-demo-001",
+        serviceProductId: "seed-credit-card-airport-transfer",
+        serviceProductCode: "credit_card_airport_transfer",
+        serviceProductVersion: "2026-06-01T00:00:00.000Z",
+        eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
+      }),
+    ]);
+    expect(assignment).toMatchObject({
+      serviceProductId: "seed-credit-card-airport-transfer",
+      serviceProductCode: "credit_card_airport_transfer",
+      serviceProductVersion: "2026-06-01T00:00:00.000Z",
+      eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
+    });
+    expect(task).toMatchObject({
+      serviceProductId: "seed-credit-card-airport-transfer",
+      serviceProductCode: "credit_card_airport_transfer",
+      serviceProductVersion: "2026-06-01T00:00:00.000Z",
+      eligibilityPolicyVersion: "2026-06-01T00:00:00.000Z",
+    });
+  });
+
   it("resolves tenant booking passenger and addresses from governed master data", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
