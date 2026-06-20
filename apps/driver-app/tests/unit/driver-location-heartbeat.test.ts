@@ -120,6 +120,29 @@ afterEach(async () => {
 });
 
 describe("driver location heartbeat transport", () => {
+  it("logs the online available transition with the availability cadence", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    await heartbeatModule.syncDriverLocationHeartbeat({
+      workState: "online_available",
+      taskId: null,
+      driverId: "driver-001",
+    });
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      "Driver heartbeat transition",
+      expect.objectContaining({
+        workState: "online_available",
+        taskId: null,
+        transportMode: "background",
+        status: "active",
+        intervalMs: 30_000,
+        distanceM: 100,
+      }),
+    );
+  });
+
   it("keeps foreground updates for trip metrics while background transport owns heartbeats", async () => {
     const heartbeatModule = await import("../../lib/driver-location-heartbeat");
 
@@ -254,5 +277,46 @@ describe("driver location heartbeat transport", () => {
         "Background location is required before the driver can stay online and available for dispatch.",
     });
     expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
+  });
+
+  it("uses the incident cadence for emergency tracking", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+
+    await heartbeatModule.syncDriverLocationHeartbeat({
+      workState: "incident",
+      taskId: "incident-001",
+      driverId: "driver-001",
+    });
+
+    expect(watchPositionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distanceInterval: 10,
+        timeInterval: 5_000,
+      }),
+      expect.any(Function),
+    );
+    expect(startLocationUpdatesAsync).toHaveBeenCalledWith(
+      "drts-driver-location-heartbeat",
+      expect.objectContaining({
+        distanceInterval: 10,
+        timeInterval: 5_000,
+        deferredUpdatesInterval: 5_000,
+        foregroundService: expect.objectContaining({
+          notificationTitle: "Emergency tracking active",
+        }),
+      }),
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      "Driver heartbeat transition",
+      expect.objectContaining({
+        workState: "incident",
+        taskId: "incident-001",
+        transportMode: "background",
+        status: "active",
+        intervalMs: 5_000,
+        distanceM: 10,
+      }),
+    );
   });
 });
