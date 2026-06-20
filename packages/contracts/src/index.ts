@@ -1,6 +1,5 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
-import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
 import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
@@ -2346,6 +2345,10 @@ export interface OwnedOrderRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
+  serviceProductId?: string | null;
+  serviceProductCode?: ServiceProductType | null;
+  serviceProductVersion?: string | null;
+  eligibilityPolicyVersion?: string | null;
   serviceBucket: Phase1ServiceBucket;
   dispatchSemantics: DispatchSemantics;
   businessDispatchSubtype: BusinessDispatchSubtype | null;
@@ -2418,6 +2421,10 @@ export interface BookingRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
+  serviceProductId?: string | null;
+  serviceProductCode?: ServiceProductType | null;
+  serviceProductVersion?: string | null;
+  eligibilityPolicyVersion?: string | null;
   status: BookingStatus;
   serviceBucket: "business_dispatch";
   businessDispatchSubtype: BusinessDispatchSubtype;
@@ -2524,34 +2531,29 @@ export interface DispatchCandidate {
   operatingArea: string;
   serviceBuckets: Phase1ServiceBucket[];
   etaMinutes: number;
-  currentLocation?: DriverLocationSnapshot | null;
-  serviceProductContext?: DispatchCandidateServiceProductContext;
-  eligibilityDecision?: EligibilityDecision;
-  hardReasonCodes?: string[];
-  softReasonCodes?: string[];
-  missingRequirements?: string[];
+  serviceProductId?: string | null;
+  serviceProductCode?: ServiceProductType | null;
+  serviceProductVersion?: string | null;
+  eligibilityPolicyVersion?: string | null;
   locationState?: DispatchCandidateLocationState;
+  currentLocation?: DriverLocationSnapshot | null;
 }
 
 export const DISPATCH_CANDIDATE_LOCATION_STATES = [
-  "fresh",
+  "live",
   "stale",
-  "low_accuracy",
-  "missing",
+  "no_location",
 ] as const;
 export type DispatchCandidateLocationState =
   (typeof DISPATCH_CANDIDATE_LOCATION_STATES)[number];
 
-export interface DispatchCandidateServiceProductContext {
-  serviceProductId: string;
-  serviceProductCode: ServiceProductType;
-  policyVersion: string;
-  evaluatedAt: string;
-}
-
 export interface DispatchJobRecord {
   dispatchJobId: string;
   orderId: string;
+  serviceProductId?: string | null;
+  serviceProductCode?: ServiceProductType | null;
+  serviceProductVersion?: string | null;
+  eligibilityPolicyVersion?: string | null;
   status: DispatchJobStatus;
   mode: "auto";
   latestEtaMinutes: number | null;
@@ -2636,6 +2638,10 @@ export interface DispatchAssignmentRecord {
   dispatchJobId: string;
   orderId: string;
   taskId: string;
+  serviceProductId?: string | null;
+  serviceProductCode?: ServiceProductType | null;
+  serviceProductVersion?: string | null;
+  eligibilityPolicyVersion?: string | null;
   vehicleId: string;
   driverId: string;
   assignmentType: "metered" | "fixed_price";
@@ -2662,6 +2668,10 @@ export interface DriverTaskRecord {
   orderId: string;
   dispatchJobId: string;
   assignmentId: string;
+  serviceProductId?: string | null;
+  serviceProductCode?: ServiceProductType | null;
+  serviceProductVersion?: string | null;
+  eligibilityPolicyVersion?: string | null;
   driverId: string;
   vehicleId: string;
   sourcePlatform: string | null;

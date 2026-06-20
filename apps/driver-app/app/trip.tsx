@@ -70,11 +70,7 @@ import {
 } from "@/lib/driver-location-heartbeat";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatMoney } from "@/lib/money";
-import {
-  formatDriverServiceProductLabel,
-  formatDriverTaskStatusLabel,
-  readDriverServiceProductCode,
-} from "@/lib/operational-labels";
+import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
 import {
   getTripExperienceState,
   getPrimaryTripAction,
@@ -1019,12 +1015,6 @@ export default function TripScreen() {
       : orderDetail?.fixedPrice
         ? "固定車資"
         : "金額待確認";
-  const serviceProductLabel = formatDriverServiceProductLabel({
-    serviceProductCode: readDriverServiceProductCode(orderDetail),
-    serviceBucket: orderDetail?.serviceBucket ?? null,
-    businessDispatchSubtype: orderDetail?.businessDispatchSubtype ?? null,
-    dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
-  });
   const routeOverlayLabel =
     routeMetricDistance !== "待同步"
       ? `${routeMetricDistance} · ${routeMetricDuration}`
@@ -1897,9 +1887,6 @@ export default function TripScreen() {
               </Pill>
               <Pill theme={driverCanvasTheme} tone="neutral">
                 {formatDriverTaskStatusLabel(taskDetail.status)}
-              </Pill>
-              <Pill theme={driverCanvasTheme} tone="neutral">
-                {serviceProductLabel}
               </Pill>
               <Pill theme={driverCanvasTheme} tone="neutral">
                 {taskDetail.taskId}

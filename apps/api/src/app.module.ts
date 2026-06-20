@@ -42,7 +42,6 @@ import { PlatformPresenceModule } from "./modules/platform-presence/platform-pre
 import { PlatformEarningsModule } from "./modules/platform-earnings/platform-earnings.module";
 import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "./modules/regulatory-registry/regulatory-registry.module";
-import { ReportingModule } from "./modules/reporting/reporting.module";
 import { ReportingFilingModule } from "./modules/reporting-filing/reporting-filing.module";
 import { ServiceProductModule } from "./modules/service-product/service-product.module";
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
@@ -72,7 +71,6 @@ import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-
     PlatformAdminModule,
     PlatformAdminAssistantModule,
     BillingSettlementModule,
-    ReportingModule,
     ReportingFilingModule,
     ServiceProductModule,
     ForwarderModule,

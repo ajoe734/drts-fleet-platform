@@ -23,6 +23,10 @@ export type OwnedMobilityTripCompletedEvent = {
   issuerAuthorizationRef: string | null;
   benefitReference: string | null;
   serviceProduct?: string | null;
+  serviceProductId?: string | null;
+  serviceProductCode?: string | null;
+  serviceProductVersion?: string | null;
+  eligibilityPolicyVersion?: string | null;
   tenantServiceProgramId?: string | null;
   sourcePlatform?: string | null;
 };

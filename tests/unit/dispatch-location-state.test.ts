@@ -33,7 +33,7 @@ describe("ORX-DP-004 dispatch candidate location state", () => {
   it("treats recent candidate locations as live", () => {
     const nowMs = new Date("2026-04-30T15:19:59.000Z").getTime();
 
-    expect(getCandidateLocationState(buildCandidate(), nowMs)).toBe("fresh");
+    expect(getCandidateLocationState(buildCandidate(), nowMs)).toBe("live");
     expect(isFreshLocation("2026-04-30T15:10:00.000Z", nowMs)).toBe(true);
   });
 
@@ -53,7 +53,7 @@ describe("ORX-DP-004 dispatch candidate location state", () => {
         buildCandidate({ currentLocation: null }),
         nowMs,
       ),
-    ).toBe("missing");
+    ).toBe("no_location");
     expect(
       getCandidateLocationState(
         buildCandidate({
@@ -77,14 +77,14 @@ describe("ORX-DP-004 dispatch candidate location state", () => {
     expect(
       getCandidateLocationState(
         buildCandidate({
-          locationState: "missing",
+          locationState: "no_location",
         }),
         nowMs,
       ),
-    ).toBe("missing");
-    expect(getCandidateLocationTone("fresh")).toBe("candidate-location-live");
+    ).toBe("no_location");
+    expect(getCandidateLocationTone("live")).toBe("candidate-location-live");
     expect(getCandidateLocationTone("stale")).toBe("candidate-location-stale");
-    expect(getCandidateLocationTone("missing")).toBe(
+    expect(getCandidateLocationTone("no_location")).toBe(
       "candidate-location-no-location",
     );
   });

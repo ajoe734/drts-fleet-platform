@@ -439,19 +439,16 @@ function getCandidateGate(
     };
   }
 
-  if (locationState === "missing") {
+  if (locationState === "no_location") {
     return {
-      label: tr(locale, "dispatch.workflow.candidateLocation.missing"),
+      label: tr(locale, "dispatch.workflow.candidateLocation.no_location"),
       tone: "warn" as const,
     };
   }
 
-  if (locationState === "stale" || locationState === "low_accuracy") {
+  if (locationState === "stale") {
     return {
-      label:
-        locationState === "low_accuracy"
-          ? tr(locale, "dispatch.workflow.candidateLocation.low_accuracy")
-          : tr(locale, "dispatch.detail.gate.locationStale"),
+      label: tr(locale, "dispatch.detail.gate.locationStale"),
       tone: "warn" as const,
     };
   }
@@ -484,11 +481,11 @@ function getCandidateScore(
     score -= 0.18;
   }
 
-  if (locationState === "stale" || locationState === "low_accuracy") {
+  if (locationState === "stale") {
     score -= 0.06;
   }
 
-  if (locationState === "missing") {
+  if (locationState === "no_location") {
     score -= 0.12;
   }
 
@@ -2165,7 +2162,7 @@ async function renderOwnedWorkspace({
     (row) => row.driver?.dispatchEligible,
   ).length;
   const liveCandidateCount = sortedCandidates.filter(
-    (candidate) => getCandidateLocationState(candidate) === "fresh",
+    (candidate) => getCandidateLocationState(candidate) === "live",
   ).length;
   const activityEntries = buildActivityEntries(
     locale,

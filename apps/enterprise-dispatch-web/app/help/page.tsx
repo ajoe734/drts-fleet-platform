@@ -32,12 +32,7 @@ export default async function HelpPage() {
           alignItems: "start",
         }}
       >
-        <ECard
-          t={t}
-          title={tr("help.faq.title")}
-          sub={tr("card.sub.faq")}
-          pad={0}
-        >
+        <ECard t={t} title={tr("help.faq.title")} sub="FAQ" pad={0}>
           <div>
             {faqs.map((f, i) => (
               <div

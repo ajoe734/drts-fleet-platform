@@ -4,8 +4,6 @@ import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
-import { ReportingModule } from "../reporting/reporting.module";
-import { ReportingService } from "../reporting/reporting.service";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { ReportingFilingController } from "./reporting-filing.controller";
@@ -17,7 +15,6 @@ import { ReportingFilingService } from "./reporting-filing.service";
     DatabaseModule,
     AuditNotificationModule,
     OwnedMobilityModule,
-    ReportingModule,
     TenantPartnerModule,
   ],
   controllers: [ReportingFilingController],
@@ -28,16 +25,12 @@ export class ReportingFilingModule implements OnModuleInit {
   constructor(
     private readonly reportingFilingService: ReportingFilingService,
     private readonly ownedMobilityService: OwnedMobilityService,
-    private readonly reportingService: ReportingService,
     private readonly tenantPartnerService: TenantPartnerService,
   ) {}
 
   onModuleInit() {
     this.reportingFilingService.registerOrderFeedProvider(() =>
       this.ownedMobilityService.listOrders(),
-    );
-    this.reportingFilingService.registerDailyDispatchRecordProvider((filters) =>
-      this.reportingService.listDailyDispatchRecords(filters),
     );
     this.reportingFilingService.registerCostCenterDirectoryProvider((tenantId) =>
       this.tenantPartnerService.listCostCenters(tenantId),

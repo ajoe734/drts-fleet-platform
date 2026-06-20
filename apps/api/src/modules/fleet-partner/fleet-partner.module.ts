@@ -9,7 +9,6 @@ import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
 import { SupplyDocumentService } from "./supply-document.service";
 import { SupplyReadinessService } from "./supply-readiness.service";
-import { SupplySubmissionRepository } from "./supply-submission.repository";
 import { SupplyReviewService } from "./supply-review.service";
 import { SupplySubmissionService } from "./supply-submission.service";
 
@@ -24,7 +23,6 @@ import { SupplySubmissionService } from "./supply-submission.service";
   providers: [
     FleetPartnerService,
     FleetPartnerRepository,
-    SupplySubmissionRepository,
     SupplySubmissionService,
     SupplyReviewService,
     SupplyReadinessService,
@@ -32,7 +30,6 @@ import { SupplySubmissionService } from "./supply-submission.service";
   ],
   exports: [
     FleetPartnerService,
-    SupplySubmissionRepository,
     SupplySubmissionService,
     SupplyReviewService,
     SupplyReadinessService,
