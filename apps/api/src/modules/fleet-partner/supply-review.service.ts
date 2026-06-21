@@ -193,7 +193,7 @@ export class SupplyReviewService implements OnModuleInit {
   }
 
   async listSubmissions() {
-    if (this.supplySubmissionRepository?.isEnabled()) {
+    if (this.supplySubmissionRepository) {
       const state = await this.supplySubmissionRepository.loadState();
       return state.submissions;
     }
@@ -207,7 +207,7 @@ export class SupplyReviewService implements OnModuleInit {
   }
 
   async listVehicleAffiliations() {
-    if (this.supplySubmissionRepository?.isEnabled()) {
+    if (this.supplySubmissionRepository) {
       const state = await this.supplySubmissionRepository.loadState();
       return state.vehicleAffiliations.map((affiliation) => ({
         ...affiliation,
@@ -302,6 +302,10 @@ export class SupplyReviewService implements OnModuleInit {
                   current.submissionId,
                 )
               : null;
+          const approvedDocuments =
+            config.nextStatus === "approved"
+              ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
+              : [];
           const canonical =
             config.nextStatus === "approved"
               ? await this.provisionCanonicalRecords(
@@ -359,6 +363,9 @@ export class SupplyReviewService implements OnModuleInit {
                   now,
                 ),
               ],
+              ...(approvedDocuments.length > 0
+                ? { documents: approvedDocuments }
+                : {}),
               ...(canonical?.vehicleAffiliation
                 ? {
                     vehicleAffiliations: [canonical.vehicleAffiliation],
@@ -382,6 +389,96 @@ export class SupplyReviewService implements OnModuleInit {
       return result.updated;
     }
 
+    if (this.supplySubmissionRepository) {
+      const state = await this.supplySubmissionRepository.loadState();
+      const current = state.submissions.find(
+        (item) => item.submissionId === submissionId,
+      );
+      if (!current) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Supply submission was not found.",
+          { submissionId },
+        );
+      }
+
+      this.assertExpectedRevision(current, normalizedCommand.expectedRevisionNo);
+      this.assertAllowedStatus(current, config);
+      if (config.nextStatus === "approved") {
+        this.assertReviewerNotSubmitter(current, reviewerId);
+      }
+
+      const now = new Date().toISOString();
+      const approvalArtifacts =
+        config.nextStatus === "approved"
+          ? this.loadApprovalArtifactsFromState(state, current.submissionId)
+          : null;
+      const approvedDocuments =
+        config.nextStatus === "approved"
+          ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
+          : [];
+      const canonical =
+        config.nextStatus === "approved"
+          ? await this.provisionCanonicalRecords(
+              null,
+              current,
+              approvalArtifacts,
+              reviewerId,
+            )
+          : null;
+      const transitionCanonical = canonical
+        ? {
+            canonicalDriverId: canonical.canonicalDriverId,
+            canonicalVehicleId: canonical.canonicalVehicleId,
+            canonicalContractId: canonical.canonicalContractId,
+            canonicalPolicyId: canonical.canonicalPolicyId,
+          }
+        : null;
+      const updated: SupplySubmissionRecord = {
+        ...current,
+        status: config.nextStatus,
+        revisionNo: current.revisionNo + 1,
+        reviewReasonCode: normalizedCommand.reasonCode,
+        reviewComment: normalizedCommand.comment,
+        updatedAt: now,
+        ...(transitionCanonical ?? {}),
+      };
+      if (config.eventType === "review_started") {
+        updated.reviewStartedBy = reviewerId;
+        updated.reviewStartedAt = now;
+      } else {
+        updated.reviewedBy = reviewerId;
+        updated.reviewedAt = now;
+      }
+
+      const reviewEvent = this.createReviewEvent(
+        updated,
+        config.eventType,
+        reviewerId,
+        normalizedCommand.reasonCode,
+        normalizedCommand.comment,
+        now,
+      );
+
+      await this.supplySubmissionRepository.persistChanges({
+        submissions: [updated],
+        reviewEvents: [reviewEvent],
+        ...(approvedDocuments.length > 0 ? { documents: approvedDocuments } : {}),
+        ...(canonical?.vehicleAffiliation
+          ? { vehicleAffiliations: [canonical.vehicleAffiliation] }
+          : {}),
+      });
+      if (canonical?.vehicleAffiliation) {
+        this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
+          canonical.vehicleAffiliation,
+          reviewerId,
+        );
+      }
+
+      return updated;
+    }
+
     const current = await this.findSubmission(submissionId);
     this.assertExpectedRevision(current, normalizedCommand.expectedRevisionNo);
     this.assertAllowedStatus(current, config);
@@ -394,6 +491,10 @@ export class SupplyReviewService implements OnModuleInit {
       config.nextStatus === "approved"
         ? this.loadInMemoryApprovalArtifacts(current.submissionId)
         : null;
+    const approvedDocuments =
+      config.nextStatus === "approved"
+        ? this.markDocumentsApproved(approvalArtifacts?.documents ?? [])
+        : [];
     const canonical =
       config.nextStatus === "approved"
         ? await this.provisionCanonicalRecords(
@@ -442,6 +543,17 @@ export class SupplyReviewService implements OnModuleInit {
       ),
       ...this.reviewEvents,
     ];
+    if (approvedDocuments.length > 0) {
+      const approvedDocumentIds = new Set(
+        approvedDocuments.map((document) => document.documentId),
+      );
+      this.documents = [
+        ...approvedDocuments.map((document) => ({ ...document })),
+        ...this.documents.filter(
+          (document) => !approvedDocumentIds.has(document.documentId),
+        ),
+      ];
+    }
     if (canonical?.vehicleAffiliation) {
       this.vehicleAffiliations = [
         { ...canonical.vehicleAffiliation },
@@ -470,6 +582,34 @@ export class SupplyReviewService implements OnModuleInit {
         (document) => document.submissionId === submissionId,
       ),
     };
+  }
+
+  private loadApprovalArtifactsFromState(
+    state: {
+      driverDrafts: DriverSupplyDraft[];
+      vehicleDrafts: VehicleSupplyDraft[];
+      documents: SupplyDocumentRecord[];
+    },
+    submissionId: string,
+  ): SubmissionApprovalArtifacts {
+    return {
+      driverDraft:
+        state.driverDrafts.find((draft) => draft.submissionId === submissionId) ??
+        null,
+      vehicleDraft:
+        state.vehicleDrafts.find((draft) => draft.submissionId === submissionId) ??
+        null,
+      documents: state.documents.filter(
+        (document) => document.submissionId === submissionId,
+      ),
+    };
+  }
+
+  private markDocumentsApproved(documents: readonly SupplyDocumentRecord[]) {
+    return documents.map((document) => ({
+      ...document,
+      reviewStatus: "approved" as const,
+    }));
   }
 
   private async provisionCanonicalRecords(
@@ -510,7 +650,7 @@ export class SupplyReviewService implements OnModuleInit {
   }
 
   private async findSubmission(submissionId: string) {
-    if (this.supplySubmissionRepository?.isEnabled()) {
+    if (this.supplySubmissionRepository) {
       const state = await this.supplySubmissionRepository.loadState();
       const submission = state.submissions.find(
         (item) => item.submissionId === submissionId,

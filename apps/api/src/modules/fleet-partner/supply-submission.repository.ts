@@ -186,8 +186,11 @@ type MissingRelationFallback = { rows: [] };
 @Injectable()
 export class SupplySubmissionRepository {
   private readonly logger = new Logger(SupplySubmissionRepository.name);
+  private inMemoryState: SupplySubmissionPersistenceState;
 
-  constructor(@Optional() private readonly databaseService?: DatabaseService) {}
+  constructor(@Optional() private readonly databaseService?: DatabaseService) {
+    this.inMemoryState = this.emptyState();
+  }
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
@@ -195,7 +198,7 @@ export class SupplySubmissionRepository {
 
   async loadState(): Promise<SupplySubmissionPersistenceState> {
     if (!this.isEnabled()) {
-      return this.emptyState();
+      return this.cloneState(this.inMemoryState);
     }
 
     const [
@@ -278,6 +281,7 @@ export class SupplySubmissionRepository {
 
   async persistChanges(changes: PersistSupplySubmissionChanges) {
     if (!this.isEnabled()) {
+      this.applyInMemoryChanges(changes);
       return;
     }
 
@@ -563,6 +567,34 @@ export class SupplySubmissionRepository {
     };
   }
 
+  async deleteDocument(
+    documentId: string,
+    submissionId: string,
+    fleetPartnerId: string,
+  ) {
+    if (!this.isEnabled()) {
+      this.inMemoryState.documents = this.inMemoryState.documents.filter(
+        (document) =>
+          !(
+            document.documentId === documentId &&
+            document.submissionId === submissionId &&
+            document.fleetPartnerId === fleetPartnerId
+          ),
+      );
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        DELETE FROM fleet.supply_documents
+        WHERE document_id = $1
+          AND submission_id = $2
+          AND fleet_partner_id = $3
+      `,
+      [documentId, submissionId, fleetPartnerId],
+    );
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -579,6 +611,85 @@ export class SupplySubmissionRepository {
       reviewEvents: [],
       vehicleAffiliations: [],
     };
+  }
+
+  private cloneState(
+    state: SupplySubmissionPersistenceState,
+  ): SupplySubmissionPersistenceState {
+    return {
+      submissions: state.submissions.map((submission) =>
+        this.cloneItem(submission),
+      ),
+      driverDrafts: state.driverDrafts.map((draft) => this.cloneItem(draft)),
+      vehicleDrafts: state.vehicleDrafts.map((draft) => this.cloneItem(draft)),
+      documents: state.documents.map((document) => this.cloneItem(document)),
+      reviewEvents: state.reviewEvents.map((event) => this.cloneItem(event)),
+      vehicleAffiliations: state.vehicleAffiliations.map((affiliation) =>
+        this.cloneItem(affiliation),
+      ),
+    };
+  }
+
+  private applyInMemoryChanges(changes: PersistSupplySubmissionChanges) {
+    this.inMemoryState.submissions = this.mergeByKey(
+      this.inMemoryState.submissions,
+      changes.submissions ?? [],
+      "submissionId",
+    );
+    this.inMemoryState.driverDrafts = this.mergeByKey(
+      this.inMemoryState.driverDrafts,
+      changes.driverDrafts ?? [],
+      "submissionId",
+    );
+    this.inMemoryState.vehicleDrafts = this.mergeByKey(
+      this.inMemoryState.vehicleDrafts,
+      changes.vehicleDrafts ?? [],
+      "submissionId",
+    );
+    this.inMemoryState.documents = this.mergeByKey(
+      this.inMemoryState.documents,
+      changes.documents ?? [],
+      "documentId",
+    );
+    this.inMemoryState.reviewEvents = this.mergeByKey(
+      this.inMemoryState.reviewEvents,
+      changes.reviewEvents ?? [],
+      "eventId",
+    );
+    this.inMemoryState.vehicleAffiliations = this.mergeByKey(
+      this.inMemoryState.vehicleAffiliations,
+      changes.vehicleAffiliations ?? [],
+      "affiliationId",
+    );
+  }
+
+  private mergeByKey<T, K extends keyof T>(
+    existing: readonly T[],
+    incoming: readonly T[],
+    key: K,
+  ): T[] {
+    if (incoming.length === 0) {
+      return existing.map((item) => this.cloneItem(item));
+    }
+
+    const incomingIds = new Set(
+      incoming.map((item) => String((item as Record<string, unknown>)[key as string])),
+    );
+    return [
+      ...incoming.map((item) => this.cloneItem(item)),
+      ...existing
+        .filter(
+          (item) =>
+            !incomingIds.has(
+              String((item as Record<string, unknown>)[key as string]),
+            ),
+        )
+        .map((item) => this.cloneItem(item)),
+    ];
+  }
+
+  private cloneItem<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
   }
 
   private async loadQuery<T extends QueryResultRow>(
