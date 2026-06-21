@@ -275,6 +275,11 @@ export class SupplyReviewService implements OnModuleInit {
     const reviewerId = this.requireActorId(reviewerActorId);
 
     if (this.supplySubmissionRepository?.isEnabled()) {
+      // DB-backed path only: submission_id is a uuid column, so a non-UUID id
+      // makes "WHERE submission_id = $1" throw a Postgres type error -> 500.
+      // Reject it as 404 up front (a non-UUID submission can never exist). The
+      // in-memory path below tolerates arbitrary string ids (used by tests).
+      this.assertDbSubmissionIdFormat(submissionId);
       const result = await this.supplySubmissionRepository.withTransaction(
         async (executor) => {
           const current = await this.supplySubmissionRepository!.lockSubmission(
@@ -488,6 +493,20 @@ export class SupplyReviewService implements OnModuleInit {
         reviewerId,
       },
     );
+  }
+
+  private assertDbSubmissionIdFormat(submissionId: string) {
+    const id = (submissionId ?? "").trim();
+    const uuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuid.test(id)) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Supply submission was not found.",
+        { submissionId },
+      );
+    }
   }
 
   private async findSubmission(submissionId: string) {
