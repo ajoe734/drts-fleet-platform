@@ -13,4 +13,3 @@
 # NOTE: the runner extracts EVERY integer run from each non-comment line, so a
 # reason string must contain no stray digits (they would be read as extra
 # deferred scenario numbers). Keep reasons digit-free.
-019   fleet supply self-service write API (create/upload/submit/resubmit) is an unbuilt scaffold and readiness is a repository-backed read-model with no submission seed in the DB hermetic stack; the review, approve, canonical-provisioning, and readiness-engine legs are proven against the in-memory stack while the unbuilt write and read-model-seam legs are reported, not silently passed (owner SUP-QA)
