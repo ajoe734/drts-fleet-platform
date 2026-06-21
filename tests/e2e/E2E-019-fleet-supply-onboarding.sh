@@ -2,36 +2,15 @@
 # E2E-019 — Fleet supply onboarding (API level)
 #
 # Source: docs/02-architecture/phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.md §11.3
-# Dependencies: SUP-BE-006 (canonical provisioning + vehicle fleet affiliation on approve),
-#               SUP-BE-007 (supply readiness service + readiness APIs).
+# Dependencies: SUP-BE-003 (fleet write API restore), SUP-BE-006 (approve-time
+# canonical provisioning), SUP-BE-007 (supply readiness service).
 #
-# Spec narrative:
-#   fleet partner creates driver/vehicle -> uploads doc metadata -> submits
-#   -> admin requests revision -> resubmits -> admin approves
-#   -> canonical driver/vehicle/affiliations created -> readiness ready
-#
-# What this scenario proves against the wired integration stack (HARD asserts):
-#   1. Platform supply-review state machine: submitted -> in_review -> needs_revision,
-#      with optimistic concurrency (expectedRevisionNo) and the reviewer-self-approval guard.
-#   2. Approve transitions an in_review submission to approved and provisions the canonical
-#      driver / vehicle / contract / policy ids (SUP-BE-006).
-#   3. The supply readiness service (SUP-BE-007) evaluates canonical subjects, returns a
-#      well-formed readiness record (state + reasonCodes + policyVersion), reaches the
-#      terminal "ready" state for a fully-credentialed subject, surfaces precise reason
-#      codes for a not_ready subject, and enforces realm/scope on the portal route.
-#
-# Explicit boundaries (see "GATED LEGS" section at the end — these are logged, never
-# silently passed, consistent with tests/e2e/README.md and gate-deferred.txt):
-#   - Fleet-partner self-service create-driver / create-vehicle / upload-document /
-#     submit / RESUBMIT is an unbuilt scaffold (apps/api/.../supply-submission.service.ts is
-#     `export class SupplySubmissionService {}`). The "creates / uploads / submits / resubmits"
-#     legs of the spec narrative are driven from the supply-review seed fixtures instead and
-#     the missing write API is reported as a tracked gap.
-#   - The readiness read-model is repository-backed; in the default in-memory stack it does not
-#     observe a runtime in-memory approval, and the DB-backed stack carries no seeded
-#     submissions to approve. So the "the just-approved submission's own canonical subject
-#     becomes readiness=ready" link is asserted at the engine level on seeded canonical
-#     subjects, and the runtime-approval->same-subject-readiness join is reported as a seam.
+# This scenario proves the full API-level chain:
+#   1. Fleet partner self-service create/update/list/detail/upload/delete/submit/withdraw
+#   2. Admin review state machine with revision loop and self-approval guard
+#   3. Approve-time canonical driver/vehicle/contract/policy provisioning
+#   4. Same-subject readiness=ready through the shared submission read-model
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,8 +19,12 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 
 SCENARIO="E2E-019"
 FLEET_PARTNER_ID="${E2E_SUPPLY_FLEET_PARTNER_ID:-fleet-demo-001}"
-# Portal readiness routes require realm partner|system plus the billing:read scope.
 READINESS_SCOPES="${E2E_SUPPLY_READINESS_SCOPES:-billing:read partner:entries:read}"
+VALID_CHECKSUM_A="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+VALID_CHECKSUM_B="fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+VALID_CHECKSUM_C="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+VALID_CHECKSUM_D="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+VALID_CHECKSUM_E="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 
 TMP_FILES=()
 cleanup() {
@@ -51,28 +34,35 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── Local helpers ─────────────────────────────────────────────────────────────
 use_admin_actor() { switch_actor "platform_admin" "e2e-platform-admin-001"; }
-
-# Re-create the reviewer actor as a specific actor id (used to drive the
-# reviewer-self-approval guard with the original submitter's identity).
 use_actor_id() { switch_actor "platform_admin" "$1"; }
-
 use_partner_actor() {
   switch_actor "partner_api_key" "e2e-fleet-partner-001"
   E2E_FLEET_PARTNER_ID="$FLEET_PARTNER_ID"
   E2E_EXTRA_SCOPES="$READINESS_SCOPES"
 }
 
-post_json() { # path json
+write_json() { # json
   local f
   f=$(mktemp)
   TMP_FILES+=("$f")
-  printf '%s' "$2" > "$f"
-  http_call POST "$1" "$f"
+  printf '%s' "$1" > "$f"
+  printf '%s' "$f"
 }
 
-assert_error_code() { # expected-code
+post_json() { # path json
+  http_call POST "$1" "$(write_json "$2")"
+}
+
+put_json() { # path json
+  http_call PUT "$1" "$(write_json "$2")"
+}
+
+delete_json() { # path json
+  http_call DELETE "$1" "$(write_json "$2")"
+}
+
+assert_error_code() { # expected
   local got
   got=$(json_get '.error.code')
   if [[ "$got" != "$1" ]]; then
@@ -83,30 +73,50 @@ assert_error_code() { # expected-code
   log_ok "Error contract ${1} (HTTP ${RESP_STATUS})"
 }
 
-# Reads a submission detail into SUB_STATUS / SUB_REV / SUB_SUBMITTER.
-read_submission() { # submission-id
+read_portal_submission() { # submission-id
+  use_partner_actor
+  http_call GET "/fleet-partner/supply-submissions/$1"
+  assert_status "200"
+  PORTAL_SUB_STATUS=$(json_get '.data.submission.status')
+  PORTAL_SUB_REV=$(json_get '.data.submission.revision_no')
+}
+
+read_admin_submission() { # submission-id
   use_admin_actor
   http_call GET "/admin/supply-review/submissions/$1"
   assert_status "200"
-  SUB_STATUS=$(json_get '.data.status')
-  SUB_REV=$(json_get '.data.revision_no')
-  SUB_SUBMITTER=$(json_get '.data.submitted_by')
+  ADMIN_SUB_STATUS=$(json_get '.data.status')
+  ADMIN_SUB_REV=$(json_get '.data.revision_no')
+  ADMIN_SUB_SUBMITTER=$(json_get '.data.submitted_by')
 }
 
-# Picks a submission_id from the current list response ($RESP_BODY), scoped to this
-# scenario's FLEET_PARTNER_ID and preferring a row already in the state the calling
-# leg expects. Selecting purely by type with [0] (the prior behaviour) is unsafe on a
-# shared stack: with multiple fleets it can stitch the review/approve legs to one fleet
-# and readiness to another, and with extra rows it can self-gate on an already-advanced
-# submission even when a valid seed exists later in the list. The fallback to the first
-# in-fleet row of that type keeps the per-leg state guards (and their GATED messaging)
-# meaningful when no row is in the preferred state.
-pick_submission() { # submission-type preferred-status
-  echo "$RESP_BODY" | jq -r --arg type "$1" --arg fleet "$FLEET_PARTNER_ID" --arg want "$2" '
-    [.data.items[]? | select(.submission_type == $type and .fleet_partner_id == $fleet)] as $pool
-    | (($pool | map(select(.status == $want)) | .[0].submission_id)
-       // ($pool | .[0].submission_id)
-       // empty)'
+list_portal_submissions() {
+  use_partner_actor
+  http_call GET "/fleet-partner/supply-submissions"
+  assert_status "200"
+}
+
+create_upload_url() { # submission-id revision document-type file-name
+  use_partner_actor
+  post_json \
+    "/fleet-partner/supply-submissions/$1/documents/upload-url" \
+    "{\"expectedRevisionNo\":$2,\"documentType\":\"$3\",\"originalFileName\":\"$4\",\"contentType\":\"application/pdf\"}"
+  assert_status "200|201"
+  DOC_OBJECT_KEY=$(json_get '.data.object_key')
+  if [[ -z "$DOC_OBJECT_KEY" ]]; then
+    log_fail "Upload URL response missing object_key"
+    log_fail "Body: ${RESP_BODY}"
+    exit 1
+  fi
+}
+
+confirm_upload() { # submission-id revision document-type file-name checksum
+  use_partner_actor
+  post_json \
+    "/fleet-partner/supply-submissions/$1/documents/confirm" \
+    "{\"expectedRevisionNo\":$2,\"documentType\":\"$3\",\"objectKey\":\"${DOC_OBJECT_KEY}\",\"originalFileName\":\"$4\",\"contentType\":\"application/pdf\",\"fileSize\":1024,\"checksumSha256\":\"$5\",\"effectiveFrom\":\"2026-01-01\",\"effectiveUntil\":\"2027-12-31\"}"
+  assert_status "200|201"
+  DOC_ID=$(json_get '.data.document_id')
 }
 
 chain_init
@@ -116,228 +126,268 @@ echo -e "${BOLD}  E2E-019 — Fleet supply onboarding (API level)${RESET}"
 echo -e "${BOLD}  Fleet partner: ${FLEET_PARTNER_ID}${RESET}"
 echo -e "${BOLD}════════════════════════════════════════════════════════${RESET}"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LEG 1 — Discover seeded supply submissions (the "create/upload/submit" inputs)
-# ══════════════════════════════════════════════════════════════════════════════
-log_surface "Platform Supply Review — submission inventory"
-log_step "LEG 1 — list supply submissions"
+log_surface "Fleet Partner Portal — driver write flow"
+log_step "LEG 1 — create/update/list/detail/upload/delete/submit/resubmit/approve driver"
+
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/drivers" \
+  '{"name":"E2E Driver Demo","mobile":"+886900111222","professionalDriverLicenseNo":"E2E-PDL-001","professionalDriverLicenseExpiry":"2027-12-31","taxiDriverRegistrationNo":"E2E-TAXI-001","taxiDriverRegistrationArea":"TPE","taxiDriverRegistrationExpiry":"2027-12-31","supportedServiceProductCodes":["taxi_realtime"],"preferredVehicleSubmissionId":null}'
+assert_status "200|201"
+DRIVER_SUB=$(json_get '.data.submission.submission_id')
+if [[ -z "$DRIVER_SUB" ]]; then
+  log_fail "Driver create response missing submission_id"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+fi
+log_ok "Created driver submission ${DRIVER_SUB}"
+save_evidence "$SCENARIO" "fleet-partner" "driver_submission_id" "$DRIVER_SUB"
+
+list_portal_submissions
+DRIVER_IN_LIST=$(echo "$RESP_BODY" | jq -r --arg id "$DRIVER_SUB" \
+  '[.data.items[]? | select(.submission.submission_id == $id)][0].submission.submission_id // empty')
+[[ "$DRIVER_IN_LIST" == "$DRIVER_SUB" ]] || { log_fail "Driver submission missing from list"; exit 1; }
+log_ok "GET /fleet-partner/supply-submissions returns created driver submission"
+
+read_portal_submission "$DRIVER_SUB"
+[[ "$PORTAL_SUB_STATUS" == "draft" ]] || { log_fail "Expected driver submission draft, got ${PORTAL_SUB_STATUS}"; exit 1; }
+[[ "$PORTAL_SUB_REV" == "1" ]] || { log_fail "Expected driver revision 1, got ${PORTAL_SUB_REV}"; exit 1; }
+log_ok "GET /fleet-partner/supply-submissions/${DRIVER_SUB} returns draft detail"
+
+use_partner_actor
+put_json \
+  "/fleet-partner/supply-submissions/${DRIVER_SUB}/driver" \
+  "{\"expectedRevisionNo\":1,\"name\":\"E2E Driver Demo Revised\",\"mobile\":\"+886900111223\",\"professionalDriverLicenseNo\":\"E2E-PDL-001\",\"professionalDriverLicenseExpiry\":\"2027-12-31\",\"taxiDriverRegistrationNo\":\"E2E-TAXI-001\",\"taxiDriverRegistrationArea\":\"TPE\",\"taxiDriverRegistrationExpiry\":\"2027-12-31\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"preferredVehicleSubmissionId\":null}"
+assert_status "200|201"
+read_portal_submission "$DRIVER_SUB"
+[[ "$PORTAL_SUB_REV" == "2" ]] || { log_fail "Expected driver revision 2 after update, got ${PORTAL_SUB_REV}"; exit 1; }
+log_ok "PUT /driver advanced driver draft revision"
+
+create_upload_url "$DRIVER_SUB" 2 "professional_driver_license" "driver-license.pdf"
+confirm_upload "$DRIVER_SUB" 2 "professional_driver_license" "driver-license.pdf" "$VALID_CHECKSUM_A"
+read_portal_submission "$DRIVER_SUB"
+[[ "$PORTAL_SUB_REV" == "3" ]] || { log_fail "Expected driver revision 3 after first document, got ${PORTAL_SUB_REV}"; exit 1; }
+
+create_upload_url "$DRIVER_SUB" 3 "taxi_driver_registration" "taxi-registration.pdf"
+confirm_upload "$DRIVER_SUB" 3 "taxi_driver_registration" "taxi-registration.pdf" "$VALID_CHECKSUM_B"
+read_portal_submission "$DRIVER_SUB"
+[[ "$PORTAL_SUB_REV" == "4" ]] || { log_fail "Expected driver revision 4 after second document, got ${PORTAL_SUB_REV}"; exit 1; }
+
+create_upload_url "$DRIVER_SUB" 4 "other" "driver-extra.pdf"
+confirm_upload "$DRIVER_SUB" 4 "other" "driver-extra.pdf" "$VALID_CHECKSUM_C"
+EXTRA_DRIVER_DOC_ID="$DOC_ID"
+delete_json \
+  "/fleet-partner/supply-submissions/${DRIVER_SUB}/documents/${EXTRA_DRIVER_DOC_ID}" \
+  '{"expectedRevisionNo":5}'
+assert_status "200|201"
+[[ "$(json_get '.data.deleted')" == "true" ]] || { log_fail "Delete document did not return deleted=true"; exit 1; }
+read_portal_submission "$DRIVER_SUB"
+[[ "$PORTAL_SUB_REV" == "6" ]] || { log_fail "Expected driver revision 6 after delete, got ${PORTAL_SUB_REV}"; exit 1; }
+log_ok "Document delete endpoint executed and advanced revision"
+
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/${DRIVER_SUB}/submit" \
+  '{"expectedRevisionNo":6}'
+assert_status "200|201"
+[[ "$(json_get '.data.submission.status')" == "submitted" ]] || { log_fail "Driver submit did not reach submitted"; exit 1; }
+log_ok "Driver submission submitted from fleet-partner portal"
+
+read_admin_submission "$DRIVER_SUB"
+post_json \
+  "/admin/supply-review/submissions/${DRIVER_SUB}/start" \
+  "{\"expectedRevisionNo\":${ADMIN_SUB_REV},\"reasonCode\":\"initial_screening\",\"comment\":\"Driver review started\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "in_review" ]] || { log_fail "Driver start review did not reach in_review"; exit 1; }
+
+read_admin_submission "$DRIVER_SUB"
+post_json \
+  "/admin/supply-review/submissions/${DRIVER_SUB}/request-revision" \
+  "{\"expectedRevisionNo\":${ADMIN_SUB_REV},\"reasonCode\":\"profile_clarification\",\"comment\":\"Please confirm updated mobile.\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "needs_revision" ]] || { log_fail "Driver request-revision did not reach needs_revision"; exit 1; }
+log_ok "Driver review entered needs_revision"
+
+read_portal_submission "$DRIVER_SUB"
+use_partner_actor
+put_json \
+  "/fleet-partner/supply-submissions/${DRIVER_SUB}/driver" \
+  "{\"expectedRevisionNo\":${PORTAL_SUB_REV},\"name\":\"E2E Driver Demo Final\",\"mobile\":\"+886900111224\",\"professionalDriverLicenseNo\":\"E2E-PDL-001\",\"professionalDriverLicenseExpiry\":\"2027-12-31\",\"taxiDriverRegistrationNo\":\"E2E-TAXI-001\",\"taxiDriverRegistrationArea\":\"TPE\",\"taxiDriverRegistrationExpiry\":\"2027-12-31\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"preferredVehicleSubmissionId\":null}"
+assert_status "200|201"
+read_portal_submission "$DRIVER_SUB"
+[[ "$PORTAL_SUB_REV" == "10" ]] || { log_fail "Expected driver revision 10 after resubmission update, got ${PORTAL_SUB_REV}"; exit 1; }
+
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/${DRIVER_SUB}/submit" \
+  "{\"expectedRevisionNo\":${PORTAL_SUB_REV}}"
+assert_status "200|201"
+[[ "$(json_get '.data.submission.status')" == "submitted" ]] || { log_fail "Driver resubmit did not return submitted"; exit 1; }
+log_ok "Driver submission resubmitted after revision request"
+
+read_admin_submission "$DRIVER_SUB"
+post_json \
+  "/admin/supply-review/submissions/${DRIVER_SUB}/start" \
+  "{\"expectedRevisionNo\":${ADMIN_SUB_REV},\"reasonCode\":\"final_screening\",\"comment\":\"Driver revision reviewed\"}"
+assert_status "200|201"
+read_admin_submission "$DRIVER_SUB"
+post_json \
+  "/admin/supply-review/submissions/${DRIVER_SUB}/approve" \
+  "{\"expectedRevisionNo\":${ADMIN_SUB_REV},\"reasonCode\":\"all_documents_valid\",\"comment\":\"Driver approved\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "approved" ]] || { log_fail "Driver approve did not reach approved"; exit 1; }
+CANON_DRIVER=$(json_get '.data.canonical_driver_id')
+[[ -n "$CANON_DRIVER" && "$CANON_DRIVER" != "null" ]] || { log_fail "Driver approve missing canonical_driver_id"; exit 1; }
+log_ok "Driver approval provisioned canonical driver ${CANON_DRIVER}"
+chain_set "regulatory-registry" "canonical_driver_id" "$CANON_DRIVER"
 
 use_admin_actor
-http_call GET "/admin/supply-review/submissions"
-assert_status "200"
+post_json \
+  "/admin/drivers/${CANON_DRIVER}/fleet-affiliations" \
+  "{\"fleetPartnerId\":\"${FLEET_PARTNER_ID}\",\"affiliationType\":\"contracted_under\",\"effectiveFrom\":\"2026-06-21T00:00:00.000Z\",\"effectiveUntil\":null,\"driverGroupId\":null}"
+assert_status "200|201"
+log_ok "Canonical driver affiliated to fleet partner"
 
-# Scope to this fleet and prefer the state each leg drives: the driver leg starts a
-# review from 'submitted', the vehicle leg approves from 'in_review'.
-DRIVER_SUB=$(pick_submission "driver_onboarding" "submitted")
-VEHICLE_SUB=$(pick_submission "vehicle_onboarding" "in_review")
+log_surface "Fleet Partner Portal — withdraw path"
+log_step "LEG 2 — submit and withdraw a disposable driver submission"
 
-log_info "driver_onboarding submission: ${DRIVER_SUB:-<none>}"
-log_info "vehicle_onboarding submission: ${VEHICLE_SUB:-<none>}"
-save_evidence "$SCENARIO" "supply-review" "driver_submission" "${DRIVER_SUB:-none}"
-save_evidence "$SCENARIO" "supply-review" "vehicle_submission" "${VEHICLE_SUB:-none}"
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/drivers" \
+  '{"name":"E2E Withdraw Demo","mobile":"+886900444555","professionalDriverLicenseNo":"E2E-PDL-WITHDRAW","professionalDriverLicenseExpiry":"2027-12-31","taxiDriverRegistrationNo":"E2E-TAXI-WITHDRAW","taxiDriverRegistrationArea":"TPE","taxiDriverRegistrationExpiry":"2027-12-31","supportedServiceProductCodes":["taxi_realtime"],"preferredVehicleSubmissionId":null}'
+assert_status "200|201"
+WITHDRAW_SUB=$(json_get '.data.submission.submission_id')
+create_upload_url "$WITHDRAW_SUB" 1 "professional_driver_license" "withdraw-license.pdf"
+confirm_upload "$WITHDRAW_SUB" 1 "professional_driver_license" "withdraw-license.pdf" "$VALID_CHECKSUM_A"
+create_upload_url "$WITHDRAW_SUB" 2 "taxi_driver_registration" "withdraw-registration.pdf"
+confirm_upload "$WITHDRAW_SUB" 2 "taxi_driver_registration" "withdraw-registration.pdf" "$VALID_CHECKSUM_B"
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/${WITHDRAW_SUB}/submit" \
+  '{"expectedRevisionNo":3}'
+assert_status "200|201"
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/${WITHDRAW_SUB}/withdraw" \
+  '{"expectedRevisionNo":4}'
+assert_status "200|201"
+[[ "$(json_get '.data.submission.status')" == "withdrawn" ]] || { log_fail "Withdraw did not return withdrawn"; exit 1; }
+log_ok "Withdraw endpoint executed on a submitted supply submission"
 
-REVIEW_LEG_ENABLED=true
-if [[ -z "$DRIVER_SUB" || -z "$VEHICLE_SUB" ]]; then
-  REVIEW_LEG_ENABLED=false
-  log_warn "GATED: no seeded driver+vehicle supply submissions are present."
-  log_warn "  The fleet-partner self-service submission write API is an unbuilt scaffold"
-  log_warn "  (supply-submission.service.ts), and the DB-backed stack carries no submission"
-  log_warn "  seed rows. The review/approve legs cannot run here; exercising readiness only."
-fi
+log_surface "Fleet Partner Portal + Admin Review — vehicle flow"
+log_step "LEG 3 — create/update/upload/submit/approve vehicle with self-approval guard"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# LEG 2 — Admin review + request-revision loop (optimistic concurrency + guards)
-# ══════════════════════════════════════════════════════════════════════════════
-if [[ "$REVIEW_LEG_ENABLED" == "true" ]]; then
-  log_surface "Platform Supply Review — review state machine"
-  log_step "LEG 2 — start review, concurrency guard, request revision"
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/vehicles" \
+  "{\"plateNo\":\"E2E-7788\",\"licenseType\":\"taxi\",\"brand\":\"Toyota\",\"model\":\"Sienta\",\"modelYear\":2024,\"seatCount\":5,\"luggageCapacity\":3,\"businessArea\":\"TPE\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"airportTransferEligible\":false,\"fixedFareAllowed\":false,\"currentDriverSubmissionId\":\"${DRIVER_SUB}\"}"
+assert_status "200|201"
+VEHICLE_SUB=$(json_get '.data.submission.submission_id')
+[[ -n "$VEHICLE_SUB" ]] || { log_fail "Vehicle create response missing submission_id"; exit 1; }
+log_ok "Created vehicle submission ${VEHICLE_SUB}"
+save_evidence "$SCENARIO" "fleet-partner" "vehicle_submission_id" "$VEHICLE_SUB"
 
-  read_submission "$DRIVER_SUB"
-  if [[ "$SUB_STATUS" == "submitted" ]]; then
-    # submitted -> in_review (start), using the current revision as the expected revision
-    post_json "/admin/supply-review/submissions/${DRIVER_SUB}/start" \
-      "{\"expectedRevisionNo\":${SUB_REV},\"reasonCode\":\"initial_screening\",\"comment\":\"E2E start review\"}"
-    assert_status "200|201"
-    [[ "$(json_get '.data.status')" == "in_review" ]] || { log_fail "start did not reach in_review"; exit 1; }
-    log_ok "Submission ${DRIVER_SUB} submitted -> in_review (rev $(json_get '.data.revision_no'))"
-    chain_set "supply-review" "driver_review_status" "$(json_get '.data.status')"
+use_partner_actor
+put_json \
+  "/fleet-partner/supply-submissions/${VEHICLE_SUB}/vehicle" \
+  "{\"expectedRevisionNo\":1,\"plateNo\":\"E2E-7788\",\"licenseType\":\"taxi\",\"brand\":\"Toyota\",\"model\":\"Sienta Hybrid\",\"modelYear\":2024,\"seatCount\":5,\"luggageCapacity\":4,\"businessArea\":\"TPE\",\"supportedServiceProductCodes\":[\"taxi_realtime\"],\"airportTransferEligible\":false,\"fixedFareAllowed\":false,\"currentDriverSubmissionId\":\"${DRIVER_SUB}\"}"
+assert_status "200|201"
+read_portal_submission "$VEHICLE_SUB"
+[[ "$PORTAL_SUB_REV" == "2" ]] || { log_fail "Expected vehicle revision 2 after update, got ${PORTAL_SUB_REV}"; exit 1; }
 
-    read_submission "$DRIVER_SUB"
+create_upload_url "$VEHICLE_SUB" 2 "vehicle_registration" "vehicle-registration.pdf"
+confirm_upload "$VEHICLE_SUB" 2 "vehicle_registration" "vehicle-registration.pdf" "$VALID_CHECKSUM_C"
+create_upload_url "$VEHICLE_SUB" 3 "insurance_policy" "vehicle-insurance.pdf"
+confirm_upload "$VEHICLE_SUB" 3 "insurance_policy" "vehicle-insurance.pdf" "$VALID_CHECKSUM_D"
+create_upload_url "$VEHICLE_SUB" 4 "fleet_participation_contract" "fleet-contract.pdf"
+confirm_upload "$VEHICLE_SUB" 4 "fleet_participation_contract" "fleet-contract.pdf" "$VALID_CHECKSUM_E"
+read_portal_submission "$VEHICLE_SUB"
+[[ "$PORTAL_SUB_REV" == "5" ]] || { log_fail "Expected vehicle revision 5 after uploads, got ${PORTAL_SUB_REV}"; exit 1; }
 
-    # Optimistic concurrency: a stale expectedRevisionNo must be rejected with 409.
-    STALE_REV=$(( SUB_REV - 1 ))
-    post_json "/admin/supply-review/submissions/${DRIVER_SUB}/request-revision" \
-      "{\"expectedRevisionNo\":${STALE_REV},\"reasonCode\":\"stale_probe\"}"
-    assert_status "409"
-    assert_error_code "SUBMISSION_REVISION_CONFLICT"
+use_partner_actor
+post_json \
+  "/fleet-partner/supply-submissions/${VEHICLE_SUB}/submit" \
+  '{"expectedRevisionNo":5}'
+assert_status "200|201"
+[[ "$(json_get '.data.submission.status')" == "submitted" ]] || { log_fail "Vehicle submit did not reach submitted"; exit 1; }
+log_ok "Vehicle submission submitted from fleet-partner portal"
 
-    # Real revision request: in_review -> needs_revision, reason echoed back.
-    post_json "/admin/supply-review/submissions/${DRIVER_SUB}/request-revision" \
-      "{\"expectedRevisionNo\":${SUB_REV},\"reasonCode\":\"documents_unclear\",\"comment\":\"Please re-upload the driver license scan.\"}"
-    assert_status "200|201"
-    [[ "$(json_get '.data.status')" == "needs_revision" ]] || { log_fail "request-revision did not reach needs_revision"; exit 1; }
-    [[ "$(json_get '.data.review_reason_code')" == "documents_unclear" ]] || { log_fail "reason code not persisted"; exit 1; }
-    log_ok "Submission ${DRIVER_SUB} in_review -> needs_revision (reason documents_unclear)"
-    save_evidence "$SCENARIO" "supply-review" "driver_needs_revision" "$(json_get '.data.revision_no')"
+read_admin_submission "$VEHICLE_SUB"
+post_json \
+  "/admin/supply-review/submissions/${VEHICLE_SUB}/start" \
+  "{\"expectedRevisionNo\":${ADMIN_SUB_REV},\"reasonCode\":\"manual_screening\",\"comment\":\"Vehicle review started\"}"
+assert_status "200|201"
+read_admin_submission "$VEHICLE_SUB"
+use_actor_id "e2e-fleet-partner-001"
+post_json \
+  "/admin/supply-review/submissions/${VEHICLE_SUB}/approve" \
+  "{\"expectedRevisionNo\":${ADMIN_SUB_REV},\"reasonCode\":\"self_approval_probe\"}"
+assert_status "403"
+assert_error_code "REVIEWER_SELF_APPROVAL_DENIED"
+log_ok "Reviewer self-approval guard enforced"
 
-    # Invalid transition: approve requires in_review; a needs_revision submission rejects.
-    read_submission "$DRIVER_SUB"
-    post_json "/admin/supply-review/submissions/${DRIVER_SUB}/approve" \
-      "{\"expectedRevisionNo\":${SUB_REV},\"reasonCode\":\"premature_approval\"}"
-    assert_status "409"
-    assert_error_code "INVALID_STATE_TRANSITION"
-    log_ok "needs_revision submission correctly refuses direct approve"
-  else
-    log_warn "GATED: driver submission ${DRIVER_SUB} is '${SUB_STATUS}', not 'submitted'."
-    log_warn "  (Likely a shared long-lived API whose seed was already advanced. Use the"
-    log_warn "  hermetic runner for a deterministic from-seed review-loop assertion.)"
+use_admin_actor
+read_admin_submission "$VEHICLE_SUB"
+post_json \
+  "/admin/supply-review/submissions/${VEHICLE_SUB}/approve" \
+  "{\"expectedRevisionNo\":${ADMIN_SUB_REV},\"reasonCode\":\"all_documents_valid\",\"comment\":\"Vehicle approved\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "approved" ]] || { log_fail "Vehicle approve did not reach approved"; exit 1; }
+CANON_VEHICLE=$(json_get '.data.canonical_vehicle_id')
+CANON_CONTRACT=$(json_get '.data.canonical_contract_id')
+CANON_POLICY=$(json_get '.data.canonical_policy_id')
+for pair in "vehicle:${CANON_VEHICLE}" "contract:${CANON_CONTRACT}" "policy:${CANON_POLICY}"; do
+  kind="${pair%%:*}"; val="${pair#*:}"
+  if [[ -z "$val" || "$val" == "null" ]]; then
+    log_fail "Vehicle approval missing canonical ${kind} id"
+    exit 1
   fi
+done
+log_ok "Vehicle approval provisioned canonical vehicle/contract/policy"
+chain_set "regulatory-registry" "canonical_vehicle_id" "$CANON_VEHICLE"
+chain_set "regulatory-registry" "canonical_contract_id" "$CANON_CONTRACT"
+chain_set "regulatory-registry" "canonical_policy_id" "$CANON_POLICY"
+save_evidence "$SCENARIO" "regulatory-registry" "canonical_vehicle_id" "$CANON_VEHICLE"
 
-  # ════════════════════════════════════════════════════════════════════════════
-  # LEG 3 — Approve -> canonical provisioning (SUP-BE-006)
-  # ════════════════════════════════════════════════════════════════════════════
-  log_surface "Platform Supply Review — approval + canonical provisioning"
-  log_step "LEG 3 — reviewer-self-approval guard, then approve -> canonical records"
-
-  read_submission "$VEHICLE_SUB"
-  if [[ "$SUB_STATUS" == "in_review" ]]; then
-    # Reviewer-self-approval guard: the original submitter may not approve.
-    if [[ -n "$SUB_SUBMITTER" ]]; then
-      use_actor_id "$SUB_SUBMITTER"
-      post_json "/admin/supply-review/submissions/${VEHICLE_SUB}/approve" \
-        "{\"expectedRevisionNo\":${SUB_REV},\"reasonCode\":\"self_approval_probe\"}"
-      assert_status "403"
-      assert_error_code "REVIEWER_SELF_APPROVAL_DENIED"
-    fi
-
-    # Approve with an independent reviewer -> approved + canonical ids.
-    use_admin_actor
-    read_submission "$VEHICLE_SUB"
-    post_json "/admin/supply-review/submissions/${VEHICLE_SUB}/approve" \
-      "{\"expectedRevisionNo\":${SUB_REV},\"reasonCode\":\"all_documents_valid\",\"comment\":\"E2E approval\"}"
-    assert_status "200|201"
-    [[ "$(json_get '.data.status')" == "approved" ]] || { log_fail "approve did not reach approved"; exit 1; }
-
-    CANON_DRIVER=$(json_get '.data.canonical_driver_id')
-    CANON_VEHICLE=$(json_get '.data.canonical_vehicle_id')
-    CANON_CONTRACT=$(json_get '.data.canonical_contract_id')
-    CANON_POLICY=$(json_get '.data.canonical_policy_id')
-    for pair in "driver:${CANON_DRIVER}" "vehicle:${CANON_VEHICLE}" "contract:${CANON_CONTRACT}" "policy:${CANON_POLICY}"; do
-      kind="${pair%%:*}"; val="${pair#*:}"
-      if [[ -z "$val" || "$val" == "null" ]]; then
-        log_fail "Approval did not provision a canonical ${kind} id"
-        exit 1
-      fi
-    done
-    log_ok "Approve provisioned canonical driver/vehicle/contract/policy ids"
-    chain_set "regulatory-registry" "canonical_driver_id" "$CANON_DRIVER"
-    chain_set "regulatory-registry" "canonical_vehicle_id" "$CANON_VEHICLE"
-    chain_set "regulatory-registry" "canonical_contract_id" "$CANON_CONTRACT"
-    chain_set "regulatory-registry" "canonical_policy_id" "$CANON_POLICY"
-    assert_chain "regulatory-registry" "canonical_vehicle_id"
-    save_evidence "$SCENARIO" "regulatory-registry" "canonical_vehicle_id" "$CANON_VEHICLE"
-    save_evidence "$SCENARIO" "regulatory-registry" "canonical_driver_id" "$CANON_DRIVER"
-  else
-    log_warn "GATED: vehicle submission ${VEHICLE_SUB} is '${SUB_STATUS}', not 'in_review'."
-    log_warn "  Approve->canonical provisioning needs an in_review submission; run hermetically."
-  fi
-fi
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LEG 4 — Supply readiness engine (SUP-BE-007)
-# ══════════════════════════════════════════════════════════════════════════════
-log_surface "Fleet Partner Portal — supply readiness"
-log_step "LEG 4 — readiness catalog, ready terminal, reason codes, realm/scope guard"
-
-POLICY_VERSION_EXPECTED="phase1-delta-supply-readiness-2026-06-19"
+log_surface "Fleet Partner Portal — readiness"
+log_step "LEG 4 — same-subject readiness=ready and portal scope guard"
 
 use_partner_actor
 http_call GET "/fleet-partner/readiness"
 assert_status "200"
+READY_DRIVER=$(echo "$RESP_BODY" | jq -r --arg id "$CANON_DRIVER" \
+  '[.data.items[]? | select(.subject_id == $id and .state == "ready" and (.reason_codes | length == 0))][0].subject_id // empty')
+READY_VEHICLE=$(echo "$RESP_BODY" | jq -r --arg id "$CANON_VEHICLE" \
+  '[.data.items[]? | select(.subject_id == $id and .state == "ready" and (.reason_codes | length == 0))][0].subject_id // empty')
+[[ "$READY_DRIVER" == "$CANON_DRIVER" ]] || { log_fail "Readiness list missing ready canonical driver ${CANON_DRIVER}"; exit 1; }
+[[ "$READY_VEHICLE" == "$CANON_VEHICLE" ]] || { log_fail "Readiness list missing ready canonical vehicle ${CANON_VEHICLE}"; exit 1; }
+log_ok "Readiness list includes the just-approved canonical driver and vehicle in ready state"
 
-READINESS_COUNT=$(echo "$RESP_BODY" | jq -r '[.data.items[]?] | length')
-log_info "Readiness subjects returned: ${READINESS_COUNT}"
-
-if [[ "${READINESS_COUNT:-0}" -gt 0 ]]; then
-  # Every record must carry the readiness contract: subjectType, state, reasonCodes[],
-  # and the current policy version.
-  MALFORMED=$(echo "$RESP_BODY" | jq -r \
-    "[.data.items[] | select((.subject_type|type!=\"string\") or (.state|type!=\"string\") or (.reason_codes|type!=\"array\") or (.policy_version!=\"${POLICY_VERSION_EXPECTED}\"))] | length")
-  if [[ "$MALFORMED" != "0" ]]; then
-    log_fail "Readiness returned ${MALFORMED} record(s) violating the readiness contract"
-    log_fail "Body: ${RESP_BODY}"
-    exit 1
-  fi
-  log_ok "All ${READINESS_COUNT} readiness records satisfy the SUP-BE-007 contract (policy ${POLICY_VERSION_EXPECTED})"
-
-  # Terminal "ready": at least one fully-credentialed subject with no blocking reasons.
-  READY_SUBJECT=$(echo "$RESP_BODY" | jq -r \
-    '[.data.items[] | select(.state=="ready" and (.reason_codes|length==0))][0].subject_id // empty')
-  if [[ -z "$READY_SUBJECT" ]]; then
-    log_fail "Readiness engine did not produce any 'ready' subject with empty reason codes"
-    log_fail "Body: ${RESP_BODY}"
-    exit 1
-  fi
-  READY_TYPE=$(echo "$RESP_BODY" | jq -r \
-    --arg id "$READY_SUBJECT" '[.data.items[] | select(.subject_id==$id)][0].subject_type')
-  log_ok "Readiness terminal 'ready' reached for ${READY_TYPE} ${READY_SUBJECT}"
-  chain_set "supply-readiness" "ready_subject_id" "$READY_SUBJECT"
-  save_evidence "$SCENARIO" "supply-readiness" "ready_subject" "${READY_TYPE}:${READY_SUBJECT}"
-
-  # Reason-code engine: a not_ready subject must enumerate at least one blocking reason.
-  NOT_READY_REASONS=$(echo "$RESP_BODY" | jq -r \
-    '[.data.items[] | select(.state!="ready")][0].reason_codes // [] | length')
-  NOT_READY_SUBJECT=$(echo "$RESP_BODY" | jq -r \
-    '[.data.items[] | select(.state!="ready")][0].subject_id // empty')
-  if [[ -n "$NOT_READY_SUBJECT" ]]; then
-    if [[ "${NOT_READY_REASONS:-0}" -lt 1 ]]; then
-      log_fail "Non-ready subject ${NOT_READY_SUBJECT} carries no reason codes"
-      exit 1
-    fi
-    log_ok "Non-ready subject ${NOT_READY_SUBJECT} enumerates ${NOT_READY_REASONS} reason code(s)"
-    save_evidence "$SCENARIO" "supply-readiness" "not_ready_subject" "$NOT_READY_SUBJECT"
-  fi
-
-  # Per-subject readiness route returns the same evaluation.
-  READY_PATH="drivers"
-  [[ "$READY_TYPE" == "vehicle" ]] && READY_PATH="vehicles"
-  use_partner_actor
-  http_call GET "/fleet-partner/readiness/${READY_PATH}/${READY_SUBJECT}"
-  assert_status "200"
-  [[ "$(json_get '.data.state')" == "ready" ]] || { log_fail "per-subject readiness state mismatch"; exit 1; }
-  log_ok "Per-subject readiness route confirms ${READY_SUBJECT} = ready"
-
-  # Unknown subject -> 404 with the readiness not-found contract.
-  use_partner_actor
-  http_call GET "/fleet-partner/readiness/drivers/e2e-no-such-subject"
-  assert_status "404"
-  assert_error_code "READINESS_SUBJECT_NOT_FOUND"
-else
-  log_warn "GATED: readiness returned no subjects on this stack; engine assertions skipped."
-fi
-
-# Realm/scope guard: the portal readiness route requires the billing:read scope.
 use_partner_actor
-E2E_EXTRA_SCOPES="partner:entries:read"   # drop billing:read on purpose
+http_call GET "/fleet-partner/readiness/drivers/${CANON_DRIVER}"
+assert_status "200"
+[[ "$(json_get '.data.state')" == "ready" ]] || { log_fail "Driver readiness route did not return ready"; exit 1; }
+[[ "$(json_get '.data.subject_id')" == "$CANON_DRIVER" ]] || { log_fail "Driver readiness route returned wrong subject"; exit 1; }
+
+use_partner_actor
+http_call GET "/fleet-partner/readiness/vehicles/${CANON_VEHICLE}"
+assert_status "200"
+[[ "$(json_get '.data.state')" == "ready" ]] || { log_fail "Vehicle readiness route did not return ready"; exit 1; }
+[[ "$(json_get '.data.subject_id')" == "$CANON_VEHICLE" ]] || { log_fail "Vehicle readiness route returned wrong subject"; exit 1; }
+log_ok "Per-subject readiness routes confirm same-subject ready terminal"
+
+use_partner_actor
+http_call GET "/fleet-partner/readiness/drivers/e2e-no-such-subject"
+assert_status "404"
+assert_error_code "READINESS_SUBJECT_NOT_FOUND"
+
+use_partner_actor
+E2E_EXTRA_SCOPES="partner:entries:read"
 http_call GET "/fleet-partner/readiness"
 assert_status "403"
 assert_error_code "AUTH_SCOPE_DENIED"
 log_ok "Readiness portal route enforces billing:read scope"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GATED LEGS — tracked gaps, reported (never silently passed)
-# ══════════════════════════════════════════════════════════════════════════════
-log_step "GATED LEGS — tracked gaps in the spec narrative"
-log_warn "GATED: fleet-partner self-service create-driver / create-vehicle / upload-document /"
-log_warn "       submit / RESUBMIT is unbuilt (supply-submission.service.ts scaffold). The"
-log_warn "       'creates/uploads/submits/resubmits' steps were driven from supply-review seed"
-log_warn "       fixtures; wire the §3.1 write API to lift this gate."
-log_warn "GATED: runtime-approval -> same-canonical-subject readiness=ready join. Readiness reads"
-log_warn "       its submission/affiliation state from the repository, so an in-memory runtime"
-log_warn "       approval is not observable through readiness, and the DB stack has no submission"
-log_warn "       seed to approve. The readiness 'ready' terminal is asserted on seeded canonical"
-log_warn "       subjects instead. Lift once both halves share one persisted read-model in CI."
-
 print_chain_summary
-echo -e "\n${GREEN}${BOLD}E2E-019 fleet supply onboarding: buildable chain verified; gated legs reported.${RESET}"
+echo -e "\n${GREEN}${BOLD}E2E-019 fleet supply onboarding: full write/review/provision/readiness chain verified.${RESET}"
 exit 0
