@@ -4979,12 +4979,11 @@ def poll_workers(
                     worker,
                     ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
                 ):
-                    if not SUPERVISOR_LOG_QUIET:
-                        console_log(
-                            f"supersede skipped (cooldown): task={worker.get('task_id')} "
-                            f"provider={worker.get('provider')} run={worker.get('run_id')}",
-                            quiet=SUPERVISOR_LOG_QUIET,
-                        )
+                    # supersede skipped: worker still within dispatch cooldown.
+                    # Intentionally silent — this branch is re-evaluated every
+                    # tick for every protected worker, so logging it floods the
+                    # journal with hundreds of identical lines and buries real
+                    # events. The cooldown check is cheap; only the log was noise.
                     continue
                 if alive:
                     terminate_worker_pid(worker.get("pid"))
@@ -5030,13 +5029,10 @@ def poll_workers(
                 worker,
                 ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
             ):
-                if not SUPERVISOR_LOG_QUIET:
-                    console_log(
-                        f"priority-escalation supersede skipped (cooldown): "
-                        f"task={worker.get('task_id')} provider={worker.get('provider')} "
-                        f"run={worker.get('run_id')}",
-                        quiet=SUPERVISOR_LOG_QUIET,
-                    )
+                # priority-escalation supersede skipped: worker still within
+                # dispatch cooldown. Intentionally silent for the same reason as
+                # the assignment-moved branch above — re-evaluated every tick per
+                # worker, so logging it is pure journal noise.
                 continue
             if alive:
                 terminate_worker_pid(worker.get("pid"))
