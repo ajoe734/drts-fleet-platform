@@ -163,6 +163,99 @@ As of `2026-04-28`, this task is therefore still evidence-gated by missing
 Expo account credentials. Android signing and Apple team inputs remain
 downstream external prerequisites once Expo authentication is available.
 
+## iOS on a Local Mac
+
+This is the fastest path now that a physical Mac workstation is available.
+Both `ios/` and `android/` native projects are committed to the repo, and
+`Pods/` is regenerated locally, so a fresh clone builds without a prior
+`expo prebuild`.
+
+### Mac One-Time Setup
+
+```bash
+# Xcode + command line tools (App Store, then:)
+xcode-select --install
+sudo xcodebuild -license accept
+
+# Toolchain
+brew install node@22 watchman cocoapods
+corepack enable                  # provides pnpm
+```
+
+Open the iOS Simulator at least once (Xcode → Open Developer Tool →
+Simulator) so a runtime is downloaded.
+
+### Tier 1 — iOS Simulator (no Apple Developer account required)
+
+Simulator builds are **not code-signed**, so they need no Apple Developer
+membership. This unblocks functional testing immediately.
+
+```bash
+# from repo root
+pnpm install
+
+# build + boot the app in the iOS Simulator
+EXPO_PUBLIC_DRIVER_ID=driver-dev-001 \
+EXPO_PUBLIC_API_URL=https://drts-api-kdhu6wzufa-uc.a.run.app \
+pnpm --filter @drts/driver-app ios
+```
+
+`pnpm --filter @drts/driver-app ios` runs `expo run:ios`, which performs
+`pod install`, compiles the native app, boots a Simulator, and attaches
+Metro. To target a specific device:
+
+```bash
+cd apps/driver-app && npx expo run:ios --device "iPhone 16 Pro"
+```
+
+Hosted alternative (still no local signing, useful for sharing a build with
+another Mac): the simulator profile produces a downloadable `.app`:
+
+```bash
+cd apps/driver-app
+npx eas-cli build --platform ios --profile development-simulator
+```
+
+Run the §Verification Checklist against the Simulator. Note: background
+location and camera/photo permissions behave differently in Simulator than
+on a device — confirm those on a physical device before sign-off.
+
+### Tier 2 — Physical iPhone (requires Apple Developer account)
+
+Device builds must be code-signed against an Apple Developer team. With the
+Mac plugged into the iPhone:
+
+```bash
+cd apps/driver-app && npx expo run:ios --device   # pick the connected iPhone
+```
+
+Xcode will prompt to select a Development Team the first time (Signing &
+Capabilities → Team). The bundle identifier is already set to
+`com.cctechsupport.drts.driver` in `app.json`; the Apple account owner must
+register an App ID matching it (or let Xcode auto-create it).
+
+### Tier 3 — TestFlight (internal tester distribution)
+
+For testers without a wired Mac, distribute through TestFlight:
+
+```bash
+cd apps/driver-app
+npx eas-cli build   --platform ios --profile production   # cloud-signed .ipa
+npx eas-cli submit  --platform ios --profile production   # upload to App Store Connect
+```
+
+`eas submit` needs three Apple inputs the repo does not store — supply them
+interactively or extend `eas.json`'s `submit.production.ios`:
+
+| Field         | What it is                                              |
+| ------------- | ------------------------------------------------------- |
+| `appleId`     | Apple ID email of an App Store Connect user             |
+| `ascAppId`    | App Store Connect app's numeric Apple ID                |
+| `appleTeamId` | 10-char Apple Developer Team ID                         |
+
+After the build appears in App Store Connect → TestFlight, add the build to
+an internal testing group; testers install via the TestFlight app.
+
 ### Staging
 
 Use the staging API host (already baked into `development` and `preview`
@@ -247,9 +340,9 @@ After installing the build, confirm:
 
 This runbook does not yet cover:
 
-- App Store / Play Store submission credentials
+- Public App Store / Play Store **public release** sign-off (TestFlight
+  internal distribution is covered above; public release review is not)
 - Push notification certificates
 - MDM distribution
-- Production mobile release sign-off
 - Admin UI / operational runbook for issuing or revoking driver registration
   codes

@@ -61,6 +61,19 @@ Hosted EAS builds currently assume `npx eas-cli` unless the operator has a
 global `eas` binary installed. The repo does not vendor `eas-cli` as a
 workspace dependency.
 
+### iOS quickstart (on a Mac)
+
+`ios/` is committed, so a fresh clone builds without `expo prebuild`. The
+iOS Simulator path needs **no Apple Developer account**:
+
+```bash
+pnpm install
+EXPO_PUBLIC_DRIVER_ID=driver-dev-001 pnpm --filter @drts/driver-app ios
+```
+
+Physical-device and TestFlight steps (which do require an Apple Developer
+account) are in the runbook §iOS on a Local Mac.
+
 The default packaged API target is the direct staging API host
 `https://drts-api-kdhu6wzufa-uc.a.run.app`, not the IAP-protected control-plane
 host. Override with `EXPO_PUBLIC_API_URL` when needed.

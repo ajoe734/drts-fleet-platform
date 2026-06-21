@@ -1,0 +1,69 @@
+name: Build Driver App (iOS, EAS)
+
+# Manual-only cloud iOS build for apps/driver-app via EAS Build.
+# Does NOT run on push/PR — iOS builds are paid/credentialed and run on
+# demand. Requires the `EXPO_TOKEN` repo secret (Expo account access token).
+# Device/TestFlight profiles additionally need Apple credentials configured
+# in the Expo project's credentials store. See
+# docs/03-runbooks/driver-app-native-dev-runbook.md §iOS on a Local Mac.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "EAS build profile"
+        required: true
+        default: development-simulator
+        type: choice
+        options:
+          - development-simulator
+          - development
+          - preview
+          - production
+      submit:
+        description: "Submit to App Store Connect / TestFlight after build (production profile only)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/driver-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — EXPO_TOKEN must be set
+        if: ${{ secrets.EXPO_TOKEN == '' }}
+        run: |
+          echo "::error::EXPO_TOKEN repo secret is not set. Add it from the Expo dashboard (Account → Access Tokens) before running this workflow." >&2
+          exit 1
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: EAS build (non-interactive, cloud)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas-cli build --platform ios --profile "${{ inputs.profile }}" --non-interactive --no-wait
+
+      - name: EAS submit to TestFlight
+        if: ${{ inputs.submit && inputs.profile == 'production' }}
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas-cli submit --platform ios --profile production --non-interactive
