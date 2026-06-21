@@ -298,6 +298,32 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath === "driver/location-heartbeats/batch" ||
+    routePath === "driver/tracking-status" ||
+    (routePath.startsWith("ops/drivers/") &&
+      routePath.endsWith("/tracking-status"))
+  ) {
+    const isOpsView =
+      routePath.startsWith("ops/drivers/") &&
+      routePath.endsWith("/tracking-status");
+    return {
+      routeKey: isOpsView
+        ? `ops:driver-tracking:${upperMethod}`
+        : `driver:location-tracking:${upperMethod}`,
+      // Auth-required + realm-restricted (no specific scope) so the driver app
+      // (driver realm), ops console (ops realm), and platform/system callers can
+      // post/read location telemetry while anonymous access is rejected.
+      requiredScopes: [],
+      allowedRealms: isOpsView
+        ? baseAllowedRealms("platform", "ops")
+        : baseAllowedRealms("platform", "ops", "driver"),
+      description: isOpsView
+        ? "Ops driver location tracking status access"
+        : "Driver location heartbeat ingest + self tracking status",
+    };
+  }
+
+  if (
     routePath === "driver/profile" ||
     routePath.startsWith("driver/profile/")
   ) {
