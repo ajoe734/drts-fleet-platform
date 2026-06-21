@@ -306,8 +306,8 @@ export class OwnedMobilityService implements OnModuleInit {
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
   ) {
-    this.assertAddress(command.pickup.address, "pickup.address");
-    this.assertAddress(command.dropoff.address, "dropoff.address");
+    this.assertAddress(command.pickup?.address, "pickup.address");
+    this.assertAddress(command.dropoff?.address, "dropoff.address");
 
     const now = new Date().toISOString();
     const etaSnapshot: EtaSnapshot = {
@@ -435,8 +435,8 @@ export class OwnedMobilityService implements OnModuleInit {
     command: CreateCallCenterOrderCommand,
     requestId?: string,
   ) {
-    this.assertAddress(command.pickup.address, "pickup.address");
-    this.assertAddress(command.dropoff.address, "dropoff.address");
+    this.assertAddress(command.pickup?.address, "pickup.address");
+    this.assertAddress(command.dropoff?.address, "dropoff.address");
     if (!command.callId?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -527,7 +527,7 @@ export class OwnedMobilityService implements OnModuleInit {
     const session = this.callcenterService.linkOrderToCallSession({
       callId: command.callId,
       callType: "booking",
-      callerPhone: command.passenger.phone,
+      callerPhone: command.passenger?.phone,
       agentId: command.agentId,
       linkedOrderId: order.orderId,
       recordingId,
@@ -3572,7 +3572,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAddress(address: string, field: string) {
-    if (!address.trim()) {
+    if (!(address ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "ADDRESS_UNRESOLVABLE",
