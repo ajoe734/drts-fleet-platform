@@ -134,11 +134,12 @@ async function uploadDocument(
     | "taxi_driver_registration"
     | "vehicle_registration"
     | "insurance_policy"
-    | "fleet_participation_contract",
+    | "fleet_participation_contract"
+    | "other",
   originalFileName: string,
   checksumSha256: string,
 ) {
-  const uploadUrl = controller.createSupplyDocumentUploadUrl(
+  const uploadUrl = await controller.createSupplyDocumentUploadUrl(
     "fleet-demo-001",
     "fleet-user-1",
     submissionId,
@@ -392,10 +393,90 @@ describe("FleetPartnerController portal routes", () => {
     );
     expect(startedDriverReview.data.status).toBe("in_review");
 
-    const approvedDriver = await controller.approveSupplySubmission(
+    const revisionRequested = await controller.requestSupplyRevision(
       driverSubmissionId,
       {
         expectedRevisionNo: 6,
+        reasonCode: "mobile_needs_confirmation",
+        comment: "Please confirm the revised mobile number.",
+      },
+      driverReviewIdentity,
+      "req-driver-revision-request",
+    );
+    expect(revisionRequested.data.status).toBe("needs_revision");
+
+    const driverNeedsRevision = await controller.getSupplySubmissionDetail(
+      "fleet-demo-001",
+      driverSubmissionId,
+      "req-driver-needs-revision-detail",
+    );
+    expect(driverNeedsRevision.data.submission).toMatchObject({
+      status: "needs_revision",
+      revisionNo: 7,
+    });
+
+    const revisionUploadUrl = await controller.createSupplyDocumentUploadUrl(
+      "fleet-demo-001",
+      "fleet-user-1",
+      driverSubmissionId,
+      {
+        expectedRevisionNo: 7,
+        documentType: "other",
+        originalFileName: "driver-revision-note.pdf",
+        contentType: "application/pdf",
+      },
+      "req-driver-revision-upload-url",
+    );
+    expect(revisionUploadUrl.data.objectKey).toContain(driverSubmissionId);
+
+    const revisedDriver = await controller.updateDriverSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      driverSubmissionId,
+      {
+        expectedRevisionNo: 7,
+        name: "Driver Supply Demo Final",
+        mobile: "+886900999890",
+        professionalDriverLicenseNo: "PDL-9988",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "TX-9988",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+      "req-supply-update-driver-after-revision",
+    );
+    expect(revisedDriver.data.submission).toMatchObject({
+      status: "needs_revision",
+      revisionNo: 8,
+    });
+
+    const resubmittedDriver = await controller.submitSupplySubmission(
+      "fleet-demo-001",
+      "fleet-user-1",
+      driverSubmissionId,
+      { expectedRevisionNo: 8 },
+      "req-supply-resubmit-driver",
+    );
+    expect(resubmittedDriver.data.submission.status).toBe("submitted");
+
+    const restartedDriverReview = await controller.startSupplyReview(
+      driverSubmissionId,
+      {
+        expectedRevisionNo: 9,
+        reasonCode: "manual_screening",
+        comment: "Driver revision reviewed.",
+      },
+      driverReviewIdentity,
+      "req-restart-driver-review",
+    );
+    expect(restartedDriverReview.data.status).toBe("in_review");
+
+    const approvedDriver = await controller.approveSupplySubmission(
+      driverSubmissionId,
+      {
+        expectedRevisionNo: 10,
         reasonCode: "all_documents_valid",
         comment: "Driver approved.",
       },
@@ -488,12 +569,14 @@ describe("FleetPartnerController portal routes", () => {
       VALID_CHECKSUM_E,
     );
 
-    const submissions = controller.listSupplySubmissions(
+    const submissions = await controller.listSupplySubmissions(
       "fleet-demo-001",
       {},
       "req-list-submissions",
     );
-    expect(submissions.data.items.map((item) => item.submission.submissionId)).toEqual(
+    expect(
+      submissions.data.items.map((item) => item.submission.submissionId),
+    ).toEqual(
       expect.arrayContaining([driverSubmissionId, vehicleSubmissionId]),
     );
 
@@ -631,7 +714,7 @@ describe("FleetPartnerController portal routes", () => {
       VALID_CHECKSUM_B,
     );
 
-    const extraUploadUrl = controller.createSupplyDocumentUploadUrl(
+    const extraUploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -689,7 +772,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     expect(withdrawn.data.submission.status).toBe("withdrawn");
 
-    const detail = controller.getSupplySubmissionDetail(
+    const detail = await controller.getSupplySubmissionDetail(
       "fleet-demo-001",
       submissionId,
       "req-withdraw-detail",
@@ -721,7 +804,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+    const uploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -800,7 +883,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+    const uploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -840,11 +923,7 @@ describe("FleetPartnerController portal routes", () => {
         details: {
           submissionId,
           objectKey: uploadUrl.data.objectKey,
-          mismatchedFields: [
-            "documentType",
-            "originalFileName",
-            "contentType",
-          ],
+          mismatchedFields: ["documentType", "originalFileName", "contentType"],
         },
       },
     });
@@ -871,7 +950,7 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const uploadUrl = controller.createSupplyDocumentUploadUrl(
+    const uploadUrl = await controller.createSupplyDocumentUploadUrl(
       "fleet-demo-001",
       "fleet-user-1",
       submissionId,
@@ -926,18 +1005,19 @@ describe("FleetPartnerController portal routes", () => {
     );
     const submissionId = created.data.submission.submissionId;
 
-    const invalidChecksumUploadUrl = controller.createSupplyDocumentUploadUrl(
-      "fleet-demo-001",
-      "fleet-user-1",
-      submissionId,
-      {
-        expectedRevisionNo: 1,
-        documentType: "professional_driver_license",
-        originalFileName: "license.pdf",
-        contentType: "application/pdf",
-      },
-      "req-supply-upload-invalid-checksum",
-    );
+    const invalidChecksumUploadUrl =
+      await controller.createSupplyDocumentUploadUrl(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+        },
+        "req-supply-upload-invalid-checksum",
+      );
 
     const invalidChecksumError = await controller
       .confirmSupplyDocumentUpload(
@@ -959,29 +1039,30 @@ describe("FleetPartnerController portal routes", () => {
       )
       .catch((error: unknown) => error);
     expect(invalidChecksumError).toBeInstanceOf(ApiRequestError);
-    expect((invalidChecksumError as ApiRequestError).getResponse()).toMatchObject(
-      {
-        error: {
-          code: "VALIDATION_ERROR",
-          details: {
-            fieldName: "checksumSha256",
-          },
+    expect(
+      (invalidChecksumError as ApiRequestError).getResponse(),
+    ).toMatchObject({
+      error: {
+        code: "VALIDATION_ERROR",
+        details: {
+          fieldName: "checksumSha256",
         },
       },
-    );
+    });
 
-    const invalidRangeUploadUrl = controller.createSupplyDocumentUploadUrl(
-      "fleet-demo-001",
-      "fleet-user-1",
-      submissionId,
-      {
-        expectedRevisionNo: 1,
-        documentType: "professional_driver_license",
-        originalFileName: "license.pdf",
-        contentType: "application/pdf",
-      },
-      "req-supply-upload-invalid-range",
-    );
+    const invalidRangeUploadUrl =
+      await controller.createSupplyDocumentUploadUrl(
+        "fleet-demo-001",
+        "fleet-user-1",
+        submissionId,
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          originalFileName: "license.pdf",
+          contentType: "application/pdf",
+        },
+        "req-supply-upload-invalid-range",
+      );
 
     const invalidRangeError = await controller
       .confirmSupplyDocumentUpload(

@@ -27,20 +27,14 @@ import type {
   WithdrawSupplySubmissionCommand,
 } from "./supply-submission.types";
 
-const DRIVER_REQUIRED_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] = [
-  "professional_driver_license",
-  "taxi_driver_registration",
-];
+const DRIVER_REQUIRED_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] =
+  ["professional_driver_license", "taxi_driver_registration"];
 
-const VEHICLE_REQUIRED_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] = [
-  "vehicle_registration",
-  "insurance_policy",
-];
+const VEHICLE_REQUIRED_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] =
+  ["vehicle_registration", "insurance_policy"];
 
-const VEHICLE_CONTRACT_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] = [
-  "fleet_participation_contract",
-  "vehicle_management_contract",
-];
+const VEHICLE_CONTRACT_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] =
+  ["fleet_participation_contract", "vehicle_management_contract"];
 
 const EDITABLE_STATUSES: readonly SupplySubmissionStatus[] = [
   "draft",
@@ -83,10 +77,16 @@ export class SupplySubmissionService implements OnModuleInit {
     }
   }
 
-  listSupplySubmissions(
+  async syncState() {
+    const state = await this.supplySubmissionRepository.loadState();
+    this.hydrateState(state);
+  }
+
+  async listSupplySubmissions(
     fleetPartnerId: string,
     filters: SupplySubmissionFilters = {},
   ) {
+    await this.syncState();
     return this.submissions
       .filter((submission) => submission.fleetPartnerId === fleetPartnerId)
       .filter((submission) =>
@@ -113,7 +113,11 @@ export class SupplySubmissionService implements OnModuleInit {
       );
   }
 
-  getSupplySubmissionDetail(fleetPartnerId: string, submissionId: string) {
+  async getSupplySubmissionDetail(
+    fleetPartnerId: string,
+    submissionId: string,
+  ) {
+    await this.syncState();
     return this.buildDetail(submissionId, fleetPartnerId);
   }
 
@@ -123,6 +127,7 @@ export class SupplySubmissionService implements OnModuleInit {
     command: CreateDriverSupplySubmissionCommand,
     requestId?: string,
   ) {
+    await this.syncState();
     this.validateDriverDraft(command);
     this.assertDriverIdentityAvailable(
       command.professionalDriverLicenseNo,
@@ -193,8 +198,12 @@ export class SupplySubmissionService implements OnModuleInit {
     command: UpdateDriverSupplySubmissionCommand,
     requestId?: string,
   ) {
+    await this.syncState();
     this.validateDriverDraft(command);
-    const submission = this.requireScopedSubmission(submissionId, fleetPartnerId);
+    const submission = this.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId,
+    );
     this.assertEditable(submission);
     this.assertExpectedRevisionNo(submission, command.expectedRevisionNo);
     this.assertDriverIdentityAvailable(
@@ -236,6 +245,7 @@ export class SupplySubmissionService implements OnModuleInit {
     command: CreateVehicleSupplySubmissionCommand,
     requestId?: string,
   ) {
+    await this.syncState();
     this.validateVehicleDraft(command);
     this.assertVehiclePlateAvailable(command.plateNo);
 
@@ -303,8 +313,12 @@ export class SupplySubmissionService implements OnModuleInit {
     command: UpdateVehicleSupplySubmissionCommand,
     requestId?: string,
   ) {
+    await this.syncState();
     this.validateVehicleDraft(command);
-    const submission = this.requireScopedSubmission(submissionId, fleetPartnerId);
+    const submission = this.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId,
+    );
     this.assertEditable(submission);
     this.assertExpectedRevisionNo(submission, command.expectedRevisionNo);
     this.assertVehiclePlateAvailable(command.plateNo, submissionId);
@@ -343,7 +357,11 @@ export class SupplySubmissionService implements OnModuleInit {
     command: SubmitSupplySubmissionCommand,
     requestId?: string,
   ) {
-    const submission = this.requireScopedSubmission(submissionId, fleetPartnerId);
+    await this.syncState();
+    const submission = this.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId,
+    );
     this.assertExpectedRevisionNo(submission, command.expectedRevisionNo);
     if (!EDITABLE_STATUSES.includes(submission.status)) {
       throw this.conflict(
@@ -402,7 +420,11 @@ export class SupplySubmissionService implements OnModuleInit {
     command: WithdrawSupplySubmissionCommand,
     requestId?: string,
   ) {
-    const submission = this.requireScopedSubmission(submissionId, fleetPartnerId);
+    await this.syncState();
+    const submission = this.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId,
+    );
     this.assertExpectedRevisionNo(submission, command.expectedRevisionNo);
     if (submission.status !== "submitted") {
       throw this.conflict(
@@ -499,7 +521,10 @@ export class SupplySubmissionService implements OnModuleInit {
     documents: readonly SupplyDocumentRecord[],
     context: string,
   ) {
-    await this.persistChanges({ submissions: [submission], documents }, context);
+    await this.persistChanges(
+      { submissions: [submission], documents },
+      context,
+    );
   }
 
   replaceDocument(document: SupplyDocumentRecord) {
@@ -547,7 +572,9 @@ export class SupplySubmissionService implements OnModuleInit {
   }
 
   private hydrateState(state: LoadedState) {
-    this.submissions = state.submissions.map((submission) => ({ ...submission }));
+    this.submissions = state.submissions.map((submission) => ({
+      ...submission,
+    }));
     this.driverDrafts = state.driverDrafts.map((draft) => ({ ...draft }));
     this.vehicleDrafts = state.vehicleDrafts.map((draft) => ({ ...draft }));
     this.documents = state.documents.map((document) => ({ ...document }));
@@ -558,15 +585,20 @@ export class SupplySubmissionService implements OnModuleInit {
     submissionId: string,
     fleetPartnerId: string,
   ): SupplySubmissionDetail {
-    const submission = this.requireScopedSubmission(submissionId, fleetPartnerId);
+    const submission = this.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId,
+    );
     return {
       submission: { ...submission },
       driverDraft:
-        this.driverDrafts.find((draft) => draft.submissionId === submissionId) ??
-        null,
+        this.driverDrafts.find(
+          (draft) => draft.submissionId === submissionId,
+        ) ?? null,
       vehicleDraft:
-        this.vehicleDrafts.find((draft) => draft.submissionId === submissionId) ??
-        null,
+        this.vehicleDrafts.find(
+          (draft) => draft.submissionId === submissionId,
+        ) ?? null,
       documents: this.listDocumentsForSubmission(submissionId),
       reviewEvents: this.listReviewEventsForSubmission(submissionId),
     };
@@ -680,7 +712,8 @@ export class SupplySubmissionService implements OnModuleInit {
       supportedServiceProductCodes: command.supportedServiceProductCodes.map(
         (item) => item.trim(),
       ),
-      currentDriverSubmissionId: command.currentDriverSubmissionId?.trim() || null,
+      currentDriverSubmissionId:
+        command.currentDriverSubmissionId?.trim() || null,
     };
   }
 
@@ -689,8 +722,12 @@ export class SupplySubmissionService implements OnModuleInit {
     taxiDriverRegistrationNo: string,
     excludeSubmissionId?: string,
   ) {
-    const normalizedLicenseNo = professionalDriverLicenseNo.trim().toLowerCase();
-    const normalizedRegistrationNo = taxiDriverRegistrationNo.trim().toLowerCase();
+    const normalizedLicenseNo = professionalDriverLicenseNo
+      .trim()
+      .toLowerCase();
+    const normalizedRegistrationNo = taxiDriverRegistrationNo
+      .trim()
+      .toLowerCase();
     const existing = this.driverDrafts.find(
       (candidate) =>
         candidate.submissionId !== excludeSubmissionId &&

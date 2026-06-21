@@ -36,13 +36,14 @@ export class SupplyDocumentService {
     private readonly supplySubmissionRepository: SupplySubmissionRepository,
   ) {}
 
-  createUploadUrl(
+  async createUploadUrl(
     fleetPartnerId: string,
     submissionId: string,
     actorId: string,
     command: CreateSupplyDocumentUploadUrlCommand,
     requestId?: string,
   ) {
+    await this.supplySubmissionService.syncState();
     const submission = this.supplySubmissionService.requireScopedSubmission(
       submissionId,
       fleetPartnerId,
@@ -112,6 +113,7 @@ export class SupplyDocumentService {
     command: ConfirmSupplyDocumentUploadCommand,
     requestId?: string,
   ) {
+    await this.supplySubmissionService.syncState();
     const objectKey = command.objectKey.trim();
     const originalFileName = command.originalFileName.trim();
     const contentType = command.contentType.trim();
@@ -223,6 +225,7 @@ export class SupplyDocumentService {
     command: DeleteSupplyDocumentCommand,
     requestId?: string,
   ) {
+    await this.supplySubmissionService.syncState();
     const submission = this.supplySubmissionService.requireScopedSubmission(
       submissionId,
       fleetPartnerId,

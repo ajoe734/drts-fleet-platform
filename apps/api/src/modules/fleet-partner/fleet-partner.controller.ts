@@ -19,7 +19,10 @@ import type {
   UpdateFleetPartnerRevenueShareRuleCommand,
 } from "@drts/contracts";
 
-import { CurrentIdentity, RequireRealms } from "../../common/auth/auth.decorators";
+import {
+  CurrentIdentity,
+  RequireRealms,
+} from "../../common/auth/auth.decorators";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import {
   ApiRequestError,
@@ -385,30 +388,26 @@ export class FleetPartnerController {
   }
 
   @Get("fleet-partner/supply-submissions")
-  listSupplySubmissions(
+  async listSupplySubmissions(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
     @Query() filters: SupplySubmissionFilters = {},
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      toApiListData(
-        this.supplySubmissionService.listSupplySubmissions(
-          this.requireFleetPartnerId(fleetPartnerId),
-          filters,
-        ),
-      ),
-      requestId,
+    const items = await this.supplySubmissionService.listSupplySubmissions(
+      this.requireFleetPartnerId(fleetPartnerId),
+      filters,
     );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("fleet-partner/supply-submissions/:submissionId")
-  getSupplySubmissionDetail(
+  async getSupplySubmissionDetail(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
     @Param("submissionId") submissionId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.supplySubmissionService.getSupplySubmissionDetail(
+      await this.supplySubmissionService.getSupplySubmissionDetail(
         this.requireFleetPartnerId(fleetPartnerId),
         submissionId,
       ),
@@ -493,7 +492,7 @@ export class FleetPartnerController {
   }
 
   @Post("fleet-partner/supply-submissions/:submissionId/documents/upload-url")
-  createSupplyDocumentUploadUrl(
+  async createSupplyDocumentUploadUrl(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
     @Headers("x-actor-id") actorId: string | undefined,
     @Param("submissionId") submissionId: string,
@@ -501,7 +500,7 @@ export class FleetPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.supplyDocumentService.createUploadUrl(
+      await this.supplyDocumentService.createUploadUrl(
         this.requireFleetPartnerId(fleetPartnerId),
         submissionId,
         this.actorId(actorId),
@@ -532,7 +531,9 @@ export class FleetPartnerController {
     );
   }
 
-  @Delete("fleet-partner/supply-submissions/:submissionId/documents/:documentId")
+  @Delete(
+    "fleet-partner/supply-submissions/:submissionId/documents/:documentId",
+  )
   async deleteSupplyDocument(
     @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
     @Headers("x-actor-id") actorId: string | undefined,
