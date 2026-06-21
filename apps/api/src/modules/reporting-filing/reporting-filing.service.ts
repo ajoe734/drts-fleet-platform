@@ -1303,7 +1303,7 @@ export class ReportingFilingService implements OnModuleInit {
   }
 
   private assertNonBlank(value: string, field: string) {
-    if (!value.trim()) {
+    if (!(value ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",

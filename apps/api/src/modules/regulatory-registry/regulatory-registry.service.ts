@@ -709,6 +709,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
       );
     }
 
+    this.assertNonBlank(command.name, "name");
     const lifecycleStatus = command.lifecycleStatus ?? "draft";
     const now = new Date().toISOString();
     const created = this.decorateDriver({
@@ -2840,7 +2841,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
   }
 
   private assertNonBlank(value: string, fieldName: string) {
-    if (!value.trim()) {
+    if (!(value ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",
