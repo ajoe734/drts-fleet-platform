@@ -974,7 +974,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
   async getDriverTrackingStatus(
     driverId: string,
   ): Promise<DriverTrackingStatus> {
-    const normalizedDriverId = driverId.trim();
+    // Guard against a missing driverId query param: `driverId.trim()` on an
+    // undefined value threw a TypeError -> 500. Normalize to "" so the
+    // assertNonBlank guard returns a clean 400 FIELD_REQUIRED instead.
+    const normalizedDriverId = (driverId ?? "").trim();
     this.assertNonBlank(normalizedDriverId, "driverId");
     this.requireDriver(normalizedDriverId);
 
