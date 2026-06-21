@@ -437,7 +437,7 @@ export class OwnedMobilityService implements OnModuleInit {
   ) {
     this.assertAddress(command.pickup.address, "pickup.address");
     this.assertAddress(command.dropoff.address, "dropoff.address");
-    if (!command.callId.trim()) {
+    if (!command.callId?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "CALL_ID_REQUIRED",
@@ -1736,7 +1736,7 @@ export class OwnedMobilityService implements OnModuleInit {
     command: RedispatchOrderCommand,
     requestId?: string,
   ) {
-    if (!command.reasonCode.trim()) {
+    if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "REDISPATCH_REASON_REQUIRED",
@@ -2438,7 +2438,7 @@ export class OwnedMobilityService implements OnModuleInit {
     command: ReassignDispatchCommand,
     requestId?: string,
   ): any {
-    if (!command.reasonCode.trim()) {
+    if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "REASSIGN_REASON_REQUIRED",
@@ -3075,7 +3075,7 @@ export class OwnedMobilityService implements OnModuleInit {
     command: DriverRejectTaskCommand,
     requestId?: string,
   ) {
-    if (!command.reasonCode.trim()) {
+    if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "REJECT_REASON_REQUIRED",
@@ -3585,7 +3585,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertNonBlank(value: string, field: string) {
-    if (!value.trim()) {
+    if (!(value ?? "").trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
@@ -3598,7 +3598,9 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private requireNonBlankText(value: string, field: string) {
-    const normalized = value.trim();
+    // Guard against a missing field: value.trim() on undefined threw a
+    // TypeError -> 500. Normalize so the blank check returns a clean 400.
+    const normalized = (value ?? "").trim();
     if (!normalized) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
