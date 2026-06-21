@@ -298,6 +298,24 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath === "admin/vehicle-eligibility-matrix" ||
+    routePath === "admin/service-products" ||
+    routePath.startsWith("admin/service-products/")
+  ) {
+    // Admin eligibility / service-product configuration (read + write). These
+    // were missing from the route-auth table and were served ANONYMOUSLY,
+    // allowing unauthenticated GET (config disclosure) and PUT/POST (e.g. making
+    // an airport-ineligible vehicle eligible). Restrict to platform/ops/system.
+    return {
+      routeKey: `admin:eligibility-config:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description:
+        "Admin vehicle-eligibility matrix + service product configuration",
+    };
+  }
+
+  if (
     routePath === "driver/location-heartbeats/batch" ||
     routePath === "driver/tracking-status" ||
     (routePath.startsWith("ops/drivers/") &&
