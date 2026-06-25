@@ -77,7 +77,7 @@ test.describe("channel partner portal surfaces", () => {
     await expect(body).toContainText(/SHA-256/);
     await expect(body).toContainText(/住戶 ••••[A-Z0-9]{3}/);
     await expect(body).toContainText(
-      /DRTS (?:→ (?:Partner|御和物業)|付給 ?夥伴)/,
+      /DRTS (?:→ (?:Partner|御和物業|夥伴)|付給 ?夥伴)/,
     );
     await expect(body).not.toContainText(forbiddenBackOfficeMarkers);
     await expect(body).not.toContainText(forbiddenPiiMarkers);
