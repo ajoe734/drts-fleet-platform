@@ -6,8 +6,8 @@
 **Current Sidecar Owner:** `Codex`
 **Assigned Reviewer:** `Claude`
 **Parent Owner / Reviewer:** `Claude` / `Codex`
-**Last Revised:** `2026-06-25T15:45:00Z (UTC)`
-**Status:** support packet drafted from machine truth plus parent branch evidence; ready for sidecar review handoff.
+**Last Revised:** `2026-06-25T15:30:46Z (UTC)`
+**Status:** `review_approved`; support-only packet refreshed for owner closeout with no canonical mutation.
 
 ---
 
@@ -161,7 +161,19 @@ git show 7ca2b66c7:apps/api/src/app.module.ts
 
 ---
 
-## 8) Handoff Notes
+## 8) Review Approval Record
+
+- `AI_NAME=Codex scripts/ai-status.sh show P2-WP0-SIDECAR-ACCEPTANCE` currently reports `status=review_approved`.
+- Machine-truth review notes confirm the approved scope remains support-only and that no canonical truth was changed.
+- The reviewer-validated anchors remain:
+  - contracts index export at `packages/contracts/src/index.ts:5524`
+  - `V0037__phase2_av_sandbox_evidence_skeleton.sql` ownership split across `av_sandbox` / `av_evidence`
+  - ten Phase2 module registrations in `apps/api/src/app.module.ts:99-109`
+  - four interface-only adapter ports
+  - `packages/contracts/src/phase2-tesla-fsd-sandbox.ts` spanning 493 lines at approved commit `7ca2b66c7`
+- Owner closeout implication: this sidecar can be finalized after a task-scoped closeout commit, normal non-force push, and `done` machine-truth update with `INTEGRATION_STATUS=not_applicable`.
+
+## 9) Handoff Notes
 
 - This artifact is limited to `support/sidecars/P2-WP0/P2-WP0-SIDECAR-ACCEPTANCE.md`.
 - No canonical runtime, registry, contract truth, or governance implementation was modified for this sidecar task.
