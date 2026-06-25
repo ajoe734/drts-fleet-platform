@@ -1,0 +1,79 @@
+name: Driver App iOS build
+
+# Maximum automated iOS coverage achievable WITHOUT a physical device:
+# typecheck/lint/unit-test the shared telemetry logic, then prebuild + pod install
+# + compile the iOS app on a real Xcode toolchain (no code signing) for the
+# simulator. This validates that the iOS native project builds and links.
+#
+# IMPORTANT: this is NOT the 真機 (physical-device) UAT. A CI simulator cannot
+# exercise real GPS, the background-location daemon, or Low Power Mode. The
+# real-device UAT (UAT-MOB-IOS-002) still requires an operator with a Mac + a
+# physical iPhone — see docs/04-uat/mob-uat-002-ios-execution-runbook-20260625.md.
+
+on:
+  pull_request:
+    branches: [main, "dev"]
+    paths:
+      - "apps/driver-app/**"
+      - ".github/workflows/ci-driver-app-ios.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-driver-app-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-build:
+    name: iOS build (simulator, unsigned)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Driver-app typecheck
+        run: pnpm --filter @drts/driver-app run typecheck
+      - name: Driver-app lint
+        run: pnpm --filter @drts/driver-app run lint
+      - name: Driver-app unit tests
+        run: pnpm --filter @drts/driver-app run test
+
+      # The iOS native project (apps/driver-app/ios) is committed, so no
+      # `expo prebuild` is run here (it would overwrite native customizations);
+      # pod install resolves the autolinked pods + generates the .xcworkspace.
+      - name: CocoaPods install
+        working-directory: apps/driver-app/ios
+        run: pod install
+
+      - name: Resolve workspace + scheme
+        id: xc
+        working-directory: apps/driver-app/ios
+        run: |
+          workspace="$(ls -d *.xcworkspace | head -n1)"
+          scheme="$(basename "$workspace" .xcworkspace)"
+          echo "workspace=$workspace" >> "$GITHUB_OUTPUT"
+          echo "scheme=$scheme" >> "$GITHUB_OUTPUT"
+
+      - name: Build for iOS Simulator (no code signing)
+        working-directory: apps/driver-app/ios
+        run: |
+          xcodebuild \
+            -workspace "${{ steps.xc.outputs.workspace }}" \
+            -scheme "${{ steps.xc.outputs.scheme }}" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
