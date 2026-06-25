@@ -11,12 +11,17 @@ import {
 } from "@nestjs/common";
 
 import type {
+  AddSupplyDocumentCommand,
   CreateDriverFleetAffiliationCommand,
   CreateFleetPartnerCommand,
   CreateFleetPartnerRevenueShareRuleCommand,
+  CreateSupplySubmissionCommand,
   SupplyReviewActionCommand,
+  SupplySubmissionLifecycleCommand,
   UpdateFleetPartnerCommand,
   UpdateFleetPartnerRevenueShareRuleCommand,
+  UpsertDriverSupplyDraftCommand,
+  UpsertVehicleSupplyDraftCommand,
 } from "@drts/contracts";
 
 import type { BootstrapRequestIdentity } from "../../common/auth";
@@ -27,8 +32,10 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { FleetPartnerService } from "./fleet-partner.service";
+import { SupplyDocumentService } from "./supply-document.service";
 import { SupplyReadinessService } from "./supply-readiness.service";
 import { SupplyReviewService } from "./supply-review.service";
+import { SupplySubmissionService } from "./supply-submission.service";
 
 @Controller()
 export class FleetPartnerController {
@@ -36,6 +43,8 @@ export class FleetPartnerController {
     private readonly fleetPartnerService: FleetPartnerService,
     private readonly supplyReviewService: SupplyReviewService,
     private readonly supplyReadinessService: SupplyReadinessService,
+    private readonly supplySubmissionService: SupplySubmissionService,
+    private readonly supplyDocumentService: SupplyDocumentService,
   ) {}
 
   private requireFleetPartnerId(fleetPartnerId?: string) {
@@ -404,6 +413,150 @@ export class FleetPartnerController {
       await this.supplyReadinessService.getVehicleReadiness(
         this.requireFleetPartnerId(fleetPartnerId),
         vehicleId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/supply-submissions")
+  @RequireRealms("partner")
+  async listSupplySubmissions(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        await this.supplySubmissionService.listSubmissions(
+          this.requireFleetPartnerId(fleetPartnerId),
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/supply-submissions/:submissionId")
+  @RequireRealms("partner")
+  async getSupplySubmission(
+    @Param("submissionId") submissionId: string,
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.getSubmission(
+        this.requireFleetPartnerId(fleetPartnerId),
+        submissionId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("fleet-partner/supply-submissions")
+  @RequireRealms("partner")
+  async createSupplySubmission(
+    @Body() command: CreateSupplySubmissionCommand,
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.createSubmission(
+        this.requireFleetPartnerId(fleetPartnerId),
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Put("fleet-partner/supply-submissions/:submissionId/driver-draft")
+  @RequireRealms("partner")
+  async upsertDriverSupplyDraft(
+    @Param("submissionId") submissionId: string,
+    @Body() command: UpsertDriverSupplyDraftCommand,
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.upsertDriverDraft(
+        this.requireFleetPartnerId(fleetPartnerId),
+        submissionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Put("fleet-partner/supply-submissions/:submissionId/vehicle-draft")
+  @RequireRealms("partner")
+  async upsertVehicleSupplyDraft(
+    @Param("submissionId") submissionId: string,
+    @Body() command: UpsertVehicleSupplyDraftCommand,
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.upsertVehicleDraft(
+        this.requireFleetPartnerId(fleetPartnerId),
+        submissionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("fleet-partner/supply-submissions/:submissionId/documents")
+  @RequireRealms("partner")
+  async addSupplyDocument(
+    @Param("submissionId") submissionId: string,
+    @Body() command: AddSupplyDocumentCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplyDocumentService.addDocument(
+        this.requireFleetPartnerId(fleetPartnerId),
+        submissionId,
+        this.requireReviewerActorId(identity),
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("fleet-partner/supply-submissions/:submissionId/submit")
+  @RequireRealms("partner")
+  async submitSupplySubmission(
+    @Param("submissionId") submissionId: string,
+    @Body() command: SupplySubmissionLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.submitSubmission(
+        this.requireFleetPartnerId(fleetPartnerId),
+        submissionId,
+        this.requireReviewerActorId(identity),
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("fleet-partner/supply-submissions/:submissionId/withdraw")
+  @RequireRealms("partner")
+  async withdrawSupplySubmission(
+    @Param("submissionId") submissionId: string,
+    @Body() command: SupplySubmissionLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.withdrawSubmission(
+        this.requireFleetPartnerId(fleetPartnerId),
+        submissionId,
+        this.requireReviewerActorId(identity),
+        command,
       ),
       requestId,
     );

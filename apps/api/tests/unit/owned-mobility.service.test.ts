@@ -565,6 +565,65 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ]);
   });
 
+  it("never offers an airport-permit-failing vehicle even under scarcity", async () => {
+    const runtimeEligibilityEvaluator = {
+      evaluate: vi.fn().mockResolvedValue({
+        serviceProductId: "svc-airport",
+        serviceProductCode: "credit_card_airport_transfer",
+        policyVersion:
+          "service:svc-airport@2026-06-20T00:00:00.000Z|capability:cap-3@2026-06-20T00:00:00.000Z",
+        decision: "ineligible",
+        hardReasonCodes: ["MISSING_AIRPORT_ELIGIBILITY"],
+        softReasonCodes: [],
+        missingRequirements: [],
+        locationState: "fresh",
+        evaluatedAt: "2026-06-20T12:00:01.000Z",
+      }),
+    };
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-no-airport",
+          vehicleId: "veh-demo-002",
+          etaMinutes: 8,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      runtimeEligibilityEvaluator,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T13:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
+        dropoff: { address: "Taoyuan Airport" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    // Default dispatch must NOT re-admit the airport-ineligible vehicle: the
+    // broad business_dispatch candidate cannot satisfy the airport transfer.
+    const fallbackCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    );
+    expect(fallbackCandidates).toHaveLength(0);
+
+    // It still appears in the diagnostic includeIneligible view.
+    const allCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+      true,
+    );
+    expect(allCandidates).toHaveLength(1);
+    expect(allCandidates[0]?.hardReasonCodes).toEqual([
+      "MISSING_AIRPORT_ELIGIBILITY",
+    ]);
+  });
+
   it("resolves tenant booking passenger and addresses from governed master data", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));

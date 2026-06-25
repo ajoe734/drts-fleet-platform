@@ -64,6 +64,44 @@ export interface SupplyReviewActionCommand {
   comment?: string | null;
 }
 
+// Fleet-partner self-service write commands (§1.1). These drive the partner side
+// of the submission lifecycle (draft → submitted → review), separate from the
+// platform-side SupplyReviewActionCommand above.
+
+export interface CreateSupplySubmissionCommand {
+  submissionType: SupplySubmissionType;
+  subjectDriverId?: string | null;
+  subjectVehicleId?: string | null;
+}
+
+export type UpsertDriverSupplyDraftCommand = Omit<
+  DriverSupplyDraft,
+  "submissionId"
+>;
+
+export type UpsertVehicleSupplyDraftCommand = Omit<
+  VehicleSupplyDraft,
+  "submissionId"
+>;
+
+export interface AddSupplyDocumentCommand {
+  documentType: SupplyDocumentType;
+  fileObjectKey: string;
+  originalFileName: string;
+  contentType: string;
+  fileSize: number;
+  checksumSha256: string;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+}
+
+// Submit (draft | needs_revision → submitted) and withdraw use optimistic
+// concurrency on revisionNo, mirroring SupplyReviewActionCommand.
+export interface SupplySubmissionLifecycleCommand {
+  expectedRevisionNo: number;
+  comment?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // §2.2 Driver Submission
 // ---------------------------------------------------------------------------

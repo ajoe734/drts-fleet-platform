@@ -73,6 +73,19 @@ const LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL = `
   COALESCE(${LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL}, '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$'
 `;
 
+// The precise service-product code carried into settlement. Previously the trip
+// record only stored `businessDispatchSubtype`, which is null for standard taxi
+// and loses the exact product identity; resolving it here keeps the precise
+// serviceProductCode flowing booking -> dispatch -> task -> settlement.
+function resolvePreciseServiceProductCode(
+  order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
+): string | null {
+  if (order.serviceBucket === "standard_taxi") {
+    return "taxi_realtime";
+  }
+  return order.businessDispatchSubtype ?? null;
+}
+
 @Injectable()
 export class BillingSettlementRepository {
   private readonly logger = new Logger(BillingSettlementRepository.name);
@@ -247,7 +260,7 @@ export class BillingSettlementRepository {
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
-        serviceProduct: order.businessDispatchSubtype,
+        serviceProduct: resolvePreciseServiceProductCode(order),
         tenantServiceProgramId: null,
         sourcePlatform: order.orderSource,
       };
@@ -616,7 +629,7 @@ export class BillingSettlementRepository {
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
-        serviceProduct: order.businessDispatchSubtype,
+        serviceProduct: resolvePreciseServiceProductCode(order),
         tenantServiceProgramId: null,
         sourcePlatform: order.orderSource,
       };

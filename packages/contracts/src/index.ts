@@ -2636,6 +2636,7 @@ export interface DispatchAssignmentRecord {
   dispatchJobId: string;
   orderId: string;
   taskId: string;
+  serviceProductCode?: ServiceProductType | null;
   vehicleId: string;
   driverId: string;
   assignmentType: "metered" | "fixed_price";
