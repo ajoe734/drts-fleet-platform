@@ -23,7 +23,8 @@ export default defineConfig({
   ...(shouldStartLocalPartnerBooking
     ? {
         webServer: {
-          command: "pnpm --filter @drts/partner-booking-web dev",
+          command:
+            "cd apps/partner-booking-web && DRTS_API_URL=https://drts-dev-api-waji3fer3a-uc.a.run.app NEXT_PUBLIC_API_URL=/control-plane-proxy pnpm exec next dev --hostname 127.0.0.1 --port 3007",
           url: localPartnerBookingBaseURL,
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,

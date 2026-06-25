@@ -16,6 +16,7 @@ import {
   createDefaultPartnerBookingDraft,
   getPartnerBookingFieldErrors,
   getPartnerProgramCoverage,
+  getPartnerProgramEntitlementNoun,
   getPartnerProgramGate,
   getPartnerProgramLabel,
   isPartnerBookingDraftReady,
@@ -252,6 +253,10 @@ export function PartnerBookingForm({
     entry.businessDispatchSubtype,
     locale,
   );
+  const entitlementNoun = getPartnerProgramEntitlementNoun(
+    entry.businessDispatchSubtype,
+    locale,
+  );
   const travelRosterPreview = draft.rosterPassengers
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -326,7 +331,7 @@ export function PartnerBookingForm({
         <div style={{ ...gridStyle, marginTop: 14 }}>
           <div style={fieldStyle}>
             <span style={{ ...labelStyle, color: theme.textMuted }}>
-              {t("book.summary.coverage")}
+              {entitlementNoun}
             </span>
             <strong style={{ color: theme.text }}>{coverage}</strong>
           </div>
