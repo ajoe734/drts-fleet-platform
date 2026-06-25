@@ -14,6 +14,7 @@ import {
   type ReferralUsageDailyRow,
   type ReferralUsagePeriod,
 } from "./referral-portal-fixtures";
+import type { Locale } from "./translations";
 import type {
   PartnerReferralDashboardRecord,
   PartnerReferralRevenuePeriodRecord,
@@ -65,37 +66,47 @@ function formatStatementLineDate(iso: string) {
   return match ? `${match[1]} ${match[2]}` : iso;
 }
 
-function maskReferralRider(tripId: string) {
+function maskReferralRider(tripId: string, locale: Locale = "zh") {
   const suffix = tripId
     .replace(/[^A-Z0-9]/gi, "")
     .slice(-3)
     .toUpperCase();
-  return `住戶 ••••${suffix || "REF"}`;
+  return (locale === "en" ? "Resident" : "住戶") + " ••••" + (suffix || "REF");
 }
 
-function inferReferralRoute(tripId: string) {
-  const routes = [
-    "社區 → 台北車站",
-    "社區 → 內湖科技園區",
-    "信義威秀 → 社區",
-    "社區 → 台北榮總",
-    "松山機場 → 社區",
-  ];
+function inferReferralRoute(tripId: string, locale: Locale = "zh") {
+  const routes =
+    locale === "en"
+      ? [
+          "Community → Taipei Main Station",
+          "Community → Neihu Technology Park",
+          "Xinyi Vieshow → Community",
+          "Community → Taipei Veterans General Hospital",
+          "Songshan Airport → Community",
+        ]
+      : [
+          "社區 → 台北車站",
+          "社區 → 內湖科技園區",
+          "信義威秀 → 社區",
+          "社區 → 台北榮總",
+          "松山機場 → 社區",
+        ];
   let sum = 0;
   for (const char of tripId) {
     sum += char.charCodeAt(0);
   }
-  return routes[sum % routes.length] ?? "社區 → 台北車站";
+  return routes[sum % routes.length] ?? routes[0] ?? "—";
 }
 
 function mapReferralLine(
   line: ReferralStatementLineRecord,
+  locale: Locale = "zh",
 ): ReferralStatementLineView {
   return {
     trip: line.tripId,
     date: formatStatementLineDate(line.completedAt),
-    route: inferReferralRoute(line.tripId),
-    rider: maskReferralRider(line.tripId),
+    route: inferReferralRoute(line.tripId, locale),
+    rider: maskReferralRider(line.tripId, locale),
     fare: formatMoney(line.fare),
     share: formatDecimalMoney(line.shareAmount),
   };
@@ -103,6 +114,7 @@ function mapReferralLine(
 
 function mapReferralStatement(
   record: ReferralStatementRecord,
+  locale: Locale = "zh",
 ): ReferralStatementView {
   return {
     id: record.statementId,
@@ -115,13 +127,14 @@ function mapReferralStatement(
     issued: record.generatedAt.slice(0, 10),
     artifactId: record.artifactRef.artifactId,
     artifactHash: record.artifactRef.manifestHash,
-    direction: "DRTS → Partner",
-    lines: record.lines.map(mapReferralLine),
+    direction: locale === "en" ? "DRTS → Partner" : "DRTS → 夥伴",
+    lines: record.lines.map((line) => mapReferralLine(line, locale)),
   };
 }
 
 function buildReferralDailyUsage(
   lines: ReferralStatementLineRecord[],
+  locale: Locale = "zh",
 ): ReferralUsageDailyRow[] {
   const grouped = new Map<
     string,
@@ -137,7 +150,7 @@ function buildReferralDailyUsage(
     };
     current.trips += 1;
     current.gmvMinor += line.fare.amountMinor;
-    current.users.add(maskReferralRider(line.tripId));
+    current.users.add(maskReferralRider(line.tripId, locale));
     grouped.set(day, current);
   }
 
@@ -156,6 +169,39 @@ export interface ReferralDashboardView {
   summary: ReferralDashboardFixture;
   periods: ReferralUsagePeriod[];
   source: DataSource;
+}
+
+function localizeReferralStatementLine(
+  line: ReferralStatementLineView,
+  locale: Locale,
+): ReferralStatementLineView {
+  return {
+    ...line,
+    route: inferReferralRoute(line.trip, locale),
+    rider: maskReferralRider(line.trip, locale),
+  };
+}
+
+function localizeReferralStatement(
+  statement: ReferralStatementView,
+  locale: Locale,
+): ReferralStatementView {
+  return {
+    ...statement,
+    direction: locale === "en" ? "DRTS → Partner" : statement.direction,
+    lines: statement.lines.map((line) =>
+      localizeReferralStatementLine(line, locale),
+    ),
+  };
+}
+
+function localizeReferralStatements(
+  statements: ReferralStatementView[],
+  locale: Locale,
+): ReferralStatementView[] {
+  return statements.map((statement) =>
+    localizeReferralStatement(statement, locale),
+  );
 }
 
 function mapReferralDashboard(
@@ -221,11 +267,15 @@ export interface ReferralUsageView {
   source: DataSource;
 }
 
-export async function loadReferralUsage(): Promise<ReferralUsageView> {
+export async function loadReferralUsage(
+  locale: Locale = "zh",
+): Promise<ReferralUsageView> {
   const fallback: ReferralUsageView = {
     periods: FX_REFERRAL_USAGE_PERIODS,
     dailyRows: FX_REFERRAL_USAGE_DAILY,
-    tripRows: FX_REFERRAL_STATEMENTS[0]?.lines ?? [],
+    tripRows: (FX_REFERRAL_STATEMENTS[0]?.lines ?? []).map((line) =>
+      localizeReferralStatementLine(line, locale),
+    ),
     source: "fallback",
   };
   try {
@@ -248,10 +298,10 @@ export async function loadReferralUsage(): Promise<ReferralUsageView> {
         source: "live",
       };
     }
-    const mappedStatement = mapReferralStatement(currentStatement);
+    const mappedStatement = mapReferralStatement(currentStatement, locale);
     return {
       periods,
-      dailyRows: buildReferralDailyUsage(currentStatement.lines),
+      dailyRows: buildReferralDailyUsage(currentStatement.lines, locale),
       tripRows: mappedStatement.lines,
       source: "live",
     };
@@ -288,19 +338,23 @@ export interface ReferralStatementsView {
   source: DataSource;
 }
 
-export async function loadReferralStatements(): Promise<ReferralStatementsView> {
+export async function loadReferralStatements(
+  locale: Locale = "zh",
+): Promise<ReferralStatementsView> {
   try {
     const { client } = await getServerReferralPartnerClient();
     const response = await client.get<{ items: ReferralStatementRecord[] }>(
       "/api/partner/referral/statements",
     );
     return {
-      rows: response.items.map(mapReferralStatement),
+      rows: response.items.map((statement) =>
+        mapReferralStatement(statement, locale),
+      ),
       source: "live",
     };
   } catch {
     return {
-      rows: FX_REFERRAL_STATEMENTS,
+      rows: localizeReferralStatements(FX_REFERRAL_STATEMENTS, locale),
       source: "fallback",
     };
   }
@@ -313,20 +367,24 @@ export interface ReferralStatementDetailView {
 
 export async function loadReferralStatementDetail(
   period: string,
+  locale: Locale = "zh",
 ): Promise<ReferralStatementDetailView> {
   try {
     const { client } = await getServerReferralPartnerClient();
-    const statement = await client.get<ReferralStatementRecord>(
-      `/api/partner/referral/statements/${encodeURIComponent(period)}`,
+    const response = await client.get<{ items: ReferralStatementRecord[] }>(
+      "/api/partner/referral/statements",
     );
+    const statement = response.items.find((item) => item.period === period);
     return {
-      statement: mapReferralStatement(statement),
+      statement: statement ? mapReferralStatement(statement, locale) : null,
       source: "live",
     };
   } catch {
     return {
       statement:
-        FX_REFERRAL_STATEMENTS.find((item) => item.period === period) ?? null,
+        localizeReferralStatements(FX_REFERRAL_STATEMENTS, locale).find(
+          (item) => item.period === period,
+        ) ?? null,
       source: "fallback",
     };
   }
