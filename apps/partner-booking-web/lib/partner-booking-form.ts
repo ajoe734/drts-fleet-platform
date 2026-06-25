@@ -140,6 +140,13 @@ export function getPartnerProgramCoverage(
   return t(`book.coverage.${subtype}`, undefined, locale);
 }
 
+export function getPartnerProgramEntitlementNoun(
+  subtype: BusinessDispatchSubtype,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return t(`book.entitlement.${subtype}`, undefined, locale);
+}
+
 export function getPartnerProgramGate(params: {
   entry: Pick<
     PartnerChannelEntryRecord,

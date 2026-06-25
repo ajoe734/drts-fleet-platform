@@ -110,6 +110,10 @@ const en = {
     "Group/order reference, group seats, itinerary, roster",
   "book.coverage.enterprise_dispatch":
     "Shared trip intake without partner-specific gating",
+  "book.entitlement.credit_card_airport_transfer": "Benefit trips",
+  "book.entitlement.insurance_replacement_vehicle": "Claim allowance",
+  "book.entitlement.travel_agency_transfer": "Group seats",
+  "book.entitlement.enterprise_dispatch": "Program entitlement",
   "program.screen.embed_handoff.label": "Embed hand-off",
   "program.screen.embed_handoff.summary":
     "Signed-in hand-off from the banking app with a resolved reference token.",
@@ -333,8 +337,7 @@ const en = {
     "· certified professional drivers and a licensed fleet",
   "airport.quota.remaining": "Free transfers left this year",
   "airport.features.kicker": "Why book with us",
-  "airport.features.title":
-    "Concierge airport transfer, every detail handled",
+  "airport.features.title": "Concierge airport transfer, every detail handled",
   "airport.features.body":
     "From booking to arrival, professional drivers, live tracking, and consolidated billing keep business trips and homecomings effortless.",
   "airport.vehicles.title": "Choose the right vehicle",
@@ -564,6 +567,10 @@ const zh = {
   "book.coverage.travel_agency_transfer":
     "團體/訂單參照、團體席次、行程連結、roster",
   "book.coverage.enterprise_dispatch": "共用行程欄位，無 partner 專屬閘門",
+  "book.entitlement.credit_card_airport_transfer": "禮遇趟次",
+  "book.entitlement.insurance_replacement_vehicle": "理賠額度",
+  "book.entitlement.travel_agency_transfer": "團體席次",
+  "book.entitlement.enterprise_dispatch": "方案權益",
   "program.screen.embed_handoff.label": "內嵌帶入",
   "program.screen.embed_handoff.summary":
     "行動銀行已完成登入交接，並帶入可解析的 reference token。",
