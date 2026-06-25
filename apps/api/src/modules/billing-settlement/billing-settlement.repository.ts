@@ -78,8 +78,15 @@ const LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL = `
 // and loses the exact product identity; resolving it here keeps the precise
 // serviceProductCode flowing booking -> dispatch -> task -> settlement.
 function resolvePreciseServiceProductCode(
-  order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
+  order: Pick<
+    OwnedOrderRecord,
+    "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
+  >,
 ): string | null {
+  // Booking-origin value wins; derivation is the legacy fallback.
+  if (order.serviceProductCode) {
+    return order.serviceProductCode;
+  }
   if (order.serviceBucket === "standard_taxi") {
     return "taxi_realtime";
   }

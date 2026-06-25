@@ -401,7 +401,7 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.orders = [order, ...this.orders];
+    this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const traceLog = this.appendTrace(
       order.orderId,
       "order.ready_for_dispatch",
@@ -533,7 +533,7 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.orders = [order, ...this.orders];
+    this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const session = this.callcenterService.linkOrderToCallSession({
       callId: command.callId,
       callType: "booking",
@@ -742,7 +742,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
-      this.orders = [order, ...this.orders];
+      this.orders = [this.stampServiceProductCode(order), ...this.orders];
       if (persistOrderWrite) {
         this.persistChanges(
           {
@@ -4442,8 +4442,16 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private resolveServiceProductCodeForOrder(
-    order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
+    >,
   ): ServiceProductType | null {
+    // Booking-origin value wins; derivation is only a legacy fallback.
+    if (order.serviceProductCode) {
+      return order.serviceProductCode;
+    }
+
     if (this.vehicleEligibilityService) {
       return this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
         order,
@@ -4453,6 +4461,16 @@ export class OwnedMobilityService implements OnModuleInit {
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
       : order.businessDispatchSubtype ?? null;
+  }
+
+  // Stamp the precise service-product code onto a freshly-built order so it
+  // originates at booking intake and flows unchanged downstream. Idempotent: an
+  // order that already carries the code is returned untouched.
+  private stampServiceProductCode<T extends OwnedOrderRecord>(order: T): T {
+    if (order.serviceProductCode) {
+      return order;
+    }
+    return { ...order, serviceProductCode: this.resolveServiceProductCodeForOrder(order) };
   }
 
   private buildDispatchAssignmentBundle(

@@ -307,6 +307,52 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
+  it("stamps serviceProductCode at booking intake and carries it through assignment + task", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    // Booking-origin: the precise code is on the order the moment it is created,
+    // before any dispatch/derivation downstream.
+    expect(service.getOrder(booking.orderId)?.serviceProductCode).toBe(
+      "credit_card_airport_transfer",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    // Same value flows to the driver task (carried from the order, not re-derived).
+    expect(service.getDriverTask(assignment.taskId)?.serviceProductCode).toBe(
+      "credit_card_airport_transfer",
+    );
+  });
+
   it("uses repository transactions for assignment-time recheck when persistence is enabled", async () => {
     let vehicleDispatchable = true;
     const repository = {

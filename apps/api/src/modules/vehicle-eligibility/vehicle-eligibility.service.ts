@@ -436,8 +436,17 @@ export class VehicleEligibilityService implements OnModuleInit {
   }
 
   resolveServiceProductForOwnedOrder(
-    order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
+    >,
   ): ServiceProductType {
+    // Prefer the precise code stamped at booking intake; only derive it from the
+    // bucket/subtype for legacy/in-flight orders that predate the stored field.
+    if (order.serviceProductCode) {
+      return order.serviceProductCode;
+    }
+
     if (order.serviceBucket === "standard_taxi") {
       return "taxi_realtime";
     }

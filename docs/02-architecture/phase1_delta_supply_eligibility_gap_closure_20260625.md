@@ -15,7 +15,7 @@ Source of truth: [`phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.
 | 2 | Submission ↔ canonical 分離 | ✅ done | canonical IDs null pre-approval; `provisionFromSubmission` on approve |
 | 3 | VehicleFleetAffiliation | ✅ done | contract + DDL (`fleet.vehicle_fleet_affiliations`) + provisioned on approve |
 | 4 | 機場接送被廣義 business_dispatch 繞過 | ✅ **CLOSED 2026-06-25** | scarcity fallback no longer re-admits airport-permit-failing vehicles |
-| 5 | serviceProductCode booking→…→settlement | ⚠️ **PARTIAL** | assignment link added; still re-derived (not booking-origin) + settlement keys on subtype |
+| 5 | serviceProductCode booking→…→settlement | ✅ **CLOSED 2026-06-25** | now a first-class field stamped at booking intake; whole chain reads the stored value |
 | 6 | 真機背景定位 / 權限 / 斷網補送 / 重啟 | ✅ done (code) | iOS real-device UAT still `provisional` (no macOS/device in fleet) |
 | 7 | Durable heartbeat / 去重 / 順序 / freshness / gap | ✅ done | client offline-queue + server sequence/duplicate/freshness |
 | 8 | 每日派遣 + 六月營運摘要 | ✅ done | reporting endpoints + service |
@@ -62,19 +62,19 @@ candidates when none were eligible — letting a broad `business_dispatch` vehic
   `OwnedMobilityModule`, so it is always injected in the running app — the `@Optional()` fallback only
   affects directly-constructed unit tests. No production "unwired evaluator" exposure.
 
-### Gap 5 — serviceProductCode chain (partial)
-- `DispatchAssignmentRecord.serviceProductCode` added to the contract and populated in
-  `buildDispatchAssignmentBundle` (it was already computed for the task; the assignment was the missing link).
+### Gap 5 — serviceProductCode booking-origin chain
+- `OwnedOrderRecord.serviceProductCode` added to the contract and **stamped at booking intake**
+  (`OwnedMobilityService.stampServiceProductCode` at the three order-creation sites), so the precise code
+  originates with the booking.
+- All consumers now **prefer the stored value** and only derive as a legacy fallback:
+  `resolveServiceProductForOwnedOrder` (vehicle-eligibility), `resolveServiceProductCodeForOrder`
+  (owned-mobility, feeds candidate decoration + assignment + task), and `resolvePreciseServiceProductCode`
+  (billing-settlement).
+- `DispatchAssignmentRecord.serviceProductCode` added + populated.
+- **Test**: `owned-mobility.service.test.ts` — *"stamps serviceProductCode at booking intake and carries it
+  through assignment + task"* (asserts `getOrder().serviceProductCode` at intake + `getDriverTask()` carries it).
 
 ## Remaining work (could not be fully closed in this pass)
-
-### Backend — serviceProductCode as a booking-origin first-class field
-Today the precise code is **re-derived** from `serviceBucket` + `businessDispatchSubtype` at dispatch time
-(`vehicle-eligibility.service.ts:resolveServiceProductForOwnedOrder`) rather than carried from the booking.
-- Add `serviceProductCode` to the booking/order contract and persist at intake.
-- Thread it through dispatch/candidate/assignment/task from the booking value (stop re-deriving).
-- **Settlement**: `billing-settlement.repository.ts` keys `serviceProduct` on `order.businessDispatchSubtype`
-  and `settlement-matrix.ts` keys the channel on subtype — switch to the precise `serviceProductCode`.
 
 ### QA — iOS real-device UAT
 [`mob-uat-002-ios-physical-device-evidence-pack-20260620.md`](../04-uat/mob-uat-002-ios-physical-device-evidence-pack-20260620.md)
@@ -94,8 +94,8 @@ legs with real `create → driver-draft → vehicle-draft → document → submi
 approve`.
 
 ## Per-team work list
-- **Backend**: serviceProductCode booking-origin + settlement keying; (done) self-create write path; (done) airport fallback.
-- **Fleet Partner Portal**: submission/correction/upload UI over the new endpoints.
+- **Backend**: (done) self-create write path; (done) airport fallback; (done) serviceProductCode booking-origin + settlement.
+- **Fleet Partner Portal**: (done) Onboarding Submissions create/driver-draft/submit UI; remaining = vehicle-draft + document-upload + needs_revision correction surfaces.
 - **Platform Admin / Ops Console**: review queue already wired (`admin/supply-review/*`); add affiliation + readiness surfacing if missing.
 - **Driver App**: heartbeat/background/offline complete; no new backend work — iOS device build for UAT.
 - **QA**: rewrite E2E-019 against the live write API; execute iOS real-device UAT.
