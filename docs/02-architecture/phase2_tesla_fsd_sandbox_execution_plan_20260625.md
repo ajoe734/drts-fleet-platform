@@ -9,8 +9,9 @@
 
 1. **現在就能在 repo 內做完的工作（Gate B repo-ready）** — 已派工。
 2. **被外部契約卡住的工作（Gate C–F）** — 寫成 capability-gated，不憑空捏造，不派 build。
-3. **需要視覺／系統設計團隊補完的缺口（UI canvas / 缺頁 / 缺規格）** — 移交
-   [`phase2_tesla_fsd_sandbox_spec_gaps_and_missing_screens_20260625.md`](./phase2_tesla_fsd_sandbox_spec_gaps_and_missing_screens_20260625.md)。
+3. **需要補完的缺口** — 已拆成兩份交付文件：
+   - 視覺設計團隊（缺 canvas / 待補頁面）→ [`phase2_tesla_fsd_sandbox_visual_design_handoff_20260625.md`](./phase2_tesla_fsd_sandbox_visual_design_handoff_20260625.md)
+   - 系統設計團隊（待裁定 / 缺規格實值 / 外部契約）→ [`phase2_tesla_fsd_sandbox_system_design_handoff_20260625.md`](./phase2_tesla_fsd_sandbox_system_design_handoff_20260625.md)
 
 ---
 
@@ -100,9 +101,12 @@ Layer 4                  ▼
 因此 repo build 不被它們卡住，但**這些值不得由 worker 捏造**。
 
 ### 3.2 UI / 視覺 canvas gate（交視覺團隊）
-新 console 與新頁面**沒有 design canvas，不可由 LLM 設計**。已整理成 gaps 文件，列為視覺團隊交付：
+新 console 與新頁面**沒有 design canvas，不可由 LLM 設計**。詳列於
+[`phase2_tesla_fsd_sandbox_visual_design_handoff_20260625.md`](./phase2_tesla_fsd_sandbox_visual_design_handoff_20260625.md)：
 `apps/roc-console-web`（新）、driver-app Safety Operator Mode、platform-admin 沙盒治理頁、
 ops-console AV fallback/passenger recovery、Compliance & Investigation 頁。
+其中部分頁面被系統設計裁定卡住（歸屬、design system），見
+[`phase2_tesla_fsd_sandbox_system_design_handoff_20260625.md`](./phase2_tesla_fsd_sandbox_system_design_handoff_20260625.md) §C。
 工程 UI build task 待 canvas 到位後追加第二波（依 `feedback_must_check_design_canvas`）。
 
 ---
