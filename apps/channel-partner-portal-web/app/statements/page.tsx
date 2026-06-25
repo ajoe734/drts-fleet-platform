@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function ReferralStatementsPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const statements = await loadReferralStatements();
+  const statements = await loadReferralStatements(locale);
 
   return (
     <>

@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function ReferralUsagePage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const usage = await loadReferralUsage();
+  const usage = await loadReferralUsage(locale);
   const current = usage.periods[0] ?? null;
 
   return (

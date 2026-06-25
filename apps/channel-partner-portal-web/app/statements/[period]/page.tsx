@@ -23,7 +23,7 @@ export default async function ReferralStatementDetailPage({
   const { period } = await params;
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const detail = await loadReferralStatementDetail(period);
+  const detail = await loadReferralStatementDetail(period, locale);
   const statement = detail.statement;
   const statusTone =
     statement?.status === "paid"
@@ -126,7 +126,7 @@ export default async function ReferralStatementDetailPage({
                     },
                     {
                       k: t("referral.statements.direction", locale),
-                      v: t("referral.dashboard.kpi.shareDelta", locale),
+                      v: statement.direction,
                     },
                     {
                       k: t("table.status", locale),
