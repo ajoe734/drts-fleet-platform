@@ -1,0 +1,180 @@
+openapi: 3.1.0
+info:
+  title: DRTS Phase 2 Tesla FSD Sandbox Operations API
+  version: 0.1.0-draft
+  description: >-
+    Draft API for Tesla integration, Taiwan sandbox governance, ROC operations,
+    safety-operator reporting, evidence preservation and regulatory reporting.
+servers:
+  - url: https://api.example.com/api
+paths:
+  /tesla/vehicles/{vin}/capabilities:
+    get:
+      operationId: getTeslaRegulatoryCapabilities
+      parameters:
+        - in: path
+          name: vin
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Capability profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeslaRegulatoryCapabilityProfile'
+  /internal/providers/tesla/regulatory-events:
+    post:
+      operationId: ingestTeslaRegulatoryEvent
+      security:
+        - mutualTLS: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderEventReceipt'
+        '401': { description: Invalid provider identity or signature }
+        '409': { description: Event ID conflict or hash mismatch }
+  /sandbox/dispatch/evaluate:
+    post:
+      operationId: evaluateSandboxDispatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SandboxDispatchEvaluationCommand'
+      responses:
+        '200':
+          description: Evaluation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxDispatchEvaluationResult'
+  /safety-operator/takeovers:
+    post:
+      operationId: createSafetyOperatorTakeoverReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SafetyOperatorTakeoverReportCommand'
+      responses:
+        '201': { description: Created }
+  /roc/alerts/{alertId}/acknowledge:
+    post:
+      operationId: acknowledgeRocAlert
+      parameters:
+        - in: path
+          name: alertId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Acknowledged }
+  /evidence/freezes:
+    post:
+      operationId: createEvidenceFreeze
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvidenceFreezeCommand'
+      responses:
+        '202': { description: Freeze initiated }
+  /accident-cases/{caseId}/bundles:
+    post:
+      operationId: createAccidentInvestigationBundle
+      parameters:
+        - in: path
+          name: caseId
+          required: true
+          schema: { type: string }
+      responses:
+        '202': { description: Bundle job accepted }
+components:
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+  schemas:
+    GeoPoint:
+      type: object
+      required: [lat, lng]
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+    TeslaRegulatoryCapabilityProfile:
+      type: object
+      required: [vin, fleetTelemetryAvailable, fsdSessionFeedAvailable, autonomyTransitionFeedAvailable, schemaVersion, assessedAt]
+      properties:
+        vin: { type: string }
+        fleetTelemetryAvailable: { type: boolean }
+        selfDrivingStatisticsAvailable: { type: boolean }
+        fsdSessionFeedAvailable: { type: boolean }
+        autonomyTransitionFeedAvailable: { type: boolean }
+        takeoverReasonAvailable: { type: boolean }
+        historicalBackfillAvailable: { type: boolean }
+        incidentEvidenceAvailable: { type: boolean }
+        providerSignatureAvailable: { type: boolean }
+        limitations: { type: array, items: { type: string } }
+        schemaVersion: { type: string }
+        assessedAt: { type: string, format: date-time }
+    ProviderEventReceipt:
+      type: object
+      required: [accepted, receiptId, receivedAt]
+      properties:
+        accepted: { type: boolean }
+        receiptId: { type: string }
+        receivedAt: { type: string, format: date-time }
+        duplicate: { type: boolean }
+    SandboxDispatchEvaluationCommand:
+      type: object
+      required: [bookingId, experimentId, vehicleId, safetyOperatorId]
+      properties:
+        bookingId: { type: string }
+        experimentId: { type: string }
+        vehicleId: { type: string }
+        safetyOperatorId: { type: string }
+    SandboxDispatchEvaluationResult:
+      type: object
+      required: [evaluationId, decision, evaluatedAt, reasons]
+      properties:
+        evaluationId: { type: string }
+        decision:
+          type: string
+          enum: [eligible, eligible_requires_manual_release, ineligible]
+        reasonCodes: { type: array, items: { type: string } }
+        evaluatedAt: { type: string, format: date-time }
+        snapshotVersion: { type: string }
+    SafetyOperatorTakeoverReportCommand:
+      type: object
+      required: [clientGeneratedReportId, tripId, vehicleId, vin, occurredAt, reasonCode, postTakeoverDisposition]
+      properties:
+        clientGeneratedReportId: { type: string }
+        tripId: { type: string }
+        vehicleId: { type: string }
+        vin: { type: string }
+        occurredAt: { type: string, format: date-time }
+        reasonCode: { type: string }
+        description: { type: [string, 'null'] }
+        postTakeoverDisposition:
+          type: string
+          enum: [fsd_resumed, human_completed, vehicle_stopped, incident_escalated]
+    CreateEvidenceFreezeCommand:
+      type: object
+      required: [caseId, triggerType, triggerId]
+      properties:
+        caseId: { type: string }
+        triggerType: { type: string }
+        triggerId: { type: string }
+        policyId: { type: [string, 'null'] }
