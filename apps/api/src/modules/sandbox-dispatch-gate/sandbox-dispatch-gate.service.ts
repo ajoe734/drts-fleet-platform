@@ -141,13 +141,10 @@ export class SandboxDispatchGateService {
       releasedAt: new Date().toISOString(),
     };
 
-    this.persistEvaluation(
-      {
-        decision,
-        evaluationSnapshot: decisionRecord.evaluationSnapshot,
-        releaseAudit,
-      },
-      "manual_release",
+    this.persistManualRelease(
+      decisionRecord,
+      releaseAudit,
+      existingRecord !== null,
     );
     this.recordAudit(
       {
@@ -774,6 +771,35 @@ export class SandboxDispatchGateService {
     void this.repository.persistEvaluation(record).catch((error) =>
       this.repository!.reportPersistenceFailure(error, context),
     );
+  }
+
+  private persistManualRelease(
+    record: SandboxDispatchStoredEvaluationRecord,
+    releaseAudit: Record<string, unknown>,
+    existingRecord: boolean,
+  ) {
+    if (!this.repository) {
+      return;
+    }
+
+    if (existingRecord) {
+      void this.repository
+        .updateReleaseAudit(record.decision.decisionId, releaseAudit)
+        .catch((error) =>
+          this.repository!.reportPersistenceFailure(error, "manual_release"),
+        );
+      return;
+    }
+
+    void this.repository
+      .persistEvaluation({
+        decision: record.decision,
+        evaluationSnapshot: record.evaluationSnapshot,
+        releaseAudit,
+      })
+      .catch((error) =>
+        this.repository!.reportPersistenceFailure(error, "manual_release"),
+      );
   }
 
   private recordAudit(

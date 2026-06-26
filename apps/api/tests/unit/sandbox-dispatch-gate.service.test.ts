@@ -233,6 +233,60 @@ describe("SandboxDispatchGateService", () => {
     });
   });
 
+  it("fails closed when enrollment is active but entitlement is omitted", async () => {
+    const gate = new SandboxDispatchGateService();
+
+    const decision = await gate.evaluateDispatch({
+      orderId: "order-av-003d",
+      dispatchJobId: "job-av-003d",
+      vehicleId: "veh-av-003d",
+      sandboxProgramId: "sandbox-program-001",
+      policyVersion: "phase2-evd-001",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
+      providerCapabilities: {
+        av_dispatch: true,
+        telemetry_stream: true,
+        regulatory_event_feed: true,
+        evidence_recorder: true,
+        odd_geofence: true,
+        minimal_risk_condition: true,
+      },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+        currentTripCount: 0,
+        odometerKm: 25_000,
+      },
+      regulatory: { approvalFresh: true, vehicleCertified: true },
+      recorder: { healthy: true },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
+    });
+
+    expect(decision.decision).toBe("block");
+    expect(decision.hardReasonCodes).toContain("REGULATORY_APPROVAL_MISSING");
+  });
+
   it("returns allow_with_safety_operator when operator is required and qualified", async () => {
     const gate = new SandboxDispatchGateService();
 
@@ -348,6 +402,7 @@ describe("SandboxDispatchGateService", () => {
         releaseAudit: null,
       }),
       loadLatestDecision: vi.fn(),
+      updateReleaseAudit: vi.fn().mockResolvedValue(undefined),
       persistEvaluation: vi.fn().mockResolvedValue(undefined),
       reportPersistenceFailure: vi.fn(),
     } as never;
@@ -374,23 +429,17 @@ describe("SandboxDispatchGateService", () => {
 
     expect(repository.loadDecisionById).toHaveBeenCalledWith("dec-existing-001");
     expect(repository.loadLatestDecision).not.toHaveBeenCalled();
-    expect(repository.persistEvaluation).toHaveBeenCalledTimes(1);
-    expect(repository.persistEvaluation).toHaveBeenCalledWith(
+    expect(repository.updateReleaseAudit).toHaveBeenCalledTimes(1);
+    expect(repository.updateReleaseAudit).toHaveBeenCalledWith(
+      "dec-existing-001",
       expect.objectContaining({
-        decision: expect.objectContaining({
-          decisionId: "dec-existing-001",
-        }),
-        evaluationSnapshot: expect.objectContaining({
-          entitlement: { active: false },
-        }),
-        releaseAudit: expect.objectContaining({
-          actorId: "ops-002",
-          actorType: "ops_user",
-          reason: "Persist release audit on existing decision",
-          decisionId: "dec-existing-001",
-        }),
+        actorId: "ops-002",
+        actorType: "ops_user",
+        reason: "Persist release audit on existing decision",
+        decisionId: "dec-existing-001",
       }),
     );
+    expect(repository.persistEvaluation).not.toHaveBeenCalled();
     expect(result.decision).toMatchObject({
       decisionId: "dec-existing-001",
     });
@@ -426,6 +475,7 @@ describe("SandboxDispatchGateService", () => {
         releaseAudit: null,
       }),
       persistEvaluation: vi.fn().mockResolvedValue(undefined),
+      updateReleaseAudit: vi.fn().mockResolvedValue(undefined),
       reportPersistenceFailure: vi.fn(),
     } as never;
     const gate = new SandboxDispatchGateService(
@@ -450,7 +500,8 @@ describe("SandboxDispatchGateService", () => {
 
     expect(repository.loadDecisionById).not.toHaveBeenCalled();
     expect(repository.loadLatestDecision).toHaveBeenCalledWith("order-av-005d");
-    expect(repository.persistEvaluation).toHaveBeenCalledTimes(1);
+    expect(repository.updateReleaseAudit).toHaveBeenCalledTimes(1);
+    expect(repository.persistEvaluation).not.toHaveBeenCalled();
     expect(result.releaseAudit.decisionId).toBe("dec-existing-002");
   });
 
@@ -459,6 +510,7 @@ describe("SandboxDispatchGateService", () => {
       loadDecisionById: vi.fn(),
       loadLatestDecision: vi.fn().mockResolvedValue(null),
       persistEvaluation: vi.fn().mockResolvedValue(undefined),
+      updateReleaseAudit: vi.fn().mockResolvedValue(undefined),
       reportPersistenceFailure: vi.fn(),
     } as never;
     const auditNotificationService = {
@@ -489,6 +541,7 @@ describe("SandboxDispatchGateService", () => {
 
     expect(repository.loadLatestDecision).toHaveBeenCalledWith("order-av-005e");
     expect(repository.persistEvaluation).toHaveBeenCalledTimes(1);
+    expect(repository.updateReleaseAudit).not.toHaveBeenCalled();
     expect(repository.persistEvaluation).toHaveBeenCalledWith(
       expect.objectContaining({
         decision: expect.objectContaining({

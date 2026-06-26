@@ -51,4 +51,32 @@ describe("SandboxDispatchGateRepository", () => {
       }),
     );
   });
+
+  it("updates release audit in place for an existing decision row", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new SandboxDispatchGateRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await repository.updateReleaseAudit("dec-002", {
+      actorId: "ops-002",
+      actorType: "ops_user",
+      reason: "In-place release update",
+    });
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("UPDATE av_sandbox.sandbox_dispatch_decisions");
+    expect(sql).toContain("SET release_audit = $2::jsonb");
+    expect(sql).toContain("WHERE decision_id = $1");
+    expect(params).toEqual([
+      "dec-002",
+      JSON.stringify({
+        actorId: "ops-002",
+        actorType: "ops_user",
+        reason: "In-place release update",
+      }),
+    ]);
+  });
 });

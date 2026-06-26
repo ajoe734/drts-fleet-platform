@@ -87,6 +87,24 @@ export class SandboxDispatchGateRepository {
     );
   }
 
+  async updateReleaseAudit(
+    decisionId: string,
+    releaseAudit: Record<string, unknown>,
+  ) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        UPDATE av_sandbox.sandbox_dispatch_decisions
+        SET release_audit = $2::jsonb
+        WHERE decision_id = $1
+      `,
+      [decisionId, JSON.stringify(releaseAudit)],
+    );
+  }
+
   async loadLatestDecision(orderId: string) {
     if (!this.isEnabled()) {
       return null;
