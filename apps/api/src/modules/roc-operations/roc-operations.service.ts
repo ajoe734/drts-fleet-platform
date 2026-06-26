@@ -1928,8 +1928,11 @@ export class RocOperationsService {
     return roles.some((role) => identity?.roles?.includes(role));
   }
 
-  private normalizeRequired(value: string, field: string) {
-    const normalized = value.trim();
+  private normalizeRequired(
+    value: string | null | undefined,
+    field: string,
+  ) {
+    const normalized = value?.trim?.();
     if (!normalized) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
