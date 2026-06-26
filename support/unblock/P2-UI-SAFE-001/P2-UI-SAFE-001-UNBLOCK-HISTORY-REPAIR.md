@@ -22,10 +22,11 @@ owner handoff unless it is documented explicitly.
    It is exactly one commit ahead of `origin/dev`, and its single commit is the
    blocker note `wip(P2-UI-SAFE-001): anchor safety-operator requirements`.
 2. The assigned helper branch
-   `codex/p2-ui-safe-001-unblock-history-repair @ 6c974f05044001e7aeb2ca59f5384a5ae781192c`
-   was created from `origin/dev` at `2026-06-26 15:07:34 +0000`, has no parent
-   commit on it, and has no matching remote ref or PR. It is a diagnosis rail
-   only, not a replay of the parent branch.
+   `codex/p2-ui-safe-001-unblock-history-repair` was created from `origin/dev`
+   at `2026-06-26 15:07:34 +0000`, and even after this repair it still does not
+   contain the parent branch commit `6aaabef9f`. This task pushes the helper
+   branch only as diagnosis evidence (`acf22c968439f4b547ed1960238cf0ac0424b11e`);
+   it is not a replay of the parent branch.
 3. The helper branch currently points at the same SHA as unrelated local refs
    `codex/p2-corr-001` and `codex/p2-safe-001`, which makes branch-name-only
    reasoning unsafe for this task family.
@@ -37,9 +38,10 @@ owner handoff unless it is documented explicitly.
    future PR replay as-is: `git diff --check origin/dev...origin/codex/p2-ui-safe-001`
    reports six trailing-whitespace errors in
    `docs/05-ui/driver-app-safety-operator-screen-requirements-20260626.md`.
-6. No PR exists for either `codex/p2-ui-safe-001` or
-   `codex/p2-ui-safe-001-unblock-history-repair`, so the only canonical parent
-   delivery rail today is the pushed remote branch `origin/codex/p2-ui-safe-001`.
+6. No PR exists for the parent branch `codex/p2-ui-safe-001`. This repair task
+   now adds a helper-only draft PR `#932` for diagnosis evidence, but the only
+   canonical parent delivery rail today is still the pushed remote branch
+   `origin/codex/p2-ui-safe-001`.
 
 ## Evidence
 
@@ -58,15 +60,20 @@ owner handoff unless it is documented explicitly.
 
 ### Helper rail
 
-- local `codex/p2-ui-safe-001-unblock-history-repair @ 6c974f05044001e7aeb2ca59f5384a5ae781192c`
+- local + remote
+  `codex/p2-ui-safe-001-unblock-history-repair @ acf22c968439f4b547ed1960238cf0ac0424b11e`
 - `git reflog show codex/p2-ui-safe-001-unblock-history-repair`
   records: `branch: Created from origin/dev`
-- `git rev-list --left-right --count origin/dev...codex/p2-ui-safe-001-unblock-history-repair`
-  returns `0 0`
+- `git merge-base origin/dev codex/p2-ui-safe-001-unblock-history-repair`
+  returns `6c974f05044001e7aeb2ca59f5384a5ae781192c`
+- `git log --oneline 6c974f050..acf22c968` shows only the helper diagnosis
+  commit:
+  `acf22c968 P2-UI-SAFE-001-UNBLOCK-HISTORY-REPAIR: document parent resume rail`
 - `git ls-remote --heads origin 'refs/heads/codex/p2-ui-safe-001-unblock-history-repair'`
-  returns no ref
-- `gh pr list --state all --head codex/p2-ui-safe-001-unblock-history-repair`
-  returns `[]`
+  returns `acf22c968439f4b547ed1960238cf0ac0424b11e`
+- `gh pr view 932 --json number,title,state,isDraft,headRefName,baseRefName,url`
+  shows an open draft PR from `codex/p2-ui-safe-001-unblock-history-repair` to
+  `dev`
 
 ### Ref noise around the same stem
 
@@ -100,8 +107,13 @@ owner handoff unless it is documented explicitly.
 ### PR state
 
 - `gh pr list --state all --head codex/p2-ui-safe-001` returns `[]`
-- `gh pr list --state all --head codex/p2-ui-safe-001-unblock-history-repair`
-  returns `[]`
+- `gh pr view 932` shows:
+  - PR `#932`
+  - title `P2-UI-SAFE-001-UNBLOCK-HISTORY-REPAIR: document parent resume rail`
+  - head `codex/p2-ui-safe-001-unblock-history-repair`
+  - base `dev`
+  - state `OPEN`
+  - draft `true`
 
 ## Exact Contamination
 
@@ -110,8 +122,9 @@ defect:
 
 1. The true parent rail is the pushed remote branch
    `origin/codex/p2-ui-safe-001 @ 6aaabef9f`, but the currently assigned helper
-   worktree sits on `codex/p2-ui-safe-001-unblock-history-repair @ origin/dev`
-   with zero parent commits.
+   worktree sits on `codex/p2-ui-safe-001-unblock-history-repair @ acf22c968`,
+   which contains only the helper diagnosis commit on top of `origin/dev` and
+   does not replay the parent branch commit.
 2. Multiple same-family local refs (`codex/p2-corr-001`, `codex/p2-safe-001`,
    and the helper branch) all resolve to the same unrelated `origin/dev` SHA,
    so a worker can easily continue on the wrong branch by name alone.
@@ -131,8 +144,9 @@ Do not force-push, amend, or rename any shared branch.
    It already contains the blocker note and is the only pushed branch with
    parent-specific content.
 2. Treat `codex/p2-ui-safe-001-unblock-history-repair` as a helper-only
-   diagnosis branch. Push only the history-repair artifact from this task on
-   that branch; do not add feature work there.
+   diagnosis branch. This task pushes only the history-repair artifact there
+   (`acf22c968`) and opens helper draft PR `#932`; do not add feature work on
+   that rail.
 3. Leave stale local refs such as `codex/p2-safe-001 @ 6c974f050` untouched for
    now. They are noise, but deleting or renaming them is not required to resume
    the parent safely.
@@ -175,8 +189,8 @@ but its next actionable step must point at the correct rail:
 - No force-push is required.
 - The existing parent branch stays available as the audit anchor for the current
   blocked design note.
-- The helper branch becomes reviewable evidence instead of a misleading pseudo-
-  parent rail.
+- The helper branch and draft PR become reviewable evidence instead of a
+  misleading pseudo-parent rail.
 - The parent resume path uses normal branch/worktree/commit flow on top of the
   existing pushed branch.
 
@@ -195,7 +209,8 @@ but its next actionable step must point at the correct rail:
   - `git worktree list --porcelain`
   - `git ls-remote --heads origin 'refs/heads/codex/p2-ui-safe-001' 'refs/heads/codex/p2-ui-safe-001-unblock-history-repair' 'refs/heads/codex/p2-safe-001' 'refs/heads/codex/p2-corr-001'`
   - `git reflog show --date=iso codex/p2-ui-safe-001-unblock-history-repair`
-  - `git rev-list --left-right --count origin/dev...codex/p2-ui-safe-001-unblock-history-repair`
+  - `git merge-base origin/dev codex/p2-ui-safe-001-unblock-history-repair`
+  - `git log --oneline 6c974f050..acf22c968`
   - `git rev-list --left-right --count origin/dev...origin/codex/p2-ui-safe-001`
   - `git merge-base origin/dev origin/codex/p2-ui-safe-001`
   - `git log --oneline 6c974f050..6aaabef9f`
@@ -204,8 +219,11 @@ but its next actionable step must point at the correct rail:
 - Inspected commit / PR evidence:
   - `git show -s --format=fuller 6aaabef9f`
   - `grep -n 'SUBJECT_RE\\|rev-list' scripts/git/check_commit_trailers.py`
+  - `git push -u origin codex/p2-ui-safe-001-unblock-history-repair`
+  - `gh pr create --draft --base dev --head codex/p2-ui-safe-001-unblock-history-repair --title 'P2-UI-SAFE-001-UNBLOCK-HISTORY-REPAIR: document parent resume rail' ...`
+  - `git fetch origin refs/heads/codex/p2-ui-safe-001-unblock-history-repair:refs/remotes/origin/codex/p2-ui-safe-001-unblock-history-repair`
   - `gh pr list --state all --head codex/p2-ui-safe-001 --json number,title,state,headRefName,baseRefName,url,mergeStateStatus,isDraft`
-  - `gh pr list --state all --head codex/p2-ui-safe-001-unblock-history-repair --json number,title,state,headRefName,baseRefName,url,mergeStateStatus,isDraft`
+  - `gh pr view 932 --json number,title,state,isDraft,headRefName,baseRefName,url`
 
 No runtime or package tests were run in this helper task. This repair is
 branch-history and machine-truth triage only.
