@@ -1,6 +1,10 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
+import type {
+  SandboxAuthorizationStatus,
+  SandboxComplianceSnapshotRecord,
+} from "./phase2-tesla-fsd-sandbox";
 import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
@@ -4332,6 +4336,155 @@ export interface ReportJobDetailRecord extends ReportJobRecord {
   rows?: DispatchRecordingIndexRowRecord[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
+}
+
+export const PHASE2_REGULATORY_REPORT_JOB_TYPES = [
+  "daily_ops_report",
+  "trip_report",
+  "takeover_report",
+  "fsd_session_report",
+  "telemetry_completeness_report",
+  "incident_report",
+] as const;
+export type Phase2RegulatoryReportJobType =
+  (typeof PHASE2_REGULATORY_REPORT_JOB_TYPES)[number];
+
+export interface CreateRegulatoryReportJobCommand {
+  reportType: Phase2RegulatoryReportJobType;
+  format: ReportOutputFormat;
+  filters?: Record<string, unknown>;
+}
+
+export interface RegulatoryReportEvidenceTraceRecord {
+  evidenceId: string;
+  sourceModule: string;
+  sourceType: string;
+  sourceId: string;
+  occurredAt: string | null;
+  manifestHash: string;
+  summary: string;
+  record: Record<string, unknown>;
+}
+
+export interface RegulatoryReportSectionRecord {
+  sectionId: string;
+  title: string;
+  summary: string;
+  rowCount: number;
+  evidenceCount: number;
+  payload: Record<string, unknown>;
+}
+
+export interface RegulatoryReportPeriodRecord {
+  from: string | null;
+  to: string | null;
+  asOf: string | null;
+}
+
+export interface RegulatoryReportJobRecord {
+  jobId: string;
+  reportType: Phase2RegulatoryReportJobType;
+  format: ReportOutputFormat;
+  status: ReportJobStatus;
+  filters: Record<string, unknown>;
+  artifact: ReportArtifactRecord | null;
+  rowCount: number;
+  evidenceCount: number;
+  reportPeriod: RegulatoryReportPeriodRecord;
+  generatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RegulatoryReportJobDetailRecord extends RegulatoryReportJobRecord {
+  artifact:
+    | (ReportArtifactRecord & {
+        downloadMetadata: ControlledDownloadRecord;
+      })
+    | null;
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
+  rows: Record<string, unknown>[];
+  evidenceTrace: RegulatoryReportEvidenceTraceRecord[];
+  sections: RegulatoryReportSectionRecord[];
+}
+
+export interface RegulatoryComplianceSummaryCoverageRecord {
+  reportType: Phase2RegulatoryReportJobType;
+  latestJobId: string | null;
+  status: ReportJobStatus | null;
+  generatedAt: string | null;
+  rowCount: number;
+  evidenceCount: number;
+  artifactId: string | null;
+}
+
+export interface RegulatoryComplianceSummaryRecord {
+  experimentId: string;
+  experimentVersionId: string | null;
+  programCode: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  authorizationStatus: SandboxAuthorizationStatus | null;
+  snapshotHashSha256: string;
+  jurisdictionCodes: string[];
+  approvalDocumentCount: number;
+  requiredCapabilityCount: number;
+  operatingAreaCount: number;
+  routeCount: number;
+  vehicleEnrollmentCount: number;
+  telemetryConfiguredVehicleCount: number;
+  telemetryGapVehicleCount: number;
+  activeTakeoverCount: number;
+  takeoverDiscrepancyCount: number;
+  openIncidentCount: number;
+  openNotificationCount: number;
+  reportCoverage: RegulatoryComplianceSummaryCoverageRecord[];
+  notes: string[];
+}
+
+export interface GenerateResumeAuthorizationDossierCommand {
+  asOf?: string | null;
+  actorId?: string | null;
+  note?: string | null;
+}
+
+export interface ResumeAuthorizationDossierSourceRecord {
+  sourceType: string;
+  sourceId: string;
+  manifestHash: string | null;
+  description: string;
+}
+
+export interface ResumeAuthorizationDossierSectionRecord {
+  sectionId: string;
+  title: string;
+  summary: string;
+  evidenceCount: number;
+  payload: Record<string, unknown>;
+}
+
+export interface ResumeAuthorizationDossierRecord {
+  dossierId: string;
+  experimentId: string;
+  experimentVersionId: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  authorizationStatus: SandboxAuthorizationStatus | null;
+  manifestHash: string;
+  immutable: true;
+  artifact:
+    | (ReportArtifactRecord & {
+        downloadMetadata: ControlledDownloadRecord;
+      })
+    | null;
+  complianceSummary: RegulatoryComplianceSummaryRecord;
+  complianceSnapshot: SandboxComplianceSnapshotRecord;
+  reportJobs: RegulatoryReportJobRecord[];
+  sections: ResumeAuthorizationDossierSectionRecord[];
+  sourceRefs: ResumeAuthorizationDossierSourceRecord[];
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
 }
 
 export const FILING_PACKAGE_TYPES = [

@@ -54,6 +54,7 @@ import type {
   CreatePlatformNoticeCommand,
   CreatePlatformPricingRuleCommand,
   CreatePlatformTenantCommand,
+  CreateRegulatoryReportJobCommand,
   CreateReportJobCommand,
   CreateTenantBookingCommand,
   CreateCallCenterOrderCommand,
@@ -284,6 +285,11 @@ import type {
   InviteTenantRoleCommand,
   AcknowledgeTenantRoleCommand,
   DispatchDailyRecord,
+  GenerateResumeAuthorizationDossierCommand,
+  RegulatoryComplianceSummaryRecord,
+  RegulatoryReportJobDetailRecord,
+  RegulatoryReportJobRecord,
+  ResumeAuthorizationDossierRecord,
   SixMonthOperationsSummary,
   SandboxExperimentProgramRecord,
   SandboxJurisdictionProfileRecord,
@@ -1930,6 +1936,28 @@ export class ApiClient {
     );
   }
 
+  async createRegulatoryReportJob(
+    command: CreateRegulatoryReportJobCommand,
+  ): Promise<ReportJobAccepted> {
+    return this.post<ReportJobAccepted>("/api/regulatory/reports/jobs", {
+      body: command,
+    });
+  }
+
+  async listRegulatoryReportJobs(): Promise<RegulatoryReportJobRecord[]> {
+    return this.getList<RegulatoryReportJobRecord>(
+      "/api/regulatory/reports/jobs",
+    );
+  }
+
+  async getRegulatoryReportJob(
+    jobId: string,
+  ): Promise<RegulatoryReportJobDetailRecord> {
+    return this.get<RegulatoryReportJobDetailRecord>(
+      `/api/regulatory/reports/jobs/${encodeURIComponent(jobId)}`,
+    );
+  }
+
   async generateFilingPackage(
     command: GenerateFilingPackageCommand,
   ): Promise<FilingPackageAccepted> {
@@ -2887,6 +2915,38 @@ export class ApiClient {
         experimentId,
       )}/resume-authorizations`,
       { body: command },
+    );
+  }
+
+  async getRegulatoryComplianceSummary(
+    experimentId: string,
+    asOf?: string,
+  ): Promise<RegulatoryComplianceSummaryRecord> {
+    const query = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
+    return this.get<RegulatoryComplianceSummaryRecord>(
+      `/api/regulatory/experiments/${encodeURIComponent(
+        experimentId,
+      )}/compliance-summary${query}`,
+    );
+  }
+
+  async generateResumeAuthorizationDossier(
+    experimentId: string,
+    command: GenerateResumeAuthorizationDossierCommand = {},
+  ): Promise<ResumeAuthorizationDossierRecord> {
+    return this.post<ResumeAuthorizationDossierRecord>(
+      `/api/regulatory/experiments/${encodeURIComponent(
+        experimentId,
+      )}/resume-dossiers`,
+      { body: command },
+    );
+  }
+
+  async getResumeAuthorizationDossier(
+    dossierId: string,
+  ): Promise<ResumeAuthorizationDossierRecord> {
+    return this.get<ResumeAuthorizationDossierRecord>(
+      `/api/regulatory/resume-dossiers/${encodeURIComponent(dossierId)}`,
     );
   }
 
