@@ -10,6 +10,8 @@ const PA_NAV = [
   { key: 'tenant-gov',   icon: 'governance',  label: '跨租戶治理 · Tenant Governance' },
   { divider: '合作夥伴治理 · Partner Governance' },
   { key: 'partners',     icon: 'partners',    label: '合作夥伴 · Partner Entries' },
+  { key: 'supply-review',icon: 'governance',  label: '供給審核 · Supply Review', badge: '4', badgeTone: 'accent' },
+  { key: 'sandbox',      icon: 'governance',  label: 'FSD 沙盒治理 · Sandbox', badge: '1', badgeTone: 'warn' },
   { divider: '人員與車隊 · People & Fleet' },
   { key: 'users',        icon: 'users',       label: '平台人員 · Users' },
   { key: 'fleet',        icon: 'fleet',       label: '車隊與法遵 · Fleet & Compliance' },
