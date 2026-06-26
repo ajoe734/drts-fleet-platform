@@ -3,7 +3,9 @@
 > 文件基準日：2026-06-26
 > 狀態：**系統設計 S1–S6 已回（2026-06-26）→ V1 解鎖、V2 收斂為小 delta**；見
 > [`..._open_decisions_s1s6_system_design_response_20260626.md`](./phase2_tesla_fsd_sandbox_open_decisions_s1s6_system_design_response_20260626.md)。
-> 下方各項已標更新；視覺團隊現在只剩兩個明確動作（V1 版位、V2 panel delta）。
+> 下方各項已標更新。**V1 已於 driver app (7) 交付完成。**
+>
+> 📌 **給視覺團隊（Phase 2 唯一剩餘項，V2）**：請把 Platform Admin Compliance 既有的 `CMP_Regulator` panel 擴出一版 delta canvas，加上 experiment/case selector、evidence manifest summary、investigation bundle status、regulatory notification status、controlled export button、legal hold / masking indicator、access log table、export receipt panel 這幾個元件版位（沿用 Platform Admin governance shell，**不做獨立 portal**）。
 > 配套（系統設計待決策）：[`..._open_decisions_system_design_team_20260626.md`](./phase2_tesla_fsd_sandbox_open_decisions_system_design_team_20260626.md)
 > 背景：A1–A5 canvas 已交付並歸檔（ROC / Safety Operator / Compliance / Sandbox Governance / Ops fallback），UI build 第二波已派工。
 > 本清單只列**canvas 已交付後仍缺的視覺項目**。**工程端不自行設計 UI**，故下列需視覺團隊出 canvas/delta 才能 build。
