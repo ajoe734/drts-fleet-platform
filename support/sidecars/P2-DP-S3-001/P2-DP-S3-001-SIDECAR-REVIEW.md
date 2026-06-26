@@ -15,32 +15,29 @@
 
 This sidecar is support-only.
 
-- In scope: package the parent task's current machine-truth snapshot, the clean review branch evidence, the contaminated closeout-branch warning, and reviewer handoff commands.
+- In scope: package the relevant parent review snapshot, the sidecar handoff timeline, the clean review branch evidence, the contaminated closeout-branch warning, and reviewer handoff commands.
 - Out of scope: changing contracts/runtime behavior, editing canonical truth, or reopening the parent implementation scope.
 
 Reviewer intent:
 
-- the parent task is already in `review`
-- the parent `next` field explicitly points reviewers at the clean repair branch
+- this packet preserves the clean-review-branch boundary that the parent review cycle established
+- the repair branch remains the evidence surface reviewers should inspect
 - this packet makes that boundary easy to verify without re-deriving the branch history
 
 ---
 
-## 2. Shared-Truth Snapshot
+## 2. Shared-Truth Snapshot And Timing
 
-Machine truth currently says:
+Read this section as a time-bounded status note, not as an evergreen "current status" panel.
 
 - Sidecar task `P2-DP-S3-001-SIDECAR-REVIEW`
-  - owner: `Codex`
-  - reviewer: `Codex2`
-  - status: `in_progress` while this packet is being prepared
-- Parent task `P2-DP-S3-001`
-  - owner: `Codex2`
-  - reviewer: `Claude2`
-  - status: `review`
-  - `next`: review the clean repair branch `origin/codex2/p2-dp-s3-001-repair@8fb33bd6f`, not the contaminated branch `origin/codex2/p2-dp-s3-001@d6cf6a8e8`
+  - `2026-06-26T18:34:27Z`: Orchestrator recorded the initial handoff of this packet as advanced to `review`
+  - `2026-06-26T18:34:39Z`: reviewer `Codex2` reopened the sidecar because section 2 still described the pre-handoff drafting state
+  - `2026-06-26T18:35:12Z`: owner `Codex` moved the task back to `in_progress` only to refresh this wording before re-handoff
+- Parent review context carried by this packet
+  - review the clean repair branch `origin/codex2/p2-dp-s3-001-repair@8fb33bd6f`, not the contaminated branch `origin/codex2/p2-dp-s3-001@d6cf6a8e8`
 
-Parent semantic summary from machine truth:
+Parent semantic summary carried into this packet:
 
 - add `SandboxFallbackCostPolicyRecord` plus resolver support
 - precedence is `regulatory/safety > experiment > partner > tenant > platform default`
@@ -49,7 +46,7 @@ Parent semantic summary from machine truth:
 - no matching policy resolves to `default_platform_no_contract` and emits audit `sandbox.billing.fallback_cost_policy.defaulted`
 - passenger surcharge is never allowed
 
-Parent review notes already recorded in machine truth say the clean repair path meets the intended behavior and that targeted verification passed.
+Parent review notes already recorded in the prior review cycle say the clean repair path meets the intended behavior and that targeted verification passed.
 
 ---
 
@@ -112,17 +109,18 @@ returns `merged`, which confirms the meaningful task commits replay cleanly onto
 
 | ID  | Evidence | Anchor |
 | --- | --- | --- |
-| E-1 | Parent machine-truth snapshot | `AI_NAME=Codex scripts/ai-status.sh show P2-DP-S3-001` |
-| E-2 | Only two real task commits exist ahead of `origin/dev` | `git cherry -v origin/dev origin/codex2/p2-dp-s3-001` |
-| E-3 | Original branch contamination is caused by merge commit `d6cf6a8e8` | `git show --no-patch --format='%H%n%P%n%s' d6cf6a8e87f37b87e82222544ef09358a944bfdb` |
-| E-4 | Nine unrelated files entered through the contaminated closeout merge | `git diff --name-only 599c988daf7815b0005355ba62e578c21a4d2afa d6cf6a8e87f37b87e82222544ef09358a944bfdb` |
-| E-5 | Clean repair branch contains only the intended resolver slice | `git diff --stat origin/dev...origin/codex2/p2-dp-s3-001-repair` |
-| E-6 | Contract surface for scopes, reasons, resolutions, and passenger guard | `origin/codex2/p2-dp-s3-001-repair:packages/contracts/src/phase2-tesla-fsd-sandbox.ts` lines `1888-1964` |
-| E-7 | Resolver precedence/defaulting/passenger normalization | `origin/codex2/p2-dp-s3-001-repair:apps/api/src/modules/billing-settlement/sandbox-fallback-cost-policy-resolver.service.ts` lines `62-188` |
-| E-8 | Billing-settlement wiring and audit emission | `origin/codex2/p2-dp-s3-001-repair:apps/api/src/modules/billing-settlement/billing-settlement.service.ts` lines `418-425`, `1015-1046`; module lines `9-24` |
-| E-9 | Unit coverage for precedence, contract gating, and no-passenger policy | `origin/codex2/p2-dp-s3-001-repair:tests/unit/sandbox-fallback-cost-policy-resolver.test.ts` lines `14-249` |
-| E-10 | Repair commit narrows the integration assertion without changing behavior | `origin/codex2/p2-dp-s3-001-repair:tests/integ/sandbox-fallback-cost-policy.integration.test.ts` lines `45-58`; commit `8fb33bd6f` |
-| E-11 | Executable verification trail | parent `review_notes_zh` in machine truth plus `Verification:` trailer on commit `8fb33bd6f` |
+| E-1 | Live sidecar machine-truth slice after reopen | `AI_NAME=Codex scripts/ai-status.sh show P2-DP-S3-001-SIDECAR-REVIEW` |
+| E-2 | Sidecar review -> reopen -> refresh timeline | `grep -n 'P2-DP-S3-001-SIDECAR-REVIEW' -A 2 -B 2 /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl \| tail -n 20` |
+| E-3 | Only two real task commits exist ahead of `origin/dev` | `git cherry -v origin/dev origin/codex2/p2-dp-s3-001` |
+| E-4 | Original branch contamination is caused by merge commit `d6cf6a8e8` | `git show --no-patch --format='%H%n%P%n%s' d6cf6a8e87f37b87e82222544ef09358a944bfdb` |
+| E-5 | Nine unrelated files entered through the contaminated closeout merge | `git diff --name-only 599c988daf7815b0005355ba62e578c21a4d2afa d6cf6a8e87f37b87e82222544ef09358a944bfdb` |
+| E-6 | Clean repair branch contains only the intended resolver slice | `git diff --stat origin/dev...origin/codex2/p2-dp-s3-001-repair` |
+| E-7 | Contract surface for scopes, reasons, resolutions, and passenger guard | `origin/codex2/p2-dp-s3-001-repair:packages/contracts/src/phase2-tesla-fsd-sandbox.ts` lines `1888-1964` |
+| E-8 | Resolver precedence/defaulting/passenger normalization | `origin/codex2/p2-dp-s3-001-repair:apps/api/src/modules/billing-settlement/sandbox-fallback-cost-policy-resolver.service.ts` lines `62-188` |
+| E-9 | Billing-settlement wiring and audit emission | `origin/codex2/p2-dp-s3-001-repair:apps/api/src/modules/billing-settlement/billing-settlement.service.ts` lines `418-425`, `1015-1046`; module lines `9-24` |
+| E-10 | Unit coverage for precedence, contract gating, and no-passenger policy | `origin/codex2/p2-dp-s3-001-repair:tests/unit/sandbox-fallback-cost-policy-resolver.test.ts` lines `14-249` |
+| E-11 | Repair commit narrows the integration assertion without changing behavior | `origin/codex2/p2-dp-s3-001-repair:tests/integ/sandbox-fallback-cost-policy.integration.test.ts` lines `45-58`; commit `8fb33bd6f` |
+| E-12 | Executable verification trail | parent `review_notes_zh` in machine truth plus `Verification:` trailer on commit `8fb33bd6f` |
 
 ### 4.1 Contract Anchor
 
@@ -200,8 +198,8 @@ This sidecar did not rerun code because it is a support-only slice, but the pare
 Reviewer `Codex2` should confirm:
 
 1. This packet remains support-only and does not mutate canonical truth.
-2. The packet correctly mirrors current machine truth: parent is still in `review`, and the `next` field points at `origin/codex2/p2-dp-s3-001-repair@8fb33bd6f`.
-3. The packet clearly separates the clean review branch from the contaminated closeout merge `d6cf6a8e8`.
+2. The packet now distinguishes the initial sidecar handoff state (`review` at `2026-06-26T18:34:27Z`) from this refresh cycle's temporary reopen / `in_progress` state (`2026-06-26T18:35:12Z`), so section 2 no longer misstates machine truth.
+3. The packet clearly separates the clean review branch `origin/codex2/p2-dp-s3-001-repair@8fb33bd6f` from the contaminated closeout merge `d6cf6a8e8`.
 4. The listed anchors cover the parent acceptance semantics:
    - precedence order
    - platform default for platform-caused or uncontracted fallbacks
@@ -212,7 +210,7 @@ Reviewer `Codex2` should confirm:
 
 Suggested approval wording:
 
-> `審查通過：P2-DP-S3-001 sidecar review packet 已對齊最新 machine truth，正確指向 clean repair branch origin/codex2/p2-dp-s3-001-repair@8fb33bd6f，並清楚隔離 contaminated closeout merge d6cf6a8e8。packet 保留了 resolver precedence、contract gating、default_platform_no_contract + audit、passenger 永不轉嫁，以及 repair commit 僅修正 integration assertion 形狀的關鍵證據。support artifact only，可回到 owner 後續 closeout。`
+> `審查通過：P2-DP-S3-001 sidecar review packet 已對齊最新 machine truth，現在明確區分了初次 handoff 的 review snapshot 與這次 refresh 的暫時 reopen/in_progress 狀態，並正確指向 clean repair branch origin/codex2/p2-dp-s3-001-repair@8fb33bd6f、隔離 contaminated closeout merge d6cf6a8e8。packet 保留了 resolver precedence、contract gating、default_platform_no_contract + audit、passenger 永不轉嫁，以及 repair commit 僅修正 integration assertion 形狀的關鍵證據。support artifact only，可回到 owner 後續 closeout。`
 
 Suggested reopen wording:
 
@@ -226,7 +224,7 @@ Owner handoff to reviewer:
 
 ```bash
 AI_NAME=Codex scripts/ai-status.sh handoff P2-DP-S3-001-SIDECAR-REVIEW Codex2 \
-  "Review packet ready at support/sidecars/P2-DP-S3-001/P2-DP-S3-001-SIDECAR-REVIEW.md. It summarizes the parent review snapshot, the clean repair branch evidence (origin/codex2/p2-dp-s3-001-repair@8fb33bd6f), the contaminated closeout merge boundary (d6cf6a8e8), and the contract/resolver/test anchors without changing canonical truth."
+  "Review packet ready at support/sidecars/P2-DP-S3-001/P2-DP-S3-001-SIDECAR-REVIEW.md. It now distinguishes the initial sidecar review snapshot from this wording-refresh reopen state, and summarizes the clean repair branch evidence (origin/codex2/p2-dp-s3-001-repair@8fb33bd6f), the contaminated closeout merge boundary (d6cf6a8e8), and the contract/resolver/test anchors without changing canonical truth."
 ```
 
 Reviewer approval:
@@ -250,3 +248,4 @@ AI_NAME=Codex2 scripts/ai-status.sh reopen P2-DP-S3-001-SIDECAR-REVIEW \
 - `2026-06-26` - Initial sidecar review packet created for `P2-DP-S3-001`.
 - `2026-06-26` - Packet aligned to current parent `review` state and the clean repair branch `origin/codex2/p2-dp-s3-001-repair@8fb33bd6f`.
 - `2026-06-26` - Packet records the contaminated closeout merge `d6cf6a8e8` as out of scope for reviewer evidence.
+- `2026-06-26` - Section 2 refreshed to distinguish the `2026-06-26T18:34:27Z` review handoff from the `2026-06-26T18:35:12Z` wording-refresh reopen state before re-handoff.
