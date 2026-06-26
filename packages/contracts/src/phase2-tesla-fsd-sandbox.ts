@@ -329,6 +329,9 @@ export const SANDBOX_DISPATCH_REASON_CODES = [
   "ACTIVE_SAFETY_INCIDENT",
   "MINIMAL_RISK_CONDITION_ACTIVE",
   "SANDBOX_PROGRAM_SUSPENDED",
+  "PASSENGER_DISCLOSURE_POLICY_MISSING",
+  "PASSENGER_DISCLOSURE_MESSAGE_MISSING",
+  "PASSENGER_ACKNOWLEDGEMENT_REQUIRED",
 ] as const;
 export type SandboxDispatchReasonCode =
   (typeof SANDBOX_DISPATCH_REASON_CODES)[number];
@@ -354,7 +357,120 @@ export interface SandboxDispatchDecision {
 }
 
 // ---------------------------------------------------------------------------
-// §3.3A Sandbox fulfillment visibility projection
+// §3.3A Passenger disclosure policy + acknowledgement
+// ---------------------------------------------------------------------------
+
+export const PASSENGER_DISCLOSURE_CHANNELS = [
+  "tenant_portal",
+  "partner_portal",
+  "call_center",
+  "ops_console",
+] as const;
+export type PassengerDisclosureChannel =
+  (typeof PASSENGER_DISCLOSURE_CHANNELS)[number];
+
+export const PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_MODES = [
+  "per_booking_checkbox",
+  "program_level_contract",
+  "verbal_recorded",
+  "operator_confirmed_notice",
+] as const;
+export type PassengerDisclosureAcknowledgementMode =
+  (typeof PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_MODES)[number];
+
+export const PASSENGER_DISCLOSURE_ACTOR_TYPES = [
+  "passenger",
+  "tenant_admin",
+  "ops_user",
+  "system",
+] as const;
+export type PassengerDisclosureActorType =
+  (typeof PASSENGER_DISCLOSURE_ACTOR_TYPES)[number];
+
+export interface PassengerDisclosureMessageCatalogEntry {
+  entryId: string;
+  catalogVersion: string;
+  messageCode: string;
+  locale: string;
+  bodyText: string;
+  legalApproved: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerDisclosurePolicyChannelRule {
+  channel: PassengerDisclosureChannel;
+  messageCode: string;
+  requiresAcknowledgement: boolean;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+}
+
+export interface PassengerDisclosurePolicy {
+  policyId: string;
+  policyVersion: string;
+  tenantId: string | null;
+  businessDispatchSubtype: string | null;
+  partnerEntrySlug: string | null;
+  active: boolean;
+  channelRules: PassengerDisclosurePolicyChannelRule[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerAcknowledgementRecord {
+  acknowledgementId: string;
+  bookingId: string;
+  orderId: string;
+  policyId: string;
+  messageCode: string;
+  channel: PassengerDisclosureChannel;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+  actorType: PassengerDisclosureActorType;
+  actorRef: string | null;
+  acknowledgedAt: string;
+  evidenceRef: string | null;
+  createdAt: string;
+}
+
+export interface PassengerDisclosureRequirementSnapshot {
+  channel: PassengerDisclosureChannel;
+  policyId: string;
+  policyVersion: string;
+  messageCode: string | null;
+  requiresAcknowledgement: boolean;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+  acknowledgedAt: string | null;
+  acknowledgementRecordId: string | null;
+}
+
+export interface UpsertPassengerDisclosurePolicyCommand {
+  policyId?: string;
+  policyVersion: string;
+  tenantId?: string | null;
+  businessDispatchSubtype?: string | null;
+  partnerEntrySlug?: string | null;
+  active?: boolean;
+  channelRules: PassengerDisclosurePolicyChannelRule[];
+}
+
+export interface UpsertPassengerDisclosureMessageCatalogEntryCommand {
+  entryId?: string;
+  catalogVersion: string;
+  messageCode: string;
+  locale: string;
+  bodyText: string;
+  legalApproved: boolean;
+}
+
+export interface RecordPassengerAcknowledgementCommand {
+  actorType?: PassengerDisclosureActorType;
+  actorRef?: string | null;
+  acknowledgedAt?: string;
+  evidenceRef?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// §3.3B Sandbox fulfillment visibility projection
 // ---------------------------------------------------------------------------
 
 export const SANDBOX_FULFILLMENT_VISIBILITY_AUDIENCES = [
@@ -373,8 +489,7 @@ export const SANDBOX_FULFILLMENT_MODES = [
   "mixed",
   "hidden",
 ] as const;
-export type SandboxFulfillmentMode =
-  (typeof SANDBOX_FULFILLMENT_MODES)[number];
+export type SandboxFulfillmentMode = (typeof SANDBOX_FULFILLMENT_MODES)[number];
 
 export const SANDBOX_FULFILLMENT_STATES = [
   "pending_dispatch",

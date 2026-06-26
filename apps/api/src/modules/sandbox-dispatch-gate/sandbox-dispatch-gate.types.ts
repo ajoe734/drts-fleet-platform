@@ -1,6 +1,8 @@
 import type {
   GeoJsonMultiLineString,
   GeoPoint,
+  PassengerDisclosureAcknowledgementMode,
+  PassengerDisclosureChannel,
   SandboxDispatchDecision,
   SandboxDispatchReasonCode,
 } from "@drts/contracts";
@@ -100,6 +102,16 @@ export interface SandboxDispatchGateInput {
     maxConcurrentTrips?: number | null;
     maxOdometerKm?: number | null;
   } | null;
+  passengerDisclosure?: {
+    channel: PassengerDisclosureChannel;
+    policyId: string | null;
+    policyVersion: string | null;
+    messageCode: string | null;
+    requiresAcknowledgement: boolean | null;
+    acknowledgementMode: PassengerDisclosureAcknowledgementMode | null;
+    acknowledgedAt: string | null;
+    acknowledgementRecordId?: string | null;
+  } | null;
 }
 
 export interface SandboxDispatchEvaluationRecord {
@@ -135,4 +147,10 @@ export const SANDBOX_DISPATCH_ERROR_CODE_MAP: Record<
   ACTIVE_SAFETY_INCIDENT: "SANDBOX_ACTIVE_SAFETY_INCIDENT",
   MINIMAL_RISK_CONDITION_ACTIVE: "SANDBOX_MINIMAL_RISK_CONDITION_ACTIVE",
   SANDBOX_PROGRAM_SUSPENDED: "SANDBOX_PROGRAM_SUSPENDED",
+  PASSENGER_DISCLOSURE_POLICY_MISSING:
+    "SANDBOX_PASSENGER_DISCLOSURE_POLICY_MISSING",
+  PASSENGER_DISCLOSURE_MESSAGE_MISSING:
+    "SANDBOX_PASSENGER_DISCLOSURE_MESSAGE_MISSING",
+  PASSENGER_ACKNOWLEDGEMENT_REQUIRED:
+    "SANDBOX_PASSENGER_ACKNOWLEDGEMENT_REQUIRED",
 };
