@@ -52,6 +52,7 @@ import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-
 // Phase 2 — Tesla / FSD / AV sandbox scaffolds (phase2-tesla-fsd-sandbox-202606)
 import { TeslaIntegrationModule } from "./modules/tesla-integration/tesla-integration.module";
 import { TeslaTelemetryModule } from "./modules/tesla-telemetry/tesla-telemetry.module";
+import { TESLA_REGULATORY_EVENTS_ROUTE } from "./modules/tesla-regulatory-events/tesla-regulatory-events.controller";
 import { TeslaRegulatoryEventsModule } from "./modules/tesla-regulatory-events/tesla-regulatory-events.module";
 import { SandboxGovernanceModule } from "./modules/sandbox-governance/sandbox-governance.module";
 import { SandboxDispatchGateModule } from "./modules/sandbox-dispatch-gate/sandbox-dispatch-gate.module";
@@ -139,6 +140,14 @@ export class AppModule implements NestModule {
       .exclude(
         { path: "health", method: RequestMethod.ALL },
         { path: "api/health", method: RequestMethod.ALL },
+        {
+          path: TESLA_REGULATORY_EVENTS_ROUTE,
+          method: RequestMethod.POST,
+        },
+        {
+          path: `api/${TESLA_REGULATORY_EVENTS_ROUTE}`,
+          method: RequestMethod.POST,
+        },
       )
       .forRoutes({ path: "*", method: RequestMethod.ALL });
   }

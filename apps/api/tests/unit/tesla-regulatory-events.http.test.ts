@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { Module, RequestMethod } from "@nestjs/common";
+import {
+  type MiddlewareConsumer,
+  Module,
+  type NestModule,
+  RequestMethod,
+} from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 
+import { InternalKeyMiddleware } from "../../src/common/auth";
 import {
   TeslaRegulatoryEventsController,
   TESLA_REGULATORY_EVENTS_ROUTE,
@@ -33,13 +39,34 @@ const teslaRegulatoryEventsService = {
     },
   ],
 })
-class TeslaRegulatoryEventsHttpTestModule {}
+class TeslaRegulatoryEventsHttpTestModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(InternalKeyMiddleware)
+      .exclude(
+        {
+          path: TESLA_REGULATORY_EVENTS_ROUTE,
+          method: RequestMethod.POST,
+        },
+        {
+          path: `api/${TESLA_REGULATORY_EVENTS_ROUTE}`,
+          method: RequestMethod.POST,
+        },
+      )
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
+  }
+}
 
 describe("Tesla regulatory events HTTP routing", () => {
   let baseUrl: string;
   let closeApplication: (() => Promise<void>) | undefined;
+  const originalEnv = { ...process.env };
 
   beforeAll(async () => {
+    process.env = {
+      ...originalEnv,
+      DRTS_INTERNAL_KEY: "test-internal-key",
+    };
     const app = await NestFactory.create(TeslaRegulatoryEventsHttpTestModule, {
       logger: false,
     });
@@ -66,6 +93,7 @@ describe("Tesla regulatory events HTTP routing", () => {
 
   afterAll(async () => {
     await closeApplication?.();
+    process.env = originalEnv;
   });
 
   it("keeps the provider callback available outside the global /api prefix", async () => {
