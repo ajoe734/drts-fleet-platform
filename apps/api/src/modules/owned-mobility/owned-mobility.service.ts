@@ -916,10 +916,6 @@ export class OwnedMobilityService implements OnModuleInit {
       () =>
         this.afterMaybePromise(applyPassengerDisclosure(), () =>
           this.afterMaybePromise(applyGovernance(null), (approvalRequest) => {
-            const result = finalizeCreation(
-              previousApprovalState,
-              approvalRequest,
-            );
             return command.passengerDisclosureAcknowledgement
               ? this.afterMaybePromise(
                   this.acknowledgePassengerDisclosure(
@@ -928,10 +924,15 @@ export class OwnedMobilityService implements OnModuleInit {
                     command.passengerDisclosureAcknowledgement,
                     identity,
                     requestId,
+                    {
+                      order,
+                      refreshDisclosure: false,
+                    },
                   ),
-                  () => result,
+                  () =>
+                    finalizeCreation(previousApprovalState, approvalRequest),
                 )
-              : result;
+              : finalizeCreation(previousApprovalState, approvalRequest);
           }),
         ),
       () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),

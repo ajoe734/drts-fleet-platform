@@ -3293,6 +3293,62 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("rolls back fallback booking creation when inline acknowledgement fails", async () => {
+    const sandboxDispatchGateService = new SandboxDispatchGateService();
+    (sandboxDispatchGateService as any).disclosurePolicies = [
+      {
+        policyId: "policy-test-av-ack",
+        policyVersion: "test-v1",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        active: true,
+        channelRules: [
+          {
+            channel: "tenant_portal",
+            messageCode: "sandbox_passenger_disclosure.av_program_notice",
+            requiresAcknowledgement: true,
+            acknowledgementMode: "per_booking_checkbox",
+          },
+        ],
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ];
+    (sandboxDispatchGateService as any).messageCatalogEntries = [];
+    (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
+
+    const { service } = createOwnedMobilityService({
+      sandboxDispatchGateService,
+    });
+
+    await expect(
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: "2026-06-26T14:00:00.000Z",
+          reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+          pickup: { address: "Sandbox Start", lat: 25.044, lng: 121.522 },
+          dropoff: { address: "Sandbox End", lat: 25.054, lng: 121.533 },
+          passenger: { name: "Sandbox Rider", phone: "0912000003" },
+          passengerDisclosureAcknowledgement: {
+            actorType: "passenger",
+            actorRef: "passenger-inline-ack-001",
+          },
+        },
+        "tenant-demo-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "PASSENGER_DISCLOSURE_MESSAGE_REQUIRED",
+        },
+      },
+    });
+
+    expect(service.listTenantBookings("tenant-demo-001").items).toHaveLength(0);
+  });
+
   it("records ops acknowledgements with server-derived actor metadata and preserves the ops_console channel on refresh", async () => {
     const sandboxDispatchGateService = new SandboxDispatchGateService();
     (sandboxDispatchGateService as any).disclosurePolicies = [
