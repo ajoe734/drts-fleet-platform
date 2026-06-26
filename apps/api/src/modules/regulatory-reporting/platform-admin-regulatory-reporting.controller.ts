@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
-import type { SubmitRegulatoryReportCommand } from "@drts/contracts";
+import type {
+  AuditLogRecord,
+  SubmitRegulatoryReportCommand,
+} from "@drts/contracts";
 
 import {
   ApiRequestError,
@@ -61,19 +64,19 @@ export class PlatformAdminRegulatoryReportingController {
     );
     const auditLog = this.auditNotificationService.recordAuditLog({
       actorId,
-      actorType: identity?.actorType ?? "platform_admin",
+      actorType: this.resolveAuditActorType(identity),
       tenantId: null,
       moduleName: "regulatory-reporting",
       actionName: "submit_sandbox_regulatory_report",
       resourceType: "regulatory_report",
       resourceId: report.reportId,
-      requestId,
       newValuesSummary: {
         reportId: report.reportId,
         reportType: report.reportType,
         acknowledgementRef: report.acknowledgementRef,
         note: command.note?.trim() || null,
       },
+      ...(requestId ? { requestId } : {}),
     });
 
     return toActionReceiptEnvelope(
@@ -98,5 +101,21 @@ export class PlatformAdminRegulatoryReportingController {
       );
     }
     return actorId;
+  }
+
+  private resolveAuditActorType(
+    identity: BootstrapRequestIdentity | null,
+  ): AuditLogRecord["actorType"] {
+    switch (identity?.actorType) {
+      case "system":
+      case "platform_admin":
+      case "tenant_admin":
+      case "ops_user":
+      case "partner_api_key":
+      case "referral_passenger":
+        return identity.actorType;
+      default:
+        return "platform_admin";
+    }
   }
 }
