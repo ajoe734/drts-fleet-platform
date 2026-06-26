@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtures/src";
+
 import type {
   Phase2SourceMetadata,
   RocTakeoverResponseRecord,
@@ -10,6 +12,7 @@ import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { AccidentInvestigationService } from "../../src/modules/accident-investigation/accident-investigation.service";
 import { RocOperationsService } from "../../src/modules/roc-operations/roc-operations.service";
 import { SafetyOperatorService } from "../../src/modules/safety-operator/safety-operator.service";
+import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
 
 function buildDriverIdentity(
   safetyOperatorId: string,
@@ -24,6 +27,26 @@ function buildDriverIdentity(
     roles: ["driver_user"],
     scopes: ["driver:read", "driver:write"],
     requestId: "req-corr-001",
+  };
+}
+
+function buildOpsIdentity(): BootstrapRequestIdentity {
+  return {
+    authMode: "bootstrap_headers",
+    actorType: "ops_user",
+    actorId: "roc-user-001",
+    realm: "ops",
+    tenantId: null,
+    roleFamilies: ["ops"],
+    roles: [
+      "roc_operator",
+      "ops_supervisor",
+      "ops_manager",
+      "safety_officer",
+      "dispatch_manager",
+    ],
+    scopes: ["dispatch:read", "dispatch:write", "incident:write"],
+    requestId: "req-roc-ops-001",
   };
 }
 
@@ -758,5 +781,87 @@ describe("RocOperationsService", () => {
       "ord-safe-001",
     );
     expect(snapshot.cases[0].rocTakeoverResponse?.orderId).toBe("ord-safe-888");
+  });
+
+  it("projects ROC alerts with authority-driven actions and vehicle gate state", async () => {
+    const safetyOperatorService = new SafetyOperatorService(
+      {
+        recordAuditLog: vi.fn(),
+      } as never,
+      undefined,
+      buildGovernanceService() as never,
+    );
+    const vehicleEvidenceService = new VehicleEvidenceService();
+    const rocOperationsService = new RocOperationsService(
+      safetyOperatorService,
+      undefined,
+      vehicleEvidenceService,
+    );
+    const opsIdentity = buildOpsIdentity();
+    const recorder = buildMockRecorderFixture({
+      recorderId: "rec-roc-001",
+      vehicleId: "veh-roc-001",
+    });
+    vehicleEvidenceService.registerRecorder(recorder);
+    vehicleEvidenceService.updateRecorderHealth(recorder.recorderId, {
+      overall: "unhealthy",
+      clockDriftMs: 20_000,
+      uploadQueueState: "error",
+      uploadPendingCount: 2,
+      storageState: "error",
+    });
+
+    const alerts = rocOperationsService.listAlerts(opsIdentity);
+    const recorderAlert = alerts.find(
+      (candidate) => candidate.alertId === "roc-alert-recorder-veh-roc-001",
+    );
+
+    expect(recorderAlert).toBeDefined();
+    expect(recorderAlert?.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "stop-new-dispatch",
+          enabled: true,
+          requiresReason: true,
+        }),
+        expect.objectContaining({
+          action: "resolve",
+          enabled: false,
+          disabledReasonCode: "source_still_active",
+        }),
+      ]),
+    );
+
+    rocOperationsService.stopNewDispatch(
+      "roc-alert-recorder-veh-roc-001",
+      {
+        reason: "Recorder unhealthy.",
+      },
+      opsIdentity,
+    );
+    rocOperationsService.startOperationalHold(
+      "roc-alert-recorder-veh-roc-001",
+      {
+        reason: "ROC review pending.",
+      },
+      opsIdentity,
+    );
+
+    const vehicle = rocOperationsService
+      .listVehicles(opsIdentity)
+      .find((candidate) => candidate.vehicleId === recorder.vehicleId);
+
+    expect(vehicle).toEqual(
+      expect.objectContaining({
+        vehicleId: recorder.vehicleId,
+        stopNewDispatchActive: true,
+        operationalHoldActive: true,
+        gateReasonCodes: expect.arrayContaining([
+          "RECORDER_UNHEALTHY",
+          "ROC_STOP_NEW_DISPATCH",
+          "ROC_OPERATIONAL_HOLD",
+        ]),
+      }),
+    );
   });
 });
