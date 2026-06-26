@@ -5548,7 +5548,7 @@ export class OwnedMobilityService implements OnModuleInit {
     const latestTrace = this.dispatchTraceLogs
       .filter((trace) => trace.orderId === order.orderId)
       .sort((left, right) =>
-        (right.occurredAt ?? "").localeCompare(left.occurredAt ?? ""),
+        (right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
       )[0];
     const fallbackTrace = this.dispatchTraceLogs
       .filter(
@@ -5557,7 +5557,7 @@ export class OwnedMobilityService implements OnModuleInit {
           trace.eventType === "roc.fallback_to_human",
       )
       .sort((left, right) =>
-        (right.occurredAt ?? "").localeCompare(left.occurredAt ?? ""),
+        (right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
       )[0];
     const hasFallback =
       order.complianceFlags.includes("sandbox_human_fallback") ||
@@ -5590,14 +5590,16 @@ export class OwnedMobilityService implements OnModuleInit {
         ? "cancelled"
         : order.status === "completed"
           ? "completed"
-          : order.status === "in_progress"
+          : order.status === "on_trip"
             ? "in_trip"
-            : order.status === "arrived_pickup"
+          : order.status === "arrived_pickup"
               ? "arrived_pickup"
-              : ["assigned", "driver_accepted", "en_route_pickup"].includes(
+              : order.status === "enroute_pickup"
+                ? "en_route_pickup"
+                : ["assigned", "driver_accepted"].includes(
                     order.status,
                   )
-                ? "en_route_pickup"
+                ? "assigned"
                 : latestAssignment
                   ? "assigned"
                   : "pending_dispatch";
@@ -5695,7 +5697,7 @@ export class OwnedMobilityService implements OnModuleInit {
         : null,
       providerBrandDisclosed,
       createdAt: order.createdAt,
-      updatedAt: latestTrace?.occurredAt ?? order.updatedAt,
+      updatedAt: latestTrace?.createdAt ?? order.updatedAt,
     };
   }
 

@@ -2929,6 +2929,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
   });
 
   it("projects sandbox fulfillment with audience-specific disclosure", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-26T14:00:00.000Z"));
+
     const tenantPartnerService = {
       previewBookingQuotaImpact: vi.fn(() => ({
         impacts: [],
@@ -2982,10 +2985,50 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const dispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
-    service.assignDispatch({
+    const assignment = service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "veh-av-demo-001",
       driverId: "safety-op-001",
+    });
+
+    const assignedProjection = service.getTenantSandboxFulfillment(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    expect(assignedProjection).toMatchObject({
+      audience: "tenant",
+      fulfillmentMode: "tesla_av",
+      state: "assigned",
+      providerBrandDisclosed: false,
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.tesla_av_active",
+        },
+      ],
+    });
+
+    vi.setSystemTime(new Date("2026-06-26T14:05:00.000Z"));
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-06-26T14:05:00.000Z",
+    });
+
+    const enRouteProjection = service.getTenantSandboxFulfillment(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    expect(enRouteProjection).toMatchObject({
+      state: "en_route_pickup",
+      statusCode: "enroute_pickup",
+      updatedAt: "2026-06-26T14:05:00.000Z",
+    });
+
+    vi.setSystemTime(new Date("2026-06-26T14:06:00.000Z"));
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-06-26T14:06:00.000Z",
+    });
+    vi.setSystemTime(new Date("2026-06-26T14:07:00.000Z"));
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-06-26T14:07:00.000Z",
     });
 
     const tenantProjection = service.getTenantSandboxFulfillment(
@@ -3004,12 +3047,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(tenantProjection).toMatchObject({
       audience: "tenant",
       fulfillmentMode: "tesla_av",
+      state: "in_trip",
       providerBrandDisclosed: false,
       messages: [
         {
           messageCode: "sandbox_fulfillment.tesla_av_active",
         },
       ],
+      updatedAt: "2026-06-26T14:07:00.000Z",
     });
     expect(partnerProjection).toMatchObject({
       audience: "partner",
