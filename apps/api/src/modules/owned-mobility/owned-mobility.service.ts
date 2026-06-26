@@ -80,6 +80,7 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
+import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityTripCompletedEvent,
@@ -250,6 +251,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly eventEmitter?: EventEmitter2,
     @Optional()
     private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
+    @Optional()
+    private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -2587,6 +2590,12 @@ export class OwnedMobilityService implements OnModuleInit {
             vehicleId,
             driverId,
           );
+          await this.assertSandboxDispatchGate(
+            bundle.order,
+            dispatchJob.dispatchJobId,
+            vehicleId,
+            requestId,
+          );
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(bundle.order)],
             dispatchJobs: [{ ...bundle.dispatchJob }],
@@ -2610,15 +2619,23 @@ export class OwnedMobilityService implements OnModuleInit {
       vehicleId,
       driverId,
     );
-    return this.applyDispatchAssignmentBundle(
-      this.buildDispatchAssignmentBundle(
-        dispatchJob,
-        order,
-        vehicleId,
-        driverId,
-        options,
-      ),
+    const sandboxGateResult = this.assertSandboxDispatchGate(
+      order,
+      dispatchJob.dispatchJobId,
+      vehicleId,
       requestId,
+    );
+    return this.afterMaybePromise(sandboxGateResult, () =>
+      this.applyDispatchAssignmentBundle(
+        this.buildDispatchAssignmentBundle(
+          dispatchJob,
+          order,
+          vehicleId,
+          driverId,
+          options,
+        ),
+        requestId,
+      ),
     );
   }
 
@@ -4429,6 +4446,28 @@ export class OwnedMobilityService implements OnModuleInit {
       default:
         return null;
     }
+  }
+
+  private assertSandboxDispatchGate(
+    order: OwnedOrderRecord,
+    dispatchJobId: string,
+    vehicleId: string,
+    requestId?: string,
+  ) {
+    if (!this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(vehicleId)) {
+      return;
+    }
+
+    return this.sandboxDispatchGateService.assertAssignmentEligible(
+      this.sandboxDispatchGateService.buildAssignmentGateInput({
+        orderId: order.orderId,
+        dispatchJobId,
+        vehicleId,
+        pickup: order.pickup,
+        dropoff: order.dropoff,
+      }),
+      requestId,
+    );
   }
 
   private resolveServiceProductCodeForOrder(
