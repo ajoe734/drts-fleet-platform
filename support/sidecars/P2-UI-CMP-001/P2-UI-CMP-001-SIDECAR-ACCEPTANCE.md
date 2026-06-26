@@ -142,8 +142,8 @@ scope token list in `auth.constants.ts`.
 
 | Screen | Route | Read (GET) scope · Mutation scope(s) | Acceptance-critical rule |
 | --- | --- | --- | --- |
-| Compliance overview | `/platform-admin/compliance` | **Read (fan-out):** `sandbox.compliance.read` (takeover-reviews, evidence-discrepancies) **+** `sandbox.investigation.read` (investigations) **+** `sandbox.evidence.preview` (controlled exports, legal holds) **+** `sandbox.regulatory_report.review` (regulatory reports). · No mutations. | triage/navigation only; **not** a single-scope route — the overview loader fans out across all five domain lists, so partial scope yields a partially-populated view, not a hard deny |
-| Trip compliance detail | `/platform-admin/compliance/trips/[tripId]` | **Read:** `sandbox.compliance.read` **+** `sandbox.investigation.read` (filters the same overview dataset by trip). · No mutations. | read drilldown; `trip-not-found` + missing-link states |
+| Compliance overview | `/platform-admin/compliance` | **Read (fan-out):** `sandbox.compliance.read` (takeover-reviews, evidence-discrepancies) **+** `sandbox.investigation.read` (investigations) **+** `sandbox.evidence.preview` (controlled exports, legal holds) **+** `sandbox.regulatory_report.review` (regulatory reports). · No mutations. | triage/navigation only; **not** a single-scope route — `loadSandboxComplianceOverview()` fans out across six lists under four read scopes via **`Promise.all` (all-or-nothing)**, so an actor missing **any** one read scope fails the whole load into the single `permission-denied` / `fetch-failed` state in req §5.1 — **not** a per-panel partial view. Per-panel graceful degradation is **not** specified by req §5.1 and **not** implemented; do not assume it |
+| Trip compliance detail | `/platform-admin/compliance/trips/[tripId]` | **Read (same fan-out as overview):** `sandbox.compliance.read` (takeover/discrepancy) **+** `sandbox.investigation.read` (investigation case) **+** `sandbox.evidence.preview` (legal-hold + manifest state) **+** `sandbox.regulatory_report.review` (regulatory-report state). · No mutations. | read drilldown filtering the overview dataset by trip; req §5.2 "data to surface" requires legal-hold **and** regulatory-report state, so it inherits the overview's four-scope `Promise.all` fan-out (same all-or-nothing); `trip-not-found` + missing-link states |
 | Investigation queue | `/platform-admin/investigations` | **Read:** `sandbox.investigation.read`. · No mutations. | ROC-linked entry from backend link metadata only |
 | Investigation detail | `/platform-admin/investigations/[caseId]` | **Read:** `sandbox.investigation.read`. · No mutations. | backend case is source of truth; no client identity reconstruction |
 | Investigation timeline | `/platform-admin/investigations/[caseId]/timeline` | **Read:** `sandbox.investigation.read`. · No mutations. | **confidence + source + discrepancy must be visually explicit (A2)** |
@@ -153,10 +153,14 @@ scope token list in `auth.constants.ts`.
 | Regulatory reports | `/platform-admin/regulatory-reports` | **Read (GET list):** `sandbox.regulatory_report.review`. · **Mutation:** submit `sandbox.regulatory_report.submit`. | review (read) and submit (mutation) stay distinct privileged actions; lifecycle obvious |
 
 Common required states for every screen: `loading`, `empty`/`no-data`, `permission-denied`,
-`fetch-failed`/`not-found`, and degraded backend freshness where applicable (req §5). For the
-**Compliance overview** specifically, `permission-denied` is **per-panel** (a missing domain
-scope blanks that panel) rather than a whole-page deny, because the loader fans out across
-multiple read scopes.
+`fetch-failed`/`not-found`, and degraded backend freshness where applicable (req §5). The
+**Compliance overview** and **Trip compliance detail** share the multi-scope fan-out: because
+`loadSandboxComplianceOverview()` uses `Promise.all` (all-or-nothing), a missing read scope
+currently fails the whole load into the single `permission-denied` / `fetch-failed` state that
+req §5.1/§5.2 specify — **not** a per-panel partial view. If the published canvas later calls
+for per-panel degradation, that is new implementation work (swap `Promise.all` for
+`Promise.allSettled` + per-panel empty/denied states); it is not the current contract, so the
+parent must not assume it.
 
 ---
 
@@ -216,7 +220,11 @@ This packet is support-only and does not change machine truth. Requested review:
   `apps/platform-admin-web/lib/sandbox-compliance.ts` `loadSandboxComplianceOverview` — confirms
   the compliance-overview loader fans out across investigations, takeover-reviews,
   evidence-discrepancies, controlled exports, legal holds, and regulatory reports (six lists,
-  four read scopes).
+  four read scopes). It uses **`Promise.all`**, so the fan-out is **all-or-nothing**: any single
+  read failure rejects the whole load (one page-level deny / fetch-failed), not a per-panel
+  partial view. The trip-detail helpers (`tripInvestigations` / `buildTripComplianceChecks`,
+  same file) filter this same dataset, so the drilldown inherits the four-scope fan-out and its
+  all-or-nothing behavior.
 - `apps/platform-admin-web/app/platform-admin/**` (nine placeholder routes),
   `apps/platform-admin-web/components/sandbox-design-pending-screen.tsx`,
   `apps/platform-admin-web/lib/sandbox-compliance.ts`
@@ -239,11 +247,43 @@ Addressed by re-verifying each route's `@RequireScopes(...)` decorator on `origi
   `legal_hold.place` / `release.request` / `release.approve` are now labelled **mutation-only**.
 - **Compliance overview** — corrected. The matrix now records the multi-scope read fan-out
   (`compliance.read` + `investigation.read` + `evidence.preview` + `regulatory_report.review`)
-  and notes that `permission-denied` is per-panel, not a single-scope whole-page deny.
+  instead of a single read scope. *(Round 2 below corrects this entry's permission-state
+  characterisation: the fan-out is `Promise.all` all-or-nothing, not per-panel.)*
 - **Regulatory reports** — clarified that `regulatory_report.review` is the GET/read scope and
   `regulatory_report.submit` is the mutation.
 - §5 A3/A4 and §9 verification basis updated to match; new sources cited
   (`platform-admin-regulatory-reporting.controller.ts`, `packages/api-client/src/index.ts`,
   `loadSandboxComplianceOverview`).
+
+No canonical truth changed; this remains a support-only packet.
+
+---
+
+## 11. Revision note — review round 2 (Codex)
+
+Reviewer findings (round 2) on §6, both fixed by re-reading `origin/dev` truth:
+
+1. **Compliance overview overstated scope behavior.** Round 1 asserted `permission-denied` is
+   *per-panel*. That is not in the screen-requirements note (§5.1 lists a single flat
+   `permission-denied` state) and contradicts the implementation: `loadSandboxComplianceOverview()`
+   runs six list reads under `Promise.all`, which is **all-or-nothing** — a missing read scope
+   rejects the whole load into one page-level `permission-denied` / `fetch-failed` state. The §6
+   overview row, the "Common required states" paragraph, the §9 verification basis, and the §10
+   round-1 entry now describe the all-or-nothing fan-out and explicitly flag per-panel degradation
+   as **unspecified and unimplemented** (it would require `Promise.allSettled` + per-panel states),
+   so the parent does not assume it.
+2. **Trip compliance detail understated read scope.** Round 1 listed only
+   `sandbox.compliance.read` + `sandbox.investigation.read`. req §5.2 "data to surface" requires
+   **legal-hold state** and **regulatory-report state**, backed by `sandbox.evidence.preview` and
+   `sandbox.regulatory_report.review` respectively; the drilldown filters the same overview dataset
+   by trip (`tripInvestigations` / `buildTripComplianceChecks`), so it inherits the overview's full
+   four-scope `Promise.all` fan-out. The §6 trip-detail row now records all four read scopes and the
+   same all-or-nothing behavior.
+
+Verification basis for round 2 (all from `origin/dev`):
+`git show origin/dev:apps/platform-admin-web/lib/sandbox-compliance.ts` (`loadSandboxComplianceOverview`
+= six `client.listSandbox*()` calls under one `Promise.all`; `buildTripComplianceChecks` filters that
+dataset) and `git show origin/dev:docs/05-ui/platform-admin-sandbox-compliance-screen-requirements-20260626.md`
+§5.1 (single `permission-denied` state) / §5.2 (data-to-surface includes legal-hold + regulatory-report state).
 
 No canonical truth changed; this remains a support-only packet.
