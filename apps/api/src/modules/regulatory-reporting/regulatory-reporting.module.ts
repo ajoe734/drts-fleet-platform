@@ -5,6 +5,7 @@ import { IncidentModule } from "../incident/incident.module";
 import { PlatformAdminModule } from "../platform-admin/platform-admin.module";
 import { RocOperationsModule } from "../roc-operations/roc-operations.module";
 import { ReportingModule } from "../reporting/reporting.module";
+import { SafetyOperatorModule } from "../safety-operator/safety-operator.module";
 import { SandboxGovernanceModule } from "../sandbox-governance/sandbox-governance.module";
 import { TeslaIntegrationModule } from "../tesla-integration/tesla-integration.module";
 import { PlatformAdminRegulatoryReportingController } from "./platform-admin-regulatory-reporting.controller";
@@ -19,6 +20,7 @@ import { RegulatoryReportingService } from "./regulatory-reporting.service";
     PlatformAdminModule,
     RocOperationsModule,
     TeslaIntegrationModule,
+    SafetyOperatorModule,
     SandboxGovernanceModule,
     IncidentModule,
   ],

@@ -122,6 +122,7 @@ async function createTestApp() {
     sandboxGovernanceService,
     incidentService,
     regulatoryNotificationService,
+    safetyOperatorService,
   );
 
   const jurisdiction = sandboxGovernanceService.createJurisdiction({
@@ -568,6 +569,12 @@ describe("E2E-P2-010 regulatory reporting", () => {
       );
       expect(kpiDashboardBody.data.safetyGates).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({
+            key: "operator_missing",
+            state: "pass",
+            hardAlert: true,
+            failClosed: true,
+          }),
           expect.objectContaining({
             key: "telemetry_stale",
             hardAlert: true,

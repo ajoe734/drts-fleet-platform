@@ -57,6 +57,7 @@ import { RocOperationsService } from "../roc-operations/roc-operations.service";
 import { RegulatoryReportingService } from "./regulatory-reporting.service";
 import { ReportingService } from "../reporting/reporting.service";
 import type { DailyDispatchRecordQuery } from "../reporting/reporting.repository";
+import { SafetyOperatorService } from "../safety-operator/safety-operator.service";
 import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
 import { TeslaIntegrationService } from "../tesla-integration/tesla-integration.service";
 import { PlatformAdminComplianceService } from "../platform-admin/platform-admin-compliance.service";
@@ -94,6 +95,18 @@ type ExperimentScope = {
   vehicleIds: Set<string>;
 };
 
+const INTERNAL_SYSTEM_IDENTITY: BootstrapRequestIdentity = {
+  authMode: "bootstrap_headers",
+  actorType: "system",
+  actorId: "regulatory-report-jobs-service",
+  realm: "system",
+  tenantId: null,
+  roleFamilies: ["ops"],
+  roles: ["system"],
+  scopes: [],
+  requestId: "regulatory-report-jobs-service",
+};
+
 const REGULATORY_REPORT_TYPE_SET = new Set<string>(
   PHASE2_REGULATORY_REPORT_JOB_TYPES,
 );
@@ -129,6 +142,8 @@ export class RegulatoryReportJobsService {
     private readonly incidentService?: IncidentService,
     @Optional()
     private readonly regulatoryReportingService?: RegulatoryReportingService,
+    @Optional()
+    private readonly safetyOperatorService?: SafetyOperatorService,
     @Optional()
     private readonly platformAdminComplianceService?: PlatformAdminComplianceService,
   ) {}
@@ -1742,9 +1757,7 @@ export class RegulatoryReportJobsService {
     const activeHold = input.legalHolds.find(
       (hold) => hold.status !== "released",
     );
-    const operatorMissing =
-      input.snapshot.vehicleEnrollments.length > 0 &&
-      input.snapshot.authorizationStatus !== "active";
+    const operatorCoverage = this.resolveSafetyOperatorCoverage(input.snapshot);
 
     return [
       this.buildSafetyGate(
@@ -1773,10 +1786,8 @@ export class RegulatoryReportJobsService {
       this.buildSafetyGate(
         "operator_missing",
         "Safety operator missing",
-        operatorMissing ? "alert" : "unknown",
-        operatorMissing
-          ? "Experiment authorization is not active for enrolled vehicles."
-          : "Live operator assignment coverage is not fully modeled in this read model.",
+        operatorCoverage.state,
+        operatorCoverage.message,
         input.snapshot.asOf,
       ),
       this.buildSafetyGate(
@@ -1831,6 +1842,70 @@ export class RegulatoryReportJobsService {
       state,
       reason,
       observedAt,
+    };
+  }
+
+  private resolveSafetyOperatorCoverage(
+    snapshot: SandboxComplianceSnapshotRecord,
+  ): {
+    state: SandboxSafetyGateRecord["state"];
+    message: string;
+  } {
+    const enrolledVehicleIds = [
+      ...new Set(
+        snapshot.vehicleEnrollments.map((enrollment) => enrollment.vehicleId),
+      ),
+    ];
+    if (enrolledVehicleIds.length === 0) {
+      return {
+        state: "pass",
+        message: "No enrolled vehicles require safety-operator coverage.",
+      };
+    }
+
+    if (!this.safetyOperatorService) {
+      return {
+        state: "unknown",
+        message:
+          "Live operator assignment and shift coverage are not available in this read model.",
+      };
+    }
+
+    const enrolledVehicleIdSet = new Set(enrolledVehicleIds);
+    const coveredVehicleIds = new Set(
+      this.safetyOperatorService
+        .listAssignments({}, INTERNAL_SYSTEM_IDENTITY)
+        .filter(
+          (assignment) =>
+            (assignment.status === "assigned" ||
+              assignment.status === "engaged") &&
+            enrolledVehicleIdSet.has(assignment.vehicleId),
+        )
+        .map((assignment) => assignment.vehicleId),
+    );
+
+    for (const shift of this.safetyOperatorService.listShifts(
+      { status: "active" },
+      INTERNAL_SYSTEM_IDENTITY,
+    )) {
+      if (shift.vehicleId && enrolledVehicleIdSet.has(shift.vehicleId)) {
+        coveredVehicleIds.add(shift.vehicleId);
+      }
+    }
+
+    const uncoveredVehicleIds = enrolledVehicleIds.filter(
+      (vehicleId) => !coveredVehicleIds.has(vehicleId),
+    );
+    if (uncoveredVehicleIds.length > 0) {
+      return {
+        state: "alert",
+        message: `Active safety-operator coverage missing for vehicles: ${uncoveredVehicleIds.join(", ")}.`,
+      };
+    }
+
+    return {
+      state: "pass",
+      message: `${coveredVehicleIds.size}/${enrolledVehicleIds.length} enrolled vehicles have active safety-operator coverage.`,
     };
   }
 
