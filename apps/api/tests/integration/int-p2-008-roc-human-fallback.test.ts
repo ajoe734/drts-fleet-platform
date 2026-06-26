@@ -67,6 +67,33 @@ function createHarness() {
     vehicleEvidenceService,
     sandboxGovernanceService,
   );
+  (sandboxDispatchGateService as any).disclosurePolicies = [
+    {
+      policyId: "policy-test-av-001",
+      policyVersion: "test-v1",
+      tenantId: null,
+      businessDispatchSubtype: null,
+      partnerEntrySlug: null,
+      active: true,
+      channelRules: [
+        {
+          channel: "tenant_portal",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          requiresAcknowledgement: false,
+          acknowledgementMode: "operator_confirmed_notice",
+        },
+        {
+          channel: "partner_portal",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          requiresAcknowledgement: false,
+          acknowledgementMode: "operator_confirmed_notice",
+        },
+      ],
+      createdAt: "2026-06-26T00:00:00.000Z",
+      updatedAt: "2026-06-26T00:00:00.000Z",
+    },
+  ];
+  (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
     auditNotificationService,
@@ -208,6 +235,16 @@ describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
       mode: "auto",
     });
     const decision = await sandboxDispatchGateService.evaluateDispatch({
+      passengerDisclosure: {
+        channel: "tenant_portal" as const,
+        policyId: "policy-test-av-001",
+        policyVersion: "test-v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        requiresAcknowledgement: false,
+        acknowledgementMode: "operator_confirmed_notice" as const,
+        acknowledgedAt: null,
+        acknowledgementRecordId: null,
+      },
       orderId: booking.orderId,
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "veh-av-missing-001",
@@ -327,6 +364,16 @@ describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
       mode: "auto",
     });
     const decision = await sandboxDispatchGateService.evaluateDispatch({
+      passengerDisclosure: {
+        channel: "tenant_portal" as const,
+        policyId: "policy-test-av-001",
+        policyVersion: "test-v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        requiresAcknowledgement: false,
+        acknowledgementMode: "operator_confirmed_notice" as const,
+        acknowledgedAt: null,
+        acknowledgementRecordId: null,
+      },
       orderId: booking.orderId,
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "veh-av-demo-001",
@@ -587,6 +634,16 @@ describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
       mode: "auto",
     });
     const decision = await sandboxDispatchGateService.evaluateDispatch({
+      passengerDisclosure: {
+        channel: "tenant_portal" as const,
+        policyId: "policy-test-av-001",
+        policyVersion: "test-v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        requiresAcknowledgement: false,
+        acknowledgementMode: "operator_confirmed_notice" as const,
+        acknowledgedAt: null,
+        acknowledgementRecordId: null,
+      },
       orderId: booking.orderId,
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "veh-av-missing-001",

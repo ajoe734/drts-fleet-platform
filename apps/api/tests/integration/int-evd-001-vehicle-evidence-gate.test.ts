@@ -21,6 +21,16 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
     });
 
     const blocked = await gate.evaluateDispatch({
+      passengerDisclosure: {
+        channel: "tenant_portal" as const,
+        policyId: "policy-test-av-001",
+        policyVersion: "test-v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        requiresAcknowledgement: false,
+        acknowledgementMode: "operator_confirmed_notice" as const,
+        acknowledgedAt: null,
+        acknowledgementRecordId: null,
+      },
       orderId: "order-int-001",
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-int",
@@ -77,6 +87,16 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
     });
 
     const allowed = await gate.evaluateDispatch({
+      passengerDisclosure: {
+        channel: "tenant_portal" as const,
+        policyId: "policy-test-av-001",
+        policyVersion: "test-v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        requiresAcknowledgement: false,
+        acknowledgementMode: "operator_confirmed_notice" as const,
+        acknowledgedAt: null,
+        acknowledgementRecordId: null,
+      },
       orderId: "order-int-002",
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-int",
