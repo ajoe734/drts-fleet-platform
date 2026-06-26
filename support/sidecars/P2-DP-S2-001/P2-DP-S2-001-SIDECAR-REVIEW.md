@@ -44,7 +44,7 @@ matches canvas; typecheck+build pass."*
 | --- | --- | --- |
 | **regulator-cases API live** (baseline routes) | ✅ matches brief | `platform-admin-regulator-cases.controller.ts` exposes `@Controller("platform-admin/compliance/regulator-cases")` with `GET /`, `GET /:caseId`, `GET /:caseId/exports`, `POST /:caseId/exports`, `GET /:caseId/access-logs` — exactly the brief's `GET/POST …/regulator-cases[/{caseId}][/exports|/access-logs]`. Service `platform-admin-regulator-cases.service.ts` (+442). |
 | **no external login realm added** | ✅ confirmed | Controller is guarded by `@RequireRealms("platform")` and emits `realm: "platform"` — it **reuses the existing platform-admin realm**. No new `regulator` login realm / auth provider is introduced anywhere in the diff. |
-| **CMP_Regulator panel shows §2.3 elements** | ✅ all 8 present | See §3 element checklist. Driven by 126 new `cmp.regulator.*` i18n keys + panel render in `sandbox-compliance-console.tsx` (+848). |
+| **CMP_Regulator panel shows §2.3 elements** | ✅ all 8 present | See §3 element checklist. Driven by **60 new `cmp.regulator.*` i18n keys** (120 translation entries = 60 `en` + 60 `zh`) + panel render in `sandbox-compliance-console.tsx` (+848). (The `translations.ts` diffstat is **126 line insertions** = those 120 entry lines + 6 wrapped value-continuation lines; the 126 is a line count, not a key count.) |
 | **controlled export + masking reused** | ✅ reused | Export goes through existing controlled-export path (`POST …/exports` returns receipt; `exportReceipt`/`latestReceipt` keys), masking indicators surfaced (`legalHold*`, `masking` references in UI). No bypass of the existing controlled-export workflow observed. |
 | **matches canvas** | ⚠ reviewer to confirm visually | Canvas `docs/05-ui/drts-design-canvas/compliance-screens.jsx` listed in parent artifacts; element set (selector/manifest/bundle/notification/export/hold/access-log/receipt) aligns with brief §2.3 enumeration. Pixel/structure parity is a reviewer judgement call — flagged, not asserted. |
 | **typecheck + build pass** | ⓘ owner-reported, re-run advised | Owner `next` records: `pnpm --filter @drts/api typecheck`; `… @drts/api build`; `… @drts/platform-admin-web typecheck`; `… @drts/platform-admin-web build`; `pnpm exec vitest run apps/api/tests/integration/e2e-p2-sandbox-compliance-controls.test.ts`. Not independently re-executed in this sidecar (support-only). Reviewer should re-run on a clean checkout. |
@@ -83,7 +83,7 @@ matches canvas; typecheck+build pass."*
  apps/api/tests/integration/e2e-p2-sandbox-compliance-controls.test.ts                | 111 +
  apps/platform-admin-web/components/sandbox-compliance-console.tsx                    | 848 ±
  apps/platform-admin-web/lib/sandbox-compliance.ts                                    |  86 ±
- apps/platform-admin-web/lib/translations.ts                                          | 126 +
+ apps/platform-admin-web/lib/translations.ts                                          | 126 +   (60 cmp.regulator.* keys × en+zh = 120 entry lines + 6 wrapped value lines)
  packages/api-client/src/index.ts                                                     |  68 +
  packages/contracts/src/phase2-tesla-fsd-sandbox.ts                                   | 133 +
 ```
