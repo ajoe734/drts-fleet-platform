@@ -865,6 +865,8 @@ function TenantShellControls({
         title={t("shell.language.switch")}
         aria-label={t("shell.language.switch")}
         style={languageButtonStyle}
+        data-tenant-locale-toggle="true"
+        data-next-locale={locale === "en" ? "zh" : "en"}
         onClick={() => setLocale(locale === "en" ? "zh" : "en")}
       >
         <span aria-hidden="true">{t("shell.language.icon")}</span>
@@ -874,6 +876,27 @@ function TenantShellControls({
       </button>
     </div>
   );
+}
+
+function TenantLocaleToggleFallbackScript() {
+  const script = `(() => {
+    const cookieName = "drts-locale-v2";
+    document.addEventListener("click", (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest("[data-tenant-locale-toggle]")
+        : null;
+      if (!target) return;
+      const next = target.getAttribute("data-next-locale") === "en" ? "en" : "zh";
+      event.preventDefault();
+      event.stopPropagation();
+      try { window.localStorage.setItem(cookieName, next); } catch {}
+      document.cookie = cookieName + "=" + next + ";path=/;max-age=31536000;SameSite=Lax";
+      document.documentElement.lang = next === "zh" ? "zh-Hant" : "en";
+      window.location.reload();
+    }, true);
+  })();`;
+
+  return <script dangerouslySetInnerHTML={{ __html: script }} />;
 }
 
 export function TenantShell({ children }: { children: ReactNode }) {
@@ -889,6 +912,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
+      <TenantLocaleToggleFallbackScript />
       <div
         data-testid="tenant-console-shell"
         style={{
