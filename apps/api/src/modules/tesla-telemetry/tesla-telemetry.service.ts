@@ -10,6 +10,13 @@ import type {
 
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
+  resolveTeslaTelemetryDelayThresholdMs,
+  resolveTeslaTelemetryDispatchHoldThresholdMs,
+  resolveTeslaTelemetryGapThresholdMs,
+  resolveTeslaTelemetryIncidentScore,
+  resolveTeslaTelemetryQualityGateScore,
+} from "./tesla-telemetry.policy";
+import {
   TeslaTelemetryRepository,
   type TeslaProviderHealthState,
   type TeslaTelemetryBackfillQuery,
@@ -20,11 +27,6 @@ import {
 } from "./tesla-telemetry.repository";
 
 const DEFAULT_PROVIDER_CODE = "tesla";
-const DEFAULT_DELAY_THRESHOLD_SECONDS = 30;
-const DEFAULT_GAP_THRESHOLD_SECONDS = 60;
-const DEFAULT_DISPATCH_HOLD_THRESHOLD_SECONDS = 180;
-const DEFAULT_QUALITY_GATE_SCORE = 0.8;
-const DEFAULT_INCIDENT_SCORE = 0.5;
 const SUPPORTED_SCHEMA_VERSIONS: Record<TeslaTelemetryFeedKind, Set<string>> = {
   vehicle_state: new Set(["tesla.vehicle-state.v1"]),
   public_telemetry: new Set(["tesla.public-telemetry.v1"]),
@@ -61,6 +63,10 @@ type IngestContext = {
   schemaVersion: string;
   receivedAt?: string;
 };
+
+type RepositoryExecutor = Parameters<
+  TeslaTelemetryRepository["findEventByProviderRef"]
+>[3];
 
 export type TeslaTelemetryIngestReceipt = {
   receiptId: string;
@@ -106,12 +112,12 @@ export class TeslaTelemetryService {
     return this.ingestTelemetryEvent("public_telemetry", sample, context);
   }
 
-  getProviderHealth(input: {
+  async getProviderHealth(input: {
     feedKind: TeslaTelemetryFeedKind;
     externalVehicleRef: string;
     sessionId?: string | null;
     asOf?: string;
-  }): TeslaTelemetryHealthRecord | null {
+  }): Promise<TeslaTelemetryHealthRecord | null> {
     const tracker = this.trackers.get(
       this.trackerKey(
         DEFAULT_PROVIDER_CODE,
@@ -172,41 +178,6 @@ export class TeslaTelemetryService {
       sessionId,
       vehicleId: "vehicleId" in payload ? payload.vehicleId : null,
     });
-
-    const duplicateByEvent = await this.repository.findEventByProviderRef(
-      providerCode,
-      feedKind,
-      context.eventId,
-    );
-    if (duplicateByEvent) {
-      const health = this.evaluateTrackerHealth(
-        tracker,
-        receivedAt,
-        duplicateByEvent.ingestStatus === "quarantined"
-          ? "UNKNOWN_SCHEMA"
-          : undefined,
-      );
-      return this.buildReceipt(duplicateByEvent, health, true);
-    }
-
-    const duplicateBySequence = await this.repository.findEventBySequence(
-      providerCode,
-      feedKind,
-      externalVehicleRef,
-      sessionId,
-      context.sequenceNo,
-    );
-    if (duplicateBySequence) {
-      const health = this.evaluateTrackerHealth(
-        tracker,
-        receivedAt,
-        duplicateBySequence.ingestStatus === "quarantined"
-          ? "UNKNOWN_SCHEMA"
-          : undefined,
-      );
-      return this.buildReceipt(duplicateBySequence, health, true);
-    }
-
     const supportedSchemas =
       SUPPORTED_SCHEMA_VERSIONS[feedKind] ?? new Set<string>();
     const schemaSupported = supportedSchemas.has(context.schemaVersion);
@@ -214,79 +185,81 @@ export class TeslaTelemetryService {
       this.detectQualityIssue(feedKind, payload) ??
       (!schemaSupported ? "UNKNOWN_SCHEMA" : null);
 
-    const persistedEvent = await this.repository.createEventIfAbsent({
-      providerCode,
-      feedKind,
-      vehicleId: "vehicleId" in payload ? payload.vehicleId : null,
-      externalVehicleRef,
-      sessionId,
-      providerEventId: context.eventId,
-      sequenceNo: this.requireSequenceNo(context.sequenceNo),
-      capturedAt,
-      sourceSchemaVersion: context.schemaVersion,
-      payloadSha256: createHash("sha256")
-        .update(JSON.stringify(payload))
-        .digest("hex"),
-      payloadBody: structuredClone(payload as Record<string, unknown>),
-      receivedAt,
-      ingestStatus:
-        !schemaSupported || qualityIssue === "INVALID_SAMPLE"
-          ? "quarantined"
-          : "accepted",
-      quarantineReason:
-        !schemaSupported || qualityIssue === "INVALID_SAMPLE"
-          ? (qualityIssue ?? "UNKNOWN_SCHEMA")
-          : null,
-    });
-
-    if (!persistedEvent.inserted) {
-      const health = this.evaluateTrackerHealth(
-        tracker,
-        receivedAt,
-        persistedEvent.eventRecord.ingestStatus === "quarantined"
-          ? (persistedEvent.eventRecord.quarantineReason ?? "UNKNOWN_SCHEMA")
-          : undefined,
+    return this.repository.withTransaction(async (executor) => {
+      const duplicateByEvent = await this.repository.findEventByProviderRef(
+        providerCode,
+        feedKind,
+        context.eventId,
+        executor,
       );
-      return this.buildReceipt(persistedEvent.eventRecord, health, true);
-    }
-
-    const eventRecord = persistedEvent.eventRecord;
-
-    this.applyEventToTracker(tracker, eventRecord);
-
-    if (eventRecord.ingestStatus === "accepted") {
-      if (feedKind === "vehicle_state") {
-        await this.repository.saveVehicleStateSnapshot(
-          this.buildVehicleStateSnapshot(
-            payload as Omit<TeslaVehicleStateSnapshot, "snapshotId" | "source">,
-            eventRecord,
-          ),
+      if (duplicateByEvent) {
+        const health = await this.materializeTelemetryEvent(
+          tracker,
+          duplicateByEvent,
+          executor,
+          receivedAt,
         );
-      } else {
-        await this.repository.savePublicTelemetrySample(
-          this.buildPublicTelemetrySample(
-            payload as Omit<TeslaPublicTelemetrySample, "sampleId" | "source">,
-            eventRecord,
-          ),
-        );
+        return this.buildReceipt(duplicateByEvent, health, true);
       }
-    } else {
-      tracker.lastUnknownSchemaAt = receivedAt;
-      tracker.issueCodes.add(eventRecord.quarantineReason ?? "UNKNOWN_SCHEMA");
-      this.recordAudit("telemetry.quarantined", eventRecord.providerEventId, {
+
+      const duplicateBySequence = await this.repository.findEventBySequence(
+        providerCode,
         feedKind,
         externalVehicleRef,
-        reason: eventRecord.quarantineReason,
         sessionId,
-      });
-    }
+        context.sequenceNo,
+        executor,
+      );
+      if (duplicateBySequence) {
+        const health = await this.materializeTelemetryEvent(
+          tracker,
+          duplicateBySequence,
+          executor,
+          receivedAt,
+        );
+        return this.buildReceipt(duplicateBySequence, health, true);
+      }
 
-    const health = this.evaluateTrackerHealth(
-      tracker,
-      receivedAt,
-      eventRecord.quarantineReason ?? undefined,
-    );
-    return this.buildReceipt(eventRecord, health, false);
+      const persistedEvent = await this.repository.createEventIfAbsent(
+        {
+          providerCode,
+          feedKind,
+          vehicleId: "vehicleId" in payload ? payload.vehicleId : null,
+          externalVehicleRef,
+          sessionId,
+          providerEventId: context.eventId,
+          sequenceNo: this.requireSequenceNo(context.sequenceNo),
+          capturedAt,
+          sourceSchemaVersion: context.schemaVersion,
+          payloadSha256: createHash("sha256")
+            .update(JSON.stringify(payload))
+            .digest("hex"),
+          payloadBody: structuredClone(payload as Record<string, unknown>),
+          receivedAt,
+          ingestStatus:
+            !schemaSupported || qualityIssue === "INVALID_SAMPLE"
+              ? "quarantined"
+              : "accepted",
+          quarantineReason:
+            !schemaSupported || qualityIssue === "INVALID_SAMPLE"
+              ? (qualityIssue ?? "UNKNOWN_SCHEMA")
+              : null,
+        },
+        executor,
+      );
+
+      const health = await this.materializeTelemetryEvent(
+        tracker,
+        persistedEvent.eventRecord,
+        executor,
+        receivedAt,
+      );
+      return this.buildReceipt(
+        persistedEvent.eventRecord,
+        health,
+        !persistedEvent.inserted,
+      );
+    });
   }
 
   private getOrCreateTracker(input: {
@@ -349,10 +322,21 @@ export class TeslaTelemetryService {
       tracker.latestSequenceNo ?? eventRecord.sequenceNo,
       eventRecord.sequenceNo,
     );
-    tracker.lastEventId = eventRecord.providerEventId;
-    tracker.lastCapturedAt = eventRecord.capturedAt;
-    tracker.lastReceivedAt = eventRecord.receivedAt;
-    if (eventRecord.quarantineReason) {
+    if (
+      !tracker.lastReceivedAt ||
+      new Date(eventRecord.receivedAt).getTime() >=
+        new Date(tracker.lastReceivedAt).getTime()
+    ) {
+      tracker.lastEventId = eventRecord.providerEventId;
+      tracker.lastCapturedAt = eventRecord.capturedAt;
+      tracker.lastReceivedAt = eventRecord.receivedAt;
+    }
+    if (
+      eventRecord.quarantineReason &&
+      (!tracker.lastQualityIncidentAt ||
+        new Date(eventRecord.receivedAt).getTime() >=
+          new Date(tracker.lastQualityIncidentAt).getTime())
+    ) {
       tracker.lastQualityIncidentAt = eventRecord.receivedAt;
       tracker.issueCodes.add(eventRecord.quarantineReason);
     }
@@ -385,31 +369,76 @@ export class TeslaTelemetryService {
     }
   }
 
-  private evaluateTrackerHealth(
+  private async materializeTelemetryEvent(
+    tracker: TelemetryTracker,
+    eventRecord: TeslaTelemetryEventRecord,
+    executor?: RepositoryExecutor,
+    asOf = eventRecord.receivedAt,
+  ) {
+    this.applyEventToTracker(tracker, eventRecord);
+
+    if (eventRecord.ingestStatus === "accepted") {
+      await this.ensureAcceptedEventProjection(eventRecord, executor);
+    } else {
+      tracker.lastUnknownSchemaAt = eventRecord.receivedAt;
+      tracker.issueCodes.add(eventRecord.quarantineReason ?? "UNKNOWN_SCHEMA");
+      this.recordAudit("telemetry.quarantined", eventRecord.providerEventId, {
+        feedKind: eventRecord.feedKind,
+        externalVehicleRef: eventRecord.externalVehicleRef,
+        reason: eventRecord.quarantineReason,
+        sessionId: eventRecord.sessionId,
+      });
+    }
+
+    return this.evaluateTrackerHealth(
+      tracker,
+      asOf,
+      eventRecord.quarantineReason ?? undefined,
+      executor,
+    );
+  }
+
+  private async ensureAcceptedEventProjection(
+    eventRecord: TeslaTelemetryEventRecord,
+    executor?: RepositoryExecutor,
+  ) {
+    if (eventRecord.feedKind === "vehicle_state") {
+      const exists = await this.repository.hasVehicleStateSnapshotForSourceRef(
+        eventRecord.providerEventId,
+        executor,
+      );
+      if (!exists) {
+        await this.repository.saveVehicleStateSnapshot(
+          this.buildVehicleStateSnapshotFromRecord(eventRecord),
+          executor,
+        );
+      }
+      return;
+    }
+
+    const exists = await this.repository.hasPublicTelemetrySampleForSourceRef(
+      eventRecord.providerEventId,
+      executor,
+    );
+    if (!exists) {
+      await this.repository.savePublicTelemetrySample(
+        this.buildPublicTelemetrySampleFromRecord(eventRecord),
+        executor,
+      );
+    }
+  }
+
+  private async evaluateTrackerHealth(
     tracker: TelemetryTracker,
     asOf: string,
     latestIssueCode?: string,
-  ): TeslaTelemetryHealthRecord {
-    const delayThresholdMs = this.secondsFromEnv(
-      "TESLA_TELEMETRY_DELAY_THRESHOLD_SECONDS",
-      DEFAULT_DELAY_THRESHOLD_SECONDS,
-    );
-    const gapThresholdMs = this.secondsFromEnv(
-      "TESLA_TELEMETRY_GAP_THRESHOLD_SECONDS",
-      DEFAULT_GAP_THRESHOLD_SECONDS,
-    );
-    const holdThresholdMs = this.secondsFromEnv(
-      "TESLA_TELEMETRY_DISPATCH_HOLD_THRESHOLD_SECONDS",
-      DEFAULT_DISPATCH_HOLD_THRESHOLD_SECONDS,
-    );
-    const qualityGate = this.numberFromEnv(
-      "TESLA_TELEMETRY_QUALITY_GATE_SCORE",
-      DEFAULT_QUALITY_GATE_SCORE,
-    );
-    const incidentGate = this.numberFromEnv(
-      "TESLA_TELEMETRY_INCIDENT_SCORE",
-      DEFAULT_INCIDENT_SCORE,
-    );
+    executor?: RepositoryExecutor,
+  ): Promise<TeslaTelemetryHealthRecord> {
+    const delayThresholdMs = resolveTeslaTelemetryDelayThresholdMs();
+    const gapThresholdMs = resolveTeslaTelemetryGapThresholdMs();
+    const holdThresholdMs = resolveTeslaTelemetryDispatchHoldThresholdMs();
+    const qualityGate = resolveTeslaTelemetryQualityGateScore();
+    const incidentGate = resolveTeslaTelemetryIncidentScore();
 
     const issueCodes = new Set(tracker.issueCodes);
     if (latestIssueCode) {
@@ -442,7 +471,12 @@ export class TeslaTelemetryService {
           state = "gap_detected";
           tracker.backfillRequestedAt = asOf;
           backfillRequestedAt = asOf;
-          this.ensureBackfillQuery(tracker, missingSequences, asOf);
+          await this.ensureBackfillQuery(
+            tracker,
+            missingSequences,
+            asOf,
+            executor,
+          );
         } else {
           state = "backfill";
           issueCodes.add("BACKFILL_REQUIRED");
@@ -532,7 +566,7 @@ export class TeslaTelemetryService {
       evaluatedAt: asOf,
     };
 
-    void this.repository.upsertHealthRecord(record);
+    await this.repository.upsertHealthRecord(record, executor);
     if (dispatchHold) {
       this.recordAudit("telemetry.dispatch_hold", tracker.lastEventId, {
         feedKind: tracker.feedKind,
@@ -545,23 +579,27 @@ export class TeslaTelemetryService {
     return record;
   }
 
-  private ensureBackfillQuery(
+  private async ensureBackfillQuery(
     tracker: TelemetryTracker,
     missingSequences: number[],
     asOf: string,
+    executor?: RepositoryExecutor,
   ) {
     if (tracker.lastBackfillId) {
       const existing = this.repository
         .listBackfillQueries()
         .find((item) => item.backfillId === tracker.lastBackfillId);
       if (existing) {
-        void this.repository.upsertBackfillQuery({
-          ...existing,
-          to: asOf,
-          eventId: tracker.lastEventId,
-          status: "requested",
-          updatedAt: asOf,
-        });
+        await this.repository.upsertBackfillQuery(
+          {
+            ...existing,
+            to: asOf,
+            eventId: tracker.lastEventId,
+            status: "requested",
+            updatedAt: asOf,
+          },
+          executor,
+        );
         return;
       }
     }
@@ -583,7 +621,7 @@ export class TeslaTelemetryService {
       updatedAt: asOf,
     };
     tracker.lastBackfillId = query.backfillId;
-    void this.repository.upsertBackfillQuery(query);
+    await this.repository.upsertBackfillQuery(query, executor);
     this.recordAudit("telemetry.backfill_requested", tracker.lastEventId, {
       feedKind: tracker.feedKind,
       externalVehicleRef: tracker.externalVehicleRef,
@@ -628,6 +666,18 @@ export class TeslaTelemetryService {
     };
   }
 
+  private buildVehicleStateSnapshotFromRecord(
+    eventRecord: TeslaTelemetryEventRecord,
+  ): TeslaVehicleStateSnapshot {
+    return this.buildVehicleStateSnapshot(
+      eventRecord.payloadBody as Omit<
+        TeslaVehicleStateSnapshot,
+        "snapshotId" | "source"
+      >,
+      eventRecord,
+    );
+  }
+
   private buildPublicTelemetrySample(
     payload: Omit<TeslaPublicTelemetrySample, "sampleId" | "source">,
     eventRecord: TeslaTelemetryEventRecord,
@@ -641,6 +691,18 @@ export class TeslaTelemetryService {
       online: payload.online,
       source: this.buildSourceMetadata(eventRecord),
     };
+  }
+
+  private buildPublicTelemetrySampleFromRecord(
+    eventRecord: TeslaTelemetryEventRecord,
+  ): TeslaPublicTelemetrySample {
+    return this.buildPublicTelemetrySample(
+      eventRecord.payloadBody as Omit<
+        TeslaPublicTelemetrySample,
+        "sampleId" | "source"
+      >,
+      eventRecord,
+    );
   }
 
   private buildSourceMetadata(
@@ -781,19 +843,6 @@ export class TeslaTelemetryService {
       throw new Error("sequenceNo must be a positive integer.");
     }
     return value;
-  }
-
-  private secondsFromEnv(name: string, defaultValue: number) {
-    return this.numberFromEnv(name, defaultValue) * 1000;
-  }
-
-  private numberFromEnv(name: string, defaultValue: number) {
-    const raw = process.env[name];
-    if (!raw) {
-      return defaultValue;
-    }
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
   }
 
   private isFiniteNumber(value: unknown): value is number {

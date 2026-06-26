@@ -71,7 +71,7 @@ describe("TeslaTelemetryService", () => {
       { providerEventId: "veh-state-003", sequenceNo: 3 },
     ]);
 
-    const health = service.getProviderHealth({
+    const health = await service.getProviderHealth({
       feedKind: "vehicle_state",
       externalVehicleRef: "VIN-001",
       sessionId: "drive-session-1",
@@ -147,7 +147,7 @@ describe("TeslaTelemetryService", () => {
     );
 
     expect(
-      service.getProviderHealth({
+      await service.getProviderHealth({
         feedKind: "vehicle_state",
         externalVehicleRef: "VIN-004",
         sessionId: "drive-session-gap",
@@ -189,7 +189,7 @@ describe("TeslaTelemetryService", () => {
     expect(receipt.backfillRequired).toBe(true);
 
     expect(
-      service.getProviderHealth({
+      await service.getProviderHealth({
         feedKind: "vehicle_state",
         externalVehicleRef: "VIN-004",
         sessionId: "drive-session-gap",
@@ -268,7 +268,7 @@ describe("TeslaTelemetryService", () => {
     expect(receipt.backfillRequired).toBe(false);
 
     expect(
-      service.getProviderHealth({
+      await service.getProviderHealth({
         feedKind: "vehicle_state",
         externalVehicleRef: "VIN-005",
         sessionId: "drive-session-newest-gap",
@@ -286,7 +286,7 @@ describe("TeslaTelemetryService", () => {
     expect(service.listBackfillQueries()).toEqual([]);
 
     expect(
-      service.getProviderHealth({
+      await service.getProviderHealth({
         feedKind: "vehicle_state",
         externalVehicleRef: "VIN-005",
         sessionId: "drive-session-newest-gap",
@@ -333,7 +333,7 @@ describe("TeslaTelemetryService", () => {
       },
     );
 
-    const health = service.getProviderHealth({
+    const health = await service.getProviderHealth({
       feedKind: "public_telemetry",
       externalVehicleRef: "VIN-002",
       sessionId: "public-session-1",
@@ -426,5 +426,55 @@ describe("TeslaTelemetryService", () => {
       providerHealthState: "healthy",
       dispatchHold: false,
     });
+  });
+
+  it("repairs missing projection and health rows when a retry hits an existing telemetry event", async () => {
+    const { repository, service } = buildService();
+
+    const payload = {
+      vehicleId: "veh-av-007",
+      externalVehicleRef: "VIN-007",
+      capturedAt: "2026-06-26T14:00:00.000Z",
+      location: { lat: 25.07, lng: 121.57 },
+      speedMps: 6,
+      headingDeg: 110,
+      shiftState: "D" as const,
+      autonomyState: "fsd_engaged" as const,
+      batteryLevelPct: 66,
+      batteryRangeKm: 240,
+      charging: false,
+      online: true,
+    };
+    const context = {
+      eventId: "veh-state-repair-001",
+      sequenceNo: 1,
+      schemaVersion: "tesla.vehicle-state.v1",
+      sessionId: "drive-session-repair",
+      receivedAt: "2026-06-26T14:00:00.000Z",
+    };
+
+    await service.ingestVehicleStateSnapshot(payload, context);
+
+    (repository as any).vehicleStateSnapshots.clear();
+    (repository as any).healthRecords.clear();
+
+    const receipt = await service.ingestVehicleStateSnapshot(payload, context);
+
+    expect(receipt).toMatchObject({
+      status: "duplicate",
+      duplicate: true,
+      providerHealthState: "healthy",
+      dispatchHold: false,
+    });
+    expect(
+      await repository.hasVehicleStateSnapshotForSourceRef("veh-state-repair-001"),
+    ).toBe(true);
+    expect(repository.listHealthRecords()).toEqual([
+      expect.objectContaining({
+        externalVehicleRef: "VIN-007",
+        sessionId: "drive-session-repair",
+        healthState: "healthy",
+      }),
+    ]);
   });
 });

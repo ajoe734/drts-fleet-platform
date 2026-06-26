@@ -205,6 +205,66 @@ describe("SandboxDispatchGateService", () => {
     expect(decision.hardReasonCodes).toContain("TELEMETRY_STALE");
   });
 
+  it("uses the telemetry service quality gate env override when evaluating dispatch", async () => {
+    vi.stubEnv("TESLA_TELEMETRY_QUALITY_GATE_SCORE", "0.6");
+    try {
+      const gate = new SandboxDispatchGateService();
+
+      const decision = await gate.evaluateDispatch({
+        orderId: "order-av-quality-override-001",
+        vehicleId: "veh-av-quality-override-001",
+        sandboxProgramId: "sandbox-program-001",
+        policyVersion: "phase2-tesla-004",
+        bookingWindow: {
+          start: "2026-06-26T14:00:00.000Z",
+          end: "2026-06-26T15:00:00.000Z",
+        },
+        entitlement: { active: true },
+        vehicleEnrollment: {
+          status: "active",
+          approvedAreaIds: ["odd-downtown-core"],
+          approvedRouteIds: ["route-downtown-loop"],
+        },
+        recorder: { healthy: true },
+        regulatory: { approvalFresh: true, vehicleCertified: true },
+        providerCapabilities: {
+          av_dispatch: true,
+          telemetry_stream: true,
+          regulatory_event_feed: true,
+          evidence_recorder: true,
+          odd_geofence: true,
+          minimal_risk_condition: true,
+        },
+        telemetry: {
+          stale: false,
+          minimalRiskConditionActive: false,
+          socPercent: 82,
+          qualityScore: 0.7,
+          providerHealthState: "healthy",
+          dispatchHold: false,
+        },
+        operatingArea: {
+          inBounds: true,
+          boundaryRisk: false,
+          matchedAreaIds: ["odd-downtown-core"],
+        },
+        routeContainment: {
+          contained: true,
+          matchedRouteIds: ["route-downtown-loop"],
+        },
+        safetyOperator: {
+          required: false,
+          available: false,
+        },
+      });
+
+      expect(decision.decision).toBe("allow");
+      expect(decision.hardReasonCodes).not.toContain("TELEMETRY_STALE");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("does not synthesize healthy provider, regulatory, or telemetry facts for assignment gating", async () => {
     const governanceService = new SandboxGovernanceService();
     const gate = new SandboxDispatchGateService(undefined, governanceService);

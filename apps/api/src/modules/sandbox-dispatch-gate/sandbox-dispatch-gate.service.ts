@@ -13,6 +13,7 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
+import { resolveTeslaTelemetryQualityGateScore } from "../tesla-telemetry/tesla-telemetry.policy";
 import { VehicleEvidenceService } from "../vehicle-evidence/vehicle-evidence.service";
 import { SandboxDispatchGateRepository } from "./sandbox-dispatch-gate.repository";
 import type {
@@ -24,7 +25,6 @@ import { SANDBOX_DISPATCH_ERROR_CODE_MAP } from "./sandbox-dispatch-gate.types";
 
 const DEFAULT_MIN_SOC_PERCENT = 20;
 const DEFAULT_MAX_ODOMETER_KM = 250_000;
-const DEFAULT_TELEMETRY_QUALITY_GATE = 0.8;
 const REQUIRED_PROVIDER_CAPABILITIES = [
   "av_dispatch",
   "telemetry_stream",
@@ -396,6 +396,7 @@ export class SandboxDispatchGateService {
     };
     requestedAt: string;
   } {
+    const telemetryQualityGate = resolveTeslaTelemetryQualityGateScore();
     return {
       ...input,
       dispatchJobId: input.dispatchJobId ?? null,
@@ -420,8 +421,7 @@ export class SandboxDispatchGateService {
         socPercent: input.telemetry?.socPercent ?? null,
         currentTripCount: input.telemetry?.currentTripCount ?? null,
         odometerKm: input.telemetry?.odometerKm ?? null,
-        qualityScore:
-          input.telemetry?.qualityScore ?? DEFAULT_TELEMETRY_QUALITY_GATE,
+        qualityScore: input.telemetry?.qualityScore ?? telemetryQualityGate,
         providerHealthState: input.telemetry?.providerHealthState ?? null,
         dispatchHold: input.telemetry?.dispatchHold === true,
       },
@@ -518,7 +518,7 @@ export class SandboxDispatchGateService {
     }
     if (
       input.telemetry.dispatchHold ||
-      input.telemetry.qualityScore < DEFAULT_TELEMETRY_QUALITY_GATE ||
+      input.telemetry.qualityScore < resolveTeslaTelemetryQualityGateScore() ||
       input.telemetry.providerHealthState === "incomplete_hold" ||
       input.telemetry.providerHealthState === "regulator_data_incident"
     ) {

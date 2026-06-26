@@ -114,22 +114,15 @@ type PgErrorWithCode = Error & {
 @Injectable()
 export class TeslaTelemetryRepository {
   private readonly events = new Map<string, TeslaTelemetryEventRecord>();
-
-  private readonly healthRecords = new Map<
-    string,
-    TeslaTelemetryHealthRecord
-  >();
-
+  private readonly healthRecords = new Map<string, TeslaTelemetryHealthRecord>();
   private readonly backfillQueries = new Map<
     string,
     TeslaTelemetryBackfillQuery
   >();
-
   private readonly vehicleStateSnapshots = new Map<
     string,
     TeslaVehicleStateSnapshot
   >();
-
   private readonly publicTelemetrySamples = new Map<
     string,
     TeslaPublicTelemetrySample
@@ -139,6 +132,27 @@ export class TeslaTelemetryRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async withTransaction<T>(
+    work: (executor?: QueryExecutor) => Promise<T>,
+  ): Promise<T> {
+    if (!this.isEnabled()) {
+      return work(undefined);
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async findEventByProviderRef(
@@ -332,10 +346,7 @@ export class TeslaTelemetryRepository {
         executor,
       );
       if (existingByProviderRef) {
-        return {
-          eventRecord: existingByProviderRef,
-          inserted: false,
-        };
+        return { eventRecord: existingByProviderRef, inserted: false };
       }
 
       const existingBySequence = await this.findEventBySequence(
@@ -347,10 +358,7 @@ export class TeslaTelemetryRepository {
         executor,
       );
       if (existingBySequence) {
-        return {
-          eventRecord: existingBySequence,
-          inserted: false,
-        };
+        return { eventRecord: existingBySequence, inserted: false };
       }
 
       return {
@@ -376,10 +384,7 @@ export class TeslaTelemetryRepository {
         executor,
       );
       if (existingByProviderRef) {
-        return {
-          eventRecord: existingByProviderRef,
-          inserted: false,
-        };
+        return { eventRecord: existingByProviderRef, inserted: false };
       }
 
       const existingBySequence = await this.findEventBySequence(
@@ -394,10 +399,7 @@ export class TeslaTelemetryRepository {
         throw error;
       }
 
-      return {
-        eventRecord: existingBySequence,
-        inserted: false,
-      };
+      return { eventRecord: existingBySequence, inserted: false };
     }
   }
 
@@ -469,6 +471,29 @@ export class TeslaTelemetryRepository {
     );
   }
 
+  async hasVehicleStateSnapshotForSourceRef(
+    sourceRef: string,
+    executor?: QueryExecutor,
+  ) {
+    if (!this.isEnabled()) {
+      return [...this.vehicleStateSnapshots.values()].some(
+        (snapshot) => snapshot.source.sourceRef === sourceRef,
+      );
+    }
+
+    const result = await (executor ?? this.databaseService!).query(
+      `
+        SELECT 1
+        FROM av_sandbox.tesla_vehicle_state_snapshots
+        WHERE source_ref = $1
+        LIMIT 1
+      `,
+      [sourceRef],
+    );
+
+    return result.rows.length > 0;
+  }
+
   async savePublicTelemetrySample(
     sample: TeslaPublicTelemetrySample,
     executor?: QueryExecutor,
@@ -520,6 +545,29 @@ export class TeslaTelemetryRepository {
         sample.source.schemaVersion,
       ],
     );
+  }
+
+  async hasPublicTelemetrySampleForSourceRef(
+    sourceRef: string,
+    executor?: QueryExecutor,
+  ) {
+    if (!this.isEnabled()) {
+      return [...this.publicTelemetrySamples.values()].some(
+        (sample) => sample.source.sourceRef === sourceRef,
+      );
+    }
+
+    const result = await (executor ?? this.databaseService!).query(
+      `
+        SELECT 1
+        FROM av_sandbox.tesla_public_telemetry_samples
+        WHERE source_ref = $1
+        LIMIT 1
+      `,
+      [sourceRef],
+    );
+
+    return result.rows.length > 0;
   }
 
   async upsertHealthRecord(
