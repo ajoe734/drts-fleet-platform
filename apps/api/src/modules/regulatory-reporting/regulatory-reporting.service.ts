@@ -321,9 +321,9 @@ export class RegulatoryReportingService {
     }
 
     const actorRoles = new Set(actor.roles);
-    const canApprove =
-      actor.roleFamilies.includes("platform") ||
-      notification.approverRoleCodes.some((roleCode) => actorRoles.has(roleCode));
+    const canApprove = notification.approverRoleCodes.some((roleCode) =>
+      actorRoles.has(roleCode),
+    );
     if (!canApprove) {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,

@@ -171,6 +171,46 @@ describe("RegulatoryReportingService", () => {
     );
   });
 
+  it("rejects review approval when roleFamilies are spoofed without an approver role code", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-003",
+        eventType: "collision",
+        severity: "incident",
+        reportVersionKind: "initial",
+        jurisdiction: "CA-CPUC",
+        vehicleId: "veh-reg-003",
+        eventOccurredAt: "2026-06-26T01:00:00.000Z",
+        summary: "Spoofed roleFamilies must not bypass approver roles.",
+      },
+      createIdentity(),
+      "req-reg-create-003",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for approval." },
+      createIdentity(),
+      "req-reg-review-003",
+    );
+
+    expect(() =>
+      service.approveReview(
+        draft.notificationId,
+        { note: "Spoofed platform family should fail." },
+        createIdentity({
+          actorId: "ops-user-approve-003",
+          roles: ["dispatcher"],
+          roleFamilies: ["ops", "platform"],
+        }),
+        "req-reg-approve-003",
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
   it("does not raise overdue when a backfilled submittedAt beats the deadline", () => {
     let now = new Date("2026-06-26T07:30:00.000Z");
     const auditNotificationService = new AuditNotificationService();
