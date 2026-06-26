@@ -5,9 +5,9 @@
 **Current Sidecar Owner:** `Codex`  
 **Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer:** `Codex2` / `Codex`  
-**Phase:** `phase2-tesla-fsd-sandbox-202606`  
-**Last Revised:** `2026-06-26T04:26Z (UTC)`  
-**Status:** `in_progress` (this sidecar is being prepared while parent `P2-TESLA-003` is already in `review`)
+**Phase:** `phase2-tesla-fsd-sandbox-202606`<br>
+**Last Revised:** `2026-06-26T04:27Z (UTC)`<br>
+**Status:** `review_approved` (packet accepted by `Codex2`; owner closeout remains branch/push/status finalization only)
 
 ---
 
@@ -36,23 +36,23 @@
 
 | Task | Relationship to `Codex` | State | Why it matters here |
 | --- | --- | --- | --- |
-| `P2-TESLA-003-SIDECAR-ACCEPTANCE` | owner | `in_progress` | 本次 dispatch 的直接工作項 |
-| `P2-TESLA-003` | reviewer | `review` | 本 packet 要支援的 parent review 目標 |
+| `P2-TESLA-003-SIDECAR-ACCEPTANCE` | owner | `review_approved` | packet 已通過 reviewer，等待 owner 做正式 closeout |
+| `P2-TESLA-003` | reviewer | `review_approved` | parent task 也已完成 reviewer gate，本 packet 保留其 acceptance/dependency 證據 |
 | `P2-TESLA-004` | reviewer | `todo` | 尚未進入待回應狀態，不納入本 packet |
 
 ### Parent task machine-truth state
 
 以 `AI_NAME=Codex scripts/ai-status.sh show P2-TESLA-003` 為準：
 
-- `status=review`
+- `status=review_approved`
 - `owner=Codex2`
 - `reviewer=Codex`
 - `depends_on=["P2-TESLA-002"]`
-- `last_update=2026-06-26T04:20:15Z`
+- `last_update=2026-06-26T04:26:28Z`
 - `acceptance[]`:
   - `Acceptance tests 04 §7 #1-3`
   - `#6 pass (valid signed accepted / invalid rejected+audited / duplicate idempotent / unknown schema quarantined raw-preserved); receipt returned; canonical event store populated; integration green`
-- `next` 已明確指出 parent closeout branch 為 `codex2/p2-tesla-003-closeout`，closeout commit 為 `7074bcf5c75f`，PR `#895` 已開到 `dev`，且 owner 已跑過：
+- `next` / `review_notes_zh` 顯示 parent 已審查通過：review target 為 `codex2/p2-tesla-003-closeout` 上的 closeout commit `7074bcf5c75f`，PR `#895` 已開到 `dev`，且 reviewer 已在 detached review worktree 重跑：
   - `pnpm --filter @drts/api lint`
   - `pnpm --filter @drts/api test -- --runInBand`
   - `python3 scripts/git/check_commit_trailers.py --base origin/dev --head HEAD`
@@ -61,7 +61,7 @@
 
 以 `AI_NAME=Codex scripts/ai-status.sh show P2-TESLA-003-SIDECAR-ACCEPTANCE` 為準：
 
-- `status=in_progress`
+- `status=review_approved`
 - `owner=Codex`
 - `reviewer=Codex2`
 - `depends_on=["P2-TESLA-002"]`
