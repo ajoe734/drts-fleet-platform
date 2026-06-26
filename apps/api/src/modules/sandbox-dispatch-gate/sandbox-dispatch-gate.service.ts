@@ -83,6 +83,11 @@ export class SandboxDispatchGateService {
   private messageCatalogEntries = BASELINE_DISCLOSURE_MESSAGE_CATALOG.map(
     (entry) => ({ ...entry }),
   );
+  private authoritativeMessageCatalogKeys = new Set<string>(
+    BASELINE_DISCLOSURE_MESSAGE_CATALOG.map((entry) =>
+      this.messageCatalogKey(entry.messageCode, entry.locale),
+    ),
+  );
   private disclosureCacheLoaded = false;
 
   constructor(
@@ -165,6 +170,9 @@ export class SandboxDispatchGateService {
         nextEntry,
       );
     }
+    this.authoritativeMessageCatalogKeys.add(
+      this.messageCatalogKey(nextEntry.messageCode, nextEntry.locale),
+    );
     return this.cloneMessageCatalogEntry(nextEntry);
   }
 
@@ -212,9 +220,7 @@ export class SandboxDispatchGateService {
       channel: input.channel,
       policyId: policy.policyId,
       policyVersion: policy.policyVersion,
-      messageCode: this.messageCatalogEntries.some(
-        (entry) => entry.messageCode === channelRule.messageCode,
-      )
+      messageCode: this.hasAuthoritativeMessageCode(channelRule.messageCode)
         ? channelRule.messageCode
         : null,
       requiresAcknowledgement: channelRule.requiresAcknowledgement,
@@ -1127,6 +1133,11 @@ export class SandboxDispatchGateService {
     this.disclosurePolicies = policies.map((policy) =>
       this.clonePassengerDisclosurePolicy(policy),
     );
+    this.authoritativeMessageCatalogKeys = new Set(
+      catalogEntries.map((entry) =>
+        this.messageCatalogKey(entry.messageCode, entry.locale),
+      ),
+    );
     this.messageCatalogEntries =
       this.mergeBaselineCatalogEntries(catalogEntries);
     this.acknowledgementRecords = acknowledgements.map((record) =>
@@ -1224,11 +1235,42 @@ export class SandboxDispatchGateService {
   ): Promise<boolean> {
     await this.ensureDisclosureCacheLoaded();
     const normalizedLocale = locale?.trim() || null;
-    return this.messageCatalogEntries.some(
-      (entry) =>
+    if (!this.usesPersistedDisclosureCatalog()) {
+      return this.messageCatalogEntries.some(
+        (entry) =>
+          entry.messageCode === messageCode &&
+          (normalizedLocale === null || entry.locale === normalizedLocale),
+      );
+    }
+    if (normalizedLocale !== null) {
+      return this.authoritativeMessageCatalogKeys.has(
+        this.messageCatalogKey(messageCode, normalizedLocale),
+      );
+    }
+    return this.hasAuthoritativeMessageCode(messageCode);
+  }
+
+  private hasAuthoritativeMessageCode(messageCode: string) {
+    if (!this.usesPersistedDisclosureCatalog()) {
+      return this.messageCatalogEntries.some(
+        (entry) => entry.messageCode === messageCode,
+      );
+    }
+    for (const entry of this.messageCatalogEntries) {
+      if (
         entry.messageCode === messageCode &&
-        (normalizedLocale === null || entry.locale === normalizedLocale),
-    );
+        this.authoritativeMessageCatalogKeys.has(
+          this.messageCatalogKey(entry.messageCode, entry.locale),
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private usesPersistedDisclosureCatalog() {
+    return this.repository?.isEnabled() ?? false;
   }
 
   private clonePassengerDisclosurePolicy(

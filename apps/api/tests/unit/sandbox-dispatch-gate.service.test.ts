@@ -79,6 +79,54 @@ describe("SandboxDispatchGateService", () => {
       ]);
   });
 
+  it("fails closed when a policy references a baseline disclosure message that is missing from the persisted catalog", async () => {
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      {
+        isEnabled: vi.fn(() => true),
+        listPassengerDisclosurePolicies: vi.fn(async () => [
+          {
+            policyId: "policy-test-av-001",
+            policyVersion: "test-v1",
+            tenantId: "tenant-demo-001",
+            businessDispatchSubtype: "enterprise_dispatch",
+            partnerEntrySlug: null,
+            active: true,
+            channelRules: [
+              {
+                channel: "tenant_portal",
+                messageCode: "sandbox_passenger_disclosure.av_program_notice",
+                requiresAcknowledgement: true,
+                acknowledgementMode: "per_booking_checkbox",
+              },
+            ],
+            createdAt: "2026-06-26T00:00:00.000Z",
+            updatedAt: "2026-06-26T00:00:00.000Z",
+          },
+        ]),
+        listPassengerDisclosureMessageCatalogEntries: vi.fn(async () => []),
+        listPassengerAcknowledgements: vi.fn(async () => []),
+      } as never,
+    );
+
+    await expect(
+      gate.resolvePassengerDisclosureForBooking({
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        channel: "tenant_portal",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        policyId: "policy-test-av-001",
+        messageCode: null,
+        requiresAcknowledgement: true,
+        acknowledgementMode: "per_booking_checkbox",
+      }),
+    );
+  });
+
   it("blocks dispatch when vehicle evidence reports a required unhealthy recorder", async () => {
     const vehicleEvidenceService = new VehicleEvidenceService();
     const recorder = buildMockRecorderFixture();
