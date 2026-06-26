@@ -273,9 +273,18 @@ export class SandboxGovernanceService implements OnModuleInit {
     }
 
     const next = command.items.map((item) => this.validateOperatingArea(item));
-    ensureUnique(next.map((item) => item.areaId), "DUPLICATE_OPERATING_AREA_ID");
+    ensureUniqueVersionedRecords(
+      next,
+      (item) => item.areaId,
+      "DUPLICATE_OPERATING_AREA_VERSION",
+    );
+    assertNonOverlappingEffectiveWindows(
+      next,
+      (item) => item.areaId,
+      "OVERLAPPING_OPERATING_AREA_EFFECTIVE_WINDOW",
+    );
     next.forEach((item) => validateSchedules(item.schedules, item.areaId));
-    this.operatingAreas = sortByUpdatedAt(next);
+    this.operatingAreas = sortVersionedRecords(next, (item) => item.areaId);
     this.persist(
       () => this.repository?.replaceOperatingAreas(this.operatingAreas),
       "replace areas",
@@ -310,9 +319,18 @@ export class SandboxGovernanceService implements OnModuleInit {
 
     const knownAreaIds = new Set(this.operatingAreas.map((item) => item.areaId));
     const next = command.items.map((item) => this.validateRoute(item, knownAreaIds));
-    ensureUnique(next.map((item) => item.routeId), "DUPLICATE_APPROVED_ROUTE_ID");
+    ensureUniqueVersionedRecords(
+      next,
+      (item) => item.routeId,
+      "DUPLICATE_APPROVED_ROUTE_VERSION",
+    );
+    assertNonOverlappingEffectiveWindows(
+      next,
+      (item) => item.routeId,
+      "OVERLAPPING_APPROVED_ROUTE_EFFECTIVE_WINDOW",
+    );
     next.forEach((item) => validateSchedules(item.schedules, item.routeId));
-    this.routes = sortByUpdatedAt(next);
+    this.routes = sortVersionedRecords(next, (item) => item.routeId);
     this.persist(() => this.repository?.replaceRoutes(this.routes), "replace routes");
     this.recordAudit(
       "sandbox_governance.approved_routes_updated",
@@ -342,11 +360,25 @@ export class SandboxGovernanceService implements OnModuleInit {
       );
     }
 
-    const next = command.items.map((item) =>
-      this.validateVehicleEnrollment(item, this.vehicleEnrollments),
+    const next = command.items.map((item) => this.validateVehicleEnrollment(item));
+    ensureUniqueVersionedRecords(
+      next,
+      (item) => item.enrollmentId,
+      "DUPLICATE_VEHICLE_ENROLLMENT_VERSION",
     );
-    ensureUnique(next.map((item) => item.enrollmentId), "DUPLICATE_VEHICLE_ENROLLMENT_ID");
-    this.vehicleEnrollments = sortByUpdatedAt(next);
+    assertNonOverlappingEffectiveWindows(
+      next,
+      (item) => item.enrollmentId,
+      "OVERLAPPING_VEHICLE_ENROLLMENT_EFFECTIVE_WINDOW",
+    );
+    assertVersionedStatusTransitions(
+      next,
+      this.vehicleEnrollments,
+      (item) => item.enrollmentId,
+      VEHICLE_STATUS_TRANSITIONS,
+      "INVALID_VEHICLE_ENROLLMENT_TRANSITION",
+    );
+    this.vehicleEnrollments = sortVersionedRecords(next, (item) => item.enrollmentId);
     this.persist(
       () => this.repository?.replaceVehicleEnrollments(this.vehicleEnrollments),
       "replace vehicle enrollments",
@@ -380,16 +412,29 @@ export class SandboxGovernanceService implements OnModuleInit {
     }
 
     const next = command.items.map((item) =>
-      this.validateSafetyOperatorQualification(
-        item,
-        this.safetyOperatorQualifications,
-      ),
+      this.validateSafetyOperatorQualification(item),
     );
-    ensureUnique(
-      next.map((item) => item.qualificationId),
-      "DUPLICATE_SAFETY_OPERATOR_QUALIFICATION_ID",
+    ensureUniqueVersionedRecords(
+      next,
+      (item) => item.qualificationId,
+      "DUPLICATE_SAFETY_OPERATOR_QUALIFICATION_VERSION",
     );
-    this.safetyOperatorQualifications = sortByUpdatedAt(next);
+    assertNonOverlappingEffectiveWindows(
+      next,
+      (item) => item.qualificationId,
+      "OVERLAPPING_SAFETY_OPERATOR_QUALIFICATION_EFFECTIVE_WINDOW",
+    );
+    assertVersionedStatusTransitions(
+      next,
+      this.safetyOperatorQualifications,
+      (item) => item.qualificationId,
+      OPERATOR_STATUS_TRANSITIONS,
+      "INVALID_SAFETY_OPERATOR_QUALIFICATION_TRANSITION",
+    );
+    this.safetyOperatorQualifications = sortVersionedRecords(
+      next,
+      (item) => item.qualificationId,
+    );
     this.persist(
       () =>
         this.repository?.replaceSafetyOperatorQualifications(
@@ -504,6 +549,7 @@ export class SandboxGovernanceService implements OnModuleInit {
           item.active &&
           pointInMultiPolygon(point.lng, point.lat, item.geometry),
       )
+      .filter(keepLatestVersionById((item) => item.areaId))
       .map<ApprovedAreaMatchRecord>((item) => ({
         areaId: item.areaId,
         areaKind: item.areaKind,
@@ -525,6 +571,7 @@ export class SandboxGovernanceService implements OnModuleInit {
           item.active &&
           lineContainedInRoute(candidatePath, item.geometry, toleranceMeters),
       )
+      .filter(keepLatestVersionById((item) => item.routeId))
       .map((item) => item.routeId);
   }
 
@@ -559,10 +606,7 @@ export class SandboxGovernanceService implements OnModuleInit {
     return clone(item);
   }
 
-  private validateVehicleEnrollment(
-    item: VehicleEnrollmentRecord,
-    currentItems: readonly VehicleEnrollmentRecord[],
-  ) {
+  private validateVehicleEnrollment(item: VehicleEnrollmentRecord) {
     validateText(item.enrollmentId, "enrollmentId");
     validateText(item.vehicleId, "vehicleId");
     validateText(item.providerCode, "providerCode");
@@ -573,14 +617,6 @@ export class SandboxGovernanceService implements OnModuleInit {
         "Vehicle enrollment status is invalid.",
       );
     }
-    this.assertStatusTransition(
-      currentItems.find((entry) => entry.enrollmentId === item.enrollmentId)
-        ?.status ?? null,
-      item.status,
-      VEHICLE_STATUS_TRANSITIONS,
-      "INVALID_VEHICLE_ENROLLMENT_TRANSITION",
-      item.enrollmentId,
-    );
     validateEffectiveDates(
       item.effectiveFrom,
       item.effectiveUntil,
@@ -591,7 +627,6 @@ export class SandboxGovernanceService implements OnModuleInit {
 
   private validateSafetyOperatorQualification(
     item: SafetyOperatorQualificationRecord,
-    currentItems: readonly SafetyOperatorQualificationRecord[],
   ) {
     validateText(item.qualificationId, "qualificationId");
     validateText(item.safetyOperatorId, "safetyOperatorId");
@@ -603,15 +638,6 @@ export class SandboxGovernanceService implements OnModuleInit {
         "Safety operator qualification status is invalid.",
       );
     }
-    this.assertStatusTransition(
-      currentItems.find(
-        (entry) => entry.qualificationId === item.qualificationId,
-      )?.status ?? null,
-      item.status,
-      OPERATOR_STATUS_TRANSITIONS,
-      "INVALID_SAFETY_OPERATOR_QUALIFICATION_TRANSITION",
-      item.qualificationId,
-    );
     validateEffectiveDates(
       item.effectiveFrom,
       item.effectiveUntil,
@@ -850,6 +876,101 @@ function ensureUnique(values: string[], errorCode: string) {
   }
 }
 
+function ensureUniqueVersionedRecords<T extends { version: number }>(
+  values: readonly T[],
+  idOf: (value: T) => string,
+  errorCode: string,
+) {
+  ensureUnique(
+    values.map((value) => `${idOf(value)}::${value.version}`),
+    errorCode,
+  );
+}
+
+function assertNonOverlappingEffectiveWindows<
+  T extends { effectiveFrom: string; effectiveUntil: string | null; version: number },
+>(values: readonly T[], idOf: (value: T) => string, errorCode: string) {
+  const groups = new Map<string, T[]>();
+  for (const value of values) {
+    const recordId = idOf(value);
+    const existing = groups.get(recordId);
+    if (existing) {
+      existing.push(value);
+    } else {
+      groups.set(recordId, [value]);
+    }
+  }
+
+  for (const [recordId, records] of groups) {
+    const sorted = [...records].sort(
+      (left, right) =>
+        Date.parse(left.effectiveFrom) - Date.parse(right.effectiveFrom) ||
+        left.version - right.version,
+    );
+    for (let index = 0; index < sorted.length - 1; index += 1) {
+      const current = sorted[index]!;
+      const next = sorted[index + 1]!;
+      if (
+        current.effectiveUntil === null ||
+        Date.parse(current.effectiveUntil) > Date.parse(next.effectiveFrom)
+      ) {
+        throw new ApiRequestError(
+          400,
+          errorCode,
+          `Record ${recordId} has overlapping effective windows.`,
+        );
+      }
+    }
+  }
+}
+
+function assertVersionedStatusTransitions<
+  T extends { version: number; status: string; effectiveFrom: string },
+>(
+  nextItems: readonly T[],
+  currentItems: readonly T[],
+  idOf: (value: T) => string,
+  allowed: Record<string, readonly string[]>,
+  errorCode: string,
+) {
+  const currentGroups = groupVersionedRecords(currentItems, idOf);
+  const nextGroups = groupVersionedRecords(nextItems, idOf);
+
+  for (const [recordId, records] of nextGroups) {
+    const currentGroup = currentGroups.get(recordId) ?? [];
+    const sorted = [...records].sort(
+      (left, right) =>
+        left.version - right.version ||
+        Date.parse(left.effectiveFrom) - Date.parse(right.effectiveFrom),
+    );
+
+    for (let index = 0; index < sorted.length; index += 1) {
+      const item = sorted[index]!;
+      const exactCurrent = currentGroup.find(
+        (current) => current.version === item.version,
+      );
+      const previousInNext = index > 0 ? sorted[index - 1]!.status : null;
+      const previousInCurrent = [...currentGroup]
+        .filter((current) => current.version < item.version)
+        .sort((left, right) => right.version - left.version)[0]?.status;
+      const previousStatus =
+        exactCurrent?.status ?? previousInNext ?? previousInCurrent ?? null;
+
+      if (!previousStatus) {
+        continue;
+      }
+      if ((allowed[previousStatus] ?? []).includes(item.status)) {
+        continue;
+      }
+      throw new ApiRequestError(
+        400,
+        errorCode,
+        `Record ${recordId} cannot transition from ${previousStatus} to ${item.status}.`,
+      );
+    }
+  }
+}
+
 function isEffective(
   effectiveFrom: string,
   effectiveUntil: string | null,
@@ -860,6 +981,37 @@ function isEffective(
     Date.parse(effectiveFrom) <= at &&
     (effectiveUntil === null || Date.parse(effectiveUntil) > at)
   );
+}
+
+function keepLatestVersionById<T extends { version: number }>(
+  idOf: (value: T) => string,
+) {
+  const seen = new Set<string>();
+  return (value: T) => {
+    const recordId = idOf(value);
+    if (seen.has(recordId)) {
+      return false;
+    }
+    seen.add(recordId);
+    return true;
+  };
+}
+
+function groupVersionedRecords<T extends { version: number }>(
+  values: readonly T[],
+  idOf: (value: T) => string,
+) {
+  const groups = new Map<string, T[]>();
+  for (const value of values) {
+    const recordId = idOf(value);
+    const existing = groups.get(recordId);
+    if (existing) {
+      existing.push(value);
+    } else {
+      groups.set(recordId, [value]);
+    }
+  }
+  return groups;
 }
 
 function pointInMultiPolygon(
@@ -959,8 +1111,16 @@ function latToMeters(lat: number) {
   return lat * 110_540;
 }
 
-function sortByUpdatedAt<T extends { updatedAt: string }>(items: T[]) {
-  return [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+function sortVersionedRecords<T extends { updatedAt: string; version: number }>(
+  items: T[],
+  idOf: (value: T) => string,
+) {
+  return [...items].sort(
+    (left, right) =>
+      idOf(left).localeCompare(idOf(right)) ||
+      right.version - left.version ||
+      right.updatedAt.localeCompare(left.updatedAt),
+  );
 }
 
 function clone<T>(value: T): T {

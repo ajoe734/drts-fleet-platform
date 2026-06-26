@@ -8,6 +8,8 @@ import type {
   VehicleEnrollmentRecord,
 } from "@drts/contracts";
 
+import type { PoolClient } from "pg";
+
 import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
@@ -66,7 +68,6 @@ export class SandboxGovernanceRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`DELETE FROM av_sandbox.approved_operating_areas`);
 
       for (const item of items) {
         await client.query(
@@ -98,6 +99,19 @@ export class SandboxGovernanceRepository {
               $12,
               $13::jsonb
             )
+            ON CONFLICT (area_id, version) DO UPDATE SET
+              sandbox_program_id = EXCLUDED.sandbox_program_id,
+              area_kind = EXCLUDED.area_kind,
+              area_name = EXCLUDED.area_name,
+              active = EXCLUDED.active,
+              effective_from = EXCLUDED.effective_from,
+              effective_until = EXCLUDED.effective_until,
+              operating_area = EXCLUDED.operating_area,
+              pickup_dropoff_zone = EXCLUDED.pickup_dropoff_zone,
+              schedules = EXCLUDED.schedules,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
           `,
           [
             item.areaId,
@@ -117,6 +131,13 @@ export class SandboxGovernanceRepository {
         );
       }
 
+      await this.deleteMissingVersionedRows(
+        client,
+        "av_sandbox.approved_operating_areas",
+        "area_id",
+        items.map((item) => [item.areaId, item.version]),
+      );
+
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -134,7 +155,6 @@ export class SandboxGovernanceRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`DELETE FROM av_sandbox.approved_routes`);
 
       for (const item of items) {
         await client.query(
@@ -161,6 +181,18 @@ export class SandboxGovernanceRepository {
               $12,
               $13::jsonb
             )
+            ON CONFLICT (route_id, version) DO UPDATE SET
+              sandbox_program_id = EXCLUDED.sandbox_program_id,
+              route_name = EXCLUDED.route_name,
+              area_id = EXCLUDED.area_id,
+              active = EXCLUDED.active,
+              effective_from = EXCLUDED.effective_from,
+              effective_until = EXCLUDED.effective_until,
+              route_geometry = EXCLUDED.route_geometry,
+              schedules = EXCLUDED.schedules,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
           `,
           [
             item.routeId,
@@ -179,6 +211,13 @@ export class SandboxGovernanceRepository {
           ],
         );
       }
+
+      await this.deleteMissingVersionedRows(
+        client,
+        "av_sandbox.approved_routes",
+        "route_id",
+        items.map((item) => [item.routeId, item.version]),
+      );
 
       await client.query("COMMIT");
     } catch (error) {
@@ -295,7 +334,7 @@ export class SandboxGovernanceRepository {
 
     const result = await this.databaseService!.query<AreaMatchRow>(
       `
-        SELECT area_id, area_kind, area_name
+        SELECT DISTINCT ON (area_id) area_id, area_kind, area_name
         FROM av_sandbox.approved_operating_areas
         WHERE sandbox_program_id = $1
           AND active = true
@@ -309,6 +348,7 @@ export class SandboxGovernanceRepository {
             END,
             ST_SetSRID(ST_MakePoint($3, $4), 4326)
           )
+        ORDER BY area_id, version DESC, effective_from DESC, updated_at DESC
       `,
       [sandboxProgramId, asOf, lng, lat],
     );
@@ -328,7 +368,7 @@ export class SandboxGovernanceRepository {
 
     const result = await this.databaseService!.query<RouteMatchRow>(
       `
-        SELECT route_id
+        SELECT DISTINCT ON (route_id) route_id
         FROM av_sandbox.approved_routes
         WHERE sandbox_program_id = $1
           AND active = true
@@ -338,6 +378,7 @@ export class SandboxGovernanceRepository {
             ST_SetSRID(ST_GeomFromGeoJSON($3), 4326),
             ST_Buffer(route_geometry::geography, $4)::geometry
           )
+        ORDER BY route_id, version DESC, effective_from DESC, updated_at DESC
       `,
       [sandboxProgramId, asOf, JSON.stringify(candidatePath), toleranceMeters],
     );
@@ -368,7 +409,7 @@ export class SandboxGovernanceRepository {
 
   private async replaceJsonRecords(
     tableName: string,
-    _keyColumn: string,
+    keyColumn: string,
     rows: Array<{ values: unknown[] }>,
     insertSql: string,
   ) {
@@ -379,11 +420,37 @@ export class SandboxGovernanceRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`DELETE FROM ${tableName}`);
 
       for (const row of rows) {
-        await client.query(insertSql, row.values);
+        await client.query(
+          `${insertSql}
+            ON CONFLICT (${keyColumn}, version) DO UPDATE SET
+              sandbox_program_id = EXCLUDED.sandbox_program_id,
+              ${keyColumn === "enrollment_id" ? "vehicle_id" : "safety_operator_id"} = EXCLUDED.${keyColumn === "enrollment_id" ? "vehicle_id" : "safety_operator_id"},
+              provider_code = EXCLUDED.provider_code,
+              status = EXCLUDED.status,
+              approved_area_ids = EXCLUDED.approved_area_ids,
+              approved_route_ids = EXCLUDED.approved_route_ids,
+              ${
+                keyColumn === "enrollment_id"
+                  ? "max_concurrent_trips = EXCLUDED.max_concurrent_trips,"
+                  : "certification_refs = EXCLUDED.certification_refs,"
+              }
+              effective_from = EXCLUDED.effective_from,
+              effective_until = EXCLUDED.effective_until,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record`,
+          row.values,
+        );
       }
+
+      await this.deleteMissingVersionedRows(
+        client,
+        tableName,
+        keyColumn,
+        rows.map((row) => [row.values[0] as string, row.values[4] as number]),
+      );
 
       await client.query("COMMIT");
     } catch (error) {
@@ -400,5 +467,28 @@ export class SandboxGovernanceRepository {
     }
 
     return record as T;
+  }
+
+  private async deleteMissingVersionedRows(
+    client: PoolClient,
+    tableName: string,
+    keyColumn: string,
+    keys: ReadonlyArray<readonly [string, number]>,
+  ) {
+    if (keys.length === 0) {
+      await client.query(`DELETE FROM ${tableName}`);
+      return;
+    }
+
+    const conditions = keys.map(
+      (_key, index) =>
+        `(${keyColumn} = $${index * 2 + 1} AND version = $${index * 2 + 2})`,
+    );
+    const values = keys.flatMap(([key, version]) => [key, version]);
+
+    await client.query(
+      `DELETE FROM ${tableName} WHERE NOT (${conditions.join(" OR ")})`,
+      values,
+    );
   }
 }
