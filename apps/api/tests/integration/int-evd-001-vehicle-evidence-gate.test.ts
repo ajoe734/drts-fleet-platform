@@ -25,8 +25,16 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-int",
       policyVersion: "phase2-evd-001",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
       entitlement: { active: true },
-      vehicleEnrollment: { status: "active" },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
       regulatory: { approvalFresh: true, vehicleCertified: true },
       providerCapabilities: {
         av_dispatch: true,
@@ -37,7 +45,19 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
         minimal_risk_condition: true,
       },
       telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
-      operatingArea: { inBounds: true, boundaryRisk: false },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
     });
 
     const failedSegment = vehicleEvidenceService.listSegmentIndex({
@@ -61,8 +81,16 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-int",
       policyVersion: "phase2-evd-001",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
       entitlement: { active: true },
-      vehicleEnrollment: { status: "active" },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
       recorder: { healthy: true },
       regulatory: { approvalFresh: true, vehicleCertified: true },
       providerCapabilities: {
@@ -74,7 +102,19 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
         minimal_risk_condition: true,
       },
       telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
-      operatingArea: { inBounds: true, boundaryRisk: false },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
     });
 
     expect(blocked.decision).toBe("block");
