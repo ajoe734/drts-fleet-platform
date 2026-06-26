@@ -171,6 +171,83 @@ describe("RegulatoryReportingService", () => {
     );
   });
 
+  it("flushes due reminders before moving a review-approved notification to submitted", () => {
+    let now = new Date("2026-06-26T00:00:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-004",
+        eventType: "cybersecurity_alert",
+        severity: "cybersecurity",
+        reportVersionKind: "initial",
+        jurisdiction: "CA-CPUC",
+        vehicleId: "veh-reg-004",
+        eventOccurredAt: "2026-06-26T00:00:00.000Z",
+        summary: "Cybersecurity disclosure requires same-day reporting.",
+      },
+      createIdentity(),
+      "req-reg-create-004",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for review." },
+      createIdentity(),
+      "req-reg-review-004",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-004",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-approve-004",
+    );
+
+    now = new Date("2026-06-26T05:00:00.000Z");
+    const submitted = service.submitNotification(
+      draft.notificationId,
+      {
+        submissionReference: "SUB-REG-004",
+        submittedAt: "2026-06-26T05:00:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-submit-004",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-submit-004",
+    );
+
+    expect(submitted.lifecycleStatus).toBe("submitted");
+    expect(submitted.reminders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          minutesBeforeDeadline: 240,
+          dueAt: "2026-06-26T04:00:00.000Z",
+          sentAt: "2026-06-26T05:00:00.000Z",
+        }),
+      ]),
+    );
+    expect(
+      auditNotificationService
+        .listNotifications()
+        .filter((notification) => notification.title === "Regulatory notification reminder"),
+    ).toHaveLength(1);
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .some(
+          (entry) =>
+            entry.actionName === "regulatory_notification_reminder_sent" &&
+            entry.resourceId === draft.notificationId,
+        ),
+    ).toBe(true);
+  });
+
   it("rejects review approval when roleFamilies are spoofed without an approver role code", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
