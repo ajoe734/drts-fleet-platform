@@ -1,6 +1,7 @@
 import type {
   EvidenceArtifactType,
   EvidenceCustodyState,
+  EvidenceGovernancePrecedence,
   EvidenceManifestItem,
   IdentityContext,
 } from "@drts/contracts";
@@ -24,7 +25,9 @@ export type VehicleEvidenceAccessAction =
   | "verify"
   | "export"
   | "signed_url"
-  | "purge";
+  | "purge"
+  | "preserve"
+  | "purge_skip";
 
 export type VehicleEvidenceStepUpMethod = "webauthn" | "totp" | "sms_otp";
 
@@ -80,6 +83,8 @@ export interface VehicleEvidenceArtifactRecord
   leafHash: string;
   objectLockEnabled: boolean;
   objectLockRetainedUntil: string | null;
+  localPreservedAt: string | null;
+  localPreservationChecksumVerifiedAt: string | null;
   purgedAt: string | null;
 }
 
@@ -149,6 +154,33 @@ export interface EvidencePurgeResult {
   purgedByActorType: IdentityContext["actorType"];
   reason: string;
   objectLockBypassed: boolean;
+}
+
+export interface EvidenceDeletionSchedulerCommand {
+  artifactId: string;
+  currentTime?: string;
+  providerNearExpiryWindowMinutes?: number;
+}
+
+export type EvidenceDeletionSchedulerDecision =
+  | "purged"
+  | "preserved_for_provider_expiry"
+  | "skipped_due_to_hold"
+  | "skipped_due_to_exception"
+  | "deferred_by_retention";
+
+export interface EvidenceDeletionSchedulerResult {
+  artifactId: string;
+  freezeId: string;
+  decision: EvidenceDeletionSchedulerDecision;
+  emittedEvent: string;
+  effectivePrecedence: EvidenceGovernancePrecedence;
+  holdIds: string[];
+  exceptionIds: string[];
+  conflictExceptionId: string | null;
+  checksumVerified: boolean | null;
+  preservedLocallyAt: string | null;
+  purgedAt: string | null;
 }
 
 export interface VehicleEvidenceAccessLogEntry {

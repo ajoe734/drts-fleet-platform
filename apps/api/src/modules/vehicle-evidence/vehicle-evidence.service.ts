@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { Injectable, Logger } from "@nestjs/common";
+import { PHASE2_AUDIT_EVENT_CATALOG } from "@drts/contracts";
 import type {
   AuditLogRecord,
   EvidenceArtifactType,
@@ -22,6 +23,8 @@ import type {
   BookmarkQuery,
   ControlledEvidenceExportCommand,
   ControlledEvidenceExportRecord,
+  EvidenceDeletionSchedulerCommand,
+  EvidenceDeletionSchedulerResult,
   EvidenceAccessLogQuery,
   EvidenceCaptureRequest,
   EvidenceFreezeCommand,
@@ -1029,6 +1032,236 @@ export class VehicleEvidenceService {
     return { ...result };
   }
 
+  async runDeletionScheduler(
+    command: EvidenceDeletionSchedulerCommand,
+    requestId?: string,
+  ): Promise<EvidenceDeletionSchedulerResult> {
+    const artifactId = this.requireNonBlank(
+      command.artifactId,
+      "artifactId",
+      "EVIDENCE_DELETION_INVALID_ARTIFACT",
+    );
+    const evaluatedAt = command.currentTime
+      ? this.requireIsoTimestamp(
+          command.currentTime,
+          "currentTime",
+          "EVIDENCE_DELETION_INVALID_TIME",
+        )
+      : new Date().toISOString();
+    const providerNearExpiryWindowMinutes = Math.max(
+      1,
+      Math.floor(command.providerNearExpiryWindowMinutes ?? 60),
+    );
+    const artifact = this.artifactCatalog.get(artifactId);
+    if (!artifact) {
+      throw new ApiRequestError(
+        404,
+        "EVIDENCE_ARTIFACT_NOT_FOUND",
+        `Artifact ${artifactId} is not indexed.`,
+      );
+    }
+
+    const freeze = this.requireFreeze(artifact.freezeId);
+    const governance = this.auditNotificationService.getEvidenceSubjectGovernance(
+      "vehicle_evidence",
+      freeze.freezeId,
+      {
+        manifestHash: freeze.manifestHash,
+      },
+    );
+    const holdIds = governance.activeLegalHolds.map((hold) => hold.holdId);
+    const activeExceptionIds = governance.activeDeletionExceptions.map(
+      (exception) => exception.exceptionId,
+    );
+
+    if (holdIds.length > 0) {
+      const conflictException =
+        this.auditNotificationService.ensureEvidenceDeletionConflictException(
+          {
+            family: "vehicle_evidence",
+            subjectId: freeze.freezeId,
+            sourceResourceType: "evidence_legal_hold",
+            sourceResourceId: holdIds[0]!,
+            reasonCode: this.mapHoldReasonToDeletionExceptionReason(
+              governance.activeLegalHolds[0]!.reasonCode,
+            ),
+            reasonNote:
+              "Deletion scheduler observed an active legal hold in the same consistency boundary.",
+            manifestHash: freeze.manifestHash,
+          },
+          requestId,
+        );
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "skipped_due_to_hold",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .skippedDueToHold,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds,
+        exceptionIds: this.uniqueStrings([
+          ...activeExceptionIds,
+          conflictException.exceptionId,
+        ]),
+        conflictExceptionId: conflictException.exceptionId,
+        checksumVerified: null,
+        preservedLocallyAt: null,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        artifact,
+        freeze,
+        result,
+        "Active legal hold blocked deletion.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    if (activeExceptionIds.length > 0) {
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "skipped_due_to_exception",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .skippedDueToException,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds: [],
+        exceptionIds: activeExceptionIds,
+        conflictExceptionId: null,
+        checksumVerified: null,
+        preservedLocallyAt: null,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        artifact,
+        freeze,
+        result,
+        "Active deletion exception blocked deletion.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    if (
+      this.isProviderNearExpiry(
+        artifact.source.providerExpiresAt ?? null,
+        evaluatedAt,
+        providerNearExpiryWindowMinutes,
+      ) &&
+      !artifact.localPreservedAt
+    ) {
+      const storedRecorder = this.requireRecorder(freeze.recorderId);
+      const checksumVerified = await storedRecorder.adapter.verifyChecksum(
+        artifact.artifactId,
+      );
+      const updatedArtifact: VehicleEvidenceArtifactRecord = {
+        ...artifact,
+        localPreservedAt: evaluatedAt,
+        localPreservationChecksumVerifiedAt: checksumVerified
+          ? evaluatedAt
+          : null,
+      };
+      this.replaceStoredArtifact(updatedArtifact);
+
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "preserved_for_provider_expiry",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .preservedForProviderExpiry,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds: [],
+        exceptionIds: [],
+        conflictExceptionId: null,
+        checksumVerified,
+        preservedLocallyAt: evaluatedAt,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        updatedArtifact,
+        freeze,
+        result,
+        "Provider source was near expiry, so the artifact was preserved locally and checksum-verified before deletion.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    const retainedUntil =
+      artifact.objectLockRetainedUntil ?? artifact.retentionUntil ?? null;
+    if (
+      retainedUntil &&
+      new Date(retainedUntil).getTime() > new Date(evaluatedAt).getTime()
+    ) {
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "deferred_by_retention",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .deferredByRetention,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds: [],
+        exceptionIds: [],
+        conflictExceptionId: null,
+        checksumVerified: null,
+        preservedLocallyAt: artifact.localPreservedAt,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        artifact,
+        freeze,
+        result,
+        "Retention boundary has not yet elapsed.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    const purged = this.purgeArtifact(
+      artifactId,
+      {
+        reason: "Retention boundary elapsed; deletion scheduler executed purge.",
+        overrideObjectLock: true,
+      },
+      this.buildSchedulerIdentity(),
+      requestId,
+    );
+    const refreshedArtifact =
+      this.artifactCatalog.get(artifactId) ?? this.cloneEvidenceArtifact(artifact);
+    const result: EvidenceDeletionSchedulerResult = {
+      artifactId,
+      freezeId: freeze.freezeId,
+      decision: "purged",
+      emittedEvent:
+        PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision.purged,
+      effectivePrecedence: governance.effectivePrecedence,
+      holdIds: [],
+      exceptionIds: [],
+      conflictExceptionId: null,
+      checksumVerified: null,
+      preservedLocallyAt: refreshedArtifact.localPreservedAt,
+      purgedAt: purged.purgedAt,
+    };
+    this.recordDeletionDecision(
+      refreshedArtifact,
+      this.requireFreeze(freeze.freezeId),
+      result,
+      "Retention boundary elapsed and the deletion scheduler purged the artifact.",
+      evaluatedAt,
+      requestId,
+    );
+    return result;
+  }
+
   listEvidenceAccessLogs(
     query: EvidenceAccessLogQuery = {},
     requestId?: string,
@@ -1433,6 +1666,8 @@ export class VehicleEvidenceService {
       leafHash: artifactResult.leafHash,
       objectLockEnabled: true,
       objectLockRetainedUntil: item.retentionUntil ?? defaultRetentionUntil,
+      localPreservedAt: null,
+      localPreservationChecksumVerifiedAt: null,
       purgedAt: null,
     };
   }
@@ -1732,6 +1967,81 @@ export class VehicleEvidenceService {
     return this.cloneAccessLog(accessLog);
   }
 
+  private recordDeletionDecision(
+    artifact: VehicleEvidenceArtifactRecord,
+    freeze: EvidenceFreezeRecord,
+    result: EvidenceDeletionSchedulerResult,
+    reason: string,
+    evaluatedAt: string,
+    requestId?: string,
+  ) {
+    this.recordAccessLog(
+      {
+        freezeId: freeze.freezeId,
+        artifactId: artifact.artifactId,
+        exportId: null,
+        manifestHash: freeze.manifestHash,
+        action:
+          result.decision === "preserved_for_provider_expiry"
+            ? "preserve"
+            : result.decision === "purged"
+              ? "purge"
+              : "purge_skip",
+        actorId: "system:evidence-deletion-scheduler",
+        actorType: "system",
+        requestId: requestId ?? null,
+        caseReference: freeze.caseReference,
+        reason,
+        stepUpMethod: null,
+        stepUpVerifiedAt: null,
+        signedUrlExpiresAt: null,
+        metadata: {
+          decision: result.decision,
+          emittedEvent: result.emittedEvent,
+          effectivePrecedence: result.effectivePrecedence,
+          holdIds: [...result.holdIds],
+          exceptionIds: [...result.exceptionIds],
+          conflictExceptionId: result.conflictExceptionId,
+          checksumVerified: result.checksumVerified,
+          preservedLocallyAt: result.preservedLocallyAt,
+          purgedAt: result.purgedAt,
+          evaluatedAt,
+          providerExpiresAt: artifact.source.providerExpiresAt ?? null,
+        },
+      },
+      requestId,
+    );
+    this.recordEvidenceAudit(
+      {
+        actorId: "system:evidence-deletion-scheduler",
+        actorType: "system",
+        tenantId: null,
+        moduleName: "vehicle-evidence",
+        actionName: result.emittedEvent,
+        resourceType: "vehicle_evidence_artifact",
+        resourceId: artifact.artifactId,
+        newValuesSummary: {
+          ...this.buildPolicySummary(
+            getEvidenceRetentionPolicy("vehicle_evidence"),
+          ),
+          freezeId: freeze.freezeId,
+          manifestHash: freeze.manifestHash,
+          decision: result.decision,
+          effectivePrecedence: result.effectivePrecedence,
+          holdIds: [...result.holdIds],
+          exceptionIds: [...result.exceptionIds],
+          conflictExceptionId: result.conflictExceptionId,
+          checksumVerified: result.checksumVerified,
+          preservedLocallyAt: result.preservedLocallyAt,
+          purgedAt: result.purgedAt,
+          evaluatedAt,
+          providerExpiresAt: artifact.source.providerExpiresAt ?? null,
+        },
+      },
+      requestId,
+    );
+  }
+
   private describeManifestAssessment(assessment: EvidenceManifestAssessment) {
     if (assessment.finalState === "partial") {
       return "One or more evidence artifacts failed checksum verification or were missing provider signatures.";
@@ -1768,6 +2078,68 @@ export class VehicleEvidenceService {
 
   private uniqueStrings(values: string[]) {
     return [...new Set(values)];
+  }
+
+  private replaceStoredArtifact(updatedArtifact: VehicleEvidenceArtifactRecord) {
+    this.artifactCatalog.set(
+      updatedArtifact.artifactId,
+      this.cloneEvidenceArtifact(updatedArtifact),
+    );
+    const freeze = this.requireFreeze(updatedArtifact.freezeId);
+    freeze.artifacts = freeze.artifacts.map((artifact) =>
+      artifact.artifactId === updatedArtifact.artifactId
+        ? this.cloneEvidenceArtifact(updatedArtifact)
+        : this.cloneEvidenceArtifact(artifact),
+    );
+  }
+
+  private isProviderNearExpiry(
+    providerExpiresAt: string | null,
+    evaluatedAt: string,
+    windowMinutes: number,
+  ) {
+    if (!providerExpiresAt) {
+      return false;
+    }
+    const providerExpiryEpoch = new Date(providerExpiresAt).getTime();
+    const evaluatedEpoch = new Date(evaluatedAt).getTime();
+    if (
+      Number.isNaN(providerExpiryEpoch) ||
+      Number.isNaN(evaluatedEpoch) ||
+      providerExpiryEpoch < evaluatedEpoch
+    ) {
+      return false;
+    }
+    return providerExpiryEpoch - evaluatedEpoch <= windowMinutes * 60 * 1000;
+  }
+
+  private mapHoldReasonToDeletionExceptionReason(
+    reasonCode:
+      | "complaint_escalation"
+      | "regulatory_inquiry"
+      | "settlement_dispute"
+      | "internal_investigation",
+  ) {
+    switch (reasonCode) {
+      case "complaint_escalation":
+        return "complaint_reference" as const;
+      case "regulatory_inquiry":
+        return "regulatory_request" as const;
+      case "settlement_dispute":
+        return "settlement_dispute" as const;
+      case "internal_investigation":
+        return "manual_preservation" as const;
+    }
+  }
+
+  private buildSchedulerIdentity(): EvidenceAccessIdentity & { actorId: string } {
+    return {
+      actorId: "system:evidence-deletion-scheduler",
+      actorType: "system",
+      realm: "system",
+      scopes: [],
+      tenantId: null,
+    };
   }
 
   private buildHealthReport(

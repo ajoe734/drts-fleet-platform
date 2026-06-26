@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { PHASE2_AUDIT_EVENT_CATALOG } from "@drts/contracts";
 import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtures/src";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
@@ -16,6 +17,14 @@ const OPS_IDENTITY = {
 
 const PLATFORM_IDENTITY = {
   actorId: "platform-admin-001",
+  actorType: "platform_admin" as const,
+  realm: "platform" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
+const PLATFORM_IDENTITY_2 = {
+  actorId: "platform-admin-002",
   actorType: "platform_admin" as const,
   realm: "platform" as const,
   scopes: ["audit:read"],
@@ -83,10 +92,24 @@ describe("INT-P2-006 / E2E-P2-006 / UAT-AV-009 vehicle evidence freeze + export"
       OPS_IDENTITY,
       "req-int-p2-006-hold",
     );
+    const schedulerResult = await vehicleEvidenceService.runDeletionScheduler(
+      {
+        artifactId: freeze.artifacts[0]!.artifactId,
+        currentTime: "2026-06-26T14:07:00.000Z",
+      },
+      "req-int-p2-006-scheduler",
+    );
 
     expect(freeze.status).toBe("sealed");
     expect(verification.valid).toBe(true);
     expect(exportRecord.download.ttlMinutes).toBeLessThanOrEqual(15);
+    expect(schedulerResult).toMatchObject({
+      decision: "skipped_due_to_hold",
+      emittedEvent:
+        PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision.skippedDueToHold,
+      holdIds: [hold.holdId],
+      conflictExceptionId: expect.any(String),
+    });
     expect(
       vehicleEvidenceService.listEvidenceAccessLogs({
         freezeId: freeze.freezeId,
@@ -100,6 +123,10 @@ describe("INT-P2-006 / E2E-P2-006 / UAT-AV-009 vehicle evidence freeze + export"
         expect.objectContaining({
           freezeId: freeze.freezeId,
           action: "signed_url",
+        }),
+        expect.objectContaining({
+          freezeId: freeze.freezeId,
+          action: "purge_skip",
         }),
       ]),
     );
@@ -128,6 +155,49 @@ describe("INT-P2-006 / E2E-P2-006 / UAT-AV-009 vehicle evidence freeze + export"
         expect.objectContaining({
           actionName: "place_evidence_legal_hold",
           resourceId: hold.holdId,
+        }),
+        expect.objectContaining({
+          actionName:
+            PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+              .skippedDueToHold,
+          resourceId: freeze.artifacts[0]!.artifactId,
+        }),
+      ]),
+    );
+
+    const releaseReason = "Regulator handoff closed.";
+    const releaseRequested = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY,
+      "req-int-p2-006-release-request",
+    );
+    expect(releaseRequested.status).toBe("release_requested");
+
+    const released = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY_2,
+      "req-int-p2-006-release-approve",
+    );
+    expect(released.status).toBe("released");
+
+    const resumedSchedulerResult = await vehicleEvidenceService.runDeletionScheduler(
+      {
+        artifactId: freeze.artifacts[0]!.artifactId,
+        currentTime: "2026-06-26T14:08:00.000Z",
+      },
+      "req-int-p2-006-scheduler-rerun",
+    );
+    expect(resumedSchedulerResult.decision).toBe("deferred_by_retention");
+    expect(resumedSchedulerResult.exceptionIds).toEqual([]);
+    expect(
+      auditNotificationService.listEvidenceDeletionExceptions(),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          exceptionId: schedulerResult.conflictExceptionId,
+          status: "resolved",
         }),
       ]),
     );
