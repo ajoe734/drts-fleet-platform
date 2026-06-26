@@ -2,6 +2,7 @@ import { createSign, generateKeyPairSync } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { TeslaRegulatoryEventsRepository } from "../../src/modules/tesla-regulatory-events/tesla-regulatory-events.repository";
 import { TeslaRegulatoryEventsService } from "../../src/modules/tesla-regulatory-events/tesla-regulatory-events.service";
@@ -120,5 +121,50 @@ describe("INT-TESLA-001 regulatory ingress", () => {
     expect(quarantinedReplay.rawEventId).toBe(quarantined.rawEventId);
     expect(service.listRawEvents()).toHaveLength(2);
     expect(service.listCanonicalEvents()).toHaveLength(1);
+  });
+
+  it("preserves raw custody for invalid known-schema payloads while rejecting normalization", async () => {
+    const service = new TeslaRegulatoryEventsService(
+      new TeslaRegulatoryEventsRepository(),
+      new AuditNotificationService(),
+    );
+    const invalidPayload = JSON.stringify({
+      schemaVersion: "tesla.regulatory-event.v1",
+      providerEventId: "evt-int-invalid-001",
+      eventType: "collision",
+      occurredAt: "2026-06-26T03:05:00.000Z",
+    });
+    const headers = {
+      "x-forwarded-client-cert": "CN=tesla-regulatory-sandbox",
+      "x-jws-signature": buildDetachedSignature(
+        invalidPayload,
+        privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+      ),
+    };
+
+    await expect(
+      service.ingest({
+        body: JSON.parse(invalidPayload) as unknown,
+        rawBody: Buffer.from(invalidPayload),
+        headers,
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+
+    await expect(
+      service.ingest({
+        body: JSON.parse(invalidPayload) as unknown,
+        rawBody: Buffer.from(invalidPayload),
+        headers,
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+
+    expect(service.listRawEvents()).toEqual([
+      expect.objectContaining({
+        providerEventId: "evt-int-invalid-001",
+        normalizationStatus: "pending",
+        canonicalEventId: null,
+      }),
+    ]);
+    expect(service.listCanonicalEvents()).toHaveLength(0);
   });
 });

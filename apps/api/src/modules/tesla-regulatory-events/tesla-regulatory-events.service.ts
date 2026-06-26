@@ -78,6 +78,14 @@ type CanonicalEventReceiptRef = {
   eventId: string;
 };
 
+type PersistedIngressResult = {
+  rawEvent: TeslaRegulatoryRawEventRecord;
+  canonicalEvent: CanonicalEventReceiptRef | null;
+  status: TeslaRegulatoryIngressReceipt["status"];
+  duplicate: boolean;
+  rejectionError?: ApiRequestError;
+};
+
 export type TeslaRegulatoryIngressReceipt = {
   receiptId: string;
   providerCode: string;
@@ -132,26 +140,17 @@ export class TeslaRegulatoryEventsService {
         clientCert,
         receivedAt,
       });
-      const canonicalEventInput = SUPPORTED_SCHEMA_VERSIONS.has(
-        payload.schemaVersion,
-      )
-        ? this.buildCanonicalEventRecord(
-            {
-              rawEventId: "",
-              receivedAt: rawEventInput.receivedAt,
-            },
-            this.parseCanonicalPayload(payload),
-            providerCode,
-            payloadSha256,
-          )
-        : null;
       const persisted = await this.persistIngress(
         rawEventInput,
-        canonicalEventInput,
+        payload,
         payloadSha256,
         providerIdentity,
         request.requestId,
       );
+
+      if (persisted.rejectionError) {
+        throw persisted.rejectionError;
+      }
 
       if (persisted.status === "quarantined") {
         this.recordAudit(
@@ -624,21 +623,16 @@ export class TeslaRegulatoryEventsService {
 
   private async persistIngress(
     rawEventInput: CreateTeslaRegulatoryRawEventInput,
-    canonicalEventInput: CreateTeslaRegulatoryCanonicalEventInput | null,
+    payload: TeslaRegulatoryIngressEnvelope,
     payloadSha256: string,
     providerIdentity: string,
     requestId?: string,
-  ): Promise<{
-    rawEvent: TeslaRegulatoryRawEventRecord;
-    canonicalEvent: CanonicalEventReceiptRef | null;
-    status: TeslaRegulatoryIngressReceipt["status"];
-    duplicate: boolean;
-  }> {
+  ): Promise<PersistedIngressResult> {
     if (this.repository.isEnabled()) {
       return this.repository.withTransaction((executor) =>
         this.persistIngressWithExecutor(
           rawEventInput,
-          canonicalEventInput,
+          payload,
           payloadSha256,
           providerIdentity,
           requestId,
@@ -649,7 +643,7 @@ export class TeslaRegulatoryEventsService {
 
     return this.persistIngressWithExecutor(
       rawEventInput,
-      canonicalEventInput,
+      payload,
       payloadSha256,
       providerIdentity,
       requestId,
@@ -658,17 +652,12 @@ export class TeslaRegulatoryEventsService {
 
   private async persistIngressWithExecutor(
     rawEventInput: CreateTeslaRegulatoryRawEventInput,
-    canonicalEventInput: CreateTeslaRegulatoryCanonicalEventInput | null,
+    payload: TeslaRegulatoryIngressEnvelope,
     payloadSha256: string,
     providerIdentity: string,
     requestId?: string,
     executor?: PoolClient,
-  ): Promise<{
-    rawEvent: TeslaRegulatoryRawEventRecord;
-    canonicalEvent: CanonicalEventReceiptRef | null;
-    status: TeslaRegulatoryIngressReceipt["status"];
-    duplicate: boolean;
-  }> {
+  ): Promise<PersistedIngressResult> {
     const existing = await this.repository.findRawEventByProviderRef(
       rawEventInput.providerCode,
       rawEventInput.providerEventId,
@@ -679,7 +668,7 @@ export class TeslaRegulatoryEventsService {
     if (existing) {
       return this.handleExistingEvent(
         existing,
-        canonicalEventInput,
+        payload,
         payloadSha256,
         providerIdentity,
         requestId,
@@ -694,7 +683,7 @@ export class TeslaRegulatoryEventsService {
     if (!rawEventResult.inserted) {
       return this.handleExistingEvent(
         rawEventResult.rawEvent,
-        canonicalEventInput,
+        payload,
         payloadSha256,
         providerIdentity,
         requestId,
@@ -702,12 +691,28 @@ export class TeslaRegulatoryEventsService {
       );
     }
 
-    if (!canonicalEventInput) {
+    if (!SUPPORTED_SCHEMA_VERSIONS.has(payload.schemaVersion)) {
       return {
         rawEvent: rawEventResult.rawEvent,
         canonicalEvent: null,
         status: "quarantined",
         duplicate: false,
+      };
+    }
+
+    const canonicalEventInput = this.buildCanonicalEventInput(
+      payload,
+      rawEventResult.rawEvent,
+      rawEventInput.providerCode,
+      payloadSha256,
+    );
+    if (canonicalEventInput instanceof ApiRequestError) {
+      return {
+        rawEvent: rawEventResult.rawEvent,
+        canonicalEvent: null,
+        status: "duplicate",
+        duplicate: false,
+        rejectionError: canonicalEventInput,
       };
     }
 
@@ -742,17 +747,12 @@ export class TeslaRegulatoryEventsService {
 
   private async handleExistingEvent(
     existing: TeslaRegulatoryRawEventRecord,
-    canonicalEventInput: CreateTeslaRegulatoryCanonicalEventInput | null,
+    payload: TeslaRegulatoryIngressEnvelope,
     payloadSha256: string,
     providerIdentity: string,
     requestId: string | undefined,
     executor?: PoolClient,
-  ): Promise<{
-    rawEvent: TeslaRegulatoryRawEventRecord;
-    canonicalEvent: CanonicalEventReceiptRef | null;
-    status: TeslaRegulatoryIngressReceipt["status"];
-    duplicate: boolean;
-  }> {
+  ): Promise<PersistedIngressResult> {
     if (existing.payloadSha256 !== payloadSha256) {
       this.recordAudit(
         "ingress.security_incident_hash_mismatch",
@@ -774,6 +774,24 @@ export class TeslaRegulatoryEventsService {
           providerEventId: existing.providerEventId,
         },
       );
+    }
+
+    const canonicalEventInput = this.resolveDuplicateCanonicalEventInput(
+      existing,
+      payload,
+      existing.providerCode,
+      payloadSha256,
+    );
+    if (canonicalEventInput instanceof ApiRequestError) {
+      return {
+        rawEvent: existing,
+        canonicalEvent: existing.canonicalEventId
+          ? { eventId: existing.canonicalEventId }
+          : null,
+        status: "duplicate",
+        duplicate: true,
+        rejectionError: canonicalEventInput,
+      };
     }
 
     if (
@@ -845,6 +863,50 @@ export class TeslaRegulatoryEventsService {
           : "duplicate",
       duplicate: true,
     };
+  }
+
+  private buildCanonicalEventInput(
+    payload: TeslaRegulatoryIngressEnvelope,
+    rawEvent: Pick<TeslaRegulatoryRawEventRecord, "rawEventId" | "receivedAt">,
+    providerCode: string,
+    payloadSha256: string,
+  ): CreateTeslaRegulatoryCanonicalEventInput | ApiRequestError {
+    try {
+      return this.buildCanonicalEventRecord(
+        rawEvent,
+        this.parseCanonicalPayload(payload),
+        providerCode,
+        payloadSha256,
+      );
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        return error;
+      }
+
+      throw error;
+    }
+  }
+
+  private resolveDuplicateCanonicalEventInput(
+    existing: TeslaRegulatoryRawEventRecord,
+    payload: TeslaRegulatoryIngressEnvelope,
+    providerCode: string,
+    payloadSha256: string,
+  ): CreateTeslaRegulatoryCanonicalEventInput | ApiRequestError | null {
+    if (
+      !SUPPORTED_SCHEMA_VERSIONS.has(payload.schemaVersion) ||
+      existing.normalizationStatus === "quarantined" ||
+      existing.canonicalEventId
+    ) {
+      return null;
+    }
+
+    return this.buildCanonicalEventInput(
+      payload,
+      existing,
+      providerCode,
+      payloadSha256,
+    );
   }
 
   private buildReceipt(

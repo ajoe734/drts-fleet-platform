@@ -280,6 +280,73 @@ describe("TeslaRegulatoryEventsService", () => {
     expect(service.listCanonicalEvents()).toHaveLength(0);
   });
 
+  it("rejects invalid known-schema payloads after preserving the raw vault entry", async () => {
+    const { audit, service } = buildService();
+    const payload = JSON.stringify({
+      schemaVersion: "tesla.regulatory-event.v1",
+      providerEventId: "evt-invalid-canonical-001",
+      eventType: "collision",
+      occurredAt: "2026-06-26T02:13:00.000Z",
+    });
+    const headers = buildHeaders(payload);
+
+    await expect(
+      service.ingest({
+        body: JSON.parse(payload) as unknown,
+        rawBody: Buffer.from(payload),
+        headers,
+        requestId: "req-invalid-canonical-001",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "INVALID_PAYLOAD",
+          details: {
+            field: "vehicleId",
+          },
+        },
+      },
+    });
+
+    expect(service.listRawEvents()).toEqual([
+      expect.objectContaining({
+        providerEventId: "evt-invalid-canonical-001",
+        schemaVersion: "tesla.regulatory-event.v1",
+        normalizationStatus: "pending",
+        canonicalEventId: null,
+      }),
+    ]);
+    expect(service.listCanonicalEvents()).toHaveLength(0);
+    expect(audit.listAuditLogs()).toContainEqual(
+      expect.objectContaining({
+        actionName: "ingress.rejected_invalid_payload",
+        requestId: "req-invalid-canonical-001",
+        moduleName: "tesla-regulatory-events",
+      }),
+    );
+
+    await expect(
+      service.ingest({
+        body: JSON.parse(payload) as unknown,
+        rawBody: Buffer.from(payload),
+        headers,
+        requestId: "req-invalid-canonical-002",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "INVALID_PAYLOAD",
+          details: {
+            field: "vehicleId",
+          },
+        },
+      },
+    });
+
+    expect(service.listRawEvents()).toHaveLength(1);
+    expect(service.listCanonicalEvents()).toHaveLength(0);
+  });
+
   it("treats quarantined replays as idempotent duplicates while preserving the raw vault entry", async () => {
     const { service } = buildService();
     const payload = JSON.stringify({
