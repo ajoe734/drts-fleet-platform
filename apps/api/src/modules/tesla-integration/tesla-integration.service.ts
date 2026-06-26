@@ -518,6 +518,16 @@ export class TeslaIntegrationService implements OnModuleInit {
     return receipt;
   }
 
+  listReceipts(vehicleId?: string) {
+    return [...this.receiptsByCommandId.values()]
+      .filter((receipt) => !vehicleId || receipt.vehicleId === vehicleId.trim())
+      .map((receipt) => ({
+        ...receipt,
+        source: { ...receipt.source },
+      }))
+      .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt));
+  }
+
   private requireOAuthConnection(connectionId: string) {
     const record = this.oauthConnections.get(connectionId.trim());
     if (!record) {

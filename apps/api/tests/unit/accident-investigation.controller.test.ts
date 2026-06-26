@@ -97,4 +97,37 @@ describe("AccidentInvestigationController", () => {
       source: "live",
     });
   });
+
+  it("wraps generated investigation bundles in the standard success envelope", async () => {
+    const { service, controller } = createController();
+    const accidentCase = service.createAccidentCase({
+      caseId: "acc-case-bundle-ctrl-001",
+      vehicleId: "veh-bundle-ctrl-001",
+      severity: "major",
+      occurredAt: "2026-06-26T11:00:00.000Z",
+      reportedBy: "roc-ctrl-001",
+    });
+
+    const response = await controller.generateInvestigationBundle(
+      accidentCase.caseId,
+      {
+        actorId: "investigator-ctrl-001",
+      },
+      "req-accident-bundle-ctrl-001",
+    );
+
+    expect(response.meta).toEqual({
+      requestId: "req-accident-bundle-ctrl-001",
+      timestamp: expect.any(String),
+    });
+    expect(response.data).toMatchObject({
+      caseId: "acc-case-bundle-ctrl-001",
+      liabilityConclusion: null,
+      liabilityConclusionEmitted: false,
+      knownGaps: expect.any(Array),
+      manifest: expect.objectContaining({
+        entryCount: expect.any(Number),
+      }),
+    });
+  });
 });
