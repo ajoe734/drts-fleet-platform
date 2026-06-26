@@ -1,10 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --color-canvas: #0a0e16;
-  --color-panel: #141b2b;
-  --color-elevated: #1a2235;
-  --font-sans: "Inter", "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
+  --font-sans: var(--roc-canvas-font);
 }
 
 * {
@@ -14,6 +11,7 @@
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background-color: #0a0e16;
-  color: #e5eaf3;
+  background-color: var(--roc-canvas-bg);
+  color: var(--roc-canvas-text);
+  min-height: 100dvh;
 }
