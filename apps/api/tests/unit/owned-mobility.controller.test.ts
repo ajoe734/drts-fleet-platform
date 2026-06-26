@@ -174,6 +174,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
     const response = await controller.acknowledgePassengerDisclosure(
       "booking-e2e-003",
       { actorType: "passenger" },
+      null,
       "tenant-e2e-001",
       "req-e2e-passenger-ack",
     );
@@ -189,7 +190,49 @@ describe("OwnedMobilityController tenant booking routes", () => {
       "tenant-e2e-001",
       "booking-e2e-003",
       { actorType: "passenger" },
+      null,
       "req-e2e-passenger-ack",
+    );
+  });
+
+  it("routes ops disclosure acknowledgements through the ops identity path", async () => {
+    const service = {
+      acknowledgePassengerDisclosureFromOps: vi.fn().mockResolvedValue({
+        bookingId: "booking-e2e-ops-001",
+        orderId: "order-e2e-ops-001",
+        passengerDisclosure: {
+          policyId: "policy-e2e-ops-001",
+          channel: "ops_console",
+          acknowledgedAt: "2026-06-26T06:12:00.000Z",
+        },
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+    const identity = {
+      actorType: "ops_user",
+      actorId: "ops-user-001",
+      realm: "ops",
+    } as never;
+
+    const response = await controller.acknowledgePassengerDisclosureFromOps(
+      "booking-e2e-ops-001",
+      { actorType: "passenger" },
+      identity,
+      "req-e2e-ops-passenger-ack",
+    );
+
+    expect(response.data).toMatchObject({
+      bookingId: "booking-e2e-ops-001",
+      passengerDisclosure: {
+        policyId: "policy-e2e-ops-001",
+        channel: "ops_console",
+      },
+    });
+    expect(service.acknowledgePassengerDisclosureFromOps).toHaveBeenCalledWith(
+      "booking-e2e-ops-001",
+      { actorType: "passenger" },
+      identity,
+      "req-e2e-ops-passenger-ack",
     );
   });
 

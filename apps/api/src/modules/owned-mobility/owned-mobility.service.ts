@@ -841,7 +841,9 @@ export class OwnedMobilityService implements OnModuleInit {
     const previousApprovalState = order.approvalState;
     const governanceSnapshot = this.captureTenantGovernanceSnapshot();
     const applyPassengerDisclosure = () =>
-      this.refreshPassengerDisclosureSnapshot(order, false);
+      this.refreshPassengerDisclosureSnapshot(order, false, {
+        channel: this.resolvePassengerDisclosureChannel(order, identity),
+      });
     const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
@@ -1107,6 +1109,7 @@ export class OwnedMobilityService implements OnModuleInit {
     tenantId: string,
     bookingId: string,
     command: RecordPassengerAcknowledgementCommand,
+    identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     options?: {
       order?: OwnedOrderRecord;
@@ -1119,7 +1122,9 @@ export class OwnedMobilityService implements OnModuleInit {
       options?.order ?? this.requireBookingOrder(bookingId, tenantId);
     const shouldRefreshDisclosure = options?.refreshDisclosure !== false;
     if (shouldRefreshDisclosure) {
-      await this.refreshPassengerDisclosureSnapshot(order);
+      await this.refreshPassengerDisclosureSnapshot(order, true, {
+        channel: this.resolvePassengerDisclosureChannel(order, identity),
+      });
     }
 
     if (!order.passengerDisclosure) {
@@ -1137,6 +1142,7 @@ export class OwnedMobilityService implements OnModuleInit {
         orderId: order.orderId,
         disclosure: order.passengerDisclosure,
         command,
+        actor: this.resolvePassengerDisclosureAcknowledgementActor(identity),
         executor: options?.tx,
       });
     if (!record) {
@@ -1199,6 +1205,27 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     return this.mapOrderToBooking(order);
+  }
+
+  async acknowledgePassengerDisclosureFromOps(
+    bookingId: string,
+    command: RecordPassengerAcknowledgementCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsPassengerDisclosureActor(identity);
+    const order = this.requireBookingOrderById(bookingId);
+
+    return this.acknowledgePassengerDisclosure(
+      order.tenantId ?? "",
+      bookingId,
+      command,
+      actor.identity,
+      requestId,
+      {
+        order,
+      },
+    );
   }
 
   async approveTenantBookingApprovalRequest(
@@ -5037,6 +5064,9 @@ export class OwnedMobilityService implements OnModuleInit {
   private refreshPassengerDisclosureSnapshot(
     order: OwnedOrderRecord,
     persistChanges = true,
+    options?: {
+      channel?: PassengerDisclosureChannel;
+    },
   ): MaybePromise<OwnedOrderRecord> {
     if (
       !this.sandboxDispatchGateService ||
@@ -5051,7 +5081,11 @@ export class OwnedMobilityService implements OnModuleInit {
         tenantId: order.tenantId,
         businessDispatchSubtype: order.businessDispatchSubtype,
         partnerEntrySlug: order.partnerEntrySlug,
-        channel: this.resolvePassengerDisclosureChannel(order),
+        channel: this.resolvePassengerDisclosureChannel(
+          order,
+          undefined,
+          options?.channel,
+        ),
       }),
       (resolvedDisclosure) => {
         const previous = order.passengerDisclosure;
@@ -5131,15 +5165,72 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private resolvePassengerDisclosureChannel(
-    order: Pick<OwnedOrderRecord, "partnerEntrySlug" | "orderSource">,
+    order: Pick<
+      OwnedOrderRecord,
+      "partnerEntrySlug" | "orderSource" | "passengerDisclosure"
+    >,
+    identity?: BootstrapRequestIdentity | null,
+    explicitChannel?: PassengerDisclosureChannel,
   ): PassengerDisclosureChannel {
+    if (explicitChannel) {
+      return explicitChannel;
+    }
+    if (
+      identity?.actorType === "ops_user" ||
+      identity?.actorType === "platform_admin"
+    ) {
+      return "ops_console";
+    }
     if (order.orderSource === "phone") {
       return "call_center";
     }
     if (order.partnerEntrySlug) {
       return "partner_portal";
     }
+    if (order.passengerDisclosure?.channel === "ops_console") {
+      return "ops_console";
+    }
     return "tenant_portal";
+  }
+
+  private resolvePassengerDisclosureAcknowledgementActor(
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (identity?.actorType === "tenant_admin" && identity.actorId) {
+      return {
+        actorType: "tenant_admin" as const,
+        actorRef: identity.actorId,
+      };
+    }
+    if (identity?.actorType === "ops_user" && identity.actorId) {
+      return {
+        actorType: "ops_user" as const,
+        actorRef: identity.actorId,
+      };
+    }
+
+    return {
+      actorType: "passenger" as const,
+      actorRef: null,
+    };
+  }
+
+  private requireOpsPassengerDisclosureActor(
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (identity?.actorType === "ops_user" && identity.actorId) {
+      return {
+        actorId: identity.actorId,
+        actorType: identity.actorType,
+        identity,
+      } as const;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_FORBIDDEN",
+      "Passenger disclosure acknowledgement from ops requires an ops_user identity.",
+    );
   }
 
   private resolveServiceProductCodeForOrder(
@@ -6100,6 +6191,10 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
     return order;
+  }
+
+  private requireBookingOrderById(bookingId: string) {
+    return this.requireBookingOrder(bookingId);
   }
 
   private requireDispatchJob(dispatchJobId: string) {

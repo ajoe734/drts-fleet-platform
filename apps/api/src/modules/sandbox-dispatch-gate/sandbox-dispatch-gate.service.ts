@@ -235,6 +235,10 @@ export class SandboxDispatchGateService {
     orderId: string;
     disclosure: PassengerDisclosureRequirementSnapshot;
     command?: RecordPassengerAcknowledgementCommand | null;
+    actor?: {
+      actorType: PassengerAcknowledgementRecord["actorType"];
+      actorRef: string | null;
+    };
     executor?: SandboxDispatchGateQueryExecutor | null;
   }) {
     await this.ensureDisclosureCacheLoaded();
@@ -262,9 +266,7 @@ export class SandboxDispatchGateService {
         },
       );
     }
-
-    const acknowledgedAt =
-      input.command?.acknowledgedAt ?? new Date().toISOString();
+    const acknowledgedAt = new Date().toISOString();
     const record: PassengerAcknowledgementRecord = {
       acknowledgementId: randomUUID(),
       bookingId: input.bookingId,
@@ -273,8 +275,8 @@ export class SandboxDispatchGateService {
       messageCode: input.disclosure.messageCode,
       channel: input.disclosure.channel,
       acknowledgementMode: input.disclosure.acknowledgementMode,
-      actorType: input.command?.actorType ?? "passenger",
-      actorRef: input.command?.actorRef?.trim() || null,
+      actorType: input.actor?.actorType ?? "passenger",
+      actorRef: input.actor?.actorRef?.trim() || null,
       acknowledgedAt,
       evidenceRef: input.command?.evidenceRef?.trim() || null,
       createdAt: acknowledgedAt,
