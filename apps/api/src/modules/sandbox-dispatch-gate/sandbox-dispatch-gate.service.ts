@@ -54,41 +54,8 @@ export class SandboxDispatchGateService {
     input: SandboxDispatchGateInput,
     requestId?: string,
   ): Promise<SandboxDispatchDecision> {
-    const evaluatedAt = input.requestedAt ?? new Date().toISOString();
-    const normalized = this.normalizeInput(input, evaluatedAt);
-    const hardReasonCodes = this.collectHardReasons(normalized);
-    const softReasonCodes = this.collectSoftReasons(normalized);
-
-    let decision: SandboxDispatchDecision["decision"] = "allow";
-    let requiredSafetyOperatorId: string | null = null;
-    if (hardReasonCodes.length > 0) {
-      decision = "block";
-    } else if (normalized.safetyOperator.required) {
-      decision =
-        normalized.safetyOperator.available &&
-        normalized.safetyOperator.qualificationStatus === "qualified"
-          ? "allow_with_safety_operator"
-          : "defer";
-      requiredSafetyOperatorId =
-        normalized.safetyOperator.safetyOperatorId ?? null;
-    } else if (softReasonCodes.length > 0) {
-      decision = "defer";
-    }
-
-    const result: SandboxDispatchDecision = {
-      decisionId: randomUUID(),
-      orderId: normalized.orderId,
-      dispatchJobId: normalized.dispatchJobId,
-      vehicleId: normalized.vehicleId,
-      sandboxProgramId: normalized.sandboxProgramId,
-      decision,
-      oddInBounds: normalized.operatingArea.inBounds,
-      hardReasonCodes,
-      softReasonCodes,
-      requiredSafetyOperatorId,
-      policyVersion: normalized.policyVersion,
-      evaluatedAt,
-    };
+    const { decision: result, evaluationSnapshot: normalized } =
+      this.buildEvaluationRecord(input);
 
     this.lastDecision = result;
     this.persistEvaluation(
@@ -164,8 +131,7 @@ export class SandboxDispatchGateService {
       command.decisionId ?? null,
     );
     const decisionRecord =
-      existingRecord ??
-      (await this.createManualReleaseDecisionBaseline(input, requestId));
+      existingRecord ?? (await this.createManualReleaseDecisionBaseline(input));
     const decision = this.cloneDecision(decisionRecord.decision);
     const releaseAudit = {
       actorId: command.actorId,
@@ -838,13 +804,52 @@ export class SandboxDispatchGateService {
 
   private async createManualReleaseDecisionBaseline(
     input: SandboxDispatchGateInput,
-    requestId?: string,
   ): Promise<SandboxDispatchStoredEvaluationRecord> {
-    const decision = await this.evaluateDispatch(input, requestId);
+    const record = this.buildEvaluationRecord(input);
+    this.lastDecision = this.cloneDecision(record.decision);
+    return { ...record, releaseAudit: null };
+  }
+
+  private buildEvaluationRecord(
+    input: SandboxDispatchGateInput,
+  ): Omit<SandboxDispatchStoredEvaluationRecord, "releaseAudit"> {
+    const evaluatedAt = input.requestedAt ?? new Date().toISOString();
+    const normalized = this.normalizeInput(input, evaluatedAt);
+    const hardReasonCodes = this.collectHardReasons(normalized);
+    const softReasonCodes = this.collectSoftReasons(normalized);
+
+    let decision: SandboxDispatchDecision["decision"] = "allow";
+    let requiredSafetyOperatorId: string | null = null;
+    if (hardReasonCodes.length > 0) {
+      decision = "block";
+    } else if (normalized.safetyOperator.required) {
+      decision =
+        normalized.safetyOperator.available &&
+        normalized.safetyOperator.qualificationStatus === "qualified"
+          ? "allow_with_safety_operator"
+          : "defer";
+      requiredSafetyOperatorId =
+        normalized.safetyOperator.safetyOperatorId ?? null;
+    } else if (softReasonCodes.length > 0) {
+      decision = "defer";
+    }
+
     return {
-      decision,
-      evaluationSnapshot: this.normalizeInput(input, decision.evaluatedAt),
-      releaseAudit: null,
+      decision: {
+        decisionId: randomUUID(),
+        orderId: normalized.orderId,
+        dispatchJobId: normalized.dispatchJobId,
+        vehicleId: normalized.vehicleId,
+        sandboxProgramId: normalized.sandboxProgramId,
+        decision,
+        oddInBounds: normalized.operatingArea.inBounds,
+        hardReasonCodes,
+        softReasonCodes,
+        requiredSafetyOperatorId,
+        policyVersion: normalized.policyVersion,
+        evaluatedAt,
+      },
+      evaluationSnapshot: normalized,
     };
   }
 }

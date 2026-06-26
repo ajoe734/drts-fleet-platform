@@ -454,6 +454,65 @@ describe("SandboxDispatchGateService", () => {
     expect(result.releaseAudit.decisionId).toBe("dec-existing-002");
   });
 
+  it("creates a manual release baseline without emitting a duplicate evaluate dispatch write", async () => {
+    const repository = {
+      loadDecisionById: vi.fn(),
+      loadLatestDecision: vi.fn().mockResolvedValue(null),
+      persistEvaluation: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as never;
+    const auditNotificationService = {
+      recordAuditLog: vi.fn(),
+    } as never;
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      repository,
+      auditNotificationService,
+    );
+
+    const result = await gate.recordManualRelease(
+      {
+        orderId: "order-av-005e",
+        dispatchJobId: "job-av-005e",
+        vehicleId: "veh-av-005e",
+        sandboxProgramId: "sandbox-program-001",
+        policyVersion: "phase2-evd-001",
+      },
+      {
+        actorId: "ops-004",
+        actorType: "ops_user",
+        reason: "Create baseline and attach release audit",
+      },
+      "req-manual-release-002",
+    );
+
+    expect(repository.loadLatestDecision).toHaveBeenCalledWith("order-av-005e");
+    expect(repository.persistEvaluation).toHaveBeenCalledTimes(1);
+    expect(repository.persistEvaluation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: expect.objectContaining({
+          orderId: "order-av-005e",
+          dispatchJobId: "job-av-005e",
+          vehicleId: "veh-av-005e",
+        }),
+        releaseAudit: expect.objectContaining({
+          actorId: "ops-004",
+          actorType: "ops_user",
+          reason: "Create baseline and attach release audit",
+          decisionId: result.decision.decisionId,
+        }),
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledTimes(1);
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "manual_release",
+        requestId: "req-manual-release-002",
+      }),
+    );
+  });
+
   it("blocks assignment gating when the booking path is missing", async () => {
     const governanceService = new SandboxGovernanceService();
     const gate = new SandboxDispatchGateService(undefined, governanceService);
