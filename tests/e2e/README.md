@@ -11,6 +11,18 @@ Use it together with:
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` for release-gate interpretation
 - `support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md` for the latest live staging rerun
 
+## Phase 2 Gate-B Repo-Local Coverage
+
+Phase 2 Tesla FSD sandbox repo-local evidence lives in
+`apps/api/tests/integration/e2e-p2-001..010*.test.ts`.
+
+- These scenarios use mock Tesla public telemetry, mock regulatory/governance,
+  and mock recorder adapters only.
+- They are Gate-B evidence only and must not be promoted as Tesla sandbox or
+  live-regulator proof.
+- Every scenario is expected to assert fail-closed behavior and avoid inventing
+  unsupported FSD facts when upstream mock data is absent.
+
 ## Gate Role
 
 The E2E suite is not "all of release" by itself.
