@@ -1,4 +1,7 @@
 import type {
+  CorrelatedTakeoverCase,
+  CrossAppResourceLink,
+  EvidenceDiscrepancyCase,
   EmptyStateEnvelope,
   ResourceActionDescriptor,
   RocAlertReadModel,
@@ -14,11 +17,13 @@ import { t, type Locale } from "@/lib/translations";
 import { getServerRocClient } from "./api-client.server";
 import {
   FALLBACK_ALERTS,
+  FALLBACK_EVIDENCE_DISCREPANCIES,
   FALLBACK_EVIDENCE_FILES,
   FALLBACK_HANDOVER_NOTE,
   FALLBACK_OVERVIEW,
   FALLBACK_PROVIDER_HEALTH,
   FALLBACK_REFRESH,
+  FALLBACK_TAKEOVERS,
   FALLBACK_TRIPS,
   FALLBACK_VEHICLES,
   ROC_ALERT_CANVAS_META,
@@ -99,6 +104,70 @@ export interface RocVehicleDetailPageData {
 
 export interface RocProviderPageData {
   snapshot: RocProviderHealthSnapshot;
+  refresh: UiRefreshMetadata;
+  usingFallback: boolean;
+}
+
+export interface RocTakeoverPageData {
+  takeovers: CorrelatedTakeoverCase[];
+  alerts: RocAlertViewModel[];
+  refresh: UiRefreshMetadata;
+  usingFallback: boolean;
+}
+
+export interface RocIncidentsPageItem {
+  incidentId: string;
+  vehicleId: string;
+  severity: "warning" | "critical";
+  status: "needs_triage" | "open" | "contained";
+  title: string;
+  summary: string;
+  source: "takeover_discrepancy" | "alert";
+  linkedAlertId: string | null;
+  investigationLink: CrossAppResourceLink | null;
+}
+
+export interface RocIncidentsPageData {
+  incidents: RocIncidentsPageItem[];
+  refresh: UiRefreshMetadata;
+  usingFallback: boolean;
+}
+
+export interface RocEvidencePageItem {
+  evidenceId: string;
+  vehicleId: string;
+  summary: string;
+  freezeStatus: "active" | "clear";
+  sources: RocEvidenceSource[];
+  investigationLink: CrossAppResourceLink | null;
+}
+
+export interface RocEvidencePageData {
+  evidence: RocEvidencePageItem[];
+  freezeActions: Array<{
+    descriptor: ResourceActionDescriptor;
+    label: string;
+    path: string;
+    resourceType: string;
+    resourceId: string;
+    reason?: string;
+  }>;
+  refresh: UiRefreshMetadata;
+  usingFallback: boolean;
+}
+
+export interface RocReportPageItem {
+  reportId: string;
+  reportKind: string;
+  subject: string;
+  windowLabel: string;
+  status: "ready" | "pending_review";
+  evidenceCount: number;
+  investigationLink: CrossAppResourceLink | null;
+}
+
+export interface RocReportsPageData {
+  reports: RocReportPageItem[];
   refresh: UiRefreshMetadata;
   usingFallback: boolean;
 }
@@ -302,6 +371,209 @@ export async function getRocProviderPageData(): Promise<RocProviderPageData> {
     snapshot: providerResult.payload.item,
     refresh: providerResult.payload.refresh,
     usingFallback: providerResult.usingFallback,
+  };
+}
+
+export async function getRocTakeoverPageData(): Promise<RocTakeoverPageData> {
+  const [takeoversResult, alertsResult] = await Promise.all([
+    loadList("/api/roc/takeovers", buildFallbackList(FALLBACK_TAKEOVERS)),
+    loadList("/api/roc/alerts", buildFallbackList(FALLBACK_ALERTS)),
+  ]);
+
+  return {
+    takeovers: takeoversResult.payload.items,
+    alerts: alertsResult.payload.items.map(resolveAlertViewModel),
+    refresh: takeoversResult.payload.refresh,
+    usingFallback: takeoversResult.usingFallback || alertsResult.usingFallback,
+  };
+}
+
+function buildIncidentItems(
+  takeovers: CorrelatedTakeoverCase[],
+  discrepancies: EvidenceDiscrepancyCase[],
+  alerts: RocAlertViewModel[],
+): RocIncidentsPageItem[] {
+  const discrepancyItems = discrepancies.map((item) => ({
+    incidentId: item.discrepancyCaseId,
+    vehicleId: item.vehicleId,
+    severity: "critical" as const,
+    status: "needs_triage" as const,
+    title: "Takeover discrepancy case",
+    summary: item.summary,
+    source: "takeover_discrepancy" as const,
+    linkedAlertId:
+      alerts.find((alert) => alert.vehicleId === item.vehicleId)?.alertId ??
+      null,
+    investigationLink: item.investigationLink ?? null,
+  }));
+
+  const escalationItems = takeovers
+    .filter((item) => item.safetyOperatorTakeoverReport.incidentId != null)
+    .map((item) => ({
+      incidentId: item.safetyOperatorTakeoverReport.incidentId as string,
+      vehicleId: item.vehicleId,
+      severity: item.rocTakeoverResponse?.resolvedAt
+        ? ("warning" as const)
+        : ("critical" as const),
+      status: item.rocTakeoverResponse?.resolvedAt
+        ? ("contained" as const)
+        : ("open" as const),
+      title: "ROC takeover escalation",
+      summary:
+        item.rocTakeoverResponse?.outcomeNote ??
+        item.safetyOperatorTakeoverReport.notes ??
+        "Takeover escalation opened from ROC response flow.",
+      source: "alert" as const,
+      linkedAlertId:
+        alerts.find((alert) => alert.vehicleId === item.vehicleId)?.alertId ??
+        null,
+      investigationLink: item.investigationLink ?? null,
+    }));
+
+  return [...discrepancyItems, ...escalationItems];
+}
+
+export async function getRocIncidentsPageData(): Promise<RocIncidentsPageData> {
+  const [takeoversResult, alertsResult] = await Promise.all([
+    loadList("/api/roc/takeovers", buildFallbackList(FALLBACK_TAKEOVERS)),
+    loadList("/api/roc/alerts", buildFallbackList(FALLBACK_ALERTS)),
+  ]);
+
+  const alerts = alertsResult.payload.items.map(resolveAlertViewModel);
+  const discrepancies = takeoversResult.usingFallback
+    ? FALLBACK_EVIDENCE_DISCREPANCIES
+    : takeoversResult.payload.items.flatMap((item) =>
+        item.discrepancyCaseIds.map((discrepancyCaseId) => ({
+          discrepancyCaseId,
+          correlatedTakeoverCaseId: item.correlatedTakeoverCaseId,
+          vehicleId: item.vehicleId,
+          discrepancyTypes: [],
+          openedAt: item.sourceTimestamps.safetyServerReceivedAt,
+          summary: `Discrepancy detected for ${item.correlatedTakeoverCaseId}.`,
+          investigationLink: item.investigationLink ?? null,
+          sourceFacts: {
+            teslaOccurredAt: item.sourceTimestamps.teslaOccurredAt,
+            safetyOccurredAt: item.sourceTimestamps.safetyOccurredAt,
+            rocRequestedAt: item.sourceTimestamps.rocRequestedAt,
+            rocRespondedAt: item.sourceTimestamps.rocRespondedAt,
+            teslaOrderId: item.teslaEvent?.orderId ?? null,
+            safetyOrderId: item.safetyOperatorTakeoverReport.orderId,
+            rocOrderId: item.rocTakeoverResponse?.orderId ?? null,
+            teslaTakeoverCorrelationId:
+              item.teslaEvent?.takeoverCorrelationId ?? null,
+            safetyTakeoverCorrelationId:
+              item.safetyOperatorTakeoverReport.correlationId,
+            rocTakeoverCorrelationId:
+              item.rocTakeoverResponse?.takeoverCorrelationId ?? null,
+          },
+        })),
+      );
+
+  return {
+    incidents: buildIncidentItems(
+      takeoversResult.payload.items,
+      discrepancies,
+      alerts,
+    ),
+    refresh: takeoversResult.payload.refresh,
+    usingFallback: takeoversResult.usingFallback || alertsResult.usingFallback,
+  };
+}
+
+function buildEvidenceItems(
+  takeovers: CorrelatedTakeoverCase[],
+  vehicles: RocVehicleViewModel[],
+  discrepancies: EvidenceDiscrepancyCase[],
+): RocEvidencePageItem[] {
+  return takeovers.map((item) => {
+    const vehicle = vehicles.find(
+      (candidate) => candidate.vehicleId === item.vehicleId,
+    );
+    const discrepancy = discrepancies.find(
+      (candidate) =>
+        candidate.correlatedTakeoverCaseId === item.correlatedTakeoverCaseId,
+    );
+
+    return {
+      evidenceId:
+        discrepancy?.discrepancyCaseId ?? item.correlatedTakeoverCaseId,
+      vehicleId: item.vehicleId,
+      summary:
+        discrepancy?.summary ??
+        item.safetyOperatorTakeoverReport.notes ??
+        "Evidence package awaiting regulatory review.",
+      freezeStatus: vehicle?.evidenceFreezeActive ? "active" : "clear",
+      sources: [
+        item.teslaEvent ? "tesla_provided" : "not_exposed_by_provider",
+        "operator_reported",
+        item.rocTakeoverResponse ? "roc_assessed" : "device_recorded",
+      ].filter(
+        (value, index, values) => values.indexOf(value) === index,
+      ) as RocEvidenceSource[],
+      investigationLink:
+        discrepancy?.investigationLink ?? item.investigationLink ?? null,
+    };
+  });
+}
+
+export async function getRocEvidencePageData(
+  locale: Locale,
+): Promise<RocEvidencePageData> {
+  const [takeoversResult, vehiclesResult, alertsResult] = await Promise.all([
+    loadList("/api/roc/takeovers", buildFallbackList(FALLBACK_TAKEOVERS)),
+    loadList("/api/roc/vehicles", buildFallbackList(FALLBACK_VEHICLES)),
+    loadList("/api/roc/alerts", buildFallbackList(FALLBACK_ALERTS)),
+  ]);
+
+  const alerts = alertsResult.payload.items.map(resolveAlertViewModel);
+  const vehicles = vehiclesResult.payload.items.map(resolveVehicleViewModel);
+  const discrepancies = takeoversResult.usingFallback
+    ? FALLBACK_EVIDENCE_DISCREPANCIES
+    : [];
+
+  return {
+    evidence: buildEvidenceItems(
+      takeoversResult.payload.items,
+      vehicles,
+      discrepancies,
+    ),
+    freezeActions: buildSupportedAlertActionItems(alerts, locale).filter(
+      (item) => item.descriptor.action === "start-evidence-freeze",
+    ),
+    refresh: takeoversResult.payload.refresh,
+    usingFallback:
+      takeoversResult.usingFallback ||
+      vehiclesResult.usingFallback ||
+      alertsResult.usingFallback,
+  };
+}
+
+export async function getRocReportsPageData(): Promise<RocReportsPageData> {
+  const [takeoversResult, alertsResult] = await Promise.all([
+    loadList("/api/roc/takeovers", buildFallbackList(FALLBACK_TAKEOVERS)),
+    loadList("/api/roc/alerts", buildFallbackList(FALLBACK_ALERTS)),
+  ]);
+
+  const reports = takeoversResult.payload.items.map((item, index) => ({
+    reportId: `roc-report-${String(index + 1).padStart(3, "0")}`,
+    reportKind:
+      item.discrepancyCaseIds.length > 0
+        ? "takeover_discrepancy_package"
+        : "takeover_case_summary",
+    subject: `${item.vehicleId} · ${item.correlatedTakeoverCaseId}`,
+    windowLabel: formatShortTime(item.sourceTimestamps.safetyOccurredAt, "en"),
+    status:
+      item.discrepancyCaseIds.length > 0
+        ? ("pending_review" as const)
+        : ("ready" as const),
+    evidenceCount: item.safetyOperatorTakeoverReport.evidenceArtifactIds.length,
+    investigationLink: item.investigationLink ?? null,
+  }));
+
+  return {
+    reports,
+    refresh: takeoversResult.payload.refresh,
+    usingFallback: takeoversResult.usingFallback || alertsResult.usingFallback,
   };
 }
 
