@@ -1003,6 +1003,51 @@ export interface Phase2AuditContext {
   amendsResourceVersion?: string | null;
 }
 
+// Phase 2 audit event names share the Phase 1 append-only audit store and are
+// distinguished by a stable domain prefix (`<domain>.<entity>.<verb>`). The
+// existing audit query reuses these helpers to offer a Phase 2 filter without a
+// second store or a second emitter (P2-DP-S4-001 S4=a).
+export const PHASE2_AUDIT_DOMAINS = [
+  "sandbox",
+  "tesla",
+  "safety_operator",
+  "roc",
+  "evidence",
+  "accident",
+  "regulatory",
+] as const;
+export type Phase2AuditDomain = (typeof PHASE2_AUDIT_DOMAINS)[number];
+
+const PHASE2_AUDIT_EVENT_NAME_SET: ReadonlySet<string> = new Set(
+  PHASE2_AUDIT_EVENT_NAMES,
+);
+
+export function isPhase2AuditEventName(
+  value: string,
+): value is Phase2AuditEventName {
+  return PHASE2_AUDIT_EVENT_NAME_SET.has(value);
+}
+
+export function getPhase2AuditDomain(
+  eventName: string,
+): Phase2AuditDomain | null {
+  if (!isPhase2AuditEventName(eventName)) {
+    return null;
+  }
+  const prefix = eventName.slice(0, eventName.indexOf("."));
+  return (PHASE2_AUDIT_DOMAINS as readonly string[]).includes(prefix)
+    ? (prefix as Phase2AuditDomain)
+    : null;
+}
+
+// Query filter applied on top of the shared audit query so callers can narrow
+// to Phase 2 events (optionally a single domain) while still using the one
+// canonical audit listing endpoint.
+export interface AuditLogQueryFilter {
+  phase2Only?: boolean;
+  phase2Domain?: Phase2AuditDomain;
+}
+
 // ---------------------------------------------------------------------------
 // §3.10 Error-code enum
 // ---------------------------------------------------------------------------

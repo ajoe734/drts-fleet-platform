@@ -1,6 +1,9 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { AuditLogRecord } from "@drts/contracts";
+import type {
+  AuditLogRecord,
+  EvidenceAccessLogRecord,
+} from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 import {
@@ -22,6 +25,13 @@ interface AuditLogRow {
   new_value: Record<string, unknown> | null;
   request_id: string;
   created_at: Date | string;
+}
+
+// Minimal surface shared by the pool (DatabaseService) and a checked-out
+// PoolClient, so the same INSERT helpers run both standalone and inside a
+// transaction.
+interface Queryable {
+  query(text: string, values?: readonly unknown[]): Promise<unknown>;
 }
 
 @Injectable()
@@ -106,7 +116,58 @@ export class AuditLogRepository {
       return;
     }
 
-    await this.databaseService!.query(
+    await this.insertAuditLog(this.databaseService!, record);
+  }
+
+  async appendEvidenceAccessLog(record: EvidenceAccessLogRecord) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.insertEvidenceAccessLog(this.databaseService!, record);
+  }
+
+  // Atomic evidence-access dual-write. The canonical audit body and its
+  // evidence-access projection must land together or not at all: a successful
+  // mirror insert with a failed canonical insert would strand an orphan row in
+  // av_evidence.evidence_access_logs that violates the 1:1 link to the shared
+  // Phase 1 audit store. Both inserts therefore run in a single transaction —
+  // the canonical row first so the FK on evidence_access_logs.audit_id is
+  // satisfied — and any failure rolls both back. When the row has no
+  // evidence-access projection, the single canonical insert is already atomic.
+  async appendWithEvidenceAccess(
+    record: AuditLogRecord,
+    evidenceAccess: EvidenceAccessLogRecord | null,
+  ) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    if (!evidenceAccess) {
+      await this.append(record);
+      return;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await this.insertAuditLog(client, record);
+      await this.insertEvidenceAccessLog(client, evidenceAccess);
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Ignore rollback failures; surface the original error instead.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async insertAuditLog(exec: Queryable, record: AuditLogRecord) {
+    await exec.query(
       `
         INSERT INTO admin.audit_logs (
           audit_id,
@@ -138,6 +199,47 @@ export class AuditLogRepository {
         JSON.stringify(record.oldValuesSummary ?? null),
         JSON.stringify(record.newValuesSummary ?? null),
         record.requestId,
+        record.createdAt,
+      ],
+    );
+  }
+
+  // Mirrors the evidence-access projection into av_evidence.evidence_access_logs,
+  // linked 1:1 by audit_id back to the canonical admin.audit_logs row.
+  private async insertEvidenceAccessLog(
+    exec: Queryable,
+    record: EvidenceAccessLogRecord,
+  ) {
+    await exec.query(
+      `
+        INSERT INTO av_evidence.evidence_access_logs (
+          audit_id,
+          evidence_family,
+          access_action,
+          actor_id,
+          actor_type,
+          tenant_id,
+          resource_type,
+          resource_id,
+          request_id,
+          context,
+          created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11
+        )
+        ON CONFLICT (audit_id) DO NOTHING
+      `,
+      [
+        record.auditId,
+        record.evidenceFamily,
+        record.accessAction,
+        record.actorId,
+        record.actorType,
+        record.tenantId,
+        record.resourceType,
+        record.resourceId,
+        record.requestId,
+        JSON.stringify(record.context ?? null),
         record.createdAt,
       ],
     );
