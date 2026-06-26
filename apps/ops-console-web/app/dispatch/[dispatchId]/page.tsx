@@ -13,11 +13,14 @@ import type {
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
   OwnedOrderRecord,
+  RocFallbackToHumanReport,
   ResourceActionDescriptor,
+  SandboxFulfillmentProjectionView,
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
+import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
@@ -63,6 +66,23 @@ type ActivityEntry = {
   at: string;
   tone: "accent" | "info" | "warn" | "danger";
   actor?: string | null;
+};
+
+type FallbackStage =
+  | "triggered"
+  | "reassigning"
+  | "human_enroute"
+  | "completed";
+
+type FallbackExceptionRow = Record<string, unknown> & {
+  reportId: string;
+  trigger: string;
+  chain: ReactNode;
+  revisedEta: ReactNode;
+  reasonCodes: ReactNode;
+  artifact: ReactNode;
+  generatedAt: ReactNode;
+  _order: number;
 };
 
 const theme = buildCanvasTheme({
@@ -1810,6 +1830,767 @@ function renderRefreshRow(
   );
 }
 
+function readTraceDetailString(
+  entry: DispatchTraceLogRecord | null | undefined,
+  key: string,
+) {
+  const value = entry?.details?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function readTraceDetailNumber(
+  entry: DispatchTraceLogRecord | null | undefined,
+  key: string,
+) {
+  const value = entry?.details?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readTraceDetailCodeList(
+  entry: DispatchTraceLogRecord | null | undefined,
+  key: string,
+) {
+  const value = entry?.details?.[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
+  );
+}
+
+function findLatestFallbackTrace(trace: DispatchTraceLogRecord[]) {
+  return (
+    [...trace]
+      .filter((entry) => entry.eventType === "roc.fallback_to_human")
+      .sort(
+        (left, right) =>
+          new Date(right.createdAt).getTime() -
+          new Date(left.createdAt).getTime(),
+      )[0] ?? null
+  );
+}
+
+function getFallbackStage(
+  order: OwnedOrderRecord,
+  task: DriverTaskRecord | null,
+  projection: SandboxFulfillmentProjectionView | null,
+): FallbackStage {
+  if (
+    projection?.state === "completed" ||
+    order.status === "completed" ||
+    task?.completedAt
+  ) {
+    return "completed";
+  }
+
+  if (
+    task?.departedAt ||
+    task?.arrivedPickupAt ||
+    task?.startedAt ||
+    task?.completedAt ||
+    projection?.state === "en_route_pickup" ||
+    projection?.state === "arrived_pickup" ||
+    projection?.state === "in_trip" ||
+    ["enroute_pickup", "arrived_pickup", "on_trip", "proof_pending"].includes(
+      order.status,
+    )
+  ) {
+    return "human_enroute";
+  }
+
+  if (
+    task ||
+    projection?.state === "assigned" ||
+    ["assigned", "driver_accepted"].includes(order.status)
+  ) {
+    return "reassigning";
+  }
+
+  return "triggered";
+}
+
+function getFallbackStageTone(stage: FallbackStage): CanvasTone {
+  switch (stage) {
+    case "triggered":
+      return "danger";
+    case "reassigning":
+      return "warn";
+    case "human_enroute":
+      return "info";
+    case "completed":
+    default:
+      return "success";
+  }
+}
+
+function getFallbackStageLabel(locale: Locale, stage: FallbackStage) {
+  return tr(locale, `dispatch.detail.avFallback.stage.${stage}`);
+}
+
+function getMessageCategoryTone(
+  category: "info" | "warning" | "critical",
+): CanvasTone {
+  switch (category) {
+    case "critical":
+      return "danger";
+    case "warning":
+      return "warn";
+    case "info":
+    default:
+      return "info";
+  }
+}
+
+function formatEtaMinutesValue(
+  locale: Locale,
+  value: number | null | undefined,
+): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  return tr(locale, "dispatch.detail.avFallback.etaMinutesCompact", {
+    count: value,
+  });
+}
+
+function formatCrewValue(vehicleId: string | null, driverId: string | null) {
+  if (!vehicleId && !driverId) {
+    return "—";
+  }
+
+  if (vehicleId && driverId) {
+    return `${vehicleId} / ${driverId}`;
+  }
+
+  return vehicleId ?? driverId ?? "—";
+}
+
+function renderFallbackProgress(locale: Locale, stage: FallbackStage) {
+  const stages: FallbackStage[] = [
+    "triggered",
+    "reassigning",
+    "human_enroute",
+    "completed",
+  ];
+  const activeIndex = stages.indexOf(stage);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 0,
+        minWidth: 0,
+      }}
+    >
+      {stages.map((value, index) => {
+        const reached = index <= activeIndex;
+        const current = index === activeIndex;
+
+        return (
+          <div
+            key={value}
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                index < stages.length - 1 ? "auto minmax(16px, 1fr)" : "auto",
+              alignItems: "center",
+              flex: index < stages.length - 1 ? 1 : "initial",
+              minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                justifyItems: "center",
+                gap: 6,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 999,
+                  background: reached ? theme.accent : theme.surfaceLo,
+                  color: reached ? theme.bg : theme.textDim,
+                  border: `1px solid ${reached ? theme.accent : theme.border}`,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                }}
+              >
+                {index + 1}
+              </span>
+              <span
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: current ? 700 : 600,
+                  color: current ? theme.text : theme.textDim,
+                  textAlign: "center",
+                }}
+              >
+                {getFallbackStageLabel(locale, value)}
+              </span>
+            </div>
+            {index < stages.length - 1 ? (
+              <span
+                aria-hidden
+                style={{
+                  height: 2,
+                  borderRadius: 999,
+                  background: index < activeIndex ? theme.accent : theme.border,
+                  margin: "0 10px 18px",
+                }}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function buildFallbackExceptionRows(
+  locale: Locale,
+  reports: RocFallbackToHumanReport[],
+): FallbackExceptionRow[] {
+  return [...reports]
+    .sort(
+      (left, right) =>
+        new Date(right.generatedAt).getTime() -
+        new Date(left.generatedAt).getTime(),
+    )
+    .map((report, index) => ({
+      reportId: report.reportId,
+      trigger: report.trigger,
+      chain: (
+        <div style={{ display: "grid", gap: 2 }}>
+          <span style={{ color: theme.text, fontWeight: 600 }}>
+            {report.fallbackAssignmentId}
+          </span>
+          <span style={{ ...monoTextStyle, ...helperTextStyle }}>
+            {report.fallbackTaskId}
+          </span>
+        </div>
+      ),
+      revisedEta: (
+        <Pill
+          theme={theme}
+          tone={report.revisedEtaMinutes <= 10 ? "info" : "warn"}
+        >
+          {formatEtaMinutesValue(locale, report.revisedEtaMinutes)}
+        </Pill>
+      ),
+      reasonCodes: (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={{ color: theme.text }}>
+            {formatOpsCodeList(locale, report.hardReasonCodes)}
+          </span>
+          <span style={{ color: theme.textDim, fontSize: 11.5 }}>
+            {formatOpsCodeList(locale, report.softReasonCodes)}
+          </span>
+        </div>
+      ),
+      artifact: (
+        <span style={{ ...monoTextStyle, color: theme.text }}>
+          {report.reportArtifactId}
+        </span>
+      ),
+      generatedAt: (
+        <span style={{ ...monoTextStyle, color: theme.text }}>
+          {formatLongDateTime(locale, report.generatedAt)} UTC
+        </span>
+      ),
+      _order: index,
+    }));
+}
+
+function renderFallbackWorkspace({
+  locale,
+  order,
+  dispatchJob,
+  currentTask,
+  passengerProjection,
+  fallbackReports,
+  fallbackTrace,
+  fallbackDataFailed,
+}: {
+  locale: Locale;
+  order: OwnedOrderRecord;
+  dispatchJob: DispatchJobRecord | undefined;
+  currentTask: DriverTaskRecord | null;
+  passengerProjection: SandboxFulfillmentProjectionView | null;
+  fallbackReports: RocFallbackToHumanReport[];
+  fallbackTrace: DispatchTraceLogRecord | null;
+  fallbackDataFailed: boolean;
+}) {
+  const primaryReport =
+    fallbackReports.find((report) => report.orderId === order.orderId) ??
+    fallbackReports[0] ??
+    null;
+  const fallbackStage = getFallbackStage(
+    order,
+    currentTask,
+    passengerProjection,
+  );
+  const revisedEtaMinutes =
+    primaryReport?.revisedEtaMinutes ??
+    readTraceDetailNumber(fallbackTrace, "revisedEtaMinutes") ??
+    passengerProjection?.etaMinutes ??
+    order.etaSnapshot?.etaMinutes ??
+    null;
+  const trigger =
+    primaryReport?.trigger ?? readTraceDetailString(fallbackTrace, "trigger");
+  const sandboxDecisionId =
+    primaryReport?.sandboxDecisionId ??
+    readTraceDetailString(fallbackTrace, "sandboxDecisionId");
+  const previousAssignmentId =
+    primaryReport?.previousAssignmentId ??
+    readTraceDetailString(fallbackTrace, "previousAssignmentId");
+  const fallbackAssignmentId =
+    primaryReport?.fallbackAssignmentId ??
+    currentTask?.assignmentId ??
+    readTraceDetailString(fallbackTrace, "fallbackAssignmentId");
+  const fallbackTaskId =
+    primaryReport?.fallbackTaskId ??
+    currentTask?.taskId ??
+    readTraceDetailString(fallbackTrace, "fallbackTaskId");
+  const avVehicleId =
+    primaryReport?.avVehicleId ??
+    readTraceDetailString(fallbackTrace, "avVehicleId");
+  const avDriverId =
+    primaryReport?.avDriverId ??
+    readTraceDetailString(fallbackTrace, "avDriverId");
+  const humanVehicleId =
+    primaryReport?.humanVehicleId ??
+    currentTask?.vehicleId ??
+    readTraceDetailString(fallbackTrace, "humanVehicleId");
+  const humanDriverId =
+    primaryReport?.humanDriverId ??
+    currentTask?.driverId ??
+    readTraceDetailString(fallbackTrace, "humanDriverId");
+  const reportArtifactId =
+    primaryReport?.reportArtifactId ??
+    readTraceDetailString(fallbackTrace, "reportArtifactId");
+  const generatedAt =
+    primaryReport?.generatedAt ?? fallbackTrace?.createdAt ?? null;
+  const hardReasonCodes =
+    primaryReport?.hardReasonCodes ??
+    readTraceDetailCodeList(fallbackTrace, "hardReasonCodes");
+  const softReasonCodes =
+    primaryReport?.softReasonCodes ??
+    readTraceDetailCodeList(fallbackTrace, "softReasonCodes");
+  const exceptionRows = buildFallbackExceptionRows(locale, fallbackReports);
+
+  return (
+    <div style={{ padding: "12px 24px 0", display: "grid", gap: 16 }}>
+      <Banner
+        theme={theme}
+        tone="warn"
+        icon="warn"
+        title={tr(locale, "dispatch.detail.avFallback.banner.title")}
+        body={tr(locale, "dispatch.detail.avFallback.banner.body")}
+      />
+      {fallbackDataFailed ? (
+        <Banner
+          theme={theme}
+          tone="warn"
+          icon="warn"
+          title={tr(locale, "dispatch.detail.avFallback.dataDegraded.title")}
+          body={tr(locale, "dispatch.detail.avFallback.dataDegraded.body")}
+        />
+      ) : null}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.25fr) minmax(320px, 1fr)",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
+        <Card
+          theme={theme}
+          title={tr(locale, "dispatch.detail.avFallback.title")}
+          subtitle={tr(locale, "dispatch.detail.avFallback.subtitle")}
+        >
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Pill
+                theme={theme}
+                tone={getFallbackStageTone(fallbackStage)}
+                dot
+              >
+                {getFallbackStageLabel(locale, fallbackStage)}
+              </Pill>
+              {order.bookingId ? (
+                <Pill theme={theme} tone="accent">
+                  {order.bookingId}
+                </Pill>
+              ) : null}
+              {dispatchJob ? (
+                <Pill theme={theme} tone="neutral">
+                  {dispatchJob.dispatchJobId}
+                </Pill>
+              ) : null}
+            </div>
+            {renderFallbackProgress(locale, fallbackStage)}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1.15fr) minmax(220px, 1fr)",
+                gap: 14,
+                alignItems: "start",
+              }}
+            >
+              <DL
+                theme={theme}
+                cols={2}
+                items={[
+                  {
+                    k: tr(locale, "dispatch.detail.avFallback.booking"),
+                    v: order.bookingId ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: tr(locale, "dispatch.detail.avFallback.order"),
+                    v: order.orderId,
+                    mono: true,
+                  },
+                  {
+                    k: tr(locale, "dispatch.detail.avFallback.trigger"),
+                    v: trigger ? formatOpsCodeLabel(locale, trigger) : "—",
+                    mono: false,
+                  },
+                  {
+                    k: tr(locale, "dispatch.detail.avFallback.revisedEta"),
+                    v: formatEtaMinutesValue(locale, revisedEtaMinutes),
+                    mono: true,
+                  },
+                  {
+                    k: tr(
+                      locale,
+                      "dispatch.detail.avFallback.previousAssignment",
+                    ),
+                    v: previousAssignmentId ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: tr(
+                      locale,
+                      "dispatch.detail.avFallback.fallbackAssignment",
+                    ),
+                    v: fallbackAssignmentId ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: tr(locale, "dispatch.detail.avFallback.fallbackTask"),
+                    v: fallbackTaskId ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: tr(locale, "dispatch.detail.avFallback.reportArtifact"),
+                    v: reportArtifactId ?? "—",
+                    mono: true,
+                  },
+                ]}
+              />
+              <div style={{ display: "grid", gap: 12 }}>
+                <Banner
+                  theme={theme}
+                  tone="info"
+                  icon="info"
+                  title={tr(
+                    locale,
+                    "dispatch.detail.avFallback.sameBooking.title",
+                  )}
+                  body={tr(
+                    locale,
+                    "dispatch.detail.avFallback.sameBooking.body",
+                  )}
+                />
+                <DL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      k: tr(locale, "dispatch.detail.avFallback.avCrew"),
+                      v: formatCrewValue(avVehicleId, avDriverId),
+                      mono: true,
+                    },
+                    {
+                      k: tr(locale, "dispatch.detail.avFallback.humanCrew"),
+                      v: formatCrewValue(humanVehicleId, humanDriverId),
+                      mono: true,
+                    },
+                    {
+                      k: tr(
+                        locale,
+                        "dispatch.detail.avFallback.sandboxDecision",
+                      ),
+                      v: sandboxDecisionId ?? "—",
+                      mono: true,
+                    },
+                    {
+                      k: tr(locale, "dispatch.detail.avFallback.reasonCodes"),
+                      v:
+                        formatOpsCodeList(locale, [
+                          ...hardReasonCodes,
+                          ...softReasonCodes,
+                        ]) || "—",
+                      mono: false,
+                    },
+                    {
+                      k: tr(
+                        locale,
+                        "dispatch.detail.avFallback.reportGenerated",
+                      ),
+                      v: generatedAt
+                        ? `${formatLongDateTime(locale, generatedAt)} UTC`
+                        : "—",
+                      mono: true,
+                    },
+                  ]}
+                />
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card
+          theme={theme}
+          title={tr(locale, "dispatch.detail.passengerRecovery.title")}
+          subtitle={tr(locale, "dispatch.detail.passengerRecovery.subtitle")}
+        >
+          {passengerProjection ? (
+            <div style={{ display: "grid", gap: 12 }}>
+              <Banner
+                theme={theme}
+                tone="info"
+                icon="lock"
+                title={tr(
+                  locale,
+                  "dispatch.detail.passengerRecovery.banner.title",
+                )}
+                body={tr(
+                  locale,
+                  "dispatch.detail.passengerRecovery.banner.body",
+                )}
+              />
+              <DL
+                theme={theme}
+                cols={2}
+                items={[
+                  {
+                    k: tr(
+                      locale,
+                      "dispatch.detail.passengerRecovery.fulfillment",
+                    ),
+                    v: (
+                      <Pill theme={theme} tone="warn" dot>
+                        {formatOpsCodeLabel(
+                          locale,
+                          passengerProjection.fulfillmentMode,
+                        )}
+                      </Pill>
+                    ),
+                  },
+                  {
+                    k: tr(locale, "dispatch.detail.passengerRecovery.status"),
+                    v: formatOpsCodeLabel(
+                      locale,
+                      passengerProjection.statusCode,
+                    ),
+                    mono: false,
+                  },
+                  {
+                    k: tr(locale, "dispatch.detail.passengerRecovery.eta"),
+                    v: formatEtaMinutesValue(
+                      locale,
+                      passengerProjection.etaMinutes,
+                    ),
+                    mono: true,
+                  },
+                  {
+                    k: tr(
+                      locale,
+                      "dispatch.detail.passengerRecovery.updatedAt",
+                    ),
+                    v: `${formatLongDateTime(
+                      locale,
+                      passengerProjection.updatedAt,
+                    )} UTC`,
+                    mono: true,
+                  },
+                ]}
+              />
+              <div style={{ display: "grid", gap: 8 }}>
+                {passengerProjection.messages.map((message, index) => (
+                  <div
+                    key={`${message.messageCode}:${index}`}
+                    style={{
+                      display: "grid",
+                      gap: 6,
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <Pill
+                        theme={theme}
+                        tone={getMessageCategoryTone(message.category)}
+                      >
+                        {formatOpsCodeLabel(locale, message.category)}
+                      </Pill>
+                      <span style={{ color: theme.text, fontWeight: 700 }}>
+                        {formatOpsCodeLabel(locale, message.messageCode)}
+                      </span>
+                    </div>
+                    <span style={{ ...monoTextStyle, color: theme.textDim }}>
+                      {message.messageCode}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <CanvasEmptyPanel
+              theme={theme}
+              tone="warn"
+              density="compact"
+              title={tr(
+                locale,
+                "dispatch.detail.passengerRecovery.empty.title",
+              )}
+              description={tr(
+                locale,
+                "dispatch.detail.passengerRecovery.empty.body",
+              )}
+              icon={<CanvasIcon name="warn" size={18} />}
+            />
+          )}
+        </Card>
+      </div>
+
+      <Card
+        theme={theme}
+        title={tr(locale, "dispatch.detail.sandboxExceptions.title")}
+        subtitle={tr(locale, "dispatch.detail.sandboxExceptions.subtitle")}
+        {...(exceptionRows.length > 0 ? { padding: 0 } : {})}
+      >
+        {exceptionRows.length > 0 ? (
+          <Table
+            theme={theme}
+            columns={
+              [
+                {
+                  h: tr(locale, "dispatch.detail.sandboxExceptions.col.report"),
+                  k: "reportId",
+                  w: 180,
+                  r: (row) => (
+                    <span
+                      style={{
+                        ...monoTextStyle,
+                        color: theme.accent,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {String(row.reportId)}
+                    </span>
+                  ),
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.trigger",
+                  ),
+                  k: "trigger",
+                  w: 128,
+                  r: (row) => (
+                    <Pill theme={theme} tone="warn" dot>
+                      {formatOpsCodeLabel(locale, String(row.trigger))}
+                    </Pill>
+                  ),
+                },
+                {
+                  h: tr(locale, "dispatch.detail.sandboxExceptions.col.chain"),
+                  k: "chain",
+                  w: 220,
+                },
+                {
+                  h: tr(locale, "dispatch.detail.sandboxExceptions.col.eta"),
+                  k: "revisedEta",
+                  w: 120,
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.reasons",
+                  ),
+                  k: "reasonCodes",
+                  w: 280,
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.artifact",
+                  ),
+                  k: "artifact",
+                  w: 200,
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.generated",
+                  ),
+                  k: "generatedAt",
+                  w: 180,
+                },
+              ] satisfies CanvasTableColumn<FallbackExceptionRow>[]
+            }
+            rows={exceptionRows}
+          />
+        ) : (
+          <CanvasEmptyPanel
+            theme={theme}
+            density="compact"
+            title={tr(locale, "dispatch.detail.sandboxExceptions.empty.title")}
+            description={tr(
+              locale,
+              "dispatch.detail.sandboxExceptions.empty.body",
+            )}
+            icon={<CanvasIcon name="audit" size={18} />}
+          />
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
   return (
     <div style={{ padding: 24, display: "grid", gap: 16 }}>
@@ -2088,10 +2869,38 @@ async function renderOwnedWorkspace({
         [] as DispatchCandidate[],
       )
     : { data: [] as DispatchCandidate[], failed: false };
-  const dispatchTrace = await resolveOrFallback(
-    () => client.getOrderDispatchTrace(order.orderId),
-    [] as DispatchTraceLogRecord[],
-  );
+  const bookingId = order.bookingId;
+  const [dispatchTrace, passengerProjectionResult, fallbackReportsResult] =
+    await Promise.all([
+      resolveOrFallback(
+        () => client.getOrderDispatchTrace(order.orderId),
+        [] as DispatchTraceLogRecord[],
+      ),
+      bookingId
+        ? load(
+            () =>
+              client.get<SandboxFulfillmentProjectionView>(
+                `/api/ops/bookings/${encodeURIComponent(bookingId)}/sandbox-fulfillment?audience=passenger`,
+              ),
+            null as SandboxFulfillmentProjectionView | null,
+          )
+        : Promise.resolve({
+            data: null as SandboxFulfillmentProjectionView | null,
+            failed: false,
+          }),
+      bookingId
+        ? load(
+            () =>
+              client.get<{ items: RocFallbackToHumanReport[] }>(
+                `/api/roc/bookings/${encodeURIComponent(bookingId)}/fallback-reports`,
+              ),
+            { items: [] as RocFallbackToHumanReport[] },
+          )
+        : Promise.resolve({
+            data: { items: [] as RocFallbackToHumanReport[] },
+            failed: false,
+          }),
+    ]);
 
   const sortedCandidates = [...candidatesResult.data].sort(
     (left, right) => left.etaMinutes - right.etaMinutes,
@@ -2174,6 +2983,19 @@ async function renderOwnedWorkspace({
     dispatchJob,
     currentTask,
   );
+  const latestFallbackTrace = findLatestFallbackTrace(dispatchTrace);
+  const passengerProjection = passengerProjectionResult.data;
+  const fallbackReports = fallbackReportsResult.data.items;
+  const fallbackSurfaceVisible =
+    Boolean(order.bookingId) &&
+    (fallbackReports.length > 0 ||
+      latestFallbackTrace !== null ||
+      passengerProjection?.fulfillmentMode === "human_fallback" ||
+      passengerProjection?.fulfillmentMode === "mixed" ||
+      order.complianceFlags.includes("sandbox_human_fallback"));
+  const fallbackDataFailed =
+    fallbackSurfaceVisible &&
+    (passengerProjectionResult.failed || fallbackReportsResult.failed);
   const overrideSummary = buildOverrideSummary(locale, order);
 
   const noSupply =
@@ -2270,6 +3092,19 @@ async function renderOwnedWorkspace({
           />
         ) : null}
       </div>
+
+      {fallbackSurfaceVisible
+        ? renderFallbackWorkspace({
+            locale,
+            order,
+            dispatchJob,
+            currentTask,
+            passengerProjection,
+            fallbackReports,
+            fallbackTrace: latestFallbackTrace,
+            fallbackDataFailed,
+          })
+        : null}
 
       <div
         style={{

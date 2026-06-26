@@ -35,6 +35,7 @@ import type {
   RejectExceptionOverrideCommand,
   RecordPassengerAcknowledgementCommand,
   RequestExceptionOverrideCommand,
+  SandboxFulfillmentVisibilityAudience,
   ResolveExceptionHoldCommand,
   SandboxFulfillmentProjectionView,
   UpdateTenantBookingCommand,
@@ -296,6 +297,21 @@ export class OwnedMobilityController {
       ),
       requestId,
     );
+  }
+
+  @Get("ops/bookings/:bookingId/sandbox-fulfillment")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getOpsSandboxFulfillment(
+    @Param("bookingId") bookingId: string,
+    @Query("audience") audience?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const projection: SandboxFulfillmentProjectionView =
+      this.ownedMobilityService.getOpsSandboxFulfillment(
+        bookingId,
+        this.resolveOpsSandboxAudience(audience),
+      );
+    return toApiSuccessEnvelope(projection, requestId);
   }
 
   @Get("partner/bookings/:bookingId/sandbox-fulfillment")
@@ -698,5 +714,32 @@ export class OwnedMobilityController {
       this.ownedMobilityService.completeDriverTask(taskId, command, requestId),
       requestId,
     );
+  }
+
+  private resolveOpsSandboxAudience(
+    audience?: string,
+  ): SandboxFulfillmentVisibilityAudience {
+    const normalizedAudience = audience?.trim();
+    if (!normalizedAudience) {
+      return "ops";
+    }
+
+    switch (normalizedAudience) {
+      case "passenger":
+      case "tenant":
+      case "partner":
+      case "ops":
+      case "platform_admin":
+        return normalizedAudience;
+      default:
+        throw new ApiRequestError(
+          400,
+          "SANDBOX_FULFILLMENT_AUDIENCE_INVALID",
+          "audience must be one of passenger, tenant, partner, ops, or platform_admin.",
+          {
+            audience: normalizedAudience,
+          },
+        );
+    }
   }
 }

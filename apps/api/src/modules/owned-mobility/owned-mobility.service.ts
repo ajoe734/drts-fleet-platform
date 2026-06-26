@@ -1085,6 +1085,16 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
+  getOpsSandboxFulfillment(
+    bookingId: string,
+    audience: SandboxFulfillmentVisibilityAudience = "ops",
+  ) {
+    return this.mapSandboxFulfillmentProjection(
+      this.requireBookingOrder(bookingId),
+      audience,
+    );
+  }
+
   getPartnerSandboxFulfillment(partnerEntrySlug: string, bookingId: string) {
     this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
     const order = this.requireBookingOrder(bookingId);
