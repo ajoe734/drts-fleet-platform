@@ -345,6 +345,7 @@ export interface SandboxDispatchDecision {
   sandboxProgramId: string;
 
   decision: SandboxDispatchOutcome;
+  fallbackRequired: boolean;
   oddInBounds: boolean;
   hardReasonCodes: SandboxDispatchReasonCode[];
   softReasonCodes: SandboxDispatchReasonCode[];
@@ -485,6 +486,7 @@ export const ROC_INTERVENTION_TYPES = [
   "reroute",
   "odd_recovery",
   "manual_takeover",
+  "fallback_to_human",
 ] as const;
 export type RocInterventionType = (typeof ROC_INTERVENTION_TYPES)[number];
 
@@ -499,6 +501,50 @@ export interface RocIntervention {
   resolvedAt: string | null;
   outcomeNote: string | null;
   source: Phase2SourceMetadata;
+}
+
+export const ROC_FALLBACK_TRIGGERS = [
+  "gate_fallback_required",
+  "roc_manual_intervention",
+] as const;
+export type RocFallbackTrigger = (typeof ROC_FALLBACK_TRIGGERS)[number];
+
+export interface RocFallbackToHumanCommand {
+  dispatchJobId?: string | null;
+  sandboxDecisionId?: string | null;
+  humanVehicleId: string;
+  humanDriverId: string;
+  revisedEtaMinutes: number;
+  reason: string;
+  rocOperatorId?: string | null;
+  avVehicleId?: string | null;
+  avDriverId?: string | null;
+  triggeredByEventId?: string | null;
+  trigger?: RocFallbackTrigger;
+}
+
+export interface RocFallbackToHumanReport {
+  reportId: string;
+  interventionId: string;
+  tripId: string;
+  orderId: string;
+  bookingId: string | null;
+  dispatchJobId: string;
+  trigger: RocFallbackTrigger;
+  sandboxDecisionId: string | null;
+  sandboxProgramId: string | null;
+  avVehicleId: string | null;
+  avDriverId: string | null;
+  previousAssignmentId: string | null;
+  fallbackAssignmentId: string;
+  fallbackTaskId: string;
+  humanVehicleId: string;
+  humanDriverId: string;
+  revisedEtaMinutes: number;
+  hardReasonCodes: SandboxDispatchReasonCode[];
+  softReasonCodes: SandboxDispatchReasonCode[];
+  reportArtifactId: string;
+  generatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -690,6 +736,7 @@ export const PHASE2_AUDIT_EVENT_CATALOG = {
   roc: {
     interventionStarted: "roc.intervention.started",
     interventionResolved: "roc.intervention.resolved",
+    fallbackToHumanReported: "roc.fallback_to_human.reported",
   },
   evidence: {
     manifestCreated: "evidence.manifest.created",

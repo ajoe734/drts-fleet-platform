@@ -294,6 +294,29 @@ export class SandboxDispatchGateService {
     return this.lastDecision ? this.cloneDecision(this.lastDecision) : null;
   }
 
+  async findDecisionForOrder(orderId: string, decisionId?: string | null) {
+    const normalizedDecisionId = decisionId?.trim() ?? null;
+    if (this.repository) {
+      const record = normalizedDecisionId
+        ? await this.repository.loadDecisionById(normalizedDecisionId)
+        : await this.repository.loadLatestDecision(orderId);
+      if (!record || record.decision.orderId !== orderId) {
+        return null;
+      }
+      return this.cloneDecision(record.decision);
+    }
+
+    if (
+      this.lastDecision?.orderId === orderId &&
+      (!normalizedDecisionId ||
+        this.lastDecision.decisionId === normalizedDecisionId)
+    ) {
+      return this.cloneDecision(this.lastDecision);
+    }
+
+    return null;
+  }
+
   private normalizeInput(
     input: SandboxDispatchGateInput,
     evaluatedAt: string,
@@ -878,6 +901,7 @@ export class SandboxDispatchGateService {
         vehicleId: normalized.vehicleId,
         sandboxProgramId: normalized.sandboxProgramId,
         decision,
+        fallbackRequired: decision === "block",
         oddInBounds: normalized.operatingArea.inBounds,
         hardReasonCodes,
         softReasonCodes,

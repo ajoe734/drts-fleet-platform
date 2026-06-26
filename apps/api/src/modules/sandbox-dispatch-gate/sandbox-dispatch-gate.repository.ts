@@ -170,6 +170,7 @@ export class SandboxDispatchGateRepository {
         vehicleId: row.vehicle_id,
         sandboxProgramId: row.sandbox_program_id,
         decision: row.decision,
+        fallbackRequired: row.decision === "block",
         oddInBounds: row.odd_in_bounds,
         hardReasonCodes: [...row.hard_reason_codes] as SandboxDispatchStoredEvaluationRecord["decision"]["hardReasonCodes"],
         softReasonCodes: [...row.soft_reason_codes] as SandboxDispatchStoredEvaluationRecord["decision"]["softReasonCodes"],
