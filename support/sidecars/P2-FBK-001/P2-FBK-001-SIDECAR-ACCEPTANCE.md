@@ -2,7 +2,7 @@
 
 > **Sidecar self-status:** `in_progress` → handoff to reviewer `Codex`
 > **Task:** P2-FBK-001-SIDECAR-ACCEPTANCE · **Owner:** Claude · **Reviewer:** Codex
-> **Parent:** P2-FBK-001 (owner Codex, reviewer Codex2, status **`review_approved`**)
+> **Parent:** P2-FBK-001 (owner Codex, reviewer Codex2, status **`in_progress`**)
 > **Helper kind:** `acceptance_packet` · **Mutates canonical:** no
 > **Refreshed:** 2026-06-26 — re-anchored to **`origin/dev`** after the parent's
 > **PR #898 squash-merged to `dev` at 2026-06-26T04:55:20Z** (merge commit
@@ -10,23 +10,32 @@
 > review head `8a3f38b40` "P2-FBK-001: finalize owner closeout"). The **base** fallback
 > surface is therefore **on `dev`** — this closes former G4 (merge-to-`dev`) and former
 > G5 (CI/e2e harness deltas).
-> **State note (re-checked this refresh, machine truth `2026-06-26T05:11:06Z`): the parent
-> is now `review_approved`.** After PR #898 merged, owner Codex resumed work and added a
-> **follow-up delta** on `origin/codex/p2-fbk-001` — commit `70bbad660` *"cover ROC fallback
-> route registration"* (a +135-line HTTP route-registration integration test
+> **State note (re-checked this refresh, machine truth `2026-06-26T05:18:53Z`): the parent
+> moved `review_approved` → `in_progress` at `2026-06-26T05:18:00Z`.** The owner (Codex)
+> resumed to drive the **integration closeout of the follow-up delta** to `dev`. That delta
+> is commit `70bbad660` *"cover ROC fallback route registration"* on `origin/codex/p2-fbk-001`
+> (a +135-line HTTP route-registration integration test
 > `int-p2-008-roc-human-fallback-route.test.ts` + a 7-line `sandbox-dispatch-gate.service`
-> fix so a repository-disabled graph falls back to the in-memory `lastDecision`). Reviewer
-> Codex2 **reviewed and approved** that delta (restored the codex task files into a reviewer
-> worktree, ran vitest → **4 files / 23 tests passed**, no regressions). So the task has
-> moved **review → review_approved**, not back to active owner hands.
-> **`git diff origin/dev origin/codex/p2-fbk-001` is no longer empty:** the codex branch is
-> **ahead** of `dev` by that approved follow-up (`70bbad660`, **not yet merged to `dev`**) and
-> **behind** `dev` by 3 unrelated commits (tesla-regulatory ingress + V0040 migrations from
-> other tasks). The base PR #898 surface remains present on `dev` (verified file-by-file, §3).
+> fix so a repository-disabled graph falls back to the in-memory `lastDecision`); reviewer
+> Codex2 previously reviewed and approved it (restored the codex task files into a reviewer
+> worktree, vitest → **4 files / 23 tests passed**, no regressions). It is now being
+> **integrated to `dev` via PR #901** ("P2-FBK-001: integrate fallback route registration to
+> dev", base `dev`, head `codex/p2-fbk-001-dev-merge-local` @ `b9a798b1`). PR #901 is **OPEN /
+> `mergeStateStatus=BLOCKED` / `mergeable`** — blocked only because its required checks are
+> still **running**: `unit`/`integration`/`typecheck`/`lint`/`Commit trailers`/`orchestrator-tests`
+> already `pass`, while `build`, `e2e (0..3)`, and `Smoke acceptance` are `pending` (state =
+> **`ci_pending`**). The parent's `next` note confirms: *"Verifying PR #901 merge/check status
+> and closeout requirements from task worktree before finalizing machine-truth state."* So the
+> task is **back in active owner hands driving integration**, not parked at `review_approved`.
+> **`git diff origin/dev origin/codex/p2-fbk-001` is non-empty:** the codex branch is
+> **ahead** of `dev` by that approved follow-up (`70bbad660`, **not yet merged to `dev`** —
+> PR #901 is its in-flight vehicle) and **behind** `dev` by 3 unrelated commits
+> (tesla-regulatory ingress + V0040 migrations from other tasks). The base PR #898 surface
+> remains present on `dev` (verified file-by-file, §3).
 > The prior open review failure (G1/G2 / AC-2) stays **closed** via the
 > `SANDBOX_FALLBACK_NOT_REQUIRED` guard + negative INT-P2-008 case, present **on `dev`**.
-> The owner's integration-coverage follow-up is now **done and approved** (pending a second
-> merge to `dev`); the only standing item is **G3 (report durability)**.
+> The owner's integration-coverage follow-up is **reviewer-approved** and now **mid-integration
+> on PR #901** (ci_pending); the only standing functional item is **G3 (report durability)**.
 
 This is a **support-only** artifact. It does **not** modify L1 canonical truth, the
 phase2 contract surface, or the parent runtime implementation. It maps the acceptance
@@ -47,14 +56,24 @@ requires.
 >
 > **Parent-status history (carried forward — for audit).** This packet's parent-status claim
 > has tracked machine truth as it moved: `review` → `review_approved` (early) → `review`
-> again → `in_progress` (owner resumed post-PR #898) → **`review_approved`** (current,
-> `05:11:06Z`, after the owner's route-coverage follow-up `70bbad660` was reviewed and
-> approved by Codex2). Each prior revision is superseded by the one above. The **dev-branch
-> base evidence** — PR #898 merge `40ee45aba`, the `SANDBOX_FALLBACK_NOT_REQUIRED` guard, and
-> the negative INT-P2-008 case — has been confirmed consistent across all of these and is
-> unchanged; what moved is (a) the parent **status**, and (b) the **dev↔codex tree relation**,
-> which is no longer empty now that the approved follow-up sits on the codex branch ahead of
-> `dev` (and `dev` has advanced with unrelated work). Both are corrected in this revision.
+> again → `in_progress` (owner resumed post-PR #898) → `review_approved` (`05:11:06Z`, after
+> the route-coverage follow-up `70bbad660` was reviewed/approved by Codex2) → **`in_progress`**
+> (current, moved `05:18:00Z`, last_update `05:18:53Z` — owner Codex resumed to drive the
+> follow-up's integration to `dev` via **PR #901**). Each prior revision is superseded by the
+> one above. The **dev-branch base evidence** — PR #898 merge `40ee45aba`, the
+> `SANDBOX_FALLBACK_NOT_REQUIRED` guard, and the negative INT-P2-008 case — has been confirmed
+> consistent across all of these and is unchanged; what moved is (a) the parent **status**
+> (now `in_progress`, integration in flight), and (b) the **dev↔codex tree relation**, which
+> is non-empty because the approved follow-up sits on the codex branch ahead of `dev` and is
+> now being merged through PR #901 (not yet landed). Both are corrected in this revision.
+>
+> **Sidecar branch surface (reviewer reopen #2 — addressed).** A prior reviewer note worried
+> the sidecar branch carried runtime/docs paths beyond the support file. Re-verified this
+> refresh: `git diff --name-only origin/dev...origin/claude/p2-fbk-001-sidecar-acceptance`
+> returns **exactly one path** — `support/sidecars/P2-FBK-001/P2-FBK-001-SIDECAR-ACCEPTANCE.md`.
+> The net reviewable surface vs `origin/dev` is **support-only**; the branch's commit count
+> ahead reflects packet-refresh history, not runtime edits. No rebase is required to make the
+> surface support-only — it already is.
 
 Evidence anchors below were re-read at refresh time from:
 - **`origin/dev` @ `40ee45aba`** (canonical trunk; the PR #898 squash merge — the entire
@@ -64,9 +83,12 @@ Evidence anchors below were re-read at refresh time from:
   `cd6c4a5f9a` / review head `8a3f38b40` are folded into the squash merge `40ee45aba` on
   `dev`. **The branch is no longer tree-equal to `dev`:** it is **ahead** by the approved
   follow-up `70bbad660` (route-registration coverage + gate in-memory-fallback fix, *not yet
-  on `dev`*) and **behind** by 3 unrelated `dev` commits (`git rev-list --count
-  origin/codex/p2-fbk-001..origin/dev` → 3). The PR #898 base surface is still present on
-  `dev` (verified per-file, §3).
+  on `dev`* — being integrated via **PR #901**, OPEN/`ci_pending`) and **behind** by 3
+  unrelated `dev` commits (`git rev-list --count origin/codex/p2-fbk-001..origin/dev` → 3).
+  The PR #898 base surface is still present on `dev` (verified per-file, §3).
+- **PR #901** `codex/p2-fbk-001-dev-merge-local` @ `b9a798b1` (base `dev`) — the in-flight
+  integration of follow-up `70bbad660`; OPEN, `mergeStateStatus=BLOCKED`/`mergeable`, checks
+  partially `pass` / `build`+`e2e`+`Smoke acceptance` `pending` (`ci_pending`).
 - this sidecar branch `claude/p2-fbk-001-sidecar-acceptance`, base `origin/dev`
 
 ---
@@ -84,19 +106,23 @@ breaking the SLA / billing / audit chain.
 - **Parent artifact dirs:** `apps/api/src/modules/sandbox-dispatch-gate/`,
   `apps/api/src/modules/owned-mobility/`, and the new
   `apps/api/src/modules/roc-operations/` controller/service (see §3) — all now on `dev`.
-- **Parent declared status:** **`review_approved`** (owner Codex, reviewer Codex2;
-  last_update `2026-06-26T05:11:06Z`). Reviewer `next` note records that Codex2 reviewed the
-  `origin/codex/p2-fbk-001` delta on top of merged commit `40ee45aba` — *"repository-disabled
-  fallback now uses in-memory lastDecision, route registration is covered by HTTP
-  integration, and no regressions found … vitest → 4 files passed, 23 tests passed."* — i.e.
-  the base implementation is on `dev` (PR #898) and the owner's follow-up route-coverage
-  delta has now been **reviewed and approved**. The earlier review failure stayed
-  **resolved** (see §3.3, §4 G1/G2, §5 AC-2), present **on `dev`**. The only step left to a
-  full integration closeout is **merging the approved follow-up `70bbad660` to `dev`** (a
-  second merge), then finalizing `done` with `INTEGRATION_STATUS=merged_to_dev`.
+- **Parent declared status:** **`in_progress`** (owner Codex, reviewer Codex2; last_update
+  `2026-06-26T05:18:53Z`, moved out of `review_approved` at `05:18:00Z`). The parent `next`
+  note records the owner is *"Verifying PR #901 merge/check status and closeout requirements
+  from task worktree before finalizing machine-truth state."* The base implementation is on
+  `dev` (PR #898 / `40ee45aba`); the owner's follow-up route-coverage delta (`70bbad660`) was
+  **reviewed and approved** by Codex2 (*"repository-disabled fallback now uses in-memory
+  lastDecision, route registration is covered by HTTP integration, no regressions … vitest →
+  4 files / 23 tests passed."*) and is now being **integrated to `dev` via PR #901** (base
+  `dev`, head `codex/p2-fbk-001-dev-merge-local` @ `b9a798b1`; OPEN, `mergeStateStatus=BLOCKED`,
+  `mergeable` — blocked only on still-running checks: `unit`/`integration`/`typecheck`/`lint`/
+  trailers `pass`, `build`/`e2e (0..3)`/`Smoke acceptance` `pending` → **`ci_pending`**). The
+  earlier review failure stayed **resolved** (see §3.3, §4 G1/G2, §5 AC-2), present **on `dev`**.
+  The step left to a full integration closeout is **PR #901's checks going green and merging
+  `70bbad660` to `dev`**, then finalizing `done` with `INTEGRATION_STATUS=merged_to_dev`.
 - **Sidecar role:** prepare the acceptance checklist + dependency map so the parent
   owner/reviewer have one reference for what "done" requires and which item (the standing
-  **G3 durability follow-up**) remains beyond the pending second merge.
+  **G3 durability follow-up**) remains beyond the in-flight PR #901 integration.
 
 ---
 
@@ -117,11 +143,12 @@ only registry match is `P2-GATE-001-SIDECAR-ACCEPTANCE`, `done`). On that repo/d
 P2-FBK-001 is **not dependency-blocked**, and — as of PR #898 — **its own surface is also
 merged to `dev`**.
 The remaining work is **not** an upstream dependency wait. With the parent now
-**`review_approved`**, the owner's follow-up integration coverage / route-wiring
-verification is **done and approved** (commit `70bbad660`); what remains for a full
-integration closeout is the **second merge of that follow-up to `dev`**, after which the
-owner finalizes `done` with `INTEGRATION_STATUS=merged_to_dev`. The optional G3 durability
-follow-up is the only other open item.
+**`in_progress`** (integration in flight), the owner's follow-up integration coverage /
+route-wiring delta is **reviewer-approved** (commit `70bbad660`) and is being merged to `dev`
+via **PR #901** (OPEN, `ci_pending` — checks still running); what remains for a full
+integration closeout is **PR #901 going green and merging**, after which the owner finalizes
+`done` with `INTEGRATION_STATUS=merged_to_dev`. The optional G3 durability follow-up is the
+only other open item.
 
 ---
 
@@ -132,7 +159,8 @@ a reviewer can confirm exist **on `dev`**; the line/symbol anchors are stable at
 tree. Each base file below was re-verified present on `origin/dev` file-by-file this refresh
 (`git cat-file -e origin/dev:<path>`). **Caveat:** the approved follow-up `70bbad660` (the
 dedicated route-registration test in §3.6 and a 7-line gate fix in §3.5) lives on
-`origin/codex/p2-fbk-001` and is **not yet on `dev`** — it is flagged inline below.
+`origin/codex/p2-fbk-001` and is **not yet on `dev`** — it is mid-integration via **PR #901**
+(OPEN, `ci_pending`) and is flagged inline below.
 
 ### 3.1 Contract additions (`packages/contracts/src/phase2-tesla-fsd-sandbox.ts`)
 - `SandboxDispatchDecision.fallbackRequired: boolean` added (the gate's fallback signal).
@@ -204,7 +232,7 @@ dedicated route-registration test in §3.6 and a 7-line gate fix in §3.5) lives
   **present-but-disabled** repository now also falls through to the in-memory `lastDecision`
   path (previously only an *absent* repository did). This is what makes gate-triggered ROC
   fallback work in no-DB module graphs. On `dev`'s `40ee45aba` the un-tightened guard is
-  still in place; this 7-line fix lands with the pending second merge.
+  still in place; this 7-line fix lands when **PR #901** merges to `dev`.
 
 ### 3.6 Tests (present on `dev`)
 - `apps/api/tests/integration/int-p2-008-roc-human-fallback.test.ts` — 4 cases:
@@ -226,7 +254,7 @@ dedicated route-registration test in §3.6 and a 7-line gate fix in §3.5) lives
   integration test that exercises **ROC fallback route registration** end-to-end (the
   owner's "verify route wiring / finish missing integration coverage" item). Reviewer
   Codex2 verified it by restoring the codex task files into a reviewer worktree and running
-  vitest → **4 files / 23 tests passed**. It lands on `dev` with the pending second merge.
+  vitest → **4 files / 23 tests passed**. It lands on `dev` when **PR #901** merges.
 
 ### 3.7 PR #898 merge vs. CI timing (repo/GitHub evidence — exact)
 An earlier revision said PR #898 *"merged after all GitHub checks passed."* That is
@@ -263,7 +291,7 @@ so the parent review is explicit about what "done" still requires.
 | ~~G1~~ | **Non-fallback gate decisions rejected.** The ROC guard rejects a `gate_fallback_required` trigger both when **no** decision is found *and* when a found decision has `fallbackRequired === false` (`SANDBOX_FALLBACK_NOT_REQUIRED` 409). | ✅ closed (on `dev`) | `roc-operations.service.ts` `"SANDBOX_FALLBACK_NOT_REQUIRED"`; two-branch guard (§3.3) |
 | ~~G2~~ | **Negative integration test present.** A `gate_fallback_required` request backed by an `allow` (`fallbackRequired:false`) decision is asserted to be rejected with `SANDBOX_FALLBACK_NOT_REQUIRED` and to produce no side effects. | ✅ closed (on `dev`) | `int-p2-008-roc-human-fallback.test.ts` negative case (§3.6) |
 | G3 | **Report persistence is in-memory.** `fallbackReports` / `reportArtifactId` are retained in-process; no durable repository for the sandbox-exception report the contract/regulatory retention implies. | ⛔ open follow-up | `private fallbackReports: RocFallbackToHumanReport[] = []` |
-| ~~G4~~ | **Base surface merged to `dev`.** The base fallback surface is on `dev` via **PR #898** (squash merge `40ee45aba`, merged 04:55:20Z). One **approved follow-up** (`70bbad660`: route-registration test + gate `isEnabled()` fix) is on `origin/codex/p2-fbk-001` ahead of `dev` and needs a **second merge**; the parent is `review_approved`, so `done` finalizes with `INTEGRATION_STATUS=merged_to_dev` once that second merge lands. | ✅ base closed (PR #898) · ⏳ 2nd merge pending | `git merge-base --is-ancestor 40ee45aba origin/dev` → true; base surface files present on `origin/dev`; follow-up `70bbad660` ahead of `dev` |
+| ~~G4~~ | **Base surface merged to `dev`.** The base fallback surface is on `dev` via **PR #898** (squash merge `40ee45aba`, merged 04:55:20Z). One **approved follow-up** (`70bbad660`: route-registration test + gate `isEnabled()` fix) is on `origin/codex/p2-fbk-001` ahead of `dev` and is now mid-integration via **PR #901** (base `dev`, head `b9a798b1`; OPEN, `mergeStateStatus=BLOCKED` on still-running checks = `ci_pending`); the parent is `in_progress` driving that closeout, so `done` finalizes with `INTEGRATION_STATUS=merged_to_dev` once PR #901 goes green and merges. | ✅ base closed (PR #898) · ⏳ PR #901 ci_pending | `git merge-base --is-ancestor 40ee45aba origin/dev` → true; base surface files present on `origin/dev`; follow-up `70bbad660` ahead of `dev`, not an ancestor; PR #901 OPEN |
 | ~~G5~~ | **CI/e2e harness deltas reconciled.** The branch's earlier edits to `.github/workflows/ci-integ.yml` and `tests/e2e/run-e2e-hermetic.sh` are reconciled with `dev`'s `CI-E2E-SHARD` (`92dbd14e6`). PR #898 head checks were green (see §3.7 timing note); the **post-merge `dev` trunk** then re-ran the full suite on `40ee45aba` and all passed. | ✅ closed (on `dev`) | post-merge `dev` checks on `40ee45aba` all `success` (ci-integ completed 04:58:27Z); harness files match `dev` (§3.7) |
 
 ---
@@ -296,12 +324,12 @@ not re-run build/typecheck/test; PR #898's GitHub checks are the `dev`-level sig
   route present; module imports deps; `RocOperationsModule` registered in `app.module`.
   ✅ present-on-`dev` (§3.2). **Route registration now has dedicated HTTP integration
   coverage** via the approved follow-up `int-p2-008-roc-human-fallback-route.test.ts`
-  (`70bbad660`, codex-branch-only, reviewer-verified — lands with the pending 2nd merge; §3.6).
+  (`70bbad660`, codex-branch-only, reviewer-verified — lands when **PR #901** merges; §3.6).
 - **AC-7 — E2E-P2-008 + UAT-AV-010 covered; integration green on mainline.** Specs
   exist (int-p2-008: **4 cases** incl. both named scenarios + the negative guard case;
   e2e shell present), on `dev`; the **route-registration** integration spec is the approved
-  follow-up `70bbad660` (codex-branch-only, reviewer-verified 23 tests pass — pending 2nd
-  merge to `dev`). The `dev`-level CI/e2e signal is satisfied by the
+  follow-up `70bbad660` (codex-branch-only, reviewer-verified 23 tests pass — mid-integration
+  via **PR #901**, `ci_pending`). The `dev`-level CI/e2e signal is satisfied by the
   **post-merge trunk run on merge commit `40ee45aba`** (full suite `success`, `ci-integ`
   completed 04:58:27Z; see §3.7) — note PR #898 merged at 04:55:20Z while the pre-merge
   head `ci-integ` completed 04:55:24Z (~4 s after), so the green of record is the
@@ -311,10 +339,11 @@ not re-run build/typecheck/test; PR #898's GitHub checks are the `dev`-level sig
 gate-decision guard closed); AC-5 present with one open follow-up (G3 report durability);
 AC-7 covered with the post-merge `dev` trunk checks on `40ee45aba` green (§3.7; G4 base
 closed, G5 closed). **No AC is blocked** — the dependency is merged and the base fallback
-surface is merged. The parent is **`review_approved`** (`05:11:06Z`): the owner's
-route-coverage / wiring follow-up (`70bbad660`) has been **reviewed and approved** by
-Codex2 (23 tests pass). The remaining step to full integration closeout is the **second
-merge of that follow-up to `dev`**, after which the owner finalizes `done`
+surface is merged. The parent is **`in_progress`** (`05:18:53Z`, moved at `05:18:00Z`): the
+owner's route-coverage / wiring follow-up (`70bbad660`) was **reviewed and approved** by
+Codex2 (23 tests pass) and is now **mid-integration via PR #901** (OPEN, `ci_pending` — checks
+still running). The remaining step to full integration closeout is **PR #901 going green and
+merging to `dev`**, after which the owner finalizes `done`
 (`INTEGRATION_STATUS=merged_to_dev`). G3 report durability is the only standing open item.
 
 ---
@@ -334,28 +363,34 @@ merge of that follow-up to `dev`**, after which the owner finalizes `done`
   guard and the negative INT-P2-008 case. The `dev`-level green is the **post-merge trunk
   run on `40ee45aba`** (full suite `success`, `ci-integ` 04:58:27Z); the pre-merge head
   `ci-integ` completed 04:55:24Z (~4 s after `mergedAt`) — see §3.7, not a strictly
-  before-merge gate. **G5 is closed; G4 base is closed with a 2nd merge pending** (below).
-- **One approved follow-up is ahead of `dev` (`70bbad660`).** `git diff origin/dev
-  origin/codex/p2-fbk-001` is **no longer empty**: the codex branch is **ahead** by the
+  before-merge gate. **G5 is closed; G4 base is closed with PR #901 (the follow-up merge) in
+  flight / `ci_pending`** (below).
+- **One approved follow-up is mid-integration via PR #901 (`70bbad660`).** `git diff
+  origin/dev origin/codex/p2-fbk-001` is **non-empty**: the codex branch is **ahead** by the
   reviewer-approved route-coverage commit `70bbad660` (`int-p2-008-roc-human-fallback-route.test.ts`
   +135 + a 7-line gate `isEnabled()` fix, §3.5/§3.6) — **not yet on `dev`** — and **behind**
-  by 3 unrelated `dev` commits. A second merge of `70bbad660` to `dev` is the remaining
-  integration step before `done`.
-- **Parent is `review_approved`** (owner Codex; reviewer Codex2; last_update
-  `2026-06-26T05:11:06Z`). PR #898 merged the base surface; the owner then completed the
-  route-coverage / wiring follow-up (`70bbad660`), which reviewer Codex2 **reviewed and
-  approved** (restored codex files into a reviewer worktree, vitest → 4 files / 23 tests
-  passed). So the next step is the **owner's `done` finalize after the 2nd merge to `dev`**,
-  not further owner implementation.
-- **Recommended parent focus order (remaining):** (1) **merge the approved follow-up
-  `70bbad660` to `dev`** (2nd merge — the route-coverage test + gate `isEnabled()` fix;
-  already reviewer-approved). (2) finalize `done` with `INTEGRATION_STATUS=merged_to_dev`
-  (base merge evidence: PR #898 / `40ee45aba`; plus the 2nd merge for the follow-up).
-  (3) **G3** — persist the sandbox-exception report — remains a follow-up if regulatory
-  retention is in-scope for this slice.
+  by 3 unrelated `dev` commits. That follow-up is now being integrated to `dev` via **PR #901**
+  ("P2-FBK-001: integrate fallback route registration to dev", base `dev`, head
+  `codex/p2-fbk-001-dev-merge-local` @ `b9a798b1`; OPEN, `mergeStateStatus=BLOCKED` only on
+  still-running checks — `unit`/`integration`/`typecheck`/`lint`/trailers `pass`,
+  `build`/`e2e (0..3)`/`Smoke acceptance` `pending` = **`ci_pending`**). PR #901 going green
+  and merging is the remaining integration step before `done`.
+- **Parent is `in_progress`** (owner Codex; reviewer Codex2; last_update
+  `2026-06-26T05:18:53Z`, moved out of `review_approved` at `05:18:00Z`). PR #898 merged the
+  base surface; the owner completed the route-coverage / wiring follow-up (`70bbad660`), which
+  reviewer Codex2 **reviewed and approved**, and has now resumed to drive its integration to
+  `dev` (PR #901). The parent `next` confirms: *"Verifying PR #901 merge/check status and
+  closeout requirements … before finalizing machine-truth state."* So the next step is **PR
+  #901 closeout → owner `done` finalize**, not further owner implementation.
+- **Recommended parent focus order (remaining):** (1) **drive PR #901 to green and merge
+  `70bbad660` to `dev`** (the route-coverage test + gate `isEnabled()` fix; already
+  reviewer-approved — blocked only on pending `build`/`e2e`/`Smoke acceptance` checks).
+  (2) finalize `done` with `INTEGRATION_STATUS=merged_to_dev` (base merge evidence: PR #898 /
+  `40ee45aba`; plus PR #901 for the follow-up). (3) **G3** — persist the sandbox-exception
+  report — remains a follow-up if regulatory retention is in-scope for this slice.
 - **Sidecar made no canonical edits.** Only this support artifact was added; the base
   fallback implementation is owned by the parent and lives on `dev`, with the approved
-  follow-up pending its 2nd merge.
+  follow-up mid-integration via PR #901.
 - **Runtime checks honestly unrun here.** The sidecar did not run build/typecheck/test;
   PR #898's GitHub checks are the `dev`-level signal of record.
 
