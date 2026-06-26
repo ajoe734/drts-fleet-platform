@@ -366,7 +366,6 @@ export class RegulatoryReportingService {
     identity: BootstrapRequestIdentity | null,
     requestId?: string,
   ) {
-    this.refreshDerivedState();
     const actor = this.requireActor(identity);
     const notification = this.requireNotification(notificationId);
     if (notification.lifecycleStatus !== "review_approved") {
@@ -388,6 +387,7 @@ export class RegulatoryReportingService {
     );
     notification.overdue = submittedAt > notification.deadlineAt;
     notification.updatedAt = this.nowIso();
+    this.refreshDerivedState();
 
     this.recordAudit(
       {
@@ -418,10 +418,7 @@ export class RegulatoryReportingService {
     this.refreshDerivedState();
     const actor = this.requireActor(identity);
     const notification = this.requireNotification(notificationId);
-    if (
-      notification.lifecycleStatus !== "submitted" &&
-      notification.lifecycleStatus !== "acknowledged"
-    ) {
+    if (notification.lifecycleStatus !== "submitted") {
       throw this.conflict(
         "REGULATORY_NOTIFICATION_ACKNOWLEDGE_INVALID",
         "Only submitted notifications can be acknowledged.",
