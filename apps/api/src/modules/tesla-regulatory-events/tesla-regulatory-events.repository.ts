@@ -59,10 +59,10 @@ export interface TeslaRegulatoryCanonicalEventRecord extends TeslaRegulatoryEven
   ingestStatus: "accepted";
 }
 
-export interface CreateTeslaRegulatoryRawEventInput extends Omit<
+export type CreateTeslaRegulatoryRawEventInput = Omit<
   TeslaRegulatoryRawEventRecord,
   "rawEventId"
-> {}
+>;
 
 export interface CreateTeslaRegulatoryCanonicalEventInput {
   providerCode: string;
@@ -453,7 +453,9 @@ export class TeslaRegulatoryEventsRepository {
       };
     }
 
-    const result = await (executor ?? this.databaseService!).query<CanonicalEventRow>(
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<CanonicalEventRow>(
       `
         INSERT INTO av_sandbox.tesla_regulatory_events (
           event_id,
@@ -560,7 +562,9 @@ export class TeslaRegulatoryEventsRepository {
       );
     }
 
-    const result = await (executor ?? this.databaseService!).query<CanonicalEventRow>(
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<CanonicalEventRow>(
       `
         SELECT
           event_id,

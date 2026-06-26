@@ -446,7 +446,9 @@ export class TeslaRegulatoryEventsService {
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed;
       }
-    } catch {}
+    } catch {
+      // Fall through to the uniform invalid-header error below.
+    }
 
     throw new ApiRequestError(
       HttpStatus.UNAUTHORIZED,
@@ -817,16 +819,15 @@ export class TeslaRegulatoryEventsService {
           },
           executor,
         ));
-      const attachedRawEvent =
-        (await this.repository.attachCanonicalEvent(
-          existing.rawEventId,
-          canonicalEvent.eventId,
-          executor,
-        )) ?? {
-          ...existing,
-          canonicalEventId: canonicalEvent.eventId,
-          normalizationStatus: "accepted",
-        };
+      const attachedRawEvent = (await this.repository.attachCanonicalEvent(
+        existing.rawEventId,
+        canonicalEvent.eventId,
+        executor,
+      )) ?? {
+        ...existing,
+        canonicalEventId: canonicalEvent.eventId,
+        normalizationStatus: "accepted",
+      };
 
       this.recordAudit(
         "ingress.recovered_missing_canonical_attachment",
