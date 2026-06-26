@@ -132,9 +132,11 @@ async function applyUpstreamAuth(
       : {}),
   });
 
-  Object.entries(controlPlaneAuth.headers).forEach(([key, value]) => {
+  for (const [key, value] of Object.entries(controlPlaneAuth.headers) as Array<
+    [string, string]
+  >) {
     headers.set(key, value);
-  });
+  }
 
   if (process.env.DRTS_API_AUTH_AUDIENCE) {
     const metadataToken = await mintMetadataIdentityToken(

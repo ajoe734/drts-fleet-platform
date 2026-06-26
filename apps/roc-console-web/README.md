@@ -14,14 +14,21 @@ the ROC Console:
   (`packages/ui-tokens/src/roc.ts`, §4.3 table) for surfaces, accent and status
   state colours.
 
-ROC **screens are owned by the visual-team canvas** and are intentionally NOT
+ROC screens are owned by the visual-team canvas and are intentionally not
 built here. What this scaffold wires:
 
-| Surface | File |
-| --- | --- |
+| Surface                                           | File                                                                                   |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Shell (left nav, top bar, sidebar footer, locale) | `components/roc-shell.tsx`, `lib/roc-shell-nav.ts`, `components/roc-health-footer.tsx` |
-| `availableActions` → `ActionReceipt` plumbing | `components/roc-action-rail.tsx`, `lib/action-runtime.ts` |
-| API client + control-plane proxy | `lib/api-client.ts` + `app/control-plane-proxy/[...path]/route.ts` |
+| `availableActions` → `ActionReceipt` plumbing     | `components/roc-action-rail.tsx`, `lib/action-runtime.ts`                              |
+| API client + control-plane proxy                  | `lib/api-client.ts` + `app/control-plane-proxy/[...path]/route.ts`                     |
+
+The response routes named in `P2-UI-ROC-002` (`/takeover`, `/alerts`,
+`/incidents`, `/evidence`, `/reports`) intentionally render a shared hold state
+that points at
+`docs/05-ui/roc-console-takeover-alerts-incidents-evidence-reports-screen-requirements-20260626.md`.
+That keeps the scaffold aligned with the UI design contract until the missing
+canonical ROC canvas lands.
 
 **Auth realm.** ROC routes are guarded by `@RequireRealms("system", "ops")`
 (P2-ROC-001) and `auth.policy` maps `roc/*` to `baseAllowedRealms("ops")`. There
