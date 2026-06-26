@@ -12,6 +12,7 @@ import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.s
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { SandboxDispatchGateService } from "../../src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
@@ -49,6 +50,7 @@ function createOwnedMobilityService(options?: {
   runtimeEligibilityEvaluator?: {
     evaluate: ReturnType<typeof vi.fn>;
   };
+  sandboxDispatchGateService?: SandboxDispatchGateService;
   repository?: {
     isEnabled: () => boolean;
     persistChanges: (...args: any[]) => Promise<unknown>;
@@ -141,6 +143,7 @@ function createOwnedMobilityService(options?: {
     serviceProductService,
     undefined,
     options?.runtimeEligibilityEvaluator as never,
+    options?.sandboxDispatchGateService,
   );
 
   return {
@@ -3070,6 +3073,76 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       providerBrandDisclosed: false,
     });
     expect(passengerProjection).not.toHaveProperty("reasonCodes");
+  });
+
+  it("records passenger disclosure acknowledgement on the booking when the policy demands it", async () => {
+    const sandboxDispatchGateService = new SandboxDispatchGateService();
+    (sandboxDispatchGateService as any).disclosurePolicies = [
+      {
+        policyId: "policy-test-av-ack",
+        policyVersion: "test-v1",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        active: true,
+        channelRules: [
+          {
+            channel: "tenant_portal",
+            messageCode: "sandbox_passenger_disclosure.av_program_notice",
+            requiresAcknowledgement: true,
+            acknowledgementMode: "per_booking_checkbox",
+          },
+        ],
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ];
+    (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
+
+    const { service } = createOwnedMobilityService({
+      sandboxDispatchGateService,
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Sandbox End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Sandbox Rider", phone: "0912000003" },
+      },
+      "tenant-demo-001",
+    );
+    const resolvedBooking =
+      booking instanceof Promise ? await booking : booking;
+    const createdBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      resolvedBooking.bookingId,
+    );
+    expect(createdBooking.passengerDisclosure).toMatchObject({
+      policyId: "policy-test-av-ack",
+      messageCode: "sandbox_passenger_disclosure.av_program_notice",
+      requiresAcknowledgement: true,
+      acknowledgementMode: "per_booking_checkbox",
+      acknowledgedAt: null,
+    });
+
+    const acknowledgedBooking = await service.acknowledgePassengerDisclosure(
+      "tenant-demo-001",
+      resolvedBooking.bookingId,
+      {
+        actorType: "passenger",
+        actorRef: "passenger-demo-001",
+      },
+    );
+    expect(acknowledgedBooking.passengerDisclosure).toMatchObject({
+      policyId: "policy-test-av-ack",
+      messageCode: "sandbox_passenger_disclosure.av_program_notice",
+    });
+    expect(
+      acknowledgedBooking.passengerDisclosure?.acknowledgedAt,
+    ).toBeTruthy();
   });
 
   it("publishes partner sandbox webhook payloads without internal reason codes", () => {

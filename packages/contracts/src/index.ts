@@ -1,6 +1,10 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
+import type {
+  PassengerDisclosureRequirementSnapshot,
+  RecordPassengerAcknowledgementCommand,
+} from "./phase2-tesla-fsd-sandbox";
 import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
@@ -2226,6 +2230,7 @@ export interface CreateTenantBookingCommand {
   quotedFareRuleVersion?: string;
   minPhotoCount?: number;
   expenseProofRequired?: boolean;
+  passengerDisclosureAcknowledgement?: RecordPassengerAcknowledgementCommand;
 }
 
 export interface UpdateTenantBookingCommand {
@@ -2477,6 +2482,7 @@ export interface OwnedOrderRecord {
   };
   approvalState: TenantBookingApprovalState;
   approvalRequestIds: string[];
+  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   complianceGates?: ComplianceGateRecord[];
   complianceFlags: string[];
   cancelledAt: string | null;
@@ -2537,6 +2543,7 @@ export interface BookingRecord {
   manualFareOverride: ManualFareOverrideRecord | null;
   approvalState: TenantBookingApprovalState;
   approvalRequestIds: string[];
+  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
   createdAt: string;

@@ -1,6 +1,11 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { SandboxDispatchDecision } from "@drts/contracts";
+import type {
+  PassengerAcknowledgementRecord,
+  PassengerDisclosureMessageCatalogEntry,
+  PassengerDisclosurePolicy,
+  SandboxDispatchDecision,
+} from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 import type {
@@ -23,6 +28,10 @@ type JsonRecordRow = {
   evaluated_at: string;
   evaluation_snapshot: unknown;
   release_audit: unknown;
+};
+
+type JsonPayloadRow = {
+  payload: unknown;
 };
 
 @Injectable()
@@ -152,6 +161,200 @@ export class SandboxDispatchGateRepository {
     return this.mapStoredEvaluation(row);
   }
 
+  async listPassengerDisclosurePolicies() {
+    if (!this.isEnabled()) {
+      return [] as PassengerDisclosurePolicy[];
+    }
+
+    const result = await this.databaseService!.query<JsonPayloadRow>(
+      `
+        SELECT policy_snapshot AS payload
+        FROM av_sandbox.passenger_disclosure_policies
+        ORDER BY updated_at DESC, created_at DESC
+      `,
+    );
+
+    return result.rows.map((row) =>
+      this.parseJsonPayload<PassengerDisclosurePolicy>(
+        row.payload,
+        "av_sandbox.passenger_disclosure_policies",
+      ),
+    );
+  }
+
+  async upsertPassengerDisclosurePolicy(policy: PassengerDisclosurePolicy) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        INSERT INTO av_sandbox.passenger_disclosure_policies (
+          policy_id,
+          tenant_id,
+          business_dispatch_subtype,
+          partner_entry_slug,
+          policy_version,
+          active,
+          policy_snapshot,
+          created_at,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9
+        )
+        ON CONFLICT (policy_id) DO UPDATE SET
+          tenant_id = EXCLUDED.tenant_id,
+          business_dispatch_subtype = EXCLUDED.business_dispatch_subtype,
+          partner_entry_slug = EXCLUDED.partner_entry_slug,
+          policy_version = EXCLUDED.policy_version,
+          active = EXCLUDED.active,
+          policy_snapshot = EXCLUDED.policy_snapshot,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [
+        policy.policyId,
+        policy.tenantId,
+        policy.businessDispatchSubtype,
+        policy.partnerEntrySlug,
+        policy.policyVersion,
+        policy.active,
+        JSON.stringify(policy),
+        policy.createdAt,
+        policy.updatedAt,
+      ],
+    );
+  }
+
+  async listPassengerDisclosureMessageCatalogEntries() {
+    if (!this.isEnabled()) {
+      return [] as PassengerDisclosureMessageCatalogEntry[];
+    }
+
+    const result = await this.databaseService!.query<JsonPayloadRow>(
+      `
+        SELECT entry_snapshot AS payload
+        FROM av_sandbox.passenger_disclosure_message_catalog
+        ORDER BY updated_at DESC, created_at DESC
+      `,
+    );
+
+    return result.rows.map((row) =>
+      this.parseJsonPayload<PassengerDisclosureMessageCatalogEntry>(
+        row.payload,
+        "av_sandbox.passenger_disclosure_message_catalog",
+      ),
+    );
+  }
+
+  async upsertPassengerDisclosureMessageCatalogEntry(
+    entry: PassengerDisclosureMessageCatalogEntry,
+  ) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        INSERT INTO av_sandbox.passenger_disclosure_message_catalog (
+          entry_id,
+          catalog_version,
+          message_code,
+          locale,
+          legal_approved,
+          body_text,
+          entry_snapshot,
+          created_at,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9
+        )
+        ON CONFLICT (entry_id) DO UPDATE SET
+          catalog_version = EXCLUDED.catalog_version,
+          message_code = EXCLUDED.message_code,
+          locale = EXCLUDED.locale,
+          legal_approved = EXCLUDED.legal_approved,
+          body_text = EXCLUDED.body_text,
+          entry_snapshot = EXCLUDED.entry_snapshot,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [
+        entry.entryId,
+        entry.catalogVersion,
+        entry.messageCode,
+        entry.locale,
+        entry.legalApproved,
+        entry.bodyText,
+        JSON.stringify(entry),
+        entry.createdAt,
+        entry.updatedAt,
+      ],
+    );
+  }
+
+  async listPassengerAcknowledgements() {
+    if (!this.isEnabled()) {
+      return [] as PassengerAcknowledgementRecord[];
+    }
+
+    const result = await this.databaseService!.query<JsonPayloadRow>(
+      `
+        SELECT acknowledgement_snapshot AS payload
+        FROM av_sandbox.passenger_acknowledgement_records
+        ORDER BY created_at DESC
+      `,
+    );
+
+    return result.rows.map((row) =>
+      this.parseJsonPayload<PassengerAcknowledgementRecord>(
+        row.payload,
+        "av_sandbox.passenger_acknowledgement_records",
+      ),
+    );
+  }
+
+  async insertPassengerAcknowledgement(record: PassengerAcknowledgementRecord) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        INSERT INTO av_sandbox.passenger_acknowledgement_records (
+          acknowledgement_id,
+          booking_id,
+          order_id,
+          policy_id,
+          message_code,
+          channel,
+          acknowledgement_mode,
+          actor_type,
+          actor_ref,
+          acknowledged_at,
+          evidence_ref,
+          acknowledgement_snapshot,
+          created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13
+        )
+      `,
+      [
+        record.acknowledgementId,
+        record.bookingId,
+        record.orderId,
+        record.policyId,
+        record.messageCode,
+        record.channel,
+        record.acknowledgementMode,
+        record.actorType,
+        record.actorRef,
+        record.acknowledgedAt,
+        record.evidenceRef,
+        JSON.stringify(record),
+        record.createdAt,
+      ],
+    );
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -172,8 +375,12 @@ export class SandboxDispatchGateRepository {
         decision: row.decision,
         fallbackRequired: row.decision === "block",
         oddInBounds: row.odd_in_bounds,
-        hardReasonCodes: [...row.hard_reason_codes] as SandboxDispatchStoredEvaluationRecord["decision"]["hardReasonCodes"],
-        softReasonCodes: [...row.soft_reason_codes] as SandboxDispatchStoredEvaluationRecord["decision"]["softReasonCodes"],
+        hardReasonCodes: [
+          ...row.hard_reason_codes,
+        ] as SandboxDispatchStoredEvaluationRecord["decision"]["hardReasonCodes"],
+        softReasonCodes: [
+          ...row.soft_reason_codes,
+        ] as SandboxDispatchStoredEvaluationRecord["decision"]["softReasonCodes"],
         requiredSafetyOperatorId: row.required_safety_operator_id,
         policyVersion: row.policy_version,
         evaluatedAt: row.evaluated_at,
@@ -186,5 +393,12 @@ export class SandboxDispatchGateRepository {
           ? (row.release_audit as Record<string, unknown>)
           : null,
     };
+  }
+
+  private parseJsonPayload<T>(payload: unknown, tableName: string): T {
+    if (!payload || typeof payload !== "object") {
+      throw new Error(`Invalid JSON payload loaded from ${tableName}`);
+    }
+    return payload as T;
   }
 }
