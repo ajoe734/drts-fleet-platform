@@ -143,7 +143,7 @@ scope token list in `auth.constants.ts`.
 | Screen | Route | Read (GET) scope · Mutation scope(s) | Acceptance-critical rule |
 | --- | --- | --- | --- |
 | Compliance overview | `/platform-admin/compliance` | **Read (fan-out):** `sandbox.compliance.read` (takeover-reviews, evidence-discrepancies) **+** `sandbox.investigation.read` (investigations) **+** `sandbox.evidence.preview` (controlled exports, legal holds) **+** `sandbox.regulatory_report.review` (regulatory reports). · No mutations. | triage/navigation only; **not** a single-scope route — `loadSandboxComplianceOverview()` fans out across six lists under four read scopes via **`Promise.all` (all-or-nothing)**, so an actor missing **any** one read scope fails the whole load into the single `permission-denied` / `fetch-failed` state in req §5.1 — **not** a per-panel partial view. Per-panel graceful degradation is **not** specified by req §5.1 and **not** implemented; do not assume it |
-| Trip compliance detail | `/platform-admin/compliance/trips/[tripId]` | **Read (same fan-out as overview):** `sandbox.compliance.read` (takeover/discrepancy) **+** `sandbox.investigation.read` (investigation case) **+** `sandbox.evidence.preview` (legal-hold + manifest state) **+** `sandbox.regulatory_report.review` (regulatory-report state). · No mutations. | read drilldown filtering the overview dataset by trip; req §5.2 "data to surface" requires legal-hold **and** regulatory-report state, so it inherits the overview's four-scope `Promise.all` fan-out (same all-or-nothing); `trip-not-found` + missing-link states |
+| Trip compliance detail | `/platform-admin/compliance/trips/[tripId]` | **Read — three scopes proven by current helper code:** `sandbox.compliance.read` (`tripTakeoverReviews` / `tripDiscrepancies`) **+** `sandbox.investigation.read` (`tripInvestigations`) **+** `sandbox.evidence.preview` (legal-hold check in `buildTripComplianceChecks`). **Fourth scope required by req §5.2 only:** `sandbox.regulatory_report.review` (regulatory-report state) — **not** read by any trip-level helper today. · No mutations. | read drilldown; route page is still a `SandboxDesignPendingScreen` placeholder. The trip helpers (`tripInvestigations` / `tripTakeoverReviews` / `tripDiscrepancies` / `buildTripComplianceChecks`) consume only investigations / takeover / discrepancy / legal-hold lists — **not** `regulatoryReports` — so current code proves only three read scopes. req §5.2 "data to surface" independently requires **regulatory-report state**, so the built screen also needs `regulatory_report.review`; the only existing loader (`loadSandboxComplianceOverview`, four-scope `Promise.all` all-or-nothing) already supplies all four lists, so a trip-detail built on it inherits that page-level fan-out. `trip-not-found` + missing-link states |
 | Investigation queue | `/platform-admin/investigations` | **Read:** `sandbox.investigation.read`. · No mutations. | ROC-linked entry from backend link metadata only |
 | Investigation detail | `/platform-admin/investigations/[caseId]` | **Read:** `sandbox.investigation.read`. · No mutations. | backend case is source of truth; no client identity reconstruction |
 | Investigation timeline | `/platform-admin/investigations/[caseId]/timeline` | **Read:** `sandbox.investigation.read`. · No mutations. | **confidence + source + discrepancy must be visually explicit (A2)** |
@@ -154,13 +154,19 @@ scope token list in `auth.constants.ts`.
 
 Common required states for every screen: `loading`, `empty`/`no-data`, `permission-denied`,
 `fetch-failed`/`not-found`, and degraded backend freshness where applicable (req §5). The
-**Compliance overview** and **Trip compliance detail** share the multi-scope fan-out: because
-`loadSandboxComplianceOverview()` uses `Promise.all` (all-or-nothing), a missing read scope
-currently fails the whole load into the single `permission-denied` / `fetch-failed` state that
-req §5.1/§5.2 specify — **not** a per-panel partial view. If the published canvas later calls
-for per-panel degradation, that is new implementation work (swap `Promise.all` for
-`Promise.allSettled` + per-panel empty/denied states); it is not the current contract, so the
-parent must not assume it.
+**Compliance overview** loads via `loadSandboxComplianceOverview()`, whose `Promise.all`
+(all-or-nothing) over six lists / four read scopes means a missing read scope fails the whole load
+into the single `permission-denied` / `fetch-failed` state in req §5.1 — **not** a per-panel
+partial view. The **Trip compliance detail** screen does not exist yet (placeholder); the only data
+loader available to build it is that same overview loader, so a trip-detail built on it would
+inherit the four-scope all-or-nothing fan-out — but note the trip-level filter helpers shipped today
+(`buildTripComplianceChecks` and the `trip*` filters) consume only three of those scopes' lists
+(investigations / takeover / discrepancy / legal-hold = `compliance.read` + `investigation.read` +
+`evidence.preview`); the fourth, `regulatory_report.review`, is required by req §5.2's data-to-surface
+(regulatory-report state), **not** by any current trip-level filter. If the published canvas later
+calls for per-panel degradation, that is new implementation work (swap `Promise.all` for
+`Promise.allSettled` + per-panel empty/denied states); it is not the current contract, so the parent
+must not assume it.
 
 ---
 
@@ -222,9 +228,16 @@ This packet is support-only and does not change machine truth. Requested review:
   evidence-discrepancies, controlled exports, legal holds, and regulatory reports (six lists,
   four read scopes). It uses **`Promise.all`**, so the fan-out is **all-or-nothing**: any single
   read failure rejects the whole load (one page-level deny / fetch-failed), not a per-panel
-  partial view. The trip-detail helpers (`tripInvestigations` / `buildTripComplianceChecks`,
-  same file) filter this same dataset, so the drilldown inherits the four-scope fan-out and its
-  all-or-nothing behavior.
+  partial view. The trip-detail filter helpers in the same file (`tripInvestigations` /
+  `tripTakeoverReviews` / `tripDiscrepancies` / `buildTripComplianceChecks`) consume **only** the
+  investigations, takeover-review, discrepancy, and legal-hold lists — three read scopes
+  (`compliance.read` + `investigation.read` + `evidence.preview`); there is **no** trip-level
+  `regulatoryReports` filter, and no screen consumes these helpers yet (the trip route is a
+  placeholder). The fourth trip-detail read scope, `sandbox.regulatory_report.review`, is therefore
+  justified **from req §5.2's data-to-surface (legal-hold + regulatory-report state) only**, not from
+  current helper code. A trip-detail screen built on `loadSandboxComplianceOverview` would still load
+  all six lists, so the page-level all-or-nothing fan-out would apply; but the shipped code does not
+  by itself prove a trip-level regulatory-report read.
 - `apps/platform-admin-web/app/platform-admin/**` (nine placeholder routes),
   `apps/platform-admin-web/components/sandbox-design-pending-screen.tsx`,
   `apps/platform-admin-web/lib/sandbox-compliance.ts`
@@ -278,12 +291,55 @@ Reviewer findings (round 2) on §6, both fixed by re-reading `origin/dev` truth:
    `sandbox.regulatory_report.review` respectively; the drilldown filters the same overview dataset
    by trip (`tripInvestigations` / `buildTripComplianceChecks`), so it inherits the overview's full
    four-scope `Promise.all` fan-out. The §6 trip-detail row now records all four read scopes and the
-   same all-or-nothing behavior.
+   same all-or-nothing behavior. *(Round 3 below corrects the basis: the current trip-level helpers
+   prove only three of these scopes; `regulatory_report.review` is justified from req §5.2 alone, not
+   from helper code.)*
 
 Verification basis for round 2 (all from `origin/dev`):
 `git show origin/dev:apps/platform-admin-web/lib/sandbox-compliance.ts` (`loadSandboxComplianceOverview`
 = six `client.listSandbox*()` calls under one `Promise.all`; `buildTripComplianceChecks` filters that
 dataset) and `git show origin/dev:docs/05-ui/platform-admin-sandbox-compliance-screen-requirements-20260626.md`
 §5.1 (single `permission-denied` state) / §5.2 (data-to-surface includes legal-hold + regulatory-report state).
+
+No canonical truth changed; this remains a support-only packet.
+
+---
+
+## 12. Revision note — review round 3 (Codex)
+
+Reviewer finding (round 3): §6 / §9 / §11 **overstated the trip-detail verification basis**. Round 2
+claimed the trip drilldown "filters the same overview dataset (`tripInvestigations` /
+`buildTripComplianceChecks`), so it inherits the overview's full four-scope `Promise.all` fan-out" —
+citing current helper code as proof that the trip detail reads all four scopes, including
+`sandbox.regulatory_report.review`. That is wrong: `origin/dev:apps/platform-admin-web/lib/sandbox-compliance.ts`
+only filters investigations / takeover-reviews / discrepancies / legal-holds at trip level
+(`tripInvestigations` L303–307, `tripTakeoverReviews` L310–315, `tripDiscrepancies` L317–329,
+`buildTripComplianceChecks` L332–352, whose `input` has **no** `regulatoryReports` field). There is **no**
+trip-level `regulatoryReports` filter, and no screen consumes these helpers yet (the trip route is a
+`SandboxDesignPendingScreen` placeholder).
+
+Fix — separate the two evidence bases for the trip-detail read scopes:
+
+- **Three scopes are proven by current helper code:** `sandbox.compliance.read` (`tripTakeoverReviews` /
+  `tripDiscrepancies`), `sandbox.investigation.read` (`tripInvestigations`), and `sandbox.evidence.preview`
+  (the legal-hold check in `buildTripComplianceChecks`).
+- **The fourth, `sandbox.regulatory_report.review`, is justified from req §5.2's "data to surface"
+  (regulatory-report state) ONLY** — current helper code does not read trip-level regulatory reports, so
+  it is no longer cited as proof of that scope.
+- The only existing data loader is `loadSandboxComplianceOverview` (six lists / four read scopes under one
+  `Promise.all`, all-or-nothing). A trip-detail screen built on it would load all six lists and so inherit
+  the page-level four-scope fan-out — but that is a property of the **loader**, not of the trip-level
+  filters, and it remains contingent on the screen being built against that loader.
+
+Updated: the §6 trip-detail row, the §6 "Common required states" paragraph, the §9 verification-basis
+bullet, and a pointer added to the §11 round-2 entry.
+
+Verification basis for round 3 (all from `origin/dev`):
+`git show origin/dev:apps/platform-admin-web/lib/sandbox-compliance.ts` (trip filters + `buildTripComplianceChecks`
+input has no `regulatoryReports`; `loadSandboxComplianceOverview` six-list `Promise.all` unchanged);
+`git show "origin/dev:apps/platform-admin-web/app/platform-admin/compliance/trips/[tripId]/page.tsx"` (renders
+`SandboxDesignPendingScreen` only); `git grep origin/dev` confirms no consumer of `buildTripComplianceChecks` /
+`loadSandboxComplianceOverview` on `dev`; `git show origin/dev:docs/05-ui/platform-admin-sandbox-compliance-screen-requirements-20260626.md`
+§5.2 (data-to-surface requires regulatory-report state).
 
 No canonical truth changed; this remains a support-only packet.
