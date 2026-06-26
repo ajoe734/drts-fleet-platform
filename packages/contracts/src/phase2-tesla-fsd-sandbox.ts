@@ -1071,8 +1071,12 @@ export interface EvidenceManifest {
 // ---------------------------------------------------------------------------
 
 export const ACCIDENT_CASE_STATUSES = [
-  "open",
-  "evidence_pending",
+  "detected",
+  "roc_acknowledged",
+  "operation_suspended",
+  "emergency_response_active",
+  "evidence_frozen",
+  "initial_notification_sent",
   "under_investigation",
   "regulator_review",
   "closed",
@@ -1087,11 +1091,46 @@ export const ACCIDENT_SEVERITIES = [
 ] as const;
 export type AccidentSeverity = (typeof ACCIDENT_SEVERITIES)[number];
 
+export const ACCIDENT_TIMELINE_FACT_CONFIDENCES = [
+  "provider_signed",
+  "provider_reported",
+  "platform_recorded",
+  "operator_reported",
+  "system_derived",
+  "unknown",
+] as const;
+export type AccidentTimelineFactConfidence =
+  (typeof ACCIDENT_TIMELINE_FACT_CONFIDENCES)[number];
+
+export const ACCIDENT_TIMELINE_SOURCE_SYSTEMS = [
+  ...PHASE2_SOURCE_SYSTEMS,
+  "accident_case",
+  "system_derived",
+] as const;
+export type AccidentTimelineSourceSystem =
+  (typeof ACCIDENT_TIMELINE_SOURCE_SYSTEMS)[number];
+
+export type AccidentTimelineFactValue =
+  | string
+  | number
+  | boolean
+  | null;
+
+export interface AccidentTimelineSourceRecord {
+  sourceSystem: AccidentTimelineSourceSystem;
+  sourceRef: string | null;
+  signatureRef: string | null;
+  recordedAt: string | null;
+  ingestedAt: string | null;
+  schemaVersion: string | null;
+}
+
 export interface AccidentCaseRecord {
   caseId: string;
   vehicleId: string;
   orderId: string | null;
   triggeringEventId: string | null;
+  takeoverCorrelationId: string | null;
 
   status: AccidentCaseStatus;
   severity: AccidentSeverity;
@@ -1104,7 +1143,133 @@ export interface AccidentCaseRecord {
   regulatoryReportId: string | null;
 
   summary: string | null;
+  discrepancyCaseIds: string[];
+  externalDocumentIds: string[];
+  createdAt: string;
+  updatedAt: string;
   closedAt: string | null;
+}
+
+export interface CreateAccidentCaseCommand {
+  caseId?: string;
+  vehicleId: string;
+  orderId?: string | null;
+  triggeringEventId?: string | null;
+  takeoverCorrelationId?: string | null;
+  severity: AccidentSeverity;
+  occurredAt: string;
+  reportedAt?: string | null;
+  reportedBy: string;
+  summary?: string | null;
+  evidenceManifestId?: string | null;
+  regulatoryReportId?: string | null;
+}
+
+export interface TransitionAccidentCaseCommand {
+  toStatus: AccidentCaseStatus;
+  transitionedAt?: string | null;
+  actorId: string;
+  note?: string | null;
+  evidenceManifestId?: string | null;
+  regulatoryReportId?: string | null;
+}
+
+export interface AddAccidentTimelineFactCommand {
+  factId?: string;
+  factKey: string;
+  label: string;
+  value: AccidentTimelineFactValue;
+  occurredAt: string;
+  recordedAt?: string | null;
+  confidence: AccidentTimelineFactConfidence;
+  sourceSystem: AccidentTimelineSourceSystem;
+  sourceRef?: string | null;
+  signatureRef?: string | null;
+  schemaVersion?: string | null;
+  derivationRule?: string | null;
+  derivedFromFactIds?: string[];
+  note?: string | null;
+  discrepancyCaseIds?: string[];
+  externalDocumentId?: string | null;
+}
+
+export interface AccidentTimelineFactRecord {
+  factId: string;
+  caseId: string;
+  factKey: string;
+  label: string;
+  value: AccidentTimelineFactValue;
+  occurredAt: string;
+  recordedAt: string | null;
+  confidence: AccidentTimelineFactConfidence;
+  source: AccidentTimelineSourceRecord;
+  derivationRule: string | null;
+  derivedFromFactIds: string[];
+  discrepancyCaseIds: string[];
+  externalDocumentId: string | null;
+  note: string | null;
+}
+
+export interface AccidentTimelineEntry {
+  entryId: string;
+  caseId: string;
+  factKey: string;
+  label: string;
+  occurredAt: string;
+  value: AccidentTimelineFactValue;
+  confidence: AccidentTimelineFactConfidence;
+  sourceSystem: AccidentTimelineSourceSystem;
+  sourceRef: string | null;
+  derivationRule: string | null;
+  discrepancyCaseIds: string[];
+  externalDocumentIds: string[];
+  facts: AccidentTimelineFactRecord[];
+}
+
+export const ACCIDENT_EXTERNAL_DOCUMENT_TYPES = [
+  "police_report",
+  "insurer_notice",
+  "insurer_assessment",
+  "insurer_settlement",
+  "witness_statement",
+  "medical_report",
+  "other",
+] as const;
+export type AccidentExternalDocumentType =
+  (typeof ACCIDENT_EXTERNAL_DOCUMENT_TYPES)[number];
+
+export interface AccidentExternalDocumentFactInput {
+  factId?: string;
+  factKey: string;
+  label: string;
+  value: AccidentTimelineFactValue;
+  occurredAt: string;
+  recordedAt?: string | null;
+  confidence?: AccidentTimelineFactConfidence | null;
+  note?: string | null;
+}
+
+export interface ImportAccidentExternalDocumentCommand {
+  documentId?: string;
+  documentType: AccidentExternalDocumentType;
+  title: string;
+  providerName?: string | null;
+  receivedAt: string;
+  checksumSha256?: string | null;
+  source: Phase2SourceMetadata;
+  extractedFacts?: AccidentExternalDocumentFactInput[];
+}
+
+export interface AccidentExternalDocumentRecord {
+  documentId: string;
+  caseId: string;
+  documentType: AccidentExternalDocumentType;
+  title: string;
+  providerName: string | null;
+  receivedAt: string;
+  checksumSha256: string | null;
+  source: Phase2SourceMetadata;
+  factIds: string[];
 }
 
 // ---------------------------------------------------------------------------
