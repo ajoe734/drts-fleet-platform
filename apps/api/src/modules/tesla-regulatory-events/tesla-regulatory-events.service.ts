@@ -446,8 +446,8 @@ export class TeslaRegulatoryEventsService {
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed;
       }
-    } catch {
-      // Fall through to the standardized invalid-header error below.
+    } catch (error) {
+      void error;
     }
 
     throw new ApiRequestError(
