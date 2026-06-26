@@ -424,10 +424,7 @@ export function resolveRouteAuthPolicy(
     };
   }
 
-  if (
-    routePath.startsWith("regulatory/") ||
-    routePath === "regulatory"
-  ) {
+  if (routePath.startsWith("regulatory/") || routePath === "regulatory") {
     return {
       routeKey: `regulatory-reporting:${upperMethod}`,
       requiredScopes: methodScope(

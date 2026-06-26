@@ -1,4 +1,8 @@
-import type { ResourceActionDescriptor, UiHealthEnvelope } from "./ui-runtime";
+import type {
+  CrossAppResourceLink,
+  ResourceActionDescriptor,
+  UiHealthEnvelope,
+} from "./ui-runtime";
 
 // Phase 2 contracts: Tesla Fleet integration, FSD/AV regulatory telemetry,
 // sandbox dispatch governance, safety-operator / ROC operations, on-board
@@ -970,6 +974,7 @@ export interface EvidenceDiscrepancyCase {
   discrepancyTypes: TakeoverDiscrepancyType[];
   openedAt: string;
   summary: string;
+  investigationLink?: CrossAppResourceLink | null;
   sourceFacts: {
     teslaOccurredAt: string | null;
     safetyOccurredAt: string | null;
@@ -1009,6 +1014,7 @@ export interface CorrelatedTakeoverCase {
   rocTakeoverResponse: RocTakeoverResponseRecord | null;
   manualCorrelation: ManualTakeoverCorrelationLink | null;
   discrepancyCaseIds: string[];
+  investigationLink?: CrossAppResourceLink | null;
 }
 
 export const ROC_ALERT_TYPES = [
@@ -1025,11 +1031,7 @@ export type RocAlertType = (typeof ROC_ALERT_TYPES)[number];
 export const ROC_ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
 export type RocAlertSeverity = (typeof ROC_ALERT_SEVERITIES)[number];
 
-export const ROC_ALERT_STATUSES = [
-  "open",
-  "acknowledged",
-  "resolved",
-] as const;
+export const ROC_ALERT_STATUSES = ["open", "acknowledged", "resolved"] as const;
 export type RocAlertStatus = (typeof ROC_ALERT_STATUSES)[number];
 
 export interface RocDataFreshness {
@@ -1058,12 +1060,7 @@ export interface RocVehicleReadModel {
   sandboxProgramId: string | null;
   currentOrderId: string | null;
   safetyOperatorId: string | null;
-  autonomyState:
-    | "manual"
-    | "fsd_supervised"
-    | "fsd_engaged"
-    | "unknown"
-    | null;
+  autonomyState: "manual" | "fsd_supervised" | "fsd_engaged" | "unknown" | null;
   location: GeoPoint | null;
   telemetryFreshness: RocDataFreshness;
   regulatoryFreshness: RocDataFreshness;
@@ -1272,11 +1269,7 @@ export const ACCIDENT_TIMELINE_SOURCE_SYSTEMS = [
 export type AccidentTimelineSourceSystem =
   (typeof ACCIDENT_TIMELINE_SOURCE_SYSTEMS)[number];
 
-export type AccidentTimelineFactValue =
-  | string
-  | number
-  | boolean
-  | null;
+export type AccidentTimelineFactValue = string | number | boolean | null;
 
 export interface AccidentTimelineSourceRecord {
   sourceSystem: AccidentTimelineSourceSystem;
@@ -1571,6 +1564,10 @@ export interface RegulatoryReportFiling {
   artifactChecksumSha256: string | null;
 }
 
+export interface SubmitRegulatoryReportCommand {
+  acknowledgementRef?: string | null;
+  note?: string | null;
+}
 export const REGULATORY_NOTIFICATION_SEVERITIES = [
   "informational",
   "incident",
@@ -1686,6 +1683,95 @@ export interface AcknowledgeRegulatoryNotificationCommand {
   acknowledgementReference: string;
   acknowledgedAt?: string;
   note?: string | null;
+}
+
+export const SANDBOX_CONTROLLED_EVIDENCE_EXPORT_STATUSES = [
+  "pending_approval",
+  "approved",
+  "completed",
+  "rejected",
+] as const;
+export type SandboxControlledEvidenceExportStatus =
+  (typeof SANDBOX_CONTROLLED_EVIDENCE_EXPORT_STATUSES)[number];
+
+export interface RequestSandboxControlledEvidenceExportCommand {
+  caseId?: string | null;
+  manifestId: string;
+  reportId?: string | null;
+  recipientLabel: string;
+  recipientScope: string;
+  reason: string;
+}
+
+export interface ApproveSandboxControlledEvidenceExportCommand {
+  approvalNote?: string | null;
+}
+
+export interface SandboxControlledEvidenceExportRecord {
+  exportRequestId: string;
+  caseId: string | null;
+  manifestId: string;
+  reportId: string | null;
+  recipientLabel: string;
+  recipientScope: string;
+  reason: string;
+  status: SandboxControlledEvidenceExportStatus;
+  requestedByActorId: string;
+  requestedAt: string;
+  approvedByActorId: string | null;
+  approvedAt: string | null;
+  approvalNote: string | null;
+  completedAt: string | null;
+  artifactChecksumSha256: string | null;
+}
+
+export const SANDBOX_LEGAL_HOLD_STATUSES = [
+  "active",
+  "release_requested",
+  "released",
+] as const;
+export type SandboxLegalHoldStatus =
+  (typeof SANDBOX_LEGAL_HOLD_STATUSES)[number];
+
+export interface CreateSandboxLegalHoldCommand {
+  caseId: string;
+  manifestId: string;
+  scopeSummary: string;
+  reason: string;
+  expiresAt?: string | null;
+}
+
+export interface RequestSandboxLegalHoldReleaseCommand {
+  releaseReason: string;
+}
+
+export interface ApproveSandboxLegalHoldReleaseCommand {
+  approvalNote?: string | null;
+}
+
+export interface SandboxLegalHoldRecord {
+  holdId: string;
+  caseId: string;
+  manifestId: string;
+  scopeSummary: string;
+  reason: string;
+  status: SandboxLegalHoldStatus;
+  retentionConflictResolved: boolean;
+  placedByActorId: string;
+  placedAt: string;
+  expiresAt: string | null;
+  releaseRequestedByActorId: string | null;
+  releaseRequestedAt: string | null;
+  releaseRequestReason: string | null;
+  releasedByActorId: string | null;
+  releasedAt: string | null;
+  approvalNote: string | null;
+}
+
+export interface SandboxEvidenceManifestView extends EvidenceManifest {
+  legalHoldActive: boolean;
+  knownGapCount: number;
+  items: EvidenceManifestItem[];
 }
 
 // ---------------------------------------------------------------------------

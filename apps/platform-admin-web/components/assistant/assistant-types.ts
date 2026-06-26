@@ -238,7 +238,16 @@ export type PlatformAdminRouteKey =
   | "health"
   | "notices"
   | "audit"
-  | "feature-flags";
+  | "feature-flags"
+  | "sandbox-compliance"
+  | "sandbox-compliance-trip-detail"
+  | "sandbox-investigations"
+  | "sandbox-investigation-detail"
+  | "sandbox-investigation-timeline"
+  | "sandbox-evidence-manifest"
+  | "sandbox-evidence-exports"
+  | "sandbox-legal-holds"
+  | "sandbox-regulatory-reports";
 
 export type LocalizedText = { zh: string; en: string };
 

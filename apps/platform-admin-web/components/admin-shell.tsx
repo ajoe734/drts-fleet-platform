@@ -168,6 +168,36 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.sandboxSuspend",
   },
   {
+    key: "sandbox-compliance",
+    icon: ShieldCheck,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxCompliance",
+  },
+  {
+    key: "sandbox-investigations",
+    icon: Search,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxInvestigations",
+  },
+  {
+    key: "sandbox-evidence-exports",
+    icon: Package,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxEvidenceExports",
+  },
+  {
+    key: "sandbox-legal-holds",
+    icon: Shield,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxLegalHolds",
+  },
+  {
+    key: "sandbox-regulatory-reports",
+    icon: ClipboardList,
+    section: "sandbox",
+    labelKey: "adminShell.route.sandboxRegulatoryReports",
+  },
+  {
     key: "switchboard",
     icon: Radio,
     section: "commerce",

@@ -1,10 +1,7 @@
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { rocTheme } from "@/lib/roc-theme";
-import {
-  getRocTripsPageData,
-  resolveTripStateKey,
-} from "@/lib/roc-page-data";
+import { getRocTripsPageData, resolveTripStateKey } from "@/lib/roc-page-data";
 import {
   RocRefreshBanner,
   RocStatePill,
@@ -48,7 +45,12 @@ export default async function TripsPage() {
         </span>
       ),
     },
-    { h: t("trips.columns.vehicle", locale), k: "vehicleId", w: 96, mono: true },
+    {
+      h: t("trips.columns.vehicle", locale),
+      k: "vehicleId",
+      w: 96,
+      mono: true,
+    },
     { h: t("trips.columns.route", locale), k: "routeLabel", w: 160 },
     { h: t("trips.columns.start", locale), k: "startLabel", w: 72, mono: true },
     {
@@ -62,7 +64,10 @@ export default async function TripsPage() {
       w: 80,
       align: "center",
       r: (row) => (
-        <Pill theme={rocTheme} tone={row.takeoverCount > 0 ? "warn" : "neutral"}>
+        <Pill
+          theme={rocTheme}
+          tone={row.takeoverCount > 0 ? "warn" : "neutral"}
+        >
           {row.takeoverCount}
         </Pill>
       ),
@@ -86,7 +91,9 @@ export default async function TripsPage() {
   ];
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={rocTheme}
         title={t("trips.title", locale)}

@@ -67,7 +67,10 @@ export default async function VehiclesPage() {
       h: t("vehicles.columns.integration", locale),
       w: 156,
       r: (row) => {
-        const integration = resolveIntegrationStatus(row.vehicleId, data.alerts);
+        const integration = resolveIntegrationStatus(
+          row.vehicleId,
+          data.alerts,
+        );
         return (
           <Pill theme={rocTheme} tone={integration.tone} dot>
             {t(`providerStatus.${integration.label}`, locale)}
@@ -79,7 +82,12 @@ export default async function VehiclesPage() {
       h: t("vehicles.columns.telemetry", locale),
       w: 92,
       r: (row) => (
-        <span style={{ color: rocTheme[resolveVehicleStateTone(row)], fontWeight: 600 }}>
+        <span
+          style={{
+            color: rocTheme[resolveVehicleStateTone(row)],
+            fontWeight: 600,
+          }}
+        >
           {t(`freshness.${row.telemetryFreshness.dataFreshness}`, locale)}
         </span>
       ),
@@ -102,7 +110,10 @@ export default async function VehiclesPage() {
       h: "",
       w: 84,
       r: (row) => (
-        <Link href={`/vehicles/${row.vehicleId}`} style={{ textDecoration: "none" }}>
+        <Link
+          href={`/vehicles/${row.vehicleId}`}
+          style={{ textDecoration: "none" }}
+        >
           <Btn theme={rocTheme} size="xs" variant="ghost" icon="arrow-right">
             {t("common.detail", locale)}
           </Btn>
@@ -112,7 +123,9 @@ export default async function VehiclesPage() {
   ];
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={rocTheme}
         title={t("vehicles.title", locale)}
