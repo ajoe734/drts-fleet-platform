@@ -2138,6 +2138,7 @@ export interface CreateOwnedOrderCommand {
   dropoff: AddressPayload;
   passenger: PassengerProfile;
   rideType?: "immediate";
+  requestedVehicleVin?: string | null;
   servicePreferences?: Partial<ServicePreferences>;
   paymentMethod?: "cash" | "card";
 }

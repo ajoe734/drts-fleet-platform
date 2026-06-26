@@ -82,6 +82,39 @@ export interface ProviderCapabilityDescriptor {
   schemaVersion: string;
 }
 
+export const TESLA_PASSENGER_SERVICE_STATUSES = ["eligible", "gated"] as const;
+export type TeslaPassengerServiceStatus =
+  (typeof TESLA_PASSENGER_SERVICE_STATUSES)[number];
+
+export const TESLA_PASSENGER_SERVICE_REASON_CODES = [
+  "required-capability-missing",
+] as const;
+export type TeslaPassengerServiceReasonCode =
+  (typeof TESLA_PASSENGER_SERVICE_REASON_CODES)[number];
+
+// A Tesla provider's latest capability advertisement persisted per VIN so
+// passenger-service and sandbox-dispatch gates can evaluate a stable snapshot
+// without live-calling the upstream provider on every request.
+export interface TeslaRegulatoryCapabilityProfile {
+  profileId: string;
+  vehicleId: string | null;
+  vin: string;
+  externalVehicleRef: string;
+  providerCode: string;
+  providerSchemaVersion: string;
+  checkedAt: string;
+
+  requiredCapabilities: Phase2ProviderCapability[];
+  capabilities: ProviderCapabilityDescriptor[];
+  missingRequiredCapabilities: Phase2ProviderCapability[];
+
+  passengerServiceStatus: TeslaPassengerServiceStatus;
+  passengerServiceReasonCode: TeslaPassengerServiceReasonCode | null;
+  reasonCodeDictionaryVersion: string;
+
+  source: Phase2SourceMetadata;
+}
+
 // ---------------------------------------------------------------------------
 // §3.1A Sandbox governance geometry / schedule / enrollment DTOs
 // ---------------------------------------------------------------------------
@@ -317,8 +350,7 @@ export const SANDBOX_DISPATCH_OUTCOMES = [
   "block",
   "defer",
 ] as const;
-export type SandboxDispatchOutcome =
-  (typeof SANDBOX_DISPATCH_OUTCOMES)[number];
+export type SandboxDispatchOutcome = (typeof SANDBOX_DISPATCH_OUTCOMES)[number];
 
 export const SANDBOX_DISPATCH_REASON_CODES = [
   "ODD_OUT_OF_BOUNDS",
@@ -390,6 +422,37 @@ export const TESLA_DISENGAGEMENT_CAUSES = [
 export type TeslaDisengagementCause =
   (typeof TESLA_DISENGAGEMENT_CAUSES)[number];
 
+export interface TeslaRegulatoryReasonCodeEntry {
+  entryId: string;
+  providerCode: string;
+  dictionaryVersion: string;
+  reasonCode: string;
+  displayLabel: string | null;
+  description: string | null;
+  relatedEventTypes: TeslaRegulatoryEventType[];
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaRegulatoryReasonCodeDictionary {
+  dictionaryId: string;
+  providerCode: string;
+  dictionaryVersion: string;
+  effectiveFrom: string;
+  publishedAt: string;
+  entries: TeslaRegulatoryReasonCodeEntry[];
+  source: Phase2SourceMetadata;
+}
+
+export const TESLA_AUTONOMY_STATES = [
+  "manual",
+  "fsd_standby",
+  "fsd_engaged",
+  "remote_assist",
+  "minimal_risk_condition",
+  "unknown",
+] as const;
+export type TeslaAutonomyState = (typeof TESLA_AUTONOMY_STATES)[number];
+
 export interface GeoPoint {
   lat: number;
   lng: number;
@@ -416,6 +479,71 @@ export interface TeslaRegulatoryEvent {
   rocOperatorId: string | null;
 
   oddZoneId: string | null;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaFsdSession {
+  sessionId: string;
+  vehicleId: string;
+  vin: string;
+  externalVehicleRef: string;
+  startedAt: string;
+  endedAt: string | null;
+  startedByEventId: string | null;
+  endedByEventId: string | null;
+  currentState: TeslaAutonomyState;
+  disengagementCount: number;
+  interventionCount: number;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaAutonomyTransition {
+  transitionId: string;
+  sessionId: string | null;
+  vehicleId: string;
+  vin: string;
+  occurredAt: string;
+  fromState: TeslaAutonomyState;
+  toState: TeslaAutonomyState;
+  triggeringEventId: string | null;
+  providerReasonCode: string | null;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaSessionSummary {
+  summaryId: string;
+  sessionId: string;
+  vehicleId: string;
+  vin: string;
+  generatedAt: string;
+  fsdEngagedSeconds: number;
+  disengagementCount: number;
+  interventionCount: number;
+  nearMissCount: number;
+  collisionCount: number;
+  source: Phase2SourceMetadata;
+}
+
+export const TESLA_INCIDENT_EVIDENCE_REFERENCE_TYPES = [
+  "video_clip",
+  "sensor_log",
+  "event_log",
+  "telemetry_export",
+] as const;
+export type TeslaIncidentEvidenceReferenceType =
+  (typeof TESLA_INCIDENT_EVIDENCE_REFERENCE_TYPES)[number];
+
+export interface TeslaIncidentEvidenceReference {
+  evidenceReferenceId: string;
+  vehicleId: string;
+  vin: string;
+  sessionId: string | null;
+  triggeringEventId: string | null;
+  evidenceManifestId: string | null;
+  artifactId: string | null;
+  referenceType: TeslaIncidentEvidenceReferenceType;
+  recordedAt: string;
+  notes: string | null;
   source: Phase2SourceMetadata;
 }
 
