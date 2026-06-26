@@ -8,7 +8,7 @@ deployment workflows in this task.
 
 - `av-sandbox-infra-config.json`
   - canonical storage bucket, Pub/Sub, CMEK, and Secret Manager naming plan
-  - retention and object-hold posture for each evidence family
+  - retention, object-hold posture, and retention-lock policy for each evidence family
   - no live project mutation
 
 ## Storage Layout
@@ -53,4 +53,6 @@ The planned topics are:
 - `dr-restore-verify`
 
 Each ingestion/reporting topic declares retention and dead-letter behavior in
-the JSON config so downstream apply tooling can consume a stable contract later.
+the JSON config using stable logical topic names so downstream apply tooling can
+compose environment-specific resource prefixes later without changing the
+canonical contract.

@@ -11,6 +11,7 @@
         "versioning": true,
         "retentionDays": 30,
         "objectHoldMode": "none",
+        "retentionLock": false,
         "cmekKey": "provider-events",
         "purpose": "Immutable raw Tesla/provider payload intake before normalization."
       },
@@ -19,6 +20,7 @@
         "versioning": true,
         "retentionDays": 365,
         "objectHoldMode": "none",
+        "retentionLock": false,
         "cmekKey": "telemetry-archive",
         "purpose": "Normalized telemetry, state snapshots, and replay material."
       },
@@ -27,6 +29,7 @@
         "versioning": true,
         "retentionDays": 30,
         "objectHoldMode": "none",
+        "retentionLock": false,
         "cmekKey": "video-normal",
         "purpose": "Routine in-vehicle video clips with standard retention."
       },
@@ -35,6 +38,7 @@
         "versioning": true,
         "retentionDays": 2555,
         "objectHoldMode": "default-event-based-hold",
+        "retentionLock": false,
         "cmekKey": "video-incident-locked",
         "purpose": "Incident-linked clips under legal/investigation hold."
       },
@@ -43,6 +47,7 @@
         "versioning": true,
         "retentionDays": 2555,
         "objectHoldMode": "default-event-based-hold",
+        "retentionLock": false,
         "cmekKey": "investigation-bundles",
         "purpose": "Evidence manifests, bundle zips, checksum ledgers, and restore reports."
       },
@@ -50,7 +55,8 @@
         "name": "regulatory-reports",
         "versioning": true,
         "retentionDays": 2555,
-        "objectHoldMode": "default-retention-lock",
+        "objectHoldMode": "none",
+        "retentionLock": true,
         "cmekKey": "regulatory-reports",
         "purpose": "Submitted regulator reports, attestations, and signed exports."
       }

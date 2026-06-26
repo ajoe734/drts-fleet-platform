@@ -34,22 +34,26 @@ describe("resolvePhase2AvInfraConfig", () => {
     expect(buckets["video-normal"]).toMatchObject({
       retentionDays: 30,
       objectHoldMode: "none",
+      retentionLock: false,
     });
     expect(buckets["video-incident-locked"]).toMatchObject({
       retentionDays: 2555,
       objectHoldMode: "default-event-based-hold",
+      retentionLock: false,
     });
     expect(buckets["investigation-bundles"]).toMatchObject({
       retentionDays: 2555,
       objectHoldMode: "default-event-based-hold",
+      retentionLock: false,
     });
     expect(buckets["regulatory-reports"]).toMatchObject({
       retentionDays: 2555,
-      objectHoldMode: "default-retention-lock",
+      objectHoldMode: "none",
+      retentionLock: true,
     });
   });
 
-  it("supports environment-specific prefix overrides without changing logical names", () => {
+  it("supports environment-specific prefixes without changing canonical topic names", () => {
     const config = resolvePhase2AvInfraConfig({
       PHASE2_AV_ENVIRONMENT: "prod",
       PHASE2_AV_BUCKET_PREFIX: "drts-av-prod",
@@ -62,7 +66,7 @@ describe("resolvePhase2AvInfraConfig", () => {
     expect(config.kms.keyRing).toBe("drts-av-prod-prod");
     expect(config.storageBuckets[0]?.name).toBe("raw-provider-events");
     expect(config.pubsubTopics[0]?.deadLetterTopic).toBe(
-      "drts.av.prod.provider-events-dead-letter",
+      "provider-events-dead-letter",
     );
   });
 
