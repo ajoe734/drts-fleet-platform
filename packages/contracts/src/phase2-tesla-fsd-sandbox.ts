@@ -100,13 +100,8 @@ export interface GeoJsonMultiLineString {
   coordinates: GeoJsonPosition[][];
 }
 
-export const SANDBOX_HOLIDAY_POLICIES = [
-  "inherit",
-  "open",
-  "closed",
-] as const;
-export type SandboxHolidayPolicy =
-  (typeof SANDBOX_HOLIDAY_POLICIES)[number];
+export const SANDBOX_HOLIDAY_POLICIES = ["inherit", "open", "closed"] as const;
+export type SandboxHolidayPolicy = (typeof SANDBOX_HOLIDAY_POLICIES)[number];
 
 export interface SandboxScheduleWindow {
   scheduleId: string;
@@ -319,8 +314,7 @@ export const SANDBOX_DISPATCH_OUTCOMES = [
   "block",
   "defer",
 ] as const;
-export type SandboxDispatchOutcome =
-  (typeof SANDBOX_DISPATCH_OUTCOMES)[number];
+export type SandboxDispatchOutcome = (typeof SANDBOX_DISPATCH_OUTCOMES)[number];
 
 export const SANDBOX_DISPATCH_REASON_CODES = [
   "ODD_OUT_OF_BOUNDS",
@@ -456,6 +450,63 @@ export interface TeslaPublicTelemetrySample {
   batteryLevelPct: number | null;
   online: boolean | null;
   source: Phase2SourceMetadata;
+}
+
+export const TESLA_TELEMETRY_FEED_KINDS = [
+  "vehicle_state",
+  "public_telemetry",
+] as const;
+export type TeslaTelemetryFeedKind =
+  (typeof TESLA_TELEMETRY_FEED_KINDS)[number];
+
+export const TESLA_PROVIDER_HEALTH_STATES = [
+  "healthy",
+  "delayed",
+  "gap_detected",
+  "backfill",
+  "complete",
+  "incomplete_hold",
+  "regulator_data_incident",
+] as const;
+export type TeslaProviderHealthState =
+  (typeof TESLA_PROVIDER_HEALTH_STATES)[number];
+
+export interface TeslaTelemetryBackfillQuery {
+  backfillId: string;
+  providerCode: string;
+  feedKind: TeslaTelemetryFeedKind;
+  vin: string;
+  from: string;
+  to: string;
+  sessionId: string | null;
+  eventId: string | null;
+  sequenceAfter: number | null;
+  pageToken: string | null;
+  status: "pending" | "requested" | "complete" | "incomplete";
+  detectedAt: string;
+  updatedAt: string;
+}
+
+export interface TeslaTelemetryHealthRecord {
+  providerCode: string;
+  feedKind: TeslaTelemetryFeedKind;
+  externalVehicleRef: string;
+  sessionId: string | null;
+  healthState: TeslaProviderHealthState;
+  qualityScore: number;
+  dispatchHold: boolean;
+  latestEventId: string | null;
+  latestSequenceNo: number | null;
+  latestContiguousSequenceNo: number | null;
+  missingSequences: number[];
+  lastCapturedAt: string | null;
+  lastReceivedAt: string | null;
+  staleHeartbeatAt: string | null;
+  gapDetectedAt: string | null;
+  backfillRequestedAt: string | null;
+  completedAt: string | null;
+  issueCodes: string[];
+  evaluatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -812,9 +863,9 @@ export type Phase2AuditEventName = NestedStringValues<
   typeof PHASE2_AUDIT_EVENT_CATALOG
 >;
 
-export const PHASE2_AUDIT_EVENT_NAMES =
-  collectPhase2AuditEventNames(PHASE2_AUDIT_EVENT_CATALOG) as
-    readonly Phase2AuditEventName[];
+export const PHASE2_AUDIT_EVENT_NAMES = collectPhase2AuditEventNames(
+  PHASE2_AUDIT_EVENT_CATALOG,
+) as readonly Phase2AuditEventName[];
 
 export type Phase2AuditActorType =
   | "system"

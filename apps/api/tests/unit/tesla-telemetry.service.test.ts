@@ -1,0 +1,812 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { TeslaTelemetryRepository } from "../../src/modules/tesla-telemetry/tesla-telemetry.repository";
+import { TeslaTelemetryService } from "../../src/modules/tesla-telemetry/tesla-telemetry.service";
+
+describe("TeslaTelemetryService", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function buildService() {
+    const repository = new TeslaTelemetryRepository();
+    const service = new TeslaTelemetryService(repository);
+    return { repository, service };
+  }
+
+  it("preserves out-of-order events and opens a backfill query after the gap threshold", async () => {
+    const { repository, service } = buildService();
+
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-001",
+        externalVehicleRef: "VIN-001",
+        capturedAt: "2026-06-26T10:00:00.000Z",
+        location: { lat: 25.03, lng: 121.56 },
+        speedMps: 8,
+        headingDeg: 90,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 80,
+        batteryRangeKm: 280,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-1",
+        receivedAt: "2026-06-26T10:00:00.000Z",
+      },
+    );
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-001",
+        externalVehicleRef: "VIN-001",
+        capturedAt: "2026-06-26T10:00:05.000Z",
+        location: { lat: 25.031, lng: 121.561 },
+        speedMps: 10,
+        headingDeg: 95,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 79,
+        batteryRangeKm: 279,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-003",
+        sequenceNo: 3,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-1",
+        receivedAt: "2026-06-26T10:00:05.000Z",
+      },
+    );
+
+    expect(
+      repository.listEvents({
+        feedKind: "vehicle_state",
+        externalVehicleRef: "VIN-001",
+        sessionId: "drive-session-1",
+      }),
+    ).toMatchObject([
+      { providerEventId: "veh-state-001", sequenceNo: 1 },
+      { providerEventId: "veh-state-003", sequenceNo: 3 },
+    ]);
+
+    const health = await service.getProviderHealth({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-001",
+      sessionId: "drive-session-1",
+      asOf: "2026-06-26T10:01:06.000Z",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "gap_detected",
+      latestSequenceNo: 3,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+    });
+    expect(service.listBackfillQueries()).toEqual([
+      expect.objectContaining({
+        vin: "VIN-001",
+        from: "2026-06-26T10:00:00.000Z",
+        to: "2026-06-26T10:01:06.000Z",
+        sessionId: "drive-session-1",
+        eventId: "veh-state-003",
+        sequenceAfter: 1,
+      }),
+    ]);
+  });
+
+  it("keeps a gap open when the missing sequence arrives quarantined with an unknown schema", async () => {
+    const { service } = buildService();
+
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-004",
+        externalVehicleRef: "VIN-004",
+        capturedAt: "2026-06-26T10:00:00.000Z",
+        location: { lat: 25.03, lng: 121.56 },
+        speedMps: 8,
+        headingDeg: 90,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 80,
+        batteryRangeKm: 280,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-gap-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-gap",
+        receivedAt: "2026-06-26T10:00:00.000Z",
+      },
+    );
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-004",
+        externalVehicleRef: "VIN-004",
+        capturedAt: "2026-06-26T10:00:05.000Z",
+        location: { lat: 25.031, lng: 121.561 },
+        speedMps: 10,
+        headingDeg: 95,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 79,
+        batteryRangeKm: 279,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-gap-003",
+        sequenceNo: 3,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-gap",
+        receivedAt: "2026-06-26T10:00:05.000Z",
+      },
+    );
+
+    expect(
+      await service.getProviderHealth({
+        feedKind: "vehicle_state",
+        externalVehicleRef: "VIN-004",
+        sessionId: "drive-session-gap",
+        asOf: "2026-06-26T10:01:06.000Z",
+      }),
+    ).toMatchObject({
+      healthState: "gap_detected",
+      latestSequenceNo: 3,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+    });
+
+    const receipt = await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-004",
+        externalVehicleRef: "VIN-004",
+        capturedAt: "2026-06-26T10:00:03.000Z",
+        location: { lat: 25.0305, lng: 121.5605 },
+        speedMps: 9,
+        headingDeg: 92,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 79.5,
+        batteryRangeKm: 279.5,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-gap-002-unknown",
+        sequenceNo: 2,
+        schemaVersion: "tesla.vehicle-state.v9",
+        sessionId: "drive-session-gap",
+        receivedAt: "2026-06-26T10:01:10.000Z",
+      },
+    );
+
+    expect(receipt.status).toBe("quarantined");
+    expect(receipt.providerHealthState).toBe("regulator_data_incident");
+    expect(receipt.backfillRequired).toBe(true);
+
+    expect(
+      await service.getProviderHealth({
+        feedKind: "vehicle_state",
+        externalVehicleRef: "VIN-004",
+        sessionId: "drive-session-gap",
+        asOf: "2026-06-26T10:01:10.000Z",
+      }),
+    ).toMatchObject({
+      healthState: "regulator_data_incident",
+      latestSequenceNo: 3,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+    });
+
+    expect(service.listBackfillQueries()).toEqual([
+      expect.objectContaining({
+        vin: "VIN-004",
+        from: "2026-06-26T10:00:00.000Z",
+        eventId: "veh-state-gap-003",
+        sequenceAfter: 1,
+      }),
+    ]);
+  });
+
+  it("treats the newest quarantined sequence as a gap and requests backfill after threshold", async () => {
+    const { service } = buildService();
+
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-005",
+        externalVehicleRef: "VIN-005",
+        capturedAt: "2026-06-26T10:00:00.000Z",
+        location: { lat: 25.03, lng: 121.56 },
+        speedMps: 8,
+        headingDeg: 90,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 80,
+        batteryRangeKm: 280,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-newest-gap-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-newest-gap",
+        receivedAt: "2026-06-26T10:00:00.000Z",
+      },
+    );
+
+    const receipt = await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-005",
+        externalVehicleRef: "VIN-005",
+        capturedAt: "2026-06-26T10:00:05.000Z",
+        location: { lat: 25.031, lng: 121.561 },
+        speedMps: 10,
+        headingDeg: 95,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 79,
+        batteryRangeKm: 279,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-newest-gap-002-unknown",
+        sequenceNo: 2,
+        schemaVersion: "tesla.vehicle-state.v9",
+        sessionId: "drive-session-newest-gap",
+        receivedAt: "2026-06-26T10:01:05.000Z",
+      },
+    );
+
+    expect(receipt.status).toBe("quarantined");
+    expect(receipt.providerHealthState).toBe("regulator_data_incident");
+    expect(receipt.backfillRequired).toBe(false);
+
+    expect(
+      await service.getProviderHealth({
+        feedKind: "vehicle_state",
+        externalVehicleRef: "VIN-005",
+        sessionId: "drive-session-newest-gap",
+        asOf: "2026-06-26T10:01:05.000Z",
+      }),
+    ).toMatchObject({
+      healthState: "regulator_data_incident",
+      latestSequenceNo: 2,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+      gapDetectedAt: "2026-06-26T10:01:05.000Z",
+      backfillRequestedAt: null,
+    });
+
+    expect(service.listBackfillQueries()).toEqual([]);
+
+    expect(
+      await service.getProviderHealth({
+        feedKind: "vehicle_state",
+        externalVehicleRef: "VIN-005",
+        sessionId: "drive-session-newest-gap",
+        asOf: "2026-06-26T10:02:06.000Z",
+      }),
+    ).toMatchObject({
+      healthState: "regulator_data_incident",
+      latestSequenceNo: 2,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+      gapDetectedAt: "2026-06-26T10:01:05.000Z",
+      backfillRequestedAt: "2026-06-26T10:02:06.000Z",
+    });
+
+    expect(service.listBackfillQueries()).toEqual([
+      expect.objectContaining({
+        vin: "VIN-005",
+        from: "2026-06-26T10:00:00.000Z",
+        to: "2026-06-26T10:02:06.000Z",
+        sessionId: "drive-session-newest-gap",
+        eventId: "veh-state-newest-gap-002-unknown",
+        sequenceAfter: 1,
+      }),
+    ]);
+  });
+
+  it("moves stale telemetry into dispatch hold after the hold threshold", async () => {
+    const { service } = buildService();
+
+    await service.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-002",
+        capturedAt: "2026-06-26T11:00:00.000Z",
+        location: { lat: 25.04, lng: 121.52 },
+        batteryLevelPct: 62,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-1",
+        receivedAt: "2026-06-26T11:00:00.000Z",
+      },
+    );
+
+    const health = await service.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-002",
+      sessionId: "public-session-1",
+      asOf: "2026-06-26T11:03:30.000Z",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "incomplete_hold",
+      dispatchHold: true,
+    });
+    expect((health?.qualityScore ?? 1) < 0.8).toBe(true);
+  });
+
+  it("uses the current time when getProviderHealth omits asOf", async () => {
+    const { service } = buildService();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-26T11:03:30.000Z"));
+
+    await service.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-OMIT-ASOF-001",
+        capturedAt: "2026-06-26T11:00:00.000Z",
+        location: { lat: 25.041, lng: 121.521 },
+        batteryLevelPct: 62,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-omit-asof-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-omit-asof",
+        receivedAt: "2026-06-26T11:00:00.000Z",
+      },
+    );
+
+    const health = await service.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-OMIT-ASOF-001",
+      sessionId: "public-session-omit-asof",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "incomplete_hold",
+      dispatchHold: true,
+      staleHeartbeatAt: "2026-06-26T11:00:00.000Z",
+      evaluatedAt: "2026-06-26T11:03:30.000Z",
+    });
+  });
+
+  it("reloads persisted provider health into a new service instance after restart", async () => {
+    const repository = new TeslaTelemetryRepository();
+    const firstService = new TeslaTelemetryService(repository);
+
+    await firstService.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-RESTART-001",
+        capturedAt: "2026-06-26T15:00:00.000Z",
+        location: { lat: 25.08, lng: 121.58 },
+        batteryLevelPct: 61,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-restart-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-restart",
+        receivedAt: "2026-06-26T15:00:00.000Z",
+      },
+    );
+
+    expect(repository.listHealthRecords()).toEqual([
+      expect.objectContaining({
+        externalVehicleRef: "VIN-RESTART-001",
+        sessionId: "public-session-restart",
+        healthState: "healthy",
+      }),
+    ]);
+
+    const restartedService = new TeslaTelemetryService(repository);
+    const health = await restartedService.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-RESTART-001",
+      sessionId: "public-session-restart",
+      asOf: "2026-06-26T15:00:10.000Z",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "healthy",
+      dispatchHold: false,
+      qualityScore: 1,
+      latestEventId: "pub-telemetry-restart-001",
+      latestSequenceNo: 1,
+      latestContiguousSequenceNo: 1,
+    });
+  });
+
+  it("reloads persisted tracker state during ingest after restart so later gaps are still detected", async () => {
+    const repository = new TeslaTelemetryRepository();
+    const firstService = new TeslaTelemetryService(repository);
+
+    await firstService.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-restart-gap-001",
+        externalVehicleRef: "VIN-RESTART-GAP-001",
+        capturedAt: "2026-06-26T18:00:00.000Z",
+        location: { lat: 25.11, lng: 121.61 },
+        speedMps: 7,
+        headingDeg: 88,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 77,
+        batteryRangeKm: 276,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-restart-gap-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-restart-gap",
+        receivedAt: "2026-06-26T18:00:00.000Z",
+      },
+    );
+
+    const restartedService = new TeslaTelemetryService(repository);
+    const receipt = await restartedService.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-restart-gap-001",
+        externalVehicleRef: "VIN-RESTART-GAP-001",
+        capturedAt: "2026-06-26T18:00:05.000Z",
+        location: { lat: 25.111, lng: 121.611 },
+        speedMps: 9,
+        headingDeg: 91,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 76,
+        batteryRangeKm: 275,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-restart-gap-003",
+        sequenceNo: 3,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-restart-gap",
+        receivedAt: "2026-06-26T18:00:05.000Z",
+      },
+    );
+
+    expect(receipt).toMatchObject({
+      providerHealthState: "healthy",
+      dispatchHold: false,
+      backfillRequired: false,
+    });
+
+    const health = await restartedService.getProviderHealth({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-RESTART-GAP-001",
+      sessionId: "drive-session-restart-gap",
+      asOf: "2026-06-26T18:01:06.000Z",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "gap_detected",
+      latestEventId: "veh-state-restart-gap-003",
+      latestSequenceNo: 3,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+      backfillRequestedAt: "2026-06-26T18:01:06.000Z",
+    });
+    expect(restartedService.listBackfillQueries()).toEqual([
+      expect.objectContaining({
+        vin: "VIN-RESTART-GAP-001",
+        from: "2026-06-26T18:00:00.000Z",
+        to: "2026-06-26T18:01:06.000Z",
+        sessionId: "drive-session-restart-gap",
+        eventId: "veh-state-restart-gap-003",
+        sequenceAfter: 1,
+      }),
+    ]);
+  });
+
+  it("clears stale heartbeat issues after fresh telemetry arrives", async () => {
+    const { service } = buildService();
+
+    await service.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-RECOVERY-001",
+        capturedAt: "2026-06-26T16:00:00.000Z",
+        location: { lat: 25.09, lng: 121.59 },
+        batteryLevelPct: 64,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-recovery-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-recovery",
+        receivedAt: "2026-06-26T16:00:00.000Z",
+      },
+    );
+
+    const staleHealth = await service.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-RECOVERY-001",
+      sessionId: "public-session-recovery",
+      asOf: "2026-06-26T16:03:30.000Z",
+    });
+
+    expect(staleHealth).toMatchObject({
+      healthState: "incomplete_hold",
+      dispatchHold: true,
+      qualityScore: 0.65,
+    });
+    expect(staleHealth?.issueCodes).toContain("STALE_HEARTBEAT");
+
+    const receipt = await service.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-RECOVERY-001",
+        capturedAt: "2026-06-26T16:03:35.000Z",
+        location: { lat: 25.091, lng: 121.591 },
+        batteryLevelPct: 63,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-recovery-002",
+        sequenceNo: 2,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-recovery",
+        receivedAt: "2026-06-26T16:03:35.000Z",
+      },
+    );
+
+    expect(receipt).toMatchObject({
+      providerHealthState: "healthy",
+      dispatchHold: false,
+      qualityScore: 1,
+    });
+
+    const recoveredHealth = await service.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-RECOVERY-001",
+      sessionId: "public-session-recovery",
+      asOf: "2026-06-26T16:03:35.000Z",
+    });
+
+    expect(recoveredHealth).toMatchObject({
+      healthState: "healthy",
+      dispatchHold: false,
+      qualityScore: 1,
+      staleHeartbeatAt: null,
+    });
+    expect(recoveredHealth?.issueCodes).not.toContain("STALE_HEARTBEAT");
+  });
+
+  it("escalates backfill to dispatch hold when heartbeat stays stale past the hold threshold", async () => {
+    const { service } = buildService();
+
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-008",
+        externalVehicleRef: "VIN-008",
+        capturedAt: "2026-06-26T17:00:00.000Z",
+        location: { lat: 25.1, lng: 121.6 },
+        speedMps: 8,
+        headingDeg: 90,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 80,
+        batteryRangeKm: 280,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-gap-hold-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-gap-hold",
+        receivedAt: "2026-06-26T17:00:00.000Z",
+      },
+    );
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-008",
+        externalVehicleRef: "VIN-008",
+        capturedAt: "2026-06-26T17:00:05.000Z",
+        location: { lat: 25.101, lng: 121.601 },
+        speedMps: 10,
+        headingDeg: 95,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 79,
+        batteryRangeKm: 279,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-gap-hold-003",
+        sequenceNo: 3,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-gap-hold",
+        receivedAt: "2026-06-26T17:00:05.000Z",
+      },
+    );
+
+    const gapHealth = await service.getProviderHealth({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-008",
+      sessionId: "drive-session-gap-hold",
+      asOf: "2026-06-26T17:01:06.000Z",
+    });
+
+    expect(gapHealth).toMatchObject({
+      healthState: "gap_detected",
+      dispatchHold: false,
+      missingSequences: [2],
+    });
+
+    const holdHealth = await service.getProviderHealth({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-008",
+      sessionId: "drive-session-gap-hold",
+      asOf: "2026-06-26T17:03:30.000Z",
+    });
+
+    expect(holdHealth).toMatchObject({
+      healthState: "regulator_data_incident",
+      dispatchHold: true,
+      missingSequences: [2],
+      staleHeartbeatAt: "2026-06-26T17:00:05.000Z",
+      backfillRequestedAt: "2026-06-26T17:01:06.000Z",
+    });
+    expect(holdHealth?.issueCodes).toEqual(
+      expect.arrayContaining([
+        "MISSING_SEQUENCE",
+        "BACKFILL_REQUIRED",
+        "STALE_HEARTBEAT",
+      ]),
+    );
+  });
+
+  it("quarantines unknown schemas and escalates provider health to regulator_data_incident", async () => {
+    const { service } = buildService();
+
+    const receipt = await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-003",
+        externalVehicleRef: "VIN-003",
+        capturedAt: "2026-06-26T12:00:00.000Z",
+        location: { lat: 25.05, lng: 121.54 },
+        speedMps: 0,
+        headingDeg: 0,
+        shiftState: "P",
+        autonomyState: "manual",
+        batteryLevelPct: 75,
+        batteryRangeKm: 300,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-unknown-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v9",
+        sessionId: "drive-session-9",
+        receivedAt: "2026-06-26T12:00:00.000Z",
+      },
+    );
+
+    expect(receipt.status).toBe("quarantined");
+    expect(receipt.providerHealthState).toBe("regulator_data_incident");
+    expect(receipt.dispatchHold).toBe(true);
+  });
+
+  it("returns a duplicate receipt when insert loses a race after duplicate preflight misses", async () => {
+    const { repository, service } = buildService();
+
+    const payload = {
+      vehicleId: "veh-av-006",
+      externalVehicleRef: "VIN-006",
+      capturedAt: "2026-06-26T13:00:00.000Z",
+      location: { lat: 25.06, lng: 121.53 },
+      speedMps: 12,
+      headingDeg: 100,
+      shiftState: "D" as const,
+      autonomyState: "fsd_engaged" as const,
+      batteryLevelPct: 68,
+      batteryRangeKm: 250,
+      charging: false,
+      online: true,
+    };
+    const context = {
+      eventId: "veh-state-race-001",
+      sequenceNo: 1,
+      schemaVersion: "tesla.vehicle-state.v1",
+      receivedAt: "2026-06-26T13:00:00.000Z",
+    };
+
+    await service.ingestVehicleStateSnapshot(payload, context);
+    const existingEvent = repository.listEvents({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-006",
+      sessionId: null,
+    })[0];
+
+    vi.spyOn(repository, "findEventByProviderRef").mockResolvedValueOnce(null);
+    vi.spyOn(repository, "findEventBySequence").mockResolvedValueOnce(null);
+    vi.spyOn(repository, "createEventIfAbsent").mockResolvedValueOnce({
+      eventRecord: existingEvent,
+      inserted: false,
+    });
+
+    const receipt = await service.ingestVehicleStateSnapshot(payload, context);
+
+    expect(receipt).toMatchObject({
+      status: "duplicate",
+      duplicate: true,
+      sessionId: null,
+      providerHealthState: "healthy",
+      dispatchHold: false,
+    });
+  });
+
+  it("repairs missing projection and health rows when a retry hits an existing telemetry event", async () => {
+    const { repository, service } = buildService();
+
+    const payload = {
+      vehicleId: "veh-av-007",
+      externalVehicleRef: "VIN-007",
+      capturedAt: "2026-06-26T14:00:00.000Z",
+      location: { lat: 25.07, lng: 121.57 },
+      speedMps: 6,
+      headingDeg: 110,
+      shiftState: "D" as const,
+      autonomyState: "fsd_engaged" as const,
+      batteryLevelPct: 66,
+      batteryRangeKm: 240,
+      charging: false,
+      online: true,
+    };
+    const context = {
+      eventId: "veh-state-repair-001",
+      sequenceNo: 1,
+      schemaVersion: "tesla.vehicle-state.v1",
+      sessionId: "drive-session-repair",
+      receivedAt: "2026-06-26T14:00:00.000Z",
+    };
+
+    await service.ingestVehicleStateSnapshot(payload, context);
+
+    (repository as any).vehicleStateSnapshots.clear();
+    (repository as any).healthRecords.clear();
+
+    const receipt = await service.ingestVehicleStateSnapshot(payload, context);
+
+    expect(receipt).toMatchObject({
+      status: "duplicate",
+      duplicate: true,
+      providerHealthState: "healthy",
+      dispatchHold: false,
+    });
+    expect(
+      await repository.hasVehicleStateSnapshotForSourceRef("veh-state-repair-001"),
+    ).toBe(true);
+    expect(repository.listHealthRecords()).toEqual([
+      expect.objectContaining({
+        externalVehicleRef: "VIN-007",
+        sessionId: "drive-session-repair",
+        healthState: "healthy",
+      }),
+    ]);
+  });
+});
