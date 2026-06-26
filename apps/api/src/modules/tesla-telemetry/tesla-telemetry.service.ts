@@ -214,7 +214,7 @@ export class TeslaTelemetryService {
       this.detectQualityIssue(feedKind, payload) ??
       (!schemaSupported ? "UNKNOWN_SCHEMA" : null);
 
-    const eventRecord = await this.repository.createEvent({
+    const persistedEvent = await this.repository.createEventIfAbsent({
       providerCode,
       feedKind,
       vehicleId: "vehicleId" in payload ? payload.vehicleId : null,
@@ -238,6 +238,19 @@ export class TeslaTelemetryService {
           ? (qualityIssue ?? "UNKNOWN_SCHEMA")
           : null,
     });
+
+    if (!persistedEvent.inserted) {
+      const health = this.evaluateTrackerHealth(
+        tracker,
+        receivedAt,
+        persistedEvent.eventRecord.ingestStatus === "quarantined"
+          ? (persistedEvent.eventRecord.quarantineReason ?? "UNKNOWN_SCHEMA")
+          : undefined,
+      );
+      return this.buildReceipt(persistedEvent.eventRecord, health, true);
+    }
+
+    const eventRecord = persistedEvent.eventRecord;
 
     this.applyEventToTracker(tracker, eventRecord);
 

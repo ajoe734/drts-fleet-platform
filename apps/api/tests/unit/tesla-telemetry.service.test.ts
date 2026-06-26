@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { TeslaTelemetryRepository } from "../../src/modules/tesla-telemetry/tesla-telemetry.repository";
 import { TeslaTelemetryService } from "../../src/modules/tesla-telemetry/tesla-telemetry.service";
@@ -377,5 +377,54 @@ describe("TeslaTelemetryService", () => {
     expect(receipt.status).toBe("quarantined");
     expect(receipt.providerHealthState).toBe("regulator_data_incident");
     expect(receipt.dispatchHold).toBe(true);
+  });
+
+  it("returns a duplicate receipt when insert loses a race after duplicate preflight misses", async () => {
+    const { repository, service } = buildService();
+
+    const payload = {
+      vehicleId: "veh-av-006",
+      externalVehicleRef: "VIN-006",
+      capturedAt: "2026-06-26T13:00:00.000Z",
+      location: { lat: 25.06, lng: 121.53 },
+      speedMps: 12,
+      headingDeg: 100,
+      shiftState: "D" as const,
+      autonomyState: "fsd_engaged" as const,
+      batteryLevelPct: 68,
+      batteryRangeKm: 250,
+      charging: false,
+      online: true,
+    };
+    const context = {
+      eventId: "veh-state-race-001",
+      sequenceNo: 1,
+      schemaVersion: "tesla.vehicle-state.v1",
+      receivedAt: "2026-06-26T13:00:00.000Z",
+    };
+
+    await service.ingestVehicleStateSnapshot(payload, context);
+    const existingEvent = repository.listEvents({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-006",
+      sessionId: null,
+    })[0];
+
+    vi.spyOn(repository, "findEventByProviderRef").mockResolvedValueOnce(null);
+    vi.spyOn(repository, "findEventBySequence").mockResolvedValueOnce(null);
+    vi.spyOn(repository, "createEventIfAbsent").mockResolvedValueOnce({
+      eventRecord: existingEvent,
+      inserted: false,
+    });
+
+    const receipt = await service.ingestVehicleStateSnapshot(payload, context);
+
+    expect(receipt).toMatchObject({
+      status: "duplicate",
+      duplicate: true,
+      sessionId: null,
+      providerHealthState: "healthy",
+      dispatchHold: false,
+    });
   });
 });

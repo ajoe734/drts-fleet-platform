@@ -107,6 +107,10 @@ type QueryExecutor = {
   ): Promise<QueryResult<T>>;
 };
 
+type PgErrorWithCode = Error & {
+  code?: string;
+};
+
 @Injectable()
 export class TeslaTelemetryRepository {
   private readonly events = new Map<string, TeslaTelemetryEventRecord>();
@@ -297,7 +301,7 @@ export class TeslaTelemetryRepository {
         record.feedKind,
         record.vehicleId,
         record.externalVehicleRef,
-        record.sessionId,
+        this.toDatabaseSessionId(record.sessionId),
         record.providerEventId,
         record.sequenceNo,
         record.capturedAt,
@@ -311,6 +315,90 @@ export class TeslaTelemetryRepository {
     );
 
     return this.mapEventRow(result.rows[0]!);
+  }
+
+  async createEventIfAbsent(
+    input: Omit<TeslaTelemetryEventRecord, "telemetryEventId">,
+    executor?: QueryExecutor,
+  ): Promise<{
+    eventRecord: TeslaTelemetryEventRecord;
+    inserted: boolean;
+  }> {
+    if (!this.isEnabled()) {
+      const existingByProviderRef = await this.findEventByProviderRef(
+        input.providerCode,
+        input.feedKind,
+        input.providerEventId,
+        executor,
+      );
+      if (existingByProviderRef) {
+        return {
+          eventRecord: existingByProviderRef,
+          inserted: false,
+        };
+      }
+
+      const existingBySequence = await this.findEventBySequence(
+        input.providerCode,
+        input.feedKind,
+        input.externalVehicleRef,
+        input.sessionId,
+        input.sequenceNo,
+        executor,
+      );
+      if (existingBySequence) {
+        return {
+          eventRecord: existingBySequence,
+          inserted: false,
+        };
+      }
+
+      return {
+        eventRecord: await this.createEvent(input, executor),
+        inserted: true,
+      };
+    }
+
+    try {
+      return {
+        eventRecord: await this.createEvent(input, executor),
+        inserted: true,
+      };
+    } catch (error) {
+      if ((error as PgErrorWithCode).code !== "23505") {
+        throw error;
+      }
+
+      const existingByProviderRef = await this.findEventByProviderRef(
+        input.providerCode,
+        input.feedKind,
+        input.providerEventId,
+        executor,
+      );
+      if (existingByProviderRef) {
+        return {
+          eventRecord: existingByProviderRef,
+          inserted: false,
+        };
+      }
+
+      const existingBySequence = await this.findEventBySequence(
+        input.providerCode,
+        input.feedKind,
+        input.externalVehicleRef,
+        input.sessionId,
+        input.sequenceNo,
+        executor,
+      );
+      if (!existingBySequence) {
+        throw error;
+      }
+
+      return {
+        eventRecord: existingBySequence,
+        inserted: false,
+      };
+    }
   }
 
   async saveVehicleStateSnapshot(
@@ -641,7 +729,7 @@ export class TeslaTelemetryRepository {
       feedKind: row.feed_kind,
       vehicleId: row.vehicle_id,
       externalVehicleRef: row.external_vehicle_ref,
-      sessionId: row.session_id,
+      sessionId: this.fromDatabaseSessionId(row.session_id),
       providerEventId: row.provider_event_id,
       sequenceNo: Number(row.sequence_no),
       capturedAt: new Date(row.captured_at).toISOString(),
@@ -652,5 +740,13 @@ export class TeslaTelemetryRepository {
       ingestStatus: row.ingest_status,
       quarantineReason: row.quarantine_reason,
     };
+  }
+
+  private toDatabaseSessionId(sessionId: string | null) {
+    return sessionId ?? "";
+  }
+
+  private fromDatabaseSessionId(sessionId: string | null) {
+    return sessionId && sessionId.length > 0 ? sessionId : null;
   }
 }
