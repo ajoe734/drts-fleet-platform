@@ -278,8 +278,6 @@ import type {
   SafetyOperatorQualificationRecord,
   SuspendSandboxExperimentAuthorizationsCommand,
   ResumeSandboxExperimentAuthorizationsCommand,
-} from "@drts/contracts";
-import type {
   CreateSafetyOperatorTripCloseoutCommand,
   EndSafetyOperatorShiftCommand,
   SafetyOperatorAssignment,
@@ -293,7 +291,7 @@ import type {
   SubmitSafetyOperatorPreTripChecklistCommand,
   SubmitSafetyOperatorTakeoverReportCommand,
   SubmitSafetyOperatorTakeoverReportResult,
-} from "../../contracts/dist/phase2-tesla-fsd-sandbox";
+} from "@drts/contracts";
 
 export interface ApiClientConfig {
   baseUrl: string;
