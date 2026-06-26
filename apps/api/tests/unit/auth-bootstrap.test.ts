@@ -263,16 +263,10 @@ describe("bootstrap auth extraction", () => {
   );
 
   it.each([
-    [
-      "/api/partner/referral/dashboard",
-      "partner:referral:dashboard:GET",
-    ],
+    ["/api/partner/referral/dashboard", "partner:referral:dashboard:GET"],
     ["/api/partner/referral/usage", "partner:referral:usage:GET"],
     ["/api/partner/referral/revenue", "partner:referral:revenue:GET"],
-    [
-      "/api/partner/referral/statements",
-      "partner:referral:statements:GET",
-    ],
+    ["/api/partner/referral/statements", "partner:referral:statements:GET"],
     [
       "/api/partner/referral/statements/2026-06",
       "partner:referral:statements/2026-06:GET",
@@ -785,6 +779,19 @@ describe("internal key middleware", () => {
           headers: {},
           method: "GET",
           originalUrl: "/api/identity/context",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows the Tesla regulatory callback path without the internal key, even when prefixed", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          method: "POST",
+          originalUrl: "/api/internal/providers/tesla/regulatory-events",
         },
         "staging-secret",
       ),
