@@ -741,7 +741,10 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    const buildCreationTraceLogs = () => [
+    const buildCreationTraceLogs = (): [
+      DispatchTraceLogRecord,
+      DispatchTraceLogRecord,
+    ] => [
       this.buildTraceLog(order.orderId, "tenant.booking_created", {
         bookingId,
         businessDispatchSubtype: order.businessDispatchSubtype,
@@ -882,6 +885,7 @@ export class OwnedMobilityService implements OnModuleInit {
               tenantId,
               bookingId,
               command.passengerDisclosureAcknowledgement,
+              identity,
               requestId,
               {
                 order,
@@ -922,6 +926,7 @@ export class OwnedMobilityService implements OnModuleInit {
                     tenantId,
                     bookingId,
                     command.passengerDisclosureAcknowledgement,
+                    identity,
                     requestId,
                   ),
                   () => result,
@@ -1143,7 +1148,7 @@ export class OwnedMobilityService implements OnModuleInit {
         disclosure: order.passengerDisclosure,
         command,
         actor: this.resolvePassengerDisclosureAcknowledgementActor(identity),
-        executor: options?.tx,
+        ...(options?.tx ? { executor: options.tx } : {}),
       });
     if (!record) {
       throw new ApiRequestError(
@@ -1168,7 +1173,10 @@ export class OwnedMobilityService implements OnModuleInit {
         policyId: order.passengerDisclosure.policyId,
         messageCode: order.passengerDisclosure.messageCode,
         acknowledgementRecordId: record.acknowledgementId,
-        actorType: record.actorType,
+        actorType:
+          record.actorType === "passenger"
+            ? "referral_passenger"
+            : record.actorType,
         actorRef: record.actorRef,
       },
     );
@@ -1186,10 +1194,14 @@ export class OwnedMobilityService implements OnModuleInit {
         "acknowledge_passenger_disclosure",
       );
     }
+    const auditActorType: AuditLogRecord["actorType"] =
+      record.actorType === "passenger"
+        ? "referral_passenger"
+        : record.actorType;
     this.recordAudit(
       {
         actorId: record.actorRef,
-        actorType: record.actorType,
+        actorType: auditActorType,
         tenantId: order.tenantId,
         moduleName: "order",
         actionName: "acknowledge_passenger_disclosure",
@@ -5089,24 +5101,24 @@ export class OwnedMobilityService implements OnModuleInit {
       }),
       (resolvedDisclosure) => {
         const previous = order.passengerDisclosure;
+        const canReuseAcknowledgement =
+          resolvedDisclosure !== null &&
+          this.canReusePassengerDisclosureAcknowledgement(
+            previous,
+            resolvedDisclosure,
+          );
         const nextDisclosure =
           resolvedDisclosure === null
             ? null
             : {
                 ...resolvedDisclosure,
-                acknowledgedAt: this.canReusePassengerDisclosureAcknowledgement(
-                  previous,
-                  resolvedDisclosure,
-                )
-                  ? previous.acknowledgedAt
-                  : null,
-                acknowledgementRecordId:
-                  this.canReusePassengerDisclosureAcknowledgement(
-                    previous,
-                    resolvedDisclosure,
-                  )
-                    ? previous.acknowledgementRecordId
+                acknowledgedAt:
+                  canReuseAcknowledgement && previous
+                    ? previous.acknowledgedAt
                     : null,
+                acknowledgementRecordId: canReuseAcknowledgement
+                  ? previous?.acknowledgementRecordId ?? null
+                  : null,
               };
 
         if (this.samePassengerDisclosure(previous, nextDisclosure)) {
@@ -5154,8 +5166,11 @@ export class OwnedMobilityService implements OnModuleInit {
     previous: PassengerDisclosureRequirementSnapshot | null | undefined,
     next: PassengerDisclosureRequirementSnapshot,
   ) {
+    if (!previous) {
+      return false;
+    }
     return (
-      previous?.channel === next.channel &&
+      previous.channel === next.channel &&
       previous.policyId === next.policyId &&
       previous.policyVersion === next.policyVersion &&
       previous.messageCode === next.messageCode &&
