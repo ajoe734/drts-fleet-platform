@@ -421,24 +421,22 @@ jobs:
           waji_wif_provider=""
           waji_deployer_service_account=""
           if [[ "$target_profile" == "waji" ]]; then
-            if [[ -n "${WAJI_WIF_PROVIDER:-}" && -n "${WAJI_WIF_SERVICE_ACCOUNT:-}" ]]; then
+            mapfile -t resolved_waji_credentials < <(resolve_waji_wif_credentials || true)
+            if (( ${#resolved_waji_credentials[@]} >= 2 )); then
+              waji_wif_provider="${resolved_waji_credentials[0]}"
+              waji_deployer_service_account="${resolved_waji_credentials[1]}"
+              deployer_sa="$waji_deployer_service_account"
+              wif_provider="$waji_wif_provider"
+              echo "::notice::Resolved a usable waji Workload Identity provider/service account pair via OIDC preflight."
+            elif [[ -n "${WAJI_WIF_PROVIDER:-}" && -n "${WAJI_WIF_SERVICE_ACCOUNT:-}" ]]; then
               waji_wif_provider="${WAJI_WIF_PROVIDER#//iam.googleapis.com/}"
               waji_deployer_service_account="${WAJI_WIF_SERVICE_ACCOUNT}"
               deployer_sa="$waji_deployer_service_account"
               wif_provider="$waji_wif_provider"
-              echo "::notice::Using configured WAJI_WIF_PROVIDER and WAJI_WIF_SERVICE_ACCOUNT."
+              echo "::warning::Using configured WAJI_WIF_PROVIDER and WAJI_WIF_SERVICE_ACCOUNT without successful OIDC preflight."
             else
-              mapfile -t resolved_waji_credentials < <(resolve_waji_wif_credentials || true)
-              if (( ${#resolved_waji_credentials[@]} >= 2 )); then
-                waji_wif_provider="${resolved_waji_credentials[0]}"
-                waji_deployer_service_account="${resolved_waji_credentials[1]}"
-                deployer_sa="$waji_deployer_service_account"
-                wif_provider="$waji_wif_provider"
-                echo "::notice::Resolved a usable waji Workload Identity provider/service account pair via OIDC preflight."
-              else
-                echo "::error::Could not resolve a usable waji Workload Identity provider/service account pair. Configure secrets.WAJI_WIF_PROVIDER and secrets.WAJI_WIF_SERVICE_ACCOUNT for the public waji profile."
-                exit 1
-              fi
+              echo "::error::Could not resolve a usable waji Workload Identity provider/service account pair. Configure secrets.WAJI_WIF_PROVIDER and secrets.WAJI_WIF_SERVICE_ACCOUNT for the public waji profile."
+              exit 1
             fi
           fi
 
