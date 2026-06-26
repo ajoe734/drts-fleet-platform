@@ -175,11 +175,13 @@ const UNKNOWN_ROUTE_WARNING: RouteContextWarning = {
 };
 
 // ---------------------------------------------------------------------------
-// Route registry — all 19 Platform Admin routes
+// Route registry — all Platform Admin routes (incl. sandbox governance)
 // ---------------------------------------------------------------------------
 
 /**
- * The 19 routes. `bodyParityPending` marks the 3 routes that returned 404
+ * All Platform Admin route descriptors, including the sandbox governance
+ * surface (`/sandbox` list, `/sandbox/[experimentId]` detail, `/sandbox/suspend`
+ * suspension console). `bodyParityPending` marks the routes that returned 404
  * on dev as of the 2026-06-02 body parity audit and whose bodies are owned by
  * separate workers; their metadata still resolves here.
  */
@@ -432,6 +434,43 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
       { key: "flagKey", kind: "feature-flag" },
     ],
     baselineWarnings: [WRITE_AUTHORITY_WARNING, HIGH_RISK_ACTIONS_WARNING],
+  },
+  {
+    routeKey: "sandbox",
+    pathTemplate: "/sandbox",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandbox.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "slow",
+  },
+  {
+    routeKey: "sandbox-detail",
+    pathTemplate: "/sandbox/[experimentId]",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxDetail.title"),
+    tabs: [
+      "areas",
+      "vehicles",
+      "operators",
+      "tesla",
+      "capabilities",
+      "policies",
+    ],
+    defaultTab: "areas",
+    refreshTier: "slow",
+    paramEntities: [{ param: "experimentId", kind: "sandbox-experiment" }],
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING],
+  },
+  {
+    routeKey: "sandbox-suspend",
+    pathTemplate: "/sandbox/suspend",
+    section: "sandbox",
+    title: localizedText("assistant.route.sandboxSuspend.title"),
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "slow",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING],
   },
 ] as const;
 

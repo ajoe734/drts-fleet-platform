@@ -444,6 +444,9 @@ const en = {
   "assistant.route.notices.title": "Notices & Maintenance",
   "assistant.route.audit.title": "Audit & Evidence",
   "assistant.route.featureFlags.title": "Feature Flags",
+  "assistant.route.sandbox.title": "Sandbox Governance",
+  "assistant.route.sandboxDetail.title": "Sandbox Experiment Detail",
+  "assistant.route.sandboxSuspend.title": "Sandbox Suspension / Resume",
 
   // ── Tenants ──
   "tenants.title": "Tenant Management",
@@ -3044,6 +3047,9 @@ const zh: typeof en = {
   "assistant.route.notices.title": "公告與維護",
   "assistant.route.audit.title": "稽核與證據",
   "assistant.route.featureFlags.title": "功能旗標",
+  "assistant.route.sandbox.title": "沙盒治理",
+  "assistant.route.sandboxDetail.title": "沙盒實驗詳情",
+  "assistant.route.sandboxSuspend.title": "沙盒暫停／恢復",
 
   // ── Tenants ──
   "tenants.title": "租戶管理",

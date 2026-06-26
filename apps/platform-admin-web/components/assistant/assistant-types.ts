@@ -229,6 +229,9 @@ export type PlatformAdminRouteKey =
   | "vehicle-eligibility"
   | "fleet-partners"
   | "fleet-partner-detail"
+  | "sandbox"
+  | "sandbox-detail"
+  | "sandbox-suspend"
   | "switchboard"
   | "pricing"
   | "payments"
@@ -259,7 +262,8 @@ export type AssistantEntityKind =
   | "audit-record"
   | "notice"
   | "public-info-version"
-  | "placard";
+  | "placard"
+  | "sandbox-experiment";
 
 /** Provenance of an entity reference, for assistant transparency/audit. */
 export type EntityRefSource = "route-param" | "query" | "page-selection";
