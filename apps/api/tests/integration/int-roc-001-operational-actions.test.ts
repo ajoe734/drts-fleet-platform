@@ -212,6 +212,71 @@ describe("INT-ROC-001 ROC operational actions", () => {
     }
   });
 
+  it("returns structured 400 errors when ROC action bodies omit required fields", async () => {
+    const { app, baseUrl } = await createTestApp();
+
+    try {
+      const vehicleEvidenceService = app.get(VehicleEvidenceService);
+      const recorder = buildMockRecorderFixture({
+        recorderId: "rec-roc-required-001",
+        vehicleId: "veh-roc-required-001",
+      });
+      vehicleEvidenceService.registerRecorder(recorder);
+      vehicleEvidenceService.updateRecorderHealth(recorder.recorderId, {
+        overall: "unhealthy",
+        clockDriftMs: 20_000,
+        uploadQueueState: "error",
+        uploadPendingCount: 1,
+        storageState: "error",
+      });
+
+      const assignResponse = await fetch(
+        `${baseUrl}/api/roc/alerts/roc-alert-recorder-veh-roc-required-001/assign`,
+        {
+          method: "POST",
+          headers: buildOpsHeaders(),
+          body: JSON.stringify({}),
+        },
+      );
+      expect(assignResponse.status).toBe(400);
+      const assignBody = await assignResponse.json();
+      expect(assignBody).toMatchObject({
+        error: {
+          code: "ROC_ACTION_FIELD_REQUIRED",
+          message: "assigneeId is required.",
+          details: {
+            field: "assigneeId",
+          },
+        },
+      });
+
+      const requestSafetyActionResponse = await fetch(
+        `${baseUrl}/api/roc/alerts/roc-alert-recorder-veh-roc-required-001/request-safety-action`,
+        {
+          method: "POST",
+          headers: buildOpsHeaders(),
+          body: JSON.stringify({
+            sandboxProgramId: "sandbox-demo-001",
+          }),
+        },
+      );
+      expect(requestSafetyActionResponse.status).toBe(400);
+      const requestSafetyActionBody =
+        await requestSafetyActionResponse.json();
+      expect(requestSafetyActionBody).toMatchObject({
+        error: {
+          code: "ROC_ACTION_FIELD_REQUIRED",
+          message: "safetyOperatorId is required.",
+          details: {
+            field: "safetyOperatorId",
+          },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects anonymous ROC requests", async () => {
     const { app, baseUrl } = await createTestApp();
 

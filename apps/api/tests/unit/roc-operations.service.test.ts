@@ -8,6 +8,7 @@ import type {
   TeslaAutonomyTransitionEvent,
 } from "@drts/contracts";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { AccidentInvestigationService } from "../../src/modules/accident-investigation/accident-investigation.service";
 import { RocOperationsService } from "../../src/modules/roc-operations/roc-operations.service";
@@ -863,5 +864,124 @@ describe("RocOperationsService", () => {
         ]),
       }),
     );
+  });
+
+  it("rejects missing assignee ids with a structured ROC action validation error", () => {
+    const safetyOperatorService = new SafetyOperatorService(
+      {
+        recordAuditLog: vi.fn(),
+      } as never,
+      undefined,
+      buildGovernanceService() as never,
+    );
+    const vehicleEvidenceService = new VehicleEvidenceService();
+    const rocOperationsService = new RocOperationsService(
+      safetyOperatorService,
+      undefined,
+      vehicleEvidenceService,
+    );
+    const opsIdentity = buildOpsIdentity();
+    const recorder = buildMockRecorderFixture({
+      recorderId: "rec-roc-assign-001",
+      vehicleId: "veh-roc-assign-001",
+    });
+    vehicleEvidenceService.registerRecorder(recorder);
+    vehicleEvidenceService.updateRecorderHealth(recorder.recorderId, {
+      overall: "unhealthy",
+      clockDriftMs: 20_000,
+      uploadQueueState: "error",
+      uploadPendingCount: 1,
+      storageState: "error",
+    });
+
+    try {
+      rocOperationsService.assignAlert(
+        "roc-alert-recorder-veh-roc-assign-001",
+        {} as never,
+        opsIdentity,
+      );
+      throw new Error("expected assignAlert to reject the missing assignee id");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(400);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "ROC_ACTION_FIELD_REQUIRED",
+          message: "assigneeId is required.",
+          details: {
+            field: "assigneeId",
+          },
+        },
+      });
+    }
+  });
+
+  it("rejects missing request-safety-action fields with a structured ROC action validation error", async () => {
+    const safetyOperatorService = new SafetyOperatorService(
+      {
+        recordAuditLog: vi.fn(),
+      } as never,
+      undefined,
+      buildGovernanceService() as never,
+    );
+    const vehicleEvidenceService = new VehicleEvidenceService();
+    const rocOperationsService = new RocOperationsService(
+      safetyOperatorService,
+      undefined,
+      vehicleEvidenceService,
+    );
+    const opsIdentity = buildOpsIdentity();
+    const recorder = buildMockRecorderFixture({
+      recorderId: "rec-roc-safety-001",
+      vehicleId: "veh-roc-safety-001",
+    });
+    vehicleEvidenceService.registerRecorder(recorder);
+    vehicleEvidenceService.updateRecorderHealth(recorder.recorderId, {
+      overall: "unhealthy",
+      clockDriftMs: 20_000,
+      uploadQueueState: "error",
+      uploadPendingCount: 1,
+      storageState: "error",
+    });
+
+    const cases = [
+      [
+        {
+          sandboxProgramId: "sandbox-demo-001",
+        } as never,
+        "safetyOperatorId",
+      ],
+      [
+        {
+          safetyOperatorId: "safe-op-001",
+        } as never,
+        "sandboxProgramId",
+      ],
+    ] as const;
+
+    for (const [command, field] of cases) {
+      try {
+        await rocOperationsService.requestSafetyAction(
+          "roc-alert-recorder-veh-roc-safety-001",
+          command,
+          opsIdentity,
+        );
+        throw new Error(
+          `expected requestSafetyAction to reject the missing ${field}`,
+        );
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        expect((error as ApiRequestError).getStatus()).toBe(400);
+        expect((error as ApiRequestError).getResponse()).toMatchObject({
+          error: {
+            code: "ROC_ACTION_FIELD_REQUIRED",
+            message: `${field} is required.`,
+            details: {
+              field,
+            },
+          },
+        });
+      }
+    }
   });
 });
