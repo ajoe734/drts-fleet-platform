@@ -293,6 +293,19 @@ import type {
   SafetyOperatorQualificationRecord,
   SuspendSandboxExperimentAuthorizationsCommand,
   ResumeSandboxExperimentAuthorizationsCommand,
+  CreateSafetyOperatorTripCloseoutCommand,
+  EndSafetyOperatorShiftCommand,
+  SafetyOperatorAssignment,
+  SafetyOperatorPreTripChecklist,
+  SafetyOperatorQualificationCheckResult,
+  SafetyOperatorShift,
+  SafetyOperatorShiftStatus,
+  SafetyOperatorTakeoverReport,
+  SafetyOperatorTripCloseout,
+  StartSafetyOperatorShiftCommand,
+  SubmitSafetyOperatorPreTripChecklistCommand,
+  SubmitSafetyOperatorTakeoverReportCommand,
+  SubmitSafetyOperatorTakeoverReportResult,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -353,9 +366,7 @@ export interface MonthlyOperationsSummaryRebuildResult {
 }
 
 /** Serialize a report filter object into a `?a=b&c=d` query suffix. */
-function buildReportQuery(
-  query: Record<string, string | undefined>,
-): string {
+function buildReportQuery(query: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (typeof value === "string" && value.trim()) {
@@ -1166,6 +1177,203 @@ export class ApiClient {
     });
   }
 
+  // ── Phase 2: Safety Operator ──
+
+  async checkSafetyOperatorQualification(query: {
+    safetyOperatorId: string;
+    sandboxProgramId: string;
+    vehicleId?: string | null;
+    asOf?: string | null;
+  }): Promise<SafetyOperatorQualificationCheckResult> {
+    const params = new URLSearchParams({
+      safetyOperatorId: query.safetyOperatorId,
+      sandboxProgramId: query.sandboxProgramId,
+    });
+    if (query.vehicleId) {
+      params.set("vehicleId", query.vehicleId);
+    }
+    if (query.asOf) {
+      params.set("asOf", query.asOf);
+    }
+
+    return this.get<SafetyOperatorQualificationCheckResult>(
+      `/api/safety-operator/qualification?${params.toString()}`,
+    );
+  }
+
+  async listSafetyOperatorAssignments(filters?: {
+    safetyOperatorId?: string;
+    vehicleId?: string;
+    status?: string;
+  }): Promise<SafetyOperatorAssignment[]> {
+    const params = new URLSearchParams();
+    if (filters?.safetyOperatorId) {
+      params.set("safetyOperatorId", filters.safetyOperatorId);
+    }
+    if (filters?.vehicleId) {
+      params.set("vehicleId", filters.vehicleId);
+    }
+    if (filters?.status) {
+      params.set("status", filters.status);
+    }
+
+    const query = params.toString();
+    return this.getList<SafetyOperatorAssignment>(
+      query
+        ? `/api/safety-operator/assignments?${query}`
+        : "/api/safety-operator/assignments",
+    );
+  }
+
+  async listSafetyOperatorShifts(filters?: {
+    safetyOperatorId?: string;
+    deviceId?: string;
+    status?: SafetyOperatorShiftStatus;
+  }): Promise<SafetyOperatorShift[]> {
+    const params = new URLSearchParams();
+    if (filters?.safetyOperatorId) {
+      params.set("safetyOperatorId", filters.safetyOperatorId);
+    }
+    if (filters?.deviceId) {
+      params.set("deviceId", filters.deviceId);
+    }
+    if (filters?.status) {
+      params.set("status", filters.status);
+    }
+
+    const query = params.toString();
+    return this.getList<SafetyOperatorShift>(
+      query
+        ? `/api/safety-operator/shifts?${query}`
+        : "/api/safety-operator/shifts",
+    );
+  }
+
+  async startSafetyOperatorShift(
+    command: StartSafetyOperatorShiftCommand,
+  ): Promise<SafetyOperatorShift> {
+    return this.post<SafetyOperatorShift>("/api/safety-operator/shifts/start", {
+      body: command,
+    });
+  }
+
+  async endSafetyOperatorShift(
+    shiftId: string,
+    command: EndSafetyOperatorShiftCommand,
+  ): Promise<SafetyOperatorShift> {
+    return this.post<SafetyOperatorShift>(
+      `/api/safety-operator/shifts/${encodeURIComponent(shiftId)}/end`,
+      { body: command },
+    );
+  }
+
+  async listSafetyOperatorPreTripChecklists(filters?: {
+    safetyOperatorId?: string;
+    vehicleId?: string;
+    shiftId?: string;
+  }): Promise<SafetyOperatorPreTripChecklist[]> {
+    const params = new URLSearchParams();
+    if (filters?.safetyOperatorId) {
+      params.set("safetyOperatorId", filters.safetyOperatorId);
+    }
+    if (filters?.vehicleId) {
+      params.set("vehicleId", filters.vehicleId);
+    }
+    if (filters?.shiftId) {
+      params.set("shiftId", filters.shiftId);
+    }
+
+    const query = params.toString();
+    return this.getList<SafetyOperatorPreTripChecklist>(
+      query
+        ? `/api/safety-operator/pre-trip-checklists?${query}`
+        : "/api/safety-operator/pre-trip-checklists",
+    );
+  }
+
+  async submitSafetyOperatorPreTripChecklist(
+    command: SubmitSafetyOperatorPreTripChecklistCommand,
+  ): Promise<SafetyOperatorPreTripChecklist> {
+    return this.post<SafetyOperatorPreTripChecklist>(
+      "/api/safety-operator/pre-trip-checklists",
+      { body: command },
+    );
+  }
+
+  async listSafetyOperatorTakeoverReports(filters?: {
+    safetyOperatorId?: string;
+    vehicleId?: string;
+    correlationId?: string;
+    clientGeneratedReportId?: string;
+  }): Promise<SafetyOperatorTakeoverReport[]> {
+    const params = new URLSearchParams();
+    if (filters?.safetyOperatorId) {
+      params.set("safetyOperatorId", filters.safetyOperatorId);
+    }
+    if (filters?.vehicleId) {
+      params.set("vehicleId", filters.vehicleId);
+    }
+    if (filters?.correlationId) {
+      params.set("correlationId", filters.correlationId);
+    }
+    if (filters?.clientGeneratedReportId) {
+      params.set("clientGeneratedReportId", filters.clientGeneratedReportId);
+    }
+
+    const query = params.toString();
+    return this.getList<SafetyOperatorTakeoverReport>(
+      query
+        ? `/api/safety-operator/takeover-reports?${query}`
+        : "/api/safety-operator/takeover-reports",
+    );
+  }
+
+  async submitSafetyOperatorTakeoverReport(
+    command: SubmitSafetyOperatorTakeoverReportCommand,
+    options?: RequestOptions,
+  ): Promise<SubmitSafetyOperatorTakeoverReportResult> {
+    return this.post<SubmitSafetyOperatorTakeoverReportResult>(
+      "/api/safety-operator/takeover-reports",
+      {
+        body: command,
+        ...(options?.headers ? { headers: options.headers } : {}),
+      },
+    );
+  }
+
+  async listSafetyOperatorTripCloseouts(filters?: {
+    safetyOperatorId?: string;
+    vehicleId?: string;
+    assignmentId?: string;
+  }): Promise<SafetyOperatorTripCloseout[]> {
+    const params = new URLSearchParams();
+    if (filters?.safetyOperatorId) {
+      params.set("safetyOperatorId", filters.safetyOperatorId);
+    }
+    if (filters?.vehicleId) {
+      params.set("vehicleId", filters.vehicleId);
+    }
+    if (filters?.assignmentId) {
+      params.set("assignmentId", filters.assignmentId);
+    }
+
+    const query = params.toString();
+    return this.getList<SafetyOperatorTripCloseout>(
+      query
+        ? `/api/safety-operator/trip-closeouts?${query}`
+        : "/api/safety-operator/trip-closeouts",
+    );
+  }
+
+  async createSafetyOperatorTripCloseout(
+    command: CreateSafetyOperatorTripCloseoutCommand,
+  ): Promise<SafetyOperatorTripCloseout> {
+    return this.post<SafetyOperatorTripCloseout>(
+      "/api/safety-operator/trip-closeouts",
+      { body: command },
+    );
+  }
+
   // ── Call Center ──
 
   async listCallSessions(): Promise<CallSessionRecord[]> {
@@ -1747,7 +1955,9 @@ export class ApiClient {
   async listDailyDispatchRecords(
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecord[]> {
-    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    const suffix = buildReportQuery(
+      query as Record<string, string | undefined>,
+    );
     return this.getList<DispatchDailyRecord>(
       `/api/reports/daily-dispatch-records${suffix}`,
     );
@@ -1765,7 +1975,9 @@ export class ApiClient {
   async previewSixMonthOperationsSummary(
     query: OperationsSummaryPreviewQuery = {},
   ): Promise<SixMonthOperationsSummary[]> {
-    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    const suffix = buildReportQuery(
+      query as Record<string, string | undefined>,
+    );
     return this.getList<SixMonthOperationsSummary>(
       `/api/reports/operations-summary/preview${suffix}`,
     );
@@ -2372,7 +2584,9 @@ export class ApiClient {
     return this.get<{
       item: SandboxEvidenceManifestView;
       refresh: UiRefreshMetadata;
-    }>(`/api/platform-admin/evidence/manifests/${encodeURIComponent(manifestId)}`);
+    }>(
+      `/api/platform-admin/evidence/manifests/${encodeURIComponent(manifestId)}`,
+    );
   }
 
   async listSandboxControlledExports(): Promise<{
@@ -2390,9 +2604,12 @@ export class ApiClient {
   async requestSandboxControlledExport(
     command: RequestSandboxControlledEvidenceExportCommand,
   ): Promise<ActionReceipt> {
-    return this.post<ActionReceipt>("/api/platform-admin/evidence/exports/request", {
-      body: command,
-    });
+    return this.post<ActionReceipt>(
+      "/api/platform-admin/evidence/exports/request",
+      {
+        body: command,
+      },
+    );
   }
 
   async approveSandboxControlledExport(
@@ -2422,9 +2639,12 @@ export class ApiClient {
   async placeSandboxLegalHold(
     command: CreateSandboxLegalHoldCommand,
   ): Promise<ActionReceipt> {
-    return this.post<ActionReceipt>("/api/platform-admin/evidence/legal-holds", {
-      body: command,
-    });
+    return this.post<ActionReceipt>(
+      "/api/platform-admin/evidence/legal-holds",
+      {
+        body: command,
+      },
+    );
   }
 
   async requestSandboxLegalHoldRelease(

@@ -1,102 +1,129 @@
-import { Controller, Get, Headers, Param, Post, Body } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
-import type { SubmitRegulatoryReportCommand } from "@drts/contracts";
+import type {
+  ApproveRegulatoryNotificationCommand,
+  AcknowledgeRegulatoryNotificationCommand,
+  CreateRegulatoryNotificationCommand,
+  SubmitRegulatoryNotificationCommand,
+  SubmitRegulatoryNotificationReviewCommand,
+} from "@drts/contracts";
 
-import {
-  ApiRequestError,
-  toApiSuccessEnvelope,
-} from "../../common/api-envelope";
-import { toActionReceiptEnvelope } from "../../common/action-receipt";
-import {
-  buildEmptyStateEnvelope,
-  buildUiReadModelList,
-} from "../../common/ui-read-model";
-import {
-  CurrentIdentity,
-  RequireRealms,
-  RequireScopes,
-  type BootstrapRequestIdentity,
-} from "../../common/auth";
-import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
+import { CurrentIdentity, RequireRealms } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { RegulatoryReportingService } from "./regulatory-reporting.service";
 
-const REGULATORY_REPORT_REFRESH_MS = 30_000;
-
-@RequireRealms("platform")
-@Controller("platform-admin/regulatory-reports")
+@Controller("regulatory")
+@RequireRealms("platform", "ops")
 export class RegulatoryReportingController {
   constructor(
     private readonly regulatoryReportingService: RegulatoryReportingService,
-    private readonly auditNotificationService: AuditNotificationService,
   ) {}
 
-  @Get()
-  @RequireScopes("sandbox.regulatory_report.review")
-  listReports(@Headers("x-request-id") requestId?: string) {
+  @Get("notifications")
+  listNotifications(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      buildUiReadModelList(this.regulatoryReportingService.listReports(), {
-        staleAfterMs: REGULATORY_REPORT_REFRESH_MS,
-        emptyState: buildEmptyStateEnvelope(
-          "no_data",
-          "platform_admin.regulatory_reports.empty",
-        ),
-      }),
+      toApiListData(this.regulatoryReportingService.listNotifications()),
       requestId,
     );
   }
 
-  @Post(":reportId/submit")
-  @RequireScopes("sandbox.regulatory_report.submit")
-  submitReport(
-    @Param("reportId") reportId: string,
-    @Body() command: SubmitRegulatoryReportCommand,
+  @Get("notifications/:notificationId")
+  getNotification(
+    @Param("notificationId") notificationId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryReportingService.getNotification(notificationId),
+      requestId,
+    );
+  }
+
+  @Post("notifications")
+  createNotification(
+    @Body() command: CreateRegulatoryNotificationCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const actorId = this.requireActorId(identity);
-    const report = this.regulatoryReportingService.submitReport(
-      reportId,
-      command,
-      actorId,
-    );
-    const auditLog = this.auditNotificationService.recordAuditLog({
-      actorId,
-      actorType: identity?.actorType ?? "platform_admin",
-      tenantId: null,
-      moduleName: "regulatory-reporting",
-      actionName: "submit_sandbox_regulatory_report",
-      resourceType: "regulatory_report",
-      resourceId: report.reportId,
-      requestId,
-      newValuesSummary: {
-        reportId: report.reportId,
-        reportType: report.reportType,
-        acknowledgementRef: report.acknowledgementRef,
-        note: command.note?.trim() || null,
-      },
-    });
-
-    return toActionReceiptEnvelope(
-      {
-        auditLog,
-        ...(requestId ? { actionId: requestId } : {}),
-        resourceType: "regulatory_report",
-        resourceId: report.reportId,
-        message: "Regulatory report submitted.",
-      },
+    return toApiSuccessEnvelope(
+      this.regulatoryReportingService.createNotification(
+        command,
+        identity,
+        requestId,
+      ),
       requestId,
     );
   }
 
-  private requireActorId(identity: BootstrapRequestIdentity | null) {
-    const actorId = identity?.actorId?.trim();
-    if (!actorId) {
-      throw new ApiRequestError(
-        401,
-        "SANDBOX_COMPLIANCE_IDENTITY_REQUIRED",
-        "Authenticated actor identity is required for sandbox compliance actions.",
-      );
-    }
-    return actorId;
+  @Post("notifications/:notificationId/submit-review")
+  submitReview(
+    @Param("notificationId") notificationId: string,
+    @Body() command: SubmitRegulatoryNotificationReviewCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryReportingService.submitReview(
+        notificationId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("notifications/:notificationId/approve")
+  approveReview(
+    @Param("notificationId") notificationId: string,
+    @Body() command: ApproveRegulatoryNotificationCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryReportingService.approveReview(
+        notificationId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("notifications/:notificationId/submit")
+  submitNotification(
+    @Param("notificationId") notificationId: string,
+    @Body() command: SubmitRegulatoryNotificationCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryReportingService.submitNotification(
+        notificationId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("notifications/:notificationId/acknowledge")
+  acknowledgeNotification(
+    @Param("notificationId") notificationId: string,
+    @Body() command: AcknowledgeRegulatoryNotificationCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryReportingService.acknowledgeNotification(
+        notificationId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
   }
 }

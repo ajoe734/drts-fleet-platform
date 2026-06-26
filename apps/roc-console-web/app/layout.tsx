@@ -6,6 +6,7 @@ import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { buildRocShellNav } from "@/lib/roc-shell-nav";
 import { RocShell } from "@/components/roc-shell";
+import { getRocBodyStyleVars } from "@/lib/roc-theme";
 
 import "./globals.css";
 
@@ -26,7 +27,7 @@ export default async function RootLayout({
 
   return (
     <html lang={locale === "zh" ? "zh-TW" : "en"}>
-      <body style={{ margin: 0 }}>
+      <body style={{ margin: 0, ...getRocBodyStyleVars() }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
           <RocShell
