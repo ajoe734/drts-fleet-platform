@@ -4,10 +4,7 @@ import { rocTheme } from "@/lib/roc-theme";
 import { crossAppHref } from "@/lib/roc-cross-app-links";
 import { getRocEvidencePageData } from "@/lib/roc-page-data";
 import { RocActionRail } from "@/components/roc-action-rail";
-import {
-  RocEvidenceTag,
-  RocRefreshBanner,
-} from "@/components/roc-screen-primitives";
+import { RocRefreshBanner } from "@/components/roc-screen-primitives";
 import {
   CanvasCard as Card,
   CanvasPageHeader as PageHeader,
@@ -44,17 +41,6 @@ export default async function EvidencePage() {
         >
           {t(`evidence.freeze.${row.freezeStatus}`, locale)}
         </Pill>
-      ),
-    },
-    {
-      h: t("evidence.columns.source", locale),
-      w: 230,
-      r: (row) => (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {row.sources.map((source) => (
-            <RocEvidenceTag key={source} source={source} locale={locale} />
-          ))}
-        </div>
       ),
     },
     {
