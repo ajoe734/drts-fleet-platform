@@ -7,7 +7,7 @@
 **Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer:** `Codex2` / `Claude2`  
 **Last Revised:** `2026-06-26 (UTC)`  
-**Status:** `READY FOR REVIEW`
+**Status:** `REVIEW APPROVED`
 
 ---
 
@@ -28,12 +28,13 @@ Reviewer intent:
 
 ## 2. Shared-Truth Snapshot And Timing
 
-Read this section as a time-bounded status note, not as an evergreen "current status" panel.
+Read this section as a time-bounded status note, not as an evergreen "current status" panel. The latest recorded machine-truth state for this support artifact is `review_approved`; the earlier `review` and wording-refresh `in_progress` transitions remain listed here because they explain why the packet wording changed.
 
 - Sidecar task `P2-DP-S3-001-SIDECAR-REVIEW`
   - `2026-06-26T18:34:27Z`: Orchestrator recorded the initial handoff of this packet as advanced to `review`
   - `2026-06-26T18:34:39Z`: reviewer `Codex2` reopened the sidecar because section 2 still described the pre-handoff drafting state
   - `2026-06-26T18:35:12Z`: owner `Codex` moved the task back to `in_progress` only to refresh this wording before re-handoff
+  - `2026-06-26T18:39:29Z`: reviewer `Codex2` approved the refreshed packet; machine truth now records the sidecar as `review_approved` and ready for owner closeout
 - Parent review context carried by this packet
   - review the clean repair branch `origin/codex2/p2-dp-s3-001-repair@8fb33bd6f`, not the contaminated branch `origin/codex2/p2-dp-s3-001@d6cf6a8e8`
 
@@ -249,3 +250,4 @@ AI_NAME=Codex2 scripts/ai-status.sh reopen P2-DP-S3-001-SIDECAR-REVIEW \
 - `2026-06-26` - Packet aligned to current parent `review` state and the clean repair branch `origin/codex2/p2-dp-s3-001-repair@8fb33bd6f`.
 - `2026-06-26` - Packet records the contaminated closeout merge `d6cf6a8e8` as out of scope for reviewer evidence.
 - `2026-06-26` - Section 2 refreshed to distinguish the `2026-06-26T18:34:27Z` review handoff from the `2026-06-26T18:35:12Z` wording-refresh reopen state before re-handoff.
+- `2026-06-26` - Header status and section 2 timeline updated to reflect reviewer approval at `2026-06-26T18:39:29Z` before owner closeout.
