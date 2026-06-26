@@ -41,34 +41,24 @@ import type {
   ExceptionHoldReasonCode,
   MoneyAmount,
   OverrideRequestRecord,
-  PassengerDisclosureChannel,
   RejectExceptionOverrideCommand,
   RejectTenantBookingApprovalRequestCommand,
   RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
   PassengerProfile,
-  PassengerDisclosureRequirementSnapshot,
   QueueCheckInCommand,
   QueueCheckOutCommand,
   QueueEntryRecord,
   ReassignDispatchCommand,
-  RecordPassengerAcknowledgementCommand,
   RedispatchOrderCommand,
   ReservationHoldStatus,
   ResolveExceptionHoldCommand,
-  RocFallbackToHumanCommand,
-  RocFallbackTrigger,
-  SandboxFulfillmentProjectionView,
-  SandboxFulfillmentVisibilityAudience,
-  SandboxFulfillmentVisibilityReason,
-  SandboxFulfillmentVisibilityRecord,
   TenantApprovalEvaluationInputSnapshot,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
   UpdateTenantBookingCommand,
-  SandboxDispatchDecision,
   ServiceProductType,
 } from "@drts/contracts";
 
@@ -90,7 +80,6 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
-import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityTripCompletedEvent,
@@ -168,26 +157,6 @@ type DispatchAssignmentResult = {
   assignmentId: string;
   status: DispatchAssignmentRecord["status"];
   taskId: string;
-};
-
-type HumanFallbackContext = {
-  reportId: string;
-  reportArtifactId: string;
-  rocOperatorId: string | null;
-  trigger: RocFallbackTrigger;
-  sandboxDecision: SandboxDispatchDecision | null;
-};
-
-type HumanFallbackResult = {
-  order: OwnedOrderRecord;
-  dispatchJobId: string;
-  assignmentId: string;
-  taskId: string;
-  previousAssignmentId: string | null;
-  previousVehicleId: string | null;
-  previousDriverId: string | null;
-  avVehicleId: string | null;
-  avDriverId: string | null;
 };
 
 type CreateDispatchAssignmentOptions = {
@@ -281,8 +250,6 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly eventEmitter?: EventEmitter2,
     @Optional()
     private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
-    @Optional()
-    private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -410,7 +377,6 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       approvalState: "not_required",
       approvalRequestIds: [],
-      passengerDisclosure: null,
       complianceFlags: [],
       cancelledAt: null,
       cancelReason: null,
@@ -541,7 +507,6 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       approvalState: "not_required",
       approvalRequestIds: [],
-      passengerDisclosure: null,
       complianceFlags: recordingId
         ? ["recording_bound"]
         : ["recording_pending"],
@@ -726,7 +691,6 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       approvalState: "not_required",
       approvalRequestIds: [],
-      passengerDisclosure: null,
       complianceFlags: [],
       cancelledAt: null,
       cancelReason: null,
@@ -741,42 +705,34 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    const buildCreationTraceLogs = (): [
-      DispatchTraceLogRecord,
-      DispatchTraceLogRecord,
-    ] => [
-      this.buildTraceLog(order.orderId, "tenant.booking_created", {
+    const bookingTraceLog = this.appendTrace(
+      order.orderId,
+      "tenant.booking_created",
+      {
         bookingId,
         businessDispatchSubtype: order.businessDispatchSubtype,
         dispatchSemantics: order.dispatchSemantics,
-        passengerDisclosurePolicyId:
-          order.passengerDisclosure?.policyId ?? null,
-        passengerDisclosureMessageCode:
-          order.passengerDisclosure?.messageCode ?? null,
-      }),
-      this.buildTraceLog(order.orderId, "reservation.hold.created", {
+      },
+    );
+    const holdTraceLog = this.appendTrace(
+      order.orderId,
+      "reservation.hold.created",
+      {
         bookingId,
         reservationHoldId,
         holdState: order.reservationHoldStatus,
         confirmationWindowMinutes: bookingWindow.confirmationWindowMinutes,
-      }),
-    ];
-
+      },
+    );
     const finalizeCreation = (
       previousApprovalState: TenantBookingApprovalState,
       approvalRequest: TenantBookingApprovalRequestRecord | null,
       persistOrderWrite = true,
     ): TenantBookingResult => {
-      const [bookingTraceLog, holdTraceLog] = buildCreationTraceLogs();
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
       this.orders = [order, ...this.orders];
-      this.dispatchTraceLogs = [
-        holdTraceLog,
-        bookingTraceLog,
-        ...this.dispatchTraceLogs,
-      ];
       if (persistOrderWrite) {
         this.persistChanges(
           {
@@ -801,10 +757,6 @@ export class OwnedMobilityService implements OnModuleInit {
             status: order.status,
             approvalState: order.approvalState,
             approvalRequestIds: order.approvalRequestIds,
-            passengerDisclosurePolicyId:
-              order.passengerDisclosure?.policyId ?? null,
-            passengerDisclosureMessageCode:
-              order.passengerDisclosure?.messageCode ?? null,
             partnerId: order.partnerId,
             partnerProgramId: order.partnerProgramId,
             partnerEntrySlug: order.partnerEntrySlug,
@@ -821,11 +773,6 @@ export class OwnedMobilityService implements OnModuleInit {
         requestId,
       );
       this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
-      this.publishPartnerSandboxFulfillmentWebhook(
-        order,
-        "partner.sandbox_fulfillment.updated",
-        order.createdAt,
-      );
       this.opsDispatchEventsService?.publishOrderCreated(
         this.cloneOrder(order),
         requestId,
@@ -843,10 +790,6 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const previousApprovalState = order.approvalState;
     const governanceSnapshot = this.captureTenantGovernanceSnapshot();
-    const applyPassengerDisclosure = () =>
-      this.refreshPassengerDisclosureSnapshot(order, false, {
-        channel: this.resolvePassengerDisclosureChannel(order, identity),
-      });
     const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
@@ -873,33 +816,16 @@ export class OwnedMobilityService implements OnModuleInit {
     ) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
-          await applyPassengerDisclosure();
           const approvalRequest = await applyGovernance(tx);
-          const [bookingTraceLog, holdTraceLog] = buildCreationTraceLogs();
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(order)],
             dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
           });
-          if (command.passengerDisclosureAcknowledgement) {
-            await this.acknowledgePassengerDisclosure(
-              tenantId,
-              bookingId,
-              command.passengerDisclosureAcknowledgement,
-              identity,
-              requestId,
-              {
-                order,
-                tx,
-                refreshDisclosure: false,
-              },
-            );
-          }
-          const result = finalizeCreation(
+          return finalizeCreation(
             previousApprovalState,
             approvalRequest,
             false,
           );
-          return result;
         })
         .catch((error) => {
           // The DB transaction rolls back persisted rows, but the in-memory
@@ -914,26 +840,8 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return this.withRollback(
       () =>
-        this.afterMaybePromise(applyPassengerDisclosure(), () =>
-          this.afterMaybePromise(applyGovernance(null), (approvalRequest) => {
-            return command.passengerDisclosureAcknowledgement
-              ? this.afterMaybePromise(
-                  this.acknowledgePassengerDisclosure(
-                    tenantId,
-                    bookingId,
-                    command.passengerDisclosureAcknowledgement,
-                    identity,
-                    requestId,
-                    {
-                      order,
-                      refreshDisclosure: false,
-                    },
-                  ),
-                  () =>
-                    finalizeCreation(previousApprovalState, approvalRequest),
-                )
-              : finalizeCreation(previousApprovalState, approvalRequest);
-          }),
+        this.afterMaybePromise(applyGovernance(null), (approvalRequest) =>
+          finalizeCreation(previousApprovalState, approvalRequest),
         ),
       () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),
     );
@@ -1074,170 +982,6 @@ export class OwnedMobilityService implements OnModuleInit {
     this.assertNonBlank(tenantId, "tenantId");
     return this.mapOrderToBooking(
       this.requireBookingOrder(bookingId, tenantId),
-    );
-  }
-
-  getTenantSandboxFulfillment(tenantId: string, bookingId: string) {
-    this.assertNonBlank(tenantId, "tenantId");
-    return this.mapSandboxFulfillmentProjection(
-      this.requireBookingOrder(bookingId, tenantId),
-      "tenant",
-    );
-  }
-
-  getOpsSandboxFulfillment(
-    bookingId: string,
-    audience: SandboxFulfillmentVisibilityAudience = "ops",
-  ) {
-    return this.mapSandboxFulfillmentProjection(
-      this.requireBookingOrder(bookingId),
-      audience,
-    );
-  }
-
-  getPartnerSandboxFulfillment(partnerEntrySlug: string, bookingId: string) {
-    this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
-    const order = this.requireBookingOrder(bookingId);
-    if (order.partnerEntrySlug !== partnerEntrySlug) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "BOOKING_NOT_FOUND",
-        "Booking was not found.",
-        {
-          bookingId,
-        },
-      );
-    }
-    return this.mapSandboxFulfillmentProjection(order, "partner");
-  }
-
-  async acknowledgePassengerDisclosure(
-    tenantId: string,
-    bookingId: string,
-    command: RecordPassengerAcknowledgementCommand,
-    identity?: BootstrapRequestIdentity | null,
-    requestId?: string,
-    options?: {
-      order?: OwnedOrderRecord;
-      tx?: OwnedMobilityQueryExecutor | null;
-      refreshDisclosure?: boolean;
-    },
-  ) {
-    this.assertNonBlank(tenantId, "tenantId");
-    const order =
-      options?.order ?? this.requireBookingOrder(bookingId, tenantId);
-    const shouldRefreshDisclosure = options?.refreshDisclosure !== false;
-    if (shouldRefreshDisclosure) {
-      await this.refreshPassengerDisclosureSnapshot(order, true, {
-        channel: this.resolvePassengerDisclosureChannel(order, identity),
-      });
-    }
-
-    if (!order.passengerDisclosure) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PASSENGER_DISCLOSURE_POLICY_NOT_CONFIGURED",
-        "Passenger disclosure is not configured for this booking.",
-        { bookingId, orderId: order.orderId },
-      );
-    }
-
-    const record =
-      await this.sandboxDispatchGateService?.recordPassengerAcknowledgement({
-        bookingId,
-        orderId: order.orderId,
-        disclosure: order.passengerDisclosure,
-        command,
-        actor: this.resolvePassengerDisclosureAcknowledgementActor(identity),
-        ...(options?.tx ? { executor: options.tx } : {}),
-      });
-    if (!record) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_IMPLEMENTED,
-        "PASSENGER_DISCLOSURE_SERVICE_UNAVAILABLE",
-        "Passenger disclosure acknowledgement service is unavailable.",
-        { bookingId, orderId: order.orderId },
-      );
-    }
-
-    order.passengerDisclosure = {
-      ...order.passengerDisclosure,
-      acknowledgedAt: record.acknowledgedAt,
-      acknowledgementRecordId: record.acknowledgementId,
-    };
-    order.updatedAt = new Date().toISOString();
-    const traceLog = this.appendTrace(
-      order.orderId,
-      "booking.passenger_disclosure_acknowledged",
-      {
-        bookingId,
-        policyId: order.passengerDisclosure.policyId,
-        messageCode: order.passengerDisclosure.messageCode,
-        acknowledgementRecordId: record.acknowledgementId,
-        actorType:
-          record.actorType === "passenger"
-            ? "referral_passenger"
-            : record.actorType,
-        actorRef: record.actorRef,
-      },
-    );
-    if (options?.tx && this.ownedMobilityRepository?.isEnabled()) {
-      await this.ownedMobilityRepository.persistOrderWorkflow(options.tx, {
-        orders: [this.cloneOrder(order)],
-        dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
-      });
-    } else {
-      this.persistChanges(
-        {
-          orders: [order],
-          dispatchTraceLogs: [traceLog],
-        },
-        "acknowledge_passenger_disclosure",
-      );
-    }
-    const auditActorType: AuditLogRecord["actorType"] =
-      record.actorType === "passenger"
-        ? "referral_passenger"
-        : record.actorType;
-    this.recordAudit(
-      {
-        actorId: record.actorRef,
-        actorType: auditActorType,
-        tenantId: order.tenantId,
-        moduleName: "order",
-        actionName: "acknowledge_passenger_disclosure",
-        resourceType: "booking",
-        resourceId: bookingId,
-        newValuesSummary: {
-          orderId: order.orderId,
-          policyId: order.passengerDisclosure.policyId,
-          messageCode: order.passengerDisclosure.messageCode,
-          acknowledgementRecordId: record.acknowledgementId,
-        },
-      },
-      requestId,
-    );
-    return this.mapOrderToBooking(order);
-  }
-
-  async acknowledgePassengerDisclosureFromOps(
-    bookingId: string,
-    command: RecordPassengerAcknowledgementCommand,
-    identity?: BootstrapRequestIdentity | null,
-    requestId?: string,
-  ) {
-    const actor = this.requireOpsPassengerDisclosureActor(identity);
-    const order = this.requireBookingOrderById(bookingId);
-
-    return this.acknowledgePassengerDisclosure(
-      order.tenantId ?? "",
-      bookingId,
-      command,
-      actor.identity,
-      requestId,
-      {
-        order,
-      },
     );
   }
 
@@ -2216,11 +1960,6 @@ export class OwnedMobilityService implements OnModuleInit {
         cancelledAt: order.cancelledAt,
         cancelReason: order.cancelReason,
       });
-      this.publishPartnerSandboxFulfillmentWebhook(
-        order,
-        "partner.sandbox_fulfillment.updated",
-        now,
-      );
       this.publishLatestDispatchJobUpdate(orderId, requestId);
 
       return this.cloneOrder(order);
@@ -2682,37 +2421,22 @@ export class OwnedMobilityService implements OnModuleInit {
   assignDispatch(
     command: AssignDispatchCommand,
     requestId?: string,
-    options?: {
-      suppressPartnerSandboxWebhook?: boolean;
-    },
   ): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
-    return this.afterMaybePromise(
-      this.createDispatchAssignment(
-        dispatchJob,
-        order,
-        command.vehicleId,
-        command.driverId,
-        command.sandboxDispatchSnapshot ?? null,
-        requestId,
-      ),
-      (result) => {
-        if (!options?.suppressPartnerSandboxWebhook) {
-          this.publishPartnerSandboxFulfillmentTransition(order.orderId);
-        }
-        return result;
-      },
+    return this.createDispatchAssignment(
+      dispatchJob,
+      order,
+      command.vehicleId,
+      command.driverId,
+      requestId,
     );
   }
 
   reassignDispatch(
     command: ReassignDispatchCommand,
     requestId?: string,
-    options?: {
-      suppressPartnerSandboxWebhook?: boolean;
-    },
   ): any {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
@@ -2748,9 +2472,8 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    const reassignAttemptSequence = this.nextAttemptSequence(
-      dispatchJob.dispatchJobId,
-    );
+    const reassignAttemptSequence =
+      this.nextAttemptSequence(dispatchJob.dispatchJobId);
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -2778,7 +2501,6 @@ export class OwnedMobilityService implements OnModuleInit {
         order,
         command.vehicleId,
         command.driverId,
-        null,
         requestId,
         {
           dispatchAttemptSequence: reassignAttemptSequence + 1,
@@ -2836,197 +2558,9 @@ export class OwnedMobilityService implements OnModuleInit {
           );
         }
 
-        if (!options?.suppressPartnerSandboxWebhook) {
-          this.publishPartnerSandboxFulfillmentTransition(order.orderId);
-        }
-
         return result;
       },
     );
-  }
-
-  async fallbackTripToHuman(
-    orderId: string,
-    command: RocFallbackToHumanCommand,
-    context: HumanFallbackContext,
-    requestId?: string,
-  ): Promise<HumanFallbackResult> {
-    this.requireOrder(orderId);
-    const humanVehicleId = this.requireNonBlankText(
-      command.humanVehicleId,
-      "humanVehicleId",
-    );
-    const humanDriverId = this.requireNonBlankText(
-      command.humanDriverId,
-      "humanDriverId",
-    );
-    const reason = this.requireNonBlankText(command.reason, "reason");
-    const revisedEtaMinutes = this.requirePositiveInteger(
-      command.revisedEtaMinutes,
-      "revisedEtaMinutes",
-    );
-
-    if (
-      this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
-        humanVehicleId,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "FALLBACK_REQUIRES_HUMAN_VEHICLE",
-        "Fallback-to-human requires a non-AV vehicle assignment.",
-        {
-          orderId,
-          vehicleId: humanVehicleId,
-        },
-      );
-    }
-
-    const dispatchJob = this.resolveFallbackDispatchJob(
-      orderId,
-      command.dispatchJobId ?? null,
-      requestId,
-    );
-    const activeAssignment = this.findLatestActiveAssignment(orderId);
-    const activeTask = activeAssignment
-      ? this.findTaskByAssignmentId(activeAssignment.assignmentId)
-      : null;
-
-    if (
-      activeAssignment &&
-      activeAssignment.vehicleId === humanVehicleId &&
-      activeAssignment.driverId === humanDriverId &&
-      !this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
-        activeAssignment.vehicleId,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "HUMAN_FALLBACK_ALREADY_ACTIVE",
-        "Order is already assigned to the requested human fallback crew.",
-        {
-          orderId,
-          dispatchJobId: dispatchJob.dispatchJobId,
-          assignmentId: activeAssignment.assignmentId,
-        },
-      );
-    }
-
-    const assignmentResult = activeAssignment
-      ? await this.reassignDispatch(
-          {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            vehicleId: humanVehicleId,
-            driverId: humanDriverId,
-            reasonCode: "vehicle_swap",
-            reasonNote: `ROC fallback to human: ${reason}`,
-          },
-          requestId,
-          { suppressPartnerSandboxWebhook: true },
-        )
-      : await this.assignDispatch(
-          {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            vehicleId: humanVehicleId,
-            driverId: humanDriverId,
-          },
-          requestId,
-          { suppressPartnerSandboxWebhook: true },
-        );
-
-    const nextOrder = this.requireOrder(orderId);
-    const now = new Date().toISOString();
-    const complianceFlags = new Set(nextOrder.complianceFlags);
-    complianceFlags.add("sandbox_human_fallback");
-    complianceFlags.add("sandbox_exception_reported");
-    nextOrder.status = "assigned";
-    nextOrder.etaSnapshot = {
-      etaMinutes: revisedEtaMinutes,
-      calculatedAt: now,
-    };
-    nextOrder.lastDispatchFailureReason = "roc_fallback_to_human";
-    nextOrder.complianceFlags = [...complianceFlags];
-    nextOrder.updatedAt = now;
-
-    const avVehicleId =
-      activeAssignment?.vehicleId ??
-      command.avVehicleId?.trim() ??
-      context.sandboxDecision?.vehicleId ??
-      null;
-    const avDriverId =
-      activeAssignment?.driverId ?? command.avDriverId?.trim() ?? null;
-    const traceLog = this.appendTrace(orderId, "roc.fallback_to_human", {
-      dispatchJobId: dispatchJob.dispatchJobId,
-      trigger: context.trigger,
-      sandboxDecisionId: context.sandboxDecision?.decisionId ?? null,
-      sandboxProgramId: context.sandboxDecision?.sandboxProgramId ?? null,
-      fallbackRequired: context.sandboxDecision?.fallbackRequired ?? false,
-      hardReasonCodes: context.sandboxDecision?.hardReasonCodes ?? [],
-      softReasonCodes: context.sandboxDecision?.softReasonCodes ?? [],
-      reportId: context.reportId,
-      reportArtifactId: context.reportArtifactId,
-      previousAssignmentId: activeAssignment?.assignmentId ?? null,
-      previousTaskId: activeTask?.taskId ?? null,
-      avVehicleId,
-      avDriverId,
-      humanVehicleId,
-      humanDriverId,
-      fallbackAssignmentId: assignmentResult.assignmentId,
-      fallbackTaskId: assignmentResult.taskId,
-      revisedEtaMinutes,
-      reason,
-      rocOperatorId: context.rocOperatorId,
-    });
-
-    this.persistChanges(
-      {
-        orders: [nextOrder],
-        dispatchTraceLogs: [traceLog],
-      },
-      "roc_fallback_to_human",
-    );
-    this.recordAudit(
-      {
-        actorId: context.rocOperatorId,
-        actorType: context.rocOperatorId ? "ops_user" : "system",
-        tenantId: nextOrder.tenantId,
-        moduleName: "dispatch",
-        actionName: "roc_fallback_to_human",
-        resourceType: "order",
-        resourceId: orderId,
-        newValuesSummary: {
-          dispatchJobId: dispatchJob.dispatchJobId,
-          trigger: context.trigger,
-          sandboxDecisionId: context.sandboxDecision?.decisionId ?? null,
-          reportId: context.reportId,
-          reportArtifactId: context.reportArtifactId,
-          previousAssignmentId: activeAssignment?.assignmentId ?? null,
-          fallbackAssignmentId: assignmentResult.assignmentId,
-          avVehicleId,
-          avDriverId,
-          humanVehicleId,
-          humanDriverId,
-          revisedEtaMinutes,
-          reason,
-        },
-      },
-      requestId,
-    );
-    this.publishOrderUpdate(nextOrder, requestId);
-    this.publishPartnerSandboxFulfillmentTransition(orderId, now);
-    this.publishLatestDispatchJobUpdate(orderId, requestId);
-
-    return {
-      order: this.cloneOrder(nextOrder),
-      dispatchJobId: dispatchJob.dispatchJobId,
-      assignmentId: assignmentResult.assignmentId,
-      taskId: assignmentResult.taskId,
-      previousAssignmentId: activeAssignment?.assignmentId ?? null,
-      previousVehicleId: activeAssignment?.vehicleId ?? null,
-      previousDriverId: activeAssignment?.driverId ?? null,
-      avVehicleId,
-      avDriverId,
-    };
   }
 
   private createDispatchAssignment(
@@ -3034,7 +2568,6 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     vehicleId: string,
     driverId: string,
-    sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     requestId?: string,
     options?: CreateDispatchAssignmentOptions,
   ): MaybePromise<DispatchAssignmentResult> {
@@ -3046,7 +2579,6 @@ export class OwnedMobilityService implements OnModuleInit {
             order,
             vehicleId,
             driverId,
-            sandboxDispatchSnapshot,
             options,
           );
           this.assertAssignmentEligibilityRecheck(
@@ -3054,14 +2586,6 @@ export class OwnedMobilityService implements OnModuleInit {
             dispatchJob.dispatchJobId,
             vehicleId,
             driverId,
-          );
-          await this.assertSandboxDispatchGate(
-            bundle.order,
-            dispatchJob.dispatchJobId,
-            vehicleId,
-            driverId,
-            sandboxDispatchSnapshot,
-            requestId,
           );
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(bundle.order)],
@@ -3086,26 +2610,15 @@ export class OwnedMobilityService implements OnModuleInit {
       vehicleId,
       driverId,
     );
-    const sandboxGateResult = this.assertSandboxDispatchGate(
-      order,
-      dispatchJob.dispatchJobId,
-      vehicleId,
-      driverId,
-      sandboxDispatchSnapshot,
-      requestId,
-    );
-    return this.afterMaybePromise(sandboxGateResult, () =>
-      this.applyDispatchAssignmentBundle(
-        this.buildDispatchAssignmentBundle(
-          dispatchJob,
-          order,
-          vehicleId,
-          driverId,
-          sandboxDispatchSnapshot,
-          options,
-        ),
-        requestId,
+    return this.applyDispatchAssignmentBundle(
+      this.buildDispatchAssignmentBundle(
+        dispatchJob,
+        order,
+        vehicleId,
+        driverId,
+        options,
       ),
+      requestId,
     );
   }
 
@@ -3191,11 +2704,6 @@ export class OwnedMobilityService implements OnModuleInit {
       cancelledAt: order.cancelledAt,
       cancelReason: order.cancelReason,
     });
-    this.publishPartnerSandboxFulfillmentWebhook(
-      order,
-      "partner.sandbox_fulfillment.updated",
-      now,
-    );
     if (task) {
       this.ownedMobilityTaskEventsService.publishTaskCancelled(
         task,
@@ -3486,24 +2994,6 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  private publishPartnerSandboxFulfillmentTransition(
-    orderId: string,
-    occurredAt?: string,
-  ) {
-    const order = this.orders.find(
-      (candidateOrder) => candidateOrder.orderId === orderId,
-    );
-    if (!order) {
-      return;
-    }
-
-    this.publishPartnerSandboxFulfillmentWebhook(
-      order,
-      "partner.sandbox_fulfillment.updated",
-      occurredAt ?? order.updatedAt,
-    );
-  }
-
   private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
     const dispatchJob = this.dispatchJobs.find(
       (job) => job.orderId === orderId,
@@ -3576,7 +3066,6 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
-    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3650,7 +3139,6 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
-    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3698,7 +3186,6 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
-    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3745,7 +3232,6 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
-    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3799,7 +3285,6 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
-    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3968,11 +3453,6 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       assignmentId: assignment.assignmentId,
     });
-    this.publishPartnerSandboxFulfillmentWebhook(
-      order,
-      "partner.sandbox_fulfillment.completed",
-      now,
-    );
     this.publishCompletedTripSettlementEvent(order, task);
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
@@ -4022,8 +3502,7 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: null,
-      sourcePlatform:
-        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -4057,42 +3536,6 @@ export class OwnedMobilityService implements OnModuleInit {
           createdAt: order.createdAt,
           updatedAt: order.updatedAt,
           ...extraData,
-        },
-      })
-      .catch(() => undefined);
-  }
-
-  private publishPartnerSandboxFulfillmentWebhook(
-    order: OwnedOrderRecord,
-    eventType:
-      | "partner.sandbox_fulfillment.updated"
-      | "partner.sandbox_fulfillment.completed",
-    occurredAt: string,
-  ) {
-    if (
-      !order.tenantId ||
-      !order.partnerEntrySlug ||
-      !this.tenantPartnerService
-    ) {
-      return;
-    }
-
-    const projection = this.mapSandboxFulfillmentProjection(order, "partner");
-    void this.tenantPartnerService
-      .publishWebhookEvent(order.tenantId, {
-        eventType,
-        occurredAt,
-        data: {
-          bookingId: projection.bookingId,
-          orderId: projection.orderId,
-          partnerEntrySlug: order.partnerEntrySlug,
-          fulfillmentMode: projection.fulfillmentMode,
-          state: projection.state,
-          statusCode: projection.statusCode,
-          messages: projection.messages.map((message) => ({ ...message })),
-          etaMinutes: projection.etaMinutes,
-          extraChargeDisclosed: projection.extraChargeDisclosed,
-          providerBrandDisclosed: projection.providerBrandDisclosed,
         },
       })
       .catch(() => undefined);
@@ -4170,22 +3613,6 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     return normalized;
-  }
-
-  private requirePositiveInteger(value: number, field: string) {
-    if (!Number.isInteger(value) || value <= 0) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_ERROR",
-        `${field} must be a positive integer.`,
-        {
-          field,
-          value,
-        },
-      );
-    }
-
-    return value;
   }
 
   private assertTenantChannelCannotSetQuotedFare(
@@ -4909,10 +4336,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAssignmentEligibilityRecheck(
-    order: Pick<
-      OwnedOrderRecord,
-      "orderId" | "serviceBucket" | "businessDispatchSubtype"
-    >,
+    order: Pick<OwnedOrderRecord, "orderId" | "serviceBucket" | "businessDispatchSubtype">,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
@@ -5007,248 +4431,6 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
-  private assertSandboxDispatchGate(
-    order: OwnedOrderRecord,
-    dispatchJobId: string,
-    vehicleId: string,
-    driverId: string,
-    sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
-    requestId?: string,
-  ) {
-    if (
-      !this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
-        vehicleId,
-      )
-    ) {
-      return;
-    }
-
-    return this.afterMaybePromise(
-      this.refreshPassengerDisclosureSnapshot(order),
-      (hydratedOrder) =>
-        this.afterMaybePromise(
-          this.sandboxDispatchGateService!.buildAssignmentGateInput({
-            orderId: hydratedOrder.orderId,
-            dispatchJobId,
-            vehicleId,
-            driverId,
-            bookingWindow: {
-              start: hydratedOrder.reservationWindowStart,
-              end: hydratedOrder.reservationWindowEnd,
-            },
-            pickup: hydratedOrder.pickup,
-            dropoff: hydratedOrder.dropoff,
-            entitlement: sandboxDispatchSnapshot?.entitlement ?? null,
-            candidateRoute: sandboxDispatchSnapshot?.candidateRoute ?? null,
-            providerCapabilities:
-              sandboxDispatchSnapshot?.providerCapabilities ?? null,
-            telemetry: sandboxDispatchSnapshot?.telemetry ?? null,
-            regulatory: sandboxDispatchSnapshot?.regulatory ?? null,
-            recorder: sandboxDispatchSnapshot?.recorder ?? null,
-            holdState: sandboxDispatchSnapshot?.holdState ?? null,
-            limits: sandboxDispatchSnapshot?.limits ?? null,
-            passengerDisclosure: hydratedOrder.passengerDisclosure
-              ? {
-                  channel: hydratedOrder.passengerDisclosure.channel,
-                  policyId: hydratedOrder.passengerDisclosure.policyId,
-                  policyVersion:
-                    hydratedOrder.passengerDisclosure.policyVersion,
-                  messageCode: hydratedOrder.passengerDisclosure.messageCode,
-                  requiresAcknowledgement:
-                    hydratedOrder.passengerDisclosure.requiresAcknowledgement,
-                  acknowledgementMode:
-                    hydratedOrder.passengerDisclosure.acknowledgementMode,
-                  acknowledgedAt:
-                    hydratedOrder.passengerDisclosure.acknowledgedAt,
-                  acknowledgementRecordId:
-                    hydratedOrder.passengerDisclosure.acknowledgementRecordId,
-                }
-              : null,
-          }),
-          (gateInput) =>
-            this.sandboxDispatchGateService!.assertAssignmentEligible(
-              gateInput,
-              requestId,
-            ),
-        ),
-    );
-  }
-
-  private refreshPassengerDisclosureSnapshot(
-    order: OwnedOrderRecord,
-    persistChanges = true,
-    options?: {
-      channel?: PassengerDisclosureChannel;
-    },
-  ): MaybePromise<OwnedOrderRecord> {
-    if (
-      !this.sandboxDispatchGateService ||
-      !order.bookingId ||
-      !order.businessDispatchSubtype
-    ) {
-      return order;
-    }
-
-    return this.afterMaybePromise(
-      this.sandboxDispatchGateService.resolvePassengerDisclosureForBooking({
-        tenantId: order.tenantId,
-        businessDispatchSubtype: order.businessDispatchSubtype,
-        partnerEntrySlug: order.partnerEntrySlug,
-        channel: this.resolvePassengerDisclosureChannel(
-          order,
-          undefined,
-          options?.channel,
-        ),
-      }),
-      (resolvedDisclosure) => {
-        const previous = order.passengerDisclosure;
-        const canReuseAcknowledgement =
-          resolvedDisclosure !== null &&
-          this.canReusePassengerDisclosureAcknowledgement(
-            previous,
-            resolvedDisclosure,
-          );
-        const nextDisclosure =
-          resolvedDisclosure === null
-            ? null
-            : {
-                ...resolvedDisclosure,
-                acknowledgedAt:
-                  canReuseAcknowledgement && previous
-                    ? previous.acknowledgedAt
-                    : null,
-                acknowledgementRecordId: canReuseAcknowledgement
-                  ? previous?.acknowledgementRecordId ?? null
-                  : null,
-              };
-
-        if (this.samePassengerDisclosure(previous, nextDisclosure)) {
-          return order;
-        }
-
-        order.passengerDisclosure = nextDisclosure;
-        order.updatedAt = new Date().toISOString();
-        if (persistChanges) {
-          this.persistChanges(
-            {
-              orders: [order],
-            },
-            "refresh_passenger_disclosure",
-          );
-        }
-        return order;
-      },
-    );
-  }
-
-  private samePassengerDisclosure(
-    left: PassengerDisclosureRequirementSnapshot | null,
-    right: PassengerDisclosureRequirementSnapshot | null,
-  ) {
-    if (left === right) {
-      return true;
-    }
-    if (!left || !right) {
-      return false;
-    }
-    return (
-      left.channel === right.channel &&
-      left.policyId === right.policyId &&
-      left.policyVersion === right.policyVersion &&
-      left.messageCode === right.messageCode &&
-      left.requiresAcknowledgement === right.requiresAcknowledgement &&
-      left.acknowledgementMode === right.acknowledgementMode &&
-      left.acknowledgedAt === right.acknowledgedAt &&
-      left.acknowledgementRecordId === right.acknowledgementRecordId
-    );
-  }
-
-  private canReusePassengerDisclosureAcknowledgement(
-    previous: PassengerDisclosureRequirementSnapshot | null | undefined,
-    next: PassengerDisclosureRequirementSnapshot,
-  ) {
-    if (!previous) {
-      return false;
-    }
-    return (
-      previous.channel === next.channel &&
-      previous.policyId === next.policyId &&
-      previous.policyVersion === next.policyVersion &&
-      previous.messageCode === next.messageCode &&
-      previous.requiresAcknowledgement === next.requiresAcknowledgement &&
-      previous.acknowledgementMode === next.acknowledgementMode
-    );
-  }
-
-  private resolvePassengerDisclosureChannel(
-    order: Pick<
-      OwnedOrderRecord,
-      "partnerEntrySlug" | "orderSource" | "passengerDisclosure"
-    >,
-    identity?: BootstrapRequestIdentity | null,
-    explicitChannel?: PassengerDisclosureChannel,
-  ): PassengerDisclosureChannel {
-    if (explicitChannel) {
-      return explicitChannel;
-    }
-    if (
-      identity?.actorType === "ops_user" ||
-      identity?.actorType === "platform_admin"
-    ) {
-      return "ops_console";
-    }
-    if (order.orderSource === "phone") {
-      return "call_center";
-    }
-    if (order.partnerEntrySlug) {
-      return "partner_portal";
-    }
-    if (order.passengerDisclosure?.channel === "ops_console") {
-      return "ops_console";
-    }
-    return "tenant_portal";
-  }
-
-  private resolvePassengerDisclosureAcknowledgementActor(
-    identity?: BootstrapRequestIdentity | null,
-  ) {
-    if (identity?.actorType === "tenant_admin" && identity.actorId) {
-      return {
-        actorType: "tenant_admin" as const,
-        actorRef: identity.actorId,
-      };
-    }
-    if (identity?.actorType === "ops_user" && identity.actorId) {
-      return {
-        actorType: "ops_user" as const,
-        actorRef: identity.actorId,
-      };
-    }
-
-    return {
-      actorType: "passenger" as const,
-      actorRef: null,
-    };
-  }
-
-  private requireOpsPassengerDisclosureActor(
-    identity?: BootstrapRequestIdentity | null,
-  ) {
-    if (identity?.actorType === "ops_user" && identity.actorId) {
-      return {
-        actorId: identity.actorId,
-        actorType: identity.actorType,
-        identity,
-      } as const;
-    }
-
-    throw new ApiRequestError(
-      HttpStatus.FORBIDDEN,
-      "PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_FORBIDDEN",
-      "Passenger disclosure acknowledgement from ops requires an ops_user identity.",
-    );
-  }
-
   private resolveServiceProductCodeForOrder(
     order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
   ): ServiceProductType | null {
@@ -5260,7 +4442,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
-      : (order.businessDispatchSubtype ?? null);
+      : order.businessDispatchSubtype ?? null;
   }
 
   private buildDispatchAssignmentBundle(
@@ -5268,7 +4450,6 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     vehicleId: string,
     driverId: string,
-    _sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     options?: CreateDispatchAssignmentOptions,
   ): DispatchAssignmentBundle {
     const now = new Date().toISOString();
@@ -5331,10 +4512,7 @@ export class OwnedMobilityService implements OnModuleInit {
     nextOrder.updatedAt = now;
 
     const traceLogs: DispatchTraceLogRecord[] = [];
-    if (
-      nextOrder.dispatchSemantics === "reservation" &&
-      nextOrder.reservationHoldStatus !== "released"
-    ) {
+    if (nextOrder.dispatchSemantics === "reservation") {
       this.transitionReservationHold(nextOrder, "released");
       nextOrder.reservationHoldExpiresAt = now;
       traceLogs.push(
@@ -5942,233 +5120,10 @@ export class OwnedMobilityService implements OnModuleInit {
         : null,
       approvalState: order.approvalState,
       approvalRequestIds: [...order.approvalRequestIds],
-      passengerDisclosure: order.passengerDisclosure
-        ? { ...order.passengerDisclosure }
-        : null,
       complianceGates,
       orderStatus: order.status,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
-    };
-  }
-
-  private mapSandboxFulfillmentProjection(
-    order: OwnedOrderRecord,
-    audience: SandboxFulfillmentVisibilityAudience,
-  ): SandboxFulfillmentProjectionView {
-    const record = this.buildSandboxFulfillmentVisibilityRecord(
-      order,
-      audience,
-    );
-    return {
-      bookingId: record.bookingId,
-      orderId: record.orderId,
-      sandboxTripId: record.sandboxTripId,
-      audience: record.audience,
-      fulfillmentMode: record.fulfillmentMode,
-      state: record.state,
-      statusCode: record.statusCode,
-      messages: record.messages.map((message) => ({ ...message })),
-      etaMinutes: record.etaMinutes,
-      extraChargeDisclosed: record.extraChargeDisclosed,
-      providerBrandDisclosed: record.providerBrandDisclosed,
-      updatedAt: record.updatedAt,
-    };
-  }
-
-  private buildSandboxFulfillmentVisibilityRecord(
-    order: OwnedOrderRecord,
-    audience: SandboxFulfillmentVisibilityAudience,
-  ): SandboxFulfillmentVisibilityRecord {
-    if (!order.bookingId) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "BOOKING_NOT_FOUND",
-        "Booking was not found.",
-        {
-          orderId: order.orderId,
-        },
-      );
-    }
-
-    const latestAssignment = this.dispatchAssignments
-      .filter((assignment) => assignment.orderId === order.orderId)
-      .sort((left, right) =>
-        (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""),
-      )[0];
-    const activeAssignment =
-      latestAssignment &&
-      ["assigned", "accepted"].includes(latestAssignment.status)
-        ? latestAssignment
-        : null;
-    const latestTrace = this.dispatchTraceLogs
-      .filter((trace) => trace.orderId === order.orderId)
-      .sort((left, right) =>
-        (right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
-      )[0];
-    const fallbackTrace = this.dispatchTraceLogs
-      .filter(
-        (trace) =>
-          trace.orderId === order.orderId &&
-          trace.eventType === "roc.fallback_to_human",
-      )
-      .sort((left, right) =>
-        (right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
-      )[0];
-    const hasFallback =
-      order.complianceFlags.includes("sandbox_human_fallback") ||
-      fallbackTrace !== undefined;
-    const latestVisibleAssignment =
-      latestAssignment &&
-      !["rejected", "expired"].includes(latestAssignment.status)
-        ? latestAssignment
-        : null;
-    const hasAvAssignment =
-      latestVisibleAssignment?.vehicleId?.startsWith("veh-av") === true ||
-      Boolean(
-        fallbackTrace &&
-        typeof fallbackTrace.details?.avVehicleId === "string" &&
-        fallbackTrace.details.avVehicleId.startsWith("veh-av"),
-      );
-    const providerBrandDisclosed =
-      audience === "partner" &&
-      Boolean(order.partnerEntrySlug) &&
-      (hasAvAssignment || hasFallback);
-
-    const fulfillmentMode =
-      audience === "passenger" && !hasFallback && !hasAvAssignment
-        ? "hidden"
-        : hasFallback && hasAvAssignment
-          ? "mixed"
-          : hasFallback
-            ? "human_fallback"
-            : hasAvAssignment
-              ? "tesla_av"
-              : "hidden";
-
-    const state =
-      order.status === "cancelled"
-        ? "cancelled"
-        : order.status === "completed"
-          ? "completed"
-          : order.status === "on_trip"
-            ? "in_trip"
-            : order.status === "arrived_pickup"
-              ? "arrived_pickup"
-              : order.status === "enroute_pickup"
-                ? "en_route_pickup"
-                : ["assigned", "driver_accepted"].includes(order.status)
-                  ? "assigned"
-                  : activeAssignment
-                    ? "assigned"
-                    : "pending_dispatch";
-
-    const reasonCodes: SandboxFulfillmentVisibilityReason[] = [];
-    if (fulfillmentMode === "tesla_av") {
-      reasonCodes.push("av_assignment_active");
-    } else if (fulfillmentMode === "human_fallback") {
-      reasonCodes.push("human_fallback_active");
-    } else if (fulfillmentMode === "mixed") {
-      reasonCodes.push("mixed_fulfillment_active");
-    } else {
-      reasonCodes.push("policy_hidden");
-    }
-    if (state === "pending_dispatch") {
-      reasonCodes.push("dispatch_pending");
-    } else if (state === "completed") {
-      reasonCodes.push("trip_completed");
-    } else if (state === "cancelled") {
-      reasonCodes.push("trip_cancelled");
-    }
-    if (fallbackTrace) {
-      reasonCodes.push("internal_takeover_redacted");
-    }
-    reasonCodes.push(
-      providerBrandDisclosed
-        ? "provider_brand_allowed"
-        : "provider_brand_withheld",
-    );
-
-    const messages =
-      state === "completed"
-        ? [
-            {
-              messageCode: "sandbox_fulfillment.trip_completed",
-              category: "info" as const,
-            },
-          ]
-        : state === "cancelled"
-          ? [
-              {
-                messageCode: "sandbox_fulfillment.trip_cancelled",
-                category: "warning" as const,
-              },
-            ]
-          : fulfillmentMode === "human_fallback"
-            ? [
-                {
-                  messageCode:
-                    audience === "passenger"
-                      ? "sandbox_fulfillment.service_continues_with_human_driver"
-                      : "sandbox_fulfillment.human_fallback_active",
-                  category: "warning" as const,
-                },
-              ]
-            : fulfillmentMode === "mixed"
-              ? [
-                  {
-                    messageCode: "sandbox_fulfillment.mixed_fulfillment_active",
-                    category: "warning" as const,
-                  },
-                ]
-              : fulfillmentMode === "tesla_av"
-                ? [
-                    {
-                      messageCode:
-                        audience === "passenger"
-                          ? (order.passengerDisclosure?.messageCode ??
-                            "sandbox_fulfillment.status_update_available")
-                          : "sandbox_fulfillment.tesla_av_active",
-                      category: "info" as const,
-                    },
-                  ]
-                : [
-                    {
-                      messageCode:
-                        "sandbox_fulfillment.status_update_available",
-                      category: "info" as const,
-                    },
-                  ];
-
-    return {
-      visibilityId: `sfv-${order.bookingId}-${audience}`,
-      bookingId: order.bookingId,
-      orderId: order.orderId,
-      sandboxTripId: activeAssignment?.assignmentId ?? null,
-      audience,
-      fulfillmentMode,
-      state,
-      statusCode: order.status,
-      messages,
-      disclosures: [
-        "vehicle_mode_summary",
-        ...(hasFallback ? (["fallback_to_human"] as const) : []),
-        ...(providerBrandDisclosed
-          ? (["provider_brand_disclosed"] as const)
-          : []),
-      ],
-      reasonCodes,
-      etaMinutes: order.etaSnapshot?.etaMinutes ?? null,
-      extraChargeDisclosed: false,
-      safetyDisclosurePolicyId:
-        audience === "passenger"
-          ? (order.passengerDisclosure?.policyId ?? null)
-          : providerBrandDisclosed
-            ? "partner_policy_disclosed"
-            : null,
-      providerBrandDisclosed,
-      createdAt: order.createdAt,
-      updatedAt: latestTrace?.createdAt ?? order.updatedAt,
     };
   }
 
@@ -6207,10 +5162,6 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
     return order;
-  }
-
-  private requireBookingOrderById(bookingId: string) {
-    return this.requireBookingOrder(bookingId);
   }
 
   private requireDispatchJob(dispatchJobId: string) {
@@ -6270,41 +5221,6 @@ export class OwnedMobilityService implements OnModuleInit {
       (dispatchJob) =>
         dispatchJob.orderId === orderId && dispatchJob.status !== "closed",
     );
-  }
-
-  private resolveFallbackDispatchJob(
-    orderId: string,
-    dispatchJobId: string | null,
-    requestId?: string,
-  ) {
-    const normalizedDispatchJobId = dispatchJobId?.trim() ?? null;
-    if (normalizedDispatchJobId) {
-      const dispatchJob = this.requireDispatchJob(normalizedDispatchJobId);
-      if (dispatchJob.orderId !== orderId) {
-        throw new ApiRequestError(
-          HttpStatus.CONFLICT,
-          "DISPATCH_JOB_ORDER_MISMATCH",
-          "Dispatch job does not belong to the requested trip.",
-          {
-            orderId,
-            dispatchJobId: normalizedDispatchJobId,
-          },
-        );
-      }
-      return dispatchJob;
-    }
-
-    const existingDispatchJob = this.findLatestOpenDispatchJob(orderId);
-    if (existingDispatchJob) {
-      return existingDispatchJob;
-    }
-
-    const createdDispatch = this.dispatchOrder(
-      orderId,
-      { mode: "auto" },
-      requestId,
-    );
-    return this.requireDispatchJob(createdDispatch.dispatchJobId);
   }
 
   private findLatestActiveAssignment(orderId: string) {
@@ -7051,9 +5967,6 @@ export class OwnedMobilityService implements OnModuleInit {
       proofRequirements: { ...order.proofRequirements },
       approvalState: order.approvalState,
       approvalRequestIds: [...order.approvalRequestIds],
-      passengerDisclosure: order.passengerDisclosure
-        ? { ...order.passengerDisclosure }
-        : null,
       complianceGates,
       complianceFlags: [...order.complianceFlags],
       queueFamily: queueState.queueFamily,

@@ -301,8 +301,7 @@ export function resolveRouteAuthPolicy(
     routePath === "admin/vehicle-eligibility-matrix" ||
     routePath === "admin/service-products" ||
     routePath.startsWith("admin/service-products/") ||
-    routePath.startsWith("admin/sandbox-governance") ||
-    routePath.startsWith("sandbox/dispatch")
+    routePath.startsWith("admin/sandbox-governance")
   ) {
     // Admin eligibility / service-product configuration (read + write). These
     // were missing from the route-auth table and were served ANONYMOUSLY,

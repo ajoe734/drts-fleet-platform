@@ -5,8 +5,6 @@ const FLP_NAV = [
   { divider: '工作面 · Workspace' },
   { key: 'dashboard',  icon: 'dashboard',   label: '營運總覽 · Dashboard' },
   { divider: '供給管理 · Supply' },
-  { key: 'supply',     icon: 'dashboard',   label: '送件總覽 · Supply', badge: '5', badgeTone: 'accent' },
-  { key: 'submissions',icon: 'audit',       label: '送件紀錄 · Submissions' },
   { key: 'drivers',    icon: 'users',       label: '司機 · Drivers', badge: '128', badgeTone: 'accent' },
   { key: 'vehicles',   icon: 'vehicles',    label: '車輛 · Vehicles' },
   { key: 'trips',      icon: 'dispatch',    label: '趟次 · Trips' },

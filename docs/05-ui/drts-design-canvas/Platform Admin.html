@@ -43,9 +43,6 @@
 <script type="text/babel" src="platform-screens-2.jsx"></script>
 <script type="text/babel" src="platform-screens-3.jsx"></script>
 <script type="text/babel" src="platform-referral.jsx"></script>
-<script type="text/babel" src="platform-supply-review.jsx"></script>
-<script type="text/babel" src="platform-sandbox.jsx"></script>
-<script type="text/babel" src="platform-regulator.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -92,29 +89,8 @@ function App() {
           <DCArtboard id="ref-creds-secret" label="✨ C3 · 簽發憑證 · plaintext-once" width={W} height={H}><Bare><PA_RefCredentials theme={th} showSecretModal /></Bare></DCArtboard>
         </DCSection>
 
-        <DCSection id="supply-review" title="03c · 供給審核 Supply Review · Packet 2" subtitle="車行送件 → 審核 → 核可 provision canonical registry · optimistic concurrency · 非自審把關">
-          <DCArtboard id="sr-queue" label="§5.1 · 審核佇列 /supply-review" width={W} height={H}><Hero url="/supply-review"><PA_SupplyReviewQueue theme={th} /></Hero></DCArtboard>
-          <DCArtboard id="sr-detail" label="§5.2 · 審核詳情 · side-by-side diff (VQ-1/2/3)" width={W} height={H}><Bare><PA_SupplyReviewDetail theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="sr-approve" label="§5.2 · 核可確認 · canonical preview (VQ-4)" width={W} height={H}><Bare><PA_SupplyReviewDetail theme={th} mode="approve_confirm" /></Bare></DCArtboard>
-          <DCArtboard id="sr-conflict" label="§6 · revision conflict · 409" width={W} height={H}><Bare><PA_SupplyReviewDetail theme={th} mode="conflict" /></Bare></DCArtboard>
-        </DCSection>
-
-        <DCSection id="sandbox" title="03d · FSD 沙盒治理 Sandbox Governance · Phase 2 A3" subtitle="Experiments / 區域·路線地圖編輯 / 車輛登錄 / 安全員資格 / Tesla 整合 / 政策 / 暫停恢復">
-          <DCArtboard id="experiments" label="實驗清單 · Experiments" width={W} height={H}><Hero url="/sandbox/experiments"><PA_Experiments theme={th} /></Hero></DCArtboard>
-          <DCArtboard id="exp-areas" label="實驗詳情 · 營運區域/路線 地圖編輯 (PostGIS)" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="areas" /></Bare></DCArtboard>
-          <DCArtboard id="exp-vehicles" label="實驗詳情 · 車輛登錄 Enrollments" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="vehicles" /></Bare></DCArtboard>
-          <DCArtboard id="exp-operators" label="實驗詳情 · 安全員資格" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="operators" /></Bare></DCArtboard>
-          <DCArtboard id="exp-tesla" label="實驗詳情 · Tesla 整合 + capability flags" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="tesla" /></Bare></DCArtboard>
-          <DCArtboard id="exp-capabilities" label="實驗詳情 · 監理能力 (policy 佔位)" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="capabilities" /></Bare></DCArtboard>
-          <DCArtboard id="exp-policies" label="實驗詳情 · 證據/保存/通報政策" width={W} height={H}><Bare><PA_ExperimentDetail theme={th} tab="policies" /></Bare></DCArtboard>
-          <DCArtboard id="sandbox-suspend" label="暫停 / 恢復 · Suspension/Resume" width={W} height={H}><Bare><PA_SandboxSuspend theme={th} /></Bare></DCArtboard>
-        </DCSection>
-
-        <DCSection id="regulator" title="03e · 主管機關檢視 Regulator Viewer · Phase 2 V2" subtitle="S2 裁定：沿用 governance shell（非獨立 portal）· 受控唯讀 + 遮罩 · 8 元件版位">
-          <DCArtboard id="regulator-viewer" label="Regulator Viewer · selector/manifest/bundle/notify/export/legal-hold/access-log/receipt" width={W} height={H}><Hero url="/regulator-viewer"><PRG_RegulatorViewer theme={th} /></Hero></DCArtboard>
-        </DCSection>
-
-        <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
+        <DCSection id="fleet" title="04 · 車隊與法遵 · 多 tab (Q-ADM08/09)">
+          <DCArtboard id="fleet-vehicles" label="Vehicles" width={W} height={H}><Hero url="/fleet?tab=vehicles"><PA_Fleet theme={th} tab="vehicles" /></Hero></DCArtboard>
           <DCArtboard id="fleet-drivers" label="Drivers · license warn" width={W} height={H}><Bare><PA_Fleet theme={th} tab="drivers" /></Bare></DCArtboard>
           <DCArtboard id="fleet-contracts" label="Contracts" width={W} height={H}><Bare><PA_Fleet theme={th} tab="contracts" /></Bare></DCArtboard>
           <DCArtboard id="fleet-device" label="Device Binding" width={W} height={H}><Bare><PA_Fleet theme={th} tab="device" /></Bare></DCArtboard>

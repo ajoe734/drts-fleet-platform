@@ -36,7 +36,6 @@
 <script type="text/babel" src="ent-screens-1.jsx"></script>
 <script type="text/babel" src="ent-screens-2.jsx"></script>
 <script type="text/babel" src="ent-states.jsx"></script>
-<script type="text/babel" src="ent-embed-flow.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -83,16 +82,7 @@ function App() {
           <DCArtboard id="degraded" label="服務降級 · /degraded" width={W} height={H}><Web route="/degraded"><ENT_Gate t={t} kind="degraded" /></Web></DCArtboard>
         </DCSection>
 
-        <DCSection id="embed-flow" title="S2 · App 內嵌 · 預約流程（compact）" subtitle="企業 App webview 內的實際叫車流程 · 與網站版同一套 page composition，僅外殼密度不同 (VQ-1)">
-          <DCArtboard id="em-home" label="內嵌首頁 · workspace" width={PW} height={PH}><Phone><ENT_EmbedHome t={t} /></Phone></DCArtboard>
-          <DCArtboard id="em-book" label="內嵌叫車 · /bookings/new" width={PW} height={PH}><Phone><ENT_EmbedBook t={t} /></Phone></DCArtboard>
-          <DCArtboard id="em-review" label="內嵌確認權責 · /review" width={PW} height={PH}><Phone><ENT_EmbedReview t={t} /></Phone></DCArtboard>
-          <DCArtboard id="em-submitted" label="內嵌已受理 · accepted+pending" width={PW} height={PH}><Phone><ENT_EmbedSubmitted t={t} /></Phone></DCArtboard>
-          <DCArtboard id="em-trip" label="內嵌目前行程 · /trip" width={PW} height={PH}><Phone><ENT_EmbedTrip t={t} /></Phone></DCArtboard>
-          <DCArtboard id="em-detail" label="內嵌預約詳情 · /bookings/[id]" width={PW} height={PH}><Phone><ENT_EmbedDetail t={t} /></Phone></DCArtboard>
-        </DCSection>
-
-        <DCSection id="embed" title="S2 · App 內嵌 · 身分交付狀態" subtitle="企業 App webview · host signed session · compact chrome · 進入預約前的 5 態身分狀態機">
+        <DCSection id="embed" title="S2 · App 內嵌 · 身分交付狀態" subtitle="企業 App webview · host signed session · compact chrome · 同一套預約流程，僅外殼密度不同 (VQ-1)">
           <DCArtboard id="e-handoff" label="handoff_ok · 已登入帶入" width={PW} height={PH}><Phone><ENT_EmbedHandoff t={t} /></Phone></DCArtboard>
           <DCArtboard id="e-reauth" label="reauth_required · 逾時重驗" width={PW} height={PH}><Phone><ENT_EmbedReauth t={t} /></Phone></DCArtboard>
           <DCArtboard id="e-unsupported" label="unsupported_host · 封鎖" width={PW} height={PH}><Phone><ENT_EmbedUnsupported t={t} /></Phone></DCArtboard>

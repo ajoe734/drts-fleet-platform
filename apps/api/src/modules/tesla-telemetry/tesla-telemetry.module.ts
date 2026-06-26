@@ -1,10 +1,9 @@
 import { Module } from "@nestjs/common";
 
-import { TeslaTelemetryRepository } from "./tesla-telemetry.repository";
 import { TeslaTelemetryService } from "./tesla-telemetry.service";
 
 @Module({
-  providers: [TeslaTelemetryRepository, TeslaTelemetryService],
+  providers: [TeslaTelemetryService],
   exports: [TeslaTelemetryService],
 })
 export class TeslaTelemetryModule {}

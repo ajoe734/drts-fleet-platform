@@ -34,7 +34,6 @@
 <script type="text/babel" src="ios-frame.jsx"></script>
 <script type="text/babel" src="pb-screens.jsx"></script>
 <script type="text/babel" src="pb-states.jsx"></script>
-<script type="text/babel" src="pb-receipts.jsx"></script>
 <script type="text/babel" src="pb-embed.jsx"></script>
 
 <script type="text/babel">
@@ -63,7 +62,6 @@ function App() {
         <DCArtboard id="ins-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Review program="insurance" /></Phone></DCArtboard>
         <DCArtboard id="ins-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Success program="insurance" /></Phone></DCArtboard>
         <DCArtboard id="ins-track" label="行程追蹤 Tracking" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Tracking program="insurance" /></Phone></DCArtboard>
-        <DCArtboard id="ins-receipt" label="行程明細 / 收據 · 理賠核銷 (§5.2)" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_InsReceipt /></Phone></DCArtboard>
       </DCSection>
 
       <DCSection id="insurance-states" title="02b · 保險 · 資格 / 阻擋狀態 · Eligibility States" subtitle="contract enum 各對應一個畫面狀態 · 由理賠系統判定">
@@ -81,7 +79,6 @@ function App() {
         <DCArtboard id="trv-book" label="預約表單 · travel fields" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookTravel /></Phone></DCArtboard>
         <DCArtboard id="trv-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Review program="travel" /></Phone></DCArtboard>
         <DCArtboard id="trv-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Success program="travel" /></Phone></DCArtboard>
-        <DCArtboard id="trv-receipt" label="行程明細 / 收據 · 已含團費 (§5.4)" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_TrvReceipt /></Phone></DCArtboard>
       </DCSection>
 
       <DCSection id="embed" title="04 · 網銀 App 內嵌身分狀態 · Online-banking Embed Identity (B1–B5)" subtitle="身分來自銀行 session (reference token) · 永不擷取卡片資料 · 中信 App webview">

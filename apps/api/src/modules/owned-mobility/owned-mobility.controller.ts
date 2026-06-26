@@ -33,11 +33,8 @@ import type {
   ReassignDispatchCommand,
   RedispatchOrderCommand,
   RejectExceptionOverrideCommand,
-  RecordPassengerAcknowledgementCommand,
   RequestExceptionOverrideCommand,
-  SandboxFulfillmentVisibilityAudience,
   ResolveExceptionHoldCommand,
-  SandboxFulfillmentProjectionView,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -100,19 +97,6 @@ export class OwnedMobilityController {
     }
 
     return normalizedTenantId;
-  }
-
-  private requirePartnerEntrySlug(identity: BootstrapRequestIdentity | null) {
-    const normalizedPartnerEntrySlug = identity?.partnerEntrySlug?.trim();
-    if (!normalizedPartnerEntrySlug) {
-      throw new ApiRequestError(
-        403,
-        "PARTNER_IDENTITY_REQUIRED",
-        "partner bootstrap identity is required for partner booking endpoints.",
-      );
-    }
-
-    return normalizedPartnerEntrySlug;
   }
 
   @Post("orders")
@@ -243,90 +227,6 @@ export class OwnedMobilityController {
       ),
       requestId,
     );
-  }
-
-  @Get("tenant/bookings/:bookingId/sandbox-fulfillment")
-  @Throttle(READ_HEAVY_RATE_LIMIT)
-  getTenantSandboxFulfillment(
-    @Param("bookingId") bookingId: string,
-    @Headers("x-tenant-id") tenantId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      this.ownedMobilityService.getTenantSandboxFulfillment(
-        this.requireTenantId(tenantId),
-        bookingId,
-      ),
-      requestId,
-    );
-  }
-
-  @Post("tenant/bookings/:bookingId/passenger-disclosure-acknowledgement")
-  async acknowledgePassengerDisclosure(
-    @Param("bookingId") bookingId: string,
-    @Body() command: RecordPassengerAcknowledgementCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-tenant-id") tenantId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.ownedMobilityService.acknowledgePassengerDisclosure(
-        this.requireTenantId(tenantId),
-        bookingId,
-        command,
-        identity,
-        requestId,
-      ),
-      requestId,
-    );
-  }
-
-  @Post("ops/bookings/:bookingId/passenger-disclosure-acknowledgement")
-  async acknowledgePassengerDisclosureFromOps(
-    @Param("bookingId") bookingId: string,
-    @Body() command: RecordPassengerAcknowledgementCommand,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.ownedMobilityService.acknowledgePassengerDisclosureFromOps(
-        bookingId,
-        command,
-        identity,
-        requestId,
-      ),
-      requestId,
-    );
-  }
-
-  @Get("ops/bookings/:bookingId/sandbox-fulfillment")
-  @Throttle(READ_HEAVY_RATE_LIMIT)
-  getOpsSandboxFulfillment(
-    @Param("bookingId") bookingId: string,
-    @Query("audience") audience?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const projection: SandboxFulfillmentProjectionView =
-      this.ownedMobilityService.getOpsSandboxFulfillment(
-        bookingId,
-        this.resolveOpsSandboxAudience(audience),
-      );
-    return toApiSuccessEnvelope(projection, requestId);
-  }
-
-  @Get("partner/bookings/:bookingId/sandbox-fulfillment")
-  @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerSandboxFulfillment(
-    @Param("bookingId") bookingId: string,
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const projection: SandboxFulfillmentProjectionView =
-      this.ownedMobilityService.getPartnerSandboxFulfillment(
-        this.requirePartnerEntrySlug(identity),
-        bookingId,
-      );
-    return toApiSuccessEnvelope(projection, requestId);
   }
 
   @Put("tenant/bookings/:bookingId")
@@ -714,32 +614,5 @@ export class OwnedMobilityController {
       this.ownedMobilityService.completeDriverTask(taskId, command, requestId),
       requestId,
     );
-  }
-
-  private resolveOpsSandboxAudience(
-    audience?: string,
-  ): SandboxFulfillmentVisibilityAudience {
-    const normalizedAudience = audience?.trim();
-    if (!normalizedAudience) {
-      return "ops";
-    }
-
-    switch (normalizedAudience) {
-      case "passenger":
-      case "tenant":
-      case "partner":
-      case "ops":
-      case "platform_admin":
-        return normalizedAudience;
-      default:
-        throw new ApiRequestError(
-          400,
-          "SANDBOX_FULFILLMENT_AUDIENCE_INVALID",
-          "audience must be one of passenger, tenant, partner, ops, or platform_admin.",
-          {
-            audience: normalizedAudience,
-          },
-        );
-    }
   }
 }
