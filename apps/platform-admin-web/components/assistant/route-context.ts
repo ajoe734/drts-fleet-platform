@@ -78,6 +78,8 @@ export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
   "service-products": { href: "/service-products" },
   "vehicle-eligibility": { href: "/vehicle-eligibility" },
   "fleet-partners": { href: "/fleet-partners" },
+  sandbox: { href: "/sandbox" },
+  "sandbox-suspend": { href: "/sandbox/suspend" },
   switchboard: { href: "/switchboard" },
   pricing: { href: "/pricing" },
   payments: { href: "/payments" },
