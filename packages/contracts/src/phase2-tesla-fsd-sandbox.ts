@@ -1,5 +1,3 @@
-import type { ResourceActionDescriptor, UiHealthEnvelope } from "./ui-runtime";
-
 // Phase 2 contracts: Tesla Fleet integration, FSD/AV regulatory telemetry,
 // sandbox dispatch governance, safety-operator / ROC operations, on-board
 // evidence custody, accident investigation, and regulatory reporting.
@@ -41,11 +39,18 @@ export interface Phase2SourceMetadata {
   ingestedAt: string;
   // When the source captured/recorded the underlying fact, if distinct.
   recordedAt: string | null;
+  // When the upstream provider copy is expected to expire, if it does.
+  providerExpiresAt?: string | null;
   // Pointer to a detached signature / attestation artifact, when the source is
   // cryptographically attested (regulatory chain-of-custody).
   signatureRef: string | null;
   // Schema version of the source payload as ingested.
   schemaVersion: string;
+}
+
+export interface Phase2MoneyAmount {
+  currency: string;
+  amountMinor: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -460,8 +465,6 @@ export const SANDBOX_DISPATCH_REASON_CODES = [
   "ODD_BOUNDARY_RISK",
   "PROVIDER_CAPABILITY_MISSING",
   "RECORDER_UNHEALTHY",
-  "ROC_STOP_NEW_DISPATCH",
-  "ROC_OPERATIONAL_HOLD",
   "SAFETY_OPERATOR_REQUIRED",
   "SAFETY_OPERATOR_UNAVAILABLE",
   "REGULATORY_APPROVAL_MISSING",
@@ -470,6 +473,9 @@ export const SANDBOX_DISPATCH_REASON_CODES = [
   "ACTIVE_SAFETY_INCIDENT",
   "MINIMAL_RISK_CONDITION_ACTIVE",
   "SANDBOX_PROGRAM_SUSPENDED",
+  "PASSENGER_DISCLOSURE_POLICY_MISSING",
+  "PASSENGER_DISCLOSURE_MESSAGE_MISSING",
+  "PASSENGER_ACKNOWLEDGEMENT_REQUIRED",
 ] as const;
 export type SandboxDispatchReasonCode =
   (typeof SANDBOX_DISPATCH_REASON_CODES)[number];
@@ -482,16 +488,345 @@ export interface SandboxDispatchDecision {
   sandboxProgramId: string;
 
   decision: SandboxDispatchOutcome;
+  fallbackRequired: boolean;
   oddInBounds: boolean;
   hardReasonCodes: SandboxDispatchReasonCode[];
   softReasonCodes: SandboxDispatchReasonCode[];
-  fallbackRequired: boolean;
 
   // Set when the outcome is allow_with_safety_operator.
   requiredSafetyOperatorId: string | null;
 
   policyVersion: string;
   evaluatedAt: string;
+}
+
+export const FULFILLMENT_SEGMENT_TYPES = [
+  "tesla_av",
+  "human_taxi",
+  "cancelled",
+  "non_revenue_recovery",
+] as const;
+export type FulfillmentSegmentType =
+  (typeof FULFILLMENT_SEGMENT_TYPES)[number];
+
+export interface FulfillmentSegmentRecord {
+  fulfillmentSegmentId: string;
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  segmentType: FulfillmentSegmentType;
+  segmentReason: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  vehicleId: string | null;
+  vin: string | null;
+  driverId: string | null;
+  safetyOperatorId: string | null;
+  sourcePlatform: string | null;
+  distanceKm: number | null;
+  durationSeconds: number | null;
+  cost: Phase2MoneyAmount | null;
+  evidenceReference: string | null;
+  createdAt: string;
+}
+
+export const SANDBOX_BILLING_TREATMENT_TYPES = [
+  "normal_av",
+  "fallback_human",
+  "incident_waived",
+  "partner_program_adjusted",
+  "tenant_contract_adjusted",
+] as const;
+export type SandboxBillingTreatmentType =
+  (typeof SANDBOX_BILLING_TREATMENT_TYPES)[number];
+
+export const SANDBOX_FALLBACK_COST_ABSORBERS = [
+  "platform",
+  "partner",
+  "tenant_contract",
+] as const;
+export type SandboxFallbackCostAbsorber =
+  (typeof SANDBOX_FALLBACK_COST_ABSORBERS)[number];
+
+export interface SandboxBillingTreatmentRecord {
+  sandboxBillingTreatmentId: string;
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  treatmentType: SandboxBillingTreatmentType;
+  fallbackCostAbsorber: SandboxFallbackCostAbsorber | null;
+  fallbackPolicyId: string | null;
+  policyResolution: string;
+  passengerExtraChargeAllowed: boolean;
+  passengerExtraCharge: Phase2MoneyAmount;
+  internalAvCost: Phase2MoneyAmount | null;
+  internalHumanFallbackCost: Phase2MoneyAmount | null;
+  partnerCharge: Phase2MoneyAmount | null;
+  tenantCharge: Phase2MoneyAmount | null;
+  platformAbsorbed: Phase2MoneyAmount | null;
+  // Phase 2 adjudication §C4/§6: sandbox fallback never adds a surcharge to
+  // passenger / tenant billing, even when internal fallback costs are tracked.
+  fallbackSurchargeApplied: boolean;
+  treatmentSnapshot: Record<string, unknown>;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// §3.3A Passenger disclosure policy + acknowledgement
+// ---------------------------------------------------------------------------
+
+export const PASSENGER_DISCLOSURE_CHANNELS = [
+  "tenant_portal",
+  "partner_portal",
+  "call_center",
+  "ops_console",
+] as const;
+export type PassengerDisclosureChannel =
+  (typeof PASSENGER_DISCLOSURE_CHANNELS)[number];
+
+export const PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_MODES = [
+  "per_booking_checkbox",
+  "program_level_contract",
+  "verbal_recorded",
+  "operator_confirmed_notice",
+] as const;
+export type PassengerDisclosureAcknowledgementMode =
+  (typeof PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_MODES)[number];
+
+export const PASSENGER_DISCLOSURE_ACTOR_TYPES = [
+  "passenger",
+  "tenant_admin",
+  "ops_user",
+  "system",
+] as const;
+export type PassengerDisclosureActorType =
+  (typeof PASSENGER_DISCLOSURE_ACTOR_TYPES)[number];
+
+export interface PassengerDisclosureMessageCatalogEntry {
+  entryId: string;
+  catalogVersion: string;
+  messageCode: string;
+  locale: string;
+  bodyText: string;
+  legalApproved: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerDisclosurePolicyChannelRule {
+  channel: PassengerDisclosureChannel;
+  messageCode: string;
+  requiresAcknowledgement: boolean;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+}
+
+export interface PassengerDisclosurePolicy {
+  policyId: string;
+  policyVersion: string;
+  tenantId: string | null;
+  businessDispatchSubtype: string | null;
+  partnerEntrySlug: string | null;
+  active: boolean;
+  channelRules: PassengerDisclosurePolicyChannelRule[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerAcknowledgementRecord {
+  acknowledgementId: string;
+  bookingId: string;
+  orderId: string;
+  policyId: string;
+  messageCode: string;
+  channel: PassengerDisclosureChannel;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+  actorType: PassengerDisclosureActorType;
+  actorRef: string | null;
+  acknowledgedAt: string;
+  evidenceRef: string | null;
+  createdAt: string;
+}
+
+export interface PassengerDisclosureRequirementSnapshot {
+  channel: PassengerDisclosureChannel;
+  policyId: string;
+  policyVersion: string;
+  messageCode: string | null;
+  requiresAcknowledgement: boolean;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+  acknowledgedAt: string | null;
+  acknowledgementRecordId: string | null;
+}
+
+export interface SandboxDispatchAssignmentSnapshot {
+  candidateRoute?: GeoJsonMultiLineString | null;
+  entitlement?: {
+    active: boolean | null;
+  } | null;
+  providerCapabilities?: Partial<
+    Record<Phase2ProviderCapability, boolean | null>
+  > | null;
+  telemetry?: {
+    stale: boolean | null;
+    minimalRiskConditionActive: boolean | null;
+    socPercent: number | null;
+    currentTripCount?: number | null;
+    odometerKm?: number | null;
+    qualityScore?: number | null;
+    providerHealthState?: TeslaProviderHealthState | null;
+    dispatchHold?: boolean | null;
+  } | null;
+  regulatory?: {
+    approvalFresh: boolean | null;
+    vehicleCertified: boolean | null;
+  } | null;
+  recorder?: {
+    healthy: boolean | null;
+  } | null;
+  holdState?: {
+    activeSafetyIncident: boolean | null;
+    programSuspended: boolean | null;
+    vehicleHold: boolean | null;
+  } | null;
+  limits?: {
+    minSocPercent?: number | null;
+    maxConcurrentTrips?: number | null;
+    maxOdometerKm?: number | null;
+  } | null;
+}
+
+export interface UpsertPassengerDisclosurePolicyCommand {
+  policyId?: string;
+  policyVersion: string;
+  tenantId?: string | null;
+  businessDispatchSubtype?: string | null;
+  partnerEntrySlug?: string | null;
+  active?: boolean;
+  channelRules: PassengerDisclosurePolicyChannelRule[];
+}
+
+export interface UpsertPassengerDisclosureMessageCatalogEntryCommand {
+  entryId?: string;
+  catalogVersion: string;
+  messageCode: string;
+  locale: string;
+  bodyText: string;
+  legalApproved: boolean;
+}
+
+export interface RecordPassengerAcknowledgementCommand {
+  actorType?: PassengerDisclosureActorType;
+  actorRef?: string | null;
+  acknowledgedAt?: string;
+  evidenceRef?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// §3.3B Sandbox fulfillment visibility projection
+// ---------------------------------------------------------------------------
+
+export const SANDBOX_FULFILLMENT_VISIBILITY_AUDIENCES = [
+  "passenger",
+  "tenant",
+  "partner",
+  "ops",
+  "platform_admin",
+] as const;
+export type SandboxFulfillmentVisibilityAudience =
+  (typeof SANDBOX_FULFILLMENT_VISIBILITY_AUDIENCES)[number];
+
+export const SANDBOX_FULFILLMENT_MODES = [
+  "tesla_av",
+  "human_fallback",
+  "mixed",
+  "hidden",
+] as const;
+export type SandboxFulfillmentMode = (typeof SANDBOX_FULFILLMENT_MODES)[number];
+
+export const SANDBOX_FULFILLMENT_STATES = [
+  "pending_dispatch",
+  "assigned",
+  "en_route_pickup",
+  "arrived_pickup",
+  "in_trip",
+  "completed",
+  "cancelled",
+  "hidden",
+] as const;
+export type SandboxFulfillmentState =
+  (typeof SANDBOX_FULFILLMENT_STATES)[number];
+
+export const SANDBOX_FULFILLMENT_DISCLOSURES = [
+  "vehicle_mode_summary",
+  "fallback_to_human",
+  "provider_brand_disclosed",
+  "extra_charge_disclosed",
+  "safety_operator_present",
+] as const;
+export type SandboxFulfillmentDisclosure =
+  (typeof SANDBOX_FULFILLMENT_DISCLOSURES)[number];
+
+export const SANDBOX_FULFILLMENT_VISIBILITY_REASONS = [
+  "av_assignment_active",
+  "human_fallback_active",
+  "mixed_fulfillment_active",
+  "policy_hidden",
+  "dispatch_pending",
+  "trip_completed",
+  "trip_cancelled",
+  "internal_takeover_redacted",
+  "provider_brand_allowed",
+  "provider_brand_withheld",
+] as const;
+export type SandboxFulfillmentVisibilityReason =
+  (typeof SANDBOX_FULFILLMENT_VISIBILITY_REASONS)[number];
+
+export const SANDBOX_FULFILLMENT_MESSAGE_CATEGORIES = [
+  "info",
+  "warning",
+  "critical",
+] as const;
+export type SandboxFulfillmentMessageCategory =
+  (typeof SANDBOX_FULFILLMENT_MESSAGE_CATEGORIES)[number];
+
+export interface SandboxFulfillmentAudienceMessage {
+  messageCode: string;
+  category: SandboxFulfillmentMessageCategory;
+}
+
+export interface SandboxFulfillmentVisibilityRecord {
+  visibilityId: string;
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  audience: SandboxFulfillmentVisibilityAudience;
+  fulfillmentMode: SandboxFulfillmentMode;
+  state: SandboxFulfillmentState;
+  statusCode: string;
+  messages: SandboxFulfillmentAudienceMessage[];
+  disclosures: SandboxFulfillmentDisclosure[];
+  reasonCodes: SandboxFulfillmentVisibilityReason[];
+  etaMinutes: number | null;
+  extraChargeDisclosed: boolean;
+  safetyDisclosurePolicyId: string | null;
+  providerBrandDisclosed: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SandboxFulfillmentProjectionView {
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  audience: SandboxFulfillmentVisibilityAudience;
+  fulfillmentMode: SandboxFulfillmentMode;
+  state: SandboxFulfillmentState;
+  statusCode: string;
+  messages: SandboxFulfillmentAudienceMessage[];
+  etaMinutes: number | null;
+  extraChargeDisclosed: boolean;
+  providerBrandDisclosed: boolean;
+  updatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -591,6 +926,63 @@ export interface TeslaPublicTelemetrySample {
   batteryLevelPct: number | null;
   online: boolean | null;
   source: Phase2SourceMetadata;
+}
+
+export const TESLA_TELEMETRY_FEED_KINDS = [
+  "vehicle_state",
+  "public_telemetry",
+] as const;
+export type TeslaTelemetryFeedKind =
+  (typeof TESLA_TELEMETRY_FEED_KINDS)[number];
+
+export const TESLA_PROVIDER_HEALTH_STATES = [
+  "healthy",
+  "delayed",
+  "gap_detected",
+  "backfill",
+  "complete",
+  "incomplete_hold",
+  "regulator_data_incident",
+] as const;
+export type TeslaProviderHealthState =
+  (typeof TESLA_PROVIDER_HEALTH_STATES)[number];
+
+export interface TeslaTelemetryBackfillQuery {
+  backfillId: string;
+  providerCode: string;
+  feedKind: TeslaTelemetryFeedKind;
+  vin: string;
+  from: string;
+  to: string;
+  sessionId: string | null;
+  eventId: string | null;
+  sequenceAfter: number | null;
+  pageToken: string | null;
+  status: "pending" | "requested" | "complete" | "incomplete";
+  detectedAt: string;
+  updatedAt: string;
+}
+
+export interface TeslaTelemetryHealthRecord {
+  providerCode: string;
+  feedKind: TeslaTelemetryFeedKind;
+  externalVehicleRef: string;
+  sessionId: string | null;
+  healthState: TeslaProviderHealthState;
+  qualityScore: number;
+  dispatchHold: boolean;
+  latestEventId: string | null;
+  latestSequenceNo: number | null;
+  latestContiguousSequenceNo: number | null;
+  missingSequences: number[];
+  lastCapturedAt: string | null;
+  lastReceivedAt: string | null;
+  staleHeartbeatAt: string | null;
+  gapDetectedAt: string | null;
+  backfillRequestedAt: string | null;
+  completedAt: string | null;
+  issueCodes: string[];
+  evaluatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -936,285 +1328,6 @@ export interface RocFallbackToHumanReport {
   generatedAt: string;
 }
 
-export const TESLA_AUTONOMY_TRANSITION_TYPES = [
-  "fsd_disengagement",
-  "manual_takeover",
-  "autonomy_resumed",
-] as const;
-export type TeslaAutonomyTransitionType =
-  (typeof TESLA_AUTONOMY_TRANSITION_TYPES)[number];
-
-export interface TeslaAutonomyTransitionEvent {
-  eventId: string;
-  takeoverCorrelationId: string | null;
-  autonomySessionId: string | null;
-  vehicleId: string;
-  orderId: string | null;
-  transitionType: TeslaAutonomyTransitionType;
-  occurredAt: string;
-  source: Phase2SourceMetadata;
-}
-
-export interface RocTakeoverResponseRecord {
-  responseId: string;
-  takeoverCorrelationId: string | null;
-  autonomySessionId: string | null;
-  triggeredByTeslaEventId: string | null;
-  rocOperatorId: string;
-  vehicleId: string;
-  orderId: string | null;
-  responseType: RocInterventionType;
-  requestedAt: string;
-  respondedAt: string | null;
-  resolvedAt: string | null;
-  outcomeNote: string | null;
-  source: Phase2SourceMetadata;
-}
-
-export interface CreateManualTakeoverCorrelationCommand {
-  manualLinkId: string;
-  vehicleId: string;
-  takeoverReportId: string;
-  teslaEventId: string | null;
-  rocResponseId: string | null;
-  linkedBy: string;
-  linkedAt: string;
-  note: string | null;
-}
-
-export interface ManualTakeoverCorrelationLink {
-  manualLinkId: string;
-  vehicleId: string;
-  takeoverReportId: string;
-  teslaEventId: string | null;
-  rocResponseId: string | null;
-  linkedBy: string;
-  linkedAt: string;
-  note: string | null;
-}
-
-export const TAKEOVER_CORRELATION_MATCH_MODES = [
-  "takeover_correlation_id",
-  "vehicle_time_trip",
-  "manual",
-] as const;
-export type TakeoverCorrelationMatchMode =
-  (typeof TAKEOVER_CORRELATION_MATCH_MODES)[number];
-
-export const TAKEOVER_DISCREPANCY_TYPES = [
-  "timestamp_mismatch",
-  "trip_mismatch",
-  "correlation_id_mismatch",
-] as const;
-export type TakeoverDiscrepancyType =
-  (typeof TAKEOVER_DISCREPANCY_TYPES)[number];
-
-export interface EvidenceDiscrepancyCase {
-  discrepancyCaseId: string;
-  correlatedTakeoverCaseId: string;
-  vehicleId: string;
-  discrepancyTypes: TakeoverDiscrepancyType[];
-  openedAt: string;
-  summary: string;
-  sourceFacts: {
-    teslaOccurredAt: string | null;
-    safetyOccurredAt: string | null;
-    rocRequestedAt: string | null;
-    rocRespondedAt: string | null;
-    teslaOrderId: string | null;
-    safetyOrderId: string | null;
-    rocOrderId: string | null;
-    teslaTakeoverCorrelationId: string | null;
-    safetyTakeoverCorrelationId: string | null;
-    rocTakeoverCorrelationId: string | null;
-  };
-}
-
-export interface CorrelatedTakeoverCase {
-  correlatedTakeoverCaseId: string;
-  vehicleId: string;
-  orderId: string | null;
-  takeoverCorrelationId: string | null;
-  correlationPriority: 1 | 2 | 3;
-  matchedBy: TakeoverCorrelationMatchMode;
-  sourceRecordIds: {
-    teslaEventId: string | null;
-    safetyOperatorTakeoverReportId: string;
-    rocTakeoverResponseId: string | null;
-  };
-  sourceTimestamps: {
-    teslaOccurredAt: string | null;
-    safetyOccurredAt: string;
-    safetyServerReceivedAt: string;
-    rocRequestedAt: string | null;
-    rocRespondedAt: string | null;
-    rocResolvedAt: string | null;
-  };
-  teslaEvent: TeslaAutonomyTransitionEvent | null;
-  safetyOperatorTakeoverReport: SafetyOperatorTakeoverReport;
-  rocTakeoverResponse: RocTakeoverResponseRecord | null;
-  manualCorrelation: ManualTakeoverCorrelationLink | null;
-  discrepancyCaseIds: string[];
-}
-
-export const ROC_ALERT_TYPES = [
-  "provider_health",
-  "takeover_discrepancy",
-  "dispatch_gate",
-  "operational_hold",
-  "evidence_freeze",
-  "human_fallback",
-  "manual_attention",
-] as const;
-export type RocAlertType = (typeof ROC_ALERT_TYPES)[number];
-
-export const ROC_ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
-export type RocAlertSeverity = (typeof ROC_ALERT_SEVERITIES)[number];
-
-export const ROC_ALERT_STATUSES = [
-  "open",
-  "acknowledged",
-  "resolved",
-] as const;
-export type RocAlertStatus = (typeof ROC_ALERT_STATUSES)[number];
-
-export interface RocDataFreshness {
-  dataFreshness: "fresh" | "stale" | "degraded" | "unknown";
-  observedAt: string | null;
-  staleAfterMs: number;
-}
-
-export interface RocOverviewReadModel {
-  generatedAt: string;
-  activeVehicleCount: number;
-  activeTripCount: number;
-  activeTakeoverCount: number;
-  openAlertCount: number;
-  criticalAlertCount: number;
-  acknowledgedAlertCount: number;
-  stopNewDispatchVehicleCount: number;
-  operationalHoldVehicleCount: number;
-  evidenceFreezeVehicleCount: number;
-  humanFallbackVehicleCount: number;
-  providerHealth: UiHealthEnvelope;
-}
-
-export interface RocVehicleReadModel {
-  vehicleId: string;
-  sandboxProgramId: string | null;
-  currentOrderId: string | null;
-  safetyOperatorId: string | null;
-  autonomyState:
-    | "manual"
-    | "fsd_supervised"
-    | "fsd_engaged"
-    | "unknown"
-    | null;
-  location: GeoPoint | null;
-  telemetryFreshness: RocDataFreshness;
-  regulatoryFreshness: RocDataFreshness;
-  stopNewDispatchActive: boolean;
-  operationalHoldActive: boolean;
-  evidenceFreezeActive: boolean;
-  humanFallbackActive: boolean;
-  dispatchGateStatus: SandboxDispatchOutcome;
-  gateReasonCodes: SandboxDispatchReasonCode[];
-  alertIds: string[];
-}
-
-export const ROC_TRIP_STATUSES = [
-  "monitoring",
-  "takeover_active",
-  "operational_hold",
-  "human_fallback",
-  "completed",
-] as const;
-export type RocTripStatus = (typeof ROC_TRIP_STATUSES)[number];
-
-export interface RocTripReadModel {
-  tripId: string;
-  orderId: string | null;
-  vehicleId: string;
-  sandboxProgramId: string | null;
-  safetyOperatorId: string | null;
-  status: RocTripStatus;
-  latestTakeoverOccurredAt: string | null;
-  stopNewDispatchActive: boolean;
-  operationalHoldActive: boolean;
-  humanFallbackActive: boolean;
-  alertIds: string[];
-}
-
-export interface RocAlertReadModel {
-  alertId: string;
-  alertType: RocAlertType;
-  status: RocAlertStatus;
-  severity: RocAlertSeverity;
-  title: string;
-  summary: string;
-  vehicleId: string | null;
-  orderId: string | null;
-  sandboxProgramId: string | null;
-  providerCode: string | null;
-  sourceRecordId: string | null;
-  acknowledgedAt: string | null;
-  acknowledgedBy: string | null;
-  assignedTo: string | null;
-  assignedAt: string | null;
-  linkedIncidentId: string | null;
-  resolvedAt: string | null;
-  resolvedBy: string | null;
-  openedAt: string;
-  updatedAt: string;
-  availableActions: ResourceActionDescriptor[];
-}
-
-export interface RocProviderHealthReadModel {
-  providerCode: string;
-  displayName: string;
-  status: "healthy" | "degraded" | "down" | "unknown";
-  lastCheckedAt: string;
-  message: string | null;
-  affectedVehicleIds: string[];
-}
-
-export interface RocProviderHealthSnapshot {
-  health: UiHealthEnvelope;
-  items: RocProviderHealthReadModel[];
-}
-
-export interface RocAlertActionCommand {
-  reason?: string | null;
-  note?: string | null;
-}
-
-export interface AssignRocAlertCommand extends RocAlertActionCommand {
-  assigneeId: string;
-}
-
-export interface RequestRocSafetyActionCommand extends RocAlertActionCommand {
-  safetyOperatorId: string;
-  sandboxProgramId: string;
-  orderId?: string | null;
-}
-
-export interface OpenRocIncidentCommand extends RocAlertActionCommand {
-  title?: string | null;
-  description?: string | null;
-  category?: "safety" | "operational" | "other";
-  severity?: "low" | "medium" | "high" | "critical";
-}
-
-export interface StartRocEvidenceFreezeCommand extends RocAlertActionCommand {
-  retentionHours?: number | null;
-}
-
-export interface NotifyRocAlertCommand extends RocAlertActionCommand {
-  channel: "email" | "slack" | "sms" | "pager";
-  target: string;
-  message?: string | null;
-}
-
 // ---------------------------------------------------------------------------
 // §3.6 Vehicle evidence custody
 // ---------------------------------------------------------------------------
@@ -1279,12 +1392,8 @@ export interface EvidenceManifest {
 // ---------------------------------------------------------------------------
 
 export const ACCIDENT_CASE_STATUSES = [
-  "detected",
-  "roc_acknowledged",
-  "operation_suspended",
-  "emergency_response_active",
-  "evidence_frozen",
-  "initial_notification_sent",
+  "open",
+  "evidence_pending",
   "under_investigation",
   "regulator_review",
   "closed",
@@ -1299,46 +1408,11 @@ export const ACCIDENT_SEVERITIES = [
 ] as const;
 export type AccidentSeverity = (typeof ACCIDENT_SEVERITIES)[number];
 
-export const ACCIDENT_TIMELINE_FACT_CONFIDENCES = [
-  "provider_signed",
-  "provider_reported",
-  "platform_recorded",
-  "operator_reported",
-  "system_derived",
-  "unknown",
-] as const;
-export type AccidentTimelineFactConfidence =
-  (typeof ACCIDENT_TIMELINE_FACT_CONFIDENCES)[number];
-
-export const ACCIDENT_TIMELINE_SOURCE_SYSTEMS = [
-  ...PHASE2_SOURCE_SYSTEMS,
-  "accident_case",
-  "system_derived",
-] as const;
-export type AccidentTimelineSourceSystem =
-  (typeof ACCIDENT_TIMELINE_SOURCE_SYSTEMS)[number];
-
-export type AccidentTimelineFactValue =
-  | string
-  | number
-  | boolean
-  | null;
-
-export interface AccidentTimelineSourceRecord {
-  sourceSystem: AccidentTimelineSourceSystem;
-  sourceRef: string | null;
-  signatureRef: string | null;
-  recordedAt: string | null;
-  ingestedAt: string | null;
-  schemaVersion: string | null;
-}
-
 export interface AccidentCaseRecord {
   caseId: string;
   vehicleId: string;
   orderId: string | null;
   triggeringEventId: string | null;
-  takeoverCorrelationId: string | null;
 
   status: AccidentCaseStatus;
   severity: AccidentSeverity;
@@ -1351,133 +1425,7 @@ export interface AccidentCaseRecord {
   regulatoryReportId: string | null;
 
   summary: string | null;
-  discrepancyCaseIds: string[];
-  externalDocumentIds: string[];
-  createdAt: string;
-  updatedAt: string;
   closedAt: string | null;
-}
-
-export interface CreateAccidentCaseCommand {
-  caseId?: string;
-  vehicleId: string;
-  orderId?: string | null;
-  triggeringEventId?: string | null;
-  takeoverCorrelationId?: string | null;
-  severity: AccidentSeverity;
-  occurredAt: string;
-  reportedAt?: string | null;
-  reportedBy: string;
-  summary?: string | null;
-  evidenceManifestId?: string | null;
-  regulatoryReportId?: string | null;
-}
-
-export interface TransitionAccidentCaseCommand {
-  toStatus: AccidentCaseStatus;
-  transitionedAt?: string | null;
-  actorId: string;
-  note?: string | null;
-  evidenceManifestId?: string | null;
-  regulatoryReportId?: string | null;
-}
-
-export interface AddAccidentTimelineFactCommand {
-  factId?: string;
-  factKey: string;
-  label: string;
-  value: AccidentTimelineFactValue;
-  occurredAt: string;
-  recordedAt?: string | null;
-  confidence: AccidentTimelineFactConfidence;
-  sourceSystem: AccidentTimelineSourceSystem;
-  sourceRef?: string | null;
-  signatureRef?: string | null;
-  schemaVersion?: string | null;
-  derivationRule?: string | null;
-  derivedFromFactIds?: string[];
-  note?: string | null;
-  discrepancyCaseIds?: string[];
-  externalDocumentId?: string | null;
-}
-
-export interface AccidentTimelineFactRecord {
-  factId: string;
-  caseId: string;
-  factKey: string;
-  label: string;
-  value: AccidentTimelineFactValue;
-  occurredAt: string;
-  recordedAt: string | null;
-  confidence: AccidentTimelineFactConfidence;
-  source: AccidentTimelineSourceRecord;
-  derivationRule: string | null;
-  derivedFromFactIds: string[];
-  discrepancyCaseIds: string[];
-  externalDocumentId: string | null;
-  note: string | null;
-}
-
-export interface AccidentTimelineEntry {
-  entryId: string;
-  caseId: string;
-  factKey: string;
-  label: string;
-  occurredAt: string;
-  value: AccidentTimelineFactValue;
-  confidence: AccidentTimelineFactConfidence;
-  sourceSystem: AccidentTimelineSourceSystem;
-  sourceRef: string | null;
-  derivationRule: string | null;
-  discrepancyCaseIds: string[];
-  externalDocumentIds: string[];
-  facts: AccidentTimelineFactRecord[];
-}
-
-export const ACCIDENT_EXTERNAL_DOCUMENT_TYPES = [
-  "police_report",
-  "insurer_notice",
-  "insurer_assessment",
-  "insurer_settlement",
-  "witness_statement",
-  "medical_report",
-  "other",
-] as const;
-export type AccidentExternalDocumentType =
-  (typeof ACCIDENT_EXTERNAL_DOCUMENT_TYPES)[number];
-
-export interface AccidentExternalDocumentFactInput {
-  factId?: string;
-  factKey: string;
-  label: string;
-  value: AccidentTimelineFactValue;
-  occurredAt: string;
-  recordedAt?: string | null;
-  confidence?: AccidentTimelineFactConfidence | null;
-  note?: string | null;
-}
-
-export interface ImportAccidentExternalDocumentCommand {
-  documentId?: string;
-  documentType: AccidentExternalDocumentType;
-  title: string;
-  providerName?: string | null;
-  receivedAt: string;
-  checksumSha256?: string | null;
-  source: Phase2SourceMetadata;
-  extractedFacts?: AccidentExternalDocumentFactInput[];
-}
-
-export interface AccidentExternalDocumentRecord {
-  documentId: string;
-  caseId: string;
-  documentType: AccidentExternalDocumentType;
-  title: string;
-  providerName: string | null;
-  receivedAt: string;
-  checksumSha256: string | null;
-  source: Phase2SourceMetadata;
-  factIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1525,317 +1473,202 @@ export interface RegulatoryReportFiling {
 }
 
 // ---------------------------------------------------------------------------
-// §3.8A Sandbox governance + compliance snapshot
+// §3.9 Canonical audit catalog
 // ---------------------------------------------------------------------------
 
-export const SANDBOX_GOVERNANCE_NOTIFICATION_CHANNELS = [
-  "email",
-  "slack",
-  "pagerduty",
-  "webhook",
+export const PHASE2_AUDIT_EVENT_CATALOG = {
+  sandbox: {
+    providerCapabilityRequirementConfigured:
+      "sandbox.provider_capability_requirement.configured",
+    providerCapabilityRequirementAmended:
+      "sandbox.provider_capability_requirement.amended",
+    providerCapabilityDescriptorRecorded:
+      "sandbox.provider_capability_descriptor.recorded",
+    dispatchDecisionByOutcome: {
+      allow: "sandbox.dispatch_decision.allowed",
+      allow_with_safety_operator:
+        "sandbox.dispatch_decision.allowed_with_safety_operator",
+      block: "sandbox.dispatch_decision.blocked",
+      defer: "sandbox.dispatch_decision.deferred",
+    } as const satisfies Record<SandboxDispatchOutcome, string>,
+  },
+  tesla: {
+    commandReceiptByStatus: {
+      accepted: "tesla.command_receipt.accepted",
+      queued: "tesla.command_receipt.queued",
+      dispatched: "tesla.command_receipt.dispatched",
+      acknowledged: "tesla.command_receipt.acknowledged",
+      rejected: "tesla.command_receipt.rejected",
+      failed: "tesla.command_receipt.failed",
+      expired: "tesla.command_receipt.expired",
+    } as const satisfies Record<CommandReceiptStatus, string>,
+    regulatoryEventRecorded: "tesla.regulatory_event.recorded",
+    vehicleStateSnapshotRecorded: "tesla.vehicle_state_snapshot.recorded",
+    publicTelemetrySampleRecorded: "tesla.public_telemetry_sample.recorded",
+  },
+  safetyOperator: {
+    assignmentByStatus: {
+      assigned: "safety_operator.assignment.assigned",
+      engaged: "safety_operator.assignment.engaged",
+      released: "safety_operator.assignment.released",
+      expired: "safety_operator.assignment.expired",
+    } as const satisfies Record<SafetyOperatorAssignmentStatus, string>,
+  },
+  roc: {
+    interventionStarted: "roc.intervention.started",
+    interventionResolved: "roc.intervention.resolved",
+    fallbackToHumanReported: "roc.fallback_to_human.reported",
+  },
+  evidence: {
+    manifestCreated: "evidence.manifest.created",
+    manifestAmended: "evidence.manifest.amended",
+    manifestItemByCustodyState: {
+      captured: "evidence.manifest_item.captured",
+      uploaded: "evidence.manifest_item.uploaded",
+      verified: "evidence.manifest_item.verified",
+      sealed: "evidence.manifest_item.sealed",
+      released: "evidence.manifest_item.released",
+      purged: "evidence.manifest_item.purged",
+    } as const satisfies Record<EvidenceCustodyState, string>,
+    deletionByDecision: {
+      purged: "evidence.deletion.purged",
+      preservedForProviderExpiry:
+        "evidence.deletion.preserved_for_provider_expiry",
+      skippedDueToHold: "evidence.deletion.skipped_due_to_hold",
+      skippedDueToException: "evidence.deletion.skipped_due_to_exception",
+      deferredByRetention: "evidence.deletion.deferred_by_retention",
+    },
+  },
+  accident: {
+    caseByStatus: {
+      open: "accident.case.opened",
+      evidence_pending: "accident.case.marked_evidence_pending",
+      under_investigation: "accident.case.investigation_started",
+      regulator_review: "accident.case.regulator_review_requested",
+      closed: "accident.case.closed",
+    } as const satisfies Record<AccidentCaseStatus, string>,
+    evidenceManifestLinked: "accident.case.evidence_manifest_linked",
+    regulatoryReportLinked: "accident.case.regulatory_report_linked",
+    caseAmended: "accident.case.amended",
+  },
+  regulatory: {
+    reportByStatus: {
+      draft: "regulatory.report.drafted",
+      generated: "regulatory.report.generated",
+      submitted: "regulatory.report.submitted",
+      accepted: "regulatory.report.accepted",
+      rejected: "regulatory.report.rejected",
+    } as const satisfies Record<RegulatoryReportStatus, string>,
+    reportAmended: "regulatory.report.amended",
+  },
+} as const;
+
+type NestedStringValues<T> = T extends string
+  ? T
+  : T extends Record<string, unknown>
+    ? { [K in keyof T]: NestedStringValues<T[K]> }[keyof T]
+    : never;
+
+function collectPhase2AuditEventNames(
+  value: unknown,
+  result: string[] = [],
+): string[] {
+  if (typeof value === "string") {
+    result.push(value);
+    return result;
+  }
+
+  if (value && typeof value === "object") {
+    for (const nestedValue of Object.values(value)) {
+      collectPhase2AuditEventNames(nestedValue, result);
+    }
+  }
+
+  return result;
+}
+
+export type Phase2AuditEventName = NestedStringValues<
+  typeof PHASE2_AUDIT_EVENT_CATALOG
+>;
+
+export const PHASE2_AUDIT_EVENT_NAMES = collectPhase2AuditEventNames(
+  PHASE2_AUDIT_EVENT_CATALOG,
+) as readonly Phase2AuditEventName[];
+
+export type Phase2AuditActorType =
+  | "system"
+  | "platform_admin"
+  | "tenant_admin"
+  | "ops_user"
+  | "partner_api_key"
+  | "referral_passenger";
+
+export interface Phase2AuditContext {
+  actorId: string | null;
+  actorType: Phase2AuditActorType;
+  tenantId: string | null;
+  moduleName: string;
+  eventName: Phase2AuditEventName;
+  resourceType: string;
+  resourceId: string | null;
+  requestId?: string;
+  summary: Record<string, unknown>;
+  previousSummary?: Record<string, unknown>;
+  resourceVersion?: string | null;
+  sourceSystem?: Phase2SourceSystem | null;
+  sourceRef?: string | null;
+  occurredAt?: string;
+  supersedesAuditId?: string | null;
+  amendsResourceVersion?: string | null;
+}
+
+// Phase 2 audit event names share the Phase 1 append-only audit store and are
+// distinguished by a stable domain prefix (`<domain>.<entity>.<verb>`). The
+// existing audit query reuses these helpers to offer a Phase 2 filter without a
+// second store or a second emitter (P2-DP-S4-001 S4=a).
+export const PHASE2_AUDIT_DOMAINS = [
+  "sandbox",
+  "tesla",
+  "safety_operator",
+  "roc",
+  "evidence",
+  "accident",
+  "regulatory",
 ] as const;
-export type SandboxGovernanceNotificationChannel =
-  (typeof SANDBOX_GOVERNANCE_NOTIFICATION_CHANNELS)[number];
+export type Phase2AuditDomain = (typeof PHASE2_AUDIT_DOMAINS)[number];
 
-export const SANDBOX_GOVERNANCE_RECIPIENT_KINDS = [
-  "role",
-  "user",
-  "distribution_list",
-  "webhook",
-] as const;
-export type SandboxGovernanceRecipientKind =
-  (typeof SANDBOX_GOVERNANCE_RECIPIENT_KINDS)[number];
+const PHASE2_AUDIT_EVENT_NAME_SET: ReadonlySet<string> = new Set(
+  PHASE2_AUDIT_EVENT_NAMES,
+);
 
-export const SANDBOX_GOVERNANCE_NOTIFICATION_TRIGGERS = [
-  "experiment_published",
-  "experiment_suspended",
-  "experiment_authorizations_resumed",
-  "jurisdiction_profile_published",
-  "approval_document_uploaded",
-  "approval_document_superseded",
-  "compliance_snapshot_generated",
-] as const;
-export type SandboxGovernanceNotificationTrigger =
-  (typeof SANDBOX_GOVERNANCE_NOTIFICATION_TRIGGERS)[number];
-
-export interface SandboxGovernanceNotificationRecipient {
-  recipientId: string;
-  kind: SandboxGovernanceRecipientKind;
-  target: string;
-  channels: SandboxGovernanceNotificationChannel[];
+export function isPhase2AuditEventName(
+  value: string,
+): value is Phase2AuditEventName {
+  return PHASE2_AUDIT_EVENT_NAME_SET.has(value);
 }
 
-export interface SandboxGovernanceNotificationMatrixEntry {
-  trigger: SandboxGovernanceNotificationTrigger;
-  recipients: SandboxGovernanceNotificationRecipient[];
-  escalationWithinMinutes: number | null;
-  retentionDays: number | null;
+export function getPhase2AuditDomain(
+  eventName: string,
+): Phase2AuditDomain | null {
+  if (!isPhase2AuditEventName(eventName)) {
+    return null;
+  }
+  const prefix = eventName.slice(0, eventName.indexOf("."));
+  return (PHASE2_AUDIT_DOMAINS as readonly string[]).includes(prefix)
+    ? (prefix as Phase2AuditDomain)
+    : null;
 }
 
-export interface SandboxGovernancePolicyVersionRefs {
-  routePolicyVersion: string | null;
-  schedulePolicyVersion: string | null;
-  enrollmentPolicyVersion: string | null;
-  capabilityPolicyVersion: string | null;
-  compliancePolicyVersion: string | null;
-}
-
-export const SANDBOX_VERSION_LIFECYCLE_STATUSES = [
-  "draft",
-  "published",
-  "archived",
-] as const;
-export type SandboxVersionLifecycleStatus =
-  (typeof SANDBOX_VERSION_LIFECYCLE_STATUSES)[number];
-
-export const SANDBOX_AUTHORIZATION_STATUSES = [
-  "pending",
-  "active",
-  "suspended",
-] as const;
-export type SandboxAuthorizationStatus =
-  (typeof SANDBOX_AUTHORIZATION_STATUSES)[number];
-
-export interface SandboxExperimentProgramVersionRecord {
-  experimentId: string;
-  versionId: string;
-  versionNo: number;
-  programCode: string;
-  name: string;
-  description: string | null;
-  jurisdictionIds: string[];
-  requiredCapabilities: ProviderCapabilityRequirement[];
-  notificationMatrix: SandboxGovernanceNotificationMatrixEntry[];
-  policyVersions: SandboxGovernancePolicyVersionRefs;
-  lifecycleStatus: SandboxVersionLifecycleStatus;
-  authorizationStatus: SandboxAuthorizationStatus;
-  effectiveFrom: string;
-  effectiveUntil: string | null;
-  publishedAt: string | null;
-  publishedBy: string | null;
-  rollbackFromVersionId: string | null;
-  createdAt: string;
-  createdBy: string | null;
-  updatedAt: string;
-  updatedBy: string | null;
-}
-
-export interface SandboxExperimentProgramRecord {
-  experimentId: string;
-  programCode: string;
-  currentVersionId: string | null;
-  versions: SandboxExperimentProgramVersionRecord[];
-  archivedAt: string | null;
-}
-
-export interface CreateSandboxExperimentProgramCommand {
-  programCode: string;
-  name: string;
-  description?: string | null;
-  jurisdictionIds?: string[];
-  requiredCapabilities?: ProviderCapabilityRequirement[];
-  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
-  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-}
-
-export interface UpdateSandboxExperimentProgramCommand {
-  name?: string;
-  description?: string | null;
-  jurisdictionIds?: string[];
-  requiredCapabilities?: ProviderCapabilityRequirement[];
-  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
-  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-}
-
-export interface PublishSandboxGovernanceVersionCommand {
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-}
-
-export interface RollbackSandboxGovernanceVersionCommand {
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-  publish?: boolean;
-}
-
-export interface SuspendSandboxExperimentAuthorizationsCommand {
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-  reason?: string | null;
-}
-
-export interface ResumeSandboxExperimentAuthorizationsCommand {
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-  reason?: string | null;
-}
-
-export interface SandboxJurisdictionProfileVersionRecord {
-  jurisdictionId: string;
-  versionId: string;
-  versionNo: number;
-  jurisdictionCode: string;
-  name: string;
-  regulatorName: string;
-  approvalLeadTimeDays: number | null;
-  retentionDays: number | null;
-  notificationMatrix: SandboxGovernanceNotificationMatrixEntry[];
-  policyVersions: SandboxGovernancePolicyVersionRefs;
-  lifecycleStatus: SandboxVersionLifecycleStatus;
-  effectiveFrom: string;
-  effectiveUntil: string | null;
-  publishedAt: string | null;
-  publishedBy: string | null;
-  rollbackFromVersionId: string | null;
-  createdAt: string;
-  createdBy: string | null;
-  updatedAt: string;
-  updatedBy: string | null;
-}
-
-export interface SandboxJurisdictionProfileRecord {
-  jurisdictionId: string;
-  jurisdictionCode: string;
-  currentVersionId: string | null;
-  versions: SandboxJurisdictionProfileVersionRecord[];
-  archivedAt: string | null;
-}
-
-export interface CreateSandboxJurisdictionProfileCommand {
-  jurisdictionCode: string;
-  name: string;
-  regulatorName: string;
-  approvalLeadTimeDays?: number | null;
-  retentionDays?: number | null;
-  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
-  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-}
-
-export interface UpdateSandboxJurisdictionProfileCommand {
-  name?: string;
-  regulatorName?: string;
-  approvalLeadTimeDays?: number | null;
-  retentionDays?: number | null;
-  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
-  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-}
-
-export const SANDBOX_APPROVAL_DOCUMENT_TYPES = [
-  "permit",
-  "waiver",
-  "insurance_certificate",
-  "operating_plan",
-  "safety_case",
-  "other",
-] as const;
-export type SandboxApprovalDocumentType =
-  (typeof SANDBOX_APPROVAL_DOCUMENT_TYPES)[number];
-
-export interface ApprovalDocumentVersionRecord {
-  documentId: string;
-  versionId: string;
-  versionNo: number;
-  experimentId: string;
-  jurisdictionId: string;
-  documentType: SandboxApprovalDocumentType;
-  title: string;
-  summary: string | null;
-  artifactFileName: string;
-  artifactContentType: string;
-  artifactByteSize: number;
-  artifactSha256: string;
-  artifactUploadedAt: string;
-  artifactUploadedBy: string | null;
-  supersedesVersionId: string | null;
-  lifecycleStatus: SandboxVersionLifecycleStatus;
-  effectiveFrom: string;
-  effectiveUntil: string | null;
-  publishedAt: string | null;
-  publishedBy: string | null;
-  rollbackFromVersionId: string | null;
-  createdAt: string;
-  createdBy: string | null;
-  updatedAt: string;
-  updatedBy: string | null;
-}
-
-export interface ApprovalDocumentRecord {
-  documentId: string;
-  experimentId: string;
-  jurisdictionId: string;
-  documentType: SandboxApprovalDocumentType;
-  title: string;
-  currentVersionId: string | null;
-  versions: ApprovalDocumentVersionRecord[];
-  archivedAt: string | null;
-}
-
-export interface CreateApprovalDocumentVersionCommand {
-  experimentId: string;
-  jurisdictionId: string;
-  documentType: SandboxApprovalDocumentType;
-  title: string;
-  summary?: string | null;
-  artifactFileName: string;
-  artifactContentType: string;
-  artifactContentBase64: string;
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-}
-
-export interface UpdateApprovalDocumentVersionCommand {
-  title?: string;
-  summary?: string | null;
-  artifactFileName: string;
-  artifactContentType: string;
-  artifactContentBase64: string;
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  actorId?: string | null;
-}
-
-export interface SandboxComplianceSnapshotRecord {
-  snapshotId: string;
-  experimentId: string;
-  experimentVersionId: string | null;
-  asOf: string;
-  generatedAt: string;
-  generatedBy: string | null;
-  snapshotHashSha256: string;
-  policyVersions: SandboxGovernancePolicyVersionRefs;
-  authorizationStatus: SandboxAuthorizationStatus | null;
-  requiredCapabilities: ProviderCapabilityRequirement[];
-  jurisdictions: SandboxJurisdictionProfileVersionRecord[];
-  approvalDocuments: ApprovalDocumentVersionRecord[];
-  operatingAreas: ApprovedOperatingAreaRecord[];
-  routes: ApprovedRouteRecord[];
-  vehicleEnrollments: VehicleEnrollmentRecord[];
-}
-
-export interface GenerateSandboxComplianceSnapshotCommand {
-  asOf?: string | null;
-  actorId?: string | null;
+// Query filter applied on top of the shared audit query so callers can narrow
+// to Phase 2 events (optionally a single domain) while still using the one
+// canonical audit listing endpoint.
+export interface AuditLogQueryFilter {
+  phase2Only?: boolean;
+  phase2Domain?: Phase2AuditDomain;
 }
 
 // ---------------------------------------------------------------------------
-// §3.9 Error-code enum
+// §3.10 Error-code enum
 // ---------------------------------------------------------------------------
 
 // Stable, machine-checkable error codes returned by Phase 2 endpoints. Wired
@@ -1858,9 +1691,5 @@ export const PHASE2_ERROR_CODES = [
   "PHASE2_ACCIDENT_CASE_NOT_FOUND",
   "PHASE2_REGULATORY_REPORT_INVALID_PERIOD",
   "PHASE2_REGULATORY_REPORT_ALREADY_SUBMITTED",
-  "PHASE2_SANDBOX_GOVERNANCE_NOT_FOUND",
-  "PHASE2_SANDBOX_GOVERNANCE_CONFLICT",
-  "PHASE2_SANDBOX_GOVERNANCE_INVALID_EFFECTIVE_RANGE",
-  "PHASE2_SANDBOX_GOVERNANCE_INVALID_VERSION_STATE",
 ] as const;
 export type Phase2ErrorCode = (typeof PHASE2_ERROR_CODES)[number];
