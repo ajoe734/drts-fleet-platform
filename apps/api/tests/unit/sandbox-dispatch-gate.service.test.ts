@@ -63,6 +63,7 @@ describe("SandboxDispatchGateService", () => {
     });
 
     expect(decision.decision).toBe("block");
+    expect(decision.fallbackRequired).toBe(true);
     expect(decision.hardReasonCodes).toContain("RECORDER_UNHEALTHY");
   });
 
@@ -114,6 +115,7 @@ describe("SandboxDispatchGateService", () => {
     });
 
     expect(decision.decision).toBe("allow");
+    expect(decision.fallbackRequired).toBe(false);
     expect(decision.hardReasonCodes).toEqual([]);
   });
 
