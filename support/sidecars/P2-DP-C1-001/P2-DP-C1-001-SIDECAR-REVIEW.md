@@ -25,14 +25,25 @@ remain. It gives one place to audit:
 - the two reopen findings and exactly how each was addressed in the fix commit
 - the one open verification caveat the parent itself recorded
 
-The most important reviewer caveat is that the deliverable is **two commits** on
-`origin/codex/p2-dp-c1-001` (`fe150898b` then `71a784abd`), the branch is now
-**3 commits behind `origin/dev`** (branched at `8f95cde3a`, dev now at
-`99836f121`), and the parent recorded that `pnpm --filter @drts/api typecheck`
-still fails on a **pre-existing** `regulatory-reporting.controller` `actorType`
-mismatch that is unrelated to this diff. The `review_approved` decision did not
-land this commit on `dev`, so the rebase and the `@drts/api` typecheck caveat
-remain open as **finalize/integration** concerns. All are explained in §5 and §6.
+The most important reviewer caveat is about the deliverable's branch shape, which
+the parent owner has advanced for closeout since the approval. The **approved**
+commit remains `71a784abd` (the tip `Codex2` approved at `2026-06-26T18:32:14Z`),
+but the parent owner `Codex` has since pushed an **integration merge commit**
+`94e6721c7` ("P2-DP-C1-001: integrate origin/dev for closeout") that merges
+`origin/dev` tip `99836f121` into the branch. As a result the branch is now
+**0 commits behind / 3 ahead of `origin/dev`** (merge-base is now the dev tip
+`99836f121`, not the old branch point `8f95cde3a`), so the earlier "3 behind dev,
+needs rebase" caveat is **resolved** — but it was resolved with a **merge commit**,
+which `dev` branch protection forbids on a direct push, so landing still requires a
+**squash PR** (a squash collapses the merge commit; a merge-preserving land would be
+rejected). The parent also recorded that `pnpm --filter @drts/api typecheck` failed
+on a **pre-existing** `regulatory-reporting.controller` `actorType` mismatch
+unrelated to this diff; the integration merge now brings in dev's P2-REG-001 (#960)
+regulatory changes and the new closeout commit re-runs the regulatory unit/integration
+tests (see §3.2/§6), so the owner should re-confirm a full `@drts/api` typecheck on
+the merged tree before merge. The `review_approved` decision did not land any commit
+on `dev`, so the squash-PR land and the `@drts/api` typecheck re-confirmation remain
+open as **finalize/integration** concerns. All are explained in §3, §5, and §6.
 
 ---
 
@@ -125,12 +136,23 @@ documented throughout this packet — the approval introduced no new commit.
 
 ### 2.4 Sidecar lifecycle
 
+This sidecar's own authoritative lifecycle in `ai-activity-log.jsonl` (kept
+current through this refresh so the artifact reflects its own latest transition):
+
 | Event              | Timestamp UTC          | Agent          | Note                                                                            |
 | ------------------ | ---------------------- | -------------- | ------------------------------------------------------------------------------- |
 | `assign`           | `2026-06-26T18:29:17Z` | `Codex`        | Auto-created review-packet sidecar; owner `Claude`, reviewer `Codex`.           |
 | `sidecar_created`  | `2026-06-26T18:29:17Z` | `Orchestrator` | Auto-created while utilization remained below threshold.                        |
 | `start`            | `2026-06-26T18:30:07Z` | `Claude`       | Began building this packet against deliverable `71a784abd`.                     |
-| `progress`         | `2026-06-26T18:36:35Z` | `Claude`       | Refreshed packet after parent reached `review_approved`; dev advanced to `99836f121` (branch now 3 behind). |
+| `handoff`          | `2026-06-26T18:33:27Z` | `Claude`       | First sidecar handoff to `Codex` at packet commit `2b4e7b29b`.                  |
+| `reopen`           | `2026-06-26T18:35:32Z` | `Codex`        | Stale: parent reached `review_approved` `18:32:14Z` before this `18:33:27Z` handoff; packet still showed `review`. |
+| `progress`         | `2026-06-26T18:36:35Z` | `Claude`       | Refreshed packet after parent reached `review_approved`; dev advanced to `99836f121` (branch then 3 behind).      |
+| `handoff`          | `2026-06-26T18:39:29Z` | `Claude`       | Second sidecar handoff to `Codex` at packet commit `2937404ad` (refreshed to parent `review_approved`).           |
+| `reopen`           | `2026-06-26T18:41:46Z` | `Codex`        | §2.4 stopped at the `18:36:35Z` progress and omitted the `18:39:29Z` handoff; §9 cited `rg`, unavailable in some worker envs. |
+| `progress`         | `2026-06-26` (this refresh) | `Claude`  | Added full lifecycle incl. `18:39:29Z` handoff + `18:41:46Z` reopen; switched §9 to portable `grep`; folded in parent integration merge `94e6721c7` (branch now 0 behind / 3 ahead of `dev`). |
+
+The next sidecar `handoff` will return the packet to reviewer `Codex` and is the
+transition that follows this `progress` row.
 
 ---
 
@@ -143,11 +165,31 @@ documented throughout this packet — the approval introduced no new commit.
 | Commit      | Subject                                                              | Role                        |
 | ----------- | ------------------------------------------------------------------- | --------------------------- |
 | `fe150898b` | `feat(P2-DP-C1-001): add platform-admin compliance routes`          | first handoff (superseded)  |
-| `71a784abd` | `P2-DP-C1-001: align sandbox compliance routes with design handoff` | **current tip / reopen fix** |
+| `71a784abd` | `P2-DP-C1-001: align sandbox compliance routes with design handoff` | **approved deliverable** (reopen fix; `Codex2` approved this tip) |
+| `94e6721c7` | `P2-DP-C1-001: integrate origin/dev for closeout`                   | **current branch tip** — integration merge commit (parents `71a784abd` + dev tip `99836f121`), added by owner `Codex` after approval |
+
+The approval at `2026-06-26T18:32:14Z` was recorded against `71a784abd`. The owner
+has since added the integration merge `94e6721c7` on top for closeout, so the
+**branch tip** and the **approved commit** now differ: review acceptance (§4–§6)
+stands on `71a784abd`; the integration shape (§3.3) is `94e6721c7`.
 
 ### 3.2 Trailers
 
-`git show --no-patch 71a784abd` (current tip) carries:
+`git show --no-patch 94e6721c7` (current branch tip, integration merge) carries:
+
+- `LLM-Agent: Codex`
+- `Task-ID: P2-DP-C1-001`
+- `Reviewer: Codex2`
+- `Verification: CI=true pnpm install --frozen-lockfile`
+- `Verification: pnpm --dir apps/api exec vitest run tests/integration/e2e-p2-sandbox-compliance-controls.test.ts tests/unit/auth-bootstrap.test.ts tests/unit/regulatory-reporting.service.test.ts tests/integration/int-reg-001-regulatory-notification-lifecycle.test.ts --config ../../vitest.config.ts`
+- `Verification: pnpm --filter @drts/platform-admin-web typecheck`
+
+The integration merge's verification set now also exercises the regulatory unit
+(`regulatory-reporting.service.test.ts`) and integration
+(`int-reg-001-regulatory-notification-lifecycle.test.ts`) suites that arrived with
+dev's P2-REG-001 (#960), which is what the merge folds in.
+
+`git show --no-patch 71a784abd` (approved deliverable) carries:
 
 - `LLM-Agent: codex`
 - `Task-ID: P2-DP-C1-001`
@@ -157,33 +199,50 @@ documented throughout this packet — the approval introduced no new commit.
 - `Verification: pnpm --filter @drts/platform-admin-web typecheck`
 
 `git show --no-patch fe150898b` (first handoff) carries `LLM-Agent: Codex`,
-`Task-ID: P2-DP-C1-001`, `Reviewer: Codex2`. Both commits carry the required
-`Task-ID` and `Reviewer` trailers; the `LLM-Agent` value is `codex`/`Codex`
-(case differs between the two commits — note for any case-sensitive trailer
-linting at integration time).
+`Task-ID: P2-DP-C1-001`, `Reviewer: Codex2`. All three commits carry the required
+`Task-ID` and `Reviewer` trailers; the `LLM-Agent` value is `codex` on
+`71a784abd` but `Codex` on `fe150898b` and `94e6721c7` (case differs across the
+commits — note for any case-sensitive trailer linting at integration time, though
+a squash land collapses these into one subject anyway).
 
 ### 3.3 Branch position vs `dev`
 
-- `git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001` = `3  2`
-- the branch base is `8f95cde3a`; `origin/dev` has since advanced to `99836f121`
-  (P2-REG-001 #960, P2-UI-ROC-001 #958, P2-UI-SAFE-001 #957)
-- therefore the branch is now **3 commits behind `dev`** (one more than at the
-  prior packet snapshot, when dev was at `1892c1c38`) and will need a rebase
-  before any PR/merge. The parent already cleared `review`, so this is now a
-  **finalize/integration** concern for parent owner `Codex`, not a review
-  blocker — but nobody should assume the branch merges cleanly without a rebase.
-- `git branch -r --contains 71a784abd` resolves only to `origin/codex/p2-dp-c1-001`;
-  the commit is **not** yet on `origin/dev`. The `review_approved` decision did
-  not change this — approval is a status transition, not a merge.
+The branch was **3 behind / 2 ahead** at the prior snapshot; the owner's
+integration merge `94e6721c7` has since re-based the comparison onto the current
+dev tip, so the position has flipped:
+
+- `git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001` =
+  `0  3` (was `3  2`) — the branch is now **0 commits behind / 3 ahead** of `dev`.
+- `git merge-base origin/dev origin/codex/p2-dp-c1-001` = `99836f121`, i.e. the
+  current `origin/dev` tip itself (P2-REG-001 #960, P2-UI-ROC-001 #958,
+  P2-UI-SAFE-001 #957). The old branch base `8f95cde3a` is no longer the
+  merge-base because dev's tip is now reachable through the integration merge.
+- so the earlier "needs a rebase before PR/merge" caveat is **resolved** — the
+  branch already contains current dev. But it was resolved with a **merge commit**
+  (`94e6721c7`, two parents), and `dev` branch protection forbids merge commits on
+  a direct/merge-preserving land, so the land path is a **squash PR** (the squash
+  collapses the merge and the three commits into one trailer-clean subject). This
+  is a **finalize/integration** concern for parent owner `Codex`, not a review
+  blocker.
+- `git branch -r --contains 71a784abd` (and `94e6721c7`) resolves only to
+  `origin/codex/p2-dp-c1-001`; neither commit is yet on `origin/dev`. The
+  `review_approved` decision did not change this — approval is a status
+  transition, not a merge.
 
 ### 3.4 Diff size
 
-`git diff --stat origin/dev...origin/codex/p2-dp-c1-001`:
-**33 files changed, 3076 insertions(+), 142 deletions(-)**, spanning
+`git diff --stat origin/dev...origin/codex/p2-dp-c1-001` (now from merge-base
+`99836f121`, identical to the two-dot `origin/dev..` delta since the branch
+contains dev):
+**46 files changed, 3268 insertions(+), 279 deletions(-)**, spanning
 `apps/api` (compliance/investigation/evidence/regulatory modules + tests),
 `apps/platform-admin-web` (route group, shell, route-context, pending-design
 screen, client, translations), `packages/contracts`, `packages/api-client`, and
-one `docs/05-ui` screen-requirements note.
+one `docs/05-ui` screen-requirements note. The count grew from the prior
+33 files / +3076 / -142 because the comparison base advanced from `8f95cde3a` to
+the current dev tip `99836f121`: the net C1-001 contribution is now measured
+against dev's newer state (which includes #957/#958/#960), so files this slice
+and recent dev both touch surface as additional delta.
 
 ---
 
@@ -337,20 +396,27 @@ The parent's recorded verification set (commit trailers + `handoff` note):
 - `pnpm --filter @drts/platform-admin-web typecheck` → **PASS**
 - targeted `eslint` on touched files (first handoff)
 
-Open caveat the parent itself flagged:
+Open caveat the parent itself flagged (at approval time, on `71a784abd`):
 
-- `pnpm --filter @drts/api typecheck` **still fails** on a pre-existing
+- `pnpm --filter @drts/api typecheck` **failed** on a pre-existing
   `regulatory-reporting.controller` `actorType` mismatch that the parent states
   is **unrelated to this diff**. Parent reviewer `Codex2` approved without
   treating this as a blocker (the approval cited the scoped integration/unit and
-  platform-admin-web typecheck PASS only). It therefore remains an open
-  **finalize/integration** item: parent owner `Codex` and the integrator should
-  confirm whether this pre-existing failure is in-scope here or tracked
-  elsewhere before any PR/merge to `dev`, since a full `@drts/api` typecheck is
-  red on this branch and CI may run it.
+  platform-admin-web typecheck PASS only).
+- Update since approval: the owner's integration merge `94e6721c7` folds in dev's
+  P2-REG-001 (#960), which is the slice that owns `regulatory-reporting`, and its
+  verification trailers now include the regulatory unit/integration suites as
+  PASS (§3.2). The pre-existing `actorType` mismatch plausibly belongs to that
+  REG-001 surface and may now be reconciled on the merged tree — but this sidecar
+  has **not** re-run `pnpm --filter @drts/api typecheck` on `94e6721c7`, so the
+  caveat is **not** verified-closed here. It remains an open
+  **finalize/integration** item: parent owner `Codex` should re-run the full
+  `@drts/api` typecheck on the merged tip before the squash PR, since CI may run
+  it and the pre-merge result was red.
 
-This sidecar did **not** rerun these commands; it records the parent's existing
-evidence and commit metadata.
+This sidecar did **not** rerun any of these commands; it records the parent's
+existing evidence and commit metadata, and the trailers carried by the new
+integration merge.
 
 ---
 
@@ -362,10 +428,13 @@ Reviewer `Codex` (sidecar reviewer) should verify this **packet** is faithful:
   owner `Codex`, reviewer `Codex2`, last_update `2026-06-26T18:32:14Z`
 - `ai-activity-log.jsonl` records the parent `review_approved` event at
   `2026-06-26T18:32:14Z` by `Codex2` against `71a784abd`
-- the deliverable tip is `71a784abd` on `origin/codex/p2-dp-c1-001`, with
-  `fe150898b` as the superseded first handoff
-- the branch is 3 behind `origin/dev` (dev tip `99836f121`) and `71a784abd` is
-  not on `origin/dev`
+- the **approved** deliverable is `71a784abd`, with `fe150898b` as the superseded
+  first handoff; the current **branch tip** is the owner's integration merge
+  `94e6721c7` (parents `71a784abd` + dev tip `99836f121`), added after approval
+- the branch is **0 behind / 3 ahead** of `origin/dev` (`rev-list --left-right` =
+  `0  3`, merge-base = dev tip `99836f121`); neither `71a784abd` nor `94e6721c7`
+  is on `origin/dev`; landing needs a **squash PR** because the branch carries a
+  merge commit `dev` forbids
 - the 12 sandbox scopes in §4.2 match `auth.constants.ts`
 - the four-eyes rejections in §4.3 exist in `platform-admin-compliance.service.ts`
 - ROC only emits a `CrossAppResourceLink` and has no hold-release path (§4.4)
@@ -377,13 +446,15 @@ Suggested audit commands:
 
 ```bash
 scripts/ai-status.sh show P2-DP-C1-001
-git log --oneline origin/dev..origin/codex/p2-dp-c1-001
-git show --no-patch 71a784abd
-git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001
+git log --oneline origin/dev..origin/codex/p2-dp-c1-001   # fe150898b, 71a784abd, 94e6721c7
+git show --no-patch 71a784abd                              # approved deliverable
+git rev-list --parents -n 1 94e6721c7                      # merge: parents 71a784abd + 99836f121
+git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001   # 0  3
+git merge-base origin/dev origin/codex/p2-dp-c1-001        # 99836f121 (= dev tip)
 git show 71a784abd:apps/api/src/common/auth/auth.constants.ts | grep -nE 'sandbox\.'
 git show 71a784abd:apps/api/src/modules/platform-admin/platform-admin-compliance.service.ts | grep -nE 'cannot approve'
 git show 71a784abd:apps/api/src/modules/roc-operations/roc-operations.service.ts | grep -nE 'CrossAppResourceLink|platform-admin/investigations'
-git diff --stat origin/dev...origin/codex/p2-dp-c1-001
+git diff --stat origin/dev...origin/codex/p2-dp-c1-001     # 46 files, +3268, -279
 ```
 
 ---
@@ -407,9 +478,9 @@ artifact under `support/sidecars/P2-DP-C1-001/`, so closeout carries
 `INTEGRATION_STATUS=not_applicable` (no canonical truth, no PR/CI/merge).
 The sidecar reviewer should judge whether this packet matches machine truth for
 the parent's current `review_approved` state, and whether the reopen-fix
-mapping, the remaining rebase (branch 3 behind `dev`), and the `@drts/api`
-typecheck caveat are sufficiently explicit for parent owner `Codex` to act on
-during finalize. This packet does not itself approve, block, or finalize the
+mapping, the integration shape (branch now 0 behind / 3 ahead via merge commit
+`94e6721c7`, squash-PR land required), and the `@drts/api` typecheck caveat are
+sufficiently explicit for parent owner `Codex` to act on during finalize. This packet does not itself approve, block, or finalize the
 parent task `P2-DP-C1-001`; the approval decision was made by parent reviewer
 `Codex2`, and the `done`/integration steps stay with parent owner `Codex`.
 
@@ -417,19 +488,22 @@ parent task `P2-DP-C1-001`; the approval decision was made by parent reviewer
 
 ## 9. Evidence Commands For This Packet
 
-Commands used to build this packet:
+Commands used to build this packet. These use only `git`, `grep`, `python3`, and
+`scripts/ai-status.sh` so they reproduce in any worker environment; an earlier
+refresh cited `rg`, which is not installed in every worker (`rg: command not
+found` in at least one), so the recipe below uses portable `grep` instead.
 
 - `scripts/ai-status.sh show P2-DP-C1-001` (now `review_approved`, last_update `2026-06-26T18:32:14Z`)
-- `rg -n '"task_id": "P2-DP-C1-001"' ai-activity-log.jsonl | tail -25` (confirms the `2026-06-26T18:32:14Z` `Codex2` `review_approved` event against `71a784abd`)
-- `git log --oneline -3 origin/dev` (dev tip `99836f121`, #960)
-- `git merge-base origin/dev origin/codex/p2-dp-c1-001` (still `8f95cde3a`, so the §3.4/§4 diff stat is unchanged at 33 files / +3076 / -142)
-- `rg -n '"task_id": "P2-DP-C1-001-SIDECAR-REVIEW"' ai-activity-log.jsonl | tail -10`
-- `git log --oneline origin/codex/p2-dp-c1-001 -5`
-- `git show --format='%H%n%s%n%n%b' --no-patch 71a784abd`
-- `git show --format='%H%n%s%n%n%b' --no-patch fe150898b`
-- `git branch -r --contains 71a784abd`
-- `git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001`
-- `git diff --stat origin/dev...origin/codex/p2-dp-c1-001`
+- `grep '"task_id": "P2-DP-C1-001"' ai-activity-log.jsonl | grep review_approved` (confirms the `2026-06-26T18:32:14Z` `Codex2` `review_approved` event against `71a784abd`)
+- `grep '"task_id": "P2-DP-C1-001-SIDECAR-REVIEW"' ai-activity-log.jsonl | tail` (sidecar lifecycle for §2.4, including the `18:39:29Z` handoff and `18:41:46Z` reopen)
+- `git fetch origin` then `git log --oneline -1 origin/dev` (dev tip `99836f121`, #960)
+- `git merge-base origin/dev origin/codex/p2-dp-c1-001` (now `99836f121` = dev tip, because the owner's integration merge `94e6721c7` pulled dev in; the §3.4 diff stat moved to 46 files / +3268 / -279)
+- `git log --oneline origin/dev..origin/codex/p2-dp-c1-001` (three commits: `fe150898b`, `71a784abd`, `94e6721c7`)
+- `git rev-list --parents -n 1 94e6721c7` (confirms `94e6721c7` is a merge: parents `71a784abd` + `99836f121`)
+- `git show --format='%H%n%s%n%n%b' --no-patch 94e6721c7` / `71a784abd` / `fe150898b` (trailers in §3.2)
+- `git branch -r --contains 71a784abd` and `… 94e6721c7` (both only on `origin/codex/p2-dp-c1-001`, not `origin/dev`)
+- `git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001` (`0  3`)
+- `git diff --stat origin/dev...origin/codex/p2-dp-c1-001` (46 files / +3268 / -279)
 - targeted `git show 71a784abd:<path> | grep -nE …` lookups on
   `auth.constants.ts`, `platform-admin-compliance.controller.ts`,
   `platform-admin-compliance.service.ts`, `roc-operations.service.ts`,
