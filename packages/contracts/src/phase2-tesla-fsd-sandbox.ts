@@ -886,6 +886,127 @@ export interface RocIntervention {
   source: Phase2SourceMetadata;
 }
 
+export const TESLA_AUTONOMY_TRANSITION_TYPES = [
+  "fsd_disengagement",
+  "manual_takeover",
+  "autonomy_resumed",
+] as const;
+export type TeslaAutonomyTransitionType =
+  (typeof TESLA_AUTONOMY_TRANSITION_TYPES)[number];
+
+export interface TeslaAutonomyTransitionEvent {
+  eventId: string;
+  takeoverCorrelationId: string | null;
+  autonomySessionId: string | null;
+  vehicleId: string;
+  orderId: string | null;
+  transitionType: TeslaAutonomyTransitionType;
+  occurredAt: string;
+  source: Phase2SourceMetadata;
+}
+
+export interface RocTakeoverResponseRecord {
+  responseId: string;
+  takeoverCorrelationId: string | null;
+  autonomySessionId: string | null;
+  triggeredByTeslaEventId: string | null;
+  rocOperatorId: string;
+  vehicleId: string;
+  orderId: string | null;
+  responseType: RocInterventionType;
+  requestedAt: string;
+  respondedAt: string | null;
+  resolvedAt: string | null;
+  outcomeNote: string | null;
+  source: Phase2SourceMetadata;
+}
+
+export interface CreateManualTakeoverCorrelationCommand {
+  manualLinkId: string;
+  vehicleId: string;
+  takeoverReportId: string;
+  teslaEventId: string | null;
+  rocResponseId: string | null;
+  linkedBy: string;
+  linkedAt: string;
+  note: string | null;
+}
+
+export interface ManualTakeoverCorrelationLink {
+  manualLinkId: string;
+  vehicleId: string;
+  takeoverReportId: string;
+  teslaEventId: string | null;
+  rocResponseId: string | null;
+  linkedBy: string;
+  linkedAt: string;
+  note: string | null;
+}
+
+export const TAKEOVER_CORRELATION_MATCH_MODES = [
+  "takeover_correlation_id",
+  "vehicle_time_trip",
+  "manual",
+] as const;
+export type TakeoverCorrelationMatchMode =
+  (typeof TAKEOVER_CORRELATION_MATCH_MODES)[number];
+
+export const TAKEOVER_DISCREPANCY_TYPES = [
+  "timestamp_mismatch",
+  "trip_mismatch",
+  "correlation_id_mismatch",
+] as const;
+export type TakeoverDiscrepancyType =
+  (typeof TAKEOVER_DISCREPANCY_TYPES)[number];
+
+export interface EvidenceDiscrepancyCase {
+  discrepancyCaseId: string;
+  correlatedTakeoverCaseId: string;
+  vehicleId: string;
+  discrepancyTypes: TakeoverDiscrepancyType[];
+  openedAt: string;
+  summary: string;
+  sourceFacts: {
+    teslaOccurredAt: string | null;
+    safetyOccurredAt: string | null;
+    rocRequestedAt: string | null;
+    rocRespondedAt: string | null;
+    teslaOrderId: string | null;
+    safetyOrderId: string | null;
+    rocOrderId: string | null;
+    teslaTakeoverCorrelationId: string | null;
+    safetyTakeoverCorrelationId: string | null;
+    rocTakeoverCorrelationId: string | null;
+  };
+}
+
+export interface CorrelatedTakeoverCase {
+  correlatedTakeoverCaseId: string;
+  vehicleId: string;
+  orderId: string | null;
+  takeoverCorrelationId: string | null;
+  correlationPriority: 1 | 2 | 3;
+  matchedBy: TakeoverCorrelationMatchMode;
+  sourceRecordIds: {
+    teslaEventId: string | null;
+    safetyOperatorTakeoverReportId: string;
+    rocTakeoverResponseId: string | null;
+  };
+  sourceTimestamps: {
+    teslaOccurredAt: string | null;
+    safetyOccurredAt: string;
+    safetyServerReceivedAt: string;
+    rocRequestedAt: string | null;
+    rocRespondedAt: string | null;
+    rocResolvedAt: string | null;
+  };
+  teslaEvent: TeslaAutonomyTransitionEvent | null;
+  safetyOperatorTakeoverReport: SafetyOperatorTakeoverReport;
+  rocTakeoverResponse: RocTakeoverResponseRecord | null;
+  manualCorrelation: ManualTakeoverCorrelationLink | null;
+  discrepancyCaseIds: string[];
+}
+
 // ---------------------------------------------------------------------------
 // §3.6 Vehicle evidence custody
 // ---------------------------------------------------------------------------
