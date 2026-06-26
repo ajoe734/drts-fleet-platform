@@ -140,15 +140,22 @@ export class RocOperationsService {
           (response) => response.responseId === manualLink.rocResponseId,
         ) ?? null;
     } else {
-      teslaEvent = this.findPriorityOneTeslaEvent(report);
-      rocResponse = this.findPriorityOneRocResponse(report, teslaEvent);
+      const priorityOneTeslaEvent = this.findPriorityOneTeslaEvent(report);
+      const priorityOneRocResponse = this.findPriorityOneRocResponse(
+        report,
+        priorityOneTeslaEvent,
+      );
+      const priorityTwoTeslaEvent =
+        priorityOneTeslaEvent ?? this.findPriorityTwoTeslaEvent(report);
+      const priorityTwoRocResponse =
+        priorityOneRocResponse ?? this.findPriorityTwoRocResponse(report);
 
-      if (teslaEvent || rocResponse) {
+      teslaEvent = priorityTwoTeslaEvent;
+      rocResponse = priorityTwoRocResponse;
+
+      if (priorityOneTeslaEvent || priorityOneRocResponse) {
         correlationPriority = 1;
         matchedBy = "takeover_correlation_id";
-      } else {
-        teslaEvent = this.findPriorityTwoTeslaEvent(report);
-        rocResponse = this.findPriorityTwoRocResponse(report);
       }
     }
 
