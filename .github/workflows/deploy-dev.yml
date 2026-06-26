@@ -548,8 +548,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_deployer_service_account || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_PROVIDER || needs.prepare.outputs.waji_wif_provider) || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_SERVICE_ACCOUNT || needs.prepare.outputs.waji_deployer_service_account) || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
           project_id: ${{ needs.prepare.outputs.project_id }}
 
       - name: Set up Cloud SDK
@@ -708,8 +708,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_deployer_service_account || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_PROVIDER || needs.prepare.outputs.waji_wif_provider) || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_SERVICE_ACCOUNT || needs.prepare.outputs.waji_deployer_service_account) || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
           project_id: ${{ needs.prepare.outputs.project_id }}
 
       - name: Set up Cloud SDK
@@ -774,8 +774,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_deployer_service_account || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_PROVIDER || needs.prepare.outputs.waji_wif_provider) || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_SERVICE_ACCOUNT || needs.prepare.outputs.waji_deployer_service_account) || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
           project_id: ${{ needs.prepare.outputs.project_id }}
 
       - name: Set up Cloud SDK
@@ -1079,8 +1079,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_wif_provider || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
-          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && needs.prepare.outputs.waji_deployer_service_account || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_PROVIDER || needs.prepare.outputs.waji_wif_provider) || env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ needs.prepare.outputs.target_profile == 'waji' && (env.WAJI_WIF_SERVICE_ACCOUNT || needs.prepare.outputs.waji_deployer_service_account) || env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
           project_id: ${{ needs.prepare.outputs.project_id }}
 
       - name: Set up Cloud SDK
