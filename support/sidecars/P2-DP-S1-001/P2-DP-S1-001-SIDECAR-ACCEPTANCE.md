@@ -5,7 +5,7 @@
 **Current Sidecar Owner:** `Codex`  
 **Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer:** `Codex2` / `Codex`  
-**Last Revised:** `2026-06-26T10:26Z (UTC)`<br>
+**Last Revised:** `2026-06-26T10:29Z (UTC)`<br>
 **Status:** `review_approved` — refreshed support packet was approved by the assigned reviewer; owner closeout is now limited to task-scoped commit/push evidence plus machine-truth `done`.
 
 ---
@@ -182,13 +182,14 @@ AI_NAME=Codex2 python3 scripts/ai_status.py reopen P2-DP-S1-001-SIDECAR-ACCEPTAN
 Owner（`Codex`）在 `review_approved` 後正式 closeout（先完成 task-scoped commit + normal push）：
 
 ```bash
-AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="P2-DP-S1-001-SIDECAR-ACCEPTANCE: finalize approved support packet" PUSH_REMOTE=origin PUSH_BRANCH=codex/p2-dp-s1-001-sidecar-acceptance INTEGRATION_STATUS=branch_pushed python3 scripts/ai_status.py done P2-DP-S1-001-SIDECAR-ACCEPTANCE "Owner finalized the approved support-only acceptance packet, pushed branch evidence, and recorded branch-scoped closeout without changing canonical truth."
+AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="P2-DP-S1-001-SIDECAR-ACCEPTANCE: finalize approved support packet" PUSH_REMOTE=origin PUSH_BRANCH=codex/p2-dp-s1-001-sidecar-acceptance INTEGRATION_STATUS=not_applicable python3 scripts/ai_status.py done P2-DP-S1-001-SIDECAR-ACCEPTANCE "Owner finalized the approved support-only acceptance packet, pushed branch evidence, and recorded support-only closeout without changing canonical truth."
 ```
 
 ---
 
 ## 9) Change Log
 
-- `2026-06-26T10:26Z` — reviewer approval consumed for owner closeout: top-level packet status advanced to `review_approved`, and the formal `done` closeout command was added with explicit branch-pushed metadata requirements.
+- `2026-06-26T10:29Z` — owner closeout command corrected after `scripts/ai-status.sh done` enforcement: support-only sidecars must finalize with `INTEGRATION_STATUS=not_applicable`, not `branch_pushed`.
+- `2026-06-26T10:26Z` — reviewer approval consumed for owner closeout: top-level packet status advanced to `review_approved`, and the formal `done` closeout command was added with explicit support-only integration metadata requirements.
 - `2026-06-26T10:20Z` — refresh after reviewer reopen: updated sections 2/4/5/6/7/8 so the packet matches the latest parent machine truth, replacing stale "open implementation blocker" framing with `4530dc20d` branch evidence plus the current package-resolution verification blocker.
 - `2026-06-26T10:18Z` — 初版 acceptance packet：根據 machine truth、phase2 S1 decision docs、dependency closeout `78e01dcae`、approved review packet `ca75a8fd7`、以及 owner worktree 當前未提交 diff，整理 acceptance checklist、dependency map、reviewer hotspots、與 parent ready-to-review gate。
