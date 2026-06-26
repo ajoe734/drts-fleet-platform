@@ -1,6 +1,9 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { AuditLogRecord } from "@drts/contracts";
+import type {
+  AuditLogRecord,
+  EvidenceAccessLogRecord,
+} from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 import {
@@ -138,6 +141,49 @@ export class AuditLogRepository {
         JSON.stringify(record.oldValuesSummary ?? null),
         JSON.stringify(record.newValuesSummary ?? null),
         record.requestId,
+        record.createdAt,
+      ],
+    );
+  }
+
+  // Evidence-access dual-write: the canonical audit body already lives in
+  // admin.audit_logs (via append); this mirrors the evidence-access projection
+  // into av_evidence.evidence_access_logs, linked 1:1 by audit_id.
+  async appendEvidenceAccessLog(record: EvidenceAccessLogRecord) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    await this.databaseService!.query(
+      `
+        INSERT INTO av_evidence.evidence_access_logs (
+          audit_id,
+          evidence_family,
+          access_action,
+          actor_id,
+          actor_type,
+          tenant_id,
+          resource_type,
+          resource_id,
+          request_id,
+          context,
+          created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11
+        )
+        ON CONFLICT (audit_id) DO NOTHING
+      `,
+      [
+        record.auditId,
+        record.evidenceFamily,
+        record.accessAction,
+        record.actorId,
+        record.actorType,
+        record.tenantId,
+        record.resourceType,
+        record.resourceId,
+        record.requestId,
+        JSON.stringify(record.context ?? null),
         record.createdAt,
       ],
     );

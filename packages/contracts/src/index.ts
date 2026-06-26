@@ -681,6 +681,26 @@ export const EVIDENCE_ACCESS_ACTIONS = [
 ] as const;
 export type EvidenceAccessAction = (typeof EVIDENCE_ACCESS_ACTIONS)[number];
 
+// Dual-write projection of an audit row that represents an evidence-access
+// event. Phase 2 (P2-DP-S4-001) keeps the canonical audit body in the shared
+// Phase 1 append-only audit store and mirrors evidence-access rows into
+// `av_evidence.evidence_access_logs`. The two stores are linked by `auditId`,
+// so there is exactly one emitter and no divergent second audit body.
+export interface EvidenceAccessLogRecord {
+  accessLogId: string;
+  auditId: string;
+  evidenceFamily: EvidenceRetentionFamily;
+  accessAction: EvidenceAccessAction;
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  tenantId: string | null;
+  resourceType: string;
+  resourceId: string | null;
+  requestId: string;
+  context: Record<string, unknown>;
+  createdAt: string;
+}
+
 export const EVIDENCE_ARCHIVE_TIERS = [
   "hot_only",
   "warm_archive",

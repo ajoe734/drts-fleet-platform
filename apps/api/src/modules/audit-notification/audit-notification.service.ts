@@ -3,9 +3,12 @@ import { randomUUID } from "node:crypto";
 import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  AuditLogQueryFilter,
   AuditLogRecord,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
+  EvidenceAccessLogRecord,
+  EvidenceAccessAction,
   EvidenceDeletionExceptionRecord,
   EvidenceDeletionExceptionStatus,
   EvidenceGovernancePrecedence,
@@ -20,9 +23,13 @@ import type {
   ResolveEvidenceDeletionExceptionCommand,
 } from "@drts/contracts";
 import {
+  EVIDENCE_ACCESS_ACTIONS,
   EVIDENCE_DELETION_EXCEPTION_REASON_CODES,
   EVIDENCE_LEGAL_HOLD_REASON_CODES,
   EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS,
+  EVIDENCE_RETENTION_FAMILIES,
+  getPhase2AuditDomain,
+  isPhase2AuditEventName,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -67,6 +74,66 @@ function trimAuditLogs(auditLogs: AuditLogRecord[]) {
   return auditLogs.length <= MAX_IN_MEMORY_AUDIT_LOGS
     ? auditLogs
     : auditLogs.slice(0, MAX_IN_MEMORY_AUDIT_LOGS);
+}
+
+// Projects an audit row into an evidence-access record when its summary carries
+// the evidence-access shape emitted by buildEvidenceAccessAuditSummary. Returns
+// null for every other audit row so only genuine evidence-access events are
+// mirrored into the av_evidence.evidence_access_logs dual-write store.
+function toEvidenceAccessLogRecord(
+  auditLog: AuditLogRecord,
+): EvidenceAccessLogRecord | null {
+  const summary = auditLog.newValuesSummary;
+  if (!summary) {
+    return null;
+  }
+
+  const evidenceFamily = summary.evidenceFamily;
+  const accessAction = summary.accessAction;
+  if (
+    typeof evidenceFamily !== "string" ||
+    typeof accessAction !== "string" ||
+    !(EVIDENCE_RETENTION_FAMILIES as readonly string[]).includes(
+      evidenceFamily,
+    ) ||
+    !(EVIDENCE_ACCESS_ACTIONS as readonly string[]).includes(accessAction)
+  ) {
+    return null;
+  }
+
+  return {
+    accessLogId: `evacc-${auditLog.auditId}`,
+    auditId: auditLog.auditId,
+    evidenceFamily: evidenceFamily as EvidenceRetentionFamily,
+    accessAction: accessAction as EvidenceAccessAction,
+    actorId: auditLog.actorId,
+    actorType: auditLog.actorType,
+    tenantId: auditLog.tenantId,
+    resourceType: auditLog.resourceType,
+    resourceId: auditLog.resourceId,
+    requestId: auditLog.requestId,
+    context: { ...summary },
+    createdAt: auditLog.createdAt,
+  };
+}
+
+function matchesPhase2Filter(
+  auditLog: AuditLogRecord,
+  filter: AuditLogQueryFilter,
+) {
+  if (!filter.phase2Only && !filter.phase2Domain) {
+    return true;
+  }
+  if (!isPhase2AuditEventName(auditLog.actionName)) {
+    return false;
+  }
+  if (
+    filter.phase2Domain &&
+    getPhase2AuditDomain(auditLog.actionName) !== filter.phase2Domain
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function cloneEvidenceLegalHold(
@@ -308,18 +375,27 @@ export class AuditNotificationService implements OnModuleInit {
     };
   }
 
-  listAuditLogs(identity?: EvidenceAccessIdentity | null, requestId?: string) {
+  listAuditLogs(
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+    filter?: AuditLogQueryFilter,
+  ) {
     const policy = assertEvidenceAccess({
       family: "audit_log",
       identity,
       tenantId: identity?.realm === "tenant" ? identity.tenantId : null,
     });
-    const items =
+    const tenantScopedItems =
       identity?.realm === "tenant" && identity.tenantId
         ? this.auditLogs.filter(
             (auditLog) => auditLog.tenantId === identity.tenantId,
           )
         : this.auditLogs;
+    const items = filter
+      ? tenantScopedItems.filter((auditLog) =>
+          matchesPhase2Filter(auditLog, filter),
+        )
+      : tenantScopedItems;
 
     const accessAudit: Omit<
       AuditLogRecord,
@@ -339,6 +415,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
         itemCount: items.length,
         tenantScoped: identity?.realm === "tenant",
+        ...(filter?.phase2Only ? { phase2Only: true } : {}),
+        ...(filter?.phase2Domain
+          ? { phase2Domain: filter.phase2Domain }
+          : {}),
       }),
     };
     if (requestId) {
@@ -981,7 +1061,17 @@ export class AuditNotificationService implements OnModuleInit {
   ) {
     const auditLog = this.appendAuditLog(input);
     this.applyEvidenceGovernanceLog(auditLog);
+    this.applyEvidenceAccessLog(auditLog);
     return auditLog;
+  }
+
+  // Evidence-access trail derived from the shared Phase 1 audit store. The
+  // canonical body stays in admin.audit_logs; this is the queryable projection
+  // that is also dual-written to av_evidence.evidence_access_logs.
+  listEvidenceAccessLogs(): EvidenceAccessLogRecord[] {
+    return this.auditLogs
+      .map((auditLog) => toEvidenceAccessLogRecord(auditLog))
+      .filter((record): record is EvidenceAccessLogRecord => record !== null);
   }
 
   markNotificationsRead(
@@ -1443,6 +1533,14 @@ export class AuditNotificationService implements OnModuleInit {
     return order.indexOf(left) - order.indexOf(right);
   }
 
+  private applyEvidenceAccessLog(auditLog: AuditLogRecord) {
+    const record = toEvidenceAccessLogRecord(auditLog);
+    if (!record) {
+      return;
+    }
+    this.persistEvidenceAccessLog(record);
+  }
+
   private persistAuditLog(auditLog: AuditLogRecord) {
     if (!this.auditLogRepository) {
       return;
@@ -1484,5 +1582,18 @@ export class AuditNotificationService implements OnModuleInit {
         requestId,
       );
     }
+  }
+
+  private persistEvidenceAccessLog(record: EvidenceAccessLogRecord) {
+    if (!this.auditLogRepository) {
+      return;
+    }
+
+    void this.auditLogRepository
+      .appendEvidenceAccessLog(record)
+      .catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Evidence-access log write-through skipped: ${detail}`);
+      });
   }
 }
