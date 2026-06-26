@@ -1434,6 +1434,99 @@ export interface AccidentExternalDocumentRecord {
   factIds: string[];
 }
 
+export interface GenerateAccidentInvestigationBundleCommand {
+  actorId: string;
+  requestedAt?: string | null;
+  note?: string | null;
+}
+
+export interface AccidentInvestigationBundleSection {
+  sectionId: string;
+  title: string;
+  itemCount: number;
+  checksumSha256: string;
+  payload: Record<string, unknown>;
+}
+
+export interface AccidentInvestigationBundleManifestEntry {
+  sectionId: string;
+  title: string;
+  itemCount: number;
+  checksumSha256: string;
+}
+
+export interface AccidentInvestigationBundleManifest {
+  manifestId: string;
+  caseId: string;
+  generatedAt: string;
+  entryCount: number;
+  entries: AccidentInvestigationBundleManifestEntry[];
+  checksumSha256: string;
+  immutable: true;
+}
+
+export interface AccidentInvestigationBundleCustodyRecord {
+  custodyId: string;
+  occurredAt: string;
+  actorId: string;
+  action: string;
+  note: string | null;
+  evidenceRefs: string[];
+}
+
+export interface AccidentInvestigationBundleKnownGap {
+  sectionId: string;
+  code: string;
+  message: string;
+  upstream: string;
+}
+
+export interface AccidentInvestigationBundleKnownGapsSectionPayload {
+  knownGaps: AccidentInvestigationBundleKnownGap[];
+  summary: {
+    totalCount: number;
+    upstreams: string[];
+  };
+}
+
+export interface AccidentInvestigationBundleDownloadMetadata {
+  kind: string;
+  subjectId: string;
+  manifestHash: string;
+  host: string;
+  keyId: string;
+  signedAt: string;
+  expiresAt: string;
+  ttlMinutes: number;
+  signatureVersion: number;
+  signature: string;
+  downloadUrl: string;
+  immutable: true;
+}
+
+export interface AccidentInvestigationBundleView {
+  bundleId: string;
+  caseId: string;
+  generatedAt: string;
+  requestedAt: string;
+  generatedBy: string;
+  status: "completed";
+  manifestHash: string;
+  manifest: AccidentInvestigationBundleManifest;
+  custodyPackage: {
+    statement: string;
+    records: AccidentInvestigationBundleCustodyRecord[];
+  };
+  sections: AccidentInvestigationBundleSection[];
+  knownGaps: AccidentInvestigationBundleKnownGap[];
+  liabilityConclusion: null;
+  liabilityConclusionEmitted: false;
+  immutable: true;
+  downloadMetadata: {
+    bundle: AccidentInvestigationBundleDownloadMetadata;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // §3.8 Regulatory reporting
 // ---------------------------------------------------------------------------

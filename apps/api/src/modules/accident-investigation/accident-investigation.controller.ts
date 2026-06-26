@@ -3,6 +3,7 @@ import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 import type {
   AddAccidentTimelineFactCommand,
   CreateAccidentCaseCommand,
+  GenerateAccidentInvestigationBundleCommand,
   ImportAccidentExternalDocumentCommand,
   TransitionAccidentCaseCommand,
 } from "@drts/contracts";
@@ -172,6 +173,22 @@ export class AccidentInvestigationController {
             "accident_cases.external_documents.empty",
           ),
         },
+      ),
+      requestId,
+    );
+  }
+
+  @Post(":caseId/bundles")
+  async generateInvestigationBundle(
+    @Param("caseId") caseId: string,
+    @Body() command: GenerateAccidentInvestigationBundleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.accidentInvestigationService.generateInvestigationBundle(
+        caseId,
+        command,
+        requestId,
       ),
       requestId,
     );
