@@ -8,13 +8,16 @@ type RawBodyRequest = {
   rawHeaders?: string[];
 };
 
+export const TESLA_REGULATORY_EVENTS_ROUTE =
+  "internal/providers/tesla/regulatory-events";
+
 @Controller()
 export class TeslaRegulatoryEventsController {
   constructor(
     private readonly teslaRegulatoryEventsService: TeslaRegulatoryEventsService,
   ) {}
 
-  @Post("internal/providers/tesla/regulatory-events")
+  @Post(TESLA_REGULATORY_EVENTS_ROUTE)
   async ingest(
     @Body() body: unknown,
     @Headers() headers: Record<string, string | string[] | undefined>,
