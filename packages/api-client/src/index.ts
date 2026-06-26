@@ -49,6 +49,7 @@ import type {
   CreatePlatformNoticeCommand,
   CreatePlatformPricingRuleCommand,
   CreatePlatformTenantCommand,
+  CreateRegulatoryReportJobCommand,
   CreateReportJobCommand,
   CreateTenantBookingCommand,
   CreateCallCenterOrderCommand,
@@ -269,6 +270,11 @@ import type {
   InviteTenantRoleCommand,
   AcknowledgeTenantRoleCommand,
   DispatchDailyRecord,
+  GenerateResumeAuthorizationDossierCommand,
+  RegulatoryComplianceSummaryRecord,
+  RegulatoryReportJobDetailRecord,
+  RegulatoryReportJobRecord,
+  ResumeAuthorizationDossierRecord,
   SixMonthOperationsSummary,
   SandboxExperimentProgramRecord,
   SandboxJurisdictionProfileRecord,
@@ -351,9 +357,7 @@ export interface MonthlyOperationsSummaryRebuildResult {
 }
 
 /** Serialize a report filter object into a `?a=b&c=d` query suffix. */
-function buildReportQuery(
-  query: Record<string, string | undefined>,
-): string {
+function buildReportQuery(query: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (typeof value === "string" && value.trim()) {
@@ -1917,6 +1921,28 @@ export class ApiClient {
     );
   }
 
+  async createRegulatoryReportJob(
+    command: CreateRegulatoryReportJobCommand,
+  ): Promise<ReportJobAccepted> {
+    return this.post<ReportJobAccepted>("/api/regulatory/reports/jobs", {
+      body: command,
+    });
+  }
+
+  async listRegulatoryReportJobs(): Promise<RegulatoryReportJobRecord[]> {
+    return this.getList<RegulatoryReportJobRecord>(
+      "/api/regulatory/reports/jobs",
+    );
+  }
+
+  async getRegulatoryReportJob(
+    jobId: string,
+  ): Promise<RegulatoryReportJobDetailRecord> {
+    return this.get<RegulatoryReportJobDetailRecord>(
+      `/api/regulatory/reports/jobs/${encodeURIComponent(jobId)}`,
+    );
+  }
+
   async generateFilingPackage(
     command: GenerateFilingPackageCommand,
   ): Promise<FilingPackageAccepted> {
@@ -1942,7 +1968,9 @@ export class ApiClient {
   async listDailyDispatchRecords(
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecord[]> {
-    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    const suffix = buildReportQuery(
+      query as Record<string, string | undefined>,
+    );
     return this.getList<DispatchDailyRecord>(
       `/api/reports/daily-dispatch-records${suffix}`,
     );
@@ -1960,7 +1988,9 @@ export class ApiClient {
   async previewSixMonthOperationsSummary(
     query: OperationsSummaryPreviewQuery = {},
   ): Promise<SixMonthOperationsSummary[]> {
-    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    const suffix = buildReportQuery(
+      query as Record<string, string | undefined>,
+    );
     return this.getList<SixMonthOperationsSummary>(
       `/api/reports/operations-summary/preview${suffix}`,
     );
@@ -2692,6 +2722,38 @@ export class ApiClient {
         experimentId,
       )}/resume-authorizations`,
       { body: command },
+    );
+  }
+
+  async getRegulatoryComplianceSummary(
+    experimentId: string,
+    asOf?: string,
+  ): Promise<RegulatoryComplianceSummaryRecord> {
+    const query = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
+    return this.get<RegulatoryComplianceSummaryRecord>(
+      `/api/regulatory/experiments/${encodeURIComponent(
+        experimentId,
+      )}/compliance-summary${query}`,
+    );
+  }
+
+  async generateResumeAuthorizationDossier(
+    experimentId: string,
+    command: GenerateResumeAuthorizationDossierCommand = {},
+  ): Promise<ResumeAuthorizationDossierRecord> {
+    return this.post<ResumeAuthorizationDossierRecord>(
+      `/api/regulatory/experiments/${encodeURIComponent(
+        experimentId,
+      )}/resume-dossiers`,
+      { body: command },
+    );
+  }
+
+  async getResumeAuthorizationDossier(
+    dossierId: string,
+  ): Promise<ResumeAuthorizationDossierRecord> {
+    return this.get<ResumeAuthorizationDossierRecord>(
+      `/api/regulatory/resume-dossiers/${encodeURIComponent(dossierId)}`,
     );
   }
 
