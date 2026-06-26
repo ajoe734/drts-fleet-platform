@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 
+import {
+  REGULATORY_NOTIFICATION_SEVERITIES,
+  REGULATORY_REPORT_VERSION_KINDS,
+} from "@drts/contracts";
 import type {
   ApproveRegulatoryNotificationCommand,
   AcknowledgeRegulatoryNotificationCommand,
@@ -9,6 +13,7 @@ import type {
   RegulatoryNotificationPolicy,
   RegulatoryNotificationRecord,
   RegulatoryNotificationReminder,
+  RegulatoryReportVersionKind,
   RegulatoryNotificationSeverity,
   SubmitRegulatoryNotificationCommand,
   SubmitRegulatoryNotificationReviewCommand,
@@ -185,29 +190,33 @@ export class RegulatoryReportingService {
   ) {
     this.refreshDerivedState();
     const actor = this.requireActor(identity);
-    const policy = this.getPolicy(command.severity);
+    const severity = this.requireSeverity(command?.severity);
+    const reportVersionKind = this.requireReportVersionKind(
+      command?.reportVersionKind,
+    );
     const now = this.nowIso();
     const eventOccurredAt = this.requireIsoDate(
-      command.eventOccurredAt,
+      command?.eventOccurredAt,
       "eventOccurredAt",
     );
+    const policy = this.getPolicy(severity);
     const deadlineAt = new Date(
       new Date(eventOccurredAt).getTime() + policy.deadlineMinutes * 60_000,
     ).toISOString();
 
     const notification: RegulatoryNotificationRecord = {
       notificationId: `regnotif-${randomUUID()}`,
-      eventId: this.requireNonBlank(command.eventId, "eventId"),
-      eventType: this.requireNonBlank(command.eventType, "eventType"),
-      severity: command.severity,
-      reportVersionKind: command.reportVersionKind,
+      eventId: this.requireNonBlank(command?.eventId, "eventId"),
+      eventType: this.requireNonBlank(command?.eventType, "eventType"),
+      severity,
+      reportVersionKind,
       lifecycleStatus: "draft",
-      jurisdiction: this.requireNonBlank(command.jurisdiction, "jurisdiction"),
-      vehicleId: this.requireNonBlank(command.vehicleId, "vehicleId"),
-      incidentId: this.normalizeNullableText(command.incidentId),
-      reportId: this.normalizeNullableText(command.reportId),
-      summary: this.requireNonBlank(command.summary, "summary"),
-      details: this.normalizeNullableText(command.details),
+      jurisdiction: this.requireNonBlank(command?.jurisdiction, "jurisdiction"),
+      vehicleId: this.requireNonBlank(command?.vehicleId, "vehicleId"),
+      incidentId: this.normalizeNullableText(command?.incidentId, "incidentId"),
+      reportId: this.normalizeNullableText(command?.reportId, "reportId"),
+      summary: this.requireNonBlank(command?.summary, "summary"),
+      details: this.normalizeNullableText(command?.details, "details"),
       recipients: policy.recipients.map((recipient) => ({ ...recipient })),
       approverRoleCodes: [...policy.approverRoleCodes],
       policy,
@@ -282,7 +291,7 @@ export class RegulatoryReportingService {
         actionName: "submit_regulatory_notification_review",
         resourceId: notification.notificationId,
         newValuesSummary: {
-          note: this.normalizeNullableText(command.note),
+          note: this.normalizeNullableText(command?.note, "note"),
           severity: notification.severity,
           deadlineAt: notification.deadlineAt,
         },
@@ -350,7 +359,7 @@ export class RegulatoryReportingService {
         actionName: "approve_regulatory_notification_review",
         resourceId: notification.notificationId,
         newValuesSummary: {
-          note: this.normalizeNullableText(command.note),
+          note: this.normalizeNullableText(command?.note, "note"),
           approverRoleCodes: notification.approverRoleCodes,
         },
       },
@@ -375,14 +384,14 @@ export class RegulatoryReportingService {
       );
     }
 
-    const submittedAt = command.submittedAt
+    const submittedAt = command?.submittedAt
       ? this.requireIsoDate(command.submittedAt, "submittedAt")
       : this.nowIso();
     notification.lifecycleStatus = "submitted";
     notification.submittedAt = submittedAt;
     notification.submittedBy = actor.actorId;
     notification.submissionReference = this.requireNonBlank(
-      command.submissionReference,
+      command?.submissionReference,
       "submissionReference",
     );
     notification.overdue = submittedAt > notification.deadlineAt;
@@ -400,7 +409,7 @@ export class RegulatoryReportingService {
           submissionReference: notification.submissionReference,
           submittedAt,
           overdue: notification.overdue,
-          note: this.normalizeNullableText(command.note),
+          note: this.normalizeNullableText(command?.note, "note"),
         },
       },
       requestId,
@@ -425,14 +434,14 @@ export class RegulatoryReportingService {
       );
     }
 
-    const acknowledgedAt = command.acknowledgedAt
+    const acknowledgedAt = command?.acknowledgedAt
       ? this.requireIsoDate(command.acknowledgedAt, "acknowledgedAt")
       : this.nowIso();
     notification.lifecycleStatus = "acknowledged";
     notification.acknowledgedAt = acknowledgedAt;
     notification.acknowledgedBy = actor.actorId;
     notification.acknowledgementReference = this.requireNonBlank(
-      command.acknowledgementReference,
+      command?.acknowledgementReference,
       "acknowledgementReference",
     );
     notification.updatedAt = this.nowIso();
@@ -447,7 +456,7 @@ export class RegulatoryReportingService {
         newValuesSummary: {
           acknowledgementReference: notification.acknowledgementReference,
           acknowledgedAt,
-          note: this.normalizeNullableText(command.note),
+          note: this.normalizeNullableText(command?.note, "note"),
         },
       },
       requestId,
@@ -614,7 +623,15 @@ export class RegulatoryReportingService {
     return this.clock().toISOString();
   }
 
-  private requireNonBlank(value: string, field: string) {
+  private requireNonBlank(value: unknown, field: string) {
+    if (typeof value !== "string") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field} must be a string.`,
+        { field },
+      );
+    }
     const normalized = value.trim();
     if (!normalized) {
       throw new ApiRequestError(
@@ -627,7 +644,7 @@ export class RegulatoryReportingService {
     return normalized;
   }
 
-  private requireIsoDate(value: string, field: string) {
+  private requireIsoDate(value: unknown, field: string) {
     const normalized = this.requireNonBlank(value, field);
     if (Number.isNaN(Date.parse(normalized))) {
       throw new ApiRequestError(
@@ -640,8 +657,55 @@ export class RegulatoryReportingService {
     return new Date(normalized).toISOString();
   }
 
-  private normalizeNullableText(value: string | null | undefined) {
-    const normalized = value?.trim();
+  private requireSeverity(value: unknown): RegulatoryNotificationSeverity {
+    return this.requireAllowedValue(
+      value,
+      "severity",
+      REGULATORY_NOTIFICATION_SEVERITIES,
+    );
+  }
+
+  private requireReportVersionKind(value: unknown): RegulatoryReportVersionKind {
+    return this.requireAllowedValue(
+      value,
+      "reportVersionKind",
+      REGULATORY_REPORT_VERSION_KINDS,
+    );
+  }
+
+  private requireAllowedValue<const T extends readonly string[]>(
+    value: unknown,
+    field: string,
+    allowedValues: T,
+  ): T[number] {
+    const normalized = this.requireNonBlank(value, field);
+    if (!allowedValues.includes(normalized)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field} must be one of: ${allowedValues.join(", ")}.`,
+        {
+          field,
+          allowedValues,
+        },
+      );
+    }
+    return normalized as T[number];
+  }
+
+  private normalizeNullableText(value: unknown, field?: string) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (typeof value !== "string") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field ?? "value"} must be a string.`,
+        { field: field ?? "value" },
+      );
+    }
+    const normalized = value.trim();
     return normalized ? normalized : null;
   }
 

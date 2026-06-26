@@ -218,4 +218,81 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
       await app.close();
     }
   });
+
+  it("returns 400 validation errors for invalid create payloads", async () => {
+    const { app, baseUrl } = await createTestApp();
+
+    try {
+      const missingEventIdResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({
+            eventType: "collision",
+            severity: "incident",
+            reportVersionKind: "initial",
+            jurisdiction: "CA-DMV",
+            vehicleId: "veh-reg-int-invalid-001",
+            eventOccurredAt: "2026-06-26T03:00:00.000Z",
+            summary: "Missing event id should be rejected.",
+          }),
+        },
+      );
+      expect(missingEventIdResponse.status).toBe(400);
+      const missingEventIdBody = await missingEventIdResponse.json();
+      expect(missingEventIdBody.error.code).toBe("VALIDATION_ERROR");
+      expect(missingEventIdBody.error.message).toBe("eventId must be a string.");
+
+      const invalidSeverityResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({
+            eventId: "evt-reg-int-invalid-002",
+            eventType: "collision",
+            severity: "not_real",
+            reportVersionKind: "initial",
+            jurisdiction: "CA-DMV",
+            vehicleId: "veh-reg-int-invalid-002",
+            eventOccurredAt: "2026-06-26T03:00:00.000Z",
+            summary: "Invalid severity should be rejected.",
+          }),
+        },
+      );
+      expect(invalidSeverityResponse.status).toBe(400);
+      const invalidSeverityBody = await invalidSeverityResponse.json();
+      expect(invalidSeverityBody.error.code).toBe("VALIDATION_ERROR");
+      expect(invalidSeverityBody.error.message).toBe(
+        "severity must be one of: informational, incident, injury_or_fatality, cybersecurity.",
+      );
+
+      const invalidReportVersionResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({
+            eventId: "evt-reg-int-invalid-003",
+            eventType: "collision",
+            severity: "incident",
+            reportVersionKind: "bogus",
+            jurisdiction: "CA-DMV",
+            vehicleId: "veh-reg-int-invalid-003",
+            eventOccurredAt: "2026-06-26T03:00:00.000Z",
+            summary: "Invalid report version kind should be rejected.",
+          }),
+        },
+      );
+      expect(invalidReportVersionResponse.status).toBe(400);
+      const invalidReportVersionBody = await invalidReportVersionResponse.json();
+      expect(invalidReportVersionBody.error.code).toBe("VALIDATION_ERROR");
+      expect(invalidReportVersionBody.error.message).toBe(
+        "reportVersionKind must be one of: initial, follow_up, final.",
+      );
+    } finally {
+      await app.close();
+    }
+  });
 });

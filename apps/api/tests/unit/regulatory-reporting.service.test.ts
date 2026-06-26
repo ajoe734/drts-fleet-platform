@@ -211,6 +211,101 @@ describe("RegulatoryReportingService", () => {
     ).toThrowError(ApiRequestError);
   });
 
+  it("rejects invalid create payloads with validation errors instead of runtime failures", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+
+    try {
+      service.createNotification(
+        {
+          eventType: "collision",
+          severity: "incident",
+          reportVersionKind: "initial",
+          jurisdiction: "CA-CPUC",
+          vehicleId: "veh-reg-invalid-001",
+          eventOccurredAt: "2026-06-26T01:00:00.000Z",
+          summary: "Missing event id should fail cleanly.",
+        } as never,
+        createIdentity(),
+        "req-reg-invalid-create-001",
+      );
+      throw new Error("Expected missing eventId to be rejected.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(400);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "eventId must be a string.",
+          details: {
+            field: "eventId",
+          },
+        },
+      });
+    }
+
+    try {
+      service.createNotification(
+        {
+          eventId: "evt-reg-invalid-002",
+          eventType: "collision",
+          severity: "not_real",
+          reportVersionKind: "initial",
+          jurisdiction: "CA-CPUC",
+          vehicleId: "veh-reg-invalid-002",
+          eventOccurredAt: "2026-06-26T01:00:00.000Z",
+          summary: "Invalid severity should be rejected.",
+        } as never,
+        createIdentity(),
+        "req-reg-invalid-create-002",
+      );
+      throw new Error("Expected invalid severity to be rejected.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(400);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          message:
+            "severity must be one of: informational, incident, injury_or_fatality, cybersecurity.",
+          details: {
+            field: "severity",
+          },
+        },
+      });
+    }
+
+    try {
+      service.createNotification(
+        {
+          eventId: "evt-reg-invalid-003",
+          eventType: "collision",
+          severity: "incident",
+          reportVersionKind: "bogus",
+          jurisdiction: "CA-CPUC",
+          vehicleId: "veh-reg-invalid-003",
+          eventOccurredAt: "2026-06-26T01:00:00.000Z",
+          summary: "Invalid report version kind should be rejected.",
+        } as never,
+        createIdentity(),
+        "req-reg-invalid-create-003",
+      );
+      throw new Error("Expected invalid reportVersionKind to be rejected.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getStatus()).toBe(400);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "reportVersionKind must be one of: initial, follow_up, final.",
+          details: {
+            field: "reportVersionKind",
+          },
+        },
+      });
+    }
+  });
+
   it("does not raise overdue when a backfilled submittedAt beats the deadline", () => {
     let now = new Date("2026-06-26T07:30:00.000Z");
     const auditNotificationService = new AuditNotificationService();
