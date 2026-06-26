@@ -45,9 +45,15 @@ import type {
   TeslaVehicleStateSnapshot,
   RequestRocSafetyActionCommand,
 } from "@drts/contracts";
+import { PHASE2_AUDIT_EVENT_CATALOG } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  emitPhase2AuditRecord,
+  emitPhase2AuditedAction,
+} from "../../common/phase2-audit";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IncidentService } from "../incident/incident.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { SafetyOperatorService } from "../safety-operator/safety-operator.service";
@@ -189,6 +195,8 @@ export class RocOperationsService {
     @Optional()
     @Inject(forwardRef(() => SandboxDispatchGateService))
     private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   listTeslaAutonomyTransitionEvents() {
@@ -502,7 +510,9 @@ export class RocOperationsService {
     report: RocFallbackToHumanReport;
     receipt: ActionReceipt;
   }> {
-    if (!this.ownedMobilityService || !this.sandboxDispatchGateService) {
+    const ownedMobilityService = this.resolveOwnedMobilityService();
+    const sandboxDispatchGateService = this.resolveSandboxDispatchGateService();
+    if (!ownedMobilityService || !sandboxDispatchGateService) {
       throw new ApiRequestError(
         HttpStatus.INTERNAL_SERVER_ERROR,
         "ROC_FALLBACK_UNAVAILABLE",
@@ -516,11 +526,10 @@ export class RocOperationsService {
       command.rocOperatorId,
     );
     const trigger = command.trigger ?? "roc_manual_intervention";
-    const sandboxDecision =
-      await this.sandboxDispatchGateService.findDecisionForOrder(
-        order.orderId,
-        command.sandboxDecisionId ?? null,
-      );
+    const sandboxDecision = await sandboxDispatchGateService.findDecisionForOrder(
+      order.orderId,
+      command.sandboxDecisionId ?? null,
+    );
 
     if (trigger === "gate_fallback_required") {
       if (!sandboxDecision) {
@@ -554,7 +563,7 @@ export class RocOperationsService {
 
     const reportId = `report-${randomUUID()}`;
     const reportArtifactId = `ART-${randomUUID()}`;
-    const fallbackResult = await this.ownedMobilityService.fallbackTripToHuman(
+    const fallbackResult = await ownedMobilityService.fallbackTripToHuman(
       order.orderId,
       command,
       {
@@ -585,9 +594,52 @@ export class RocOperationsService {
       humanDriverId: command.humanDriverId,
       fallbackAssignmentId: fallbackResult.assignmentId,
       reportId,
-      requestId,
+      ...(requestId ? { requestId } : {}),
     });
     this.interventions = [intervention, ...this.interventions];
+
+    const auditNotificationService = this.resolveAuditNotificationService();
+    if (auditNotificationService) {
+      emitPhase2AuditRecord(auditNotificationService, {
+        actorId: rocOperatorId,
+        actorType: "ops_user",
+        tenantId: fallbackResult.order.tenantId,
+        moduleName: "roc-operations",
+        eventName: PHASE2_AUDIT_EVENT_CATALOG.roc.interventionStarted,
+        resourceType: "roc_intervention",
+        resourceId: intervention.interventionId,
+        summary: {
+          orderId: intervention.orderId,
+          vehicleId: intervention.vehicleId,
+          interventionType: intervention.interventionType,
+          trigger,
+        },
+        ...(requestId ? { requestId } : {}),
+        sourceSystem: intervention.source.sourceSystem,
+        sourceRef: intervention.source.sourceRef,
+        occurredAt: startedAt,
+      });
+      emitPhase2AuditRecord(auditNotificationService, {
+        actorId: rocOperatorId,
+        actorType: "ops_user",
+        tenantId: fallbackResult.order.tenantId,
+        moduleName: "roc-operations",
+        eventName: PHASE2_AUDIT_EVENT_CATALOG.roc.interventionResolved,
+        resourceType: "roc_intervention",
+        resourceId: intervention.interventionId,
+        summary: {
+          orderId: intervention.orderId,
+          vehicleId: intervention.vehicleId,
+          interventionType: intervention.interventionType,
+          outcomeNote: intervention.outcomeNote,
+          reportId,
+        },
+        ...(requestId ? { requestId } : {}),
+        sourceSystem: intervention.source.sourceSystem,
+        sourceRef: intervention.source.sourceRef,
+        occurredAt: resolvedAt,
+      });
+    }
 
     const report = this.buildFallbackReport({
       order: fallbackResult.order,
@@ -611,14 +663,53 @@ export class RocOperationsService {
     });
     this.fallbackReports = [report, ...this.fallbackReports];
 
-    const receipt: ActionReceipt = {
-      actionId: requestId?.trim() || `roc-fallback-${randomUUID()}`,
-      auditId: `roc-fallback-audit-${randomUUID()}`,
-      resourceType: "sandbox_exception_report",
-      resourceId: report.reportId,
-      status: "completed",
-      message: "ROC fallback to human completed and report generated.",
-    };
+    const receipt: ActionReceipt = auditNotificationService
+      ? emitPhase2AuditedAction({
+          sink: auditNotificationService,
+          audit: {
+            actorId: rocOperatorId,
+            actorType: "ops_user",
+            tenantId: fallbackResult.order.tenantId,
+            moduleName: "roc-operations",
+            eventName: PHASE2_AUDIT_EVENT_CATALOG.roc.fallbackToHumanReported,
+            resourceType: "sandbox_exception_report",
+            resourceId: report.reportId,
+            summary: {
+              tripId: report.tripId,
+              orderId: report.orderId,
+              bookingId: report.bookingId,
+              dispatchJobId: report.dispatchJobId,
+              trigger: report.trigger,
+              sandboxDecisionId: report.sandboxDecisionId,
+              sandboxProgramId: report.sandboxProgramId,
+              avVehicleId: report.avVehicleId,
+              avDriverId: report.avDriverId,
+              previousAssignmentId: report.previousAssignmentId,
+              fallbackAssignmentId: report.fallbackAssignmentId,
+              fallbackTaskId: report.fallbackTaskId,
+              humanVehicleId: report.humanVehicleId,
+              humanDriverId: report.humanDriverId,
+              revisedEtaMinutes: report.revisedEtaMinutes,
+              hardReasonCodes: report.hardReasonCodes,
+              softReasonCodes: report.softReasonCodes,
+              reportArtifactId: report.reportArtifactId,
+            },
+            ...(requestId ? { requestId } : {}),
+            sourceSystem: "roc_operator",
+            sourceRef: intervention.interventionId,
+            occurredAt: report.generatedAt,
+          },
+          data: report,
+          message: "ROC fallback to human completed and report generated.",
+        }).receipt
+      : {
+          actionId: requestId?.trim() || `roc-fallback-${randomUUID()}`,
+          auditId: `roc-fallback-audit-${randomUUID()}`,
+          resourceType: "sandbox_exception_report",
+          resourceId: report.reportId,
+          status: "completed",
+          message: "ROC fallback to human completed and report generated.",
+        };
 
     this.logger.debug(
       `ROC fallback completed for ${order.orderId}: ${fallbackResult.assignmentId}`,
@@ -2523,7 +2614,8 @@ export class RocOperationsService {
       );
     }
 
-    if (!this.ownedMobilityService) {
+    const ownedMobilityService = this.resolveOwnedMobilityService();
+    if (!ownedMobilityService) {
       throw new ApiRequestError(
         HttpStatus.INTERNAL_SERVER_ERROR,
         "ROC_FALLBACK_UNAVAILABLE",
@@ -2532,16 +2624,63 @@ export class RocOperationsService {
     }
 
     try {
-      return this.ownedMobilityService.getOrder(normalizedTripId);
+      return ownedMobilityService.getOrder(normalizedTripId);
     } catch (error) {
-      const match = this.ownedMobilityService
+      const match = ownedMobilityService
         .listOrders()
         .find((candidate) => candidate.bookingId === normalizedTripId);
       if (match) {
-        return this.ownedMobilityService.getOrder(match.orderId);
+        return ownedMobilityService.getOrder(match.orderId);
       }
       throw error;
     }
+  }
+
+  private resolveOwnedMobilityService() {
+    if (this.ownedMobilityService) {
+      return this.ownedMobilityService;
+    }
+
+    const legacyOwnedMobility =
+      this.safetyOperatorService as unknown as Partial<OwnedMobilityService>;
+    if (
+      typeof legacyOwnedMobility?.getOrder === "function" &&
+      typeof legacyOwnedMobility?.fallbackTripToHuman === "function"
+    ) {
+      return legacyOwnedMobility as OwnedMobilityService;
+    }
+
+    return null;
+  }
+
+  private resolveSandboxDispatchGateService() {
+    if (this.sandboxDispatchGateService) {
+      return this.sandboxDispatchGateService;
+    }
+
+    const legacySandboxDispatchGate =
+      this.incidentService as unknown as Partial<SandboxDispatchGateService>;
+    if (
+      typeof legacySandboxDispatchGate?.findDecisionForOrder === "function"
+    ) {
+      return legacySandboxDispatchGate as SandboxDispatchGateService;
+    }
+
+    return null;
+  }
+
+  private resolveAuditNotificationService() {
+    if (this.auditNotificationService) {
+      return this.auditNotificationService;
+    }
+
+    const legacyAuditNotification =
+      this.vehicleEvidenceService as unknown as Partial<AuditNotificationService>;
+    if (typeof legacyAuditNotification?.recordAuditLog === "function") {
+      return legacyAuditNotification as AuditNotificationService;
+    }
+
+    return null;
   }
 
   private resolveRocOperatorId(
