@@ -4,6 +4,7 @@ import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtures/src";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
@@ -25,7 +26,9 @@ function createHarness() {
   const eventEmitter = new EventEmitter2();
   const auditNotificationService = new AuditNotificationService();
   const opsDispatchEventsService = new OpsDispatchEventsService(eventEmitter);
-  const driverProfileService = new DriverProfileService(auditNotificationService);
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
+  );
   const regulatoryRegistryRepository = {
     isEnabled: () => true,
     upsertDriverLocation: async () => true,
@@ -287,7 +290,9 @@ describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
       ]),
     );
     expect(
-      auditNotificationService.listAuditLogs().map((auditLog) => auditLog.actionName),
+      auditNotificationService
+        .listAuditLogs()
+        .map((auditLog) => auditLog.actionName),
     ).toEqual(
       expect.arrayContaining([
         "roc.intervention.started",
@@ -296,6 +301,134 @@ describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
         "roc_fallback_to_human",
       ]),
     );
+  });
+
+  it("rejects gate-triggered human fallback when the sandbox decision does not require fallback", async () => {
+    const {
+      ownedMobilityService,
+      rocOperationsService,
+      sandboxDispatchGateService,
+      cleanup,
+    } = createHarness();
+    cleanups.push(cleanup);
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Governed Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Governed End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Rider Guard", phone: "0912000013" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const decision = await sandboxDispatchGateService.evaluateDispatch({
+      orderId: booking.orderId,
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-demo-001",
+      sandboxProgramId: "phase2-tesla-fsd-sandbox-202606",
+      policyVersion: "sandbox-dispatch-gate.v1",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
+      entitlement: {
+        active: true,
+      },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-area-demo"],
+        approvedRouteIds: ["odd-route-demo"],
+      },
+      safetyOperator: {
+        required: false,
+      },
+      candidateRoute: {
+        type: "MultiLineString",
+        coordinates: [
+          [
+            [121.522, 25.044],
+            [121.526, 25.047],
+            [121.529, 25.05],
+            [121.533, 25.054],
+          ],
+        ],
+      },
+      providerCapabilities: {
+        av_dispatch: true,
+        telemetry_stream: true,
+        regulatory_event_feed: true,
+        evidence_recorder: true,
+        odd_geofence: true,
+        minimal_risk_condition: true,
+      },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+        currentTripCount: 0,
+        odometerKm: 25_000,
+      },
+      regulatory: {
+        approvalFresh: true,
+        vehicleCertified: true,
+      },
+      recorder: {
+        healthy: true,
+      },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-area-demo"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["odd-route-demo"],
+      },
+    });
+
+    expect(decision.decision).toBe("allow");
+    expect(decision.fallbackRequired).toBe(false);
+
+    try {
+      await rocOperationsService.fallbackTripToHuman(
+        booking.orderId,
+        {
+          dispatchJobId: dispatchResult.dispatchJobId,
+          sandboxDecisionId: decision.decisionId,
+          humanVehicleId: "veh-human-003",
+          humanDriverId: "drv-human-003",
+          revisedEtaMinutes: 12,
+          reason:
+            "Operator attempted gate fallback without a fallback-required decision",
+          rocOperatorId: "ops-roc-003",
+          trigger: "gate_fallback_required",
+        },
+        null,
+        "req-p2-fallback-003",
+      );
+
+      throw new Error("Expected gate-triggered human fallback to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "SANDBOX_FALLBACK_NOT_REQUIRED",
+        },
+      });
+    }
+
+    expect(rocOperationsService.listInterventions()).toHaveLength(0);
+    expect(rocOperationsService.listFallbackReports()).toHaveLength(0);
+    expect(
+      ownedMobilityService
+        .listDriverTasks()
+        .filter((task) => task.orderId === booking.orderId),
+    ).toHaveLength(0);
   });
 
   it("cancels the active AV assignment and creates a human replacement assignment on the same dispatch job", async () => {
@@ -409,11 +542,15 @@ describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
         }),
       ]),
     );
-    expect(ownedMobilityService.getOrder(booking.orderId).etaSnapshot).toMatchObject({
+    expect(
+      ownedMobilityService.getOrder(booking.orderId).etaSnapshot,
+    ).toMatchObject({
       etaMinutes: 11,
     });
     expect(
-      auditNotificationService.listAuditLogs().map((auditLog) => auditLog.actionName),
+      auditNotificationService
+        .listAuditLogs()
+        .map((auditLog) => auditLog.actionName),
     ).toEqual(
       expect.arrayContaining([
         "reassign_dispatch",
@@ -550,7 +687,9 @@ describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
       ]),
     );
     expect(
-      auditNotificationService.listAuditLogs().map((auditLog) => auditLog.actionName),
+      auditNotificationService
+        .listAuditLogs()
+        .map((auditLog) => auditLog.actionName),
     ).toEqual(
       expect.arrayContaining([
         "roc_fallback_to_human",
