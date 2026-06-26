@@ -156,12 +156,7 @@ export class RocOperationsService {
       correlatedTakeoverCaseId: `takeover-case-${report.reportId}`,
       vehicleId: report.vehicleId,
       orderId: report.orderId,
-      takeoverCorrelationId:
-        manualLink == null
-          ? report.correlationId
-          : teslaEvent?.takeoverCorrelationId ??
-            rocResponse?.takeoverCorrelationId ??
-            report.correlationId,
+      takeoverCorrelationId: report.correlationId,
       correlationPriority,
       matchedBy,
       sourceRecordIds: {
@@ -236,34 +231,28 @@ export class RocOperationsService {
   }
 
   private findPriorityTwoTeslaEvent(report: SafetyOperatorTakeoverReport) {
-    return (
-      this.teslaTransitionEvents.find(
-        (candidate) =>
-          candidate.vehicleId === report.vehicleId &&
-          candidate.orderId != null &&
-          candidate.orderId === report.orderId &&
-          this.withinWindow(
-            candidate.occurredAt,
-            report.occurredAt,
-            PRIORITY_TWO_WINDOW_MS,
-          ),
-      ) ?? null
+    return this.findNearestByTime(
+      this.teslaTransitionEvents,
+      report.occurredAt,
+      PRIORITY_TWO_WINDOW_MS,
+      (candidate) =>
+        candidate.vehicleId === report.vehicleId &&
+        candidate.orderId != null &&
+        candidate.orderId === report.orderId,
+      (candidate) => candidate.occurredAt,
     );
   }
 
   private findPriorityTwoRocResponse(report: SafetyOperatorTakeoverReport) {
-    return (
-      this.takeoverResponses.find(
-        (candidate) =>
-          candidate.vehicleId === report.vehicleId &&
-          candidate.orderId != null &&
-          candidate.orderId === report.orderId &&
-          this.withinWindow(
-            candidate.requestedAt,
-            report.occurredAt,
-            PRIORITY_TWO_WINDOW_MS,
-          ),
-      ) ?? null
+    return this.findNearestByTime(
+      this.takeoverResponses,
+      report.occurredAt,
+      PRIORITY_TWO_WINDOW_MS,
+      (candidate) =>
+        candidate.vehicleId === report.vehicleId &&
+        candidate.orderId != null &&
+        candidate.orderId === report.orderId,
+      (candidate) => candidate.requestedAt,
     );
   }
 
@@ -336,6 +325,35 @@ export class RocOperationsService {
 
   private withinWindow(left: string, right: string, windowMs: number) {
     return Math.abs(Date.parse(left) - Date.parse(right)) <= windowMs;
+  }
+
+  private findNearestByTime<T>(
+    records: readonly T[],
+    targetTime: string,
+    windowMs: number,
+    predicate: (record: T) => boolean,
+    getTimestamp: (record: T) => string,
+  ) {
+    let closest: T | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    for (const record of records) {
+      if (!predicate(record)) {
+        continue;
+      }
+
+      const distance = Math.abs(
+        Date.parse(getTimestamp(record)) - Date.parse(targetTime),
+      );
+      if (distance > windowMs || distance >= closestDistance) {
+        continue;
+      }
+
+      closest = record;
+      closestDistance = distance;
+    }
+
+    return closest;
   }
 
   private cloneTeslaEvent(event: TeslaAutonomyTransitionEvent) {
