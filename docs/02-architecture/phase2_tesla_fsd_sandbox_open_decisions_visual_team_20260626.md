@@ -25,9 +25,10 @@
 - 乘客端**不顯示** Tesla reason code、FSD transition、operational hold 細節、事故分類、evidence freeze/legal hold、安全員/ROC 人員姓名。
 - 不因 fallback 出現第二張 booking 或加收提示（裁決 C4：`fallbackSurchargeApplied=false`）。
 
-**阻擋**：UI task `P2-UI-OPS-001` 只涵蓋 ops-console 側；passenger/tenant 既有 app 的 fallback 顯示**尚無對應 UI task**，待此 canvas delta 才能開。
-**相依**：✅ **已解鎖** — 系統設計 S1=(a) 已定 message catalog（`P2_AV_FALLBACK_INITIATED_V1` / `_FALLBACK_ASSIGNED_V1` / `_ASSIGNED_NOTICE_V1` / `_INCIDENT_HOLD_NOTICE_V1` 等 baseline messageCode 已有文字）。視覺只需定**版位與狀態切換**，文字 slot 接 `messageCode`，**canvas 不寫死文案**。
-**需要回**：上述三個既有 app 的 fallback 狀態 canvas/delta（現在可直接進場）。
+**阻擋**：UI task `P2-UI-OPS-001` 只涵蓋 ops-console 側；passenger/tenant 既有 app 的 fallback 顯示原本無對應 UI task。
+**相依**：S1=(a) 已定 message catalog。
+
+✅ **2026-06-26 CANVAS 已交付（driver app (7)）並歸檔**：`pe-fallback.jsx`（乘客四態 `PE_FbVehicleChange/ServiceContinuing/HumanAssigned/EtaUpdated`，含 `MsgSlot` 強制文案走 messageCode、leak-check 0）、`tenant-av-fallback.jsx`（`TN_AvFallbackList/Detail`）。**UI build 已派工**：`P2-UI-PAX-001`（referral-embed/passenger-web）、`P2-UI-TEN-001`（tenant-console），deps = `P2-DP-C3-001` + `P2-DP-S1-001`。→ **V1 完成**。
 
 ---
 
@@ -42,7 +43,7 @@
 
 歸屬：仍在 `apps/platform-admin-web` Compliance route group（與 C1 一致）。
 **對應 UI/API task**：`P2-DP-S2-001`（已派工）。
-**需要回**：`CMP_Regulator` panel 的 delta canvas（含上述元件版位）。完整外部 regulator 直連 portal 列 Phase 2.x，本波不做。
+**需要回**：⏳ **仍待視覺** — `CMP_Regulator` panel 的 delta canvas（含上述元件版位）。driver app (7) 更新只含 V1（passenger/tenant fallback），**未含 V2 的 CMP_Regulator delta**；`P2-DP-S2-001` 可先做 API + 既有 panel，視覺 delta 到位後再補版位。完整外部 regulator 直連 portal 列 Phase 2.x，本波不做。
 
 ---
 
