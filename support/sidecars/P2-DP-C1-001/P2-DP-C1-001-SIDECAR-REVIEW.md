@@ -8,24 +8,31 @@
 **Snapshot Basis:** `ai-status.json` (via `scripts/ai-status.sh show`), `ai-activity-log.jsonl`, `git show`, and `git log`
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
-This packet supports the in-flight review of `P2-DP-C1-001` (platform-admin
+This packet supports the review of `P2-DP-C1-001` (platform-admin
 Compliance/Investigation route group + scopes + backend deep-links). It is
-support-only and does not modify canonical truth. Its job is to give reviewer
-`Codex2` one place to audit:
+support-only and does not modify canonical truth. As of this refresh the parent
+has **already reached `review_approved`** (parent reviewer `Codex2` approved at
+`2026-06-26T18:32:14Z` against deliverable tip `71a784abd`); the parent owner
+`Codex` now holds an `owned_finalize_dispatch` to record `done`. This packet
+therefore serves two audiences: parent reviewer `Codex2` for the approval that
+just landed, and parent owner `Codex` for the finalize/integration steps that
+remain. It gives one place to audit:
 
-- the parent's recorded lifecycle, including the `review → reopen → review`
-  cycle that produced the current closeout commit
+- the parent's recorded lifecycle, including the `review → reopen → review →
+  review_approved` cycle that produced the current closeout commit
 - the deliverable commit, its trailers, and its branch position relative to `dev`
 - a per-criterion acceptance-to-evidence map with concrete files and anchors
 - the two reopen findings and exactly how each was addressed in the fix commit
 - the one open verification caveat the parent itself recorded
 
 The most important reviewer caveat is that the deliverable is **two commits** on
-`origin/codex/p2-dp-c1-001` (`fe150898b` then `71a784abd`), the branch is
-**2 commits behind `origin/dev`** (branched at `8f95cde3a`, dev now at
-`1892c1c38`), and the parent recorded that `pnpm --filter @drts/api typecheck`
+`origin/codex/p2-dp-c1-001` (`fe150898b` then `71a784abd`), the branch is now
+**3 commits behind `origin/dev`** (branched at `8f95cde3a`, dev now at
+`99836f121`), and the parent recorded that `pnpm --filter @drts/api typecheck`
 still fails on a **pre-existing** `regulatory-reporting.controller` `actorType`
-mismatch that is unrelated to this diff. All three are explained in §5 and §6.
+mismatch that is unrelated to this diff. The `review_approved` decision did not
+land this commit on `dev`, so the rebase and the `@drts/api` typecheck caveat
+remain open as **finalize/integration** concerns. All are explained in §5 and §6.
 
 ---
 
@@ -62,24 +69,30 @@ Out of scope:
 - title=`platform-admin Compliance/Investigation route group + scopes + deep-links`
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`review`
+- status=`review_approved`
 - phase=`phase2-tesla-fsd-sandbox-202606`
 - depends_on=`P2-WP0`, `P2-ACC-002`, `P2-EVD-002`
-- last_update=`2026-06-26T18:29:07Z`
+- last_update=`2026-06-26T18:32:14Z`
 - artifacts=`apps/api/src/modules/accident-investigation/`,
   `apps/api/src/modules/platform-admin/`, `apps/platform-admin-web/`
 
-Recorded `next` field (second handoff, after the reopen fix):
+Recorded `next` field (parent reviewer `Codex2`, on approval):
 
-> Added docs/05-ui platform-admin sandbox compliance screen-requirements handoff,
-> replaced non-canvas compliance/investigation/evidence/regulatory route bodies
-> with pending-design placeholders, and switched takeover/discrepancy
-> investigation links to backend-provided platform-admin detail/queue routes.
-> Verification: commit 71a784abdaed007bb2b728c9f92204af280c926d pushed to
-> origin/codex/p2-dp-c1-001; integration + unit suites PASS; platform-admin-web
-> typecheck PASS. Note: `pnpm --filter @drts/api typecheck` still fails on
-> pre-existing regulatory-reporting.controller actorType mismatch unrelated to
-> this diff.
+> Reviewed origin/codex/p2-dp-c1-001 at 71a784abd. Acceptance checks passed:
+> sandbox compliance/investigation route group added with pending-design
+> placeholders per handoff, sandbox scopes enforced with platform-only
+> release/approval actions, four-eyes separation enforced for export approval and
+> legal-hold release approval, ROC/correlation deep-links backend-provided via
+> CrossAppResourceLink, and compliance/regulatory APIs exposed. Verification:
+> pnpm --dir apps/api exec vitest run tests/integration/e2e-p2-sandbox-compliance-controls.test.ts --config ../../vitest.config.ts PASS;
+> pnpm --dir apps/api exec vitest run tests/unit/auth-bootstrap.test.ts --config ../../vitest.config.ts PASS;
+> pnpm --filter @drts/platform-admin-web typecheck PASS.
+
+The deliverable tip the reviewer approved (`71a784abd`) is unchanged from the
+second handoff, so the acceptance-to-evidence map (§4), reopen-fix map (§5), and
+verification evidence (§6) below remain current. The second-handoff `next`
+(pending-design placeholders + backend-provided links + `@drts/api` typecheck
+caveat) is preserved in §5 and §6.
 
 ### 2.2 Acceptance clause (single combined criterion)
 
@@ -102,9 +115,13 @@ The parent's authoritative lifecycle in `ai-activity-log.jsonl` is:
 | `reopen`          | `2026-06-26T18:17:32Z` | `Codex2` | Two findings: (1) new pages built without a canvas source screen; (2) frontend still rebuilt deep-links from query params.  |
 | `progress`        | `2026-06-26T18:17:54Z` | `Codex`  | Reviewing implementation against design-canvas requirements and the backend deep-link contract.                            |
 | `handoff`         | `2026-06-26T18:29:07Z` | `Codex`  | Second handoff at commit `71a784abd`: screen-requirements note + pending-design placeholders + backend-provided links.      |
+| `review_approved` | `2026-06-26T18:32:14Z` | `Codex2` | Approved against `71a784abd`; all six acceptance sub-claims confirmed; integration+unit+platform-admin-web typecheck PASS.  |
 
-The task is now at `review` awaiting `Codex2`. The current deliverable is the
-**second** handoff commit `71a784abd`, not the first handoff `fe150898b`.
+The task is now at `review_approved`; parent owner `Codex` holds an
+`owned_finalize_dispatch` (queued `2026-06-26T18:32:15Z`) to record `done`. The
+current deliverable is the **second** handoff commit `71a784abd`, not the first
+handoff `fe150898b`. The approval was recorded against `71a784abd`, the same tip
+documented throughout this packet — the approval introduced no new commit.
 
 ### 2.4 Sidecar lifecycle
 
@@ -113,6 +130,7 @@ The task is now at `review` awaiting `Codex2`. The current deliverable is the
 | `assign`           | `2026-06-26T18:29:17Z` | `Codex`        | Auto-created review-packet sidecar; owner `Claude`, reviewer `Codex`.           |
 | `sidecar_created`  | `2026-06-26T18:29:17Z` | `Orchestrator` | Auto-created while utilization remained below threshold.                        |
 | `start`            | `2026-06-26T18:30:07Z` | `Claude`       | Began building this packet against deliverable `71a784abd`.                     |
+| `progress`         | `2026-06-26T18:36:35Z` | `Claude`       | Refreshed packet after parent reached `review_approved`; dev advanced to `99836f121` (branch now 3 behind). |
 
 ---
 
@@ -146,14 +164,17 @@ linting at integration time).
 
 ### 3.3 Branch position vs `dev`
 
-- `git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001` = `2  2`
-- the branch base is `8f95cde3a`; `origin/dev` has since advanced to `1892c1c38`
-  (P2-UI-ROC-001 #958, P2-UI-SAFE-001 #957)
-- therefore the branch is **2 commits behind `dev`** and will need a rebase
-  before any PR/merge. This is an integration-time concern, not a parent
-  `review` blocker, but the reviewer should not assume the branch merges cleanly.
+- `git rev-list --left-right --count origin/dev...origin/codex/p2-dp-c1-001` = `3  2`
+- the branch base is `8f95cde3a`; `origin/dev` has since advanced to `99836f121`
+  (P2-REG-001 #960, P2-UI-ROC-001 #958, P2-UI-SAFE-001 #957)
+- therefore the branch is now **3 commits behind `dev`** (one more than at the
+  prior packet snapshot, when dev was at `1892c1c38`) and will need a rebase
+  before any PR/merge. The parent already cleared `review`, so this is now a
+  **finalize/integration** concern for parent owner `Codex`, not a review
+  blocker — but nobody should assume the branch merges cleanly without a rebase.
 - `git branch -r --contains 71a784abd` resolves only to `origin/codex/p2-dp-c1-001`;
-  the commit is **not** yet on `origin/dev`.
+  the commit is **not** yet on `origin/dev`. The `review_approved` decision did
+  not change this — approval is a status transition, not a merge.
 
 ### 3.4 Diff size
 
@@ -320,9 +341,13 @@ Open caveat the parent itself flagged:
 
 - `pnpm --filter @drts/api typecheck` **still fails** on a pre-existing
   `regulatory-reporting.controller` `actorType` mismatch that the parent states
-  is **unrelated to this diff**. The reviewer should confirm whether this
-  pre-existing failure is in-scope for this task or tracked elsewhere before
-  approving, since a full `@drts/api` typecheck is red on this branch.
+  is **unrelated to this diff**. Parent reviewer `Codex2` approved without
+  treating this as a blocker (the approval cited the scoped integration/unit and
+  platform-admin-web typecheck PASS only). It therefore remains an open
+  **finalize/integration** item: parent owner `Codex` and the integrator should
+  confirm whether this pre-existing failure is in-scope here or tracked
+  elsewhere before any PR/merge to `dev`, since a full `@drts/api` typecheck is
+  red on this branch and CI may run it.
 
 This sidecar did **not** rerun these commands; it records the parent's existing
 evidence and commit metadata.
@@ -333,11 +358,14 @@ evidence and commit metadata.
 
 Reviewer `Codex` (sidecar reviewer) should verify this **packet** is faithful:
 
-- `scripts/ai-status.sh show P2-DP-C1-001` still reports `status=review`,
-  owner `Codex`, reviewer `Codex2`, last_update `2026-06-26T18:29:07Z`
+- `scripts/ai-status.sh show P2-DP-C1-001` now reports `status=review_approved`,
+  owner `Codex`, reviewer `Codex2`, last_update `2026-06-26T18:32:14Z`
+- `ai-activity-log.jsonl` records the parent `review_approved` event at
+  `2026-06-26T18:32:14Z` by `Codex2` against `71a784abd`
 - the deliverable tip is `71a784abd` on `origin/codex/p2-dp-c1-001`, with
   `fe150898b` as the superseded first handoff
-- the branch is 2 behind `origin/dev` and `71a784abd` is not on `origin/dev`
+- the branch is 3 behind `origin/dev` (dev tip `99836f121`) and `71a784abd` is
+  not on `origin/dev`
 - the 12 sandbox scopes in §4.2 match `auth.constants.ts`
 - the four-eyes rejections in §4.3 exist in `platform-admin-compliance.service.ts`
 - ROC only emits a `CrossAppResourceLink` and has no hold-release path (§4.4)
@@ -373,13 +401,17 @@ Reviewer actions:
 - blocked:
   `AI_NAME=Codex scripts/ai-status.sh blocker P2-DP-C1-001-SIDECAR-REVIEW "<external blocker>"`
 
-Sidecar closeout is support-only (`NO_COMMIT_REQUIRED` is allowed for this
-review-packet artifact; `INTEGRATION_STATUS=not_applicable`). The sidecar
-reviewer should judge whether this packet matches machine truth for the parent's
-current `review` state, and whether the reopen-fix mapping and the
-`@drts/api` typecheck caveat are sufficiently explicit for the parent owner and
-reviewer to act on. This packet does not itself approve or block the parent
-task `P2-DP-C1-001`; that decision stays with parent reviewer `Codex2`.
+Sidecar closeout is support-only. This packet **is** a committed support
+artifact under `support/sidecars/P2-DP-C1-001/`, so closeout carries
+`COMMIT_HASH`/`COMMIT_SUBJECT`/`PUSH_REMOTE`/`PUSH_BRANCH` with
+`INTEGRATION_STATUS=not_applicable` (no canonical truth, no PR/CI/merge).
+The sidecar reviewer should judge whether this packet matches machine truth for
+the parent's current `review_approved` state, and whether the reopen-fix
+mapping, the remaining rebase (branch 3 behind `dev`), and the `@drts/api`
+typecheck caveat are sufficiently explicit for parent owner `Codex` to act on
+during finalize. This packet does not itself approve, block, or finalize the
+parent task `P2-DP-C1-001`; the approval decision was made by parent reviewer
+`Codex2`, and the `done`/integration steps stay with parent owner `Codex`.
 
 ---
 
@@ -387,8 +419,10 @@ task `P2-DP-C1-001`; that decision stays with parent reviewer `Codex2`.
 
 Commands used to build this packet:
 
-- `scripts/ai-status.sh show P2-DP-C1-001`
-- `rg -n '"task_id": "P2-DP-C1-001"' ai-activity-log.jsonl | tail -25`
+- `scripts/ai-status.sh show P2-DP-C1-001` (now `review_approved`, last_update `2026-06-26T18:32:14Z`)
+- `rg -n '"task_id": "P2-DP-C1-001"' ai-activity-log.jsonl | tail -25` (confirms the `2026-06-26T18:32:14Z` `Codex2` `review_approved` event against `71a784abd`)
+- `git log --oneline -3 origin/dev` (dev tip `99836f121`, #960)
+- `git merge-base origin/dev origin/codex/p2-dp-c1-001` (still `8f95cde3a`, so the §3.4/§4 diff stat is unchanged at 33 files / +3076 / -142)
 - `rg -n '"task_id": "P2-DP-C1-001-SIDECAR-REVIEW"' ai-activity-log.jsonl | tail -10`
 - `git log --oneline origin/codex/p2-dp-c1-001 -5`
 - `git show --format='%H%n%s%n%n%b' --no-patch 71a784abd`
