@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #0a0e16;
+  --color-panel: #141b2b;
+  --color-elevated: #1a2235;
+  --font-sans: "Inter", "Noto Sans TC", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: #0a0e16;
+  color: #e5eaf3;
+}
