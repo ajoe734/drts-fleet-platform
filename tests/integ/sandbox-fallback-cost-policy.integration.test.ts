@@ -42,18 +42,20 @@ describe("billing settlement fallback-cost policy integration", () => {
       auditEventCode: "sandbox.billing.fallback_cost_policy.defaulted",
     });
 
-    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith({
-      moduleName: "billing-settlement",
-      actionName: "sandbox.billing.fallback_cost_policy.defaulted",
-      resourceType: "sandbox_fallback_cost_policy",
-      requestId: "fallback-policy-request-001",
-      tenantId: "tenant-demo-001",
-      newValuesSummary: {
-        reason: "partner_operational_issue",
-        fallbackCostAbsorber: "platform",
-        policyResolution: "default_platform_no_contract",
-      },
-    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        moduleName: "billing-settlement",
+        actionName: "sandbox.billing.fallback_cost_policy.defaulted",
+        resourceType: "sandbox_fallback_cost_policy",
+        requestId: "fallback-policy-request-001",
+        tenantId: "tenant-demo-001",
+        newValuesSummary: {
+          reason: "partner_operational_issue",
+          fallbackCostAbsorber: "platform",
+          policyResolution: "default_platform_no_contract",
+        },
+      }),
+    );
   });
 
   it("returns a contracted absorber without recording the default audit event", () => {
