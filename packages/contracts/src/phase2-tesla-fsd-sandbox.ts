@@ -39,6 +39,8 @@ export interface Phase2SourceMetadata {
   ingestedAt: string;
   // When the source captured/recorded the underlying fact, if distinct.
   recordedAt: string | null;
+  // When the upstream provider copy is expected to expire, if it does.
+  providerExpiresAt?: string | null;
   // Pointer to a detached signature / attestation artifact, when the source is
   // cryptographically attested (regulatory chain-of-custody).
   signatureRef: string | null;
@@ -749,6 +751,14 @@ export const PHASE2_AUDIT_EVENT_CATALOG = {
       released: "evidence.manifest_item.released",
       purged: "evidence.manifest_item.purged",
     } as const satisfies Record<EvidenceCustodyState, string>,
+    deletionByDecision: {
+      purged: "evidence.deletion.purged",
+      preservedForProviderExpiry:
+        "evidence.deletion.preserved_for_provider_expiry",
+      skippedDueToHold: "evidence.deletion.skipped_due_to_hold",
+      skippedDueToException: "evidence.deletion.skipped_due_to_exception",
+      deferredByRetention: "evidence.deletion.deferred_by_retention",
+    },
   },
   accident: {
     caseByStatus: {

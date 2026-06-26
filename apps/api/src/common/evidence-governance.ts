@@ -13,7 +13,7 @@ import type {
 
 import { ApiRequestError } from "./api-envelope";
 
-export const EVIDENCE_GOVERNANCE_VERSION = "phase1-2026-04-29";
+export const EVIDENCE_GOVERNANCE_VERSION = "phase2-2026-06-26";
 
 export type EvidenceAccessIdentity = Pick<
   IdentityContext,
@@ -491,6 +491,8 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
 
 const LEGAL_HOLD_WORKFLOW = [
   "Platform admin or ops places the hold with a case number, evidence family, subject reference, and reason code.",
+  "Legal holds take precedence over regulator, contract, normal-retention, and deletion-request flows until the hold is released.",
+  "Release requires a different platform-admin approver than the actor who placed the hold, and authority-triggered releases must record a release reference.",
   "Archive and deletion workers must skip held evidence until an audited release is recorded by platform admin.",
   "Tenant-visible surfaces may note that evidence is under hold, but they cannot release or delete held evidence directly.",
 ];

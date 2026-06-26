@@ -19,6 +19,14 @@ const PLATFORM_IDENTITY = {
   tenantId: null,
 };
 
+const PLATFORM_IDENTITY_2 = {
+  actorId: "platform-admin-002",
+  actorType: "platform_admin" as const,
+  realm: "platform" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
 describe("AuditNotificationService evidence governance workflows", () => {
   it("tracks legal holds and deletion exceptions on the evidence subject view", () => {
     const service = new AuditNotificationService();
@@ -83,6 +91,7 @@ describe("AuditNotificationService evidence governance workflows", () => {
     expect(governance).toMatchObject({
       family: "report_artifact",
       subjectId: "artifact-report-001",
+      effectivePrecedence: "active_hold",
       deletionSuppressed: true,
     });
     expect(governance.activeLegalHolds).toHaveLength(1);
@@ -109,13 +118,46 @@ describe("AuditNotificationService evidence governance workflows", () => {
       ),
     ).toThrowError(ApiRequestError);
 
+    const platformPlacedHold = service.placeEvidenceLegalHold(
+      {
+        family: "filing_package",
+        subjectId: "pkg-002",
+        caseNumber: "CASE-2026-003",
+        reasonCode: "regulatory_inquiry",
+      },
+      PLATFORM_IDENTITY,
+    );
+
+    expect(() =>
+      service.releaseEvidenceLegalHold(
+        platformPlacedHold.holdId,
+        {
+          releaseReason: "Same admin attempted release.",
+          releaseTrigger: "authority",
+        },
+        PLATFORM_IDENTITY,
+      ),
+    ).toThrowError(ApiRequestError);
+
     const released = service.releaseEvidenceLegalHold(
       hold.holdId,
-      { releaseReason: "regulator packet closed" },
-      PLATFORM_IDENTITY,
+      {
+        releaseReason: "regulator packet closed",
+        releaseTrigger: "authority",
+        releaseReference: "AUTH-REL-2026-001",
+      },
+      PLATFORM_IDENTITY_2,
       "req-hold-release-001",
     );
     expect(released.status).toBe("released");
     expect(released.releasedByActorType).toBe("platform_admin");
+    expect(released.releaseTrigger).toBe("authority");
+    expect(released.releaseReference).toBe("AUTH-REL-2026-001");
+    expect(released.transitionHistory.map((transition) => transition.to)).toEqual([
+      "draft",
+      "active",
+      "release_requested",
+      "released",
+    ]);
   });
 });

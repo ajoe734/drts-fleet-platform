@@ -10,7 +10,7 @@ describe("evidence-governance policy catalog", () => {
   it("publishes all phase1 evidence families with legal-hold workflow", () => {
     const catalog = getEvidenceGovernanceCatalog();
 
-    expect(catalog.version).toBe("phase1-2026-04-29");
+    expect(catalog.version).toBe("phase2-2026-06-26");
     expect(catalog.policies).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ family: "call_recording" }),
@@ -23,7 +23,7 @@ describe("evidence-governance policy catalog", () => {
         expect.objectContaining({ family: "proof_bundle" }),
       ]),
     );
-    expect(catalog.legalHoldWorkflow).toHaveLength(3);
+    expect(catalog.legalHoldWorkflow).toHaveLength(5);
   });
 
   it("denies tenant access to call-recording evidence but allows tenant-scoped reports", () => {
