@@ -133,8 +133,13 @@ export class SandboxDispatchGateService {
   ) {
     await this.ensureDisclosureCacheLoaded();
     const now = new Date().toISOString();
+    const existingEntry = this.findMessageCatalogEntry(
+      command.messageCode,
+      command.locale,
+    );
     const entryId =
       command.entryId?.trim() ||
+      existingEntry?.entryId ||
       `${command.catalogVersion}:${command.messageCode}:${command.locale}`;
     const nextEntry: PassengerDisclosureMessageCatalogEntry = {
       entryId,
@@ -143,16 +148,16 @@ export class SandboxDispatchGateService {
       locale: command.locale,
       bodyText: command.bodyText,
       legalApproved: command.legalApproved,
-      createdAt:
-        this.messageCatalogEntries.find((entry) => entry.entryId === entryId)
-          ?.createdAt ?? now,
+      createdAt: existingEntry?.createdAt ?? now,
       updatedAt: now,
     };
 
     this.messageCatalogEntries = [
       nextEntry,
       ...this.messageCatalogEntries.filter(
-        (entry) => entry.entryId !== entryId,
+        (entry) =>
+          entry.entryId !== existingEntry?.entryId &&
+          !this.matchesCatalogEntry(entry, command.messageCode, command.locale),
       ),
     ];
     if (this.repository) {
@@ -1135,9 +1140,33 @@ export class SandboxDispatchGateService {
   ) {
     const deduped = new Map<string, PassengerDisclosureMessageCatalogEntry>();
     for (const entry of [...BASELINE_DISCLOSURE_MESSAGE_CATALOG, ...entries]) {
-      deduped.set(entry.entryId, this.cloneMessageCatalogEntry(entry));
+      deduped.set(
+        this.messageCatalogKey(entry.messageCode, entry.locale),
+        this.cloneMessageCatalogEntry(entry),
+      );
     }
     return [...deduped.values()];
+  }
+
+  private findMessageCatalogEntry(messageCode: string, locale: string) {
+    return this.messageCatalogEntries.find((entry) =>
+      this.matchesCatalogEntry(entry, messageCode, locale),
+    );
+  }
+
+  private matchesCatalogEntry(
+    entry: PassengerDisclosureMessageCatalogEntry,
+    messageCode: string,
+    locale: string,
+  ) {
+    return (
+      this.messageCatalogKey(entry.messageCode, entry.locale) ===
+      this.messageCatalogKey(messageCode, locale)
+    );
+  }
+
+  private messageCatalogKey(messageCode: string, locale: string) {
+    return `${messageCode}::${locale}`;
   }
 
   private selectPassengerDisclosurePolicy(input: {

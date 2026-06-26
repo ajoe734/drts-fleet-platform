@@ -79,4 +79,48 @@ describe("SandboxDispatchGateRepository", () => {
       }),
     ]);
   });
+
+  it("upserts disclosure catalog entries on the message code and locale key", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new SandboxDispatchGateRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    await repository.upsertPassengerDisclosureMessageCatalogEntry({
+      entryId: "pdc-v1-av-en-us",
+      catalogVersion: "passenger_disclosure.v1",
+      messageCode: "sandbox_passenger_disclosure.av_program_notice",
+      locale: "en-US",
+      bodyText: "updated legal copy",
+      legalApproved: true,
+      createdAt: "2026-06-26T00:00:00.000Z",
+      updatedAt: "2026-06-26T01:00:00.000Z",
+    });
+
+    expect(query).toHaveBeenCalledTimes(1);
+    const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("ON CONFLICT (message_code, locale) DO UPDATE SET");
+    expect(sql).toContain("entry_id = EXCLUDED.entry_id");
+    expect(params).toEqual([
+      "pdc-v1-av-en-us",
+      "passenger_disclosure.v1",
+      "sandbox_passenger_disclosure.av_program_notice",
+      "en-US",
+      true,
+      "updated legal copy",
+      JSON.stringify({
+        entryId: "pdc-v1-av-en-us",
+        catalogVersion: "passenger_disclosure.v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "updated legal copy",
+        legalApproved: true,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T01:00:00.000Z",
+      }),
+      "2026-06-26T00:00:00.000Z",
+      "2026-06-26T01:00:00.000Z",
+    ]);
+  });
 });
