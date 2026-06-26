@@ -39,6 +39,8 @@ export interface Phase2SourceMetadata {
   ingestedAt: string;
   // When the source captured/recorded the underlying fact, if distinct.
   recordedAt: string | null;
+  // When the upstream provider copy is expected to expire, if it does.
+  providerExpiresAt?: string | null;
   // Pointer to a detached signature / attestation artifact, when the source is
   // cryptographically attested (regulatory chain-of-custody).
   signatureRef: string | null;
@@ -471,6 +473,9 @@ export const SANDBOX_DISPATCH_REASON_CODES = [
   "ACTIVE_SAFETY_INCIDENT",
   "MINIMAL_RISK_CONDITION_ACTIVE",
   "SANDBOX_PROGRAM_SUSPENDED",
+  "PASSENGER_DISCLOSURE_POLICY_MISSING",
+  "PASSENGER_DISCLOSURE_MESSAGE_MISSING",
+  "PASSENGER_ACKNOWLEDGEMENT_REQUIRED",
 ] as const;
 export type SandboxDispatchReasonCode =
   (typeof SANDBOX_DISPATCH_REASON_CODES)[number];
@@ -483,6 +488,7 @@ export interface SandboxDispatchDecision {
   sandboxProgramId: string;
 
   decision: SandboxDispatchOutcome;
+  fallbackRequired: boolean;
   oddInBounds: boolean;
   hardReasonCodes: SandboxDispatchReasonCode[];
   softReasonCodes: SandboxDispatchReasonCode[];
@@ -563,6 +569,264 @@ export interface SandboxBillingTreatmentRecord {
   fallbackSurchargeApplied: boolean;
   treatmentSnapshot: Record<string, unknown>;
   createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// §3.3A Passenger disclosure policy + acknowledgement
+// ---------------------------------------------------------------------------
+
+export const PASSENGER_DISCLOSURE_CHANNELS = [
+  "tenant_portal",
+  "partner_portal",
+  "call_center",
+  "ops_console",
+] as const;
+export type PassengerDisclosureChannel =
+  (typeof PASSENGER_DISCLOSURE_CHANNELS)[number];
+
+export const PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_MODES = [
+  "per_booking_checkbox",
+  "program_level_contract",
+  "verbal_recorded",
+  "operator_confirmed_notice",
+] as const;
+export type PassengerDisclosureAcknowledgementMode =
+  (typeof PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_MODES)[number];
+
+export const PASSENGER_DISCLOSURE_ACTOR_TYPES = [
+  "passenger",
+  "tenant_admin",
+  "ops_user",
+  "system",
+] as const;
+export type PassengerDisclosureActorType =
+  (typeof PASSENGER_DISCLOSURE_ACTOR_TYPES)[number];
+
+export interface PassengerDisclosureMessageCatalogEntry {
+  entryId: string;
+  catalogVersion: string;
+  messageCode: string;
+  locale: string;
+  bodyText: string;
+  legalApproved: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerDisclosurePolicyChannelRule {
+  channel: PassengerDisclosureChannel;
+  messageCode: string;
+  requiresAcknowledgement: boolean;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+}
+
+export interface PassengerDisclosurePolicy {
+  policyId: string;
+  policyVersion: string;
+  tenantId: string | null;
+  businessDispatchSubtype: string | null;
+  partnerEntrySlug: string | null;
+  active: boolean;
+  channelRules: PassengerDisclosurePolicyChannelRule[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PassengerAcknowledgementRecord {
+  acknowledgementId: string;
+  bookingId: string;
+  orderId: string;
+  policyId: string;
+  messageCode: string;
+  channel: PassengerDisclosureChannel;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+  actorType: PassengerDisclosureActorType;
+  actorRef: string | null;
+  acknowledgedAt: string;
+  evidenceRef: string | null;
+  createdAt: string;
+}
+
+export interface PassengerDisclosureRequirementSnapshot {
+  channel: PassengerDisclosureChannel;
+  policyId: string;
+  policyVersion: string;
+  messageCode: string | null;
+  requiresAcknowledgement: boolean;
+  acknowledgementMode: PassengerDisclosureAcknowledgementMode;
+  acknowledgedAt: string | null;
+  acknowledgementRecordId: string | null;
+}
+
+export interface SandboxDispatchAssignmentSnapshot {
+  candidateRoute?: GeoJsonMultiLineString | null;
+  entitlement?: {
+    active: boolean | null;
+  } | null;
+  providerCapabilities?: Partial<
+    Record<Phase2ProviderCapability, boolean | null>
+  > | null;
+  telemetry?: {
+    stale: boolean | null;
+    minimalRiskConditionActive: boolean | null;
+    socPercent: number | null;
+    currentTripCount?: number | null;
+    odometerKm?: number | null;
+    qualityScore?: number | null;
+    providerHealthState?: TeslaProviderHealthState | null;
+    dispatchHold?: boolean | null;
+  } | null;
+  regulatory?: {
+    approvalFresh: boolean | null;
+    vehicleCertified: boolean | null;
+  } | null;
+  recorder?: {
+    healthy: boolean | null;
+  } | null;
+  holdState?: {
+    activeSafetyIncident: boolean | null;
+    programSuspended: boolean | null;
+    vehicleHold: boolean | null;
+  } | null;
+  limits?: {
+    minSocPercent?: number | null;
+    maxConcurrentTrips?: number | null;
+    maxOdometerKm?: number | null;
+  } | null;
+}
+
+export interface UpsertPassengerDisclosurePolicyCommand {
+  policyId?: string;
+  policyVersion: string;
+  tenantId?: string | null;
+  businessDispatchSubtype?: string | null;
+  partnerEntrySlug?: string | null;
+  active?: boolean;
+  channelRules: PassengerDisclosurePolicyChannelRule[];
+}
+
+export interface UpsertPassengerDisclosureMessageCatalogEntryCommand {
+  entryId?: string;
+  catalogVersion: string;
+  messageCode: string;
+  locale: string;
+  bodyText: string;
+  legalApproved: boolean;
+}
+
+export interface RecordPassengerAcknowledgementCommand {
+  actorType?: PassengerDisclosureActorType;
+  actorRef?: string | null;
+  acknowledgedAt?: string;
+  evidenceRef?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// §3.3B Sandbox fulfillment visibility projection
+// ---------------------------------------------------------------------------
+
+export const SANDBOX_FULFILLMENT_VISIBILITY_AUDIENCES = [
+  "passenger",
+  "tenant",
+  "partner",
+  "ops",
+  "platform_admin",
+] as const;
+export type SandboxFulfillmentVisibilityAudience =
+  (typeof SANDBOX_FULFILLMENT_VISIBILITY_AUDIENCES)[number];
+
+export const SANDBOX_FULFILLMENT_MODES = [
+  "tesla_av",
+  "human_fallback",
+  "mixed",
+  "hidden",
+] as const;
+export type SandboxFulfillmentMode = (typeof SANDBOX_FULFILLMENT_MODES)[number];
+
+export const SANDBOX_FULFILLMENT_STATES = [
+  "pending_dispatch",
+  "assigned",
+  "en_route_pickup",
+  "arrived_pickup",
+  "in_trip",
+  "completed",
+  "cancelled",
+  "hidden",
+] as const;
+export type SandboxFulfillmentState =
+  (typeof SANDBOX_FULFILLMENT_STATES)[number];
+
+export const SANDBOX_FULFILLMENT_DISCLOSURES = [
+  "vehicle_mode_summary",
+  "fallback_to_human",
+  "provider_brand_disclosed",
+  "extra_charge_disclosed",
+  "safety_operator_present",
+] as const;
+export type SandboxFulfillmentDisclosure =
+  (typeof SANDBOX_FULFILLMENT_DISCLOSURES)[number];
+
+export const SANDBOX_FULFILLMENT_VISIBILITY_REASONS = [
+  "av_assignment_active",
+  "human_fallback_active",
+  "mixed_fulfillment_active",
+  "policy_hidden",
+  "dispatch_pending",
+  "trip_completed",
+  "trip_cancelled",
+  "internal_takeover_redacted",
+  "provider_brand_allowed",
+  "provider_brand_withheld",
+] as const;
+export type SandboxFulfillmentVisibilityReason =
+  (typeof SANDBOX_FULFILLMENT_VISIBILITY_REASONS)[number];
+
+export const SANDBOX_FULFILLMENT_MESSAGE_CATEGORIES = [
+  "info",
+  "warning",
+  "critical",
+] as const;
+export type SandboxFulfillmentMessageCategory =
+  (typeof SANDBOX_FULFILLMENT_MESSAGE_CATEGORIES)[number];
+
+export interface SandboxFulfillmentAudienceMessage {
+  messageCode: string;
+  category: SandboxFulfillmentMessageCategory;
+}
+
+export interface SandboxFulfillmentVisibilityRecord {
+  visibilityId: string;
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  audience: SandboxFulfillmentVisibilityAudience;
+  fulfillmentMode: SandboxFulfillmentMode;
+  state: SandboxFulfillmentState;
+  statusCode: string;
+  messages: SandboxFulfillmentAudienceMessage[];
+  disclosures: SandboxFulfillmentDisclosure[];
+  reasonCodes: SandboxFulfillmentVisibilityReason[];
+  etaMinutes: number | null;
+  extraChargeDisclosed: boolean;
+  safetyDisclosurePolicyId: string | null;
+  providerBrandDisclosed: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SandboxFulfillmentProjectionView {
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  audience: SandboxFulfillmentVisibilityAudience;
+  fulfillmentMode: SandboxFulfillmentMode;
+  state: SandboxFulfillmentState;
+  statusCode: string;
+  messages: SandboxFulfillmentAudienceMessage[];
+  etaMinutes: number | null;
+  extraChargeDisclosed: boolean;
+  providerBrandDisclosed: boolean;
+  updatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -662,6 +926,63 @@ export interface TeslaPublicTelemetrySample {
   batteryLevelPct: number | null;
   online: boolean | null;
   source: Phase2SourceMetadata;
+}
+
+export const TESLA_TELEMETRY_FEED_KINDS = [
+  "vehicle_state",
+  "public_telemetry",
+] as const;
+export type TeslaTelemetryFeedKind =
+  (typeof TESLA_TELEMETRY_FEED_KINDS)[number];
+
+export const TESLA_PROVIDER_HEALTH_STATES = [
+  "healthy",
+  "delayed",
+  "gap_detected",
+  "backfill",
+  "complete",
+  "incomplete_hold",
+  "regulator_data_incident",
+] as const;
+export type TeslaProviderHealthState =
+  (typeof TESLA_PROVIDER_HEALTH_STATES)[number];
+
+export interface TeslaTelemetryBackfillQuery {
+  backfillId: string;
+  providerCode: string;
+  feedKind: TeslaTelemetryFeedKind;
+  vin: string;
+  from: string;
+  to: string;
+  sessionId: string | null;
+  eventId: string | null;
+  sequenceAfter: number | null;
+  pageToken: string | null;
+  status: "pending" | "requested" | "complete" | "incomplete";
+  detectedAt: string;
+  updatedAt: string;
+}
+
+export interface TeslaTelemetryHealthRecord {
+  providerCode: string;
+  feedKind: TeslaTelemetryFeedKind;
+  externalVehicleRef: string;
+  sessionId: string | null;
+  healthState: TeslaProviderHealthState;
+  qualityScore: number;
+  dispatchHold: boolean;
+  latestEventId: string | null;
+  latestSequenceNo: number | null;
+  latestContiguousSequenceNo: number | null;
+  missingSequences: number[];
+  lastCapturedAt: string | null;
+  lastReceivedAt: string | null;
+  staleHeartbeatAt: string | null;
+  gapDetectedAt: string | null;
+  backfillRequestedAt: string | null;
+  completedAt: string | null;
+  issueCodes: string[];
+  evaluatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -946,6 +1267,7 @@ export const ROC_INTERVENTION_TYPES = [
   "reroute",
   "odd_recovery",
   "manual_takeover",
+  "fallback_to_human",
 ] as const;
 export type RocInterventionType = (typeof ROC_INTERVENTION_TYPES)[number];
 
@@ -960,6 +1282,50 @@ export interface RocIntervention {
   resolvedAt: string | null;
   outcomeNote: string | null;
   source: Phase2SourceMetadata;
+}
+
+export const ROC_FALLBACK_TRIGGERS = [
+  "gate_fallback_required",
+  "roc_manual_intervention",
+] as const;
+export type RocFallbackTrigger = (typeof ROC_FALLBACK_TRIGGERS)[number];
+
+export interface RocFallbackToHumanCommand {
+  dispatchJobId?: string | null;
+  sandboxDecisionId?: string | null;
+  humanVehicleId: string;
+  humanDriverId: string;
+  revisedEtaMinutes: number;
+  reason: string;
+  rocOperatorId?: string | null;
+  avVehicleId?: string | null;
+  avDriverId?: string | null;
+  triggeredByEventId?: string | null;
+  trigger?: RocFallbackTrigger;
+}
+
+export interface RocFallbackToHumanReport {
+  reportId: string;
+  interventionId: string;
+  tripId: string;
+  orderId: string;
+  bookingId: string | null;
+  dispatchJobId: string;
+  trigger: RocFallbackTrigger;
+  sandboxDecisionId: string | null;
+  sandboxProgramId: string | null;
+  avVehicleId: string | null;
+  avDriverId: string | null;
+  previousAssignmentId: string | null;
+  fallbackAssignmentId: string;
+  fallbackTaskId: string;
+  humanVehicleId: string;
+  humanDriverId: string;
+  revisedEtaMinutes: number;
+  hardReasonCodes: SandboxDispatchReasonCode[];
+  softReasonCodes: SandboxDispatchReasonCode[];
+  reportArtifactId: string;
+  generatedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1417,7 +1783,202 @@ export interface GenerateSandboxComplianceSnapshotCommand {
 }
 
 // ---------------------------------------------------------------------------
-// §3.9 Error-code enum
+// §3.9 Canonical audit catalog
+// ---------------------------------------------------------------------------
+
+export const PHASE2_AUDIT_EVENT_CATALOG = {
+  sandbox: {
+    providerCapabilityRequirementConfigured:
+      "sandbox.provider_capability_requirement.configured",
+    providerCapabilityRequirementAmended:
+      "sandbox.provider_capability_requirement.amended",
+    providerCapabilityDescriptorRecorded:
+      "sandbox.provider_capability_descriptor.recorded",
+    dispatchDecisionByOutcome: {
+      allow: "sandbox.dispatch_decision.allowed",
+      allow_with_safety_operator:
+        "sandbox.dispatch_decision.allowed_with_safety_operator",
+      block: "sandbox.dispatch_decision.blocked",
+      defer: "sandbox.dispatch_decision.deferred",
+    } as const satisfies Record<SandboxDispatchOutcome, string>,
+  },
+  tesla: {
+    commandReceiptByStatus: {
+      accepted: "tesla.command_receipt.accepted",
+      queued: "tesla.command_receipt.queued",
+      dispatched: "tesla.command_receipt.dispatched",
+      acknowledged: "tesla.command_receipt.acknowledged",
+      rejected: "tesla.command_receipt.rejected",
+      failed: "tesla.command_receipt.failed",
+      expired: "tesla.command_receipt.expired",
+    } as const satisfies Record<CommandReceiptStatus, string>,
+    regulatoryEventRecorded: "tesla.regulatory_event.recorded",
+    vehicleStateSnapshotRecorded: "tesla.vehicle_state_snapshot.recorded",
+    publicTelemetrySampleRecorded: "tesla.public_telemetry_sample.recorded",
+  },
+  safetyOperator: {
+    assignmentByStatus: {
+      assigned: "safety_operator.assignment.assigned",
+      engaged: "safety_operator.assignment.engaged",
+      released: "safety_operator.assignment.released",
+      expired: "safety_operator.assignment.expired",
+    } as const satisfies Record<SafetyOperatorAssignmentStatus, string>,
+  },
+  roc: {
+    interventionStarted: "roc.intervention.started",
+    interventionResolved: "roc.intervention.resolved",
+    fallbackToHumanReported: "roc.fallback_to_human.reported",
+  },
+  evidence: {
+    manifestCreated: "evidence.manifest.created",
+    manifestAmended: "evidence.manifest.amended",
+    manifestItemByCustodyState: {
+      captured: "evidence.manifest_item.captured",
+      uploaded: "evidence.manifest_item.uploaded",
+      verified: "evidence.manifest_item.verified",
+      sealed: "evidence.manifest_item.sealed",
+      released: "evidence.manifest_item.released",
+      purged: "evidence.manifest_item.purged",
+    } as const satisfies Record<EvidenceCustodyState, string>,
+    deletionByDecision: {
+      purged: "evidence.deletion.purged",
+      preservedForProviderExpiry:
+        "evidence.deletion.preserved_for_provider_expiry",
+      skippedDueToHold: "evidence.deletion.skipped_due_to_hold",
+      skippedDueToException: "evidence.deletion.skipped_due_to_exception",
+      deferredByRetention: "evidence.deletion.deferred_by_retention",
+    },
+  },
+  accident: {
+    caseByStatus: {
+      open: "accident.case.opened",
+      evidence_pending: "accident.case.marked_evidence_pending",
+      under_investigation: "accident.case.investigation_started",
+      regulator_review: "accident.case.regulator_review_requested",
+      closed: "accident.case.closed",
+    } as const satisfies Record<AccidentCaseStatus, string>,
+    evidenceManifestLinked: "accident.case.evidence_manifest_linked",
+    regulatoryReportLinked: "accident.case.regulatory_report_linked",
+    caseAmended: "accident.case.amended",
+  },
+  regulatory: {
+    reportByStatus: {
+      draft: "regulatory.report.drafted",
+      generated: "regulatory.report.generated",
+      submitted: "regulatory.report.submitted",
+      accepted: "regulatory.report.accepted",
+      rejected: "regulatory.report.rejected",
+    } as const satisfies Record<RegulatoryReportStatus, string>,
+    reportAmended: "regulatory.report.amended",
+  },
+} as const;
+
+type NestedStringValues<T> = T extends string
+  ? T
+  : T extends Record<string, unknown>
+    ? { [K in keyof T]: NestedStringValues<T[K]> }[keyof T]
+    : never;
+
+function collectPhase2AuditEventNames(
+  value: unknown,
+  result: string[] = [],
+): string[] {
+  if (typeof value === "string") {
+    result.push(value);
+    return result;
+  }
+
+  if (value && typeof value === "object") {
+    for (const nestedValue of Object.values(value)) {
+      collectPhase2AuditEventNames(nestedValue, result);
+    }
+  }
+
+  return result;
+}
+
+export type Phase2AuditEventName = NestedStringValues<
+  typeof PHASE2_AUDIT_EVENT_CATALOG
+>;
+
+export const PHASE2_AUDIT_EVENT_NAMES = collectPhase2AuditEventNames(
+  PHASE2_AUDIT_EVENT_CATALOG,
+) as readonly Phase2AuditEventName[];
+
+export type Phase2AuditActorType =
+  | "system"
+  | "platform_admin"
+  | "tenant_admin"
+  | "ops_user"
+  | "partner_api_key"
+  | "referral_passenger";
+
+export interface Phase2AuditContext {
+  actorId: string | null;
+  actorType: Phase2AuditActorType;
+  tenantId: string | null;
+  moduleName: string;
+  eventName: Phase2AuditEventName;
+  resourceType: string;
+  resourceId: string | null;
+  requestId?: string;
+  summary: Record<string, unknown>;
+  previousSummary?: Record<string, unknown>;
+  resourceVersion?: string | null;
+  sourceSystem?: Phase2SourceSystem | null;
+  sourceRef?: string | null;
+  occurredAt?: string;
+  supersedesAuditId?: string | null;
+  amendsResourceVersion?: string | null;
+}
+
+// Phase 2 audit event names share the Phase 1 append-only audit store and are
+// distinguished by a stable domain prefix (`<domain>.<entity>.<verb>`). The
+// existing audit query reuses these helpers to offer a Phase 2 filter without a
+// second store or a second emitter (P2-DP-S4-001 S4=a).
+export const PHASE2_AUDIT_DOMAINS = [
+  "sandbox",
+  "tesla",
+  "safety_operator",
+  "roc",
+  "evidence",
+  "accident",
+  "regulatory",
+] as const;
+export type Phase2AuditDomain = (typeof PHASE2_AUDIT_DOMAINS)[number];
+
+const PHASE2_AUDIT_EVENT_NAME_SET: ReadonlySet<string> = new Set(
+  PHASE2_AUDIT_EVENT_NAMES,
+);
+
+export function isPhase2AuditEventName(
+  value: string,
+): value is Phase2AuditEventName {
+  return PHASE2_AUDIT_EVENT_NAME_SET.has(value);
+}
+
+export function getPhase2AuditDomain(
+  eventName: string,
+): Phase2AuditDomain | null {
+  if (!isPhase2AuditEventName(eventName)) {
+    return null;
+  }
+  const prefix = eventName.slice(0, eventName.indexOf("."));
+  return (PHASE2_AUDIT_DOMAINS as readonly string[]).includes(prefix)
+    ? (prefix as Phase2AuditDomain)
+    : null;
+}
+
+// Query filter applied on top of the shared audit query so callers can narrow
+// to Phase 2 events (optionally a single domain) while still using the one
+// canonical audit listing endpoint.
+export interface AuditLogQueryFilter {
+  phase2Only?: boolean;
+  phase2Domain?: Phase2AuditDomain;
+}
+
+// ---------------------------------------------------------------------------
+// §3.10 Error-code enum
 // ---------------------------------------------------------------------------
 
 // Stable, machine-checkable error codes returned by Phase 2 endpoints. Wired
