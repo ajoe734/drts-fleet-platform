@@ -65,14 +65,6 @@ const en: Dictionary = {
     "Control-plane data is unavailable, so the ROC canvas fallback snapshot is rendering.",
   "runtime.refreshHint":
     "This ROC snapshot is not fully fresh. Verify telemetry and regulatory-event feeds before acting.",
-  "screenHold.bannerTitle": "Canonical ROC canvas pending",
-  "screenHold.bannerBody":
-    "This response route stays at scaffold level because docs/05-ui/drts-design-canvas/roc-screens-2.jsx is not present in the repository.",
-  "screenHold.cardTitle": "Implementation Hold",
-  "screenHold.emptyTitle": "Screen requirements hand-off only",
-  "screenHold.emptyBody":
-    "Use the ROC screen-requirements packet as the current authority for route scope, states, cross-app links, and write-contract rules. Do not introduce bespoke layout until the visual-team canvas lands.",
-
   "freshness.telemetry": "telemetry freshness",
   "freshness.regulatory": "regulatory-event freshness",
   "freshness.fresh": "fresh",
@@ -379,14 +371,6 @@ const zh: Dictionary = {
     "控制平面資料目前不可用，畫面改以 ROC canvas fallback snapshot 呈現。",
   "runtime.refreshHint":
     "目前 ROC snapshot 並非完全 fresh；採取處置前請再核對 telemetry 與監理事件饋送。",
-  "screenHold.bannerTitle": "Canonical ROC canvas 尚未落地",
-  "screenHold.bannerBody":
-    "此回應路由目前維持 scaffold 狀態，因為 repo 內不存在 docs/05-ui/drts-design-canvas/roc-screens-2.jsx。",
-  "screenHold.cardTitle": "實作保留",
-  "screenHold.emptyTitle": "目前僅有 screen-requirements hand-off",
-  "screenHold.emptyBody":
-    "此路由的範圍、狀態、跨 App deep-link 與寫入 contract 目前以 ROC screen-requirements 文件為準；在 visual-team canvas 落地前不得自行發明版面。",
-
   "freshness.telemetry": "telemetry 鮮度",
   "freshness.regulatory": "監理事件鮮度",
   "freshness.fresh": "fresh",
