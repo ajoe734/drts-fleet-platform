@@ -276,7 +276,8 @@ export class SandboxDispatchGateRepository {
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9
         )
-        ON CONFLICT (entry_id) DO UPDATE SET
+        ON CONFLICT (message_code, locale) DO UPDATE SET
+          entry_id = EXCLUDED.entry_id,
           catalog_version = EXCLUDED.catalog_version,
           message_code = EXCLUDED.message_code,
           locale = EXCLUDED.locale,
