@@ -189,4 +189,33 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
       await app.close();
     }
   });
+
+  it("rejects create requests that only carry unrelated read scopes", async () => {
+    const { app, baseUrl } = await createTestApp();
+
+    try {
+      const response = await fetch(`${baseUrl}/api/regulatory/notifications`, {
+        method: "POST",
+        headers: buildHeaders({
+          "x-scopes": "reports:read",
+        }),
+        body: JSON.stringify({
+          eventId: "evt-reg-int-002",
+          eventType: "collision",
+          severity: "incident",
+          reportVersionKind: "initial",
+          jurisdiction: "CA-DMV",
+          vehicleId: "veh-reg-int-002",
+          eventOccurredAt: "2026-06-26T03:00:00.000Z",
+          summary: "This request should be scope denied.",
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body.error.code).toBe("AUTH_SCOPE_DENIED");
+    } finally {
+      await app.close();
+    }
+  });
 });
