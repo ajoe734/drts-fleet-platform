@@ -60,6 +60,7 @@ import { RocOperationsModule } from "./modules/roc-operations/roc-operations.mod
 import { VehicleEvidenceModule } from "./modules/vehicle-evidence/vehicle-evidence.module";
 import { AccidentInvestigationModule } from "./modules/accident-investigation/accident-investigation.module";
 import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regulatory-reporting.module";
+import { TESLA_REGULATORY_EVENTS_ROUTE } from "./modules/tesla-regulatory-events/tesla-regulatory-events.controller";
 
 @Module({
   imports: [
@@ -139,6 +140,14 @@ export class AppModule implements NestModule {
       .exclude(
         { path: "health", method: RequestMethod.ALL },
         { path: "api/health", method: RequestMethod.ALL },
+        {
+          path: TESLA_REGULATORY_EVENTS_ROUTE,
+          method: RequestMethod.POST,
+        },
+        {
+          path: `api/${TESLA_REGULATORY_EVENTS_ROUTE}`,
+          method: RequestMethod.POST,
+        },
       )
       .forRoutes({ path: "*", method: RequestMethod.ALL });
   }
