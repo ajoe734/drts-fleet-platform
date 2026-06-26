@@ -7,7 +7,7 @@
 | Parent task | `P2-SAFE-001` — Safety Operator backend: shift / checklist / takeover report / offline sync |
 | Sidecar owner | Claude |
 | Sidecar reviewer | Codex |
-| Sidecar self-status | in_progress → handed off for review |
+| Sidecar self-status | rev2 — G1 severity raised per Codex finding (2026-06-26), re-handed for review |
 | Parent status (at packet build) | `review` (owner=Codex, reviewer=Claude2) |
 | Parent impl commit | `8dc9972908483f3e15349c08a9c3e0cd4c2c63f5` |
 | Parent impl branch | `origin/codex/p2-safe-001` |
@@ -133,8 +133,11 @@ persistence is **on by default**; the `@Optional()` is the unit-test fallback (p
   sufficient or a DB CHECK is wanted (see G4).
 - **R5 — Audit trail.** Each mutation calls `recordAudit(...)` (e.g. `takeover_report_submit`
   L867); confirm actor/tenant derivation and that audit is best-effort vs. blocking.
-- **R6 — Migration apply.** See G1 — confirm `scripts/db-apply.sh` ordering/keying tolerates a 4th
-  `V0040` prefix on `dev`, or require renumber to `V0042`.
+- **R6 — Migration apply (BLOCKING).** See G1 — `scripts/db-apply.sh` keys `schema_migrations` by
+  *version* (`${filename%%__*}`), not filename, and silently `[skip]`s any later file sharing an
+  already-applied version. A 4th `V0040` is therefore **never applied** on a fresh DB. This is a
+  hard apply blocker: **require renumber to `V0042` before merge** — do not accept "tolerates
+  duplicates" as a resolution.
 - **R7 — Test green re-run.** Re-run Vitest (3 files) + `tsc` on contracts + api against current
   `dev` before approve (owner's green was on the impl branch base, see G3).
 
@@ -142,15 +145,40 @@ persistence is **on by default**; the `@Optional()` is the unit-test fallback (p
 
 ## 7. Gaps & gotchas (G1–G4)
 
-- **G1 — V0040 migration-number collision (highest integration risk).** `origin/dev` already carries
-  **three** `V0040__*` files (`phase2_decision_packet_addendum`, `phase2_evidence_access_logs`,
+- **G1 — V0040 migration-number collision is a CONCRETE APPLY BLOCKER (not an ordering/hygiene smell).**
+  *(Severity raised per reviewer finding 2026-06-26; supersedes the earlier "ordering/hygiene smell"
+  framing.)* `origin/dev` already carries **three** `V0040__*` files
+  (`phase2_decision_packet_addendum`, `phase2_evidence_access_logs`,
   `tesla_regulatory_raw_event_ingress`) **plus `V0041__tesla_provider_telemetry_health`**. The impl
   branch was cut from an older `dev` and adds a **fourth** `V0040__phase2_safety_operator_runtime`.
-  All four are independent `CREATE TABLE IF NOT EXISTS` with distinct table names, so there is no
-  DDL conflict, but the duplicated version prefix is an ordering/hygiene smell. **Recommendation:**
-  integrator should renumber to `V0042__phase2_safety_operator_runtime` on merge, or explicitly
-  confirm `db-apply.sh` keys applied migrations by filename (not version) and tolerates duplicates.
-  (This is a recognized fleet-wide Phase-2 parallel-branch pattern, not novel to this task.)
+  The four DDL bodies are independent `CREATE TABLE IF NOT EXISTS` with distinct table names, so they
+  do not collide on DDL — **but the runner keys applied migrations by *version*, not by filename:**
+  - `scripts/db-apply.sh` L44 iterates `find … -name 'V*.sql' | sort` (alphabetical).
+  - L47 derives the version from the prefix: `version="${filename%%__*}"` → `V0040` for **all four** files.
+  - L48-53 short-circuits: if `admin.schema_migrations` already has a row `WHERE version = '<version>'`,
+    it prints `[skip] <version> already applied` and `continue`s — **without applying the file**.
+  - L75-79 records each applied file as `INSERT … (version, file_name, checksum) … ON CONFLICT (version) DO NOTHING`.
+
+  Net effect on a **fresh apply**: only the **alphabetically-first** `V0040__*.sql`
+  (`V0040__phase2_decision_packet_addendum`) is applied and recorded under version `V0040`; every
+  subsequent `V0040__*.sql` — including `V0040__phase2_safety_operator_runtime` — is **silently
+  skipped and never executed**. The four `av_sandbox.safety_operator_*` tables would **not exist**,
+  and the service's repository dual-write / `hydrateState()` paths (§5) would fail at runtime against
+  a DB that was provisioned by this runner. This is a **blocking integration defect**, not cosmetic.
+
+  **Required fix (blocking, not optional):** integrator **must** renumber the new file to
+  `V0042__phase2_safety_operator_runtime` (next free version after `V0041`) before merge to `dev`.
+  Confirming "db-apply tolerates duplicates" is **not** an acceptable alternative — the runner
+  demonstrably does not (it dedupes by version and skips).
+
+  **Pre-existing latent risk (out of scope for this task, flag to integrator/infra):** the **three**
+  V0040 files *already on `dev`* are themselves a version collision under the same rule — a fresh
+  `db-apply.sh` run would apply only `…decision_packet_addendum` and skip `…evidence_access_logs` and
+  `…tesla_regulatory_raw_event_ingress`. Existing `dev`/staging DBs likely have those tables only
+  because the files landed and were applied at different times before the collision accumulated. A
+  clean-rebuild of `dev` from `infra/migrations` would be incomplete today regardless of this task.
+  This pre-dates P2-SAFE-001 and is not introduced by it, but renumbering the new file does **not**
+  fix the pre-existing three — that is a separate infra cleanup the integrator should track.
 - **G2 — Multi-instance dedup edge.** Dedup is an in-memory `Array.find` (L782), not a DB lookup.
   In a horizontally-scaled deployment (>1 API instance), a replay that lands on an instance whose
   cache never saw the first write will **miss** the in-memory check, build a new report, then hit
@@ -174,8 +202,12 @@ persistence is **on by default**; the `@Optional()` is the unit-test fallback (p
 
 - **Parent verdict basis:** AC-1..AC-7 have concrete code+test evidence; AC-8 pending a re-run on
   current `dev` (G3). No provider-data overwrite path found (AC-3 strong).
-- **Blocking items for integrator (not the code reviewer):** G1 (renumber V0040→V0042) before
-  merge-to-dev.
+- **Blocking items for integrator (not the code reviewer):** G1 — **renumber
+  `V0040__phase2_safety_operator_runtime` → `V0042` before merge-to-dev.** This is a hard apply
+  blocker, not a hygiene preference: `db-apply.sh` dedupes by version prefix and would silently skip
+  the 4th `V0040`, so the safety-operator tables would never be created. Separately flag the
+  pre-existing 3×`V0040`-on-dev collision to infra (out of scope for this task, but a latent
+  clean-rebuild defect).
 - **Reviewer to weigh in on:** G2 (cross-instance `duplicate` flag), G4 (enum CHECK defense-in-depth).
 - This sidecar makes **no** canonical change; closeout uses `INTEGRATION_STATUS=not_applicable`.
   Re-dispatch of this packet is redundant unless the reviewer reopens or the parent impl commit moves.
