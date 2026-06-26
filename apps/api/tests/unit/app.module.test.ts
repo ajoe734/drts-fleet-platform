@@ -28,6 +28,10 @@ describe("AppModule middleware wiring", () => {
         path: TESLA_REGULATORY_EVENTS_ROUTE,
         method: RequestMethod.POST,
       },
+      {
+        path: `api/${TESLA_REGULATORY_EVENTS_ROUTE}`,
+        method: RequestMethod.POST,
+      },
     );
     expect(forRoutes).toHaveBeenCalledWith({
       path: "*",

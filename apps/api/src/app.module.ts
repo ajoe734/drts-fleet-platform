@@ -144,6 +144,10 @@ export class AppModule implements NestModule {
           path: TESLA_REGULATORY_EVENTS_ROUTE,
           method: RequestMethod.POST,
         },
+        {
+          path: `api/${TESLA_REGULATORY_EVENTS_ROUTE}`,
+          method: RequestMethod.POST,
+        },
       )
       .forRoutes({ path: "*", method: RequestMethod.ALL });
   }
