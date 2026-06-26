@@ -10,6 +10,7 @@ export const driverRouteTitles = {
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
   settings: "設定",
+  safetyOperator: "安全員模式",
 } as const;
 
 export const driverTaskActionLabels: Record<DriverTaskAction, string> = {
