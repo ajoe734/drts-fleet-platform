@@ -388,6 +388,7 @@ describe("BillingSettlementService settlement matrix", () => {
       tenantId,
       driverId: "drv-live-enterprise-001",
       orderId: "order-live-enterprise-001",
+      bookingId: "booking-live-enterprise-001",
       completedAt: "2026-05-12T09:30:00Z",
       grossEarning: { currency: "NTD", amountMinor: 98000 },
       orderSource: "portal",
@@ -529,6 +530,117 @@ describe("BillingSettlementService settlement matrix", () => {
 });
 
 describe("BillingSettlementService referral settlement (drts_pays_partner)", () => {
+  it("keeps sandbox AV revenue on one invoice while suppressing AV driver settlement", async () => {
+    const service = createService();
+
+    service.handleOwnedMobilityTripCompleted({
+      tenantId: "tenant-demo-001",
+      driverId: "safety-op-001",
+      orderId: "order-av-only-001",
+      bookingId: "booking-av-only-001",
+      completedAt: "2026-05-27T10:15:00.000Z",
+      grossEarning: { currency: "NTD", amountMinor: 88000 },
+      orderSource: "portal",
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: "enterprise_dispatch",
+      costCenterCode: "CC-AV-001",
+      riderId: "rider-av-001",
+      partnerId: null,
+      partnerProgramId: null,
+      partnerEntrySlug: null,
+      eligibilityVerificationId: null,
+      issuerAuthorizationRef: null,
+      benefitReference: null,
+      serviceProduct: "enterprise_dispatch",
+      tenantServiceProgramId: null,
+      sourcePlatform: "portal",
+      sandboxFulfillmentSegments: [
+        {
+          fulfillmentSegmentId: "segment-order-av-only-001-1",
+          bookingId: "booking-av-only-001",
+          orderId: "order-av-only-001",
+          sandboxTripId: "order-av-only-001",
+          segmentType: "tesla_av",
+          segmentReason: "sandbox_av_completed",
+          startedAt: "2026-05-27T09:55:00.000Z",
+          endedAt: "2026-05-27T10:15:00.000Z",
+          vehicleId: "veh-av-demo-001",
+          vin: null,
+          driverId: "safety-op-001",
+          safetyOperatorId: "safety-op-001",
+          sourcePlatform: "portal",
+          distanceKm: 12.5,
+          durationSeconds: 1200,
+          cost: { currency: "NTD", amountMinor: 88000 },
+          evidenceReference: null,
+          createdAt: "2026-05-27T09:55:00.000Z",
+        },
+      ],
+      sandboxBillingTreatment: {
+        sandboxBillingTreatmentId: "sandbox-billing-order-av-only-001",
+        bookingId: "booking-av-only-001",
+        orderId: "order-av-only-001",
+        sandboxTripId: "order-av-only-001",
+        treatmentType: "normal_av",
+        fallbackCostAbsorber: null,
+        fallbackPolicyId: null,
+        policyResolution:
+          "Sandbox AV fulfillment completed with no fallback surcharge applied.",
+        passengerExtraChargeAllowed: false,
+        passengerExtraCharge: { currency: "NTD", amountMinor: 0 },
+        internalAvCost: { currency: "NTD", amountMinor: 88000 },
+        internalHumanFallbackCost: null,
+        partnerCharge: null,
+        tenantCharge: null,
+        platformAbsorbed: null,
+        fallbackSurchargeApplied: false,
+        treatmentSnapshot: {
+          fulfillmentMode: "tesla_av",
+        },
+        createdAt: "2026-05-27T10:15:00.000Z",
+      },
+    });
+
+    const invoice = await service.generateTenantInvoice(
+      "tenant-demo-001",
+      {
+        tenantId: "tenant-demo-001",
+        periodStart: "2026-05-01T00:00:00.000Z",
+        periodEnd: "2026-05-31T23:59:59.000Z",
+      },
+      "req-sandbox-av-invoice",
+    );
+    expect(invoice.lines.some((line) => line.orderId === "order-av-only-001")).toBe(
+      true,
+    );
+    expect(service.listSandboxBillingTreatments("order-av-only-001")).toEqual([
+      expect.objectContaining({
+        treatmentType: "normal_av",
+        fallbackSurchargeApplied: false,
+      }),
+    ]);
+
+    service.publishDriverFeePlan({
+      planName: "Sandbox fee plan",
+      version: "2026-05",
+      serviceFeeBps: 1000,
+      reimbursementMode: "platform_funded",
+    });
+
+    await expect(
+      service.generateDriverStatements({
+        periodMonth: "2026-05",
+        driverId: "safety-op-001",
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: "VALIDATION_ERROR",
+        }),
+      }),
+    });
+  });
+
   it("builds a referral statement with per-trip share, GMV, and active riders", () => {
     const service = createService();
     const statement = service.getReferralStatement(
