@@ -2821,6 +2821,7 @@ async function renderOwnedWorkspace({
         [] as DispatchCandidate[],
       )
     : { data: [] as DispatchCandidate[], failed: false };
+  const bookingId = order.bookingId;
   const [
     dispatchTrace,
     passengerProjectionResult,
@@ -2830,11 +2831,11 @@ async function renderOwnedWorkspace({
       () => client.getOrderDispatchTrace(order.orderId),
       [] as DispatchTraceLogRecord[],
     ),
-    order.bookingId
+    bookingId
       ? load(
           () =>
             client.get<SandboxFulfillmentProjectionView>(
-              `/api/ops/bookings/${encodeURIComponent(order.bookingId)}/sandbox-fulfillment?audience=passenger`,
+              `/api/ops/bookings/${encodeURIComponent(bookingId)}/sandbox-fulfillment?audience=passenger`,
             ),
           null as SandboxFulfillmentProjectionView | null,
         )
@@ -2842,11 +2843,11 @@ async function renderOwnedWorkspace({
           data: null as SandboxFulfillmentProjectionView | null,
           failed: false,
         }),
-    order.bookingId
+    bookingId
       ? load(
           () =>
             client.get<{ items: RocFallbackToHumanReport[] }>(
-              `/api/roc/bookings/${encodeURIComponent(order.bookingId)}/fallback-reports`,
+              `/api/roc/bookings/${encodeURIComponent(bookingId)}/fallback-reports`,
             ),
           { items: [] as RocFallbackToHumanReport[] },
         )
