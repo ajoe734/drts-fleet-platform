@@ -704,6 +704,258 @@ export class TeslaTelemetryRepository {
     );
   }
 
+  async findHealthRecord(
+    providerCode: string,
+    feedKind: TeslaTelemetryFeedKind,
+    externalVehicleRef: string,
+    sessionId: string | null,
+    executor?: QueryExecutor,
+  ): Promise<TeslaTelemetryHealthRecord | null> {
+    if (!this.isEnabled()) {
+      return (
+        this.healthRecords.get(
+          this.healthKey({
+            providerCode,
+            feedKind,
+            externalVehicleRef,
+            sessionId,
+          }),
+        ) ?? null
+      );
+    }
+
+    const result = await (executor ?? this.databaseService!).query<{
+      provider_code: string;
+      feed_kind: TeslaTelemetryFeedKind;
+      external_vehicle_ref: string;
+      session_id: string | null;
+      health_state: TeslaProviderHealthState;
+      quality_score: number | string;
+      dispatch_hold: boolean;
+      latest_event_id: string | null;
+      latest_sequence_no: number | string | null;
+      latest_contiguous_sequence_no: number | string | null;
+      missing_sequences: number[] | string;
+      last_captured_at: Date | string | null;
+      last_received_at: Date | string | null;
+      stale_heartbeat_at: Date | string | null;
+      gap_detected_at: Date | string | null;
+      backfill_requested_at: Date | string | null;
+      completed_at: Date | string | null;
+      issue_codes: string[] | null;
+      evaluated_at: Date | string;
+    }>(
+      `
+        SELECT
+          provider_code,
+          feed_kind,
+          external_vehicle_ref,
+          session_id,
+          health_state,
+          quality_score,
+          dispatch_hold,
+          latest_event_id,
+          latest_sequence_no,
+          latest_contiguous_sequence_no,
+          missing_sequences,
+          last_captured_at,
+          last_received_at,
+          stale_heartbeat_at,
+          gap_detected_at,
+          backfill_requested_at,
+          completed_at,
+          issue_codes,
+          evaluated_at
+        FROM av_sandbox.tesla_provider_health
+        WHERE provider_code = $1
+          AND feed_kind = $2
+          AND external_vehicle_ref = $3
+          AND session_id = $4
+        LIMIT 1
+      `,
+      [providerCode, feedKind, externalVehicleRef, this.toDatabaseSessionId(sessionId)],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      providerCode: row.provider_code,
+      feedKind: row.feed_kind,
+      externalVehicleRef: row.external_vehicle_ref,
+      sessionId: this.fromDatabaseSessionId(row.session_id),
+      healthState: row.health_state,
+      qualityScore: Number(row.quality_score),
+      dispatchHold: row.dispatch_hold,
+      latestEventId: row.latest_event_id,
+      latestSequenceNo:
+        row.latest_sequence_no === null ? null : Number(row.latest_sequence_no),
+      latestContiguousSequenceNo:
+        row.latest_contiguous_sequence_no === null
+          ? null
+          : Number(row.latest_contiguous_sequence_no),
+      missingSequences: Array.isArray(row.missing_sequences)
+        ? row.missing_sequences.map((value) => Number(value))
+        : JSON.parse(row.missing_sequences).map((value: number) => Number(value)),
+      lastCapturedAt: row.last_captured_at
+        ? new Date(row.last_captured_at).toISOString()
+        : null,
+      lastReceivedAt: row.last_received_at
+        ? new Date(row.last_received_at).toISOString()
+        : null,
+      staleHeartbeatAt: row.stale_heartbeat_at
+        ? new Date(row.stale_heartbeat_at).toISOString()
+        : null,
+      gapDetectedAt: row.gap_detected_at
+        ? new Date(row.gap_detected_at).toISOString()
+        : null,
+      backfillRequestedAt: row.backfill_requested_at
+        ? new Date(row.backfill_requested_at).toISOString()
+        : null,
+      completedAt: row.completed_at
+        ? new Date(row.completed_at).toISOString()
+        : null,
+      issueCodes: [...(row.issue_codes ?? [])],
+      evaluatedAt: new Date(row.evaluated_at).toISOString(),
+    };
+  }
+
+  async listEventsForTracker(
+    providerCode: string,
+    feedKind: TeslaTelemetryFeedKind,
+    externalVehicleRef: string,
+    sessionId: string | null,
+    executor?: QueryExecutor,
+  ): Promise<TeslaTelemetryEventRecord[]> {
+    if (!this.isEnabled()) {
+      return this.listEvents({
+        feedKind,
+        externalVehicleRef,
+        sessionId,
+      }).filter((event) => event.providerCode === providerCode);
+    }
+
+    const result = await (executor ?? this.databaseService!).query<EventRow>(
+      `
+        SELECT
+          telemetry_event_id,
+          provider_code,
+          feed_kind,
+          vehicle_id,
+          external_vehicle_ref,
+          session_id,
+          provider_event_id,
+          sequence_no,
+          captured_at,
+          source_schema_version,
+          payload_sha256,
+          payload_body,
+          received_at,
+          ingest_status,
+          quarantine_reason
+        FROM av_sandbox.tesla_provider_telemetry_events
+        WHERE provider_code = $1
+          AND feed_kind = $2
+          AND external_vehicle_ref = $3
+          AND COALESCE(session_id, '') = COALESCE($4, '')
+        ORDER BY sequence_no ASC, received_at ASC
+      `,
+      [providerCode, feedKind, externalVehicleRef, sessionId],
+    );
+
+    return result.rows.map((row) => this.mapEventRow(row));
+  }
+
+  async findLatestBackfillQuery(
+    providerCode: string,
+    feedKind: TeslaTelemetryFeedKind,
+    vin: string,
+    sessionId: string | null,
+    executor?: QueryExecutor,
+  ): Promise<TeslaTelemetryBackfillQuery | null> {
+    if (!this.isEnabled()) {
+      const records = this.listBackfillQueries()
+        .filter(
+          (record) =>
+            record.providerCode === providerCode &&
+            record.feedKind === feedKind &&
+            record.vin === vin &&
+            (record.sessionId ?? null) === (sessionId ?? null),
+        )
+        .sort(
+          (left, right) =>
+            new Date(right.updatedAt).getTime() -
+            new Date(left.updatedAt).getTime(),
+        );
+      return records[0] ?? null;
+    }
+
+    const result = await (executor ?? this.databaseService!).query<{
+      backfill_id: string;
+      provider_code: string;
+      feed_kind: TeslaTelemetryFeedKind;
+      vin: string;
+      from_at: Date | string;
+      to_at: Date | string;
+      session_id: string | null;
+      event_id: string | null;
+      sequence_after: number | string | null;
+      page_token: string | null;
+      status: TeslaTelemetryBackfillQuery["status"];
+      detected_at: Date | string;
+      updated_at: Date | string;
+    }>(
+      `
+        SELECT
+          backfill_id,
+          provider_code,
+          feed_kind,
+          vin,
+          from_at,
+          to_at,
+          session_id,
+          event_id,
+          sequence_after,
+          page_token,
+          status,
+          detected_at,
+          updated_at
+        FROM av_sandbox.tesla_provider_backfill_requests
+        WHERE provider_code = $1
+          AND feed_kind = $2
+          AND vin = $3
+          AND COALESCE(session_id, '') = COALESCE($4, '')
+        ORDER BY updated_at DESC, detected_at DESC
+        LIMIT 1
+      `,
+      [providerCode, feedKind, vin, sessionId],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      backfillId: row.backfill_id,
+      providerCode: row.provider_code,
+      feedKind: row.feed_kind,
+      vin: row.vin,
+      from: new Date(row.from_at).toISOString(),
+      to: new Date(row.to_at).toISOString(),
+      sessionId: this.fromDatabaseSessionId(row.session_id),
+      eventId: row.event_id,
+      sequenceAfter:
+        row.sequence_after === null ? null : Number(row.sequence_after),
+      pageToken: row.page_token,
+      status: row.status,
+      detectedAt: new Date(row.detected_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
   listEvents(filter?: {
     feedKind?: TeslaTelemetryFeedKind;
     externalVehicleRef?: string;

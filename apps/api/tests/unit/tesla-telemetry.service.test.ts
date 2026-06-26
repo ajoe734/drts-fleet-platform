@@ -347,6 +347,126 @@ describe("TeslaTelemetryService", () => {
     expect((health?.qualityScore ?? 1) < 0.8).toBe(true);
   });
 
+  it("reloads persisted provider health into a new service instance after restart", async () => {
+    const repository = new TeslaTelemetryRepository();
+    const firstService = new TeslaTelemetryService(repository);
+
+    await firstService.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-RESTART-001",
+        capturedAt: "2026-06-26T15:00:00.000Z",
+        location: { lat: 25.08, lng: 121.58 },
+        batteryLevelPct: 61,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-restart-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-restart",
+        receivedAt: "2026-06-26T15:00:00.000Z",
+      },
+    );
+
+    expect(repository.listHealthRecords()).toEqual([
+      expect.objectContaining({
+        externalVehicleRef: "VIN-RESTART-001",
+        sessionId: "public-session-restart",
+        healthState: "healthy",
+      }),
+    ]);
+
+    const restartedService = new TeslaTelemetryService(repository);
+    const health = await restartedService.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-RESTART-001",
+      sessionId: "public-session-restart",
+      asOf: "2026-06-26T15:00:10.000Z",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "healthy",
+      dispatchHold: false,
+      qualityScore: 1,
+      latestEventId: "pub-telemetry-restart-001",
+      latestSequenceNo: 1,
+      latestContiguousSequenceNo: 1,
+    });
+  });
+
+  it("clears stale heartbeat issues after fresh telemetry arrives", async () => {
+    const { service } = buildService();
+
+    await service.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-RECOVERY-001",
+        capturedAt: "2026-06-26T16:00:00.000Z",
+        location: { lat: 25.09, lng: 121.59 },
+        batteryLevelPct: 64,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-recovery-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-recovery",
+        receivedAt: "2026-06-26T16:00:00.000Z",
+      },
+    );
+
+    const staleHealth = await service.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-RECOVERY-001",
+      sessionId: "public-session-recovery",
+      asOf: "2026-06-26T16:03:30.000Z",
+    });
+
+    expect(staleHealth).toMatchObject({
+      healthState: "incomplete_hold",
+      dispatchHold: true,
+      qualityScore: 0.65,
+    });
+    expect(staleHealth?.issueCodes).toContain("STALE_HEARTBEAT");
+
+    const receipt = await service.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-RECOVERY-001",
+        capturedAt: "2026-06-26T16:03:35.000Z",
+        location: { lat: 25.091, lng: 121.591 },
+        batteryLevelPct: 63,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-recovery-002",
+        sequenceNo: 2,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-recovery",
+        receivedAt: "2026-06-26T16:03:35.000Z",
+      },
+    );
+
+    expect(receipt).toMatchObject({
+      providerHealthState: "healthy",
+      dispatchHold: false,
+      qualityScore: 1,
+    });
+
+    const recoveredHealth = await service.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-RECOVERY-001",
+      sessionId: "public-session-recovery",
+      asOf: "2026-06-26T16:03:35.000Z",
+    });
+
+    expect(recoveredHealth).toMatchObject({
+      healthState: "healthy",
+      dispatchHold: false,
+      qualityScore: 1,
+      staleHeartbeatAt: null,
+    });
+    expect(recoveredHealth?.issueCodes).not.toContain("STALE_HEARTBEAT");
+  });
+
   it("quarantines unknown schemas and escalates provider health to regulator_data_incident", async () => {
     const { service } = buildService();
 

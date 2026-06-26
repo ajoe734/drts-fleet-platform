@@ -31,6 +31,11 @@ const SUPPORTED_SCHEMA_VERSIONS: Record<TeslaTelemetryFeedKind, Set<string>> = {
   vehicle_state: new Set(["tesla.vehicle-state.v1"]),
   public_telemetry: new Set(["tesla.public-telemetry.v1"]),
 };
+const TRANSIENT_ISSUE_CODES = new Set([
+  "STALE_HEARTBEAT",
+  "MISSING_SEQUENCE",
+  "BACKFILL_REQUIRED",
+]);
 
 type TelemetryTracker = {
   providerCode: string;
@@ -118,14 +123,12 @@ export class TeslaTelemetryService {
     sessionId?: string | null;
     asOf?: string;
   }): Promise<TeslaTelemetryHealthRecord | null> {
-    const tracker = this.trackers.get(
-      this.trackerKey(
-        DEFAULT_PROVIDER_CODE,
-        input.feedKind,
-        input.externalVehicleRef,
-        input.sessionId ?? null,
-      ),
-    );
+    const tracker = await this.getOrLoadTracker({
+      providerCode: DEFAULT_PROVIDER_CODE,
+      feedKind: input.feedKind,
+      externalVehicleRef: input.externalVehicleRef,
+      sessionId: input.sessionId ?? null,
+    });
     if (!tracker) {
       return null;
     }
@@ -309,6 +312,97 @@ export class TeslaTelemetryService {
     return tracker;
   }
 
+  private async getOrLoadTracker(input: {
+    providerCode: string;
+    feedKind: TeslaTelemetryFeedKind;
+    externalVehicleRef: string;
+    sessionId: string | null;
+  }) {
+    const key = this.trackerKey(
+      input.providerCode,
+      input.feedKind,
+      input.externalVehicleRef,
+      input.sessionId,
+    );
+    const existing = this.trackers.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const persistedHealth = await this.repository.findHealthRecord(
+      input.providerCode,
+      input.feedKind,
+      input.externalVehicleRef,
+      input.sessionId,
+    );
+    if (!persistedHealth) {
+      return null;
+    }
+
+    const [events, latestBackfill] = await Promise.all([
+      this.repository.listEventsForTracker(
+        input.providerCode,
+        input.feedKind,
+        input.externalVehicleRef,
+        input.sessionId,
+      ),
+      this.repository.findLatestBackfillQuery(
+        input.providerCode,
+        input.feedKind,
+        input.externalVehicleRef,
+        input.sessionId,
+      ),
+    ]);
+
+    const latestEvent =
+      events.find(
+        (event) => event.providerEventId === persistedHealth.latestEventId,
+      ) ?? events[events.length - 1] ?? null;
+
+    const tracker: TelemetryTracker = {
+      providerCode: persistedHealth.providerCode,
+      feedKind: persistedHealth.feedKind,
+      externalVehicleRef: persistedHealth.externalVehicleRef,
+      sessionId: persistedHealth.sessionId,
+      vehicleId:
+        [...events]
+          .reverse()
+          .find((event) => event.vehicleId)?.vehicleId ?? null,
+      sequences: new Map<number, TeslaTelemetryEventRecord>(
+        events
+          .filter((event) => event.ingestStatus === "accepted")
+          .map((event) => [event.sequenceNo, event] as const),
+      ),
+      latestSequenceNo:
+        persistedHealth.latestSequenceNo ??
+        latestEvent?.sequenceNo ??
+        null,
+      latestContiguousSequenceNo:
+        persistedHealth.latestContiguousSequenceNo,
+      lastEventId: persistedHealth.latestEventId,
+      lastCapturedAt:
+        persistedHealth.lastCapturedAt ?? latestEvent?.capturedAt ?? null,
+      lastReceivedAt:
+        persistedHealth.lastReceivedAt ?? latestEvent?.receivedAt ?? null,
+      gapDetectedAt: persistedHealth.gapDetectedAt,
+      backfillRequestedAt: persistedHealth.backfillRequestedAt,
+      completedAt: persistedHealth.completedAt,
+      staleHeartbeatAt: persistedHealth.staleHeartbeatAt,
+      lastUnknownSchemaAt: persistedHealth.issueCodes.includes("UNKNOWN_SCHEMA")
+        ? persistedHealth.evaluatedAt
+        : null,
+      lastQualityIncidentAt: latestEvent?.quarantineReason
+        ? latestEvent.receivedAt
+        : null,
+      issueCodes: this.persistentIssueCodes(persistedHealth.issueCodes),
+      currentHealthState: persistedHealth.healthState,
+      lastBackfillId: latestBackfill?.backfillId ?? null,
+    };
+
+    this.trackers.set(key, tracker);
+    return tracker;
+  }
+
   private applyEventToTracker(
     tracker: TelemetryTracker,
     eventRecord: TeslaTelemetryEventRecord,
@@ -440,7 +534,7 @@ export class TeslaTelemetryService {
     const qualityGate = resolveTeslaTelemetryQualityGateScore();
     const incidentGate = resolveTeslaTelemetryIncidentScore();
 
-    const issueCodes = new Set(tracker.issueCodes);
+    const issueCodes = this.persistentIssueCodes(tracker.issueCodes);
     if (latestIssueCode) {
       issueCodes.add(latestIssueCode);
     }
@@ -542,7 +636,7 @@ export class TeslaTelemetryService {
     tracker.staleHeartbeatAt = staleHeartbeatAt;
     tracker.backfillRequestedAt = backfillRequestedAt;
     tracker.completedAt = completedAt;
-    tracker.issueCodes = issueCodes;
+    tracker.issueCodes = this.persistentIssueCodes(issueCodes);
 
     const record: TeslaTelemetryHealthRecord = {
       providerCode: tracker.providerCode,
@@ -577,6 +671,16 @@ export class TeslaTelemetryService {
       });
     }
     return record;
+  }
+
+  private persistentIssueCodes(issueCodes: Iterable<string>) {
+    const normalized = new Set<string>();
+    for (const issueCode of issueCodes) {
+      if (!TRANSIENT_ISSUE_CODES.has(issueCode)) {
+        normalized.add(issueCode);
+      }
+    }
+    return normalized;
   }
 
   private async ensureBackfillQuery(
