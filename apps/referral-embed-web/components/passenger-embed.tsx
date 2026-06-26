@@ -14,9 +14,15 @@ import {
 } from "@/lib/embed-fixtures";
 import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
 
+function resolveEffectiveEntryHost(context: EmbedContext) {
+  return (
+    context.decision.requestedEntryHost ?? context.entry.entryHost?.trim() ?? ""
+  );
+}
+
 function buildHref(context: EmbedContext, next: Record<string, string>) {
   const params = new URLSearchParams({
-    entryHost: context.entry.entryHost?.trim() || "",
+    entryHost: resolveEffectiveEntryHost(context),
   });
 
   if (context.handoff.apiKey) {
@@ -253,7 +259,8 @@ function EmbedShell({
                 whiteSpace: "nowrap",
               }}
             >
-              {getEntryHost(context.entry)}
+              {resolveEffectiveEntryHost(context) ||
+                getEntryHost(context.entry)}
             </span>
           </span>
         </div>
