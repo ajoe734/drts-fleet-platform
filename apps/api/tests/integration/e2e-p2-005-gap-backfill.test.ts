@@ -161,16 +161,11 @@ describe("E2E-P2-005 gap + backfill", () => {
         }),
       ]),
     );
-    expect(backfilledBundle.knownGaps).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: "TESLA_TELEMETRY_STATUS_UNAVAILABLE",
-        }),
-        expect.objectContaining({
-          code: "SYNCED_VIDEO_MISSING",
-        }),
-      ]),
+    const backfilledGapCodes = backfilledBundle.knownGaps.map((gap) => gap.code);
+    expect(backfilledGapCodes).not.toContain(
+      "TESLA_TELEMETRY_STATUS_UNAVAILABLE",
     );
+    expect(backfilledGapCodes).not.toContain("SYNCED_VIDEO_MISSING");
     expect(backfilledBundle.sections).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
