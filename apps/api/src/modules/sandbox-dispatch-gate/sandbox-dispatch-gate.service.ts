@@ -13,6 +13,7 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
+import { resolveTeslaTelemetryQualityGateScore } from "../tesla-telemetry/tesla-telemetry.policy";
 import { VehicleEvidenceService } from "../vehicle-evidence/vehicle-evidence.service";
 import { SandboxDispatchGateRepository } from "./sandbox-dispatch-gate.repository";
 import type {
@@ -99,14 +100,20 @@ export class SandboxDispatchGateService {
     requestId?: string,
   ) {
     const decision = await this.evaluateDispatch(input, requestId);
-    if (decision.decision === "allow" || decision.decision === "allow_with_safety_operator") {
+    if (
+      decision.decision === "allow" ||
+      decision.decision === "allow_with_safety_operator"
+    ) {
       return decision;
     }
 
-    const primaryReason = decision.hardReasonCodes[0] ?? decision.softReasonCodes[0];
+    const primaryReason =
+      decision.hardReasonCodes[0] ?? decision.softReasonCodes[0];
     throw new ApiRequestError(
       HttpStatus.CONFLICT,
-      primaryReason ? SANDBOX_DISPATCH_ERROR_CODE_MAP[primaryReason] : "SANDBOX_DISPATCH_BLOCKED",
+      primaryReason
+        ? SANDBOX_DISPATCH_ERROR_CODE_MAP[primaryReason]
+        : "SANDBOX_DISPATCH_BLOCKED",
       "Sandbox dispatch gate did not approve this assignment.",
       {
         orderId: decision.orderId,
@@ -215,7 +222,10 @@ export class SandboxDispatchGateService {
         : null;
     const dropoff =
       Number.isFinite(input.dropoff?.lat) && Number.isFinite(input.dropoff?.lng)
-        ? { lat: input.dropoff!.lat as number, lng: input.dropoff!.lng as number }
+        ? {
+            lat: input.dropoff!.lat as number,
+            lng: input.dropoff!.lng as number,
+          }
         : null;
     const requestedAt = input.requestedAt ?? new Date().toISOString();
     const sandboxProgramId =
@@ -241,7 +251,8 @@ export class SandboxDispatchGateService {
         end: input.bookingWindow?.end ?? null,
       },
     });
-    const enrollment = preselectedEnrollment ?? governanceSnapshot.vehicleEnrollment;
+    const enrollment =
+      preselectedEnrollment ?? governanceSnapshot.vehicleEnrollment;
     const safetyOperator =
       input.safetyOperator ?? governanceSnapshot.safetyOperator;
     return {
@@ -321,12 +332,22 @@ export class SandboxDispatchGateService {
     evaluatedAt: string,
   ): SandboxDispatchGateInput & {
     dispatchJobId: string | null;
-    operatingArea: { inBounds: boolean; boundaryRisk: boolean; matchedAreaIds: string[] };
+    operatingArea: {
+      inBounds: boolean;
+      boundaryRisk: boolean;
+      matchedAreaIds: string[];
+    };
     safetyOperator: {
       required: boolean;
       available: boolean;
       safetyOperatorId: string | null;
-      qualificationStatus: "pending" | "qualified" | "suspended" | "revoked" | "expired" | null;
+      qualificationStatus:
+        | "pending"
+        | "qualified"
+        | "suspended"
+        | "revoked"
+        | "expired"
+        | null;
       approvedAreaIds: string[];
       approvedRouteIds: string[];
     };
@@ -336,6 +357,17 @@ export class SandboxDispatchGateService {
       socPercent: number | null;
       currentTripCount: number | null;
       odometerKm: number | null;
+      qualityScore: number;
+      providerHealthState:
+        | "healthy"
+        | "delayed"
+        | "gap_detected"
+        | "backfill"
+        | "complete"
+        | "incomplete_hold"
+        | "regulator_data_incident"
+        | null;
+      dispatchHold: boolean;
     };
     regulatory: {
       approvalFresh: boolean;
@@ -363,6 +395,7 @@ export class SandboxDispatchGateService {
     };
     requestedAt: string;
   } {
+    const telemetryQualityGate = resolveTeslaTelemetryQualityGateScore();
     return {
       ...input,
       dispatchJobId: input.dispatchJobId ?? null,
@@ -387,6 +420,9 @@ export class SandboxDispatchGateService {
         socPercent: input.telemetry?.socPercent ?? null,
         currentTripCount: input.telemetry?.currentTripCount ?? null,
         odometerKm: input.telemetry?.odometerKm ?? null,
+        qualityScore: input.telemetry?.qualityScore ?? telemetryQualityGate,
+        providerHealthState: input.telemetry?.providerHealthState ?? null,
+        dispatchHold: input.telemetry?.dispatchHold === true,
       },
       regulatory: {
         approvalFresh: input.regulatory?.approvalFresh === true,
@@ -401,7 +437,9 @@ export class SandboxDispatchGateService {
       vehicleEnrollment: {
         status: input.vehicleEnrollment?.status ?? null,
         approvedAreaIds: [...(input.vehicleEnrollment?.approvedAreaIds ?? [])],
-        approvedRouteIds: [...(input.vehicleEnrollment?.approvedRouteIds ?? [])],
+        approvedRouteIds: [
+          ...(input.vehicleEnrollment?.approvedRouteIds ?? []),
+        ],
         maxConcurrentTrips: input.vehicleEnrollment?.maxConcurrentTrips ?? null,
       },
       routeContainment: {
@@ -419,7 +457,8 @@ export class SandboxDispatchGateService {
         telemetry_stream: input.providerCapabilities?.telemetry_stream ?? null,
         regulatory_event_feed:
           input.providerCapabilities?.regulatory_event_feed ?? null,
-        evidence_recorder: input.providerCapabilities?.evidence_recorder ?? null,
+        evidence_recorder:
+          input.providerCapabilities?.evidence_recorder ?? null,
         odd_geofence: input.providerCapabilities?.odd_geofence ?? null,
         minimal_risk_condition:
           input.providerCapabilities?.minimal_risk_condition ?? null,
@@ -443,7 +482,10 @@ export class SandboxDispatchGateService {
     if (!this.isBookingWindowEligible(input)) {
       reasons.push("ODD_OUT_OF_BOUNDS");
     }
-    if (!input.operatingArea.inBounds || input.routeContainment.contained === false) {
+    if (
+      !input.operatingArea.inBounds ||
+      input.routeContainment.contained === false
+    ) {
       reasons.push("ODD_OUT_OF_BOUNDS");
     }
     if (input.holdState.programSuspended || input.holdState.vehicleHold) {
@@ -471,6 +513,14 @@ export class SandboxDispatchGateService {
       reasons.push("RECORDER_UNHEALTHY");
     }
     if (input.telemetry.stale) {
+      reasons.push("TELEMETRY_STALE");
+    }
+    if (
+      input.telemetry.dispatchHold ||
+      input.telemetry.qualityScore < resolveTeslaTelemetryQualityGateScore() ||
+      input.telemetry.providerHealthState === "incomplete_hold" ||
+      input.telemetry.providerHealthState === "regulator_data_incident"
+    ) {
       reasons.push("TELEMETRY_STALE");
     }
     if (input.telemetry.minimalRiskConditionActive) {
@@ -543,30 +593,31 @@ export class SandboxDispatchGateService {
       input.requestedAt,
     );
 
-    const [pickupValidation, dropoffValidation, routeValidation] = await Promise.all([
-      input.pickup
-        ? this.sandboxGovernanceService?.validatePointInApprovedArea({
-            sandboxProgramId: input.sandboxProgramId,
-            point: input.pickup,
-            asOf: input.requestedAt,
-          })
-        : Promise.resolve(null),
-      input.dropoff
-        ? this.sandboxGovernanceService?.validatePointInApprovedArea({
-            sandboxProgramId: input.sandboxProgramId,
-            point: input.dropoff,
-            asOf: input.requestedAt,
-          })
-        : Promise.resolve(null),
-      input.candidateRoute
-        ? this.sandboxGovernanceService?.validateRouteContainment({
-            sandboxProgramId: input.sandboxProgramId,
-            candidatePath: input.candidateRoute,
-            asOf: input.requestedAt,
-            toleranceMeters: 25,
-          })
-        : Promise.resolve(null),
-    ]);
+    const [pickupValidation, dropoffValidation, routeValidation] =
+      await Promise.all([
+        input.pickup
+          ? this.sandboxGovernanceService?.validatePointInApprovedArea({
+              sandboxProgramId: input.sandboxProgramId,
+              point: input.pickup,
+              asOf: input.requestedAt,
+            })
+          : Promise.resolve(null),
+        input.dropoff
+          ? this.sandboxGovernanceService?.validatePointInApprovedArea({
+              sandboxProgramId: input.sandboxProgramId,
+              point: input.dropoff,
+              asOf: input.requestedAt,
+            })
+          : Promise.resolve(null),
+        input.candidateRoute
+          ? this.sandboxGovernanceService?.validateRouteContainment({
+              sandboxProgramId: input.sandboxProgramId,
+              candidatePath: input.candidateRoute,
+              asOf: input.requestedAt,
+              toleranceMeters: 25,
+            })
+          : Promise.resolve(null),
+      ]);
 
     const matchedAreaIds = new Set<string>();
     for (const match of pickupValidation?.matches ?? []) {
@@ -615,11 +666,13 @@ export class SandboxDispatchGateService {
           (input.dropoff ? dropoffValidation?.inApprovedArea === true : false),
         boundaryRisk:
           (pickupValidation?.inApprovedArea ?? false) !==
-            (dropoffValidation?.inApprovedArea ?? false),
+          (dropoffValidation?.inApprovedArea ?? false),
         matchedAreaIds: [...matchedAreaIds],
       },
       routeContainment: {
-        contained: input.candidateRoute ? routeValidation?.contained ?? false : null,
+        contained: input.candidateRoute
+          ? (routeValidation?.contained ?? false)
+          : null,
         matchedRouteIds: [...(routeValidation?.routeIds ?? [])],
       },
     };
@@ -631,13 +684,18 @@ export class SandboxDispatchGateService {
     asOf: string,
   ) {
     const enrollments =
-      this.sandboxGovernanceService?.listVehicleEnrollments().filter(
-        (item) =>
-          item.vehicleId === vehicleId &&
-          item.sandboxProgramId === sandboxProgramId &&
-          this.isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
-      ) ?? [];
-    return [...enrollments].sort((left, right) => right.version - left.version)[0] ?? null;
+      this.sandboxGovernanceService
+        ?.listVehicleEnrollments()
+        .filter(
+          (item) =>
+            item.vehicleId === vehicleId &&
+            item.sandboxProgramId === sandboxProgramId &&
+            this.isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
+        ) ?? [];
+    return (
+      [...enrollments].sort((left, right) => right.version - left.version)[0] ??
+      null
+    );
   }
 
   private selectSafetyOperatorQualification(
@@ -649,13 +707,19 @@ export class SandboxDispatchGateService {
       return null;
     }
     const qualifications =
-      this.sandboxGovernanceService?.listSafetyOperatorQualifications().filter(
-        (item) =>
-          item.safetyOperatorId === driverId &&
-          item.sandboxProgramId === sandboxProgramId &&
-          this.isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
-      ) ?? [];
-    return [...qualifications].sort((left, right) => right.version - left.version)[0] ?? null;
+      this.sandboxGovernanceService
+        ?.listSafetyOperatorQualifications()
+        .filter(
+          (item) =>
+            item.safetyOperatorId === driverId &&
+            item.sandboxProgramId === sandboxProgramId &&
+            this.isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
+        ) ?? [];
+    return (
+      [...qualifications].sort(
+        (left, right) => right.version - left.version,
+      )[0] ?? null
+    );
   }
 
   private collectRelevantSchedules(
@@ -666,17 +730,21 @@ export class SandboxDispatchGateService {
     const areaSet = new Set(areaIds);
     const routeSet = new Set(routeIds);
     const areaSchedules =
-      this.sandboxGovernanceService?.listOperatingAreas()
+      this.sandboxGovernanceService
+        ?.listOperatingAreas()
         .filter(
           (item) =>
-            item.sandboxProgramId === sandboxProgramId && areaSet.has(item.areaId),
+            item.sandboxProgramId === sandboxProgramId &&
+            areaSet.has(item.areaId),
         )
         .flatMap((item) => item.schedules) ?? [];
     const routeSchedules =
-      this.sandboxGovernanceService?.listRoutes()
+      this.sandboxGovernanceService
+        ?.listRoutes()
         .filter(
           (item) =>
-            item.sandboxProgramId === sandboxProgramId && routeSet.has(item.routeId),
+            item.sandboxProgramId === sandboxProgramId &&
+            routeSet.has(item.routeId),
         )
         .flatMap((item) => item.schedules) ?? [];
     return [...areaSchedules, ...routeSchedules];
@@ -690,13 +758,18 @@ export class SandboxDispatchGateService {
     if (schedules.length === 0) {
       return false;
     }
-    return schedules.some((schedule) =>
-      this.scheduleContains(schedule, startAt) && this.scheduleContains(schedule, endAt),
+    return schedules.some(
+      (schedule) =>
+        this.scheduleContains(schedule, startAt) &&
+        this.scheduleContains(schedule, endAt),
     );
   }
 
   private scheduleContains(schedule: SandboxScheduleWindow, at: string) {
-    if (!schedule.active || !this.isEffective(schedule.effectiveFrom, schedule.effectiveUntil, at)) {
+    if (
+      !schedule.active ||
+      !this.isEffective(schedule.effectiveFrom, schedule.effectiveUntil, at)
+    ) {
       return false;
     }
     const date = new Date(at);
@@ -790,9 +863,11 @@ export class SandboxDispatchGateService {
       return;
     }
 
-    void this.repository.persistEvaluation(record).catch((error) =>
-      this.repository!.reportPersistenceFailure(error, context),
-    );
+    void this.repository
+      .persistEvaluation(record)
+      .catch((error) =>
+        this.repository!.reportPersistenceFailure(error, context),
+      );
   }
 
   private persistManualRelease(
