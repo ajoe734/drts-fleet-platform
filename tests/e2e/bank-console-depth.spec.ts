@@ -230,22 +230,54 @@ test.describe("bank console deep runtime coverage", () => {
     await expect(page.locator("main")).not.toContainText("People & roles");
     await expect(page.locator("main")).not.toContainText("program-admin");
     await expect(page.locator("main")).not.toContainText("fubon.demo");
-    await expect(page.locator(".bank-account-menu summary")).toContainText(
-      "Signed out",
-    );
-    await expect(page.locator(".bank-account-menu summary")).toContainText(
-      "Login required",
-    );
-
-    await openDetails(page, ".bank-account-menu");
-    await expect(page.locator(".bank-account-popover")).toContainText(
-      "Sign in",
-    );
-    await expect(page.locator(".bank-account-popover")).not.toContainText(
+    await expect(page.locator(".bank-account-menu")).toHaveCount(0);
+    await expect(page.locator(".bank-demo-menu")).toHaveCount(0);
+    await expect(page.locator("body")).toContainText("Bank console sign-in");
+    await expect(page.locator("body")).toContainText("Sign in as demo user");
+    await expect(page.locator("body")).not.toContainText(
       "program-admin@fubon.demo",
     );
-    await expect(page.locator(".bank-account-popover")).not.toContainText(
-      "Account management",
-    );
+    await expect(page.locator("body")).not.toContainText("Account management");
+  });
+
+  test("applies distinct issuer theme variables for each demo bank", async ({
+    page,
+  }) => {
+    const expectedBanks = {
+      ctbc: { primary: "#6E9DE0", label: "中信" },
+      cathay: { primary: "#53A27D", label: "國泰" },
+      taishin: { primary: "#D77499", label: "台新" },
+      dbs: { primary: "#EF6F76", label: "星展" },
+      fubon: { primary: "#4AB08B", label: "富邦" },
+    } as const;
+
+    for (const [bank, expected] of Object.entries(expectedBanks)) {
+      await page.goto(
+        withQuery("/programs", {
+          bank,
+          locale: "zh",
+          role: "bank_program_admin",
+        }),
+        { waitUntil: "domcontentloaded" },
+      );
+
+      const shellVars = await page
+        .locator(".bank-runtime-shell")
+        .last()
+        .evaluate((element) => {
+          const styles = getComputedStyle(element);
+
+          return {
+            bankNavy: styles.getPropertyValue("--bank-navy").trim(),
+            issuerPrimary: styles.getPropertyValue("--issuer-primary").trim(),
+          };
+        });
+
+      expect(shellVars.bankNavy, bank).toBe(expected.primary);
+      expect(shellVars.issuerPrimary, bank).toBe(expected.primary);
+      await expect(page.locator(".bank-demo-menu summary"), bank).toContainText(
+        expected.label,
+      );
+    }
   });
 });

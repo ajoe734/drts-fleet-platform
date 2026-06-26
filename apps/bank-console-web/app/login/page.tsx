@@ -41,7 +41,7 @@ export default async function LoginPage({
   const activeBank = resolveBankDemoTenant(params?.bank);
 
   return (
-    <div className="page-shell login-page">
+    <main className="page-shell login-page">
       <section className="login-hero">
         <span className="eyebrow">{t("login.eyebrow", locale)}</span>
         <h1>{t("login.title", locale)}</h1>
@@ -98,6 +98,6 @@ export default async function LoginPage({
         <strong>{t("login.securityNoteTitle", locale)}</strong>
         <p>{t("login.securityNoteBody", locale)}</p>
       </section>
-    </div>
+    </main>
   );
 }

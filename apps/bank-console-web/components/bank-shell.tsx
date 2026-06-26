@@ -1,12 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import {
-  Suspense,
-  useEffect,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { Suspense, useEffect, type CSSProperties, type ReactNode } from "react";
 import {
   CanvasShell,
   ManagementThemeProvider,
@@ -32,45 +27,60 @@ import {
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
 
-// Chrome uses the `bank` surface tokens — CTBC navy/gold — per the design
-// canvas (mgmt-tokens.jsx `bank` accent + BK_GOLD). The implementation
-// previously fell back to the `tenant` (teal) realm because no `bank` surface
-// existed; that is the colour mismatch this restores.
-const bankCanvasTheme = buildCanvasTheme({
+const bankCanvasBaseTheme = buildCanvasTheme({
   surface: "bank",
   dark: true,
   density: "compact",
 });
 
-// Design-canvas bank palette (mgmt-tokens.jsx `bank` + bank-data.jsx BK_GOLD).
-const BANK_NAVY = "#84A9E8";
-const BANK_NAVY_RGB = "132, 169, 232";
-const BANK_NAVY_DARK = "#13478F";
-const BANK_GOLD = "#A8771B";
-const BANK_SURFACE = "#0F1E3C";
-const BANK_BORDER = "#21376A";
+function hexToRgbChannels(hex: string) {
+  const normalized = hex.replace("#", "");
+  const value = Number.parseInt(normalized, 16);
 
-// CSS variables consumed by globals.css; set once on the shell wrapper so the
-// whole console (chrome + page bodies) renders CTBC navy with gold reserved for
-// benefit/quota emphasis — matching the canvas.
-const bankIssuerStyle = {
-  "--issuer-accent": BANK_NAVY,
-  "--issuer-accent-rgb": BANK_NAVY_RGB,
-  "--issuer-primary": BANK_NAVY,
-  "--issuer-primary-dark": BANK_NAVY_DARK,
-  "--issuer-accent-soft": "rgba(132, 169, 232, 0.12)",
-  "--issuer-border": BANK_BORDER,
-  "--issuer-panel-border": BANK_BORDER,
-  "--issuer-surface": BANK_SURFACE,
-  "--bank-navy": BANK_NAVY,
-  "--bank-navy-dark": BANK_NAVY_DARK,
-  "--bank-navy-rgb": BANK_NAVY_RGB,
-  "--bank-navy-soft": "rgba(132, 169, 232, 0.12)",
-  "--bank-surface": BANK_SURFACE,
-  "--bank-border": BANK_BORDER,
-  "--bank-gold": BANK_GOLD,
-  "--bank-gold-soft": "rgba(168, 119, 27, 0.14)",
-} as CSSProperties;
+  if (normalized.length !== 6 || Number.isNaN(value)) {
+    return "132, 169, 232";
+  }
+
+  return [value >> 16, (value >> 8) & 255, value & 255].join(", ");
+}
+
+function buildBankCanvasTheme(bank: BankDemoTenant) {
+  const issuerTokens = bank.template.tokens.dark;
+
+  return {
+    ...bankCanvasBaseTheme,
+    accent: issuerTokens.primary,
+    accentHi: issuerTokens.primaryDark,
+    accentBg: issuerTokens.theme.accentSoft,
+    accentBorder: issuerTokens.surface.border,
+    surfaceName: bank.issuerCode,
+    surfaceTagline: bank.template.programName,
+  };
+}
+
+function buildBankIssuerStyle(bank: BankDemoTenant) {
+  const issuerTokens = bank.template.tokens.dark;
+
+  return {
+    "--issuer-accent": issuerTokens.accent,
+    "--issuer-accent-rgb": hexToRgbChannels(issuerTokens.accent),
+    "--issuer-primary": issuerTokens.primary,
+    "--issuer-primary-dark": issuerTokens.primaryDark,
+    "--issuer-accent-soft": issuerTokens.theme.accentSoft,
+    "--issuer-border": issuerTokens.surface.border,
+    "--issuer-panel-border": issuerTokens.theme.panelBorder,
+    "--issuer-surface": issuerTokens.surface.bg,
+    "--bank-navy": issuerTokens.primary,
+    "--bank-navy-dark": issuerTokens.primaryDark,
+    "--bank-navy-rgb": hexToRgbChannels(issuerTokens.primary),
+    "--bank-navy-soft": issuerTokens.theme.accentSoft,
+    "--bank-surface": issuerTokens.surface.bg,
+    "--bank-border": issuerTokens.surface.border,
+    "--bank-gold": issuerTokens.accent,
+    "--bank-gold-soft": issuerTokens.theme.accentSoft,
+    "--bank-shell-bg": issuerTokens.theme.pageBackground,
+  } as CSSProperties;
+}
 
 export function BankShell({ children }: { children: ReactNode }) {
   return (
@@ -116,10 +126,24 @@ function BankShellContent({ children }: { children: ReactNode }) {
   const navEntries = buildBankNavEntries(locale, searchParams.toString());
   const activeItem = findNavItem(pathname, navEntries);
   const activeKey = activeItem?.key;
+  const bankIssuerStyle = buildBankIssuerStyle(bank);
+  const bankCanvasTheme = buildBankCanvasTheme(bank);
 
   useEffect(() => {
     document.documentElement.lang = getLocaleTag(locale);
   }, [locale]);
+
+  if (pathname === "/login" || signedOut) {
+    return (
+      <div className="bank-runtime-shell" style={bankIssuerStyle}>
+        {signedOut && pathname !== "/login" ? (
+          <SignedOutBoundary bank={bank} locale={locale} />
+        ) : (
+          children
+        )}
+      </div>
+    );
+  }
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
@@ -138,24 +162,20 @@ function BankShellContent({ children }: { children: ReactNode }) {
           versionLabel={BANK_CONSOLE_VERSION}
           searchPlaceholder={t("shell.search", locale)}
           searchWidth={260}
-          avatarLabel={signedOut ? t("shell.guestAvatar", locale) : bank.avatar}
+          avatarLabel={bank.avatar}
           topRight={
             <BankDemoControls
               bank={bank}
               locale={locale}
               pathname={pathname}
               searchParams={searchParams}
-              signedOut={signedOut}
+              signedOut={false}
             />
           }
           style={{ height: "100%" }}
           {...(activeKey ? { active: activeKey } : {})}
         >
-          {signedOut && pathname !== "/login" ? (
-            <SignedOutBoundary bank={bank} locale={locale} />
-          ) : (
-            children
-          )}
+          {children}
         </CanvasShell>
       </div>
     </ManagementThemeProvider>

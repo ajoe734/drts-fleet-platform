@@ -30,8 +30,12 @@ body {
   min-height: 100vh;
   height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(132, 169, 232, 0.16), transparent 22%),
-    #060b13;
+    radial-gradient(
+      circle at top left,
+      rgba(var(--bank-navy-rgb, 132, 169, 232), 0.16),
+      transparent 22%
+    ),
+    var(--bank-shell-bg, #060b13);
 }
 
 .bank-demo-controls {
@@ -283,7 +287,7 @@ body {
   gap: 8px;
   padding: 18px;
   border-radius: 12px;
-  background: #0F1E3C;
+  background: #0f1e3c;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
 }
 
@@ -314,7 +318,7 @@ body {
   gap: 6px;
   padding: 16px 18px;
   border-radius: 12px;
-  background: #21376A;
+  background: #21376a;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.22);
 }
 
@@ -478,7 +482,7 @@ body {
   gap: 16px;
   padding: 18px;
   border-radius: 12px;
-  background: #0F1E3C;
+  background: #0f1e3c;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
 }
 
@@ -988,12 +992,11 @@ body {
   justify-content: center;
   padding: 18px;
   border-radius: 12px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bank-navy-dark) 82%, transparent),
-      color-mix(in srgb, var(--bank-navy-soft) 92%, transparent)
-    );
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--bank-navy-dark) 82%, transparent),
+    color-mix(in srgb, var(--bank-navy-soft) 92%, transparent)
+  );
   border: 1px solid color-mix(in srgb, var(--bank-navy) 28%, transparent);
 }
 
@@ -1015,12 +1018,11 @@ body {
   color: #ffffff;
   font-weight: 700;
   text-decoration: none;
-  background:
-    linear-gradient(
-      135deg,
-      var(--bank-navy),
-      color-mix(in srgb, var(--bank-navy-dark) 72%, var(--bank-navy))
-    );
+  background: linear-gradient(
+    135deg,
+    var(--bank-navy),
+    color-mix(in srgb, var(--bank-navy-dark) 72%, var(--bank-navy))
+  );
 }
 
 .ops-link-button.is-disabled {
@@ -1148,12 +1150,11 @@ body {
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--bank-navy) 34%, transparent);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--bank-navy) 16%, transparent),
-      color-mix(in srgb, var(--bank-navy-dark) 84%, transparent)
-    );
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--bank-navy) 16%, transparent),
+    color-mix(in srgb, var(--bank-navy-dark) 84%, transparent)
+  );
 }
 
 .booking-impact-banner strong {
@@ -1176,13 +1177,12 @@ body {
   padding: 20px 22px;
   border-radius: 14px;
   border: 1px solid var(--bank-border);
-  background:
-    linear-gradient(
-      135deg,
-      var(--bank-navy-soft),
-      rgba(15, 30, 60, 0.92) 48%,
-      rgba(33, 55, 106, 0.88)
-    );
+  background: linear-gradient(
+    135deg,
+    var(--bank-navy-soft),
+    rgba(15, 30, 60, 0.92) 48%,
+    rgba(33, 55, 106, 0.88)
+  );
 }
 
 .programs-banner h2 {
@@ -1251,13 +1251,12 @@ body {
 
 .programs-kpi-primary {
   border-color: var(--bank-border);
-  background:
-    linear-gradient(
-      180deg,
-      rgba(var(--bank-navy-rgb), 0.12),
-      rgba(15, 30, 60, 0.96) 38%,
-      #0F1E3C
-    );
+  background: linear-gradient(
+    180deg,
+    rgba(var(--bank-navy-rgb), 0.12),
+    rgba(15, 30, 60, 0.96) 38%,
+    #0f1e3c
+  );
 }
 
 .programs-kpi-value-row,
@@ -1596,7 +1595,7 @@ body {
 .statement-summary-card {
   padding: 18px;
   border-radius: 14px;
-  background: #0F1E3C;
+  background: #0f1e3c;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
 }
 
@@ -1641,7 +1640,7 @@ body {
   gap: 16px;
   padding: 20px;
   border-radius: 14px;
-  background: #0F1E3C;
+  background: #0f1e3c;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
 }
 
@@ -1700,7 +1699,7 @@ body {
   padding: 0 12px;
   border-radius: 10px;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
-  background: #21376A;
+  background: #21376a;
   color: #ffffff;
   font: inherit;
 }
@@ -1761,7 +1760,7 @@ body {
 .audit-row {
   padding: 16px;
   border-radius: 12px;
-  background: #21376A;
+  background: #21376a;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
 }
 
@@ -1985,7 +1984,6 @@ body {
   }
 }
 
-
 /* ── Home / overview (BK_Home) ───────────────────────────────────────────────
  * Body styling for the role-cut posture dashboard. Window chrome stays tenant
  * realm (teal, from BankShell); the issuer (CTBC navy + gold) only accents the
@@ -2063,7 +2061,7 @@ body {
   gap: 4px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: #0F1E3C;
+  background: #0f1e3c;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
 }
 
@@ -2110,7 +2108,7 @@ body {
   display: flex;
   flex-direction: column;
   border-radius: 12px;
-  background: #0F1E3C;
+  background: #0f1e3c;
   border: 1px solid rgba(var(--bank-navy-rgb, 94, 234, 212), 0.18);
   overflow: hidden;
 }
