@@ -10,6 +10,11 @@ import type {
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "./ui-runtime";
+import type {
+  PassengerDisclosureRequirementSnapshot,
+  RecordPassengerAcknowledgementCommand,
+  SandboxDispatchAssignmentSnapshot,
+} from "./phase2-tesla-fsd-sandbox";
 
 export * from "./referral-channel";
 
@@ -2186,6 +2191,7 @@ export interface CreateTenantBookingCommand {
   quotedFareRuleVersion?: string;
   minPhotoCount?: number;
   expenseProofRequired?: boolean;
+  passengerDisclosureAcknowledgement?: RecordPassengerAcknowledgementCommand;
 }
 
 export interface UpdateTenantBookingCommand {
@@ -2271,6 +2277,7 @@ export interface AssignDispatchCommand {
   dispatchJobId: string;
   vehicleId: string;
   driverId: string;
+  sandboxDispatchSnapshot?: SandboxDispatchAssignmentSnapshot | null;
 }
 
 export interface ReassignDispatchCommand {
@@ -2346,6 +2353,7 @@ export interface OwnedOrderRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
+  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   serviceBucket: Phase1ServiceBucket;
   dispatchSemantics: DispatchSemantics;
   businessDispatchSubtype: BusinessDispatchSubtype | null;
@@ -2418,6 +2426,7 @@ export interface BookingRecord {
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
+  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   status: BookingStatus;
   serviceBucket: "business_dispatch";
   businessDispatchSubtype: BusinessDispatchSubtype;
