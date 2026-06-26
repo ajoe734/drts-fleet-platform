@@ -74,6 +74,7 @@ export interface Phase2AvInfraConfig {
 const DEFAULT_ENVIRONMENT = "staging";
 const DEFAULT_BUCKET_PREFIX = "drts-phase2-av";
 const DEFAULT_TOPIC_PREFIX = "drts.phase2.av";
+const DEFAULT_KMS_KEY_RING_PREFIX = "drts-phase2-av";
 
 function normalize(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -197,7 +198,7 @@ export function resolvePhase2AvInfraConfig(
       },
     ],
     kms: {
-      keyRing: `${bucketPrefix}-${environment}`,
+      keyRing: `${DEFAULT_KMS_KEY_RING_PREFIX}-${environment}`,
       location: "asia-east1",
       keys: [
         {
