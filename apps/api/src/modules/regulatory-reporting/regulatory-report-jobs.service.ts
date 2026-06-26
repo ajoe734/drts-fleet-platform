@@ -314,13 +314,7 @@ export class RegulatoryReportJobsService {
         this.buildSnapshotCommand(asOf?.trim(), generatedBy),
       );
     const scope = this.buildScopeFromSnapshot(experimentId.trim(), snapshot);
-    const filters: Record<string, unknown> = {
-      experimentId: scope.experimentId,
-      asOf: scope.asOf,
-    };
-    if (scope.programCode) {
-      filters.sandboxProgramId = scope.programCode;
-    }
+    const filters = this.buildKpiDashboardDispatchFilters(scope, snapshot);
 
     const dispatchRecords = this.reportingService
       ? (await this.loadDailyDispatchRecords(filters)).filter((record) =>
@@ -1701,15 +1695,21 @@ export class RegulatoryReportJobsService {
 
   private buildKpiTarget(
     key: SandboxKpiTargetRecord["key"],
-    input: Omit<SandboxKpiTargetRecord, "key" | "targetStatus">,
+    input: Omit<
+      SandboxKpiTargetRecord,
+      "key" | "targetStatus" | "unit" | "numerator" | "denominator"
+    > &
+      Partial<
+        Pick<SandboxKpiTargetRecord, "unit" | "numerator" | "denominator">
+      >,
   ): SandboxKpiTargetRecord {
     return {
       key,
       targetStatus: "baseline_collecting",
-      unit: null,
-      numerator: null,
-      denominator: null,
       ...input,
+      unit: input.unit ?? null,
+      numerator: input.numerator ?? null,
+      denominator: input.denominator ?? null,
     };
   }
 
@@ -2081,6 +2081,29 @@ export class RegulatoryReportJobsService {
     return this.buildScopeFromSnapshot(experimentId, snapshot);
   }
 
+  private buildKpiDashboardDispatchFilters(
+    scope: ExperimentScope,
+    snapshot: SandboxComplianceSnapshotRecord,
+  ): Record<string, unknown> {
+    const filters: Record<string, unknown> = {
+      experimentId: scope.experimentId,
+      asOf: scope.asOf,
+    };
+    if (scope.programCode) {
+      filters.sandboxProgramId = scope.programCode;
+    }
+
+    const collectionStartAt = this.resolveBaselineCollectionStartAt(snapshot);
+    if (collectionStartAt) {
+      filters.serviceDateFrom = this.resolveServiceDate(collectionStartAt);
+    }
+    if (scope.asOf) {
+      filters.serviceDateTo = this.resolveServiceDate(scope.asOf);
+    }
+
+    return filters;
+  }
+
   private async loadDailyDispatchRecords(filters: Record<string, unknown>) {
     const reportingService = this.requireReportingService();
     const query = this.buildDispatchQuery(filters);
@@ -2268,6 +2291,7 @@ export class RegulatoryReportJobsService {
   private matchesDispatchRecord(
     record: {
       finalVehicleId?: unknown;
+      serviceDate?: unknown;
       requestedAt?: unknown;
     },
     filters: Record<string, unknown>,
@@ -2296,7 +2320,11 @@ export class RegulatoryReportJobsService {
       this.readString(filters, "serviceDateTo") ??
       this.readString(filters, "to");
     return this.matchesTimeRange(
-      typeof record.requestedAt === "string" ? record.requestedAt : null,
+      typeof record.serviceDate === "string"
+        ? record.serviceDate
+        : typeof record.requestedAt === "string"
+          ? record.requestedAt
+          : null,
       from,
       to,
     );

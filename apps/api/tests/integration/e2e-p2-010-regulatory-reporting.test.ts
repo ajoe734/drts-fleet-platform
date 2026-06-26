@@ -80,6 +80,15 @@ async function createTestApp() {
     {
       listDailyDispatchRecords: async () => [
         {
+          serviceDate: "2026-06-20",
+          orderId: "ord-reg-010-pre",
+          orderNo: "ORD-REG-010-PRE",
+          requestedAt: "2026-06-20T07:30:00.000Z",
+          finalStatus: "completed",
+          finalVehicleId: "veh-av-demo-001",
+          generatedAt: "2026-06-20T07:35:00.000Z",
+        },
+        {
           serviceDate: "2026-06-26",
           orderId: "ord-reg-010-001",
           orderNo: "ORD-REG-010-001",
@@ -96,6 +105,15 @@ async function createTestApp() {
           finalStatus: "cancelled",
           finalVehicleId: "veh-av-demo-001",
           generatedAt: "2026-06-26T09:20:00.000Z",
+        },
+        {
+          serviceDate: "2026-07-01",
+          orderId: "ord-reg-010-post",
+          orderNo: "ORD-REG-010-POST",
+          requestedAt: "2026-07-01T09:15:00.000Z",
+          finalStatus: "completed",
+          finalVehicleId: "veh-av-demo-001",
+          generatedAt: "2026-07-01T09:20:00.000Z",
         },
       ],
     } as never,
@@ -525,6 +543,7 @@ describe("E2E-P2-010 regulatory reporting", () => {
         targetStatus: "baseline_collecting",
         configuredDays: 14,
         configuredTrips: 12,
+        tripsCollected: 2,
       });
       expect(kpiDashboardBody.data.targets).toEqual(
         expect.arrayContaining([
@@ -539,6 +558,11 @@ describe("E2E-P2-010 regulatory reporting", () => {
           expect.objectContaining({
             key: "notification_timeliness",
             targetStatus: "baseline_collecting",
+          }),
+          expect.objectContaining({
+            key: "fallback_success",
+            numerator: 2,
+            denominator: 2,
           }),
         ]),
       );
