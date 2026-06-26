@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import {
   DEFAULT_PLATFORM_ADMIN_AUTHORITY,
   type PlatformAdminAuthority,
@@ -79,7 +80,7 @@ export function isPlatformAdminAssistantEnabled(): boolean {
   );
 }
 
-export async function RuntimeConfigScript({
+export function RuntimeConfigScript({
   authority,
 }: {
   authority: PlatformAdminAuthority;
@@ -92,11 +93,9 @@ export async function RuntimeConfigScript({
   };
   const serializedConfig = JSON.stringify(config).replace(/</g, "\\u003c");
 
-  return (
-    <script
-      dangerouslySetInnerHTML={{
-        __html: `window.${RUNTIME_CONFIG_WINDOW_KEY} = ${serializedConfig};`,
-      }}
-    />
-  );
+  return createElement("script", {
+    dangerouslySetInnerHTML: {
+      __html: `window.${RUNTIME_CONFIG_WINDOW_KEY} = ${serializedConfig};`,
+    },
+  });
 }
