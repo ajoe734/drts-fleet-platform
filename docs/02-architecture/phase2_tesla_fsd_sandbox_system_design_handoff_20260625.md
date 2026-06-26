@@ -11,9 +11,11 @@
 
 ---
 
-## C. 待系統設計裁定（decision packets）
+## C. 系統設計裁定 — ✅ 已全部裁決（2026-06-25）
 
-> C1–C3 直接**卡住視覺團隊 UI 第二波**（見配套文件標 🔒 的頁面），請優先裁定。
+> **C1–C6 已 ACCEPTED**，正式裁決與全部 contract/scope/audit-catalog 見
+> [`..._system_design_decision_packet_c1c6_b1b5_20260625.md`](./phase2_tesla_fsd_sandbox_system_design_decision_packet_c1c6_b1b5_20260625.md)。
+> 工程已依此派 6 個 `P2-DP-C*-001` 任務（見執行計畫 §2b）；視覺團隊 🔒 已解鎖。下表保留原問題脈絡 + 裁決摘要。
 
 | # | 裁定項 | 影響 | 阻擋對象 |
 |---|---|---|---|
