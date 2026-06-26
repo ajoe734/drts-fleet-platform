@@ -5600,6 +5600,11 @@ export class OwnedMobilityService implements OnModuleInit {
       .sort((left, right) =>
         (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""),
       )[0];
+    const activeAssignment =
+      latestAssignment &&
+      ["assigned", "accepted"].includes(latestAssignment.status)
+        ? latestAssignment
+        : null;
     const latestTrace = this.dispatchTraceLogs
       .filter((trace) => trace.orderId === order.orderId)
       .sort((left, right) =>
@@ -5618,7 +5623,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order.complianceFlags.includes("sandbox_human_fallback") ||
       fallbackTrace !== undefined;
     const hasAvAssignment =
-      latestAssignment?.vehicleId?.startsWith("veh-av") === true ||
+      activeAssignment?.vehicleId?.startsWith("veh-av") === true ||
       Boolean(
         fallbackTrace &&
         typeof fallbackTrace.details?.avVehicleId === "string" &&
@@ -5653,7 +5658,7 @@ export class OwnedMobilityService implements OnModuleInit {
                 ? "en_route_pickup"
                 : ["assigned", "driver_accepted"].includes(order.status)
                   ? "assigned"
-                  : latestAssignment
+                  : activeAssignment
                     ? "assigned"
                     : "pending_dispatch";
 
@@ -5737,7 +5742,7 @@ export class OwnedMobilityService implements OnModuleInit {
       visibilityId: `sfv-${order.bookingId}-${audience}`,
       bookingId: order.bookingId,
       orderId: order.orderId,
-      sandboxTripId: latestAssignment?.assignmentId ?? null,
+      sandboxTripId: activeAssignment?.assignmentId ?? null,
       audience,
       fulfillmentMode,
       state,

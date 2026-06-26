@@ -3238,6 +3238,111 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ]);
   });
 
+  it("returns sandbox fulfillment to pending_dispatch after driver rejection", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "veh-av-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000004" },
+        partnerEntrySlug: "partner-entry-002",
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-001",
+      driverId: "driver-001",
+    });
+
+    service.rejectDriverTask(assignment.taskId, {
+      reasonCode: "driver_rejected",
+      reasonNote: "Too far",
+    });
+
+    expect(
+      service.getTenantSandboxFulfillment("tenant-demo-001", booking.bookingId),
+    ).toMatchObject({
+      sandboxTripId: null,
+      fulfillmentMode: "hidden",
+      state: "pending_dispatch",
+      statusCode: "redispatch_required",
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.status_update_available",
+          category: "info",
+        },
+      ],
+      providerBrandDisclosed: false,
+    });
+
+    const partnerCalls = (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([, payload]) =>
+        payload.eventType === "partner.sandbox_fulfillment.updated",
+    );
+
+    expect(partnerCalls.map(([, payload]) => payload.data.state)).toEqual([
+      "pending_dispatch",
+      "assigned",
+      "pending_dispatch",
+    ]);
+    expect(partnerCalls.at(-1)?.[1]).toMatchObject({
+      eventType: "partner.sandbox_fulfillment.updated",
+      data: {
+        bookingId: booking.bookingId,
+        fulfillmentMode: "hidden",
+        state: "pending_dispatch",
+        statusCode: "redispatch_required",
+      },
+    });
+    expect(partnerCalls.at(-1)?.[1].data).not.toHaveProperty("sandboxTripId");
+  });
+
   it("publishes partner sandbox fulfillment updates when a dispatch is reassigned", () => {
     const tenantPartnerService = {
       previewBookingQuotaImpact: vi.fn(() => ({
