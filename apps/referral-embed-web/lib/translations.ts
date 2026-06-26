@@ -14,6 +14,7 @@ const en = {
   "common.none": "Not created",
   "common.estimatedFare": "Estimated fare",
   "common.approxNtd": "Approx. NT$ {amount}",
+  "common.minutes": "min",
   "shell.badge": "Phase 1 passenger surface",
   "shell.title": "Passenger Web",
   "shell.description":
@@ -637,6 +638,7 @@ const en = {
   "embed.card.completed": "Trip completed",
   "embed.card.cancelled": "Trip cancelled",
   "embed.card.negative": "Negative state · {screen}",
+  "embed.card.fallbackStates": "Passenger fallback states",
   "embed.field.signature": "Community signature valid",
   "embed.field.identity": "Resident identity resolved",
   "embed.field.unit": "Community / unit",
@@ -670,6 +672,8 @@ const en = {
   "embed.field.rebook": "Request another ride",
   "embed.field.backToBook": "Back to booking form",
   "embed.field.viewTrip": "View existing trip",
+  "embed.field.contactSupport": "Contact support",
+  "embed.field.contactDriver": "Contact driver",
   "embed.field.confirmRide": "Confirm ride request",
   "embed.field.returnToApp": "Back to community app",
   "embed.field.openStandalone": "Open standalone ride site",
@@ -684,6 +688,29 @@ const en = {
   "embed.nav.receipt": "Receipt",
   "embed.nav.completed": "Completed",
   "embed.nav.cancelled": "Cancelled",
+  "embed.fallback.link.fb_vehicle_change": "Vehicle change",
+  "embed.fallback.link.fb_human_assigned": "Human assigned",
+  "embed.fallback.link.fb_service_continuing": "Service continuing",
+  "embed.fallback.link.fb_eta_updated": "ETA updated",
+  "embed.fallback.progress.vehicle_change_in_progress":
+    "Reassigning vehicle",
+  "embed.fallback.progress.human_fallback_assigned":
+    "Replacement assigned",
+  "embed.fallback.progress.service_continuing": "Service continuing",
+  "embed.fallback.eta.label": "Estimated pickup · ETA",
+  "embed.fallback.eta.note": "Estimate only, not guaranteed",
+  "embed.fallback.messageCode": "passengerMessageCode · {code}",
+  "embed.fallback.message.note":
+    "Copy resolves from the passenger-safe backend passengerMessageCode.",
+  "embed.fallback.field.tripId": "Trip ID",
+  "embed.fallback.field.destination": "Destination",
+  "embed.fallback.field.fare": "Fare",
+  "embed.fallback.value.fareStable":
+    "Original fare unchanged · no extra charge",
+  "embed.fallback.guardrail":
+    "The same booking continues. No second booking or surcharge will be created.",
+  "embed.fallback.providerNote":
+    "Trip updates remain available through {appName}.",
   "embed.state.handoff.title": "Ready to book as {name}",
   "embed.state.handoff.badge": "handoff · linked",
   "embed.state.reauth.title": "Sign-in state expired",
@@ -741,6 +768,30 @@ const en = {
     "This booking request was not approved. Confirm that the trip remains within the supported service area.",
   "embed.negative.degraded":
     "Service is responding slowly right now. Recovery will continue after the system stabilizes.",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.default.title":
+    "Service status updated",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.default.body":
+    "A service update is available for this trip. Use the latest ETA and trip status shown on this page.",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_vehicle_change.title":
+    "Reassigning your vehicle",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_vehicle_change.body":
+    "Due to sandbox operating conditions or vehicle status, this service is being reassigned to a human-driven vehicle. Your original booking remains active, and the estimated arrival time will be updated.",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_human_assigned.title":
+    "A replacement vehicle has been assigned",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_human_assigned.body":
+    "A human-driven vehicle has been assigned for this service. Unless your contract or program says otherwise, this reassignment does not add an extra fee.",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_eta_updated.title":
+    "Estimated arrival updated",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_eta_updated.body":
+    "Your original booking remains active, and the updated ETA shown on this page is the latest estimate for pickup.",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.default.title":
+    "Service continues with a human driver",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.default.body":
+    "This trip is continuing with a human driver for service continuity. The original booking stays active, and the latest ETA shown here is authoritative.",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.fb_service_continuing.title":
+    "Trip continuing",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.fb_service_continuing.body":
+    "This trip is continuing with a human driver for service continuity. The original booking stays active, and the latest ETA shown here is authoritative.",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -755,6 +806,7 @@ const zh: Record<keyof typeof en, string> = {
   "common.none": "未建立",
   "common.estimatedFare": "預估車資",
   "common.approxNtd": "約 NT$ {amount}",
+  "common.minutes": "分鐘",
   "shell.badge": "Phase 1 乘客前台",
   "shell.title": "乘客前台",
   "shell.description":
@@ -1329,6 +1381,7 @@ const zh: Record<keyof typeof en, string> = {
   "embed.card.completed": "行程已完成",
   "embed.card.cancelled": "行程已取消",
   "embed.card.negative": "負向狀態 · {screen}",
+  "embed.card.fallbackStates": "乘客 fallback 狀態",
   "embed.field.signature": "社區簽章有效",
   "embed.field.identity": "住戶身分已解析",
   "embed.field.unit": "社區 / 戶別",
@@ -1362,6 +1415,8 @@ const zh: Record<keyof typeof en, string> = {
   "embed.field.rebook": "重新叫車",
   "embed.field.backToBook": "返回叫車表單",
   "embed.field.viewTrip": "查看既有行程",
+  "embed.field.contactSupport": "聯絡客服",
+  "embed.field.contactDriver": "聯絡司機",
   "embed.field.confirmRide": "確認叫車",
   "embed.field.returnToApp": "回社區 App",
   "embed.field.openStandalone": "前往獨立叫車網站",
@@ -1376,6 +1431,25 @@ const zh: Record<keyof typeof en, string> = {
   "embed.nav.receipt": "收據",
   "embed.nav.completed": "完成",
   "embed.nav.cancelled": "取消",
+  "embed.fallback.link.fb_vehicle_change": "重新安排車輛",
+  "embed.fallback.link.fb_human_assigned": "新車已指派",
+  "embed.fallback.link.fb_service_continuing": "行程繼續",
+  "embed.fallback.link.fb_eta_updated": "ETA 更新",
+  "embed.fallback.progress.vehicle_change_in_progress": "重新安排車輛",
+  "embed.fallback.progress.human_fallback_assigned": "新車已指派",
+  "embed.fallback.progress.service_continuing": "行程繼續",
+  "embed.fallback.eta.label": "預計上車 · ETA",
+  "embed.fallback.eta.note": "估計值，非保證",
+  "embed.fallback.messageCode": "passengerMessageCode · {code}",
+  "embed.fallback.message.note":
+    "文案由 passenger-safe backend passengerMessageCode 渲染。",
+  "embed.fallback.field.tripId": "行程編號",
+  "embed.fallback.field.destination": "目的地",
+  "embed.fallback.field.fare": "費用",
+  "embed.fallback.value.fareStable": "維持原價 · 無額外收費",
+  "embed.fallback.guardrail":
+    "同一筆 booking 會繼續，不會產生第二筆訂單或加收費用。",
+  "embed.fallback.providerNote": "您可持續透過 {appName} 查看行程更新。",
   "embed.state.handoff.title": "以 {name} 身分為您準備叫車",
   "embed.state.handoff.badge": "handoff · 已交接",
   "embed.state.reauth.title": "登入狀態已逾時",
@@ -1428,6 +1502,30 @@ const zh: Record<keyof typeof en, string> = {
   "embed.negative.denied":
     "此次叫車請求未通過，請確認行程仍在支援的服務範圍內。",
   "embed.negative.degraded": "服務目前回應較慢，系統恢復後會再繼續。",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.default.title":
+    "服務狀態已更新",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.default.body":
+    "此行程已有新的服務更新，請以本頁顯示的最新 ETA 與狀態為準。",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_vehicle_change.title":
+    "正在為您重新安排車輛",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_vehicle_change.body":
+    "因沙盒運營條件或車輛狀態調整，本次服務正在改派人駕車輛。您的原 booking 仍保留，我們將更新預估到達時間。",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_human_assigned.title":
+    "新車已為您指派",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_human_assigned.body":
+    "已為本次服務改派人駕車輛。除您的合約或方案另有約定外，您不會因本次改派而負擔額外費用。",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_eta_updated.title":
+    "預計時間已更新",
+  "passengerMessageCode.sandbox_fulfillment.status_update_available.fb_eta_updated.body":
+    "您的原 booking 仍會繼續，且本頁顯示的更新 ETA 即為目前最新的預估上車時間。",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.default.title":
+    "行程將由人駕繼續",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.default.body":
+    "本趟已由人駕接續履約以維持服務連續性。原 booking 維持不變，請以本頁最新 ETA 為準。",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.fb_service_continuing.title":
+    "行程繼續進行",
+  "passengerMessageCode.sandbox_fulfillment.service_continues_with_human_driver.fb_service_continuing.body":
+    "本趟已由人駕接續履約以維持服務連續性。原 booking 維持不變，請以本頁最新 ETA 為準。",
 };
 
 export const translations = { en, zh } as const;

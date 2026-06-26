@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { EmbedContext, EmbedState } from "@/lib/embed-context";
 import { useTranslation } from "@/lib/i18n";
 import {
+  embedFallbackTripProjections,
   embedReceipt,
   embedResident,
   embedSavedPlaces,
@@ -12,6 +13,14 @@ import {
   embedTripHistory,
   embedVehicles,
 } from "@/lib/embed-fixtures";
+import {
+  buildPassengerMessageBodyKey,
+  buildPassengerMessageTitleKey,
+  isPassengerFallbackScreen,
+  type PassengerFallbackScreen,
+  type PassengerFallbackStage,
+  resolvePassengerFallbackView,
+} from "@/lib/passenger-fallback";
 import { buildEmbedTheme, getEntryHost } from "@/lib/embed-presentation";
 
 function buildHref(context: EmbedContext, next: Record<string, string>) {
@@ -72,11 +81,15 @@ const EMBED_GLYPHS: Record<string, string> = {
   lock: "M7 10V7a5 5 0 0110 0v3 M5 10h14v9H5z",
   check: "M5 12l4 4 10-10",
   x: "M6 6l12 12 M18 6L6 18",
+  refresh: "M20 11a8 8 0 00-14.9-4M4 13a8 8 0 0014.9 4M4 4v4h4M20 20v-4h-4",
   clock: "M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z",
   ban: "M6 6l12 12 M12 21a9 9 0 100-18 9 9 0 000 18z",
   ext: "M14 4h6v6 M20 4l-8 8 M18 13v6H5V6h6",
   shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z",
   bolt: "M13 3L5 13h6l-1 8 8-10h-6z",
+  user: "M12 12a4 4 0 100-8 4 4 0 000 8z M5 21a7 7 0 0114 0",
+  car: "M5 16l1.5-5.5A2 2 0 018.4 9h7.2a2 2 0 011.9 1.5L19 16M6 16h12M7 18a1.5 1.5 0 103 0 1.5 1.5 0 00-3 0zm8 0a1.5 1.5 0 103 0 1.5 1.5 0 00-3 0z",
+  phone: "M6.5 4.5l2.5 2.5-1.6 2.2a14.4 14.4 0 007 7L16.6 15l2.9 2.4a1.8 1.8 0 01.2 2.7l-1.4 1.4a2.2 2.2 0 01-2.2.5 18.4 18.4 0 01-9-5.5 18.4 18.4 0 01-5.5-9 2.2 2.2 0 01.5-2.2l1.4-1.4a1.8 1.8 0 012.7.1z",
   info: "M12 8h.02 M11 12h1v5h1 M12 21a9 9 0 100-18 9 9 0 000 18z",
 };
 
@@ -841,6 +854,408 @@ function StateHero({
   );
 }
 
+function resolvePassengerFallbackCopy(
+  t: ReturnType<typeof useTranslation>["t"],
+  screen: PassengerFallbackScreen,
+  code: string,
+  field: "title" | "body",
+) {
+  const specificKey =
+    field === "title"
+      ? buildPassengerMessageTitleKey(code, screen)
+      : buildPassengerMessageBodyKey(code, screen);
+  const specificValue = t(specificKey);
+  if (specificValue !== specificKey) {
+    return specificValue;
+  }
+
+  const fallbackKey = `passengerMessageCode.${code}.default.${field}`;
+  const fallbackValue = t(fallbackKey);
+  return fallbackValue === fallbackKey ? code : fallbackValue;
+}
+
+function PassengerFallbackQuickLinks({ context }: { context: EmbedContext }) {
+  const { t } = useTranslation();
+
+  return (
+    <Card title={t("embed.card.fallbackStates")}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {(
+          [
+            "fb_vehicle_change",
+            "fb_human_assigned",
+            "fb_service_continuing",
+            "fb_eta_updated",
+          ] as const
+        ).map((screen) => (
+          <Link
+            key={screen}
+            href={buildHref(context, { screen })}
+            style={{
+              borderRadius: 999,
+              padding: "6px 10px",
+              fontSize: 11,
+              fontWeight: 700,
+              border:
+                "1px solid color-mix(in srgb, var(--embed-accent) 18%, transparent)",
+              background:
+                context.screen === screen ? "var(--embed-accent-soft)" : "white",
+            }}
+          >
+            {t(`embed.fallback.link.${screen}`)}
+          </Link>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function PassengerMessageSlot({
+  messageCode,
+  body,
+}: {
+  messageCode: string;
+  body: string;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        padding: "13px 14px",
+        borderRadius: 14,
+        background:
+          "color-mix(in srgb, var(--embed-neutral-bg) 72%, white)",
+        border:
+          "1px dashed color-mix(in srgb, var(--embed-neutral-fg) 20%, transparent)",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: -8,
+          left: 10,
+          borderRadius: 4,
+          padding: "0 5px",
+          background: "white",
+          color: "var(--embed-neutral-fg)",
+          fontSize: 9,
+          fontFamily: EMBED_MONO,
+          fontWeight: 700,
+        }}
+      >
+        {t("embed.fallback.messageCode", { code: messageCode })}
+      </span>
+      <div
+        style={{
+          fontSize: 13,
+          lineHeight: 1.6,
+          color: "var(--embed-neutral-fg)",
+        }}
+      >
+        {body}
+      </div>
+      <div
+        style={{
+          marginTop: 8,
+          fontSize: 10.5,
+          color: "var(--embed-neutral-fg)",
+          opacity: 0.72,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <EmbedGlyph name="info" size={12} />
+        <span>{t("embed.fallback.message.note")}</span>
+      </div>
+    </div>
+  );
+}
+
+function PassengerFallbackProgressRail({
+  context,
+  stage,
+}: {
+  context: EmbedContext;
+  stage: PassengerFallbackStage;
+}) {
+  const theme = buildEmbedTheme(context.accent);
+  const { t } = useTranslation();
+  const stages: PassengerFallbackStage[] = [
+    "vehicle_change_in_progress",
+    "human_fallback_assigned",
+    "service_continuing",
+  ];
+  const currentIndex = stages.indexOf(stage);
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start" }}>
+      {stages.map((step, index) => {
+        const done = index <= currentIndex;
+        const active = index === currentIndex;
+        return (
+          <div
+            key={step}
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 6,
+              position: "relative",
+            }}
+          >
+            {index < stages.length - 1 ? (
+              <span
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  left: "50%",
+                  right: "-50%",
+                  height: 2,
+                  background:
+                    index < currentIndex ? theme.accent : theme.neutralBorder,
+                }}
+              />
+            ) : null}
+            <span
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 12,
+                zIndex: 1,
+                background: done ? theme.accent : "white",
+                border: `2px solid ${done ? theme.accent : theme.neutralBorder}`,
+                color: done ? "white" : theme.neutralFg,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {done ? (
+                <EmbedGlyph name="check" size={12} stroke={3} />
+              ) : (
+                index + 1
+              )}
+            </span>
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: active ? 700 : 500,
+                color: active ? "var(--embed-neutral-fg)" : theme.neutralFg,
+                textAlign: "center",
+                lineHeight: 1.25,
+              }}
+            >
+              {t(`embed.fallback.progress.${step}`)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PassengerFallbackStatePanel({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  const { t } = useTranslation();
+  const projection =
+    embedFallbackTripProjections[context.screen as PassengerFallbackScreen];
+  const fallback = resolvePassengerFallbackView({
+    screen: context.screen as PassengerFallbackScreen,
+    projection,
+  });
+  const title = resolvePassengerFallbackCopy(
+    t,
+    fallback.screen,
+    fallback.copyCode,
+    "title",
+  );
+  const body = resolvePassengerFallbackCopy(
+    t,
+    fallback.screen,
+    fallback.copyCode,
+    "body",
+  );
+
+  return (
+    <>
+      <StateHero
+        theme={theme}
+        tone={fallback.tone}
+        icon={fallback.icon}
+        title={title}
+      />
+      <div style={{ marginTop: -2, display: "flex", justifyContent: "center" }}>
+        <span
+          style={{
+            fontSize: 9.5,
+            fontFamily: EMBED_MONO,
+            color: theme.neutralFg,
+            background: theme.neutralBg,
+            padding: "2px 8px",
+            borderRadius: 999,
+            border: `1px dashed ${theme.neutralBorder}`,
+          }}
+        >
+          {t("embed.fallback.messageCode", { code: fallback.messageCode })}
+        </span>
+      </div>
+
+      {fallback.progressStage ? (
+        <Card>
+          <PassengerFallbackProgressRail
+            context={context}
+            stage={fallback.progressStage}
+          />
+        </Card>
+      ) : null}
+
+      {fallback.etaMinutes !== null ? (
+        <Card>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 13,
+            }}
+          >
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: "var(--embed-accent-soft)",
+                color: "var(--embed-accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <EmbedGlyph name="car" size={22} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12.5, color: "var(--embed-neutral-fg)" }}>
+                {t("embed.fallback.eta.label")}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--embed-neutral-fg)",
+                  opacity: 0.72,
+                }}
+              >
+                {t("embed.fallback.eta.note")}
+              </div>
+            </div>
+            <div
+              style={{
+                textAlign: "center",
+                background: "var(--embed-accent-soft)",
+                border: "1px solid var(--embed-accent)",
+                borderRadius: 12,
+                padding: "8px 16px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 26,
+                  fontWeight: 800,
+                  fontFamily: EMBED_MONO,
+                  color: "var(--embed-accent)",
+                  lineHeight: 1,
+                }}
+              >
+                {fallback.etaMinutes}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--embed-neutral-fg)",
+                  marginTop: 3,
+                }}
+              >
+                {t("common.minutes")}
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      <PassengerMessageSlot
+        messageCode={fallback.messageCode}
+        body={body}
+      />
+
+      <Card>
+        <div
+          style={{
+            display: "grid",
+            gap: 8,
+            fontSize: 13,
+            color: "var(--embed-neutral-fg)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <span>{t("embed.fallback.field.tripId")}</span>
+            <strong style={{ fontFamily: EMBED_MONO }}>{embedTrip.id}</strong>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <span>{t("embed.fallback.field.destination")}</span>
+            <strong>{t("embed.book.dropoff")}</strong>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <span>{t("embed.fallback.field.fare")}</span>
+            <strong>{t("embed.fallback.value.fareStable")}</strong>
+          </div>
+        </div>
+      </Card>
+
+      <EmbedBanner theme={theme} tone="success" icon="check">
+        {t("embed.fallback.guardrail")}
+      </EmbedBanner>
+
+      <div
+        style={{
+          fontSize: 10.5,
+          lineHeight: 1.5,
+          textAlign: "center",
+          color: "var(--embed-neutral-fg)",
+          opacity: 0.72,
+        }}
+      >
+        {t("embed.fallback.providerNote", {
+          appName: context.strings.appName,
+        })}
+      </div>
+
+      <PassengerFallbackQuickLinks context={context} />
+    </>
+  );
+}
+
 const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
   denied: { tone: "danger", icon: "ban" },
   ineligible: { tone: "warn", icon: "ban" },
@@ -851,6 +1266,7 @@ const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
 function CompactFlow({ context }: { context: EmbedContext }) {
   const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
+  const supportHref = `tel:${context.strings.supportPhone.replace(/[^+\d]/g, "")}`;
 
   const footer = (() => {
     switch (context.screen) {
@@ -870,6 +1286,36 @@ function CompactFlow({ context }: { context: EmbedContext }) {
               tone="danger"
             />
           </>
+        );
+      case "fb_vehicle_change":
+        return (
+          <ActionLink
+            href={supportHref}
+            label={t("embed.field.contactSupport")}
+            tone="default"
+          />
+        );
+      case "fb_human_assigned":
+        return (
+          <>
+            <ActionLink
+              href={buildHref(context, { screen: "trip" })}
+              label={t("embed.field.viewTrip")}
+            />
+            <ActionLink
+              href={buildHref(context, { screen: "trip" })}
+              label={t("embed.field.contactDriver")}
+              tone="default"
+            />
+          </>
+        );
+      case "fb_service_continuing":
+      case "fb_eta_updated":
+        return (
+          <ActionLink
+            href={buildHref(context, { screen: "trip" })}
+            label={t("embed.field.viewTrip")}
+          />
         );
       case "receipt":
         return (
@@ -1034,7 +1480,12 @@ function CompactFlow({ context }: { context: EmbedContext }) {
               {t("embed.trip.bound")}
             </div>
           </Card>
+          <PassengerFallbackQuickLinks context={context} />
         </>
+      ) : null}
+
+      {isPassengerFallbackScreen(context.screen) ? (
+        <PassengerFallbackStatePanel context={context} />
       ) : null}
 
       {context.screen === "trips" ? (
