@@ -300,7 +300,8 @@ export function resolveRouteAuthPolicy(
   if (
     routePath === "admin/vehicle-eligibility-matrix" ||
     routePath === "admin/service-products" ||
-    routePath.startsWith("admin/service-products/")
+    routePath.startsWith("admin/service-products/") ||
+    routePath.startsWith("admin/sandbox-governance")
   ) {
     // Admin eligibility / service-product configuration (read + write). These
     // were missing from the route-auth table and were served ANONYMOUSLY,
@@ -311,7 +312,7 @@ export function resolveRouteAuthPolicy(
       requiredScopes: [],
       allowedRealms: baseAllowedRealms("platform", "ops"),
       description:
-        "Admin vehicle-eligibility matrix + service product configuration",
+        "Admin vehicle-eligibility matrix + sandbox governance + service product configuration",
     };
   }
 
