@@ -261,9 +261,6 @@ describe("TeslaRegulatoryEventsService", () => {
     const payload = JSON.stringify({
       schemaVersion: "tesla.regulatory-event.v99",
       providerEventId: "evt-quarantine-001",
-      vehicleId: "veh-demo-003",
-      eventType: "remote_assist_requested",
-      occurredAt: "2026-06-26T02:13:00.000Z",
     });
 
     const receipt = await service.ingest({
@@ -277,6 +274,39 @@ describe("TeslaRegulatoryEventsService", () => {
     expect(service.listRawEvents()).toEqual([
       expect.objectContaining({
         providerEventId: "evt-quarantine-001",
+        normalizationStatus: "quarantined",
+      }),
+    ]);
+    expect(service.listCanonicalEvents()).toHaveLength(0);
+  });
+
+  it("treats quarantined replays as idempotent duplicates while preserving the raw vault entry", async () => {
+    const { service } = buildService();
+    const payload = JSON.stringify({
+      schemaVersion: "tesla.regulatory-event.v99",
+      providerEventId: "evt-quarantine-duplicate-001",
+    });
+    const headers = buildHeaders(payload);
+
+    const firstReceipt = await service.ingest({
+      body: JSON.parse(payload) as unknown,
+      rawBody: Buffer.from(payload),
+      headers,
+    });
+    const secondReceipt = await service.ingest({
+      body: JSON.parse(payload) as unknown,
+      rawBody: Buffer.from(payload),
+      headers,
+    });
+
+    expect(firstReceipt.status).toBe("quarantined");
+    expect(firstReceipt.duplicate).toBe(false);
+    expect(secondReceipt.status).toBe("quarantined");
+    expect(secondReceipt.duplicate).toBe(true);
+    expect(secondReceipt.rawEventId).toBe(firstReceipt.rawEventId);
+    expect(service.listRawEvents()).toEqual([
+      expect.objectContaining({
+        providerEventId: "evt-quarantine-duplicate-001",
         normalizationStatus: "quarantined",
       }),
     ]);

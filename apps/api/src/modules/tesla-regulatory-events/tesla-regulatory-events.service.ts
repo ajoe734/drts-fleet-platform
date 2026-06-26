@@ -45,6 +45,13 @@ type TeslaRegulatoryIngressRequest = {
 type TeslaRegulatoryIngressEnvelope = {
   schemaVersion: string;
   providerEventId: string;
+  occurredAt: string | null;
+  record: Record<string, unknown>;
+};
+
+type TeslaRegulatoryCanonicalEnvelope = {
+  schemaVersion: string;
+  providerEventId: string;
   vehicleId: string;
   externalVehicleRef: string | null;
   eventType: TeslaRegulatoryEventType;
@@ -133,7 +140,7 @@ export class TeslaRegulatoryEventsService {
               rawEventId: "",
               receivedAt: rawEventInput.receivedAt,
             },
-            payload,
+            this.parseCanonicalPayload(payload),
             providerCode,
             payloadSha256,
           )
@@ -158,7 +165,12 @@ export class TeslaRegulatoryEventsService {
             rawEventId: persisted.rawEvent.rawEventId,
           },
         );
-        return this.buildReceipt(persisted.rawEvent, null, "quarantined", false);
+        return this.buildReceipt(
+          persisted.rawEvent,
+          null,
+          "quarantined",
+          persisted.duplicate,
+        );
       }
 
       if (persisted.duplicate) {
@@ -501,20 +513,27 @@ export class TeslaRegulatoryEventsService {
       record.providerEventId,
       "providerEventId",
     );
-    const vehicleId = this.requiredString(record.vehicleId, "vehicleId");
-    const eventType = this.requiredEventType(record.eventType);
-    const occurredAt = this.requiredIsoTimestamp(
-      record.occurredAt,
-      "occurredAt",
-    );
 
     return {
       schemaVersion,
       providerEventId,
-      vehicleId,
+      occurredAt: this.optionalIsoTimestamp(record.occurredAt),
+      record,
+    };
+  }
+
+  private parseCanonicalPayload(
+    payload: TeslaRegulatoryIngressEnvelope,
+  ): TeslaRegulatoryCanonicalEnvelope {
+    const { record } = payload;
+
+    return {
+      schemaVersion: payload.schemaVersion,
+      providerEventId: payload.providerEventId,
+      vehicleId: this.requiredString(record.vehicleId, "vehicleId"),
       externalVehicleRef: this.optionalString(record.externalVehicleRef),
-      eventType,
-      occurredAt,
+      eventType: this.requiredEventType(record.eventType),
+      occurredAt: this.requiredIsoTimestamp(record.occurredAt, "occurredAt"),
       location: this.optionalLocation(record.location),
       speedMps: this.optionalNumber(record.speedMps),
       headingDeg: this.optionalNumber(record.headingDeg),
@@ -556,7 +575,7 @@ export class TeslaRegulatoryEventsService {
       mtlsClientCert: input.clientCert ?? input.providerIdentity,
       mtlsFingerprint: this.extractCertFingerprint(input.clientCert),
       receivedAt: input.receivedAt,
-      occurredAt: input.payload.occurredAt,
+      occurredAt: input.payload.occurredAt ?? input.receivedAt,
       normalizationStatus: SUPPORTED_SCHEMA_VERSIONS.has(
         input.payload.schemaVersion,
       )
@@ -568,7 +587,7 @@ export class TeslaRegulatoryEventsService {
 
   private buildCanonicalEventRecord(
     rawEvent: Pick<TeslaRegulatoryRawEventRecord, "rawEventId" | "receivedAt">,
-    payload: TeslaRegulatoryIngressEnvelope,
+    payload: TeslaRegulatoryCanonicalEnvelope,
     providerCode: string,
     payloadSha256: string,
   ): CreateTeslaRegulatoryCanonicalEventInput {
@@ -977,6 +996,15 @@ export class TeslaRegulatoryEventsService {
       "INVALID_PAYLOAD",
       "Tesla regulatory ingress encountered a non-numeric field.",
     );
+  }
+
+  private optionalIsoTimestamp(value: unknown) {
+    if (typeof value !== "string" || !value.trim()) {
+      return null;
+    }
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
 
   private optionalLocation(value: unknown) {

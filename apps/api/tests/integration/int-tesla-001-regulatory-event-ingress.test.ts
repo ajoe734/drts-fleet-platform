@@ -65,9 +65,6 @@ describe("INT-TESLA-001 regulatory ingress", () => {
     const quarantinedPayload = JSON.stringify({
       schemaVersion: "tesla.regulatory-event.v404",
       providerEventId: "evt-int-002",
-      vehicleId: "veh-int-002",
-      eventType: "remote_assist_resolved",
-      occurredAt: "2026-06-26T03:01:00.000Z",
     });
 
     const accepted = await service.ingest({
@@ -103,10 +100,24 @@ describe("INT-TESLA-001 regulatory ingress", () => {
         ),
       },
     });
+    const quarantinedReplay = await service.ingest({
+      body: JSON.parse(quarantinedPayload) as unknown,
+      rawBody: Buffer.from(quarantinedPayload),
+      headers: {
+        "x-forwarded-client-cert": "CN=tesla-regulatory-sandbox",
+        "x-jws-signature": buildDetachedSignature(
+          quarantinedPayload,
+          privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+        ),
+      },
+    });
 
     expect(accepted.status).toBe("accepted");
     expect(duplicate.status).toBe("duplicate");
     expect(quarantined.status).toBe("quarantined");
+    expect(quarantinedReplay.status).toBe("quarantined");
+    expect(quarantinedReplay.duplicate).toBe(true);
+    expect(quarantinedReplay.rawEventId).toBe(quarantined.rawEventId);
     expect(service.listRawEvents()).toHaveLength(2);
     expect(service.listCanonicalEvents()).toHaveLength(1);
   });
