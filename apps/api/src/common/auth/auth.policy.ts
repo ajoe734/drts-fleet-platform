@@ -425,6 +425,22 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath.startsWith("regulatory/") ||
+    routePath === "regulatory"
+  ) {
+    return {
+      routeKey: `regulatory-reporting:${upperMethod}`,
+      requiredScopes: methodScope(
+        "regulatory:read",
+        "regulatory:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Regulatory notification reporting",
+    };
+  }
+
+  if (
     routePath.startsWith("regulatory-registry/") ||
     routePath === "regulatory-registry"
   ) {

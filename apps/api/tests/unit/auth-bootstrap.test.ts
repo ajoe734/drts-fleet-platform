@@ -16,6 +16,7 @@ import {
   InternalKeyMiddleware,
   JwtAuthService,
   OpenRoute,
+  RequireRealms,
   RequireScopes,
   extractBootstrapRequestIdentity,
   isHealthRequest,
@@ -560,6 +561,30 @@ describe("bootstrap auth guard", () => {
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity?.actorType).toBe("tenant_admin");
     expect(request.identity?.scopes).toContain("tenant:webhooks:write");
+  });
+
+  it("keeps route-policy scopes active when class-level realms are present", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "ops_user",
+        "x-actor-id": "ops-user-001",
+        "x-realm": "ops",
+        "x-scopes": "reports:read",
+      },
+      method: "POST",
+      originalUrl: "/api/regulatory/notifications",
+    };
+    class RegulatoryControllerLike {}
+    RequireRealms("platform", "ops")(RegulatoryControllerLike);
+
+    const context = createExecutionContext(
+      request,
+      function createNotificationHandler() {},
+      RegulatoryControllerLike,
+    );
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
   });
 
   it("accepts SSE bootstrap identity from query params on ops dispatch streams", () => {

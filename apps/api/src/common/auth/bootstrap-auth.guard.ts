@@ -90,6 +90,10 @@ function includesAll(haystack: string[], needles: string[]): boolean {
   return needles.every((needle) => haystack.includes(needle));
 }
 
+function mergeUnique<T>(...values: readonly T[][]): T[] {
+  return [...new Set(values.flat())];
+}
+
 function extractBearerToken(
   headers: Record<string, string | string[] | undefined>,
 ): string | null {
@@ -155,6 +159,7 @@ export class BootstrapAuthGuard implements CanActivate {
           asQueryRecord((request as { query?: unknown }).query),
         )
       : baseHeaders;
+    const routePolicy = resolveRouteAuthPolicy(request.method ?? "GET", requestUrl);
     const decoratorScopes =
       this.reflector.getAllAndOverride<string[]>(AUTH_REQUIRED_SCOPES_KEY, [
         context.getHandler(),
@@ -165,15 +170,25 @@ export class BootstrapAuthGuard implements CanActivate {
         context.getHandler(),
         context.getClass(),
       ]) ?? [];
+    const mergedScopes = mergeUnique(
+      routePolicy?.requiredScopes ?? [],
+      decoratorScopes,
+    );
+    const mergedRealms = mergeUnique(
+      routePolicy?.allowedRealms ?? [],
+      decoratorRealms,
+    );
     const policy =
-      decoratorScopes.length > 0 || decoratorRealms.length > 0
+      mergedScopes.length > 0 || mergedRealms.length > 0
         ? {
-            requiredScopes: decoratorScopes,
-            allowedRealms: decoratorRealms,
-            description: "Decorator-authenticated route",
-            routeKey: "decorator",
+            requiredScopes: mergedScopes,
+            allowedRealms: mergedRealms,
+            description: routePolicy
+              ? routePolicy.description
+              : "Decorator-authenticated route",
+            routeKey: routePolicy?.routeKey ?? "decorator",
           }
-        : resolveRouteAuthPolicy(request.method ?? "GET", requestUrl);
+        : null;
 
     if (!policy) {
       const anonymousIdentity = extractBootstrapRequestIdentity(headers, {
