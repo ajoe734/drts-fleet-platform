@@ -350,15 +350,17 @@ export class TeslaTelemetryService {
     }
 
     tracker.latestContiguousSequenceNo = contiguous;
+    const missingSequences = this.missingSequences(tracker);
     if (
-      eventRecord.sequenceNo > priorContiguous + 1 &&
+      missingSequences.length > 0 &&
+      eventRecord.sequenceNo > priorContiguous &&
       !tracker.gapDetectedAt
     ) {
       tracker.gapDetectedAt = eventRecord.receivedAt;
     }
     if (
       tracker.gapDetectedAt &&
-      this.missingSequences(tracker).length === 0 &&
+      missingSequences.length === 0 &&
       tracker.latestSequenceNo !== null &&
       tracker.latestContiguousSequenceNo === tracker.latestSequenceNo
     ) {
@@ -728,7 +730,7 @@ export class TeslaTelemetryService {
     const missing: number[] = [];
     for (
       let sequence = tracker.latestContiguousSequenceNo + 1;
-      sequence < tracker.latestSequenceNo;
+      sequence <= tracker.latestSequenceNo;
       sequence += 1
     ) {
       if (!tracker.sequences.has(sequence)) {

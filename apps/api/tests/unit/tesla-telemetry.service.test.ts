@@ -212,6 +212,107 @@ describe("TeslaTelemetryService", () => {
     ]);
   });
 
+  it("treats the newest quarantined sequence as a gap and requests backfill after threshold", async () => {
+    const { service } = buildService();
+
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-005",
+        externalVehicleRef: "VIN-005",
+        capturedAt: "2026-06-26T10:00:00.000Z",
+        location: { lat: 25.03, lng: 121.56 },
+        speedMps: 8,
+        headingDeg: 90,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 80,
+        batteryRangeKm: 280,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-newest-gap-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-newest-gap",
+        receivedAt: "2026-06-26T10:00:00.000Z",
+      },
+    );
+
+    const receipt = await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-005",
+        externalVehicleRef: "VIN-005",
+        capturedAt: "2026-06-26T10:00:05.000Z",
+        location: { lat: 25.031, lng: 121.561 },
+        speedMps: 10,
+        headingDeg: 95,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 79,
+        batteryRangeKm: 279,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-newest-gap-002-unknown",
+        sequenceNo: 2,
+        schemaVersion: "tesla.vehicle-state.v9",
+        sessionId: "drive-session-newest-gap",
+        receivedAt: "2026-06-26T10:01:05.000Z",
+      },
+    );
+
+    expect(receipt.status).toBe("quarantined");
+    expect(receipt.providerHealthState).toBe("regulator_data_incident");
+    expect(receipt.backfillRequired).toBe(false);
+
+    expect(
+      service.getProviderHealth({
+        feedKind: "vehicle_state",
+        externalVehicleRef: "VIN-005",
+        sessionId: "drive-session-newest-gap",
+        asOf: "2026-06-26T10:01:05.000Z",
+      }),
+    ).toMatchObject({
+      healthState: "regulator_data_incident",
+      latestSequenceNo: 2,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+      gapDetectedAt: "2026-06-26T10:01:05.000Z",
+      backfillRequestedAt: null,
+    });
+
+    expect(service.listBackfillQueries()).toEqual([]);
+
+    expect(
+      service.getProviderHealth({
+        feedKind: "vehicle_state",
+        externalVehicleRef: "VIN-005",
+        sessionId: "drive-session-newest-gap",
+        asOf: "2026-06-26T10:02:06.000Z",
+      }),
+    ).toMatchObject({
+      healthState: "regulator_data_incident",
+      latestSequenceNo: 2,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+      gapDetectedAt: "2026-06-26T10:01:05.000Z",
+      backfillRequestedAt: "2026-06-26T10:02:06.000Z",
+    });
+
+    expect(service.listBackfillQueries()).toEqual([
+      expect.objectContaining({
+        vin: "VIN-005",
+        from: "2026-06-26T10:00:00.000Z",
+        to: "2026-06-26T10:02:06.000Z",
+        sessionId: "drive-session-newest-gap",
+        eventId: "veh-state-newest-gap-002-unknown",
+        sequenceAfter: 1,
+      }),
+    ]);
+  });
+
   it("moves stale telemetry into dispatch hold after the hold threshold", async () => {
     const { service } = buildService();
 
