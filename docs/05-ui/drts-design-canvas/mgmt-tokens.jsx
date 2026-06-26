@@ -38,6 +38,18 @@ const MGMT_ACCENTS = {
     dark:  '#84A9E8', darkHi:  '#A9C5F2', darkBg:  '#0F1E3C', darkBorder:  '#21376A',
     name: 'Bank Console', tagline: '發卡行方案監管台',
   },
+  // ROC Console — cyan (FSD 監理沙盒 · 遠端監控中心 Remote Operations Center)
+  roc: {
+    light: '#0E7490', lightHi: '#0891B2', lightBg: '#ECFEFF', lightBorder: '#A5E8F2',
+    dark:  '#67E8F9', darkHi:  '#A5F3FC', darkBg:  '#08323F', darkBorder:  '#155E72',
+    name: 'ROC Console', tagline: 'FSD 沙盒遠端監控中心',
+  },
+  // Compliance & Investigation Console — slate-violet (法遵與調查)
+  compliance: {
+    light: '#5B5BD6', lightHi: '#6E56CF', lightBg: '#F1F0FE', lightBorder: '#CFC9F2',
+    dark:  '#B0A7F0', darkHi:  '#C9C2F7', darkBg:  '#1B1840', darkBorder:  '#332C66',
+    name: 'Compliance Console', tagline: '法遵調查與監理揭露',
+  },
 };
 
 // ── Actor realm colors — for cross-actor audit chips (Q-TEN13) ──────────────
@@ -49,6 +61,8 @@ const REALM_COLORS = {
     system:   { fg: '#6B7280', bg: '#F1F4F8', bd: '#CBD5E1' },
     driver:   { fg: '#A8590B', bg: '#FCEED6', bd: '#F0CC95' },
     issuer:   { fg: '#13478F', bg: '#EDF2FB', bd: '#C3D5EF' },
+    roc:      { fg: '#0E7490', bg: '#ECFEFF', bd: '#A5E8F2' },
+    compliance:{ fg: '#5B5BD6', bg: '#F1F0FE', bd: '#CFC9F2' },
   },
   dark: {
     tenant:   { fg: '#5EEAD4', bg: '#0F2A28', bd: '#134E48' },
@@ -57,6 +71,8 @@ const REALM_COLORS = {
     system:   { fg: '#94A3B8', bg: '#1A2230', bd: '#2A3445' },
     driver:   { fg: '#FCD34D', bg: '#3A2A0A', bd: '#5C4218' },
     issuer:   { fg: '#84A9E8', bg: '#0F1E3C', bd: '#21376A' },
+    roc:      { fg: '#67E8F9', bg: '#08323F', bd: '#155E72' },
+    compliance:{ fg: '#B0A7F0', bg: '#1B1840', bd: '#332C66' },
   },
 };
 
