@@ -4,6 +4,16 @@
 > **Task:** P2-FBK-001-SIDECAR-ACCEPTANCE · **Owner:** Claude · **Reviewer:** Codex
 > **Parent:** P2-FBK-001 (owner Codex, reviewer Codex2; integration **`merged_to_dev`**)
 > **Helper kind:** `acceptance_packet` · **Mutates canonical:** no
+> **Refreshed:** 2026-06-26 (reviewer reopen #5) — **post-merge trunk CI truth corrected.** The
+> dev-push run `28218927968` on the merge commit `c4126ee…` was previously described as "green
+> except still-running `e2e` shards." Current GitHub truth: all non-e2e jobs are `success`, but
+> **`e2e (3)` (job `83595749448`) FAILED at `2026-06-26T05:34:22Z`** (`e2e (0..2)` still
+> `in_progress`). Job log root cause is an **unrelated `TeslaRegulatoryEventsService` DI boot
+> break** (hermetic API never came up), **not** a fallback-route regression — the fallback's own
+> coverage runs in the green `integration` job. The merge to `dev` stays durable (`merged_to_dev`;
+> the failure is post-merge). §3.8, the G4 row, AC-7, and Handoff Notes are refreshed accordingly.
+> Prior-revision history (reviewer reopen #3) is retained below.
+>
 > **Refreshed:** 2026-06-26 (reviewer reopen #3) — re-anchored to **`origin/dev`** after the
 > parent's follow-up integration **PR #901 squash-merged to `dev` at 2026-06-26T05:21:46Z**
 > (merge commit **`c4126ee8899ee672503ac314d957d9338b382056`**, *"P2-FBK-001: integrate
@@ -41,12 +51,17 @@
 > (the "behind by 4"). **Every P2-FBK-001 fallback file is content-identical on `dev`.** No
 > rebase or further merge of the codex branch is required for the fallback surface.
 >
-> **Post-merge `dev` trunk CI (in flight).** The dev-push run on the merge commit `c4126ee…`
-> (`CI (integration trunk)`, run `28218927968`) currently shows
+> **Post-merge `dev` trunk CI (e2e shard now RED — unrelated cause).** The dev-push run on the
+> merge commit `c4126ee…` (`CI (integration trunk)`, run `28218927968`) shows
 > `typecheck`/`unit`/`integration`/`build`/`lint`/`i18n-guard`/`orchestrator-tests` =
-> **`success`**, with `e2e (0..3)` still **`in_progress`**. The merge to `dev` is durable
-> (`merged_to_dev`); a `dev_deployed` claim is **not** made here (no `Deploy - Dev` evidence and
-> the trunk e2e shards are still finishing).
+> **`success`**, but **`e2e (3)` (job `83595749448`) FAILED at `2026-06-26T05:34:22Z`**
+> (`e2e (0..2)` still `in_progress`; run status `in_progress`). **Root cause is unrelated to the
+> fallback surface:** the hermetic API failed to boot with
+> `UnknownDependenciesException: Nest can't resolve dependencies of the TeslaRegulatoryEventsService`
+> — the Tesla-regulatory module DI wiring (the same unrelated tesla/`V0040` surface noted above),
+> not the ROC fallback route. The merge to `dev` is durable (`merged_to_dev`, the failure is
+> **post-merge** and does not un-merge `c4126ee…`); a `dev_deployed` claim is **not** made here
+> (no `Deploy - Dev` evidence and the post-merge trunk e2e is now red on an unrelated boot break).
 >
 > The earlier open review failure (G1/G2 / AC-2) remains **closed** via the
 > `SANDBOX_FALLBACK_NOT_REQUIRED` guard + negative INT-P2-008 case, present **on `dev`**. The
@@ -124,9 +139,11 @@ breaking the SLA / billing / audit chain.
   `dev`. There is **no standalone `P2-FBK-001` task in `ai-status`** (`show` → "Task not
   found"), so this status rests on repo/GitHub merge evidence; the last parent activity
   (`05:23:39Z`) records the owner reconciling from `origin/dev@c4126ee…` after the merge and the
-  worker then being superseded. The only step beyond `merged_to_dev` toward `dev_deployed` is
-  the post-merge trunk CI (run `28218927968`) finishing its still-running `e2e` shards and a
-  `Deploy - Dev` run — neither is claimed here.
+  worker then being superseded. Beyond `merged_to_dev`, `dev_deployed` is **not** reachable yet:
+  the post-merge trunk CI (run `28218927968`) has all non-e2e jobs green but its **`e2e (3)`
+  shard FAILED on an unrelated `TeslaRegulatoryEventsService` DI boot break** (§3.8), and there
+  is no `Deploy - Dev` run — neither is claimed here, and the e2e red is an unrelated Tesla
+  module break rather than a fallback-route regression.
 - **Sidecar role:** prepare the acceptance checklist + dependency map so the parent
   owner/reviewer have one reference for what "done" requires and which item (the standing
   **G3 durability follow-up**) remains beyond the now-merged fallback surface.
@@ -288,11 +305,20 @@ An earlier revision said PR #898 *"merged after all GitHub checks passed."* That
   Changed files: `sandbox-dispatch-gate.service.ts`,
   `int-p2-008-roc-human-fallback-route.test.ts`, `sandbox-dispatch-gate.service.test.ts`.
 - **Post-merge `dev` trunk run on `c4126ee…`** (`CI (integration trunk)`, run `28218927968`):
-  at refresh time `typecheck` / `unit` / `integration` / `build` / `lint` / `i18n-guard` /
-  `orchestrator-tests` = **`success`**; **`e2e (0..3)` still `in_progress`** (run status
-  `in_progress`). The merge is durable on `dev`; the trunk e2e shards are still finishing.
-- **Integration level: `merged_to_dev`.** `dev_deployed` is **not** asserted — there is no
-  `Deploy - Dev` run evidence and the post-merge e2e shards have not yet completed.
+  `typecheck` / `unit` / `integration` / `build` / `lint` / `i18n-guard` / `orchestrator-tests`
+  = **`success`**; **`e2e (3)` (job `83595749448`) = `failure`** (completed
+  `2026-06-26T05:34:22Z`); `e2e (0..2)` still `in_progress` (run status `in_progress`).
+- **`e2e (3)` failure root cause — unrelated to the fallback surface.** The job log shows the
+  hermetic API never became healthy:
+  `UnknownDependenciesException: Nest can't resolve dependencies of the TeslaRegulatoryEventsService (?, Object)`
+  → `[hermetic] API failed to become healthy` → `[hermetic] FAIL (5): 004 008 012 016 020` →
+  `exit code 1`. This is a **Tesla-regulatory module DI boot break** (the same unrelated
+  tesla/`V0040` surface that is the only `dev`↔codex content diff), **not** a regression in the
+  ROC fallback route — the fallback's own coverage runs in the `integration` job, which is green.
+- **Integration level: `merged_to_dev`** (unchanged — PR #901 merged at `05:21:46Z`; the e2e
+  failure is post-merge and does not un-merge `c4126ee…`). `dev_deployed` is **not** asserted —
+  there is no `Deploy - Dev` run evidence **and** the post-merge trunk e2e is now red (on the
+  unrelated Tesla boot break, which must be cleared before any `dev_deployed` claim).
 
 ---
 
@@ -308,7 +334,7 @@ so the parent review is explicit about what "done" still requires.
 | ~~G1~~ | **Non-fallback gate decisions rejected.** The ROC guard rejects a `gate_fallback_required` trigger both when **no** decision is found *and* when a found decision has `fallbackRequired === false` (`SANDBOX_FALLBACK_NOT_REQUIRED` 409). | ✅ closed (on `dev`) | `roc-operations.service.ts` `"SANDBOX_FALLBACK_NOT_REQUIRED"`; two-branch guard (§3.3) |
 | ~~G2~~ | **Negative integration test present.** A `gate_fallback_required` request backed by an `allow` (`fallbackRequired:false`) decision is asserted to be rejected with `SANDBOX_FALLBACK_NOT_REQUIRED` and to produce no side effects. | ✅ closed (on `dev`) | `int-p2-008-roc-human-fallback.test.ts` negative case (§3.6) |
 | G3 | **Report persistence is in-memory.** `fallbackReports` / `reportArtifactId` are retained in-process; no durable repository for the sandbox-exception report the contract/regulatory retention implies. | ⛔ open follow-up | `private fallbackReports: RocFallbackToHumanReport[] = []` |
-| ~~G4~~ | **Full surface merged to `dev`.** The base fallback surface merged via **PR #898** (squash `40ee45aba`, 04:55:20Z) **and** the approved route-coverage follow-up (`70bbad660`: route-registration test + gate `isEnabled()` fix) merged via **PR #901** (squash `c4126ee…`, **05:21:46Z**, `is-ancestor` of `origin/dev` → true). Both are content-identical on `dev`. Integration level = **`merged_to_dev`**; post-merge trunk CI (run `28218927968`) green except still-running `e2e` shards. | ✅ closed — both base + follow-up `merged_to_dev` | `git merge-base --is-ancestor c4126ee… origin/dev` → true; `…isEnabled()` at `sandbox-dispatch-gate.service.ts:299` on `dev`; route test present on `dev`; follow-up content diff vs codex branch empty |
+| ~~G4~~ | **Full surface merged to `dev`.** The base fallback surface merged via **PR #898** (squash `40ee45aba`, 04:55:20Z) **and** the approved route-coverage follow-up (`70bbad660`: route-registration test + gate `isEnabled()` fix) merged via **PR #901** (squash `c4126ee…`, **05:21:46Z**, `is-ancestor` of `origin/dev` → true). Both are content-identical on `dev`. Integration level = **`merged_to_dev`**; post-merge trunk CI (run `28218927968`) has all non-e2e jobs green but **`e2e (3)` failed on an unrelated `TeslaRegulatoryEventsService` DI boot break** (§3.8) — does not un-merge or regress the fallback surface. | ✅ closed — both base + follow-up `merged_to_dev` | `git merge-base --is-ancestor c4126ee… origin/dev` → true; `…isEnabled()` at `sandbox-dispatch-gate.service.ts:299` on `dev`; route test present on `dev`; follow-up content diff vs codex branch empty |
 | ~~G5~~ | **CI/e2e harness deltas reconciled.** The branch's earlier edits to `.github/workflows/ci-integ.yml` and `tests/e2e/run-e2e-hermetic.sh` are reconciled with `dev`'s `CI-E2E-SHARD` (`92dbd14e6`). PR #898 head checks were green (see §3.7 timing note); the **post-merge `dev` trunk** then re-ran the full suite on `40ee45aba` and all passed. | ✅ closed (on `dev`) | post-merge `dev` checks on `40ee45aba` all `success` (ci-integ completed 04:58:27Z); harness files match `dev` (§3.7) |
 
 ---
@@ -347,19 +373,24 @@ not re-run build/typecheck/test; the GitHub trunk checks are the `dev`-level sig
   e2e shell present), on `dev`; the **route-registration** integration spec (follow-up
   `70bbad660`) is now **on `dev`** via PR #901 (reviewer-verified 23 tests pass). The base
   `dev`-level CI/e2e signal is the **post-merge trunk run on `40ee45aba`** (full suite
-  `success`, §3.7); the follow-up's post-merge trunk run on `c4126ee…` (run `28218927968`) is
-  green except still-running `e2e` shards (§3.8). ◻️ runtime not re-run in this sidecar.
+  `success`, §3.7); the follow-up's post-merge trunk run on `c4126ee…` (run `28218927968`) has
+  all non-e2e jobs green but its **`e2e (3)` shard FAILED on an unrelated
+  `TeslaRegulatoryEventsService` DI boot break** (not a fallback-route regression — the
+  fallback's coverage is in the green `integration` job; §3.8). ◻️ runtime not re-run in this
+  sidecar; ⚠️ the post-merge trunk e2e is red on an unrelated Tesla module break.
 
 **Summary:** AC-1, AC-2, AC-3, AC-4, AC-6 present-and-verified **on `dev`** (AC-2's
 gate-decision guard closed); AC-5 present with one open follow-up (G3 report durability);
-AC-7 covered with the base post-merge `dev` trunk checks on `40ee45aba` green (§3.7) and the
-follow-up trunk run on `c4126ee…` green-except-e2e-in-flight (§3.8). **No AC is blocked** —
-the dependency is merged and the **full fallback surface is merged to `dev`** (base PR #898 +
-follow-up PR #901). The parent integration status is **`merged_to_dev`**: the owner's
-route-coverage / wiring follow-up (`70bbad660`) was reviewed and approved by Codex2 (23 tests
-pass) and **merged via PR #901** (`c4126ee…`, 05:21:46Z). The remaining step toward
-`dev_deployed` is the post-merge trunk CI finishing its `e2e` shards plus a `Deploy - Dev`
-run (neither claimed here). **G3 report durability is the only standing open functional item.**
+AC-7 covered with the base post-merge `dev` trunk checks on `40ee45aba` green (§3.7); the
+follow-up trunk run on `c4126ee…` has all non-e2e jobs green but its **`e2e (3)` shard failed
+on an unrelated `TeslaRegulatoryEventsService` DI boot break** (§3.8). **No AC is blocked by the
+fallback surface** — the dependency is merged and the **full fallback surface is merged to
+`dev`** (base PR #898 + follow-up PR #901). The parent integration status is **`merged_to_dev`**:
+the owner's route-coverage / wiring follow-up (`70bbad660`) was reviewed and approved by Codex2
+(23 tests pass) and **merged via PR #901** (`c4126ee…`, 05:21:46Z). The remaining steps toward
+`dev_deployed` are (a) the **unrelated Tesla-module DI boot break clearing the trunk e2e**, and
+(b) a `Deploy - Dev` run (neither claimed here). **G3 report durability is the only standing
+open functional item attributable to this slice**; the trunk e2e red is an unrelated Tesla break.
 
 ---
 
@@ -386,19 +417,29 @@ run (neither claimed here). **G3 report durability is the only standing open fun
   No further merge of the codex branch is needed for the fallback surface.
 - **Parent integration status is `merged_to_dev`** (owner Codex; reviewer Codex2; last parent
   activity `2026-06-26T05:23:39Z` — owner reconciled from `origin/dev@c4126ee…` after the merge,
-  then the worker was superseded). The post-merge trunk CI run `28218927968` on `c4126ee…` is
-  green except its still-running `e2e (0..3)` shards. **`dev_deployed` is not claimed** — no
-  `Deploy - Dev` evidence and the trunk e2e shards are unfinished.
-- **Recommended parent focus order (remaining):** (1) let the post-merge trunk CI run
-  `28218927968` finish its `e2e` shards and confirm green on `c4126ee…`. (2) finalize parent
+  then the worker was superseded). The post-merge trunk CI run `28218927968` on `c4126ee…` has
+  all non-e2e jobs green but its **`e2e (3)` shard (job `83595749448`) FAILED at `05:34:22Z`**
+  (`e2e (0..2)` still in flight). **`dev_deployed` is not claimed** — no `Deploy - Dev` evidence
+  and the post-merge trunk e2e is now red.
+- **The trunk `e2e (3)` failure is unrelated to the fallback surface.** Job log root cause:
+  `UnknownDependenciesException: Nest can't resolve dependencies of the TeslaRegulatoryEventsService`
+  → hermetic API never booted → `[hermetic] FAIL (5): 004 008 012 016 020` → `exit code 1`. This
+  is a **Tesla-regulatory module DI break** (the same unrelated tesla/`V0040` surface that is the
+  only `dev`↔codex content diff), **not** a regression in the ROC fallback route. The fallback's
+  own coverage runs in the green `integration` job. Owner should route the e2e red to the Tesla
+  module owner, not treat it as a P2-FBK-001 defect.
+- **Recommended parent focus order (remaining):** (1) treat the post-merge trunk `e2e (3)`
+  failure as an **unrelated `TeslaRegulatoryEventsService` DI boot break** — hand it to the Tesla
+  module owner; do not block P2-FBK-001 finalize on it as a fallback defect. (2) finalize parent
   `done` with `INTEGRATION_STATUS=merged_to_dev` (evidence: PR #898 `40ee45aba` + PR #901
-  `c4126ee…`), or `dev_deployed` only once a `Deploy - Dev` run includes the change. (3) **G3**
-  — persist the sandbox-exception report — remains a follow-up if regulatory retention is
-  in-scope for this slice.
+  `c4126ee…`); `dev_deployed` only once the trunk e2e is green **and** a `Deploy - Dev` run
+  includes the change. (3) **G3** — persist the sandbox-exception report — remains a follow-up if
+  regulatory retention is in-scope for this slice.
 - **Sidecar made no canonical edits.** Only this support artifact was added; the base + follow-up
   fallback implementation is owned by the parent and is fully on `dev`.
 - **Runtime checks honestly unrun here.** The sidecar did not run build/typecheck/test; the
-  GitHub trunk checks on `40ee45aba` (base) and `c4126ee…` (follow-up) are the `dev`-level
+  GitHub trunk checks on `40ee45aba` (base, full suite green) and `c4126ee…` (follow-up: all
+  non-e2e jobs green, `e2e (3)` red on the unrelated Tesla DI boot break) are the `dev`-level
   signal of record.
 
 ### Self-status
