@@ -3,8 +3,8 @@ import { SandboxDesignPendingScreen } from "@/components/sandbox-design-pending-
 export default function CompliancePage() {
   return (
     <SandboxDesignPendingScreen
-      title="Sandbox Compliance Overview"
-      purpose="Platform-admin needs a canonical triage screen for investigations, takeover reviews, discrepancies, exports, legal holds, and filing posture."
+      titleKey="assistant.route.sandboxCompliance.title"
+      purposeKey="sandbox.pending.compliance.purpose"
       route="/platform-admin/compliance"
     />
   );

@@ -3,8 +3,8 @@ import { SandboxDesignPendingScreen } from "@/components/sandbox-design-pending-
 export default function InvestigationDetailPage() {
   return (
     <SandboxDesignPendingScreen
-      title="Investigation Detail"
-      purpose="This route needs a canonical accident-case detail screen for summary state, linked evidence, linked reports, and case-level drilldowns."
+      titleKey="assistant.route.sandboxInvestigationDetail.title"
+      purposeKey="sandbox.pending.investigationDetail.purpose"
       route="/platform-admin/investigations/[caseId]"
     />
   );

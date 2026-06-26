@@ -3,8 +3,8 @@ import { SandboxDesignPendingScreen } from "@/components/sandbox-design-pending-
 export default function InvestigationTimelinePage() {
   return (
     <SandboxDesignPendingScreen
-      title="Investigation Timeline"
-      purpose="This route needs a canonical synchronized fact timeline screen with explicit confidence, source, and discrepancy treatment."
+      titleKey="assistant.route.sandboxInvestigationTimeline.title"
+      purposeKey="sandbox.pending.investigationTimeline.purpose"
       route="/platform-admin/investigations/[caseId]/timeline"
     />
   );

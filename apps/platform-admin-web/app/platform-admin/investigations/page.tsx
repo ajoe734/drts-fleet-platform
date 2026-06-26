@@ -3,8 +3,8 @@ import { SandboxDesignPendingScreen } from "@/components/sandbox-design-pending-
 export default function InvestigationsPage() {
   return (
     <SandboxDesignPendingScreen
-      title="Sandbox Investigations"
-      purpose="Platform-admin needs a canonical investigation queue screen, including ROC-originated entry handling driven by backend-provided deep links."
+      titleKey="assistant.route.sandboxInvestigations.title"
+      purposeKey="sandbox.pending.investigations.purpose"
       route="/platform-admin/investigations"
     />
   );

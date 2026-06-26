@@ -180,11 +180,11 @@ const UNKNOWN_ROUTE_WARNING: RouteContextWarning = {
 };
 
 // ---------------------------------------------------------------------------
-// Route registry — all 19 Platform Admin routes
+// Route registry — all current Platform Admin routes
 // ---------------------------------------------------------------------------
 
 /**
- * The 19 routes. `bodyParityPending` marks the 3 routes that returned 404
+ * The registered routes. `bodyParityPending` marks the 3 routes that returned 404
  * on dev as of the 2026-06-02 body parity audit and whose bodies are owned by
  * separate workers; their metadata still resolves here.
  */

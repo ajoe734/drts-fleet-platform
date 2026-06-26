@@ -100,8 +100,7 @@ const en = {
   "platformLabel.complaint": "Complaint",
   "platformLabel.pendingArtifactId": "pending-artifact-id",
   "platformLabel.defaultPlanName": "Phase 1 Driver Fee Plan",
-  "platformLabel.maintenanceReasonExample":
-    "e.g. Scheduled upgrade window",
+  "platformLabel.maintenanceReasonExample": "e.g. Scheduled upgrade window",
   "platformLabel.placardSourceNone":
     "Select a source public info version to keep placard lineage traceable.",
   "platformLabel.placardSourcePublished":
@@ -140,8 +139,7 @@ const en = {
   "platformCode.enterprise_dispatch": "Enterprise Dispatch",
   "platformCode.exclusivity_expired": "Exclusivity Expired",
   "platformCode.exclusivity_missing": "No Exclusivity File",
-  "platformCode.exclusivity_pending_review":
-    "Exclusivity Pending Review",
+  "platformCode.exclusivity_pending_review": "Exclusivity Pending Review",
   "platformCode.exclusivity_rejected": "Exclusivity Rejected",
   "platformCode.exclusivity_revoked": "Exclusivity Revoked",
   "platformCode.healthy": "Healthy",
@@ -241,8 +239,7 @@ const en = {
   "home.audit.systemActor": "system",
   "home.kpi.tenantsSub": "{pilot} pilot · {sandbox} sandbox",
   "home.kpi.tenantsDelta": "{count} rollback_hold",
-  "home.kpi.partnersSub":
-    "{bank} bank · {hotelEnterprise} hotel / enterprise",
+  "home.kpi.partnersSub": "{bank} bank · {hotelEnterprise} hotel / enterprise",
   "home.kpi.driversStable": "healthy",
   "home.kpi.reconHintEmpty": "no open issue ids",
   "home.shortcut.tenants": "Tenants",
@@ -266,8 +263,7 @@ const en = {
   "home.page.recentTitle":
     "Recent sensitive operations · platform-layer audit trail (24h)",
   "home.page.noAudit": "No audit records found.",
-  "home.page.noTodos":
-    "No platform-routed governance blockers at the moment.",
+  "home.page.noTodos": "No platform-routed governance blockers at the moment.",
   "home.kpi.partnerReadiness": "{count} pending readiness",
   "home.kpi.driverDelta": "{count} stale in dispatch feed",
   "home.kpi.driverSub": "{eligible} dispatch-eligible · {total} total",
@@ -462,6 +458,29 @@ const en = {
   "assistant.route.sandboxLegalHolds.title": "Sandbox Legal Holds",
   "assistant.route.sandboxRegulatoryReports.title":
     "Sandbox Regulatory Reports",
+  "sandbox.pending.title": "{title} · Design Pending",
+  "sandbox.pending.bodySuffix":
+    "This route intentionally stays as a placeholder until the canonical Platform Admin design canvas adds the required screen.",
+  "sandbox.pending.note":
+    "This body does not invent a final layout. Functional requirements are captured in the screen handoff note below.",
+  "sandbox.pending.compliance.purpose":
+    "Platform-admin needs a canonical triage screen for investigations, takeover reviews, discrepancies, exports, legal holds, and filing posture.",
+  "sandbox.pending.complianceTripDetail.purpose":
+    "This route needs a canonical trip-centric compliance drilldown across investigation, evidence, discrepancy, and legal-hold state.",
+  "sandbox.pending.evidenceExports.purpose":
+    "This route needs a canonical controlled-export queue that makes request-versus-approval separation visually explicit.",
+  "sandbox.pending.legalHolds.purpose":
+    "This route needs a canonical legal-hold governance screen covering placement, release request, and approval with four-eyes separation.",
+  "sandbox.pending.evidenceManifest.purpose":
+    "This route needs a canonical chain-of-custody detail screen for one evidence manifest and its linked case context.",
+  "sandbox.pending.investigations.purpose":
+    "Platform-admin needs a canonical investigation queue screen, including ROC-originated entry handling driven by backend-provided deep links.",
+  "sandbox.pending.investigationDetail.purpose":
+    "This route needs a canonical accident-case detail screen for summary state, linked evidence, linked reports, and case-level drilldowns.",
+  "sandbox.pending.investigationTimeline.purpose":
+    "This route needs a canonical synchronized fact timeline screen with explicit confidence, source, and discrepancy treatment.",
+  "sandbox.pending.regulatoryReports.purpose":
+    "This route needs a canonical filing queue screen for draft, submitted, accepted, and rejected regulator reports linked to investigation cases.",
 
   // ── Tenants ──
   "tenants.title": "Tenant Management",
@@ -1742,8 +1761,7 @@ const en = {
   "featureFlagsAdmin.historyFocusAll":
     "Showing all receipts recorded in this browser session.",
   "featureFlagsAdmin.historyFocusKey": "Focused on {key}",
-  "featureFlagsAdmin.secondaryPanelTitle":
-    "Change control & extended details",
+  "featureFlagsAdmin.secondaryPanelTitle": "Change control & extended details",
   "featureFlagsAdmin.secondaryPanelSubtitle":
     "High-risk reason capture, notes, and local history stay below the default table-first body.",
   "featureFlagsAdmin.actionComposerTitle": "Pending high-risk change",
@@ -2356,7 +2374,8 @@ const en = {
   "fleetUi.driverNamePrompt": "Driver name",
   "fleetUi.vehicleIdPrompt": "Vehicle ID",
   "fleetUi.partnerIdPrompt": "Partner ID",
-  "fleetUi.actionNotWired": "This action is not wired to a mutation endpoint yet.",
+  "fleetUi.actionNotWired":
+    "This action is not wired to a mutation endpoint yet.",
   "fleetUi.readOnly": "Read-only",
   "fleetUi.unavailable": "Unavailable",
   "fleetUi.working": "Working...",
@@ -2390,19 +2409,24 @@ const en = {
   "fleetUi.colEvidence": "Evidence",
   "fleetUi.colTimeline": "Timeline",
   "fleetUi.pageTitle": "Fleet & compliance governance",
-  "fleetUi.pageSubtitle": "vehicles · drivers · contracts · device binding · exclusivity reviews · offboarding state machine",
-  "fleetUi.filterReserved": "Canvas-aligned filter surface is reserved for the next iteration.",
+  "fleetUi.pageSubtitle":
+    "vehicles · drivers · contracts · device binding · exclusivity reviews · offboarding state machine",
+  "fleetUi.filterReserved":
+    "Canvas-aligned filter surface is reserved for the next iteration.",
   "fleetUi.filter": "Filter",
   "fleetUi.refreshFailedTitle": "Fleet data refresh failed",
   "fleetUi.retry": "Retry",
   "fleetUi.snapshotNotFresh": "Snapshot is not fully fresh",
   "fleetUi.blockedDriversTitle": "{count} drivers need compliance review",
-  "fleetUi.blockedDriversBody": "Ops Console keeps the 30-day license-warning compliance block enforced until these blockers are cleared.",
+  "fleetUi.blockedDriversBody":
+    "Ops Console keeps the 30-day license-warning compliance block enforced until these blockers are cleared.",
   "fleetUi.exportList": "Export list",
   "fleetUi.exclusivityGovernanceTitle": "Exclusivity governance · Q-ADM08",
-  "fleetUi.exclusivityGovernanceBody": "Vehicle or driver dispatch eligibility cannot be enabled until exclusivity is approved.",
+  "fleetUi.exclusivityGovernanceBody":
+    "Vehicle or driver dispatch eligibility cannot be enabled until exclusivity is approved.",
   "fleetUi.offboardingMachineTitle": "Offboarding state machine · Q-ADM09",
-  "fleetUi.offboardingMachineSubtitle": "Every transition needs timestamp · actor · evidence · audit",
+  "fleetUi.offboardingMachineSubtitle":
+    "Every transition needs timestamp · actor · evidence · audit",
   "fleetUi.refreshTierSubtitle": "Refresh tier {tier} / 30s · {freshness}",
   "fleetUi.refreshTab": "Refresh tab",
   "partnerDetail.eligibility.contractId": "Contract ID",
@@ -2411,8 +2435,10 @@ const en = {
   "partnerDetail.eligibility.fallback": "Fallback",
   "partnerDetail.eligibility.opsQueueRequired": "Ops queue required",
   "partnerDetail.eligibility.noTimeoutFallback": "No timeout fallback",
-  "partnerDetail.eligibility.noVerification": "No partner-side eligibility verification is required before fulfillment.",
-  "partnerDetail.eligibility.platformGoverned": "Eligibility remains platform-governed and is backed by the linked contract snapshot.",
+  "partnerDetail.eligibility.noVerification":
+    "No partner-side eligibility verification is required before fulfillment.",
+  "partnerDetail.eligibility.platformGoverned":
+    "Eligibility remains platform-governed and is backed by the linked contract snapshot.",
   "partnerDetail.audit.source": "Audit source",
   "partnerDetail.audit.requestId": "Request ID",
   "partnerDetail.audit.createdBy": "Created by",
@@ -2422,13 +2448,15 @@ const en = {
   "partnerDetail.audit.revokedAt": "Revoked at",
   "partnerDetail.audit.revokeReason": "Revoke reason",
   "partnerDetail.audit.entryRevoked": "Entry revoked",
-  "partnerDetail.audit.entryRevokedBody": "Traffic should remain blocked for this entry.",
+  "partnerDetail.audit.entryRevokedBody":
+    "Traffic should remain blocked for this entry.",
   "partnerDetail.action.deactivateEntry": "Deactivate",
   "partnerDetail.action.activateEntry": "Activate",
   "partnerDetail.action.revokeEntry": "Revoke entry",
   "partnerDetail.previewFixtureMode": "Preview fixture mode",
   "partnerDetail.governance.title": "Governance actions",
-  "partnerDetail.governance.subtitle": "State transitions and high-risk lifecycle controls.",
+  "partnerDetail.governance.subtitle":
+    "State transitions and high-risk lifecycle controls.",
   "partnerDetail.governance.status": "Status",
   "partnerDetail.governance.trafficPosture": "Traffic posture",
   "partnerDetail.governance.trafficAccept": "Entry can accept governed traffic",
@@ -2436,13 +2464,15 @@ const en = {
   "partnerDetail.governance.deactivate": "Deactivate",
   "partnerDetail.governance.activate": "Activate",
   "partnerDetail.auth.webhookLinkage": "Webhook linkage",
-  "partnerDetail.auth.webhookSubtitle": "Operational delivery remains masked here; only the governance binding is shown.",
+  "partnerDetail.auth.webhookSubtitle":
+    "Operational delivery remains masked here; only the governance binding is shown.",
   "partnerDetail.auth.requestLineage": "Request lineage",
   "partnerDetail.auth.bound": "bound",
   "partnerDetail.auth.gap": "gap",
   "partnerDetail.auth.platformOwned": "platform-owned",
   "partnerDetail.adapter.linkage": "Adapter linkage",
-  "partnerDetail.adapter.subtitle": "Cross-link the contract snapshot to the platform adapter registry.",
+  "partnerDetail.adapter.subtitle":
+    "Cross-link the contract snapshot to the platform adapter registry.",
   "partnerDetail.adapter.linkedAdapter": "Linked adapter",
   "partnerDetail.adapter.manualFallback": "Manual fallback",
   "partnerDetail.adapter.opsConsoleRequired": "ops_console required on timeout",
@@ -2455,7 +2485,8 @@ const en = {
   "tenantDetail.backToTenants": "Back to tenants",
   "tenantDetail.unableToLoad": "Unable to load tenant detail",
   "tenantDetail.notFoundHeading": "Tenant not found",
-  "tenantDetail.notFoundBody": "The assigned route now resolves with a page body and no longer falls through to a 404. Pick another tenant from the lifecycle table.",
+  "tenantDetail.notFoundBody":
+    "The assigned route now resolves with a page body and no longer falls through to a 404. Pick another tenant from the lifecycle table.",
   "tenantDetail.openInTenantConsole": "Open in Tenant Console",
   "tenantDetail.enterRollbackHold": "Enter rollback_hold",
   "tenantDetail.actionFailed": "Tenant detail action failed",
@@ -2464,12 +2495,15 @@ const en = {
   "tenantDetail.onboardingPackage": "Onboarding package",
   "tenantDetail.tenantBaseline": "Tenant baseline",
   "tenantDetail.recentActivity": "Recent activity",
-  "tenantDetail.recentActivitySubtitle": "Audit subset for rollout, onboarding, and role-invite decisions",
+  "tenantDetail.recentActivitySubtitle":
+    "Audit subset for rollout, onboarding, and role-invite decisions",
   "tenantDetail.tenantRecordUpdated": "Tenant record updated",
   "tenantDetail.tenantCreated": "Tenant created",
   "tenantDetail.modalTitle": "Enter rollback_hold",
-  "tenantDetail.modalHighRiskNote": "High-risk action. Reason is required before the command is sent.",
-  "tenantDetail.reasonPlaceholder": "Describe the incident, rollout risk, or operator decision that requires rollback_hold.",
+  "tenantDetail.modalHighRiskNote":
+    "High-risk action. Reason is required before the command is sent.",
+  "tenantDetail.reasonPlaceholder":
+    "Describe the incident, rollout risk, or operator decision that requires rollback_hold.",
   "paMisc.referralValueRequired": "Enter a channel and a value >= 0.",
   "paMisc.placardCall": "Call",
   "paMisc.placardComplaint": "Complaint",
@@ -2486,7 +2520,8 @@ const en = {
   "paMisc.assistantAuditId": "Audit ID",
   "paMisc.assistantViewAuditEvidence": "View audit evidence",
   "paMisc.assistantSuggestedPrompts": "Assistant suggested prompts",
-  "paMisc.assistantMockProviderNote": "Mock provider in dev. Actions still require governed backend gates.",
+  "paMisc.assistantMockProviderNote":
+    "Mock provider in dev. Actions still require governed backend gates.",
   "paMisc.tenantNamePlaceholder": "Acme Mobility",
   "paMisc.tenantBootstrapEmailPlaceholder": "admin@acme.example",
 
@@ -2648,7 +2683,6 @@ const en = {
   "sandbox.suspend.effects.notifyValue": "ROC / safety operators / regulator",
   "sandbox.suspend.effects.audit": "Audit",
   "sandbox.suspend.effects.auditValue": "append-only audit record",
-
 };
 
 const zh: typeof en = {
@@ -2984,8 +3018,7 @@ const zh: typeof en = {
   "assistant.overlay.emptyTitle": "平台助理已就緒",
   "assistant.overlay.emptyBody":
     "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
-  "assistant.overlay.thinking":
-    "我正在讀取目前平台管理路由脈絡並整理回答...",
+  "assistant.overlay.thinking": "我正在讀取目前平台管理路由脈絡並整理回答...",
   "assistant.overlay.sessionTitle": "平台管理助理",
   "assistant.overlay.requestFailedBody": "助理暫時無法完成這次請求。",
   "assistant.overlay.requestFailedTitle": "助理請求失敗",
@@ -3014,12 +3047,9 @@ const zh: typeof en = {
   "assistant.composer.helper.planning": "正在整理可供審閱的計畫。",
   "assistant.composer.helper.awaitingConfirmation":
     "執行已暫停，等待你的確認。",
-  "assistant.composer.helper.executing":
-    "命令執行中，請避免重複送出。",
-  "assistant.composer.helper.receipt":
-    "上一個操作已完成，可以繼續對話。",
-  "assistant.composer.helper.error":
-    "上一輪失敗，請調整請求或重新嘗試。",
+  "assistant.composer.helper.executing": "命令執行中，請避免重複送出。",
+  "assistant.composer.helper.receipt": "上一個操作已完成，可以繼續對話。",
+  "assistant.composer.helper.error": "上一輪失敗，請調整請求或重新嘗試。",
   "assistant.composer.waiting": "請稍候...",
   "assistant.confirmation.aria": "助理確認面板",
   "assistant.confirmation.targetResource": "目標資源",
@@ -3027,10 +3057,8 @@ const zh: typeof en = {
   "assistant.confirmation.requiredError": "執行前必須填寫原因。",
   "assistant.confirmation.requiredPlaceholder": "高風險操作必填。",
   "assistant.confirmation.optionalPlaceholder": "可選填操作備註。",
-  "assistant.confirmation.requiredHint":
-    "未提供非空白原因前，此操作不可執行。",
-  "assistant.confirmation.optionalHint":
-    "若有填寫，原因會附在稽核紀錄中。",
+  "assistant.confirmation.requiredHint": "未提供非空白原因前，此操作不可執行。",
+  "assistant.confirmation.optionalHint": "若有填寫，原因會附在稽核紀錄中。",
   "assistant.warning.highRiskActions":
     "本頁含高風險操作，需透過確認視窗填寫原因並產生稽核紀錄。",
   "assistant.warning.writeAuthority":
@@ -3076,6 +3104,29 @@ const zh: typeof en = {
   "assistant.route.sandboxEvidenceExports.title": "受控匯出",
   "assistant.route.sandboxLegalHolds.title": "法律保留",
   "assistant.route.sandboxRegulatoryReports.title": "監理報表",
+  "sandbox.pending.title": "{title} · 設計待補",
+  "sandbox.pending.bodySuffix":
+    "在正式的 Platform Admin design canvas 補上對應畫面之前，這個路由會刻意維持為 placeholder。",
+  "sandbox.pending.note":
+    "這個頁面內容不會自行發明最終版面；功能需求已整理在下方的 screen handoff note。",
+  "sandbox.pending.compliance.purpose":
+    "Platform-admin 需要一個合規總覽工作台，統整調查、接管審查、差異、匯出、法律保留與報送狀態。",
+  "sandbox.pending.complianceTripDetail.purpose":
+    "這個路由需要一個以單趟行程為中心的合規鑽取頁，串起調查、證據、差異與法律保留狀態。",
+  "sandbox.pending.evidenceExports.purpose":
+    "這個路由需要一個受控證據匯出佇列，並把申請與核准的四眼分離清楚呈現。",
+  "sandbox.pending.legalHolds.purpose":
+    "這個路由需要一個法律保留治理頁，涵蓋保留建立、釋放申請與核准的四眼分離。",
+  "sandbox.pending.evidenceManifest.purpose":
+    "這個路由需要一個單一證據清單的 chain-of-custody 詳情頁，並帶出關聯案件脈絡。",
+  "sandbox.pending.investigations.purpose":
+    "Platform-admin 需要一個調查案件佇列頁，並納入由 backend deep link 驅動的 ROC 入口處理。",
+  "sandbox.pending.investigationDetail.purpose":
+    "這個路由需要一個事故案件詳情頁，呈現摘要狀態、關聯證據、關聯報表與案件層級鑽取。",
+  "sandbox.pending.investigationTimeline.purpose":
+    "這個路由需要一個同步事實時間軸頁，明確處理信心度、來源與差異。",
+  "sandbox.pending.regulatoryReports.purpose":
+    "這個路由需要一個監理報送佇列頁，串起草稿、已送出、已受理、已退件等狀態與調查案件。",
 
   // ── Tenants ──
   "tenants.title": "租戶管理",
@@ -3287,8 +3338,7 @@ const zh: typeof en = {
   "adapterRegistry.modal.serviceBuckets": "服務級距（以逗號分隔）",
   "adapterRegistry.modal.maxCandidates": "最大候選數",
   "adapterRegistry.modal.acceptTimeoutSeconds": "接受逾時（秒）",
-  "adapterRegistry.modal.manualFallbackThresholdSeconds":
-    "人工備援門檻（秒）",
+  "adapterRegistry.modal.manualFallbackThresholdSeconds": "人工備援門檻（秒）",
   "adapterRegistry.modal.supportedActions": "支援動作",
   "adapterRegistry.modal.noSupportedActions":
     "此平台目前沒有啟用任何轉接器動作。",
@@ -3626,8 +3676,7 @@ const zh: typeof en = {
     "補助規則與報銷佇列採獨立治理，但共用權威報價來源",
   "pricing.card.subsidyOverride.subtitle": "人工覆寫操作者與證據義務",
   "pricing.card.historyFilters.title": "已發布版本篩選",
-  "pricing.card.historyFilters.subtitle":
-    "跨分頁歷史可依類型、範圍與期間篩選",
+  "pricing.card.historyFilters.subtitle": "跨分頁歷史可依類型、範圍與期間篩選",
   "pricing.card.historyTable.title": "所有已發布版本 · 跨分頁歷史",
   "pricing.col.name": "名稱",
   "pricing.col.nameUpper": "名稱",
@@ -3765,8 +3814,7 @@ const zh: typeof en = {
   "vehicleEligibility.platformForwardingAllowed": "可平台轉派",
   "vehicleEligibility.active": "規則啟用",
   "vehicleEligibility.note": "營運備註",
-  "vehicleEligibility.notePlaceholder":
-    "填寫例外情境、推出備註或法遵背景。",
+  "vehicleEligibility.notePlaceholder": "填寫例外情境、推出備註或法遵背景。",
   "vehicleEligibility.selectRule": "請選擇一筆矩陣規則以查看或編輯。",
   "vehicleEligibility.noSelection": "尚未選取規則",
   "vehicleEligibility.yes": "需要",
@@ -4203,7 +4251,8 @@ const zh: typeof en = {
   "featureFlagsAdmin.removeOverride": "移除覆寫",
   "featureFlagsAdmin.history": "歷史",
   "featureFlagsAdmin.confirmToggleTitle": "確認切換功能旗標",
-  "featureFlagsAdmin.confirmToggleBody": "這會變更目前檢視範圍中的有效功能旗標狀態。",
+  "featureFlagsAdmin.confirmToggleBody":
+    "這會變更目前檢視範圍中的有效功能旗標狀態。",
   "featureFlagsAdmin.confirmOverrideTitle": "建立租戶覆寫",
   "featureFlagsAdmin.confirmOverrideBody":
     "這會為所選 key 建立租戶專屬覆寫，不影響其他範圍。",
@@ -4400,8 +4449,7 @@ const zh: typeof en = {
   "payments.reimbursements.detail.copyBatchId": "複製批次 ID",
   "payments.reimbursements.detail.refreshFailed": "重新整理失敗",
   "payments.reimbursements.detail.fallbackTitle": "備援代墊批次詳情",
-  "payments.reimbursements.detail.auditViewTitle":
-    "由稽核紀錄推導的流程視圖",
+  "payments.reimbursements.detail.auditViewTitle": "由稽核紀錄推導的流程視圖",
   "payments.reimbursements.detail.auditViewBody":
     "六狀態步驟與版面規格一致；目前狀態由批次的核准、匯款憑證與付款時間推導呈現。",
   "payments.reimbursements.detail.auditReceipt": "稽核收據",
@@ -4912,19 +4960,23 @@ const zh: typeof en = {
   "fleetUi.colEvidence": "證據 / 工單",
   "fleetUi.colTimeline": "時間點",
   "fleetUi.pageTitle": "車隊與合規治理",
-  "fleetUi.pageSubtitle": "車輛 · 司機 · 合約 · 裝置綁定 · 排他審核 · 退場狀態機",
+  "fleetUi.pageSubtitle":
+    "車輛 · 司機 · 合約 · 裝置綁定 · 排他審核 · 退場狀態機",
   "fleetUi.filterReserved": "符合設計畫布的篩選面保留到下一輪整合。",
   "fleetUi.filter": "篩選",
   "fleetUi.refreshFailedTitle": "車隊資料更新失敗",
   "fleetUi.retry": "重試",
   "fleetUi.snapshotNotFresh": "目前快照不是最新狀態",
   "fleetUi.blockedDriversTitle": "{count} 位司機需要合規處理",
-  "fleetUi.blockedDriversBody": "在阻擋原因解除前，營運主控台會持續套用 30 日證照預警的合規阻擋。",
+  "fleetUi.blockedDriversBody":
+    "在阻擋原因解除前，營運主控台會持續套用 30 日證照預警的合規阻擋。",
   "fleetUi.exportList": "匯出名單",
   "fleetUi.exclusivityGovernanceTitle": "排他治理 · Q-ADM08",
-  "fleetUi.exclusivityGovernanceBody": "排他審核通過前，車輛或司機的派遣資格不得啟用。",
+  "fleetUi.exclusivityGovernanceBody":
+    "排他審核通過前，車輛或司機的派遣資格不得啟用。",
   "fleetUi.offboardingMachineTitle": "退場狀態機 · Q-ADM09",
-  "fleetUi.offboardingMachineSubtitle": "每一步狀態轉換都需要時間戳、操作人、證據與稽核紀錄",
+  "fleetUi.offboardingMachineSubtitle":
+    "每一步狀態轉換都需要時間戳、操作人、證據與稽核紀錄",
   "fleetUi.refreshTierSubtitle": "更新層級 {tier} / 30 秒 · {freshness}",
   "fleetUi.refreshTab": "重新整理",
   "partnerDetail.eligibility.contractId": "契約 ID",
@@ -4933,8 +4985,10 @@ const zh: typeof en = {
   "partnerDetail.eligibility.fallback": "備援",
   "partnerDetail.eligibility.opsQueueRequired": "需進 ops queue",
   "partnerDetail.eligibility.noTimeoutFallback": "無 timeout fallback",
-  "partnerDetail.eligibility.noVerification": "此流程在 fulfill 前不要求 partner-side eligibility verification。",
-  "partnerDetail.eligibility.platformGoverned": "Eligibility 仍由平台治理，且已有對應 contract snapshot。",
+  "partnerDetail.eligibility.noVerification":
+    "此流程在 fulfill 前不要求 partner-side eligibility verification。",
+  "partnerDetail.eligibility.platformGoverned":
+    "Eligibility 仍由平台治理，且已有對應 contract snapshot。",
   "partnerDetail.audit.source": "Audit 來源",
   "partnerDetail.audit.requestId": "請求 ID",
   "partnerDetail.audit.createdBy": "建立者",
@@ -4950,7 +5004,8 @@ const zh: typeof en = {
   "partnerDetail.action.revokeEntry": "撤銷 entry",
   "partnerDetail.previewFixtureMode": "Preview fixture 模式",
   "partnerDetail.governance.title": "治理動作",
-  "partnerDetail.governance.subtitle": "集中執行狀態切換與高風險 lifecycle 控制。",
+  "partnerDetail.governance.subtitle":
+    "集中執行狀態切換與高風險 lifecycle 控制。",
   "partnerDetail.governance.status": "狀態",
   "partnerDetail.governance.trafficPosture": "流量姿態",
   "partnerDetail.governance.trafficAccept": "可承接平台治理流量",
@@ -4958,13 +5013,15 @@ const zh: typeof en = {
   "partnerDetail.governance.deactivate": "停用",
   "partnerDetail.governance.activate": "啟用",
   "partnerDetail.auth.webhookLinkage": "Webhook 連結",
-  "partnerDetail.auth.webhookSubtitle": "此處只顯示治理綁定，不展開 operational delivery 細節。",
+  "partnerDetail.auth.webhookSubtitle":
+    "此處只顯示治理綁定，不展開 operational delivery 細節。",
   "partnerDetail.auth.requestLineage": "請求鏈",
   "partnerDetail.auth.bound": "已綁定",
   "partnerDetail.auth.gap": "缺口",
   "partnerDetail.auth.platformOwned": "平台治理",
   "partnerDetail.adapter.linkage": "轉接器連結",
-  "partnerDetail.adapter.subtitle": "將 contract snapshot 與平台 adapter registry 對照。",
+  "partnerDetail.adapter.subtitle":
+    "將 contract snapshot 與平台 adapter registry 對照。",
   "partnerDetail.adapter.linkedAdapter": "已連結轉接器",
   "partnerDetail.adapter.manualFallback": "人工備援",
   "partnerDetail.adapter.opsConsoleRequired": "timeout 時需進 ops_console",
@@ -4977,7 +5034,8 @@ const zh: typeof en = {
   "tenantDetail.backToTenants": "返回租戶列表",
   "tenantDetail.unableToLoad": "無法載入租戶詳情",
   "tenantDetail.notFoundHeading": "找不到租戶",
-  "tenantDetail.notFoundBody": "指定的路由現在會解析出頁面內容，不再落入 404。請從生命週期表格中選擇另一個租戶。",
+  "tenantDetail.notFoundBody":
+    "指定的路由現在會解析出頁面內容，不再落入 404。請從生命週期表格中選擇另一個租戶。",
   "tenantDetail.openInTenantConsole": "在 Tenant Console 開啟",
   "tenantDetail.enterRollbackHold": "進入 rollback_hold",
   "tenantDetail.actionFailed": "租戶詳情操作失敗",
@@ -4986,12 +5044,14 @@ const zh: typeof en = {
   "tenantDetail.onboardingPackage": "開通套件",
   "tenantDetail.tenantBaseline": "租戶基準",
   "tenantDetail.recentActivity": "近期活動",
-  "tenantDetail.recentActivitySubtitle": "Rollout、開通與角色邀請決策的稽核子集",
+  "tenantDetail.recentActivitySubtitle":
+    "Rollout、開通與角色邀請決策的稽核子集",
   "tenantDetail.tenantRecordUpdated": "租戶紀錄已更新",
   "tenantDetail.tenantCreated": "租戶已建立",
   "tenantDetail.modalTitle": "進入 rollback_hold",
   "tenantDetail.modalHighRiskNote": "高風險操作。送出指令前必須填寫原因。",
-  "tenantDetail.reasonPlaceholder": "描述需要進入 rollback_hold 的事件、rollout 風險或操作決策。",
+  "tenantDetail.reasonPlaceholder":
+    "描述需要進入 rollback_hold 的事件、rollout 風險或操作決策。",
   "paMisc.referralValueRequired": "請填渠道與 >= 0 的數值。",
   "paMisc.placardCall": "叫車",
   "paMisc.placardComplaint": "客訴",
@@ -5008,7 +5068,8 @@ const zh: typeof en = {
   "paMisc.assistantAuditId": "稽核 ID",
   "paMisc.assistantViewAuditEvidence": "查看稽核證據",
   "paMisc.assistantSuggestedPrompts": "助理建議提示",
-  "paMisc.assistantMockProviderNote": "開發環境使用模擬供應商。行動仍需通過受控後端關卡。",
+  "paMisc.assistantMockProviderNote":
+    "開發環境使用模擬供應商。行動仍需通過受控後端關卡。",
   "paMisc.tenantNamePlaceholder": "Acme Mobility",
   "paMisc.tenantBootstrapEmailPlaceholder": "admin@acme.example",
 
@@ -5076,8 +5137,7 @@ const zh: typeof en = {
   "sandbox.areas.col.kind": "型",
   "sandbox.areas.kind.route": "route",
   "sandbox.areas.kind.zone": "zone",
-  "sandbox.areas.readonlyNote":
-    "此處幾何唯讀；變更須走受控核准流程。",
+  "sandbox.areas.readonlyNote": "此處幾何唯讀；變更須走受控核准流程。",
   "sandbox.vehicles.title": "車輛登錄 · Vehicle Enrollments",
   "sandbox.vehicles.subtitle": "登錄至本實驗的車輛",
   "sandbox.vehicles.empty": "尚無登錄車輛",
@@ -5167,7 +5227,6 @@ const zh: typeof en = {
   "sandbox.suspend.effects.notifyValue": "ROC / 安全員 / 主管機關",
   "sandbox.suspend.effects.audit": "稽核",
   "sandbox.suspend.effects.auditValue": "append-only 稽核記錄",
-
 };
 
 export const translations: Record<Locale, typeof en> = { en, zh };

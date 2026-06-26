@@ -3,8 +3,8 @@ import { SandboxDesignPendingScreen } from "@/components/sandbox-design-pending-
 export default function EvidenceManifestPage() {
   return (
     <SandboxDesignPendingScreen
-      title="Evidence Manifest Detail"
-      purpose="This route needs a canonical chain-of-custody detail screen for one evidence manifest and its linked case context."
+      titleKey="assistant.route.sandboxEvidenceManifest.title"
+      purposeKey="sandbox.pending.evidenceManifest.purpose"
       route="/platform-admin/evidence/manifests/[manifestId]"
     />
   );

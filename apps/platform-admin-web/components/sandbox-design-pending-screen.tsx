@@ -1,5 +1,9 @@
+"use client";
+
 import type { CSSProperties } from "react";
 import { CanvasEmptyState, buildCanvasTheme } from "@drts/ui-web";
+
+import { useTranslation } from "@/lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -31,26 +35,26 @@ const NOTE_PATH =
   "docs/05-ui/platform-admin-sandbox-compliance-screen-requirements-20260626.md";
 
 export function SandboxDesignPendingScreen({
-  title,
-  purpose,
+  titleKey,
+  purposeKey,
   route,
 }: {
-  title: string;
-  purpose: string;
+  titleKey: string;
+  purposeKey: string;
   route: string;
 }) {
+  const { t } = useTranslation();
+  const title = t(titleKey);
+
   return (
     <div style={containerStyle}>
       <CanvasEmptyState
         theme={theme}
         tone="warn"
-        title={`${title} · Design Pending`}
-        body={`${purpose} This route intentionally stays as a placeholder until the canonical Platform Admin design canvas adds the required screen.`}
+        title={t("sandbox.pending.title", { title })}
+        body={`${t(purposeKey)} ${t("sandbox.pending.bodySuffix")}`}
       />
-      <div style={noteStyle}>
-        This body does not invent a final layout. Functional requirements are
-        captured in the screen handoff note below.
-      </div>
+      <div style={noteStyle}>{t("sandbox.pending.note")}</div>
       <div style={monoStyle}>{route}</div>
       <div style={monoStyle}>{NOTE_PATH}</div>
     </div>

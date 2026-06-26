@@ -3,8 +3,8 @@ import { SandboxDesignPendingScreen } from "@/components/sandbox-design-pending-
 export default function TripComplianceDetailPage() {
   return (
     <SandboxDesignPendingScreen
-      title="Trip Compliance Detail"
-      purpose="This route needs a canonical trip-centric compliance drilldown across investigation, evidence, discrepancy, and legal-hold state."
+      titleKey="assistant.route.sandboxComplianceTripDetail.title"
+      purposeKey="sandbox.pending.complianceTripDetail.purpose"
       route="/platform-admin/compliance/trips/[tripId]"
     />
   );
