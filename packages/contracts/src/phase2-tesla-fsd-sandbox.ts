@@ -467,6 +467,84 @@ export interface RegulatoryReportFiling {
 }
 
 // ---------------------------------------------------------------------------
+// §7.3 Canonical audit event catalog
+// ---------------------------------------------------------------------------
+
+export const PHASE2_AUDIT_EVENT_CATALOG = {
+  sandboxProviderCapabilityRequirementConfigured:
+    "sandbox.provider_capability_requirement.configured",
+  sandboxProviderCapabilityRequirementAmended:
+    "sandbox.provider_capability_requirement.amended",
+  teslaRemoteCommandIssued: "tesla.remote_command.issued",
+  teslaRemoteCommandAcknowledged: "tesla.remote_command.acknowledged",
+  teslaRemoteCommandRejected: "tesla.remote_command.rejected",
+  teslaRemoteCommandFailed: "tesla.remote_command.failed",
+  teslaRemoteCommandExpired: "tesla.remote_command.expired",
+  sandboxDispatchDecisionEvaluated: "sandbox.dispatch_decision.evaluated",
+  sandboxDispatchDecisionAmended: "sandbox.dispatch_decision.amended",
+  teslaRegulatoryEventIngested: "tesla.regulatory_event.ingested",
+  teslaVehicleStateSnapshotIngested: "tesla.vehicle_state_snapshot.ingested",
+  teslaPublicTelemetrySampleIngested:
+    "tesla.public_telemetry_sample.ingested",
+  sandboxSafetyOperatorAssignmentAssigned:
+    "sandbox.safety_operator_assignment.assigned",
+  sandboxSafetyOperatorAssignmentEngaged:
+    "sandbox.safety_operator_assignment.engaged",
+  sandboxSafetyOperatorAssignmentReleased:
+    "sandbox.safety_operator_assignment.released",
+  sandboxSafetyOperatorAssignmentExpired:
+    "sandbox.safety_operator_assignment.expired",
+  sandboxRocInterventionStarted: "sandbox.roc_intervention.started",
+  sandboxRocInterventionResolved: "sandbox.roc_intervention.resolved",
+  evidenceManifestCaptured: "evidence.manifest.captured",
+  evidenceManifestVerified: "evidence.manifest.verified",
+  evidenceManifestSealed: "evidence.manifest.sealed",
+  evidenceManifestReleased: "evidence.manifest.released",
+  evidenceManifestPurged: "evidence.manifest.purged",
+  evidenceManifestItemRecorded: "evidence.manifest_item.recorded",
+  evidenceAccidentCaseOpened: "evidence.accident_case.opened",
+  evidenceAccidentCaseUpdated: "evidence.accident_case.updated",
+  evidenceAccidentCaseClosed: "evidence.accident_case.closed",
+  evidenceRegulatoryReportGenerated: "evidence.regulatory_report.generated",
+  evidenceRegulatoryReportSubmitted: "evidence.regulatory_report.submitted",
+  evidenceRegulatoryReportAccepted: "evidence.regulatory_report.accepted",
+  evidenceRegulatoryReportRejected: "evidence.regulatory_report.rejected",
+  evidenceRegulatoryReportAmended: "evidence.regulatory_report.amended",
+} as const;
+
+export const PHASE2_AUDIT_EVENT_NAMES = Object.values(
+  PHASE2_AUDIT_EVENT_CATALOG,
+);
+
+export type Phase2AuditEventName =
+  (typeof PHASE2_AUDIT_EVENT_CATALOG)[keyof typeof PHASE2_AUDIT_EVENT_CATALOG];
+
+export type Phase2AuditActorType =
+  | "system"
+  | "platform_admin"
+  | "tenant_admin"
+  | "ops_user"
+  | "partner_api_key"
+  | "referral_passenger";
+
+export interface Phase2AuditContext {
+  actorId: string | null;
+  actorType: Phase2AuditActorType;
+  tenantId: string | null;
+  moduleName: string;
+  requestId?: string;
+  correlationId?: string | null;
+  sourceSystem?: Phase2SourceSystem | null;
+}
+
+export interface Phase2AuditSummary {
+  oldValuesSummary?: Record<string, unknown>;
+  newValuesSummary?: Record<string, unknown>;
+  supersedesAuditId?: string | null;
+  amendsResourceVersion?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // §3.9 Error-code enum
 // ---------------------------------------------------------------------------
 
