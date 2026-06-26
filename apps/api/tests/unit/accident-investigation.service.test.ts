@@ -425,8 +425,25 @@ describe("AccidentInvestigationService", () => {
         "fsd_session_events",
         "synced_video",
         "commands_and_receipts",
+        "known_gaps",
       ]),
     );
+    expect(bundle.manifest.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sectionId: "known_gaps",
+          itemCount: bundle.knownGaps.length,
+        }),
+      ]),
+    );
+    expect(
+      bundle.sections.find((section) => section.sectionId === "known_gaps")?.payload,
+    ).toMatchObject({
+      knownGaps: bundle.knownGaps,
+      summary: {
+        totalCount: bundle.knownGaps.length,
+      },
+    });
     expect(bundle.knownGaps).toEqual(expect.any(Array));
     expect(bundle.knownGaps).toEqual(
       expect.arrayContaining([

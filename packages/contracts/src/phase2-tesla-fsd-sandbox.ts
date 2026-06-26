@@ -1319,6 +1319,14 @@ export interface AccidentInvestigationBundleKnownGap {
   upstream: string;
 }
 
+export interface AccidentInvestigationBundleKnownGapsSectionPayload {
+  knownGaps: AccidentInvestigationBundleKnownGap[];
+  summary: {
+    totalCount: number;
+    upstreams: string[];
+  };
+}
+
 export interface AccidentInvestigationBundleDownloadMetadata {
   kind: string;
   subjectId: string;

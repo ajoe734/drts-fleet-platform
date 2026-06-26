@@ -97,8 +97,16 @@ type BundleSnapshot = {
     RocOperationsService["listManualTakeoverCorrelations"]
   > | null;
   segments: ReturnType<VehicleEvidenceService["listSegmentIndex"]> | null;
+  segmentsUnavailable: boolean;
   bookmarks: ReturnType<VehicleEvidenceService["listBookmarks"]> | null;
+  bookmarksUnavailable: boolean;
   receipts: ReturnType<TeslaIntegrationService["listReceipts"]> | null;
+  receiptsUnavailable: boolean;
+};
+
+type SnapshotResolution<T> = {
+  value: T | null;
+  unavailable: boolean;
 };
 
 @Injectable()
@@ -423,6 +431,7 @@ export class AccidentInvestigationService {
       this.buildNotificationsAuditSection(record),
       this.buildExternalDocumentsSection(record),
     ];
+    sections.push(this.buildKnownGapsSection(knownGaps));
 
     const manifestEntries = sections.map((section) => ({
       sectionId: section.sectionId,
@@ -1077,7 +1086,26 @@ export class AccidentInvestigationService {
     const segments = snapshot.segments ?? [];
     const bookmarks = this.filterBookmarksForCase(record, snapshot, segments);
 
-    if (segments.length === 0) {
+    if (snapshot.segmentsUnavailable) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "synced_video",
+        code: "VEHICLE_EVIDENCE_SEGMENTS_UNAVAILABLE",
+        message:
+          "Vehicle evidence segment index is unavailable for synchronized recorder export.",
+        upstream: "vehicle-evidence",
+      });
+    }
+    if (snapshot.bookmarksUnavailable) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "synced_video",
+        code: "VEHICLE_EVIDENCE_BOOKMARKS_UNAVAILABLE",
+        message:
+          "Vehicle evidence bookmarks are unavailable for synchronized recorder export.",
+        upstream: "vehicle-evidence",
+      });
+    }
+
+    if (!snapshot.segmentsUnavailable && segments.length === 0) {
       this.pushKnownGap(knownGaps, {
         sectionId: "synced_video",
         code: "SYNCED_VIDEO_MISSING",
@@ -1232,6 +1260,14 @@ export class AccidentInvestigationService {
         upstream: "tesla-integration",
       });
     }
+    if (snapshot.receiptsUnavailable) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "commands_and_receipts",
+        code: "TESLA_COMMAND_RECEIPTS_UNAVAILABLE",
+        message: "Tesla command receipt snapshot is unavailable for this case.",
+        upstream: "tesla-integration",
+      });
+    }
     const receipts = this.filterReceiptsForCase(record, snapshot);
     return this.createBundleSection(
       "commands_and_receipts",
@@ -1240,6 +1276,25 @@ export class AccidentInvestigationService {
         receipts,
       },
       receipts.length,
+    );
+  }
+
+  private buildKnownGapsSection(
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    return this.createBundleSection(
+      "known_gaps",
+      "Known gaps and unavailable providers",
+      {
+        knownGaps,
+        summary: {
+          totalCount: knownGaps.length,
+          upstreams: this.uniqueStrings(
+            knownGaps.map((gap) => gap.upstream).filter(Boolean),
+          ),
+        },
+      },
+      knownGaps.length,
     );
   }
 
@@ -1577,6 +1632,22 @@ export class AccidentInvestigationService {
       record,
       correlationSnapshot?.cases ?? [],
     );
+    const segments = this.captureSnapshotValue(
+      () =>
+        this.vehicleEvidenceService?.listSegmentIndex({
+          vehicleId: record.vehicleId,
+          caseId: record.caseId,
+        }),
+      "listSegmentIndex",
+    );
+    const bookmarks = this.captureSnapshotValue(
+      () => this.vehicleEvidenceService?.listBookmarks({ vehicleId: record.vehicleId }),
+      "listBookmarks",
+    );
+    const receipts = this.captureSnapshotValue(
+      () => this.teslaIntegrationService?.listReceipts(record.vehicleId),
+      "listReceipts",
+    );
 
     return {
       timeline: this.buildTimeline(record, correlatedCase),
@@ -1618,22 +1689,12 @@ export class AccidentInvestigationService {
         () => this.rocOperationsService.listManualTakeoverCorrelations(),
         "listManualTakeoverCorrelations",
       ),
-      segments: this.captureResolve(
-        () =>
-          this.vehicleEvidenceService?.listSegmentIndex({
-            vehicleId: record.vehicleId,
-            caseId: record.caseId,
-          }),
-        "listSegmentIndex",
-      ),
-      bookmarks: this.captureResolve(
-        () => this.vehicleEvidenceService?.listBookmarks({ vehicleId: record.vehicleId }),
-        "listBookmarks",
-      ),
-      receipts: this.captureResolve(
-        () => this.teslaIntegrationService?.listReceipts(record.vehicleId),
-        "listReceipts",
-      ),
+      segments: segments.value,
+      segmentsUnavailable: segments.unavailable,
+      bookmarks: bookmarks.value,
+      bookmarksUnavailable: bookmarks.unavailable,
+      receipts: receipts.value,
+      receiptsUnavailable: receipts.unavailable,
     };
   }
 
@@ -1861,6 +1922,29 @@ export class AccidentInvestigationService {
         }`,
       );
       return null;
+    }
+  }
+
+  private captureSnapshotValue<T>(
+    resolver: () => T | null | undefined,
+    source: string,
+  ): SnapshotResolution<T> {
+    try {
+      const value = resolver();
+      return {
+        value: value ?? null,
+        unavailable: false,
+      };
+    } catch (error) {
+      this.logger.debug(
+        `bundle snapshot source ${source} degraded: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return {
+        value: null,
+        unavailable: true,
+      };
     }
   }
 
