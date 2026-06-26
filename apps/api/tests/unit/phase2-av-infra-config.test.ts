@@ -65,7 +65,7 @@ describe("resolvePhase2AvInfraConfig", () => {
     expect(config.environment).toBe("prod");
     expect(config.bucketPrefix).toBe("drts-av-prod");
     expect(config.topicPrefix).toBe("drts.av.prod");
-    expect(config.kms.keyRing).toBe("drts-av-prod-prod");
+    expect(config.kms.keyRing).toBe("drts-phase2-av-prod");
     expect(config.storageBuckets[0]?.name).toBe("raw-provider-events");
     expect(config.pubsubTopics[0]?.deadLetterTopic).toBe(
       "provider-events-dead-letter",
@@ -94,6 +94,11 @@ describe("resolvePhase2AvInfraConfig", () => {
           ordering: boolean;
           deadLetterTopic?: string;
         }>;
+        kms: {
+          keyRingName: string;
+          location: string;
+          rotationPeriodDays: Record<string, number>;
+        };
       };
     };
 
@@ -111,6 +116,13 @@ describe("resolvePhase2AvInfraConfig", () => {
         purpose: expect.any(String),
       })),
     );
+    expect(config.kms.keyRing).toBe(
+      infraConfig.gcp.kms.keyRingName.replace("<env>", config.environment),
+    );
+    expect(config.kms.location).toBe(infraConfig.gcp.kms.location);
+    expect(
+      Object.fromEntries(config.kms.keys.map((key) => [key.name, key.rotationPeriodDays])),
+    ).toEqual(infraConfig.gcp.kms.rotationPeriodDays);
   });
 
   it("defines telemetry data-quality rules for identity, freshness, location, and schema drift", () => {
