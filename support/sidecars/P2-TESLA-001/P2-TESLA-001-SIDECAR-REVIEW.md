@@ -6,8 +6,8 @@
 **Current Owner:** `Codex`  
 **Assigned Sidecar Reviewer:** `Codex2`  
 **Parent Reviewer of Record:** `Claude2`  
-**Last Revised:** `2026-06-26` (UTC)  
-**Status:** `READY FOR REVIEW HANDOFF`
+**Last Revised:** `2026-06-26T09:49:51Z`  
+**Status:** `REFRESHED FOR REVIEW HANDOFF`
 
 ---
 
@@ -19,6 +19,7 @@ This file is a support-only reviewer packet for the Phase 2 Tesla public fleet i
 Its scope is intentionally narrow:
 
 - capture the current machine-truth snapshot for the sidecar and parent task
+- identify the packet branch separately from the pushed parent review branch
 - summarize the pushed parent review surface at `origin/codex2/p2-tesla-001`
 - give the assigned sidecar reviewer `Codex2` a compact evidence packet without changing canonical truth
 
@@ -31,11 +32,13 @@ The parent task remains in the normal canonical review flow.
 
 ### 2.1 Sidecar task
 
-`AI_NAME=Codex scripts/ai-status.sh show P2-TESLA-001-SIDECAR-REVIEW` reports:
+At packet refresh time, `AI_NAME=Codex scripts/ai-status.sh show P2-TESLA-001-SIDECAR-REVIEW`
+reported:
 
 - owner: `Codex`
 - reviewer: `Codex2`
-- status: `in_progress`
+- status: `in_progress` (owner-side snapshot before reviewer handoff)
+- last_update: `2026-06-26T09:49:02Z`
 - acceptance:
   - create support artifacts only
   - do not edit canonical truth
@@ -48,6 +51,7 @@ The parent task remains in the normal canonical review flow.
 - owner: `Codex2`
 - reviewer: `Claude2`
 - status: `review`
+- last_update: `2026-06-26T01:24:08Z`
 - artifact roots:
   - `apps/api/src/modules/tesla-integration/`
   - `packages/shared-test-fixtures/`
@@ -65,7 +69,20 @@ The parent task remains in the normal canonical review flow.
   - `pnpm --filter @drts/shared-test-fixtures build`
   - `pnpm --filter @drts/api exec vitest run --pool=threads --maxWorkers=1 tests/unit/tesla-integration.service.test.ts tests/integration/int-tesla-001-public-fleet-mock.test.ts`
 
-### 2.3 Parent review branch
+### 2.3 Sidecar artifact branch
+
+The support artifact in this packet lives on:
+
+- branch: `origin/codex/p2-tesla-001-sidecar-review`
+- role: owner-side branch carrying the sidecar review packet for `P2-TESLA-001-SIDECAR-REVIEW`
+
+Practical meaning:
+
+- the assigned reviewer `Codex2` should inspect this packet on the sidecar branch above
+- this branch is separate from the parent implementation branch under canonical review
+- approving this sidecar does not close or reinterpret the parent task
+
+### 2.4 Parent review branch
 
 The pushed parent branch under review is:
 
@@ -209,6 +226,7 @@ worktree.
 
 Current evidence is therefore:
 
+- refreshed sidecar packet branch at `origin/codex/p2-tesla-001-sidecar-review`
 - pushed parent review branch at `origin/codex2/p2-tesla-001`
 - machine-truth verification note already recorded on parent task `P2-TESLA-001`
 - directly inspected parent diff, service/controller/repository code, and the parent test files
@@ -221,9 +239,10 @@ The assigned sidecar reviewer `Codex2` should check these points before approvin
 
 1. The packet stays in support scope and does not pretend to close or approve the parent task.
 2. The parent task is described as `review` with reviewer `Claude2`, not as `done`.
-3. The packet accurately reflects the pushed parent branch `origin/codex2/p2-tesla-001` at `ad05153b5`.
-4. The command broker summary preserves the key safety boundary: non-driving allowlist only, no implication of controllable FSD or live-driving command authority.
-5. The recorded verification commands and test summaries match the parent task's machine truth.
+3. The packet clearly separates the sidecar artifact branch `origin/codex/p2-tesla-001-sidecar-review` from the parent review branch `origin/codex2/p2-tesla-001`.
+4. The packet accurately reflects the pushed parent branch `origin/codex2/p2-tesla-001` at `ad05153b5`.
+5. The command broker summary preserves the key safety boundary: non-driving allowlist only, no implication of controllable FSD or live-driving command authority.
+6. The recorded verification commands and test summaries match the parent task's machine truth.
 
 If the packet is accurate, the sidecar reviewer can approve the sidecar artifact while the parent
 task continues through its own canonical review path.
@@ -235,13 +254,13 @@ task continues through its own canonical review path.
 Owner handoff to `Codex2`:
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff P2-TESLA-001-SIDECAR-REVIEW Codex2 "P2-TESLA-001 sidecar review packet is ready at support/sidecars/P2-TESLA-001/P2-TESLA-001-SIDECAR-REVIEW.md. The packet captures current machine truth: sidecar task owner=Codex reviewer=Codex2 status=in_progress, while parent P2-TESLA-001 remains in review with owner=Codex2 reviewer=Claude2. It summarizes the pushed parent review branch origin/codex2/p2-tesla-001 at ad05153b5, the 8-file Tesla integration review surface, the non-driving command allowlist guardrail, and the recorded verification commands without changing canonical truth."
+AI_NAME=Codex scripts/ai-status.sh handoff P2-TESLA-001-SIDECAR-REVIEW Codex2 "P2-TESLA-001 sidecar review packet is refreshed at support/sidecars/P2-TESLA-001/P2-TESLA-001-SIDECAR-REVIEW.md. The packet separates the sidecar artifact branch origin/codex/p2-tesla-001-sidecar-review from the parent review branch origin/codex2/p2-tesla-001@ad05153b5, captures the owner-side sidecar snapshot (owner=Codex reviewer=Codex2 status=in_progress at 2026-06-26T09:49:02Z before this handoff), confirms parent P2-TESLA-001 remains in review with owner=Codex2 reviewer=Claude2, and summarizes the 8-file Tesla integration review surface, non-driving command allowlist guardrail, and recorded verification commands without changing canonical truth."
 ```
 
 Reviewer approval:
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh approve P2-TESLA-001-SIDECAR-REVIEW "審查通過：P2-TESLA-001 sidecar review packet 已正確整理 parent task 仍在 review（owner=Codex2, reviewer=Claude2）時的 machine-truth snapshot、推送中的 review branch origin/codex2/p2-tesla-001@ad05153b5、Tesla integration API surface、non-driving command allowlist guardrail，以及 parent task 已記錄的驗證命令；support artifact only，未改 canonical truth。"
+AI_NAME=Codex2 scripts/ai-status.sh approve P2-TESLA-001-SIDECAR-REVIEW "審查通過：P2-TESLA-001 sidecar review packet 已正確區分 sidecar artifact branch origin/codex/p2-tesla-001-sidecar-review 與 parent review branch origin/codex2/p2-tesla-001@ad05153b5，並整理 parent task 仍在 review（owner=Codex2, reviewer=Claude2）時的 machine-truth snapshot、Tesla integration API surface、non-driving command allowlist guardrail，以及 parent task 已記錄的驗證命令；support artifact only，未改 canonical truth。"
 ```
 
 Reviewer reopen:
@@ -263,3 +282,4 @@ AI_NAME=Codex NO_COMMIT_REQUIRED=1 INTEGRATION_STATUS=not_applicable scripts/ai-
 - `2026-06-26`: created the initial sidecar reviewer packet for `P2-TESLA-001`
 - `2026-06-26`: captured parent status `review` plus pushed branch evidence at `origin/codex2/p2-tesla-001`
 - `2026-06-26`: summarized controller endpoints, service guardrails, persistence behavior, and parent test coverage for reviewer handoff
+- `2026-06-26T09:49:51Z`: refreshed the packet snapshot, recorded exact machine-truth timestamps, and separated the sidecar artifact branch from the parent review branch
