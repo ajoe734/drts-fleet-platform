@@ -35,6 +35,7 @@ import {
   useAsyncData,
   usePlatformAdminClient,
 } from "@/lib/admin-client";
+import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import {
   accidentSeverityTone,
   buildTripComplianceChecks,
@@ -61,7 +62,6 @@ import {
   truncateHash,
   uniqueManifestIds,
 } from "@/lib/sandbox-compliance";
-import { PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID } from "@/lib/platform-admin-client-factory";
 
 type ShellNavKey =
   | "dashboard"
@@ -100,6 +100,13 @@ type HoldFormState = {
   reason: string;
   expiresAt: string;
 };
+
+const SCOPE_CONTROLLED_EXPORT_REQUEST = "sandbox.evidence.export.request";
+const SCOPE_CONTROLLED_EXPORT_APPROVE = "sandbox.evidence.export.approve";
+const SCOPE_LEGAL_HOLD_PLACE = "sandbox.legal_hold.place";
+const SCOPE_LEGAL_HOLD_RELEASE_REQUEST = "sandbox.legal_hold.release.request";
+const SCOPE_LEGAL_HOLD_RELEASE_APPROVE = "sandbox.legal_hold.release.approve";
+const SCOPE_REGULATORY_REPORT_SUBMIT = "sandbox.regulatory_report.submit";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -288,36 +295,72 @@ function timelineSourceTone(entry: AccidentTimelineEntry): CanvasTone {
   }
 }
 
-function scopeCard(title: string, hints: ScopeHint[]) {
+function hasScope(scopeSet: ReadonlySet<string>, scope: string) {
+  return scopeSet.has(scope);
+}
+
+function missingScopeMessage(scope: string) {
+  return `Requires ${scope}.`;
+}
+
+function actionStatusText(message: string) {
+  return <span style={mutedStyle}>{message}</span>;
+}
+
+function scopeCard(
+  title: string,
+  hints: ScopeHint[],
+  actorId: string,
+  scopeSet: ReadonlySet<string>,
+) {
   return (
-    <CanvasCard theme={theme} title={title} subtitle="required scopes">
+    <CanvasCard
+      theme={theme}
+      title={title}
+      subtitle={`current actor ${actorId}`}
+    >
       <div style={scopeListStyle}>
-        {hints.map((hint) => (
-          <div
-            key={`${hint.label}-${hint.scope}`}
-            style={{
-              display: "grid",
-              gap: 6,
-              paddingBottom: 10,
-              borderBottom: `1px solid ${theme.border}`,
-            }}
-          >
+        {hints.map((hint) => {
+          const granted = hasScope(scopeSet, hint.scope);
+
+          return (
             <div
+              key={`${hint.label}-${hint.scope}`}
               style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                alignItems: "center",
+                display: "grid",
+                gap: 6,
+                paddingBottom: 10,
+                borderBottom: `1px solid ${theme.border}`,
               }}
             >
-              <strong style={{ fontSize: 12.5 }}>{hint.label}</strong>
-              <CanvasPill theme={theme} tone="neutral">
-                {hint.scope}
-              </CanvasPill>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  alignItems: "center",
+                }}
+              >
+                <strong style={{ fontSize: 12.5 }}>{hint.label}</strong>
+                <CanvasPill theme={theme} tone={granted ? "success" : "warn"}>
+                  {hint.scope}
+                </CanvasPill>
+                <CanvasPill
+                  theme={theme}
+                  tone={granted ? "success" : "neutral"}
+                >
+                  {granted ? "granted" : "missing"}
+                </CanvasPill>
+              </div>
+              {!granted ? (
+                <div style={mutedStyle}>{missingScopeMessage(hint.scope)}</div>
+              ) : null}
+              {hint.blocked ? (
+                <div style={mutedStyle}>{hint.blocked}</div>
+              ) : null}
             </div>
-            {hint.blocked ? <div style={mutedStyle}>{hint.blocked}</div> : null}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </CanvasCard>
   );
@@ -408,6 +451,8 @@ function ComplianceConsoleFrame({
   scopeHints?: ScopeHint[];
   children: ReactNode;
 }) {
+  const authority = usePlatformAdminAuthority();
+  const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
   const tripId = context?.tripId ?? null;
   const caseId = context?.caseId ?? null;
   const manifestId = context?.manifestId ?? null;
@@ -568,7 +613,12 @@ function ComplianceConsoleFrame({
           />
           <div style={pageStackStyle}>
             {scopeHints && scopeHints.length > 0
-              ? scopeCard("Authority posture", scopeHints)
+              ? scopeCard(
+                  "Authority posture",
+                  scopeHints,
+                  authority.actorId,
+                  scopeSet,
+                )
               : null}
             {children}
           </div>
@@ -2274,6 +2324,8 @@ export function SandboxEvidenceManifestPage() {
 
 export function SandboxEvidenceExportsPage() {
   const client = usePlatformAdminClient();
+  const authority = usePlatformAdminAuthority();
+  const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
   const { data, loading, error, refresh } = useOverviewState();
   const [form, setForm] = useState<ExportFormState>({
     manifestId: "",
@@ -2311,8 +2363,21 @@ export function SandboxEvidenceExportsPage() {
   const selectedManifestOption =
     manifestOptions.find((item) => item.manifestId === selectedManifestId) ??
     null;
+  const canRequestExportScope = hasScope(
+    scopeSet,
+    SCOPE_CONTROLLED_EXPORT_REQUEST,
+  );
+  const canApproveExportScope = hasScope(
+    scopeSet,
+    SCOPE_CONTROLLED_EXPORT_APPROVE,
+  );
 
   async function handleRequestExport() {
+    if (!canRequestExportScope) {
+      setActionError(missingScopeMessage(SCOPE_CONTROLLED_EXPORT_REQUEST));
+      return;
+    }
+
     if (!selectedManifestId) {
       return;
     }
@@ -2347,6 +2412,11 @@ export function SandboxEvidenceExportsPage() {
   }
 
   async function handleApproveExport(exportRequestId: string) {
+    if (!canApproveExportScope) {
+      setActionError(missingScopeMessage(SCOPE_CONTROLLED_EXPORT_APPROVE));
+      return;
+    }
+
     setBusyId(exportRequestId);
     setActionError(null);
     setMessage(null);
@@ -2391,11 +2461,11 @@ export function SandboxEvidenceExportsPage() {
       scopeHints={[
         {
           label: "Request controlled export",
-          scope: "sandbox.evidence.export.request",
+          scope: SCOPE_CONTROLLED_EXPORT_REQUEST,
         },
         {
           label: "Approve controlled export",
-          scope: "sandbox.evidence.export.approve",
+          scope: SCOPE_CONTROLLED_EXPORT_APPROVE,
           blocked: "Requester and approver must be different actors.",
         },
       ]}
@@ -2430,111 +2500,123 @@ export function SandboxEvidenceExportsPage() {
             ) : null}
 
             <div style={autoGridStyle("360px")}>
-              <CanvasCard
-                theme={theme}
-                title="Request controlled export"
-                subtitle="reason + step-up gate"
-              >
-                <div style={fieldGridStyle}>
+              {canRequestExportScope ? (
+                <CanvasCard
+                  theme={theme}
+                  title="Request controlled export"
+                  subtitle="reason + step-up gate"
+                >
                   <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="export-manifest">
-                      Manifest
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="export-manifest">
+                        Manifest
+                      </label>
+                      <select
+                        id="export-manifest"
+                        style={inputStyle}
+                        value={selectedManifestId}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            manifestId: event.target.value,
+                          }))
+                        }
+                      >
+                        {manifestOptions.length === 0 ? (
+                          <option value="">No manifests available</option>
+                        ) : null}
+                        {manifestOptions.map((item) => (
+                          <option key={item.manifestId} value={item.manifestId}>
+                            {item.manifestId}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="export-recipient">
+                        Recipient label
+                      </label>
+                      <input
+                        id="export-recipient"
+                        style={inputStyle}
+                        value={form.recipientLabel}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            recipientLabel: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="export-scope">
+                        Recipient scope
+                      </label>
+                      <input
+                        id="export-scope"
+                        style={inputStyle}
+                        value={form.recipientScope}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            recipientScope: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="export-reason">
+                        Reason
+                      </label>
+                      <textarea
+                        id="export-reason"
+                        style={textareaStyle}
+                        value={form.reason}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            reason: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <label style={checkboxRowStyle}>
+                      <input
+                        type="checkbox"
+                        checked={stepUpConfirmed}
+                        onChange={(event) =>
+                          setStepUpConfirmed(event.target.checked)
+                        }
+                      />
+                      <span>
+                        I confirm the recipient scope, evidentiary need, and
+                        that a second compliance actor must approve this export
+                        before it leaves the platform.
+                      </span>
                     </label>
-                    <select
-                      id="export-manifest"
-                      style={inputStyle}
-                      value={selectedManifestId}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          manifestId: event.target.value,
-                        }))
-                      }
+                    <CanvasBtn
+                      theme={theme}
+                      variant="primary"
+                      disabled={!canRequest || busyId === "request"}
+                      onClick={() => void handleRequestExport()}
                     >
-                      {manifestOptions.length === 0 ? (
-                        <option value="">No manifests available</option>
-                      ) : null}
-                      {manifestOptions.map((item) => (
-                        <option key={item.manifestId} value={item.manifestId}>
-                          {item.manifestId}
-                        </option>
-                      ))}
-                    </select>
+                      {busyId === "request"
+                        ? "Requesting…"
+                        : "Submit export request"}
+                    </CanvasBtn>
                   </div>
-                  <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="export-recipient">
-                      Recipient label
-                    </label>
-                    <input
-                      id="export-recipient"
-                      style={inputStyle}
-                      value={form.recipientLabel}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          recipientLabel: event.target.value,
-                        }))
-                      }
-                    />
+                </CanvasCard>
+              ) : (
+                <CanvasCard
+                  theme={theme}
+                  title="Request controlled export"
+                  subtitle="scope required"
+                >
+                  <div style={mutedStyle}>
+                    {missingScopeMessage(SCOPE_CONTROLLED_EXPORT_REQUEST)}
                   </div>
-                  <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="export-scope">
-                      Recipient scope
-                    </label>
-                    <input
-                      id="export-scope"
-                      style={inputStyle}
-                      value={form.recipientScope}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          recipientScope: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="export-reason">
-                      Reason
-                    </label>
-                    <textarea
-                      id="export-reason"
-                      style={textareaStyle}
-                      value={form.reason}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          reason: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <label style={checkboxRowStyle}>
-                    <input
-                      type="checkbox"
-                      checked={stepUpConfirmed}
-                      onChange={(event) =>
-                        setStepUpConfirmed(event.target.checked)
-                      }
-                    />
-                    <span>
-                      I confirm the recipient scope, evidentiary need, and that
-                      a second compliance actor must approve this export before
-                      it leaves the platform.
-                    </span>
-                  </label>
-                  <CanvasBtn
-                    theme={theme}
-                    variant="primary"
-                    disabled={!canRequest || busyId === "request"}
-                    onClick={() => void handleRequestExport()}
-                  >
-                    {busyId === "request"
-                      ? "Requesting…"
-                      : "Submit export request"}
-                  </CanvasBtn>
-                </div>
-              </CanvasCard>
+                </CanvasCard>
+              )}
 
               <CanvasCard
                 theme={theme}
@@ -2563,6 +2645,11 @@ export function SandboxEvidenceExportsPage() {
                     {
                       k: "Approval rule",
                       v: "Four-eyes approval enforced by backend",
+                    },
+                    {
+                      k: "Current actor",
+                      v: authority.actorId,
+                      mono: true,
                     },
                   ]}
                 />
@@ -2640,10 +2727,10 @@ export function SandboxEvidenceExportsPage() {
                     w: 180,
                     r: (row: SandboxControlledEvidenceExportRecord) => {
                       const selfApprovalBlocked =
-                        row.requestedByActorId ===
-                        PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID;
+                        row.requestedByActorId === authority.actorId;
                       const canApprove =
                         row.status === "pending_approval" &&
+                        canApproveExportScope &&
                         !selfApprovalBlocked;
 
                       return canApprove ? (
@@ -2659,10 +2746,16 @@ export function SandboxEvidenceExportsPage() {
                             ? "Approving…"
                             : "Approve"}
                         </CanvasBtn>
+                      ) : row.status !== "pending_approval" ? (
+                        actionStatusText("No pending approval")
+                      ) : !canApproveExportScope ? (
+                        actionStatusText(
+                          missingScopeMessage(SCOPE_CONTROLLED_EXPORT_APPROVE),
+                        )
                       ) : selfApprovalBlocked ? (
-                        <span style={mutedStyle}>Self-approval blocked</span>
+                        actionStatusText("Self-approval blocked")
                       ) : (
-                        <span style={mutedStyle}>No pending approval</span>
+                        actionStatusText("Approval unavailable")
                       );
                     },
                   },
@@ -2679,6 +2772,8 @@ export function SandboxEvidenceExportsPage() {
 
 export function SandboxLegalHoldsPage() {
   const client = usePlatformAdminClient();
+  const authority = usePlatformAdminAuthority();
+  const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
   const { data, loading, error, refresh } = useOverviewState();
   const [form, setForm] = useState<HoldFormState>({
     caseId: "",
@@ -2699,8 +2794,22 @@ export function SandboxLegalHoldsPage() {
   const selectedCaseId = form.caseId || caseOptions[0]?.caseId || "";
   const selectedCase =
     caseOptions.find((item) => item.caseId === selectedCaseId) ?? null;
+  const canPlaceHoldScope = hasScope(scopeSet, SCOPE_LEGAL_HOLD_PLACE);
+  const canRequestReleaseScope = hasScope(
+    scopeSet,
+    SCOPE_LEGAL_HOLD_RELEASE_REQUEST,
+  );
+  const canApproveReleaseScope = hasScope(
+    scopeSet,
+    SCOPE_LEGAL_HOLD_RELEASE_APPROVE,
+  );
 
   async function handlePlaceHold() {
+    if (!canPlaceHoldScope) {
+      setActionError(missingScopeMessage(SCOPE_LEGAL_HOLD_PLACE));
+      return;
+    }
+
     if (!selectedCase?.evidenceManifestId) {
       return;
     }
@@ -2736,6 +2845,11 @@ export function SandboxLegalHoldsPage() {
   }
 
   async function handleRequestRelease() {
+    if (!canRequestReleaseScope) {
+      setActionError(missingScopeMessage(SCOPE_LEGAL_HOLD_RELEASE_REQUEST));
+      return;
+    }
+
     if (!releaseHoldId || releaseReason.trim().length === 0) {
       return;
     }
@@ -2763,6 +2877,11 @@ export function SandboxLegalHoldsPage() {
   }
 
   async function handleApproveRelease(holdId: string) {
+    if (!canApproveReleaseScope) {
+      setActionError(missingScopeMessage(SCOPE_LEGAL_HOLD_RELEASE_APPROVE));
+      return;
+    }
+
     setBusyId(holdId);
     setActionError(null);
     setMessage(null);
@@ -2803,14 +2922,14 @@ export function SandboxLegalHoldsPage() {
         </CanvasBtn>
       }
       scopeHints={[
-        { label: "Place legal hold", scope: "sandbox.legal_hold.place" },
+        { label: "Place legal hold", scope: SCOPE_LEGAL_HOLD_PLACE },
         {
           label: "Request hold release",
-          scope: "sandbox.legal_hold.release.request",
+          scope: SCOPE_LEGAL_HOLD_RELEASE_REQUEST,
         },
         {
           label: "Approve hold release",
-          scope: "sandbox.legal_hold.release.approve",
+          scope: SCOPE_LEGAL_HOLD_RELEASE_APPROVE,
           blocked: "Release requester cannot approve their own hold release.",
         },
       ]}
@@ -2845,98 +2964,110 @@ export function SandboxLegalHoldsPage() {
             ) : null}
 
             <div style={autoGridStyle("360px")}>
-              <CanvasCard
-                theme={theme}
-                title="Place legal hold"
-                subtitle="case + manifest authority"
-              >
-                <div style={fieldGridStyle}>
+              {canPlaceHoldScope ? (
+                <CanvasCard
+                  theme={theme}
+                  title="Place legal hold"
+                  subtitle="case + manifest authority"
+                >
                   <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="hold-case">
-                      Investigation case
-                    </label>
-                    <select
-                      id="hold-case"
-                      style={inputStyle}
-                      value={selectedCaseId}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          caseId: event.target.value,
-                        }))
-                      }
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="hold-case">
+                        Investigation case
+                      </label>
+                      <select
+                        id="hold-case"
+                        style={inputStyle}
+                        value={selectedCaseId}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            caseId: event.target.value,
+                          }))
+                        }
+                      >
+                        {caseOptions.length === 0 ? (
+                          <option value="">
+                            No manifest-backed cases available
+                          </option>
+                        ) : null}
+                        {caseOptions.map((item) => (
+                          <option key={item.caseId} value={item.caseId}>
+                            {item.caseId}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="hold-scope">
+                        Scope summary
+                      </label>
+                      <input
+                        id="hold-scope"
+                        style={inputStyle}
+                        value={form.scopeSummary}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            scopeSummary: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="hold-reason">
+                        Hold reason
+                      </label>
+                      <textarea
+                        id="hold-reason"
+                        style={textareaStyle}
+                        value={form.reason}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            reason: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div style={fieldGridStyle}>
+                      <label style={fieldLabelStyle} htmlFor="hold-expiry">
+                        Expiration (optional)
+                      </label>
+                      <input
+                        id="hold-expiry"
+                        style={inputStyle}
+                        type="datetime-local"
+                        value={form.expiresAt}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            expiresAt: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <CanvasBtn
+                      theme={theme}
+                      variant="primary"
+                      disabled={!canPlaceHold || busyId === "place"}
+                      onClick={() => void handlePlaceHold()}
                     >
-                      {caseOptions.length === 0 ? (
-                        <option value="">
-                          No manifest-backed cases available
-                        </option>
-                      ) : null}
-                      {caseOptions.map((item) => (
-                        <option key={item.caseId} value={item.caseId}>
-                          {item.caseId}
-                        </option>
-                      ))}
-                    </select>
+                      {busyId === "place" ? "Placing…" : "Place hold"}
+                    </CanvasBtn>
                   </div>
-                  <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="hold-scope">
-                      Scope summary
-                    </label>
-                    <input
-                      id="hold-scope"
-                      style={inputStyle}
-                      value={form.scopeSummary}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          scopeSummary: event.target.value,
-                        }))
-                      }
-                    />
+                </CanvasCard>
+              ) : (
+                <CanvasCard
+                  theme={theme}
+                  title="Place legal hold"
+                  subtitle="scope required"
+                >
+                  <div style={mutedStyle}>
+                    {missingScopeMessage(SCOPE_LEGAL_HOLD_PLACE)}
                   </div>
-                  <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="hold-reason">
-                      Hold reason
-                    </label>
-                    <textarea
-                      id="hold-reason"
-                      style={textareaStyle}
-                      value={form.reason}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          reason: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <div style={fieldGridStyle}>
-                    <label style={fieldLabelStyle} htmlFor="hold-expiry">
-                      Expiration (optional)
-                    </label>
-                    <input
-                      id="hold-expiry"
-                      style={inputStyle}
-                      type="datetime-local"
-                      value={form.expiresAt}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          expiresAt: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <CanvasBtn
-                    theme={theme}
-                    variant="primary"
-                    disabled={!canPlaceHold || busyId === "place"}
-                    onClick={() => void handlePlaceHold()}
-                  >
-                    {busyId === "place" ? "Placing…" : "Place hold"}
-                  </CanvasBtn>
-                </div>
-              </CanvasCard>
+                </CanvasCard>
+              )}
 
               <CanvasCard
                 theme={theme}
@@ -2961,6 +3092,11 @@ export function SandboxLegalHoldsPage() {
                             investigationStatusTone(selectedCase.status),
                           )
                         : "—",
+                    },
+                    {
+                      k: "Current actor",
+                      v: authority.actorId,
+                      mono: true,
                     },
                   ]}
                 />
@@ -3037,11 +3173,10 @@ export function SandboxLegalHoldsPage() {
                     w: 190,
                     r: (row: SandboxLegalHoldRecord) => {
                       const selfApprovalBlocked =
-                        row.releaseRequestedByActorId ===
-                        PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID;
+                        row.releaseRequestedByActorId === authority.actorId;
 
                       if (row.status === "active") {
-                        return (
+                        return canRequestReleaseScope ? (
                           <CanvasBtn
                             theme={theme}
                             variant="secondary"
@@ -3049,11 +3184,18 @@ export function SandboxLegalHoldsPage() {
                           >
                             Request release
                           </CanvasBtn>
+                        ) : (
+                          actionStatusText(
+                            missingScopeMessage(
+                              SCOPE_LEGAL_HOLD_RELEASE_REQUEST,
+                            ),
+                          )
                         );
                       }
 
                       if (
                         row.status === "release_requested" &&
+                        canApproveReleaseScope &&
                         !selfApprovalBlocked
                       ) {
                         return (
@@ -3074,14 +3216,21 @@ export function SandboxLegalHoldsPage() {
 
                       if (
                         row.status === "release_requested" &&
-                        selfApprovalBlocked
+                        !canApproveReleaseScope
                       ) {
-                        return (
-                          <span style={mutedStyle}>Self-approval blocked</span>
+                        return actionStatusText(
+                          missingScopeMessage(SCOPE_LEGAL_HOLD_RELEASE_APPROVE),
                         );
                       }
 
-                      return <span style={mutedStyle}>Released</span>;
+                      if (
+                        row.status === "release_requested" &&
+                        selfApprovalBlocked
+                      ) {
+                        return actionStatusText("Self-approval blocked");
+                      }
+
+                      return actionStatusText("Released");
                     },
                   },
                 ]}
@@ -3089,7 +3238,7 @@ export function SandboxLegalHoldsPage() {
               />
             </CanvasCard>
 
-            {releaseHoldId ? (
+            {releaseHoldId && canRequestReleaseScope ? (
               <CanvasCard
                 theme={theme}
                 title="Request hold release"
@@ -3144,6 +3293,8 @@ export function SandboxLegalHoldsPage() {
 
 export function SandboxRegulatoryReportsPage() {
   const client = usePlatformAdminClient();
+  const authority = usePlatformAdminAuthority();
+  const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
   const searchParams = useSearchParams();
   const view =
     searchParams.get("view") === "regulator" ? "regulator" : "reportjobs";
@@ -3151,8 +3302,17 @@ export function SandboxRegulatoryReportsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const canSubmitReportScope = hasScope(
+    scopeSet,
+    SCOPE_REGULATORY_REPORT_SUBMIT,
+  );
 
   async function handleSubmitReport(reportId: string) {
+    if (!canSubmitReportScope) {
+      setActionError(missingScopeMessage(SCOPE_REGULATORY_REPORT_SUBMIT));
+      return;
+    }
+
     setBusyId(reportId);
     setActionError(null);
     setMessage(null);
@@ -3214,7 +3374,7 @@ export function SandboxRegulatoryReportsPage() {
         },
         {
           label: "Submit filing",
-          scope: "sandbox.regulatory_report.submit",
+          scope: SCOPE_REGULATORY_REPORT_SUBMIT,
         },
       ]}
     >
@@ -3440,7 +3600,7 @@ export function SandboxRegulatoryReportsPage() {
                             row.status === "draft" ||
                             row.status === "generated" ||
                             row.status === "rejected";
-                          return canSubmit ? (
+                          return canSubmit && canSubmitReportScope ? (
                             <CanvasBtn
                               theme={theme}
                               variant="primary"
@@ -3455,8 +3615,14 @@ export function SandboxRegulatoryReportsPage() {
                                   ? "Re-submit"
                                   : "Submit"}
                             </CanvasBtn>
+                          ) : canSubmit ? (
+                            actionStatusText(
+                              missingScopeMessage(
+                                SCOPE_REGULATORY_REPORT_SUBMIT,
+                              ),
+                            )
                           ) : (
-                            <span style={mutedStyle}>No submit action</span>
+                            actionStatusText("No submit action")
                           );
                         },
                       },
