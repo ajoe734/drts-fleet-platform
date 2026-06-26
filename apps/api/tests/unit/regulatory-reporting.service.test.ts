@@ -170,4 +170,77 @@ describe("RegulatoryReportingService", () => {
       ]),
     );
   });
+
+  it("keeps overdue latched for late submissions and stops reminders after submit", () => {
+    let now = new Date("2026-06-26T10:00:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-003",
+        eventType: "security_alert",
+        severity: "cybersecurity",
+        reportVersionKind: "final",
+        jurisdiction: "US-NHTSA",
+        vehicleId: "veh-reg-003",
+        eventOccurredAt: "2026-06-26T00:00:00.000Z",
+        summary: "Cybersecurity filing remains open past deadline.",
+      },
+      createIdentity(),
+      "req-reg-create-003",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for security review." },
+      createIdentity(),
+      "req-reg-review-003",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-003",
+        roles: ["security_manager"],
+      }),
+      "req-reg-approve-003",
+    );
+
+    now = new Date("2026-06-26T10:05:00.000Z");
+    const overdueBeforeSubmit = service.getNotification(draft.notificationId);
+    expect(overdueBeforeSubmit.overdue).toBe(true);
+    expect(overdueBeforeSubmit.overdueRaisedAt).toBe("2026-06-26T10:00:00.000Z");
+
+    const reminderCountBeforeSubmit = auditNotificationService
+      .listNotifications()
+      .filter((notification) => notification.title === "Regulatory notification reminder")
+      .length;
+
+    const submitted = service.submitNotification(
+      draft.notificationId,
+      {
+        submissionReference: "SUB-REG-003",
+        submittedAt: "2026-06-26T10:06:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-submit-003",
+        roles: ["security_manager"],
+      }),
+      "req-reg-submit-003",
+    );
+    expect(submitted.overdue).toBe(true);
+
+    now = new Date("2026-06-26T12:30:00.000Z");
+    const afterSubmit = service.getNotification(draft.notificationId);
+    expect(afterSubmit.lifecycleStatus).toBe("submitted");
+    expect(afterSubmit.overdue).toBe(true);
+
+    const reminderCountAfterSubmit = auditNotificationService
+      .listNotifications()
+      .filter((notification) => notification.title === "Regulatory notification reminder")
+      .length;
+    expect(reminderCountAfterSubmit).toBe(reminderCountBeforeSubmit);
+  });
 });
