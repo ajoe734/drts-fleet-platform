@@ -79,10 +79,16 @@ export class AuditController {
 
   @Get("evidence-access-logs")
   @RequireRealms("platform", "ops")
-  listEvidenceAccessLogs(@Headers("x-request-id") requestId?: string) {
+  listEvidenceAccessLogs(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
       {
-        items: this.auditNotificationService.listEvidenceAccessLogs(),
+        items: this.auditNotificationService.listEvidenceAccessLogs(
+          identity,
+          requestId,
+        ),
       },
       requestId,
     );

@@ -1068,10 +1068,55 @@ export class AuditNotificationService implements OnModuleInit {
   // Evidence-access trail derived from the shared Phase 1 audit store. The
   // canonical body stays in admin.audit_logs; this is the queryable projection
   // that is also dual-written to av_evidence.evidence_access_logs.
-  listEvidenceAccessLogs(): EvidenceAccessLogRecord[] {
-    return this.auditLogs
+  //
+  // Reading this projection is itself an audit_log-family evidence access, so it
+  // is gated by the same policy as listAuditLogs (assertEvidenceAccess) and the
+  // access is itself recorded through the single emitter (recordAuditLog).
+  listEvidenceAccessLogs(
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): EvidenceAccessLogRecord[] {
+    const policy = assertEvidenceAccess({
+      family: "audit_log",
+      identity,
+      tenantId: identity?.realm === "tenant" ? identity.tenantId : null,
+    });
+
+    const projection = this.auditLogs
       .map((auditLog) => toEvidenceAccessLogRecord(auditLog))
       .filter((record): record is EvidenceAccessLogRecord => record !== null);
+    const items =
+      identity?.realm === "tenant" && identity.tenantId
+        ? projection.filter((record) => record.tenantId === identity.tenantId)
+        : projection;
+
+    const accessAudit: Omit<
+      AuditLogRecord,
+      "auditId" | "createdAt" | "requestId"
+    > & {
+      requestId?: string;
+    } = {
+      actorId: identity?.actorId ?? null,
+      actorType:
+        (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+        "system",
+      tenantId: identity?.tenantId ?? null,
+      moduleName: "audit-notification",
+      actionName: policy.auditAction,
+      resourceType: "audit_log",
+      resourceId: null,
+      newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+        itemCount: items.length,
+        tenantScoped: identity?.realm === "tenant",
+        projection: "evidence_access_logs",
+      }),
+    };
+    if (requestId) {
+      accessAudit.requestId = requestId;
+    }
+    this.recordAuditLog(accessAudit);
+
+    return items;
   }
 
   markNotificationsRead(

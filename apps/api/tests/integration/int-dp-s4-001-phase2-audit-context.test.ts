@@ -139,6 +139,79 @@ describe("INT-DP-S4-001 phase2 audit context integration", () => {
     expect(linkedAuditRow?.resourceType).toBe("audit_log");
   });
 
+  it("enforces the audit_log evidence policy on the evidence-access-logs projection", () => {
+    const service = new AuditNotificationService();
+
+    // Seed an evidence-access row so the projection is non-empty.
+    service.listAuditLogs(PLATFORM_IDENTITY, "req-seed-001");
+
+    // A platform caller that carries scopes but lacks audit:read cannot read the
+    // audit evidence projection — the same policy that gates listAuditLogs.
+    const withoutAuditRead = {
+      actorId: "platform-admin-002",
+      actorType: "platform_admin" as const,
+      realm: "platform" as const,
+      scopes: ["notification:read"],
+      tenantId: null,
+    };
+    const accessErrorCode = (run: () => unknown): string | undefined => {
+      try {
+        run();
+      } catch (error) {
+        const response = (error as { getResponse?: () => unknown }).getResponse?.();
+        return (response as { error?: { code?: string } })?.error?.code;
+      }
+      return undefined;
+    };
+
+    expect(
+      accessErrorCode(() =>
+        service.listEvidenceAccessLogs(withoutAuditRead, "req-forbidden-001"),
+      ),
+    ).toBe("EVIDENCE_ACCESS_FORBIDDEN");
+
+    // The same caller is forbidden from listAuditLogs, confirming parity.
+    expect(
+      accessErrorCode(() =>
+        service.listAuditLogs(withoutAuditRead, "req-forbidden-002"),
+      ),
+    ).toBe("EVIDENCE_ACCESS_FORBIDDEN");
+
+    // An authorized caller succeeds.
+    expect(() =>
+      service.listEvidenceAccessLogs(PLATFORM_IDENTITY, "req-allowed-001"),
+    ).not.toThrow();
+  });
+
+  it("audits reads of the evidence-access-logs projection through the single emitter", () => {
+    const service = new AuditNotificationService();
+
+    const before = service
+      .getAuditLogsSnapshot()
+      .filter((log) => log.actionName === "view_audit_log_evidence").length;
+
+    service.listEvidenceAccessLogs(PLATFORM_IDENTITY, "req-self-audit-001");
+
+    const accessRows = service
+      .getAuditLogsSnapshot()
+      .filter(
+        (log) =>
+          log.actionName === "view_audit_log_evidence" &&
+          log.requestId === "req-self-audit-001",
+      );
+    // Reading the projection is itself recorded as an audit_log evidence access.
+    expect(accessRows.length).toBe(1);
+    expect(accessRows[0]?.actorId).toBe("platform-admin-001");
+    expect(accessRows[0]?.newValuesSummary?.projection).toBe(
+      "evidence_access_logs",
+    );
+    expect(
+      service
+        .getAuditLogsSnapshot()
+        .filter((log) => log.actionName === "view_audit_log_evidence").length,
+    ).toBe(before + 1);
+  });
+
   it("write-through persists evidence access into av_evidence.evidence_access_logs", async () => {
     const fakeDb = new FakeDatabaseService();
     const repository = new AuditLogRepository(
