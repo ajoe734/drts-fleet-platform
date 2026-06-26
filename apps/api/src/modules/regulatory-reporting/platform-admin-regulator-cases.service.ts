@@ -54,7 +54,8 @@ export class PlatformAdminRegulatorCasesService {
   }
 
   getRegulatorCase(caseId: string): SandboxRegulatorCaseView {
-    const caseRecord = this.platformAdminComplianceService.getInvestigation(caseId);
+    const caseRecord =
+      this.platformAdminComplianceService.getInvestigation(caseId);
     return this.toView(this.buildCaseContext(caseRecord));
   }
 
@@ -139,7 +140,9 @@ export class PlatformAdminRegulatorCasesService {
       }));
   }
 
-  private buildCaseContext(caseRecord: AccidentCaseRecord): RegulatorCaseContext {
+  private buildCaseContext(
+    caseRecord: AccidentCaseRecord,
+  ): RegulatorCaseContext {
     const reports = this.regulatoryReportingService.listReports();
     const notifications = this.regulatoryReportingService.listNotifications();
     const controlledExports =
@@ -147,12 +150,16 @@ export class PlatformAdminRegulatorCasesService {
     const legalHolds = this.platformAdminComplianceService.listLegalHolds();
     const correlatedTakeover = this.findCorrelatedTakeover(caseRecord);
     const report =
-      reports.find((candidate) => candidate.reportId === caseRecord.regulatoryReportId) ??
+      reports.find(
+        (candidate) => candidate.reportId === caseRecord.regulatoryReportId,
+      ) ??
       reports.find((candidate) => candidate.caseId === caseRecord.caseId) ??
       null;
     const manifestId =
       caseRecord.evidenceManifestId ?? report?.evidenceManifestId ?? null;
-    const manifest = manifestId ? this.tryGetEvidenceManifest(manifestId) : null;
+    const manifest = manifestId
+      ? this.tryGetEvidenceManifest(manifestId)
+      : null;
     const activeHold =
       legalHolds.find(
         (record) =>
@@ -190,7 +197,9 @@ export class PlatformAdminRegulatorCasesService {
     };
   }
 
-  private toSummary(context: RegulatorCaseContext): SandboxRegulatorCaseSummary {
+  private toSummary(
+    context: RegulatorCaseContext,
+  ): SandboxRegulatorCaseSummary {
     const { experimentId, experimentLabel } = this.resolveExperiment(context);
     return {
       caseId: context.caseRecord.caseId,
@@ -326,8 +335,8 @@ export class PlatformAdminRegulatorCasesService {
 
   private resolveExperiment(context: RegulatorCaseContext) {
     const experimentId =
-      context.correlatedTakeover?.safetyOperatorTakeoverReport.sandboxProgramId ??
-      null;
+      context.correlatedTakeover?.safetyOperatorTakeoverReport
+        .sandboxProgramId ?? null;
     return {
       experimentId,
       experimentLabel: experimentId ?? "program_unassigned",
@@ -337,27 +346,27 @@ export class PlatformAdminRegulatorCasesService {
   private findCorrelatedTakeover(
     caseRecord: AccidentCaseRecord,
   ): CorrelatedTakeoverCase | null {
+    const takeoverCases =
+      this.accidentInvestigationService.listCorrelatedTakeoverCases();
     return (
-      this.accidentInvestigationService
-        .listCorrelatedTakeoverCases()
-        .find(
-          (candidate) =>
-            candidate.takeoverCorrelationId != null &&
-            candidate.takeoverCorrelationId === caseRecord.takeoverCorrelationId,
-        ) ??
-      this.accidentInvestigationService
-        .listCorrelatedTakeoverCases()
-        .find(
-          (candidate) =>
-            candidate.orderId != null && candidate.orderId === caseRecord.orderId,
-        ) ??
+      takeoverCases.find(
+        (candidate) =>
+          candidate.takeoverCorrelationId != null &&
+          candidate.takeoverCorrelationId === caseRecord.takeoverCorrelationId,
+      ) ??
+      takeoverCases.find(
+        (candidate) =>
+          candidate.orderId != null && candidate.orderId === caseRecord.orderId,
+      ) ??
       null
     );
   }
 
   private tryGetEvidenceManifest(manifestId: string) {
     try {
-      return this.platformAdminComplianceService.getEvidenceManifest(manifestId);
+      return this.platformAdminComplianceService.getEvidenceManifest(
+        manifestId,
+      );
     } catch {
       return null;
     }
@@ -398,7 +407,9 @@ export class PlatformAdminRegulatorCasesService {
       oldValuesSummary: auditLog.oldValuesSummary ?? null,
       newValuesSummary: auditLog.newValuesSummary ?? null,
     });
-    return [...relatedIds].some((identifier) => summaryText.includes(identifier));
+    return [...relatedIds].some((identifier) =>
+      summaryText.includes(identifier),
+    );
   }
 
   private humanizeToken(value: string | null | undefined) {

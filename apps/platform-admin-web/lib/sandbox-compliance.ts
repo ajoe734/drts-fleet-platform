@@ -12,6 +12,11 @@ import type {
   SandboxControlledEvidenceExportRecord,
   SandboxEvidenceManifestView,
   SandboxLegalHoldRecord,
+  SandboxRegulatorCaseAccessLogRecord,
+  SandboxRegulatorCaseBundleState,
+  SandboxRegulatorCaseNotificationState,
+  SandboxRegulatorCaseSummary,
+  SandboxRegulatorCaseView,
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web";
 
@@ -81,6 +86,34 @@ export async function loadSandboxInvestigationDetail(
     investigation: investigation.item,
     timeline: timeline.items ?? [],
     manifest,
+  };
+}
+
+export async function loadSandboxRegulatorCases(
+  client: ApiClient,
+): Promise<SandboxRegulatorCaseSummary[]> {
+  const result = await client.listSandboxRegulatorCases();
+  return result.items ?? [];
+}
+
+export async function loadSandboxRegulatorCaseDetail(
+  client: ApiClient,
+  caseId: string,
+): Promise<{
+  detail: SandboxRegulatorCaseView;
+  exports: SandboxControlledEvidenceExportRecord[];
+  accessLogs: SandboxRegulatorCaseAccessLogRecord[];
+}> {
+  const [detail, controlledExports, accessLogs] = await Promise.all([
+    client.getSandboxRegulatorCase(caseId),
+    client.listSandboxRegulatorCaseExports(caseId),
+    client.listSandboxRegulatorCaseAccessLogs(caseId),
+  ]);
+
+  return {
+    detail: detail.item,
+    exports: controlledExports.items ?? [],
+    accessLogs: accessLogs.items ?? [],
   };
 }
 
@@ -174,8 +207,54 @@ export function reportStatusTone(
   }
 }
 
+export function regulatorBundleTone(
+  state: SandboxRegulatorCaseBundleState,
+): CanvasTone {
+  switch (state) {
+    case "export_completed":
+      return "success";
+    case "export_approved":
+    case "bundle_generated":
+      return "accent";
+    case "export_pending_approval":
+      return "warn";
+    case "export_rejected":
+    case "missing_manifest":
+      return "danger";
+    case "manifest_ready":
+    default:
+      return "info";
+  }
+}
+
+export function regulatorNotificationTone(
+  state: SandboxRegulatorCaseNotificationState,
+  overdue: boolean,
+): CanvasTone {
+  if (overdue) {
+    return "danger";
+  }
+
+  switch (state) {
+    case "acknowledged":
+      return "success";
+    case "submitted":
+      return "accent";
+    case "review_approved":
+      return "info";
+    case "review_pending":
+      return "warn";
+    case "draft":
+    case "not_started":
+    default:
+      return "neutral";
+  }
+}
+
 export function custodyStateTone(
-  state: SandboxEvidenceManifestView["custodyState"] | EvidenceManifestItem["custodyState"],
+  state:
+    | SandboxEvidenceManifestView["custodyState"]
+    | EvidenceManifestItem["custodyState"],
 ): CanvasTone {
   switch (state) {
     case "sealed":
@@ -337,7 +416,10 @@ export function buildTripComplianceChecks(input: {
   legalHolds: SandboxLegalHoldRecord[];
 }) {
   const investigations = tripInvestigations(input.investigations, input.tripId);
-  const takeoverReviews = tripTakeoverReviews(input.takeoverReviews, input.tripId);
+  const takeoverReviews = tripTakeoverReviews(
+    input.takeoverReviews,
+    input.tripId,
+  );
   const discrepancies = tripDiscrepancies(
     input.discrepancies,
     input.takeoverReviews,
