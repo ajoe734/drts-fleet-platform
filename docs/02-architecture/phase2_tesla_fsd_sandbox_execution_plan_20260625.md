@@ -86,6 +86,27 @@ Layer 4                  ▼
 
 ---
 
+## 2b. 系統設計裁決後追加 wave（已 dispatch，6 tasks）
+
+來源：[`..._system_design_decision_packet_c1c6_b1b5_20260625.md`](./phase2_tesla_fsd_sandbox_system_design_decision_packet_c1c6_b1b5_20260625.md)（C1–C6 ACCEPTED）。
+派工腳本：[`scripts/dispatch-phase2-tesla-sandbox-decision-wave.py`](../../scripts/dispatch-phase2-tesla-sandbox-decision-wave.py)。
+**只派後端/契約/test；UI 螢幕仍待視覺團隊 canvas（C2 的 token+shell scaffold 不含螢幕設計）。**
+
+| ID | Owner→Rev | 交付重點 | Deps | Gate |
+|----|-----------|----------|------|------|
+| **P2-DP-C5-001** | Codex2→Codex | Canonical audit event catalog 常數（§7.3 全表）+ `Phase2AuditContext` + emit helpers + `ActionReceipt`；append-only amendment（`supersedesAuditId`）；敏感資料不入 summary | P2-WP0 | B |
+| **P2-DP-C1-001** | Codex→Codex2 | platform-admin Compliance/Investigation route group + 12 scopes（§3.4，export/hold request≠approve four-eyes）+ `CrossAppResourceLink` deep-link + compliance/investigations/evidence/legal-hold/exports API（§10.3） | P2-WP0,P2-ACC-002,P2-EVD-002 | B |
+| **P2-DP-C2-001** | Claude→Codex | `packages/ui-tokens` 新增 `roc` semantic aliases（§4.3）+ `apps/roc-console-web` 採 Ops shell 之 scaffold（**僅 token+shell，不含螢幕**，螢幕待 canvas）；availableActions + ActionReceipt 接線 | P2-WP0,P2-ROC-001 | B |
+| **P2-DP-C3-001** | Codex2→Codex | `SandboxFulfillmentVisibilityRecord` + message/state/disclosure enums（§5.2）+ tenant/partner projection API（§10.3）+ partner webhook events（§5.5）；backend 回 messageCode，不外洩 internal reason | P2-WP0,P2-FBK-001,P2-GATE-001 | B |
+| **P2-DP-C4-001** | Codex→Claude2 | `FulfillmentSegmentRecord` + `SandboxBillingTreatmentRecord`（§6，`fallbackSurchargeApplied=false` 固定）+ invoice/report dimensions；同一 booking 一張發票；fallback 不加收 | P2-WP0,P2-FBK-001 | B |
+| **P2-DP-C6-001** | Claude2→Codex2 | legal-hold precedence（§8.1）+ state machine（draft→active→release_requested→released）+ four-eyes release + deletion scheduler guard（§8.6 同 consistency boundary 檢查，skip 發 `evidence.deletion.skipped_due_to_hold`）+ provider 屆期本地 preserve（§8.7） | P2-WP0,P2-EVD-002 | B |
+
+新增測試（§10.4）：ROC scope 不能 release hold、export request≠approve、four-eyes、active hold 擋刪除、provider 屆期 preserve、AV fallback 不加收、human fallback 走 Phase1 結算、mixed 仍一張發票、passenger projection 不洩 internal reason、partner webhook 只出 contract-approved、audit denied/failed/duplicate。
+
+**仍外部-gated（B1–B5，不派 build）**：Tesla regulatory ICD、核可 policy pack（`SandboxApprovalPolicyValueSet`）、在地通報矩陣、recorder vendor contract、Tesla Fleet 帳號 —— 缺值 `missing/unverified/external_gated`，production fail-closed。
+
+---
+
 ## 3. 不在本 wave 派 build 的工作（明確排除，附原因）
 
 ### 3.1 外部契約 gate（Gate C–F，等輸入到位）
