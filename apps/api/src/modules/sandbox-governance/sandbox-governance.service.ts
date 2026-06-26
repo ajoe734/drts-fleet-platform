@@ -238,18 +238,10 @@ export class SandboxGovernanceService implements OnModuleInit {
         this.repository.loadSafetyOperatorQualifications(),
       ]);
 
-      if (areas.length > 0) {
-        this.operatingAreas = cloneList(areas);
-      }
-      if (routes.length > 0) {
-        this.routes = cloneList(routes);
-      }
-      if (enrollments.length > 0) {
-        this.vehicleEnrollments = cloneList(enrollments);
-      }
-      if (qualifications.length > 0) {
-        this.safetyOperatorQualifications = cloneList(qualifications);
-      }
+      this.operatingAreas = cloneList(areas);
+      this.routes = cloneList(routes);
+      this.vehicleEnrollments = cloneList(enrollments);
+      this.safetyOperatorQualifications = cloneList(qualifications);
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
     }
@@ -259,7 +251,7 @@ export class SandboxGovernanceService implements OnModuleInit {
     return cloneList(this.operatingAreas);
   }
 
-  updateOperatingAreas(
+  async updateOperatingAreas(
     command: UpsertApprovedOperatingAreasCommand,
     actor: AuditActor,
     requestId?: string,
@@ -284,9 +276,14 @@ export class SandboxGovernanceService implements OnModuleInit {
       "OVERLAPPING_OPERATING_AREA_EFFECTIVE_WINDOW",
     );
     next.forEach((item) => validateSchedules(item.schedules, item.areaId));
-    this.operatingAreas = sortVersionedRecords(next, (item) => item.areaId);
-    this.persist(
+    const previous = cloneList(this.operatingAreas);
+    const persisted = sortVersionedRecords(next, (item) => item.areaId);
+    this.operatingAreas = persisted;
+    await this.persist(
       () => this.repository?.replaceOperatingAreas(this.operatingAreas),
+      () => {
+        this.operatingAreas = previous;
+      },
       "replace areas",
     );
     this.recordAudit(
@@ -304,7 +301,7 @@ export class SandboxGovernanceService implements OnModuleInit {
     return cloneList(this.routes);
   }
 
-  updateRoutes(
+  async updateRoutes(
     command: UpsertApprovedRoutesCommand,
     actor: AuditActor,
     requestId?: string,
@@ -330,8 +327,16 @@ export class SandboxGovernanceService implements OnModuleInit {
       "OVERLAPPING_APPROVED_ROUTE_EFFECTIVE_WINDOW",
     );
     next.forEach((item) => validateSchedules(item.schedules, item.routeId));
-    this.routes = sortVersionedRecords(next, (item) => item.routeId);
-    this.persist(() => this.repository?.replaceRoutes(this.routes), "replace routes");
+    const previous = cloneList(this.routes);
+    const persisted = sortVersionedRecords(next, (item) => item.routeId);
+    this.routes = persisted;
+    await this.persist(
+      () => this.repository?.replaceRoutes(this.routes),
+      () => {
+        this.routes = previous;
+      },
+      "replace routes",
+    );
     this.recordAudit(
       "sandbox_governance.approved_routes_updated",
       "approved_route",
@@ -347,7 +352,7 @@ export class SandboxGovernanceService implements OnModuleInit {
     return cloneList(this.vehicleEnrollments);
   }
 
-  updateVehicleEnrollments(
+  async updateVehicleEnrollments(
     command: UpsertVehicleEnrollmentsCommand,
     actor: AuditActor,
     requestId?: string,
@@ -378,9 +383,14 @@ export class SandboxGovernanceService implements OnModuleInit {
       VEHICLE_STATUS_TRANSITIONS,
       "INVALID_VEHICLE_ENROLLMENT_TRANSITION",
     );
-    this.vehicleEnrollments = sortVersionedRecords(next, (item) => item.enrollmentId);
-    this.persist(
+    const previous = cloneList(this.vehicleEnrollments);
+    const persisted = sortVersionedRecords(next, (item) => item.enrollmentId);
+    this.vehicleEnrollments = persisted;
+    await this.persist(
       () => this.repository?.replaceVehicleEnrollments(this.vehicleEnrollments),
+      () => {
+        this.vehicleEnrollments = previous;
+      },
       "replace vehicle enrollments",
     );
     this.recordAudit(
@@ -398,7 +408,7 @@ export class SandboxGovernanceService implements OnModuleInit {
     return cloneList(this.safetyOperatorQualifications);
   }
 
-  updateSafetyOperatorQualifications(
+  async updateSafetyOperatorQualifications(
     command: UpsertSafetyOperatorQualificationsCommand,
     actor: AuditActor,
     requestId?: string,
@@ -431,15 +441,20 @@ export class SandboxGovernanceService implements OnModuleInit {
       OPERATOR_STATUS_TRANSITIONS,
       "INVALID_SAFETY_OPERATOR_QUALIFICATION_TRANSITION",
     );
-    this.safetyOperatorQualifications = sortVersionedRecords(
+    const previous = cloneList(this.safetyOperatorQualifications);
+    const persisted = sortVersionedRecords(
       next,
       (item) => item.qualificationId,
     );
-    this.persist(
+    this.safetyOperatorQualifications = persisted;
+    await this.persist(
       () =>
         this.repository?.replaceSafetyOperatorQualifications(
           this.safetyOperatorQualifications,
         ),
+      () => {
+        this.safetyOperatorQualifications = previous;
+      },
       "replace safety operator qualifications",
     );
     this.recordAudit(
@@ -687,14 +702,22 @@ export class SandboxGovernanceService implements OnModuleInit {
     });
   }
 
-  private persist(operation: () => Promise<void> | undefined, context: string) {
+  private async persist(
+    operation: () => Promise<void> | undefined,
+    rollback: () => void,
+    context: string,
+  ) {
     const pending = operation();
     if (!pending) {
       return;
     }
-    void pending.catch((error) =>
-      this.repository?.reportPersistenceFailure(error, context),
-    );
+    try {
+      await pending;
+    } catch (error) {
+      rollback();
+      this.repository?.reportPersistenceFailure(error, context);
+      throw error;
+    }
   }
 }
 

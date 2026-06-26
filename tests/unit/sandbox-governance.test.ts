@@ -58,13 +58,13 @@ describe("sandbox governance service", () => {
     expect(result.routeIds).toContain("route-downtown-loop");
   });
 
-  it("rejects invalid vehicle enrollment lifecycle transitions", () => {
+  it("rejects invalid vehicle enrollment lifecycle transitions", async () => {
     const service = createService();
 
     const existing = service.listVehicleEnrollments()[0] as VehicleEnrollmentRecord;
     expect(existing.status).toBe("active");
 
-    expect(() =>
+    await expect(
       service.updateVehicleEnrollments(
         {
           items: [
@@ -81,10 +81,10 @@ describe("sandbox governance service", () => {
           tenantId: null,
         },
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
   });
 
-  it("allows suspended safety operators to be re-qualified", () => {
+  it("allows suspended safety operators to be re-qualified", async () => {
     const service = createService();
 
     const existing =
@@ -95,7 +95,7 @@ describe("sandbox governance service", () => {
       updatedAt: "2026-06-26T09:00:00.000Z",
     };
 
-    service.updateSafetyOperatorQualifications(
+    await service.updateSafetyOperatorQualifications(
       { items: [suspended] },
       {
         actorId: "admin-001",
@@ -104,7 +104,7 @@ describe("sandbox governance service", () => {
       },
     );
 
-    const restored = service.updateSafetyOperatorQualifications(
+    const restored = await service.updateSafetyOperatorQualifications(
       {
         items: [
           {

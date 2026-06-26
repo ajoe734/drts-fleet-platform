@@ -127,9 +127,12 @@ function buildQualification(
   };
 }
 
-function expectApiRequestErrorMessage(fn: () => unknown, messagePattern: RegExp) {
+async function expectApiRequestErrorMessage(
+  fn: () => unknown | Promise<unknown>,
+  messagePattern: RegExp,
+) {
   try {
-    fn();
+    await fn();
   } catch (error) {
     expect(error).toBeInstanceOf(ApiRequestError);
     const response = (error as ApiRequestError).getResponse() as {
@@ -146,7 +149,7 @@ describe("SandboxGovernanceService", () => {
   it("keeps multiple operating-area versions under the same logical area id", async () => {
     const service = createService();
 
-    service.updateOperatingAreas(
+    await service.updateOperatingAreas(
       {
         items: [
           buildArea(),
@@ -179,11 +182,11 @@ describe("SandboxGovernanceService", () => {
     ]);
   });
 
-  it("rejects overlapping effective windows for the same operating area", () => {
+  it("rejects overlapping effective windows for the same operating area", async () => {
     const service = createService();
 
-    expectApiRequestErrorMessage(
-      () =>
+    await expectApiRequestErrorMessage(
+      async () =>
         service.updateOperatingAreas(
           {
             items: [
@@ -204,11 +207,11 @@ describe("SandboxGovernanceService", () => {
 
   it("deduplicates matching route ids across historical route versions", async () => {
     const service = createService();
-    service.updateOperatingAreas(
+    await service.updateOperatingAreas(
       { items: [buildArea(), buildArea({ version: 2, effectiveFrom: "2026-07-01T00:00:00.000Z", effectiveUntil: null, updatedAt: "2026-07-01T00:00:00.000Z" })] },
       { actorId: "tester", actorType: "system", tenantId: null },
     );
-    service.updateRoutes(
+    await service.updateRoutes(
       {
         items: [
           buildRoute(),
@@ -233,10 +236,10 @@ describe("SandboxGovernanceService", () => {
     expect(result.routeIds).toEqual(["route-downtown-loop"]);
   });
 
-  it("enforces vehicle enrollment lifecycle across versions", () => {
+  it("enforces vehicle enrollment lifecycle across versions", async () => {
     const service = createService();
 
-    service.updateVehicleEnrollments(
+    await service.updateVehicleEnrollments(
       {
         items: [
           buildVehicleEnrollment(),
@@ -254,8 +257,8 @@ describe("SandboxGovernanceService", () => {
 
     expect(service.listVehicleEnrollments()).toHaveLength(2);
 
-    expectApiRequestErrorMessage(
-      () =>
+    await expectApiRequestErrorMessage(
+      async () =>
         service.updateVehicleEnrollments(
           {
             items: [
@@ -275,10 +278,10 @@ describe("SandboxGovernanceService", () => {
     );
   });
 
-  it("enforces safety-operator qualification lifecycle across versions", () => {
+  it("enforces safety-operator qualification lifecycle across versions", async () => {
     const service = createService();
 
-    service.updateSafetyOperatorQualifications(
+    await service.updateSafetyOperatorQualifications(
       {
         items: [
           buildQualification(),
@@ -296,8 +299,8 @@ describe("SandboxGovernanceService", () => {
 
     expect(service.listSafetyOperatorQualifications()).toHaveLength(2);
 
-    expectApiRequestErrorMessage(
-      () =>
+    await expectApiRequestErrorMessage(
+      async () =>
         service.updateSafetyOperatorQualifications(
           {
             items: [
@@ -314,6 +317,52 @@ describe("SandboxGovernanceService", () => {
           { actorId: "tester", actorType: "system", tenantId: null },
         ),
       /cannot transition from suspended to pending/i,
+    );
+  });
+
+  it("clears seed fixtures when persistence loads empty tables", async () => {
+    const repository = {
+      loadOperatingAreas: vi.fn().mockResolvedValue([]),
+      loadRoutes: vi.fn().mockResolvedValue([]),
+      loadVehicleEnrollments: vi.fn().mockResolvedValue([]),
+      loadSafetyOperatorQualifications: vi.fn().mockResolvedValue([]),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new SandboxGovernanceService(
+      { recordAuditLog: vi.fn() } as never,
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    expect(service.listOperatingAreas()).toEqual([]);
+    expect(service.listRoutes()).toEqual([]);
+    expect(service.listVehicleEnrollments()).toEqual([]);
+    expect(service.listSafetyOperatorQualifications()).toEqual([]);
+  });
+
+  it("rolls back in-memory changes and rethrows when persistence fails", async () => {
+    const repository = {
+      replaceOperatingAreas: vi.fn().mockRejectedValue(new Error("db offline")),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new SandboxGovernanceService(
+      { recordAuditLog: vi.fn() } as never,
+      repository as never,
+    );
+    const previous = service.listOperatingAreas();
+
+    await expect(
+      service.updateOperatingAreas(
+        { items: [buildArea({ areaId: "new-area" })] },
+        { actorId: "tester", actorType: "system", tenantId: null },
+      ),
+    ).rejects.toThrow("db offline");
+
+    expect(service.listOperatingAreas()).toEqual(previous);
+    expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "replace areas",
     );
   });
 });

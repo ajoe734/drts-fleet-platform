@@ -30,14 +30,14 @@ export class SandboxGovernanceController {
   }
 
   @Put("operating-areas")
-  updateOperatingAreas(
+  async updateOperatingAreas(
     @Body() command: UpsertApprovedOperatingAreasCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: this.sandboxGovernanceService.updateOperatingAreas(
+        items: await this.sandboxGovernanceService.updateOperatingAreas(
           command,
           toAuditActor(identity),
           requestId,
@@ -56,14 +56,14 @@ export class SandboxGovernanceController {
   }
 
   @Put("routes")
-  updateRoutes(
+  async updateRoutes(
     @Body() command: UpsertApprovedRoutesCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: this.sandboxGovernanceService.updateRoutes(
+        items: await this.sandboxGovernanceService.updateRoutes(
           command,
           toAuditActor(identity),
           requestId,
@@ -82,14 +82,14 @@ export class SandboxGovernanceController {
   }
 
   @Put("vehicle-enrollments")
-  updateVehicleEnrollments(
+  async updateVehicleEnrollments(
     @Body() command: UpsertVehicleEnrollmentsCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: this.sandboxGovernanceService.updateVehicleEnrollments(
+        items: await this.sandboxGovernanceService.updateVehicleEnrollments(
           command,
           toAuditActor(identity),
           requestId,
@@ -111,7 +111,7 @@ export class SandboxGovernanceController {
   }
 
   @Put("safety-operator-qualifications")
-  updateSafetyOperatorQualifications(
+  async updateSafetyOperatorQualifications(
     @Body() command: UpsertSafetyOperatorQualificationsCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
@@ -119,7 +119,7 @@ export class SandboxGovernanceController {
     return toApiSuccessEnvelope(
       {
         items:
-          this.sandboxGovernanceService.updateSafetyOperatorQualifications(
+          await this.sandboxGovernanceService.updateSafetyOperatorQualifications(
             command,
             toAuditActor(identity),
             requestId,
