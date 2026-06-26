@@ -169,11 +169,14 @@ its own latest handoff and the reopen that followed it):
 | `handoff`          | `2026-06-26T18:58:20Z` | `Claude`       | Fourth sidecar handoff to `Codex` at packet commit `1c29eb033` (pushed `origin/claude/p2-dp-c1-001-sidecar-review`); reframed parent to `in_progress`, tip `ad5caf3dd`. |
 | `reopen`           | `2026-06-26T19:00:52Z` | `Codex`        | Stale: since the `18:58:20Z` handoff the parent reached a **second** `review_approved` `18:58:32Z` on clean branch `623808d7f`, reconciled from `origin/dev@17650b25e144`, and was archived; §2/3/7/8/9 still showed the parent as current `in_progress` on `ad5caf3dd` / PR #961, `0 behind / 4 ahead`. |
 | `progress`         | `2026-06-26T19:01:28Z` | `Claude`       | This refresh: parent is now **archived / merged to `dev`** via PR #962 (`17650b25e`); reframed the whole packet to the final landed state (clean deliverable `623808d7f`), demoted `ad5caf3dd` / `71a784abd` / PR #961 to historical. |
+| `handoff`          | `2026-06-26T19:06:59Z` | `Claude`       | Fifth sidecar handoff to `Codex` at packet commit `93c545100` (pushed `origin/claude/p2-dp-c1-001-sidecar-review`); packet reframed to the final merged-to-`dev` closeout. |
+| `reopen`           | `2026-06-26T19:09:37Z` | `Codex`        | Narrative accepted as matching machine truth, but the **evidence recipe was not reproducible from the isolated worker worktree**: §9 still ran a whole-file `json.load(open('ai-status.json'))` archived-task check (forbidden for a single-task review) and cited bare `ai-status.json` / `ai-activity-log.jsonl` paths that do not exist in the worktree cwd. Asked to refresh §7/§9 to reproduce without whole-file reads, preferring `scripts/ai-status.sh show` + targeted `ai_status.py` queries + canonical-root log paths. |
+| `progress`         | `2026-06-26T19:12:18Z` | `Claude`       | This refresh: removed the whole-file `ai-status.json` check (replaced by `scripts/ai-status.sh show P2-DP-C1-001` → `Task not found` as the archived signal) and anchored all raw log/status greps in §7/§9 to the canonical status root (`ORCH_STATUS_ROOT`), so the audit recipe reproduces from the isolated worker worktree. |
 
 The next sidecar `handoff` will return the packet to reviewer `Codex` and is the
-transition that follows this `19:01:28Z` start/progress row. Every completed
-transition up to and including the `19:00:52Z` reopen is recorded above; the only
-row a handoff can never pre-contain is the handoff that performs it.
+transition that follows this `19:12:18Z` progress row. Every completed transition up
+to and including the `19:09:37Z` reopen is recorded above; the only row a handoff can
+never pre-contain is the handoff that performs it.
 
 ---
 
@@ -190,7 +193,12 @@ The slice is now on `origin/dev` as a single squash commit:
 `git rev-list --parents -n1 17650b25e` → `17650b25e … 99836f121` (single parent —
 an ordinary squash-merge commit, **not** a merge commit). Its diff vs the prior dev
 tip `99836f121` is **47 files changed, +3423 / -352** (§3.4). The earlier dev tip
-`99836f121` is P2-REG-001 (#960); `17650b25e` is now the dev tip.
+`99836f121` is P2-REG-001 (#960). `17650b25e` **remains reachable from `origin/dev`**
+(`git merge-base --is-ancestor 17650b25e origin/dev` succeeds); the slice is landed
+for good. `dev` has since advanced past it (e.g. P2-REG-002 #963), so the durable
+claim is that `17650b25e` is **an ancestor of `dev`**, not that it is the live tip —
+the diff stats above are anchored to its own parent `99836f121`, so they stay stable
+as `dev` moves.
 
 ### 3.2 The approved deliverable (clean replacement branch)
 
@@ -456,7 +464,9 @@ final machine truth:
 - the slice **landed on `dev`** as `17650b25e`
   (`P2-DP-C1-001: … routes (#962)`); `git rev-list --parents -n1 17650b25e` shows a
   **single parent `99836f121`** (an ordinary squash merge, not a merge commit), and
-  `17650b25e` is the current `origin/dev` tip
+  `17650b25e` **remains reachable from `origin/dev`**
+  (`git merge-base --is-ancestor 17650b25e origin/dev` succeeds). `dev` may have
+  advanced past it (e.g. P2-REG-002 #963) — verify ancestry, not tip identity
 - the **approved deliverable** `623808d7f` is a single linear commit on `99836f121`
   and is **content-identical** to what landed (`git diff 623808d7f 17650b25e` empty)
 - the diff vs the prior dev tip is **47 files / +3423 / -352**
@@ -475,10 +485,17 @@ final machine truth:
 - this sidecar remains support-only and edits no canonical truth
 
 Suggested audit commands (use only `git`, `grep`, `python3`, `scripts/ai-status.sh`
-so they reproduce in any worker environment):
+so they reproduce **from the assigned isolated worker worktree** — no whole-file
+`ai-status.json` reads, and the status/log files are read from the canonical status
+root the worker inherits as `ORCH_STATUS_ROOT`, since the worktree cwd does not
+contain them):
 
 ```bash
-scripts/ai-status.sh show P2-DP-C1-001                     # Task not found (archived)
+STATUS_ROOT="${ORCH_STATUS_ROOT:-/home/edna/workspace/drts-fleet-platform}"
+scripts/ai-status.sh show P2-DP-C1-001                     # Task not found (archived signal; no full-file read)
+grep '"task_id": "P2-DP-C1-001"' "$STATUS_ROOT/ai-activity-log.jsonl" \
+  | grep '"type": "review_approved"'                       # two events: 18:32:14Z and 18:58:32Z
+git fetch origin
 git log --oneline -1 origin/dev                            # 17650b25e … (#962)
 git rev-list --parents -n 1 17650b25e                      # single parent 99836f121 (squash)
 git show --no-patch 623808d7f                              # final approved deliverable + clean trailers
@@ -525,21 +542,58 @@ branch).
 ## 9. Evidence Commands For This Packet
 
 Commands used to build this packet. These use only `git`, `grep`, `python3`, and
-`scripts/ai-status.sh` so they reproduce in any worker environment (an earlier
-refresh cited `rg`, which is not installed in every worker; the recipe below uses
-portable `grep`).
+`scripts/ai-status.sh` so they reproduce **from the assigned isolated worker
+worktree**. Two portability rules apply (both came out of reopen findings):
 
-- `scripts/ai-status.sh show P2-DP-C1-001` (now `Task not found` — archived) and
-  `python3 -c "import json;print('P2-DP-C1-001' in json.load(open('ai-status.json'))['archived_task_ids'])"` (→ `True`)
-- `grep '"task_id": "P2-DP-C1-001"' ai-activity-log.jsonl` filtered by `type`
-  (confirms the two `review_approved` events `18:32:14Z`/`18:58:32Z`, the
+1. **No whole-file `ai-status.json` reads.** A single-task check uses the
+   sanctioned slice command `scripts/ai-status.sh show <id>` (or
+   `python3 scripts/ai_status.py show <id>`), never `Read ai-status.json` or a
+   `python3 -c "json.load(open('ai-status.json'))"` one-liner. An earlier refresh
+   used such a one-liner to test `archived_task_ids` membership; it is removed.
+2. **Status/log files live in the canonical status root, not this worktree.** The
+   isolated task worktree does **not** contain `ai-status.json` or
+   `ai-activity-log.jsonl`; they live in the canonical status root the worker
+   process inherits as `ORCH_STATUS_ROOT`. Bare relative paths fail here, so the
+   raw-log greps below anchor to that root:
+
+   ```bash
+   STATUS_ROOT="${ORCH_STATUS_ROOT:-/home/edna/workspace/drts-fleet-platform}"
+   ```
+
+Parent-state checks (no whole-file read):
+
+- `scripts/ai-status.sh show P2-DP-C1-001` → `Task not found: P2-DP-C1-001`. The
+  row is off the live board because it was archived; "Task not found" is the
+  archived signal and needs no full-file read. (Equivalent:
+  `python3 scripts/ai_status.py show P2-DP-C1-001`.)
+- Optional explicit `archived_task_ids` confirmation **without** loading the file
+  into context — a bounded `grep` on the canonical-root status file prints only the
+  matching lines, never the whole document:
+  `grep -n '"P2-DP-C1-001"' "$STATUS_ROOT/ai-status.json"`. The id appears on a few
+  lines (other tasks' `depends_on`, this sidecar's `helper_parent`, and mirrored log
+  entries); the archived membership is the bare-string entry
+  (`"P2-DP-C1-001"` with no trailing key) inside the `archived_task_ids` array near
+  the end of the file. The `scripts/ai-status.sh show` → `Task not found` signal
+  above is sufficient on its own; this grep is only for reviewers who want to see the
+  array entry directly.
+
+Lifecycle reconstruction (raw log greps — needed because the archived parent is no
+longer queryable via `ai_status.py`, and anchored to the canonical root):
+
+- `grep '"task_id": "P2-DP-C1-001"' "$STATUS_ROOT/ai-activity-log.jsonl"` filtered
+  by `type` (confirms the two `review_approved` events `18:32:14Z`/`18:58:32Z`, the
   `18:55:24Z` clean-branch handoff, and the `18:59:18Z` `reconciled_from_git` from
   `origin/dev@17650b25e144`)
-- `grep '"task_id": "P2-DP-C1-001-SIDECAR-REVIEW"' ai-activity-log.jsonl` filtered
-  by `type` (sidecar lifecycle for §2.4, including the `18:58:20Z` handoff and the
-  `19:00:52Z` reopen)
-- `git fetch origin` then `git log --oneline -1 origin/dev` (dev tip now
-  `17650b25e`, #962)
+- `grep '"task_id": "P2-DP-C1-001-SIDECAR-REVIEW"' "$STATUS_ROOT/ai-activity-log.jsonl"`
+  filtered by `type` (sidecar lifecycle for §2.4, including the `18:58:20Z` handoff
+  and the `19:00:52Z` reopen)
+
+Git checks (reproduce directly in the worker worktree):
+
+- `git fetch origin` then
+  `git merge-base --is-ancestor 17650b25e origin/dev && echo landed` (the slice
+  `17650b25e` / #962 remains reachable from `origin/dev`; `dev` may have advanced
+  past it — e.g. P2-REG-002 #963 — so check ancestry, not the live tip)
 - `git rev-list --parents -n 1 17650b25e` (single parent `99836f121` → squash merge)
 - `git show --no-patch 623808d7f` (final approved deliverable; clean trailer set in §3.3)
 - `git diff 623808d7f 17650b25e` (empty — content-identical) and
