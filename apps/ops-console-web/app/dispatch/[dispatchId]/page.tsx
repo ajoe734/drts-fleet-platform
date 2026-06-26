@@ -1954,7 +1954,9 @@ function formatEtaMinutesValue(
     return "—";
   }
 
-  return locale === "zh" ? `${value} 分` : `${value} min`;
+  return tr(locale, "dispatch.detail.avFallback.etaMinutesCompact", {
+    count: value,
+  });
 }
 
 function formatCrewValue(vehicleId: string | null, driverId: string | null) {
