@@ -1478,6 +1478,123 @@ export interface RegulatoryReportFiling {
   artifactChecksumSha256: string | null;
 }
 
+export const REGULATORY_NOTIFICATION_SEVERITIES = [
+  "informational",
+  "incident",
+  "injury_or_fatality",
+  "cybersecurity",
+] as const;
+export type RegulatoryNotificationSeverity =
+  (typeof REGULATORY_NOTIFICATION_SEVERITIES)[number];
+
+export const REGULATORY_REPORT_VERSION_KINDS = [
+  "initial",
+  "follow_up",
+  "final",
+] as const;
+export type RegulatoryReportVersionKind =
+  (typeof REGULATORY_REPORT_VERSION_KINDS)[number];
+
+export const REGULATORY_NOTIFICATION_LIFECYCLE_STATUSES = [
+  "draft",
+  "review_pending",
+  "review_approved",
+  "submitted",
+  "acknowledged",
+] as const;
+export type RegulatoryNotificationLifecycleStatus =
+  (typeof REGULATORY_NOTIFICATION_LIFECYCLE_STATUSES)[number];
+
+export interface RegulatoryNotificationRecipient {
+  recipientId: string;
+  roleCode: string;
+  channel: "email" | "slack" | "pagerduty" | "webhook";
+  label: string;
+}
+
+export interface RegulatoryNotificationReminder {
+  minutesBeforeDeadline: number;
+  dueAt: string;
+  sentAt: string | null;
+}
+
+export interface RegulatoryNotificationPolicy {
+  severity: RegulatoryNotificationSeverity;
+  recipients: RegulatoryNotificationRecipient[];
+  approverRoleCodes: string[];
+  deadlineMinutes: number;
+  reminderOffsetsMinutes: number[];
+}
+
+export interface RegulatoryNotificationRecord {
+  notificationId: string;
+  eventId: string;
+  eventType: TeslaRegulatoryEventType | string;
+  severity: RegulatoryNotificationSeverity;
+  reportVersionKind: RegulatoryReportVersionKind;
+  lifecycleStatus: RegulatoryNotificationLifecycleStatus;
+  jurisdiction: string;
+  vehicleId: string;
+  incidentId: string | null;
+  reportId: string | null;
+  summary: string;
+  details: string | null;
+  recipients: RegulatoryNotificationRecipient[];
+  approverRoleCodes: string[];
+  policy: RegulatoryNotificationPolicy;
+  eventOccurredAt: string;
+  reviewSubmittedAt: string | null;
+  reviewSubmittedBy: string | null;
+  reviewApprovedAt: string | null;
+  reviewApprovedBy: string | null;
+  submittedAt: string | null;
+  submittedBy: string | null;
+  submissionReference: string | null;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  acknowledgementReference: string | null;
+  deadlineAt: string;
+  overdue: boolean;
+  overdueRaisedAt: string | null;
+  reminders: RegulatoryNotificationReminder[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateRegulatoryNotificationCommand {
+  eventId: string;
+  eventType: TeslaRegulatoryEventType | string;
+  severity: RegulatoryNotificationSeverity;
+  reportVersionKind: RegulatoryReportVersionKind;
+  jurisdiction: string;
+  vehicleId: string;
+  incidentId?: string | null;
+  reportId?: string | null;
+  eventOccurredAt: string;
+  summary: string;
+  details?: string | null;
+}
+
+export interface SubmitRegulatoryNotificationReviewCommand {
+  note?: string | null;
+}
+
+export interface ApproveRegulatoryNotificationCommand {
+  note?: string | null;
+}
+
+export interface SubmitRegulatoryNotificationCommand {
+  submissionReference: string;
+  submittedAt?: string;
+  note?: string | null;
+}
+
+export interface AcknowledgeRegulatoryNotificationCommand {
+  acknowledgementReference: string;
+  acknowledgedAt?: string;
+  note?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // §3.8A Sandbox governance + compliance snapshot
 // ---------------------------------------------------------------------------
