@@ -276,6 +276,21 @@ export class RocOperationsService {
     }));
   }
 
+  listFallbackReportsForBooking(bookingId: string) {
+    const normalizedBookingId = bookingId.trim();
+    if (!normalizedBookingId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_ID_REQUIRED",
+        "bookingId is required.",
+      );
+    }
+
+    return this.listFallbackReports().filter(
+      (report) => report.bookingId === normalizedBookingId,
+    );
+  }
+
   private resolveTripOrder(tripId: string) {
     const normalizedTripId = tripId.trim();
     if (!normalizedTripId) {
