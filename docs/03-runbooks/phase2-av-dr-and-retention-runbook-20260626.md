@@ -70,13 +70,18 @@ Secret names are environment-scoped but logically stable:
 Mounting rules:
 
 - API runtime may resolve all five at runtime.
-- Tesla sync workers may resolve only provider auth secrets.
+- Tesla sync workers may resolve only `tesla-fleet-api-client-id` and
+  `tesla-fleet-api-client-secret`.
+- Tesla command workers may resolve only `tesla-fleet-api-private-key`.
+- Provider ingest workers may resolve only `av-webhook-shared-secret`.
 - Evidence bundle workers may resolve only `av-evidence-signing-secret`.
 - No frontend surface may read these secrets directly.
 
 ### KMS
 
 - one key ring per environment, region `asia-east1`
+- canonical key-ring name is `drts-phase2-av-<env>` even if deployment-time
+  bucket prefixes are overridden
 - one CMEK key per storage family
 - 90-day rotation for raw/telemetry/routine-video keys
 - 60-day rotation for incident/investigation/regulatory keys
