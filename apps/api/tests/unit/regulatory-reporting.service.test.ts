@@ -323,7 +323,6 @@ describe("RegulatoryReportingService", () => {
         ),
     ).toBe(false);
   });
-
   it("rejects review approval when roleFamilies are spoofed without an approver role code", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
