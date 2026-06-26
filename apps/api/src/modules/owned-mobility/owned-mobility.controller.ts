@@ -264,6 +264,7 @@ export class OwnedMobilityController {
   async acknowledgePassengerDisclosure(
     @Param("bookingId") bookingId: string,
     @Body() command: RecordPassengerAcknowledgementCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -272,6 +273,25 @@ export class OwnedMobilityController {
         this.requireTenantId(tenantId),
         bookingId,
         command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/bookings/:bookingId/passenger-disclosure-acknowledgement")
+  async acknowledgePassengerDisclosureFromOps(
+    @Param("bookingId") bookingId: string,
+    @Body() command: RecordPassengerAcknowledgementCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.acknowledgePassengerDisclosureFromOps(
+        bookingId,
+        command,
+        identity,
         requestId,
       ),
       requestId,

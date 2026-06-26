@@ -127,6 +127,61 @@ describe("SandboxDispatchGateService", () => {
     );
   });
 
+  it("ignores client-supplied acknowledgement actor fields and timestamps for persisted legal records", async () => {
+    const insertPassengerAcknowledgement = vi.fn(async () => undefined);
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      {
+        isEnabled: vi.fn(() => true),
+        listPassengerDisclosurePolicies: vi.fn(async () => []),
+        listPassengerDisclosureMessageCatalogEntries: vi.fn(async () => []),
+        listPassengerAcknowledgements: vi.fn(async () => []),
+        insertPassengerAcknowledgement,
+      } as never,
+    );
+
+    const record = await gate.recordPassengerAcknowledgement({
+      bookingId: "booking-av-001",
+      orderId: "order-av-001",
+      disclosure: {
+        channel: "ops_console",
+        policyId: "policy-av-001",
+        policyVersion: "test-v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        requiresAcknowledgement: true,
+        acknowledgementMode: "operator_confirmed_notice",
+        acknowledgedAt: null,
+        acknowledgementRecordId: null,
+      },
+      command: {
+        actorType: "passenger",
+        actorRef: "spoofed-passenger-ref",
+        acknowledgedAt: "2020-01-01T00:00:00.000Z",
+        evidenceRef: "call-recording-001",
+      },
+      actor: {
+        actorType: "ops_user",
+        actorRef: "ops-user-001",
+      },
+    });
+
+    expect(record).toMatchObject({
+      channel: "ops_console",
+      actorType: "ops_user",
+      actorRef: "ops-user-001",
+      evidenceRef: "call-recording-001",
+    });
+    expect(record.acknowledgedAt).not.toBe("2020-01-01T00:00:00.000Z");
+    expect(insertPassengerAcknowledgement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorType: "ops_user",
+        actorRef: "ops-user-001",
+      }),
+      undefined,
+    );
+  });
+
   it("blocks dispatch when vehicle evidence reports a required unhealthy recorder", async () => {
     const vehicleEvidenceService = new VehicleEvidenceService();
     const recorder = buildMockRecorderFixture();

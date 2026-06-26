@@ -3157,6 +3157,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         actorType: "passenger",
         actorRef: "passenger-demo-001",
       },
+      {
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        tenantId: "tenant-demo-001",
+        realm: "tenant",
+      } as never,
     );
     expect(acknowledgedBooking.passengerDisclosure).toMatchObject({
       policyId: "policy-test-av-ack",
@@ -3280,10 +3286,110 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: booking.bookingId,
-        actorRef: "passenger-inline-ack-001",
+        actorType: "passenger",
+        actorRef: null,
       }),
       tx,
     );
+  });
+
+  it("records ops acknowledgements with server-derived actor metadata and preserves the ops_console channel on refresh", async () => {
+    const sandboxDispatchGateService = new SandboxDispatchGateService();
+    (sandboxDispatchGateService as any).disclosurePolicies = [
+      {
+        policyId: "policy-test-av-ops",
+        policyVersion: "test-v1",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        active: true,
+        channelRules: [
+          {
+            channel: "ops_console",
+            messageCode: "sandbox_passenger_disclosure.av_program_notice",
+            requiresAcknowledgement: true,
+            acknowledgementMode: "operator_confirmed_notice",
+          },
+        ],
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ];
+    (sandboxDispatchGateService as any).messageCatalogEntries = [
+      {
+        entryId: "pdc-v1-av-en-us",
+        catalogVersion: "passenger_disclosure.v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "baseline",
+        legalApproved: true,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ];
+    (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
+
+    const { service } = createOwnedMobilityService({
+      sandboxDispatchGateService,
+    });
+    const opsIdentity = {
+      actorType: "ops_user",
+      actorId: "ops-user-001",
+      realm: "ops",
+      tenantId: null,
+    } as never;
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Sandbox End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Sandbox Rider", phone: "0912000003" },
+      },
+      "tenant-demo-001",
+      opsIdentity,
+    );
+
+    expect(booking.passengerDisclosure).toMatchObject({
+      channel: "ops_console",
+      policyId: "policy-test-av-ops",
+      requiresAcknowledgement: true,
+      acknowledgementMode: "operator_confirmed_notice",
+    });
+
+    await service.acknowledgePassengerDisclosureFromOps(
+      booking.bookingId,
+      {
+        actorType: "passenger",
+        actorRef: "spoofed-passenger-ref",
+        acknowledgedAt: "2020-01-01T00:00:00.000Z",
+      },
+      opsIdentity,
+    );
+
+    const acknowledgementRecord = (sandboxDispatchGateService as any)
+      .acknowledgementRecords[0];
+    expect(acknowledgementRecord).toMatchObject({
+      bookingId: booking.bookingId,
+      channel: "ops_console",
+      actorType: "ops_user",
+      actorRef: "ops-user-001",
+    });
+    expect(acknowledgementRecord.acknowledgedAt).not.toBe(
+      "2020-01-01T00:00:00.000Z",
+    );
+
+    const order = (service as any).orders.find(
+      (candidate: { bookingId: string }) =>
+        candidate.bookingId === booking.bookingId,
+    );
+    await (service as any).refreshPassengerDisclosureSnapshot(order);
+    expect(order.passengerDisclosure).toMatchObject({
+      channel: "ops_console",
+      acknowledgementMode: "operator_confirmed_notice",
+    });
   });
 
   it("clears stored disclosure acknowledgements when policy semantics change", async () => {
@@ -3354,6 +3460,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         actorType: "passenger",
         actorRef: "passenger-demo-001",
       },
+      null,
     );
 
     (sandboxDispatchGateService as any).disclosurePolicies = [
