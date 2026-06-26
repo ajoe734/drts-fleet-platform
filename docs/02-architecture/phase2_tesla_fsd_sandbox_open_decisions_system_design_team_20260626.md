@@ -1,7 +1,10 @@
 # Phase 2 Tesla FSD 監理沙盒 — 待決策清單（系統設計團隊）
 
 > 文件基準日：2026-06-26
-> 狀態：**待系統設計團隊裁定**
+> 狀態：✅ **已全部裁決（2026-06-26）：S1=a S2=b S3=a S4=a S5=a S6=b**。
+> 正式回覆與 contracts/DDL/message-catalog 見
+> [`..._open_decisions_s1s6_system_design_response_20260626.md`](./phase2_tesla_fsd_sandbox_open_decisions_s1s6_system_design_response_20260626.md)；
+> 已派 6 個 `P2-DP-S*-001` 任務。下方保留原問題脈絡。
 > 配套（視覺待決策）：[`..._open_decisions_visual_team_20260626.md`](./phase2_tesla_fsd_sandbox_open_decisions_visual_team_20260626.md)
 > 背景：C1–C6 已 ACCEPTED（見 [`..._decision_packet_c1c6_b1b5_20260625.md`](./phase2_tesla_fsd_sandbox_system_design_decision_packet_c1c6_b1b5_20260625.md)）；
 > 後端/契約/UI wave 已派工。本清單只列 **C1–C6 之後仍未拍板的系統設計缺口**（非 B1–B5 外部契約）。

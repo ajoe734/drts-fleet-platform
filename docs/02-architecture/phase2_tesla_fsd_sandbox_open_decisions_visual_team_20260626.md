@@ -1,7 +1,9 @@
 # Phase 2 Tesla FSD 監理沙盒 — 待決策清單（視覺設計團隊）
 
 > 文件基準日：2026-06-26
-> 狀態：**待視覺團隊回覆**
+> 狀態：**系統設計 S1–S6 已回（2026-06-26）→ V1 解鎖、V2 收斂為小 delta**；見
+> [`..._open_decisions_s1s6_system_design_response_20260626.md`](./phase2_tesla_fsd_sandbox_open_decisions_s1s6_system_design_response_20260626.md)。
+> 下方各項已標更新；視覺團隊現在只剩兩個明確動作（V1 版位、V2 panel delta）。
 > 配套（系統設計待決策）：[`..._open_decisions_system_design_team_20260626.md`](./phase2_tesla_fsd_sandbox_open_decisions_system_design_team_20260626.md)
 > 背景：A1–A5 canvas 已交付並歸檔（ROC / Safety Operator / Compliance / Sandbox Governance / Ops fallback），UI build 第二波已派工。
 > 本清單只列**canvas 已交付後仍缺的視覺項目**。**工程端不自行設計 UI**，故下列需視覺團隊出 canvas/delta 才能 build。
@@ -24,22 +26,23 @@
 - 不因 fallback 出現第二張 booking 或加收提示（裁決 C4：`fallbackSurchargeApplied=false`）。
 
 **阻擋**：UI task `P2-UI-OPS-001` 只涵蓋 ops-console 側；passenger/tenant 既有 app 的 fallback 顯示**尚無對應 UI task**，待此 canvas delta 才能開。
-**相依**：實際文案內容（messageCode→文字）與揭露 policy 屬系統設計 [S1]，視覺只需定**版位與狀態切換**，文字由 S1 供。
-**需要回**：上述三個既有 app 的 fallback 狀態 canvas/delta。
+**相依**：✅ **已解鎖** — 系統設計 S1=(a) 已定 message catalog（`P2_AV_FALLBACK_INITIATED_V1` / `_FALLBACK_ASSIGNED_V1` / `_ASSIGNED_NOTICE_V1` / `_INCIDENT_HOLD_NOTICE_V1` 等 baseline messageCode 已有文字）。視覺只需定**版位與狀態切換**，文字 slot 接 `messageCode`，**canvas 不寫死文案**。
+**需要回**：上述三個既有 app 的 fallback 狀態 canvas/delta（現在可直接進場）。
 
 ---
 
-## V2. A6 Regulator / Local Authority Viewer Portal（缺完整 canvas，且先等 S2 拍板）
+## V2. A6 Regulator / Local Authority Viewer Portal ✅ 已收斂（S2=b：不做獨立 portal）
 
-**問題**：原 spec `05_..._spec.md §7` 的「受控管轄調閱 portal」目前 canvas 只有 Compliance 內的 `CMP_Regulator` **片段**，沒有完整的 scoped read-only regulator portal（experiment overview / approved route-time-vehicle-operator / active trips / incident & takeover summary / regulatory reports / evidence bundle request + masking）。
+**裁決（S2=b）**：Phase 2 **不建獨立 regulator portal**，改用 Platform Admin Compliance 的 `CMP_Regulator` panel + controlled export。
+所以視覺團隊**不用出整套新 canvas**，只需把現有 `CMP_Regulator` panel 擴成下列內容（小 delta）：
 
-**先決條件**：原 spec 標此頁為「可選」。**是否納入 Phase 2、歸屬與 scope/masking 規則由系統設計 [S2] 先拍板**。
+> experiment selector、accident case selector、evidence manifest summary、investigation bundle status、
+> regulatory notification status、controlled export button、legal hold indicator、masking mode indicator、
+> access log table、export receipt panel
 
-**需要回（條件式）**：
-- 若 [S2] 決定**做** → 視覺團隊依其 scope 出完整 regulator viewer canvas（建議仍用 Platform Admin governance shell + masking 呈現，與 C1 一致）。
-- 若 [S2] 決定**不做 / 用 `CMP_Regulator` 片段即可** → 視覺團隊無需動作，本項關閉。
-
-**阻擋**：A6 對應的 UI task 尚未派（待 S2）。
+歸屬：仍在 `apps/platform-admin-web` Compliance route group（與 C1 一致）。
+**對應 UI/API task**：`P2-DP-S2-001`（已派工）。
+**需要回**：`CMP_Regulator` panel 的 delta canvas（含上述元件版位）。完整外部 regulator 直連 portal 列 Phase 2.x，本波不做。
 
 ---
 
