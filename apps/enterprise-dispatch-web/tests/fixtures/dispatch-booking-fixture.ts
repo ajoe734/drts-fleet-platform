@@ -81,6 +81,7 @@ export const enterpriseDispatchBookingRecord: BookingRecord = {
   manualFareOverride: null,
   approvalState: "approved",
   approvalRequestIds: [],
+  passengerDisclosure: null,
   complianceGates: [
     {
       gateType: "eligibility",

@@ -78,7 +78,12 @@ describe("OwnedMobilityController tenant booking routes", () => {
         fulfillmentMode: "tesla_av",
         state: "assigned",
         statusCode: "assigned",
-        messages: [{ messageCode: "sandbox_fulfillment.tesla_av_active", category: "info" }],
+        messages: [
+          {
+            messageCode: "sandbox_fulfillment.tesla_av_active",
+            category: "info",
+          },
+        ],
         etaMinutes: 6,
         extraChargeDisclosed: false,
         providerBrandDisclosed: false,
@@ -152,6 +157,85 @@ describe("OwnedMobilityController tenant booking routes", () => {
     );
   });
 
+  it("awaits passenger disclosure acknowledgement before wrapping the API envelope", async () => {
+    const service = {
+      acknowledgePassengerDisclosure: vi.fn().mockResolvedValue({
+        bookingId: "booking-e2e-003",
+        orderId: "order-e2e-003",
+        passengerDisclosure: {
+          policyId: "policy-e2e-001",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          acknowledgedAt: "2026-06-26T06:10:00.000Z",
+        },
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = await controller.acknowledgePassengerDisclosure(
+      "booking-e2e-003",
+      { actorType: "passenger" },
+      null,
+      "tenant-e2e-001",
+      "req-e2e-passenger-ack",
+    );
+
+    expect(response.data).toMatchObject({
+      bookingId: "booking-e2e-003",
+      passengerDisclosure: {
+        policyId: "policy-e2e-001",
+        acknowledgedAt: "2026-06-26T06:10:00.000Z",
+      },
+    });
+    expect(service.acknowledgePassengerDisclosure).toHaveBeenCalledWith(
+      "tenant-e2e-001",
+      "booking-e2e-003",
+      { actorType: "passenger" },
+      null,
+      "req-e2e-passenger-ack",
+    );
+  });
+
+  it("routes ops disclosure acknowledgements through the ops identity path", async () => {
+    const service = {
+      acknowledgePassengerDisclosureFromOps: vi.fn().mockResolvedValue({
+        bookingId: "booking-e2e-ops-001",
+        orderId: "order-e2e-ops-001",
+        passengerDisclosure: {
+          policyId: "policy-e2e-ops-001",
+          channel: "ops_console",
+          acknowledgedAt: "2026-06-26T06:12:00.000Z",
+        },
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+    const identity = {
+      actorType: "ops_user",
+      actorId: "ops-user-001",
+      realm: "ops",
+    } as never;
+
+    const response = await controller.acknowledgePassengerDisclosureFromOps(
+      "booking-e2e-ops-001",
+      { actorType: "passenger" },
+      identity,
+      "req-e2e-ops-passenger-ack",
+    );
+
+    expect(response.data).toMatchObject({
+      bookingId: "booking-e2e-ops-001",
+      passengerDisclosure: {
+        policyId: "policy-e2e-ops-001",
+        channel: "ops_console",
+      },
+    });
+    expect(service.acknowledgePassengerDisclosureFromOps).toHaveBeenCalledWith(
+      "booking-e2e-ops-001",
+      { actorType: "passenger" },
+      identity,
+      "req-e2e-ops-passenger-ack",
+    );
+  });
+
   it("passes includeIneligible through candidate queries before wrapping the API envelope", async () => {
     const service = {
       listDispatchCandidates: vi.fn().mockResolvedValue([
@@ -205,10 +289,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       status: "assigned",
       taskId: "task-e2e-001",
     });
-    expect(service.assignDispatch).toHaveBeenCalledWith(
-      {},
-      "req-e2e-assign",
-    );
+    expect(service.assignDispatch).toHaveBeenCalledWith({}, "req-e2e-assign");
   });
 
   it("awaits dispatch reassignment before wrapping the API envelope", async () => {
