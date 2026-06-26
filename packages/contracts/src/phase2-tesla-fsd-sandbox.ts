@@ -257,6 +257,145 @@ export interface ValidateRouteContainmentResult {
   toleranceMeters: number;
 }
 
+// §3.1.5 Tesla Fleet integration control-plane DTOs
+// ---------------------------------------------------------------------------
+
+export const TESLA_FLEET_REGIONS = [
+  "north_america",
+  "europe_middle_east_africa",
+  "asia_pacific",
+] as const;
+export type TeslaFleetRegion = (typeof TESLA_FLEET_REGIONS)[number];
+
+export const TESLA_OAUTH_CONNECTION_STATUSES = [
+  "active",
+  "revoked",
+  "expired",
+] as const;
+export type TeslaOAuthConnectionStatus =
+  (typeof TESLA_OAUTH_CONNECTION_STATUSES)[number];
+
+export interface TeslaOAuthConnectionRecord {
+  connectionId: string;
+  businessAccountId: string;
+  region: TeslaFleetRegion;
+  scopes: string[];
+  status: TeslaOAuthConnectionStatus;
+  authorizedAt: string;
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
+  lastRefreshedAt: string | null;
+  revokedAt: string | null;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaBeginOAuthCommand {
+  businessAccountId: string;
+  region: TeslaFleetRegion;
+  authorizationCode: string;
+  scopes?: string[];
+}
+
+export interface TeslaRefreshOAuthCommand {
+  connectionId: string;
+  reason?: string | null;
+}
+
+export interface TeslaRevokeOAuthCommand {
+  connectionId: string;
+  reason?: string | null;
+}
+
+export interface TeslaDiscoveredVehicle {
+  vin: string;
+  externalVehicleRef: string;
+  connectionId: string;
+  region: TeslaFleetRegion;
+  model: string;
+  online: boolean;
+  batteryLevelPct: number | null;
+  lastSeenAt: string;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaVehicleBindingRecord {
+  bindingId: string;
+  vehicleId: string;
+  vin: string;
+  externalVehicleRef: string;
+  connectionId: string;
+  region: TeslaFleetRegion;
+  boundAt: string;
+  lastDiscoveredAt: string;
+  source: Phase2SourceMetadata;
+}
+
+export interface BindTeslaVehicleCommand {
+  vehicleId: string;
+  vin: string;
+}
+
+export const TESLA_VIRTUAL_KEY_PAIRING_STATUSES = [
+  "unpaired",
+  "pairing_pending",
+  "paired",
+  "revoked",
+  "failed",
+] as const;
+export type TeslaVirtualKeyPairingStatus =
+  (typeof TESLA_VIRTUAL_KEY_PAIRING_STATUSES)[number];
+
+export interface TeslaVirtualKeyRecord {
+  vehicleId: string;
+  externalVehicleRef: string;
+  status: TeslaVirtualKeyPairingStatus;
+  requestedAt: string;
+  pairedAt: string | null;
+  revokedAt: string | null;
+  requestedBy: string;
+  publicKeyHint: string;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaPairVirtualKeyCommand {
+  vehicleId: string;
+  requestedBy: string;
+}
+
+export const TESLA_TELEMETRY_MODES = ["fleet_api", "public_mock"] as const;
+export type TeslaTelemetryMode = (typeof TESLA_TELEMETRY_MODES)[number];
+
+export interface ConfigureTeslaTelemetryCommand {
+  vehicleId: string;
+  mode: TeslaTelemetryMode;
+  sampleIntervalSec: number;
+  mockOnline?: boolean;
+  mockBatteryLevelPct?: number | null;
+  mockLocation?: GeoPoint | null;
+}
+
+export interface TeslaTelemetryStatusRecord {
+  vehicleId: string;
+  externalVehicleRef: string;
+  mode: TeslaTelemetryMode;
+  sampleIntervalSec: number;
+  enabled: boolean;
+  configuredAt: string;
+  lastSyncAt: string | null;
+  lastProjectionAt: string | null;
+  lastPublicSampleId: string | null;
+  health: "ok" | "stale" | "disabled";
+  source: Phase2SourceMetadata;
+}
+
+export interface IssueTeslaCommandCommand {
+  vehicleId: string;
+  commandType: TeslaRemoteCommandType;
+  issuedBy: string;
+  idempotencyKey?: string;
+  params?: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // §3.2 Remote command receipt (Tesla command bridge)
 // ---------------------------------------------------------------------------
