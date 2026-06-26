@@ -9,7 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3002",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@drts/api-client": "workspace:*",
