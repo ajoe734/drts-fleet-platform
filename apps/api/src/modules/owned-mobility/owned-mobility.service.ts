@@ -2485,23 +2485,37 @@ export class OwnedMobilityService implements OnModuleInit {
   assignDispatch(
     command: AssignDispatchCommand,
     requestId?: string,
+    options?: {
+      suppressPartnerSandboxWebhook?: boolean;
+    },
   ): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
-    return this.createDispatchAssignment(
-      dispatchJob,
-      order,
-      command.vehicleId,
-      command.driverId,
-      command.sandboxDispatchSnapshot ?? null,
-      requestId,
+    return this.afterMaybePromise(
+      this.createDispatchAssignment(
+        dispatchJob,
+        order,
+        command.vehicleId,
+        command.driverId,
+        command.sandboxDispatchSnapshot ?? null,
+        requestId,
+      ),
+      (result) => {
+        if (!options?.suppressPartnerSandboxWebhook) {
+          this.publishPartnerSandboxFulfillmentTransition(order.orderId);
+        }
+        return result;
+      },
     );
   }
 
   reassignDispatch(
     command: ReassignDispatchCommand,
     requestId?: string,
+    options?: {
+      suppressPartnerSandboxWebhook?: boolean;
+    },
   ): any {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
@@ -2537,8 +2551,9 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    const reassignAttemptSequence =
-      this.nextAttemptSequence(dispatchJob.dispatchJobId);
+    const reassignAttemptSequence = this.nextAttemptSequence(
+      dispatchJob.dispatchJobId,
+    );
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -2624,6 +2639,10 @@ export class OwnedMobilityService implements OnModuleInit {
           );
         }
 
+        if (!options?.suppressPartnerSandboxWebhook) {
+          this.publishPartnerSandboxFulfillmentTransition(order.orderId);
+        }
+
         return result;
       },
     );
@@ -2706,6 +2725,7 @@ export class OwnedMobilityService implements OnModuleInit {
             reasonNote: `ROC fallback to human: ${reason}`,
           },
           requestId,
+          { suppressPartnerSandboxWebhook: true },
         )
       : await this.assignDispatch(
           {
@@ -2714,6 +2734,7 @@ export class OwnedMobilityService implements OnModuleInit {
             driverId: humanDriverId,
           },
           requestId,
+          { suppressPartnerSandboxWebhook: true },
         );
 
     const nextOrder = this.requireOrder(orderId);
@@ -2795,6 +2816,7 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     this.publishOrderUpdate(nextOrder, requestId);
+    this.publishPartnerSandboxFulfillmentTransition(orderId, now);
     this.publishLatestDispatchJobUpdate(orderId, requestId);
 
     return {
@@ -3265,10 +3287,23 @@ export class OwnedMobilityService implements OnModuleInit {
       this.cloneOrder(order),
       requestId,
     );
+  }
+
+  private publishPartnerSandboxFulfillmentTransition(
+    orderId: string,
+    occurredAt?: string,
+  ) {
+    const order = this.orders.find(
+      (candidateOrder) => candidateOrder.orderId === orderId,
+    );
+    if (!order) {
+      return;
+    }
+
     this.publishPartnerSandboxFulfillmentWebhook(
       order,
       "partner.sandbox_fulfillment.updated",
-      order.updatedAt,
+      occurredAt ?? order.updatedAt,
     );
   }
 
@@ -3344,6 +3379,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3417,6 +3453,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3464,6 +3501,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3510,6 +3548,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3563,6 +3602,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3785,7 +3825,8 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: null,
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -3831,7 +3872,11 @@ export class OwnedMobilityService implements OnModuleInit {
       | "partner.sandbox_fulfillment.completed",
     occurredAt: string,
   ) {
-    if (!order.tenantId || !order.partnerEntrySlug || !this.tenantPartnerService) {
+    if (
+      !order.tenantId ||
+      !order.partnerEntrySlug ||
+      !this.tenantPartnerService
+    ) {
       return;
     }
 
@@ -4667,7 +4712,10 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAssignmentEligibilityRecheck(
-    order: Pick<OwnedOrderRecord, "orderId" | "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "serviceBucket" | "businessDispatchSubtype"
+    >,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
@@ -4770,7 +4818,11 @@ export class OwnedMobilityService implements OnModuleInit {
     sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     requestId?: string,
   ) {
-    if (!this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(vehicleId)) {
+    if (
+      !this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
+        vehicleId,
+      )
+    ) {
       return;
     }
 
@@ -4815,7 +4867,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
-      : order.businessDispatchSubtype ?? null;
+      : (order.businessDispatchSubtype ?? null);
   }
 
   private buildDispatchAssignmentBundle(
@@ -5508,7 +5560,10 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     audience: SandboxFulfillmentVisibilityAudience,
   ): SandboxFulfillmentProjectionView {
-    const record = this.buildSandboxFulfillmentVisibilityRecord(order, audience);
+    const record = this.buildSandboxFulfillmentVisibilityRecord(
+      order,
+      audience,
+    );
     return {
       bookingId: record.bookingId,
       orderId: record.orderId,
@@ -5566,8 +5621,8 @@ export class OwnedMobilityService implements OnModuleInit {
       latestAssignment?.vehicleId?.startsWith("veh-av") === true ||
       Boolean(
         fallbackTrace &&
-          typeof fallbackTrace.details?.avVehicleId === "string" &&
-          fallbackTrace.details.avVehicleId.startsWith("veh-av"),
+        typeof fallbackTrace.details?.avVehicleId === "string" &&
+        fallbackTrace.details.avVehicleId.startsWith("veh-av"),
       );
     const providerBrandDisclosed =
       audience === "partner" &&
@@ -5592,17 +5647,15 @@ export class OwnedMobilityService implements OnModuleInit {
           ? "completed"
           : order.status === "on_trip"
             ? "in_trip"
-          : order.status === "arrived_pickup"
+            : order.status === "arrived_pickup"
               ? "arrived_pickup"
               : order.status === "enroute_pickup"
                 ? "en_route_pickup"
-                : ["assigned", "driver_accepted"].includes(
-                    order.status,
-                  )
-                ? "assigned"
-                : latestAssignment
+                : ["assigned", "driver_accepted"].includes(order.status)
                   ? "assigned"
-                  : "pending_dispatch";
+                  : latestAssignment
+                    ? "assigned"
+                    : "pending_dispatch";
 
     const reasonCodes: SandboxFulfillmentVisibilityReason[] = [];
     if (fulfillmentMode === "tesla_av") {
@@ -5625,12 +5678,19 @@ export class OwnedMobilityService implements OnModuleInit {
       reasonCodes.push("internal_takeover_redacted");
     }
     reasonCodes.push(
-      providerBrandDisclosed ? "provider_brand_allowed" : "provider_brand_withheld",
+      providerBrandDisclosed
+        ? "provider_brand_allowed"
+        : "provider_brand_withheld",
     );
 
     const messages =
       state === "completed"
-        ? [{ messageCode: "sandbox_fulfillment.trip_completed", category: "info" as const }]
+        ? [
+            {
+              messageCode: "sandbox_fulfillment.trip_completed",
+              category: "info" as const,
+            },
+          ]
         : state === "cancelled"
           ? [
               {
@@ -5667,7 +5727,8 @@ export class OwnedMobilityService implements OnModuleInit {
                   ]
                 : [
                     {
-                      messageCode: "sandbox_fulfillment.status_update_available",
+                      messageCode:
+                        "sandbox_fulfillment.status_update_available",
                       category: "info" as const,
                     },
                   ];
@@ -5824,7 +5885,11 @@ export class OwnedMobilityService implements OnModuleInit {
       return existingDispatchJob;
     }
 
-    const createdDispatch = this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+    const createdDispatch = this.dispatchOrder(
+      orderId,
+      { mode: "auto" },
+      requestId,
+    );
     return this.requireDispatchJob(createdDispatch.dispatchJobId);
   }
 
