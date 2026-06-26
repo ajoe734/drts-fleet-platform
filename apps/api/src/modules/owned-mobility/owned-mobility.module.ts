@@ -8,6 +8,7 @@ import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-regi
 import { ServiceProductModule } from "../service-product/service-product.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { TeslaRegulatoryEventsModule } from "../tesla-regulatory-events/tesla-regulatory-events.module";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
@@ -21,6 +22,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     RegulatoryRegistryModule,
     ServiceProductModule,
     VehicleEligibilityModule,
+    TeslaRegulatoryEventsModule,
     AuditNotificationModule,
     CallcenterModule,
     forwardRef(() => TenantPartnerModule),

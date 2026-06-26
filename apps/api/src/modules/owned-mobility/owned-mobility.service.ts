@@ -78,6 +78,7 @@ import {
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { TeslaRegulatoryEventsService } from "../tesla-regulatory-events/tesla-regulatory-events.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import {
@@ -250,6 +251,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly eventEmitter?: EventEmitter2,
     @Optional()
     private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
+    @Optional()
+    private readonly teslaRegulatoryEventsService?: TeslaRegulatoryEventsService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -308,6 +311,24 @@ export class OwnedMobilityService implements OnModuleInit {
   ) {
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
+    const requestedVehicleVin = command.requestedVehicleVin?.trim() || null;
+    if (requestedVehicleVin) {
+      if (!this.teslaRegulatoryEventsService) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "PHASE2_PROVIDER_UNAVAILABLE",
+          "Tesla capability service is unavailable for the requested VIN.",
+          {
+            requestedVehicleVin,
+          },
+          true,
+        );
+      }
+
+      this.teslaRegulatoryEventsService.assertPassengerServiceEligible(
+        requestedVehicleVin,
+      );
+    }
 
     const now = new Date().toISOString();
     const etaSnapshot: EtaSnapshot = {
@@ -357,7 +378,7 @@ export class OwnedMobilityService implements OnModuleInit {
       bookedBy: null,
       onsiteContact: null,
       costCenter: null,
-      vehiclePreference: null,
+      vehiclePreference: requestedVehicleVin,
       benefitReference: null,
       direction: null,
       flightNo: null,
@@ -2418,10 +2439,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(
-    command: AssignDispatchCommand,
-    requestId?: string,
-  ): any {
+  assignDispatch(command: AssignDispatchCommand, requestId?: string): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2434,10 +2452,7 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  reassignDispatch(
-    command: ReassignDispatchCommand,
-    requestId?: string,
-  ): any {
+  reassignDispatch(command: ReassignDispatchCommand, requestId?: string): any {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2472,8 +2487,9 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    const reassignAttemptSequence =
-      this.nextAttemptSequence(dispatchJob.dispatchJobId);
+    const reassignAttemptSequence = this.nextAttemptSequence(
+      dispatchJob.dispatchJobId,
+    );
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -3502,7 +3518,8 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: null,
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -4336,7 +4353,10 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAssignmentEligibilityRecheck(
-    order: Pick<OwnedOrderRecord, "orderId" | "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "serviceBucket" | "businessDispatchSubtype"
+    >,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
@@ -4442,7 +4462,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
-      : order.businessDispatchSubtype ?? null;
+      : (order.businessDispatchSubtype ?? null);
   }
 
   private buildDispatchAssignmentBundle(
