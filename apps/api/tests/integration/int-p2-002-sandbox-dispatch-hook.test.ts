@@ -462,4 +462,109 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       providerBrandDisclosed: false,
     });
   });
+
+  it("preserves completed AV visibility for partner sandbox fulfillment projections", async () => {
+    const { ownedMobilityService, cleanup } = createHarness();
+    cleanups.push(cleanup);
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Route Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Route End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Rider Six", phone: "0912000005" },
+      },
+      "tenant-demo-001",
+    );
+    (ownedMobilityService as any).orders[0].partnerEntrySlug = "partner-entry-001";
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    const assignment = await ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+      sandboxDispatchSnapshot: {
+        entitlement: {
+          active: true,
+        },
+        candidateRoute: {
+          type: "MultiLineString",
+          coordinates: [
+            [
+              [121.522, 25.044],
+              [121.526, 25.047],
+              [121.529, 25.05],
+              [121.533, 25.054],
+            ],
+          ],
+        },
+        providerCapabilities: {
+          av_dispatch: true,
+          telemetry_stream: true,
+          regulatory_event_feed: true,
+          evidence_recorder: true,
+          odd_geofence: true,
+          minimal_risk_condition: true,
+        },
+        telemetry: {
+          stale: false,
+          minimalRiskConditionActive: false,
+          socPercent: 80,
+          currentTripCount: 0,
+          odometerKm: 25_000,
+        },
+        regulatory: {
+          approvalFresh: true,
+          vehicleCertified: true,
+        },
+        recorder: {
+          healthy: true,
+        },
+      },
+    });
+
+    ownedMobilityService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-06-26T14:05:00.000Z",
+    });
+    ownedMobilityService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-06-26T14:08:00.000Z",
+    });
+    ownedMobilityService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-06-26T14:12:00.000Z",
+    });
+    ownedMobilityService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-06-26T14:15:00.000Z",
+    });
+    ownedMobilityService.completeDriverTask(assignment.taskId, {
+      completedAt: "2026-06-26T14:35:00.000Z",
+      actualDistanceKm: 8.5,
+      actualDurationSec: 1200,
+      proof: {
+        photos: ["cHJvb2YtcGhvdG8tMDAx"],
+      },
+    });
+
+    expect(
+      ownedMobilityService.getPartnerSandboxFulfillment(
+        "partner-entry-001",
+        booking.bookingId,
+      ),
+    ).toMatchObject({
+      sandboxTripId: null,
+      fulfillmentMode: "tesla_av",
+      state: "completed",
+      statusCode: "completed",
+      providerBrandDisclosed: true,
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.trip_completed",
+          category: "info",
+        },
+      ],
+    });
+  });
 });

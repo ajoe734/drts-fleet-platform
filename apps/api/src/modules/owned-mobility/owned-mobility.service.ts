@@ -5622,8 +5622,13 @@ export class OwnedMobilityService implements OnModuleInit {
     const hasFallback =
       order.complianceFlags.includes("sandbox_human_fallback") ||
       fallbackTrace !== undefined;
+    const latestVisibleAssignment =
+      latestAssignment &&
+      !["rejected", "expired"].includes(latestAssignment.status)
+        ? latestAssignment
+        : null;
     const hasAvAssignment =
-      activeAssignment?.vehicleId?.startsWith("veh-av") === true ||
+      latestVisibleAssignment?.vehicleId?.startsWith("veh-av") === true ||
       Boolean(
         fallbackTrace &&
         typeof fallbackTrace.details?.avVehicleId === "string" &&

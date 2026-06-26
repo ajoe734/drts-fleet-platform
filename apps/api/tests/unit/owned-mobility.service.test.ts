@@ -3507,6 +3507,122 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(partnerCalls[0]?.[1].data.orderId).toBe(booking.orderId);
   });
 
+  it("preserves AV fulfillment visibility after trip completion", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "veh-av-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000005" },
+        partnerEntrySlug: "partner-entry-003",
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-001",
+      driverId: "driver-001",
+    });
+
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-06-26T14:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-06-26T14:08:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-06-26T14:12:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-06-26T14:15:00.000Z",
+    });
+    service.completeDriverTask(assignment.taskId, {
+      completedAt: "2026-06-26T14:35:00.000Z",
+      actualDistanceKm: 8.5,
+      actualDurationSec: 1200,
+      proof: {
+        photos: [SAMPLE_PROOF_PHOTO],
+      },
+    });
+
+    expect(
+      service.getTenantSandboxFulfillment("tenant-demo-001", booking.bookingId),
+    ).toMatchObject({
+      fulfillmentMode: "tesla_av",
+      state: "completed",
+      statusCode: "completed",
+      sandboxTripId: null,
+      providerBrandDisclosed: false,
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.trip_completed",
+          category: "info",
+        },
+      ],
+    });
+    expect(
+      service.getPartnerSandboxFulfillment(
+        "partner-entry-003",
+        booking.bookingId,
+      ),
+    ).toMatchObject({
+      fulfillmentMode: "tesla_av",
+      state: "completed",
+      statusCode: "completed",
+      sandboxTripId: null,
+      providerBrandDisclosed: true,
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.trip_completed",
+          category: "info",
+        },
+      ],
+    });
+  });
+
   it("rejects duplicate completion requests after the trip is already completed", () => {
     const { service } = createOwnedMobilityService({
       candidates: [
