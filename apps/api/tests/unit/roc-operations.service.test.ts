@@ -284,6 +284,187 @@ describe("RocOperationsService", () => {
     );
   });
 
+  it("keeps the safety report correlation id on manual links when source ids disagree", async () => {
+    const {
+      accidentInvestigationService,
+      identity,
+      rocOperationsService,
+      safetyOperatorService,
+      assignmentId,
+      shiftId,
+    } = await buildServices();
+
+    const takeover = await safetyOperatorService.submitTakeoverReport(
+      {
+        clientGeneratedReportId: "client-report-003b",
+        safetyOperatorId: "safe-op-001",
+        vehicleId: "veh-safe-001",
+        orderId: "ord-safe-001",
+        sandboxProgramId: "sandbox-demo-001",
+        shiftId,
+        assignmentId,
+        correlationId: "corr-safe-003b",
+        trigger: "vehicle_alert",
+        reasonCode: "other",
+        disposition: "trip_ended",
+        fsdResumed: false,
+        bookmarkId: null,
+        incidentId: null,
+        evidenceArtifactIds: [],
+        notes: "Manual correlation keeps safety correlation id.",
+        occurredAt: "2026-06-26T04:00:00.000Z",
+      },
+      identity,
+    );
+
+    rocOperationsService.recordTeslaAutonomyTransitionEvent(
+      buildTeslaEvent({
+        eventId: "tesla-event-003b",
+        takeoverCorrelationId: "corr-tesla-003b",
+        occurredAt: "2026-06-26T04:00:30.000Z",
+        source: buildSource(
+          "tesla_fleet_api",
+          "tesla-event-003b",
+          "2026-06-26T04:00:30.000Z",
+        ),
+      }),
+    );
+    rocOperationsService.recordRocTakeoverResponseRecord(
+      buildRocResponse({
+        responseId: "roc-response-003b",
+        takeoverCorrelationId: "corr-roc-003b",
+        triggeredByTeslaEventId: "tesla-event-003b",
+        requestedAt: "2026-06-26T04:00:40.000Z",
+        respondedAt: "2026-06-26T04:01:00.000Z",
+        source: buildSource(
+          "roc_operator",
+          "roc-response-003b",
+          "2026-06-26T04:00:40.000Z",
+        ),
+      }),
+    );
+    rocOperationsService.createManualTakeoverCorrelation({
+      manualLinkId: "manual-link-003b",
+      vehicleId: "veh-safe-001",
+      takeoverReportId: takeover.report.reportId,
+      teslaEventId: "tesla-event-003b",
+      rocResponseId: "roc-response-003b",
+      linkedBy: "reviewer-001",
+      linkedAt: "2026-06-26T04:02:00.000Z",
+      note: "Manual review tied mismatched sources together.",
+    });
+
+    const snapshot =
+      accidentInvestigationService.rebuildTakeoverCorrelationSnapshot();
+
+    expect(snapshot.cases[0]?.takeoverCorrelationId).toBe("corr-safe-003b");
+    expect(snapshot.discrepancies[0]?.sourceFacts).toEqual(
+      expect.objectContaining({
+        teslaTakeoverCorrelationId: "corr-tesla-003b",
+        safetyTakeoverCorrelationId: "corr-safe-003b",
+        rocTakeoverCorrelationId: "corr-roc-003b",
+      }),
+    );
+  });
+
+  it("chooses the nearest priority 2 records inside the time window instead of insertion order", async () => {
+    const {
+      accidentInvestigationService,
+      identity,
+      rocOperationsService,
+      safetyOperatorService,
+      assignmentId,
+      shiftId,
+    } = await buildServices();
+
+    await safetyOperatorService.submitTakeoverReport(
+      {
+        clientGeneratedReportId: "client-report-002b",
+        safetyOperatorId: "safe-op-001",
+        vehicleId: "veh-safe-001",
+        orderId: "ord-safe-001",
+        sandboxProgramId: "sandbox-demo-001",
+        shiftId,
+        assignmentId,
+        correlationId: "corr-safe-002b",
+        trigger: "vehicle_alert",
+        reasonCode: "sensor_fault",
+        disposition: "remote_assist",
+        fsdResumed: false,
+        bookmarkId: null,
+        incidentId: null,
+        evidenceArtifactIds: [],
+        notes: "Priority 2 nearest-match selection.",
+        occurredAt: "2026-06-26T03:04:00.000Z",
+      },
+      identity,
+    );
+
+    rocOperationsService.recordTeslaAutonomyTransitionEvent(
+      buildTeslaEvent({
+        eventId: "tesla-event-002b-far",
+        takeoverCorrelationId: null,
+        occurredAt: "2026-06-26T03:09:00.000Z",
+        source: buildSource(
+          "tesla_fleet_api",
+          "tesla-event-002b-far",
+          "2026-06-26T03:09:00.000Z",
+        ),
+      }),
+    );
+    rocOperationsService.recordTeslaAutonomyTransitionEvent(
+      buildTeslaEvent({
+        eventId: "tesla-event-002b-near",
+        takeoverCorrelationId: null,
+        occurredAt: "2026-06-26T03:04:10.000Z",
+        source: buildSource(
+          "tesla_fleet_api",
+          "tesla-event-002b-near",
+          "2026-06-26T03:04:10.000Z",
+        ),
+      }),
+    );
+    rocOperationsService.recordRocTakeoverResponseRecord(
+      buildRocResponse({
+        responseId: "roc-response-002b-far",
+        takeoverCorrelationId: null,
+        triggeredByTeslaEventId: "tesla-event-002b-far",
+        requestedAt: "2026-06-26T03:08:30.000Z",
+        respondedAt: "2026-06-26T03:08:50.000Z",
+        source: buildSource(
+          "roc_operator",
+          "roc-response-002b-far",
+          "2026-06-26T03:08:30.000Z",
+        ),
+      }),
+    );
+    rocOperationsService.recordRocTakeoverResponseRecord(
+      buildRocResponse({
+        responseId: "roc-response-002b-near",
+        takeoverCorrelationId: null,
+        triggeredByTeslaEventId: "tesla-event-002b-near",
+        requestedAt: "2026-06-26T03:04:20.000Z",
+        respondedAt: "2026-06-26T03:04:40.000Z",
+        source: buildSource(
+          "roc_operator",
+          "roc-response-002b-near",
+          "2026-06-26T03:04:20.000Z",
+        ),
+      }),
+    );
+
+    const cases = accidentInvestigationService.listCorrelatedTakeoverCases();
+
+    expect(cases[0]).toEqual(
+      expect.objectContaining({
+        sourceRecordIds: expect.objectContaining({
+          teslaEventId: "tesla-event-002b-near",
+          rocTakeoverResponseId: "roc-response-002b-near",
+        }),
+      }),
+    );
+  });
+
   it("supports priority 3 manual links and emits discrepancy cases without overwriting source facts", async () => {
     const {
       accidentInvestigationService,
