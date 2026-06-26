@@ -322,6 +322,32 @@ describe("SandboxDispatchGateService", () => {
 
   it("persists release audit data on the same decision record", async () => {
     const repository = {
+      loadDecisionById: vi.fn().mockResolvedValue({
+        decision: {
+          decisionId: "dec-existing-001",
+          orderId: "order-av-005c",
+          dispatchJobId: "job-av-005c",
+          vehicleId: "veh-av-005c",
+          sandboxProgramId: "sandbox-program-001",
+          decision: "block",
+          oddInBounds: false,
+          hardReasonCodes: ["REGULATORY_APPROVAL_MISSING"],
+          softReasonCodes: [],
+          requiredSafetyOperatorId: null,
+          policyVersion: "phase2-evd-001",
+          evaluatedAt: "2026-06-26T00:00:00.000Z",
+        },
+        evaluationSnapshot: {
+          orderId: "order-av-005c",
+          dispatchJobId: "job-av-005c",
+          vehicleId: "veh-av-005c",
+          sandboxProgramId: "sandbox-program-001",
+          policyVersion: "phase2-evd-001",
+          entitlement: { active: false },
+        },
+        releaseAudit: null,
+      }),
+      loadLatestDecision: vi.fn(),
       persistEvaluation: vi.fn().mockResolvedValue(undefined),
       reportPersistenceFailure: vi.fn(),
     } as never;
@@ -342,24 +368,90 @@ describe("SandboxDispatchGateService", () => {
         actorId: "ops-002",
         actorType: "ops_user",
         reason: "Persist release audit on existing decision",
+        decisionId: "dec-existing-001",
       },
     );
 
-    expect(repository.persistEvaluation).toHaveBeenCalledTimes(2);
-    const [evaluationInsert, releaseUpdate] = repository.persistEvaluation.mock.calls;
-    expect(releaseUpdate[0]).toMatchObject({
-      decision: expect.objectContaining({
-        decisionId: evaluationInsert[0].decision.decisionId,
+    expect(repository.loadDecisionById).toHaveBeenCalledWith("dec-existing-001");
+    expect(repository.loadLatestDecision).not.toHaveBeenCalled();
+    expect(repository.persistEvaluation).toHaveBeenCalledTimes(1);
+    expect(repository.persistEvaluation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: expect.objectContaining({
+          decisionId: "dec-existing-001",
+        }),
+        evaluationSnapshot: expect.objectContaining({
+          entitlement: { active: false },
+        }),
+        releaseAudit: expect.objectContaining({
+          actorId: "ops-002",
+          actorType: "ops_user",
+          reason: "Persist release audit on existing decision",
+          decisionId: "dec-existing-001",
+        }),
       }),
-      releaseAudit: expect.objectContaining({
-        actorId: "ops-002",
-        actorType: "ops_user",
-        reason: "Persist release audit on existing decision",
-      }),
-    });
-    expect(result.releaseAudit.decisionId).toBe(
-      evaluationInsert[0].decision.decisionId,
     );
+    expect(result.decision).toMatchObject({
+      decisionId: "dec-existing-001",
+    });
+    expect(result.releaseAudit.decisionId).toBe("dec-existing-001");
+  });
+
+  it("falls back to the latest stored decision when manual release omits decisionId", async () => {
+    const repository = {
+      loadDecisionById: vi.fn(),
+      loadLatestDecision: vi.fn().mockResolvedValue({
+        decision: {
+          decisionId: "dec-existing-002",
+          orderId: "order-av-005d",
+          dispatchJobId: "job-av-005d",
+          vehicleId: "veh-av-005d",
+          sandboxProgramId: "sandbox-program-001",
+          decision: "defer",
+          oddInBounds: false,
+          hardReasonCodes: [],
+          softReasonCodes: ["SAFETY_OPERATOR_UNAVAILABLE"],
+          requiredSafetyOperatorId: null,
+          policyVersion: "phase2-evd-001",
+          evaluatedAt: "2026-06-26T00:00:00.000Z",
+        },
+        evaluationSnapshot: {
+          orderId: "order-av-005d",
+          dispatchJobId: "job-av-005d",
+          vehicleId: "veh-av-005d",
+          sandboxProgramId: "sandbox-program-001",
+          policyVersion: "phase2-evd-001",
+          entitlement: { active: true },
+        },
+        releaseAudit: null,
+      }),
+      persistEvaluation: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as never;
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      repository,
+    );
+
+    const result = await gate.recordManualRelease(
+      {
+        orderId: "order-av-005d",
+        vehicleId: "veh-av-005d",
+        sandboxProgramId: "sandbox-program-001",
+        policyVersion: "phase2-evd-001",
+      },
+      {
+        actorId: "ops-003",
+        actorType: "ops_user",
+        reason: "Persist release audit on latest decision",
+      },
+    );
+
+    expect(repository.loadDecisionById).not.toHaveBeenCalled();
+    expect(repository.loadLatestDecision).toHaveBeenCalledWith("order-av-005d");
+    expect(repository.persistEvaluation).toHaveBeenCalledTimes(1);
+    expect(result.releaseAudit.decisionId).toBe("dec-existing-002");
   });
 
   it("blocks assignment gating when the booking path is missing", async () => {

@@ -18,6 +18,7 @@ import { SandboxDispatchGateRepository } from "./sandbox-dispatch-gate.repositor
 import type {
   SandboxDispatchGateInput,
   SandboxDispatchManualReleaseCommand,
+  SandboxDispatchStoredEvaluationRecord,
 } from "./sandbox-dispatch-gate.types";
 import { SANDBOX_DISPATCH_ERROR_CODE_MAP } from "./sandbox-dispatch-gate.types";
 
@@ -158,19 +159,26 @@ export class SandboxDispatchGateService {
     command: SandboxDispatchManualReleaseCommand,
     requestId?: string,
   ) {
-    const decision = await this.evaluateDispatch(input, requestId);
+    const existingRecord = await this.loadManualReleaseDecision(
+      input.orderId,
+      command.decisionId ?? null,
+    );
+    const decisionRecord =
+      existingRecord ??
+      (await this.createManualReleaseDecisionBaseline(input, requestId));
+    const decision = this.cloneDecision(decisionRecord.decision);
     const releaseAudit = {
       actorId: command.actorId,
       actorType: command.actorType ?? "ops_user",
       reason: command.reason,
-      decisionId: command.decisionId ?? decision.decisionId,
+      decisionId: decision.decisionId,
       releasedAt: new Date().toISOString(),
     };
 
     this.persistEvaluation(
       {
         decision,
-        evaluationSnapshot: this.normalizeInput(input, decision.evaluatedAt),
+        evaluationSnapshot: decisionRecord.evaluationSnapshot,
         releaseAudit,
       },
       "manual_release",
@@ -183,7 +191,7 @@ export class SandboxDispatchGateService {
         moduleName: "sandbox-dispatch-gate",
         actionName: "manual_release",
         resourceType: "sandbox_dispatch_decision",
-        resourceId: command.decisionId ?? decision.decisionId,
+        resourceId: decision.decisionId,
         newValuesSummary: {
           orderId: decision.orderId,
           dispatchJobId: decision.dispatchJobId,
@@ -197,7 +205,7 @@ export class SandboxDispatchGateService {
     );
 
     return {
-      decision: this.cloneDecision(decision),
+      decision,
       manualReleaseRecorded: true,
       releaseAudit,
     };
@@ -808,5 +816,35 @@ export class SandboxDispatchGateService {
   ) {
     const payload = requestId ? { ...input, requestId } : input;
     this.auditNotificationService?.recordAuditLog(payload);
+  }
+
+  private async loadManualReleaseDecision(
+    orderId: string,
+    decisionId: string | null,
+  ) {
+    if (!this.repository) {
+      return null;
+    }
+
+    if (decisionId) {
+      const record = await this.repository.loadDecisionById(decisionId);
+      if (record) {
+        return record;
+      }
+    }
+
+    return this.repository.loadLatestDecision(orderId);
+  }
+
+  private async createManualReleaseDecisionBaseline(
+    input: SandboxDispatchGateInput,
+    requestId?: string,
+  ): Promise<SandboxDispatchStoredEvaluationRecord> {
+    const decision = await this.evaluateDispatch(input, requestId);
+    return {
+      decision,
+      evaluationSnapshot: this.normalizeInput(input, decision.evaluatedAt),
+      releaseAudit: null,
+    };
   }
 }

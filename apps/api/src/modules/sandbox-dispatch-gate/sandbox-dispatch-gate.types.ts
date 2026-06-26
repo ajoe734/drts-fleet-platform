@@ -96,6 +96,11 @@ export interface SandboxDispatchEvaluationRecord {
   releaseAudit?: Record<string, unknown> | null;
 }
 
+export interface SandboxDispatchStoredEvaluationRecord
+  extends SandboxDispatchEvaluationRecord {
+  releaseAudit: Record<string, unknown> | null;
+}
+
 export interface SandboxDispatchManualReleaseCommand {
   actorId: string;
   actorType?: "ops_user" | "system";

@@ -3,7 +3,10 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { SandboxDispatchDecision } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
-import type { SandboxDispatchEvaluationRecord } from "./sandbox-dispatch-gate.types";
+import type {
+  SandboxDispatchEvaluationRecord,
+  SandboxDispatchStoredEvaluationRecord,
+} from "./sandbox-dispatch-gate.types";
 
 type JsonRecordRow = {
   decision_id: string;
@@ -105,7 +108,30 @@ export class SandboxDispatchGateRepository {
       return null;
     }
 
-    return row;
+    return this.mapStoredEvaluation(row);
+  }
+
+  async loadDecisionById(decisionId: string) {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT *
+        FROM av_sandbox.sandbox_dispatch_decisions
+        WHERE decision_id = $1
+        LIMIT 1
+      `,
+      [decisionId],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return this.mapStoredEvaluation(row);
   }
 
   reportPersistenceFailure(error: unknown, context: string) {
@@ -113,5 +139,33 @@ export class SandboxDispatchGateRepository {
     this.logger.warn(
       `Sandbox dispatch persistence skipped during ${context}: ${detail}`,
     );
+  }
+
+  private mapStoredEvaluation(
+    row: JsonRecordRow,
+  ): SandboxDispatchStoredEvaluationRecord {
+    return {
+      decision: {
+        decisionId: row.decision_id,
+        orderId: row.order_id,
+        dispatchJobId: row.dispatch_job_id,
+        vehicleId: row.vehicle_id,
+        sandboxProgramId: row.sandbox_program_id,
+        decision: row.decision,
+        oddInBounds: row.odd_in_bounds,
+        hardReasonCodes: [...row.hard_reason_codes] as SandboxDispatchStoredEvaluationRecord["decision"]["hardReasonCodes"],
+        softReasonCodes: [...row.soft_reason_codes] as SandboxDispatchStoredEvaluationRecord["decision"]["softReasonCodes"],
+        requiredSafetyOperatorId: row.required_safety_operator_id,
+        policyVersion: row.policy_version,
+        evaluatedAt: row.evaluated_at,
+      },
+      evaluationSnapshot:
+        (row.evaluation_snapshot as SandboxDispatchStoredEvaluationRecord["evaluationSnapshot"]) ??
+        {},
+      releaseAudit:
+        row.release_audit && typeof row.release_audit === "object"
+          ? (row.release_audit as Record<string, unknown>)
+          : null,
+    };
   }
 }
