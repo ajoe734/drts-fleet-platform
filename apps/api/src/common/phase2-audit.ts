@@ -64,7 +64,7 @@ function sanitizeAuditSummary(
   if (!sanitized || typeof sanitized !== "object" || Array.isArray(sanitized)) {
     return undefined;
   }
-  return sanitized;
+  return sanitized as Record<string, unknown>;
 }
 
 function isAmendmentEvent(eventName: Phase2AuditEventName) {
@@ -108,8 +108,9 @@ export function emitPhase2AuditEvent(
   input: EmitPhase2AuditEventInput,
 ) {
   const summaries = buildAuditSummary(input.eventName, input.summary);
-
-  return sink.recordAuditLog({
+  const auditInput: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
+    requestId?: string;
+  } = {
     actorId: input.context.actorId,
     actorType: input.context.actorType,
     tenantId: input.context.tenantId,
@@ -117,7 +118,17 @@ export function emitPhase2AuditEvent(
     actionName: input.eventName,
     resourceType: input.resourceType,
     resourceId: input.resourceId,
-    requestId: input.context.requestId,
-    ...summaries,
-  });
+  };
+
+  if (input.context.requestId) {
+    auditInput.requestId = input.context.requestId;
+  }
+  if (summaries.oldValuesSummary) {
+    auditInput.oldValuesSummary = summaries.oldValuesSummary;
+  }
+  if (summaries.newValuesSummary) {
+    auditInput.newValuesSummary = summaries.newValuesSummary;
+  }
+
+  return sink.recordAuditLog(auditInput);
 }

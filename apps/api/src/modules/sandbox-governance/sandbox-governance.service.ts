@@ -12,7 +12,10 @@ import {
   PHASE2_PROVIDER_CAPABILITIES,
 } from "@drts/contracts";
 
-import { toActionReceipt } from "../../common/action-receipt";
+import {
+  toActionReceipt,
+  type ActionReceiptEnvelopeInput,
+} from "../../common/action-receipt";
 import { emitPhase2AuditEvent } from "../../common/phase2-audit";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 
@@ -109,16 +112,20 @@ export class SandboxGovernanceService {
       },
     });
 
-    const receipt = toActionReceipt({
+    const receiptInput: ActionReceiptEnvelopeInput = {
       auditLog,
-      actionId: command.auditContext.requestId,
       resourceType: "provider_capability_requirement",
       resourceId: requirement.requirementId,
       message:
         existingIndex >= 0
           ? "Provider capability requirement amended."
           : "Provider capability requirement configured.",
-    });
+    };
+    if (command.auditContext.requestId) {
+      receiptInput.actionId = command.auditContext.requestId;
+    }
+
+    const receipt = toActionReceipt(receiptInput);
 
     return {
       requirement,
