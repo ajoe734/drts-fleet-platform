@@ -3352,7 +3352,10 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       opsIdentity,
     );
 
-    expect(booking.passengerDisclosure).toMatchObject({
+    expect(
+      service.getTenantBooking("tenant-demo-001", booking.bookingId)
+        .passengerDisclosure,
+    ).toMatchObject({
       channel: "ops_console",
       policyId: "policy-test-av-ops",
       requiresAcknowledgement: true,

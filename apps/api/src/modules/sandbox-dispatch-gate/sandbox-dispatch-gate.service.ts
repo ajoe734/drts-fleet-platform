@@ -574,7 +574,7 @@ export class SandboxDispatchGateService {
   private normalizeInput(
     input: SandboxDispatchGateInput,
     evaluatedAt: string,
-  ): SandboxDispatchGateInput & {
+  ): Omit<SandboxDispatchGateInput, "passengerDisclosure"> & {
     dispatchJobId: string | null;
     operatingArea: {
       inBounds: boolean;
@@ -638,16 +638,44 @@ export class SandboxDispatchGateService {
       maxOdometerKm: number;
     };
     passengerDisclosure: {
-      channel: PassengerDisclosureChannel | null;
+      channel: PassengerDisclosureChannel;
       policyId: string | null;
       policyVersion: string | null;
       messageCode: string | null;
       requiresAcknowledgement: boolean;
+      acknowledgementMode:
+        | PassengerDisclosureRequirementSnapshot["acknowledgementMode"]
+        | null;
       acknowledgedAt: string | null;
+      acknowledgementRecordId: string | null;
     };
     requestedAt: string;
   } {
     const telemetryQualityGate = resolveTeslaTelemetryQualityGateScore();
+    const passengerDisclosure: {
+      channel: PassengerDisclosureChannel;
+      policyId: string | null;
+      policyVersion: string | null;
+      messageCode: string | null;
+      requiresAcknowledgement: boolean;
+      acknowledgementMode:
+        | PassengerDisclosureRequirementSnapshot["acknowledgementMode"]
+        | null;
+      acknowledgedAt: string | null;
+      acknowledgementRecordId: string | null;
+    } = {
+      channel: input.passengerDisclosure?.channel ?? "tenant_portal",
+      policyId: input.passengerDisclosure?.policyId ?? null,
+      policyVersion: input.passengerDisclosure?.policyVersion ?? null,
+      messageCode: input.passengerDisclosure?.messageCode ?? null,
+      requiresAcknowledgement:
+        input.passengerDisclosure?.requiresAcknowledgement === true,
+      acknowledgementMode:
+        input.passengerDisclosure?.acknowledgementMode ?? null,
+      acknowledgedAt: input.passengerDisclosure?.acknowledgedAt ?? null,
+      acknowledgementRecordId:
+        input.passengerDisclosure?.acknowledgementRecordId ?? null,
+    };
     return {
       ...input,
       dispatchJobId: input.dispatchJobId ?? null,
@@ -720,15 +748,7 @@ export class SandboxDispatchGateService {
         maxConcurrentTrips: input.limits?.maxConcurrentTrips ?? null,
         maxOdometerKm: input.limits?.maxOdometerKm ?? DEFAULT_MAX_ODOMETER_KM,
       },
-      passengerDisclosure: {
-        channel: input.passengerDisclosure?.channel ?? null,
-        policyId: input.passengerDisclosure?.policyId ?? null,
-        policyVersion: input.passengerDisclosure?.policyVersion ?? null,
-        messageCode: input.passengerDisclosure?.messageCode ?? null,
-        requiresAcknowledgement:
-          input.passengerDisclosure?.requiresAcknowledgement === true,
-        acknowledgedAt: input.passengerDisclosure?.acknowledgedAt ?? null,
-      },
+      passengerDisclosure,
     };
   }
 
