@@ -6,7 +6,7 @@
 - Parent: `P2-DP-S1-001`
 - Owner: `Codex2`
 - Reviewer: `Codex`
-- Audit timestamp: `2026-06-26T11:14:00Z`
+- Audit timestamp: `2026-06-26T11:24:00Z`
 - Canonical machine-truth root:
   `/home/edna/workspace/drts-fleet-platform`
 - Assigned helper worktree:
@@ -43,9 +43,10 @@ not by missing disclosure-policy code.
    `origin/codex2/p2-dp-s1-001-final @ eac1fbf3d`. Both avoid the
    `P2-UI-OPS-001` files, but neither is the branch currently referenced by the
    blocked parent task.
-6. The helper branch for this unblock task was created correctly from
-   `origin/dev @ 5bdb8c636`, so the history problem is isolated to the parent
-   branch and not to the helper worktree itself.
+6. The helper branch for this unblock task has since advanced to
+   `cdb9b29a6` on both local and `origin`, while its merge-base with
+   `origin/dev @ 5bdb8c636` remains clean. The history problem is therefore
+   isolated to the parent branch and not to the helper worktree itself.
 
 ## Evidence
 
@@ -63,8 +64,10 @@ not by missing disclosure-policy code.
 - `origin/codex2/p2-dp-s1-001 @ 7af85c58ae792a71098b3b3e5bf39e21357e764f`
 - `origin/codex2/p2-dp-s1-001-final @ eac1fbf3df857f302481c0c437870a7b56a2d4eb`
 - `origin/codex2/p2-dp-s1-001-closeout @ aba1ba32111368c264af87b3b8dc4dde16010f3a`
-- helper branch
-  `codex2/p2-dp-s1-001-unblock-history-repair @ 5bdb8c63697e384d415db44579beb7c6c06d2ec7`
+- helper branch (local + origin)
+  `codex2/p2-dp-s1-001-unblock-history-repair @ cdb9b29a60b8b7195fd8cee4f11411aee0dc46ce`
+- `git merge-base --all codex2/p2-dp-s1-001-unblock-history-repair origin/dev`
+  returns `5bdb8c63697e384d415db44579beb7c6c06d2ec7`
 - `git rev-list --left-right --count origin/dev...codex2/p2-dp-s1-001`
   returns `0 11`
 - `git rev-list --left-right --count origin/dev...codex2/p2-dp-s1-001-final`
