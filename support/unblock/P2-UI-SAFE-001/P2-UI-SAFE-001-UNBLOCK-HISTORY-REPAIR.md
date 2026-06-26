@@ -25,7 +25,7 @@ owner handoff unless it is documented explicitly.
    `codex/p2-ui-safe-001-unblock-history-repair` was created from `origin/dev`
    at `2026-06-26 15:07:34 +0000`, and even after this repair it still does not
    contain the parent branch commit `6aaabef9f`. This task pushes the helper
-   branch only as diagnosis evidence (`acf22c968439f4b547ed1960238cf0ac0424b11e`);
+   branch only as diagnosis evidence with task-local commits above `origin/dev`;
    it is not a replay of the parent branch.
 3. The helper branch currently points at the same SHA as unrelated local refs
    `codex/p2-corr-001` and `codex/p2-safe-001`, which makes branch-name-only
@@ -60,17 +60,16 @@ owner handoff unless it is documented explicitly.
 
 ### Helper rail
 
-- local + remote
-  `codex/p2-ui-safe-001-unblock-history-repair @ acf22c968439f4b547ed1960238cf0ac0424b11e`
+- local + remote `codex/p2-ui-safe-001-unblock-history-repair`
 - `git reflog show codex/p2-ui-safe-001-unblock-history-repair`
   records: `branch: Created from origin/dev`
 - `git merge-base origin/dev codex/p2-ui-safe-001-unblock-history-repair`
   returns `6c974f05044001e7aeb2ca59f5384a5ae781192c`
-- `git log --oneline 6c974f050..acf22c968` shows only the helper diagnosis
-  commit:
-  `acf22c968 P2-UI-SAFE-001-UNBLOCK-HISTORY-REPAIR: document parent resume rail`
+- `git log --oneline origin/dev..origin/codex/p2-ui-safe-001-unblock-history-repair`
+  shows only task-local helper commits with subject prefix
+  `P2-UI-SAFE-001-UNBLOCK-HISTORY-REPAIR:`
 - `git ls-remote --heads origin 'refs/heads/codex/p2-ui-safe-001-unblock-history-repair'`
-  returns `acf22c968439f4b547ed1960238cf0ac0424b11e`
+  returns exactly one remote ref under that branch name
 - `gh pr view 932 --json number,title,state,isDraft,headRefName,baseRefName,url`
   shows an open draft PR from `codex/p2-ui-safe-001-unblock-history-repair` to
   `dev`
@@ -122,9 +121,9 @@ defect:
 
 1. The true parent rail is the pushed remote branch
    `origin/codex/p2-ui-safe-001 @ 6aaabef9f`, but the currently assigned helper
-   worktree sits on `codex/p2-ui-safe-001-unblock-history-repair @ acf22c968`,
-   which contains only the helper diagnosis commit on top of `origin/dev` and
-   does not replay the parent branch commit.
+   worktree sits on `codex/p2-ui-safe-001-unblock-history-repair`, which
+   contains only helper diagnosis commits on top of `origin/dev` and does not
+   replay the parent branch commit.
 2. Multiple same-family local refs (`codex/p2-corr-001`, `codex/p2-safe-001`,
    and the helper branch) all resolve to the same unrelated `origin/dev` SHA,
    so a worker can easily continue on the wrong branch by name alone.
@@ -144,9 +143,8 @@ Do not force-push, amend, or rename any shared branch.
    It already contains the blocker note and is the only pushed branch with
    parent-specific content.
 2. Treat `codex/p2-ui-safe-001-unblock-history-repair` as a helper-only
-   diagnosis branch. This task pushes only the history-repair artifact there
-   (`acf22c968`) and opens helper draft PR `#932`; do not add feature work on
-   that rail.
+   diagnosis branch. This task pushes only history-repair commits there and
+   opens helper draft PR `#932`; do not add feature work on that rail.
 3. Leave stale local refs such as `codex/p2-safe-001 @ 6c974f050` untouched for
    now. They are noise, but deleting or renaming them is not required to resume
    the parent safely.
@@ -210,7 +208,7 @@ but its next actionable step must point at the correct rail:
   - `git ls-remote --heads origin 'refs/heads/codex/p2-ui-safe-001' 'refs/heads/codex/p2-ui-safe-001-unblock-history-repair' 'refs/heads/codex/p2-safe-001' 'refs/heads/codex/p2-corr-001'`
   - `git reflog show --date=iso codex/p2-ui-safe-001-unblock-history-repair`
   - `git merge-base origin/dev codex/p2-ui-safe-001-unblock-history-repair`
-  - `git log --oneline 6c974f050..acf22c968`
+  - `git log --oneline origin/dev..origin/codex/p2-ui-safe-001-unblock-history-repair`
   - `git rev-list --left-right --count origin/dev...origin/codex/p2-ui-safe-001`
   - `git merge-base origin/dev origin/codex/p2-ui-safe-001`
   - `git log --oneline 6c974f050..6aaabef9f`
