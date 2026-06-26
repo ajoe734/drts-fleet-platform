@@ -174,13 +174,21 @@ export class TeslaTelemetryService {
       payload.capturedAt,
       "capturedAt",
     );
-    const tracker = this.getOrCreateTracker({
-      providerCode,
-      feedKind,
-      externalVehicleRef,
-      sessionId,
-      vehicleId: "vehicleId" in payload ? payload.vehicleId : null,
-    });
+    const tracker =
+      (await this.getOrLoadTracker({
+        providerCode,
+        feedKind,
+        externalVehicleRef,
+        sessionId,
+        vehicleId: "vehicleId" in payload ? payload.vehicleId : null,
+      })) ??
+      this.getOrCreateTracker({
+        providerCode,
+        feedKind,
+        externalVehicleRef,
+        sessionId,
+        vehicleId: "vehicleId" in payload ? payload.vehicleId : null,
+      });
     const supportedSchemas =
       SUPPORTED_SCHEMA_VERSIONS[feedKind] ?? new Set<string>();
     const schemaSupported = supportedSchemas.has(context.schemaVersion);
@@ -317,6 +325,7 @@ export class TeslaTelemetryService {
     feedKind: TeslaTelemetryFeedKind;
     externalVehicleRef: string;
     sessionId: string | null;
+    vehicleId?: string | null;
   }) {
     const key = this.trackerKey(
       input.providerCode,
@@ -326,6 +335,9 @@ export class TeslaTelemetryService {
     );
     const existing = this.trackers.get(key);
     if (existing) {
+      if (!existing.vehicleId && input.vehicleId) {
+        existing.vehicleId = input.vehicleId;
+      }
       return existing;
     }
 
@@ -400,6 +412,9 @@ export class TeslaTelemetryService {
     };
 
     this.trackers.set(key, tracker);
+    if (!tracker.vehicleId && input.vehicleId) {
+      tracker.vehicleId = input.vehicleId;
+    }
     return tracker;
   }
 

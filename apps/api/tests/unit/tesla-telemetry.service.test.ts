@@ -434,6 +434,92 @@ describe("TeslaTelemetryService", () => {
     });
   });
 
+  it("reloads persisted tracker state during ingest after restart so later gaps are still detected", async () => {
+    const repository = new TeslaTelemetryRepository();
+    const firstService = new TeslaTelemetryService(repository);
+
+    await firstService.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-restart-gap-001",
+        externalVehicleRef: "VIN-RESTART-GAP-001",
+        capturedAt: "2026-06-26T18:00:00.000Z",
+        location: { lat: 25.11, lng: 121.61 },
+        speedMps: 7,
+        headingDeg: 88,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 77,
+        batteryRangeKm: 276,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-restart-gap-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-restart-gap",
+        receivedAt: "2026-06-26T18:00:00.000Z",
+      },
+    );
+
+    const restartedService = new TeslaTelemetryService(repository);
+    const receipt = await restartedService.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-restart-gap-001",
+        externalVehicleRef: "VIN-RESTART-GAP-001",
+        capturedAt: "2026-06-26T18:00:05.000Z",
+        location: { lat: 25.111, lng: 121.611 },
+        speedMps: 9,
+        headingDeg: 91,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 76,
+        batteryRangeKm: 275,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-restart-gap-003",
+        sequenceNo: 3,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-restart-gap",
+        receivedAt: "2026-06-26T18:00:05.000Z",
+      },
+    );
+
+    expect(receipt).toMatchObject({
+      providerHealthState: "healthy",
+      dispatchHold: false,
+      backfillRequired: false,
+    });
+
+    const health = await restartedService.getProviderHealth({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-RESTART-GAP-001",
+      sessionId: "drive-session-restart-gap",
+      asOf: "2026-06-26T18:01:06.000Z",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "gap_detected",
+      latestEventId: "veh-state-restart-gap-003",
+      latestSequenceNo: 3,
+      latestContiguousSequenceNo: 1,
+      missingSequences: [2],
+      backfillRequestedAt: "2026-06-26T18:01:06.000Z",
+    });
+    expect(restartedService.listBackfillQueries()).toEqual([
+      expect.objectContaining({
+        vin: "VIN-RESTART-GAP-001",
+        from: "2026-06-26T18:00:00.000Z",
+        to: "2026-06-26T18:01:06.000Z",
+        sessionId: "drive-session-restart-gap",
+        eventId: "veh-state-restart-gap-003",
+        sequenceAfter: 1,
+      }),
+    ]);
+  });
+
   it("clears stale heartbeat issues after fresh telemetry arrives", async () => {
     const { service } = buildService();
 
