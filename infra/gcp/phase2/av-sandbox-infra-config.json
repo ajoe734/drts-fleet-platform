@@ -1,0 +1,147 @@
+{
+  "configVersion": "2026-06-26",
+  "scope": "repo-local planning only",
+  "phase": "phase2-tesla-fsd-sandbox-202606",
+  "gcp": {
+    "projectVariable": "PHASE2_AV_GCP_PROJECT_ID",
+    "regionVariable": "PHASE2_AV_GCP_REGION",
+    "storageBuckets": [
+      {
+        "name": "raw-provider-events",
+        "versioning": true,
+        "retentionDays": 30,
+        "objectHoldMode": "none",
+        "retentionLock": false,
+        "cmekKey": "provider-events",
+        "purpose": "Immutable raw Tesla/provider payload intake before normalization."
+      },
+      {
+        "name": "telemetry-archive",
+        "versioning": true,
+        "retentionDays": 365,
+        "objectHoldMode": "none",
+        "retentionLock": false,
+        "cmekKey": "telemetry-archive",
+        "purpose": "Normalized telemetry, state snapshots, and replay material."
+      },
+      {
+        "name": "video-normal",
+        "versioning": true,
+        "retentionDays": 30,
+        "objectHoldMode": "none",
+        "retentionLock": false,
+        "cmekKey": "video-normal",
+        "purpose": "Routine in-vehicle video clips with standard retention."
+      },
+      {
+        "name": "video-incident-locked",
+        "versioning": true,
+        "retentionDays": 2555,
+        "objectHoldMode": "default-event-based-hold",
+        "retentionLock": false,
+        "cmekKey": "video-incident-locked",
+        "purpose": "Incident-linked clips under legal/investigation hold."
+      },
+      {
+        "name": "investigation-bundles",
+        "versioning": true,
+        "retentionDays": 2555,
+        "objectHoldMode": "default-event-based-hold",
+        "retentionLock": false,
+        "cmekKey": "investigation-bundles",
+        "purpose": "Evidence manifests, bundle zips, checksum ledgers, and restore reports."
+      },
+      {
+        "name": "regulatory-reports",
+        "versioning": true,
+        "retentionDays": 2555,
+        "objectHoldMode": "none",
+        "retentionLock": true,
+        "cmekKey": "regulatory-reports",
+        "purpose": "Submitted regulator reports, attestations, and signed exports."
+      }
+    ],
+    "pubsubTopics": [
+      {
+        "name": "provider-events-ingest",
+        "ordering": true,
+        "retentionDays": 7,
+        "deadLetterTopic": "provider-events-dead-letter",
+        "purpose": "Raw provider event fan-out into validation/normalization."
+      },
+      {
+        "name": "telemetry-normalized",
+        "ordering": true,
+        "retentionDays": 7,
+        "deadLetterTopic": "telemetry-normalized-dead-letter",
+        "purpose": "Validated telemetry feed for downstream consumers."
+      },
+      {
+        "name": "video-ingest",
+        "ordering": true,
+        "retentionDays": 7,
+        "deadLetterTopic": "video-ingest-dead-letter",
+        "purpose": "Clip upload, checksum seal, and evidence-link orchestration."
+      },
+      {
+        "name": "evidence-manifest-created",
+        "ordering": true,
+        "retentionDays": 14,
+        "deadLetterTopic": "evidence-manifest-dead-letter",
+        "purpose": "Manifest verification and investigation bundle assembly."
+      },
+      {
+        "name": "regulatory-report-requested",
+        "ordering": true,
+        "retentionDays": 14,
+        "deadLetterTopic": "regulatory-report-dead-letter",
+        "purpose": "Regulator export generation and approval workflow."
+      },
+      {
+        "name": "dr-restore-verify",
+        "ordering": false,
+        "retentionDays": 14,
+        "purpose": "Restore drill orchestration and manifest verification."
+      }
+    ],
+    "kms": {
+      "keyRingName": "drts-phase2-av-<env>",
+      "location": "asia-east1",
+      "rotationPeriodDays": {
+        "provider-events": 90,
+        "telemetry-archive": 90,
+        "video-normal": 90,
+        "video-incident-locked": 60,
+        "investigation-bundles": 60,
+        "regulatory-reports": 60
+      }
+    },
+    "secretManager": [
+      {
+        "name": "tesla-fleet-api-client-id",
+        "mountAs": "TESLA_FLEET_API_CLIENT_ID",
+        "usedBy": ["api-runtime", "tesla-sync-worker"]
+      },
+      {
+        "name": "tesla-fleet-api-client-secret",
+        "mountAs": "TESLA_FLEET_API_CLIENT_SECRET",
+        "usedBy": ["api-runtime", "tesla-sync-worker"]
+      },
+      {
+        "name": "tesla-fleet-api-private-key",
+        "mountAs": "TESLA_FLEET_API_PRIVATE_KEY",
+        "usedBy": ["api-runtime", "tesla-command-worker"]
+      },
+      {
+        "name": "av-webhook-shared-secret",
+        "mountAs": "AV_WEBHOOK_SHARED_SECRET",
+        "usedBy": ["api-runtime", "provider-ingest-worker"]
+      },
+      {
+        "name": "av-evidence-signing-secret",
+        "mountAs": "AV_EVIDENCE_SIGNING_SECRET",
+        "usedBy": ["api-runtime", "evidence-bundle-worker"]
+      }
+    ]
+  }
+}
