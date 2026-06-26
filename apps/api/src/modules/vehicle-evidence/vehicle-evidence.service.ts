@@ -43,7 +43,6 @@ import type {
   SegmentIndexEntry,
   SegmentIndexQuery,
   SegmentUploadStatus,
-  VehicleEvidenceAccessAction,
   VehicleEvidenceAccessLogEntry,
   VehicleEvidenceArtifactRecord,
 } from "./vehicle-evidence.ports";
