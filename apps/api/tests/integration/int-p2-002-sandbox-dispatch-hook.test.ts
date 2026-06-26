@@ -22,7 +22,9 @@ function createHarness() {
   const eventEmitter = new EventEmitter2();
   const auditNotificationService = new AuditNotificationService();
   const opsDispatchEventsService = new OpsDispatchEventsService(eventEmitter);
-  const driverProfileService = new DriverProfileService(auditNotificationService);
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
+  );
   const regulatoryRegistryRepository = {
     isEnabled: () => true,
     upsertDriverLocation: async () => true,
@@ -61,6 +63,33 @@ function createHarness() {
     vehicleEvidenceService,
     sandboxGovernanceService,
   );
+  (sandboxDispatchGateService as any).disclosurePolicies = [
+    {
+      policyId: "policy-test-av-001",
+      policyVersion: "test-v1",
+      tenantId: "tenant-demo-001",
+      businessDispatchSubtype: "enterprise_dispatch",
+      partnerEntrySlug: null,
+      active: true,
+      channelRules: [
+        {
+          channel: "tenant_portal",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          requiresAcknowledgement: false,
+          acknowledgementMode: "operator_confirmed_notice",
+        },
+        {
+          channel: "partner_portal",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          requiresAcknowledgement: false,
+          acknowledgementMode: "operator_confirmed_notice",
+        },
+      ],
+      createdAt: "2026-06-26T00:00:00.000Z",
+      updatedAt: "2026-06-26T00:00:00.000Z",
+    },
+  ];
+  (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
     auditNotificationService,
@@ -78,6 +107,7 @@ function createHarness() {
 
   return {
     ownedMobilityService,
+    sandboxDispatchGateService,
     regulatoryRegistryService,
     cleanup: async () => {
       await taskEventsService.onModuleDestroy();
@@ -96,7 +126,7 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
   });
 
   it("fails closed before assignment when an AV candidate lacks sandbox evidence", async () => {
-    const { ownedMobilityService, regulatoryRegistryService, cleanup } =
+    const { ownedMobilityService, sandboxDispatchGateService, cleanup } =
       createHarness();
     cleanups.push(cleanup);
 
@@ -106,11 +136,20 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
         reservationWindowStart: "2026-06-26T14:00:00.000Z",
         reservationWindowEnd: "2026-06-26T15:00:00.000Z",
         pickup: { address: "Taipei 101", lat: 25.0338, lng: 121.5646 },
-        dropoff: { address: "Taipei Main Station", lat: 25.0478, lng: 121.5170 },
+        dropoff: { address: "Taipei Main Station", lat: 25.0478, lng: 121.517 },
         passenger: { name: "Rider One", phone: "0912000000" },
       },
       "tenant-demo-001",
     );
+    const disclosure =
+      await sandboxDispatchGateService.resolvePassengerDisclosureForBooking({
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        channel: "tenant_portal",
+      });
+    expect(disclosure).not.toBeNull();
+    (ownedMobilityService as any).orders[0].passengerDisclosure = disclosure;
     const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
@@ -131,8 +170,23 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
   });
 
   it("allows assignment when governance, operator, booking window, route, and recorder facts align", async () => {
-    const { ownedMobilityService, cleanup } = createHarness();
+    const { ownedMobilityService, sandboxDispatchGateService, cleanup } =
+      createHarness();
     cleanups.push(cleanup);
+    await sandboxDispatchGateService.upsertPassengerDisclosurePolicy({
+      policyId: "policy-test-av-allow-001",
+      policyVersion: "test-v1",
+      tenantId: "tenant-demo-001",
+      businessDispatchSubtype: "enterprise_dispatch",
+      channelRules: [
+        {
+          channel: "tenant_portal",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          requiresAcknowledgement: false,
+          acknowledgementMode: "operator_confirmed_notice",
+        },
+      ],
+    });
 
     const booking = await ownedMobilityService.createTenantBooking(
       {
@@ -145,6 +199,15 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       },
       "tenant-demo-001",
     );
+    const disclosure =
+      await sandboxDispatchGateService.resolvePassengerDisclosureForBooking({
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        channel: "tenant_portal",
+      });
+    expect(disclosure).not.toBeNull();
+    (ownedMobilityService as any).orders[0].passengerDisclosure = disclosure;
     const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
@@ -194,9 +257,154 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
     });
 
     expect(assignment.status).toBe("assigned");
-    expect(ownedMobilityService.getDriverTask(assignment.taskId)).toMatchObject({
-      vehicleId: "veh-av-demo-001",
-      driverId: "safety-op-001",
+    expect(ownedMobilityService.getDriverTask(assignment.taskId)).toMatchObject(
+      {
+        vehicleId: "veh-av-demo-001",
+        driverId: "safety-op-001",
+      },
+    );
+  });
+
+  it("requires a passenger acknowledgement before AV assignment when the configured policy demands it", async () => {
+    const { ownedMobilityService, sandboxDispatchGateService, cleanup } =
+      createHarness();
+    cleanups.push(cleanup);
+    await sandboxDispatchGateService.upsertPassengerDisclosurePolicy({
+      policyId: "policy-test-av-ack-001",
+      policyVersion: "test-v1",
+      tenantId: "tenant-demo-001",
+      businessDispatchSubtype: "enterprise_dispatch",
+      channelRules: [
+        {
+          channel: "tenant_portal",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          requiresAcknowledgement: true,
+          acknowledgementMode: "per_booking_checkbox",
+        },
+      ],
+    });
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Route Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Route End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Rider Ack", phone: "0912000099" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    await expect(
+      ownedMobilityService.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId: "veh-av-demo-001",
+        driverId: "safety-op-001",
+        sandboxDispatchSnapshot: {
+          entitlement: {
+            active: true,
+          },
+          candidateRoute: {
+            type: "MultiLineString",
+            coordinates: [
+              [
+                [121.522, 25.044],
+                [121.526, 25.047],
+                [121.529, 25.05],
+                [121.533, 25.054],
+              ],
+            ],
+          },
+          providerCapabilities: {
+            av_dispatch: true,
+            telemetry_stream: true,
+            regulatory_event_feed: true,
+            evidence_recorder: true,
+            odd_geofence: true,
+            minimal_risk_condition: true,
+          },
+          telemetry: {
+            stale: false,
+            minimalRiskConditionActive: false,
+            socPercent: 80,
+            currentTripCount: 0,
+            odometerKm: 25_000,
+          },
+          regulatory: {
+            approvalFresh: true,
+            vehicleCertified: true,
+          },
+          recorder: {
+            healthy: true,
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "SANDBOX_PASSENGER_ACKNOWLEDGEMENT_REQUIRED",
+        },
+      },
+    });
+
+    const updatedBooking =
+      await ownedMobilityService.acknowledgePassengerDisclosure(
+        "tenant-demo-001",
+        booking.bookingId,
+        { actorType: "passenger", actorRef: "rider-ack-001" },
+      );
+    expect(updatedBooking.passengerDisclosure?.acknowledgedAt).toBeTruthy();
+
+    await expect(
+      ownedMobilityService.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId: "veh-av-demo-001",
+        driverId: "safety-op-001",
+        sandboxDispatchSnapshot: {
+          entitlement: {
+            active: true,
+          },
+          candidateRoute: {
+            type: "MultiLineString",
+            coordinates: [
+              [
+                [121.522, 25.044],
+                [121.526, 25.047],
+                [121.529, 25.05],
+                [121.533, 25.054],
+              ],
+            ],
+          },
+          providerCapabilities: {
+            av_dispatch: true,
+            telemetry_stream: true,
+            regulatory_event_feed: true,
+            evidence_recorder: true,
+            odd_geofence: true,
+            minimal_risk_condition: true,
+          },
+          telemetry: {
+            stale: false,
+            minimalRiskConditionActive: false,
+            socPercent: 80,
+            currentTripCount: 0,
+            odometerKm: 25_000,
+          },
+          regulatory: {
+            approvalFresh: true,
+            vehicleCertified: true,
+          },
+          recorder: {
+            healthy: true,
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      status: "assigned",
     });
   });
 
@@ -284,7 +492,8 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       },
       "tenant-demo-001",
     );
-    (ownedMobilityService as any).orders[0].partnerEntrySlug = "partner-entry-001";
+    (ownedMobilityService as any).orders[0].partnerEntrySlug =
+      "partner-entry-001";
     const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
@@ -370,7 +579,8 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       },
       "tenant-demo-001",
     );
-    (ownedMobilityService as any).orders[0].partnerEntrySlug = "partner-entry-001";
+    (ownedMobilityService as any).orders[0].partnerEntrySlug =
+      "partner-entry-001";
     const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
@@ -478,7 +688,8 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       },
       "tenant-demo-001",
     );
-    (ownedMobilityService as any).orders[0].partnerEntrySlug = "partner-entry-001";
+    (ownedMobilityService as any).orders[0].partnerEntrySlug =
+      "partner-entry-001";
     const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });

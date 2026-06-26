@@ -33,6 +33,7 @@ import type {
   ReassignDispatchCommand,
   RedispatchOrderCommand,
   RejectExceptionOverrideCommand,
+  RecordPassengerAcknowledgementCommand,
   RequestExceptionOverrideCommand,
   SandboxFulfillmentVisibilityAudience,
   ResolveExceptionHoldCommand,
@@ -255,6 +256,44 @@ export class OwnedMobilityController {
       this.ownedMobilityService.getTenantSandboxFulfillment(
         this.requireTenantId(tenantId),
         bookingId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/bookings/:bookingId/passenger-disclosure-acknowledgement")
+  async acknowledgePassengerDisclosure(
+    @Param("bookingId") bookingId: string,
+    @Body() command: RecordPassengerAcknowledgementCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.acknowledgePassengerDisclosure(
+        this.requireTenantId(tenantId),
+        bookingId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/bookings/:bookingId/passenger-disclosure-acknowledgement")
+  async acknowledgePassengerDisclosureFromOps(
+    @Param("bookingId") bookingId: string,
+    @Body() command: RecordPassengerAcknowledgementCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.acknowledgePassengerDisclosureFromOps(
+        bookingId,
+        command,
+        identity,
+        requestId,
       ),
       requestId,
     );
