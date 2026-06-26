@@ -268,4 +268,198 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       },
     });
   });
+
+  it("builds tenant and partner sandbox fulfillment projections without exposing internal reasons", async () => {
+    const { ownedMobilityService, cleanup } = createHarness();
+    cleanups.push(cleanup);
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Route Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Route End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Rider Four", phone: "0912000003" },
+      },
+      "tenant-demo-001",
+    );
+    (ownedMobilityService as any).orders[0].partnerEntrySlug = "partner-entry-001";
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    await ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+      sandboxDispatchSnapshot: {
+        entitlement: {
+          active: true,
+        },
+        candidateRoute: {
+          type: "MultiLineString",
+          coordinates: [
+            [
+              [121.522, 25.044],
+              [121.526, 25.047],
+              [121.529, 25.05],
+              [121.533, 25.054],
+            ],
+          ],
+        },
+        providerCapabilities: {
+          av_dispatch: true,
+          telemetry_stream: true,
+          regulatory_event_feed: true,
+          evidence_recorder: true,
+          odd_geofence: true,
+          minimal_risk_condition: true,
+        },
+        telemetry: {
+          stale: false,
+          minimalRiskConditionActive: false,
+          socPercent: 80,
+          currentTripCount: 0,
+          odometerKm: 25_000,
+        },
+        regulatory: {
+          approvalFresh: true,
+          vehicleCertified: true,
+        },
+        recorder: {
+          healthy: true,
+        },
+      },
+    });
+
+    const tenantProjection = ownedMobilityService.getTenantSandboxFulfillment(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    const partnerProjection = ownedMobilityService.getPartnerSandboxFulfillment(
+      "partner-entry-001",
+      booking.bookingId,
+    );
+
+    expect(tenantProjection).toMatchObject({
+      audience: "tenant",
+      fulfillmentMode: "tesla_av",
+      providerBrandDisclosed: false,
+    });
+    expect(partnerProjection).toMatchObject({
+      audience: "partner",
+      providerBrandDisclosed: true,
+    });
+    expect(tenantProjection).not.toHaveProperty("reasonCodes");
+    expect(partnerProjection).not.toHaveProperty("reasonCodes");
+  });
+
+  it("returns sandbox fulfillment to pending_dispatch after a rejected AV assignment", async () => {
+    const { ownedMobilityService, cleanup } = createHarness();
+    cleanups.push(cleanup);
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Route Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Route End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Rider Five", phone: "0912000004" },
+      },
+      "tenant-demo-001",
+    );
+    (ownedMobilityService as any).orders[0].partnerEntrySlug = "partner-entry-001";
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    const assignment = await ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+      sandboxDispatchSnapshot: {
+        entitlement: {
+          active: true,
+        },
+        candidateRoute: {
+          type: "MultiLineString",
+          coordinates: [
+            [
+              [121.522, 25.044],
+              [121.526, 25.047],
+              [121.529, 25.05],
+              [121.533, 25.054],
+            ],
+          ],
+        },
+        providerCapabilities: {
+          av_dispatch: true,
+          telemetry_stream: true,
+          regulatory_event_feed: true,
+          evidence_recorder: true,
+          odd_geofence: true,
+          minimal_risk_condition: true,
+        },
+        telemetry: {
+          stale: false,
+          minimalRiskConditionActive: false,
+          socPercent: 80,
+          currentTripCount: 0,
+          odometerKm: 25_000,
+        },
+        regulatory: {
+          approvalFresh: true,
+          vehicleCertified: true,
+        },
+        recorder: {
+          healthy: true,
+        },
+      },
+    });
+
+    ownedMobilityService.rejectDriverTask(assignment.taskId, {
+      reasonCode: "driver_rejected",
+      reasonNote: "Operator requested reassignment",
+    });
+
+    expect(
+      ownedMobilityService.getTenantSandboxFulfillment(
+        "tenant-demo-001",
+        booking.bookingId,
+      ),
+    ).toMatchObject({
+      sandboxTripId: null,
+      fulfillmentMode: "hidden",
+      state: "pending_dispatch",
+      statusCode: "redispatch_required",
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.status_update_available",
+          category: "info",
+        },
+      ],
+      providerBrandDisclosed: false,
+    });
+
+    expect(
+      ownedMobilityService.getPartnerSandboxFulfillment(
+        "partner-entry-001",
+        booking.bookingId,
+      ),
+    ).toMatchObject({
+      sandboxTripId: null,
+      fulfillmentMode: "hidden",
+      state: "pending_dispatch",
+      statusCode: "redispatch_required",
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.status_update_available",
+          category: "info",
+        },
+      ],
+      providerBrandDisclosed: false,
+    });
+  });
 });

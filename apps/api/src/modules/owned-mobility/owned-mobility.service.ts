@@ -56,6 +56,10 @@ import type {
   ResolveExceptionHoldCommand,
   RocFallbackToHumanCommand,
   RocFallbackTrigger,
+  SandboxFulfillmentProjectionView,
+  SandboxFulfillmentVisibilityAudience,
+  SandboxFulfillmentVisibilityReason,
+  SandboxFulfillmentVisibilityRecord,
   TenantApprovalEvaluationInputSnapshot,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
@@ -799,6 +803,11 @@ export class OwnedMobilityService implements OnModuleInit {
         requestId,
       );
       this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
+      this.publishPartnerSandboxFulfillmentWebhook(
+        order,
+        "partner.sandbox_fulfillment.updated",
+        order.createdAt,
+      );
       this.opsDispatchEventsService?.publishOrderCreated(
         this.cloneOrder(order),
         requestId,
@@ -1009,6 +1018,30 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.mapOrderToBooking(
       this.requireBookingOrder(bookingId, tenantId),
     );
+  }
+
+  getTenantSandboxFulfillment(tenantId: string, bookingId: string) {
+    this.assertNonBlank(tenantId, "tenantId");
+    return this.mapSandboxFulfillmentProjection(
+      this.requireBookingOrder(bookingId, tenantId),
+      "tenant",
+    );
+  }
+
+  getPartnerSandboxFulfillment(partnerEntrySlug: string, bookingId: string) {
+    this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
+    const order = this.requireBookingOrder(bookingId);
+    if (order.partnerEntrySlug !== partnerEntrySlug) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+        {
+          bookingId,
+        },
+      );
+    }
+    return this.mapSandboxFulfillmentProjection(order, "partner");
   }
 
   async approveTenantBookingApprovalRequest(
@@ -1986,6 +2019,11 @@ export class OwnedMobilityService implements OnModuleInit {
         cancelledAt: order.cancelledAt,
         cancelReason: order.cancelReason,
       });
+      this.publishPartnerSandboxFulfillmentWebhook(
+        order,
+        "partner.sandbox_fulfillment.updated",
+        now,
+      );
       this.publishLatestDispatchJobUpdate(orderId, requestId);
 
       return this.cloneOrder(order);
@@ -2447,23 +2485,37 @@ export class OwnedMobilityService implements OnModuleInit {
   assignDispatch(
     command: AssignDispatchCommand,
     requestId?: string,
+    options?: {
+      suppressPartnerSandboxWebhook?: boolean;
+    },
   ): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
-    return this.createDispatchAssignment(
-      dispatchJob,
-      order,
-      command.vehicleId,
-      command.driverId,
-      command.sandboxDispatchSnapshot ?? null,
-      requestId,
+    return this.afterMaybePromise(
+      this.createDispatchAssignment(
+        dispatchJob,
+        order,
+        command.vehicleId,
+        command.driverId,
+        command.sandboxDispatchSnapshot ?? null,
+        requestId,
+      ),
+      (result) => {
+        if (!options?.suppressPartnerSandboxWebhook) {
+          this.publishPartnerSandboxFulfillmentTransition(order.orderId);
+        }
+        return result;
+      },
     );
   }
 
   reassignDispatch(
     command: ReassignDispatchCommand,
     requestId?: string,
+    options?: {
+      suppressPartnerSandboxWebhook?: boolean;
+    },
   ): any {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
@@ -2499,8 +2551,9 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    const reassignAttemptSequence =
-      this.nextAttemptSequence(dispatchJob.dispatchJobId);
+    const reassignAttemptSequence = this.nextAttemptSequence(
+      dispatchJob.dispatchJobId,
+    );
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -2586,6 +2639,10 @@ export class OwnedMobilityService implements OnModuleInit {
           );
         }
 
+        if (!options?.suppressPartnerSandboxWebhook) {
+          this.publishPartnerSandboxFulfillmentTransition(order.orderId);
+        }
+
         return result;
       },
     );
@@ -2668,6 +2725,7 @@ export class OwnedMobilityService implements OnModuleInit {
             reasonNote: `ROC fallback to human: ${reason}`,
           },
           requestId,
+          { suppressPartnerSandboxWebhook: true },
         )
       : await this.assignDispatch(
           {
@@ -2676,6 +2734,7 @@ export class OwnedMobilityService implements OnModuleInit {
             driverId: humanDriverId,
           },
           requestId,
+          { suppressPartnerSandboxWebhook: true },
         );
 
     const nextOrder = this.requireOrder(orderId);
@@ -2757,6 +2816,7 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     this.publishOrderUpdate(nextOrder, requestId);
+    this.publishPartnerSandboxFulfillmentTransition(orderId, now);
     this.publishLatestDispatchJobUpdate(orderId, requestId);
 
     return {
@@ -2934,6 +2994,11 @@ export class OwnedMobilityService implements OnModuleInit {
       cancelledAt: order.cancelledAt,
       cancelReason: order.cancelReason,
     });
+    this.publishPartnerSandboxFulfillmentWebhook(
+      order,
+      "partner.sandbox_fulfillment.updated",
+      now,
+    );
     if (task) {
       this.ownedMobilityTaskEventsService.publishTaskCancelled(
         task,
@@ -3224,6 +3289,24 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
+  private publishPartnerSandboxFulfillmentTransition(
+    orderId: string,
+    occurredAt?: string,
+  ) {
+    const order = this.orders.find(
+      (candidateOrder) => candidateOrder.orderId === orderId,
+    );
+    if (!order) {
+      return;
+    }
+
+    this.publishPartnerSandboxFulfillmentWebhook(
+      order,
+      "partner.sandbox_fulfillment.updated",
+      occurredAt ?? order.updatedAt,
+    );
+  }
+
   private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
     const dispatchJob = this.dispatchJobs.find(
       (job) => job.orderId === orderId,
@@ -3296,6 +3379,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3369,6 +3453,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3416,6 +3501,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3462,6 +3548,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3515,6 +3602,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishPartnerSandboxFulfillmentTransition(order.orderId);
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
@@ -3683,6 +3771,11 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       assignmentId: assignment.assignmentId,
     });
+    this.publishPartnerSandboxFulfillmentWebhook(
+      order,
+      "partner.sandbox_fulfillment.completed",
+      now,
+    );
     this.publishCompletedTripSettlementEvent(order, task);
     this.ownedMobilityTaskEventsService.publishTaskUpdated(
       task,
@@ -3732,7 +3825,8 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: null,
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -3766,6 +3860,42 @@ export class OwnedMobilityService implements OnModuleInit {
           createdAt: order.createdAt,
           updatedAt: order.updatedAt,
           ...extraData,
+        },
+      })
+      .catch(() => undefined);
+  }
+
+  private publishPartnerSandboxFulfillmentWebhook(
+    order: OwnedOrderRecord,
+    eventType:
+      | "partner.sandbox_fulfillment.updated"
+      | "partner.sandbox_fulfillment.completed",
+    occurredAt: string,
+  ) {
+    if (
+      !order.tenantId ||
+      !order.partnerEntrySlug ||
+      !this.tenantPartnerService
+    ) {
+      return;
+    }
+
+    const projection = this.mapSandboxFulfillmentProjection(order, "partner");
+    void this.tenantPartnerService
+      .publishWebhookEvent(order.tenantId, {
+        eventType,
+        occurredAt,
+        data: {
+          bookingId: projection.bookingId,
+          orderId: projection.orderId,
+          partnerEntrySlug: order.partnerEntrySlug,
+          fulfillmentMode: projection.fulfillmentMode,
+          state: projection.state,
+          statusCode: projection.statusCode,
+          messages: projection.messages.map((message) => ({ ...message })),
+          etaMinutes: projection.etaMinutes,
+          extraChargeDisclosed: projection.extraChargeDisclosed,
+          providerBrandDisclosed: projection.providerBrandDisclosed,
         },
       })
       .catch(() => undefined);
@@ -4582,7 +4712,10 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAssignmentEligibilityRecheck(
-    order: Pick<OwnedOrderRecord, "orderId" | "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "serviceBucket" | "businessDispatchSubtype"
+    >,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
@@ -4685,7 +4818,11 @@ export class OwnedMobilityService implements OnModuleInit {
     sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     requestId?: string,
   ) {
-    if (!this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(vehicleId)) {
+    if (
+      !this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
+        vehicleId,
+      )
+    ) {
       return;
     }
 
@@ -4730,7 +4867,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
-      : order.businessDispatchSubtype ?? null;
+      : (order.businessDispatchSubtype ?? null);
   }
 
   private buildDispatchAssignmentBundle(
@@ -5419,6 +5556,217 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
+  private mapSandboxFulfillmentProjection(
+    order: OwnedOrderRecord,
+    audience: SandboxFulfillmentVisibilityAudience,
+  ): SandboxFulfillmentProjectionView {
+    const record = this.buildSandboxFulfillmentVisibilityRecord(
+      order,
+      audience,
+    );
+    return {
+      bookingId: record.bookingId,
+      orderId: record.orderId,
+      sandboxTripId: record.sandboxTripId,
+      audience: record.audience,
+      fulfillmentMode: record.fulfillmentMode,
+      state: record.state,
+      statusCode: record.statusCode,
+      messages: record.messages.map((message) => ({ ...message })),
+      etaMinutes: record.etaMinutes,
+      extraChargeDisclosed: record.extraChargeDisclosed,
+      providerBrandDisclosed: record.providerBrandDisclosed,
+      updatedAt: record.updatedAt,
+    };
+  }
+
+  private buildSandboxFulfillmentVisibilityRecord(
+    order: OwnedOrderRecord,
+    audience: SandboxFulfillmentVisibilityAudience,
+  ): SandboxFulfillmentVisibilityRecord {
+    if (!order.bookingId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+        {
+          orderId: order.orderId,
+        },
+      );
+    }
+
+    const latestAssignment = this.dispatchAssignments
+      .filter((assignment) => assignment.orderId === order.orderId)
+      .sort((left, right) =>
+        (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""),
+      )[0];
+    const activeAssignment =
+      latestAssignment &&
+      ["assigned", "accepted"].includes(latestAssignment.status)
+        ? latestAssignment
+        : null;
+    const latestTrace = this.dispatchTraceLogs
+      .filter((trace) => trace.orderId === order.orderId)
+      .sort((left, right) =>
+        (right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
+      )[0];
+    const fallbackTrace = this.dispatchTraceLogs
+      .filter(
+        (trace) =>
+          trace.orderId === order.orderId &&
+          trace.eventType === "roc.fallback_to_human",
+      )
+      .sort((left, right) =>
+        (right.createdAt ?? "").localeCompare(left.createdAt ?? ""),
+      )[0];
+    const hasFallback =
+      order.complianceFlags.includes("sandbox_human_fallback") ||
+      fallbackTrace !== undefined;
+    const hasAvAssignment =
+      activeAssignment?.vehicleId?.startsWith("veh-av") === true ||
+      Boolean(
+        fallbackTrace &&
+        typeof fallbackTrace.details?.avVehicleId === "string" &&
+        fallbackTrace.details.avVehicleId.startsWith("veh-av"),
+      );
+    const providerBrandDisclosed =
+      audience === "partner" &&
+      Boolean(order.partnerEntrySlug) &&
+      (hasAvAssignment || hasFallback);
+
+    const fulfillmentMode =
+      audience === "passenger" && !hasFallback && !hasAvAssignment
+        ? "hidden"
+        : hasFallback && hasAvAssignment
+          ? "mixed"
+          : hasFallback
+            ? "human_fallback"
+            : hasAvAssignment
+              ? "tesla_av"
+              : "hidden";
+
+    const state =
+      order.status === "cancelled"
+        ? "cancelled"
+        : order.status === "completed"
+          ? "completed"
+          : order.status === "on_trip"
+            ? "in_trip"
+            : order.status === "arrived_pickup"
+              ? "arrived_pickup"
+              : order.status === "enroute_pickup"
+                ? "en_route_pickup"
+                : ["assigned", "driver_accepted"].includes(order.status)
+                  ? "assigned"
+                  : activeAssignment
+                    ? "assigned"
+                    : "pending_dispatch";
+
+    const reasonCodes: SandboxFulfillmentVisibilityReason[] = [];
+    if (fulfillmentMode === "tesla_av") {
+      reasonCodes.push("av_assignment_active");
+    } else if (fulfillmentMode === "human_fallback") {
+      reasonCodes.push("human_fallback_active");
+    } else if (fulfillmentMode === "mixed") {
+      reasonCodes.push("mixed_fulfillment_active");
+    } else {
+      reasonCodes.push("policy_hidden");
+    }
+    if (state === "pending_dispatch") {
+      reasonCodes.push("dispatch_pending");
+    } else if (state === "completed") {
+      reasonCodes.push("trip_completed");
+    } else if (state === "cancelled") {
+      reasonCodes.push("trip_cancelled");
+    }
+    if (fallbackTrace) {
+      reasonCodes.push("internal_takeover_redacted");
+    }
+    reasonCodes.push(
+      providerBrandDisclosed
+        ? "provider_brand_allowed"
+        : "provider_brand_withheld",
+    );
+
+    const messages =
+      state === "completed"
+        ? [
+            {
+              messageCode: "sandbox_fulfillment.trip_completed",
+              category: "info" as const,
+            },
+          ]
+        : state === "cancelled"
+          ? [
+              {
+                messageCode: "sandbox_fulfillment.trip_cancelled",
+                category: "warning" as const,
+              },
+            ]
+          : fulfillmentMode === "human_fallback"
+            ? [
+                {
+                  messageCode:
+                    audience === "passenger"
+                      ? "sandbox_fulfillment.service_continues_with_human_driver"
+                      : "sandbox_fulfillment.human_fallback_active",
+                  category: "warning" as const,
+                },
+              ]
+            : fulfillmentMode === "mixed"
+              ? [
+                  {
+                    messageCode: "sandbox_fulfillment.mixed_fulfillment_active",
+                    category: "warning" as const,
+                  },
+                ]
+              : fulfillmentMode === "tesla_av"
+                ? [
+                    {
+                      messageCode:
+                        audience === "passenger"
+                          ? "sandbox_fulfillment.vehicle_assignment_confirmed"
+                          : "sandbox_fulfillment.tesla_av_active",
+                      category: "info" as const,
+                    },
+                  ]
+                : [
+                    {
+                      messageCode:
+                        "sandbox_fulfillment.status_update_available",
+                      category: "info" as const,
+                    },
+                  ];
+
+    return {
+      visibilityId: `sfv-${order.bookingId}-${audience}`,
+      bookingId: order.bookingId,
+      orderId: order.orderId,
+      sandboxTripId: activeAssignment?.assignmentId ?? null,
+      audience,
+      fulfillmentMode,
+      state,
+      statusCode: order.status,
+      messages,
+      disclosures: [
+        "vehicle_mode_summary",
+        ...(hasFallback ? (["fallback_to_human"] as const) : []),
+        ...(providerBrandDisclosed
+          ? (["provider_brand_disclosed"] as const)
+          : []),
+      ],
+      reasonCodes,
+      etaMinutes: order.etaSnapshot?.etaMinutes ?? null,
+      extraChargeDisclosed: false,
+      safetyDisclosurePolicyId: providerBrandDisclosed
+        ? "partner_policy_disclosed"
+        : null,
+      providerBrandDisclosed,
+      createdAt: order.createdAt,
+      updatedAt: latestTrace?.createdAt ?? order.updatedAt,
+    };
+  }
+
   private requireOrder(orderId: string) {
     const order = this.orders.find(
       (candidateOrder) => candidateOrder.orderId === orderId,
@@ -5542,7 +5890,11 @@ export class OwnedMobilityService implements OnModuleInit {
       return existingDispatchJob;
     }
 
-    const createdDispatch = this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+    const createdDispatch = this.dispatchOrder(
+      orderId,
+      { mode: "auto" },
+      requestId,
+    );
     return this.requireDispatchJob(createdDispatch.dispatchJobId);
   }
 

@@ -42,10 +42,7 @@ function createOwnedMobilityService(options?: {
     serviceBucket: string,
   ) => boolean;
   driverAvailable?: boolean;
-  getDriverAvailability?: (
-    driverId: string,
-    serviceBucket: string,
-  ) => boolean;
+  getDriverAvailability?: (driverId: string, serviceBucket: string) => boolean;
   enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
   serviceProductOverrides?: Record<string, unknown>;
@@ -76,10 +73,11 @@ function createOwnedMobilityService(options?: {
         options?.vehicleDispatchable ??
         true,
     ),
-    getDriverAvailability: vi.fn((driverId: string, serviceBucket: string) =>
-      options?.getDriverAvailability?.(driverId, serviceBucket) ??
-      options?.driverAvailable ??
-      true,
+    getDriverAvailability: vi.fn(
+      (driverId: string, serviceBucket: string) =>
+        options?.getDriverAvailability?.(driverId, serviceBucket) ??
+        options?.driverAvailable ??
+        true,
     ),
   };
   const auditNotificationService = {
@@ -483,7 +481,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
       "tenant-demo-001",
     );
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
 
     const candidates = await service.listDispatchCandidates(
       dispatchJob.dispatchJobId,
@@ -547,7 +547,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
       "tenant-demo-001",
     );
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
 
     const fallbackCandidates = await service.listDispatchCandidates(
       dispatchJob.dispatchJobId,
@@ -2523,7 +2525,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const snapshot = service.getReportingSnapshot();
     expect(
       snapshot.dispatchAssignments.filter(
-        (assignment) => assignment.dispatchJobId === dispatchResult.dispatchJobId,
+        (assignment) =>
+          assignment.dispatchJobId === dispatchResult.dispatchJobId,
       ),
     ).toEqual([
       expect.objectContaining({
@@ -2832,6 +2835,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         ledgerEntries: [],
         impacts: [],
       })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
       publishWebhookEvent: vi.fn(async () => undefined),
     } as unknown as TenantPartnerService;
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -2918,6 +2929,582 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         ([, payload]) => payload.eventType === "order.completed",
       ),
     ).toHaveLength(1);
+  });
+
+  it("projects sandbox fulfillment with audience-specific disclosure", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-26T14:00:00.000Z"));
+
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "safety-op-001",
+          vehicleId: "veh-av-demo-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000003" },
+        partnerEntrySlug: "partner-entry-001",
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+    });
+
+    const assignedProjection = service.getTenantSandboxFulfillment(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    expect(assignedProjection).toMatchObject({
+      audience: "tenant",
+      fulfillmentMode: "tesla_av",
+      state: "assigned",
+      providerBrandDisclosed: false,
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.tesla_av_active",
+        },
+      ],
+    });
+
+    vi.setSystemTime(new Date("2026-06-26T14:05:00.000Z"));
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-06-26T14:05:00.000Z",
+    });
+
+    const enRouteProjection = service.getTenantSandboxFulfillment(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    expect(enRouteProjection).toMatchObject({
+      state: "en_route_pickup",
+      statusCode: "enroute_pickup",
+      updatedAt: "2026-06-26T14:05:00.000Z",
+    });
+
+    vi.setSystemTime(new Date("2026-06-26T14:06:00.000Z"));
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-06-26T14:06:00.000Z",
+    });
+    vi.setSystemTime(new Date("2026-06-26T14:07:00.000Z"));
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-06-26T14:07:00.000Z",
+    });
+
+    const tenantProjection = service.getTenantSandboxFulfillment(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    const partnerProjection = service.getPartnerSandboxFulfillment(
+      "partner-entry-001",
+      booking.bookingId,
+    );
+    const passengerProjection = (
+      service as any
+    ).mapSandboxFulfillmentProjection(
+      service.getOrder(booking.orderId),
+      "passenger",
+    );
+
+    expect(tenantProjection).toMatchObject({
+      audience: "tenant",
+      fulfillmentMode: "tesla_av",
+      state: "in_trip",
+      providerBrandDisclosed: false,
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.tesla_av_active",
+        },
+      ],
+      updatedAt: "2026-06-26T14:07:00.000Z",
+    });
+    expect(partnerProjection).toMatchObject({
+      audience: "partner",
+      providerBrandDisclosed: true,
+    });
+    expect(passengerProjection).toMatchObject({
+      audience: "passenger",
+      providerBrandDisclosed: false,
+    });
+    expect(passengerProjection).not.toHaveProperty("reasonCodes");
+  });
+
+  it("publishes partner sandbox webhook payloads without internal reason codes", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "human-driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 7,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000004" },
+        partnerEntrySlug: "partner-entry-002",
+      },
+      "tenant-demo-001",
+    );
+
+    const partnerCalls = (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([, payload]) =>
+        payload.eventType === "partner.sandbox_fulfillment.updated",
+    );
+
+    expect(partnerCalls).toHaveLength(1);
+    expect(partnerCalls[0]?.[1]).toMatchObject({
+      eventType: "partner.sandbox_fulfillment.updated",
+      data: {
+        bookingId: booking.bookingId,
+        partnerEntrySlug: "partner-entry-002",
+        messages: [
+          {
+            messageCode: "sandbox_fulfillment.status_update_available",
+          },
+        ],
+      },
+    });
+    expect(partnerCalls[0]?.[1].data).not.toHaveProperty("reasonCodes");
+    expect(partnerCalls[0]?.[1].data).not.toHaveProperty("disclosures");
+  });
+
+  it("publishes partner sandbox fulfillment updates on dispatch transitions only", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "veh-av-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000004" },
+        partnerEntrySlug: "partner-entry-002",
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-001",
+      driverId: "driver-001",
+    });
+
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-06-26T14:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-06-26T14:08:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-06-26T14:12:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-06-26T14:15:00.000Z",
+    });
+
+    const partnerCalls = (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([, payload]) =>
+        payload.eventType === "partner.sandbox_fulfillment.updated",
+    );
+
+    expect(partnerCalls).toHaveLength(6);
+    expect(partnerCalls.map(([, payload]) => payload.data.state)).toEqual([
+      "pending_dispatch",
+      "assigned",
+      "assigned",
+      "en_route_pickup",
+      "arrived_pickup",
+      "in_trip",
+    ]);
+  });
+
+  it("returns sandbox fulfillment to pending_dispatch after driver rejection", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "veh-av-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000004" },
+        partnerEntrySlug: "partner-entry-002",
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-001",
+      driverId: "driver-001",
+    });
+
+    service.rejectDriverTask(assignment.taskId, {
+      reasonCode: "driver_rejected",
+      reasonNote: "Too far",
+    });
+
+    expect(
+      service.getTenantSandboxFulfillment("tenant-demo-001", booking.bookingId),
+    ).toMatchObject({
+      sandboxTripId: null,
+      fulfillmentMode: "hidden",
+      state: "pending_dispatch",
+      statusCode: "redispatch_required",
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.status_update_available",
+          category: "info",
+        },
+      ],
+      providerBrandDisclosed: false,
+    });
+
+    const partnerCalls = (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([, payload]) =>
+        payload.eventType === "partner.sandbox_fulfillment.updated",
+    );
+
+    expect(partnerCalls.map(([, payload]) => payload.data.state)).toEqual([
+      "pending_dispatch",
+      "assigned",
+      "pending_dispatch",
+    ]);
+    expect(partnerCalls.at(-1)?.[1]).toMatchObject({
+      eventType: "partner.sandbox_fulfillment.updated",
+      data: {
+        bookingId: booking.bookingId,
+        fulfillmentMode: "hidden",
+        state: "pending_dispatch",
+        statusCode: "redispatch_required",
+      },
+    });
+    expect(partnerCalls.at(-1)?.[1].data).not.toHaveProperty("sandboxTripId");
+  });
+
+  it("publishes partner sandbox fulfillment updates when a dispatch is reassigned", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "veh-av-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000004" },
+        partnerEntrySlug: "partner-entry-002",
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-001",
+      driverId: "driver-001",
+    });
+
+    service.reassignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-002",
+      driverId: "driver-002",
+      reasonCode: "operator_reassign",
+      reasonNote: "Closer AV vehicle",
+    });
+
+    const partnerCalls = (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([, payload]) =>
+        payload.eventType === "partner.sandbox_fulfillment.updated",
+    );
+
+    expect(partnerCalls).toHaveLength(3);
+    expect(partnerCalls.at(-1)?.[1]).toMatchObject({
+      eventType: "partner.sandbox_fulfillment.updated",
+      data: {
+        bookingId: booking.bookingId,
+        state: "assigned",
+      },
+    });
+  });
+
+  it("does not publish partner sandbox fulfillment updates for non-transition order updates", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "veh-av-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000004" },
+        partnerEntrySlug: "partner-entry-002",
+      },
+      "tenant-demo-001",
+    );
+
+    service.applyManualFareOverride(
+      booking.orderId,
+      {
+        fare: {
+          currency: "NTD",
+          amountMinor: 4200,
+        },
+        reason: "post-dispatch correction",
+        traceId: "fare-override-001",
+      },
+      {
+        actorId: "ops-001",
+        actorType: "ops_user",
+      } as never,
+      "req-fare-override-001",
+    );
+
+    const partnerCalls = (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([, payload]) =>
+        payload.eventType === "partner.sandbox_fulfillment.updated",
+    );
+
+    expect(partnerCalls).toHaveLength(1);
+    expect(partnerCalls[0]?.[1].data.orderId).toBe(booking.orderId);
   });
 
   it("rejects duplicate completion requests after the trip is already completed", () => {
