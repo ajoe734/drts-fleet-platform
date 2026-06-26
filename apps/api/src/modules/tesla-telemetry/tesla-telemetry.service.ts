@@ -329,7 +329,9 @@ export class TeslaTelemetryService {
   ) {
     const priorContiguous =
       tracker.latestContiguousSequenceNo ?? eventRecord.sequenceNo - 1;
-    tracker.sequences.set(eventRecord.sequenceNo, eventRecord);
+    if (eventRecord.ingestStatus === "accepted") {
+      tracker.sequences.set(eventRecord.sequenceNo, eventRecord);
+    }
     tracker.latestSequenceNo = Math.max(
       tracker.latestSequenceNo ?? eventRecord.sequenceNo,
       eventRecord.sequenceNo,
@@ -414,9 +416,9 @@ export class TeslaTelemetryService {
     let completedAt = tracker.completedAt;
 
     if (tracker.lastUnknownSchemaAt) {
-      state = "regulator_data_incident";
       issueCodes.add("UNKNOWN_SCHEMA");
-    } else if (missingSequences.length > 0 && tracker.gapDetectedAt) {
+    }
+    if (missingSequences.length > 0 && tracker.gapDetectedAt) {
       const gapAgeMs =
         asOfDate.getTime() - new Date(tracker.gapDetectedAt).getTime();
       if (gapAgeMs >= gapThresholdMs) {
@@ -469,7 +471,12 @@ export class TeslaTelemetryService {
     }
     qualityScore = Math.max(0, Number(qualityScore.toFixed(2)));
 
-    if (qualityScore <= incidentGate && state !== "regulator_data_incident") {
+    if (issueCodes.has("UNKNOWN_SCHEMA")) {
+      state = "regulator_data_incident";
+    } else if (
+      qualityScore <= incidentGate &&
+      state !== "regulator_data_incident"
+    ) {
       state = "regulator_data_incident";
     }
     const dispatchHold =
@@ -552,10 +559,7 @@ export class TeslaTelemetryService {
       providerCode: tracker.providerCode,
       feedKind: tracker.feedKind,
       vin: tracker.externalVehicleRef,
-      from:
-        tracker.lastCapturedAt ??
-        tracker.lastReceivedAt ??
-        new Date().toISOString(),
+      from: this.resolveBackfillWindowStart(tracker),
       to: asOf,
       sessionId: tracker.sessionId,
       eventId: tracker.lastEventId,
@@ -575,6 +579,19 @@ export class TeslaTelemetryService {
       missingSequences,
       sequenceAfter: query.sequenceAfter,
     });
+  }
+
+  private resolveBackfillWindowStart(tracker: TelemetryTracker) {
+    const contiguousEvent =
+      tracker.latestContiguousSequenceNo === null
+        ? null
+        : tracker.sequences.get(tracker.latestContiguousSequenceNo) ?? null;
+    return (
+      contiguousEvent?.capturedAt ??
+      tracker.lastCapturedAt ??
+      tracker.lastReceivedAt ??
+      new Date().toISOString()
+    );
   }
 
   private buildVehicleStateSnapshot(
