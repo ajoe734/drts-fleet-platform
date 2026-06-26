@@ -35,6 +35,7 @@ import type {
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
+  SandboxFulfillmentProjectionView,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -97,6 +98,19 @@ export class OwnedMobilityController {
     }
 
     return normalizedTenantId;
+  }
+
+  private requirePartnerEntrySlug(identity: BootstrapRequestIdentity | null) {
+    const normalizedPartnerEntrySlug = identity?.partnerEntrySlug?.trim();
+    if (!normalizedPartnerEntrySlug) {
+      throw new ApiRequestError(
+        403,
+        "PARTNER_IDENTITY_REQUIRED",
+        "partner bootstrap identity is required for partner booking endpoints.",
+      );
+    }
+
+    return normalizedPartnerEntrySlug;
   }
 
   @Post("orders")
@@ -227,6 +241,37 @@ export class OwnedMobilityController {
       ),
       requestId,
     );
+  }
+
+  @Get("tenant/bookings/:bookingId/sandbox-fulfillment")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantSandboxFulfillment(
+    @Param("bookingId") bookingId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.getTenantSandboxFulfillment(
+        this.requireTenantId(tenantId),
+        bookingId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/bookings/:bookingId/sandbox-fulfillment")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerSandboxFulfillment(
+    @Param("bookingId") bookingId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const projection: SandboxFulfillmentProjectionView =
+      this.ownedMobilityService.getPartnerSandboxFulfillment(
+        this.requirePartnerEntrySlug(identity),
+        bookingId,
+      );
+    return toApiSuccessEnvelope(projection, requestId);
   }
 
   @Put("tenant/bookings/:bookingId")
