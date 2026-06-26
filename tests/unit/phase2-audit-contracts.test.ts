@@ -52,6 +52,15 @@ describe("Phase 2 audit contracts", () => {
     ).toEqual([...REGULATORY_REPORT_STATUSES].sort());
   });
 
+  it("includes explicit append-only amendment events for sandbox governance", () => {
+    expect(
+      PHASE2_AUDIT_EVENT_CATALOG.sandbox.providerCapabilityRequirementAmended,
+    ).toBe("sandbox.provider_capability_requirement.amended");
+    expect(PHASE2_AUDIT_EVENT_NAMES).toContain(
+      "sandbox.provider_capability_requirement.amended",
+    );
+  });
+
   it("allows Phase2AuditContext to reference the canonical catalog directly", () => {
     const context: Phase2AuditContext = {
       actorId: null,
