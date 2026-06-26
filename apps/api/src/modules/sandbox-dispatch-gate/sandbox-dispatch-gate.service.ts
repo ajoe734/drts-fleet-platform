@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+} from "@nestjs/common";
 
 import type { SandboxDispatchDecision } from "@drts/contracts";
 
@@ -25,6 +31,7 @@ export class SandboxDispatchGateService {
     @Optional()
     private readonly vehicleEvidenceService?: VehicleEvidenceService,
     @Optional()
+    @Inject(forwardRef(() => RocOperationsService))
     private readonly rocOperationsService?: RocOperationsService,
   ) {}
 
@@ -51,6 +58,7 @@ export class SandboxDispatchGateService {
           oddInBounds: true,
           hardReasonCodes,
           softReasonCodes: [],
+          fallbackRequired: true,
           requiredSafetyOperatorId: null,
           policyVersion: input.policyVersion,
           evaluatedAt: new Date().toISOString(),
@@ -65,6 +73,7 @@ export class SandboxDispatchGateService {
           oddInBounds: true,
           hardReasonCodes: [],
           softReasonCodes: [],
+          fallbackRequired: false,
           requiredSafetyOperatorId: null,
           policyVersion: input.policyVersion,
           evaluatedAt: new Date().toISOString(),
@@ -89,5 +98,27 @@ export class SandboxDispatchGateService {
           softReasonCodes: [...this.lastDecision.softReasonCodes],
         }
       : null;
+  }
+
+  async findDecisionForOrder(orderId: string, decisionId?: string | null) {
+    const normalizedOrderId = orderId.trim();
+    const normalizedDecisionId = decisionId?.trim() ?? null;
+    if (!normalizedOrderId) {
+      return null;
+    }
+
+    if (
+      this.lastDecision?.orderId === normalizedOrderId &&
+      (!normalizedDecisionId ||
+        this.lastDecision.decisionId === normalizedDecisionId)
+    ) {
+      return {
+        ...this.lastDecision,
+        hardReasonCodes: [...this.lastDecision.hardReasonCodes],
+        softReasonCodes: [...this.lastDecision.softReasonCodes],
+      };
+    }
+
+    return null;
   }
 }

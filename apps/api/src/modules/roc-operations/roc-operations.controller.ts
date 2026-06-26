@@ -12,6 +12,7 @@ import type {
   NotifyRocAlertCommand,
   OpenRocIncidentCommand,
   RocAlertActionCommand,
+  RocFallbackToHumanCommand,
   RequestRocSafetyActionCommand,
   StartRocEvidenceFreezeCommand,
 } from "@drts/contracts";
@@ -36,6 +37,21 @@ const ROC_PROVIDER_REFRESH_MS = 15_000;
 @Controller("roc")
 export class RocOperationsController {
   constructor(private readonly rocOperationsService: RocOperationsService) {}
+
+  @Get("bookings/:bookingId/fallback-reports")
+  listFallbackReports(
+    @Param("bookingId") bookingId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.rocOperationsService.listFallbackReportsForBooking(
+          bookingId,
+        ),
+      },
+      requestId,
+    );
+  }
 
   @Get("overview")
   getOverview(
@@ -235,6 +251,24 @@ export class RocOperationsController {
   ) {
     return toApiSuccessEnvelope(
       this.rocOperationsService.fallbackToHuman(alertId, command, identity),
+      requestId,
+    );
+  }
+
+  @Post("trips/:tripId/fallback-to-human")
+  async fallbackTripToHuman(
+    @Param("tripId") tripId: string,
+    @Body() command: RocFallbackToHumanCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.rocOperationsService.fallbackTripToHuman(
+        tripId,
+        command,
+        identity,
+        requestId,
+      ),
       requestId,
     );
   }

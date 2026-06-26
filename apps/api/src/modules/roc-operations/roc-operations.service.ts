@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  Inject,
   HttpStatus,
   Injectable,
   Logger,
   Optional,
+  forwardRef,
 } from "@nestjs/common";
 
 import type {
@@ -14,9 +16,11 @@ import type {
   CreateIncidentCommand,
   CreateManualTakeoverCorrelationCommand,
   EvidenceDiscrepancyCase,
+  EtaSnapshot,
   ManualTakeoverCorrelationLink,
   NotifyRocAlertCommand,
   OpenRocIncidentCommand,
+  OwnedOrderRecord,
   ResourceActionDescriptor,
   RocAlertActionCommand,
   RocAlertReadModel,
@@ -24,6 +28,9 @@ import type {
   RocAlertStatus,
   RocAlertType,
   RocDataFreshness,
+  RocFallbackToHumanCommand,
+  RocFallbackToHumanReport,
+  RocIntervention,
   RocOverviewReadModel,
   RocProviderHealthReadModel,
   RocProviderHealthSnapshot,
@@ -42,7 +49,9 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { IncidentService } from "../incident/incident.service";
+import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { SafetyOperatorService } from "../safety-operator/safety-operator.service";
+import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
 import { TeslaIntegrationService } from "../tesla-integration/tesla-integration.service";
 import { VehicleEvidenceService } from "../vehicle-evidence/vehicle-evidence.service";
 
@@ -167,12 +176,19 @@ export class RocOperationsService {
     string,
     RocVehicleRestrictionState
   >();
+  private interventions: RocIntervention[] = [];
+  private fallbackReports: RocFallbackToHumanReport[] = [];
 
   constructor(
     private readonly safetyOperatorService: SafetyOperatorService,
     @Optional() private readonly incidentService?: IncidentService,
     @Optional() private readonly vehicleEvidenceService?: VehicleEvidenceService,
     @Optional() private readonly teslaIntegrationService?: TeslaIntegrationService,
+    @Optional()
+    private readonly ownedMobilityService?: OwnedMobilityService,
+    @Optional()
+    @Inject(forwardRef(() => SandboxDispatchGateService))
+    private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
   ) {}
 
   listTeslaAutonomyTransitionEvents() {
@@ -466,6 +482,191 @@ export class RocOperationsService {
       operationalHoldActive: operationalHold,
       humanFallbackActive: humanFallback,
     };
+  }
+
+  async fallbackTripToHuman(
+    tripId: string,
+    command: RocFallbackToHumanCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<{
+    tripId: string;
+    orderId: string;
+    bookingId: string | null;
+    dispatchJobId: string;
+    status: OwnedOrderRecord["status"];
+    etaSnapshot: EtaSnapshot | null;
+    assignmentId: string;
+    taskId: string;
+    intervention: RocIntervention;
+    report: RocFallbackToHumanReport;
+    receipt: ActionReceipt;
+  }> {
+    if (!this.ownedMobilityService || !this.sandboxDispatchGateService) {
+      throw new ApiRequestError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        "ROC_FALLBACK_UNAVAILABLE",
+        "ROC fallback-to-human dependencies are not configured.",
+      );
+    }
+
+    const order = this.resolveTripOrder(tripId);
+    const rocOperatorId = this.resolveRocOperatorId(
+      identity,
+      command.rocOperatorId,
+    );
+    const trigger = command.trigger ?? "roc_manual_intervention";
+    const sandboxDecision =
+      await this.sandboxDispatchGateService.findDecisionForOrder(
+        order.orderId,
+        command.sandboxDecisionId ?? null,
+      );
+
+    if (trigger === "gate_fallback_required") {
+      if (!sandboxDecision) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SANDBOX_FALLBACK_DECISION_REQUIRED",
+          "Gate-triggered human fallback requires a sandbox dispatch decision.",
+          {
+            tripId,
+            orderId: order.orderId,
+            sandboxDecisionId: command.sandboxDecisionId ?? null,
+          },
+        );
+      }
+
+      if (!sandboxDecision.fallbackRequired) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SANDBOX_FALLBACK_NOT_REQUIRED",
+          "Gate-triggered human fallback requires a sandbox dispatch decision that mandates fallback.",
+          {
+            tripId,
+            orderId: order.orderId,
+            sandboxDecisionId: sandboxDecision.decisionId,
+            sandboxDecision: sandboxDecision.decision,
+            fallbackRequired: sandboxDecision.fallbackRequired,
+          },
+        );
+      }
+    }
+
+    const reportId = `report-${randomUUID()}`;
+    const reportArtifactId = `ART-${randomUUID()}`;
+    const fallbackResult = await this.ownedMobilityService.fallbackTripToHuman(
+      order.orderId,
+      command,
+      {
+        reportId,
+        reportArtifactId,
+        rocOperatorId,
+        trigger,
+        sandboxDecision,
+      },
+      requestId,
+    );
+
+    const startedAt = new Date().toISOString();
+    const resolvedAt = new Date().toISOString();
+    const intervention = this.buildFallbackIntervention({
+      orderId: order.orderId,
+      rocOperatorId,
+      trigger,
+      avVehicleId:
+        fallbackResult.avVehicleId ??
+        command.avVehicleId?.trim() ??
+        sandboxDecision?.vehicleId ??
+        null,
+      triggeredByEventId: command.triggeredByEventId ?? null,
+      startedAt,
+      resolvedAt,
+      humanVehicleId: command.humanVehicleId,
+      humanDriverId: command.humanDriverId,
+      fallbackAssignmentId: fallbackResult.assignmentId,
+      reportId,
+      requestId,
+    });
+    this.interventions = [intervention, ...this.interventions];
+
+    const report = this.buildFallbackReport({
+      order: fallbackResult.order,
+      dispatchJobId: fallbackResult.dispatchJobId,
+      assignmentId: fallbackResult.assignmentId,
+      taskId: fallbackResult.taskId,
+      previousAssignmentId: fallbackResult.previousAssignmentId,
+      avVehicleId:
+        fallbackResult.avVehicleId ??
+        command.avVehicleId?.trim() ??
+        sandboxDecision?.vehicleId ??
+        null,
+      avDriverId:
+        fallbackResult.avDriverId ?? command.avDriverId?.trim() ?? null,
+      command,
+      trigger,
+      sandboxDecision,
+      reportId,
+      reportArtifactId,
+      interventionId: intervention.interventionId,
+    });
+    this.fallbackReports = [report, ...this.fallbackReports];
+
+    const receipt: ActionReceipt = {
+      actionId: requestId?.trim() || `roc-fallback-${randomUUID()}`,
+      auditId: `roc-fallback-audit-${randomUUID()}`,
+      resourceType: "sandbox_exception_report",
+      resourceId: report.reportId,
+      status: "completed",
+      message: "ROC fallback to human completed and report generated.",
+    };
+
+    this.logger.debug(
+      `ROC fallback completed for ${order.orderId}: ${fallbackResult.assignmentId}`,
+    );
+
+    return {
+      tripId: order.orderId,
+      orderId: order.orderId,
+      bookingId: fallbackResult.order.bookingId,
+      dispatchJobId: fallbackResult.dispatchJobId,
+      status: fallbackResult.order.status,
+      etaSnapshot: fallbackResult.order.etaSnapshot,
+      assignmentId: fallbackResult.assignmentId,
+      taskId: fallbackResult.taskId,
+      intervention,
+      report,
+      receipt,
+    };
+  }
+
+  listInterventions() {
+    return this.interventions.map((intervention) => ({
+      ...intervention,
+      source: { ...intervention.source },
+    }));
+  }
+
+  listFallbackReports() {
+    return this.fallbackReports.map((report) => ({
+      ...report,
+      hardReasonCodes: [...report.hardReasonCodes],
+      softReasonCodes: [...report.softReasonCodes],
+    }));
+  }
+
+  listFallbackReportsForBooking(bookingId: string) {
+    const normalizedBookingId = bookingId.trim();
+    if (!normalizedBookingId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_ID_REQUIRED",
+        "bookingId is required.",
+      );
+    }
+
+    return this.listFallbackReports().filter(
+      (report) => report.bookingId === normalizedBookingId,
+    );
   }
 
   ackAlert(
@@ -2310,6 +2511,138 @@ export class RocOperationsService {
 
   private cloneManualLink(link: ManualTakeoverCorrelationLink) {
     return { ...link };
+  }
+
+  private resolveTripOrder(tripId: string) {
+    const normalizedTripId = tripId.trim();
+    if (!normalizedTripId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TRIP_ID_REQUIRED",
+        "tripId is required.",
+      );
+    }
+
+    if (!this.ownedMobilityService) {
+      throw new ApiRequestError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        "ROC_FALLBACK_UNAVAILABLE",
+        "ROC fallback-to-human dependencies are not configured.",
+      );
+    }
+
+    try {
+      return this.ownedMobilityService.getOrder(normalizedTripId);
+    } catch (error) {
+      const match = this.ownedMobilityService
+        .listOrders()
+        .find((candidate) => candidate.bookingId === normalizedTripId);
+      if (match) {
+        return this.ownedMobilityService.getOrder(match.orderId);
+      }
+      throw error;
+    }
+  }
+
+  private resolveRocOperatorId(
+    identity: BootstrapRequestIdentity | null | undefined,
+    fallbackOperatorId?: string | null,
+  ) {
+    const fromIdentity =
+      identity?.actorId &&
+      (identity.actorType === "ops_user" || identity.realm === "ops")
+        ? identity.actorId
+        : null;
+    const fromCommand = fallbackOperatorId?.trim() ?? null;
+    const operatorId = fromIdentity ?? fromCommand;
+    if (!operatorId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ROC_OPERATOR_REQUIRED",
+        "ROC fallback-to-human requires an operator identity.",
+      );
+    }
+    return operatorId;
+  }
+
+  private buildFallbackIntervention(input: {
+    orderId: string;
+    rocOperatorId: string;
+    trigger: RocFallbackToHumanCommand["trigger"];
+    avVehicleId: string | null;
+    triggeredByEventId: string | null;
+    startedAt: string;
+    resolvedAt: string;
+    humanVehicleId: string;
+    humanDriverId: string;
+    fallbackAssignmentId: string;
+    reportId: string;
+    requestId?: string;
+  }): RocIntervention {
+    return {
+      interventionId: randomUUID(),
+      rocOperatorId: input.rocOperatorId,
+      vehicleId: input.avVehicleId ?? input.humanVehicleId,
+      orderId: input.orderId,
+      interventionType: "fallback_to_human",
+      triggeredByEventId: input.triggeredByEventId,
+      startedAt: input.startedAt,
+      resolvedAt: input.resolvedAt,
+      outcomeNote:
+        `Trigger=${input.trigger ?? "roc_manual_intervention"}; ` +
+        `human=${input.humanDriverId}/${input.humanVehicleId}; ` +
+        `assignment=${input.fallbackAssignmentId}; report=${input.reportId}`,
+      source: {
+        sourceSystem: "roc_operator",
+        sourceRef: input.requestId ?? input.reportId,
+        ingestedAt: input.resolvedAt,
+        recordedAt: input.startedAt,
+        signatureRef: null,
+        schemaVersion: "2026-06-26",
+      },
+    };
+  }
+
+  private buildFallbackReport(input: {
+    order: OwnedOrderRecord;
+    dispatchJobId: string;
+    assignmentId: string;
+    taskId: string;
+    previousAssignmentId: string | null;
+    avVehicleId: string | null;
+    avDriverId: string | null;
+    command: RocFallbackToHumanCommand;
+    trigger: NonNullable<RocFallbackToHumanCommand["trigger"]>;
+    sandboxDecision: Awaited<
+      ReturnType<SandboxDispatchGateService["findDecisionForOrder"]>
+    >;
+    reportId: string;
+    reportArtifactId: string;
+    interventionId: string;
+  }): RocFallbackToHumanReport {
+    return {
+      reportId: input.reportId,
+      interventionId: input.interventionId,
+      tripId: input.order.orderId,
+      orderId: input.order.orderId,
+      bookingId: input.order.bookingId,
+      dispatchJobId: input.dispatchJobId,
+      trigger: input.trigger,
+      sandboxDecisionId: input.sandboxDecision?.decisionId ?? null,
+      sandboxProgramId: input.sandboxDecision?.sandboxProgramId ?? null,
+      avVehicleId: input.avVehicleId,
+      avDriverId: input.avDriverId,
+      previousAssignmentId: input.previousAssignmentId,
+      fallbackAssignmentId: input.assignmentId,
+      fallbackTaskId: input.taskId,
+      humanVehicleId: input.command.humanVehicleId.trim(),
+      humanDriverId: input.command.humanDriverId.trim(),
+      revisedEtaMinutes: input.command.revisedEtaMinutes,
+      hardReasonCodes: [...(input.sandboxDecision?.hardReasonCodes ?? [])],
+      softReasonCodes: [...(input.sandboxDecision?.softReasonCodes ?? [])],
+      reportArtifactId: input.reportArtifactId,
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   private cloneTakeoverReport(report: SafetyOperatorTakeoverReport) {

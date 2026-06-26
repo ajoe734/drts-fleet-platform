@@ -48,11 +48,6 @@ export interface Phase2SourceMetadata {
   schemaVersion: string;
 }
 
-export interface Phase2MoneyAmount {
-  currency: string;
-  amountMinor: number;
-}
-
 // ---------------------------------------------------------------------------
 // §3.1 Provider capability requirements
 // ---------------------------------------------------------------------------
@@ -490,83 +485,13 @@ export interface SandboxDispatchDecision {
   oddInBounds: boolean;
   hardReasonCodes: SandboxDispatchReasonCode[];
   softReasonCodes: SandboxDispatchReasonCode[];
+  fallbackRequired: boolean;
 
   // Set when the outcome is allow_with_safety_operator.
   requiredSafetyOperatorId: string | null;
 
   policyVersion: string;
   evaluatedAt: string;
-}
-
-export const FULFILLMENT_SEGMENT_TYPES = [
-  "tesla_av",
-  "human_taxi",
-  "cancelled",
-  "non_revenue_recovery",
-] as const;
-export type FulfillmentSegmentType =
-  (typeof FULFILLMENT_SEGMENT_TYPES)[number];
-
-export interface FulfillmentSegmentRecord {
-  fulfillmentSegmentId: string;
-  bookingId: string;
-  orderId: string;
-  sandboxTripId: string | null;
-  segmentType: FulfillmentSegmentType;
-  segmentReason: string;
-  startedAt: string | null;
-  endedAt: string | null;
-  vehicleId: string | null;
-  vin: string | null;
-  driverId: string | null;
-  safetyOperatorId: string | null;
-  sourcePlatform: string | null;
-  distanceKm: number | null;
-  durationSeconds: number | null;
-  cost: Phase2MoneyAmount | null;
-  evidenceReference: string | null;
-  createdAt: string;
-}
-
-export const SANDBOX_BILLING_TREATMENT_TYPES = [
-  "normal_av",
-  "fallback_human",
-  "incident_waived",
-  "partner_program_adjusted",
-  "tenant_contract_adjusted",
-] as const;
-export type SandboxBillingTreatmentType =
-  (typeof SANDBOX_BILLING_TREATMENT_TYPES)[number];
-
-export const SANDBOX_FALLBACK_COST_ABSORBERS = [
-  "platform",
-  "partner",
-  "tenant_contract",
-] as const;
-export type SandboxFallbackCostAbsorber =
-  (typeof SANDBOX_FALLBACK_COST_ABSORBERS)[number];
-
-export interface SandboxBillingTreatmentRecord {
-  sandboxBillingTreatmentId: string;
-  bookingId: string;
-  orderId: string;
-  sandboxTripId: string | null;
-  treatmentType: SandboxBillingTreatmentType;
-  fallbackCostAbsorber: SandboxFallbackCostAbsorber | null;
-  fallbackPolicyId: string | null;
-  policyResolution: string;
-  passengerExtraChargeAllowed: boolean;
-  passengerExtraCharge: Phase2MoneyAmount;
-  internalAvCost: Phase2MoneyAmount | null;
-  internalHumanFallbackCost: Phase2MoneyAmount | null;
-  partnerCharge: Phase2MoneyAmount | null;
-  tenantCharge: Phase2MoneyAmount | null;
-  platformAbsorbed: Phase2MoneyAmount | null;
-  // Phase 2 adjudication §C4/§6: sandbox fallback never adds a surcharge to
-  // passenger / tenant billing, even when internal fallback costs are tracked.
-  fallbackSurchargeApplied: boolean;
-  treatmentSnapshot: Record<string, unknown>;
-  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -950,6 +875,7 @@ export const ROC_INTERVENTION_TYPES = [
   "reroute",
   "odd_recovery",
   "manual_takeover",
+  "fallback_to_human",
 ] as const;
 export type RocInterventionType = (typeof ROC_INTERVENTION_TYPES)[number];
 
@@ -964,6 +890,50 @@ export interface RocIntervention {
   resolvedAt: string | null;
   outcomeNote: string | null;
   source: Phase2SourceMetadata;
+}
+
+export const ROC_FALLBACK_TRIGGERS = [
+  "gate_fallback_required",
+  "roc_manual_intervention",
+] as const;
+export type RocFallbackTrigger = (typeof ROC_FALLBACK_TRIGGERS)[number];
+
+export interface RocFallbackToHumanCommand {
+  dispatchJobId?: string | null;
+  sandboxDecisionId?: string | null;
+  humanVehicleId: string;
+  humanDriverId: string;
+  revisedEtaMinutes: number;
+  reason: string;
+  rocOperatorId?: string | null;
+  avVehicleId?: string | null;
+  avDriverId?: string | null;
+  triggeredByEventId?: string | null;
+  trigger?: RocFallbackTrigger;
+}
+
+export interface RocFallbackToHumanReport {
+  reportId: string;
+  interventionId: string;
+  tripId: string;
+  orderId: string;
+  bookingId: string | null;
+  dispatchJobId: string;
+  trigger: RocFallbackTrigger;
+  sandboxDecisionId: string | null;
+  sandboxProgramId: string | null;
+  avVehicleId: string | null;
+  avDriverId: string | null;
+  previousAssignmentId: string | null;
+  fallbackAssignmentId: string;
+  fallbackTaskId: string;
+  humanVehicleId: string;
+  humanDriverId: string;
+  revisedEtaMinutes: number;
+  hardReasonCodes: SandboxDispatchReasonCode[];
+  softReasonCodes: SandboxDispatchReasonCode[];
+  reportArtifactId: string;
+  generatedAt: string;
 }
 
 export const TESLA_AUTONOMY_TRANSITION_TYPES = [
