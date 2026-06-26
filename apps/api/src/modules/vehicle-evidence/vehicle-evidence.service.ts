@@ -1,16 +1,43 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { Injectable, Logger } from "@nestjs/common";
-import type { EvidenceArtifactType, EvidenceManifestItem } from "@drts/contracts";
+import { PHASE2_AUDIT_EVENT_CATALOG } from "@drts/contracts";
+import type {
+  AuditLogRecord,
+  EvidenceArtifactType,
+  EvidenceManifestItem,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { createControlledDownloadMetadata } from "../../common/controlled-download";
+import {
+  EVIDENCE_GOVERNANCE_VERSION,
+  assertEvidenceAccess,
+  buildEvidenceAccessAuditSummary,
+  getEvidenceRetentionPolicy,
+  type EvidenceAccessIdentity,
+} from "../../common/evidence-governance";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { MockEvidenceRecorderAdapter } from "./mock-recorder.adapter";
 import type {
   BookmarkQuery,
+  ControlledEvidenceExportCommand,
+  ControlledEvidenceExportRecord,
+  EvidenceDeletionSchedulerCommand,
+  EvidenceDeletionSchedulerResult,
+  EvidenceAccessLogQuery,
+  EvidenceCaptureRequest,
+  EvidenceFreezeCommand,
+  EvidenceFreezeQuery,
+  EvidenceFreezeRecord,
+  EvidenceFreezeState,
+  EvidenceManifestVerificationArtifactRecord,
+  EvidenceManifestVerificationRecord,
+  EvidencePurgeCommand,
+  EvidencePurgeResult,
+  EvidenceRecorderAdapter,
   EventBookmarkCommand,
   EventBookmarkRecord,
-  EvidenceCaptureRequest,
-  EvidenceRecorderAdapter,
   NoNewDispatchSignal,
   RecorderHealthReport,
   RecorderRegistrationInput,
@@ -19,11 +46,22 @@ import type {
   SegmentIndexEntry,
   SegmentIndexQuery,
   SegmentUploadStatus,
+  VehicleEvidenceAccessLogEntry,
+  VehicleEvidenceArtifactRecord,
 } from "./vehicle-evidence.ports";
+
+const VEHICLE_EVIDENCE_HASH_ALGORITHM = "sha256-merkle-v1" as const;
+const MAX_ACCESS_LOGS = 1000;
 
 type StoredRecorder = {
   registration: RecorderRegistrationRecord;
   adapter: EvidenceRecorderAdapter;
+};
+
+type StoredEvidenceFreeze = EvidenceFreezeRecord;
+
+type EvidenceManifestAssessment = EvidenceManifestVerificationRecord & {
+  finalState: Extract<EvidenceFreezeState, "sealed" | "partial" | "failed">;
 };
 
 type SeedSegmentOptions = {
@@ -43,6 +81,18 @@ export class VehicleEvidenceService {
   private readonly healthSnapshots = new Map<string, RecorderHealthReport>();
   private readonly segmentIndex = new Map<string, SegmentIndexEntry>();
   private readonly bookmarks = new Map<string, EventBookmarkRecord>();
+  private readonly evidenceFreezes = new Map<string, StoredEvidenceFreeze>();
+  private readonly artifactCatalog = new Map<string, VehicleEvidenceArtifactRecord>();
+  private readonly evidenceExports = new Map<
+    string,
+    ControlledEvidenceExportRecord
+  >();
+
+  private accessLogs: VehicleEvidenceAccessLogEntry[] = [];
+
+  constructor(
+    private readonly auditNotificationService: AuditNotificationService = new AuditNotificationService(),
+  ) {}
 
   registerRecorder(
     input: RecorderRegistrationInput,
@@ -217,6 +267,1045 @@ export class VehicleEvidenceService {
     return items.map((item) => ({ ...item, source: { ...item.source } }));
   }
 
+  async requestEvidenceFreeze(
+    recorderId: string,
+    command: EvidenceFreezeCommand,
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ): Promise<EvidenceFreezeRecord> {
+    const stored = this.requireRecorder(recorderId);
+    const policy = assertEvidenceAccess({
+      family: "vehicle_evidence",
+      identity,
+    });
+    const normalizedCommand = this.normalizeFreezeCommand(
+      stored.registration.vehicleId,
+      command,
+    );
+    const requestedAt = new Date().toISOString();
+    const freezeId = `freeze-${randomUUID()}`;
+
+    const freeze: StoredEvidenceFreeze = {
+      freezeId,
+      recorderId: stored.registration.recorderId,
+      vehicleId: stored.registration.vehicleId,
+      caseId: normalizedCommand.caseId,
+      caseReference: normalizedCommand.caseReference,
+      requestedReason: normalizedCommand.reason,
+      requestedBy: normalizedCommand.requestedBy,
+      requestedAt,
+      sealedAt: null,
+      status: "requested",
+      manifestId: null,
+      manifestHash: null,
+      hashAlgorithm: null,
+      providerSignatureRefs: [],
+      sourceSystems: [],
+      objectLockEnabled: false,
+      objectLockRetainedUntil: null,
+      immutable: false,
+      supersedesFreezeId: normalizedCommand.supersedesFreezeId,
+      verification: null,
+      transitionHistory: [
+        {
+          from: null,
+          to: "requested",
+          at: requestedAt,
+          reason: "freeze_requested",
+          errorCode: null,
+        },
+      ],
+      artifacts: [],
+      exportCount: 0,
+      failureCode: null,
+      failureReason: null,
+    };
+    this.evidenceFreezes.set(freezeId, freeze);
+
+    this.recordAccessLog(
+      {
+        freezeId,
+        artifactId: null,
+        exportId: null,
+        manifestHash: null,
+        action: "freeze_request",
+        actorId: identity?.actorId ?? null,
+        actorType: identity?.actorType ?? null,
+        requestId: requestId ?? null,
+        caseReference: freeze.caseReference,
+        reason: freeze.requestedReason,
+        stepUpMethod: null,
+        stepUpVerifiedAt: null,
+        signedUrlExpiresAt: null,
+        metadata: {
+          recorderId,
+          windowStart: normalizedCommand.windowStart,
+          windowEnd: normalizedCommand.windowEnd,
+          caseId: normalizedCommand.caseId,
+        },
+      },
+      requestId,
+    );
+    this.recordEvidenceAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "request_vehicle_evidence_freeze",
+        resourceType: "vehicle_evidence_freeze",
+        resourceId: freezeId,
+        newValuesSummary: {
+          ...this.buildPolicySummary(policy),
+          recorderId,
+          vehicleId: freeze.vehicleId,
+          caseId: freeze.caseId,
+          caseReference: freeze.caseReference,
+          windowStart: normalizedCommand.windowStart,
+          windowEnd: normalizedCommand.windowEnd,
+          requestedReason: freeze.requestedReason,
+        },
+      },
+      requestId,
+    );
+
+    try {
+      this.transitionFreeze(freeze, "collecting", "capture_window_started");
+      const items = await this.captureEvidenceWindow(recorderId, {
+        vehicleId: stored.registration.vehicleId,
+        windowStart: normalizedCommand.windowStart,
+        windowEnd: normalizedCommand.windowEnd,
+        caseId: normalizedCommand.caseId,
+      });
+      if (items.length === 0) {
+        return this.failFreeze(
+          freeze,
+          "EVIDENCE_FREEZE_EMPTY",
+          "No evidence artifacts were returned for the requested capture window.",
+          identity,
+          requestId,
+        );
+      }
+
+      const assessment = await this.assessManifest(stored.adapter, items);
+      const objectLockRetainedUntil = this.computeRetentionBoundary(
+        normalizedCommand.windowEnd,
+      );
+      const artifacts = items.map((item) =>
+        this.buildArtifactRecord(
+          freeze.freezeId,
+          item,
+          assessment,
+          objectLockRetainedUntil,
+        ),
+      );
+      freeze.manifestId = items[0]?.manifestId ?? null;
+      freeze.manifestHash = assessment.manifestHash;
+      freeze.hashAlgorithm = VEHICLE_EVIDENCE_HASH_ALGORITHM;
+      freeze.providerSignatureRefs = this.uniqueStrings(
+        artifacts
+          .map((artifact) => artifact.source.signatureRef)
+          .filter((value): value is string => Boolean(value)),
+      );
+      freeze.sourceSystems = this.uniqueStrings(
+        artifacts.map((artifact) => artifact.source.sourceSystem),
+      );
+      freeze.objectLockEnabled = true;
+      freeze.objectLockRetainedUntil = objectLockRetainedUntil;
+      freeze.immutable = assessment.finalState !== "failed";
+      freeze.verification = this.cloneManifestVerification(assessment);
+      freeze.artifacts = artifacts.map((artifact) =>
+        this.cloneEvidenceArtifact(artifact),
+      );
+      freeze.failureCode =
+        assessment.finalState === "sealed"
+          ? null
+          : assessment.finalState === "partial"
+            ? "EVIDENCE_MANIFEST_PARTIAL"
+            : "EVIDENCE_MANIFEST_VERIFICATION_FAILED";
+      freeze.failureReason =
+        assessment.finalState === "sealed"
+          ? null
+          : this.describeManifestAssessment(assessment);
+      if (assessment.finalState === "sealed" || assessment.finalState === "partial") {
+        freeze.sealedAt = new Date().toISOString();
+      }
+
+      for (const artifact of artifacts) {
+        this.artifactCatalog.set(
+          artifact.artifactId,
+          this.cloneEvidenceArtifact(artifact),
+        );
+      }
+
+      this.transitionFreeze(
+        freeze,
+        assessment.finalState,
+        assessment.finalState === "sealed"
+          ? "manifest_verified"
+          : assessment.finalState === "partial"
+            ? "manifest_partially_verified"
+            : "manifest_verification_failed",
+        freeze.failureCode,
+      );
+      this.recordAccessLog(
+        {
+          freezeId: freeze.freezeId,
+          artifactId: null,
+          exportId: null,
+          manifestHash: freeze.manifestHash,
+          action: "verify",
+          actorId: identity?.actorId ?? null,
+          actorType: identity?.actorType ?? null,
+          requestId: requestId ?? null,
+          caseReference: freeze.caseReference,
+          reason: freeze.requestedReason,
+          stepUpMethod: null,
+          stepUpVerifiedAt: null,
+          signedUrlExpiresAt: null,
+          metadata: {
+            status: freeze.status,
+            valid: assessment.valid,
+            verifiedArtifactIds: [...assessment.verifiedArtifactIds],
+            failedArtifactIds: [...assessment.failedArtifactIds],
+            missingSignatureArtifactIds: [
+              ...assessment.missingSignatureArtifactIds,
+            ],
+          },
+        },
+        requestId,
+      );
+      this.recordEvidenceAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType:
+            (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+            "system",
+          tenantId: identity?.tenantId ?? null,
+          moduleName: "vehicle-evidence",
+          actionName: "finalize_vehicle_evidence_freeze",
+          resourceType: "vehicle_evidence_freeze",
+          resourceId: freeze.freezeId,
+          newValuesSummary: {
+            ...this.buildPolicySummary(policy),
+            status: freeze.status,
+            manifestHash: freeze.manifestHash,
+            manifestId: freeze.manifestId,
+            artifactCount: freeze.artifacts.length,
+            verifiedArtifactIds: [...assessment.verifiedArtifactIds],
+            failedArtifactIds: [...assessment.failedArtifactIds],
+            missingSignatureArtifactIds: [
+              ...assessment.missingSignatureArtifactIds,
+            ],
+            objectLockEnabled: freeze.objectLockEnabled,
+            objectLockRetainedUntil: freeze.objectLockRetainedUntil,
+          },
+        },
+        requestId,
+      );
+
+      return this.cloneEvidenceFreeze(freeze);
+    } catch (error) {
+      this.logger.warn(
+        `Evidence freeze ${freezeId} failed: ${this.describeUnknownError(error)}`,
+      );
+      return this.failFreeze(
+        freeze,
+        "EVIDENCE_FREEZE_CAPTURE_FAILED",
+        this.describeUnknownError(error),
+        identity,
+        requestId,
+      );
+    }
+  }
+
+  listEvidenceFreezes(
+    query: EvidenceFreezeQuery = {},
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "vehicle_evidence",
+      identity,
+    });
+    const items = [...this.evidenceFreezes.values()]
+      .filter((freeze) => {
+        if (query.recorderId && freeze.recorderId !== query.recorderId) {
+          return false;
+        }
+        if (query.vehicleId && freeze.vehicleId !== query.vehicleId) {
+          return false;
+        }
+        if (query.caseId && freeze.caseId !== query.caseId) {
+          return false;
+        }
+        if (query.status && freeze.status !== query.status) {
+          return false;
+        }
+        return true;
+      })
+      .map((freeze) => this.cloneEvidenceFreeze(freeze))
+      .sort((left, right) =>
+        left.requestedAt < right.requestedAt ? 1 : -1,
+      );
+
+    this.recordEvidenceAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "list_vehicle_evidence_freezes",
+        resourceType: "vehicle_evidence_freeze",
+        resourceId: null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+          itemCount: items.length,
+          recorderId: query.recorderId ?? null,
+          vehicleId: query.vehicleId ?? null,
+          caseId: query.caseId ?? null,
+          status: query.status ?? null,
+        }),
+      },
+      requestId,
+    );
+
+    return items;
+  }
+
+  getEvidenceFreeze(
+    freezeId: string,
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "vehicle_evidence",
+      identity,
+    });
+    const freeze = this.requireFreeze(freezeId);
+    this.recordAccessLog(
+      {
+        freezeId: freeze.freezeId,
+        artifactId: null,
+        exportId: null,
+        manifestHash: freeze.manifestHash,
+        action: "read",
+        actorId: identity?.actorId ?? null,
+        actorType: identity?.actorType ?? null,
+        requestId: requestId ?? null,
+        caseReference: freeze.caseReference,
+        reason: null,
+        stepUpMethod: null,
+        stepUpVerifiedAt: null,
+        signedUrlExpiresAt: null,
+        metadata: {
+          status: freeze.status,
+          artifactCount: freeze.artifacts.length,
+        },
+      },
+      requestId,
+    );
+    this.recordEvidenceAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "view_vehicle_evidence_manifest",
+        resourceType: "vehicle_evidence_freeze",
+        resourceId: freeze.freezeId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+          status: freeze.status,
+          manifestHash: freeze.manifestHash,
+          artifactCount: freeze.artifacts.length,
+        }),
+      },
+      requestId,
+    );
+    return this.cloneEvidenceFreeze(freeze);
+  }
+
+  async verifyEvidenceFreeze(
+    freezeId: string,
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "vehicle_evidence",
+      identity,
+    });
+    const freeze = this.requireFreeze(freezeId);
+    if (!freeze.manifestHash || freeze.artifacts.length === 0) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_MANIFEST_NOT_AVAILABLE",
+        "This freeze does not have a manifest available for verification.",
+        { freezeId },
+      );
+    }
+
+    const storedRecorder = this.requireRecorder(freeze.recorderId);
+    const manifestItems = freeze.artifacts.map((artifact) =>
+      this.toManifestItem(artifact),
+    );
+    const assessment = await this.assessManifest(storedRecorder.adapter, manifestItems);
+    if (assessment.manifestHash !== freeze.manifestHash) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_MANIFEST_HASH_MISMATCH",
+        "The recomputed manifest hash does not match the sealed freeze manifest.",
+        {
+          freezeId,
+          expectedManifestHash: freeze.manifestHash,
+          actualManifestHash: assessment.manifestHash,
+        },
+      );
+    }
+
+    freeze.verification = this.cloneManifestVerification(assessment);
+    this.recordAccessLog(
+      {
+        freezeId: freeze.freezeId,
+        artifactId: null,
+        exportId: null,
+        manifestHash: freeze.manifestHash,
+        action: "verify",
+        actorId: identity?.actorId ?? null,
+        actorType: identity?.actorType ?? null,
+        requestId: requestId ?? null,
+        caseReference: freeze.caseReference,
+        reason: null,
+        stepUpMethod: null,
+        stepUpVerifiedAt: null,
+        signedUrlExpiresAt: null,
+        metadata: {
+          valid: assessment.valid,
+          verifiedArtifactIds: [...assessment.verifiedArtifactIds],
+          failedArtifactIds: [...assessment.failedArtifactIds],
+        },
+      },
+      requestId,
+    );
+    this.recordEvidenceAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "verify_vehicle_evidence_manifest",
+        resourceType: "vehicle_evidence_freeze",
+        resourceId: freeze.freezeId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+          manifestHash: freeze.manifestHash,
+          valid: assessment.valid,
+          verifiedArtifactIds: [...assessment.verifiedArtifactIds],
+          failedArtifactIds: [...assessment.failedArtifactIds],
+          missingSignatureArtifactIds: [
+            ...assessment.missingSignatureArtifactIds,
+          ],
+        }),
+      },
+      requestId,
+    );
+
+    return this.cloneManifestVerification(assessment);
+  }
+
+  issueControlledExport(
+    freezeId: string,
+    command: ControlledEvidenceExportCommand,
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "vehicle_evidence",
+      identity,
+    });
+    const actor = this.requireEvidenceActor(
+      identity,
+      "EVIDENCE_EXPORT_IDENTITY_REQUIRED",
+    );
+    const freeze = this.requireFreeze(freezeId);
+    if (freeze.status !== "sealed" && freeze.status !== "partial") {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_EXPORT_NOT_READY",
+        "Vehicle evidence export is only available after the freeze reaches sealed or partial.",
+        {
+          freezeId,
+          status: freeze.status,
+        },
+      );
+    }
+    if (!freeze.manifestHash) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_MANIFEST_NOT_AVAILABLE",
+        "Vehicle evidence export requires a manifest hash.",
+        { freezeId },
+      );
+    }
+
+    const reason = this.requireNonBlank(
+      command.reason,
+      "reason",
+      "EVIDENCE_EXPORT_REASON_REQUIRED",
+    );
+    const caseReference =
+      command.caseReference?.trim() || freeze.caseReference.trim();
+    if (!caseReference) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_EXPORT_CASE_REFERENCE_REQUIRED",
+        "Vehicle evidence export requires a case reference.",
+        { freezeId },
+      );
+    }
+
+    const stepUpSessionId = this.requireNonBlank(
+      command.stepUpSessionId,
+      "stepUpSessionId",
+      "EVIDENCE_STEP_UP_REQUIRED",
+    );
+    const stepUpVerifiedAt = this.requireIsoTimestamp(
+      command.stepUpVerifiedAt,
+      "stepUpVerifiedAt",
+      "EVIDENCE_STEP_UP_REQUIRED",
+    );
+
+    const requestedAt = new Date().toISOString();
+    const exportId = `evexp-${randomUUID()}`;
+    const watermarkText =
+      command.watermarkText?.trim() ||
+      `${caseReference} | ${actor.actorId} | ${freeze.manifestHash}`;
+    const download = createControlledDownloadMetadata({
+      kind: "vehicle-evidence-export",
+      subjectId: exportId,
+      manifestHash: freeze.manifestHash,
+      createdAt: requestedAt,
+    });
+    const record: ControlledEvidenceExportRecord = {
+      exportId,
+      freezeId: freeze.freezeId,
+      manifestHash: freeze.manifestHash,
+      caseReference,
+      reason,
+      watermarkText,
+      requestedAt,
+      requestedByActorId: actor.actorId,
+      requestedByActorType: actor.actorType,
+      stepUpMethod: command.stepUpMethod,
+      stepUpVerifiedAt,
+      stepUpSessionId,
+      download: { ...download },
+    };
+    this.evidenceExports.set(exportId, this.cloneEvidenceExport(record));
+    freeze.exportCount += 1;
+
+    this.recordAccessLog(
+      {
+        freezeId: freeze.freezeId,
+        artifactId: null,
+        exportId,
+        manifestHash: freeze.manifestHash,
+        action: "export",
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        requestId: requestId ?? null,
+        caseReference,
+        reason,
+        stepUpMethod: command.stepUpMethod,
+        stepUpVerifiedAt,
+        signedUrlExpiresAt: download.expiresAt,
+        metadata: {
+          watermarkText,
+          manifestStatus: freeze.status,
+        },
+      },
+      requestId,
+    );
+    this.recordAccessLog(
+      {
+        freezeId: freeze.freezeId,
+        artifactId: null,
+        exportId,
+        manifestHash: freeze.manifestHash,
+        action: "signed_url",
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        requestId: requestId ?? null,
+        caseReference,
+        reason,
+        stepUpMethod: command.stepUpMethod,
+        stepUpVerifiedAt,
+        signedUrlExpiresAt: download.expiresAt,
+        metadata: {
+          ttlMinutes: download.ttlMinutes,
+          signatureVersion: download.signatureVersion,
+        },
+      },
+      requestId,
+    );
+    this.recordEvidenceAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType as AuditLogRecord["actorType"],
+        tenantId: actor.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "issue_vehicle_evidence_export",
+        resourceType: "vehicle_evidence_export",
+        resourceId: exportId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "export", {
+          freezeId: freeze.freezeId,
+          manifestHash: freeze.manifestHash,
+          caseReference,
+          reason,
+          stepUpMethod: command.stepUpMethod,
+          stepUpVerifiedAt,
+          ttlMinutes: download.ttlMinutes,
+          expiresAt: download.expiresAt,
+          watermarkText,
+        }),
+      },
+      requestId,
+    );
+
+    return this.cloneEvidenceExport(record);
+  }
+
+  purgeArtifact(
+    artifactId: string,
+    command: EvidencePurgeCommand,
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "vehicle_evidence",
+      identity,
+    });
+    const actor = this.requireEvidenceActor(
+      identity,
+      "EVIDENCE_PURGE_IDENTITY_REQUIRED",
+    );
+    const artifact = this.artifactCatalog.get(artifactId);
+    if (!artifact) {
+      throw new ApiRequestError(
+        404,
+        "EVIDENCE_ARTIFACT_NOT_FOUND",
+        `Artifact ${artifactId} is not indexed.`,
+      );
+    }
+
+    const freeze = this.requireFreeze(artifact.freezeId);
+    const reason = this.requireNonBlank(
+      command.reason,
+      "reason",
+      "EVIDENCE_PURGE_REASON_REQUIRED",
+    );
+    const governance = this.auditNotificationService.getEvidenceSubjectGovernance(
+      "vehicle_evidence",
+      freeze.freezeId,
+      {
+        manifestHash: freeze.manifestHash,
+      },
+    );
+    if (governance.activeLegalHolds.length > 0) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_DELETION_BLOCKED_BY_HOLD",
+        "Vehicle evidence cannot be deleted while an active legal hold exists.",
+        {
+          freezeId: freeze.freezeId,
+          artifactId,
+          holdIds: governance.activeLegalHolds.map((hold) => hold.holdId),
+        },
+      );
+    }
+    if (governance.activeDeletionExceptions.length > 0) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_DELETION_BLOCKED",
+        "Vehicle evidence cannot be deleted while a deletion exception remains active.",
+        {
+          freezeId: freeze.freezeId,
+          artifactId,
+          exceptionIds: governance.activeDeletionExceptions.map(
+            (item) => item.exceptionId,
+          ),
+        },
+      );
+    }
+    if (artifact.objectLockEnabled && !command.overrideObjectLock) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_OBJECT_LOCKED",
+        "Vehicle evidence purge requires an audited object-lock override.",
+        {
+          freezeId: freeze.freezeId,
+          artifactId,
+          retainedUntil: artifact.objectLockRetainedUntil,
+        },
+      );
+    }
+
+    const purgedAt = new Date().toISOString();
+    const previousState = artifact.currentCustodyState;
+    const updatedArtifact: VehicleEvidenceArtifactRecord = {
+      ...artifact,
+      currentCustodyState: "purged",
+      purgedAt,
+    };
+    this.artifactCatalog.set(
+      artifact.artifactId,
+      this.cloneEvidenceArtifact(updatedArtifact),
+    );
+    freeze.artifacts = freeze.artifacts.map((item) =>
+      item.artifactId === artifact.artifactId
+        ? this.cloneEvidenceArtifact(updatedArtifact)
+        : this.cloneEvidenceArtifact(item),
+    );
+
+    this.recordAccessLog(
+      {
+        freezeId: freeze.freezeId,
+        artifactId,
+        exportId: null,
+        manifestHash: freeze.manifestHash,
+        action: "purge",
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        requestId: requestId ?? null,
+        caseReference: freeze.caseReference,
+        reason,
+        stepUpMethod: null,
+        stepUpVerifiedAt: null,
+        signedUrlExpiresAt: null,
+        metadata: {
+          previousState,
+          objectLockBypassed: command.overrideObjectLock,
+        },
+      },
+      requestId,
+    );
+    this.recordEvidenceAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType as AuditLogRecord["actorType"],
+        tenantId: actor.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "purge_vehicle_evidence_artifact",
+        resourceType: "vehicle_evidence_artifact",
+        resourceId: artifactId,
+        oldValuesSummary: {
+          currentCustodyState: previousState,
+          purgedAt: artifact.purgedAt,
+        },
+        newValuesSummary: {
+          ...this.buildPolicySummary(policy),
+          freezeId: freeze.freezeId,
+          manifestHash: freeze.manifestHash,
+          currentCustodyState: updatedArtifact.currentCustodyState,
+          purgedAt,
+          reason,
+          objectLockBypassed: command.overrideObjectLock,
+        },
+      },
+      requestId,
+    );
+
+    const result: EvidencePurgeResult = {
+      artifactId,
+      freezeId: freeze.freezeId,
+      purgedAt,
+      purgedByActorId: actor.actorId,
+      purgedByActorType: actor.actorType,
+      reason,
+      objectLockBypassed: command.overrideObjectLock,
+    };
+    return { ...result };
+  }
+
+  async runDeletionScheduler(
+    command: EvidenceDeletionSchedulerCommand,
+    requestId?: string,
+  ): Promise<EvidenceDeletionSchedulerResult> {
+    const artifactId = this.requireNonBlank(
+      command.artifactId,
+      "artifactId",
+      "EVIDENCE_DELETION_INVALID_ARTIFACT",
+    );
+    const evaluatedAt = command.currentTime
+      ? this.requireIsoTimestamp(
+          command.currentTime,
+          "currentTime",
+          "EVIDENCE_DELETION_INVALID_TIME",
+        )
+      : new Date().toISOString();
+    const providerNearExpiryWindowMinutes = Math.max(
+      1,
+      Math.floor(command.providerNearExpiryWindowMinutes ?? 60),
+    );
+    const artifact = this.artifactCatalog.get(artifactId);
+    if (!artifact) {
+      throw new ApiRequestError(
+        404,
+        "EVIDENCE_ARTIFACT_NOT_FOUND",
+        `Artifact ${artifactId} is not indexed.`,
+      );
+    }
+
+    const freeze = this.requireFreeze(artifact.freezeId);
+    const governance = this.auditNotificationService.getEvidenceSubjectGovernance(
+      "vehicle_evidence",
+      freeze.freezeId,
+      {
+        manifestHash: freeze.manifestHash,
+      },
+    );
+    const holdIds = governance.activeLegalHolds.map((hold) => hold.holdId);
+    const activeExceptionIds = governance.activeDeletionExceptions.map(
+      (exception) => exception.exceptionId,
+    );
+
+    if (holdIds.length > 0) {
+      const conflictException =
+        this.auditNotificationService.ensureEvidenceDeletionConflictException(
+          {
+            family: "vehicle_evidence",
+            subjectId: freeze.freezeId,
+            sourceResourceType: "evidence_legal_hold",
+            sourceResourceId: holdIds[0]!,
+            reasonCode: this.mapHoldReasonToDeletionExceptionReason(
+              governance.activeLegalHolds[0]!.reasonCode,
+            ),
+            reasonNote:
+              "Deletion scheduler observed an active legal hold in the same consistency boundary.",
+            manifestHash: freeze.manifestHash,
+          },
+          requestId,
+        );
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "skipped_due_to_hold",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .skippedDueToHold,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds,
+        exceptionIds: this.uniqueStrings([
+          ...activeExceptionIds,
+          conflictException.exceptionId,
+        ]),
+        conflictExceptionId: conflictException.exceptionId,
+        checksumVerified: null,
+        preservedLocallyAt: null,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        artifact,
+        freeze,
+        result,
+        "Active legal hold blocked deletion.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    if (activeExceptionIds.length > 0) {
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "skipped_due_to_exception",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .skippedDueToException,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds: [],
+        exceptionIds: activeExceptionIds,
+        conflictExceptionId: null,
+        checksumVerified: null,
+        preservedLocallyAt: null,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        artifact,
+        freeze,
+        result,
+        "Active deletion exception blocked deletion.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    if (
+      this.isProviderNearExpiry(
+        artifact.source.providerExpiresAt ?? null,
+        evaluatedAt,
+        providerNearExpiryWindowMinutes,
+      ) &&
+      !artifact.localPreservedAt
+    ) {
+      const storedRecorder = this.requireRecorder(freeze.recorderId);
+      const checksumVerified = await storedRecorder.adapter.verifyChecksum(
+        artifact.artifactId,
+      );
+      const updatedArtifact: VehicleEvidenceArtifactRecord = {
+        ...artifact,
+        localPreservedAt: evaluatedAt,
+        localPreservationChecksumVerifiedAt: checksumVerified
+          ? evaluatedAt
+          : null,
+      };
+      this.replaceStoredArtifact(updatedArtifact);
+
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "preserved_for_provider_expiry",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .preservedForProviderExpiry,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds: [],
+        exceptionIds: [],
+        conflictExceptionId: null,
+        checksumVerified,
+        preservedLocallyAt: evaluatedAt,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        updatedArtifact,
+        freeze,
+        result,
+        "Provider source was near expiry, so the artifact was preserved locally and checksum-verified before deletion.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    const retainedUntil =
+      artifact.objectLockRetainedUntil ?? artifact.retentionUntil ?? null;
+    if (
+      retainedUntil &&
+      new Date(retainedUntil).getTime() > new Date(evaluatedAt).getTime()
+    ) {
+      const result: EvidenceDeletionSchedulerResult = {
+        artifactId,
+        freezeId: freeze.freezeId,
+        decision: "deferred_by_retention",
+        emittedEvent:
+          PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+            .deferredByRetention,
+        effectivePrecedence: governance.effectivePrecedence,
+        holdIds: [],
+        exceptionIds: [],
+        conflictExceptionId: null,
+        checksumVerified: null,
+        preservedLocallyAt: artifact.localPreservedAt,
+        purgedAt: null,
+      };
+      this.recordDeletionDecision(
+        artifact,
+        freeze,
+        result,
+        "Retention boundary has not yet elapsed.",
+        evaluatedAt,
+        requestId,
+      );
+      return result;
+    }
+
+    const purged = this.purgeArtifact(
+      artifactId,
+      {
+        reason: "Retention boundary elapsed; deletion scheduler executed purge.",
+        overrideObjectLock: true,
+      },
+      this.buildSchedulerIdentity(),
+      requestId,
+    );
+    const refreshedArtifact =
+      this.artifactCatalog.get(artifactId) ?? this.cloneEvidenceArtifact(artifact);
+    const result: EvidenceDeletionSchedulerResult = {
+      artifactId,
+      freezeId: freeze.freezeId,
+      decision: "purged",
+      emittedEvent:
+        PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision.purged,
+      effectivePrecedence: governance.effectivePrecedence,
+      holdIds: [],
+      exceptionIds: [],
+      conflictExceptionId: null,
+      checksumVerified: null,
+      preservedLocallyAt: refreshedArtifact.localPreservedAt,
+      purgedAt: purged.purgedAt,
+    };
+    this.recordDeletionDecision(
+      refreshedArtifact,
+      this.requireFreeze(freeze.freezeId),
+      result,
+      "Retention boundary elapsed and the deletion scheduler purged the artifact.",
+      evaluatedAt,
+      requestId,
+    );
+    return result;
+  }
+
+  listEvidenceAccessLogs(
+    query: EvidenceAccessLogQuery = {},
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "vehicle_evidence",
+      identity,
+    });
+    const items = this.accessLogs
+      .filter((log) => {
+        if (query.freezeId && log.freezeId !== query.freezeId) {
+          return false;
+        }
+        if (query.action && log.action !== query.action) {
+          return false;
+        }
+        return true;
+      })
+      .map((log) => this.cloneAccessLog(log));
+
+    this.recordEvidenceAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "list_vehicle_evidence_access_log",
+        resourceType: "vehicle_evidence_access_log",
+        resourceId: query.freezeId ?? null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+          itemCount: items.length,
+          freezeId: query.freezeId ?? null,
+          action: query.action ?? null,
+        }),
+      },
+      requestId,
+    );
+
+    return items;
+  }
+
   listSegmentIndex(query: SegmentIndexQuery = {}) {
     const entries = [...this.segmentIndex.values()].filter((entry) => {
       if (query.recorderId && entry.recorderId !== query.recorderId) {
@@ -307,11 +1396,9 @@ export class VehicleEvidenceService {
     }
 
     const retriedAt = new Date().toISOString();
-    const nextStatus: SegmentUploadStatus =
-      segment.uploadStatus === "uploaded" ? "uploaded" : "uploaded";
     const updated: SegmentIndexEntry = {
       ...segment,
-      uploadStatus: nextStatus,
+      uploadStatus: "uploaded",
       retryCount: segment.retryCount + 1,
       lastRetryAt: retriedAt,
     };
@@ -371,20 +1458,34 @@ export class VehicleEvidenceService {
       return;
     }
 
-    this.seedSegment(recorderId, vehicleId, "mock-manifest-001", "mock-artifact-001", "video_clip", {
-      startedAt: "2026-06-25T10:00:00.000Z",
-      endedAt: "2026-06-25T10:05:00.000Z",
-      eventId: "fsd-disengagement-001",
-      eventType: "fsd_disengagement",
-      uploadStatus: "failed",
-    });
-    this.seedSegment(recorderId, vehicleId, "mock-manifest-002", "mock-artifact-002", "telemetry_export", {
-      startedAt: "2026-06-25T10:05:00.000Z",
-      endedAt: "2026-06-25T10:06:00.000Z",
-      eventId: "remote-assist-002",
-      eventType: "remote_assist_requested",
-      uploadStatus: "uploaded",
-    });
+    this.seedSegment(
+      recorderId,
+      vehicleId,
+      "mock-manifest-001",
+      "mock-artifact-001",
+      "video_clip",
+      {
+        startedAt: "2026-06-25T10:00:00.000Z",
+        endedAt: "2026-06-25T10:05:00.000Z",
+        eventId: "fsd-disengagement-001",
+        eventType: "fsd_disengagement",
+        uploadStatus: "failed",
+      },
+    );
+    this.seedSegment(
+      recorderId,
+      vehicleId,
+      "mock-manifest-002",
+      "mock-artifact-002",
+      "telemetry_export",
+      {
+        startedAt: "2026-06-25T10:05:00.000Z",
+        endedAt: "2026-06-25T10:06:00.000Z",
+        eventId: "remote-assist-002",
+        eventType: "remote_assist_requested",
+        uploadStatus: "uploaded",
+      },
+    );
 
     this.updateRecorderHealth(recorderId, {
       observedAt: "2026-06-25T10:06:30.000Z",
@@ -451,6 +1552,594 @@ export class VehicleEvidenceService {
       bookmarked: false,
       lastRetryAt: null,
     });
+  }
+
+  private async assessManifest(
+    adapter: EvidenceRecorderAdapter,
+    items: EvidenceManifestItem[],
+  ): Promise<EvidenceManifestAssessment> {
+    const artifactResults: EvidenceManifestVerificationArtifactRecord[] = [];
+    for (const item of items) {
+      const checksumVerified = await adapter.verifyChecksum(item.artifactId);
+      const signaturePresent = Boolean(item.source.signatureRef?.trim());
+        artifactResults.push({
+          artifactId: item.artifactId,
+          checksumSha256: item.checksumSha256,
+          leafHash: this.computeHash({
+            artifactId: item.artifactId,
+          manifestId: item.manifestId,
+          artifactType: item.artifactType,
+          objectKey: item.objectKey,
+          contentType: item.contentType,
+          byteSize: item.byteSize,
+            checksumSha256: item.checksumSha256,
+            capturedAt: item.capturedAt,
+            vehicleId: item.vehicleId,
+            caseId: item.caseId,
+            source: item.source,
+          }),
+          checksumVerified,
+          signaturePresent,
+        });
+    }
+
+    const verifiedArtifactIds = artifactResults
+      .filter((result) => result.checksumVerified && result.signaturePresent)
+      .map((result) => result.artifactId);
+    const failedArtifactIds = artifactResults
+      .filter((result) => !result.checksumVerified)
+      .map((result) => result.artifactId);
+    const missingSignatureArtifactIds = artifactResults
+      .filter((result) => !result.signaturePresent)
+      .map((result) => result.artifactId);
+    const finalState: EvidenceManifestAssessment["finalState"] =
+      artifactResults.length === 0 || verifiedArtifactIds.length === 0
+        ? "failed"
+        : verifiedArtifactIds.length === artifactResults.length &&
+            missingSignatureArtifactIds.length === 0 &&
+            failedArtifactIds.length === 0
+          ? "sealed"
+          : "partial";
+
+    return {
+      verifiedAt: new Date().toISOString(),
+      hashAlgorithm: VEHICLE_EVIDENCE_HASH_ALGORITHM,
+      manifestHash: this.computeMerkleRoot(
+        artifactResults.map((result) => result.leafHash),
+      ),
+      leafCount: artifactResults.length,
+      valid: finalState === "sealed",
+      verifiedArtifactIds,
+      failedArtifactIds,
+      missingSignatureArtifactIds,
+      artifactResults,
+      finalState,
+    };
+  }
+
+  private buildArtifactRecord(
+    freezeId: string,
+    item: EvidenceManifestItem,
+    assessment: EvidenceManifestAssessment,
+    defaultRetentionUntil: string,
+  ): VehicleEvidenceArtifactRecord {
+    const artifactResult = assessment.artifactResults.find(
+      (result) => result.artifactId === item.artifactId,
+    );
+    if (!artifactResult) {
+      throw new ApiRequestError(
+        500,
+        "EVIDENCE_MANIFEST_RESULT_MISSING",
+        "Evidence manifest verification lost the artifact assessment.",
+        {
+          freezeId,
+          artifactId: item.artifactId,
+        },
+      );
+    }
+
+    const manifestCustodyState =
+      artifactResult.checksumVerified && artifactResult.signaturePresent
+        ? assessment.finalState === "sealed"
+          ? "sealed"
+          : "verified"
+        : "captured";
+
+    return {
+      freezeId,
+      artifactId: item.artifactId,
+      manifestId: item.manifestId,
+      artifactType: item.artifactType,
+      objectKey: item.objectKey,
+      contentType: item.contentType,
+      byteSize: item.byteSize,
+      checksumSha256: item.checksumSha256,
+      capturedAt: item.capturedAt,
+      vehicleId: item.vehicleId,
+      caseId: item.caseId,
+      retentionUntil: item.retentionUntil ?? defaultRetentionUntil,
+      source: { ...item.source },
+      manifestCustodyState,
+      currentCustodyState: manifestCustodyState,
+      checksumVerified: artifactResult.checksumVerified,
+      signaturePresent: artifactResult.signaturePresent,
+      leafHash: artifactResult.leafHash,
+      objectLockEnabled: true,
+      objectLockRetainedUntil: item.retentionUntil ?? defaultRetentionUntil,
+      localPreservedAt: null,
+      localPreservationChecksumVerifiedAt: null,
+      purgedAt: null,
+    };
+  }
+
+  private normalizeFreezeCommand(
+    expectedVehicleId: string,
+    command: EvidenceFreezeCommand,
+  ) {
+    const vehicleId = command.vehicleId.trim();
+    if (vehicleId !== expectedVehicleId) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_FREEZE_VEHICLE_MISMATCH",
+        "Freeze request vehicleId must match the registered recorder vehicle.",
+        {
+          expectedVehicleId,
+          actualVehicleId: vehicleId,
+        },
+      );
+    }
+
+    const windowStart = this.requireIsoTimestamp(
+      command.windowStart,
+      "windowStart",
+      "EVIDENCE_FREEZE_INVALID_WINDOW",
+    );
+    const windowEnd = this.requireIsoTimestamp(
+      command.windowEnd,
+      "windowEnd",
+      "EVIDENCE_FREEZE_INVALID_WINDOW",
+    );
+    if (new Date(windowEnd).getTime() <= new Date(windowStart).getTime()) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_FREEZE_INVALID_WINDOW",
+        "windowEnd must be later than windowStart.",
+        {
+          windowStart,
+          windowEnd,
+        },
+      );
+    }
+
+    const caseId = command.caseId?.trim() || null;
+    const caseReference =
+      command.caseReference?.trim() ||
+      caseId ||
+      `freeze:${expectedVehicleId}:${windowStart}`;
+
+    return {
+      windowStart,
+      windowEnd,
+      caseId,
+      caseReference,
+      reason: this.requireNonBlank(
+        command.reason,
+        "reason",
+        "EVIDENCE_FREEZE_REASON_REQUIRED",
+      ),
+      requestedBy: command.requestedBy?.trim() || null,
+      supersedesFreezeId: command.supersedesFreezeId?.trim() || null,
+    };
+  }
+
+  private failFreeze(
+    freeze: StoredEvidenceFreeze,
+    code: string,
+    reason: string,
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ) {
+    freeze.failureCode = code;
+    freeze.failureReason = reason;
+    freeze.objectLockEnabled = false;
+    freeze.objectLockRetainedUntil = null;
+    freeze.immutable = false;
+    if (freeze.status !== "failed") {
+      this.transitionFreeze(freeze, "failed", "freeze_failed", code);
+    }
+    this.recordEvidenceAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "vehicle-evidence",
+        actionName: "finalize_vehicle_evidence_freeze",
+        resourceType: "vehicle_evidence_freeze",
+        resourceId: freeze.freezeId,
+        newValuesSummary: {
+          evidenceFamily: "vehicle_evidence",
+          policyVersion: EVIDENCE_GOVERNANCE_VERSION,
+          status: freeze.status,
+          failureCode: code,
+          failureReason: reason,
+        },
+      },
+      requestId,
+    );
+    return this.cloneEvidenceFreeze(freeze);
+  }
+
+  private transitionFreeze(
+    freeze: StoredEvidenceFreeze,
+    nextStatus: EvidenceFreezeState,
+    reason: string,
+    errorCode?: string | null,
+  ) {
+    const allowedTransitions: Record<EvidenceFreezeState, EvidenceFreezeState[]> = {
+      requested: ["collecting"],
+      collecting: ["sealed", "partial", "failed"],
+      sealed: [],
+      partial: [],
+      failed: [],
+    };
+    const allowedNextStatuses = allowedTransitions[freeze.status];
+    if (!allowedNextStatuses.includes(nextStatus)) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_FREEZE_TRANSITION_INVALID",
+        `Cannot transition evidence freeze from ${freeze.status} to ${nextStatus}.`,
+        {
+          freezeId: freeze.freezeId,
+          from: freeze.status,
+          to: nextStatus,
+        },
+      );
+    }
+
+    const transitionedAt = new Date().toISOString();
+    freeze.transitionHistory = [
+      ...freeze.transitionHistory,
+      {
+        from: freeze.status,
+        to: nextStatus,
+        at: transitionedAt,
+        reason,
+        errorCode: errorCode ?? null,
+      },
+    ];
+    freeze.status = nextStatus;
+  }
+
+  private requireFreeze(freezeId: string) {
+    const freeze = this.evidenceFreezes.get(freezeId);
+    if (!freeze) {
+      throw new ApiRequestError(
+        404,
+        "EVIDENCE_FREEZE_NOT_FOUND",
+        `Evidence freeze ${freezeId} could not be found.`,
+        { freezeId },
+      );
+    }
+    return freeze;
+  }
+
+  private requireEvidenceActor(
+    identity: EvidenceAccessIdentity | null | undefined,
+    errorCode: string,
+  ): EvidenceAccessIdentity & { actorId: string } {
+    const actorId = identity?.actorId?.trim();
+    if (!actorId) {
+      throw new ApiRequestError(
+        403,
+        errorCode,
+        "An authenticated actor identity is required for this evidence action.",
+      );
+    }
+    return {
+      ...identity,
+      actorId,
+    } as EvidenceAccessIdentity & { actorId: string };
+  }
+
+  private requireIsoTimestamp(
+    value: string | null | undefined,
+    fieldName: string,
+    errorCode: string,
+  ) {
+    const normalizedValue = this.requireNonBlank(value, fieldName, errorCode);
+    if (Number.isNaN(new Date(normalizedValue).getTime())) {
+      throw new ApiRequestError(
+        400,
+        errorCode,
+        `${fieldName} must be a valid ISO-8601 timestamp.`,
+        { fieldName },
+      );
+    }
+    return normalizedValue;
+  }
+
+  private requireNonBlank(
+    value: string | null | undefined,
+    fieldName: string,
+    errorCode: string,
+  ) {
+    const normalizedValue = value?.trim();
+    if (!normalizedValue) {
+      throw new ApiRequestError(
+        400,
+        errorCode,
+        `${fieldName} is required.`,
+        { fieldName },
+      );
+    }
+    return normalizedValue;
+  }
+
+  private computeRetentionBoundary(anchorAt: string) {
+    const policy = getEvidenceRetentionPolicy("vehicle_evidence");
+    const days =
+      policy.archiveRetentionDays ??
+      policy.archiveAfterDays ??
+      policy.hotRetentionDays;
+    const anchorEpoch = new Date(anchorAt).getTime();
+    return new Date(anchorEpoch + days * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  private computeMerkleRoot(leafHashes: string[]) {
+    if (leafHashes.length === 0) {
+      return this.computeHash("vehicle-evidence-empty-manifest");
+    }
+
+    let level = [...leafHashes];
+    while (level.length > 1) {
+      const nextLevel: string[] = [];
+      for (let index = 0; index < level.length; index += 2) {
+        const left = level[index]!;
+        const right = level[index + 1] ?? left;
+        nextLevel.push(this.computeHash({ left, right }));
+      }
+      level = nextLevel;
+    }
+
+    return level[0]!;
+  }
+
+  private computeHash(value: unknown) {
+    return createHash("sha256")
+      .update(this.stableSerialize(value))
+      .digest("hex");
+  }
+
+  private stableSerialize(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.stableSerialize(item)).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => {
+          const nestedValue = (value as Record<string, unknown>)[key];
+          return `${JSON.stringify(key)}:${this.stableSerialize(nestedValue)}`;
+        })
+        .join(",")}}`;
+    }
+    return JSON.stringify(value);
+  }
+
+  private buildPolicySummary(policy: ReturnType<typeof getEvidenceRetentionPolicy>) {
+    return {
+      evidenceFamily: policy.family,
+      policyVersion: EVIDENCE_GOVERNANCE_VERSION,
+      hotRetentionDays: policy.hotRetentionDays,
+      archiveAfterDays: policy.archiveAfterDays,
+      archiveRetentionDays: policy.archiveRetentionDays,
+      archiveTier: policy.archiveTier,
+      legalHoldSupported: policy.legalHold.supported,
+      deletionSuppressedOnHold: policy.legalHold.deletionSuppressed,
+    };
+  }
+
+  private recordEvidenceAudit(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+  ) {
+    this.auditNotificationService.recordAuditLog({
+      ...input,
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
+  }
+
+  private recordAccessLog(
+    input: Omit<VehicleEvidenceAccessLogEntry, "accessId" | "createdAt">,
+    requestId?: string,
+  ) {
+    const createdAt = new Date().toISOString();
+    const accessLog: VehicleEvidenceAccessLogEntry = {
+      accessId: `evlog-${randomUUID()}`,
+      createdAt,
+      ...input,
+      requestId: input.requestId ?? requestId ?? null,
+      metadata: { ...input.metadata },
+    };
+    this.accessLogs = [accessLog, ...this.accessLogs].slice(0, MAX_ACCESS_LOGS);
+    return this.cloneAccessLog(accessLog);
+  }
+
+  private recordDeletionDecision(
+    artifact: VehicleEvidenceArtifactRecord,
+    freeze: EvidenceFreezeRecord,
+    result: EvidenceDeletionSchedulerResult,
+    reason: string,
+    evaluatedAt: string,
+    requestId?: string,
+  ) {
+    this.recordAccessLog(
+      {
+        freezeId: freeze.freezeId,
+        artifactId: artifact.artifactId,
+        exportId: null,
+        manifestHash: freeze.manifestHash,
+        action:
+          result.decision === "preserved_for_provider_expiry"
+            ? "preserve"
+            : result.decision === "purged"
+              ? "purge"
+              : "purge_skip",
+        actorId: "system:evidence-deletion-scheduler",
+        actorType: "system",
+        requestId: requestId ?? null,
+        caseReference: freeze.caseReference,
+        reason,
+        stepUpMethod: null,
+        stepUpVerifiedAt: null,
+        signedUrlExpiresAt: null,
+        metadata: {
+          decision: result.decision,
+          emittedEvent: result.emittedEvent,
+          effectivePrecedence: result.effectivePrecedence,
+          holdIds: [...result.holdIds],
+          exceptionIds: [...result.exceptionIds],
+          conflictExceptionId: result.conflictExceptionId,
+          checksumVerified: result.checksumVerified,
+          preservedLocallyAt: result.preservedLocallyAt,
+          purgedAt: result.purgedAt,
+          evaluatedAt,
+          providerExpiresAt: artifact.source.providerExpiresAt ?? null,
+        },
+      },
+      requestId,
+    );
+    this.recordEvidenceAudit(
+      {
+        actorId: "system:evidence-deletion-scheduler",
+        actorType: "system",
+        tenantId: null,
+        moduleName: "vehicle-evidence",
+        actionName: result.emittedEvent,
+        resourceType: "vehicle_evidence_artifact",
+        resourceId: artifact.artifactId,
+        newValuesSummary: {
+          ...this.buildPolicySummary(
+            getEvidenceRetentionPolicy("vehicle_evidence"),
+          ),
+          freezeId: freeze.freezeId,
+          manifestHash: freeze.manifestHash,
+          decision: result.decision,
+          effectivePrecedence: result.effectivePrecedence,
+          holdIds: [...result.holdIds],
+          exceptionIds: [...result.exceptionIds],
+          conflictExceptionId: result.conflictExceptionId,
+          checksumVerified: result.checksumVerified,
+          preservedLocallyAt: result.preservedLocallyAt,
+          purgedAt: result.purgedAt,
+          evaluatedAt,
+          providerExpiresAt: artifact.source.providerExpiresAt ?? null,
+        },
+      },
+      requestId,
+    );
+  }
+
+  private describeManifestAssessment(assessment: EvidenceManifestAssessment) {
+    if (assessment.finalState === "partial") {
+      return "One or more evidence artifacts failed checksum verification or were missing provider signatures.";
+    }
+    return "All evidence artifacts failed manifest verification.";
+  }
+
+  private describeUnknownError(error: unknown) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return "Unknown evidence freeze failure.";
+  }
+
+  private toManifestItem(
+    artifact: VehicleEvidenceArtifactRecord,
+  ): EvidenceManifestItem {
+    return {
+      artifactId: artifact.artifactId,
+      manifestId: artifact.manifestId,
+      artifactType: artifact.artifactType,
+      objectKey: artifact.objectKey,
+      contentType: artifact.contentType,
+      byteSize: artifact.byteSize,
+      checksumSha256: artifact.checksumSha256,
+      capturedAt: artifact.capturedAt,
+      custodyState: artifact.manifestCustodyState,
+      vehicleId: artifact.vehicleId,
+      caseId: artifact.caseId,
+      retentionUntil: artifact.retentionUntil,
+      source: { ...artifact.source },
+    };
+  }
+
+  private uniqueStrings(values: string[]) {
+    return [...new Set(values)];
+  }
+
+  private replaceStoredArtifact(updatedArtifact: VehicleEvidenceArtifactRecord) {
+    this.artifactCatalog.set(
+      updatedArtifact.artifactId,
+      this.cloneEvidenceArtifact(updatedArtifact),
+    );
+    const freeze = this.requireFreeze(updatedArtifact.freezeId);
+    freeze.artifacts = freeze.artifacts.map((artifact) =>
+      artifact.artifactId === updatedArtifact.artifactId
+        ? this.cloneEvidenceArtifact(updatedArtifact)
+        : this.cloneEvidenceArtifact(artifact),
+    );
+  }
+
+  private isProviderNearExpiry(
+    providerExpiresAt: string | null,
+    evaluatedAt: string,
+    windowMinutes: number,
+  ) {
+    if (!providerExpiresAt) {
+      return false;
+    }
+    const providerExpiryEpoch = new Date(providerExpiresAt).getTime();
+    const evaluatedEpoch = new Date(evaluatedAt).getTime();
+    if (
+      Number.isNaN(providerExpiryEpoch) ||
+      Number.isNaN(evaluatedEpoch) ||
+      providerExpiryEpoch < evaluatedEpoch
+    ) {
+      return false;
+    }
+    return providerExpiryEpoch - evaluatedEpoch <= windowMinutes * 60 * 1000;
+  }
+
+  private mapHoldReasonToDeletionExceptionReason(
+    reasonCode:
+      | "complaint_escalation"
+      | "regulatory_inquiry"
+      | "settlement_dispute"
+      | "internal_investigation",
+  ) {
+    switch (reasonCode) {
+      case "complaint_escalation":
+        return "complaint_reference" as const;
+      case "regulatory_inquiry":
+        return "regulatory_request" as const;
+      case "settlement_dispute":
+        return "settlement_dispute" as const;
+      case "internal_investigation":
+        return "manual_preservation" as const;
+    }
+  }
+
+  private buildSchedulerIdentity(): EvidenceAccessIdentity & { actorId: string } {
+    return {
+      actorId: "system:evidence-deletion-scheduler",
+      actorType: "system",
+      realm: "system",
+      scopes: [],
+      tenantId: null,
+    };
   }
 
   private buildHealthReport(
@@ -641,5 +2330,67 @@ export class VehicleEvidenceService {
 
   private cloneBookmark(record: EventBookmarkRecord): EventBookmarkRecord {
     return { ...record };
+  }
+
+  private cloneManifestVerification(
+    verification: EvidenceManifestVerificationRecord,
+  ): EvidenceManifestVerificationRecord {
+    return {
+      ...verification,
+      verifiedArtifactIds: [...verification.verifiedArtifactIds],
+      failedArtifactIds: [...verification.failedArtifactIds],
+      missingSignatureArtifactIds: [
+        ...verification.missingSignatureArtifactIds,
+      ],
+      artifactResults: verification.artifactResults.map((result) => ({
+        ...result,
+      })),
+    };
+  }
+
+  private cloneEvidenceArtifact(
+    artifact: VehicleEvidenceArtifactRecord,
+  ): VehicleEvidenceArtifactRecord {
+    return {
+      ...artifact,
+      source: { ...artifact.source },
+    };
+  }
+
+  private cloneEvidenceFreeze(
+    freeze: StoredEvidenceFreeze,
+  ): EvidenceFreezeRecord {
+    return {
+      ...freeze,
+      providerSignatureRefs: [...freeze.providerSignatureRefs],
+      sourceSystems: [...freeze.sourceSystems],
+      verification: freeze.verification
+        ? this.cloneManifestVerification(freeze.verification)
+        : null,
+      transitionHistory: freeze.transitionHistory.map((transition) => ({
+        ...transition,
+      })),
+      artifacts: freeze.artifacts.map((artifact) =>
+        this.cloneEvidenceArtifact(artifact),
+      ),
+    };
+  }
+
+  private cloneEvidenceExport(
+    record: ControlledEvidenceExportRecord,
+  ): ControlledEvidenceExportRecord {
+    return {
+      ...record,
+      download: { ...record.download },
+    };
+  }
+
+  private cloneAccessLog(
+    log: VehicleEvidenceAccessLogEntry,
+  ): VehicleEvidenceAccessLogEntry {
+    return {
+      ...log,
+      metadata: { ...log.metadata },
+    };
   }
 }

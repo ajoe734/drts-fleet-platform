@@ -19,6 +19,22 @@ const PLATFORM_IDENTITY = {
   tenantId: null,
 };
 
+const PLATFORM_IDENTITY_2 = {
+  actorId: "platform-admin-002",
+  actorType: "platform_admin" as const,
+  realm: "platform" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
+function getErrorCode(error: unknown) {
+  if (!(error instanceof ApiRequestError)) {
+    throw error;
+  }
+  const response = error.getResponse() as { error: { code: string } };
+  return response.error.code;
+}
+
 describe("AuditNotificationService evidence governance workflows", () => {
   it("tracks legal holds and deletion exceptions on the evidence subject view", () => {
     const service = new AuditNotificationService();
@@ -83,13 +99,14 @@ describe("AuditNotificationService evidence governance workflows", () => {
     expect(governance).toMatchObject({
       family: "report_artifact",
       subjectId: "artifact-report-001",
+      effectivePrecedence: "active_hold",
       deletionSuppressed: true,
     });
     expect(governance.activeLegalHolds).toHaveLength(1);
     expect(governance.activeDeletionExceptions).toHaveLength(1);
   });
 
-  it("only allows platform admins to release legal holds", () => {
+  it("only allows platform admins to request and approve legal hold releases", () => {
     const service = new AuditNotificationService();
     const hold = service.placeEvidenceLegalHold(
       {
@@ -101,21 +118,105 @@ describe("AuditNotificationService evidence governance workflows", () => {
       OPS_IDENTITY,
     );
 
-    expect(() =>
+    try {
       service.releaseEvidenceLegalHold(
         hold.holdId,
         { releaseReason: "ops attempted release" },
         OPS_IDENTITY,
-      ),
-    ).toThrowError(ApiRequestError);
+      );
+      throw new Error("Expected platform-admin restriction.");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("EVIDENCE_GOVERNANCE_FORBIDDEN");
+    }
+
+    const platformPlacedHold = service.placeEvidenceLegalHold(
+      {
+        family: "filing_package",
+        subjectId: "pkg-002",
+        caseNumber: "CASE-2026-003",
+        reasonCode: "regulatory_inquiry",
+      },
+      PLATFORM_IDENTITY,
+    );
+
+    const releaseRequested = service.releaseEvidenceLegalHold(
+      hold.holdId,
+      {
+        releaseReason: "regulator packet closed",
+        releaseTrigger: "authority",
+        releaseReference: "AUTH-REL-2026-001",
+      },
+      PLATFORM_IDENTITY,
+      "req-hold-release-request-001",
+    );
+    expect(releaseRequested.status).toBe("release_requested");
+    expect(releaseRequested.releaseRequestedByActorId).toBe(
+      PLATFORM_IDENTITY.actorId,
+    );
+    expect(releaseRequested.releasedAt).toBeNull();
+
+    try {
+      service.releaseEvidenceLegalHold(
+        hold.holdId,
+        {
+          releaseReason: "regulator packet closed",
+          releaseTrigger: "authority",
+          releaseReference: "AUTH-REL-2026-001",
+        },
+        PLATFORM_IDENTITY,
+      );
+      throw new Error("Expected second approver rejection.");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe(
+        "EVIDENCE_LEGAL_HOLD_SECOND_APPROVER_REQUIRED",
+      );
+    }
+
+    const platformPlacedRequest = service.releaseEvidenceLegalHold(
+      platformPlacedHold.holdId,
+      {
+        releaseReason: "Platform-placed hold can be requested by the placer.",
+      },
+      PLATFORM_IDENTITY,
+      "req-hold-release-request-002",
+    );
+    expect(platformPlacedRequest.status).toBe("release_requested");
+
+    try {
+      service.releaseEvidenceLegalHold(
+        platformPlacedHold.holdId,
+        {
+          releaseReason: "Platform-placed hold can be requested by the placer.",
+        },
+        PLATFORM_IDENTITY,
+      );
+      throw new Error("Expected placer approval rejection.");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe(
+        "EVIDENCE_LEGAL_HOLD_SECOND_APPROVER_REQUIRED",
+      );
+    }
 
     const released = service.releaseEvidenceLegalHold(
       hold.holdId,
-      { releaseReason: "regulator packet closed" },
-      PLATFORM_IDENTITY,
+      {
+        releaseReason: "regulator packet closed",
+        releaseTrigger: "authority",
+        releaseReference: "AUTH-REL-2026-001",
+      },
+      PLATFORM_IDENTITY_2,
       "req-hold-release-001",
     );
     expect(released.status).toBe("released");
+    expect(released.releaseRequestedByActorType).toBe("platform_admin");
     expect(released.releasedByActorType).toBe("platform_admin");
+    expect(released.releaseTrigger).toBe("authority");
+    expect(released.releaseReference).toBe("AUTH-REL-2026-001");
+    expect(released.transitionHistory.map((transition) => transition.to)).toEqual([
+      "draft",
+      "active",
+      "release_requested",
+      "released",
+    ]);
   });
 });

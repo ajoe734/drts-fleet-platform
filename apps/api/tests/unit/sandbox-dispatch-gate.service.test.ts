@@ -973,4 +973,36 @@ describe("SandboxDispatchGateService", () => {
     expect(decision.decision).toBe("block");
     expect(decision.hardReasonCodes).toContain("ODD_OUT_OF_BOUNDS");
   });
+
+  it("falls back to the in-memory decision when repository storage is disabled", async () => {
+    const repository = {
+      isEnabled: vi.fn(() => false),
+      loadDecisionById: vi.fn(),
+      loadLatestDecision: vi.fn(),
+      persistEvaluation: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as never;
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      repository,
+    );
+
+    const decision = await gate.evaluateDispatch({
+      orderId: "order-av-007",
+      dispatchJobId: "job-av-007",
+      vehicleId: "veh-av-007",
+      sandboxProgramId: "sandbox-program-001",
+      policyVersion: "phase2-evd-001",
+    });
+
+    await expect(
+      gate.findDecisionForOrder("order-av-007", decision.decisionId),
+    ).resolves.toMatchObject({
+      decisionId: decision.decisionId,
+      orderId: "order-av-007",
+    });
+    expect(repository.loadDecisionById).not.toHaveBeenCalled();
+    expect(repository.loadLatestDecision).not.toHaveBeenCalled();
+  });
 });

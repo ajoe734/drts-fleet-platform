@@ -307,14 +307,13 @@ export class SandboxDispatchGateService {
 
   async findDecisionForOrder(orderId: string, decisionId?: string | null) {
     const normalizedDecisionId = decisionId?.trim() ?? null;
-    if (this.repository) {
+    if (this.repository?.isEnabled()) {
       const record = normalizedDecisionId
         ? await this.repository.loadDecisionById(normalizedDecisionId)
         : await this.repository.loadLatestDecision(orderId);
-      if (!record || record.decision.orderId !== orderId) {
-        return null;
+      if (record && record.decision.orderId === orderId) {
+        return this.cloneDecision(record.decision);
       }
-      return this.cloneDecision(record.decision);
     }
 
     if (

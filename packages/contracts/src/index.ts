@@ -664,6 +664,7 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "call_recording",
   "report_artifact",
   "filing_package",
+  "vehicle_evidence",
   "audit_log",
   "webhook_delivery",
   "eligibility_verification",
@@ -739,6 +740,16 @@ export interface EvidenceGovernanceCatalog {
   legalHoldWorkflow: string[];
 }
 
+export const EVIDENCE_GOVERNANCE_PRECEDENCE = [
+  "active_hold",
+  "regulator",
+  "contract",
+  "normal",
+  "deletion_request",
+] as const;
+export type EvidenceGovernancePrecedence =
+  (typeof EVIDENCE_GOVERNANCE_PRECEDENCE)[number];
+
 export const EVIDENCE_LEGAL_HOLD_REASON_CODES = [
   "complaint_escalation",
   "regulatory_inquiry",
@@ -748,9 +759,28 @@ export const EVIDENCE_LEGAL_HOLD_REASON_CODES = [
 export type EvidenceLegalHoldReasonCode =
   (typeof EVIDENCE_LEGAL_HOLD_REASON_CODES)[number];
 
-export const EVIDENCE_LEGAL_HOLD_STATUSES = ["active", "released"] as const;
+export const EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS = [
+  "manual",
+  "authority",
+] as const;
+export type EvidenceLegalHoldReleaseTrigger =
+  (typeof EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS)[number];
+
+export const EVIDENCE_LEGAL_HOLD_STATUSES = [
+  "draft",
+  "active",
+  "release_requested",
+  "released",
+] as const;
 export type EvidenceLegalHoldStatus =
   (typeof EVIDENCE_LEGAL_HOLD_STATUSES)[number];
+
+export interface EvidenceLegalHoldTransitionRecord {
+  from: EvidenceLegalHoldStatus | null;
+  to: EvidenceLegalHoldStatus;
+  at: string;
+  reason: string;
+}
 
 export interface CreateEvidenceLegalHoldCommand {
   family: EvidenceRetentionFamily;
@@ -764,6 +794,8 @@ export interface CreateEvidenceLegalHoldCommand {
 
 export interface ReleaseEvidenceLegalHoldCommand {
   releaseReason: string;
+  releaseTrigger?: EvidenceLegalHoldReleaseTrigger | null;
+  releaseReference?: string | null;
 }
 
 export interface EvidenceLegalHoldRecord {
@@ -775,14 +807,21 @@ export interface EvidenceLegalHoldRecord {
   reasonNote: string | null;
   tenantId: string | null;
   manifestHash: string | null;
+  precedence: EvidenceGovernancePrecedence;
   status: EvidenceLegalHoldStatus;
   placedByActorId: string;
   placedByActorType: IdentityContext["actorType"];
   placedAt: string;
+  releaseRequestedByActorId: string | null;
+  releaseRequestedByActorType: IdentityContext["actorType"] | null;
+  releaseRequestedAt: string | null;
+  releaseTrigger: EvidenceLegalHoldReleaseTrigger | null;
+  releaseReference: string | null;
   releasedByActorId: string | null;
   releasedByActorType: IdentityContext["actorType"] | null;
   releasedAt: string | null;
   releaseReason: string | null;
+  transitionHistory: EvidenceLegalHoldTransitionRecord[];
 }
 
 export const EVIDENCE_DELETION_EXCEPTION_REASON_CODES = [
@@ -853,6 +892,7 @@ export interface EvidenceSubjectGovernanceRecord {
   manifestHash: string | null;
   activeLegalHolds: EvidenceLegalHoldRecord[];
   activeDeletionExceptions: EvidenceDeletionExceptionRecord[];
+  effectivePrecedence: EvidenceGovernancePrecedence;
   deletionSuppressed: boolean;
 }
 

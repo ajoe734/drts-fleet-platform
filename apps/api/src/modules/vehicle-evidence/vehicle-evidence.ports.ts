@@ -1,14 +1,217 @@
-import type { EvidenceArtifactType, EvidenceManifestItem } from "@drts/contracts";
+import type {
+  EvidenceArtifactType,
+  EvidenceCustodyState,
+  EvidenceGovernancePrecedence,
+  EvidenceManifestItem,
+  IdentityContext,
+} from "@drts/contracts";
+
+import type { ControlledDownloadMetadata } from "../../common/controlled-download";
 
 export type RecorderHealthState = "ok" | "warning" | "error";
 export type RecorderOverallHealth = "healthy" | "degraded" | "unhealthy";
 export type SegmentUploadStatus = "pending" | "retrying" | "uploaded" | "failed";
+
+export type EvidenceFreezeState =
+  | "requested"
+  | "collecting"
+  | "sealed"
+  | "partial"
+  | "failed";
+
+export type VehicleEvidenceAccessAction =
+  | "freeze_request"
+  | "read"
+  | "verify"
+  | "export"
+  | "signed_url"
+  | "purge"
+  | "preserve"
+  | "purge_skip";
+
+export type VehicleEvidenceStepUpMethod = "webauthn" | "totp" | "sms_otp";
 
 export interface EvidenceCaptureRequest {
   vehicleId: string;
   windowStart: string;
   windowEnd: string;
   caseId?: string | null;
+}
+
+export interface EvidenceFreezeCommand extends EvidenceCaptureRequest {
+  caseReference?: string | null;
+  reason: string;
+  requestedBy?: string | null;
+  supersedesFreezeId?: string | null;
+}
+
+export interface EvidenceFreezeTransitionRecord {
+  from: EvidenceFreezeState | null;
+  to: EvidenceFreezeState;
+  at: string;
+  reason: string;
+  errorCode: string | null;
+}
+
+export interface EvidenceManifestVerificationArtifactRecord {
+  artifactId: string;
+  checksumSha256: string;
+  leafHash: string;
+  checksumVerified: boolean;
+  signaturePresent: boolean;
+}
+
+export interface EvidenceManifestVerificationRecord {
+  verifiedAt: string;
+  hashAlgorithm: "sha256-merkle-v1";
+  manifestHash: string;
+  leafCount: number;
+  valid: boolean;
+  verifiedArtifactIds: string[];
+  failedArtifactIds: string[];
+  missingSignatureArtifactIds: string[];
+  artifactResults: EvidenceManifestVerificationArtifactRecord[];
+}
+
+export interface VehicleEvidenceArtifactRecord
+  extends Omit<EvidenceManifestItem, "custodyState"> {
+  freezeId: string;
+  manifestCustodyState: EvidenceCustodyState;
+  currentCustodyState: EvidenceCustodyState;
+  checksumVerified: boolean;
+  signaturePresent: boolean;
+  leafHash: string;
+  objectLockEnabled: boolean;
+  objectLockRetainedUntil: string | null;
+  localPreservedAt: string | null;
+  localPreservationChecksumVerifiedAt: string | null;
+  purgedAt: string | null;
+}
+
+export interface EvidenceFreezeRecord {
+  freezeId: string;
+  recorderId: string;
+  vehicleId: string;
+  caseId: string | null;
+  caseReference: string;
+  requestedReason: string;
+  requestedBy: string | null;
+  requestedAt: string;
+  sealedAt: string | null;
+  status: EvidenceFreezeState;
+  manifestId: string | null;
+  manifestHash: string | null;
+  hashAlgorithm: "sha256-merkle-v1" | null;
+  providerSignatureRefs: string[];
+  sourceSystems: string[];
+  objectLockEnabled: boolean;
+  objectLockRetainedUntil: string | null;
+  immutable: boolean;
+  supersedesFreezeId: string | null;
+  verification: EvidenceManifestVerificationRecord | null;
+  transitionHistory: EvidenceFreezeTransitionRecord[];
+  artifacts: VehicleEvidenceArtifactRecord[];
+  exportCount: number;
+  failureCode: string | null;
+  failureReason: string | null;
+}
+
+export interface ControlledEvidenceExportCommand {
+  reason: string;
+  caseReference?: string | null;
+  watermarkText?: string | null;
+  stepUpMethod: VehicleEvidenceStepUpMethod;
+  stepUpVerifiedAt: string;
+  stepUpSessionId: string;
+}
+
+export interface ControlledEvidenceExportRecord {
+  exportId: string;
+  freezeId: string;
+  manifestHash: string;
+  caseReference: string;
+  reason: string;
+  watermarkText: string;
+  requestedAt: string;
+  requestedByActorId: string;
+  requestedByActorType: IdentityContext["actorType"];
+  stepUpMethod: VehicleEvidenceStepUpMethod;
+  stepUpVerifiedAt: string;
+  stepUpSessionId: string;
+  download: ControlledDownloadMetadata;
+}
+
+export interface EvidencePurgeCommand {
+  reason: string;
+  overrideObjectLock: boolean;
+}
+
+export interface EvidencePurgeResult {
+  artifactId: string;
+  freezeId: string;
+  purgedAt: string;
+  purgedByActorId: string;
+  purgedByActorType: IdentityContext["actorType"];
+  reason: string;
+  objectLockBypassed: boolean;
+}
+
+export interface EvidenceDeletionSchedulerCommand {
+  artifactId: string;
+  currentTime?: string;
+  providerNearExpiryWindowMinutes?: number;
+}
+
+export type EvidenceDeletionSchedulerDecision =
+  | "purged"
+  | "preserved_for_provider_expiry"
+  | "skipped_due_to_hold"
+  | "skipped_due_to_exception"
+  | "deferred_by_retention";
+
+export interface EvidenceDeletionSchedulerResult {
+  artifactId: string;
+  freezeId: string;
+  decision: EvidenceDeletionSchedulerDecision;
+  emittedEvent: string;
+  effectivePrecedence: EvidenceGovernancePrecedence;
+  holdIds: string[];
+  exceptionIds: string[];
+  conflictExceptionId: string | null;
+  checksumVerified: boolean | null;
+  preservedLocallyAt: string | null;
+  purgedAt: string | null;
+}
+
+export interface VehicleEvidenceAccessLogEntry {
+  accessId: string;
+  freezeId: string;
+  artifactId: string | null;
+  exportId: string | null;
+  manifestHash: string | null;
+  action: VehicleEvidenceAccessAction;
+  actorId: string | null;
+  actorType: IdentityContext["actorType"] | null;
+  requestId: string | null;
+  caseReference: string | null;
+  reason: string | null;
+  stepUpMethod: VehicleEvidenceStepUpMethod | null;
+  stepUpVerifiedAt: string | null;
+  signedUrlExpiresAt: string | null;
+  createdAt: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface EvidenceFreezeQuery {
+  recorderId?: string;
+  vehicleId?: string;
+  caseId?: string;
+  status?: EvidenceFreezeState;
+}
+
+export interface EvidenceAccessLogQuery {
+  freezeId?: string;
+  action?: VehicleEvidenceAccessAction;
 }
 
 export interface RecorderRegistrationInput {

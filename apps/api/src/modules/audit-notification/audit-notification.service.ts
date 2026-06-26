@@ -8,7 +8,9 @@ import type {
   CreateEvidenceLegalHoldCommand,
   EvidenceDeletionExceptionRecord,
   EvidenceDeletionExceptionStatus,
+  EvidenceGovernancePrecedence,
   EvidenceLegalHoldRecord,
+  EvidenceLegalHoldReleaseTrigger,
   EvidenceRetentionFamily,
   EvidenceSubjectGovernanceRecord,
   IdentityContext,
@@ -20,6 +22,7 @@ import type {
 import {
   EVIDENCE_DELETION_EXCEPTION_REASON_CODES,
   EVIDENCE_LEGAL_HOLD_REASON_CODES,
+  EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -76,6 +79,10 @@ function cloneEvidenceDeletionException(
   exception: EvidenceDeletionExceptionRecord,
 ): EvidenceDeletionExceptionRecord {
   return { ...exception };
+}
+
+function holdBlocksDeletion(status: EvidenceLegalHoldRecord["status"]) {
+  return status === "active" || status === "release_requested";
 }
 
 @Injectable()
@@ -401,6 +408,7 @@ export class AuditNotificationService implements OnModuleInit {
       );
     }
 
+    const placedAt = new Date().toISOString();
     const holdRecord: EvidenceLegalHoldRecord = {
       holdId: `hold-${randomUUID()}`,
       family: policy.family,
@@ -410,14 +418,21 @@ export class AuditNotificationService implements OnModuleInit {
       reasonNote,
       tenantId,
       manifestHash,
+      precedence: "active_hold",
       status: "active",
       placedByActorId: actor.actorId,
       placedByActorType: actor.actorType,
-      placedAt: new Date().toISOString(),
+      placedAt,
+      releaseRequestedByActorId: null,
+      releaseRequestedByActorType: null,
+      releaseRequestedAt: null,
+      releaseTrigger: null,
+      releaseReference: null,
       releasedByActorId: null,
       releasedByActorType: null,
       releasedAt: null,
       releaseReason: null,
+      transitionHistory: this.buildLegalHoldTransitionHistory(placedAt),
     };
 
     this.recordAuditLog({
@@ -431,6 +446,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...holdRecord },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceLegalHolds.set(
+      holdRecord.holdId,
+      cloneEvidenceLegalHold(holdRecord),
+    );
 
     return cloneEvidenceLegalHold(holdRecord);
   }
@@ -453,7 +472,7 @@ export class AuditNotificationService implements OnModuleInit {
       );
     }
     this.assertLegalHoldReleaseAllowed(existing.family, actor);
-    if (existing.status !== "active") {
+    if (existing.status === "released") {
       throw new ApiRequestError(
         409,
         "EVIDENCE_LEGAL_HOLD_ALREADY_RELEASED",
@@ -462,16 +481,69 @@ export class AuditNotificationService implements OnModuleInit {
       );
     }
 
+    if (existing.status === "active") {
+      return this.requestEvidenceLegalHoldRelease(
+        existing,
+        command,
+        actor,
+        requestId,
+      );
+    }
+
+    if (existing.status !== "release_requested") {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_INVALID_STATUS",
+        "The evidence legal hold is not in a releasable state.",
+        { holdId: normalizedHoldId, status: existing.status },
+      );
+    }
+
+    if (
+      existing.releaseRequestedByActorId === actor.actorId ||
+      existing.placedByActorId === actor.actorId
+    ) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_SECOND_APPROVER_REQUIRED",
+        "Final release approval requires a different platform-admin approver than the requester and the actor who placed the hold.",
+        {
+          holdId: normalizedHoldId,
+          placedByActorId: existing.placedByActorId,
+          releaseRequestedByActorId: existing.releaseRequestedByActorId,
+          approverActorId: actor.actorId,
+        },
+      );
+    }
+
+    const {
+      releaseReason,
+      releaseTrigger,
+      releaseReference,
+    } = this.requirePendingLegalHoldReleaseApproval(existing, command);
+    const releasedAt = new Date().toISOString();
+
     const updated: EvidenceLegalHoldRecord = {
       ...existing,
       status: "released",
+      releaseTrigger,
+      releaseReference,
       releasedByActorId: actor.actorId,
       releasedByActorType: actor.actorType,
-      releasedAt: new Date().toISOString(),
-      releaseReason: this.requireNonBlank(
-        command.releaseReason,
-        "releaseReason",
-      ),
+      releasedAt,
+      releaseReason,
+      transitionHistory: [
+        ...existing.transitionHistory,
+        {
+          from: "release_requested",
+          to: "released",
+          at: releasedAt,
+          reason:
+            releaseTrigger === "authority"
+              ? "authority_release_approved"
+              : "release_approved",
+        },
+      ],
     };
 
     this.recordAuditLog({
@@ -486,6 +558,84 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...updated },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceLegalHolds.set(
+      updated.holdId,
+      cloneEvidenceLegalHold(updated),
+    );
+
+    this.resolveSyntheticDeletionConflictExceptionsForHold(
+      updated,
+      actor,
+      requestId,
+    );
+
+    return cloneEvidenceLegalHold(updated);
+  }
+
+  private requestEvidenceLegalHoldRelease(
+    existing: EvidenceLegalHoldRecord,
+    command: ReleaseEvidenceLegalHoldCommand,
+    actor: OperationalIdentity & { actorId: string },
+    requestId?: string,
+  ) {
+    const releaseReason = this.requireNonBlank(
+      command.releaseReason,
+      "releaseReason",
+    );
+    const releaseTrigger = this.requireLegalHoldReleaseTrigger(
+      command.releaseTrigger,
+    );
+    const releaseReference = this.normalizeOptional(command.releaseReference);
+    if (releaseTrigger === "authority" && !releaseReference) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REFERENCE_REQUIRED",
+        "Authority-triggered legal hold releases require a release reference.",
+        { holdId: existing.holdId },
+      );
+    }
+
+    const releaseRequestedAt = new Date().toISOString();
+
+    const updated: EvidenceLegalHoldRecord = {
+      ...existing,
+      status: "release_requested",
+      releaseRequestedByActorId: actor.actorId,
+      releaseRequestedByActorType: actor.actorType,
+      releaseRequestedAt,
+      releaseTrigger,
+      releaseReference,
+      releasedByActorId: null,
+      releasedByActorType: null,
+      releasedAt: null,
+      releaseReason,
+      transitionHistory: [
+        ...existing.transitionHistory,
+        {
+          from: "active",
+          to: "release_requested",
+          at: releaseRequestedAt,
+          reason: "release_requested",
+        },
+      ],
+    };
+
+    this.recordAuditLog({
+      actorId: actor.actorId,
+      actorType: actor.actorType as AuditLogRecord["actorType"],
+      tenantId: updated.tenantId,
+      moduleName: "audit-notification",
+      actionName: "request_evidence_legal_hold_release",
+      resourceType: "evidence_legal_hold",
+      resourceId: updated.holdId,
+      oldValuesSummary: { ...existing },
+      newValuesSummary: { ...updated },
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
+    this.evidenceLegalHolds.set(
+      updated.holdId,
+      cloneEvidenceLegalHold(updated),
+    );
 
     return cloneEvidenceLegalHold(updated);
   }
@@ -586,6 +736,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...exceptionRecord },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceDeletionExceptions.set(
+      exceptionRecord.exceptionId,
+      cloneEvidenceDeletionException(exceptionRecord),
+    );
 
     return cloneEvidenceDeletionException(exceptionRecord);
   }
@@ -649,6 +803,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...updated },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceDeletionExceptions.set(
+      updated.exceptionId,
+      cloneEvidenceDeletionException(updated),
+    );
 
     return cloneEvidenceDeletionException(updated);
   }
@@ -670,9 +828,12 @@ export class AuditNotificationService implements OnModuleInit {
           hold.subjectId === subjectId &&
           (!tenantId || hold.tenantId === tenantId) &&
           (!manifestHash || hold.manifestHash === manifestHash) &&
-          hold.status === "active",
+          holdBlocksDeletion(hold.status),
       )
-      .map((hold) => cloneEvidenceLegalHold(hold));
+      .map((hold) => cloneEvidenceLegalHold(hold))
+      .sort((left, right) =>
+        this.compareGovernancePrecedence(left.precedence, right.precedence),
+      );
     const activeDeletionExceptions = [
       ...this.evidenceDeletionExceptions.values(),
     ]
@@ -686,6 +847,10 @@ export class AuditNotificationService implements OnModuleInit {
           exception.status === "active",
       )
       .map((exception) => cloneEvidenceDeletionException(exception));
+    const effectivePrecedence = this.computeGovernancePrecedence(
+      activeLegalHolds,
+      activeDeletionExceptions,
+    );
 
     return {
       family,
@@ -694,9 +859,100 @@ export class AuditNotificationService implements OnModuleInit {
       manifestHash,
       activeLegalHolds,
       activeDeletionExceptions,
+      effectivePrecedence,
       deletionSuppressed:
         activeLegalHolds.length > 0 || activeDeletionExceptions.length > 0,
     };
+  }
+
+  ensureEvidenceDeletionConflictException(
+    input: {
+      family: EvidenceRetentionFamily;
+      subjectId: string;
+      sourceResourceType: string;
+      sourceResourceId: string;
+      reasonCode: CreateEvidenceDeletionExceptionCommand["reasonCode"];
+      reasonNote?: string | null;
+      tenantId?: string | null;
+      manifestHash?: string | null;
+      reviewerActorId?: string | null;
+      reviewerActorType?: IdentityContext["actorType"] | null;
+      expiresAt?: string | null;
+    },
+    requestId?: string,
+  ) {
+    const subjectId = this.requireNonBlank(input.subjectId, "subjectId");
+    const sourceResourceType = this.requireNonBlank(
+      input.sourceResourceType,
+      "sourceResourceType",
+    );
+    const sourceResourceId = this.requireNonBlank(
+      input.sourceResourceId,
+      "sourceResourceId",
+    );
+    const manifestHash = this.normalizeOptional(input.manifestHash);
+    const tenantId = this.normalizeOptional(input.tenantId);
+    const activeExisting = [...this.evidenceDeletionExceptions.values()]
+      .map((exception) => this.withEffectiveDeletionExceptionStatus(exception))
+      .find(
+        (exception) =>
+          exception.family === input.family &&
+          exception.subjectId === subjectId &&
+          exception.sourceResourceType === sourceResourceType &&
+          exception.sourceResourceId === sourceResourceId &&
+          (!tenantId || exception.tenantId === tenantId) &&
+          (!manifestHash || exception.manifestHash === manifestHash) &&
+          exception.status === "active",
+      );
+    if (activeExisting) {
+      return cloneEvidenceDeletionException(activeExisting);
+    }
+
+    const expiresAt =
+      input.expiresAt && input.expiresAt.trim()
+        ? this.requireFutureIso(input.expiresAt, "expiresAt")
+        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const exceptionRecord: EvidenceDeletionExceptionRecord = {
+      exceptionId: `delex-${randomUUID()}`,
+      family: input.family,
+      subjectId,
+      sourceResourceType,
+      sourceResourceId,
+      reviewerActorId:
+        input.reviewerActorId?.trim() || "platform-admin-review-queue",
+      reviewerActorType: input.reviewerActorType ?? "platform_admin",
+      expiresAt,
+      reasonCode: input.reasonCode,
+      reasonNote: this.normalizeOptional(input.reasonNote),
+      tenantId,
+      manifestHash,
+      status: "active",
+      requestedByActorId: "system:evidence-deletion-scheduler",
+      requestedByActorType: "system",
+      requestedAt: new Date().toISOString(),
+      resolvedByActorId: null,
+      resolvedByActorType: null,
+      resolvedAt: null,
+      resolutionNote: null,
+    };
+
+    this.recordAuditLog({
+      actorId: exceptionRecord.requestedByActorId,
+      actorType: exceptionRecord.requestedByActorType as AuditLogRecord["actorType"],
+      tenantId,
+      moduleName: "audit-notification",
+      actionName: "register_evidence_deletion_exception",
+      resourceType: "evidence_deletion_exception",
+      resourceId: exceptionRecord.exceptionId,
+      newValuesSummary: { ...exceptionRecord },
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
+    this.evidenceDeletionExceptions.set(
+      exceptionRecord.exceptionId,
+      cloneEvidenceDeletionException(exceptionRecord),
+    );
+
+    return cloneEvidenceDeletionException(exceptionRecord);
   }
 
   recordNotification(
@@ -840,7 +1096,39 @@ export class AuditNotificationService implements OnModuleInit {
     ) {
       return null;
     }
-    return payload as unknown as EvidenceLegalHoldRecord;
+    return {
+      ...(payload as unknown as EvidenceLegalHoldRecord),
+      precedence:
+        (payload.precedence as EvidenceGovernancePrecedence | undefined) ??
+        "active_hold",
+      releaseRequestedByActorId:
+        typeof payload.releaseRequestedByActorId === "string"
+          ? payload.releaseRequestedByActorId
+          : null,
+      releaseRequestedByActorType:
+        typeof payload.releaseRequestedByActorType === "string"
+          ? (payload.releaseRequestedByActorType as IdentityContext["actorType"])
+          : null,
+      releaseRequestedAt:
+        typeof payload.releaseRequestedAt === "string"
+          ? payload.releaseRequestedAt
+          : null,
+      releaseTrigger:
+        typeof payload.releaseTrigger === "string"
+          ? (payload.releaseTrigger as EvidenceLegalHoldRecord["releaseTrigger"])
+          : null,
+      releaseReference:
+        typeof payload.releaseReference === "string"
+          ? payload.releaseReference
+          : null,
+      transitionHistory: Array.isArray(payload.transitionHistory)
+        ? (payload.transitionHistory as EvidenceLegalHoldRecord["transitionHistory"])
+        : this.buildLegalHoldTransitionHistory(
+            typeof payload.placedAt === "string"
+              ? payload.placedAt
+              : new Date().toISOString(),
+          ),
+    };
   }
 
   private parseEvidenceDeletionException(
@@ -972,6 +1260,109 @@ export class AuditNotificationService implements OnModuleInit {
     return normalized as T[number];
   }
 
+  private requireLegalHoldReleaseTrigger(
+    value: string | null | undefined,
+  ): EvidenceLegalHoldReleaseTrigger {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return "manual";
+    }
+    if (
+      !EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS.includes(
+        normalized as EvidenceLegalHoldReleaseTrigger,
+      )
+    ) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_GOVERNANCE_INVALID_RELEASE_TRIGGER",
+        "The releaseTrigger value is not supported.",
+        {
+          field: "releaseTrigger",
+          value: normalized,
+          allowed: EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS,
+        },
+      );
+    }
+    return normalized as EvidenceLegalHoldReleaseTrigger;
+  }
+
+  private requirePendingLegalHoldReleaseApproval(
+    existing: EvidenceLegalHoldRecord,
+    command: ReleaseEvidenceLegalHoldCommand,
+  ) {
+    const releaseReason = this.requireNonBlank(
+      command.releaseReason,
+      "releaseReason",
+    );
+    if (existing.releaseReason && existing.releaseReason !== releaseReason) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REQUEST_MISMATCH",
+        "The releaseReason does not match the pending legal hold release request.",
+        {
+          holdId: existing.holdId,
+          field: "releaseReason",
+          expected: existing.releaseReason,
+          received: releaseReason,
+        },
+      );
+    }
+
+    const releaseTrigger = this.requireLegalHoldReleaseTrigger(
+      command.releaseTrigger ?? existing.releaseTrigger,
+    );
+    if (existing.releaseTrigger && existing.releaseTrigger !== releaseTrigger) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REQUEST_MISMATCH",
+        "The releaseTrigger does not match the pending legal hold release request.",
+        {
+          holdId: existing.holdId,
+          field: "releaseTrigger",
+          expected: existing.releaseTrigger,
+          received: releaseTrigger,
+        },
+      );
+    }
+
+    const requestedReleaseReference = this.normalizeOptional(
+      command.releaseReference,
+    );
+    if (
+      existing.releaseReference &&
+      requestedReleaseReference &&
+      existing.releaseReference !== requestedReleaseReference
+    ) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REQUEST_MISMATCH",
+        "The releaseReference does not match the pending legal hold release request.",
+        {
+          holdId: existing.holdId,
+          field: "releaseReference",
+          expected: existing.releaseReference,
+          received: requestedReleaseReference,
+        },
+      );
+    }
+
+    const releaseReference = existing.releaseReference ?? requestedReleaseReference;
+    if (releaseTrigger === "authority" && !releaseReference) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REFERENCE_REQUIRED",
+        "Authority-triggered legal hold releases require a release reference.",
+        { holdId: existing.holdId },
+      );
+    }
+
+    return {
+      releaseReason: existing.releaseReason ?? releaseReason,
+      releaseTrigger,
+      releaseReference,
+    };
+  }
+
   private withEffectiveDeletionExceptionStatus(
     exception: EvidenceDeletionExceptionRecord,
   ): EvidenceDeletionExceptionRecord {
@@ -988,6 +1379,70 @@ export class AuditNotificationService implements OnModuleInit {
     };
   }
 
+  private buildLegalHoldTransitionHistory(placedAt?: string) {
+    const transitionedAt = placedAt ?? new Date().toISOString();
+    return [
+      {
+        from: null,
+        to: "draft" as const,
+        at: transitionedAt,
+        reason: "draft_created",
+      },
+      {
+        from: "draft" as const,
+        to: "active" as const,
+        at: transitionedAt,
+        reason: "hold_activated",
+      },
+    ];
+  }
+
+  private computeGovernancePrecedence(
+    activeLegalHolds: EvidenceLegalHoldRecord[],
+    activeDeletionExceptions: EvidenceDeletionExceptionRecord[],
+  ): EvidenceGovernancePrecedence {
+    if (activeLegalHolds.length > 0) {
+      return "active_hold";
+    }
+
+    const exceptionPrecedences = activeDeletionExceptions.map((exception) =>
+      this.resolveDeletionExceptionPrecedence(exception.reasonCode),
+    );
+    if (exceptionPrecedences.length === 0) {
+      return "normal";
+    }
+
+    return [...exceptionPrecedences].sort((left, right) =>
+      this.compareGovernancePrecedence(left, right),
+    )[0]!;
+  }
+
+  private resolveDeletionExceptionPrecedence(
+    reasonCode: EvidenceDeletionExceptionRecord["reasonCode"],
+  ): EvidenceGovernancePrecedence {
+    if (reasonCode === "regulatory_request" || reasonCode === "filing_reference") {
+      return "regulator";
+    }
+    if (reasonCode === "settlement_dispute") {
+      return "contract";
+    }
+    return "normal";
+  }
+
+  private compareGovernancePrecedence(
+    left: EvidenceGovernancePrecedence,
+    right: EvidenceGovernancePrecedence,
+  ) {
+    const order: EvidenceGovernancePrecedence[] = [
+      "active_hold",
+      "regulator",
+      "contract",
+      "normal",
+      "deletion_request",
+    ];
+    return order.indexOf(left) - order.indexOf(right);
+  }
+
   private persistAuditLog(auditLog: AuditLogRecord) {
     if (!this.auditLogRepository) {
       return;
@@ -997,5 +1452,37 @@ export class AuditNotificationService implements OnModuleInit {
       const detail = error instanceof Error ? error.message : String(error);
       this.logger.warn(`Audit log write-through skipped: ${detail}`);
     });
+  }
+
+  private resolveSyntheticDeletionConflictExceptionsForHold(
+    hold: EvidenceLegalHoldRecord,
+    actor: OperationalIdentity,
+    requestId?: string,
+  ) {
+    const syntheticExceptions = [...this.evidenceDeletionExceptions.values()]
+      .map((exception) => this.withEffectiveDeletionExceptionStatus(exception))
+      .filter(
+        (exception) =>
+          exception.family === hold.family &&
+          exception.subjectId === hold.subjectId &&
+          exception.sourceResourceType === "evidence_legal_hold" &&
+          exception.sourceResourceId === hold.holdId &&
+          exception.requestedByActorId ===
+            "system:evidence-deletion-scheduler" &&
+          exception.requestedByActorType === "system" &&
+          exception.status === "active",
+      );
+
+    for (const exception of syntheticExceptions) {
+      this.resolveEvidenceDeletionException(
+        exception.exceptionId,
+        {
+          resolutionNote:
+            "Legal hold released; clearing scheduler-created deletion conflict exception.",
+        },
+        actor,
+        requestId,
+      );
+    }
   }
 }

@@ -1,8 +1,142 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
+
+import { PHASE2_AUDIT_EVENT_CATALOG } from "@drts/contracts";
+import type { EvidenceManifestItem } from "@drts/contracts";
 
 import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtures/src";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import type { EvidenceRecorderAdapter } from "../../src/modules/vehicle-evidence/vehicle-evidence.ports";
 import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
+
+const OPS_IDENTITY = {
+  actorId: "ops-user-001",
+  actorType: "ops_user" as const,
+  realm: "ops" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
+const PLATFORM_IDENTITY = {
+  actorId: "platform-admin-001",
+  actorType: "platform_admin" as const,
+  realm: "platform" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
+const PLATFORM_IDENTITY_2 = {
+  actorId: "platform-admin-002",
+  actorType: "platform_admin" as const,
+  realm: "platform" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
+function buildChecksum(input: string) {
+  return createHash("sha256").update(input).digest("hex");
+}
+
+class PartialEvidenceRecorderAdapter implements EvidenceRecorderAdapter {
+  async captureWindow(): Promise<EvidenceManifestItem[]> {
+    const sourceBase = {
+      sourceSystem: "onboard_recorder" as const,
+      ingestedAt: "2026-06-26T15:00:00.000Z",
+      recordedAt: "2026-06-26T14:59:59.000Z",
+      schemaVersion: "partial-recorder-v1",
+    };
+
+    return [
+      {
+        artifactId: "artifact-good-001",
+        manifestId: "manifest-partial-001",
+        artifactType: "video_clip",
+        objectKey: "veh-partial-001/video.mp4",
+        contentType: "video/mp4",
+        byteSize: 1024,
+        checksumSha256: buildChecksum("artifact-good-001"),
+        capturedAt: "2026-06-26T15:00:00.000Z",
+        custodyState: "captured",
+        vehicleId: "veh-partial-001",
+        caseId: "case-partial-001",
+        retentionUntil: null,
+        source: {
+          ...sourceBase,
+          sourceRef: "good-001",
+          signatureRef: "sig-good-001",
+        },
+      },
+      {
+        artifactId: "artifact-bad-001",
+        manifestId: "manifest-partial-001",
+        artifactType: "telemetry_export",
+        objectKey: "veh-partial-001/telemetry.json",
+        contentType: "application/json",
+        byteSize: 512,
+        checksumSha256: buildChecksum("artifact-bad-001"),
+        capturedAt: "2026-06-26T15:00:00.000Z",
+        custodyState: "captured",
+        vehicleId: "veh-partial-001",
+        caseId: "case-partial-001",
+        retentionUntil: null,
+        source: {
+          ...sourceBase,
+          sourceRef: "bad-001",
+          signatureRef: null,
+        },
+      },
+    ];
+  }
+
+  async verifyChecksum(artifactId: string): Promise<boolean> {
+    return artifactId !== "artifact-bad-001";
+  }
+}
+
+class NearExpiryEvidenceRecorderAdapter implements EvidenceRecorderAdapter {
+  async captureWindow(): Promise<EvidenceManifestItem[]> {
+    return [
+      {
+        artifactId: "artifact-near-expiry-001",
+        manifestId: "manifest-near-expiry-001",
+        artifactType: "video_clip",
+        objectKey: "veh-near-expiry-001/video.mp4",
+        contentType: "video/mp4",
+        byteSize: 2048,
+        checksumSha256: buildChecksum("artifact-near-expiry-001"),
+        capturedAt: "2026-06-26T15:00:00.000Z",
+        custodyState: "captured",
+        vehicleId: "veh-near-expiry-001",
+        caseId: "case-near-expiry-001",
+        retentionUntil: "2026-06-27T15:00:00.000Z",
+        source: {
+          sourceSystem: "tesla_fleet_api",
+          sourceRef: "tesla-artifact-001",
+          ingestedAt: "2026-06-26T15:00:05.000Z",
+          recordedAt: "2026-06-26T14:59:59.000Z",
+          providerExpiresAt: "2026-06-26T15:15:00.000Z",
+          signatureRef: "tesla-sig-001",
+          schemaVersion: "tesla-evidence-v1",
+        },
+      },
+    ];
+  }
+
+  async verifyChecksum(): Promise<boolean> {
+    return true;
+  }
+}
+
+function getErrorCode(error: unknown) {
+  if (!(error instanceof ApiRequestError)) {
+    throw error;
+  }
+  const response = error.getResponse() as { error: { code: string } };
+  return response.error.code;
+}
 
 describe("VehicleEvidenceService", () => {
   it("registers a mock recorder and exposes seeded health + segment index", () => {
@@ -70,6 +204,369 @@ describe("VehicleEvidenceService", () => {
         vehicleId: recorder.vehicleId,
         reasonCode: "RECORDER_UNHEALTHY",
       }),
+    );
+  });
+
+  it("seals freezes, verifies manifest hashes, and issues controlled exports", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new VehicleEvidenceService(auditNotificationService);
+    const recorder = buildMockRecorderFixture({ recorderId: "rec-freeze-001" });
+    service.registerRecorder(recorder);
+
+    const freeze = await service.requestEvidenceFreeze(
+      recorder.recorderId,
+      {
+        vehicleId: recorder.vehicleId,
+        windowStart: "2026-06-26T14:00:00.000Z",
+        windowEnd: "2026-06-26T14:05:00.000Z",
+        caseId: "case-evd-001",
+        caseReference: "CASE-AV-009",
+        reason: "Prepare regulator export.",
+      },
+      OPS_IDENTITY,
+      "req-freeze-001",
+    );
+
+    expect(freeze.status).toBe("sealed");
+    expect(freeze.transitionHistory.map((transition) => transition.to)).toEqual([
+      "requested",
+      "collecting",
+      "sealed",
+    ]);
+    expect(freeze.manifestHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(freeze.objectLockEnabled).toBe(true);
+    expect(freeze.verification?.valid).toBe(true);
+
+    const verification = await service.verifyEvidenceFreeze(
+      freeze.freezeId,
+      "req-verify-001",
+      OPS_IDENTITY,
+    );
+    expect(verification.manifestHash).toBe(freeze.manifestHash);
+
+    const exportRecord = service.issueControlledExport(
+      freeze.freezeId,
+      {
+        reason: "Hand off sealed evidence bundle.",
+        caseReference: "CASE-AV-009",
+        stepUpMethod: "webauthn",
+        stepUpVerifiedAt: "2026-06-26T14:06:00.000Z",
+        stepUpSessionId: "mfa-session-001",
+      },
+      OPS_IDENTITY,
+      "req-export-001",
+    );
+
+    expect(exportRecord.download.ttlMinutes).toBeLessThanOrEqual(15);
+    expect(exportRecord.download.downloadUrl).toContain(
+      "/vehicle-evidence-export/",
+    );
+
+    const accessLogs = service.listEvidenceAccessLogs({
+      freezeId: freeze.freezeId,
+    });
+    expect(accessLogs.map((log) => log.action)).toEqual(
+      expect.arrayContaining([
+        "freeze_request",
+        "verify",
+        "export",
+        "signed_url",
+      ]),
+    );
+    expect(auditNotificationService.getAuditLogsSnapshot()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "issue_vehicle_evidence_export",
+          resourceId: exportRecord.exportId,
+        }),
+      ]),
+    );
+  });
+
+  it("marks the freeze partial when checksum verification or provider signatures fail", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new VehicleEvidenceService(auditNotificationService);
+    const recorder = buildMockRecorderFixture({
+      recorderId: "rec-partial-001",
+      vehicleId: "veh-partial-001",
+      vendorCode: "tesla_partial",
+    });
+    service.registerRecorder(recorder, new PartialEvidenceRecorderAdapter());
+
+    const freeze = await service.requestEvidenceFreeze(
+      recorder.recorderId,
+      {
+        vehicleId: recorder.vehicleId,
+        windowStart: "2026-06-26T14:00:00.000Z",
+        windowEnd: "2026-06-26T14:05:00.000Z",
+        caseId: "case-partial-001",
+        caseReference: "CASE-PARTIAL-001",
+        reason: "Verify partial evidence path.",
+      },
+      OPS_IDENTITY,
+      "req-partial-001",
+    );
+
+    expect(freeze.status).toBe("partial");
+    expect(freeze.failureCode).toBe("EVIDENCE_MANIFEST_PARTIAL");
+    expect(freeze.verification?.failedArtifactIds).toContain("artifact-bad-001");
+    expect(freeze.verification?.missingSignatureArtifactIds).toContain(
+      "artifact-bad-001",
+    );
+  });
+
+  it("blocks purge while a legal hold is active and requires object-lock override", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new VehicleEvidenceService(auditNotificationService);
+    const recorder = buildMockRecorderFixture({ recorderId: "rec-purge-001" });
+    service.registerRecorder(recorder);
+
+    const freeze = await service.requestEvidenceFreeze(
+      recorder.recorderId,
+      {
+        vehicleId: recorder.vehicleId,
+        windowStart: "2026-06-26T14:10:00.000Z",
+        windowEnd: "2026-06-26T14:15:00.000Z",
+        caseId: "case-purge-001",
+        caseReference: "CASE-PURGE-001",
+        reason: "Validate purge controls.",
+      },
+      OPS_IDENTITY,
+      "req-purge-freeze-001",
+    );
+    const artifactId = freeze.artifacts[0]!.artifactId;
+
+    try {
+      service.purgeArtifact(
+        artifactId,
+        {
+          reason: "Attempt purge without override.",
+          overrideObjectLock: false,
+        },
+        PLATFORM_IDENTITY,
+        "req-purge-001",
+      );
+      throw new Error("Expected object lock rejection.");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("EVIDENCE_OBJECT_LOCKED");
+    }
+
+    const hold = auditNotificationService.placeEvidenceLegalHold(
+      {
+        family: "vehicle_evidence",
+        subjectId: freeze.freezeId,
+        caseNumber: "CASE-PURGE-001",
+        reasonCode: "regulatory_inquiry",
+        manifestHash: freeze.manifestHash,
+      },
+      OPS_IDENTITY,
+      "req-hold-001",
+    );
+
+    try {
+      service.purgeArtifact(
+        artifactId,
+        {
+          reason: "Attempt purge while on hold.",
+          overrideObjectLock: true,
+        },
+        PLATFORM_IDENTITY,
+        "req-purge-002",
+      );
+      throw new Error("Expected legal hold rejection.");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("EVIDENCE_DELETION_BLOCKED_BY_HOLD");
+    }
+
+    const releaseReason = "Investigation closed.";
+    auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY,
+      "req-release-001",
+    );
+    auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY_2,
+      "req-release-002",
+    );
+    const purged = service.purgeArtifact(
+      artifactId,
+      {
+        reason: "Approved retention override.",
+        overrideObjectLock: true,
+      },
+      PLATFORM_IDENTITY,
+      "req-purge-003",
+    );
+    const refreshedFreeze = service.getEvidenceFreeze(freeze.freezeId);
+
+    expect(purged.objectLockBypassed).toBe(true);
+    expect(
+      refreshedFreeze.artifacts.find((artifact) => artifact.artifactId === artifactId)
+        ?.currentCustodyState,
+    ).toBe("purged");
+  });
+
+  it("records a deletion exception and skip event when the scheduler meets an active legal hold", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new VehicleEvidenceService(auditNotificationService);
+    const recorder = buildMockRecorderFixture({ recorderId: "rec-scheduler-001" });
+    service.registerRecorder(recorder);
+
+    const freeze = await service.requestEvidenceFreeze(
+      recorder.recorderId,
+      {
+        vehicleId: recorder.vehicleId,
+        windowStart: "2026-06-26T15:00:00.000Z",
+        windowEnd: "2026-06-26T15:05:00.000Z",
+        caseId: "case-scheduler-001",
+        caseReference: "CASE-SCHEDULER-001",
+        reason: "Validate deletion scheduler guard.",
+      },
+      OPS_IDENTITY,
+      "req-scheduler-freeze-001",
+    );
+    const hold = auditNotificationService.placeEvidenceLegalHold(
+      {
+        family: "vehicle_evidence",
+        subjectId: freeze.freezeId,
+        caseNumber: "CASE-SCHEDULER-001",
+        reasonCode: "regulatory_inquiry",
+        manifestHash: freeze.manifestHash,
+      },
+      OPS_IDENTITY,
+      "req-scheduler-hold-001",
+    );
+
+    const result = await service.runDeletionScheduler(
+      {
+        artifactId: freeze.artifacts[0]!.artifactId,
+        currentTime: "2026-06-26T15:06:00.000Z",
+      },
+      "req-scheduler-run-001",
+    );
+
+    expect(result).toMatchObject({
+      decision: "skipped_due_to_hold",
+      emittedEvent:
+        PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision.skippedDueToHold,
+      holdIds: [hold.holdId],
+      conflictExceptionId: expect.any(String),
+    });
+    expect(auditNotificationService.listEvidenceDeletionExceptions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          exceptionId: result.conflictExceptionId,
+          family: "vehicle_evidence",
+          subjectId: freeze.freezeId,
+          sourceResourceType: "evidence_legal_hold",
+          sourceResourceId: hold.holdId,
+          status: "active",
+        }),
+      ]),
+    );
+    expect(
+      service
+        .listEvidenceAccessLogs({
+          freezeId: freeze.freezeId,
+        })
+        .some(
+          (entry) =>
+            entry.action === "purge_skip" &&
+            entry.metadata.emittedEvent === result.emittedEvent,
+        ),
+    ).toBe(true);
+
+    const releaseReason = "Retention review completed.";
+    const releaseRequested = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY,
+      "req-scheduler-release-request-001",
+    );
+    expect(releaseRequested.status).toBe("release_requested");
+
+    const released = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY_2,
+      "req-scheduler-release-001",
+    );
+    expect(released.status).toBe("released");
+    expect(auditNotificationService.listEvidenceDeletionExceptions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          exceptionId: result.conflictExceptionId,
+          status: "resolved",
+        }),
+      ]),
+    );
+
+    const rerun = await service.runDeletionScheduler(
+      {
+        artifactId: freeze.artifacts[0]!.artifactId,
+        currentTime: "2026-06-26T15:07:00.000Z",
+      },
+      "req-scheduler-run-002",
+    );
+    expect(rerun).toMatchObject({
+      decision: "deferred_by_retention",
+      emittedEvent:
+        PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+          .deferredByRetention,
+      exceptionIds: [],
+      conflictExceptionId: null,
+    });
+  });
+
+  it("preserves evidence locally and verifies checksum when provider expiry is near", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new VehicleEvidenceService(auditNotificationService);
+    const recorder = buildMockRecorderFixture({
+      recorderId: "rec-near-expiry-001",
+      vehicleId: "veh-near-expiry-001",
+      vendorCode: "tesla_near_expiry",
+    });
+    service.registerRecorder(recorder, new NearExpiryEvidenceRecorderAdapter());
+
+    const freeze = await service.requestEvidenceFreeze(
+      recorder.recorderId,
+      {
+        vehicleId: recorder.vehicleId,
+        windowStart: "2026-06-26T15:00:00.000Z",
+        windowEnd: "2026-06-26T15:05:00.000Z",
+        caseId: "case-near-expiry-001",
+        caseReference: "CASE-NEAR-EXPIRY-001",
+        reason: "Validate near-expiry preservation path.",
+      },
+      OPS_IDENTITY,
+      "req-near-expiry-freeze-001",
+    );
+
+    const result = await service.runDeletionScheduler(
+      {
+        artifactId: freeze.artifacts[0]!.artifactId,
+        currentTime: "2026-06-26T15:10:00.000Z",
+        providerNearExpiryWindowMinutes: 10,
+      },
+      "req-near-expiry-run-001",
+    );
+    const refreshedFreeze = service.getEvidenceFreeze(freeze.freezeId);
+    const preservedArtifact = refreshedFreeze.artifacts[0]!;
+
+    expect(result).toMatchObject({
+      decision: "preserved_for_provider_expiry",
+      emittedEvent:
+        PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+          .preservedForProviderExpiry,
+      checksumVerified: true,
+      preservedLocallyAt: "2026-06-26T15:10:00.000Z",
+    });
+    expect(preservedArtifact.localPreservedAt).toBe("2026-06-26T15:10:00.000Z");
+    expect(preservedArtifact.localPreservationChecksumVerifiedAt).toBe(
+      "2026-06-26T15:10:00.000Z",
     );
   });
 });
