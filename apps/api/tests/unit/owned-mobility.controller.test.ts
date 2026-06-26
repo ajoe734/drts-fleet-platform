@@ -78,7 +78,12 @@ describe("OwnedMobilityController tenant booking routes", () => {
         fulfillmentMode: "tesla_av",
         state: "assigned",
         statusCode: "assigned",
-        messages: [{ messageCode: "sandbox_fulfillment.tesla_av_active", category: "info" }],
+        messages: [
+          {
+            messageCode: "sandbox_fulfillment.tesla_av_active",
+            category: "info",
+          },
+        ],
         etaMinutes: 6,
         extraChargeDisclosed: false,
         providerBrandDisclosed: false,
@@ -152,6 +157,42 @@ describe("OwnedMobilityController tenant booking routes", () => {
     );
   });
 
+  it("awaits passenger disclosure acknowledgement before wrapping the API envelope", async () => {
+    const service = {
+      acknowledgePassengerDisclosure: vi.fn().mockResolvedValue({
+        bookingId: "booking-e2e-003",
+        orderId: "order-e2e-003",
+        passengerDisclosure: {
+          policyId: "policy-e2e-001",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          acknowledgedAt: "2026-06-26T06:10:00.000Z",
+        },
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = await controller.acknowledgePassengerDisclosure(
+      "booking-e2e-003",
+      { actorType: "passenger" },
+      "tenant-e2e-001",
+      "req-e2e-passenger-ack",
+    );
+
+    expect(response.data).toMatchObject({
+      bookingId: "booking-e2e-003",
+      passengerDisclosure: {
+        policyId: "policy-e2e-001",
+        acknowledgedAt: "2026-06-26T06:10:00.000Z",
+      },
+    });
+    expect(service.acknowledgePassengerDisclosure).toHaveBeenCalledWith(
+      "tenant-e2e-001",
+      "booking-e2e-003",
+      { actorType: "passenger" },
+      "req-e2e-passenger-ack",
+    );
+  });
+
   it("passes includeIneligible through candidate queries before wrapping the API envelope", async () => {
     const service = {
       listDispatchCandidates: vi.fn().mockResolvedValue([
@@ -205,10 +246,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       status: "assigned",
       taskId: "task-e2e-001",
     });
-    expect(service.assignDispatch).toHaveBeenCalledWith(
-      {},
-      "req-e2e-assign",
-    );
+    expect(service.assignDispatch).toHaveBeenCalledWith({}, "req-e2e-assign");
   });
 
   it("awaits dispatch reassignment before wrapping the API envelope", async () => {

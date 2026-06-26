@@ -6,7 +6,79 @@ import { SandboxGovernanceService } from "../../src/modules/sandbox-governance/s
 import { SandboxDispatchGateService } from "../../src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service";
 import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
 
+const READY_PASSENGER_DISCLOSURE = {
+  channel: "tenant_portal" as const,
+  policyId: "policy-test-av-001",
+  policyVersion: "test-v1",
+  messageCode: "sandbox_passenger_disclosure.av_program_notice",
+  requiresAcknowledgement: false,
+  acknowledgementMode: "operator_confirmed_notice" as const,
+  acknowledgedAt: null,
+  acknowledgementRecordId: null,
+};
+
 describe("SandboxDispatchGateService", () => {
+  it("reuses the persisted catalog entry id when updating a seeded disclosure message without an explicit entry id", async () => {
+    const persistEntry = vi.fn(async () => undefined);
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      {
+        isEnabled: vi.fn(() => true),
+        listPassengerDisclosurePolicies: vi.fn(async () => []),
+        listPassengerDisclosureMessageCatalogEntries: vi.fn(async () => [
+          {
+            entryId: "pdc-v1-av-en-us",
+            catalogVersion: "passenger_disclosure.v1",
+            messageCode: "sandbox_passenger_disclosure.av_program_notice",
+            locale: "en-US",
+            bodyText: "baseline",
+            legalApproved: true,
+            createdAt: "2026-06-26T00:00:00.000Z",
+            updatedAt: "2026-06-26T00:00:00.000Z",
+          },
+        ]),
+        listPassengerAcknowledgements: vi.fn(async () => []),
+        upsertPassengerDisclosureMessageCatalogEntry: persistEntry,
+      } as never,
+    );
+
+    const updatedEntry =
+      await gate.upsertPassengerDisclosureMessageCatalogEntry({
+        catalogVersion: "passenger_disclosure.v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "updated legal copy",
+        legalApproved: true,
+      });
+
+    expect(updatedEntry.entryId).toBe("pdc-v1-av-en-us");
+    expect(updatedEntry.createdAt).toBe("2026-06-26T00:00:00.000Z");
+    expect(persistEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entryId: "pdc-v1-av-en-us",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "updated legal copy",
+      }),
+    );
+
+    await expect(gate.listPassengerDisclosureMessageCatalogEntries()).resolves
+      .toEqual([
+        expect.objectContaining({
+          entryId: "pdc-v1-av-en-us",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          locale: "en-US",
+          bodyText: "updated legal copy",
+        }),
+        expect.objectContaining({
+          entryId: "pdc-v1-av-zh-tw",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          locale: "zh-TW",
+        }),
+      ]);
+  });
+
   it("blocks dispatch when vehicle evidence reports a required unhealthy recorder", async () => {
     const vehicleEvidenceService = new VehicleEvidenceService();
     const recorder = buildMockRecorderFixture();
@@ -27,6 +99,7 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      passengerDisclosure: READY_PASSENGER_DISCLOSURE,
       bookingWindow: {
         start: "2026-06-26T14:00:00.000Z",
         end: "2026-06-26T15:00:00.000Z",
@@ -84,6 +157,7 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      passengerDisclosure: READY_PASSENGER_DISCLOSURE,
       bookingWindow: {
         start: "2026-06-26T14:00:00.000Z",
         end: "2026-06-26T15:00:00.000Z",
@@ -146,6 +220,8 @@ describe("SandboxDispatchGateService", () => {
         "TELEMETRY_STALE",
         "RECORDER_UNHEALTHY",
         "PROVIDER_CAPABILITY_MISSING",
+        "PASSENGER_DISCLOSURE_POLICY_MISSING",
+        "PASSENGER_DISCLOSURE_MESSAGE_MISSING",
       ]),
     );
   });
@@ -158,6 +234,7 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: "veh-av-quality-001",
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-tesla-004",
+      passengerDisclosure: READY_PASSENGER_DISCLOSURE,
       bookingWindow: {
         start: "2026-06-26T14:00:00.000Z",
         end: "2026-06-26T15:00:00.000Z",
@@ -215,6 +292,7 @@ describe("SandboxDispatchGateService", () => {
         vehicleId: "veh-av-quality-override-001",
         sandboxProgramId: "sandbox-program-001",
         policyVersion: "phase2-tesla-004",
+        passengerDisclosure: READY_PASSENGER_DISCLOSURE,
         bookingWindow: {
           start: "2026-06-26T14:00:00.000Z",
           end: "2026-06-26T15:00:00.000Z",
@@ -350,6 +428,7 @@ describe("SandboxDispatchGateService", () => {
 
     expect(gateInput.vehicleEnrollment?.status).toBe("active");
     expect(gateInput.entitlement).toEqual({ active: null });
+    gateInput.passengerDisclosure = READY_PASSENGER_DISCLOSURE;
 
     await expect(
       gate.assertAssignmentEligible(gateInput),
@@ -371,6 +450,7 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: "veh-av-003d",
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      passengerDisclosure: READY_PASSENGER_DISCLOSURE,
       bookingWindow: {
         start: "2026-06-26T14:00:00.000Z",
         end: "2026-06-26T15:00:00.000Z",
@@ -424,6 +504,7 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: "veh-av-004",
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      passengerDisclosure: READY_PASSENGER_DISCLOSURE,
       bookingWindow: {
         start: "2026-06-26T14:00:00.000Z",
         end: "2026-06-26T15:00:00.000Z",
@@ -922,6 +1003,65 @@ describe("SandboxDispatchGateService", () => {
     expect(decision.hardReasonCodes).toContain("ODD_OUT_OF_BOUNDS");
   });
 
+  it("blocks dispatch when the disclosure acknowledgement is required but missing", async () => {
+    const gate = new SandboxDispatchGateService();
+
+    const decision = await gate.evaluateDispatch({
+      orderId: "order-av-ack-001",
+      vehicleId: "veh-av-ack-001",
+      sandboxProgramId: "sandbox-program-001",
+      policyVersion: "phase2-evd-001",
+      passengerDisclosure: {
+        ...READY_PASSENGER_DISCLOSURE,
+        requiresAcknowledgement: true,
+        acknowledgementMode: "per_booking_checkbox",
+      },
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
+      entitlement: { active: true },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
+      recorder: { healthy: true },
+      regulatory: { approvalFresh: true, vehicleCertified: true },
+      providerCapabilities: {
+        av_dispatch: true,
+        telemetry_stream: true,
+        regulatory_event_feed: true,
+        evidence_recorder: true,
+        odd_geofence: true,
+        minimal_risk_condition: true,
+      },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+      },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
+    });
+
+    expect(decision.decision).toBe("block");
+    expect(decision.hardReasonCodes).toContain(
+      "PASSENGER_ACKNOWLEDGEMENT_REQUIRED",
+    );
+  });
+
   it("blocks when booking window or approved route facts are missing", async () => {
     const gate = new SandboxDispatchGateService();
 
@@ -930,6 +1070,7 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: "veh-av-006",
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      passengerDisclosure: READY_PASSENGER_DISCLOSURE,
       entitlement: { active: true },
       vehicleEnrollment: {
         status: "active",
