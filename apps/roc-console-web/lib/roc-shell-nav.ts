@@ -38,6 +38,7 @@ export function buildRocShellNav(locale: Locale): CanvasShellNavItem[] {
     { divider: t("nav.group.response", locale) },
     {
       key: "takeover",
+      href: "/takeover",
       icon: "dispatch",
       label: t("nav.takeover", locale),
       badge: "3",
@@ -45,6 +46,7 @@ export function buildRocShellNav(locale: Locale): CanvasShellNavItem[] {
     },
     {
       key: "alerts",
+      href: "/alerts",
       icon: "bell",
       label: t("nav.alerts", locale),
       badge: "5",
@@ -52,6 +54,7 @@ export function buildRocShellNav(locale: Locale): CanvasShellNavItem[] {
     },
     {
       key: "incidents",
+      href: "/incidents",
       icon: "incidents",
       label: t("nav.incidents", locale),
       badge: "1",
@@ -59,6 +62,7 @@ export function buildRocShellNav(locale: Locale): CanvasShellNavItem[] {
     },
     {
       key: "evidence",
+      href: "/evidence",
       icon: "audit",
       label: t("nav.evidence", locale),
     },
@@ -71,6 +75,7 @@ export function buildRocShellNav(locale: Locale): CanvasShellNavItem[] {
     },
     {
       key: "reports",
+      href: "/reports",
       icon: "reports",
       label: t("nav.reports", locale),
     },

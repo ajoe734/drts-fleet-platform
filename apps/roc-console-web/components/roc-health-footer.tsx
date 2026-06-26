@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Languages } from "lucide-react";
 import { buildCanvasTheme } from "@drts/ui-web";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
@@ -173,11 +172,14 @@ export function RocHealthFooter() {
           cursor: "pointer",
         }}
       >
-        <Languages size={13} />
+        <span
+          aria-hidden="true"
+          style={{ fontSize: 11, letterSpacing: 0.4, fontWeight: 700 }}
+        >
+          ZH/EN
+        </span>
         <span>
-          {locale === "en"
-            ? t("rocShell.locale.zh")
-            : t("rocShell.locale.en")}
+          {locale === "en" ? t("rocShell.locale.zh") : t("rocShell.locale.en")}
         </span>
       </button>
     </div>
