@@ -875,19 +875,25 @@ export class OwnedMobilityService implements OnModuleInit {
             orders: [this.cloneOrder(order)],
             dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
           });
+          if (command.passengerDisclosureAcknowledgement) {
+            await this.acknowledgePassengerDisclosure(
+              tenantId,
+              bookingId,
+              command.passengerDisclosureAcknowledgement,
+              requestId,
+              {
+                order,
+                tx,
+                refreshDisclosure: false,
+              },
+            );
+          }
           const result = finalizeCreation(
             previousApprovalState,
             approvalRequest,
             false,
           );
-          return command.passengerDisclosureAcknowledgement
-            ? this.acknowledgePassengerDisclosure(
-                tenantId,
-                bookingId,
-                command.passengerDisclosureAcknowledgement,
-                requestId,
-              ).then(() => result)
-            : result;
+          return result;
         })
         .catch((error) => {
           // The DB transaction rolls back persisted rows, but the in-memory
@@ -1102,10 +1108,19 @@ export class OwnedMobilityService implements OnModuleInit {
     bookingId: string,
     command: RecordPassengerAcknowledgementCommand,
     requestId?: string,
+    options?: {
+      order?: OwnedOrderRecord;
+      tx?: OwnedMobilityQueryExecutor | null;
+      refreshDisclosure?: boolean;
+    },
   ) {
     this.assertNonBlank(tenantId, "tenantId");
-    const order = this.requireBookingOrder(bookingId, tenantId);
-    await this.refreshPassengerDisclosureSnapshot(order);
+    const order =
+      options?.order ?? this.requireBookingOrder(bookingId, tenantId);
+    const shouldRefreshDisclosure = options?.refreshDisclosure !== false;
+    if (shouldRefreshDisclosure) {
+      await this.refreshPassengerDisclosureSnapshot(order);
+    }
 
     if (!order.passengerDisclosure) {
       throw new ApiRequestError(
@@ -1122,6 +1137,7 @@ export class OwnedMobilityService implements OnModuleInit {
         orderId: order.orderId,
         disclosure: order.passengerDisclosure,
         command,
+        executor: options?.tx,
       });
     if (!record) {
       throw new ApiRequestError(
@@ -1150,13 +1166,20 @@ export class OwnedMobilityService implements OnModuleInit {
         actorRef: record.actorRef,
       },
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchTraceLogs: [traceLog],
-      },
-      "acknowledge_passenger_disclosure",
-    );
+    if (options?.tx && this.ownedMobilityRepository?.isEnabled()) {
+      await this.ownedMobilityRepository.persistOrderWorkflow(options.tx, {
+        orders: [this.cloneOrder(order)],
+        dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
+      });
+    } else {
+      this.persistChanges(
+        {
+          orders: [order],
+          dispatchTraceLogs: [traceLog],
+        },
+        "acknowledge_passenger_disclosure",
+      );
+    }
     this.recordAudit(
       {
         actorId: record.actorRef,
@@ -5037,12 +5060,17 @@ export class OwnedMobilityService implements OnModuleInit {
             ? null
             : {
                 ...resolvedDisclosure,
-                acknowledgedAt:
-                  previous?.policyId === resolvedDisclosure.policyId
-                    ? previous.acknowledgedAt
-                    : null,
+                acknowledgedAt: this.canReusePassengerDisclosureAcknowledgement(
+                  previous,
+                  resolvedDisclosure,
+                )
+                  ? previous.acknowledgedAt
+                  : null,
                 acknowledgementRecordId:
-                  previous?.policyId === resolvedDisclosure.policyId
+                  this.canReusePassengerDisclosureAcknowledgement(
+                    previous,
+                    resolvedDisclosure,
+                  )
                     ? previous.acknowledgementRecordId
                     : null,
               };
@@ -5085,6 +5113,20 @@ export class OwnedMobilityService implements OnModuleInit {
       left.acknowledgementMode === right.acknowledgementMode &&
       left.acknowledgedAt === right.acknowledgedAt &&
       left.acknowledgementRecordId === right.acknowledgementRecordId
+    );
+  }
+
+  private canReusePassengerDisclosureAcknowledgement(
+    previous: PassengerDisclosureRequirementSnapshot | null | undefined,
+    next: PassengerDisclosureRequirementSnapshot,
+  ) {
+    return (
+      previous?.channel === next.channel &&
+      previous.policyId === next.policyId &&
+      previous.policyVersion === next.policyVersion &&
+      previous.messageCode === next.messageCode &&
+      previous.requiresAcknowledgement === next.requiresAcknowledgement &&
+      previous.acknowledgementMode === next.acknowledgementMode
     );
   }
 

@@ -23,7 +23,10 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
 import { resolveTeslaTelemetryQualityGateScore } from "../tesla-telemetry/tesla-telemetry.policy";
 import { VehicleEvidenceService } from "../vehicle-evidence/vehicle-evidence.service";
-import { SandboxDispatchGateRepository } from "./sandbox-dispatch-gate.repository";
+import {
+  SandboxDispatchGateRepository,
+  type SandboxDispatchGateQueryExecutor,
+} from "./sandbox-dispatch-gate.repository";
 import type {
   SandboxDispatchGateInput,
   SandboxDispatchManualReleaseCommand,
@@ -221,6 +224,7 @@ export class SandboxDispatchGateService {
     orderId: string;
     disclosure: PassengerDisclosureRequirementSnapshot;
     command?: RecordPassengerAcknowledgementCommand | null;
+    executor?: SandboxDispatchGateQueryExecutor | null;
   }) {
     await this.ensureDisclosureCacheLoaded();
     if (!input.disclosure.requiresAcknowledgement) {
@@ -267,7 +271,10 @@ export class SandboxDispatchGateService {
 
     this.acknowledgementRecords = [record, ...this.acknowledgementRecords];
     if (this.repository) {
-      await this.repository.insertPassengerAcknowledgement(record);
+      await this.repository.insertPassengerAcknowledgement(
+        record,
+        input.executor,
+      );
     }
 
     return this.cloneAcknowledgementRecord(record);

@@ -3097,6 +3097,28 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         updatedAt: "2026-06-26T00:00:00.000Z",
       },
     ];
+    (sandboxDispatchGateService as any).messageCatalogEntries = [
+      {
+        entryId: "pdc-v1-av-en-us",
+        catalogVersion: "passenger_disclosure.v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "baseline",
+        legalApproved: true,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+      {
+        entryId: "pdc-v2-av-en-us",
+        catalogVersion: "passenger_disclosure.v2",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice.updated",
+        locale: "en-US",
+        bodyText: "updated",
+        legalApproved: true,
+        createdAt: "2026-06-26T01:00:00.000Z",
+        updatedAt: "2026-06-26T01:00:00.000Z",
+      },
+    ];
     (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
 
     const { service } = createOwnedMobilityService({
@@ -3143,6 +3165,234 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(
       acknowledgedBooking.passengerDisclosure?.acknowledgedAt,
     ).toBeTruthy();
+  });
+
+  it("persists inline booking acknowledgements on the same transaction executor", async () => {
+    const tx = { query: vi.fn() };
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(
+        async (work: (executor: unknown) => Promise<unknown>) => work(tx),
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const sandboxRepository = {
+      isEnabled: vi.fn(() => true),
+      insertPassengerAcknowledgement: vi.fn(async () => undefined),
+      listPassengerDisclosurePolicies: vi.fn(async () => []),
+      listPassengerDisclosureMessageCatalogEntries: vi.fn(async () => []),
+      listPassengerAcknowledgements: vi.fn(async () => []),
+      persistEvaluation: vi.fn(async () => undefined),
+      loadDecisionById: vi.fn(async () => null),
+      upsertPassengerDisclosurePolicy: vi.fn(async () => undefined),
+      upsertPassengerDisclosureMessageCatalogEntry: vi.fn(
+        async () => undefined,
+      ),
+    };
+    const sandboxDispatchGateService = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      sandboxRepository as never,
+    );
+    (sandboxDispatchGateService as any).disclosurePolicies = [
+      {
+        policyId: "policy-test-av-ack",
+        policyVersion: "test-v1",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        active: true,
+        channelRules: [
+          {
+            channel: "tenant_portal",
+            messageCode: "sandbox_passenger_disclosure.av_program_notice",
+            requiresAcknowledgement: true,
+            acknowledgementMode: "per_booking_checkbox",
+          },
+        ],
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ];
+    (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
+    const tenantPartnerService = {
+      isPersistenceEnabled: vi.fn(() => true),
+      previewBookingQuotaImpact: vi.fn(() => ({ impacts: [] })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(async () => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      createGovernanceMutationSnapshot: vi.fn(() => null),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+
+    const { service } = createOwnedMobilityService({
+      repository,
+      tenantPartnerService,
+      sandboxDispatchGateService,
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Sandbox End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Sandbox Rider", phone: "0912000003" },
+        passengerDisclosureAcknowledgement: {
+          actorType: "passenger",
+          actorRef: "passenger-inline-ack-001",
+        },
+      },
+      "tenant-demo-001",
+    );
+
+    expect(booking.bookingId).toBeTruthy();
+    expect(repository.withTransaction).toHaveBeenCalledTimes(1);
+    expect(repository.persistOrderWorkflow).toHaveBeenCalledTimes(2);
+    expect(repository.persistOrderWorkflow).toHaveBeenNthCalledWith(
+      1,
+      tx,
+      expect.objectContaining({
+        orders: expect.any(Array),
+        dispatchTraceLogs: expect.any(Array),
+      }),
+    );
+    expect(repository.persistOrderWorkflow).toHaveBeenNthCalledWith(
+      2,
+      tx,
+      expect.objectContaining({
+        orders: expect.any(Array),
+        dispatchTraceLogs: expect.any(Array),
+      }),
+    );
+    expect(
+      sandboxRepository.insertPassengerAcknowledgement,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: booking.bookingId,
+        actorRef: "passenger-inline-ack-001",
+      }),
+      tx,
+    );
+  });
+
+  it("clears stored disclosure acknowledgements when policy semantics change", async () => {
+    const sandboxDispatchGateService = new SandboxDispatchGateService();
+    (sandboxDispatchGateService as any).disclosurePolicies = [
+      {
+        policyId: "policy-test-av-ack",
+        policyVersion: "test-v1",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        active: true,
+        channelRules: [
+          {
+            channel: "tenant_portal",
+            messageCode: "sandbox_passenger_disclosure.av_program_notice",
+            requiresAcknowledgement: true,
+            acknowledgementMode: "per_booking_checkbox",
+          },
+        ],
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ];
+    (sandboxDispatchGateService as any).messageCatalogEntries = [
+      {
+        entryId: "pdc-v1-av-en-us",
+        catalogVersion: "passenger_disclosure.v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "baseline",
+        legalApproved: true,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+      {
+        entryId: "pdc-v2-av-en-us",
+        catalogVersion: "passenger_disclosure.v2",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice.updated",
+        locale: "en-US",
+        bodyText: "updated",
+        legalApproved: true,
+        createdAt: "2026-06-26T01:00:00.000Z",
+        updatedAt: "2026-06-26T01:00:00.000Z",
+      },
+    ];
+    (sandboxDispatchGateService as any).disclosureCacheLoaded = true;
+
+    const { service } = createOwnedMobilityService({
+      sandboxDispatchGateService,
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Sandbox End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Sandbox Rider", phone: "0912000003" },
+      },
+      "tenant-demo-001",
+    );
+    await service.acknowledgePassengerDisclosure(
+      "tenant-demo-001",
+      booking.bookingId,
+      {
+        actorType: "passenger",
+        actorRef: "passenger-demo-001",
+      },
+    );
+
+    (sandboxDispatchGateService as any).disclosurePolicies = [
+      {
+        policyId: "policy-test-av-ack",
+        policyVersion: "test-v2",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerEntrySlug: null,
+        active: true,
+        channelRules: [
+          {
+            channel: "tenant_portal",
+            messageCode:
+              "sandbox_passenger_disclosure.av_program_notice.updated",
+            requiresAcknowledgement: true,
+            acknowledgementMode: "per_booking_checkbox",
+          },
+        ],
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T01:00:00.000Z",
+      },
+    ];
+    await (service as any).refreshPassengerDisclosureSnapshot(
+      (service as any).orders[0],
+      false,
+    );
+
+    const refreshedBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    expect(refreshedBooking.passengerDisclosure).toMatchObject({
+      policyId: "policy-test-av-ack",
+      policyVersion: "test-v2",
+      messageCode: "sandbox_passenger_disclosure.av_program_notice.updated",
+      acknowledgedAt: null,
+      acknowledgementRecordId: null,
+    });
   });
 
   it("publishes partner sandbox webhook payloads without internal reason codes", () => {

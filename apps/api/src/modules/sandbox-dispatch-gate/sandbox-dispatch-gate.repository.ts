@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import type { QueryResult, QueryResultRow } from "pg";
 
 import type {
   PassengerAcknowledgementRecord,
@@ -32,6 +33,13 @@ type JsonRecordRow = {
 
 type JsonPayloadRow = {
   payload: unknown;
+};
+
+export type SandboxDispatchGateQueryExecutor = {
+  query<T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
 };
 
 @Injectable()
@@ -312,12 +320,15 @@ export class SandboxDispatchGateRepository {
     );
   }
 
-  async insertPassengerAcknowledgement(record: PassengerAcknowledgementRecord) {
+  async insertPassengerAcknowledgement(
+    record: PassengerAcknowledgementRecord,
+    executor?: SandboxDispatchGateQueryExecutor | null,
+  ) {
     if (!this.isEnabled()) {
       return;
     }
 
-    await this.databaseService!.query(
+    await (executor ?? this.databaseService!).query(
       `
         INSERT INTO av_sandbox.passenger_acknowledgement_records (
           acknowledgement_id,
