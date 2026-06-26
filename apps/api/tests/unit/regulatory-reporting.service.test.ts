@@ -323,6 +323,165 @@ describe("RegulatoryReportingService", () => {
         ),
     ).toBe(false);
   });
+
+  it("records backfilled reminder flushes at the effective submittedAt instead of wall-clock now", () => {
+    let now = new Date("2026-06-26T00:00:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-006b",
+        eventType: "cybersecurity_alert",
+        severity: "cybersecurity",
+        reportVersionKind: "follow_up",
+        jurisdiction: "CA-CPUC",
+        vehicleId: "veh-reg-006b",
+        eventOccurredAt: "2026-06-26T00:00:00.000Z",
+        summary: "Backfilled submit should timestamp reminder flushes at submit time.",
+      },
+      createIdentity(),
+      "req-reg-create-006b",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for review." },
+      createIdentity(),
+      "req-reg-review-006b",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-006b",
+        roles: ["security_manager"],
+      }),
+      "req-reg-approve-006b",
+    );
+
+    now = new Date("2026-06-26T07:00:00.000Z");
+    const submitted = service.submitNotification(
+      draft.notificationId,
+      {
+        submissionReference: "SUB-REG-006B",
+        submittedAt: "2026-06-26T05:30:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-submit-006b",
+        roles: ["security_manager"],
+      }),
+      "req-reg-submit-006b",
+    );
+
+    expect(submitted.reminders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          minutesBeforeDeadline: 240,
+          sentAt: "2026-06-26T05:30:00.000Z",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects invalid submit payloads before emitting reminder or audit side effects", () => {
+    let now = new Date("2026-06-26T00:00:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-submit-invalid-001",
+        eventType: "cybersecurity_alert",
+        severity: "cybersecurity",
+        reportVersionKind: "initial",
+        jurisdiction: "CA-CPUC",
+        vehicleId: "veh-reg-submit-invalid-001",
+        eventOccurredAt: "2026-06-26T00:00:00.000Z",
+        summary: "Invalid submit must not flush reminders or audit side effects.",
+      },
+      createIdentity(),
+      "req-reg-create-submit-invalid-001",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for review." },
+      createIdentity(),
+      "req-reg-review-submit-invalid-001",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-submit-invalid-001",
+        roles: ["security_manager"],
+      }),
+      "req-reg-approve-submit-invalid-001",
+    );
+
+    now = new Date("2026-06-26T05:00:00.000Z");
+    const reminderNotificationsBefore = auditNotificationService
+      .listNotifications()
+      .filter(
+        (notification) =>
+          notification.title === "Regulatory notification reminder" &&
+          notification.message.includes(draft.notificationId),
+      ).length;
+    const notificationAuditsBefore = auditNotificationService
+      .listAuditLogs()
+      .filter(
+        (entry) =>
+          entry.resourceId === draft.notificationId &&
+          (entry.actionName === "regulatory_notification_reminder_sent" ||
+            entry.actionName === "submit_regulatory_notification"),
+      ).length;
+
+    expect(() =>
+      service.submitNotification(
+        draft.notificationId,
+        {
+          submissionReference: "   ",
+          submittedAt: "2026-06-26T05:00:00.000Z",
+        },
+        createIdentity({
+          actorId: "ops-user-submit-invalid-001",
+          roles: ["security_manager"],
+        }),
+        "req-reg-submit-invalid-001",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    expect(
+      auditNotificationService
+        .listNotifications()
+        .filter(
+          (notification) =>
+            notification.title === "Regulatory notification reminder" &&
+            notification.message.includes(draft.notificationId),
+        ).length,
+    ).toBe(reminderNotificationsBefore);
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .filter(
+          (entry) =>
+            entry.resourceId === draft.notificationId &&
+            (entry.actionName === "regulatory_notification_reminder_sent" ||
+              entry.actionName === "submit_regulatory_notification"),
+        ).length,
+    ).toBe(notificationAuditsBefore);
+
+    now = new Date("2026-06-26T03:00:00.000Z");
+    const persisted = service.getNotification(draft.notificationId);
+    expect(persisted.lifecycleStatus).toBe("review_approved");
+    expect(persisted.submittedAt).toBeNull();
+    expect(persisted.reminders.every((reminder) => reminder.sentAt === null)).toBe(
+      true,
+    );
+  });
   it("rejects review approval when roleFamilies are spoofed without an approver role code", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);

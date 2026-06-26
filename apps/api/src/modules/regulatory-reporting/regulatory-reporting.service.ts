@@ -387,17 +387,22 @@ export class RegulatoryReportingService {
     const submittedAt = command?.submittedAt
       ? this.requireIsoDate(command.submittedAt, "submittedAt")
       : this.nowIso();
-    const now = this.nowIso();
-    const reminderDueThroughAt =
-      submittedAt < now ? submittedAt : now;
-    this.refreshNotificationReminders(notification, reminderDueThroughAt, now);
-    notification.lifecycleStatus = "submitted";
-    notification.submittedAt = submittedAt;
-    notification.submittedBy = actor.actorId;
-    notification.submissionReference = this.requireNonBlank(
+    const submissionReference = this.requireNonBlank(
       command?.submissionReference,
       "submissionReference",
     );
+    const note = this.normalizeNullableText(command?.note, "note");
+    const now = this.nowIso();
+    const reminderCutoffAt = submittedAt < now ? submittedAt : now;
+    this.refreshNotificationReminders(
+      notification,
+      reminderCutoffAt,
+      reminderCutoffAt,
+    );
+    notification.lifecycleStatus = "submitted";
+    notification.submittedAt = submittedAt;
+    notification.submittedBy = actor.actorId;
+    notification.submissionReference = submissionReference;
     notification.overdue = submittedAt > notification.deadlineAt;
     notification.updatedAt = this.nowIso();
     this.refreshDerivedState();
@@ -413,7 +418,7 @@ export class RegulatoryReportingService {
           submissionReference: notification.submissionReference,
           submittedAt,
           overdue: notification.overdue,
-          note: this.normalizeNullableText(command?.note, "note"),
+          note,
         },
       },
       requestId,
