@@ -171,7 +171,7 @@ describe("RegulatoryReportingService", () => {
     );
   });
 
-  it("flushes due reminders before moving a review-approved notification to submitted", () => {
+  it("does not emit stale reminders while moving a review-approved notification to submitted", () => {
     let now = new Date("2026-06-26T00:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
@@ -223,20 +223,19 @@ describe("RegulatoryReportingService", () => {
     );
 
     expect(submitted.lifecycleStatus).toBe("submitted");
-    expect(submitted.reminders).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          minutesBeforeDeadline: 240,
-          dueAt: "2026-06-26T04:00:00.000Z",
-          sentAt: "2026-06-26T05:00:00.000Z",
-        }),
-      ]),
+    expect(
+      submitted.reminders.find((reminder) => reminder.minutesBeforeDeadline === 240),
+    ).toEqual(
+      expect.objectContaining({
+        dueAt: "2026-06-26T04:00:00.000Z",
+        sentAt: null,
+      }),
     );
     expect(
       auditNotificationService
         .listNotifications()
         .filter((notification) => notification.title === "Regulatory notification reminder"),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       auditNotificationService
         .listAuditLogs()
@@ -245,7 +244,7 @@ describe("RegulatoryReportingService", () => {
             entry.actionName === "regulatory_notification_reminder_sent" &&
             entry.resourceId === draft.notificationId,
         ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("does not retroactively flush reminders that were still in the future at backfilled submittedAt", () => {
@@ -324,7 +323,7 @@ describe("RegulatoryReportingService", () => {
     ).toBe(false);
   });
 
-  it("records backfilled reminder flushes at the effective submittedAt instead of wall-clock now", () => {
+  it("does not retroactively emit reminders for backfilled submissions after the reminder window passed", () => {
     let now = new Date("2026-06-26T00:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
@@ -375,14 +374,174 @@ describe("RegulatoryReportingService", () => {
       "req-reg-submit-006b",
     );
 
-    expect(submitted.reminders).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          minutesBeforeDeadline: 240,
-          sentAt: "2026-06-26T05:30:00.000Z",
-        }),
-      ]),
+    expect(
+      submitted.reminders.find((reminder) => reminder.minutesBeforeDeadline === 240),
+    ).toEqual(
+      expect.objectContaining({
+        sentAt: null,
+      }),
     );
+    expect(
+      auditNotificationService
+        .listNotifications()
+        .filter((notification) => notification.title === "Regulatory notification reminder"),
+    ).toHaveLength(0);
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .some(
+          (entry) =>
+            entry.actionName === "regulatory_notification_reminder_sent" &&
+            entry.resourceId === draft.notificationId,
+        ),
+    ).toBe(false);
+  });
+
+  it("rejects submittedAt values that predate review approval", () => {
+    let now = new Date("2026-06-26T00:00:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-submit-chronology-001",
+        eventType: "incident_review",
+        severity: "incident",
+        reportVersionKind: "initial",
+        jurisdiction: "CA-CPUC",
+        vehicleId: "veh-reg-submit-chronology-001",
+        eventOccurredAt: "2026-06-26T00:00:00.000Z",
+        summary: "Submit timestamps must not predate review approval.",
+      },
+      createIdentity(),
+      "req-reg-create-submit-chronology-001",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for review." },
+      createIdentity(),
+      "req-reg-review-submit-chronology-001",
+    );
+    const approved = service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-submit-chronology-001",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-approve-submit-chronology-001",
+    );
+
+    expect(() =>
+      service.submitNotification(
+        draft.notificationId,
+        {
+          submissionReference: "SUB-REG-SUBMIT-CHRONOLOGY-001",
+          submittedAt: "2026-06-25T23:59:59.000Z",
+        },
+        createIdentity({
+          actorId: "ops-user-submit-chronology-001",
+          roles: ["compliance_manager"],
+        }),
+        "req-reg-submit-chronology-001",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    const persisted = service.getNotification(draft.notificationId);
+    expect(persisted.lifecycleStatus).toBe("review_approved");
+    expect(persisted.reviewApprovedAt).toBe(approved.reviewApprovedAt);
+    expect(persisted.submittedAt).toBeNull();
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .some(
+          (entry) =>
+            entry.resourceId === draft.notificationId &&
+            entry.actionName === "submit_regulatory_notification",
+        ),
+    ).toBe(false);
+  });
+
+  it("rejects acknowledgedAt values that predate submittedAt", () => {
+    let now = new Date("2026-06-26T02:00:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-ack-chronology-001",
+        eventType: "odd_boundary_exit",
+        severity: "incident",
+        reportVersionKind: "follow_up",
+        jurisdiction: "TW-MOTC",
+        vehicleId: "veh-reg-ack-chronology-001",
+        eventOccurredAt: "2026-06-26T01:30:00.000Z",
+        summary: "Acknowledgement timestamps must not predate submission.",
+      },
+      createIdentity(),
+      "req-reg-create-ack-chronology-001",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for compliance review." },
+      createIdentity(),
+      "req-reg-review-ack-chronology-001",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved by separate reviewer." },
+      createIdentity({
+        actorId: "ops-user-approve-ack-chronology-001",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-approve-ack-chronology-001",
+    );
+
+    const submitted = service.submitNotification(
+      draft.notificationId,
+      {
+        submissionReference: "SUB-REG-ACK-CHRONOLOGY-001",
+        submittedAt: "2026-06-26T02:10:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-submit-ack-chronology-001",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-submit-ack-chronology-001",
+    );
+
+    expect(() =>
+      service.acknowledgeNotification(
+        draft.notificationId,
+        {
+          acknowledgementReference: "ACK-REG-ACK-CHRONOLOGY-001",
+          acknowledgedAt: "2026-06-26T02:09:59.000Z",
+        },
+        createIdentity({
+          actorId: "ops-user-ack-chronology-001",
+          roles: ["compliance_manager"],
+        }),
+        "req-reg-ack-chronology-001",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    const persisted = service.getNotification(draft.notificationId);
+    expect(persisted.lifecycleStatus).toBe("submitted");
+    expect(persisted.submittedAt).toBe(submitted.submittedAt);
+    expect(persisted.acknowledgedAt).toBeNull();
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .some(
+          (entry) =>
+            entry.resourceId === draft.notificationId &&
+            entry.actionName === "acknowledge_regulatory_notification",
+        ),
+    ).toBe(false);
   });
 
   it("rejects invalid submit payloads before emitting reminder or audit side effects", () => {
@@ -482,6 +641,7 @@ describe("RegulatoryReportingService", () => {
       true,
     );
   });
+
   it("rejects review approval when roleFamilies are spoofed without an approver role code", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
@@ -685,8 +845,10 @@ describe("RegulatoryReportingService", () => {
   });
 
   it("rejects repeated acknowledgement attempts", () => {
+    let now = new Date("2026-06-26T02:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
 
     const draft = service.createNotification(
       {
@@ -718,6 +880,7 @@ describe("RegulatoryReportingService", () => {
       }),
       "req-reg-approve-005",
     );
+    now = new Date("2026-06-26T02:10:00.000Z");
     service.submitNotification(
       draft.notificationId,
       {

@@ -387,18 +387,18 @@ export class RegulatoryReportingService {
     const submittedAt = command?.submittedAt
       ? this.requireIsoDate(command.submittedAt, "submittedAt")
       : this.nowIso();
+    this.requireTimestampNotBefore(
+      submittedAt,
+      notification.reviewApprovedAt,
+      "submittedAt",
+      "reviewApprovedAt",
+      "REGULATORY_NOTIFICATION_SUBMIT_CHRONOLOGY_INVALID",
+    );
     const submissionReference = this.requireNonBlank(
       command?.submissionReference,
       "submissionReference",
     );
     const note = this.normalizeNullableText(command?.note, "note");
-    const now = this.nowIso();
-    const reminderCutoffAt = submittedAt < now ? submittedAt : now;
-    this.refreshNotificationReminders(
-      notification,
-      reminderCutoffAt,
-      reminderCutoffAt,
-    );
     notification.lifecycleStatus = "submitted";
     notification.submittedAt = submittedAt;
     notification.submittedBy = actor.actorId;
@@ -446,6 +446,13 @@ export class RegulatoryReportingService {
     const acknowledgedAt = command?.acknowledgedAt
       ? this.requireIsoDate(command.acknowledgedAt, "acknowledgedAt")
       : this.nowIso();
+    this.requireTimestampNotBefore(
+      acknowledgedAt,
+      notification.submittedAt,
+      "acknowledgedAt",
+      "submittedAt",
+      "REGULATORY_NOTIFICATION_ACKNOWLEDGE_CHRONOLOGY_INVALID",
+    );
     notification.lifecycleStatus = "acknowledged";
     notification.acknowledgedAt = acknowledgedAt;
     notification.acknowledgedBy = actor.actorId;
@@ -672,6 +679,28 @@ export class RegulatoryReportingService {
       );
     }
     return new Date(normalized).toISOString();
+  }
+
+  private requireTimestampNotBefore(
+    candidate: string,
+    floor: string | null,
+    candidateField: string,
+    floorField: string,
+    code: string,
+  ) {
+    if (floor !== null && candidate < floor) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        code,
+        `${candidateField} must be on or after ${floorField}.`,
+        {
+          candidateField,
+          floorField,
+          [candidateField]: candidate,
+          [floorField]: floor,
+        },
+      );
+    }
   }
 
   private requireSeverity(value: unknown): RegulatoryNotificationSeverity {

@@ -109,6 +109,10 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
         },
       );
       expect(approveResponse.ok).toBe(true);
+      const approveBody = await approveResponse.json();
+      const submittedAt = new Date(
+        new Date(approveBody.data.reviewApprovedAt as string).getTime() + 60_000,
+      ).toISOString();
 
       const submitResponse = await fetch(
         `${baseUrl}/api/regulatory/notifications/${notificationId}/submit`,
@@ -120,13 +124,16 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
           }),
           body: JSON.stringify({
             submissionReference: "SUB-INT-001",
-            submittedAt: "2026-06-26T03:20:00.000Z",
+            submittedAt,
           }),
         },
       );
       expect(submitResponse.ok).toBe(true);
       const submitBody = await submitResponse.json();
       expect(submitBody.data.lifecycleStatus).toBe("submitted");
+      const acknowledgedAt = new Date(
+        new Date(submitBody.data.submittedAt as string).getTime() + 60_000,
+      ).toISOString();
 
       const acknowledgeResponse = await fetch(
         `${baseUrl}/api/regulatory/notifications/${notificationId}/acknowledge`,
@@ -138,7 +145,7 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
           }),
           body: JSON.stringify({
             acknowledgementReference: "ACK-INT-001",
-            acknowledgedAt: "2026-06-26T03:30:00.000Z",
+            acknowledgedAt,
           }),
         },
       );
@@ -157,7 +164,7 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
           }),
           body: JSON.stringify({
             acknowledgementReference: "ACK-INT-001-B",
-            acknowledgedAt: "2026-06-26T03:35:00.000Z",
+            acknowledgedAt,
           }),
         },
       );
@@ -185,6 +192,123 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
           }),
         ]),
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects submit and acknowledge timestamps that break lifecycle chronology", async () => {
+    const { app, baseUrl } = await createTestApp();
+
+    try {
+      const createResponse = await fetch(`${baseUrl}/api/regulatory/notifications`, {
+        method: "POST",
+        headers: buildHeaders(),
+        body: JSON.stringify({
+          eventId: "evt-reg-int-chronology-001",
+          eventType: "collision",
+          severity: "incident",
+          reportVersionKind: "initial",
+          jurisdiction: "CA-DMV",
+          vehicleId: "veh-reg-int-chronology-001",
+          eventOccurredAt: "2026-06-26T03:00:00.000Z",
+          summary: "Chronology guards should reject impossible regulatory audit trails.",
+        }),
+      });
+      expect(createResponse.ok).toBe(true);
+      const createdBody = await createResponse.json();
+      const notificationId = createdBody.data.notificationId as string;
+
+      const reviewResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/submit-review`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({ note: "Ready for review." }),
+        },
+      );
+      expect(reviewResponse.ok).toBe(true);
+
+      const approveResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/approve`,
+        {
+          method: "POST",
+          headers: buildHeaders({
+            "x-actor-id": "ops-user-approve-chronology-001",
+            "x-roles": "compliance_manager",
+          }),
+          body: JSON.stringify({ note: "Approved." }),
+        },
+      );
+      expect(approveResponse.ok).toBe(true);
+      const approveBody = await approveResponse.json();
+      const reviewApprovedAt = approveBody.data.reviewApprovedAt as string;
+      const validSubmittedAt = new Date(
+        new Date(reviewApprovedAt).getTime() + 60_000,
+      ).toISOString();
+
+      const invalidSubmitResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/submit`,
+        {
+          method: "POST",
+          headers: buildHeaders({
+            "x-actor-id": "ops-user-submit-chronology-001",
+            "x-roles": "compliance_manager",
+          }),
+          body: JSON.stringify({
+            submissionReference: "SUB-INT-CHRONOLOGY-001-INVALID",
+            submittedAt: "2026-06-26T03:00:00.000Z",
+          }),
+        },
+      );
+      expect(invalidSubmitResponse.status).toBe(409);
+      const invalidSubmitBody = await invalidSubmitResponse.json();
+      expect(invalidSubmitBody.error.code).toBe(
+        "REGULATORY_NOTIFICATION_SUBMIT_CHRONOLOGY_INVALID",
+      );
+      expect(invalidSubmitBody.error.details.reviewApprovedAt).toBe(reviewApprovedAt);
+
+      const submitResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/submit`,
+        {
+          method: "POST",
+          headers: buildHeaders({
+            "x-actor-id": "ops-user-submit-chronology-001",
+            "x-roles": "compliance_manager",
+          }),
+          body: JSON.stringify({
+            submissionReference: "SUB-INT-CHRONOLOGY-001",
+            submittedAt: validSubmittedAt,
+          }),
+        },
+      );
+      expect(submitResponse.ok).toBe(true);
+      const submitBody = await submitResponse.json();
+      expect(submitBody.data.lifecycleStatus).toBe("submitted");
+      expect(submitBody.data.submittedAt).toBe(validSubmittedAt);
+
+      const invalidAcknowledgeResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/acknowledge`,
+        {
+          method: "POST",
+          headers: buildHeaders({
+            "x-actor-id": "ops-user-ack-chronology-001",
+            "x-roles": "compliance_manager",
+          }),
+          body: JSON.stringify({
+            acknowledgementReference: "ACK-INT-CHRONOLOGY-001-INVALID",
+            acknowledgedAt: new Date(
+              new Date(validSubmittedAt).getTime() - 1_000,
+            ).toISOString(),
+          }),
+        },
+      );
+      expect(invalidAcknowledgeResponse.status).toBe(409);
+      const invalidAcknowledgeBody = await invalidAcknowledgeResponse.json();
+      expect(invalidAcknowledgeBody.error.code).toBe(
+        "REGULATORY_NOTIFICATION_ACKNOWLEDGE_CHRONOLOGY_INVALID",
+      );
+      expect(invalidAcknowledgeBody.error.details.submittedAt).toBe(validSubmittedAt);
     } finally {
       await app.close();
     }
