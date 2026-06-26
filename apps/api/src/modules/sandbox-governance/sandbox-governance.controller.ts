@@ -1,10 +1,32 @@
-import { Body, Controller, Get, Headers, Post, Put } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  CreateApprovalDocumentVersionCommand,
+  CreateSandboxExperimentProgramCommand,
+  CreateSandboxJurisdictionProfileCommand,
+  GenerateSandboxComplianceSnapshotCommand,
+  PublishSandboxGovernanceVersionCommand,
+  ResumeSandboxExperimentAuthorizationsCommand,
+  RollbackSandboxGovernanceVersionCommand,
+  SuspendSandboxExperimentAuthorizationsCommand,
   UpsertApprovedOperatingAreasCommand,
   UpsertApprovedRoutesCommand,
   UpsertSafetyOperatorQualificationsCommand,
+  UpdateApprovalDocumentVersionCommand,
+  UpdateSandboxExperimentProgramCommand,
+  UpdateSandboxJurisdictionProfileCommand,
   UpsertVehicleEnrollmentsCommand,
   ValidateOperatingAreaPointCommand,
   ValidateRouteContainmentCommand,
@@ -20,6 +42,335 @@ export class SandboxGovernanceController {
   constructor(
     private readonly sandboxGovernanceService: SandboxGovernanceService,
   ) {}
+
+  @Get("experiments")
+  listExperiments(
+    @Query("asOf") asOf?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      { items: this.sandboxGovernanceService.listExperiments(asOf) },
+      requestId,
+    );
+  }
+
+  @Post("experiments")
+  createExperiment(
+    @Body() command: CreateSandboxExperimentProgramCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.createExperiment(command),
+      requestId,
+    );
+  }
+
+  @Get("experiments/:experimentId")
+  getExperiment(
+    @Param("experimentId") experimentId: string,
+    @Query("asOf") asOf?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.getExperiment(experimentId, asOf),
+      requestId,
+    );
+  }
+
+  @Patch("experiments/:experimentId")
+  updateExperiment(
+    @Param("experimentId") experimentId: string,
+    @Body() command: UpdateSandboxExperimentProgramCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.updateExperiment(experimentId, command),
+      requestId,
+    );
+  }
+
+  @Delete("experiments/:experimentId")
+  archiveExperiment(
+    @Param("experimentId") experimentId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.archiveExperiment(experimentId),
+      requestId,
+    );
+  }
+
+  @Post("experiments/:experimentId/versions/:versionId/publish")
+  publishExperimentVersion(
+    @Param("experimentId") experimentId: string,
+    @Param("versionId") versionId: string,
+    @Body() command: PublishSandboxGovernanceVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.publishExperimentVersion(
+        experimentId,
+        versionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("experiments/:experimentId/suspend")
+  suspendExperimentAuthorizations(
+    @Param("experimentId") experimentId: string,
+    @Body() command: SuspendSandboxExperimentAuthorizationsCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.suspendExperimentAuthorizations(
+        experimentId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("experiments/:experimentId/resume-authorizations")
+  resumeExperimentAuthorizations(
+    @Param("experimentId") experimentId: string,
+    @Body() command: ResumeSandboxExperimentAuthorizationsCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.resumeExperimentAuthorizations(
+        experimentId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("experiments/:experimentId/rollback/:versionId")
+  rollbackExperimentVersion(
+    @Param("experimentId") experimentId: string,
+    @Param("versionId") versionId: string,
+    @Body() command: RollbackSandboxGovernanceVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.rollbackExperimentVersion(
+        experimentId,
+        versionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("jurisdictions")
+  listJurisdictions(
+    @Query("asOf") asOf?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      { items: this.sandboxGovernanceService.listJurisdictions(asOf) },
+      requestId,
+    );
+  }
+
+  @Post("jurisdictions")
+  createJurisdiction(
+    @Body() command: CreateSandboxJurisdictionProfileCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.createJurisdiction(command),
+      requestId,
+    );
+  }
+
+  @Get("jurisdictions/:jurisdictionId")
+  getJurisdiction(
+    @Param("jurisdictionId") jurisdictionId: string,
+    @Query("asOf") asOf?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.getJurisdiction(jurisdictionId, asOf),
+      requestId,
+    );
+  }
+
+  @Patch("jurisdictions/:jurisdictionId")
+  updateJurisdiction(
+    @Param("jurisdictionId") jurisdictionId: string,
+    @Body() command: UpdateSandboxJurisdictionProfileCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.updateJurisdiction(jurisdictionId, command),
+      requestId,
+    );
+  }
+
+  @Delete("jurisdictions/:jurisdictionId")
+  archiveJurisdiction(
+    @Param("jurisdictionId") jurisdictionId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.archiveJurisdiction(jurisdictionId),
+      requestId,
+    );
+  }
+
+  @Post("jurisdictions/:jurisdictionId/versions/:versionId/publish")
+  publishJurisdictionVersion(
+    @Param("jurisdictionId") jurisdictionId: string,
+    @Param("versionId") versionId: string,
+    @Body() command: PublishSandboxGovernanceVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.publishJurisdictionVersion(
+        jurisdictionId,
+        versionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("jurisdictions/:jurisdictionId/rollback/:versionId")
+  rollbackJurisdictionVersion(
+    @Param("jurisdictionId") jurisdictionId: string,
+    @Param("versionId") versionId: string,
+    @Body() command: RollbackSandboxGovernanceVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.rollbackJurisdictionVersion(
+        jurisdictionId,
+        versionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("approval-documents")
+  listApprovalDocuments(
+    @Query("asOf") asOf?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      { items: this.sandboxGovernanceService.listApprovalDocuments(asOf) },
+      requestId,
+    );
+  }
+
+  @Post("approval-documents")
+  createApprovalDocument(
+    @Body() command: CreateApprovalDocumentVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.createApprovalDocument(command),
+      requestId,
+    );
+  }
+
+  @Get("approval-documents/:documentId")
+  getApprovalDocument(
+    @Param("documentId") documentId: string,
+    @Query("asOf") asOf?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.getApprovalDocument(documentId, asOf),
+      requestId,
+    );
+  }
+
+  @Patch("approval-documents/:documentId")
+  uploadApprovalDocumentVersion(
+    @Param("documentId") documentId: string,
+    @Body() command: UpdateApprovalDocumentVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.uploadApprovalDocumentVersion(
+        documentId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Delete("approval-documents/:documentId")
+  archiveApprovalDocument(
+    @Param("documentId") documentId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.archiveApprovalDocument(documentId),
+      requestId,
+    );
+  }
+
+  @Post("approval-documents/:documentId/versions/:versionId/publish")
+  publishApprovalDocumentVersion(
+    @Param("documentId") documentId: string,
+    @Param("versionId") versionId: string,
+    @Body() command: PublishSandboxGovernanceVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.publishApprovalDocumentVersion(
+        documentId,
+        versionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("approval-documents/:documentId/rollback/:versionId")
+  rollbackApprovalDocumentVersion(
+    @Param("documentId") documentId: string,
+    @Param("versionId") versionId: string,
+    @Body() command: RollbackSandboxGovernanceVersionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.rollbackApprovalDocumentVersion(
+        documentId,
+        versionId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("experiments/:experimentId/compliance-snapshot")
+  generateComplianceSnapshot(
+    @Param("experimentId") experimentId: string,
+    @Query("asOf") asOf: string | undefined,
+    @Query("actorId") actorId: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const command: GenerateSandboxComplianceSnapshotCommand = {};
+    if (asOf !== undefined) {
+      command.asOf = asOf;
+    }
+    if (actorId !== undefined) {
+      command.actorId = actorId;
+    }
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.generateComplianceSnapshot(
+        experimentId,
+        command,
+      ),
+      requestId,
+    );
+  }
 
   @Get("operating-areas")
   listOperatingAreas(@Headers("x-request-id") requestId?: string) {

@@ -365,4 +365,211 @@ describe("SandboxGovernanceService", () => {
       "replace areas",
     );
   });
+
+  it("stores approval artifact hashes, supersedes prior versions, and supports rollback", () => {
+    const service = createService();
+    const jurisdiction = service.createJurisdiction({
+      jurisdictionCode: "us-ca-cpuc",
+      name: "California CPUC",
+      regulatorName: "California Public Utilities Commission",
+      actorId: "ops-user-1",
+    });
+    const jurisdictionVersionId = jurisdiction.currentVersionId as string;
+    service.publishJurisdictionVersion(
+      jurisdiction.jurisdictionId,
+      jurisdictionVersionId,
+      {
+        actorId: "ops-user-1",
+      },
+    );
+
+    const experiment = service.createExperiment({
+      programCode: PROGRAM_ID,
+      name: "Tesla San Francisco Beta",
+      jurisdictionIds: [jurisdiction.jurisdictionId],
+      actorId: "ops-user-1",
+    });
+    service.publishExperimentVersion(
+      experiment.experimentId,
+      experiment.currentVersionId as string,
+      {
+        actorId: "ops-user-1",
+      },
+    );
+
+    const initial = service.createApprovalDocument({
+      experimentId: experiment.experimentId,
+      jurisdictionId: jurisdiction.jurisdictionId,
+      documentType: "permit",
+      title: "Pilot Permit",
+      artifactFileName: "permit-v1.pdf",
+      artifactContentType: "application/pdf",
+      artifactContentBase64: Buffer.from("permit-v1").toString("base64"),
+      actorId: "ops-user-1",
+    });
+    const initialVersionId = initial.currentVersionId as string;
+    service.publishApprovalDocumentVersion(initial.documentId, initialVersionId, {
+      actorId: "ops-user-1",
+    });
+
+    const next = service.uploadApprovalDocumentVersion(initial.documentId, {
+      artifactFileName: "permit-v2.pdf",
+      artifactContentType: "application/pdf",
+      artifactContentBase64: Buffer.from("permit-v2").toString("base64"),
+      summary: "updated regulator stamp",
+      actorId: "ops-user-2",
+    });
+
+    expect(next.versions.at(-1)?.artifactSha256).toHaveLength(64);
+    expect(next.versions.at(-1)?.supersedesVersionId).toBe(initialVersionId);
+
+    const rolledBack = service.rollbackApprovalDocumentVersion(
+      initial.documentId,
+      initialVersionId,
+      {
+        actorId: "ops-user-3",
+        publish: true,
+      },
+    );
+
+    expect(rolledBack.versions.at(-1)).toMatchObject({
+      rollbackFromVersionId: initialVersionId,
+      lifecycleStatus: "published",
+    });
+    expect(rolledBack.effectiveVersion?.artifactSha256).toBe(
+      rolledBack.versions[0]?.artifactSha256,
+    );
+  });
+
+  it("creates reproducible compliance snapshots including routes and enrollments", async () => {
+    const service = createService();
+    const jurisdiction = service.createJurisdiction({
+      jurisdictionCode: "us-nv-dot",
+      name: "Nevada DOT",
+      regulatorName: "Nevada Department of Transportation",
+      actorId: "ops-user-1",
+      policyVersions: {
+        compliancePolicyVersion: "cp-2026-06",
+      },
+    });
+    service.publishJurisdictionVersion(
+      jurisdiction.jurisdictionId,
+      jurisdiction.currentVersionId as string,
+      {
+        actorId: "ops-user-1",
+      },
+    );
+
+    const experiment = service.createExperiment({
+      programCode: PROGRAM_ID,
+      name: "Tesla Las Vegas Pilot",
+      jurisdictionIds: [jurisdiction.jurisdictionId],
+      policyVersions: {
+        routePolicyVersion: "route-9",
+        schedulePolicyVersion: "sched-4",
+        enrollmentPolicyVersion: "enroll-2",
+        capabilityPolicyVersion: "cap-7",
+        compliancePolicyVersion: "cp-2026-06",
+      },
+      requiredCapabilities: [
+        {
+          capability: "av_dispatch",
+          required: true,
+          minSchemaVersion: "2.0",
+          notes: null,
+        },
+      ],
+      actorId: "ops-user-1",
+    });
+    service.publishExperimentVersion(
+      experiment.experimentId,
+      experiment.currentVersionId as string,
+      {
+        actorId: "ops-user-1",
+      },
+    );
+
+    const document = service.createApprovalDocument({
+      experimentId: experiment.experimentId,
+      jurisdictionId: jurisdiction.jurisdictionId,
+      documentType: "operating_plan",
+      title: "Operating Plan",
+      artifactFileName: "plan.pdf",
+      artifactContentType: "application/pdf",
+      artifactContentBase64: Buffer.from("plan-v1").toString("base64"),
+      actorId: "ops-user-1",
+    });
+    const publishedDocument = service.publishApprovalDocumentVersion(
+      document.documentId,
+      document.currentVersionId as string,
+      {
+        actorId: "ops-user-1",
+      },
+    );
+
+    const asOf = publishedDocument.effectiveVersion?.effectiveFrom as string;
+    const snapshotA = service.generateComplianceSnapshot(experiment.experimentId, {
+      asOf,
+      actorId: "auditor-1",
+    });
+    const snapshotB = service.generateComplianceSnapshot(experiment.experimentId, {
+      asOf,
+      actorId: "auditor-2",
+    });
+
+    expect(snapshotA.snapshotHashSha256).toBe(snapshotB.snapshotHashSha256);
+    expect(snapshotA.policyVersions).toMatchObject({
+      routePolicyVersion: "route-9",
+      schedulePolicyVersion: "sched-4",
+      enrollmentPolicyVersion: "enroll-2",
+      capabilityPolicyVersion: "cap-7",
+      compliancePolicyVersion: "cp-2026-06",
+    });
+    expect(snapshotA.approvalDocuments).toHaveLength(1);
+    expect(snapshotA.jurisdictions).toHaveLength(1);
+    expect(snapshotA.routes).toHaveLength(1);
+    expect(snapshotA.vehicleEnrollments).toHaveLength(1);
+  });
+
+  it("suspends and resumes experiment authorizations by publishing derivative versions", () => {
+    const service = createService();
+    const jurisdiction = service.createJurisdiction({
+      jurisdictionCode: "jp-tokyo",
+      name: "Tokyo Sandbox",
+      regulatorName: "Tokyo Mobility Bureau",
+    });
+    service.publishJurisdictionVersion(
+      jurisdiction.jurisdictionId,
+      jurisdiction.currentVersionId as string,
+      {},
+    );
+
+    const experiment = service.createExperiment({
+      programCode: PROGRAM_ID,
+      name: "Tokyo Nightly Pilot",
+      jurisdictionIds: [jurisdiction.jurisdictionId],
+    });
+    service.publishExperimentVersion(
+      experiment.experimentId,
+      experiment.currentVersionId as string,
+      {},
+    );
+
+    const suspended = service.suspendExperimentAuthorizations(
+      experiment.experimentId,
+      {
+        actorId: "ops-user-2",
+      },
+    );
+    expect(suspended.effectiveVersion?.authorizationStatus).toBe("suspended");
+
+    const resumed = service.resumeExperimentAuthorizations(
+      experiment.experimentId,
+      {
+        actorId: "ops-user-3",
+      },
+    );
+    expect(resumed.effectiveVersion?.authorizationStatus).toBe("active");
+    expect(resumed.versions).toHaveLength(3);
+  });
 });
