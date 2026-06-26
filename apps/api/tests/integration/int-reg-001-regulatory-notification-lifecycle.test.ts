@@ -42,6 +42,8 @@ async function createTestApp() {
   return {
     app,
     baseUrl: `http://127.0.0.1:${address.port}`,
+    regulatoryReportingService: app.get(RegulatoryReportingService),
+    auditNotificationService: app.get(AuditNotificationService),
   };
 }
 
@@ -67,21 +69,24 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
     const { app, baseUrl } = await createTestApp();
 
     try {
-      const createResponse = await fetch(`${baseUrl}/api/regulatory/notifications`, {
-        method: "POST",
-        headers: buildHeaders(),
-        body: JSON.stringify({
-          eventId: "evt-reg-int-001",
-          eventType: "collision",
-          severity: "incident",
-          reportVersionKind: "initial",
-          jurisdiction: "CA-DMV",
-          vehicleId: "veh-reg-int-001",
-          eventOccurredAt: "2026-06-26T03:00:00.000Z",
-          summary: "Integration lifecycle report.",
-          details: "Draft body for regulator.",
-        }),
-      });
+      const createResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({
+            eventId: "evt-reg-int-001",
+            eventType: "collision",
+            severity: "incident",
+            reportVersionKind: "initial",
+            jurisdiction: "CA-DMV",
+            vehicleId: "veh-reg-int-001",
+            eventOccurredAt: "2026-06-26T03:00:00.000Z",
+            summary: "Integration lifecycle report.",
+            details: "Draft body for regulator.",
+          }),
+        },
+      );
       expect(createResponse.ok).toBe(true);
       const createdBody = await createResponse.json();
       const notificationId = createdBody.data.notificationId as string;
@@ -111,7 +116,8 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
       expect(approveResponse.ok).toBe(true);
       const approveBody = await approveResponse.json();
       const submittedAt = new Date(
-        new Date(approveBody.data.reviewApprovedAt as string).getTime() + 60_000,
+        new Date(approveBody.data.reviewApprovedAt as string).getTime() +
+          60_000,
       ).toISOString();
 
       const submitResponse = await fetch(
@@ -174,12 +180,15 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
         "REGULATORY_NOTIFICATION_ACKNOWLEDGE_INVALID",
       );
 
-      const listResponse = await fetch(`${baseUrl}/api/regulatory/notifications`, {
-        method: "GET",
-        headers: buildHeaders({
-          "x-scopes": "regulatory:read",
-        }),
-      });
+      const listResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications`,
+        {
+          method: "GET",
+          headers: buildHeaders({
+            "x-scopes": "regulatory:read",
+          }),
+        },
+      );
       expect(listResponse.ok).toBe(true);
       const listBody = await listResponse.json();
       expect(listBody.data.items).toEqual(
@@ -201,20 +210,24 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
     const { app, baseUrl } = await createTestApp();
 
     try {
-      const createResponse = await fetch(`${baseUrl}/api/regulatory/notifications`, {
-        method: "POST",
-        headers: buildHeaders(),
-        body: JSON.stringify({
-          eventId: "evt-reg-int-chronology-001",
-          eventType: "collision",
-          severity: "incident",
-          reportVersionKind: "initial",
-          jurisdiction: "CA-DMV",
-          vehicleId: "veh-reg-int-chronology-001",
-          eventOccurredAt: "2026-06-26T03:00:00.000Z",
-          summary: "Chronology guards should reject impossible regulatory audit trails.",
-        }),
-      });
+      const createResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({
+            eventId: "evt-reg-int-chronology-001",
+            eventType: "collision",
+            severity: "incident",
+            reportVersionKind: "initial",
+            jurisdiction: "CA-DMV",
+            vehicleId: "veh-reg-int-chronology-001",
+            eventOccurredAt: "2026-06-26T03:00:00.000Z",
+            summary:
+              "Chronology guards should reject impossible regulatory audit trails.",
+          }),
+        },
+      );
       expect(createResponse.ok).toBe(true);
       const createdBody = await createResponse.json();
       const notificationId = createdBody.data.notificationId as string;
@@ -266,7 +279,9 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
       expect(invalidSubmitBody.error.code).toBe(
         "REGULATORY_NOTIFICATION_SUBMIT_CHRONOLOGY_INVALID",
       );
-      expect(invalidSubmitBody.error.details.reviewApprovedAt).toBe(reviewApprovedAt);
+      expect(invalidSubmitBody.error.details.reviewApprovedAt).toBe(
+        reviewApprovedAt,
+      );
 
       const submitResponse = await fetch(
         `${baseUrl}/api/regulatory/notifications/${notificationId}/submit`,
@@ -308,7 +323,115 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
       expect(invalidAcknowledgeBody.error.code).toBe(
         "REGULATORY_NOTIFICATION_ACKNOWLEDGE_CHRONOLOGY_INVALID",
       );
-      expect(invalidAcknowledgeBody.error.details.submittedAt).toBe(validSubmittedAt);
+      expect(invalidAcknowledgeBody.error.details.submittedAt).toBe(
+        validSubmittedAt,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("flushes due reminder audits when a review-approved notification is submitted after the reminder window", async () => {
+    const {
+      app,
+      baseUrl,
+      regulatoryReportingService,
+      auditNotificationService,
+    } = await createTestApp();
+    let now = new Date("2026-06-26T00:00:00.000Z");
+    regulatoryReportingService.setClockForTests(() => now);
+
+    try {
+      const createResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({
+            eventId: "evt-reg-int-reminder-001",
+            eventType: "cybersecurity_alert",
+            severity: "cybersecurity",
+            reportVersionKind: "initial",
+            jurisdiction: "CA-CPUC",
+            vehicleId: "veh-reg-int-reminder-001",
+            eventOccurredAt: "2026-06-26T00:00:00.000Z",
+            summary:
+              "Late submit should flush due reminder audit side effects.",
+          }),
+        },
+      );
+      expect(createResponse.ok).toBe(true);
+      const createdBody = await createResponse.json();
+      const notificationId = createdBody.data.notificationId as string;
+
+      const reviewResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/submit-review`,
+        {
+          method: "POST",
+          headers: buildHeaders(),
+          body: JSON.stringify({ note: "Ready for review." }),
+        },
+      );
+      expect(reviewResponse.ok).toBe(true);
+
+      const approveResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/approve`,
+        {
+          method: "POST",
+          headers: buildHeaders({
+            "x-actor-id": "ops-user-approve-reminder-001",
+            "x-roles": "security_manager",
+          }),
+          body: JSON.stringify({ note: "Approved." }),
+        },
+      );
+      expect(approveResponse.ok).toBe(true);
+
+      now = new Date("2026-06-26T05:00:00.000Z");
+      const submitResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/submit`,
+        {
+          method: "POST",
+          headers: buildHeaders({
+            "x-actor-id": "ops-user-submit-reminder-001",
+            "x-roles": "security_manager",
+          }),
+          body: JSON.stringify({
+            submissionReference: "SUB-INT-REMINDER-001",
+            submittedAt: "2026-06-26T05:00:00.000Z",
+          }),
+        },
+      );
+      expect(submitResponse.ok).toBe(true);
+      const submitBody = await submitResponse.json();
+      expect(submitBody.data.reminders).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            minutesBeforeDeadline: 240,
+            dueAt: "2026-06-26T04:00:00.000Z",
+            sentAt: "2026-06-26T05:00:00.000Z",
+          }),
+        ]),
+      );
+      expect(
+        auditNotificationService
+          .listNotifications()
+          .filter(
+            (notification) =>
+              notification.title === "Regulatory notification reminder" &&
+              notification.message.includes(notificationId),
+          ),
+      ).toHaveLength(1);
+      expect(
+        auditNotificationService
+          .listAuditLogs()
+          .some(
+            (entry) =>
+              entry.resourceId === notificationId &&
+              entry.actionName === "regulatory_notification_reminder_sent" &&
+              entry.newValuesSummary?.dueAt === "2026-06-26T04:00:00.000Z",
+          ),
+      ).toBe(true);
     } finally {
       await app.close();
     }
@@ -366,7 +489,9 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
       expect(missingEventIdResponse.status).toBe(400);
       const missingEventIdBody = await missingEventIdResponse.json();
       expect(missingEventIdBody.error.code).toBe("VALIDATION_ERROR");
-      expect(missingEventIdBody.error.message).toBe("eventId must be a string.");
+      expect(missingEventIdBody.error.message).toBe(
+        "eventId must be a string.",
+      );
 
       const invalidSeverityResponse = await fetch(
         `${baseUrl}/api/regulatory/notifications`,
@@ -410,7 +535,8 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
         },
       );
       expect(invalidReportVersionResponse.status).toBe(400);
-      const invalidReportVersionBody = await invalidReportVersionResponse.json();
+      const invalidReportVersionBody =
+        await invalidReportVersionResponse.json();
       expect(invalidReportVersionBody.error.code).toBe("VALIDATION_ERROR");
       expect(invalidReportVersionBody.error.message).toBe(
         "reportVersionKind must be one of: initial, follow_up, final.",

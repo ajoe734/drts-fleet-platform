@@ -69,7 +69,11 @@ const DEFAULT_REGULATORY_NOTIFICATION_POLICIES: Record<
         label: "Safety operations escalation",
       },
     ],
-    approverRoleCodes: ["compliance_manager", "safety_manager", "platform_admin"],
+    approverRoleCodes: [
+      "compliance_manager",
+      "safety_manager",
+      "platform_admin",
+    ],
     deadlineMinutes: 24 * 60,
     reminderOffsetsMinutes: [12 * 60, 60],
   },
@@ -95,7 +99,11 @@ const DEFAULT_REGULATORY_NOTIFICATION_POLICIES: Record<
         label: "Legal on-duty reviewer",
       },
     ],
-    approverRoleCodes: ["compliance_manager", "legal_reviewer", "platform_admin"],
+    approverRoleCodes: [
+      "compliance_manager",
+      "legal_reviewer",
+      "platform_admin",
+    ],
     deadlineMinutes: 120,
     reminderOffsetsMinutes: [60, 15],
   },
@@ -115,7 +123,11 @@ const DEFAULT_REGULATORY_NOTIFICATION_POLICIES: Record<
         label: "Regulatory compliance inbox",
       },
     ],
-    approverRoleCodes: ["security_manager", "compliance_manager", "platform_admin"],
+    approverRoleCodes: [
+      "security_manager",
+      "compliance_manager",
+      "platform_admin",
+    ],
     deadlineMinutes: 8 * 60,
     reminderOffsetsMinutes: [4 * 60, 60],
   },
@@ -127,7 +139,9 @@ function cloneReminder(
   return { ...reminder };
 }
 
-function clonePolicy(policy: RegulatoryNotificationPolicy): RegulatoryNotificationPolicy {
+function clonePolicy(
+  policy: RegulatoryNotificationPolicy,
+): RegulatoryNotificationPolicy {
   return {
     ...policy,
     recipients: policy.recipients.map((recipient) => ({ ...recipient })),
@@ -157,7 +171,10 @@ export class RegulatoryReportingService {
     RegulatoryNotificationPolicy
   >(
     Object.entries(DEFAULT_REGULATORY_NOTIFICATION_POLICIES).map(
-      ([severity, policy]) => [severity as RegulatoryNotificationSeverity, clonePolicy(policy)],
+      ([severity, policy]) => [
+        severity as RegulatoryNotificationSeverity,
+        clonePolicy(policy),
+      ],
     ),
   );
 
@@ -252,7 +269,9 @@ export class RegulatoryReportingService {
           severity: notification.severity,
           reportVersionKind: notification.reportVersionKind,
           deadlineAt: notification.deadlineAt,
-          recipients: notification.recipients.map((recipient) => recipient.recipientId),
+          recipients: notification.recipients.map(
+            (recipient) => recipient.recipientId,
+          ),
         },
       },
       requestId,
@@ -399,6 +418,13 @@ export class RegulatoryReportingService {
       "submissionReference",
     );
     const note = this.normalizeNullableText(command?.note, "note");
+    const now = this.nowIso();
+    const reminderCutoffAt = submittedAt < now ? submittedAt : now;
+    this.refreshNotificationReminders(
+      notification,
+      reminderCutoffAt,
+      reminderCutoffAt,
+    );
     notification.lifecycleStatus = "submitted";
     notification.submittedAt = submittedAt;
     notification.submittedBy = actor.actorId;
@@ -563,7 +589,9 @@ export class RegulatoryReportingService {
       .sort((left, right) => right - left)
       .map<RegulatoryNotificationReminder>((minutesBeforeDeadline) => ({
         minutesBeforeDeadline,
-        dueAt: new Date(deadlineMillis - minutesBeforeDeadline * 60_000).toISOString(),
+        dueAt: new Date(
+          deadlineMillis - minutesBeforeDeadline * 60_000,
+        ).toISOString(),
         sentAt: null,
       }));
   }
@@ -591,7 +619,9 @@ export class RegulatoryReportingService {
     return notification;
   }
 
-  private requireActor(identity: BootstrapRequestIdentity | null): RegulatoryActionActor {
+  private requireActor(
+    identity: BootstrapRequestIdentity | null,
+  ): RegulatoryActionActor {
     if (!identity?.actorId) {
       throw new ApiRequestError(
         HttpStatus.UNAUTHORIZED,
@@ -711,7 +741,9 @@ export class RegulatoryReportingService {
     );
   }
 
-  private requireReportVersionKind(value: unknown): RegulatoryReportVersionKind {
+  private requireReportVersionKind(
+    value: unknown,
+  ): RegulatoryReportVersionKind {
     return this.requireAllowedValue(
       value,
       "reportVersionKind",

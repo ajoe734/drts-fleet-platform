@@ -42,7 +42,9 @@ describe("RegulatoryReportingService", () => {
     );
 
     expect(created.deadlineAt).toBe("2026-06-26T01:30:00.000Z");
-    expect(created.recipients.map((recipient) => recipient.recipientId)).toEqual(
+    expect(
+      created.recipients.map((recipient) => recipient.recipientId),
+    ).toEqual(
       expect.arrayContaining([
         "reg-compliance-inbox",
         "safety-ops-hotline",
@@ -59,18 +61,23 @@ describe("RegulatoryReportingService", () => {
     const overdue = service.getNotification(created.notificationId);
     expect(overdue.overdue).toBe(true);
     expect(overdue.overdueRaisedAt).toBe("2026-06-26T01:31:00.000Z");
-    expect(overdue.reminders.every((reminder) => reminder.sentAt !== null)).toBe(
-      true,
-    );
+    expect(
+      overdue.reminders.every((reminder) => reminder.sentAt !== null),
+    ).toBe(true);
     expect(
       auditNotificationService
         .listNotifications()
-        .some((notification) => notification.title === "REGULATORY_NOTIFICATION_OVERDUE"),
+        .some(
+          (notification) =>
+            notification.title === "REGULATORY_NOTIFICATION_OVERDUE",
+        ),
     ).toBe(true);
     expect(
       auditNotificationService
         .listAuditLogs()
-        .some((entry) => entry.actionName === "REGULATORY_NOTIFICATION_OVERDUE"),
+        .some(
+          (entry) => entry.actionName === "REGULATORY_NOTIFICATION_OVERDUE",
+        ),
     ).toBe(true);
   });
 
@@ -171,7 +178,7 @@ describe("RegulatoryReportingService", () => {
     );
   });
 
-  it("does not emit stale reminders while moving a review-approved notification to submitted", () => {
+  it("flushes due reminders before moving a review-approved notification to submitted", () => {
     let now = new Date("2026-06-26T00:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
@@ -223,19 +230,23 @@ describe("RegulatoryReportingService", () => {
     );
 
     expect(submitted.lifecycleStatus).toBe("submitted");
-    expect(
-      submitted.reminders.find((reminder) => reminder.minutesBeforeDeadline === 240),
-    ).toEqual(
-      expect.objectContaining({
-        dueAt: "2026-06-26T04:00:00.000Z",
-        sentAt: null,
-      }),
+    expect(submitted.reminders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          minutesBeforeDeadline: 240,
+          dueAt: "2026-06-26T04:00:00.000Z",
+          sentAt: "2026-06-26T05:00:00.000Z",
+        }),
+      ]),
     );
     expect(
       auditNotificationService
         .listNotifications()
-        .filter((notification) => notification.title === "Regulatory notification reminder"),
-    ).toHaveLength(0);
+        .filter(
+          (notification) =>
+            notification.title === "Regulatory notification reminder",
+        ),
+    ).toHaveLength(1);
     expect(
       auditNotificationService
         .listAuditLogs()
@@ -244,7 +255,7 @@ describe("RegulatoryReportingService", () => {
             entry.actionName === "regulatory_notification_reminder_sent" &&
             entry.resourceId === draft.notificationId,
         ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("does not retroactively flush reminders that were still in the future at backfilled submittedAt", () => {
@@ -262,7 +273,8 @@ describe("RegulatoryReportingService", () => {
         jurisdiction: "CA-CPUC",
         vehicleId: "veh-reg-006",
         eventOccurredAt: "2026-06-26T00:00:00.000Z",
-        summary: "Backfilled submit should not send future reminders retroactively.",
+        summary:
+          "Backfilled submit should not send future reminders retroactively.",
       },
       createIdentity(),
       "req-reg-create-006",
@@ -310,7 +322,10 @@ describe("RegulatoryReportingService", () => {
     expect(
       auditNotificationService
         .listNotifications()
-        .filter((notification) => notification.title === "Regulatory notification reminder"),
+        .filter(
+          (notification) =>
+            notification.title === "Regulatory notification reminder",
+        ),
     ).toHaveLength(0);
     expect(
       auditNotificationService
@@ -323,7 +338,7 @@ describe("RegulatoryReportingService", () => {
     ).toBe(false);
   });
 
-  it("does not retroactively emit reminders for backfilled submissions after the reminder window passed", () => {
+  it("records backfilled reminder flushes at the effective submittedAt instead of wall-clock now", () => {
     let now = new Date("2026-06-26T00:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
@@ -338,7 +353,8 @@ describe("RegulatoryReportingService", () => {
         jurisdiction: "CA-CPUC",
         vehicleId: "veh-reg-006b",
         eventOccurredAt: "2026-06-26T00:00:00.000Z",
-        summary: "Backfilled submit should timestamp reminder flushes at submit time.",
+        summary:
+          "Backfilled submit should timestamp reminder flushes at submit time.",
       },
       createIdentity(),
       "req-reg-create-006b",
@@ -374,31 +390,18 @@ describe("RegulatoryReportingService", () => {
       "req-reg-submit-006b",
     );
 
-    expect(
-      submitted.reminders.find((reminder) => reminder.minutesBeforeDeadline === 240),
-    ).toEqual(
-      expect.objectContaining({
-        sentAt: null,
-      }),
+    expect(submitted.reminders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          minutesBeforeDeadline: 240,
+          sentAt: "2026-06-26T05:30:00.000Z",
+        }),
+      ]),
     );
-    expect(
-      auditNotificationService
-        .listNotifications()
-        .filter((notification) => notification.title === "Regulatory notification reminder"),
-    ).toHaveLength(0);
-    expect(
-      auditNotificationService
-        .listAuditLogs()
-        .some(
-          (entry) =>
-            entry.actionName === "regulatory_notification_reminder_sent" &&
-            entry.resourceId === draft.notificationId,
-        ),
-    ).toBe(false);
   });
 
   it("rejects submittedAt values that predate review approval", () => {
-    let now = new Date("2026-06-26T00:00:00.000Z");
+    const now = new Date("2026-06-26T00:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
     service.setClockForTests(() => now);
@@ -465,7 +468,7 @@ describe("RegulatoryReportingService", () => {
   });
 
   it("rejects acknowledgedAt values that predate submittedAt", () => {
-    let now = new Date("2026-06-26T02:00:00.000Z");
+    const now = new Date("2026-06-26T02:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
     service.setClockForTests(() => now);
@@ -559,7 +562,8 @@ describe("RegulatoryReportingService", () => {
         jurisdiction: "CA-CPUC",
         vehicleId: "veh-reg-submit-invalid-001",
         eventOccurredAt: "2026-06-26T00:00:00.000Z",
-        summary: "Invalid submit must not flush reminders or audit side effects.",
+        summary:
+          "Invalid submit must not flush reminders or audit side effects.",
       },
       createIdentity(),
       "req-reg-create-submit-invalid-001",
@@ -637,9 +641,9 @@ describe("RegulatoryReportingService", () => {
     const persisted = service.getNotification(draft.notificationId);
     expect(persisted.lifecycleStatus).toBe("review_approved");
     expect(persisted.submittedAt).toBeNull();
-    expect(persisted.reminders.every((reminder) => reminder.sentAt === null)).toBe(
-      true,
-    );
+    expect(
+      persisted.reminders.every((reminder) => reminder.sentAt === null),
+    ).toBe(true);
   });
 
   it("rejects review approval when roleFamilies are spoofed without an approver role code", () => {
@@ -768,7 +772,8 @@ describe("RegulatoryReportingService", () => {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
           code: "VALIDATION_ERROR",
-          message: "reportVersionKind must be one of: initial, follow_up, final.",
+          message:
+            "reportVersionKind must be one of: initial, follow_up, final.",
           details: {
             field: "reportVersionKind",
           },
@@ -835,12 +840,17 @@ describe("RegulatoryReportingService", () => {
     expect(
       auditNotificationService
         .listNotifications()
-        .some((notification) => notification.title === "REGULATORY_NOTIFICATION_OVERDUE"),
+        .some(
+          (notification) =>
+            notification.title === "REGULATORY_NOTIFICATION_OVERDUE",
+        ),
     ).toBe(false);
     expect(
       auditNotificationService
         .listAuditLogs()
-        .some((entry) => entry.actionName === "REGULATORY_NOTIFICATION_OVERDUE"),
+        .some(
+          (entry) => entry.actionName === "REGULATORY_NOTIFICATION_OVERDUE",
+        ),
     ).toBe(false);
   });
 
@@ -969,12 +979,16 @@ describe("RegulatoryReportingService", () => {
     now = new Date("2026-06-26T10:05:00.000Z");
     const overdueBeforeSubmit = service.getNotification(draft.notificationId);
     expect(overdueBeforeSubmit.overdue).toBe(true);
-    expect(overdueBeforeSubmit.overdueRaisedAt).toBe("2026-06-26T10:00:00.000Z");
+    expect(overdueBeforeSubmit.overdueRaisedAt).toBe(
+      "2026-06-26T10:00:00.000Z",
+    );
 
     const reminderCountBeforeSubmit = auditNotificationService
       .listNotifications()
-      .filter((notification) => notification.title === "Regulatory notification reminder")
-      .length;
+      .filter(
+        (notification) =>
+          notification.title === "Regulatory notification reminder",
+      ).length;
 
     const submitted = service.submitNotification(
       draft.notificationId,
@@ -997,8 +1011,10 @@ describe("RegulatoryReportingService", () => {
 
     const reminderCountAfterSubmit = auditNotificationService
       .listNotifications()
-      .filter((notification) => notification.title === "Regulatory notification reminder")
-      .length;
+      .filter(
+        (notification) =>
+          notification.title === "Regulatory notification reminder",
+      ).length;
     expect(reminderCountAfterSubmit).toBe(reminderCountBeforeSubmit);
   });
 });
