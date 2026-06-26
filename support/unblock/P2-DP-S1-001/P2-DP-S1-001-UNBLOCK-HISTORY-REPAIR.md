@@ -44,9 +44,10 @@ not by missing disclosure-policy code.
    `P2-UI-OPS-001` files, but neither is the branch currently referenced by the
    blocked parent task.
 6. The helper branch for this unblock task has since advanced to
-   `7a256ab54` on both local and `origin`, while its merge-base with
-   `origin/dev @ 5bdb8c636` remains clean. The history problem is therefore
-   isolated to the parent branch and not to the helper worktree itself.
+   `c0b1d98fc` on both local and `origin`, and PR #920 now points at the same
+   head commit. Its merge-base with `origin/dev @ 5bdb8c636` remains clean, so
+   the history problem is isolated to the parent branch and not to the helper
+   worktree itself.
 
 ## Evidence
 
@@ -65,7 +66,7 @@ not by missing disclosure-policy code.
 - `origin/codex2/p2-dp-s1-001-final @ eac1fbf3df857f302481c0c437870a7b56a2d4eb`
 - `origin/codex2/p2-dp-s1-001-closeout @ aba1ba32111368c264af87b3b8dc4dde16010f3a`
 - helper branch (local + origin)
-  `codex2/p2-dp-s1-001-unblock-history-repair @ 7a256ab54dbda08d806ce31b6b8408c3e956f9ff`
+  `codex2/p2-dp-s1-001-unblock-history-repair @ c0b1d98fc6ee5e7b6d61de7a4a22ec6966d078a3`
 - `git merge-base --all codex2/p2-dp-s1-001-unblock-history-repair origin/dev`
   returns `5bdb8c63697e384d415db44579beb7c6c06d2ec7`
 - `git rev-list --left-right --count origin/dev...codex2/p2-dp-s1-001`
@@ -82,6 +83,22 @@ not by missing disclosure-policy code.
   `codex2/p2-dp-s1-001-final`
 - `git branch --contains aba1ba321` returns only
   `codex2/p2-dp-s1-001-closeout`
+- `gh pr view 920 --json number,title,headRefName,headRefOid,baseRefName,state,isDraft,url`
+  reports draft PR `#920`
+  `codex2/p2-dp-s1-001-unblock-history-repair -> dev` with head
+  `c0b1d98fc6ee5e7b6d61de7a4a22ec6966d078a3`
+
+### Canonical helper update evidence
+
+- Latest helper branch commit:
+  `c0b1d98fc6ee5e7b6d61de7a4a22ec6966d078a3`
+  (`P2-DP-S1-001-UNBLOCK-HISTORY-REPAIR: refresh helper head evidence`)
+- `git show --stat --format=fuller c0b1d98fc --` confirms the canonical change
+  was authored and committed with `LLM-Agent: Codex2`, touching only this
+  unblock artifact.
+- The local branch, `origin/codex2/p2-dp-s1-001-unblock-history-repair`, and
+  PR #920 all now converge on `c0b1d98fc`, so the helper branch evidence is
+  pushed and reviewable without any force-push or history rewrite.
 
 ### Exact contamination chain
 
@@ -267,3 +284,10 @@ Concrete next step:
   - `git diff --stat origin/dev...codex2/p2-dp-s1-001`
   - `git diff --name-only origin/dev...codex2/p2-dp-s1-001-final`
   - `git diff --name-only origin/dev...codex2/p2-dp-s1-001`
+- Verified helper branch / PR alignment:
+  - `git rev-parse --short=9 HEAD`
+  - `git rev-parse HEAD`
+  - `git rev-parse --short=9 origin/codex2/p2-dp-s1-001-unblock-history-repair`
+  - `git rev-parse origin/codex2/p2-dp-s1-001-unblock-history-repair`
+  - `git show --stat --format=fuller c0b1d98fc --`
+  - `gh pr view 920 --json number,title,headRefName,headRefOid,baseRefName,state,isDraft,url`
