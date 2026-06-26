@@ -653,6 +653,8 @@ export const PHASE2_AUDIT_EVENT_CATALOG = {
   sandbox: {
     providerCapabilityRequirementConfigured:
       "sandbox.provider_capability_requirement.configured",
+    providerCapabilityRequirementAmended:
+      "sandbox.provider_capability_requirement.amended",
     providerCapabilityDescriptorRecorded:
       "sandbox.provider_capability_descriptor.recorded",
     dispatchDecisionByOutcome: {
