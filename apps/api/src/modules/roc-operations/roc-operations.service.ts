@@ -191,18 +191,28 @@ export class RocOperationsService {
   }
 
   private findPriorityOneTeslaEvent(report: SafetyOperatorTakeoverReport) {
-    return (
-      this.teslaTransitionEvents.find(
-        (candidate) =>
-          candidate.takeoverCorrelationId != null &&
-          candidate.takeoverCorrelationId === report.correlationId &&
-          candidate.vehicleId === report.vehicleId &&
-          this.withinWindow(
-            candidate.occurredAt,
-            report.occurredAt,
-            PRIORITY_ONE_WINDOW_MS,
-          ),
-      ) ?? null
+    return this.findBestMatch(
+      this.teslaTransitionEvents,
+      report.occurredAt,
+      PRIORITY_ONE_WINDOW_MS,
+      (candidate) =>
+        candidate.takeoverCorrelationId != null &&
+        candidate.takeoverCorrelationId === report.correlationId &&
+        candidate.vehicleId === report.vehicleId,
+      (left, right) => {
+        const transitionRank =
+          this.rankTeslaPriorityOneTransition(left.transitionType) -
+          this.rankTeslaPriorityOneTransition(right.transitionType);
+        if (transitionRank !== 0) {
+          return transitionRank;
+        }
+
+        return (
+          this.timestampDistance(left.occurredAt, report.occurredAt) -
+          this.timestampDistance(right.occurredAt, report.occurredAt)
+        );
+      },
+      (candidate) => candidate.occurredAt,
     );
   }
 
@@ -210,23 +220,32 @@ export class RocOperationsService {
     report: SafetyOperatorTakeoverReport,
     teslaEvent: TeslaAutonomyTransitionEvent | null,
   ) {
-    return (
-      this.takeoverResponses.find(
-        (candidate) =>
-          candidate.vehicleId === report.vehicleId &&
-          ((candidate.takeoverCorrelationId != null &&
-            candidate.takeoverCorrelationId === report.correlationId) ||
-            (teslaEvent != null &&
-              (candidate.triggeredByTeslaEventId === teslaEvent.eventId ||
-                (candidate.autonomySessionId != null &&
-                  candidate.autonomySessionId ===
-                    teslaEvent.autonomySessionId)))) &&
-          this.withinWindow(
-            candidate.requestedAt,
-            report.occurredAt,
-            PRIORITY_ONE_WINDOW_MS,
-          ),
-      ) ?? null
+    return this.findBestMatch(
+      this.takeoverResponses,
+      report.occurredAt,
+      PRIORITY_ONE_WINDOW_MS,
+      (candidate) =>
+        candidate.vehicleId === report.vehicleId &&
+        ((candidate.takeoverCorrelationId != null &&
+          candidate.takeoverCorrelationId === report.correlationId) ||
+          (teslaEvent != null &&
+            (candidate.triggeredByTeslaEventId === teslaEvent.eventId ||
+              (candidate.autonomySessionId != null &&
+                candidate.autonomySessionId === teslaEvent.autonomySessionId)))),
+      (left, right) => {
+        const relationRank =
+          this.rankPriorityOneRocResponse(left, report, teslaEvent) -
+          this.rankPriorityOneRocResponse(right, report, teslaEvent);
+        if (relationRank !== 0) {
+          return relationRank;
+        }
+
+        return (
+          this.timestampDistance(left.requestedAt, report.occurredAt) -
+          this.timestampDistance(right.requestedAt, report.occurredAt)
+        );
+      },
+      (candidate) => candidate.requestedAt,
     );
   }
 
@@ -324,7 +343,11 @@ export class RocOperationsService {
   }
 
   private withinWindow(left: string, right: string, windowMs: number) {
-    return Math.abs(Date.parse(left) - Date.parse(right)) <= windowMs;
+    return this.timestampDistance(left, right) <= windowMs;
+  }
+
+  private timestampDistance(left: string, right: string) {
+    return Math.abs(Date.parse(left) - Date.parse(right));
   }
 
   private findNearestByTime<T>(
@@ -354,6 +377,76 @@ export class RocOperationsService {
     }
 
     return closest;
+  }
+
+  private findBestMatch<T>(
+    records: readonly T[],
+    targetTime: string,
+    windowMs: number,
+    predicate: (record: T) => boolean,
+    compare: (left: T, right: T) => number,
+    getTimestamp: (record: T) => string,
+  ) {
+    let best: T | null = null;
+
+    for (const record of records) {
+      if (!predicate(record)) {
+        continue;
+      }
+
+      if (this.timestampDistance(getTimestamp(record), targetTime) > windowMs) {
+        continue;
+      }
+
+      if (best == null || compare(record, best) < 0) {
+        best = record;
+      }
+    }
+
+    return best;
+  }
+
+  private rankTeslaPriorityOneTransition(
+    transitionType: TeslaAutonomyTransitionEvent["transitionType"],
+  ) {
+    switch (transitionType) {
+      case "manual_takeover":
+        return 0;
+      case "fsd_disengagement":
+        return 1;
+      case "autonomy_resumed":
+        return 2;
+      default:
+        return Number.MAX_SAFE_INTEGER;
+    }
+  }
+
+  private rankPriorityOneRocResponse(
+    response: RocTakeoverResponseRecord,
+    report: SafetyOperatorTakeoverReport,
+    teslaEvent: TeslaAutonomyTransitionEvent | null,
+  ) {
+    if (teslaEvent != null && response.triggeredByTeslaEventId === teslaEvent.eventId) {
+      return 0;
+    }
+
+    if (
+      teslaEvent != null &&
+      teslaEvent.autonomySessionId != null &&
+      response.autonomySessionId != null &&
+      response.autonomySessionId === teslaEvent.autonomySessionId
+    ) {
+      return 1;
+    }
+
+    if (
+      response.takeoverCorrelationId != null &&
+      response.takeoverCorrelationId === report.correlationId
+    ) {
+      return 2;
+    }
+
+    return 3;
   }
 
   private cloneTeslaEvent(event: TeslaAutonomyTransitionEvent) {
