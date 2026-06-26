@@ -171,10 +171,10 @@ export function emitPhase2AuditedAction<T>(
   const auditLog = emitPhase2AuditRecord(input.sink, input.audit);
   const receipt = toActionReceipt({
     auditLog,
-    actionId: input.actionId,
-    resourceType: input.resourceType,
-    resourceId: input.resourceId,
-    status: input.status,
+    ...(input.actionId ? { actionId: input.actionId } : {}),
+    ...(input.resourceType ? { resourceType: input.resourceType } : {}),
+    ...(input.resourceId ? { resourceId: input.resourceId } : {}),
+    ...(input.status ? { status: input.status } : {}),
     message: input.message,
   });
 
