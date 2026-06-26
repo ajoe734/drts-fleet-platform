@@ -6,15 +6,17 @@
 **Parent Reviewer:** `Codex2`  
 **Sidecar Owner:** `Codex`  
 **Sidecar Reviewer:** `Codex2`  
-**Generated:** `2026-06-26` (UTC)  
-**Status:** `ACCEPTANCE SUPPORT ARTIFACT` — support-only; no canonical truth,
-runtime implementation, or task-board fields are changed by this packet.
+**Last Revised:** `2026-06-26T01:37:00Z (UTC)`
+**Status:** `review` — support-only packet refreshed for closeout and
+re-handed to reviewer `Codex2`; no canonical truth, runtime implementation,
+or task-board definition is changed by this artifact.
 
 This packet converts the parent task's single-line acceptance target into a
-reviewer-facing checklist, dependency map, and evidence index. It is scoped to
-the current cumulative parent branch state and to machine-truth context as of
-packet generation. It does not approve the parent by itself; the parent still
-needs owner handoff through `ai-status` after the fix branch is ready.
+reviewer-facing checklist, dependency map, and evidence index. It now reflects
+the reviewed parent branch state plus the sidecar's closeout-refresh review
+pass. It does not approve the parent by itself; this sidecar only packages
+acceptance guidance/evidence for the parent branch and its current
+integration-gate state.
 
 ---
 
@@ -50,7 +52,7 @@ Machine-truth row: `ai-status.json` → `P2-DP-C5-001-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress`
+- status=`review` (closeout refresh re-handed to reviewer `Codex2`)
 - depends_on=`[P2-WP0]`
 - helper_parent=`P2-DP-C5-001`
 - helper_kind=`acceptance_packet`
@@ -63,15 +65,16 @@ Machine-truth row: `ai-status.json` → `P2-DP-C5-001`
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress` at packet generation time
+- status=`blocked` (review-approved implementation is waiting for merge-to-dev
+  closeout after the integration gate refused branch-only `done`)
 - depends_on=`[P2-WP0]`
 - artifacts:
   - `packages/contracts/src/`
   - `apps/api/src/common/`
 - acceptance:
   - `Audit catalog constants exported & exhaustive vs §7.3; Phase2AuditContext compiles; emit helper writes append-only; ActionReceipt returned by sample command; sensitive fields excluded; unit tests green`
-- latest owner note at packet generation:
-  - `Fixing amended audit emission metadata path and re-running targeted contracts/api tests.`
+- latest owner/integration note:
+  - `Formal closeout commit 6f39a2caa is pushed to origin/codex/p2-dp-c5-001 after green verification (vitest phase2-audit-contracts/phase2-audit-helper/action-receipt/maintenance-action-receipt and contracts tsc). scripts/ai-status.sh done was refused by the integration gate because branch_pushed is branch-only; waiting for merge to dev, then rerun done with INTEGRATION_STATUS=merged_to_dev or dev_deployed.`
 
 ### 2.3 Hard upstream dependency
 
@@ -125,6 +128,18 @@ Reviewer implication:
   rather than the superseded `codex2/p2-dp-c5-001` review-failed snapshot
 - the fix is not only test expansion; it also changes the sandbox-governance
   write path so the amended event now carries append-only linkage metadata
+
+### 3.3 Sidecar review record and closeout refresh
+
+- reviewer approval already exists for sidecar commit `56a62e092` on
+  `origin/codex/p2-dp-c5-001-sidecar-acceptance`
+- that approval confirmed the packet stayed within sidecar scope, added only
+  this support artifact, and matched current refs plus task slices for
+  `P2-DP-C5-001`, `P2-WP0`, `P2-GOV-001`, `P2-TESLA-001`, `P2-REG-001`,
+  `P2-DP-C2-001`, and `P2-UI-ROC-002`
+- this refresh does not change the acceptance checklist, dependency map, or
+  code/test anchors; it only realigns stale self-status and handoff wording for
+  owner closeout
 
 ---
 
@@ -350,13 +365,20 @@ Reviewer note:
 ## 9. Handoff Notes
 
 - This packet is support-only and does not modify canonical truth.
-- The parent was `in_progress` at packet generation time, not yet back in
-  `review`; use this packet to guide the next owner handoff and the subsequent
-  reviewer pass.
+- Parent `P2-DP-C5-001` is now `blocked` only on integration closeout after a
+  reviewer-approved branch push; the core review focus remains the previously
+  failing amended sandbox-governance path plus audited `ActionReceipt`
+  behavior.
+- This sidecar is back in `review` only for a closeout metadata refresh after
+  owner prep; the acceptance checklist, dependency map, and evidence anchors are
+  otherwise unchanged from the already-approved packet.
 - The most important regression to guard against is the previously failing
   amended sandbox-governance path. A green catalog test alone is insufficient.
 - Treat `ActionReceipt` as shared foundation behavior, not as sandbox-local
   convenience API surface.
+- After reviewer re-ack, owner closeout should record
+  `INTEGRATION_STATUS=not_applicable` because this is a support-only sidecar
+  artifact with no deploy target.
 - If the owner handoff mentions repo-wide typecheck failures, require the note
   to distinguish pre-existing baseline debt from any new errors introduced by
   this branch.
@@ -378,10 +400,14 @@ Reviewer note:
   - `origin/codex/p2-dp-c5-001`
   - `codex/p2-dp-c5-001`
   - `codex2/p2-dp-c5-001`
+  - `origin/codex/p2-dp-c5-001-sidecar-acceptance`
+  - `codex/p2-dp-c5-001-sidecar-acceptance`
 - cumulative owner-branch commits:
   - `ff529ba08`
   - `7ebda704d`
   - `66c6b4655`
+- approved sidecar packet commit:
+  - `56a62e092`
 - review-failed prior branch commit:
   - `29a2930e4`
 - code/test anchors:
