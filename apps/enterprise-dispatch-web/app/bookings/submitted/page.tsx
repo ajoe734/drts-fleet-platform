@@ -133,7 +133,7 @@ export default async function SubmittedBookingPage({
           />
           <ERow
             t={t}
-            k={tr("review.card.summary")}
+            k={tr("submitted.card.summary")}
             v={`${draft.passenger} · ${draft.bookedBy}`}
           />
           <ERow t={t} k={tr("new.field.costCenter")} v="CC-PRD-07" mono />

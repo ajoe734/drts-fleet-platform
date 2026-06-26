@@ -22,11 +22,13 @@ import {
 type LanguageContextValue = {
   locale: Locale;
   setLocale: (locale: Locale) => void;
+  isHydrated: boolean;
 };
 
 const LanguageContext = createContext<LanguageContextValue>({
   locale: "zh",
   setLocale: () => {},
+  isHydrated: false,
 });
 
 function setDocumentLang(locale: Locale) {
@@ -41,9 +43,11 @@ export function LanguageProvider({
   defaultLocale?: Locale;
 }) {
   const [locale, setLocaleState] = useState<Locale>(defaultLocale);
+  const [isHydrated, setIsHydrated] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
+    setIsHydrated(true);
     const stored = localStorage.getItem(
       ENTERPRISE_LOCALE_COOKIE,
     ) as Locale | null;
@@ -58,24 +62,21 @@ export function LanguageProvider({
 
   const setLocale = useCallback(
     (next: Locale) => {
-      setLocaleState((current) => {
-        if (current === next) {
-          return current;
-        }
-
-        localStorage.setItem(ENTERPRISE_LOCALE_COOKIE, next);
-        document.cookie = `${ENTERPRISE_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
-        setDocumentLang(next);
-        startTransition(() => {
-          router.refresh();
-        });
-        return next;
+      setLocaleState(next);
+      localStorage.setItem(ENTERPRISE_LOCALE_COOKIE, next);
+      document.cookie = `${ENTERPRISE_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
+      setDocumentLang(next);
+      startTransition(() => {
+        router.refresh();
       });
     },
     [router],
   );
 
-  const value = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
+  const value = useMemo(
+    () => ({ locale, setLocale, isHydrated }),
+    [locale, setLocale, isHydrated],
+  );
 
   return (
     <LanguageContext.Provider value={value}>
@@ -85,12 +86,15 @@ export function LanguageProvider({
 }
 
 export function useTranslation() {
-  const { locale, setLocale } = useContext(LanguageContext);
+  const { locale, setLocale, isHydrated } = useContext(LanguageContext);
   const t = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) =>
       translate(key, params, locale),
     [locale],
   );
 
-  return useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
+  return useMemo(
+    () => ({ locale, setLocale, t, isHydrated }),
+    [locale, setLocale, t, isHydrated],
+  );
 }

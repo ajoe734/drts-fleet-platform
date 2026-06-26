@@ -51,18 +51,12 @@ export function LanguageProvider({
 
   const setLocale = useCallback(
     (next: Locale) => {
-      setLocaleState((current) => {
-        if (current === next) {
-          return current;
-        }
-
-        localStorage.setItem(TENANT_LOCALE_COOKIE, next);
-        document.cookie = `${TENANT_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
-        setDocumentLang(next);
-        startTransition(() => {
-          router.refresh();
-        });
-        return next;
+      setLocaleState(next);
+      localStorage.setItem(TENANT_LOCALE_COOKIE, next);
+      document.cookie = `${TENANT_LOCALE_COOKIE}=${next};path=/;max-age=31536000;SameSite=Lax`;
+      setDocumentLang(next);
+      startTransition(() => {
+        router.refresh();
       });
     },
     [router],

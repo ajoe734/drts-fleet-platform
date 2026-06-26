@@ -113,10 +113,12 @@ function EnterpriseShellControls({
   locale,
   setLocale,
   tr,
+  isHydrated,
 }: {
   locale: "en" | "zh";
   setLocale: (locale: "en" | "zh") => void;
   tr: EnterpriseTr;
+  isHydrated: boolean;
 }) {
   const { status, lastCheckedAt } = useApiHealth();
   const statusCopy = {
@@ -172,7 +174,12 @@ function EnterpriseShellControls({
         type="button"
         title={tr("shell.language.switch")}
         aria-label={tr("shell.language.switch")}
-        style={languageButtonStyle}
+        style={{
+          ...languageButtonStyle,
+          opacity: isHydrated ? 1 : 0.6,
+          cursor: isHydrated ? "pointer" : "wait",
+        }}
+        disabled={!isHydrated}
         onClick={() => setLocale(locale === "en" ? "zh" : "en")}
       >
         <span aria-hidden="true">{tr("shell.language.icon")}</span>
@@ -185,7 +192,7 @@ function EnterpriseShellControls({
 }
 
 export function EnterpriseShell({ children }: { children: ReactNode }) {
-  const { t: tr, locale, setLocale } = useTranslation();
+  const { t: tr, locale, setLocale, isHydrated } = useTranslation();
   const pathname = usePathname() ?? "/";
   const tenant = enterpriseTenant;
   const user = getEnterpriseUser(locale);
@@ -289,6 +296,7 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
               locale={locale}
               setLocale={setLocale}
               tr={tr}
+              isHydrated={isHydrated}
             />
             <span
               style={{
