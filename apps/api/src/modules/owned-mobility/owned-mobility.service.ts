@@ -4481,6 +4481,7 @@ export class OwnedMobilityService implements OnModuleInit {
         },
         pickup: order.pickup,
         dropoff: order.dropoff,
+        entitlement: sandboxDispatchSnapshot?.entitlement ?? null,
         candidateRoute: sandboxDispatchSnapshot?.candidateRoute ?? null,
         providerCapabilities:
           sandboxDispatchSnapshot?.providerCapabilities ?? null,

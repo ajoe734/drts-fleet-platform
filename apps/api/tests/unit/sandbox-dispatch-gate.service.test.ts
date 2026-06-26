@@ -161,6 +161,7 @@ describe("SandboxDispatchGateService", () => {
     expect(gateInput.regulatory).toBeNull();
     expect(gateInput.telemetry).toBeNull();
     expect(gateInput.candidateRoute).toBeNull();
+    expect(gateInput.entitlement).toEqual({ active: null });
 
     const decision = await gate.evaluateDispatch(gateInput);
 
@@ -173,6 +174,63 @@ describe("SandboxDispatchGateService", () => {
         "ODD_OUT_OF_BOUNDS",
       ]),
     );
+  });
+
+  it("requires an explicit entitlement snapshot for assignment gating", async () => {
+    const governanceService = new SandboxGovernanceService();
+    const gate = new SandboxDispatchGateService(undefined, governanceService);
+
+    const gateInput = await gate.buildAssignmentGateInput({
+      orderId: "order-av-003c",
+      dispatchJobId: "job-av-003c",
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+      requestedAt: "2026-06-26T14:00:00.000Z",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
+      pickup: { lat: 25.0445, lng: 121.5235 },
+      dropoff: { lat: 25.0535, lng: 121.5325 },
+      candidateRoute: {
+        type: "MultiLineString",
+        coordinates: [
+          [
+            [121.5235, 25.0445],
+            [121.528, 25.049],
+            [121.5325, 25.0535],
+          ],
+        ],
+      },
+      providerCapabilities: {
+        av_dispatch: true,
+        telemetry_stream: true,
+        regulatory_event_feed: true,
+        evidence_recorder: true,
+        odd_geofence: true,
+        minimal_risk_condition: true,
+      },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+        currentTripCount: 0,
+        odometerKm: 25_000,
+      },
+      regulatory: { approvalFresh: true, vehicleCertified: true },
+      recorder: { healthy: true },
+    });
+
+    expect(gateInput.vehicleEnrollment?.status).toBe("active");
+    expect(gateInput.entitlement).toEqual({ active: null });
+
+    await expect(gate.assertAssignmentEligible(gateInput)).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "SANDBOX_REGULATORY_APPROVAL_MISSING",
+        },
+      },
+    });
   });
 
   it("returns allow_with_safety_operator when operator is required and qualified", async () => {
@@ -262,6 +320,48 @@ describe("SandboxDispatchGateService", () => {
     );
   });
 
+  it("persists release audit data on the same decision record", async () => {
+    const repository = {
+      persistEvaluation: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as never;
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      repository,
+    );
+
+    const result = await gate.recordManualRelease(
+      {
+        orderId: "order-av-005c",
+        vehicleId: "veh-av-005c",
+        sandboxProgramId: "sandbox-program-001",
+        policyVersion: "phase2-evd-001",
+      },
+      {
+        actorId: "ops-002",
+        actorType: "ops_user",
+        reason: "Persist release audit on existing decision",
+      },
+    );
+
+    expect(repository.persistEvaluation).toHaveBeenCalledTimes(2);
+    const [evaluationInsert, releaseUpdate] = repository.persistEvaluation.mock.calls;
+    expect(releaseUpdate[0]).toMatchObject({
+      decision: expect.objectContaining({
+        decisionId: evaluationInsert[0].decision.decisionId,
+      }),
+      releaseAudit: expect.objectContaining({
+        actorId: "ops-002",
+        actorType: "ops_user",
+        reason: "Persist release audit on existing decision",
+      }),
+    });
+    expect(result.releaseAudit.decisionId).toBe(
+      evaluationInsert[0].decision.decisionId,
+    );
+  });
+
   it("blocks assignment gating when the booking path is missing", async () => {
     const governanceService = new SandboxGovernanceService();
     const gate = new SandboxDispatchGateService(undefined, governanceService);
@@ -278,6 +378,7 @@ describe("SandboxDispatchGateService", () => {
       },
       pickup: { lat: 25.0445, lng: 121.5235 },
       dropoff: { lat: 25.0535, lng: 121.5325 },
+      entitlement: { active: true },
       recorder: { healthy: true },
       regulatory: { approvalFresh: true, vehicleCertified: true },
       providerCapabilities: {
@@ -316,6 +417,7 @@ describe("SandboxDispatchGateService", () => {
       },
       pickup: { lat: 25.0445, lng: 121.5235 },
       dropoff: { lat: 25.0535, lng: 121.5325 },
+      entitlement: { active: true },
       candidateRoute: {
         type: "MultiLineString",
         coordinates: [[[121.521, 25.055], [121.5215, 25.0555], [121.522, 25.056]]],

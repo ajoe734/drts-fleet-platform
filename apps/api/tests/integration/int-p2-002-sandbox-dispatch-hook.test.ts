@@ -154,6 +154,9 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       vehicleId: "veh-av-demo-001",
       driverId: "safety-op-001",
       sandboxDispatchSnapshot: {
+        entitlement: {
+          active: true,
+        },
         candidateRoute: {
           type: "MultiLineString",
           coordinates: [
@@ -194,6 +197,75 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
     expect(ownedMobilityService.getDriverTask(assignment.taskId)).toMatchObject({
       vehicleId: "veh-av-demo-001",
       driverId: "safety-op-001",
+    });
+  });
+
+  it("fails closed before assignment when entitlement snapshot is omitted", async () => {
+    const { ownedMobilityService, cleanup } = createHarness();
+    cleanups.push(cleanup);
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Route Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Route End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Rider Three", phone: "0912000002" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    await expect(
+      ownedMobilityService.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId: "veh-av-demo-001",
+        driverId: "safety-op-001",
+        sandboxDispatchSnapshot: {
+          candidateRoute: {
+            type: "MultiLineString",
+            coordinates: [
+              [
+                [121.522, 25.044],
+                [121.526, 25.047],
+                [121.529, 25.05],
+                [121.533, 25.054],
+              ],
+            ],
+          },
+          providerCapabilities: {
+            av_dispatch: true,
+            telemetry_stream: true,
+            regulatory_event_feed: true,
+            evidence_recorder: true,
+            odd_geofence: true,
+            minimal_risk_condition: true,
+          },
+          telemetry: {
+            stale: false,
+            minimalRiskConditionActive: false,
+            socPercent: 80,
+            currentTripCount: 0,
+            odometerKm: 25_000,
+          },
+          regulatory: {
+            approvalFresh: true,
+            vehicleCertified: true,
+          },
+          recorder: {
+            healthy: true,
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "SANDBOX_REGULATORY_APPROVAL_MISSING",
+        },
+      },
     });
   });
 });

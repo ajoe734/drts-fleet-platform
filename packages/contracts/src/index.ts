@@ -2272,6 +2272,9 @@ export interface AssignDispatchCommand {
   vehicleId: string;
   driverId: string;
   sandboxDispatchSnapshot?: {
+    entitlement?: {
+      active: boolean | null;
+    } | null;
     candidateRoute?: {
       type: "MultiLineString";
       coordinates: [number, number][][];

@@ -289,7 +289,7 @@ export class SandboxDispatchGateService {
       pickup,
       dropoff,
       entitlement: {
-        active: input.entitlement?.active ?? enrollment?.status === "active",
+        active: input.entitlement?.active ?? null,
       },
       vehicleEnrollment: enrollment,
       safetyOperator,

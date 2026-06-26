@@ -57,6 +57,13 @@ export class SandboxDispatchGateRepository {
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13::jsonb, $14::jsonb
         )
+        ON CONFLICT (decision_id) DO UPDATE SET
+          evaluation_snapshot = EXCLUDED.evaluation_snapshot,
+          release_audit = CASE
+            WHEN EXCLUDED.release_audit = '{}'::jsonb
+              THEN av_sandbox.sandbox_dispatch_decisions.release_audit
+            ELSE EXCLUDED.release_audit
+          END
       `,
       [
         record.decision.decisionId,
