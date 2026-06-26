@@ -49,6 +49,17 @@ import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendan
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-eligibility.module";
+// Phase 2 — Tesla / FSD / AV sandbox scaffolds (phase2-tesla-fsd-sandbox-202606)
+import { TeslaIntegrationModule } from "./modules/tesla-integration/tesla-integration.module";
+import { TeslaTelemetryModule } from "./modules/tesla-telemetry/tesla-telemetry.module";
+import { TeslaRegulatoryEventsModule } from "./modules/tesla-regulatory-events/tesla-regulatory-events.module";
+import { SandboxGovernanceModule } from "./modules/sandbox-governance/sandbox-governance.module";
+import { SandboxDispatchGateModule } from "./modules/sandbox-dispatch-gate/sandbox-dispatch-gate.module";
+import { SafetyOperatorModule } from "./modules/safety-operator/safety-operator.module";
+import { RocOperationsModule } from "./modules/roc-operations/roc-operations.module";
+import { VehicleEvidenceModule } from "./modules/vehicle-evidence/vehicle-evidence.module";
+import { AccidentInvestigationModule } from "./modules/accident-investigation/accident-investigation.module";
+import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regulatory-reporting.module";
 
 @Module({
   imports: [
@@ -85,6 +96,17 @@ import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-
     PlatformPresenceModule,
     PlatformEarningsModule,
     VehicleEligibilityModule,
+    // Phase 2 — Tesla / FSD / AV sandbox scaffolds
+    TeslaIntegrationModule,
+    TeslaTelemetryModule,
+    TeslaRegulatoryEventsModule,
+    SandboxGovernanceModule,
+    SandboxDispatchGateModule,
+    SafetyOperatorModule,
+    RocOperationsModule,
+    VehicleEvidenceModule,
+    AccidentInvestigationModule,
+    RegulatoryReportingModule,
   ],
   providers: [
     JwtAuthService,
