@@ -64,24 +64,45 @@ export class RocOperationsService {
     receipt: ActionReceipt;
   }> {
     const order = this.resolveTripOrder(tripId);
-    const rocOperatorId = this.resolveRocOperatorId(identity, command.rocOperatorId);
-    const trigger = command.trigger ?? "roc_manual_intervention";
-    const sandboxDecision = await this.sandboxDispatchGateService.findDecisionForOrder(
-      order.orderId,
-      command.sandboxDecisionId ?? null,
+    const rocOperatorId = this.resolveRocOperatorId(
+      identity,
+      command.rocOperatorId,
     );
-
-    if (trigger === "gate_fallback_required" && !sandboxDecision) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "SANDBOX_FALLBACK_DECISION_REQUIRED",
-        "Gate-triggered human fallback requires a sandbox dispatch decision.",
-        {
-          tripId,
-          orderId: order.orderId,
-          sandboxDecisionId: command.sandboxDecisionId ?? null,
-        },
+    const trigger = command.trigger ?? "roc_manual_intervention";
+    const sandboxDecision =
+      await this.sandboxDispatchGateService.findDecisionForOrder(
+        order.orderId,
+        command.sandboxDecisionId ?? null,
       );
+
+    if (trigger === "gate_fallback_required") {
+      if (!sandboxDecision) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SANDBOX_FALLBACK_DECISION_REQUIRED",
+          "Gate-triggered human fallback requires a sandbox dispatch decision.",
+          {
+            tripId,
+            orderId: order.orderId,
+            sandboxDecisionId: command.sandboxDecisionId ?? null,
+          },
+        );
+      }
+
+      if (!sandboxDecision.fallbackRequired) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SANDBOX_FALLBACK_NOT_REQUIRED",
+          "Gate-triggered human fallback requires a sandbox dispatch decision that mandates fallback.",
+          {
+            tripId,
+            orderId: order.orderId,
+            sandboxDecisionId: sandboxDecision.decisionId,
+            sandboxDecision: sandboxDecision.decision,
+            fallbackRequired: sandboxDecision.fallbackRequired,
+          },
+        );
+      }
     }
 
     const reportId = `report-${randomUUID()}`;
