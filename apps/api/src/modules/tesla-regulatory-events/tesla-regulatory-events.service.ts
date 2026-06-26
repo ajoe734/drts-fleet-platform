@@ -1,19 +1,879 @@
-import { Injectable, Logger } from "@nestjs/common";
+import {
+  createHash,
+  createPublicKey,
+  createVerify,
+  randomUUID,
+} from "node:crypto";
 
-import type { TeslaRegulatoryEventProvider } from "./tesla-regulatory-events.ports";
+import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
 
-/**
- * TeslaRegulatoryEventsService — Phase 2 scaffold.
- *
- * Scaffold-only: registers the regulatory autonomy-event ingestion surface
- * (FSD engagement/disengagement, safety interventions, collisions) for the
- * phase2-tesla-fsd-sandbox-202606 phase. The concrete
- * TeslaRegulatoryEventProvider and persistence against
- * av_sandbox.tesla_regulatory_events (V0037) land in downstream waves.
- */
+import type {
+  Phase2SourceMetadata,
+  TeslaDisengagementCause,
+  TeslaRegulatoryEventType,
+} from "@drts/contracts";
+import {
+  TESLA_DISENGAGEMENT_CAUSES,
+  TESLA_REGULATORY_EVENT_TYPES,
+} from "@drts/contracts";
+
+import { ApiRequestError } from "../../common/api-envelope";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import {
+  TeslaRegulatoryEventsRepository,
+  type CreateTeslaRegulatoryCanonicalEventInput,
+  type CreateTeslaRegulatoryRawEventInput,
+  type TeslaRegulatoryCanonicalEventRecord,
+  type TeslaRegulatoryRawEventRecord,
+} from "./tesla-regulatory-events.repository";
+
+const DEFAULT_PROVIDER_CODE = "tesla";
+const DEFAULT_REPLAY_WINDOW_SECONDS = 300;
+const DEFAULT_PAYLOAD_LIMIT_BYTES = 65_536;
+const DEFAULT_PROVIDER_IDENTITIES = ["tesla-regulatory-sandbox"];
+const SUPPORTED_SCHEMA_VERSIONS = new Set(["tesla.regulatory-event.v1"]);
+const SUPPORTED_JWS_ALGORITHMS = new Set(["RS256", "ES256"]);
+
+type TeslaRegulatoryIngressRequest = {
+  body: unknown;
+  headers: Record<string, string | string[] | undefined>;
+  rawBody?: Buffer;
+  rawHeaders?: string[];
+  requestId?: string;
+};
+
+type TeslaRegulatoryIngressEnvelope = {
+  schemaVersion: string;
+  providerEventId: string;
+  vehicleId: string;
+  externalVehicleRef: string | null;
+  eventType: TeslaRegulatoryEventType;
+  occurredAt: string;
+  location: { lat: number; lng: number } | null;
+  speedMps: number | null;
+  headingDeg: number | null;
+  disengagementCause: TeslaDisengagementCause | null;
+  providerReasonCode: string | null;
+  safetyOperatorId: string | null;
+  rocOperatorId: string | null;
+  oddZoneId: string | null;
+};
+
+type VerifiedJws = {
+  protectedHeader: Record<string, unknown>;
+  keyId: string;
+  algorithm: string;
+  issuedAt: string;
+  detachedCompact: string;
+};
+
+export type TeslaRegulatoryIngressReceipt = {
+  receiptId: string;
+  providerCode: string;
+  providerEventId: string;
+  schemaVersion: string;
+  payloadSha256: string;
+  rawEventId: string | null;
+  canonicalEventId: string | null;
+  status: "accepted" | "duplicate" | "quarantined";
+  duplicate: boolean;
+  receivedAt: string;
+};
+
 @Injectable()
 export class TeslaRegulatoryEventsService {
   private readonly logger = new Logger(TeslaRegulatoryEventsService.name);
 
-  private eventProvider: TeslaRegulatoryEventProvider | null = null;
+  constructor(
+    private readonly repository = new TeslaRegulatoryEventsRepository(),
+    @Optional()
+    private readonly auditNotificationService = new AuditNotificationService(),
+  ) {}
+
+  async ingest(
+    request: TeslaRegulatoryIngressRequest,
+  ): Promise<TeslaRegulatoryIngressReceipt> {
+    try {
+      const receivedAt = new Date().toISOString();
+      const rawBody = this.resolveRawBody(request.body, request.rawBody);
+
+      this.assertPayloadLimit(rawBody);
+
+      const providerCode = this.resolveProviderCode(request.headers);
+      const clientCert = this.resolveHeader(
+        request.headers,
+        "x-forwarded-client-cert",
+        "x-ssl-client-subject-dn",
+        "x-provider-identity",
+      );
+      const providerIdentity = this.verifyProviderIdentity(clientCert);
+      const verifiedJws = this.verifyDetachedJws(rawBody, request.headers);
+      const payloadSha256 = createHash("sha256").update(rawBody).digest("hex");
+      const payload = this.parsePayload(request.body);
+
+      const existing = await this.repository.findRawEventByProviderRef(
+        providerCode,
+        payload.providerEventId,
+      );
+      if (existing) {
+        return this.handleExistingEvent(
+          existing,
+          payloadSha256,
+          request.requestId,
+          providerIdentity,
+        );
+      }
+
+      const rawEvent = await this.repository.createRawEvent(
+        this.buildRawEventRecord({
+          providerCode,
+          providerIdentity,
+          payload,
+          payloadSha256,
+          rawBody,
+          rawHeaders: request.rawHeaders ?? [],
+          verifiedJws,
+          clientCert,
+          receivedAt,
+        }),
+      );
+
+      if (!SUPPORTED_SCHEMA_VERSIONS.has(payload.schemaVersion)) {
+        this.recordAudit(
+          "ingress.quarantined_unknown_schema",
+          payload.providerEventId,
+          request.requestId,
+          {
+            providerCode,
+            providerIdentity,
+            schemaVersion: payload.schemaVersion,
+            rawEventId: rawEvent.rawEventId,
+          },
+        );
+        return this.buildReceipt(rawEvent, null, "quarantined", false);
+      }
+
+      const canonicalEvent = await this.repository.createCanonicalEvent(
+        this.buildCanonicalEventRecord(
+          rawEvent,
+          payload,
+          providerCode,
+          payloadSha256,
+        ),
+      );
+      await this.repository.attachCanonicalEvent(
+        rawEvent.rawEventId,
+        canonicalEvent.eventId,
+      );
+
+      this.recordAudit(
+        "ingress.accepted",
+        payload.providerEventId,
+        request.requestId,
+        {
+          providerCode,
+          providerIdentity,
+          schemaVersion: payload.schemaVersion,
+          rawEventId: rawEvent.rawEventId,
+          canonicalEventId: canonicalEvent.eventId,
+        },
+      );
+
+      return this.buildReceipt(rawEvent, canonicalEvent, "accepted", false);
+    } catch (error) {
+      this.recordRejectedIngressAudit(error, request);
+      throw error;
+    }
+  }
+
+  listRawEvents() {
+    return this.repository.listRawEvents();
+  }
+
+  listCanonicalEvents() {
+    return this.repository.listCanonicalEvents();
+  }
+
+  private resolveRawBody(body: unknown, rawBody?: Buffer) {
+    if (rawBody && rawBody.length > 0) {
+      return rawBody;
+    }
+
+    return Buffer.from(JSON.stringify(body ?? {}));
+  }
+
+  private assertPayloadLimit(rawBody: Buffer) {
+    const maxBytes = Number.parseInt(
+      process.env.TESLA_REGULATORY_MAX_PAYLOAD_BYTES ??
+        `${DEFAULT_PAYLOAD_LIMIT_BYTES}`,
+      10,
+    );
+
+    if (rawBody.byteLength <= maxBytes) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.PAYLOAD_TOO_LARGE,
+      "PAYLOAD_TOO_LARGE",
+      "Tesla regulatory event payload exceeded the configured size limit.",
+      {
+        maxBytes,
+        actualBytes: rawBody.byteLength,
+      },
+    );
+  }
+
+  private resolveProviderCode(
+    headers: Record<string, string | string[] | undefined>,
+  ) {
+    const providerCode =
+      this.resolveHeader(headers, "x-provider-code") ?? DEFAULT_PROVIDER_CODE;
+    const normalized = providerCode.trim().toLowerCase();
+
+    if (normalized === DEFAULT_PROVIDER_CODE) {
+      return normalized;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "PROVIDER_NOT_ALLOWLISTED",
+      "Tesla regulatory ingress rejected an unallowlisted provider code.",
+      {
+        providerCode,
+      },
+    );
+  }
+
+  private verifyProviderIdentity(clientCertHeader: string | null) {
+    if (!clientCertHeader) {
+      this.recordAudit(
+        "ingress.rejected_missing_mtls_identity",
+        null,
+        undefined,
+        {
+          reason: "missing_client_certificate_header",
+        },
+      );
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "MTLS_IDENTITY_REQUIRED",
+        "Tesla regulatory ingress requires a verified mTLS client identity.",
+      );
+    }
+
+    const allowlist = (
+      process.env.TESLA_REGULATORY_PROVIDER_IDENTITIES ??
+      DEFAULT_PROVIDER_IDENTITIES.join(",")
+    )
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    const candidates = new Set<string>([clientCertHeader]);
+    const cnMatch = clientCertHeader.match(/CN=([^,;"\s]+)/i);
+    if (cnMatch?.[1]) {
+      candidates.add(cnMatch[1]);
+    }
+    const uriMatch = clientCertHeader.match(/URI=([^,;"\s]+)/i);
+    if (uriMatch?.[1]) {
+      candidates.add(uriMatch[1]);
+    }
+
+    const matched = allowlist.find((allowed) => candidates.has(allowed));
+    if (matched) {
+      return matched;
+    }
+
+    this.recordAudit("ingress.rejected_mtls_identity", null, undefined, {
+      allowlist,
+      presentedIdentity: clientCertHeader,
+    });
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "MTLS_IDENTITY_NOT_ALLOWLISTED",
+      "Tesla regulatory ingress rejected an unallowlisted mTLS client identity.",
+      {
+        presentedIdentity: clientCertHeader,
+      },
+    );
+  }
+
+  private verifyDetachedJws(
+    rawBody: Buffer,
+    headers: Record<string, string | string[] | undefined>,
+  ): VerifiedJws {
+    const signature = this.resolveHeader(
+      headers,
+      "x-jws-signature",
+      "x-provider-jws-signature",
+    );
+    if (!signature) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "JWS_SIGNATURE_REQUIRED",
+        "Tesla regulatory ingress requires a detached JWS signature.",
+      );
+    }
+
+    const parts = signature.split(".");
+    if (parts.length !== 3 || parts[1] !== "") {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "INVALID_DETACHED_JWS",
+        "Tesla regulatory ingress requires compact detached JWS serialization.",
+      );
+    }
+
+    const [protectedSegment, , signatureSegment] = parts;
+    if (!protectedSegment || !signatureSegment) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "INVALID_DETACHED_JWS",
+        "Tesla regulatory ingress requires compact detached JWS serialization.",
+      );
+    }
+
+    const protectedHeader = this.parseProtectedHeader(protectedSegment);
+    const algorithm = this.requiredString(protectedHeader.alg, "alg");
+    const keyId = this.requiredString(protectedHeader.kid, "kid");
+    if (!SUPPORTED_JWS_ALGORITHMS.has(algorithm)) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "UNSUPPORTED_JWS_ALGORITHM",
+        "Tesla regulatory ingress rejected an unsupported JWS algorithm.",
+        {
+          alg: algorithm,
+        },
+      );
+    }
+
+    const issuedAtSeconds = this.resolveIssuedAtSeconds(protectedHeader);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const replayWindowSeconds = Number.parseInt(
+      process.env.TESLA_REGULATORY_REPLAY_WINDOW_SECONDS ??
+        `${DEFAULT_REPLAY_WINDOW_SECONDS}`,
+      10,
+    );
+
+    if (Math.abs(nowSeconds - issuedAtSeconds) > replayWindowSeconds) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "JWS_REPLAY_WINDOW_EXCEEDED",
+        "Tesla regulatory ingress rejected a signature outside the replay window.",
+        {
+          issuedAt: new Date(issuedAtSeconds * 1000).toISOString(),
+          replayWindowSeconds,
+        },
+      );
+    }
+
+    const publicKeyPem = this.resolvePublicKeyPem(keyId);
+    const verifier = createVerify("SHA256");
+    verifier.update(`${protectedSegment}.${this.toBase64Url(rawBody)}`);
+    verifier.end();
+
+    const verified = verifier.verify(
+      createPublicKey(publicKeyPem),
+      this.fromBase64Url(signatureSegment),
+    );
+    if (!verified) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "INVALID_JWS_SIGNATURE",
+        "Tesla regulatory ingress rejected an invalid detached JWS signature.",
+        {
+          kid: keyId,
+          alg: algorithm,
+        },
+      );
+    }
+
+    return {
+      protectedHeader,
+      keyId,
+      algorithm,
+      issuedAt: new Date(issuedAtSeconds * 1000).toISOString(),
+      detachedCompact: signature,
+    };
+  }
+
+  private parseProtectedHeader(protectedSegment: string) {
+    try {
+      const decoded = this.fromBase64Url(protectedSegment).toString("utf8");
+      const parsed = JSON.parse(decoded) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {}
+
+    throw new ApiRequestError(
+      HttpStatus.UNAUTHORIZED,
+      "INVALID_JWS_HEADER",
+      "Tesla regulatory ingress could not parse the detached JWS header.",
+    );
+  }
+
+  private resolveIssuedAtSeconds(protectedHeader: Record<string, unknown>) {
+    const candidate = protectedHeader.iat;
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return Math.trunc(candidate);
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.UNAUTHORIZED,
+      "JWS_IAT_REQUIRED",
+      "Tesla regulatory ingress requires `iat` in the detached JWS protected header.",
+    );
+  }
+
+  private resolvePublicKeyPem(keyId: string) {
+    const configuredMap = process.env.TESLA_REGULATORY_JWS_PUBLIC_KEYS_JSON;
+    if (configuredMap) {
+      const parsed = JSON.parse(configuredMap) as Record<string, string>;
+      if (typeof parsed[keyId] === "string" && parsed[keyId].trim()) {
+        return parsed[keyId];
+      }
+    }
+
+    const fallbackKey = process.env.TESLA_REGULATORY_JWS_PUBLIC_KEY;
+    const fallbackKid =
+      process.env.TESLA_REGULATORY_JWS_DEFAULT_KID ?? "default";
+    if (fallbackKey && keyId === fallbackKid) {
+      return fallbackKey;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.UNAUTHORIZED,
+      "UNKNOWN_JWS_KEY",
+      "Tesla regulatory ingress rejected an unknown JWS key identifier.",
+      {
+        kid: keyId,
+      },
+    );
+  }
+
+  private parsePayload(body: unknown): TeslaRegulatoryIngressEnvelope {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_PAYLOAD",
+        "Tesla regulatory ingress expects a JSON object payload.",
+      );
+    }
+
+    const record = body as Record<string, unknown>;
+    const schemaVersion = this.requiredString(
+      record.schemaVersion,
+      "schemaVersion",
+    );
+    const providerEventId = this.requiredString(
+      record.providerEventId,
+      "providerEventId",
+    );
+    const vehicleId = this.requiredString(record.vehicleId, "vehicleId");
+    const eventType = this.requiredEventType(record.eventType);
+    const occurredAt = this.requiredIsoTimestamp(
+      record.occurredAt,
+      "occurredAt",
+    );
+
+    return {
+      schemaVersion,
+      providerEventId,
+      vehicleId,
+      externalVehicleRef: this.optionalString(record.externalVehicleRef),
+      eventType,
+      occurredAt,
+      location: this.optionalLocation(record.location),
+      speedMps: this.optionalNumber(record.speedMps),
+      headingDeg: this.optionalNumber(record.headingDeg),
+      disengagementCause: this.optionalDisengagementCause(
+        record.disengagementCause,
+      ),
+      providerReasonCode: this.optionalString(record.providerReasonCode),
+      safetyOperatorId: this.optionalString(record.safetyOperatorId),
+      rocOperatorId: this.optionalString(record.rocOperatorId),
+      oddZoneId: this.optionalString(record.oddZoneId),
+    };
+  }
+
+  private async handleExistingEvent(
+    existing: TeslaRegulatoryRawEventRecord,
+    payloadSha256: string,
+    requestId: string | undefined,
+    providerIdentity: string,
+  ) {
+    if (existing.payloadSha256 !== payloadSha256) {
+      this.recordAudit(
+        "ingress.security_incident_hash_mismatch",
+        existing.providerEventId,
+        requestId,
+        {
+          providerCode: existing.providerCode,
+          providerIdentity,
+          existingPayloadSha256: existing.payloadSha256,
+          incomingPayloadSha256: payloadSha256,
+          rawEventId: existing.rawEventId,
+        },
+      );
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PROVIDER_EVENT_HASH_MISMATCH",
+        "Tesla regulatory ingress detected a payload hash mismatch for an existing provider event id.",
+        {
+          providerEventId: existing.providerEventId,
+        },
+      );
+    }
+
+    this.recordAudit("ingress.duplicate", existing.providerEventId, requestId, {
+      providerCode: existing.providerCode,
+      providerIdentity,
+      rawEventId: existing.rawEventId,
+      canonicalEventId: existing.canonicalEventId,
+    });
+
+    return this.buildReceipt(
+      existing,
+      existing.canonicalEventId
+        ? ({
+            eventId: existing.canonicalEventId,
+          } as TeslaRegulatoryCanonicalEventRecord)
+        : null,
+      existing.normalizationStatus === "quarantined"
+        ? "quarantined"
+        : "duplicate",
+      true,
+    );
+  }
+
+  private buildRawEventRecord(input: {
+    providerCode: string;
+    providerIdentity: string;
+    payload: TeslaRegulatoryIngressEnvelope;
+    payloadSha256: string;
+    rawBody: Buffer;
+    rawHeaders: string[];
+    verifiedJws: VerifiedJws;
+    clientCert: string | null;
+    receivedAt: string;
+  }): CreateTeslaRegulatoryRawEventInput {
+    return {
+      providerCode: input.providerCode,
+      providerIdentity: input.providerIdentity,
+      providerEventId: input.payload.providerEventId,
+      schemaVersion: input.payload.schemaVersion,
+      payloadSha256: input.payloadSha256,
+      payloadBody: input.rawBody.toString("utf8"),
+      payloadBytes: input.rawBody.byteLength,
+      rawHeaders: [...input.rawHeaders],
+      jwsProtectedHeader: structuredClone(input.verifiedJws.protectedHeader),
+      jwsSignature: input.verifiedJws.detachedCompact,
+      jwsKid: input.verifiedJws.keyId,
+      jwsAlg: input.verifiedJws.algorithm,
+      jwsIssuedAt: input.verifiedJws.issuedAt,
+      mtlsClientCert: input.clientCert ?? input.providerIdentity,
+      mtlsFingerprint: this.extractCertFingerprint(input.clientCert),
+      receivedAt: input.receivedAt,
+      occurredAt: input.payload.occurredAt,
+      normalizationStatus: SUPPORTED_SCHEMA_VERSIONS.has(
+        input.payload.schemaVersion,
+      )
+        ? "accepted"
+        : "quarantined",
+      canonicalEventId: null,
+    };
+  }
+
+  private buildCanonicalEventRecord(
+    rawEvent: TeslaRegulatoryRawEventRecord,
+    payload: TeslaRegulatoryIngressEnvelope,
+    providerCode: string,
+    payloadSha256: string,
+  ): CreateTeslaRegulatoryCanonicalEventInput {
+    const signatureRef = `tesla-regulatory-raw:${rawEvent.rawEventId}`;
+    const source: Phase2SourceMetadata = {
+      sourceSystem: "tesla_fleet_api",
+      sourceRef: payload.providerEventId,
+      ingestedAt: rawEvent.receivedAt,
+      recordedAt: payload.occurredAt,
+      signatureRef,
+      schemaVersion: payload.schemaVersion,
+    };
+
+    return {
+      providerCode,
+      providerEventId: payload.providerEventId,
+      payloadSha256,
+      rawEventId: rawEvent.rawEventId,
+      vehicleId: payload.vehicleId,
+      externalVehicleRef: payload.externalVehicleRef,
+      eventType: payload.eventType,
+      occurredAt: payload.occurredAt,
+      location: payload.location,
+      speedMps: payload.speedMps,
+      headingDeg: payload.headingDeg,
+      disengagementCause: payload.disengagementCause,
+      providerReasonCode: payload.providerReasonCode,
+      safetyOperatorId: payload.safetyOperatorId,
+      rocOperatorId: payload.rocOperatorId,
+      oddZoneId: payload.oddZoneId,
+      source,
+    };
+  }
+
+  private buildReceipt(
+    rawEvent: TeslaRegulatoryRawEventRecord,
+    canonicalEvent: Pick<TeslaRegulatoryCanonicalEventRecord, "eventId"> | null,
+    status: TeslaRegulatoryIngressReceipt["status"],
+    duplicate: boolean,
+  ): TeslaRegulatoryIngressReceipt {
+    return {
+      receiptId: randomUUID(),
+      providerCode: rawEvent.providerCode,
+      providerEventId: rawEvent.providerEventId,
+      schemaVersion: rawEvent.schemaVersion,
+      payloadSha256: rawEvent.payloadSha256,
+      rawEventId: rawEvent.rawEventId,
+      canonicalEventId: canonicalEvent?.eventId ?? rawEvent.canonicalEventId,
+      status,
+      duplicate,
+      receivedAt: rawEvent.receivedAt,
+    };
+  }
+
+  private recordAudit(
+    actionName: string,
+    resourceId: string | null,
+    requestId: string | undefined,
+    details: Record<string, unknown>,
+  ) {
+    this.auditNotificationService.recordAuditLog({
+      actorId: null,
+      actorType: "system",
+      tenantId: null,
+      moduleName: "tesla-regulatory-events",
+      actionName,
+      resourceType: "tesla_regulatory_event_ingress",
+      resourceId,
+      newValuesSummary: details,
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private recordRejectedIngressAudit(
+    error: unknown,
+    request: TeslaRegulatoryIngressRequest,
+  ) {
+    if (!(error instanceof ApiRequestError)) {
+      return;
+    }
+
+    const response = error.getResponse();
+    const envelope =
+      response && typeof response === "object" && "error" in response
+        ? (response as {
+            error?: {
+              code?: string;
+              details?: Record<string, unknown>;
+            };
+          })
+        : null;
+    const code = envelope?.error?.code;
+    if (!code) {
+      return;
+    }
+
+    if (
+      code === "PROVIDER_EVENT_HASH_MISMATCH" ||
+      code === "MTLS_IDENTITY_NOT_ALLOWLISTED" ||
+      code === "MTLS_IDENTITY_REQUIRED"
+    ) {
+      return;
+    }
+
+    this.recordAudit(
+      `ingress.rejected_${code.toLowerCase()}`,
+      null,
+      request.requestId,
+      {
+        ...envelope?.error?.details,
+        headerKeys: Object.keys(request.headers),
+      },
+    );
+    this.logger.warn(`Rejected Tesla regulatory ingress with code ${code}.`);
+  }
+
+  private resolveHeader(
+    headers: Record<string, string | string[] | undefined>,
+    ...candidates: string[]
+  ) {
+    for (const candidate of candidates) {
+      const value = headers[candidate];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+      if (Array.isArray(value) && value[0]?.trim()) {
+        return value[0].trim();
+      }
+    }
+
+    return null;
+  }
+
+  private requiredString(value: unknown, fieldName: string) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "INVALID_PAYLOAD",
+      `Tesla regulatory ingress requires \`${fieldName}\`.`,
+      {
+        field: fieldName,
+      },
+    );
+  }
+
+  private optionalString(value: unknown) {
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  }
+
+  private requiredIsoTimestamp(value: unknown, fieldName: string) {
+    const timestamp = this.requiredString(value, fieldName);
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_PAYLOAD",
+        `Tesla regulatory ingress requires \`${fieldName}\` to be an ISO timestamp.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+
+    return parsed.toISOString();
+  }
+
+  private optionalNumber(value: unknown) {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "INVALID_PAYLOAD",
+      "Tesla regulatory ingress encountered a non-numeric field.",
+    );
+  }
+
+  private optionalLocation(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_PAYLOAD",
+        "Tesla regulatory ingress requires `location` to be an object.",
+      );
+    }
+
+    const record = value as Record<string, unknown>;
+    return {
+      lat: this.requiredFiniteNumber(record.lat, "location.lat"),
+      lng: this.requiredFiniteNumber(record.lng, "location.lng"),
+    };
+  }
+
+  private requiredFiniteNumber(value: unknown, fieldName: string) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "INVALID_PAYLOAD",
+      `Tesla regulatory ingress requires \`${fieldName}\` to be numeric.`,
+      {
+        field: fieldName,
+      },
+    );
+  }
+
+  private requiredEventType(value: unknown): TeslaRegulatoryEventType {
+    const eventType = this.requiredString(value, "eventType");
+    if (
+      (TESLA_REGULATORY_EVENT_TYPES as readonly string[]).includes(eventType)
+    ) {
+      return eventType as TeslaRegulatoryEventType;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "INVALID_PAYLOAD",
+      "Tesla regulatory ingress encountered an unknown event type.",
+      {
+        eventType,
+      },
+    );
+  }
+
+  private optionalDisengagementCause(
+    value: unknown,
+  ): TeslaDisengagementCause | null {
+    const cause = this.optionalString(value);
+    if (!cause) {
+      return null;
+    }
+
+    if ((TESLA_DISENGAGEMENT_CAUSES as readonly string[]).includes(cause)) {
+      return cause as TeslaDisengagementCause;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "INVALID_PAYLOAD",
+      "Tesla regulatory ingress encountered an unknown disengagement cause.",
+      {
+        disengagementCause: cause,
+      },
+    );
+  }
+
+  private extractCertFingerprint(clientCertHeader: string | null) {
+    if (!clientCertHeader) {
+      return null;
+    }
+
+    const fingerprintMatch = clientCertHeader.match(
+      /(sha256|fingerprint)=([A-Za-z0-9:+/=-]+)/i,
+    );
+    return fingerprintMatch?.[2] ?? null;
+  }
+
+  private toBase64Url(buffer: Buffer) {
+    return buffer
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  private fromBase64Url(value: string) {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padding =
+      normalized.length % 4 === 0
+        ? ""
+        : "=".repeat(4 - (normalized.length % 4));
+    return Buffer.from(`${normalized}${padding}`, "base64");
+  }
 }
