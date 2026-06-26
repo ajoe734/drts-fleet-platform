@@ -462,8 +462,12 @@ export class RegulatoryReportingService {
   private refreshDerivedState() {
     const now = this.nowIso();
     for (const notification of this.notifications) {
+      const isOpen =
+        notification.lifecycleStatus === "draft" ||
+        notification.lifecycleStatus === "review_pending" ||
+        notification.lifecycleStatus === "review_approved";
       for (const reminder of notification.reminders) {
-        if (reminder.sentAt || reminder.dueAt > now) {
+        if (reminder.sentAt || reminder.dueAt > now || !isOpen) {
           continue;
         }
         reminder.sentAt = now;
@@ -488,8 +492,12 @@ export class RegulatoryReportingService {
         });
       }
 
+      const submittedLate =
+        notification.submittedAt !== null &&
+        notification.submittedAt > notification.deadlineAt;
       const shouldBeOverdue =
-        notification.submittedAt === null && now > notification.deadlineAt;
+        (notification.submittedAt === null && now > notification.deadlineAt) ||
+        submittedLate;
       notification.overdue = shouldBeOverdue;
       if (shouldBeOverdue && notification.overdueRaisedAt === null) {
         notification.overdueRaisedAt = now;
