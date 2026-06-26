@@ -4405,11 +4405,6 @@ export function SandboxRegulatoryReportsPage() {
   const acceptedCount =
     data?.regulatoryReports.filter((item) => item.status === "accepted")
       .length ?? 0;
-  const exportReadyCount =
-    data?.controlledExports.filter((item) =>
-      ["approved", "completed"].includes(item.status),
-    ).length ?? 0;
-
   return (
     <ComplianceConsoleFrame
       active={view === "regulator" ? "regulator" : "reportjobs"}
