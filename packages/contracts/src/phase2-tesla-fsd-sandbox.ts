@@ -83,6 +83,184 @@ export interface ProviderCapabilityDescriptor {
 }
 
 // ---------------------------------------------------------------------------
+// §3.1A Sandbox governance geometry / schedule / enrollment DTOs
+// ---------------------------------------------------------------------------
+
+export type GeoJsonPosition = [number, number];
+
+export interface GeoJsonMultiPolygon {
+  type: "MultiPolygon";
+  coordinates: GeoJsonPosition[][][];
+}
+
+export interface GeoJsonMultiLineString {
+  type: "MultiLineString";
+  coordinates: GeoJsonPosition[][];
+}
+
+export const SANDBOX_HOLIDAY_POLICIES = [
+  "inherit",
+  "open",
+  "closed",
+] as const;
+export type SandboxHolidayPolicy =
+  (typeof SANDBOX_HOLIDAY_POLICIES)[number];
+
+export interface SandboxScheduleWindow {
+  scheduleId: string;
+  version: number;
+  active: boolean;
+  daysOfWeek: number[];
+  startLocalTime: string;
+  endLocalTime: string;
+  exceptionDates: string[];
+  holidayPolicy: SandboxHolidayPolicy;
+  maxConcurrentVehicles: number | null;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+}
+
+export const SANDBOX_OPERATING_AREA_KINDS = [
+  "operating_area",
+  "pickup_dropoff_zone",
+] as const;
+export type SandboxOperatingAreaKind =
+  (typeof SANDBOX_OPERATING_AREA_KINDS)[number];
+
+export interface ApprovedOperatingAreaRecord {
+  areaId: string;
+  sandboxProgramId: string;
+  name: string;
+  areaKind: SandboxOperatingAreaKind;
+  version: number;
+  active: boolean;
+  geometry: GeoJsonMultiPolygon;
+  schedules: SandboxScheduleWindow[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApprovedRouteRecord {
+  routeId: string;
+  sandboxProgramId: string;
+  name: string;
+  areaId: string | null;
+  version: number;
+  active: boolean;
+  geometry: GeoJsonMultiLineString;
+  schedules: SandboxScheduleWindow[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const VEHICLE_ENROLLMENT_STATUSES = [
+  "pending",
+  "active",
+  "suspended",
+  "revoked",
+  "expired",
+] as const;
+export type VehicleEnrollmentStatus =
+  (typeof VEHICLE_ENROLLMENT_STATUSES)[number];
+
+export interface VehicleEnrollmentRecord {
+  enrollmentId: string;
+  sandboxProgramId: string;
+  vehicleId: string;
+  providerCode: string;
+  version: number;
+  status: VehicleEnrollmentStatus;
+  approvedAreaIds: string[];
+  approvedRouteIds: string[];
+  maxConcurrentTrips: number | null;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const SAFETY_OPERATOR_QUALIFICATION_STATUSES = [
+  "pending",
+  "qualified",
+  "suspended",
+  "revoked",
+  "expired",
+] as const;
+export type SafetyOperatorQualificationStatus =
+  (typeof SAFETY_OPERATOR_QUALIFICATION_STATUSES)[number];
+
+export interface SafetyOperatorQualificationRecord {
+  qualificationId: string;
+  sandboxProgramId: string;
+  safetyOperatorId: string;
+  providerCode: string;
+  version: number;
+  status: SafetyOperatorQualificationStatus;
+  approvedAreaIds: string[];
+  approvedRouteIds: string[];
+  certificationRefs: string[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertApprovedOperatingAreasCommand {
+  items: ApprovedOperatingAreaRecord[];
+}
+
+export interface UpsertApprovedRoutesCommand {
+  items: ApprovedRouteRecord[];
+}
+
+export interface UpsertVehicleEnrollmentsCommand {
+  items: VehicleEnrollmentRecord[];
+}
+
+export interface UpsertSafetyOperatorQualificationsCommand {
+  items: SafetyOperatorQualificationRecord[];
+}
+
+export interface ValidateOperatingAreaPointCommand {
+  sandboxProgramId: string;
+  point: GeoPoint;
+  asOf: string | null;
+}
+
+export interface ValidateRouteContainmentCommand {
+  sandboxProgramId: string;
+  candidatePath: GeoJsonMultiLineString;
+  asOf: string | null;
+  toleranceMeters: number | null;
+}
+
+export interface ApprovedAreaMatchRecord {
+  areaId: string;
+  areaKind: SandboxOperatingAreaKind;
+  name: string;
+}
+
+export interface ValidateOperatingAreaPointResult {
+  sandboxProgramId: string;
+  point: GeoPoint;
+  matches: ApprovedAreaMatchRecord[];
+  inApprovedArea: boolean;
+  evaluatedAt: string;
+}
+
+export interface ValidateRouteContainmentResult {
+  sandboxProgramId: string;
+  routeIds: string[];
+  contained: boolean;
+  evaluatedAt: string;
+  toleranceMeters: number;
+}
+
+// ---------------------------------------------------------------------------
 // §3.2 Remote command receipt (Tesla command bridge)
 // ---------------------------------------------------------------------------
 
