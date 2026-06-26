@@ -51,8 +51,33 @@ function accidentContext(): Phase2AuditContext {
   };
 }
 
+class FakeClient {
+  released = false;
+
+  constructor(
+    private readonly sink: Array<{ text: string; values: unknown[] }>,
+    private readonly failOn?: string,
+  ) {}
+
+  async query(text: string, values?: readonly unknown[]) {
+    this.sink.push({ text, values: (values ?? []) as unknown[] });
+    if (this.failOn && text.includes(this.failOn)) {
+      throw new Error(`simulated failure on ${this.failOn}`);
+    }
+    return { rows: [], rowCount: 0 };
+  }
+
+  release() {
+    this.released = true;
+  }
+}
+
 class FakeDatabaseService {
   readonly queries: Array<{ text: string; values: unknown[] }> = [];
+  // When set, the checked-out client throws on any query whose text contains
+  // this fragment, simulating a mid-transaction insert failure.
+  failOn?: string;
+  lastClient?: FakeClient;
 
   isEnabled() {
     return true;
@@ -61,6 +86,12 @@ class FakeDatabaseService {
   async query(text: string, values?: readonly unknown[]) {
     this.queries.push({ text, values: (values ?? []) as unknown[] });
     return { rows: [], rowCount: 0 };
+  }
+
+  async connect() {
+    const client = new FakeClient(this.queries, this.failOn);
+    this.lastClient = client;
+    return client;
   }
 }
 
@@ -242,5 +273,52 @@ describe("INT-DP-S4-001 phase2 audit context integration", () => {
     );
     // Only the evidence-access listing produced an access-log write.
     expect(evidenceAccessInserts.length).toBe(1);
+
+    // The dual-write is atomic: both inserts run inside a single transaction,
+    // canonical audit row before the evidence-access mirror, then COMMIT.
+    const order = fakeDb.queries.map((query) => query.text);
+    const beginAt = order.findIndex((text) => text.includes("BEGIN"));
+    const auditAt = order.findIndex((text) =>
+      text.includes("admin.audit_logs"),
+    );
+    const mirrorAt = order.findIndex((text) =>
+      text.includes("av_evidence.evidence_access_logs"),
+    );
+    const commitAt = order.findIndex((text) => text.includes("COMMIT"));
+    expect(beginAt).toBeGreaterThanOrEqual(0);
+    expect(beginAt).toBeLessThan(auditAt);
+    expect(auditAt).toBeLessThan(mirrorAt);
+    expect(mirrorAt).toBeLessThan(commitAt);
+  });
+
+  it("rolls back the evidence-access mirror when the canonical insert fails so no orphan row is stranded", async () => {
+    const fakeDb = new FakeDatabaseService();
+    // Fail the canonical admin.audit_logs insert mid-transaction.
+    fakeDb.failOn = "admin.audit_logs";
+    const repository = new AuditLogRepository(
+      fakeDb as unknown as DatabaseService,
+    );
+    const service = new AuditNotificationService(repository);
+
+    // Listing audit logs self-audits an audit_log-family access, triggering the
+    // evidence-access dual-write whose canonical insert is rigged to fail.
+    expect(() =>
+      service.listAuditLogs(PLATFORM_IDENTITY, "req-orphan-guard-001"),
+    ).not.toThrow();
+    await flush();
+
+    const order = fakeDb.queries.map((query) => query.text);
+    // The transaction opened and rolled back without committing.
+    expect(order.some((text) => text.includes("BEGIN"))).toBe(true);
+    expect(order.some((text) => text.includes("ROLLBACK"))).toBe(true);
+    expect(order.some((text) => text.includes("COMMIT"))).toBe(false);
+    // The mirror insert never ran, so no orphan evidence-access row is possible.
+    expect(
+      order.filter((text) =>
+        text.includes("av_evidence.evidence_access_logs"),
+      ).length,
+    ).toBe(0);
+    // The failed transaction still released its client back to the pool.
+    expect(fakeDb.lastClient?.released).toBe(true);
   });
 });

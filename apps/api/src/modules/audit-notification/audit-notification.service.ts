@@ -1061,7 +1061,7 @@ export class AuditNotificationService implements OnModuleInit {
   ) {
     const auditLog = this.appendAuditLog(input);
     this.applyEvidenceGovernanceLog(auditLog);
-    this.applyEvidenceAccessLog(auditLog);
+    this.persistAuditTrail(auditLog);
     return auditLog;
   }
 
@@ -1179,7 +1179,6 @@ export class AuditNotificationService implements OnModuleInit {
   ) {
     const auditLog = createAuditLogRecord(input);
     this.auditLogs = trimAuditLogs([auditLog, ...this.auditLogs]);
-    this.persistAuditLog(auditLog);
     return auditLog;
   }
 
@@ -1578,25 +1577,6 @@ export class AuditNotificationService implements OnModuleInit {
     return order.indexOf(left) - order.indexOf(right);
   }
 
-  private applyEvidenceAccessLog(auditLog: AuditLogRecord) {
-    const record = toEvidenceAccessLogRecord(auditLog);
-    if (!record) {
-      return;
-    }
-    this.persistEvidenceAccessLog(record);
-  }
-
-  private persistAuditLog(auditLog: AuditLogRecord) {
-    if (!this.auditLogRepository) {
-      return;
-    }
-
-    void this.auditLogRepository.append(auditLog).catch((error: unknown) => {
-      const detail = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Audit log write-through skipped: ${detail}`);
-    });
-  }
-
   private resolveSyntheticDeletionConflictExceptionsForHold(
     hold: EvidenceLegalHoldRecord,
     actor: OperationalIdentity,
@@ -1629,16 +1609,24 @@ export class AuditNotificationService implements OnModuleInit {
     }
   }
 
-  private persistEvidenceAccessLog(record: EvidenceAccessLogRecord) {
+  // Single atomic write-through for the canonical audit row and its
+  // evidence-access projection. The two used to persist via independent
+  // fire-and-forget inserts, which could strand an orphan evidence-access row
+  // if the canonical insert failed but the mirror succeeded. They now go through
+  // one transactional call so they land together or not at all, preserving the
+  // 1:1 link to the shared Phase 1 audit store. The boundary stays
+  // fire-and-forget so a persistence outage never breaks the request path.
+  private persistAuditTrail(auditLog: AuditLogRecord) {
     if (!this.auditLogRepository) {
       return;
     }
 
+    const evidenceAccess = toEvidenceAccessLogRecord(auditLog);
     void this.auditLogRepository
-      .appendEvidenceAccessLog(record)
+      .appendWithEvidenceAccess(auditLog, evidenceAccess)
       .catch((error: unknown) => {
         const detail = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`Evidence-access log write-through skipped: ${detail}`);
+        this.logger.warn(`Audit trail write-through skipped: ${detail}`);
       });
   }
 }

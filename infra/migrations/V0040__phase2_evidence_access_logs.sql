@@ -42,3 +42,26 @@ CREATE INDEX IF NOT EXISTS idx_evidence_access_logs_family
 
 CREATE INDEX IF NOT EXISTS idx_evidence_access_logs_tenant
   ON av_evidence.evidence_access_logs(tenant_id, created_at DESC);
+
+-- Enforce the 1:1 link at the database level: an evidence-access row cannot
+-- exist without its canonical admin.audit_logs row. Combined with the
+-- transactional dual-write in AuditLogRepository (canonical row inserted first,
+-- then the mirror, both committed together), this makes orphan evidence-access
+-- rows impossible even if the canonical insert fails. ON DELETE RESTRICT keeps
+-- the append-only chain-of-custody guarantee: a canonical audit row that still
+-- has an evidence-access mirror cannot be deleted out from under it.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_evidence_access_logs_audit_id'
+      AND conrelid = 'av_evidence.evidence_access_logs'::regclass
+  ) THEN
+    ALTER TABLE av_evidence.evidence_access_logs
+      ADD CONSTRAINT fk_evidence_access_logs_audit_id
+      FOREIGN KEY (audit_id)
+      REFERENCES admin.audit_logs(audit_id)
+      ON DELETE RESTRICT;
+  END IF;
+END$$;
