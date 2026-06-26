@@ -38,13 +38,11 @@ import {
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import {
   accidentSeverityTone,
-  buildTripComplianceChecks,
   confidenceTone,
   custodyStateTone,
   exportStatusTone,
   findInvestigationForDiscrepancy,
   findTakeoverReview,
-  focusBannerText,
   investigationHref,
   investigationStatusTone,
   investigationTimelineHref,
@@ -53,7 +51,6 @@ import {
   loadSandboxInvestigationDetail,
   manifestHref,
   reportStatusTone,
-  sourceLabel,
   sourceTone,
   tripDiscrepancies,
   tripHref,
@@ -62,6 +59,7 @@ import {
   truncateHash,
   uniqueManifestIds,
 } from "@/lib/sandbox-compliance";
+import { useTranslation } from "@/lib/i18n";
 
 type ShellNavKey =
   | "dashboard"
@@ -247,9 +245,63 @@ const evidenceChipRowStyle: CSSProperties = {
   gap: 8,
 };
 
+const EMPTY_VALUE = "—";
+
+type TranslationFn = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
+
+const COMPLIANCE_CODE_KEYS: Record<string, string> = {
+  accepted: "cmp.code.accepted",
+  active: "cmp.code.active",
+  accident_case: "cmp.code.accidentCase",
+  approved: "cmp.code.approved",
+  captured: "cmp.code.captured",
+  clear: "cmp.code.clear",
+  closed: "cmp.code.closed",
+  completed: "cmp.code.completed",
+  draft: "cmp.code.draft",
+  evidence_frozen: "cmp.code.evidenceFrozen",
+  fatal: "cmp.code.fatal",
+  generated: "cmp.code.generated",
+  initial_notification_sent: "cmp.code.initialNotificationSent",
+  major: "cmp.code.major",
+  minor: "cmp.code.minor",
+  near_miss: "cmp.code.nearMiss",
+  operator_reported: "cmp.code.operatorReported",
+  pending: "cmp.code.pending",
+  pending_approval: "cmp.code.pendingApproval",
+  platform_recorded: "cmp.code.platformRecorded",
+  provider_reported: "cmp.code.providerReported",
+  provider_signed: "cmp.code.providerSigned",
+  purged: "cmp.code.purged",
+  rejected: "cmp.code.rejected",
+  regulator_review: "cmp.code.regulatorReview",
+  release_requested: "cmp.code.releaseRequested",
+  released: "cmp.code.released",
+  sealed: "cmp.code.sealed",
+  submitted: "cmp.code.submitted",
+  system_derived: "cmp.code.systemDerived",
+  under_investigation: "cmp.code.underInvestigation",
+  unknown: "cmp.code.unknown",
+  uploaded: "cmp.code.uploaded",
+  verified: "cmp.code.verified",
+};
+
+const COMPLIANCE_SOURCE_KEYS: Record<string, string> = {
+  manual_entry: "cmp.source.manualEntry",
+  onboard_recorder: "cmp.source.vehicleRecorded",
+  regulatory_filing: "cmp.source.regulatoryFiling",
+  roc_operator: "cmp.source.rocInput",
+  sandbox_governance: "cmp.source.sandboxGovernance",
+  tesla_fleet_api: "cmp.source.teslaProvided",
+  tesla_public_telemetry: "cmp.source.teslaProvided",
+};
+
 function humanizeToken(value: string | null | undefined) {
   if (!value) {
-    return "—";
+    return EMPTY_VALUE;
   }
   return value
     .split("_")
@@ -258,7 +310,7 @@ function humanizeToken(value: string | null | undefined) {
 }
 
 function compactDate(value: string | null | undefined) {
-  return value ? formatDateTime(value) : "—";
+  return value ? formatDateTime(value) : EMPTY_VALUE;
 }
 
 function safeHref(value: string) {
@@ -273,14 +325,31 @@ function statusPill(label: ReactNode, tone: CanvasTone, dot = true): ReactNode {
   );
 }
 
-function timelineSourceLabel(entry: AccidentTimelineEntry) {
+function formatComplianceCode(
+  t: TranslationFn,
+  value: string | null | undefined,
+) {
+  if (!value) {
+    return EMPTY_VALUE;
+  }
+
+  const key = COMPLIANCE_CODE_KEYS[value];
+  return key ? t(key) : humanizeToken(value);
+}
+
+function formatComplianceSource(t: TranslationFn, sourceSystem: string) {
+  const key = COMPLIANCE_SOURCE_KEYS[sourceSystem];
+  return key ? t(key) : humanizeToken(sourceSystem);
+}
+
+function timelineSourceLabel(t: TranslationFn, entry: AccidentTimelineEntry) {
   switch (entry.sourceSystem) {
     case "system_derived":
-      return "System derived";
+      return t("cmp.code.systemDerived");
     case "accident_case":
-      return "Accident case";
+      return t("cmp.code.accidentCase");
     default:
-      return sourceLabel(entry.sourceSystem);
+      return formatComplianceSource(t, entry.sourceSystem);
   }
 }
 
@@ -299,8 +368,8 @@ function hasScope(scopeSet: ReadonlySet<string>, scope: string) {
   return scopeSet.has(scope);
 }
 
-function missingScopeMessage(scope: string) {
-  return `Requires ${scope}.`;
+function missingScopeMessage(t: TranslationFn, scope: string) {
+  return t("cmp.scope.requires", { scope });
 }
 
 function actionStatusText(message: string) {
@@ -308,6 +377,7 @@ function actionStatusText(message: string) {
 }
 
 function scopeCard(
+  t: TranslationFn,
   title: string,
   hints: ScopeHint[],
   actorId: string,
@@ -317,7 +387,7 @@ function scopeCard(
     <CanvasCard
       theme={theme}
       title={title}
-      subtitle={`current actor ${actorId}`}
+      subtitle={t("cmp.scope.currentActor", { actorId })}
     >
       <div style={scopeListStyle}>
         {hints.map((hint) => {
@@ -349,11 +419,13 @@ function scopeCard(
                   theme={theme}
                   tone={granted ? "success" : "neutral"}
                 >
-                  {granted ? "granted" : "missing"}
+                  {granted ? t("cmp.scope.granted") : t("cmp.scope.missing")}
                 </CanvasPill>
               </div>
               {!granted ? (
-                <div style={mutedStyle}>{missingScopeMessage(hint.scope)}</div>
+                <div style={mutedStyle}>
+                  {missingScopeMessage(t, hint.scope)}
+                </div>
               ) : null}
               {hint.blocked ? (
                 <div style={mutedStyle}>{hint.blocked}</div>
@@ -403,10 +475,12 @@ function PageState({
   empty?: string | null;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
+
   if (loading) {
     return (
       <CanvasCard theme={theme}>
-        <div style={emptyStateStyle}>Loading compliance data…</div>
+        <div style={emptyStateStyle}>{t("cmp.pageState.loading")}</div>
       </CanvasCard>
     );
   }
@@ -417,7 +491,7 @@ function PageState({
         theme={theme}
         tone="danger"
         icon="warn"
-        title="Compliance data failed to load"
+        title={t("cmp.pageState.loadErrorTitle")}
         body={error}
       />
     );
@@ -451,6 +525,7 @@ function ComplianceConsoleFrame({
   scopeHints?: ScopeHint[];
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const authority = usePlatformAdminAuthority();
   const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
   const tripId = context?.tripId ?? null;
@@ -459,26 +534,26 @@ function ComplianceConsoleFrame({
 
   const sections = [
     {
-      label: "調查 · Investigation",
+      label: t("cmp.shell.section.investigation"),
       items: [
         {
           key: "dashboard" as const,
-          label: "合規總覽 · Dashboard",
+          label: t("cmp.shell.nav.dashboard"),
           href: "/platform-admin/compliance",
         },
         {
           key: "trips" as const,
-          label: "行程合規 · Trip Compliance",
+          label: t("cmp.shell.nav.trips"),
           href: tripId ? tripHref(tripId) : null,
         },
         {
           key: "takeover" as const,
-          label: "接管審查 · Takeover Review",
+          label: t("cmp.shell.nav.takeover"),
           href: "/platform-admin/investigations?view=takeover",
         },
         {
           key: "accident" as const,
-          label: "事故案件 · Accident Cases",
+          label: t("cmp.shell.nav.accident"),
           href: caseId
             ? investigationHref(caseId)
             : "/platform-admin/investigations",
@@ -486,41 +561,41 @@ function ComplianceConsoleFrame({
       ],
     },
     {
-      label: "證據 · Evidence",
+      label: t("cmp.shell.section.evidence"),
       items: [
         {
           key: "timeline" as const,
-          label: "同步時間軸 · Timeline",
+          label: t("cmp.shell.nav.timeline"),
           href: caseId ? investigationTimelineHref(caseId) : null,
         },
         {
           key: "manifest" as const,
-          label: "證據清單 · Manifest",
+          label: t("cmp.shell.nav.manifest"),
           href: manifestId ? manifestHref(manifestId) : null,
         },
         {
           key: "export" as const,
-          label: "受控匯出 · Controlled Export",
+          label: t("cmp.shell.nav.export"),
           href: "/platform-admin/evidence/exports",
         },
         {
           key: "legalhold" as const,
-          label: "法律保留 · Legal Hold",
+          label: t("cmp.shell.nav.legalHold"),
           href: "/platform-admin/evidence/legal-holds",
         },
       ],
     },
     {
-      label: "監理 · Regulatory",
+      label: t("cmp.shell.section.regulatory"),
       items: [
         {
           key: "reportjobs" as const,
-          label: "報表作業 · Report Jobs",
+          label: t("cmp.shell.nav.reportJobs"),
           href: "/platform-admin/regulatory-reports",
         },
         {
           key: "regulator" as const,
-          label: "主管機關檢視 · Regulator",
+          label: t("cmp.shell.nav.regulator"),
           href: "/platform-admin/regulatory-reports?view=regulator",
         },
       ],
@@ -533,14 +608,11 @@ function ComplianceConsoleFrame({
         <aside style={railStyle}>
           <CanvasCard
             theme={theme}
-            title="Sandbox Compliance Console"
-            subtitle="platform-admin route group"
+            title={t("cmp.shell.title")}
+            subtitle={t("cmp.shell.subtitle")}
           >
             <div style={cardStackStyle}>
-              <div style={mutedStyle}>
-                Historical `compliance-screens.jsx` restored to HEAD and used as
-                the visual source for this inner console.
-              </div>
+              <div style={mutedStyle}>{t("cmp.shell.note")}</div>
               {sections.map((section) => (
                 <div key={section.label} style={cardStackStyle}>
                   <div
@@ -563,7 +635,7 @@ function ComplianceConsoleFrame({
                           <span>{item.label}</span>
                           {isActive ? (
                             <CanvasPill theme={theme} tone="accent">
-                              Live
+                              {t("cmp.shell.live")}
                             </CanvasPill>
                           ) : null}
                         </span>
@@ -597,8 +669,8 @@ function ComplianceConsoleFrame({
                 theme={theme}
                 tone="info"
                 icon="info"
-                title="Scope-driven actions"
-                body="Mutation buttons remain tied to backend authority, workflow state, and four-eyes guards."
+                title={t("cmp.shell.scopeBannerTitle")}
+                body={t("cmp.shell.scopeBannerBody")}
               />
             </div>
           </CanvasCard>
@@ -614,7 +686,8 @@ function ComplianceConsoleFrame({
           <div style={pageStackStyle}>
             {scopeHints && scopeHints.length > 0
               ? scopeCard(
-                  "Authority posture",
+                  t,
+                  t("cmp.scope.authorityPosture"),
                   scopeHints,
                   authority.actorId,
                   scopeSet,
@@ -626,6 +699,114 @@ function ComplianceConsoleFrame({
       </div>
     </div>
   );
+}
+
+function buildLocalizedTripComplianceChecks(
+  t: TranslationFn,
+  input: {
+    tripId: string;
+    investigations: AccidentCaseRecord[];
+    takeoverReviews: CorrelatedTakeoverCase[];
+    discrepancies: EvidenceDiscrepancyCase[];
+    legalHolds: SandboxLegalHoldRecord[];
+  },
+) {
+  const investigations = tripInvestigations(input.investigations, input.tripId);
+  const takeoverReviews = tripTakeoverReviews(
+    input.takeoverReviews,
+    input.tripId,
+  );
+  const discrepancies = tripDiscrepancies(
+    input.discrepancies,
+    input.takeoverReviews,
+    input.tripId,
+  );
+  const investigation = investigations[0] ?? null;
+  const manifestId = investigation?.evidenceManifestId ?? null;
+  const hasLegalHold = manifestId
+    ? input.legalHolds.some(
+        (item) => item.manifestId === manifestId && item.status !== "released",
+      )
+    : false;
+
+  return [
+    {
+      label: t("cmp.trip.check.takeover.label"),
+      passed: takeoverReviews.length > 0,
+      detail:
+        takeoverReviews.length > 0
+          ? t("cmp.trip.check.takeover.passDetail", {
+              count: takeoverReviews.length,
+            })
+          : t("cmp.trip.check.takeover.failDetail"),
+    },
+    {
+      label: t("cmp.trip.check.investigation.label"),
+      passed: Boolean(investigation),
+      detail: investigation
+        ? t("cmp.trip.check.investigation.passDetail", {
+            caseId: investigation.caseId,
+            status: formatComplianceCode(t, investigation.status),
+          })
+        : t("cmp.trip.check.investigation.failDetail"),
+    },
+    {
+      label: t("cmp.trip.check.manifest.label"),
+      passed: Boolean(manifestId),
+      detail: manifestId
+        ? t("cmp.trip.check.manifest.passDetail", { manifestId })
+        : t("cmp.trip.check.manifest.failDetail"),
+    },
+    {
+      label: t("cmp.trip.check.discrepancy.label"),
+      passed: discrepancies.length === 0,
+      detail:
+        discrepancies.length === 0
+          ? t("cmp.trip.check.discrepancy.passDetail")
+          : t("cmp.trip.check.discrepancy.failDetail", {
+              count: discrepancies.length,
+            }),
+    },
+    {
+      label: t("cmp.trip.check.hold.label"),
+      passed: !hasLegalHold,
+      detail: hasLegalHold
+        ? t("cmp.trip.check.hold.failDetail")
+        : t("cmp.trip.check.hold.passDetail"),
+    },
+  ];
+}
+
+function resolveFocusBannerText(
+  t: TranslationFn,
+  input: {
+    takeoverCaseId: string | null;
+    discrepancyCaseId: string | null;
+    takeoverReview?: CorrelatedTakeoverCase | null;
+    discrepancy?: EvidenceDiscrepancyCase | null;
+  },
+) {
+  if (input.takeoverCaseId) {
+    if (input.takeoverReview) {
+      return t("cmp.investigations.banner.takeoverLoaded", {
+        takeoverId: input.takeoverReview.correlatedTakeoverCaseId,
+      });
+    }
+    return t("cmp.investigations.banner.takeoverMissing", {
+      takeoverId: input.takeoverCaseId,
+    });
+  }
+  if (input.discrepancyCaseId) {
+    if (input.discrepancy) {
+      return t("cmp.investigations.banner.discrepancyLoaded", {
+        discrepancyId: input.discrepancy.discrepancyCaseId,
+      });
+    }
+    return t("cmp.investigations.banner.discrepancyMissing", {
+      discrepancyId: input.discrepancyCaseId,
+    });
+  }
+  return null;
 }
 
 function useOverviewState() {
@@ -723,6 +904,7 @@ function useCurrentParam(name: string) {
 }
 
 export function SandboxComplianceDashboardPage() {
+  const { t } = useTranslation();
   const { data, loading, error, refresh } = useOverviewState();
 
   const openInvestigations =
@@ -744,28 +926,28 @@ export function SandboxComplianceDashboardPage() {
   return (
     <ComplianceConsoleFrame
       active="dashboard"
-      title="實驗合規總覽 · Compliance Dashboard"
-      subtitle="Investigation backlog, takeover review, evidence governance, and regulator-facing filing posture."
+      title={t("cmp.dashboard.title")}
+      subtitle={t("cmp.dashboard.subtitle")}
       actions={
         <CanvasBtn
           theme={theme}
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       scopeHints={[
         {
-          label: "Read compliance snapshot",
+          label: t("cmp.dashboard.scope.readSnapshot"),
           scope: "sandbox.compliance.read",
         },
         {
-          label: "Read investigations",
+          label: t("cmp.dashboard.scope.readInvestigations"),
           scope: "sandbox.investigation.read",
         },
         {
-          label: "Preview evidence posture",
+          label: t("cmp.dashboard.scope.previewEvidence"),
           scope: "sandbox.evidence.preview",
         },
       ]}
@@ -775,79 +957,91 @@ export function SandboxComplianceDashboardPage() {
         error={error}
         empty={
           data && data.investigations.length === 0
-            ? "No sandbox investigations are available yet."
+            ? t("cmp.dashboard.empty")
             : null
         }
       >
         <div style={autoGridStyle("180px")}>
-          <CanvasCard theme={theme} title="Open investigations">
+          <CanvasCard theme={theme} title={t("cmp.dashboard.card.open.title")}>
             <div style={{ fontSize: 28, fontWeight: 700 }}>
               {openInvestigations.length}
             </div>
-            <div style={mutedStyle}>Cases not yet closed.</div>
+            <div style={mutedStyle}>{t("cmp.dashboard.card.open.body")}</div>
           </CanvasCard>
-          <CanvasCard theme={theme} title="Takeover review">
+          <CanvasCard
+            theme={theme}
+            title={t("cmp.dashboard.card.takeover.title")}
+          >
             <div style={{ fontSize: 28, fontWeight: 700 }}>
               {data?.takeoverReviews.length ?? 0}
             </div>
-            <div style={mutedStyle}>Correlated takeover records.</div>
+            <div style={mutedStyle}>
+              {t("cmp.dashboard.card.takeover.body")}
+            </div>
           </CanvasCard>
-          <CanvasCard theme={theme} title="Evidence coverage">
+          <CanvasCard
+            theme={theme}
+            title={t("cmp.dashboard.card.coverage.title")}
+          >
             <div style={{ fontSize: 28, fontWeight: 700 }}>
               {evidenceCoverage}%
             </div>
-            <div style={mutedStyle}>Investigations with linked manifests.</div>
+            <div style={mutedStyle}>
+              {t("cmp.dashboard.card.coverage.body")}
+            </div>
           </CanvasCard>
-          <CanvasCard theme={theme} title="Active legal holds">
+          <CanvasCard theme={theme} title={t("cmp.dashboard.card.holds.title")}>
             <div style={{ fontSize: 28, fontWeight: 700 }}>
               {activeHolds.length}
             </div>
-            <div style={mutedStyle}>Released holds excluded.</div>
+            <div style={mutedStyle}>{t("cmp.dashboard.card.holds.body")}</div>
           </CanvasCard>
         </div>
 
         <div style={autoGridStyle("360px")}>
           <CanvasCard
             theme={theme}
-            title="事故案件 · Accident cases"
-            subtitle="Open and recently updated investigations"
+            title={t("cmp.dashboard.investigations.title")}
+            subtitle={t("cmp.dashboard.investigations.subtitle")}
             padding={0}
           >
             <CanvasTable
               theme={theme}
               columns={[
                 {
-                  h: "Case",
+                  h: t("cmp.label.case"),
                   w: 150,
                   r: (row: AccidentCaseRecord) => (
                     <div style={cardStackStyle}>
                       <InlineLink href={investigationHref(row.caseId)}>
                         <span style={monoStyle}>{row.caseId}</span>
                       </InlineLink>
-                      <span style={mutedStyle}>{row.summary ?? "—"}</span>
+                      <span style={mutedStyle}>
+                        {row.summary ?? EMPTY_VALUE}
+                      </span>
                     </div>
                   ),
                 },
                 {
-                  h: "Severity",
+                  h: t("cmp.label.severity"),
                   w: 120,
                   r: (row: AccidentCaseRecord) =>
                     statusPill(
-                      humanizeToken(row.severity),
+                      formatComplianceCode(t, row.severity),
                       accidentSeverityTone(row.severity),
                     ),
                 },
                 {
-                  h: "Status",
+                  h: t("common.status"),
                   w: 140,
                   r: (row: AccidentCaseRecord) =>
                     statusPill(
-                      humanizeToken(row.status),
+                      formatComplianceCode(t, row.status),
                       investigationStatusTone(row.status),
                     ),
                 },
                 {
-                  h: "Trip",
+                  h: t("cmp.label.trip"),
                   w: 140,
                   r: (row: AccidentCaseRecord) =>
                     row.orderId ? (
@@ -855,7 +1049,7 @@ export function SandboxComplianceDashboardPage() {
                         {row.orderId}
                       </InlineLink>
                     ) : (
-                      "—"
+                      EMPTY_VALUE
                     ),
                 },
               ]}
@@ -865,15 +1059,15 @@ export function SandboxComplianceDashboardPage() {
 
           <CanvasCard
             theme={theme}
-            title="接管審查 · Takeover review"
-            subtitle="Linked takeover records plus discrepancy signals"
+            title={t("cmp.dashboard.takeoverTable.title")}
+            subtitle={t("cmp.dashboard.takeoverTable.subtitle")}
             padding={0}
           >
             <CanvasTable
               theme={theme}
               columns={[
                 {
-                  h: "Takeover",
+                  h: t("cmp.label.takeover"),
                   w: 150,
                   r: (row: CorrelatedTakeoverCase) => (
                     <div style={cardStackStyle}>
@@ -887,7 +1081,7 @@ export function SandboxComplianceDashboardPage() {
                   ),
                 },
                 {
-                  h: "Trip",
+                  h: t("cmp.label.trip"),
                   w: 130,
                   r: (row: CorrelatedTakeoverCase) =>
                     row.orderId ? (
@@ -895,17 +1089,20 @@ export function SandboxComplianceDashboardPage() {
                         {row.orderId}
                       </InlineLink>
                     ) : (
-                      "—"
+                      EMPTY_VALUE
                     ),
                 },
                 {
-                  h: "Match",
+                  h: t("cmp.label.match"),
                   w: 120,
                   r: (row: CorrelatedTakeoverCase) =>
-                    statusPill(humanizeToken(row.matchedBy), "accent"),
+                    statusPill(
+                      formatComplianceCode(t, row.matchedBy),
+                      "accent",
+                    ),
                 },
                 {
-                  h: "Investigation",
+                  h: t("cmp.label.investigation"),
                   w: 140,
                   r: (row: CorrelatedTakeoverCase) =>
                     row.investigationLink ? (
@@ -913,7 +1110,9 @@ export function SandboxComplianceDashboardPage() {
                         {row.investigationLink.resourceId}
                       </InlineLink>
                     ) : (
-                      <span style={mutedStyle}>Not linked</span>
+                      <span style={mutedStyle}>
+                        {t("cmp.common.notLinked")}
+                      </span>
                     ),
                 },
               ]}
@@ -925,25 +1124,25 @@ export function SandboxComplianceDashboardPage() {
         <div style={autoGridStyle("360px")}>
           <CanvasCard
             theme={theme}
-            title="證據治理 · Evidence posture"
-            subtitle="Controlled export and legal-hold workflow state"
+            title={t("cmp.dashboard.evidence.title")}
+            subtitle={t("cmp.dashboard.evidence.subtitle")}
             padding={0}
           >
             <CanvasTable
               theme={theme}
               columns={[
                 {
-                  h: "Hold / Export",
+                  h: t("cmp.dashboard.evidence.kind"),
                   w: 150,
                   r: (row: Record<string, unknown>) => row.kind as ReactNode,
                 },
                 {
-                  h: "Subject",
+                  h: t("cmp.dashboard.evidence.subject"),
                   w: 180,
                   r: (row: Record<string, unknown>) => row.subject as ReactNode,
                 },
                 {
-                  h: "Status",
+                  h: t("common.status"),
                   w: 150,
                   r: (row: Record<string, unknown>) => row.status as ReactNode,
                 },
@@ -957,7 +1156,7 @@ export function SandboxComplianceDashboardPage() {
                   ),
                   subject: <span style={monoStyle}>{item.caseId}</span>,
                   status: statusPill(
-                    humanizeToken(item.status),
+                    formatComplianceCode(t, item.status),
                     legalHoldStatusTone(item.status),
                   ),
                 })),
@@ -969,7 +1168,7 @@ export function SandboxComplianceDashboardPage() {
                   ),
                   subject: <span style={monoStyle}>{item.manifestId}</span>,
                   status: statusPill(
-                    humanizeToken(item.status),
+                    formatComplianceCode(t, item.status),
                     exportStatusTone(item.status),
                   ),
                 })),
@@ -979,37 +1178,37 @@ export function SandboxComplianceDashboardPage() {
 
           <CanvasCard
             theme={theme}
-            title="監理報表 · Filing queue"
-            subtitle="Generated and submitted reports"
+            title={t("cmp.dashboard.reports.title")}
+            subtitle={t("cmp.dashboard.reports.subtitle")}
             padding={0}
           >
             <CanvasTable
               theme={theme}
               columns={[
                 {
-                  h: "Report",
+                  h: t("cmp.label.report"),
                   w: 180,
                   r: (row: RegulatoryReportFiling) => (
                     <span style={monoStyle}>{row.reportId}</span>
                   ),
                 },
                 {
-                  h: "Jurisdiction",
+                  h: t("cmp.label.jurisdiction"),
                   w: 120,
                   r: (row: RegulatoryReportFiling) =>
                     humanizeToken(row.jurisdiction),
                 },
                 {
-                  h: "Status",
+                  h: t("common.status"),
                   w: 140,
                   r: (row: RegulatoryReportFiling) =>
                     statusPill(
-                      humanizeToken(row.status),
+                      formatComplianceCode(t, row.status),
                       reportStatusTone(row.status),
                     ),
                 },
                 {
-                  h: "Case",
+                  h: t("cmp.label.case"),
                   w: 140,
                   r: (row: RegulatoryReportFiling) =>
                     row.caseId ? (
@@ -1017,7 +1216,7 @@ export function SandboxComplianceDashboardPage() {
                         {row.caseId}
                       </InlineLink>
                     ) : (
-                      "—"
+                      EMPTY_VALUE
                     ),
                 },
               ]}
@@ -1031,6 +1230,7 @@ export function SandboxComplianceDashboardPage() {
 }
 
 export function SandboxTripComplianceDetailPage() {
+  const { t } = useTranslation();
   const tripId = useCurrentParam("tripId");
   const { data, loading, error, refresh } = useOverviewState();
 
@@ -1055,7 +1255,7 @@ export function SandboxTripComplianceDetailPage() {
         item.manifestId === manifestId || item.caseId === investigation?.caseId,
     ) ?? [];
   const checks = data
-    ? buildTripComplianceChecks({
+    ? buildLocalizedTripComplianceChecks(t, {
         tripId,
         investigations: data.investigations,
         takeoverReviews: data.takeoverReviews,
@@ -1067,15 +1267,19 @@ export function SandboxTripComplianceDetailPage() {
   return (
     <ComplianceConsoleFrame
       active="trips"
-      title={`行程合規 · ${tripId || "Trip compliance"}`}
-      subtitle="Trip-centric read model across investigation, takeover correlation, discrepancy treatment, manifest custody, and regulator reporting."
+      title={
+        tripId
+          ? t("cmp.trip.titleWithId", { tripId })
+          : t("cmp.trip.titleFallback")
+      }
+      subtitle={t("cmp.trip.subtitle")}
       actions={
         <CanvasBtn
           theme={theme}
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       context={{
@@ -1084,12 +1288,18 @@ export function SandboxTripComplianceDetailPage() {
         manifestId,
       }}
       scopeHints={[
-        { label: "Read trip compliance", scope: "sandbox.compliance.read" },
         {
-          label: "Read linked investigation",
+          label: t("cmp.trip.scope.readTrip"),
+          scope: "sandbox.compliance.read",
+        },
+        {
+          label: t("cmp.trip.scope.readInvestigation"),
           scope: "sandbox.investigation.read",
         },
-        { label: "Preview linked evidence", scope: "sandbox.evidence.preview" },
+        {
+          label: t("cmp.trip.scope.previewEvidence"),
+          scope: "sandbox.evidence.preview",
+        },
       ]}
     >
       <PageState
@@ -1097,15 +1307,15 @@ export function SandboxTripComplianceDetailPage() {
         error={error}
         empty={
           data && investigations.length === 0 && takeovers.length === 0
-            ? `No compliance-linked trip records were found for ${tripId}.`
+            ? t("cmp.trip.empty", { tripId })
             : null
         }
       >
         <div style={autoGridStyle("320px")}>
           <CanvasCard
             theme={theme}
-            title="Compliance checks"
-            subtitle="derived pass / fail"
+            title={t("cmp.trip.checksTitle")}
+            subtitle={t("cmp.trip.checksSubtitle")}
           >
             <div style={cardStackStyle}>
               {checks.map((check) => (
@@ -1128,7 +1338,9 @@ export function SandboxTripComplianceDetailPage() {
                   >
                     <strong style={{ fontSize: 12.5 }}>{check.label}</strong>
                     {statusPill(
-                      check.passed ? "Pass" : "Needs review",
+                      check.passed
+                        ? t("cmp.common.pass")
+                        : t("cmp.common.needsReview"),
                       check.passed ? "success" : "warn",
                     )}
                   </div>
@@ -1140,42 +1352,50 @@ export function SandboxTripComplianceDetailPage() {
 
           <CanvasCard
             theme={theme}
-            title="Trip posture"
-            subtitle="linked resources"
+            title={t("cmp.trip.postureTitle")}
+            subtitle={t("cmp.trip.postureSubtitle")}
           >
             <CanvasDL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: "Investigation",
-                  v: investigation?.caseId ?? "—",
+                  k: t("cmp.label.investigation"),
+                  v: investigation?.caseId ?? EMPTY_VALUE,
                   mono: true,
                 },
-                { k: "Manifest", v: manifestId ?? "—", mono: true },
-                { k: "Takeovers", v: String(takeovers.length), mono: true },
                 {
-                  k: "Discrepancies",
+                  k: t("cmp.label.manifest"),
+                  v: manifestId ?? EMPTY_VALUE,
+                  mono: true,
+                },
+                {
+                  k: t("cmp.label.takeovers"),
+                  v: String(takeovers.length),
+                  mono: true,
+                },
+                {
+                  k: t("cmp.label.discrepancies"),
                   v: String(discrepancies.length),
                   mono: true,
                 },
                 {
-                  k: "Legal hold",
+                  k: t("cmp.label.legalHold"),
                   v: hold
                     ? statusPill(
-                        humanizeToken(hold.status),
+                        formatComplianceCode(t, hold.status),
                         legalHoldStatusTone(hold.status),
                       )
-                    : "None",
+                    : t("cmp.common.none"),
                 },
                 {
-                  k: "Report",
+                  k: t("cmp.label.report"),
                   v: report
                     ? statusPill(
-                        humanizeToken(report.status),
+                        formatComplianceCode(t, report.status),
                         reportStatusTone(report.status),
                       )
-                    : "None",
+                    : t("cmp.common.none"),
                 },
               ]}
             />
@@ -1185,62 +1405,65 @@ export function SandboxTripComplianceDetailPage() {
         <div style={autoGridStyle("320px")}>
           <CanvasCard
             theme={theme}
-            title="Linked investigation"
-            subtitle="case summary"
+            title={t("cmp.trip.linkedInvestigationTitle")}
+            subtitle={t("cmp.trip.linkedInvestigationSubtitle")}
           >
             <CanvasDL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: "Case",
+                  k: t("cmp.label.case"),
                   v: investigation?.caseId ? (
                     <InlineLink href={investigationHref(investigation.caseId)}>
                       {investigation.caseId}
                     </InlineLink>
                   ) : (
-                    "—"
+                    EMPTY_VALUE
                   ),
                 },
                 {
-                  k: "Status",
+                  k: t("common.status"),
                   v: investigation
                     ? statusPill(
-                        humanizeToken(investigation.status),
+                        formatComplianceCode(t, investigation.status),
                         investigationStatusTone(investigation.status),
                       )
-                    : "—",
+                    : EMPTY_VALUE,
                 },
                 {
-                  k: "Severity",
+                  k: t("cmp.label.severity"),
                   v: investigation
                     ? statusPill(
-                        humanizeToken(investigation.severity),
+                        formatComplianceCode(t, investigation.severity),
                         accidentSeverityTone(investigation.severity),
                       )
-                    : "—",
+                    : EMPTY_VALUE,
                 },
-                { k: "Occurred", v: compactDate(investigation?.occurredAt) },
                 {
-                  k: "Timeline",
+                  k: t("cmp.label.occurred"),
+                  v: compactDate(investigation?.occurredAt),
+                },
+                {
+                  k: t("cmp.label.timeline"),
                   v: investigation?.caseId ? (
                     <InlineLink
                       href={investigationTimelineHref(investigation.caseId)}
                     >
-                      Open synchronized facts
+                      {t("cmp.trip.openTimeline")}
                     </InlineLink>
                   ) : (
-                    "—"
+                    EMPTY_VALUE
                   ),
                 },
                 {
-                  k: "Manifest",
+                  k: t("cmp.label.manifest"),
                   v: manifestId ? (
                     <InlineLink href={manifestHref(manifestId)}>
                       {manifestId}
                     </InlineLink>
                   ) : (
-                    "—"
+                    EMPTY_VALUE
                   ),
                 },
               ]}
@@ -1249,25 +1472,25 @@ export function SandboxTripComplianceDetailPage() {
 
           <CanvasCard
             theme={theme}
-            title="Takeover & discrepancy detail"
-            subtitle="trip-linked correlation signals"
+            title={t("cmp.trip.correlationTitle")}
+            subtitle={t("cmp.trip.correlationSubtitle")}
             padding={0}
           >
             <CanvasTable
               theme={theme}
               columns={[
                 {
-                  h: "Record",
+                  h: t("cmp.label.record"),
                   w: 150,
                   r: (row: Record<string, unknown>) => row.record as ReactNode,
                 },
                 {
-                  h: "Status",
+                  h: t("common.status"),
                   w: 160,
                   r: (row: Record<string, unknown>) => row.status as ReactNode,
                 },
                 {
-                  h: "Notes",
+                  h: t("cmp.label.notes"),
                   w: 260,
                   r: (row: Record<string, unknown>) => row.notes as ReactNode,
                 },
@@ -1279,10 +1502,13 @@ export function SandboxTripComplianceDetailPage() {
                       {item.correlatedTakeoverCaseId}
                     </span>
                   ),
-                  status: statusPill(humanizeToken(item.matchedBy), "accent"),
+                  status: statusPill(
+                    formatComplianceCode(t, item.matchedBy),
+                    "accent",
+                  ),
                   notes: (
                     <span style={mutedStyle}>
-                      safety{" "}
+                      {t("cmp.trip.safetyTimestamp")}{" "}
                       {compactDate(item.sourceTimestamps.safetyOccurredAt)}
                     </span>
                   ),
@@ -1292,7 +1518,9 @@ export function SandboxTripComplianceDetailPage() {
                     <span style={monoStyle}>{item.discrepancyCaseId}</span>
                   ),
                   status: statusPill(
-                    `${item.discrepancyTypes.length} discrepancy`,
+                    t("cmp.trip.discrepancyCount", {
+                      count: item.discrepancyTypes.length,
+                    }),
                     "warn",
                   ),
                   notes: <span style={mutedStyle}>{item.summary}</span>,
@@ -1305,8 +1533,8 @@ export function SandboxTripComplianceDetailPage() {
         {relatedExports.length > 0 ? (
           <CanvasCard
             theme={theme}
-            title="Controlled export posture"
-            subtitle="linked queue items"
+            title={t("cmp.trip.exportsTitle")}
+            subtitle={t("cmp.trip.exportsSubtitle")}
           >
             <div style={cardStackStyle}>
               {relatedExports.map((item) => (
@@ -1325,7 +1553,7 @@ export function SandboxTripComplianceDetailPage() {
                     <span style={mutedStyle}>{item.recipientLabel}</span>
                   </div>
                   {statusPill(
-                    humanizeToken(item.status),
+                    formatComplianceCode(t, item.status),
                     exportStatusTone(item.status),
                   )}
                 </div>
@@ -1339,6 +1567,7 @@ export function SandboxTripComplianceDetailPage() {
 }
 
 export function SandboxInvestigationsPage() {
+  const { t } = useTranslation();
   const searchParams = useSearchParams();
   const takeoverCaseId = searchParams.get("takeoverCaseId");
   const discrepancyCaseId = searchParams.get("discrepancyCaseId");
@@ -1347,7 +1576,7 @@ export function SandboxInvestigationsPage() {
   const { data, loading, error, refresh } = useOverviewState();
 
   const bannerText = data
-    ? focusBannerText({
+    ? resolveFocusBannerText(t, {
         takeoverCaseId,
         discrepancyCaseId,
         takeoverReview: takeoverCaseId
@@ -1366,13 +1595,13 @@ export function SandboxInvestigationsPage() {
       active={view === "takeover" ? "takeover" : "accident"}
       title={
         view === "takeover"
-          ? "接管審查 · Takeover Review"
-          : "事故案件 · Accident Investigation Queue"
+          ? t("cmp.investigations.takeoverTitle")
+          : t("cmp.investigations.accidentTitle")
       }
       subtitle={
         view === "takeover"
-          ? "Three-source takeover correlation, discrepancy detection, and investigation deep-links emitted by backend authority."
-          : "Operational case queue with linked trip, manifest, discrepancy, and timeline entry points."
+          ? t("cmp.investigations.takeoverSubtitle")
+          : t("cmp.investigations.accidentSubtitle")
       }
       actions={
         <CanvasBtn
@@ -1380,12 +1609,18 @@ export function SandboxInvestigationsPage() {
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       scopeHints={[
-        { label: "Read investigations", scope: "sandbox.investigation.read" },
-        { label: "Read takeover triage", scope: "sandbox.compliance.read" },
+        {
+          label: t("cmp.investigations.scope.readInvestigations"),
+          scope: "sandbox.investigation.read",
+        },
+        {
+          label: t("cmp.investigations.scope.readTakeover"),
+          scope: "sandbox.compliance.read",
+        },
       ]}
     >
       {bannerText ? (
@@ -1393,7 +1628,7 @@ export function SandboxInvestigationsPage() {
           theme={theme}
           tone="accent"
           icon="info"
-          title="Resolved ROC deep-link"
+          title={t("cmp.investigations.banner.title")}
           body={bannerText}
         />
       ) : null}
@@ -1405,7 +1640,7 @@ export function SandboxInvestigationsPage() {
           data &&
           data.investigations.length === 0 &&
           data.takeoverReviews.length === 0
-            ? "No investigation or takeover records are currently available."
+            ? t("cmp.investigations.empty")
             : null
         }
       >
@@ -1413,15 +1648,15 @@ export function SandboxInvestigationsPage() {
           <div style={pageStackStyle}>
             <CanvasCard
               theme={theme}
-              title="Takeover review queue"
-              subtitle="backend-linked investigation targets"
+              title={t("cmp.investigations.takeoverQueueTitle")}
+              subtitle={t("cmp.investigations.takeoverQueueSubtitle")}
               padding={0}
             >
               <CanvasTable
                 theme={theme}
                 columns={[
                   {
-                    h: "Takeover",
+                    h: t("cmp.label.takeover"),
                     w: 160,
                     r: (row: CorrelatedTakeoverCase) => (
                       <div style={cardStackStyle}>
@@ -1435,36 +1670,41 @@ export function SandboxInvestigationsPage() {
                     ),
                   },
                   {
-                    h: "Vehicle / trip",
+                    h: t("cmp.label.vehicleTrip"),
                     w: 150,
                     r: (row: CorrelatedTakeoverCase) => (
                       <div style={cardStackStyle}>
                         <span style={monoStyle}>{row.vehicleId}</span>
                         <span style={mutedStyle}>
-                          {row.orderId ?? "No trip linked"}
+                          {row.orderId ?? t("cmp.common.noTripLinked")}
                         </span>
                       </div>
                     ),
                   },
                   {
-                    h: "Match mode",
+                    h: t("cmp.label.matchMode"),
                     w: 120,
                     r: (row: CorrelatedTakeoverCase) =>
-                      statusPill(humanizeToken(row.matchedBy), "accent"),
+                      statusPill(
+                        formatComplianceCode(t, row.matchedBy),
+                        "accent",
+                      ),
                   },
                   {
-                    h: "Discrepancies",
+                    h: t("cmp.label.discrepancies"),
                     w: 120,
                     r: (row: CorrelatedTakeoverCase) =>
                       row.discrepancyCaseIds.length > 0
                         ? statusPill(
-                            `${row.discrepancyCaseIds.length} open`,
+                            t("cmp.investigations.openCount", {
+                              count: row.discrepancyCaseIds.length,
+                            }),
                             "warn",
                           )
-                        : statusPill("Clear", "success"),
+                        : statusPill(t("cmp.code.clear"), "success"),
                   },
                   {
-                    h: "Investigation",
+                    h: t("cmp.label.investigation"),
                     w: 160,
                     r: (row: CorrelatedTakeoverCase) =>
                       row.investigationLink ? (
@@ -1472,7 +1712,9 @@ export function SandboxInvestigationsPage() {
                           {row.investigationLink.resourceId}
                         </InlineLink>
                       ) : (
-                        <span style={mutedStyle}>Unlinked</span>
+                        <span style={mutedStyle}>
+                          {t("cmp.common.unlinked")}
+                        </span>
                       ),
                   },
                 ]}
@@ -1482,15 +1724,15 @@ export function SandboxInvestigationsPage() {
 
             <CanvasCard
               theme={theme}
-              title="Discrepancy queue"
-              subtitle="timestamp, trip, and correlation mismatches"
+              title={t("cmp.investigations.discrepancyQueueTitle")}
+              subtitle={t("cmp.investigations.discrepancyQueueSubtitle")}
               padding={0}
             >
               <CanvasTable
                 theme={theme}
                 columns={[
                   {
-                    h: "Case",
+                    h: t("cmp.label.case"),
                     w: 160,
                     r: (row: EvidenceDiscrepancyCase) => (
                       <div style={cardStackStyle}>
@@ -1500,18 +1742,22 @@ export function SandboxInvestigationsPage() {
                     ),
                   },
                   {
-                    h: "Types",
+                    h: t("cmp.label.types"),
                     w: 180,
                     r: (row: EvidenceDiscrepancyCase) => (
                       <div style={evidenceChipRowStyle}>
                         {row.discrepancyTypes.map((item) =>
-                          statusPill(humanizeToken(item), "warn", false),
+                          statusPill(
+                            formatComplianceCode(t, item),
+                            "warn",
+                            false,
+                          ),
                         )}
                       </div>
                     ),
                   },
                   {
-                    h: "Takeover",
+                    h: t("cmp.label.takeover"),
                     w: 160,
                     r: (row: EvidenceDiscrepancyCase) =>
                       findTakeoverReview(
@@ -1522,11 +1768,13 @@ export function SandboxInvestigationsPage() {
                           {row.correlatedTakeoverCaseId}
                         </span>
                       ) : (
-                        <span style={mutedStyle}>Missing review</span>
+                        <span style={mutedStyle}>
+                          {t("cmp.common.missingReview")}
+                        </span>
                       ),
                   },
                   {
-                    h: "Investigation",
+                    h: t("cmp.label.investigation"),
                     w: 160,
                     r: (row: EvidenceDiscrepancyCase) =>
                       row.investigationLink ? (
@@ -1534,7 +1782,9 @@ export function SandboxInvestigationsPage() {
                           {row.investigationLink.resourceId}
                         </InlineLink>
                       ) : (
-                        <span style={mutedStyle}>Unlinked</span>
+                        <span style={mutedStyle}>
+                          {t("cmp.common.unlinked")}
+                        </span>
                       ),
                   },
                 ]}
@@ -1546,45 +1796,47 @@ export function SandboxInvestigationsPage() {
           <div style={pageStackStyle}>
             <CanvasCard
               theme={theme}
-              title="Investigation queue"
-              subtitle="case detail, timeline, trip, and manifest entry points"
+              title={t("cmp.investigations.queueTitle")}
+              subtitle={t("cmp.investigations.queueSubtitle")}
               padding={0}
             >
               <CanvasTable
                 theme={theme}
                 columns={[
                   {
-                    h: "Case",
+                    h: t("cmp.label.case"),
                     w: 170,
                     r: (row: AccidentCaseRecord) => (
                       <div style={cardStackStyle}>
                         <InlineLink href={investigationHref(row.caseId)}>
                           <span style={monoStyle}>{row.caseId}</span>
                         </InlineLink>
-                        <span style={mutedStyle}>{row.summary ?? "—"}</span>
+                        <span style={mutedStyle}>
+                          {row.summary ?? EMPTY_VALUE}
+                        </span>
                       </div>
                     ),
                   },
                   {
-                    h: "Severity",
+                    h: t("cmp.label.severity"),
                     w: 110,
                     r: (row: AccidentCaseRecord) =>
                       statusPill(
-                        humanizeToken(row.severity),
+                        formatComplianceCode(t, row.severity),
                         accidentSeverityTone(row.severity),
                       ),
                   },
                   {
-                    h: "Status",
+                    h: t("common.status"),
                     w: 140,
                     r: (row: AccidentCaseRecord) =>
                       statusPill(
-                        humanizeToken(row.status),
+                        formatComplianceCode(t, row.status),
                         investigationStatusTone(row.status),
                       ),
                   },
                   {
-                    h: "Trip / manifest",
+                    h: t("cmp.label.tripManifest"),
                     w: 180,
                     r: (row: AccidentCaseRecord) => (
                       <div style={cardStackStyle}>
@@ -1593,7 +1845,9 @@ export function SandboxInvestigationsPage() {
                             {row.orderId}
                           </InlineLink>
                         ) : (
-                          <span style={mutedStyle}>No trip linked</span>
+                          <span style={mutedStyle}>
+                            {t("cmp.common.noTripLinked")}
+                          </span>
                         )}
                         {row.evidenceManifestId ? (
                           <InlineLink
@@ -1602,17 +1856,19 @@ export function SandboxInvestigationsPage() {
                             {row.evidenceManifestId}
                           </InlineLink>
                         ) : (
-                          <span style={mutedStyle}>No manifest linked</span>
+                          <span style={mutedStyle}>
+                            {t("cmp.common.noManifestLinked")}
+                          </span>
                         )}
                       </div>
                     ),
                   },
                   {
-                    h: "Timeline",
+                    h: t("cmp.label.timeline"),
                     w: 140,
                     r: (row: AccidentCaseRecord) => (
                       <InlineLink href={investigationTimelineHref(row.caseId)}>
-                        Open facts
+                        {t("cmp.investigations.openFacts")}
                       </InlineLink>
                     ),
                   },
@@ -1624,29 +1880,29 @@ export function SandboxInvestigationsPage() {
             <div style={autoGridStyle("360px")}>
               <CanvasCard
                 theme={theme}
-                title="Discrepancy-linked cases"
-                subtitle="open evidence mismatch signals"
+                title={t("cmp.investigations.linkedCasesTitle")}
+                subtitle={t("cmp.investigations.linkedCasesSubtitle")}
                 padding={0}
               >
                 <CanvasTable
                   theme={theme}
                   columns={[
                     {
-                      h: "Discrepancy",
+                      h: t("cmp.label.discrepancy"),
                       w: 160,
                       r: (row: EvidenceDiscrepancyCase) => (
                         <span style={monoStyle}>{row.discrepancyCaseId}</span>
                       ),
                     },
                     {
-                      h: "Summary",
+                      h: t("cmp.label.summary"),
                       w: 280,
                       r: (row: EvidenceDiscrepancyCase) => (
                         <span style={mutedStyle}>{row.summary}</span>
                       ),
                     },
                     {
-                      h: "Investigation",
+                      h: t("cmp.label.investigation"),
                       w: 160,
                       r: (row: EvidenceDiscrepancyCase) => {
                         const linked = row.investigationLink
@@ -1665,7 +1921,9 @@ export function SandboxInvestigationsPage() {
                             {linked}
                           </InlineLink>
                         ) : (
-                          <span style={mutedStyle}>Unlinked</span>
+                          <span style={mutedStyle}>
+                            {t("cmp.common.unlinked")}
+                          </span>
                         );
                       },
                     },
@@ -1678,24 +1936,24 @@ export function SandboxInvestigationsPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Queue health"
-                subtitle="what needs human attention first"
+                title={t("cmp.investigations.healthTitle")}
+                subtitle={t("cmp.investigations.healthSubtitle")}
               >
                 <div style={cardStackStyle}>
                   <div style={mutedStyle}>
-                    Open investigations:{" "}
+                    {t("cmp.investigations.health.openInvestigations")}{" "}
                     {data?.investigations.filter(
                       (item) => item.status !== "closed",
                     ).length ?? 0}
                   </div>
                   <div style={mutedStyle}>
-                    Takeovers with discrepancies:{" "}
+                    {t("cmp.investigations.health.takeoversWithDiscrepancies")}{" "}
                     {data?.takeoverReviews.filter(
                       (item) => item.discrepancyCaseIds.length > 0,
                     ).length ?? 0}
                   </div>
                   <div style={mutedStyle}>
-                    Cases awaiting initial notification:{" "}
+                    {t("cmp.investigations.health.awaitingNotification")}{" "}
                     {data?.investigations.filter(
                       (item) => item.status === "evidence_frozen",
                     ).length ?? 0}
@@ -1711,21 +1969,26 @@ export function SandboxInvestigationsPage() {
 }
 
 export function SandboxInvestigationDetailPage() {
+  const { t } = useTranslation();
   const caseId = useCurrentParam("caseId");
   const { data, loading, error, refresh } = useInvestigationState(caseId);
 
   return (
     <ComplianceConsoleFrame
       active="accident"
-      title={`事故案件 · ${caseId || "Investigation detail"}`}
-      subtitle="Backend case record is the source of truth for linked manifest, report, discrepancy, and takeover context."
+      title={
+        caseId
+          ? t("cmp.caseDetail.titleWithId", { caseId })
+          : t("cmp.caseDetail.titleFallback")
+      }
+      subtitle={t("cmp.caseDetail.subtitle")}
       actions={
         <CanvasBtn
           theme={theme}
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       context={{
@@ -1738,12 +2001,15 @@ export function SandboxInvestigationDetailPage() {
       }}
       scopeHints={[
         {
-          label: "Read investigation detail",
+          label: t("cmp.caseDetail.scope.readDetail"),
           scope: "sandbox.investigation.read",
         },
-        { label: "Preview linked evidence", scope: "sandbox.evidence.preview" },
         {
-          label: "Review regulator filing state",
+          label: t("cmp.caseDetail.scope.previewEvidence"),
+          scope: "sandbox.evidence.preview",
+        },
+        {
+          label: t("cmp.caseDetail.scope.reviewFiling"),
           scope: "sandbox.regulatory_report.review",
         },
       ]}
@@ -1752,47 +2018,57 @@ export function SandboxInvestigationDetailPage() {
         {data ? (
           <>
             <div style={autoGridStyle("320px")}>
-              <CanvasCard theme={theme} title="Case summary">
+              <CanvasCard
+                theme={theme}
+                title={t("cmp.caseDetail.summaryTitle")}
+              >
                 <CanvasDL
                   theme={theme}
                   cols={2}
                   items={[
-                    { k: "Case", v: data.investigation.caseId, mono: true },
                     {
-                      k: "Status",
+                      k: t("cmp.label.case"),
+                      v: data.investigation.caseId,
+                      mono: true,
+                    },
+                    {
+                      k: t("common.status"),
                       v: statusPill(
-                        humanizeToken(data.investigation.status),
+                        formatComplianceCode(t, data.investigation.status),
                         investigationStatusTone(data.investigation.status),
                       ),
                     },
                     {
-                      k: "Severity",
+                      k: t("cmp.label.severity"),
                       v: statusPill(
-                        humanizeToken(data.investigation.severity),
+                        formatComplianceCode(t, data.investigation.severity),
                         accidentSeverityTone(data.investigation.severity),
                       ),
                     },
                     {
-                      k: "Occurred",
+                      k: t("cmp.label.occurred"),
                       v: compactDate(data.investigation.occurredAt),
                     },
                     {
-                      k: "Reported",
+                      k: t("cmp.caseDetail.reported"),
                       v: compactDate(data.investigation.reportedAt),
                     },
-                    { k: "Reported by", v: data.investigation.reportedBy },
                     {
-                      k: "Trip",
-                      v: data.investigation.orderId ?? "—",
+                      k: t("cmp.caseDetail.reportedBy"),
+                      v: data.investigation.reportedBy,
+                    },
+                    {
+                      k: t("cmp.label.trip"),
+                      v: data.investigation.orderId ?? EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Manifest",
-                      v: data.investigation.evidenceManifestId ?? "—",
+                      k: t("cmp.label.manifest"),
+                      v: data.investigation.evidenceManifestId ?? EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Report",
+                      k: t("cmp.label.report"),
                       v:
                         data.reports.find(
                           (item) =>
@@ -1800,15 +2076,15 @@ export function SandboxInvestigationDetailPage() {
                             data.investigation.regulatoryReportId,
                         )?.reportId ??
                         data.investigation.regulatoryReportId ??
-                        "—",
+                        EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Linked discrepancy IDs",
+                      k: t("cmp.caseDetail.discrepancyIds"),
                       v:
                         data.investigation.discrepancyCaseIds.length > 0
                           ? data.investigation.discrepancyCaseIds.join(", ")
-                          : "None",
+                          : t("cmp.common.none"),
                     },
                   ]}
                 />
@@ -1816,31 +2092,35 @@ export function SandboxInvestigationDetailPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Linked actions"
-                subtitle="same-app navigation"
+                title={t("cmp.caseDetail.actionsTitle")}
+                subtitle={t("cmp.caseDetail.actionsSubtitle")}
               >
                 <div style={cardStackStyle}>
                   <InlineLink
                     href={investigationTimelineHref(data.investigation.caseId)}
                   >
-                    Open synchronized timeline
+                    {t("cmp.caseDetail.openTimeline")}
                   </InlineLink>
                   {data.manifest ? (
                     <InlineLink href={manifestHref(data.manifest.manifestId)}>
-                      Open evidence manifest
+                      {t("cmp.caseDetail.openManifest")}
                     </InlineLink>
                   ) : (
-                    <span style={mutedStyle}>Manifest not available</span>
+                    <span style={mutedStyle}>
+                      {t("cmp.caseDetail.manifestUnavailable")}
+                    </span>
                   )}
                   {data.investigation.orderId ? (
                     <InlineLink href={tripHref(data.investigation.orderId)}>
-                      Open trip compliance detail
+                      {t("cmp.caseDetail.openTrip")}
                     </InlineLink>
                   ) : (
-                    <span style={mutedStyle}>Trip deep-link unavailable</span>
+                    <span style={mutedStyle}>
+                      {t("cmp.caseDetail.tripUnavailable")}
+                    </span>
                   )}
                   <InlineLink href="/platform-admin/regulatory-reports">
-                    Open regulatory reports queue
+                    {t("cmp.caseDetail.openReports")}
                   </InlineLink>
                 </div>
               </CanvasCard>
@@ -1851,7 +2131,7 @@ export function SandboxInvestigationDetailPage() {
                 theme={theme}
                 tone="accent"
                 icon="info"
-                title="Case summary note"
+                title={t("cmp.caseDetail.summaryNoteTitle")}
                 body={data.investigation.summary}
               />
             ) : null}
@@ -1859,8 +2139,8 @@ export function SandboxInvestigationDetailPage() {
             <div style={autoGridStyle("360px")}>
               <CanvasCard
                 theme={theme}
-                title="Timeline preview"
-                subtitle="most recent synchronized facts"
+                title={t("cmp.caseDetail.timelineTitle")}
+                subtitle={t("cmp.caseDetail.timelineSubtitle")}
               >
                 <div style={cardStackStyle}>
                   {data.timeline.slice(0, 5).map((entry) => (
@@ -1890,19 +2170,19 @@ export function SandboxInvestigationDetailPage() {
                       </div>
                       <div style={evidenceChipRowStyle}>
                         {statusPill(
-                          humanizeToken(entry.confidence),
+                          formatComplianceCode(t, entry.confidence),
                           confidenceTone(entry.confidence),
                           false,
                         )}
                         {statusPill(
-                          timelineSourceLabel(entry),
+                          timelineSourceLabel(t, entry),
                           timelineSourceTone(entry),
                           false,
                         )}
                       </div>
                       <div style={mutedStyle}>
                         {entry.value === null
-                          ? "No value recorded"
+                          ? t("cmp.common.noValueRecorded")
                           : String(entry.value)}
                       </div>
                     </div>
@@ -1912,40 +2192,41 @@ export function SandboxInvestigationDetailPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Linked evidence posture"
-                subtitle="manifest and filing state"
+                title={t("cmp.caseDetail.evidenceTitle")}
+                subtitle={t("cmp.caseDetail.evidenceSubtitle")}
               >
                 <CanvasDL
                   theme={theme}
                   cols={1}
                   items={[
                     {
-                      k: "Manifest custody",
+                      k: t("cmp.caseDetail.manifestCustody"),
                       v: data.manifest
                         ? statusPill(
-                            humanizeToken(data.manifest.custodyState),
+                            formatComplianceCode(t, data.manifest.custodyState),
                             custodyStateTone(data.manifest.custodyState),
                           )
-                        : "No manifest linked",
+                        : t("cmp.common.noManifestLinked"),
                     },
                     {
-                      k: "Legal hold",
+                      k: t("cmp.label.legalHold"),
                       v: data.manifest?.legalHoldActive
-                        ? statusPill("Active", "warn")
-                        : "No active hold",
+                        ? statusPill(t("cmp.code.active"), "warn")
+                        : t("cmp.caseDetail.noActiveHold"),
                     },
                     {
-                      k: "Known gaps",
+                      k: t("cmp.caseDetail.knownGaps"),
                       v: data.manifest
                         ? String(data.manifest.knownGapCount)
-                        : "—",
+                        : EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Regulatory report",
+                      k: t("cmp.caseDetail.regulatoryReport"),
                       v: reportForCase(data.reports, data.investigation.caseId)
                         ? statusPill(
-                            humanizeToken(
+                            formatComplianceCode(
+                              t,
                               reportForCase(
                                 data.reports,
                                 data.investigation.caseId,
@@ -1958,7 +2239,7 @@ export function SandboxInvestigationDetailPage() {
                               )?.status ?? "draft",
                             ),
                           )
-                        : "None",
+                        : t("cmp.common.none"),
                     },
                   ]}
                 />
@@ -1972,6 +2253,7 @@ export function SandboxInvestigationDetailPage() {
 }
 
 export function SandboxInvestigationTimelinePage() {
+  const { t } = useTranslation();
   const caseId = useCurrentParam("caseId");
   const { data, loading, error, refresh } = useInvestigationState(caseId);
 
@@ -1986,15 +2268,19 @@ export function SandboxInvestigationTimelinePage() {
   return (
     <ComplianceConsoleFrame
       active="timeline"
-      title={`同步時間軸 · ${caseId || "Timeline"}`}
-      subtitle="Fact-by-fact synchronized evidence timeline with explicit confidence, source, derivation, and discrepancy tags."
+      title={
+        caseId
+          ? t("cmp.timeline.titleWithId", { caseId })
+          : t("cmp.timeline.titleFallback")
+      }
+      subtitle={t("cmp.timeline.subtitle")}
       actions={
         <CanvasBtn
           theme={theme}
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       context={{
@@ -2006,9 +2292,12 @@ export function SandboxInvestigationTimelinePage() {
           null,
       }}
       scopeHints={[
-        { label: "Read timeline facts", scope: "sandbox.investigation.read" },
         {
-          label: "Inspect evidence lineage",
+          label: t("cmp.timeline.scope.readFacts"),
+          scope: "sandbox.investigation.read",
+        },
+        {
+          label: t("cmp.timeline.scope.inspectLineage"),
           scope: "sandbox.evidence.preview",
         },
       ]}
@@ -2018,36 +2307,47 @@ export function SandboxInvestigationTimelinePage() {
         error={error}
         empty={
           data && sortedTimeline.length === 0
-            ? `No synchronized timeline facts were found for ${caseId}.`
+            ? t("cmp.timeline.empty", { caseId })
             : null
         }
       >
         {data ? (
           <>
             <div style={autoGridStyle("180px")}>
-              <CanvasCard theme={theme} title="Facts">
+              <CanvasCard
+                theme={theme}
+                title={t("cmp.timeline.card.factsTitle")}
+              >
                 <div style={{ fontSize: 28, fontWeight: 700 }}>
                   {sortedTimeline.length}
                 </div>
-                <div style={mutedStyle}>Synchronized entries in order.</div>
+                <div style={mutedStyle}>{t("cmp.timeline.card.factsBody")}</div>
               </CanvasCard>
-              <CanvasCard theme={theme} title="Discrepancy tags">
+              <CanvasCard
+                theme={theme}
+                title={t("cmp.timeline.card.discrepanciesTitle")}
+              >
                 <div style={{ fontSize: 28, fontWeight: 700 }}>
                   {sortedTimeline.reduce(
                     (sum, item) => sum + item.discrepancyCaseIds.length,
                     0,
                   )}
                 </div>
-                <div style={mutedStyle}>Cross-source mismatch references.</div>
+                <div style={mutedStyle}>
+                  {t("cmp.timeline.card.discrepanciesBody")}
+                </div>
               </CanvasCard>
-              <CanvasCard theme={theme} title="External docs">
+              <CanvasCard
+                theme={theme}
+                title={t("cmp.timeline.card.docsTitle")}
+              >
                 <div style={{ fontSize: 28, fontWeight: 700 }}>
                   {sortedTimeline.reduce(
                     (sum, item) => sum + item.externalDocumentIds.length,
                     0,
                   )}
                 </div>
-                <div style={mutedStyle}>Linked document references.</div>
+                <div style={mutedStyle}>{t("cmp.timeline.card.docsBody")}</div>
               </CanvasCard>
             </div>
 
@@ -2070,11 +2370,11 @@ export function SandboxInvestigationTimelinePage() {
                     </div>
                     <div style={evidenceChipRowStyle}>
                       {statusPill(
-                        humanizeToken(entry.confidence),
+                        formatComplianceCode(t, entry.confidence),
                         confidenceTone(entry.confidence),
                       )}
                       {statusPill(
-                        timelineSourceLabel(entry),
+                        timelineSourceLabel(t, entry),
                         timelineSourceTone(entry),
                       )}
                     </div>
@@ -2082,31 +2382,33 @@ export function SandboxInvestigationTimelinePage() {
 
                   <div style={{ fontSize: 13, color: theme.text }}>
                     {entry.value === null
-                      ? "No value recorded"
+                      ? t("cmp.common.noValueRecorded")
                       : String(entry.value)}
                   </div>
 
                   <div style={autoGridStyle("220px")}>
                     <CanvasCard
                       theme={theme}
-                      title="Lineage"
-                      subtitle="fact derivation"
+                      title={t("cmp.timeline.lineageTitle")}
+                      subtitle={t("cmp.timeline.lineageSubtitle")}
                     >
                       <CanvasDL
                         theme={theme}
                         cols={1}
                         items={[
                           {
-                            k: "Source ref",
-                            v: entry.sourceRef ?? "—",
+                            k: t("cmp.timeline.sourceRef"),
+                            v: entry.sourceRef ?? EMPTY_VALUE,
                             mono: true,
                           },
                           {
-                            k: "Derivation",
-                            v: entry.derivationRule ?? "Direct source fact",
+                            k: t("cmp.timeline.derivation"),
+                            v:
+                              entry.derivationRule ??
+                              t("cmp.timeline.directFact"),
                           },
                           {
-                            k: "Fact count",
+                            k: t("cmp.timeline.factCount"),
                             v: String(entry.facts.length),
                             mono: true,
                           },
@@ -2116,8 +2418,8 @@ export function SandboxInvestigationTimelinePage() {
 
                     <CanvasCard
                       theme={theme}
-                      title="Discrepancies & docs"
-                      subtitle="linked references"
+                      title={t("cmp.timeline.linksTitle")}
+                      subtitle={t("cmp.timeline.linksSubtitle")}
                     >
                       <div style={cardStackStyle}>
                         <div style={evidenceChipRowStyle}>
@@ -2127,7 +2429,7 @@ export function SandboxInvestigationTimelinePage() {
                               )
                             : [
                                 <span key="clear" style={mutedStyle}>
-                                  No discrepancy tags
+                                  {t("cmp.timeline.noDiscrepancyTags")}
                                 </span>,
                               ]}
                         </div>
@@ -2138,7 +2440,7 @@ export function SandboxInvestigationTimelinePage() {
                               )
                             : [
                                 <span key="docs" style={mutedStyle}>
-                                  No external documents
+                                  {t("cmp.timeline.noExternalDocuments")}
                                 </span>,
                               ]}
                         </div>
@@ -2156,21 +2458,26 @@ export function SandboxInvestigationTimelinePage() {
 }
 
 export function SandboxEvidenceManifestPage() {
+  const { t } = useTranslation();
   const manifestId = useCurrentParam("manifestId");
   const { data, loading, error, refresh } = useManifestState(manifestId);
 
   return (
     <ComplianceConsoleFrame
       active="manifest"
-      title={`證據清單 · ${manifestId || "Evidence manifest"}`}
-      subtitle="Append-only manifest view with source provenance, checksum references, custody state, legal-hold posture, and known gaps."
+      title={
+        manifestId
+          ? t("cmp.manifest.titleWithId", { manifestId })
+          : t("cmp.manifest.titleFallback")
+      }
+      subtitle={t("cmp.manifest.subtitle")}
       actions={
         <CanvasBtn
           theme={theme}
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       context={{
@@ -2179,9 +2486,12 @@ export function SandboxEvidenceManifestPage() {
         manifestId: data?.manifestId ?? manifestId,
       }}
       scopeHints={[
-        { label: "Read evidence manifest", scope: "sandbox.evidence.preview" },
         {
-          label: "Request export from this manifest",
+          label: t("cmp.manifest.scope.readManifest"),
+          scope: "sandbox.evidence.preview",
+        },
+        {
+          label: t("cmp.manifest.scope.requestExport"),
           scope: "sandbox.evidence.export.request",
         },
       ]}
@@ -2194,8 +2504,8 @@ export function SandboxEvidenceManifestPage() {
                 theme={theme}
                 tone="warn"
                 icon="lock"
-                title="Legal hold active"
-                body="This manifest is currently frozen under legal hold. Retention deletion does not apply while the hold is active."
+                title={t("cmp.manifest.holdBannerTitle")}
+                body={t("cmp.manifest.holdBannerBody")}
               />
             ) : null}
             {data.knownGapCount > 0 ? (
@@ -2203,53 +2513,82 @@ export function SandboxEvidenceManifestPage() {
                 theme={theme}
                 tone="info"
                 icon="info"
-                title="Known evidence gaps"
-                body={`${data.knownGapCount} item(s) were captured through manual-entry fallbacks and should be treated as explicit upstream gaps.`}
+                title={t("cmp.manifest.gapBannerTitle")}
+                body={t("cmp.manifest.gapBannerBody", {
+                  count: data.knownGapCount,
+                })}
               />
             ) : null}
 
             <div style={autoGridStyle("320px")}>
-              <CanvasCard theme={theme} title="Manifest posture">
+              <CanvasCard theme={theme} title={t("cmp.manifest.postureTitle")}>
                 <CanvasDL
                   theme={theme}
                   cols={2}
                   items={[
-                    { k: "Manifest", v: data.manifestId, mono: true },
-                    { k: "Vehicle", v: data.vehicleId, mono: true },
-                    { k: "Case", v: data.caseId ?? "—", mono: true },
                     {
-                      k: "Custody",
+                      k: t("cmp.label.manifest"),
+                      v: data.manifestId,
+                      mono: true,
+                    },
+                    {
+                      k: t("cmp.label.vehicle"),
+                      v: data.vehicleId,
+                      mono: true,
+                    },
+                    {
+                      k: t("cmp.label.case"),
+                      v: data.caseId ?? EMPTY_VALUE,
+                      mono: true,
+                    },
+                    {
+                      k: t("cmp.label.custody"),
                       v: statusPill(
-                        humanizeToken(data.custodyState),
+                        formatComplianceCode(t, data.custodyState),
                         custodyStateTone(data.custodyState),
                       ),
                     },
-                    { k: "Window start", v: compactDate(data.windowStart) },
-                    { k: "Window end", v: compactDate(data.windowEnd) },
-                    { k: "Items", v: String(data.itemCount), mono: true },
-                    { k: "Created", v: compactDate(data.createdAt) },
+                    {
+                      k: t("cmp.manifest.windowStart"),
+                      v: compactDate(data.windowStart),
+                    },
+                    {
+                      k: t("cmp.manifest.windowEnd"),
+                      v: compactDate(data.windowEnd),
+                    },
+                    {
+                      k: t("cmp.label.items"),
+                      v: String(data.itemCount),
+                      mono: true,
+                    },
+                    {
+                      k: t("cmp.manifest.created"),
+                      v: compactDate(data.createdAt),
+                    },
                   ]}
                 />
               </CanvasCard>
 
               <CanvasCard
                 theme={theme}
-                title="Linked navigation"
-                subtitle="same-app routes"
+                title={t("cmp.manifest.navTitle")}
+                subtitle={t("cmp.manifest.navSubtitle")}
               >
                 <div style={cardStackStyle}>
                   {data.caseId ? (
                     <InlineLink href={investigationHref(data.caseId)}>
-                      Open linked investigation
+                      {t("cmp.manifest.openInvestigation")}
                     </InlineLink>
                   ) : (
-                    <span style={mutedStyle}>No linked case</span>
+                    <span style={mutedStyle}>
+                      {t("cmp.manifest.noLinkedCase")}
+                    </span>
                   )}
                   <InlineLink href="/platform-admin/evidence/legal-holds">
-                    Open legal-hold queue
+                    {t("cmp.manifest.openLegalHolds")}
                   </InlineLink>
                   <InlineLink href="/platform-admin/evidence/exports">
-                    Open controlled export queue
+                    {t("cmp.manifest.openExports")}
                   </InlineLink>
                 </div>
               </CanvasCard>
@@ -2257,15 +2596,15 @@ export function SandboxEvidenceManifestPage() {
 
             <CanvasCard
               theme={theme}
-              title="Manifest items"
-              subtitle="source, checksum, and custody per artifact"
+              title={t("cmp.manifest.itemsTitle")}
+              subtitle={t("cmp.manifest.itemsSubtitle")}
               padding={0}
             >
               <CanvasTable
                 theme={theme}
                 columns={[
                   {
-                    h: "Artifact",
+                    h: t("cmp.label.artifact"),
                     w: 220,
                     r: (row: SandboxEvidenceManifestView["items"][number]) => (
                       <div style={cardStackStyle}>
@@ -2275,38 +2614,38 @@ export function SandboxEvidenceManifestPage() {
                     ),
                   },
                   {
-                    h: "Source",
+                    h: t("cmp.label.source"),
                     w: 180,
                     r: (row: SandboxEvidenceManifestView["items"][number]) =>
                       statusPill(
-                        sourceLabel(row.source.sourceSystem),
+                        formatComplianceSource(t, row.source.sourceSystem),
                         sourceTone(row.source.sourceSystem),
                       ),
                   },
                   {
-                    h: "Custody",
+                    h: t("cmp.label.custody"),
                     w: 120,
                     r: (row: SandboxEvidenceManifestView["items"][number]) =>
                       statusPill(
-                        humanizeToken(row.custodyState),
+                        formatComplianceCode(t, row.custodyState),
                         custodyStateTone(row.custodyState),
                       ),
                   },
                   {
-                    h: "Captured",
+                    h: t("cmp.manifest.captured"),
                     w: 170,
                     r: (row: SandboxEvidenceManifestView["items"][number]) =>
                       compactDate(row.capturedAt),
                   },
                   {
-                    h: "Checksum",
+                    h: t("cmp.manifest.checksum"),
                     w: 120,
                     mono: true,
                     r: (row: SandboxEvidenceManifestView["items"][number]) =>
                       truncateHash(row.checksumSha256),
                   },
                   {
-                    h: "Retention",
+                    h: t("cmp.manifest.retention"),
                     w: 170,
                     r: (row: SandboxEvidenceManifestView["items"][number]) =>
                       compactDate(row.retentionUntil),
@@ -2323,13 +2662,14 @@ export function SandboxEvidenceManifestPage() {
 }
 
 export function SandboxEvidenceExportsPage() {
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
   const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
   const { data, loading, error, refresh } = useOverviewState();
   const [form, setForm] = useState<ExportFormState>({
     manifestId: "",
-    recipientLabel: "Taipei City Transportation Department",
+    recipientLabel: t("cmp.exports.defaultRecipient"),
     recipientScope: "regulator.viewer.taipei_city",
     reason: "",
   });
@@ -2374,7 +2714,7 @@ export function SandboxEvidenceExportsPage() {
 
   async function handleRequestExport() {
     if (!canRequestExportScope) {
-      setActionError(missingScopeMessage(SCOPE_CONTROLLED_EXPORT_REQUEST));
+      setActionError(missingScopeMessage(t, SCOPE_CONTROLLED_EXPORT_REQUEST));
       return;
     }
 
@@ -2395,7 +2735,7 @@ export function SandboxEvidenceExportsPage() {
         reason: form.reason.trim(),
       });
       setMessage(
-        `Controlled export request created for ${selectedManifestId}.`,
+        t("cmp.exports.requestSuccess", { manifestId: selectedManifestId }),
       );
       setForm((current) => ({ ...current, reason: "" }));
       setStepUpConfirmed(false);
@@ -2413,7 +2753,7 @@ export function SandboxEvidenceExportsPage() {
 
   async function handleApproveExport(exportRequestId: string) {
     if (!canApproveExportScope) {
-      setActionError(missingScopeMessage(SCOPE_CONTROLLED_EXPORT_APPROVE));
+      setActionError(missingScopeMessage(t, SCOPE_CONTROLLED_EXPORT_APPROVE));
       return;
     }
 
@@ -2424,7 +2764,7 @@ export function SandboxEvidenceExportsPage() {
       await client.approveSandboxControlledExport(exportRequestId, {
         approvalNote: "Approved through platform-admin compliance console.",
       });
-      setMessage(`Controlled export ${exportRequestId} approved.`);
+      setMessage(t("cmp.exports.approveSuccess", { exportRequestId }));
       await refresh();
     } catch (approveError: unknown) {
       setActionError(
@@ -2447,26 +2787,26 @@ export function SandboxEvidenceExportsPage() {
   return (
     <ComplianceConsoleFrame
       active="export"
-      title="受控匯出 · Controlled Export"
-      subtitle="Controlled evidence bundle request and approval queue with reason capture, step-up confirmation, and self-approval blocking."
+      title={t("cmp.exports.title")}
+      subtitle={t("cmp.exports.subtitle")}
       actions={
         <CanvasBtn
           theme={theme}
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       scopeHints={[
         {
-          label: "Request controlled export",
+          label: t("cmp.exports.scope.request"),
           scope: SCOPE_CONTROLLED_EXPORT_REQUEST,
         },
         {
-          label: "Approve controlled export",
+          label: t("cmp.exports.scope.approve"),
           scope: SCOPE_CONTROLLED_EXPORT_APPROVE,
-          blocked: "Requester and approver must be different actors.",
+          blocked: t("cmp.exports.scope.approveBlocked"),
         },
       ]}
     >
@@ -2477,15 +2817,15 @@ export function SandboxEvidenceExportsPage() {
               theme={theme}
               tone="warn"
               icon="lock"
-              title="Step-up required before export request"
-              body="Controlled export requires a non-empty reason, explicit recipient scope, and an additional operator confirmation before the request can be submitted."
+              title={t("cmp.exports.stepUpTitle")}
+              body={t("cmp.exports.stepUpBody")}
             />
             {message ? (
               <CanvasBanner
                 theme={theme}
                 tone="success"
                 icon="check"
-                title="Export workflow updated"
+                title={t("cmp.exports.updatedTitle")}
                 body={message}
               />
             ) : null}
@@ -2494,7 +2834,7 @@ export function SandboxEvidenceExportsPage() {
                 theme={theme}
                 tone="danger"
                 icon="warn"
-                title="Export action failed"
+                title={t("cmp.exports.failedTitle")}
                 body={actionError}
               />
             ) : null}
@@ -2503,13 +2843,13 @@ export function SandboxEvidenceExportsPage() {
               {canRequestExportScope ? (
                 <CanvasCard
                   theme={theme}
-                  title="Request controlled export"
-                  subtitle="reason + step-up gate"
+                  title={t("cmp.exports.requestCardTitle")}
+                  subtitle={t("cmp.exports.requestCardSubtitle")}
                 >
                   <div style={fieldGridStyle}>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="export-manifest">
-                        Manifest
+                        {t("cmp.label.manifest")}
                       </label>
                       <select
                         id="export-manifest"
@@ -2523,7 +2863,9 @@ export function SandboxEvidenceExportsPage() {
                         }
                       >
                         {manifestOptions.length === 0 ? (
-                          <option value="">No manifests available</option>
+                          <option value="">
+                            {t("cmp.exports.noManifests")}
+                          </option>
                         ) : null}
                         {manifestOptions.map((item) => (
                           <option key={item.manifestId} value={item.manifestId}>
@@ -2534,7 +2876,7 @@ export function SandboxEvidenceExportsPage() {
                     </div>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="export-recipient">
-                        Recipient label
+                        {t("cmp.exports.recipientLabel")}
                       </label>
                       <input
                         id="export-recipient"
@@ -2550,7 +2892,7 @@ export function SandboxEvidenceExportsPage() {
                     </div>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="export-scope">
-                        Recipient scope
+                        {t("cmp.exports.recipientScope")}
                       </label>
                       <input
                         id="export-scope"
@@ -2566,7 +2908,7 @@ export function SandboxEvidenceExportsPage() {
                     </div>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="export-reason">
-                        Reason
+                        {t("cmp.exports.reason")}
                       </label>
                       <textarea
                         id="export-reason"
@@ -2588,11 +2930,7 @@ export function SandboxEvidenceExportsPage() {
                           setStepUpConfirmed(event.target.checked)
                         }
                       />
-                      <span>
-                        I confirm the recipient scope, evidentiary need, and
-                        that a second compliance actor must approve this export
-                        before it leaves the platform.
-                      </span>
+                      <span>{t("cmp.exports.stepUpConfirm")}</span>
                     </label>
                     <CanvasBtn
                       theme={theme}
@@ -2601,53 +2939,53 @@ export function SandboxEvidenceExportsPage() {
                       onClick={() => void handleRequestExport()}
                     >
                       {busyId === "request"
-                        ? "Requesting…"
-                        : "Submit export request"}
+                        ? t("cmp.exports.requesting")
+                        : t("cmp.exports.submitRequest")}
                     </CanvasBtn>
                   </div>
                 </CanvasCard>
               ) : (
                 <CanvasCard
                   theme={theme}
-                  title="Request controlled export"
-                  subtitle="scope required"
+                  title={t("cmp.exports.requestCardTitle")}
+                  subtitle={t("cmp.scope.scopeRequired")}
                 >
                   <div style={mutedStyle}>
-                    {missingScopeMessage(SCOPE_CONTROLLED_EXPORT_REQUEST)}
+                    {missingScopeMessage(t, SCOPE_CONTROLLED_EXPORT_REQUEST)}
                   </div>
                 </CanvasCard>
               )}
 
               <CanvasCard
                 theme={theme}
-                title="Selected evidence posture"
-                subtitle="linked authority data"
+                title={t("cmp.exports.selectedTitle")}
+                subtitle={t("cmp.exports.selectedSubtitle")}
               >
                 <CanvasDL
                   theme={theme}
                   cols={1}
                   items={[
                     {
-                      k: "Manifest",
-                      v: selectedManifestId || "—",
+                      k: t("cmp.label.manifest"),
+                      v: selectedManifestId || EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Case",
-                      v: selectedManifestOption?.caseId ?? "—",
+                      k: t("cmp.label.case"),
+                      v: selectedManifestOption?.caseId ?? EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Report",
-                      v: selectedManifestOption?.reportId ?? "—",
+                      k: t("cmp.label.report"),
+                      v: selectedManifestOption?.reportId ?? EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Approval rule",
-                      v: "Four-eyes approval enforced by backend",
+                      k: t("cmp.exports.approvalRule"),
+                      v: t("cmp.exports.approvalRuleValue"),
                     },
                     {
-                      k: "Current actor",
+                      k: t("cmp.scope.actor"),
                       v: authority.actorId,
                       mono: true,
                     },
@@ -2658,15 +2996,15 @@ export function SandboxEvidenceExportsPage() {
 
             <CanvasCard
               theme={theme}
-              title="Export queue"
-              subtitle="request / approval separation"
+              title={t("cmp.exports.queueTitle")}
+              subtitle={t("cmp.exports.queueSubtitle")}
               padding={0}
             >
               <CanvasTable
                 theme={theme}
                 columns={[
                   {
-                    h: "Request",
+                    h: t("cmp.exports.requestColumn"),
                     w: 170,
                     r: (row: SandboxControlledEvidenceExportRecord) => (
                       <div style={cardStackStyle}>
@@ -2678,19 +3016,19 @@ export function SandboxEvidenceExportsPage() {
                     ),
                   },
                   {
-                    h: "Manifest / case",
+                    h: t("cmp.exports.manifestCaseColumn"),
                     w: 170,
                     r: (row: SandboxControlledEvidenceExportRecord) => (
                       <div style={cardStackStyle}>
                         <span style={monoStyle}>{row.manifestId}</span>
                         <span style={mutedStyle}>
-                          {row.caseId ?? "No case linked"}
+                          {row.caseId ?? t("cmp.manifest.noLinkedCase")}
                         </span>
                       </div>
                     ),
                   },
                   {
-                    h: "Recipient",
+                    h: t("cmp.exports.recipientColumn"),
                     w: 220,
                     r: (row: SandboxControlledEvidenceExportRecord) => (
                       <div style={cardStackStyle}>
@@ -2700,30 +3038,31 @@ export function SandboxEvidenceExportsPage() {
                     ),
                   },
                   {
-                    h: "Status",
+                    h: t("common.status"),
                     w: 140,
                     r: (row: SandboxControlledEvidenceExportRecord) =>
                       statusPill(
-                        humanizeToken(row.status),
+                        formatComplianceCode(t, row.status),
                         exportStatusTone(row.status),
                       ),
                   },
                   {
-                    h: "Actors",
+                    h: t("cmp.exports.actorsColumn"),
                     w: 220,
                     r: (row: SandboxControlledEvidenceExportRecord) => (
                       <div style={cardStackStyle}>
                         <span style={mutedStyle}>
-                          requester: {row.requestedByActorId}
+                          {t("cmp.exports.requester")} {row.requestedByActorId}
                         </span>
                         <span style={mutedStyle}>
-                          approver: {row.approvedByActorId ?? "pending"}
+                          {t("cmp.exports.approver")}{" "}
+                          {row.approvedByActorId ?? t("cmp.code.pending")}
                         </span>
                       </div>
                     ),
                   },
                   {
-                    h: "Action",
+                    h: t("common.actions"),
                     w: 180,
                     r: (row: SandboxControlledEvidenceExportRecord) => {
                       const selfApprovalBlocked =
@@ -2743,19 +3082,22 @@ export function SandboxEvidenceExportsPage() {
                           }
                         >
                           {busyId === row.exportRequestId
-                            ? "Approving…"
-                            : "Approve"}
+                            ? t("cmp.exports.approving")
+                            : t("common.approve")}
                         </CanvasBtn>
                       ) : row.status !== "pending_approval" ? (
-                        actionStatusText("No pending approval")
+                        actionStatusText(t("cmp.exports.noPendingApproval"))
                       ) : !canApproveExportScope ? (
                         actionStatusText(
-                          missingScopeMessage(SCOPE_CONTROLLED_EXPORT_APPROVE),
+                          missingScopeMessage(
+                            t,
+                            SCOPE_CONTROLLED_EXPORT_APPROVE,
+                          ),
                         )
                       ) : selfApprovalBlocked ? (
-                        actionStatusText("Self-approval blocked")
+                        actionStatusText(t("cmp.exports.selfApprovalBlocked"))
                       ) : (
-                        actionStatusText("Approval unavailable")
+                        actionStatusText(t("cmp.exports.approvalUnavailable"))
                       );
                     },
                   },
@@ -2771,6 +3113,7 @@ export function SandboxEvidenceExportsPage() {
 }
 
 export function SandboxLegalHoldsPage() {
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
   const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
@@ -2806,7 +3149,7 @@ export function SandboxLegalHoldsPage() {
 
   async function handlePlaceHold() {
     if (!canPlaceHoldScope) {
-      setActionError(missingScopeMessage(SCOPE_LEGAL_HOLD_PLACE));
+      setActionError(missingScopeMessage(t, SCOPE_LEGAL_HOLD_PLACE));
       return;
     }
 
@@ -2827,7 +3170,9 @@ export function SandboxLegalHoldsPage() {
           ? new Date(form.expiresAt).toISOString()
           : null,
       });
-      setMessage(`Legal hold placed for ${selectedCase.caseId}.`);
+      setMessage(
+        t("cmp.legalHold.placeSuccess", { caseId: selectedCase.caseId }),
+      );
       setForm({
         caseId: selectedCase.caseId,
         scopeSummary: "",
@@ -2846,7 +3191,7 @@ export function SandboxLegalHoldsPage() {
 
   async function handleRequestRelease() {
     if (!canRequestReleaseScope) {
-      setActionError(missingScopeMessage(SCOPE_LEGAL_HOLD_RELEASE_REQUEST));
+      setActionError(missingScopeMessage(t, SCOPE_LEGAL_HOLD_RELEASE_REQUEST));
       return;
     }
 
@@ -2861,7 +3206,9 @@ export function SandboxLegalHoldsPage() {
       await client.requestSandboxLegalHoldRelease(releaseHoldId, {
         releaseReason: releaseReason.trim(),
       });
-      setMessage(`Release request recorded for ${releaseHoldId}.`);
+      setMessage(
+        t("cmp.legalHold.releaseRequestSuccess", { holdId: releaseHoldId }),
+      );
       setReleaseHoldId(null);
       setReleaseReason("");
       await refresh();
@@ -2878,7 +3225,7 @@ export function SandboxLegalHoldsPage() {
 
   async function handleApproveRelease(holdId: string) {
     if (!canApproveReleaseScope) {
-      setActionError(missingScopeMessage(SCOPE_LEGAL_HOLD_RELEASE_APPROVE));
+      setActionError(missingScopeMessage(t, SCOPE_LEGAL_HOLD_RELEASE_APPROVE));
       return;
     }
 
@@ -2889,7 +3236,7 @@ export function SandboxLegalHoldsPage() {
       await client.approveSandboxLegalHoldRelease(holdId, {
         approvalNote: "Approved through platform-admin compliance console.",
       });
-      setMessage(`Legal hold ${holdId} released.`);
+      setMessage(t("cmp.legalHold.releaseSuccess", { holdId }));
       await refresh();
     } catch (approveError: unknown) {
       setActionError(
@@ -2910,27 +3257,30 @@ export function SandboxLegalHoldsPage() {
   return (
     <ComplianceConsoleFrame
       active="legalhold"
-      title="法律保留 · Legal Hold"
-      subtitle="Preserve evidence, request release, and approve release through explicit four-eyes separation."
+      title={t("cmp.legalHold.title")}
+      subtitle={t("cmp.legalHold.subtitle")}
       actions={
         <CanvasBtn
           theme={theme}
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       scopeHints={[
-        { label: "Place legal hold", scope: SCOPE_LEGAL_HOLD_PLACE },
         {
-          label: "Request hold release",
+          label: t("cmp.legalHold.scope.place"),
+          scope: SCOPE_LEGAL_HOLD_PLACE,
+        },
+        {
+          label: t("cmp.legalHold.scope.requestRelease"),
           scope: SCOPE_LEGAL_HOLD_RELEASE_REQUEST,
         },
         {
-          label: "Approve hold release",
+          label: t("cmp.legalHold.scope.approveRelease"),
           scope: SCOPE_LEGAL_HOLD_RELEASE_APPROVE,
-          blocked: "Release requester cannot approve their own hold release.",
+          blocked: t("cmp.legalHold.scope.releaseBlocked"),
         },
       ]}
     >
@@ -2941,15 +3291,15 @@ export function SandboxLegalHoldsPage() {
               theme={theme}
               tone="warn"
               icon="lock"
-              title="Four-eyes release rule"
-              body="Legal-hold release remains a two-step workflow. A requester records the release reason; a different actor must approve the release."
+              title={t("cmp.legalHold.ruleTitle")}
+              body={t("cmp.legalHold.ruleBody")}
             />
             {message ? (
               <CanvasBanner
                 theme={theme}
                 tone="success"
                 icon="check"
-                title="Legal-hold workflow updated"
+                title={t("cmp.legalHold.updatedTitle")}
                 body={message}
               />
             ) : null}
@@ -2958,7 +3308,7 @@ export function SandboxLegalHoldsPage() {
                 theme={theme}
                 tone="danger"
                 icon="warn"
-                title="Legal-hold action failed"
+                title={t("cmp.legalHold.failedTitle")}
                 body={actionError}
               />
             ) : null}
@@ -2967,13 +3317,13 @@ export function SandboxLegalHoldsPage() {
               {canPlaceHoldScope ? (
                 <CanvasCard
                   theme={theme}
-                  title="Place legal hold"
-                  subtitle="case + manifest authority"
+                  title={t("cmp.legalHold.placeCardTitle")}
+                  subtitle={t("cmp.legalHold.placeCardSubtitle")}
                 >
                   <div style={fieldGridStyle}>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="hold-case">
-                        Investigation case
+                        {t("cmp.legalHold.investigationCase")}
                       </label>
                       <select
                         id="hold-case"
@@ -2987,9 +3337,7 @@ export function SandboxLegalHoldsPage() {
                         }
                       >
                         {caseOptions.length === 0 ? (
-                          <option value="">
-                            No manifest-backed cases available
-                          </option>
+                          <option value="">{t("cmp.legalHold.noCases")}</option>
                         ) : null}
                         {caseOptions.map((item) => (
                           <option key={item.caseId} value={item.caseId}>
@@ -3000,7 +3348,7 @@ export function SandboxLegalHoldsPage() {
                     </div>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="hold-scope">
-                        Scope summary
+                        {t("cmp.legalHold.scopeSummary")}
                       </label>
                       <input
                         id="hold-scope"
@@ -3016,7 +3364,7 @@ export function SandboxLegalHoldsPage() {
                     </div>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="hold-reason">
-                        Hold reason
+                        {t("cmp.legalHold.holdReason")}
                       </label>
                       <textarea
                         id="hold-reason"
@@ -3032,7 +3380,7 @@ export function SandboxLegalHoldsPage() {
                     </div>
                     <div style={fieldGridStyle}>
                       <label style={fieldLabelStyle} htmlFor="hold-expiry">
-                        Expiration (optional)
+                        {t("cmp.legalHold.expiration")}
                       </label>
                       <input
                         id="hold-expiry"
@@ -3053,48 +3401,54 @@ export function SandboxLegalHoldsPage() {
                       disabled={!canPlaceHold || busyId === "place"}
                       onClick={() => void handlePlaceHold()}
                     >
-                      {busyId === "place" ? "Placing…" : "Place hold"}
+                      {busyId === "place"
+                        ? t("cmp.legalHold.placing")
+                        : t("cmp.legalHold.placeAction")}
                     </CanvasBtn>
                   </div>
                 </CanvasCard>
               ) : (
                 <CanvasCard
                   theme={theme}
-                  title="Place legal hold"
-                  subtitle="scope required"
+                  title={t("cmp.legalHold.placeCardTitle")}
+                  subtitle={t("cmp.scope.scopeRequired")}
                 >
                   <div style={mutedStyle}>
-                    {missingScopeMessage(SCOPE_LEGAL_HOLD_PLACE)}
+                    {missingScopeMessage(t, SCOPE_LEGAL_HOLD_PLACE)}
                   </div>
                 </CanvasCard>
               )}
 
               <CanvasCard
                 theme={theme}
-                title="Selected case posture"
-                subtitle="linked manifest + status"
+                title={t("cmp.legalHold.selectedTitle")}
+                subtitle={t("cmp.legalHold.selectedSubtitle")}
               >
                 <CanvasDL
                   theme={theme}
                   cols={1}
                   items={[
-                    { k: "Case", v: selectedCase?.caseId ?? "—", mono: true },
                     {
-                      k: "Manifest",
-                      v: selectedCase?.evidenceManifestId ?? "—",
+                      k: t("cmp.label.case"),
+                      v: selectedCase?.caseId ?? EMPTY_VALUE,
                       mono: true,
                     },
                     {
-                      k: "Status",
-                      v: selectedCase
-                        ? statusPill(
-                            humanizeToken(selectedCase.status),
-                            investigationStatusTone(selectedCase.status),
-                          )
-                        : "—",
+                      k: t("cmp.label.manifest"),
+                      v: selectedCase?.evidenceManifestId ?? EMPTY_VALUE,
+                      mono: true,
                     },
                     {
-                      k: "Current actor",
+                      k: t("common.status"),
+                      v: selectedCase
+                        ? statusPill(
+                            formatComplianceCode(t, selectedCase.status),
+                            investigationStatusTone(selectedCase.status),
+                          )
+                        : EMPTY_VALUE,
+                    },
+                    {
+                      k: t("cmp.scope.actor"),
                       v: authority.actorId,
                       mono: true,
                     },
@@ -3105,15 +3459,15 @@ export function SandboxLegalHoldsPage() {
 
             <CanvasCard
               theme={theme}
-              title="Legal-hold queue"
-              subtitle="place / release-request / release-approve"
+              title={t("cmp.legalHold.queueTitle")}
+              subtitle={t("cmp.legalHold.queueSubtitle")}
               padding={0}
             >
               <CanvasTable
                 theme={theme}
                 columns={[
                   {
-                    h: "Hold",
+                    h: t("cmp.legalHold.holdColumn"),
                     w: 170,
                     r: (row: SandboxLegalHoldRecord) => (
                       <div style={cardStackStyle}>
@@ -3125,7 +3479,7 @@ export function SandboxLegalHoldsPage() {
                     ),
                   },
                   {
-                    h: "Case / manifest",
+                    h: t("cmp.legalHold.caseManifestColumn"),
                     w: 190,
                     r: (row: SandboxLegalHoldRecord) => (
                       <div style={cardStackStyle}>
@@ -3135,7 +3489,7 @@ export function SandboxLegalHoldsPage() {
                     ),
                   },
                   {
-                    h: "Scope",
+                    h: t("cmp.legalHold.scopeColumn"),
                     w: 240,
                     r: (row: SandboxLegalHoldRecord) => (
                       <div style={cardStackStyle}>
@@ -3145,31 +3499,33 @@ export function SandboxLegalHoldsPage() {
                     ),
                   },
                   {
-                    h: "Status",
+                    h: t("common.status"),
                     w: 160,
                     r: (row: SandboxLegalHoldRecord) =>
                       statusPill(
-                        humanizeToken(row.status),
+                        formatComplianceCode(t, row.status),
                         legalHoldStatusTone(row.status),
                       ),
                   },
                   {
-                    h: "Release actors",
+                    h: t("cmp.legalHold.releaseActorsColumn"),
                     w: 220,
                     r: (row: SandboxLegalHoldRecord) => (
                       <div style={cardStackStyle}>
                         <span style={mutedStyle}>
-                          requester:{" "}
-                          {row.releaseRequestedByActorId ?? "pending"}
+                          {t("cmp.exports.requester")}{" "}
+                          {row.releaseRequestedByActorId ??
+                            t("cmp.code.pending")}
                         </span>
                         <span style={mutedStyle}>
-                          approver: {row.releasedByActorId ?? "pending"}
+                          {t("cmp.exports.approver")}{" "}
+                          {row.releasedByActorId ?? t("cmp.code.pending")}
                         </span>
                       </div>
                     ),
                   },
                   {
-                    h: "Action",
+                    h: t("common.actions"),
                     w: 190,
                     r: (row: SandboxLegalHoldRecord) => {
                       const selfApprovalBlocked =
@@ -3182,11 +3538,12 @@ export function SandboxLegalHoldsPage() {
                             variant="secondary"
                             onClick={() => setReleaseHoldId(row.holdId)}
                           >
-                            Request release
+                            {t("cmp.legalHold.requestReleaseAction")}
                           </CanvasBtn>
                         ) : (
                           actionStatusText(
                             missingScopeMessage(
+                              t,
                               SCOPE_LEGAL_HOLD_RELEASE_REQUEST,
                             ),
                           )
@@ -3208,8 +3565,8 @@ export function SandboxLegalHoldsPage() {
                             }
                           >
                             {busyId === row.holdId
-                              ? "Approving…"
-                              : "Approve release"}
+                              ? t("cmp.legalHold.approving")
+                              : t("cmp.legalHold.approveReleaseAction")}
                           </CanvasBtn>
                         );
                       }
@@ -3219,7 +3576,10 @@ export function SandboxLegalHoldsPage() {
                         !canApproveReleaseScope
                       ) {
                         return actionStatusText(
-                          missingScopeMessage(SCOPE_LEGAL_HOLD_RELEASE_APPROVE),
+                          missingScopeMessage(
+                            t,
+                            SCOPE_LEGAL_HOLD_RELEASE_APPROVE,
+                          ),
                         );
                       }
 
@@ -3227,10 +3587,12 @@ export function SandboxLegalHoldsPage() {
                         row.status === "release_requested" &&
                         selfApprovalBlocked
                       ) {
-                        return actionStatusText("Self-approval blocked");
+                        return actionStatusText(
+                          t("cmp.exports.selfApprovalBlocked"),
+                        );
                       }
 
-                      return actionStatusText("Released");
+                      return actionStatusText(t("cmp.code.released"));
                     },
                   },
                 ]}
@@ -3241,13 +3603,13 @@ export function SandboxLegalHoldsPage() {
             {releaseHoldId && canRequestReleaseScope ? (
               <CanvasCard
                 theme={theme}
-                title="Request hold release"
+                title={t("cmp.legalHold.releaseCardTitle")}
                 subtitle={releaseHoldId}
               >
                 <div style={fieldGridStyle}>
                   <div style={fieldGridStyle}>
                     <label style={fieldLabelStyle} htmlFor="release-reason">
-                      Release reason
+                      {t("cmp.legalHold.releaseReason")}
                     </label>
                     <textarea
                       id="release-reason"
@@ -3267,8 +3629,8 @@ export function SandboxLegalHoldsPage() {
                       onClick={() => void handleRequestRelease()}
                     >
                       {busyId === releaseHoldId
-                        ? "Requesting…"
-                        : "Submit release request"}
+                        ? t("cmp.exports.requesting")
+                        : t("cmp.legalHold.submitReleaseRequest")}
                     </CanvasBtn>
                     <CanvasBtn
                       theme={theme}
@@ -3278,7 +3640,7 @@ export function SandboxLegalHoldsPage() {
                         setReleaseReason("");
                       }}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </CanvasBtn>
                   </div>
                 </div>
@@ -3292,6 +3654,7 @@ export function SandboxLegalHoldsPage() {
 }
 
 export function SandboxRegulatoryReportsPage() {
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
   const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
@@ -3309,7 +3672,7 @@ export function SandboxRegulatoryReportsPage() {
 
   async function handleSubmitReport(reportId: string) {
     if (!canSubmitReportScope) {
-      setActionError(missingScopeMessage(SCOPE_REGULATORY_REPORT_SUBMIT));
+      setActionError(missingScopeMessage(t, SCOPE_REGULATORY_REPORT_SUBMIT));
       return;
     }
 
@@ -3318,7 +3681,7 @@ export function SandboxRegulatoryReportsPage() {
     setMessage(null);
     try {
       await client.submitSandboxRegulatoryReport(reportId);
-      setMessage(`Regulatory report ${reportId} submitted.`);
+      setMessage(t("cmp.reports.submitSuccess", { reportId }));
       await refresh();
     } catch (submitError: unknown) {
       setActionError(
@@ -3350,13 +3713,13 @@ export function SandboxRegulatoryReportsPage() {
       active={view === "regulator" ? "regulator" : "reportjobs"}
       title={
         view === "regulator"
-          ? "主管機關檢視 · Regulator Viewer"
-          : "監理報表作業 · Report Jobs"
+          ? t("cmp.reports.regulatorTitle")
+          : t("cmp.reports.jobsTitle")
       }
       subtitle={
         view === "regulator"
-          ? "Scoped read-only regulator posture with masked operational context and evidence bundle request routing."
-          : "Filing queue, report lifecycle, and submit / re-submit actions driven by backend filing status."
+          ? t("cmp.reports.regulatorSubtitle")
+          : t("cmp.reports.jobsSubtitle")
       }
       actions={
         <CanvasBtn
@@ -3364,16 +3727,16 @@ export function SandboxRegulatoryReportsPage() {
           variant="secondary"
           onClick={() => void refresh()}
         >
-          Refresh
+          {t("common.refresh")}
         </CanvasBtn>
       }
       scopeHints={[
         {
-          label: "Review filing queue",
+          label: t("cmp.reports.scope.reviewQueue"),
           scope: "sandbox.regulatory_report.review",
         },
         {
-          label: "Submit filing",
+          label: t("cmp.reports.scope.submit"),
           scope: SCOPE_REGULATORY_REPORT_SUBMIT,
         },
       ]}
@@ -3386,7 +3749,7 @@ export function SandboxRegulatoryReportsPage() {
                 theme={theme}
                 tone="success"
                 icon="check"
-                title="Regulatory filing updated"
+                title={t("cmp.reports.updatedTitle")}
                 body={message}
               />
             ) : null}
@@ -3395,7 +3758,7 @@ export function SandboxRegulatoryReportsPage() {
                 theme={theme}
                 tone="danger"
                 icon="warn"
-                title="Regulatory filing action failed"
+                title={t("cmp.reports.failedTitle")}
                 body={actionError}
               />
             ) : null}
@@ -3406,77 +3769,97 @@ export function SandboxRegulatoryReportsPage() {
                   theme={theme}
                   tone="info"
                   icon="lock"
-                  title="Read-only regulator scope"
-                  body="This view is intended for masked regulator-facing posture only. It references filings, cases, and evidence bundle request state without exposing passenger or commercial PII."
+                  title={t("cmp.reports.readonlyTitle")}
+                  body={t("cmp.reports.readonlyBody")}
                 />
                 <div style={autoGridStyle("180px")}>
-                  <CanvasCard theme={theme} title="Generated filings">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("cmp.reports.card.generatedTitle")}
+                  >
                     <div style={{ fontSize: 28, fontWeight: 700 }}>
                       {generatedCount}
                     </div>
-                    <div style={mutedStyle}>Awaiting submit.</div>
+                    <div style={mutedStyle}>
+                      {t("cmp.reports.card.generatedBody")}
+                    </div>
                   </CanvasCard>
-                  <CanvasCard theme={theme} title="Submitted filings">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("cmp.reports.card.submittedTitle")}
+                  >
                     <div style={{ fontSize: 28, fontWeight: 700 }}>
                       {submittedCount}
                     </div>
-                    <div style={mutedStyle}>Sent to regulator.</div>
+                    <div style={mutedStyle}>
+                      {t("cmp.reports.card.submittedBody")}
+                    </div>
                   </CanvasCard>
-                  <CanvasCard theme={theme} title="Accepted filings">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("cmp.reports.card.acceptedTitle")}
+                  >
                     <div style={{ fontSize: 28, fontWeight: 700 }}>
                       {acceptedCount}
                     </div>
-                    <div style={mutedStyle}>Acknowledged or accepted.</div>
+                    <div style={mutedStyle}>
+                      {t("cmp.reports.card.acceptedBody")}
+                    </div>
                   </CanvasCard>
-                  <CanvasCard theme={theme} title="Evidence bundles ready">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("cmp.reports.card.exportsTitle")}
+                  >
                     <div style={{ fontSize: 28, fontWeight: 700 }}>
                       {exportReadyCount}
                     </div>
-                    <div style={mutedStyle}>Approved or completed exports.</div>
+                    <div style={mutedStyle}>
+                      {t("cmp.reports.card.exportsBody")}
+                    </div>
                   </CanvasCard>
                 </div>
 
                 <div style={autoGridStyle("360px")}>
                   <CanvasCard
                     theme={theme}
-                    title="Regulator filing queue"
-                    subtitle="masked operational context"
+                    title={t("cmp.reports.regulatorQueueTitle")}
+                    subtitle={t("cmp.reports.regulatorQueueSubtitle")}
                     padding={0}
                   >
                     <CanvasTable
                       theme={theme}
                       columns={[
                         {
-                          h: "Report",
+                          h: t("cmp.label.report"),
                           w: 190,
                           r: (row: RegulatoryReportFiling) => (
                             <span style={monoStyle}>{row.reportId}</span>
                           ),
                         },
                         {
-                          h: "Jurisdiction",
+                          h: t("cmp.label.jurisdiction"),
                           w: 140,
                           r: (row: RegulatoryReportFiling) =>
                             humanizeToken(row.jurisdiction),
                         },
                         {
-                          h: "Status",
+                          h: t("common.status"),
                           w: 140,
                           r: (row: RegulatoryReportFiling) =>
                             statusPill(
-                              humanizeToken(row.status),
+                              formatComplianceCode(t, row.status),
                               reportStatusTone(row.status),
                             ),
                         },
                         {
-                          h: "Linked case",
+                          h: t("cmp.reports.linkedCase"),
                           w: 160,
                           r: (row: RegulatoryReportFiling) =>
                             row.caseId ? (
                               <span style={monoStyle}>{row.caseId}</span>
                             ) : (
                               <span style={mutedStyle}>
-                                Program-level filing
+                                {t("cmp.reports.programLevel")}
                               </span>
                             ),
                         },
@@ -3487,16 +3870,15 @@ export function SandboxRegulatoryReportsPage() {
 
                   <CanvasCard
                     theme={theme}
-                    title="Evidence package request posture"
-                    subtitle="bundle request routing"
+                    title={t("cmp.reports.exportPostureTitle")}
+                    subtitle={t("cmp.reports.exportPostureSubtitle")}
                   >
                     <div style={cardStackStyle}>
                       <div style={mutedStyle}>
-                        Approved / completed controlled exports:{" "}
-                        {exportReadyCount}
+                        {t("cmp.reports.approvedExports")} {exportReadyCount}
                       </div>
                       <div style={mutedStyle}>
-                        Active legal holds:{" "}
+                        {t("cmp.reports.activeHolds")}{" "}
                         {
                           data.legalHolds.filter(
                             (item) => item.status !== "released",
@@ -3504,8 +3886,7 @@ export function SandboxRegulatoryReportsPage() {
                         }
                       </div>
                       <div style={mutedStyle}>
-                        Evidence bundle requests remain routed through the
-                        controlled export queue and inherit four-eyes approval.
+                        {t("cmp.reports.exportRoutingNote")}
                       </div>
                     </div>
                   </CanvasCard>
@@ -3514,37 +3895,52 @@ export function SandboxRegulatoryReportsPage() {
             ) : (
               <>
                 <div style={autoGridStyle("180px")}>
-                  <CanvasCard theme={theme} title="Generated">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("cmp.reports.jobsCard.generatedTitle")}
+                  >
                     <div style={{ fontSize: 28, fontWeight: 700 }}>
                       {generatedCount}
                     </div>
-                    <div style={mutedStyle}>Ready for submit.</div>
+                    <div style={mutedStyle}>
+                      {t("cmp.reports.jobsCard.generatedBody")}
+                    </div>
                   </CanvasCard>
-                  <CanvasCard theme={theme} title="Submitted">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("cmp.reports.jobsCard.submittedTitle")}
+                  >
                     <div style={{ fontSize: 28, fontWeight: 700 }}>
                       {submittedCount}
                     </div>
-                    <div style={mutedStyle}>Awaiting regulator response.</div>
+                    <div style={mutedStyle}>
+                      {t("cmp.reports.jobsCard.submittedBody")}
+                    </div>
                   </CanvasCard>
-                  <CanvasCard theme={theme} title="Accepted">
+                  <CanvasCard
+                    theme={theme}
+                    title={t("cmp.reports.jobsCard.acceptedTitle")}
+                  >
                     <div style={{ fontSize: 28, fontWeight: 700 }}>
                       {acceptedCount}
                     </div>
-                    <div style={mutedStyle}>Accepted filings.</div>
+                    <div style={mutedStyle}>
+                      {t("cmp.reports.jobsCard.acceptedBody")}
+                    </div>
                   </CanvasCard>
                 </div>
 
                 <CanvasCard
                   theme={theme}
-                  title="Report jobs queue"
-                  subtitle="filing lifecycle and linked case state"
+                  title={t("cmp.reports.jobsQueueTitle")}
+                  subtitle={t("cmp.reports.jobsQueueSubtitle")}
                   padding={0}
                 >
                   <CanvasTable
                     theme={theme}
                     columns={[
                       {
-                        h: "Report",
+                        h: t("cmp.label.report"),
                         w: 200,
                         r: (row: RegulatoryReportFiling) => (
                           <div style={cardStackStyle}>
@@ -3556,7 +3952,7 @@ export function SandboxRegulatoryReportsPage() {
                         ),
                       },
                       {
-                        h: "Window",
+                        h: t("cmp.reports.window"),
                         w: 180,
                         r: (row: RegulatoryReportFiling) => (
                           <div style={cardStackStyle}>
@@ -3570,30 +3966,31 @@ export function SandboxRegulatoryReportsPage() {
                         ),
                       },
                       {
-                        h: "Status",
+                        h: t("common.status"),
                         w: 140,
                         r: (row: RegulatoryReportFiling) =>
                           statusPill(
-                            humanizeToken(row.status),
+                            formatComplianceCode(t, row.status),
                             reportStatusTone(row.status),
                           ),
                       },
                       {
-                        h: "Case / manifest",
+                        h: t("cmp.reports.caseManifest"),
                         w: 200,
                         r: (row: RegulatoryReportFiling) => (
                           <div style={cardStackStyle}>
                             <span style={monoStyle}>
-                              {row.caseId ?? "Program-level"}
+                              {row.caseId ?? t("cmp.reports.programLevel")}
                             </span>
                             <span style={mutedStyle}>
-                              {row.evidenceManifestId ?? "No manifest"}
+                              {row.evidenceManifestId ??
+                                t("cmp.common.noManifestLinked")}
                             </span>
                           </div>
                         ),
                       },
                       {
-                        h: "Action",
+                        h: t("common.actions"),
                         w: 170,
                         r: (row: RegulatoryReportFiling) => {
                           const canSubmit =
@@ -3610,19 +4007,20 @@ export function SandboxRegulatoryReportsPage() {
                               }
                             >
                               {busyId === row.reportId
-                                ? "Submitting…"
+                                ? t("cmp.reports.submitting")
                                 : row.status === "rejected"
-                                  ? "Re-submit"
-                                  : "Submit"}
+                                  ? t("cmp.reports.resubmit")
+                                  : t("cmp.reports.submit")}
                             </CanvasBtn>
                           ) : canSubmit ? (
                             actionStatusText(
                               missingScopeMessage(
+                                t,
                                 SCOPE_REGULATORY_REPORT_SUBMIT,
                               ),
                             )
                           ) : (
-                            actionStatusText("No submit action")
+                            actionStatusText(t("cmp.reports.noSubmitAction"))
                           );
                         },
                       },
