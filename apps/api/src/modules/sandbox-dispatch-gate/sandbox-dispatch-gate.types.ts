@@ -9,6 +9,7 @@ export interface SandboxDispatchGateInput {
   orderId: string;
   dispatchJobId?: string | null;
   vehicleId: string;
+  driverId?: string | null;
   sandboxProgramId: string;
   policyVersion: string;
   requestedAt?: string | null;
@@ -71,9 +72,11 @@ export interface SandboxDispatchGateInput {
   operatingArea?: {
     inBounds: boolean | null;
     boundaryRisk: boolean | null;
+    matchedAreaIds?: string[];
   } | null;
   routeContainment?: {
     contained: boolean | null;
+    matchedRouteIds?: string[];
   } | null;
   holdState?: {
     activeSafetyIncident: boolean | null;

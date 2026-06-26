@@ -2594,6 +2594,7 @@ export class OwnedMobilityService implements OnModuleInit {
             bundle.order,
             dispatchJob.dispatchJobId,
             vehicleId,
+            driverId,
             requestId,
           );
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
@@ -2623,6 +2624,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       dispatchJob.dispatchJobId,
       vehicleId,
+      driverId,
       requestId,
     );
     return this.afterMaybePromise(sandboxGateResult, () =>
@@ -4452,21 +4454,31 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     dispatchJobId: string,
     vehicleId: string,
+    driverId: string,
     requestId?: string,
   ) {
     if (!this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(vehicleId)) {
       return;
     }
 
-    return this.sandboxDispatchGateService.assertAssignmentEligible(
+    return this.afterMaybePromise(
       this.sandboxDispatchGateService.buildAssignmentGateInput({
         orderId: order.orderId,
         dispatchJobId,
         vehicleId,
+        driverId,
+        bookingWindow: {
+          start: order.reservationWindowStart,
+          end: order.reservationWindowEnd,
+        },
         pickup: order.pickup,
         dropoff: order.dropoff,
       }),
-      requestId,
+      (gateInput) =>
+        this.sandboxDispatchGateService!.assertAssignmentEligible(
+          gateInput,
+          requestId,
+        ),
     );
   }
 

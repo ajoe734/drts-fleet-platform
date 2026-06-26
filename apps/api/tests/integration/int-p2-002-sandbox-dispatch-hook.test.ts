@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
 
+import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtures/src";
+
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
@@ -11,8 +13,10 @@ import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mob
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../../src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service";
+import { SandboxGovernanceService } from "../../src/modules/sandbox-governance/sandbox-governance.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
+import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
 
 function createHarness() {
   const eventEmitter = new EventEmitter2();
@@ -41,31 +45,22 @@ function createHarness() {
     undefined,
     serviceProductService,
   );
-  const sandboxDispatchGateService = {
-    shouldEvaluateSandboxAssignment: () => true,
-    buildAssignmentGateInput: ({
-      orderId,
-      dispatchJobId,
-      vehicleId,
-    }: {
-      orderId: string;
-      dispatchJobId: string;
-      vehicleId: string;
-    }) => ({
-      orderId,
-      dispatchJobId,
-      vehicleId,
-      sandboxProgramId: "phase2-tesla-fsd-sandbox-202606",
-      policyVersion: "sandbox-dispatch-gate.v1",
+  vehicleEligibilityService.assertDispatchAssignmentEligible = () => undefined;
+  const sandboxGovernanceService = new SandboxGovernanceService(
+    auditNotificationService,
+    undefined,
+  );
+  const vehicleEvidenceService = new VehicleEvidenceService();
+  vehicleEvidenceService.registerRecorder(
+    buildMockRecorderFixture({
+      recorderId: "rec-veh-av-demo-001",
+      vehicleId: "veh-av-demo-001",
     }),
-    assertAssignmentEligible: () => {
-      throw new ApiRequestError(
-        409,
-        "SANDBOX_REGULATORY_APPROVAL_MISSING",
-        "Sandbox dispatch gate did not approve this assignment.",
-      );
-    },
-  } as unknown as SandboxDispatchGateService;
+  );
+  const sandboxDispatchGateService = new SandboxDispatchGateService(
+    vehicleEvidenceService,
+    sandboxGovernanceService,
+  );
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
     auditNotificationService,
@@ -120,18 +115,10 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       mode: "auto",
     });
 
-    expect(() =>
-      ownedMobilityService.assignDispatch({
-        dispatchJobId: dispatchResult.dispatchJobId,
-        vehicleId: "veh-demo-001",
-        driverId: "drv-demo-001",
-      }),
-    ).toThrowError(ApiRequestError);
-
     try {
       await ownedMobilityService.assignDispatch({
         dispatchJobId: dispatchResult.dispatchJobId,
-        vehicleId: "veh-demo-001",
+        vehicleId: "veh-av-missing-001",
         driverId: "drv-demo-001",
       });
     } catch (error) {
@@ -141,5 +128,37 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
         },
       });
     }
+  });
+
+  it("allows assignment when governance, operator, booking window, route, and recorder facts align", async () => {
+    const { ownedMobilityService, cleanup } = createHarness();
+    cleanups.push(cleanup);
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Route Start", lat: 25.044, lng: 121.522 },
+        dropoff: { address: "Route End", lat: 25.054, lng: 121.533 },
+        passenger: { name: "Rider Two", phone: "0912000001" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    const assignment = await ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+    });
+
+    expect(assignment.status).toBe("assigned");
+    expect(ownedMobilityService.getDriverTask(assignment.taskId)).toMatchObject({
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+    });
   });
 });

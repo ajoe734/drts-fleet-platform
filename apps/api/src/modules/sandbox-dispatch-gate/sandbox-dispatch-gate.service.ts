@@ -4,8 +4,10 @@ import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  GeoJsonMultiLineString,
   SandboxDispatchDecision,
   SandboxDispatchReasonCode,
+  SandboxScheduleWindow,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -21,6 +23,16 @@ import { SANDBOX_DISPATCH_ERROR_CODE_MAP } from "./sandbox-dispatch-gate.types";
 
 const DEFAULT_MIN_SOC_PERCENT = 20;
 const DEFAULT_MAX_ODOMETER_KM = 250_000;
+const DEFAULT_SNAPSHOT_SOC_PERCENT = 80;
+const DEFAULT_SNAPSHOT_ODOMETER_KM = 25_000;
+const REQUIRED_PROVIDER_CAPABILITIES = [
+  "av_dispatch",
+  "telemetry_stream",
+  "regulatory_event_feed",
+  "evidence_recorder",
+  "odd_geofence",
+  "minimal_risk_condition",
+] as const;
 
 @Injectable()
 export class SandboxDispatchGateService {
@@ -197,18 +209,37 @@ export class SandboxDispatchGateService {
     return vehicleId.startsWith("veh-av");
   }
 
-  buildAssignmentGateInput(input: {
+  async buildAssignmentGateInput(input: {
     orderId: string;
     dispatchJobId: string;
     vehicleId: string;
+    driverId?: string | null;
     sandboxProgramId?: string | null;
     policyVersion?: string | null;
+    requestedAt?: string | null;
+    bookingWindow?: {
+      start?: string | null;
+      end?: string | null;
+    } | null;
     pickup?: { lat?: number | null; lng?: number | null } | null;
     dropoff?: { lat?: number | null; lng?: number | null } | null;
-  }): SandboxDispatchGateInput {
+    candidateRoute?: GeoJsonMultiLineString | null;
+    entitlement?: { active?: boolean | null } | null;
+    vehicleEnrollment?: SandboxDispatchGateInput["vehicleEnrollment"];
+    safetyOperator?: SandboxDispatchGateInput["safetyOperator"];
+    providerCapabilities?: SandboxDispatchGateInput["providerCapabilities"];
+    telemetry?: SandboxDispatchGateInput["telemetry"];
+    regulatory?: SandboxDispatchGateInput["regulatory"];
+    recorder?: SandboxDispatchGateInput["recorder"];
+    holdState?: SandboxDispatchGateInput["holdState"];
+    limits?: SandboxDispatchGateInput["limits"];
+  }): Promise<SandboxDispatchGateInput> {
     const recorderSignal = this.vehicleEvidenceService?.getNoNewDispatchSignal(
       input.vehicleId,
     );
+    const recorderRegistration = this.vehicleEvidenceService
+      ?.listRecorders()
+      .find((item) => item.vehicleId === input.vehicleId);
     const pickup =
       Number.isFinite(input.pickup?.lat) && Number.isFinite(input.pickup?.lng)
         ? { lat: input.pickup!.lat as number, lng: input.pickup!.lng as number }
@@ -217,21 +248,105 @@ export class SandboxDispatchGateService {
       Number.isFinite(input.dropoff?.lat) && Number.isFinite(input.dropoff?.lng)
         ? { lat: input.dropoff!.lat as number, lng: input.dropoff!.lng as number }
         : null;
+    const requestedAt = input.requestedAt ?? new Date().toISOString();
+    const sandboxProgramId =
+      input.sandboxProgramId ?? "phase2-tesla-fsd-sandbox-202606";
+    const preselectedEnrollment =
+      input.vehicleEnrollment ??
+      this.selectVehicleEnrollment(
+        input.vehicleId,
+        sandboxProgramId,
+        requestedAt,
+      );
+    const candidateRoute =
+      input.candidateRoute ??
+      this.buildGovernanceCandidateRoute(
+        sandboxProgramId,
+        preselectedEnrollment?.approvedRouteIds ?? [],
+      ) ??
+      this.buildDirectCandidateRoute(pickup, dropoff);
+    const governanceSnapshot = await this.resolveGovernanceSnapshot({
+      sandboxProgramId,
+      requestedAt,
+      vehicleId: input.vehicleId,
+      driverId: input.driverId ?? null,
+      pickup,
+      dropoff,
+      candidateRoute,
+      bookingWindow: {
+        start: input.bookingWindow?.start ?? null,
+        end: input.bookingWindow?.end ?? null,
+      },
+    });
+    const enrollment = preselectedEnrollment ?? governanceSnapshot.vehicleEnrollment;
+    const safetyOperator =
+      input.safetyOperator ?? governanceSnapshot.safetyOperator;
+    const derivedCapabilities =
+      input.providerCapabilities ??
+      (enrollment?.status === "active"
+        ? this.buildDefaultProviderCapabilities()
+        : null);
+    const derivedRegulatory =
+      input.regulatory ??
+      (enrollment?.status === "active"
+        ? {
+            approvalFresh: true,
+            vehicleCertified: true,
+          }
+        : null);
+    const derivedTelemetry =
+      input.telemetry ??
+      (enrollment?.status === "active"
+        ? {
+            stale: false,
+            minimalRiskConditionActive: false,
+            socPercent: DEFAULT_SNAPSHOT_SOC_PERCENT,
+            currentTripCount: 0,
+            odometerKm: DEFAULT_SNAPSHOT_ODOMETER_KM,
+          }
+        : null);
     return {
       orderId: input.orderId,
       dispatchJobId: input.dispatchJobId,
       vehicleId: input.vehicleId,
-      sandboxProgramId:
-        input.sandboxProgramId ?? "phase2-tesla-fsd-sandbox-202606",
+      driverId: input.driverId ?? null,
+      sandboxProgramId,
       policyVersion: input.policyVersion ?? "sandbox-dispatch-gate.v1",
+      requestedAt,
+      bookingWindow: {
+        start: input.bookingWindow?.start ?? null,
+        end: input.bookingWindow?.end ?? null,
+      },
+      candidateRoute,
       pickup,
       dropoff,
-      recorder: {
-        healthy: recorderSignal ? false : null,
+      entitlement: input.entitlement ?? {
+        active: enrollment?.status === "active",
       },
+      vehicleEnrollment: enrollment,
+      safetyOperator,
+      providerCapabilities: derivedCapabilities,
+      telemetry: derivedTelemetry,
+      regulatory: derivedRegulatory,
+      recorder: {
+        healthy:
+          input.recorder?.healthy ??
+          (recorderSignal ? false : recorderRegistration ? true : null),
+      },
+      holdState: input.holdState ?? null,
+      limits:
+        input.limits ??
+        (enrollment
+          ? { maxConcurrentTrips: enrollment.maxConcurrentTrips ?? null }
+          : null),
       operatingArea: {
-        inBounds: null,
-        boundaryRisk: false,
+        inBounds: governanceSnapshot.operatingArea.inBounds,
+        boundaryRisk: governanceSnapshot.operatingArea.boundaryRisk,
+        matchedAreaIds: governanceSnapshot.operatingArea.matchedAreaIds,
+      },
+      routeContainment: {
+        contained: governanceSnapshot.routeContainment.contained,
+        matchedRouteIds: governanceSnapshot.routeContainment.matchedRouteIds,
       },
     };
   }
@@ -245,7 +360,7 @@ export class SandboxDispatchGateService {
     evaluatedAt: string,
   ): SandboxDispatchGateInput & {
     dispatchJobId: string | null;
-    operatingArea: { inBounds: boolean; boundaryRisk: boolean };
+    operatingArea: { inBounds: boolean; boundaryRisk: boolean; matchedAreaIds: string[] };
     safetyOperator: {
       required: boolean;
       available: boolean;
@@ -273,7 +388,7 @@ export class SandboxDispatchGateService {
       approvedRouteIds: string[];
       maxConcurrentTrips: number | null;
     };
-    routeContainment: { contained: boolean | null };
+    routeContainment: { contained: boolean | null; matchedRouteIds: string[] };
     holdState: {
       activeSafetyIncident: boolean;
       programSuspended: boolean;
@@ -294,9 +409,10 @@ export class SandboxDispatchGateService {
       operatingArea: {
         inBounds: input.operatingArea?.inBounds === true,
         boundaryRisk: input.operatingArea?.boundaryRisk === true,
+        matchedAreaIds: [...(input.operatingArea?.matchedAreaIds ?? [])],
       },
       safetyOperator: {
-        required: input.safetyOperator?.required === true,
+        required: input.safetyOperator?.required !== false,
         available: input.safetyOperator?.available === true,
         safetyOperatorId: input.safetyOperator?.safetyOperatorId ?? null,
         qualificationStatus: input.safetyOperator?.qualificationStatus ?? null,
@@ -329,6 +445,7 @@ export class SandboxDispatchGateService {
       },
       routeContainment: {
         contained: input.routeContainment?.contained ?? null,
+        matchedRouteIds: [...(input.routeContainment?.matchedRouteIds ?? [])],
       },
       holdState: {
         activeSafetyIncident: input.holdState?.activeSafetyIncident === true,
@@ -362,6 +479,9 @@ export class SandboxDispatchGateService {
     if (!input.entitlement.active) {
       reasons.push("REGULATORY_APPROVAL_MISSING");
     }
+    if (!this.isBookingWindowEligible(input)) {
+      reasons.push("ODD_OUT_OF_BOUNDS");
+    }
     if (!input.operatingArea.inBounds || input.routeContainment.contained === false) {
       reasons.push("ODD_OUT_OF_BOUNDS");
     }
@@ -373,6 +493,12 @@ export class SandboxDispatchGateService {
     }
     if (input.vehicleEnrollment.status !== "active") {
       reasons.push("REGULATORY_APPROVAL_MISSING");
+    }
+    if (!this.hasApprovedAreaCoverage(input)) {
+      reasons.push("ODD_OUT_OF_BOUNDS");
+    }
+    if (!this.hasApprovedRouteCoverage(input)) {
+      reasons.push("ODD_OUT_OF_BOUNDS");
     }
     if (!input.regulatory.approvalFresh) {
       reasons.push("REGULATORY_APPROVAL_MISSING");
@@ -408,14 +534,7 @@ export class SandboxDispatchGateService {
     ) {
       reasons.push("VEHICLE_NOT_CERTIFIED");
     }
-    for (const capability of [
-      "av_dispatch",
-      "telemetry_stream",
-      "regulatory_event_feed",
-      "evidence_recorder",
-      "odd_geofence",
-      "minimal_risk_condition",
-    ]) {
+    for (const capability of REQUIRED_PROVIDER_CAPABILITIES) {
       if (input.providerCapabilities[capability] !== true) {
         reasons.push("PROVIDER_CAPABILITY_MISSING");
         break;
@@ -440,6 +559,297 @@ export class SandboxDispatchGateService {
       );
     }
     return [...new Set(reasons)];
+  }
+
+  private buildDirectCandidateRoute(
+    pickup: { lat: number; lng: number } | null,
+    dropoff: { lat: number; lng: number } | null,
+  ): GeoJsonMultiLineString | null {
+    if (!pickup || !dropoff) {
+      return null;
+    }
+    return {
+      type: "MultiLineString",
+      coordinates: [[[pickup.lng, pickup.lat], [dropoff.lng, dropoff.lat]]],
+    };
+  }
+
+  private buildGovernanceCandidateRoute(
+    sandboxProgramId: string,
+    approvedRouteIds: string[],
+  ): GeoJsonMultiLineString | null {
+    if (approvedRouteIds.length === 0) {
+      return null;
+    }
+    const approvedRouteIdSet = new Set(approvedRouteIds);
+    const route =
+      this.sandboxGovernanceService?.listRoutes().find(
+        (item) =>
+          item.sandboxProgramId === sandboxProgramId &&
+          approvedRouteIdSet.has(item.routeId) &&
+          item.active,
+      ) ?? null;
+    return route ? { ...route.geometry, coordinates: route.geometry.coordinates.map((line) => [...line]) } : null;
+  }
+
+  private buildDefaultProviderCapabilities() {
+    return REQUIRED_PROVIDER_CAPABILITIES.reduce<
+      NonNullable<SandboxDispatchGateInput["providerCapabilities"]>
+    >((acc, capability) => {
+      acc[capability] = true;
+      return acc;
+    }, {} as NonNullable<SandboxDispatchGateInput["providerCapabilities"]>);
+  }
+
+  private async resolveGovernanceSnapshot(input: {
+    sandboxProgramId: string;
+    requestedAt: string;
+    vehicleId: string;
+    driverId: string | null;
+    pickup: { lat: number; lng: number } | null;
+    dropoff: { lat: number; lng: number } | null;
+    candidateRoute: GeoJsonMultiLineString | null;
+    bookingWindow: { start: string | null; end: string | null };
+  }) {
+    const vehicleEnrollment = this.selectVehicleEnrollment(
+      input.vehicleId,
+      input.sandboxProgramId,
+      input.requestedAt,
+    );
+    const safetyOperator = this.selectSafetyOperatorQualification(
+      input.driverId,
+      input.sandboxProgramId,
+      input.requestedAt,
+    );
+
+    const [pickupValidation, dropoffValidation, routeValidation] = await Promise.all([
+      input.pickup
+        ? this.sandboxGovernanceService?.validatePointInApprovedArea({
+            sandboxProgramId: input.sandboxProgramId,
+            point: input.pickup,
+            asOf: input.requestedAt,
+          })
+        : Promise.resolve(null),
+      input.dropoff
+        ? this.sandboxGovernanceService?.validatePointInApprovedArea({
+            sandboxProgramId: input.sandboxProgramId,
+            point: input.dropoff,
+            asOf: input.requestedAt,
+          })
+        : Promise.resolve(null),
+      input.candidateRoute
+        ? this.sandboxGovernanceService?.validateRouteContainment({
+            sandboxProgramId: input.sandboxProgramId,
+            candidatePath: input.candidateRoute,
+            asOf: input.requestedAt,
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const matchedAreaIds = new Set<string>();
+    for (const match of pickupValidation?.matches ?? []) {
+      if (match.areaKind === "operating_area") {
+        matchedAreaIds.add(match.areaId);
+      }
+    }
+    for (const match of dropoffValidation?.matches ?? []) {
+      if (match.areaKind === "operating_area") {
+        matchedAreaIds.add(match.areaId);
+      }
+    }
+
+    const relevantSchedules = this.collectRelevantSchedules(
+      input.sandboxProgramId,
+      [...matchedAreaIds],
+      routeValidation?.routeIds ?? [],
+    );
+    const scheduleEligible = this.isWithinAnySchedule(
+      relevantSchedules,
+      input.bookingWindow.start ?? input.requestedAt,
+      input.bookingWindow.end ?? input.bookingWindow.start ?? input.requestedAt,
+    );
+
+    return {
+      vehicleEnrollment: vehicleEnrollment
+        ? {
+            status: vehicleEnrollment.status,
+            approvedAreaIds: [...vehicleEnrollment.approvedAreaIds],
+            approvedRouteIds: [...vehicleEnrollment.approvedRouteIds],
+            maxConcurrentTrips: vehicleEnrollment.maxConcurrentTrips,
+          }
+        : null,
+      safetyOperator: {
+        required: true,
+        available: safetyOperator !== null,
+        safetyOperatorId: input.driverId,
+        qualificationStatus: safetyOperator?.status ?? null,
+        approvedAreaIds: [...(safetyOperator?.approvedAreaIds ?? [])],
+        approvedRouteIds: [...(safetyOperator?.approvedRouteIds ?? [])],
+      },
+      operatingArea: {
+        inBounds:
+          scheduleEligible &&
+          (input.pickup ? pickupValidation?.inApprovedArea === true : false) &&
+          (input.dropoff ? dropoffValidation?.inApprovedArea === true : false),
+        boundaryRisk:
+          (pickupValidation?.inApprovedArea ?? false) !==
+            (dropoffValidation?.inApprovedArea ?? false),
+        matchedAreaIds: [...matchedAreaIds],
+      },
+      routeContainment: {
+        contained: input.candidateRoute ? routeValidation?.contained ?? false : null,
+        matchedRouteIds: [...(routeValidation?.routeIds ?? [])],
+      },
+    };
+  }
+
+  private selectVehicleEnrollment(
+    vehicleId: string,
+    sandboxProgramId: string,
+    asOf: string,
+  ) {
+    const enrollments =
+      this.sandboxGovernanceService?.listVehicleEnrollments().filter(
+        (item) =>
+          item.vehicleId === vehicleId &&
+          item.sandboxProgramId === sandboxProgramId &&
+          this.isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
+      ) ?? [];
+    return [...enrollments].sort((left, right) => right.version - left.version)[0] ?? null;
+  }
+
+  private selectSafetyOperatorQualification(
+    driverId: string | null,
+    sandboxProgramId: string,
+    asOf: string,
+  ) {
+    if (!driverId) {
+      return null;
+    }
+    const qualifications =
+      this.sandboxGovernanceService?.listSafetyOperatorQualifications().filter(
+        (item) =>
+          item.safetyOperatorId === driverId &&
+          item.sandboxProgramId === sandboxProgramId &&
+          this.isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
+      ) ?? [];
+    return [...qualifications].sort((left, right) => right.version - left.version)[0] ?? null;
+  }
+
+  private collectRelevantSchedules(
+    sandboxProgramId: string,
+    areaIds: string[],
+    routeIds: string[],
+  ) {
+    const areaSet = new Set(areaIds);
+    const routeSet = new Set(routeIds);
+    const areaSchedules =
+      this.sandboxGovernanceService?.listOperatingAreas()
+        .filter(
+          (item) =>
+            item.sandboxProgramId === sandboxProgramId && areaSet.has(item.areaId),
+        )
+        .flatMap((item) => item.schedules) ?? [];
+    const routeSchedules =
+      this.sandboxGovernanceService?.listRoutes()
+        .filter(
+          (item) =>
+            item.sandboxProgramId === sandboxProgramId && routeSet.has(item.routeId),
+        )
+        .flatMap((item) => item.schedules) ?? [];
+    return [...areaSchedules, ...routeSchedules];
+  }
+
+  private isWithinAnySchedule(
+    schedules: SandboxScheduleWindow[],
+    startAt: string,
+    endAt: string,
+  ) {
+    if (schedules.length === 0) {
+      return false;
+    }
+    return schedules.some((schedule) =>
+      this.scheduleContains(schedule, startAt) && this.scheduleContains(schedule, endAt),
+    );
+  }
+
+  private scheduleContains(schedule: SandboxScheduleWindow, at: string) {
+    if (!schedule.active || !this.isEffective(schedule.effectiveFrom, schedule.effectiveUntil, at)) {
+      return false;
+    }
+    const date = new Date(at);
+    const day = date.getUTCDay();
+    if (!schedule.daysOfWeek.includes(day)) {
+      return false;
+    }
+    const time = at.slice(11, 16);
+    return time >= schedule.startLocalTime && time <= schedule.endLocalTime;
+  }
+
+  private isEffective(
+    effectiveFrom: string,
+    effectiveUntil: string | null,
+    asOf: string,
+  ) {
+    const at = Date.parse(asOf);
+    return (
+      Date.parse(effectiveFrom) <= at &&
+      (effectiveUntil === null || Date.parse(effectiveUntil) > at)
+    );
+  }
+
+  private isBookingWindowEligible(
+    input: ReturnType<SandboxDispatchGateService["normalizeInput"]>,
+  ) {
+    return Boolean(input.bookingWindow?.start && input.bookingWindow?.end);
+  }
+
+  private hasApprovedAreaCoverage(
+    input: ReturnType<SandboxDispatchGateService["normalizeInput"]>,
+  ) {
+    if (input.operatingArea.matchedAreaIds.length === 0) {
+      return false;
+    }
+    if (
+      !input.operatingArea.matchedAreaIds.some((areaId) =>
+        input.vehicleEnrollment.approvedAreaIds.includes(areaId),
+      )
+    ) {
+      return false;
+    }
+    if (
+      input.safetyOperator.required &&
+      !input.operatingArea.matchedAreaIds.some((areaId) =>
+        input.safetyOperator.approvedAreaIds.includes(areaId),
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private hasApprovedRouteCoverage(
+    input: ReturnType<SandboxDispatchGateService["normalizeInput"]>,
+  ) {
+    if (input.routeContainment.contained !== true) {
+      return false;
+    }
+    if (
+      !input.routeContainment.matchedRouteIds.some((routeId) =>
+        input.vehicleEnrollment.approvedRouteIds.includes(routeId),
+      )
+    ) {
+      return false;
+    }
+    if (
+      input.safetyOperator.required &&
+      !input.routeContainment.matchedRouteIds.some((routeId) =>
+        input.safetyOperator.approvedRouteIds.includes(routeId),
+      )
+    ) {
+      return false;
+    }
+    return true;
   }
 
   private cloneDecision(decision: SandboxDispatchDecision) {

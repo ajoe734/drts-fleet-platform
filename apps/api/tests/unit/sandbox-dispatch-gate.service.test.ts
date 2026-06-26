@@ -26,8 +26,16 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
       entitlement: { active: true },
-      vehicleEnrollment: { status: "active" },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
       regulatory: { approvalFresh: true, vehicleCertified: true },
       providerCapabilities: {
         av_dispatch: true,
@@ -38,7 +46,19 @@ describe("SandboxDispatchGateService", () => {
         minimal_risk_condition: true,
       },
       telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 80 },
-      operatingArea: { inBounds: true, boundaryRisk: false },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
     });
 
     expect(decision.decision).toBe("block");
@@ -56,8 +76,16 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
       entitlement: { active: true },
-      vehicleEnrollment: { status: "active" },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
       recorder: { healthy: true },
       regulatory: { approvalFresh: true, vehicleCertified: true },
       providerCapabilities: {
@@ -69,7 +97,19 @@ describe("SandboxDispatchGateService", () => {
         minimal_risk_condition: true,
       },
       telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 80 },
-      operatingArea: { inBounds: true, boundaryRisk: false },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
     });
 
     expect(decision.decision).toBe("allow");
@@ -105,8 +145,16 @@ describe("SandboxDispatchGateService", () => {
       vehicleId: "veh-av-004",
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
       entitlement: { active: true },
-      vehicleEnrollment: { status: "active" },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
       recorder: { healthy: true },
       regulatory: { approvalFresh: true, vehicleCertified: true },
       providerCapabilities: {
@@ -118,12 +166,22 @@ describe("SandboxDispatchGateService", () => {
         minimal_risk_condition: true,
       },
       telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
-      operatingArea: { inBounds: true, boundaryRisk: false },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
       safetyOperator: {
         required: true,
         available: true,
         safetyOperatorId: "safety-op-001",
         qualificationStatus: "qualified",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
       },
     });
 
@@ -164,5 +222,49 @@ describe("SandboxDispatchGateService", () => {
         requestId: "req-manual-release-001",
       }),
     );
+  });
+
+  it("blocks when booking window or approved route facts are missing", async () => {
+    const gate = new SandboxDispatchGateService();
+
+    const decision = await gate.evaluateDispatch({
+      orderId: "order-av-006",
+      vehicleId: "veh-av-006",
+      sandboxProgramId: "sandbox-program-001",
+      policyVersion: "phase2-evd-001",
+      entitlement: { active: true },
+      vehicleEnrollment: { status: "active", approvedAreaIds: [], approvedRouteIds: [] },
+      recorder: { healthy: true },
+      regulatory: { approvalFresh: true, vehicleCertified: true },
+      providerCapabilities: {
+        av_dispatch: true,
+        telemetry_stream: true,
+        regulatory_event_feed: true,
+        evidence_recorder: true,
+        odd_geofence: true,
+        minimal_risk_condition: true,
+      },
+      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: [],
+      },
+      routeContainment: {
+        contained: false,
+        matchedRouteIds: [],
+      },
+      safetyOperator: {
+        required: true,
+        available: true,
+        safetyOperatorId: "safety-op-001",
+        qualificationStatus: "qualified",
+        approvedAreaIds: [],
+        approvedRouteIds: [],
+      },
+    });
+
+    expect(decision.decision).toBe("block");
+    expect(decision.hardReasonCodes).toContain("ODD_OUT_OF_BOUNDS");
   });
 });
