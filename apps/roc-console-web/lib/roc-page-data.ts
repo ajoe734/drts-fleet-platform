@@ -133,6 +133,15 @@ export interface RocIncidentsPageData {
   usingFallback: boolean;
 }
 
+export interface RocPageActionItem {
+  descriptor: ResourceActionDescriptor;
+  label: string;
+  path: string;
+  resourceType: string;
+  resourceId: string;
+  reason?: string;
+}
+
 export interface RocEvidencePageItem {
   evidenceId: string;
   vehicleId: string;
@@ -140,6 +149,7 @@ export interface RocEvidencePageItem {
   freezeStatus: "active" | "clear";
   sources: RocEvidenceSource[];
   investigationLink: CrossAppResourceLink | null;
+  availableActions: RocPageActionItem[];
 }
 
 export interface RocEvidencePageData {
@@ -476,6 +486,8 @@ function buildEvidenceItems(
   takeovers: CorrelatedTakeoverCase[],
   vehicles: RocVehicleViewModel[],
   discrepancies: EvidenceDiscrepancyCase[],
+  alerts: RocAlertViewModel[],
+  locale: Locale,
 ): RocEvidencePageItem[] {
   return takeovers.map((item) => {
     const vehicle = vehicles.find(
@@ -504,16 +516,24 @@ function buildEvidenceItems(
       ) as RocEvidenceSource[],
       investigationLink:
         discrepancy?.investigationLink ?? item.investigationLink ?? null,
+      availableActions: buildSupportedEvidenceActionItems(
+        alerts.filter((alert) => alert.vehicleId === item.vehicleId),
+        locale,
+      ),
     };
   });
 }
 
-export async function getRocEvidencePageData(): Promise<RocEvidencePageData> {
-  const [takeoversResult, vehiclesResult] = await Promise.all([
+export async function getRocEvidencePageData(
+  locale: Locale = "en",
+): Promise<RocEvidencePageData> {
+  const [takeoversResult, vehiclesResult, alertsResult] = await Promise.all([
     loadList("/api/roc/takeovers", buildFallbackList(FALLBACK_TAKEOVERS)),
     loadList("/api/roc/vehicles", buildFallbackList(FALLBACK_VEHICLES)),
+    loadList("/api/roc/alerts", buildFallbackList(FALLBACK_ALERTS)),
   ]);
   const vehicles = vehiclesResult.payload.items.map(resolveVehicleViewModel);
+  const alerts = alertsResult.payload.items.map(resolveAlertViewModel);
   const discrepancies = takeoversResult.usingFallback
     ? FALLBACK_EVIDENCE_DISCREPANCIES
     : [];
@@ -523,10 +543,14 @@ export async function getRocEvidencePageData(): Promise<RocEvidencePageData> {
       takeoversResult.payload.items,
       vehicles,
       discrepancies,
+      alerts,
+      locale,
     ),
     refresh: takeoversResult.payload.refresh,
     usingFallback:
-      takeoversResult.usingFallback || vehiclesResult.usingFallback,
+      takeoversResult.usingFallback ||
+      vehiclesResult.usingFallback ||
+      alertsResult.usingFallback,
   };
 }
 
@@ -709,14 +733,7 @@ export function resolveTripStateKey(trip: RocTripReadModel): RocTripStatus {
 export function buildSupportedAlertActionItems(
   alerts: RocAlertViewModel[],
   locale: Locale,
-): Array<{
-  descriptor: ResourceActionDescriptor;
-  label: string;
-  path: string;
-  resourceType: string;
-  resourceId: string;
-  reason?: string;
-}> {
+): RocPageActionItem[] {
   const supportedActions = new Set([
     "ack",
     "stop-new-dispatch",
@@ -748,5 +765,14 @@ export function buildSupportedAlertActionItems(
             }
           : {}),
       })),
+  );
+}
+
+export function buildSupportedEvidenceActionItems(
+  alerts: RocAlertViewModel[],
+  locale: Locale,
+) {
+  return buildSupportedAlertActionItems(alerts, locale).filter(
+    (item) => item.descriptor.action === "start-evidence-freeze",
   );
 }

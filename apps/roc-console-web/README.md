@@ -14,25 +14,21 @@ the ROC Console:
   (`packages/ui-tokens/src/roc.ts`, §4.3 table) for surfaces, accent and status
   state colours.
 
-ROC response surfaces follow the approved ROC canvas contract. This app wires:
+ROC screens are owned by the visual-team canvas and are intentionally not
+built here. What this scaffold wires:
 
-| Surface                                            | File                                                                                                                      |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Shell (left nav, top bar, sidebar footer, locale)  | `components/roc-shell.tsx`, `lib/roc-shell-nav.ts`, `components/roc-health-footer.tsx`                                    |
-| `availableActions` → `ActionReceipt` plumbing      | `components/roc-action-rail.tsx`, `lib/action-runtime.ts`                                                                 |
-| API client + control-plane proxy                   | `lib/api-client.ts` + `app/control-plane-proxy/[...path]/route.ts`                                                        |
-| Takeover / alerts / incidents / evidence / reports | `app/takeover/page.tsx`, `app/alerts/page.tsx`, `app/incidents/page.tsx`, `app/evidence/page.tsx`, `app/reports/page.tsx` |
+| Surface                                           | File                                                                                   |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Shell (left nav, top bar, sidebar footer, locale) | `components/roc-shell.tsx`, `lib/roc-shell-nav.ts`, `components/roc-health-footer.tsx` |
+| `availableActions` → `ActionReceipt` plumbing     | `components/roc-action-rail.tsx`, `lib/action-runtime.ts`                              |
+| API client + control-plane proxy                  | `lib/api-client.ts` + `app/control-plane-proxy/[...path]/route.ts`                     |
 
-The ROC response routes implement the required canvas behaviors:
-
-- `/takeover` keeps the three-source truth split into Tesla original event,
-  safety-operator report, and ROC disposition columns.
-- `/alerts` mounts backend-driven `availableActions` and shows the returned
-  `ActionReceipt` tracking state after writes succeed.
-- `/incidents`, `/evidence`, and `/reports` expose platform-admin deep links
-  from backend `investigationLink` data instead of composing URLs in the UI.
-- `/evidence` stays summary-only and surfaces freeze posture without rendering
-  raw evidence drilldown inside ROC.
+The response routes named in `P2-UI-ROC-002` (`/takeover`, `/alerts`,
+`/incidents`, `/evidence`, `/reports`) intentionally render a shared hold state
+that points at
+`docs/05-ui/roc-console-takeover-alerts-incidents-evidence-reports-screen-requirements-20260626.md`.
+That keeps the scaffold aligned with the UI design contract until the missing
+canonical ROC canvas lands.
 
 **Auth realm.** ROC routes are guarded by `@RequireRealms("system", "ops")`
 (P2-ROC-001) and `auth.policy` maps `roc/*` to `baseAllowedRealms("ops")`. There
@@ -44,9 +40,9 @@ generic Ops Console operator. Write actions return the real backend
 `ActionReceipt`; failures surface as failures — the scaffold never synthesises an
 `accepted` receipt.
 
-The home route still renders the shared `CanvasEmptyState` primitive. The
-`availableActions` → `ActionReceipt` rail remains reusable plumbing mounted by
-the alerts flow and any future ROC write surfaces.
+The home route renders the shared `CanvasEmptyState` primitive (no bespoke
+screen). The `availableActions` → `ActionReceipt` rail is reusable plumbing that
+real ROC screens mount once the visual-team canvas defines them.
 
 ## Scripts
 
