@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AuditLogRecord,
   ApprovedOperatingAreaRecord,
   ApprovedRouteRecord,
@@ -9,6 +10,9 @@ import type {
   GeoJsonMultiPolygon,
   GeoJsonPosition,
   IdentityContext,
+  Phase2AuditContext,
+  Phase2ProviderCapability,
+  ProviderCapabilityRequirement,
   SafetyOperatorQualificationRecord,
   SafetyOperatorQualificationStatus,
   UpsertApprovedOperatingAreasCommand,
@@ -23,6 +27,8 @@ import type {
   VehicleEnrollmentStatus,
 } from "@drts/contracts";
 import {
+  PHASE2_AUDIT_EVENT_CATALOG,
+  PHASE2_PROVIDER_CAPABILITIES,
   SAFETY_OPERATOR_QUALIFICATION_STATUSES,
   SANDBOX_HOLIDAY_POLICIES,
   SANDBOX_OPERATING_AREA_KINDS,
@@ -30,12 +36,45 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { emitPhase2AuditedAction } from "../../common/phase2-audit";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { SandboxGovernanceRepository } from "./sandbox-governance.repository";
 
 type AuditActor = Pick<IdentityContext, "actorId" | "tenantId"> & {
   actorType: AuditLogRecord["actorType"];
 };
+
+type ProviderCapabilityRequirementAuditContext = Pick<
+  Phase2AuditContext,
+  "actorId" | "actorType" | "tenantId" | "moduleName" | "requestId"
+>;
+
+export interface SandboxProviderCapabilityRequirementRecord
+  extends ProviderCapabilityRequirement {
+  requirementId: string;
+  sandboxProgramId: string;
+}
+
+interface StoredProviderCapabilityRequirementRecord
+  extends SandboxProviderCapabilityRequirementRecord {
+  latestAuditId: string;
+  resourceVersion: number;
+}
+
+export interface UpsertProviderCapabilityRequirementCommand {
+  sandboxProgramId: string;
+  capability: Phase2ProviderCapability;
+  required: boolean;
+  minSchemaVersion?: string | null;
+  notes?: string | null;
+  auditContext: ProviderCapabilityRequirementAuditContext;
+}
+
+export interface UpsertProviderCapabilityRequirementResult {
+  requirement: SandboxProviderCapabilityRequirementRecord;
+  receipt: ActionReceipt;
+  auditLog: AuditLogRecord;
+}
 
 const SANDBOX_PROGRAM_ID = "phase2-tesla-fsd-sandbox-202606";
 const SEED_TIMESTAMP = "2026-06-26T00:00:00.000Z";
@@ -217,6 +256,7 @@ export class SandboxGovernanceService implements OnModuleInit {
   );
   private safetyOperatorQualifications: SafetyOperatorQualificationRecord[] =
     cloneList(DEFAULT_OPERATOR_QUALIFICATIONS);
+  private requirements: StoredProviderCapabilityRequirementRecord[] = [];
 
   constructor(
     @Optional()
@@ -245,6 +285,83 @@ export class SandboxGovernanceService implements OnModuleInit {
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
     }
+  }
+
+  upsertProviderCapabilityRequirement(
+    command: UpsertProviderCapabilityRequirementCommand,
+  ): UpsertProviderCapabilityRequirementResult {
+    if (!PHASE2_PROVIDER_CAPABILITIES.includes(command.capability)) {
+      throw new Error(`Unsupported provider capability: ${command.capability}`);
+    }
+    if (!this.auditNotificationService) {
+      throw new Error(
+        "AuditNotificationService is required for provider capability requirement writes.",
+      );
+    }
+
+    const requirementId = `${command.sandboxProgramId}:${command.capability}`;
+    const existing =
+      this.requirements.find(
+        (candidate) => candidate.requirementId === requirementId,
+      ) ?? null;
+    const requirement: SandboxProviderCapabilityRequirementRecord = {
+      requirementId,
+      sandboxProgramId: command.sandboxProgramId,
+      capability: command.capability,
+      required: command.required,
+      minSchemaVersion: command.minSchemaVersion ?? null,
+      notes: command.notes ?? null,
+    };
+    const nextResourceVersion = existing ? existing.resourceVersion + 1 : 1;
+
+    const result = emitPhase2AuditedAction({
+      sink: this.auditNotificationService,
+      audit: {
+        ...command.auditContext,
+        eventName: existing
+          ? PHASE2_AUDIT_EVENT_CATALOG.sandbox
+              .providerCapabilityRequirementAmended
+          : PHASE2_AUDIT_EVENT_CATALOG.sandbox
+              .providerCapabilityRequirementConfigured,
+        resourceType: "provider_capability_requirement",
+        resourceId: requirement.requirementId,
+        summary: this.buildRequirementAuditSummary(requirement),
+        ...(existing
+          ? {
+              previousSummary: this.buildRequirementAuditSummary(existing),
+              supersedesAuditId: existing.latestAuditId,
+              amendsResourceVersion: this.formatResourceVersion(
+                existing.resourceVersion,
+              ),
+            }
+          : {}),
+        resourceVersion: this.formatResourceVersion(nextResourceVersion),
+      },
+      data: requirement,
+      message: existing
+        ? "Provider capability requirement amended."
+        : "Provider capability requirement configured.",
+    });
+
+    const storedRequirement: StoredProviderCapabilityRequirementRecord = {
+      ...result.data,
+      latestAuditId: result.auditLog.auditId,
+      resourceVersion: nextResourceVersion,
+    };
+
+    this.requirements = existing
+      ? this.requirements.map((candidate) =>
+          candidate.requirementId === storedRequirement.requirementId
+            ? storedRequirement
+            : candidate,
+        )
+      : [...this.requirements, storedRequirement];
+
+    return {
+      requirement: result.data,
+      receipt: result.receipt,
+      auditLog: result.auditLog,
+    };
   }
 
   listOperatingAreas() {
@@ -700,6 +817,22 @@ export class SandboxGovernanceService implements OnModuleInit {
       newValuesSummary,
       ...(requestId ? { requestId } : {}),
     });
+  }
+
+  private buildRequirementAuditSummary(
+    requirement: SandboxProviderCapabilityRequirementRecord,
+  ) {
+    return {
+      sandboxProgramId: requirement.sandboxProgramId,
+      capability: requirement.capability,
+      required: requirement.required,
+      minSchemaVersion: requirement.minSchemaVersion,
+      notes: requirement.notes,
+    };
+  }
+
+  private formatResourceVersion(resourceVersion: number) {
+    return `v${resourceVersion}`;
   }
 
   private async persist(

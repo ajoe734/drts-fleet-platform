@@ -646,7 +646,148 @@ export interface RegulatoryReportFiling {
 }
 
 // ---------------------------------------------------------------------------
-// §3.9 Error-code enum
+// §3.9 Canonical audit catalog
+// ---------------------------------------------------------------------------
+
+export const PHASE2_AUDIT_EVENT_CATALOG = {
+  sandbox: {
+    providerCapabilityRequirementConfigured:
+      "sandbox.provider_capability_requirement.configured",
+    providerCapabilityRequirementAmended:
+      "sandbox.provider_capability_requirement.amended",
+    providerCapabilityDescriptorRecorded:
+      "sandbox.provider_capability_descriptor.recorded",
+    dispatchDecisionByOutcome: {
+      allow: "sandbox.dispatch_decision.allowed",
+      allow_with_safety_operator:
+        "sandbox.dispatch_decision.allowed_with_safety_operator",
+      block: "sandbox.dispatch_decision.blocked",
+      defer: "sandbox.dispatch_decision.deferred",
+    } as const satisfies Record<SandboxDispatchOutcome, string>,
+  },
+  tesla: {
+    commandReceiptByStatus: {
+      accepted: "tesla.command_receipt.accepted",
+      queued: "tesla.command_receipt.queued",
+      dispatched: "tesla.command_receipt.dispatched",
+      acknowledged: "tesla.command_receipt.acknowledged",
+      rejected: "tesla.command_receipt.rejected",
+      failed: "tesla.command_receipt.failed",
+      expired: "tesla.command_receipt.expired",
+    } as const satisfies Record<CommandReceiptStatus, string>,
+    regulatoryEventRecorded: "tesla.regulatory_event.recorded",
+    vehicleStateSnapshotRecorded: "tesla.vehicle_state_snapshot.recorded",
+    publicTelemetrySampleRecorded: "tesla.public_telemetry_sample.recorded",
+  },
+  safetyOperator: {
+    assignmentByStatus: {
+      assigned: "safety_operator.assignment.assigned",
+      engaged: "safety_operator.assignment.engaged",
+      released: "safety_operator.assignment.released",
+      expired: "safety_operator.assignment.expired",
+    } as const satisfies Record<SafetyOperatorAssignmentStatus, string>,
+  },
+  roc: {
+    interventionStarted: "roc.intervention.started",
+    interventionResolved: "roc.intervention.resolved",
+  },
+  evidence: {
+    manifestCreated: "evidence.manifest.created",
+    manifestAmended: "evidence.manifest.amended",
+    manifestItemByCustodyState: {
+      captured: "evidence.manifest_item.captured",
+      uploaded: "evidence.manifest_item.uploaded",
+      verified: "evidence.manifest_item.verified",
+      sealed: "evidence.manifest_item.sealed",
+      released: "evidence.manifest_item.released",
+      purged: "evidence.manifest_item.purged",
+    } as const satisfies Record<EvidenceCustodyState, string>,
+  },
+  accident: {
+    caseByStatus: {
+      open: "accident.case.opened",
+      evidence_pending: "accident.case.marked_evidence_pending",
+      under_investigation: "accident.case.investigation_started",
+      regulator_review: "accident.case.regulator_review_requested",
+      closed: "accident.case.closed",
+    } as const satisfies Record<AccidentCaseStatus, string>,
+    evidenceManifestLinked: "accident.case.evidence_manifest_linked",
+    regulatoryReportLinked: "accident.case.regulatory_report_linked",
+    caseAmended: "accident.case.amended",
+  },
+  regulatory: {
+    reportByStatus: {
+      draft: "regulatory.report.drafted",
+      generated: "regulatory.report.generated",
+      submitted: "regulatory.report.submitted",
+      accepted: "regulatory.report.accepted",
+      rejected: "regulatory.report.rejected",
+    } as const satisfies Record<RegulatoryReportStatus, string>,
+    reportAmended: "regulatory.report.amended",
+  },
+} as const;
+
+type NestedStringValues<T> = T extends string
+  ? T
+  : T extends Record<string, unknown>
+    ? { [K in keyof T]: NestedStringValues<T[K]> }[keyof T]
+    : never;
+
+function collectPhase2AuditEventNames(
+  value: unknown,
+  result: string[] = [],
+): string[] {
+  if (typeof value === "string") {
+    result.push(value);
+    return result;
+  }
+
+  if (value && typeof value === "object") {
+    for (const nestedValue of Object.values(value)) {
+      collectPhase2AuditEventNames(nestedValue, result);
+    }
+  }
+
+  return result;
+}
+
+export type Phase2AuditEventName = NestedStringValues<
+  typeof PHASE2_AUDIT_EVENT_CATALOG
+>;
+
+export const PHASE2_AUDIT_EVENT_NAMES =
+  collectPhase2AuditEventNames(PHASE2_AUDIT_EVENT_CATALOG) as
+    readonly Phase2AuditEventName[];
+
+export type Phase2AuditActorType =
+  | "system"
+  | "platform_admin"
+  | "tenant_admin"
+  | "ops_user"
+  | "partner_api_key"
+  | "referral_passenger";
+
+export interface Phase2AuditContext {
+  actorId: string | null;
+  actorType: Phase2AuditActorType;
+  tenantId: string | null;
+  moduleName: string;
+  eventName: Phase2AuditEventName;
+  resourceType: string;
+  resourceId: string | null;
+  requestId?: string;
+  summary: Record<string, unknown>;
+  previousSummary?: Record<string, unknown>;
+  resourceVersion?: string | null;
+  sourceSystem?: Phase2SourceSystem | null;
+  sourceRef?: string | null;
+  occurredAt?: string;
+  supersedesAuditId?: string | null;
+  amendsResourceVersion?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// §3.10 Error-code enum
 // ---------------------------------------------------------------------------
 
 // Stable, machine-checkable error codes returned by Phase 2 endpoints. Wired
