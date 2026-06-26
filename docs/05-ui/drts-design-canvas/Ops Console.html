@@ -41,8 +41,6 @@
 <script type="text/babel" src="ops-screens-1.jsx"></script>
 <script type="text/babel" src="ops-screens-2.jsx"></script>
 <script type="text/babel" src="ops-screens-3.jsx"></script>
-<script type="text/babel" src="ops-supply.jsx"></script>
-<script type="text/babel" src="ops-av-fallback.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -91,24 +89,7 @@ function App() {
           <DCArtboard id="approvals" label="跨租戶審批佇列 · Q-OPS10" width={W} height={H}><Hero url="/approval-requests"><OC_Approvals theme={th} /></Hero></DCArtboard>
         </DCSection>
 
-        <DCSection id="av-fallback" title="04a · AV Fallback / 乘客安撫 · Phase 2 A4" subtitle="自駕→人駕轉派觸發與追蹤 · 乘客 ETA/服務狀態 · 沙盒例外 · flows §5">
-          <DCArtboard id="av-fallback" label="AV→人駕 Fallback 監控 · 觸發+進度" width={W} height={H}><Hero url="/av-fallback"><OC_AvFallback theme={th} /></Hero></DCArtboard>
-          <DCArtboard id="pax-recovery" label="乘客安撫 · 僅服務狀態（不見 AV 內部）" width={W} height={H}><Bare><OC_PassengerRecovery theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="sandbox-exceptions" label="沙盒例外清單 · 邊界/失聯/逾時/鮮度" width={W} height={H}><Bare><OC_SandboxExceptions theme={th} /></Bare></DCArtboard>
-        </DCSection>
-
-        <DCSection id="eligibility" title="04b · 派車資格 Eligibility · Packet 3A" subtitle="候選判斷 + hard/soft 原因 + freshness · 不只「無車」">          <DCArtboard id="elig-normal" label="候選面板 · eligible 優先 (VQ-1)" width={W} height={H}><Hero url="/dispatch/ord_8233/candidates"><OC_EligibilityPanel theme={th} /></Hero></DCArtboard>
-          <DCArtboard id="elig-include" label="includeIneligible · 顯示被排除 (VQ-2)" width={W} height={H}><Bare><OC_EligibilityPanel theme={th} variant="include_ineligible" /></Bare></DCArtboard>
-          <DCArtboard id="elig-nosupply" label="NO_ELIGIBLE_SUPPLY · 顯示原因 (VQ-3)" width={W} height={H}><Bare><OC_EligibilityPanel theme={th} variant="no_supply" /></Bare></DCArtboard>
-          <DCArtboard id="elig-conflict" label="409 · assignment recheck (VQ-4)" width={W} height={H}><Bare><OC_EligibilityPanel theme={th} variant="recheck_conflict" /></Bare></DCArtboard>
-        </DCSection>
-
-        <DCSection id="ops-reports" title="05b · 營運報表 Operational Reports · Packet 3B" subtitle="每日派遣紀錄 + 半年營運摘要 · 固定口徑 SA §7.4">
-          <DCArtboard id="report-daily" label="每日派遣紀錄 · DispatchDailyRecord" width={W} height={H}><Hero url="/reports/daily-dispatch"><OC_OpsReports theme={th} report="daily" /></Hero></DCArtboard>
-          <DCArtboard id="report-summary" label="半年營運摘要 · coverage<95% (VQ-5/6)" width={W} height={H}><Bare><OC_OpsReports theme={th} report="summary" /></Bare></DCArtboard>
-        </DCSection>
-
-        <DCSection id="monitor" title="06 · 營運監控">
+        <DCSection id="monitor" title="05 · 營運監控">
           <DCArtboard id="reports" label="報表 / Reports · T6" width={W} height={H}><Bare><OC_Reports theme={th} /></Bare></DCArtboard>
           <DCArtboard id="revenue" label="收益審視 / Revenue + mismatch (Q-OPS14)" width={W} height={H}><Bare><OC_Revenue theme={th} /></Bare></DCArtboard>
           <DCArtboard id="attendance" label="出勤 / Attendance" width={W} height={H}><Bare><OC_Attendance theme={th} /></Bare></DCArtboard>

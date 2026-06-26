@@ -1,10 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type { EligibilityDecision } from "./phase1-delta-supply-eligibility";
-import type {
-  PassengerDisclosureRequirementSnapshot,
-  RecordPassengerAcknowledgementCommand,
-} from "./phase2-tesla-fsd-sandbox";
 import type { PartnerType } from "./referral-channel";
 import type {
   CrossAppResourceLink,
@@ -668,7 +664,6 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "call_recording",
   "report_artifact",
   "filing_package",
-  "vehicle_evidence",
   "audit_log",
   "webhook_delivery",
   "eligibility_verification",
@@ -684,26 +679,6 @@ export const EVIDENCE_ACCESS_ACTIONS = [
   "export",
 ] as const;
 export type EvidenceAccessAction = (typeof EVIDENCE_ACCESS_ACTIONS)[number];
-
-// Dual-write projection of an audit row that represents an evidence-access
-// event. Phase 2 (P2-DP-S4-001) keeps the canonical audit body in the shared
-// Phase 1 append-only audit store and mirrors evidence-access rows into
-// `av_evidence.evidence_access_logs`. The two stores are linked by `auditId`,
-// so there is exactly one emitter and no divergent second audit body.
-export interface EvidenceAccessLogRecord {
-  accessLogId: string;
-  auditId: string;
-  evidenceFamily: EvidenceRetentionFamily;
-  accessAction: EvidenceAccessAction;
-  actorId: string | null;
-  actorType: AuditLogRecord["actorType"];
-  tenantId: string | null;
-  resourceType: string;
-  resourceId: string | null;
-  requestId: string;
-  context: Record<string, unknown>;
-  createdAt: string;
-}
 
 export const EVIDENCE_ARCHIVE_TIERS = [
   "hot_only",
@@ -764,16 +739,6 @@ export interface EvidenceGovernanceCatalog {
   legalHoldWorkflow: string[];
 }
 
-export const EVIDENCE_GOVERNANCE_PRECEDENCE = [
-  "active_hold",
-  "regulator",
-  "contract",
-  "normal",
-  "deletion_request",
-] as const;
-export type EvidenceGovernancePrecedence =
-  (typeof EVIDENCE_GOVERNANCE_PRECEDENCE)[number];
-
 export const EVIDENCE_LEGAL_HOLD_REASON_CODES = [
   "complaint_escalation",
   "regulatory_inquiry",
@@ -783,28 +748,9 @@ export const EVIDENCE_LEGAL_HOLD_REASON_CODES = [
 export type EvidenceLegalHoldReasonCode =
   (typeof EVIDENCE_LEGAL_HOLD_REASON_CODES)[number];
 
-export const EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS = [
-  "manual",
-  "authority",
-] as const;
-export type EvidenceLegalHoldReleaseTrigger =
-  (typeof EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS)[number];
-
-export const EVIDENCE_LEGAL_HOLD_STATUSES = [
-  "draft",
-  "active",
-  "release_requested",
-  "released",
-] as const;
+export const EVIDENCE_LEGAL_HOLD_STATUSES = ["active", "released"] as const;
 export type EvidenceLegalHoldStatus =
   (typeof EVIDENCE_LEGAL_HOLD_STATUSES)[number];
-
-export interface EvidenceLegalHoldTransitionRecord {
-  from: EvidenceLegalHoldStatus | null;
-  to: EvidenceLegalHoldStatus;
-  at: string;
-  reason: string;
-}
 
 export interface CreateEvidenceLegalHoldCommand {
   family: EvidenceRetentionFamily;
@@ -818,8 +764,6 @@ export interface CreateEvidenceLegalHoldCommand {
 
 export interface ReleaseEvidenceLegalHoldCommand {
   releaseReason: string;
-  releaseTrigger?: EvidenceLegalHoldReleaseTrigger | null;
-  releaseReference?: string | null;
 }
 
 export interface EvidenceLegalHoldRecord {
@@ -831,21 +775,14 @@ export interface EvidenceLegalHoldRecord {
   reasonNote: string | null;
   tenantId: string | null;
   manifestHash: string | null;
-  precedence: EvidenceGovernancePrecedence;
   status: EvidenceLegalHoldStatus;
   placedByActorId: string;
   placedByActorType: IdentityContext["actorType"];
   placedAt: string;
-  releaseRequestedByActorId: string | null;
-  releaseRequestedByActorType: IdentityContext["actorType"] | null;
-  releaseRequestedAt: string | null;
-  releaseTrigger: EvidenceLegalHoldReleaseTrigger | null;
-  releaseReference: string | null;
   releasedByActorId: string | null;
   releasedByActorType: IdentityContext["actorType"] | null;
   releasedAt: string | null;
   releaseReason: string | null;
-  transitionHistory: EvidenceLegalHoldTransitionRecord[];
 }
 
 export const EVIDENCE_DELETION_EXCEPTION_REASON_CODES = [
@@ -916,7 +853,6 @@ export interface EvidenceSubjectGovernanceRecord {
   manifestHash: string | null;
   activeLegalHolds: EvidenceLegalHoldRecord[];
   activeDeletionExceptions: EvidenceDeletionExceptionRecord[];
-  effectivePrecedence: EvidenceGovernancePrecedence;
   deletionSuppressed: boolean;
 }
 
@@ -2250,7 +2186,6 @@ export interface CreateTenantBookingCommand {
   quotedFareRuleVersion?: string;
   minPhotoCount?: number;
   expenseProofRequired?: boolean;
-  passengerDisclosureAcknowledgement?: RecordPassengerAcknowledgementCommand;
 }
 
 export interface UpdateTenantBookingCommand {
@@ -2336,51 +2271,6 @@ export interface AssignDispatchCommand {
   dispatchJobId: string;
   vehicleId: string;
   driverId: string;
-  sandboxDispatchSnapshot?: {
-    entitlement?: {
-      active: boolean | null;
-    } | null;
-    candidateRoute?: {
-      type: "MultiLineString";
-      coordinates: [number, number][][];
-    } | null;
-    providerCapabilities?: Partial<
-      Record<
-        | "av_dispatch"
-        | "remote_command"
-        | "telemetry_stream"
-        | "regulatory_event_feed"
-        | "evidence_recorder"
-        | "odd_geofence"
-        | "minimal_risk_condition",
-        boolean | null
-      >
-    > | null;
-    telemetry?: {
-      stale: boolean | null;
-      minimalRiskConditionActive: boolean | null;
-      socPercent: number | null;
-      currentTripCount?: number | null;
-      odometerKm?: number | null;
-    } | null;
-    regulatory?: {
-      approvalFresh: boolean | null;
-      vehicleCertified: boolean | null;
-    } | null;
-    recorder?: {
-      healthy: boolean | null;
-    } | null;
-    holdState?: {
-      activeSafetyIncident: boolean | null;
-      programSuspended: boolean | null;
-      vehicleHold: boolean | null;
-    } | null;
-    limits?: {
-      minSocPercent?: number | null;
-      maxConcurrentTrips?: number | null;
-      maxOdometerKm?: number | null;
-    } | null;
-  } | null;
 }
 
 export interface ReassignDispatchCommand {
@@ -2502,7 +2392,6 @@ export interface OwnedOrderRecord {
   };
   approvalState: TenantBookingApprovalState;
   approvalRequestIds: string[];
-  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   complianceGates?: ComplianceGateRecord[];
   complianceFlags: string[];
   cancelledAt: string | null;
@@ -2563,7 +2452,6 @@ export interface BookingRecord {
   manualFareOverride: ManualFareOverrideRecord | null;
   approvalState: TenantBookingApprovalState;
   approvalRequestIds: string[];
-  passengerDisclosure: PassengerDisclosureRequirementSnapshot | null;
   complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
   createdAt: string;

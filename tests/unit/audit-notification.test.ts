@@ -28,7 +28,7 @@ describe("audit notification persistence baseline", () => {
   it("writes audit logs through to the repository and keeps UUID ids", async () => {
     const appended: AuditLogRecord[] = [];
     const repository = {
-      appendWithEvidenceAccess: vi.fn(async (record: AuditLogRecord) => {
+      append: vi.fn(async (record: AuditLogRecord) => {
         appended.push(record);
       }),
     } as unknown as AuditLogRepository;
@@ -95,7 +95,7 @@ describe("audit notification persistence baseline", () => {
       }),
       loadEvidenceGovernanceTrail: vi.fn(async () => []),
       reportPersistenceFailure,
-      appendWithEvidenceAccess: vi.fn(async () => {}),
+      append: vi.fn(async () => {}),
     } as unknown as AuditLogRepository;
 
     const service = new AuditNotificationService(repository);
@@ -109,7 +109,7 @@ describe("audit notification persistence baseline", () => {
   it("keeps only the 1000 newest audit logs in memory while preserving write-through", async () => {
     const appended: AuditLogRecord[] = [];
     const repository = {
-      appendWithEvidenceAccess: vi.fn(async (record: AuditLogRecord) => {
+      append: vi.fn(async (record: AuditLogRecord) => {
         appended.push(record);
       }),
     } as unknown as AuditLogRepository;
@@ -156,7 +156,7 @@ describe("audit notification persistence baseline", () => {
       ),
       loadEvidenceGovernanceTrail: vi.fn(async () => []),
       reportPersistenceFailure: vi.fn(),
-      appendWithEvidenceAccess: vi.fn(async () => {}),
+      append: vi.fn(async () => {}),
     } as unknown as AuditLogRepository;
 
     const service = new AuditNotificationService(repository);

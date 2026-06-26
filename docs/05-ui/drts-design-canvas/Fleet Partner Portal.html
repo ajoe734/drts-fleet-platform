@@ -41,7 +41,6 @@
 <script type="text/babel" src="fleet-data.jsx"></script>
 <script type="text/babel" src="fleet-screens.jsx"></script>
 <script type="text/babel" src="fleet-referral.jsx"></script>
-<script type="text/babel" src="fleet-supply.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -70,17 +69,6 @@ function App() {
           <DCArtboard id="drivers" label="司機 / Drivers · 服務資格" width={W} height={H}><Hero url="/drivers"><FLP_Drivers theme={th} /></Hero></DCArtboard>
           <DCArtboard id="vehicles" label="車輛 / Vehicles · 車型資格" width={W} height={H}><Bare><FLP_Vehicles theme={th} /></Bare></DCArtboard>
           <DCArtboard id="trips" label="趟次 / Trips · 含分潤" width={W} height={H}><Bare><FLP_Trips theme={th} /></Bare></DCArtboard>
-        </DCSection>
-
-        <DCSection id="supply-write" title="02b · 供給自主建檔 write-flow · Packet 1" subtitle="submission (draft) → 送審 → 平台核可寫入 canonical · fleet-scoped">
-          <DCArtboard id="supply-dash" label="§5.1 · 送件總覽 /supply · 6 分組 (VQ-6)" width={W} height={H}><Hero url="/supply"><FLP_SupplyDashboard theme={th} /></Hero></DCArtboard>
-          <DCArtboard id="driver-draft" label="§5.2 · 新增司機 draft · wizard (VQ-1)" width={W} height={H}><Bare><FLP_DriverDraft theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="vehicle-draft" label="§5.3 · 新增車輛 draft" width={W} height={H}><Bare><FLP_VehicleDraft theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="supply-docs" label="§5.4 · 文件 /documents · pre-signed (VQ-4)" width={W} height={H}><Hero url="/documents"><FLP_SupplyDocuments theme={th} /></Hero></DCArtboard>
-          <DCArtboard id="submissions" label="§5.5 · 送件紀錄 /supply/submissions" width={W} height={H}><Bare><FLP_Submissions theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="submission-detail" label="§5.6 · 送件詳情 · diff + revision (VQ-2/5)" width={W} height={H}><Bare><FLP_SubmissionDetail theme={th} /></Bare></DCArtboard>
-          <DCArtboard id="submission-approved" label="§5.6 · 詳情 · approved 不可編輯" width={W} height={H}><Bare><FLP_SubmissionDetail theme={th} variant="approved" /></Bare></DCArtboard>
-          <DCArtboard id="supply-errors" label="§7 · 錯誤 / edge states" width={W} height={H}><Bare><FLP_SupplyErrors theme={th} /></Bare></DCArtboard>
         </DCSection>
 
         <DCSection id="revenue" title="03 · 分潤 Revenue Share">

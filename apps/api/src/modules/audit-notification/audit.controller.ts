@@ -9,46 +9,17 @@ import {
 } from "@nestjs/common";
 
 import type {
-  AuditLogQueryFilter,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
   EvidenceRetentionFamily,
   IdentityContext,
-  Phase2AuditDomain,
   ReleaseEvidenceLegalHoldCommand,
   ResolveEvidenceDeletionExceptionCommand,
 } from "@drts/contracts";
-import { PHASE2_AUDIT_DOMAINS } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import { AuditNotificationService } from "./audit-notification.service";
-
-const TRUTHY_QUERY_VALUES = new Set(["1", "true", "yes", "on"]);
-
-function buildAuditLogQueryFilter(
-  phase2?: string,
-  phase2Domain?: string,
-): AuditLogQueryFilter | undefined {
-  const filter: AuditLogQueryFilter = {};
-
-  if (phase2 !== undefined && TRUTHY_QUERY_VALUES.has(phase2.toLowerCase())) {
-    filter.phase2Only = true;
-  }
-
-  if (
-    phase2Domain &&
-    (PHASE2_AUDIT_DOMAINS as readonly string[]).includes(phase2Domain)
-  ) {
-    filter.phase2Domain = phase2Domain as Phase2AuditDomain;
-  }
-
-  if (filter.phase2Only === undefined && filter.phase2Domain === undefined) {
-    return undefined;
-  }
-
-  return filter;
-}
 
 @Controller("audit")
 export class AuditController {
@@ -60,35 +31,11 @@ export class AuditController {
   @RequireRealms("tenant", "platform", "ops")
   listAuditLogs(
     @CurrentIdentity() identity: IdentityContext | null,
-    @Query("phase2") phase2?: string,
-    @Query("phase2Domain") phase2Domain?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const filter = buildAuditLogQueryFilter(phase2, phase2Domain);
-    return toApiSuccessEnvelope(
-      {
-        items: this.auditNotificationService.listAuditLogs(
-          identity,
-          requestId,
-          filter,
-        ),
-      },
-      requestId,
-    );
-  }
-
-  @Get("evidence-access-logs")
-  @RequireRealms("platform", "ops")
-  listEvidenceAccessLogs(
-    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       {
-        items: this.auditNotificationService.listEvidenceAccessLogs(
-          identity,
-          requestId,
-        ),
+        items: this.auditNotificationService.listAuditLogs(identity, requestId),
       },
       requestId,
     );

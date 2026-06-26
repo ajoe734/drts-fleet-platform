@@ -791,19 +791,6 @@ describe("internal key middleware", () => {
     ).not.toThrow();
   });
 
-  it("allows the Tesla regulatory callback path without the internal key, even when prefixed", () => {
-    expect(() =>
-      validateInternalKey(
-        {
-          headers: {},
-          method: "POST",
-          originalUrl: "/api/internal/providers/tesla/regulatory-events",
-        },
-        "staging-secret",
-      ),
-    ).not.toThrow();
-  });
-
   it("allows public tenant role-catalog reads without the internal key", () => {
     expect(() =>
       validateInternalKey(

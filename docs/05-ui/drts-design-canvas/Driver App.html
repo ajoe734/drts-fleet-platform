@@ -37,8 +37,6 @@
 <script type="text/babel" src="driver-screens-1.jsx"></script>
 <script type="text/babel" src="driver-screens-2.jsx"></script>
 <script type="text/babel" src="driver-screens-3.jsx"></script>
-<script type="text/babel" src="driver-supply.jsx"></script>
-<script type="text/babel" src="driver-safety-operator.jsx"></script>
 
 <script type="text/babel">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -165,64 +163,7 @@ function App() {
           </DCArtboard>
         </DCSection>
 
-        <DCSection id="tracking-perm" title="09 · 追蹤 / 權限 / 產品脈絡 · Packet 4" subtitle="Tracking Status 診斷 · Permission Gate · Service Product Context · SA §6">
-          <DCArtboard id="tracking-good" label="A · 追蹤狀態 · good" width={W} height={H}>
-            {pad(<PhoneRaw tab="home"><DrvAppBar theme={t} zh="追蹤狀態" en="tracking-status" back /><DRV_TrackingStatus theme={t} variant="good" /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="tracking-degraded" label="A · 追蹤降級 · queue 42 · stale (VQ-2/4)" width={W} height={H}>
-            {pad(<PhoneRaw tab="home"><DrvAppBar theme={t} zh="追蹤狀態" en="tracking-status" back /><DRV_TrackingStatus theme={t} variant="degraded" /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="tracking-gap" label="A · tracking gap · 重開偵測 (SA §6.7)" width={W} height={H}>
-            {pad(<PhoneRaw tab="home"><DrvAppBar theme={t} zh="追蹤狀態" en="tracking-status" back /><DRV_TrackingStatus theme={t} variant="gap" /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="gate-foreground" label="B · 前景定位被拒 · LOCATION_PERMISSION_DENIED" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="上線前檢查" en="permission-gate" /><DRV_PermissionGate theme={t} variant="foreground_denied" /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="gate-background" label="B · 背景定位未開 · 可瀏覽不可上線 (VQ-3)" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="上線前檢查" en="permission-gate" /><DRV_PermissionGate theme={t} variant="background_denied" /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="gate-device" label="B · 裝置未綁定 · DEVICE_NOT_BOUND" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><DrvAppBar theme={t} zh="上線前檢查" en="permission-gate" /><DRV_PermissionGate theme={t} variant="device_not_bound" /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="product-context" label="C · 任務卡 · 精確 service product (VQ-5)" width={W} height={H}>
-            {pad(<PhoneRaw tab="jobs"><DrvAppBar theme={t} zh="任務" en="jobs" /><DRV_ProductContext theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="state-model" label="狀態模型 · 定位節奏 (SA §6.2/6.8)" width={W} height={H}>
-            {pad(<PhoneRaw tab="home"><DrvAppBar theme={t} zh="狀態模型" en="state-model" back /><DRV_StateModel theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-        </DCSection>
-
-        <DCSection id="safety-operator" title="11 · 安全員模式 Safety Operator · Phase 2 A2" subtitle="FSD 監理沙盒 · driver-app 新 realm（與一般司機分離）· 離線暫存可視 · 不顯示/不控制 Tesla FSD 內部控制">
-          <DCArtboard id="so-qual" label="1 · 資格 Provisioning / Qualification" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_Provisioning theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-shift-start" label="2 · 開始輪班 Shift Start" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_ShiftStart theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-vehicle" label="3 · 指派車輛 Vehicle Assignment" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_VehicleAssign theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-pretrip" label="4 · 行前檢查 Pre-trip Checklist" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_Pretrip theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-active" label="5 · 行程監看 Active Trip · 雙鮮度 + 無 FSD 控制" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_ActiveTrip theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-takeover" label="6 · 接管回報 Takeover · 快速 capture + audit" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_TakeoverReport theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-incident" label="7 · 事故 / 證據上傳 · 離線佇列" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_IncidentUpload theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-closeout" label="8 · 行程結束 Trip Closeout" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_TripCloseout theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-          <DCArtboard id="so-handover" label="9 · 交班 Shift Handover" width={W} height={H}>
-            {pad(<PhoneRaw tabHidden><SO_ShiftHandover theme={t} /></PhoneRaw>)}
-          </DCArtboard>
-        </DCSection>
-
-        <DCSection id="narrow" title="12 · 窄機支援 360×800" subtitle="同設計系統在 Android 入門機">
+        <DCSection id="narrow" title="08 · 窄機支援 360×800" subtitle="同設計系統在 Android 入門機">
           <DCArtboard id="narrow-cockpit" label="窄機 · workspace cockpit" width={360 + 32} height={800 + 32}>
             <div style={{ width: 360 + 32, height: 800 + 32, padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F0EEE9' }}>
               <PhoneBezel device="narrow" dark={tw.dark}>

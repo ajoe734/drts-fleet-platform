@@ -6,21 +6,11 @@ import { SandboxDispatchGateService } from "../../src/modules/sandbox-dispatch-g
 import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
 
 describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
-  it("turns a recorder health regression into a dispatch block and clears it after upload retry recovery", async () => {
+  it("turns a recorder health regression into a dispatch block and clears it after upload retry recovery", () => {
     const vehicleEvidenceService = new VehicleEvidenceService();
     const recorder = buildMockRecorderFixture({ recorderId: "rec-int-001" });
     vehicleEvidenceService.registerRecorder(recorder);
     const gate = new SandboxDispatchGateService(vehicleEvidenceService);
-    const passengerDisclosure = {
-      channel: "tenant_portal" as const,
-      policyId: "policy-int-evd-001",
-      policyVersion: "phase2-evd-001",
-      messageCode: "sandbox_passenger_disclosure.av_program_notice",
-      requiresAcknowledgement: false,
-      acknowledgementMode: "operator_confirmed_notice" as const,
-      acknowledgedAt: null,
-      acknowledgementRecordId: null,
-    };
 
     vehicleEvidenceService.updateRecorderHealth(recorder.recorderId, {
       overall: "unhealthy",
@@ -30,45 +20,11 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
       storageState: "error",
     });
 
-    const blocked = await gate.evaluateDispatch({
+    const blocked = gate.evaluateDispatch({
       orderId: "order-int-001",
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-int",
       policyVersion: "phase2-evd-001",
-      bookingWindow: {
-        start: "2026-06-26T14:00:00.000Z",
-        end: "2026-06-26T15:00:00.000Z",
-      },
-      entitlement: { active: true },
-      vehicleEnrollment: {
-        status: "active",
-        approvedAreaIds: ["odd-downtown-core"],
-        approvedRouteIds: ["route-downtown-loop"],
-      },
-      regulatory: { approvalFresh: true, vehicleCertified: true },
-      providerCapabilities: {
-        av_dispatch: true,
-        telemetry_stream: true,
-        regulatory_event_feed: true,
-        evidence_recorder: true,
-        odd_geofence: true,
-        minimal_risk_condition: true,
-      },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
-      operatingArea: {
-        inBounds: true,
-        boundaryRisk: false,
-        matchedAreaIds: ["odd-downtown-core"],
-      },
-      routeContainment: {
-        contained: true,
-        matchedRouteIds: ["route-downtown-loop"],
-      },
-      passengerDisclosure,
-      safetyOperator: {
-        required: false,
-        available: false,
-      },
     });
 
     const failedSegment = vehicleEvidenceService.listSegmentIndex({
@@ -87,46 +43,11 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
       lastSegmentState: "ok",
     });
 
-    const allowed = await gate.evaluateDispatch({
+    const allowed = gate.evaluateDispatch({
       orderId: "order-int-002",
       vehicleId: recorder.vehicleId,
       sandboxProgramId: "sandbox-program-int",
       policyVersion: "phase2-evd-001",
-      bookingWindow: {
-        start: "2026-06-26T14:00:00.000Z",
-        end: "2026-06-26T15:00:00.000Z",
-      },
-      entitlement: { active: true },
-      vehicleEnrollment: {
-        status: "active",
-        approvedAreaIds: ["odd-downtown-core"],
-        approvedRouteIds: ["route-downtown-loop"],
-      },
-      recorder: { healthy: true },
-      regulatory: { approvalFresh: true, vehicleCertified: true },
-      providerCapabilities: {
-        av_dispatch: true,
-        telemetry_stream: true,
-        regulatory_event_feed: true,
-        evidence_recorder: true,
-        odd_geofence: true,
-        minimal_risk_condition: true,
-      },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
-      operatingArea: {
-        inBounds: true,
-        boundaryRisk: false,
-        matchedAreaIds: ["odd-downtown-core"],
-      },
-      routeContainment: {
-        contained: true,
-        matchedRouteIds: ["route-downtown-loop"],
-      },
-      passengerDisclosure,
-      safetyOperator: {
-        required: false,
-        available: false,
-      },
     });
 
     expect(blocked.decision).toBe("block");

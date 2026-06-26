@@ -26,10 +26,6 @@ export type EmbedScreen =
   | "receipt"
   | "completed"
   | "cancelled"
-  | "fb_vehicle_change"
-  | "fb_human_assigned"
-  | "fb_service_continuing"
-  | "fb_eta_updated"
   | "nosupply"
   | "ineligible"
   | "denied"
@@ -97,10 +93,6 @@ function toEmbedScreen(value: string | undefined): EmbedScreen {
     case "receipt":
     case "completed":
     case "cancelled":
-    case "fb_vehicle_change":
-    case "fb_human_assigned":
-    case "fb_service_continuing":
-    case "fb_eta_updated":
     case "nosupply":
     case "ineligible":
     case "denied":
