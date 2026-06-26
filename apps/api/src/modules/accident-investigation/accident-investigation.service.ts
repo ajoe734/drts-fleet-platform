@@ -1,10 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   AccidentCaseRecord,
   AccidentCaseStatus,
+  AccidentInvestigationBundleCustodyRecord,
+  AccidentInvestigationBundleKnownGap,
+  AccidentInvestigationBundleManifest,
+  AccidentInvestigationBundleSection,
+  AccidentInvestigationBundleView,
   AccidentExternalDocumentRecord,
   AccidentTimelineEntry,
   AccidentTimelineFactConfidence,
@@ -13,13 +18,28 @@ import type {
   CorrelatedTakeoverCase,
   CreateAccidentCaseCommand,
   EvidenceDiscrepancyCase,
+  GenerateAccidentInvestigationBundleCommand,
   ImportAccidentExternalDocumentCommand,
   Phase2SourceMetadata,
   TransitionAccidentCaseCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  DEFAULT_CONTROLLED_DOWNLOAD_HOST,
+  DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
+  DEFAULT_CONTROLLED_DOWNLOAD_SECRET,
+  DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION,
+  DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES,
+  createControlledDownloadMetadata,
+} from "../../common/controlled-download";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RocOperationsService } from "../roc-operations/roc-operations.service";
+import { SafetyOperatorService } from "../safety-operator/safety-operator.service";
+import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
+import { TeslaIntegrationService } from "../tesla-integration/tesla-integration.service";
+import { VehicleEvidenceService } from "../vehicle-evidence/vehicle-evidence.service";
 
 const CASE_STATUS_FLOW: readonly AccidentCaseStatus[] = [
   "detected",
@@ -57,6 +77,12 @@ const CONFIDENCE_PRIORITY: Record<AccidentTimelineFactConfidence, number> = {
 @Injectable()
 export class AccidentInvestigationService {
   private readonly logger = new Logger(AccidentInvestigationService.name);
+  private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
+  private readonly downloadSigningKeyId = DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID;
+  private readonly downloadSigningSecret = DEFAULT_CONTROLLED_DOWNLOAD_SECRET;
+  private readonly downloadSignatureVersion =
+    DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION;
+  private readonly downloadExpiryMinutes = DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES;
 
   private readonly accidentCases = new Map<string, AccidentCaseRecord>();
   private readonly timelineFacts = new Map<string, AccidentTimelineFactRecord[]>();
@@ -64,9 +90,22 @@ export class AccidentInvestigationService {
     string,
     AccidentExternalDocumentRecord[]
   >();
+  private readonly bundles = new Map<string, AccidentInvestigationBundleView>();
 
   constructor(
     private readonly rocOperationsService: RocOperationsService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly ownedMobilityService?: OwnedMobilityService,
+    @Optional()
+    private readonly safetyOperatorService?: SafetyOperatorService,
+    @Optional()
+    private readonly sandboxGovernanceService?: SandboxGovernanceService,
+    @Optional()
+    private readonly teslaIntegrationService?: TeslaIntegrationService,
+    @Optional()
+    private readonly vehicleEvidenceService?: VehicleEvidenceService,
   ) {}
 
   listCorrelatedTakeoverCases(): CorrelatedTakeoverCase[] {
@@ -307,6 +346,117 @@ export class AccidentInvestigationService {
     );
   }
 
+  async generateInvestigationBundle(
+    caseId: string,
+    command: GenerateAccidentInvestigationBundleCommand,
+    requestId?: string,
+  ): Promise<AccidentInvestigationBundleView> {
+    const record = this.synchronizeCaseLinks(this.requireCase(caseId));
+    const generatedAt = new Date().toISOString();
+    const requestedAt = command.requestedAt
+      ? this.normalizeTimestamp(command.requestedAt, "requestedAt")
+      : generatedAt;
+    const actorId = this.normalizeIdentifier(command.actorId, "actorId");
+    const bundleId = `accident-bundle-${randomUUID()}`;
+    const knownGaps: AccidentInvestigationBundleKnownGap[] = [];
+    const timeline = this.getTimeline(record.caseId);
+    const correlatedCase = this.findCorrelatedTakeoverCase(record);
+
+    const sections: AccidentInvestigationBundleSection[] = [
+      this.createBundleSection(
+        "case",
+        "Case, timeline, and investigation posture",
+        {
+          caseRecord: this.cloneCase(record),
+          timeline,
+          noLiabilityConclusion: true,
+        },
+        1 + timeline.length,
+      ),
+      this.buildBookingSection(record, knownGaps),
+      await this.buildExperimentSection(record, correlatedCase, actorId, knownGaps),
+      this.buildVehicleTeslaStateSection(record, knownGaps),
+      this.buildFsdSessionSection(record, correlatedCase, knownGaps),
+      this.buildSafetyReportsSection(record, correlatedCase, knownGaps),
+      this.buildRocActionsSection(record, correlatedCase),
+      this.buildTelemetrySection(record, knownGaps),
+      this.buildSyncedVideoSection(record, knownGaps),
+      await this.buildRouteGeofenceSection(record, correlatedCase, knownGaps),
+      this.buildCommandsSection(record, knownGaps),
+      this.buildNotificationsAuditSection(record),
+      this.buildExternalDocumentsSection(record),
+    ];
+
+    const manifestEntries = sections.map((section) => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      itemCount: section.itemCount,
+      checksumSha256: section.checksumSha256,
+    }));
+    const manifestChecksum = this.computeHash({
+      bundleId,
+      caseId: record.caseId,
+      entries: manifestEntries,
+      knownGaps,
+    });
+    const manifest: AccidentInvestigationBundleManifest = {
+      manifestId: `accident-manifest-${randomUUID()}`,
+      caseId: record.caseId,
+      generatedAt,
+      entryCount: manifestEntries.length,
+      entries: manifestEntries,
+      checksumSha256: manifestChecksum,
+      immutable: true,
+    };
+    const custodyPackage = {
+      statement:
+        "Custody records preserve evidence references and known gaps without emitting a liability conclusion.",
+      records: this.buildCustodyRecords(
+        record,
+        manifest,
+        actorId,
+        requestedAt,
+        generatedAt,
+        command.note,
+      ),
+    };
+    const downloadMetadata = {
+      bundle: createControlledDownloadMetadata({
+        kind: "accident-investigation-bundle",
+        subjectId: bundleId,
+        manifestHash: manifestChecksum,
+        createdAt: generatedAt,
+        host: this.downloadHost,
+        keyId: this.downloadSigningKeyId,
+        signingSecret: this.downloadSigningSecret,
+        ttlMinutes: this.downloadExpiryMinutes,
+        signatureVersion: this.downloadSignatureVersion,
+      }),
+    };
+
+    const bundle: AccidentInvestigationBundleView = {
+      bundleId,
+      caseId: record.caseId,
+      generatedAt,
+      requestedAt,
+      generatedBy: actorId,
+      status: "completed",
+      manifestHash: manifestChecksum,
+      manifest,
+      custodyPackage,
+      sections,
+      knownGaps,
+      liabilityConclusion: null,
+      liabilityConclusionEmitted: false,
+      immutable: true,
+      downloadMetadata,
+    };
+
+    this.bundles.set(bundleId, this.cloneBundle(bundle));
+    this.recordBundleAudit(bundle, requestId);
+    return this.cloneBundle(bundle);
+  }
+
   getTimeline(caseId: string): AccidentTimelineEntry[] {
     const record = this.synchronizeCaseLinks(this.requireCase(caseId));
     const facts = [
@@ -519,6 +669,803 @@ export class AccidentInvestigationService {
     };
   }
 
+  private buildBookingSection(
+    record: AccidentCaseRecord,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    if (!record.orderId) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "booking",
+        code: "ORDER_UNLINKED",
+        message: "Accident case is not linked to a booking/order record.",
+        upstream: "owned-mobility",
+      });
+      return this.createBundleSection(
+        "booking",
+        "Booking and dispatch context",
+        { order: null },
+        0,
+      );
+    }
+
+    const order = this.tryResolve(
+      () => this.ownedMobilityService?.getOrder(record.orderId!),
+      "booking",
+      "ORDER_LOOKUP_UNAVAILABLE",
+      "Owned mobility order context is unavailable for this case.",
+      "owned-mobility",
+      knownGaps,
+    );
+    const dispatchTrace = this.tryResolve(
+      () => this.ownedMobilityService?.listDispatchTrace(record.orderId!),
+      "booking",
+      "DISPATCH_TRACE_UNAVAILABLE",
+      "Dispatch trace could not be synchronized for this case order.",
+      "owned-mobility",
+      knownGaps,
+    );
+
+    return this.createBundleSection(
+      "booking",
+      "Booking and dispatch context",
+      {
+        order: order ?? null,
+        dispatchTrace: dispatchTrace ?? [],
+      },
+      (order ? 1 : 0) + (dispatchTrace?.length ?? 0),
+    );
+  }
+
+  private async buildExperimentSection(
+    record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
+    actorId: string,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    const sandboxProgramId =
+      correlatedCase?.safetyOperatorTakeoverReport.sandboxProgramId ?? null;
+    if (!sandboxProgramId) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "experiment_jurisdiction_snapshot",
+        code: "SANDBOX_PROGRAM_UNKNOWN",
+        message: "No sandbox program could be derived from the synchronized takeover evidence.",
+        upstream: "safety-operator",
+      });
+      return this.createBundleSection(
+        "experiment_jurisdiction_snapshot",
+        "Experiment and jurisdiction snapshot",
+        { sandboxProgramId: null, experiment: null, complianceSnapshot: null },
+        0,
+      );
+    }
+
+    if (!this.sandboxGovernanceService) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "experiment_jurisdiction_snapshot",
+        code: "SANDBOX_GOVERNANCE_UNAVAILABLE",
+        message: "Sandbox governance service is unavailable in this worker context.",
+        upstream: "sandbox-governance",
+      });
+      return this.createBundleSection(
+        "experiment_jurisdiction_snapshot",
+        "Experiment and jurisdiction snapshot",
+        { sandboxProgramId, experiment: null, complianceSnapshot: null },
+        0,
+      );
+    }
+
+    const experiment =
+      this.sandboxGovernanceService
+        .listExperiments(record.occurredAt)
+        .find((candidate) => candidate.programCode === sandboxProgramId) ?? null;
+    if (!experiment) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "experiment_jurisdiction_snapshot",
+        code: "EXPERIMENT_NOT_FOUND",
+        message: `No sandbox experiment was found for program ${sandboxProgramId}.`,
+        upstream: "sandbox-governance",
+      });
+    }
+
+    const complianceSnapshot = experiment
+      ? await this.tryResolveAsync(
+          () =>
+            this.sandboxGovernanceService!.generateComplianceSnapshot(
+              experiment.experimentId,
+              {
+                asOf: record.occurredAt,
+                actorId,
+              },
+            ),
+          "experiment_jurisdiction_snapshot",
+          "COMPLIANCE_SNAPSHOT_UNAVAILABLE",
+          "Compliance snapshot generation failed for the governing experiment.",
+          "sandbox-governance",
+          knownGaps,
+        )
+      : null;
+
+    return this.createBundleSection(
+      "experiment_jurisdiction_snapshot",
+      "Experiment and jurisdiction snapshot",
+      {
+        sandboxProgramId,
+        experiment,
+        complianceSnapshot: complianceSnapshot ?? null,
+      },
+      (experiment ? 1 : 0) + (complianceSnapshot ? 1 : 0),
+    );
+  }
+
+  private buildVehicleTeslaStateSection(
+    record: AccidentCaseRecord,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    const telemetryStatus = this.tryResolve(
+      () => this.teslaIntegrationService?.getTelemetryStatus(record.vehicleId),
+      "vehicle_tesla_state",
+      "TESLA_TELEMETRY_STATUS_UNAVAILABLE",
+      "Tesla telemetry status is unavailable for the accident vehicle.",
+      "tesla-integration",
+      knownGaps,
+    );
+    const publicSample = this.tryResolve(
+      () => this.teslaIntegrationService?.getPublicTelemetrySample(record.vehicleId),
+      "vehicle_tesla_state",
+      "TESLA_PUBLIC_SAMPLE_UNAVAILABLE",
+      "Tesla public telemetry sample is unavailable for the accident vehicle.",
+      "tesla-integration",
+      knownGaps,
+    );
+    const projection = this.tryResolve(
+      () => this.teslaIntegrationService?.getTelemetryProjection(record.vehicleId),
+      "vehicle_tesla_state",
+      "TESLA_STATE_PROJECTION_UNAVAILABLE",
+      "Tesla state projection is unavailable for the accident vehicle.",
+      "tesla-integration",
+      knownGaps,
+    );
+
+    return this.createBundleSection(
+      "vehicle_tesla_state",
+      "Vehicle and Tesla state",
+      {
+        vehicleId: record.vehicleId,
+        telemetryStatus: telemetryStatus ?? null,
+        publicTelemetrySample: publicSample ?? null,
+        stateProjection: projection ?? null,
+      },
+      [telemetryStatus, publicSample, projection].filter(Boolean).length,
+    );
+  }
+
+  private buildFsdSessionSection(
+    record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    const teslaEvents =
+      this.tryResolve(
+        () => this.rocOperationsService.listTeslaAutonomyTransitionEvents(),
+        "fsd_session_events",
+        "TESLA_EVENTS_UNAVAILABLE",
+        "Tesla autonomy transition events are unavailable for synchronized replay.",
+        "roc-operations",
+        knownGaps,
+      ) ?? []
+    ;
+    const filteredTeslaEvents = teslaEvents
+      .filter((event) => this.matchesEventCase(record, event, correlatedCase));
+    const rocResponses =
+      this.tryResolve(
+        () => this.rocOperationsService.listRocTakeoverResponseRecords(),
+        "fsd_session_events",
+        "ROC_RESPONSES_UNAVAILABLE",
+        "ROC takeover responses are unavailable for synchronized replay.",
+        "roc-operations",
+        knownGaps,
+      ) ?? []
+    ;
+    const filteredRocResponses = rocResponses
+      .filter((response) => this.matchesResponseCase(record, response, correlatedCase));
+
+    if (
+      !correlatedCase &&
+      filteredTeslaEvents.length === 0 &&
+      filteredRocResponses.length === 0
+    ) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "fsd_session_events",
+        code: "FSD_SESSION_NOT_SYNCHRONIZED",
+        message: "No synchronized FSD session/takeover event sequence is linked to this case yet.",
+        upstream: "roc-operations",
+      });
+    }
+
+    return this.createBundleSection(
+      "fsd_session_events",
+      "FSD session and synchronized events",
+      {
+        correlatedTakeoverCase: correlatedCase ?? null,
+        teslaEvents: filteredTeslaEvents,
+        rocResponses: filteredRocResponses,
+      },
+      (correlatedCase ? 1 : 0) +
+        filteredTeslaEvents.length +
+        filteredRocResponses.length,
+    );
+  }
+
+  private buildSafetyReportsSection(
+    record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    const reports = correlatedCase
+      ? [correlatedCase.safetyOperatorTakeoverReport]
+      : [];
+
+    if (reports.length === 0) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "safety_reports",
+        code: "SAFETY_REPORT_MISSING",
+        message: "No safety-operator takeover report is linked to this case.",
+        upstream: "safety-operator",
+      });
+    }
+
+    return this.createBundleSection(
+      "safety_reports",
+      "Safety operator reports",
+      {
+        reports,
+      },
+      reports.length,
+    );
+  }
+
+  private buildRocActionsSection(
+    record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
+  ) {
+    const discrepancies = this.rocOperationsService
+      .rebuildCorrelatedTakeoverCases()
+      .discrepancies.filter((discrepancy) =>
+        record.discrepancyCaseIds.includes(discrepancy.discrepancyCaseId),
+      );
+    const manualCorrelations =
+      this.tryResolve(
+        () => this.rocOperationsService.listManualTakeoverCorrelations(),
+        "roc_actions",
+        "MANUAL_CORRELATIONS_UNAVAILABLE",
+        "Manual ROC correlation links are unavailable.",
+        "roc-operations",
+        [],
+      ) ?? []
+    ;
+    const filteredManualCorrelations = manualCorrelations
+      .filter((link) =>
+        correlatedCase
+          ? link.takeoverReportId ===
+            correlatedCase.safetyOperatorTakeoverReport.reportId
+          : false,
+      );
+    const responses =
+      this.tryResolve(
+        () => this.rocOperationsService.listRocTakeoverResponseRecords(),
+        "roc_actions",
+        "ROC_RESPONSES_UNAVAILABLE",
+        "ROC takeover response records are unavailable.",
+        "roc-operations",
+        [],
+      ) ?? []
+    ;
+    const filteredResponses = responses
+      .filter((response) => this.matchesResponseCase(record, response, correlatedCase));
+
+    return this.createBundleSection(
+      "roc_actions",
+      "ROC actions and discrepancy handling",
+      {
+        discrepancyCaseIds: [...record.discrepancyCaseIds],
+        discrepancies,
+        manualCorrelations: filteredManualCorrelations,
+        rocResponses: filteredResponses,
+      },
+      record.discrepancyCaseIds.length +
+        discrepancies.length +
+        filteredManualCorrelations.length +
+        filteredResponses.length,
+    );
+  }
+
+  private buildTelemetrySection(
+    record: AccidentCaseRecord,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    const publicSample = this.tryResolve(
+      () => this.teslaIntegrationService?.getPublicTelemetrySample(record.vehicleId),
+      "telemetry_and_gaps",
+      "PUBLIC_TELEMETRY_UNAVAILABLE",
+      "Public telemetry sample is unavailable for the accident vehicle.",
+      "tesla-integration",
+      knownGaps,
+    );
+    const projection = this.tryResolve(
+      () => this.teslaIntegrationService?.getTelemetryProjection(record.vehicleId),
+      "telemetry_and_gaps",
+      "TELEMETRY_PROJECTION_UNAVAILABLE",
+      "Projected telemetry snapshot is unavailable for the accident vehicle.",
+      "tesla-integration",
+      knownGaps,
+    );
+    const timelineFacts = (this.timelineFacts.get(record.caseId) ?? [])
+      .filter((fact) => fact.factKey.includes("telemetry"))
+      .map((fact) => this.cloneTimelineFact(fact));
+
+    return this.createBundleSection(
+      "telemetry_and_gaps",
+      "Telemetry and known gaps",
+      {
+        telemetryTimelineFacts: timelineFacts,
+        publicTelemetrySample: publicSample ?? null,
+        stateProjection: projection ?? null,
+        knownGaps: knownGaps.filter(
+          (gap) =>
+            gap.sectionId === "vehicle_tesla_state" ||
+            gap.sectionId === "telemetry_and_gaps",
+        ),
+      },
+      timelineFacts.length + [publicSample, projection].filter(Boolean).length,
+    );
+  }
+
+  private buildSyncedVideoSection(
+    record: AccidentCaseRecord,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    const segments = this.vehicleEvidenceService?.listSegmentIndex({
+      vehicleId: record.vehicleId,
+      caseId: record.caseId,
+    }) ?? [];
+    const bookmarks = this.vehicleEvidenceService?.listBookmarks({
+      vehicleId: record.vehicleId,
+    }) ?? [];
+
+    if (segments.length === 0) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "synced_video",
+        code: "SYNCED_VIDEO_MISSING",
+        message: "No synchronized recorder segment is currently linked to this case.",
+        upstream: "vehicle-evidence",
+      });
+    }
+
+    return this.createBundleSection(
+      "synced_video",
+      "Synchronized video and recorder evidence",
+      {
+        segments,
+        bookmarks,
+      },
+      segments.length + bookmarks.length,
+    );
+  }
+
+  private async buildRouteGeofenceSection(
+    record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    const order = record.orderId
+      ? this.tryResolve(
+          () => this.ownedMobilityService?.getOrder(record.orderId!),
+          "route_geofence_compare",
+          "ORDER_CONTEXT_UNAVAILABLE",
+          "Order context is unavailable for route/geofence comparison.",
+          "owned-mobility",
+          knownGaps,
+        )
+      : null;
+    const sandboxProgramId =
+      correlatedCase?.safetyOperatorTakeoverReport.sandboxProgramId ?? null;
+    const pickupPoint = this.extractGeoPoint(order, "pickup");
+    const dropoffPoint = this.extractGeoPoint(order, "dropoff");
+
+    if (!sandboxProgramId || !this.sandboxGovernanceService) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "route_geofence_compare",
+        code: "ROUTE_GEOFENCE_UNAVAILABLE",
+        message: "Sandbox route/geofence comparison cannot run without program context and governance service.",
+        upstream: "sandbox-governance",
+      });
+      return this.createBundleSection(
+        "route_geofence_compare",
+        "Route and geofence comparison",
+        {
+          sandboxProgramId,
+          orderRoute: order ? { pickup: pickupPoint, dropoff: dropoffPoint } : null,
+          pickupAreaValidation: null,
+          dropoffAreaValidation: null,
+          routeValidation: null,
+        },
+        order ? 1 : 0,
+      );
+    }
+
+    if (!pickupPoint || !dropoffPoint) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "route_geofence_compare",
+        code: "ROUTE_COORDINATES_MISSING",
+        message: "Pickup/dropoff coordinates are missing, so route/geofence comparison is partial.",
+        upstream: "owned-mobility",
+      });
+    }
+
+    const pickupAreaValidation = pickupPoint
+      ? await this.tryResolveAsync(
+          () =>
+            this.sandboxGovernanceService!.validatePointInApprovedArea({
+              sandboxProgramId,
+              point: pickupPoint,
+              asOf: record.occurredAt,
+            }),
+          "route_geofence_compare",
+          "PICKUP_AREA_VALIDATION_FAILED",
+          "Pickup point could not be validated against approved areas.",
+          "sandbox-governance",
+          knownGaps,
+        )
+      : null;
+    const dropoffAreaValidation = dropoffPoint
+      ? await this.tryResolveAsync(
+          () =>
+            this.sandboxGovernanceService!.validatePointInApprovedArea({
+              sandboxProgramId,
+              point: dropoffPoint,
+              asOf: record.occurredAt,
+            }),
+          "route_geofence_compare",
+          "DROPOFF_AREA_VALIDATION_FAILED",
+          "Dropoff point could not be validated against approved areas.",
+          "sandbox-governance",
+          knownGaps,
+        )
+      : null;
+    const routeValidation =
+      pickupPoint && dropoffPoint
+        ? await this.tryResolveAsync(
+            () =>
+              this.sandboxGovernanceService!.validateRouteContainment({
+                sandboxProgramId,
+                candidatePath: {
+                  type: "MultiLineString",
+                  coordinates: [
+                    [
+                      [pickupPoint.lng, pickupPoint.lat],
+                      [dropoffPoint.lng, dropoffPoint.lat],
+                    ],
+                  ],
+                },
+                asOf: record.occurredAt,
+                toleranceMeters: 50,
+              }),
+            "route_geofence_compare",
+            "ROUTE_VALIDATION_FAILED",
+            "Candidate route could not be validated against approved routes.",
+            "sandbox-governance",
+            knownGaps,
+          )
+        : null;
+
+    return this.createBundleSection(
+      "route_geofence_compare",
+      "Route and geofence comparison",
+      {
+        sandboxProgramId,
+        orderRoute: order ? { pickup: pickupPoint, dropoff: dropoffPoint } : null,
+        pickupAreaValidation,
+        dropoffAreaValidation,
+        routeValidation,
+      },
+      [order, pickupAreaValidation, dropoffAreaValidation, routeValidation].filter(
+        Boolean,
+      ).length,
+    );
+  }
+
+  private buildCommandsSection(
+    record: AccidentCaseRecord,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ) {
+    if (!this.teslaIntegrationService) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "commands_and_receipts",
+        code: "TESLA_COMMAND_SERVICE_UNAVAILABLE",
+        message: "Tesla command receipts are unavailable in this worker context.",
+        upstream: "tesla-integration",
+      });
+    }
+    const receipts = this.teslaIntegrationService?.listReceipts(record.vehicleId) ?? [];
+    return this.createBundleSection(
+      "commands_and_receipts",
+      "Commands and receipts",
+      {
+        receipts,
+      },
+      receipts.length,
+    );
+  }
+
+  private buildNotificationsAuditSection(record: AccidentCaseRecord) {
+    const notifications =
+      this.auditNotificationService?.listNotifications().filter((notification) =>
+        this.matchesBundleReference(notification, record),
+      ) ?? [];
+    const audits =
+      this.auditNotificationService?.getAuditLogsSnapshot().filter((audit) =>
+        this.matchesBundleReference(audit, record),
+      ) ?? [];
+
+    return this.createBundleSection(
+      "notifications_and_audit",
+      "Notifications and audit references",
+      {
+        notifications,
+        audits,
+      },
+      notifications.length + audits.length,
+    );
+  }
+
+  private buildExternalDocumentsSection(record: AccidentCaseRecord) {
+    const documents = this.listExternalDocuments(record.caseId);
+    return this.createBundleSection(
+      "external_documents",
+      "External documents and imported facts",
+      {
+        documents,
+      },
+      documents.length,
+    );
+  }
+
+  private createBundleSection(
+    sectionId: string,
+    title: string,
+    payload: Record<string, unknown>,
+    itemCount: number,
+  ): AccidentInvestigationBundleSection {
+    return {
+      sectionId,
+      title,
+      itemCount,
+      checksumSha256: this.computeHash(payload),
+      payload,
+    };
+  }
+
+  private buildCustodyRecords(
+    record: AccidentCaseRecord,
+    manifest: AccidentInvestigationBundleManifest,
+    actorId: string,
+    requestedAt: string,
+    generatedAt: string,
+    note?: string | null,
+  ): AccidentInvestigationBundleCustodyRecord[] {
+    return [
+      {
+        custodyId: `custody-${randomUUID()}`,
+        occurredAt: requestedAt,
+        actorId,
+        action: "bundle_requested",
+        note: this.normalizeNullable(note),
+        evidenceRefs: this.uniqueStrings([
+          record.caseId,
+          record.vehicleId,
+          record.orderId ?? "",
+        ].filter(Boolean)),
+      },
+      {
+        custodyId: `custody-${randomUUID()}`,
+        occurredAt: generatedAt,
+        actorId: "accident-investigation-service",
+        action: "bundle_generated",
+        note: "Manifest and known gaps synchronized.",
+        evidenceRefs: this.uniqueStrings([
+          manifest.manifestId,
+          record.evidenceManifestId ?? "",
+          record.regulatoryReportId ?? "",
+        ].filter(Boolean)),
+      },
+      {
+        custodyId: `custody-${randomUUID()}`,
+        occurredAt: generatedAt,
+        actorId: "accident-investigation-service",
+        action: "controlled_download_issued",
+        note: "Controlled download metadata issued and audited.",
+        evidenceRefs: [manifest.checksumSha256],
+      },
+    ];
+  }
+
+  private recordBundleAudit(
+    bundle: AccidentInvestigationBundleView,
+    requestId?: string,
+  ) {
+    this.auditNotificationService?.recordAuditLog({
+      actorId: bundle.generatedBy,
+      actorType: "system",
+      tenantId: null,
+      moduleName: "accident-investigation",
+      actionName: "issue_accident_investigation_bundle_download",
+      resourceType: "accident_investigation_bundle",
+      resourceId: bundle.bundleId,
+      newValuesSummary: {
+        caseId: bundle.caseId,
+        manifestHash: bundle.manifestHash,
+        knownGapCount: bundle.knownGaps.length,
+        ttlMinutes: bundle.downloadMetadata.bundle.ttlMinutes,
+        liabilityConclusionEmitted: bundle.liabilityConclusionEmitted,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private pushKnownGap(
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+    gap: AccidentInvestigationBundleKnownGap,
+  ) {
+    if (
+      knownGaps.some(
+        (candidate) =>
+          candidate.sectionId === gap.sectionId && candidate.code === gap.code,
+      )
+    ) {
+      return;
+    }
+    knownGaps.push(gap);
+  }
+
+  private tryResolve<T>(
+    resolver: () => T | null | undefined,
+    sectionId: string,
+    code: string,
+    message: string,
+    upstream: string,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ): T | null {
+    try {
+      const value = resolver();
+      return value ?? null;
+    } catch (error) {
+      this.logger.debug(
+        `${sectionId} degraded for ${code}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.pushKnownGap(knownGaps, {
+        sectionId,
+        code,
+        message,
+        upstream,
+      });
+      return null;
+    }
+  }
+
+  private async tryResolveAsync<T>(
+    resolver: () => Promise<T> | T,
+    sectionId: string,
+    code: string,
+    message: string,
+    upstream: string,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
+  ): Promise<T | null> {
+    try {
+      return await resolver();
+    } catch (error) {
+      this.logger.debug(
+        `${sectionId} degraded for ${code}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.pushKnownGap(knownGaps, {
+        sectionId,
+        code,
+        message,
+        upstream,
+      });
+      return null;
+    }
+  }
+
+  private extractGeoPoint(
+    order: { pickup?: unknown; dropoff?: unknown } | null,
+    field: "pickup" | "dropoff",
+  ) {
+    const candidate = order?.[field];
+    if (!candidate || typeof candidate !== "object") {
+      return null;
+    }
+    const lat = (candidate as { lat?: unknown }).lat;
+    const lng = (candidate as { lng?: unknown }).lng;
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      return null;
+    }
+    return { lat, lng };
+  }
+
+  private matchesEventCase(
+    record: AccidentCaseRecord,
+    event: {
+      vehicleId: string;
+      orderId: string | null;
+      takeoverCorrelationId: string | null;
+    },
+    correlatedCase: CorrelatedTakeoverCase | null,
+  ) {
+    if (event.vehicleId !== record.vehicleId) {
+      return false;
+    }
+    if (
+      record.takeoverCorrelationId &&
+      event.takeoverCorrelationId === record.takeoverCorrelationId
+    ) {
+      return true;
+    }
+    if (record.orderId && event.orderId === record.orderId) {
+      return true;
+    }
+    return correlatedCase
+      ? event.takeoverCorrelationId === correlatedCase.takeoverCorrelationId
+      : true;
+  }
+
+  private matchesResponseCase(
+    record: AccidentCaseRecord,
+    response: {
+      vehicleId: string;
+      orderId: string | null;
+      takeoverCorrelationId: string | null;
+      triggeredByTeslaEventId: string | null;
+    },
+    correlatedCase: CorrelatedTakeoverCase | null,
+  ) {
+    if (response.vehicleId !== record.vehicleId) {
+      return false;
+    }
+    if (
+      record.takeoverCorrelationId &&
+      response.takeoverCorrelationId === record.takeoverCorrelationId
+    ) {
+      return true;
+    }
+    if (record.orderId && response.orderId === record.orderId) {
+      return true;
+    }
+    return correlatedCase
+      ? response.takeoverCorrelationId === correlatedCase.takeoverCorrelationId
+      : true;
+  }
+
+  private matchesBundleReference(
+    item: unknown,
+    record: AccidentCaseRecord,
+  ) {
+    const serialized = this.stableSerialize(item);
+    return [
+      record.caseId,
+      record.vehicleId,
+      record.orderId,
+      record.takeoverCorrelationId,
+      record.evidenceManifestId,
+      record.regulatoryReportId,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .some((value) => serialized.includes(value));
+  }
+
   private synchronizeCaseLinks(record: AccidentCaseRecord): AccidentCaseRecord {
     const discrepancyCaseIds = this.findLinkedDiscrepancyIds(record);
     const externalDocumentIds = this.uniqueStrings(
@@ -691,6 +1638,26 @@ export class AccidentInvestigationService {
     return Date.parse(left) - Date.parse(right);
   }
 
+  private computeHash(value: unknown) {
+    return createHash("sha256").update(this.stableSerialize(value)).digest("hex");
+  }
+
+  private stableSerialize(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.stableSerialize(item)).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => {
+          const nestedValue = (value as Record<string, unknown>)[key];
+          return `${JSON.stringify(key)}:${this.stableSerialize(nestedValue)}`;
+        })
+        .join(",")}}`;
+    }
+    return JSON.stringify(value);
+  }
+
   private requireCase(caseId: string): AccidentCaseRecord {
     const normalizedCaseId = this.normalizeIdentifier(caseId, "caseId");
     const record = this.accidentCases.get(normalizedCaseId);
@@ -732,6 +1699,12 @@ export class AccidentInvestigationService {
       source: { ...document.source },
       factIds: [...document.factIds],
     };
+  }
+
+  private cloneBundle(
+    bundle: AccidentInvestigationBundleView,
+  ): AccidentInvestigationBundleView {
+    return JSON.parse(JSON.stringify(bundle)) as AccidentInvestigationBundleView;
   }
 
   private normalizeIdentifier(value: string, field: string): string {
