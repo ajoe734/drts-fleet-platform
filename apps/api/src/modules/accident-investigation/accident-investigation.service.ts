@@ -1500,6 +1500,7 @@ export class AccidentInvestigationService {
   private matchesEventCase(
     record: AccidentCaseRecord,
     event: {
+      eventId?: string;
       vehicleId: string;
       orderId: string | null;
       takeoverCorrelationId: string | null;
@@ -1518,9 +1519,15 @@ export class AccidentInvestigationService {
     if (record.orderId && event.orderId === record.orderId) {
       return true;
     }
-    return correlatedCase
-      ? event.takeoverCorrelationId === correlatedCase.takeoverCorrelationId
-      : true;
+    if (
+      record.triggeringEventId &&
+      event.eventId === record.triggeringEventId
+    ) {
+      return true;
+    }
+    return this.hasExplicitCaseLink(record, correlatedCase)
+      ? correlatedCase?.takeoverCorrelationId === event.takeoverCorrelationId
+      : false;
   }
 
   private matchesResponseCase(
@@ -1545,9 +1552,27 @@ export class AccidentInvestigationService {
     if (record.orderId && response.orderId === record.orderId) {
       return true;
     }
-    return correlatedCase
-      ? response.takeoverCorrelationId === correlatedCase.takeoverCorrelationId
-      : true;
+    if (
+      record.triggeringEventId &&
+      response.triggeredByTeslaEventId === record.triggeringEventId
+    ) {
+      return true;
+    }
+    return this.hasExplicitCaseLink(record, correlatedCase)
+      ? correlatedCase?.takeoverCorrelationId === response.takeoverCorrelationId
+      : false;
+  }
+
+  private hasExplicitCaseLink(
+    record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
+  ) {
+    return Boolean(
+      record.takeoverCorrelationId ||
+        record.orderId ||
+        record.triggeringEventId ||
+        correlatedCase,
+    );
   }
 
   private matchesBundleReference(

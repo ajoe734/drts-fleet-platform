@@ -749,6 +749,171 @@ describe("AccidentInvestigationService", () => {
     ).toEqual([expect.objectContaining({ commandId: "receipt-keep-001" })]);
   });
 
+  it("keeps unlinked cases from inheriting same-vehicle Tesla and ROC evidence", async () => {
+    const service = new AccidentInvestigationService(
+      {
+        rebuildCorrelatedTakeoverCases: () => ({
+          cases: [],
+          discrepancies: [],
+        }),
+        listTeslaAutonomyTransitionEvents: () => [
+          {
+            eventId: "tesla-unrelated-001",
+            takeoverCorrelationId: "takeover-unrelated-001",
+            autonomySessionId: "session-unrelated-001",
+            vehicleId: "veh-review-001",
+            orderId: "ord-unrelated-001",
+            transitionType: "manual_takeover",
+            occurredAt: "2026-06-26T13:30:05.000Z",
+            source: {
+              sourceSystem: "tesla_fleet_api",
+              sourceRef: "tesla-unrelated-001",
+              ingestedAt: "2026-06-26T13:30:05.000Z",
+              recordedAt: "2026-06-26T13:30:05.000Z",
+              signatureRef: null,
+              schemaVersion: "2026-06",
+            },
+          },
+        ],
+        listRocTakeoverResponseRecords: () => [
+          {
+            responseId: "roc-unrelated-001",
+            takeoverCorrelationId: "takeover-unrelated-001",
+            autonomySessionId: "session-unrelated-001",
+            triggeredByTeslaEventId: "tesla-unrelated-001",
+            rocOperatorId: "roc-unrelated-001",
+            vehicleId: "veh-review-001",
+            orderId: "ord-unrelated-001",
+            responseType: "remote_assist",
+            requestedAt: "2026-06-26T13:30:15.000Z",
+            respondedAt: "2026-06-26T13:30:30.000Z",
+            resolvedAt: null,
+            outcomeNote: "Unrelated ROC response for the same vehicle.",
+            source: {
+              sourceSystem: "roc_operator",
+              sourceRef: "roc-unrelated-001",
+              ingestedAt: "2026-06-26T13:30:15.000Z",
+              recordedAt: "2026-06-26T13:30:15.000Z",
+              signatureRef: null,
+              schemaVersion: "2026-06",
+            },
+          },
+        ],
+        listManualTakeoverCorrelations: () => [],
+      } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        getTelemetryStatus: vi.fn(() => null),
+        getPublicTelemetrySample: vi.fn(() => null),
+        getTelemetryProjection: vi.fn(() => null),
+        listReceipts: () => [
+          {
+            commandId: "receipt-unrelated-001",
+            idempotencyKey: "idem-unrelated-001",
+            vehicleId: "veh-review-001",
+            commandType: "flash_lights",
+            status: "acknowledged",
+            issuedBy: "roc-unrelated-001",
+            issuedAt: "2026-06-26T13:30:45.000Z",
+            acknowledgedAt: "2026-06-26T13:30:45.000Z",
+            providerRef: "provider-unrelated-001",
+            failureReasonCode: null,
+            source: {
+              sourceSystem: "tesla_fleet_api",
+              sourceRef: "provider-unrelated-001",
+              ingestedAt: "2026-06-26T13:30:45.000Z",
+              recordedAt: "2026-06-26T13:30:45.000Z",
+              signatureRef: null,
+              schemaVersion: "2026-06",
+            },
+          },
+        ],
+      } as never,
+      {
+        listSegmentIndex: () => [
+          {
+            segmentId: "segment-review-001",
+            recorderId: "recorder-review-001",
+            vehicleId: "veh-review-001",
+            caseId: "acc-case-review-001",
+            manifestId: "manifest-review-001",
+            artifactId: "artifact-review-001",
+            artifactType: "video_clip",
+            objectKey: "veh-review-001/segment-review-001.mp4",
+            startedAt: "2026-06-26T12:59:30.000Z",
+            endedAt: "2026-06-26T13:01:30.000Z",
+            checksumSha256: "checksum-review-001",
+            custodyState: "captured",
+            uploadStatus: "uploaded",
+            retryCount: 0,
+            lastRetryAt: null,
+            eventType: "collision",
+            bookmarked: false,
+          },
+        ],
+        listBookmarks: () => [
+          {
+            bookmarkId: "bookmark-unrelated-001",
+            recorderId: "recorder-review-002",
+            vehicleId: "veh-review-001",
+            segmentId: "segment-unrelated-001",
+            eventId: "tesla-unrelated-001",
+            eventType: "collision",
+            note: "Unrelated bookmark from the same vehicle.",
+            bookmarkedAt: "2026-06-26T13:30:10.000Z",
+          },
+        ],
+      } as never,
+    );
+
+    service.createAccidentCase({
+      caseId: "acc-case-review-001",
+      vehicleId: "veh-review-001",
+      severity: "major",
+      occurredAt: "2026-06-26T13:00:00.000Z",
+      reportedBy: "roc-review-001",
+      summary: "Unlinked case should not inherit unrelated evidence.",
+    });
+
+    const bundle = await service.generateInvestigationBundle("acc-case-review-001", {
+      actorId: "investigator-review-001",
+    });
+
+    const fsdSection = bundle.sections.find(
+      (section) => section.sectionId === "fsd_session_events",
+    );
+    expect(fsdSection?.payload).toMatchObject({
+      correlatedTakeoverCase: null,
+      teslaEvents: [],
+      rocResponses: [],
+    });
+    expect(bundle.knownGaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sectionId: "fsd_session_events",
+          code: "FSD_SESSION_NOT_SYNCHRONIZED",
+        }),
+      ]),
+    );
+
+    const syncedVideo = bundle.sections.find(
+      (section) => section.sectionId === "synced_video",
+    );
+    expect(
+      (syncedVideo?.payload as { bookmarks: Array<{ bookmarkId: string }> }).bookmarks,
+    ).toEqual([]);
+
+    const commands = bundle.sections.find(
+      (section) => section.sectionId === "commands_and_receipts",
+    );
+    expect(
+      (commands?.payload as { receipts: Array<{ commandId: string }> }).receipts,
+    ).toEqual([]);
+  });
+
   it("reuses a single upstream snapshot across bundle sections", async () => {
     const getOrder = vi.fn(() => ({
       orderId: "ord-snapshot-001",
