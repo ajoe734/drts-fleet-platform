@@ -763,11 +763,13 @@ function createServiceFixture() {
 }
 
 describe("OperationalObservabilityService", () => {
-  it("aggregates workflow metrics and raises role-routed alerts", () => {
+  it("aggregates workflow metrics and raises role-routed alerts", async () => {
     const { service, callcenterService, reportingFilingService } =
       createServiceFixture();
 
-    const snapshot = service.getSnapshot(new Date("2026-04-30T10:30:00.000Z"));
+    const snapshot = await service.getSnapshot(
+      new Date("2026-04-30T10:30:00.000Z"),
+    );
 
     expect(callcenterService.listCallSessions).toHaveBeenCalled();
     expect(reportingFilingService.listReportJobs).toHaveBeenCalled();
@@ -850,6 +852,7 @@ describe("OperationalObservabilityService", () => {
         credentialStatus: "stub",
       }),
     ]);
+    expect(snapshot.phase2SandboxKpiDashboard).toBeNull();
 
     expect(snapshot.alerts).toEqual(
       expect.arrayContaining([

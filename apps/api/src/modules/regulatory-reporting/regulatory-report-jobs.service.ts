@@ -22,10 +22,16 @@ import type {
   RegulatoryReportSectionRecord,
   ReportArtifactRecord,
   ReportJobAccepted,
+  SandboxControlledEvidenceExportRecord,
   ResumeAuthorizationDossierRecord,
   ResumeAuthorizationDossierSectionRecord,
   ResumeAuthorizationDossierSourceRecord,
   SandboxComplianceSnapshotRecord,
+  SandboxKpiBaselineWindowRecord,
+  SandboxKpiDashboardRecord,
+  SandboxKpiTargetRecord,
+  SandboxSafetyGateRecord,
+  SandboxLegalHoldRecord,
   TeslaAutonomyTransitionEvent,
 } from "@drts/contracts";
 
@@ -53,6 +59,7 @@ import { ReportingService } from "../reporting/reporting.service";
 import type { DailyDispatchRecordQuery } from "../reporting/reporting.repository";
 import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
 import { TeslaIntegrationService } from "../tesla-integration/tesla-integration.service";
+import { PlatformAdminComplianceService } from "../platform-admin/platform-admin-compliance.service";
 
 type RegulatoryArtifactView = ReportArtifactRecord & {
   downloadMetadata: ControlledDownloadMetadata;
@@ -122,6 +129,8 @@ export class RegulatoryReportJobsService {
     private readonly incidentService?: IncidentService,
     @Optional()
     private readonly regulatoryReportingService?: RegulatoryReportingService,
+    @Optional()
+    private readonly platformAdminComplianceService?: PlatformAdminComplianceService,
   ) {}
 
   createReportJob(
@@ -288,6 +297,115 @@ export class RegulatoryReportJobsService {
       requestId,
     );
     return summary;
+  }
+
+  async generateKpiDashboard(
+    experimentId: string,
+    asOf?: string,
+    baselineWindowDays?: number,
+    baselineWindowTrips?: number,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<SandboxKpiDashboardRecord> {
+    const generatedBy = identity?.actorId ?? null;
+    const snapshot =
+      this.requireSandboxGovernanceService().generateComplianceSnapshot(
+        experimentId.trim(),
+        this.buildSnapshotCommand(asOf?.trim(), generatedBy),
+      );
+    const scope = this.buildScopeFromSnapshot(experimentId.trim(), snapshot);
+    const filters: Record<string, unknown> = {
+      experimentId: scope.experimentId,
+      asOf: scope.asOf,
+    };
+    if (scope.programCode) {
+      filters.sandboxProgramId = scope.programCode;
+    }
+
+    const dispatchRecords = this.reportingService
+      ? (await this.loadDailyDispatchRecords(filters)).filter((record) =>
+          this.matchesDispatchRecord(record, filters, scope),
+        )
+      : [];
+    const telemetryRows = this.buildTelemetryCoverageRows(scope);
+    const takeovers = this.filterTakeovers(this.listTakeovers(), {}, scope);
+    const notifications = this.filterNotifications(
+      this.listNotifications(),
+      scope.vehicleIds,
+      new Set(snapshot.jurisdictions.map((item) => item.jurisdictionCode)),
+    );
+    const providerHealth =
+      this.rocOperationsService?.getProviderHealthSnapshot().items ?? [];
+    const rocAlerts = this.rocOperationsService?.listAlerts(null) ?? [];
+    const investigations = this.filterInvestigations(scope);
+    const legalHolds = this.filterLegalHolds(scope, investigations);
+    const controlledExports = this.filterControlledExports(
+      scope,
+      investigations,
+      legalHolds,
+    );
+    const baselineWindow = this.buildKpiBaselineWindow(
+      snapshot,
+      dispatchRecords.length,
+      baselineWindowDays,
+      baselineWindowTrips,
+    );
+
+    const dashboard: SandboxKpiDashboardRecord = {
+      experimentId: scope.experimentId ?? experimentId.trim(),
+      experimentVersionId: snapshot.experimentVersionId,
+      programCode: scope.programCode,
+      asOf: scope.asOf ?? snapshot.asOf,
+      generatedAt: new Date().toISOString(),
+      generatedBy,
+      baselineWindow,
+      targets: this.buildKpiTargets({
+        snapshot,
+        telemetryRows,
+        takeovers,
+        notifications,
+        providerHealth,
+        investigations,
+        legalHolds,
+        controlledExports,
+        dispatchRecordCount: dispatchRecords.length,
+        activeHumanFallbackCount: rocAlerts.filter(
+          (alert) => alert.alertType === "human_fallback",
+        ).length,
+      }),
+      safetyGates: this.buildSafetyGates({
+        snapshot,
+        telemetryRows,
+        notifications,
+        rocAlerts,
+        legalHolds,
+      }),
+    };
+
+    this.recordAudit(
+      {
+        actorId: generatedBy,
+        actorType: this.toAuditActorType(identity?.actorType),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "regulatory-reporting",
+        actionName: "generate_sandbox_kpi_dashboard",
+        resourceType: "sandbox_experiment",
+        resourceId: experimentId.trim(),
+        newValuesSummary: {
+          baselineWindow,
+          targetStatusSet: [
+            ...new Set(dashboard.targets.map((target) => target.targetStatus)),
+          ],
+          safetyGateStates: dashboard.safetyGates.map((gate) => ({
+            key: gate.key,
+            state: gate.state,
+          })),
+        },
+      },
+      requestId,
+    );
+
+    return dashboard;
   }
 
   async generateResumeAuthorizationDossier(
@@ -1305,6 +1423,417 @@ export class RegulatoryReportJobsService {
     };
   }
 
+  private buildKpiBaselineWindow(
+    snapshot: SandboxComplianceSnapshotRecord,
+    tripsCollected: number,
+    baselineWindowDays?: number,
+    baselineWindowTrips?: number,
+  ): SandboxKpiBaselineWindowRecord {
+    const configuredDays = this.normalizePositiveInteger(
+      baselineWindowDays,
+      30,
+    );
+    const configuredTrips = this.normalizePositiveInteger(
+      baselineWindowTrips,
+      50,
+    );
+    const collectionStartAt = this.resolveBaselineCollectionStartAt(snapshot);
+    const elapsedDays = collectionStartAt
+      ? Math.max(
+          0,
+          Math.floor(
+            (new Date(snapshot.asOf).getTime() -
+              new Date(collectionStartAt).getTime()) /
+              (24 * 60 * 60 * 1000),
+          ),
+        )
+      : 0;
+    const readyByDays = elapsedDays >= configuredDays;
+    const readyByTrips = tripsCollected >= configuredTrips;
+
+    return {
+      targetStatus: "baseline_collecting",
+      configuredDays,
+      configuredTrips,
+      collectionStartAt,
+      evaluatedAt: snapshot.generatedAt,
+      elapsedDays,
+      tripsCollected,
+      ready: readyByDays || readyByTrips,
+      readinessReason: readyByDays
+        ? "days"
+        : readyByTrips
+          ? "trips"
+          : "collecting",
+    };
+  }
+
+  private resolveBaselineCollectionStartAt(
+    snapshot: SandboxComplianceSnapshotRecord,
+  ) {
+    const experiment = this.sandboxGovernanceService
+      ?.listExperiments(snapshot.asOf)
+      .find((candidate) => candidate.experimentId === snapshot.experimentId);
+    const version = experiment?.versions.find(
+      (candidate) => candidate.versionId === snapshot.experimentVersionId,
+    );
+    return version?.effectiveFrom ?? null;
+  }
+
+  private buildKpiTargets(input: {
+    snapshot: SandboxComplianceSnapshotRecord;
+    telemetryRows: Array<{
+      completenessStatus: string;
+      telemetryConfigured: boolean;
+    }>;
+    takeovers: CorrelatedTakeoverCase[];
+    notifications: RegulatoryNotificationRecord[];
+    providerHealth: Array<{
+      status: "healthy" | "degraded" | "down" | "unknown";
+      lastCheckedAt: string;
+    }>;
+    investigations: Array<{
+      status: string;
+      occurredAt: string;
+    }>;
+    legalHolds: SandboxLegalHoldRecord[];
+    controlledExports: SandboxControlledEvidenceExportRecord[];
+    dispatchRecordCount: number;
+    activeHumanFallbackCount: number;
+  }): SandboxKpiTargetRecord[] {
+    const activeVehicleCount = input.snapshot.vehicleEnrollments.filter(
+      (enrollment) => enrollment.status === "active",
+    ).length;
+    const providerHealthyCount = input.providerHealth.filter(
+      (item) => item.status === "healthy",
+    ).length;
+    const correlatedTakeoverCount = input.takeovers.filter(
+      (candidate) =>
+        Boolean(candidate.takeoverCorrelationId) &&
+        candidate.discrepancyCaseIds.length === 0,
+    ).length;
+    const frozenInvestigationCount = input.investigations.filter((caseRecord) =>
+      [
+        "evidence_frozen",
+        "initial_notification_sent",
+        "under_investigation",
+        "regulator_review",
+        "closed",
+      ].includes(caseRecord.status),
+    ).length;
+    const onTimeNotificationCount = input.notifications.filter(
+      (notification) => !notification.overdue,
+    ).length;
+    const telemetryFreshVehicleCount = input.telemetryRows.filter(
+      (row) => row.telemetryConfigured && row.completenessStatus === "complete",
+    ).length;
+    const successfulExportCount = input.controlledExports.filter((record) =>
+      ["approved", "completed"].includes(record.status),
+    ).length;
+    const releasedHoldDurationsHours = input.legalHolds
+      .filter((hold) => hold.releaseRequestedAt && hold.releasedAt)
+      .map((hold) =>
+        this.diffHours(
+          hold.releasedAt as string,
+          hold.releaseRequestedAt as string,
+        ),
+      )
+      .filter((value): value is number => value !== null);
+
+    return [
+      this.buildKpiTarget("readiness", {
+        label: "Authorization readiness",
+        measurementKind: "status",
+        value: input.snapshot.authorizationStatus ?? "unknown",
+        observedAt: input.snapshot.asOf,
+        note:
+          input.snapshot.authorizationStatus === "active"
+            ? "Experiment authorization is active."
+            : "Experiment authorization is not active.",
+      }),
+      this.buildKpiTarget("eligibility", {
+        label: "Vehicle eligibility",
+        measurementKind: "percentage",
+        value: this.toPercent(
+          activeVehicleCount,
+          input.snapshot.vehicleEnrollments.length,
+        ),
+        unit: "percent",
+        numerator: activeVehicleCount,
+        denominator: input.snapshot.vehicleEnrollments.length,
+        observedAt: input.snapshot.asOf,
+        note: `${activeVehicleCount}/${input.snapshot.vehicleEnrollments.length} enrolled vehicles are active.`,
+      }),
+      this.buildKpiTarget("provider_completeness", {
+        label: "Provider completeness",
+        measurementKind: "percentage",
+        value: this.toPercent(
+          providerHealthyCount,
+          input.providerHealth.length,
+        ),
+        unit: "percent",
+        numerator: providerHealthyCount,
+        denominator: input.providerHealth.length,
+        observedAt:
+          input.providerHealth[0]?.lastCheckedAt ?? input.snapshot.asOf,
+        note:
+          input.providerHealth.length > 0
+            ? `${providerHealthyCount}/${input.providerHealth.length} provider feeds are healthy.`
+            : "No provider health feed is wired for this scope yet.",
+      }),
+      this.buildKpiTarget("takeover_correlation", {
+        label: "Takeover correlation",
+        measurementKind: "percentage",
+        value: this.toPercent(correlatedTakeoverCount, input.takeovers.length),
+        unit: "percent",
+        numerator: correlatedTakeoverCount,
+        denominator: input.takeovers.length,
+        observedAt:
+          input.takeovers[0]?.sourceTimestamps.safetyOccurredAt ??
+          input.snapshot.asOf,
+        note:
+          input.takeovers.length > 0
+            ? `${correlatedTakeoverCount}/${input.takeovers.length} takeover cases are correlated without discrepancies.`
+            : "No takeover cases observed in the current scope.",
+      }),
+      this.buildKpiTarget("freeze_success", {
+        label: "Freeze success",
+        measurementKind: "percentage",
+        value: this.toPercent(
+          frozenInvestigationCount,
+          input.investigations.length,
+        ),
+        unit: "percent",
+        numerator: frozenInvestigationCount,
+        denominator: input.investigations.length,
+        observedAt: input.investigations[0]?.occurredAt ?? input.snapshot.asOf,
+        note:
+          input.investigations.length > 0
+            ? `${frozenInvestigationCount}/${input.investigations.length} investigations reached evidence-freeze or later workflow states.`
+            : "No investigation cases observed in the current scope.",
+      }),
+      this.buildKpiTarget("fallback_success", {
+        label: "Fallback success",
+        measurementKind: "percentage",
+        value: this.toPercent(
+          Math.max(
+            input.dispatchRecordCount - input.activeHumanFallbackCount,
+            0,
+          ),
+          input.dispatchRecordCount,
+        ),
+        unit: "percent",
+        numerator: Math.max(
+          input.dispatchRecordCount - input.activeHumanFallbackCount,
+          0,
+        ),
+        denominator: input.dispatchRecordCount,
+        observedAt: input.snapshot.asOf,
+        note:
+          input.dispatchRecordCount > 0
+            ? `${input.activeHumanFallbackCount} active human fallbacks remain against ${input.dispatchRecordCount} observed trips.`
+            : "Trip volume has not yet been collected for fallback success.",
+      }),
+      this.buildKpiTarget("notification_timeliness", {
+        label: "Notification timeliness",
+        measurementKind: "percentage",
+        value: this.toPercent(
+          onTimeNotificationCount,
+          input.notifications.length,
+        ),
+        unit: "percent",
+        numerator: onTimeNotificationCount,
+        denominator: input.notifications.length,
+        observedAt: input.notifications[0]?.updatedAt ?? input.snapshot.asOf,
+        note:
+          input.notifications.length > 0
+            ? `${onTimeNotificationCount}/${input.notifications.length} regulatory notifications are within deadline.`
+            : "No regulatory notifications observed in the current scope.",
+      }),
+      this.buildKpiTarget("telemetry_freshness", {
+        label: "Telemetry freshness",
+        measurementKind: "percentage",
+        value: this.toPercent(
+          telemetryFreshVehicleCount,
+          input.telemetryRows.length,
+        ),
+        unit: "percent",
+        numerator: telemetryFreshVehicleCount,
+        denominator: input.telemetryRows.length,
+        observedAt: input.snapshot.asOf,
+        note:
+          input.telemetryRows.length > 0
+            ? `${telemetryFreshVehicleCount}/${input.telemetryRows.length} vehicles have complete telemetry coverage.`
+            : "No vehicle telemetry rows are available in the current scope.",
+      }),
+      this.buildKpiTarget("export_success", {
+        label: "Export success",
+        measurementKind: "percentage",
+        value: this.toPercent(
+          successfulExportCount,
+          input.controlledExports.length,
+        ),
+        unit: "percent",
+        numerator: successfulExportCount,
+        denominator: input.controlledExports.length,
+        observedAt:
+          input.controlledExports[0]?.requestedAt ?? input.snapshot.asOf,
+        note:
+          input.controlledExports.length > 0
+            ? `${successfulExportCount}/${input.controlledExports.length} controlled evidence exports reached approved or completed status.`
+            : "No controlled evidence export requests observed in the current scope.",
+      }),
+      this.buildKpiTarget("legal_hold_release_cycle", {
+        label: "Legal-hold release cycle",
+        measurementKind: "duration_hours",
+        value: this.average(releasedHoldDurationsHours),
+        unit: "hours",
+        numerator: releasedHoldDurationsHours.length,
+        denominator: input.legalHolds.length,
+        observedAt: input.legalHolds[0]?.placedAt ?? input.snapshot.asOf,
+        note:
+          releasedHoldDurationsHours.length > 0
+            ? `Average release cycle is calculated from ${releasedHoldDurationsHours.length} released legal hold(s).`
+            : "No released legal holds observed in the current scope.",
+      }),
+    ];
+  }
+
+  private buildKpiTarget(
+    key: SandboxKpiTargetRecord["key"],
+    input: Omit<SandboxKpiTargetRecord, "key" | "targetStatus">,
+  ): SandboxKpiTargetRecord {
+    return {
+      key,
+      targetStatus: "baseline_collecting",
+      unit: null,
+      numerator: null,
+      denominator: null,
+      ...input,
+    };
+  }
+
+  private buildSafetyGates(input: {
+    snapshot: SandboxComplianceSnapshotRecord;
+    telemetryRows: Array<{
+      completenessStatus: string;
+    }>;
+    notifications: RegulatoryNotificationRecord[];
+    rocAlerts: Array<{
+      alertType: string;
+      providerCode: string | null;
+      summary: string;
+      updatedAt: string;
+    }>;
+    legalHolds: SandboxLegalHoldRecord[];
+  }): SandboxSafetyGateRecord[] {
+    const telemetryGap = input.telemetryRows.some(
+      (row) => row.completenessStatus === "gap",
+    );
+    const recorderAlert = input.rocAlerts.find(
+      (alert) => alert.providerCode === "onboard_recorder",
+    );
+    const providerAlert = input.rocAlerts.find(
+      (alert) => alert.alertType === "provider_health",
+    );
+    const overdueNotification = input.notifications.find(
+      (notification) => notification.overdue,
+    );
+    const activeHold = input.legalHolds.find(
+      (hold) => hold.status !== "released",
+    );
+    const operatorMissing =
+      input.snapshot.vehicleEnrollments.length > 0 &&
+      input.snapshot.authorizationStatus !== "active";
+
+    return [
+      this.buildSafetyGate(
+        "feed_missing",
+        "Provider feed missing",
+        providerAlert ? "alert" : "pass",
+        providerAlert?.summary ?? null,
+        providerAlert?.updatedAt ?? input.snapshot.asOf,
+      ),
+      this.buildSafetyGate(
+        "telemetry_stale",
+        "Telemetry stale",
+        telemetryGap ? "alert" : "pass",
+        telemetryGap
+          ? "One or more vehicles have telemetry completeness gaps."
+          : null,
+        input.snapshot.asOf,
+      ),
+      this.buildSafetyGate(
+        "recorder_offline",
+        "Recorder offline",
+        recorderAlert ? "alert" : "pass",
+        recorderAlert?.summary ?? null,
+        recorderAlert?.updatedAt ?? input.snapshot.asOf,
+      ),
+      this.buildSafetyGate(
+        "operator_missing",
+        "Safety operator missing",
+        operatorMissing ? "alert" : "unknown",
+        operatorMissing
+          ? "Experiment authorization is not active for enrolled vehicles."
+          : "Live operator assignment coverage is not fully modeled in this read model.",
+        input.snapshot.asOf,
+      ),
+      this.buildSafetyGate(
+        "outside_area",
+        "Outside approved area",
+        "unknown",
+        "ODD geofence breach monitoring remains fail-closed and is not summarized in this KPI aggregate yet.",
+        input.snapshot.asOf,
+      ),
+      this.buildSafetyGate(
+        "experiment_expired",
+        "Experiment expired",
+        input.snapshot.authorizationStatus === "active" ? "pass" : "alert",
+        input.snapshot.authorizationStatus === "active"
+          ? null
+          : `Authorization status is '${input.snapshot.authorizationStatus}'.`,
+        input.snapshot.asOf,
+      ),
+      this.buildSafetyGate(
+        "legal_hold_blocks_deletion",
+        "Legal hold blocks deletion",
+        activeHold ? "alert" : "pass",
+        activeHold
+          ? `Legal hold ${activeHold.holdId} remains ${activeHold.status}.`
+          : null,
+        activeHold?.placedAt ?? input.snapshot.asOf,
+      ),
+      this.buildSafetyGate(
+        "notification_overdue",
+        "Notification overdue",
+        overdueNotification ? "alert" : "pass",
+        overdueNotification
+          ? `${overdueNotification.notificationId} missed its deadline.`
+          : null,
+        overdueNotification?.updatedAt ?? input.snapshot.asOf,
+      ),
+    ];
+  }
+
+  private buildSafetyGate(
+    key: string,
+    label: string,
+    state: SandboxSafetyGateRecord["state"],
+    reason: string | null,
+    observedAt: string | null,
+  ): SandboxSafetyGateRecord {
+    return {
+      key,
+      label,
+      hardAlert: true,
+      failClosed: true,
+      state,
+      reason,
+      observedAt,
+    };
+  }
+
   private buildReportCoverage(
     scope: ExperimentScope,
     reportType: Phase2RegulatoryReportJobType,
@@ -1789,6 +2318,53 @@ export class RegulatoryReportJobsService {
     return this.regulatoryReportingService?.listNotifications() ?? [];
   }
 
+  private filterInvestigations(scope: ExperimentScope) {
+    return (
+      this.platformAdminComplianceService?.listInvestigations() ?? []
+    ).filter(
+      (caseRecord) =>
+        scope.vehicleIds.size === 0 ||
+        scope.vehicleIds.has(caseRecord.vehicleId),
+    );
+  }
+
+  private filterLegalHolds(
+    scope: ExperimentScope,
+    investigations: Array<{ caseId: string }>,
+  ) {
+    const caseIds = new Set(
+      investigations.map((caseRecord) => caseRecord.caseId),
+    );
+    return (this.platformAdminComplianceService?.listLegalHolds() ?? []).filter(
+      (hold) =>
+        caseIds.size > 0
+          ? caseIds.has(hold.caseId)
+          : scope.vehicleIds.size === 0,
+    );
+  }
+
+  private filterControlledExports(
+    scope: ExperimentScope,
+    investigations: Array<{ caseId: string }>,
+    legalHolds: SandboxLegalHoldRecord[],
+  ) {
+    const caseIds = new Set(
+      investigations.map((caseRecord) => caseRecord.caseId),
+    );
+    const manifestIds = new Set(legalHolds.map((hold) => hold.manifestId));
+    return (
+      this.platformAdminComplianceService?.listControlledExports() ?? []
+    ).filter((record) => {
+      if (caseIds.size === 0 && manifestIds.size === 0) {
+        return scope.vehicleIds.size === 0;
+      }
+      return (
+        (record.caseId !== null && caseIds.has(record.caseId)) ||
+        manifestIds.has(record.manifestId)
+      );
+    });
+  }
+
   private tryLoadTelemetryStatus(vehicleId: string) {
     try {
       return this.requireTeslaIntegrationService().getTelemetryStatus(
@@ -2154,6 +2730,43 @@ export class RegulatoryReportJobsService {
       command.asOf = asOf;
     }
     return command;
+  }
+
+  private normalizePositiveInteger(
+    value: number | undefined,
+    fallback: number,
+  ) {
+    if (!Number.isInteger(value) || (value as number) <= 0) {
+      return fallback;
+    }
+    return value as number;
+  }
+
+  private toPercent(numerator: number, denominator: number) {
+    if (denominator <= 0) {
+      return null;
+    }
+    return Math.round((numerator / denominator) * 10_000) / 100;
+  }
+
+  private average(values: number[]) {
+    if (values.length === 0) {
+      return null;
+    }
+    return (
+      Math.round(
+        (values.reduce((sum, value) => sum + value, 0) / values.length) * 100,
+      ) / 100
+    );
+  }
+
+  private diffHours(later: string, earlier: string) {
+    const laterMs = new Date(later).getTime();
+    const earlierMs = new Date(earlier).getTime();
+    if (Number.isNaN(laterMs) || Number.isNaN(earlierMs)) {
+      return null;
+    }
+    return Math.round(((laterMs - earlierMs) / (60 * 60 * 1000)) * 100) / 100;
   }
 
   private toAuditActorType(

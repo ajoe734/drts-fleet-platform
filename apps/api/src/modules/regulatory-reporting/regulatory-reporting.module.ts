@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { IncidentModule } from "../incident/incident.module";
+import { PlatformAdminModule } from "../platform-admin/platform-admin.module";
 import { RocOperationsModule } from "../roc-operations/roc-operations.module";
 import { ReportingModule } from "../reporting/reporting.module";
 import { SandboxGovernanceModule } from "../sandbox-governance/sandbox-governance.module";
@@ -15,6 +16,7 @@ import { RegulatoryReportingService } from "./regulatory-reporting.service";
   imports: [
     AuditNotificationModule,
     ReportingModule,
+    PlatformAdminModule,
     RocOperationsModule,
     TeslaIntegrationModule,
     SandboxGovernanceModule,

@@ -508,6 +508,55 @@ describe("E2E-P2-010 regulatory reporting", () => {
         ]),
       );
 
+      const kpiDashboardResponse = await fetch(
+        `${baseUrl}/api/regulatory/experiments/${experimentId}/kpi-dashboard?asOf=${encodeURIComponent(
+          "2026-06-26T10:00:00.000Z",
+        )}&baselineWindowDays=14&baselineWindowTrips=12`,
+        {
+          method: "GET",
+          headers: buildHeaders({
+            "x-scopes": "regulatory:read",
+          }),
+        },
+      );
+      expect(kpiDashboardResponse.ok).toBe(true);
+      const kpiDashboardBody = await kpiDashboardResponse.json();
+      expect(kpiDashboardBody.data.baselineWindow).toMatchObject({
+        targetStatus: "baseline_collecting",
+        configuredDays: 14,
+        configuredTrips: 12,
+      });
+      expect(kpiDashboardBody.data.targets).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "readiness",
+            targetStatus: "baseline_collecting",
+          }),
+          expect.objectContaining({
+            key: "telemetry_freshness",
+            targetStatus: "baseline_collecting",
+          }),
+          expect.objectContaining({
+            key: "notification_timeliness",
+            targetStatus: "baseline_collecting",
+          }),
+        ]),
+      );
+      expect(kpiDashboardBody.data.safetyGates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "telemetry_stale",
+            hardAlert: true,
+            failClosed: true,
+          }),
+          expect.objectContaining({
+            key: "notification_overdue",
+            hardAlert: true,
+            failClosed: true,
+          }),
+        ]),
+      );
+
       const dossierResponse = await fetch(
         `${baseUrl}/api/regulatory/experiments/${experimentId}/resume-dossiers`,
         {
