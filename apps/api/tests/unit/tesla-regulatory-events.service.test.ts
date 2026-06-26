@@ -1,4 +1,4 @@
-import { generateKeyPairSync, createSign } from "node:crypto";
+import { createHash, createSign, generateKeyPairSync } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -20,6 +20,7 @@ function signDetachedJws(
   privateKeyPem: string,
   kid = "tesla-test-kid",
   issuedAt = Math.floor(Date.now() / 1000),
+  dsaEncoding: "ieee-p1363" | "der" = "ieee-p1363",
 ) {
   const protectedHeader = toBase64Url(
     JSON.stringify({
@@ -31,7 +32,7 @@ function signDetachedJws(
   const signer = createSign("SHA256");
   signer.update(`${protectedHeader}.${toBase64Url(payload)}`);
   signer.end();
-  const signature = signer.sign(privateKeyPem);
+  const signature = signer.sign({ key: privateKeyPem, dsaEncoding });
   return `${protectedHeader}..${toBase64Url(signature)}`;
 }
 
@@ -150,6 +151,40 @@ describe("TeslaRegulatoryEventsService", () => {
     ).toBe(true);
   });
 
+  it("rejects DER-encoded ES256 detached signatures because JOSE requires P-1363", async () => {
+    const { service } = buildService();
+    const payload = JSON.stringify({
+      schemaVersion: "tesla.regulatory-event.v1",
+      providerEventId: "evt-der-001",
+      vehicleId: "veh-demo-005",
+      eventType: "collision",
+      occurredAt: "2026-06-26T02:15:00.000Z",
+    });
+
+    await expect(
+      service.ingest({
+        body: JSON.parse(payload) as unknown,
+        rawBody: Buffer.from(payload),
+        headers: {
+          "x-forwarded-client-cert": "CN=tesla-regulatory-sandbox",
+          "x-jws-signature": signDetachedJws(
+            payload,
+            privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+            "tesla-test-kid",
+            Math.floor(Date.now() / 1000),
+            "der",
+          ),
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "INVALID_JWS_SIGNATURE",
+        },
+      },
+    });
+  });
+
   it("replays duplicates idempotently when providerEventId and payload hash match", async () => {
     const { service } = buildService();
     const payload = JSON.stringify({
@@ -238,5 +273,57 @@ describe("TeslaRegulatoryEventsService", () => {
         headers: buildHeaders(replayPayload),
       }),
     ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("repairs a raw-only known-schema duplicate by attaching a canonical event on replay", async () => {
+    const { repository, service } = buildService();
+    const payload = JSON.stringify({
+      schemaVersion: "tesla.regulatory-event.v1",
+      providerEventId: "evt-recover-001",
+      vehicleId: "veh-demo-006",
+      eventType: "near_miss",
+      occurredAt: "2026-06-26T02:16:00.000Z",
+    });
+
+    const seeded = await repository.createRawEvent({
+      providerCode: "tesla",
+      providerIdentity: "tesla-regulatory-sandbox",
+      providerEventId: "evt-recover-001",
+      schemaVersion: "tesla.regulatory-event.v1",
+      payloadSha256: createHash("sha256").update(Buffer.from(payload)).digest("hex"),
+      payloadBody: payload,
+      payloadBytes: Buffer.byteLength(payload),
+      rawHeaders: [],
+      jwsProtectedHeader: { alg: "ES256", kid: "tesla-test-kid" },
+      jwsSignature: "seeded",
+      jwsKid: "tesla-test-kid",
+      jwsAlg: "ES256",
+      jwsIssuedAt: "2026-06-26T02:16:00.000Z",
+      mtlsClientCert: "CN=tesla-regulatory-sandbox",
+      mtlsFingerprint: null,
+      receivedAt: "2026-06-26T02:16:01.000Z",
+      occurredAt: "2026-06-26T02:16:00.000Z",
+      normalizationStatus: "pending",
+      canonicalEventId: null,
+    });
+
+    const receipt = await service.ingest({
+      body: JSON.parse(payload) as unknown,
+      rawBody: Buffer.from(payload),
+      headers: buildHeaders(payload),
+    });
+
+    expect(receipt.status).toBe("duplicate");
+    expect(receipt.duplicate).toBe(true);
+    expect(receipt.rawEventId).toBe(seeded.rawEventId);
+    expect(receipt.canonicalEventId).toBeTruthy();
+    expect(service.listCanonicalEvents()).toHaveLength(1);
+    expect(service.listRawEvents()).toEqual([
+      expect.objectContaining({
+        rawEventId: seeded.rawEventId,
+        canonicalEventId: receipt.canonicalEventId,
+        normalizationStatus: "accepted",
+      }),
+    ]);
   });
 });

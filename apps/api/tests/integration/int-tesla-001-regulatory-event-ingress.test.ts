@@ -25,7 +25,9 @@ function buildDetachedSignature(payload: string, privateKeyPem: string) {
   const signer = createSign("SHA256");
   signer.update(`${protectedHeader}.${toBase64Url(payload)}`);
   signer.end();
-  return `${protectedHeader}..${toBase64Url(signer.sign(privateKeyPem))}`;
+  return `${protectedHeader}..${toBase64Url(
+    signer.sign({ key: privateKeyPem, dsaEncoding: "ieee-p1363" }),
+  )}`;
 }
 
 describe("INT-TESLA-001 regulatory ingress", () => {

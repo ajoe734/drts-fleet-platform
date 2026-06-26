@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
+import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type {
   Phase2SourceMetadata,
@@ -11,7 +12,17 @@ import type {
 
 import { DatabaseService } from "../../common/db";
 
-export type TeslaRegulatoryRawNormalizationStatus = "accepted" | "quarantined";
+export type TeslaRegulatoryRawNormalizationStatus =
+  | "pending"
+  | "accepted"
+  | "quarantined";
+
+type TeslaRegulatoryEventsQueryExecutor = {
+  query<T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
+};
 
 export interface TeslaRegulatoryRawEventRecord {
   rawEventId: string;
@@ -135,9 +146,32 @@ export class TeslaRegulatoryEventsRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async withTransaction<T>(
+    work: (executor: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    if (!this.isEnabled()) {
+      throw new Error("DATABASE_URL is not configured");
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async findRawEventByProviderRef(
     providerCode: string,
     providerEventId: string,
+    executor?: TeslaRegulatoryEventsQueryExecutor,
+    options?: { forUpdate?: boolean },
   ): Promise<TeslaRegulatoryRawEventRecord | null> {
     if (!this.isEnabled()) {
       return (
@@ -146,7 +180,7 @@ export class TeslaRegulatoryEventsRepository {
       );
     }
 
-    const result = await this.databaseService!.query<RawEventRow>(
+    const result = await (executor ?? this.databaseService!).query<RawEventRow>(
       `
         SELECT
           raw_event_id,
@@ -173,6 +207,7 @@ export class TeslaRegulatoryEventsRepository {
         WHERE provider_code = $1
           AND provider_event_id = $2
         LIMIT 1
+        ${options?.forUpdate ? "FOR UPDATE" : ""}
       `,
       [providerCode, providerEventId],
     );
@@ -182,6 +217,7 @@ export class TeslaRegulatoryEventsRepository {
 
   async createRawEvent(
     input: CreateTeslaRegulatoryRawEventInput,
+    executor?: TeslaRegulatoryEventsQueryExecutor,
   ): Promise<TeslaRegulatoryRawEventRecord> {
     const rawEvent: TeslaRegulatoryRawEventRecord = {
       rawEventId: randomUUID(),
@@ -196,7 +232,7 @@ export class TeslaRegulatoryEventsRepository {
       return { ...rawEvent };
     }
 
-    const result = await this.databaseService!.query<RawEventRow>(
+    const result = await (executor ?? this.databaseService!).query<RawEventRow>(
       `
         INSERT INTO av_sandbox.tesla_regulatory_raw_events (
           raw_event_id,
@@ -272,32 +308,60 @@ export class TeslaRegulatoryEventsRepository {
     return this.mapRawEventRow(result.rows[0]!);
   }
 
-  async attachCanonicalEvent(rawEventId: string, canonicalEventId: string) {
+  async attachCanonicalEvent(
+    rawEventId: string,
+    canonicalEventId: string,
+    executor?: TeslaRegulatoryEventsQueryExecutor,
+  ): Promise<TeslaRegulatoryRawEventRecord | null> {
     if (!this.isEnabled()) {
       const entry = [...this.rawEvents.values()].find(
         (item) => item.rawEventId === rawEventId,
       );
       if (!entry) {
-        return;
+        return null;
       }
       entry.canonicalEventId = canonicalEventId;
       entry.normalizationStatus = "accepted";
-      return;
+      return { ...entry };
     }
 
-    await this.databaseService!.query(
+    const result = await (executor ?? this.databaseService!).query<RawEventRow>(
       `
         UPDATE av_sandbox.tesla_regulatory_raw_events
         SET canonical_event_id = $2,
             normalization_status = 'accepted'
         WHERE raw_event_id = $1
+        RETURNING
+          raw_event_id,
+          provider_code,
+          provider_identity,
+          provider_event_id,
+          schema_version,
+          payload_sha256,
+          payload_body,
+          payload_bytes,
+          raw_headers,
+          jws_protected_header,
+          jws_signature,
+          jws_kid,
+          jws_alg,
+          jws_issued_at,
+          mtls_client_cert,
+          mtls_fingerprint,
+          received_at,
+          occurred_at,
+          normalization_status,
+          canonical_event_id
       `,
       [rawEventId, canonicalEventId],
     );
+
+    return result.rows[0] ? this.mapRawEventRow(result.rows[0]) : null;
   }
 
   async createCanonicalEvent(
     input: CreateTeslaRegulatoryCanonicalEventInput,
+    executor?: TeslaRegulatoryEventsQueryExecutor,
   ): Promise<TeslaRegulatoryCanonicalEventRecord> {
     const canonicalEvent: TeslaRegulatoryCanonicalEventRecord = {
       eventId: randomUUID(),
@@ -334,7 +398,7 @@ export class TeslaRegulatoryEventsRepository {
       };
     }
 
-    const result = await this.databaseService!.query<CanonicalEventRow>(
+    const result = await (executor ?? this.databaseService!).query<CanonicalEventRow>(
       `
         INSERT INTO av_sandbox.tesla_regulatory_events (
           event_id,
@@ -424,6 +488,60 @@ export class TeslaRegulatoryEventsRepository {
     );
 
     return this.mapCanonicalEventRow(result.rows[0]!);
+  }
+
+  async findCanonicalEventByProviderRef(
+    providerCode: string,
+    providerEventId: string,
+    executor?: TeslaRegulatoryEventsQueryExecutor,
+  ): Promise<TeslaRegulatoryCanonicalEventRecord | null> {
+    if (!this.isEnabled()) {
+      return (
+        [...this.canonicalEvents.values()].find(
+          (item) =>
+            item.providerCode === providerCode &&
+            item.providerEventId === providerEventId,
+        ) ?? null
+      );
+    }
+
+    const result = await (executor ?? this.databaseService!).query<CanonicalEventRow>(
+      `
+        SELECT
+          event_id,
+          vehicle_id,
+          external_vehicle_ref,
+          event_type,
+          occurred_at,
+          location_lat,
+          location_lng,
+          speed_mps,
+          heading_deg,
+          disengagement_cause,
+          provider_reason_code,
+          safety_operator_id,
+          roc_operator_id,
+          odd_zone_id,
+          source_system,
+          source_ref,
+          source_ingested_at,
+          source_recorded_at,
+          source_signature_ref,
+          source_schema_version,
+          provider_code,
+          provider_event_id,
+          payload_sha256,
+          raw_event_id,
+          ingest_status
+        FROM av_sandbox.tesla_regulatory_events
+        WHERE provider_code = $1
+          AND provider_event_id = $2
+        LIMIT 1
+      `,
+      [providerCode, providerEventId],
+    );
+
+    return result.rows[0] ? this.mapCanonicalEventRow(result.rows[0]) : null;
   }
 
   listRawEvents() {
