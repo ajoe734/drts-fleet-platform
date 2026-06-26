@@ -85,11 +85,17 @@ describe("E2E-P2-007 investigation bundle", () => {
         getTelemetryProjection: () => {
           throw new Error("projection unavailable");
         },
-        listReceipts: () => [],
+        listReceipts: () => {
+          throw new Error("receipt snapshot unavailable");
+        },
       } as never,
       {
-        listSegmentIndex: () => [],
-        listBookmarks: () => [],
+        listSegmentIndex: () => {
+          throw new Error("segment index unavailable");
+        },
+        listBookmarks: () => {
+          throw new Error("bookmark index unavailable");
+        },
       } as never,
     );
     const controller = new AccidentInvestigationController(
@@ -206,6 +212,11 @@ describe("E2E-P2-007 investigation bundle", () => {
       liabilityConclusionEmitted: false,
       manifest: expect.objectContaining({
         entryCount: expect.any(Number),
+        entries: expect.arrayContaining([
+          expect.objectContaining({
+            sectionId: "known_gaps",
+          }),
+        ]),
       }),
       custodyPackage: {
         records: expect.arrayContaining([
@@ -225,8 +236,33 @@ describe("E2E-P2-007 investigation bundle", () => {
         }),
         expect.objectContaining({
           sectionId: "synced_video",
+          code: "VEHICLE_EVIDENCE_SEGMENTS_UNAVAILABLE",
+        }),
+        expect.objectContaining({
+          sectionId: "synced_video",
+          code: "VEHICLE_EVIDENCE_BOOKMARKS_UNAVAILABLE",
+        }),
+        expect.objectContaining({
+          sectionId: "commands_and_receipts",
+          code: "TESLA_COMMAND_RECEIPTS_UNAVAILABLE",
         }),
       ]),
+    });
+    expect(response.data.knownGaps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SYNCED_VIDEO_MISSING",
+        }),
+      ]),
+    );
+    expect(
+      response.data.sections.find((section) => section.sectionId === "known_gaps")
+        ?.payload,
+    ).toMatchObject({
+      knownGaps: response.data.knownGaps,
+      summary: {
+        totalCount: response.data.knownGaps.length,
+      },
     });
 
     const routeSection = response.data.sections.find(
