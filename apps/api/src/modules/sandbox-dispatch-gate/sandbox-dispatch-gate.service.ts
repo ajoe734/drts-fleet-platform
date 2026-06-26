@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+} from "@nestjs/common";
 
 import type {
   AuditLogRecord,
@@ -20,6 +27,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { RocOperationsService } from "../roc-operations/roc-operations.service";
 import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
 import { resolveTeslaTelemetryQualityGateScore } from "../tesla-telemetry/tesla-telemetry.policy";
 import { VehicleEvidenceService } from "../vehicle-evidence/vehicle-evidence.service";
@@ -30,6 +38,7 @@ import {
 import type {
   SandboxDispatchGateInput,
   SandboxDispatchManualReleaseCommand,
+  SandboxDispatchRocRestrictionSnapshot,
   SandboxDispatchStoredEvaluationRecord,
 } from "./sandbox-dispatch-gate.types";
 import { SANDBOX_DISPATCH_ERROR_CODE_MAP } from "./sandbox-dispatch-gate.types";
@@ -99,6 +108,9 @@ export class SandboxDispatchGateService {
     private readonly repository?: SandboxDispatchGateRepository,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    @Inject(forwardRef(() => RocOperationsService))
+    private readonly rocOperationsService?: RocOperationsService,
   ) {}
 
   async upsertPassengerDisclosurePolicy(
@@ -449,11 +461,15 @@ export class SandboxDispatchGateService {
     telemetry?: SandboxDispatchGateInput["telemetry"];
     regulatory?: SandboxDispatchGateInput["regulatory"];
     recorder?: SandboxDispatchGateInput["recorder"];
+    roc?: SandboxDispatchGateInput["roc"];
     holdState?: SandboxDispatchGateInput["holdState"];
     limits?: SandboxDispatchGateInput["limits"];
     passengerDisclosure?: SandboxDispatchGateInput["passengerDisclosure"];
   }): Promise<SandboxDispatchGateInput> {
     const recorderSignal = this.vehicleEvidenceService?.getNoNewDispatchSignal(
+      input.vehicleId,
+    );
+    const rocRestriction = this.rocOperationsService?.getDispatchRestrictions(
       input.vehicleId,
     );
     const recorderRegistration = this.vehicleEvidenceService
@@ -526,6 +542,7 @@ export class SandboxDispatchGateService {
           input.recorder?.healthy ??
           (recorderSignal ? false : recorderRegistration ? true : null),
       },
+      roc: input.roc ?? rocRestriction ?? null,
       holdState: input.holdState ?? null,
       limits:
         input.limits ??
@@ -618,6 +635,7 @@ export class SandboxDispatchGateService {
       vehicleCertified: boolean;
     };
     recorder: { healthy: boolean };
+    roc: SandboxDispatchRocRestrictionSnapshot;
     entitlement: { active: boolean };
     vehicleEnrollment: {
       status: "pending" | "active" | "suspended" | "revoked" | "expired" | null;
@@ -711,6 +729,12 @@ export class SandboxDispatchGateService {
       recorder: {
         healthy: input.recorder?.healthy === true,
       },
+      roc: {
+        reasonCodes: [...(input.roc?.reasonCodes ?? [])],
+        stopNewDispatchActive: input.roc?.stopNewDispatchActive === true,
+        operationalHoldActive: input.roc?.operationalHoldActive === true,
+        humanFallbackActive: input.roc?.humanFallbackActive === true,
+      },
       entitlement: {
         active: input.entitlement?.active === true,
       },
@@ -793,6 +817,7 @@ export class SandboxDispatchGateService {
     if (!input.recorder.healthy) {
       reasons.push("RECORDER_UNHEALTHY");
     }
+    reasons.push(...input.roc.reasonCodes);
     if (input.telemetry.stale) {
       reasons.push("TELEMETRY_STALE");
     }

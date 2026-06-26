@@ -385,6 +385,93 @@ describe("SandboxDispatchGateService", () => {
     expect(decision.hardReasonCodes).toContain("TELEMETRY_STALE");
   });
 
+  it("blocks dispatch when ROC stop/hold restrictions are active", async () => {
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        getDispatchRestrictions: vi.fn(() => ({
+          reasonCodes: ["ROC_STOP_NEW_DISPATCH", "ROC_OPERATIONAL_HOLD"],
+          stopNewDispatchActive: true,
+          operationalHoldActive: true,
+          humanFallbackActive: false,
+        })),
+      } as never,
+    );
+
+    const gateInput = await gate.buildAssignmentGateInput({
+      orderId: "order-av-roc-001",
+      dispatchJobId: "job-av-roc-001",
+      vehicleId: "veh-av-roc-001",
+      driverId: "safety-op-001",
+      sandboxProgramId: "sandbox-program-001",
+      policyVersion: "phase2-roc-001",
+      requestedAt: "2026-06-26T14:00:00.000Z",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
+      entitlement: { active: true },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
+      recorder: { healthy: true },
+      regulatory: { approvalFresh: true, vehicleCertified: true },
+      providerCapabilities: {
+        av_dispatch: true,
+        telemetry_stream: true,
+        regulatory_event_feed: true,
+        evidence_recorder: true,
+        odd_geofence: true,
+        minimal_risk_condition: true,
+      },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 82,
+        qualityScore: 0.9,
+        providerHealthState: "healthy",
+        dispatchHold: false,
+      },
+      pickup: { lat: 25.0445, lng: 121.5235 },
+      dropoff: { lat: 25.0535, lng: 121.5325 },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
+    });
+
+    expect(gateInput.roc).toEqual({
+      reasonCodes: ["ROC_STOP_NEW_DISPATCH", "ROC_OPERATIONAL_HOLD"],
+      stopNewDispatchActive: true,
+      operationalHoldActive: true,
+      humanFallbackActive: false,
+    });
+
+    const decision = await gate.evaluateDispatch(gateInput);
+
+    expect(decision.decision).toBe("block");
+    expect(decision.hardReasonCodes).toEqual(
+      expect.arrayContaining([
+        "ROC_STOP_NEW_DISPATCH",
+        "ROC_OPERATIONAL_HOLD",
+      ]),
+    );
+  });
+
   it("uses the telemetry service quality gate env override when evaluating dispatch", async () => {
     vi.stubEnv("TESLA_TELEMETRY_QUALITY_GATE_SCORE", "0.6");
     try {

@@ -16,6 +16,13 @@ type TeslaProviderHealthState =
   | "incomplete_hold"
   | "regulator_data_incident";
 
+export interface SandboxDispatchRocRestrictionSnapshot {
+  reasonCodes: SandboxDispatchReasonCode[];
+  stopNewDispatchActive: boolean;
+  operationalHoldActive: boolean;
+  humanFallbackActive: boolean;
+}
+
 export interface SandboxDispatchGateInput {
   orderId: string;
   dispatchJobId?: string | null;
@@ -83,6 +90,7 @@ export interface SandboxDispatchGateInput {
   recorder?: {
     healthy: boolean | null;
   } | null;
+  roc?: Partial<SandboxDispatchRocRestrictionSnapshot> | null;
   operatingArea?: {
     inBounds: boolean | null;
     boundaryRisk: boolean | null;
