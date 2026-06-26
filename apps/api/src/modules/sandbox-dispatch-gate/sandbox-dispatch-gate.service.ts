@@ -820,9 +820,19 @@ export class SandboxDispatchGateService {
 
     if (decisionId) {
       const record = await this.repository.loadDecisionById(decisionId);
-      if (record) {
-        return record;
+      if (!record || record.decision.orderId !== orderId) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "SANDBOX_DISPATCH_DECISION_NOT_FOUND",
+          "Sandbox dispatch decision not found for manual release.",
+          {
+            orderId,
+            decisionId,
+          },
+        );
       }
+
+      return record;
     }
 
     return this.repository.loadLatestDecision(orderId);

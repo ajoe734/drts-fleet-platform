@@ -505,6 +505,127 @@ describe("SandboxDispatchGateService", () => {
     expect(result.releaseAudit.decisionId).toBe("dec-existing-002");
   });
 
+  it("rejects manual release when the provided decisionId does not exist", async () => {
+    const repository = {
+      loadDecisionById: vi.fn().mockResolvedValue(null),
+      loadLatestDecision: vi.fn(),
+      persistEvaluation: vi.fn().mockResolvedValue(undefined),
+      updateReleaseAudit: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as never;
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      repository,
+    );
+
+    await expect(
+      gate.recordManualRelease(
+        {
+          orderId: "order-av-005d-missing",
+          vehicleId: "veh-av-005d-missing",
+          sandboxProgramId: "sandbox-program-001",
+          policyVersion: "phase2-evd-001",
+        },
+        {
+          actorId: "ops-003b",
+          actorType: "ops_user",
+          reason: "Reject unknown decisionId",
+          decisionId: "dec-missing-001",
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "SANDBOX_DISPATCH_DECISION_NOT_FOUND",
+          details: {
+            orderId: "order-av-005d-missing",
+            decisionId: "dec-missing-001",
+          },
+        },
+      },
+      status: 404,
+    });
+
+    expect(repository.loadDecisionById).toHaveBeenCalledWith("dec-missing-001");
+    expect(repository.loadLatestDecision).not.toHaveBeenCalled();
+    expect(repository.updateReleaseAudit).not.toHaveBeenCalled();
+    expect(repository.persistEvaluation).not.toHaveBeenCalled();
+  });
+
+  it("rejects manual release when the provided decisionId belongs to a different order", async () => {
+    const repository = {
+      loadDecisionById: vi.fn().mockResolvedValue({
+        decision: {
+          decisionId: "dec-other-order-001",
+          orderId: "order-av-foreign",
+          dispatchJobId: "job-av-foreign",
+          vehicleId: "veh-av-foreign",
+          sandboxProgramId: "sandbox-program-001",
+          decision: "block",
+          oddInBounds: false,
+          hardReasonCodes: ["REGULATORY_APPROVAL_MISSING"],
+          softReasonCodes: [],
+          requiredSafetyOperatorId: null,
+          policyVersion: "phase2-evd-001",
+          evaluatedAt: "2026-06-26T00:00:00.000Z",
+        },
+        evaluationSnapshot: {
+          orderId: "order-av-foreign",
+          dispatchJobId: "job-av-foreign",
+          vehicleId: "veh-av-foreign",
+          sandboxProgramId: "sandbox-program-001",
+          policyVersion: "phase2-evd-001",
+        },
+        releaseAudit: null,
+      }),
+      loadLatestDecision: vi.fn(),
+      persistEvaluation: vi.fn().mockResolvedValue(undefined),
+      updateReleaseAudit: vi.fn().mockResolvedValue(undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as never;
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      repository,
+    );
+
+    await expect(
+      gate.recordManualRelease(
+        {
+          orderId: "order-av-005d-owner",
+          vehicleId: "veh-av-005d-owner",
+          sandboxProgramId: "sandbox-program-001",
+          policyVersion: "phase2-evd-001",
+        },
+        {
+          actorId: "ops-003c",
+          actorType: "ops_user",
+          reason: "Reject cross-order decisionId",
+          decisionId: "dec-other-order-001",
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "SANDBOX_DISPATCH_DECISION_NOT_FOUND",
+          details: {
+            orderId: "order-av-005d-owner",
+            decisionId: "dec-other-order-001",
+          },
+        },
+      },
+      status: 404,
+    });
+
+    expect(repository.loadDecisionById).toHaveBeenCalledWith(
+      "dec-other-order-001",
+    );
+    expect(repository.loadLatestDecision).not.toHaveBeenCalled();
+    expect(repository.updateReleaseAudit).not.toHaveBeenCalled();
+    expect(repository.persistEvaluation).not.toHaveBeenCalled();
+  });
+
   it("creates a manual release baseline without emitting a duplicate evaluate dispatch write", async () => {
     const repository = {
       loadDecisionById: vi.fn(),
