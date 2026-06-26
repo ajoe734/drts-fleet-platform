@@ -384,11 +384,13 @@ export class RegulatoryReportingService {
       );
     }
 
-    this.refreshNotificationReminders(notification, this.nowIso());
-
     const submittedAt = command?.submittedAt
       ? this.requireIsoDate(command.submittedAt, "submittedAt")
       : this.nowIso();
+    const now = this.nowIso();
+    const reminderDueThroughAt =
+      submittedAt < now ? submittedAt : now;
+    this.refreshNotificationReminders(notification, reminderDueThroughAt, now);
     notification.lifecycleStatus = "submitted";
     notification.submittedAt = submittedAt;
     notification.submittedBy = actor.actorId;
@@ -470,7 +472,7 @@ export class RegulatoryReportingService {
   private refreshDerivedState() {
     const now = this.nowIso();
     for (const notification of this.notifications) {
-      this.refreshNotificationReminders(notification, now);
+      this.refreshNotificationReminders(notification, now, now);
 
       const submittedLate =
         notification.submittedAt !== null &&
@@ -506,17 +508,18 @@ export class RegulatoryReportingService {
 
   private refreshNotificationReminders(
     notification: RegulatoryNotificationRecord,
-    now: string,
+    dueThroughAt: string,
+    sentAt: string,
   ) {
     const isOpen =
       notification.lifecycleStatus === "draft" ||
       notification.lifecycleStatus === "review_pending" ||
       notification.lifecycleStatus === "review_approved";
     for (const reminder of notification.reminders) {
-      if (reminder.sentAt || reminder.dueAt > now || !isOpen) {
+      if (reminder.sentAt || reminder.dueAt > dueThroughAt || !isOpen) {
         continue;
       }
-      reminder.sentAt = now;
+      reminder.sentAt = sentAt;
       this.auditNotificationService.recordNotification({
         tenantId: null,
         recipientUserId: null,

@@ -248,6 +248,82 @@ describe("RegulatoryReportingService", () => {
     ).toBe(true);
   });
 
+  it("does not retroactively flush reminders that were still in the future at backfilled submittedAt", () => {
+    let now = new Date("2026-06-26T00:00:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-006",
+        eventType: "information_update",
+        severity: "informational",
+        reportVersionKind: "initial",
+        jurisdiction: "CA-CPUC",
+        vehicleId: "veh-reg-006",
+        eventOccurredAt: "2026-06-26T00:00:00.000Z",
+        summary: "Backfilled submit should not send future reminders retroactively.",
+      },
+      createIdentity(),
+      "req-reg-create-006",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for review." },
+      createIdentity(),
+      "req-reg-review-006",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-006",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-approve-006",
+    );
+
+    now = new Date("2026-06-27T12:30:00.000Z");
+    const submitted = service.submitNotification(
+      draft.notificationId,
+      {
+        submissionReference: "SUB-REG-006",
+        submittedAt: "2026-06-26T12:30:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-submit-006",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-submit-006",
+    );
+
+    const reminder24h = submitted.reminders.find(
+      (reminder) => reminder.minutesBeforeDeadline === 24 * 60,
+    );
+    const reminder1h = submitted.reminders.find(
+      (reminder) => reminder.minutesBeforeDeadline === 60,
+    );
+
+    expect(reminder24h?.sentAt).toBeNull();
+    expect(reminder1h?.sentAt).toBeNull();
+    expect(
+      auditNotificationService
+        .listNotifications()
+        .filter((notification) => notification.title === "Regulatory notification reminder"),
+    ).toHaveLength(0);
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .some(
+          (entry) =>
+            entry.actionName === "regulatory_notification_reminder_sent" &&
+            entry.resourceId === draft.notificationId,
+        ),
+    ).toBe(false);
+  });
+
   it("rejects review approval when roleFamilies are spoofed without an approver role code", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new RegulatoryReportingService(auditNotificationService);
