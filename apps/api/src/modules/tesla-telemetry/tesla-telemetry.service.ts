@@ -475,10 +475,7 @@ export class TeslaTelemetryService {
 
     if (issueCodes.has("UNKNOWN_SCHEMA")) {
       state = "regulator_data_incident";
-    } else if (
-      qualityScore <= incidentGate &&
-      state !== "regulator_data_incident"
-    ) {
+    } else if (qualityScore <= incidentGate) {
       state = "regulator_data_incident";
     }
     const dispatchHold =
