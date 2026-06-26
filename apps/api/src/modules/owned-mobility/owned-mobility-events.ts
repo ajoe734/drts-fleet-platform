@@ -1,4 +1,9 @@
-import type { MoneyAmount, OwnedOrderRecord } from "@drts/contracts";
+import type {
+  FulfillmentSegmentRecord,
+  MoneyAmount,
+  OwnedOrderRecord,
+  SandboxBillingTreatmentRecord,
+} from "@drts/contracts";
 
 export const OWNED_MOBILITY_TRIP_COMPLETED_EVENT =
   "owned-mobility.trip.completed";
@@ -7,6 +12,7 @@ export type OwnedMobilityTripCompletedEvent = {
   tenantId: string;
   driverId: string;
   orderId: string;
+  bookingId: string | null;
   completedAt: string;
   grossEarning: MoneyAmount;
   orderSource: OwnedOrderRecord["orderSource"];
@@ -25,4 +31,6 @@ export type OwnedMobilityTripCompletedEvent = {
   serviceProduct?: string | null;
   tenantServiceProgramId?: string | null;
   sourcePlatform?: string | null;
+  sandboxFulfillmentSegments?: FulfillmentSegmentRecord[];
+  sandboxBillingTreatment?: SandboxBillingTreatmentRecord | null;
 };

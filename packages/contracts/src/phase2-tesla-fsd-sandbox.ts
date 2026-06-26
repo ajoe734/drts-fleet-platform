@@ -48,6 +48,11 @@ export interface Phase2SourceMetadata {
   schemaVersion: string;
 }
 
+export interface Phase2MoneyAmount {
+  currency: string;
+  amountMinor: number;
+}
+
 // ---------------------------------------------------------------------------
 // §3.1 Provider capability requirements
 // ---------------------------------------------------------------------------
@@ -491,6 +496,77 @@ export interface SandboxDispatchDecision {
 
   policyVersion: string;
   evaluatedAt: string;
+}
+
+export const FULFILLMENT_SEGMENT_TYPES = [
+  "tesla_av",
+  "human_taxi",
+  "cancelled",
+  "non_revenue_recovery",
+] as const;
+export type FulfillmentSegmentType =
+  (typeof FULFILLMENT_SEGMENT_TYPES)[number];
+
+export interface FulfillmentSegmentRecord {
+  fulfillmentSegmentId: string;
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  segmentType: FulfillmentSegmentType;
+  segmentReason: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  vehicleId: string | null;
+  vin: string | null;
+  driverId: string | null;
+  safetyOperatorId: string | null;
+  sourcePlatform: string | null;
+  distanceKm: number | null;
+  durationSeconds: number | null;
+  cost: Phase2MoneyAmount | null;
+  evidenceReference: string | null;
+  createdAt: string;
+}
+
+export const SANDBOX_BILLING_TREATMENT_TYPES = [
+  "normal_av",
+  "fallback_human",
+  "incident_waived",
+  "partner_program_adjusted",
+  "tenant_contract_adjusted",
+] as const;
+export type SandboxBillingTreatmentType =
+  (typeof SANDBOX_BILLING_TREATMENT_TYPES)[number];
+
+export const SANDBOX_FALLBACK_COST_ABSORBERS = [
+  "platform",
+  "partner",
+  "tenant_contract",
+] as const;
+export type SandboxFallbackCostAbsorber =
+  (typeof SANDBOX_FALLBACK_COST_ABSORBERS)[number];
+
+export interface SandboxBillingTreatmentRecord {
+  sandboxBillingTreatmentId: string;
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  treatmentType: SandboxBillingTreatmentType;
+  fallbackCostAbsorber: SandboxFallbackCostAbsorber | null;
+  fallbackPolicyId: string | null;
+  policyResolution: string;
+  passengerExtraChargeAllowed: boolean;
+  passengerExtraCharge: Phase2MoneyAmount;
+  internalAvCost: Phase2MoneyAmount | null;
+  internalHumanFallbackCost: Phase2MoneyAmount | null;
+  partnerCharge: Phase2MoneyAmount | null;
+  tenantCharge: Phase2MoneyAmount | null;
+  platformAbsorbed: Phase2MoneyAmount | null;
+  // Phase 2 adjudication §C4/§6: sandbox fallback never adds a surcharge to
+  // passenger / tenant billing, even when internal fallback costs are tracked.
+  fallbackSurchargeApplied: boolean;
+  treatmentSnapshot: Record<string, unknown>;
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------

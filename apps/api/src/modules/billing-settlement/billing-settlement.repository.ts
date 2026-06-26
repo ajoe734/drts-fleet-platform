@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  FulfillmentSegmentRecord,
   DriverTaskRecord,
   DriverFeePlanRecord,
   DriverStatementRecord,
@@ -8,6 +9,7 @@ import type {
   OwnedOrderRecord,
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
+  SandboxBillingTreatmentRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
 } from "@drts/contracts";
@@ -24,6 +26,49 @@ type LiveSettlementTripRow = {
   task_record: unknown;
 };
 
+type FulfillmentSegmentRow = {
+  fulfillment_segment_id: string;
+  booking_id: string;
+  order_id: string;
+  sandbox_trip_id: string | null;
+  segment_type: FulfillmentSegmentRecord["segmentType"];
+  segment_reason: string;
+  started_at: string | null;
+  ended_at: string | null;
+  vehicle_id: string | null;
+  vin: string | null;
+  driver_id: string | null;
+  safety_operator_id: string | null;
+  source_platform: string | null;
+  distance_km: number | null;
+  duration_seconds: number | null;
+  cost_minor: string | number | null;
+  currency: string;
+  evidence_reference: string | null;
+  created_at: string;
+};
+
+type SandboxBillingTreatmentRow = {
+  sandbox_billing_treatment_id: string;
+  booking_id: string;
+  order_id: string;
+  sandbox_trip_id: string | null;
+  treatment_type: SandboxBillingTreatmentRecord["treatmentType"];
+  fallback_cost_absorber: SandboxBillingTreatmentRecord["fallbackCostAbsorber"];
+  fallback_policy_id: string | null;
+  policy_resolution: string;
+  passenger_extra_charge_allowed: boolean;
+  passenger_extra_charge_minor: string | number;
+  internal_av_cost_minor: string | number | null;
+  internal_human_fallback_cost_minor: string | number | null;
+  partner_charge_minor: string | number | null;
+  tenant_charge_minor: string | number | null;
+  platform_absorbed_minor: string | number | null;
+  currency: string;
+  treatment_snapshot: unknown;
+  created_at: string;
+};
+
 export type StoredTenantInvoiceRecord = TenantInvoiceRecord & {
   artifactDownloadMetadata: ControlledDownloadMetadata;
 };
@@ -32,6 +77,7 @@ export type LiveSettlementTripRecord = {
   tenantId: string;
   driverId: string;
   orderId: string;
+  bookingId?: string | null;
   completedAt: string;
   grossEarning: MoneyAmount;
   orderSource: OwnedOrderRecord["orderSource"];
@@ -48,6 +94,8 @@ export type LiveSettlementTripRecord = {
   serviceProduct?: string | null;
   tenantServiceProgramId?: string | null;
   sourcePlatform?: string | null;
+  sandboxBillingTreatment?: SandboxBillingTreatmentRecord | null;
+  sandboxFulfillmentSegments?: FulfillmentSegmentRecord[];
 };
 
 export type BillingSettlementState = {
@@ -57,6 +105,8 @@ export type BillingSettlementState = {
   driverStatements: DriverStatementRecord[];
   reimbursementBatches: ReimbursementBatchRecord[];
   reconciliationIssues: ReconciliationIssueRecord[];
+  fulfillmentSegments: FulfillmentSegmentRecord[];
+  sandboxBillingTreatments: SandboxBillingTreatmentRecord[];
 };
 
 export type PersistBillingSettlementChanges = {
@@ -66,12 +116,15 @@ export type PersistBillingSettlementChanges = {
   driverStatements?: readonly DriverStatementRecord[];
   reimbursementBatches?: readonly ReimbursementBatchRecord[];
   reconciliationIssues?: readonly ReconciliationIssueRecord[];
+  fulfillmentSegments?: readonly FulfillmentSegmentRecord[];
+  sandboxBillingTreatments?: readonly SandboxBillingTreatmentRecord[];
 };
 
 const LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL = "tasks.record->>'completedAt'";
 const LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL = `
   COALESCE(${LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL}, '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$'
 `;
+const DEFAULT_CURRENCY = "NTD";
 
 @Injectable()
 export class BillingSettlementRepository {
@@ -92,6 +145,8 @@ export class BillingSettlementRepository {
         driverStatements: [],
         reimbursementBatches: [],
         reconciliationIssues: [],
+        fulfillmentSegments: [],
+        sandboxBillingTreatments: [],
       };
     }
 
@@ -102,6 +157,8 @@ export class BillingSettlementRepository {
       statementsResult,
       reimbursementsResult,
       reconciliationResult,
+      fulfillmentSegmentsResult,
+      sandboxBillingTreatmentsResult,
     ] = await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `
@@ -145,6 +202,20 @@ export class BillingSettlementRepository {
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
+      this.databaseService!.query<FulfillmentSegmentRow>(
+        `
+          SELECT *
+          FROM av_sandbox.fulfillment_segments
+          ORDER BY created_at DESC
+        `,
+      ),
+      this.databaseService!.query<SandboxBillingTreatmentRow>(
+        `
+          SELECT *
+          FROM av_sandbox.sandbox_billing_treatments
+          ORDER BY created_at DESC
+        `,
+      ),
     ]);
 
     return {
@@ -183,6 +254,12 @@ export class BillingSettlementRepository {
           row.record,
           "billing.phase1_reconciliation_issues",
         ),
+      ),
+      fulfillmentSegments: fulfillmentSegmentsResult.rows.map((row) =>
+        this.mapFulfillmentSegmentRow(row),
+      ),
+      sandboxBillingTreatments: sandboxBillingTreatmentsResult.rows.map((row) =>
+        this.mapSandboxBillingTreatmentRow(row),
       ),
     };
   }
@@ -571,6 +648,152 @@ export class BillingSettlementRepository {
       );
     }
 
+    for (const segment of changes.fulfillmentSegments ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO av_sandbox.fulfillment_segments (
+              fulfillment_segment_id,
+              booking_id,
+              order_id,
+              sandbox_trip_id,
+              segment_type,
+              segment_reason,
+              started_at,
+              ended_at,
+              vehicle_id,
+              vin,
+              driver_id,
+              safety_operator_id,
+              source_platform,
+              distance_km,
+              duration_seconds,
+              cost_minor,
+              currency,
+              evidence_reference,
+              created_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+              $11, $12, $13, $14, $15, $16, $17, $18, $19
+            )
+            ON CONFLICT (fulfillment_segment_id) DO UPDATE SET
+              booking_id = EXCLUDED.booking_id,
+              order_id = EXCLUDED.order_id,
+              sandbox_trip_id = EXCLUDED.sandbox_trip_id,
+              segment_type = EXCLUDED.segment_type,
+              segment_reason = EXCLUDED.segment_reason,
+              started_at = EXCLUDED.started_at,
+              ended_at = EXCLUDED.ended_at,
+              vehicle_id = EXCLUDED.vehicle_id,
+              vin = EXCLUDED.vin,
+              driver_id = EXCLUDED.driver_id,
+              safety_operator_id = EXCLUDED.safety_operator_id,
+              source_platform = EXCLUDED.source_platform,
+              distance_km = EXCLUDED.distance_km,
+              duration_seconds = EXCLUDED.duration_seconds,
+              cost_minor = EXCLUDED.cost_minor,
+              currency = EXCLUDED.currency,
+              evidence_reference = EXCLUDED.evidence_reference,
+              created_at = EXCLUDED.created_at
+          `,
+          [
+            segment.fulfillmentSegmentId,
+            segment.bookingId,
+            segment.orderId,
+            segment.sandboxTripId,
+            segment.segmentType,
+            segment.segmentReason,
+            segment.startedAt,
+            segment.endedAt,
+            segment.vehicleId,
+            segment.vin,
+            segment.driverId,
+            segment.safetyOperatorId,
+            segment.sourcePlatform,
+            segment.distanceKm,
+            segment.durationSeconds,
+            segment.cost?.amountMinor ?? null,
+            segment.cost?.currency ?? DEFAULT_CURRENCY,
+            segment.evidenceReference,
+            segment.createdAt,
+          ],
+        ),
+      );
+    }
+
+    for (const treatment of changes.sandboxBillingTreatments ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO av_sandbox.sandbox_billing_treatments (
+              sandbox_billing_treatment_id,
+              booking_id,
+              order_id,
+              sandbox_trip_id,
+              treatment_type,
+              fallback_cost_absorber,
+              fallback_policy_id,
+              policy_resolution,
+              passenger_extra_charge_allowed,
+              passenger_extra_charge_minor,
+              internal_av_cost_minor,
+              internal_human_fallback_cost_minor,
+              partner_charge_minor,
+              tenant_charge_minor,
+              platform_absorbed_minor,
+              currency,
+              treatment_snapshot,
+              created_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+              $11, $12, $13, $14, $15, $16, $17::jsonb, $18
+            )
+            ON CONFLICT (sandbox_billing_treatment_id) DO UPDATE SET
+              booking_id = EXCLUDED.booking_id,
+              order_id = EXCLUDED.order_id,
+              sandbox_trip_id = EXCLUDED.sandbox_trip_id,
+              treatment_type = EXCLUDED.treatment_type,
+              fallback_cost_absorber = EXCLUDED.fallback_cost_absorber,
+              fallback_policy_id = EXCLUDED.fallback_policy_id,
+              policy_resolution = EXCLUDED.policy_resolution,
+              passenger_extra_charge_allowed = EXCLUDED.passenger_extra_charge_allowed,
+              passenger_extra_charge_minor = EXCLUDED.passenger_extra_charge_minor,
+              internal_av_cost_minor = EXCLUDED.internal_av_cost_minor,
+              internal_human_fallback_cost_minor = EXCLUDED.internal_human_fallback_cost_minor,
+              partner_charge_minor = EXCLUDED.partner_charge_minor,
+              tenant_charge_minor = EXCLUDED.tenant_charge_minor,
+              platform_absorbed_minor = EXCLUDED.platform_absorbed_minor,
+              currency = EXCLUDED.currency,
+              treatment_snapshot = EXCLUDED.treatment_snapshot,
+              created_at = EXCLUDED.created_at
+          `,
+          [
+            treatment.sandboxBillingTreatmentId,
+            treatment.bookingId,
+            treatment.orderId,
+            treatment.sandboxTripId,
+            treatment.treatmentType,
+            treatment.fallbackCostAbsorber,
+            treatment.fallbackPolicyId,
+            treatment.policyResolution,
+            treatment.passengerExtraChargeAllowed,
+            treatment.passengerExtraCharge.amountMinor,
+            treatment.internalAvCost?.amountMinor ?? null,
+            treatment.internalHumanFallbackCost?.amountMinor ?? null,
+            treatment.partnerCharge?.amountMinor ?? null,
+            treatment.tenantCharge?.amountMinor ?? null,
+            treatment.platformAbsorbed?.amountMinor ?? null,
+            treatment.passengerExtraCharge.currency,
+            JSON.stringify({
+              ...treatment.treatmentSnapshot,
+              fallbackSurchargeApplied: treatment.fallbackSurchargeApplied,
+            }),
+            treatment.createdAt,
+          ],
+        ),
+      );
+    }
+
     await Promise.all(writes);
   }
 
@@ -603,6 +826,7 @@ export class BillingSettlementRepository {
         tenantId: order.tenantId ?? "",
         driverId: task.driverId,
         orderId: order.orderId,
+        bookingId: order.bookingId,
         completedAt: task.completedAt ?? order.updatedAt,
         grossEarning: { ...grossEarning },
         orderSource: order.orderSource,
@@ -629,5 +853,92 @@ export class BillingSettlementRepository {
     }
 
     return record as T;
+  }
+
+  private mapFulfillmentSegmentRow(
+    row: FulfillmentSegmentRow,
+  ): FulfillmentSegmentRecord {
+    return {
+      fulfillmentSegmentId: row.fulfillment_segment_id,
+      bookingId: row.booking_id,
+      orderId: row.order_id,
+      sandboxTripId: row.sandbox_trip_id,
+      segmentType: row.segment_type,
+      segmentReason: row.segment_reason,
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      vehicleId: row.vehicle_id,
+      vin: row.vin,
+      driverId: row.driver_id,
+      safetyOperatorId: row.safety_operator_id,
+      sourcePlatform: row.source_platform,
+      distanceKm:
+        row.distance_km === null ? null : Number(row.distance_km),
+      durationSeconds: row.duration_seconds,
+      cost:
+        row.cost_minor === null
+          ? null
+          : {
+              currency: row.currency,
+              amountMinor: Number(row.cost_minor),
+            },
+      evidenceReference: row.evidence_reference,
+      createdAt: row.created_at,
+    };
+  }
+
+  private mapSandboxBillingTreatmentRow(
+    row: SandboxBillingTreatmentRow,
+  ): SandboxBillingTreatmentRecord {
+    const treatmentSnapshot =
+      row.treatment_snapshot && typeof row.treatment_snapshot === "object"
+        ? (row.treatment_snapshot as Record<string, unknown>)
+        : {};
+
+    return {
+      sandboxBillingTreatmentId: row.sandbox_billing_treatment_id,
+      bookingId: row.booking_id,
+      orderId: row.order_id,
+      sandboxTripId: row.sandbox_trip_id,
+      treatmentType: row.treatment_type,
+      fallbackCostAbsorber: row.fallback_cost_absorber,
+      fallbackPolicyId: row.fallback_policy_id,
+      policyResolution: row.policy_resolution,
+      passengerExtraChargeAllowed: row.passenger_extra_charge_allowed,
+      passengerExtraCharge: {
+        currency: row.currency,
+        amountMinor: Number(row.passenger_extra_charge_minor),
+      },
+      internalAvCost: this.toOptionalMoney(
+        row.internal_av_cost_minor,
+        row.currency,
+      ),
+      internalHumanFallbackCost: this.toOptionalMoney(
+        row.internal_human_fallback_cost_minor,
+        row.currency,
+      ),
+      partnerCharge: this.toOptionalMoney(row.partner_charge_minor, row.currency),
+      tenantCharge: this.toOptionalMoney(row.tenant_charge_minor, row.currency),
+      platformAbsorbed: this.toOptionalMoney(
+        row.platform_absorbed_minor,
+        row.currency,
+      ),
+      fallbackSurchargeApplied:
+        treatmentSnapshot.fallbackSurchargeApplied === true,
+      treatmentSnapshot,
+      createdAt: row.created_at,
+    };
+  }
+
+  private toOptionalMoney(
+    amountMinor: string | number | null,
+    currency: string,
+  ) {
+    return amountMinor === null
+      ? null
+      : {
+          currency,
+          amountMinor: Number(amountMinor),
+        };
   }
 }
