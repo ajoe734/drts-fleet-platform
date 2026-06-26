@@ -40,7 +40,8 @@ These screens are platform-owned. Actual visibility and mutation remain backend-
 | Place legal hold                             | `sandbox.legal_hold.place`           | platform-only mutation                                              |
 | Request legal hold release                   | `sandbox.legal_hold.release.request` | requester cannot approve same release                               |
 | Approve legal hold release                   | `sandbox.legal_hold.release.approve` | ROC read scope must not release hold                                |
-| Read / submit regulatory reports             | backend contract authority           | route is platform-owned; final scope labels follow backend contract |
+| Read regulatory reports                      | `sandbox.regulatory_report.review`   | platform-admin filing queue / detail review authority               |
+| Submit regulatory reports                    | `sandbox.regulatory_report.submit`   | submit remains a distinct privileged action from review             |
 
 ## 3. Cross-app and deep-link rules
 
@@ -152,3 +153,21 @@ These screens are platform-owned. Actual visibility and mutation remain backend-
 - No visual palette changes beyond the existing Platform Admin realm/token system.
 - No ROC screen design in this packet.
 - No new product semantics beyond the backend/API contracts already accepted for `P2-DP-C1-001`.
+
+## 8. Planning resolution recorded on 2026-06-26
+
+- The remaining product/contract ambiguity for regulatory reporting scopes is
+  resolved by the backend controller contract, not left open for frontend
+  invention:
+  - `GET /platform-admin/regulatory-reports` uses
+    `sandbox.regulatory_report.review`
+  - `POST /platform-admin/regulatory-reports/:reportId/submit` uses
+    `sandbox.regulatory_report.submit`
+- The parent implementation blocker is therefore **not** missing scope naming or
+  action authority semantics. Those are already fixed by accepted backend/API
+  surfaces plus the route list in this packet.
+- The unresolved blocker that still requires follow-up is canonical visual
+  publication: `docs/05-ui/drts-design-canvas/Platform Admin.html` and
+  `platform-screens-*.jsx` still need first-class sandbox compliance /
+  investigation / evidence / regulatory-report screens before engineering can
+  implement the parent task without inventing UI.
