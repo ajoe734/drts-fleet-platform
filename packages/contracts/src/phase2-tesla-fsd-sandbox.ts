@@ -1774,6 +1774,81 @@ export interface SandboxEvidenceManifestView extends EvidenceManifest {
   items: EvidenceManifestItem[];
 }
 
+export const SANDBOX_KPI_TARGET_STATUSES = ["baseline_collecting"] as const;
+export type SandboxKpiTargetStatus =
+  (typeof SANDBOX_KPI_TARGET_STATUSES)[number];
+
+export const SANDBOX_KPI_MEASUREMENT_KINDS = [
+  "count",
+  "percentage",
+  "duration_hours",
+  "duration_minutes",
+  "status",
+] as const;
+export type SandboxKpiMeasurementKind =
+  (typeof SANDBOX_KPI_MEASUREMENT_KINDS)[number];
+
+export const SANDBOX_KPI_KEYS = [
+  "readiness",
+  "eligibility",
+  "provider_completeness",
+  "takeover_correlation",
+  "freeze_success",
+  "fallback_success",
+  "notification_timeliness",
+  "telemetry_freshness",
+  "export_success",
+  "legal_hold_release_cycle",
+] as const;
+export type SandboxKpiKey = (typeof SANDBOX_KPI_KEYS)[number];
+
+export interface SandboxKpiBaselineWindowRecord {
+  targetStatus: SandboxKpiTargetStatus;
+  configuredDays: number;
+  configuredTrips: number;
+  collectionStartAt: string | null;
+  evaluatedAt: string;
+  elapsedDays: number;
+  tripsCollected: number;
+  ready: boolean;
+  readinessReason: "days" | "trips" | "collecting";
+}
+
+export interface SandboxKpiTargetRecord {
+  key: SandboxKpiKey;
+  label: string;
+  targetStatus: SandboxKpiTargetStatus;
+  measurementKind: SandboxKpiMeasurementKind;
+  value: number | string | null;
+  unit: string | null;
+  numerator: number | null;
+  denominator: number | null;
+  observedAt: string | null;
+  note: string | null;
+}
+
+export interface SandboxSafetyGateRecord {
+  key: string;
+  label: string;
+  hardAlert: true;
+  failClosed: true;
+  state: "pass" | "alert" | "unknown";
+  reason: string | null;
+  observedAt: string | null;
+}
+
+export interface SandboxKpiDashboardRecord {
+  experimentId: string;
+  experimentVersionId: string | null;
+  programCode: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  baselineWindow: SandboxKpiBaselineWindowRecord;
+  targets: SandboxKpiTargetRecord[];
+  safetyGates: SandboxSafetyGateRecord[];
+}
+
 // ---------------------------------------------------------------------------
 // §3.8A Sandbox governance + compliance snapshot
 // ---------------------------------------------------------------------------

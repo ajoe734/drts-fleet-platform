@@ -4443,6 +4443,68 @@ export interface RegulatoryComplianceSummaryRecord {
   notes: string[];
 }
 
+export interface SandboxKpiBaselineWindowRecord {
+  targetStatus: "baseline_collecting";
+  configuredDays: number;
+  configuredTrips: number;
+  collectionStartAt: string | null;
+  evaluatedAt: string;
+  elapsedDays: number;
+  tripsCollected: number;
+  ready: boolean;
+  readinessReason: "days" | "trips" | "collecting";
+}
+
+export interface SandboxKpiTargetRecord {
+  key:
+    | "readiness"
+    | "eligibility"
+    | "provider_completeness"
+    | "takeover_correlation"
+    | "freeze_success"
+    | "fallback_success"
+    | "notification_timeliness"
+    | "telemetry_freshness"
+    | "export_success"
+    | "legal_hold_release_cycle";
+  label: string;
+  targetStatus: "baseline_collecting";
+  measurementKind:
+    | "count"
+    | "percentage"
+    | "duration_hours"
+    | "duration_minutes"
+    | "status";
+  value: number | string | null;
+  unit: string | null;
+  numerator: number | null;
+  denominator: number | null;
+  observedAt: string | null;
+  note: string | null;
+}
+
+export interface SandboxSafetyGateRecord {
+  key: string;
+  label: string;
+  hardAlert: true;
+  failClosed: true;
+  state: "pass" | "alert" | "unknown";
+  reason: string | null;
+  observedAt: string | null;
+}
+
+export interface SandboxKpiDashboardRecord {
+  experimentId: string;
+  experimentVersionId: string | null;
+  programCode: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  baselineWindow: SandboxKpiBaselineWindowRecord;
+  targets: SandboxKpiTargetRecord[];
+  safetyGates: SandboxSafetyGateRecord[];
+}
+
 export interface GenerateResumeAuthorizationDossierCommand {
   asOf?: string | null;
   actorId?: string | null;
@@ -5611,6 +5673,7 @@ export interface OperationalObservabilitySnapshot {
   adapters: OperationalAdapterMetrics;
   forwarderOps: OperationalForwarderOpsMetrics;
   adapterDetails: OperationalAdapterDetailRecord[];
+  phase2SandboxKpiDashboard: SandboxKpiDashboardRecord | null;
   roleViews: OperationalRoleView[];
 }
 
