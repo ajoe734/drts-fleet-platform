@@ -154,7 +154,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # V0038+ migrations require the PostGIS extension during hermetic resets.
+        image: postgis/postgis:16-3.5
         env:
           POSTGRES_DB: drts_fleet_platform
           POSTGRES_USER: postgres
