@@ -18,6 +18,13 @@ function joinBase(base: string, route: string): string {
 
 export function crossAppHref(link: CrossAppResourceLink): string {
   if (link.targetApp === "platform-admin") {
+    if (
+      link.route === "/platform-admin" ||
+      link.route.startsWith("/platform-admin/")
+    ) {
+      return link.route;
+    }
+
     return joinBase(resolvePlatformAdminBase(), link.route);
   }
 

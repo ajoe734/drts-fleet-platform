@@ -5,10 +5,7 @@ import {
   RocStatusPill,
   rocFreezeStatusTone,
 } from "@/components/roc-response-surfaces";
-import {
-  RocEvidenceTag,
-  RocRefreshBanner,
-} from "@/components/roc-screen-primitives";
+import { RocRefreshBanner } from "@/components/roc-screen-primitives";
 import { getRocEvidencePageData } from "@/lib/roc-page-data";
 import { getServerLocale } from "@/lib/server-locale";
 import { rocTheme } from "@/lib/roc-theme";
@@ -60,21 +57,12 @@ export default async function EvidencePage() {
           >
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr auto",
+                display: "flex",
+                justifyContent: "flex-end",
                 gap: 12,
                 alignItems: "center",
               }}
             >
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {item.sources.map((source) => (
-                  <RocEvidenceTag
-                    key={source}
-                    source={source}
-                    locale={locale}
-                  />
-                ))}
-              </div>
               <RocInvestigationLink
                 link={item.investigationLink}
                 locale={locale}
