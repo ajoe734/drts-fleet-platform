@@ -384,6 +384,8 @@ export class RegulatoryReportingService {
       );
     }
 
+    this.refreshNotificationReminders(notification, this.nowIso());
+
     const submittedAt = command?.submittedAt
       ? this.requireIsoDate(command.submittedAt, "submittedAt")
       : this.nowIso();
@@ -468,35 +470,7 @@ export class RegulatoryReportingService {
   private refreshDerivedState() {
     const now = this.nowIso();
     for (const notification of this.notifications) {
-      const isOpen =
-        notification.lifecycleStatus === "draft" ||
-        notification.lifecycleStatus === "review_pending" ||
-        notification.lifecycleStatus === "review_approved";
-      for (const reminder of notification.reminders) {
-        if (reminder.sentAt || reminder.dueAt > now || !isOpen) {
-          continue;
-        }
-        reminder.sentAt = now;
-        this.auditNotificationService.recordNotification({
-          tenantId: null,
-          recipientUserId: null,
-          channel: "ops_notice",
-          title: "Regulatory notification reminder",
-          message: `${notification.notificationId} is due by ${notification.deadlineAt}.`,
-          status: "unread",
-        });
-        this.recordAudit({
-          actorId: null,
-          actorType: "system",
-          moduleName: "regulatory-reporting",
-          actionName: "regulatory_notification_reminder_sent",
-          resourceId: notification.notificationId,
-          newValuesSummary: {
-            dueAt: reminder.dueAt,
-            minutesBeforeDeadline: reminder.minutesBeforeDeadline,
-          },
-        });
-      }
+      this.refreshNotificationReminders(notification, now);
 
       const submittedLate =
         notification.submittedAt !== null &&
@@ -527,6 +501,41 @@ export class RegulatoryReportingService {
           },
         });
       }
+    }
+  }
+
+  private refreshNotificationReminders(
+    notification: RegulatoryNotificationRecord,
+    now: string,
+  ) {
+    const isOpen =
+      notification.lifecycleStatus === "draft" ||
+      notification.lifecycleStatus === "review_pending" ||
+      notification.lifecycleStatus === "review_approved";
+    for (const reminder of notification.reminders) {
+      if (reminder.sentAt || reminder.dueAt > now || !isOpen) {
+        continue;
+      }
+      reminder.sentAt = now;
+      this.auditNotificationService.recordNotification({
+        tenantId: null,
+        recipientUserId: null,
+        channel: "ops_notice",
+        title: "Regulatory notification reminder",
+        message: `${notification.notificationId} is due by ${notification.deadlineAt}.`,
+        status: "unread",
+      });
+      this.recordAudit({
+        actorId: null,
+        actorType: "system",
+        moduleName: "regulatory-reporting",
+        actionName: "regulatory_notification_reminder_sent",
+        resourceId: notification.notificationId,
+        newValuesSummary: {
+          dueAt: reminder.dueAt,
+          minutesBeforeDeadline: reminder.minutesBeforeDeadline,
+        },
+      });
     }
   }
 
