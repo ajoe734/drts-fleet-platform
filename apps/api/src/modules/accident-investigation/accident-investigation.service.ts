@@ -74,6 +74,33 @@ const CONFIDENCE_PRIORITY: Record<AccidentTimelineFactConfidence, number> = {
   unknown: 0,
 };
 
+type BundleSnapshot = {
+  timeline: AccidentTimelineEntry[];
+  correlatedCase: CorrelatedTakeoverCase | null;
+  discrepancies: EvidenceDiscrepancyCase[];
+  order: ReturnType<OwnedMobilityService["getOrder"]> | null;
+  dispatchTrace: ReturnType<OwnedMobilityService["listDispatchTrace"]> | null;
+  telemetryStatus: ReturnType<TeslaIntegrationService["getTelemetryStatus"]> | null;
+  publicTelemetrySample: ReturnType<
+    TeslaIntegrationService["getPublicTelemetrySample"]
+  > | null;
+  telemetryProjection: ReturnType<
+    TeslaIntegrationService["getTelemetryProjection"]
+  > | null;
+  teslaEvents: ReturnType<
+    RocOperationsService["listTeslaAutonomyTransitionEvents"]
+  > | null;
+  rocResponses: ReturnType<
+    RocOperationsService["listRocTakeoverResponseRecords"]
+  > | null;
+  manualCorrelations: ReturnType<
+    RocOperationsService["listManualTakeoverCorrelations"]
+  > | null;
+  segments: ReturnType<VehicleEvidenceService["listSegmentIndex"]> | null;
+  bookmarks: ReturnType<VehicleEvidenceService["listBookmarks"]> | null;
+  receipts: ReturnType<TeslaIntegrationService["listReceipts"]> | null;
+};
+
 @Injectable()
 export class AccidentInvestigationService {
   private readonly logger = new Logger(AccidentInvestigationService.name);
@@ -351,7 +378,7 @@ export class AccidentInvestigationService {
     command: GenerateAccidentInvestigationBundleCommand,
     requestId?: string,
   ): Promise<AccidentInvestigationBundleView> {
-    const record = this.synchronizeCaseLinks(this.requireCase(caseId));
+    const record = this.cloneCase(this.requireCase(caseId));
     const generatedAt = new Date().toISOString();
     const requestedAt = command.requestedAt
       ? this.normalizeTimestamp(command.requestedAt, "requestedAt")
@@ -359,8 +386,8 @@ export class AccidentInvestigationService {
     const actorId = this.normalizeIdentifier(command.actorId, "actorId");
     const bundleId = `accident-bundle-${randomUUID()}`;
     const knownGaps: AccidentInvestigationBundleKnownGap[] = [];
-    const timeline = this.getTimeline(record.caseId);
-    const correlatedCase = this.findCorrelatedTakeoverCase(record);
+    const snapshot = this.buildBundleSnapshot(record);
+    this.synchronizeCaseLinksFromSnapshot(record, snapshot);
 
     const sections: AccidentInvestigationBundleSection[] = [
       this.createBundleSection(
@@ -368,21 +395,31 @@ export class AccidentInvestigationService {
         "Case, timeline, and investigation posture",
         {
           caseRecord: this.cloneCase(record),
-          timeline,
+          timeline: snapshot.timeline,
           noLiabilityConclusion: true,
         },
-        1 + timeline.length,
+        1 + snapshot.timeline.length,
       ),
-      this.buildBookingSection(record, knownGaps),
-      await this.buildExperimentSection(record, correlatedCase, actorId, knownGaps),
-      this.buildVehicleTeslaStateSection(record, knownGaps),
-      this.buildFsdSessionSection(record, correlatedCase, knownGaps),
-      this.buildSafetyReportsSection(record, correlatedCase, knownGaps),
-      this.buildRocActionsSection(record, correlatedCase),
-      this.buildTelemetrySection(record, knownGaps),
-      this.buildSyncedVideoSection(record, knownGaps),
-      await this.buildRouteGeofenceSection(record, correlatedCase, knownGaps),
-      this.buildCommandsSection(record, knownGaps),
+      this.buildBookingSection(record, snapshot, knownGaps),
+      await this.buildExperimentSection(
+        record,
+        snapshot.correlatedCase,
+        actorId,
+        knownGaps,
+      ),
+      this.buildVehicleTeslaStateSection(record, snapshot, knownGaps),
+      this.buildFsdSessionSection(record, snapshot, knownGaps),
+      this.buildSafetyReportsSection(record, snapshot.correlatedCase, knownGaps),
+      this.buildRocActionsSection(record, snapshot, knownGaps),
+      this.buildTelemetrySection(record, snapshot, knownGaps),
+      this.buildSyncedVideoSection(record, snapshot, knownGaps),
+      await this.buildRouteGeofenceSection(
+        record,
+        snapshot.correlatedCase,
+        snapshot,
+        knownGaps,
+      ),
+      this.buildCommandsSection(record, snapshot, knownGaps),
       this.buildNotificationsAuditSection(record),
       this.buildExternalDocumentsSection(record),
     ];
@@ -459,11 +496,19 @@ export class AccidentInvestigationService {
 
   getTimeline(caseId: string): AccidentTimelineEntry[] {
     const record = this.synchronizeCaseLinks(this.requireCase(caseId));
+    const correlatedCase = this.findCorrelatedTakeoverCase(record);
+    return this.buildTimeline(record, correlatedCase);
+  }
+
+  private buildTimeline(
+    record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
+  ): AccidentTimelineEntry[] {
     const facts = [
-      ...(this.timelineFacts.get(caseId) ?? []).map((fact) =>
+      ...(this.timelineFacts.get(record.caseId) ?? []).map((fact) =>
         this.cloneTimelineFact(fact),
       ),
-      ...this.buildCorrelationTimelineFacts(record),
+      ...this.buildCorrelationTimelineFacts(record, correlatedCase),
     ];
 
     const grouped = new Map<string, AccidentTimelineFactRecord[]>();
@@ -510,8 +555,8 @@ export class AccidentInvestigationService {
 
   private buildCorrelationTimelineFacts(
     record: AccidentCaseRecord,
+    correlatedCase: CorrelatedTakeoverCase | null,
   ): AccidentTimelineFactRecord[] {
-    const correlatedCase = this.findCorrelatedTakeoverCase(record);
     if (!correlatedCase) {
       return [];
     }
@@ -671,6 +716,7 @@ export class AccidentInvestigationService {
 
   private buildBookingSection(
     record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
     knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
     if (!record.orderId) {
@@ -688,31 +734,31 @@ export class AccidentInvestigationService {
       );
     }
 
-    const order = this.tryResolve(
-      () => this.ownedMobilityService?.getOrder(record.orderId!),
-      "booking",
-      "ORDER_LOOKUP_UNAVAILABLE",
-      "Owned mobility order context is unavailable for this case.",
-      "owned-mobility",
-      knownGaps,
-    );
-    const dispatchTrace = this.tryResolve(
-      () => this.ownedMobilityService?.listDispatchTrace(record.orderId!),
-      "booking",
-      "DISPATCH_TRACE_UNAVAILABLE",
-      "Dispatch trace could not be synchronized for this case order.",
-      "owned-mobility",
-      knownGaps,
-    );
+    if (!snapshot.order) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "booking",
+        code: "ORDER_LOOKUP_UNAVAILABLE",
+        message: "Owned mobility order context is unavailable for this case.",
+        upstream: "owned-mobility",
+      });
+    }
+    if (!snapshot.dispatchTrace) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "booking",
+        code: "DISPATCH_TRACE_UNAVAILABLE",
+        message: "Dispatch trace could not be synchronized for this case order.",
+        upstream: "owned-mobility",
+      });
+    }
 
     return this.createBundleSection(
       "booking",
       "Booking and dispatch context",
       {
-        order: order ?? null,
-        dispatchTrace: dispatchTrace ?? [],
+        order: snapshot.order,
+        dispatchTrace: snapshot.dispatchTrace ?? [],
       },
-      (order ? 1 : 0) + (dispatchTrace?.length ?? 0),
+      (snapshot.order ? 1 : 0) + (snapshot.dispatchTrace?.length ?? 0),
     );
   }
 
@@ -799,78 +845,81 @@ export class AccidentInvestigationService {
 
   private buildVehicleTeslaStateSection(
     record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
     knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
-    const telemetryStatus = this.tryResolve(
-      () => this.teslaIntegrationService?.getTelemetryStatus(record.vehicleId),
-      "vehicle_tesla_state",
-      "TESLA_TELEMETRY_STATUS_UNAVAILABLE",
-      "Tesla telemetry status is unavailable for the accident vehicle.",
-      "tesla-integration",
-      knownGaps,
-    );
-    const publicSample = this.tryResolve(
-      () => this.teslaIntegrationService?.getPublicTelemetrySample(record.vehicleId),
-      "vehicle_tesla_state",
-      "TESLA_PUBLIC_SAMPLE_UNAVAILABLE",
-      "Tesla public telemetry sample is unavailable for the accident vehicle.",
-      "tesla-integration",
-      knownGaps,
-    );
-    const projection = this.tryResolve(
-      () => this.teslaIntegrationService?.getTelemetryProjection(record.vehicleId),
-      "vehicle_tesla_state",
-      "TESLA_STATE_PROJECTION_UNAVAILABLE",
-      "Tesla state projection is unavailable for the accident vehicle.",
-      "tesla-integration",
-      knownGaps,
-    );
+    if (!snapshot.telemetryStatus) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "vehicle_tesla_state",
+        code: "TESLA_TELEMETRY_STATUS_UNAVAILABLE",
+        message: "Tesla telemetry status is unavailable for the accident vehicle.",
+        upstream: "tesla-integration",
+      });
+    }
+    if (!snapshot.publicTelemetrySample) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "vehicle_tesla_state",
+        code: "TESLA_PUBLIC_SAMPLE_UNAVAILABLE",
+        message: "Tesla public telemetry sample is unavailable for the accident vehicle.",
+        upstream: "tesla-integration",
+      });
+    }
+    if (!snapshot.telemetryProjection) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "vehicle_tesla_state",
+        code: "TESLA_STATE_PROJECTION_UNAVAILABLE",
+        message: "Tesla state projection is unavailable for the accident vehicle.",
+        upstream: "tesla-integration",
+      });
+    }
 
     return this.createBundleSection(
       "vehicle_tesla_state",
       "Vehicle and Tesla state",
       {
         vehicleId: record.vehicleId,
-        telemetryStatus: telemetryStatus ?? null,
-        publicTelemetrySample: publicSample ?? null,
-        stateProjection: projection ?? null,
+        telemetryStatus: snapshot.telemetryStatus,
+        publicTelemetrySample: snapshot.publicTelemetrySample,
+        stateProjection: snapshot.telemetryProjection,
       },
-      [telemetryStatus, publicSample, projection].filter(Boolean).length,
+      [
+        snapshot.telemetryStatus,
+        snapshot.publicTelemetrySample,
+        snapshot.telemetryProjection,
+      ].filter(Boolean).length,
     );
   }
 
   private buildFsdSessionSection(
     record: AccidentCaseRecord,
-    correlatedCase: CorrelatedTakeoverCase | null,
+    snapshot: BundleSnapshot,
     knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
-    const teslaEvents =
-      this.tryResolve(
-        () => this.rocOperationsService.listTeslaAutonomyTransitionEvents(),
-        "fsd_session_events",
-        "TESLA_EVENTS_UNAVAILABLE",
-        "Tesla autonomy transition events are unavailable for synchronized replay.",
-        "roc-operations",
-        knownGaps,
-      ) ?? []
-    ;
-    const filteredTeslaEvents = teslaEvents
-      .filter((event) => this.matchesEventCase(record, event, correlatedCase));
-    const rocResponses =
-      this.tryResolve(
-        () => this.rocOperationsService.listRocTakeoverResponseRecords(),
-        "fsd_session_events",
-        "ROC_RESPONSES_UNAVAILABLE",
-        "ROC takeover responses are unavailable for synchronized replay.",
-        "roc-operations",
-        knownGaps,
-      ) ?? []
-    ;
-    const filteredRocResponses = rocResponses
-      .filter((response) => this.matchesResponseCase(record, response, correlatedCase));
+    if (!snapshot.teslaEvents) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "fsd_session_events",
+        code: "TESLA_EVENTS_UNAVAILABLE",
+        message: "Tesla autonomy transition events are unavailable for synchronized replay.",
+        upstream: "roc-operations",
+      });
+    }
+    if (!snapshot.rocResponses) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "fsd_session_events",
+        code: "ROC_RESPONSES_UNAVAILABLE",
+        message: "ROC takeover responses are unavailable for synchronized replay.",
+        upstream: "roc-operations",
+      });
+    }
+    const filteredTeslaEvents = (snapshot.teslaEvents ?? []).filter((event) =>
+      this.matchesEventCase(record, event, snapshot.correlatedCase),
+    );
+    const filteredRocResponses = (snapshot.rocResponses ?? []).filter((response) =>
+      this.matchesResponseCase(record, response, snapshot.correlatedCase),
+    );
 
     if (
-      !correlatedCase &&
+      !snapshot.correlatedCase &&
       filteredTeslaEvents.length === 0 &&
       filteredRocResponses.length === 0
     ) {
@@ -886,11 +935,11 @@ export class AccidentInvestigationService {
       "fsd_session_events",
       "FSD session and synchronized events",
       {
-        correlatedTakeoverCase: correlatedCase ?? null,
+        correlatedTakeoverCase: snapshot.correlatedCase,
         teslaEvents: filteredTeslaEvents,
         rocResponses: filteredRocResponses,
       },
-      (correlatedCase ? 1 : 0) +
+      (snapshot.correlatedCase ? 1 : 0) +
         filteredTeslaEvents.length +
         filteredRocResponses.length,
     );
@@ -926,42 +975,38 @@ export class AccidentInvestigationService {
 
   private buildRocActionsSection(
     record: AccidentCaseRecord,
-    correlatedCase: CorrelatedTakeoverCase | null,
+    snapshot: BundleSnapshot,
+    knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
-    const discrepancies = this.rocOperationsService
-      .rebuildCorrelatedTakeoverCases()
-      .discrepancies.filter((discrepancy) =>
-        record.discrepancyCaseIds.includes(discrepancy.discrepancyCaseId),
-      );
-    const manualCorrelations =
-      this.tryResolve(
-        () => this.rocOperationsService.listManualTakeoverCorrelations(),
-        "roc_actions",
-        "MANUAL_CORRELATIONS_UNAVAILABLE",
-        "Manual ROC correlation links are unavailable.",
-        "roc-operations",
-        [],
-      ) ?? []
-    ;
-    const filteredManualCorrelations = manualCorrelations
+    const discrepancies = snapshot.discrepancies.filter((discrepancy) =>
+      record.discrepancyCaseIds.includes(discrepancy.discrepancyCaseId),
+    );
+    if (!snapshot.manualCorrelations) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "roc_actions",
+        code: "MANUAL_CORRELATIONS_UNAVAILABLE",
+        message: "Manual ROC correlation links are unavailable.",
+        upstream: "roc-operations",
+      });
+    }
+    if (!snapshot.rocResponses) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "roc_actions",
+        code: "ROC_RESPONSES_UNAVAILABLE",
+        message: "ROC takeover response records are unavailable.",
+        upstream: "roc-operations",
+      });
+    }
+    const filteredManualCorrelations = (snapshot.manualCorrelations ?? [])
       .filter((link) =>
-        correlatedCase
+        snapshot.correlatedCase
           ? link.takeoverReportId ===
-            correlatedCase.safetyOperatorTakeoverReport.reportId
+            snapshot.correlatedCase.safetyOperatorTakeoverReport.reportId
           : false,
       );
-    const responses =
-      this.tryResolve(
-        () => this.rocOperationsService.listRocTakeoverResponseRecords(),
-        "roc_actions",
-        "ROC_RESPONSES_UNAVAILABLE",
-        "ROC takeover response records are unavailable.",
-        "roc-operations",
-        [],
-      ) ?? []
-    ;
-    const filteredResponses = responses
-      .filter((response) => this.matchesResponseCase(record, response, correlatedCase));
+    const filteredResponses = (snapshot.rocResponses ?? []).filter((response) =>
+      this.matchesResponseCase(record, response, snapshot.correlatedCase),
+    );
 
     return this.createBundleSection(
       "roc_actions",
@@ -981,24 +1026,25 @@ export class AccidentInvestigationService {
 
   private buildTelemetrySection(
     record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
     knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
-    const publicSample = this.tryResolve(
-      () => this.teslaIntegrationService?.getPublicTelemetrySample(record.vehicleId),
-      "telemetry_and_gaps",
-      "PUBLIC_TELEMETRY_UNAVAILABLE",
-      "Public telemetry sample is unavailable for the accident vehicle.",
-      "tesla-integration",
-      knownGaps,
-    );
-    const projection = this.tryResolve(
-      () => this.teslaIntegrationService?.getTelemetryProjection(record.vehicleId),
-      "telemetry_and_gaps",
-      "TELEMETRY_PROJECTION_UNAVAILABLE",
-      "Projected telemetry snapshot is unavailable for the accident vehicle.",
-      "tesla-integration",
-      knownGaps,
-    );
+    if (!snapshot.publicTelemetrySample) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "telemetry_and_gaps",
+        code: "PUBLIC_TELEMETRY_UNAVAILABLE",
+        message: "Public telemetry sample is unavailable for the accident vehicle.",
+        upstream: "tesla-integration",
+      });
+    }
+    if (!snapshot.telemetryProjection) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "telemetry_and_gaps",
+        code: "TELEMETRY_PROJECTION_UNAVAILABLE",
+        message: "Projected telemetry snapshot is unavailable for the accident vehicle.",
+        upstream: "tesla-integration",
+      });
+    }
     const timelineFacts = (this.timelineFacts.get(record.caseId) ?? [])
       .filter((fact) => fact.factKey.includes("telemetry"))
       .map((fact) => this.cloneTimelineFact(fact));
@@ -1008,29 +1054,28 @@ export class AccidentInvestigationService {
       "Telemetry and known gaps",
       {
         telemetryTimelineFacts: timelineFacts,
-        publicTelemetrySample: publicSample ?? null,
-        stateProjection: projection ?? null,
+        publicTelemetrySample: snapshot.publicTelemetrySample,
+        stateProjection: snapshot.telemetryProjection,
         knownGaps: knownGaps.filter(
           (gap) =>
             gap.sectionId === "vehicle_tesla_state" ||
             gap.sectionId === "telemetry_and_gaps",
         ),
       },
-      timelineFacts.length + [publicSample, projection].filter(Boolean).length,
+      timelineFacts.length +
+        [snapshot.publicTelemetrySample, snapshot.telemetryProjection].filter(
+          Boolean,
+        ).length,
     );
   }
 
   private buildSyncedVideoSection(
     record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
     knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
-    const segments = this.vehicleEvidenceService?.listSegmentIndex({
-      vehicleId: record.vehicleId,
-      caseId: record.caseId,
-    }) ?? [];
-    const bookmarks = this.vehicleEvidenceService?.listBookmarks({
-      vehicleId: record.vehicleId,
-    }) ?? [];
+    const segments = snapshot.segments ?? [];
+    const bookmarks = this.filterBookmarksForCase(record, snapshot, segments);
 
     if (segments.length === 0) {
       this.pushKnownGap(knownGaps, {
@@ -1055,18 +1100,18 @@ export class AccidentInvestigationService {
   private async buildRouteGeofenceSection(
     record: AccidentCaseRecord,
     correlatedCase: CorrelatedTakeoverCase | null,
+    snapshot: BundleSnapshot,
     knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
-    const order = record.orderId
-      ? this.tryResolve(
-          () => this.ownedMobilityService?.getOrder(record.orderId!),
-          "route_geofence_compare",
-          "ORDER_CONTEXT_UNAVAILABLE",
-          "Order context is unavailable for route/geofence comparison.",
-          "owned-mobility",
-          knownGaps,
-        )
-      : null;
+    const order = record.orderId ? snapshot.order : null;
+    if (record.orderId && !order) {
+      this.pushKnownGap(knownGaps, {
+        sectionId: "route_geofence_compare",
+        code: "ORDER_CONTEXT_UNAVAILABLE",
+        message: "Order context is unavailable for route/geofence comparison.",
+        upstream: "owned-mobility",
+      });
+    }
     const sandboxProgramId =
       correlatedCase?.safetyOperatorTakeoverReport.sandboxProgramId ?? null;
     const pickupPoint = this.extractGeoPoint(order, "pickup");
@@ -1176,6 +1221,7 @@ export class AccidentInvestigationService {
 
   private buildCommandsSection(
     record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
     knownGaps: AccidentInvestigationBundleKnownGap[],
   ) {
     if (!this.teslaIntegrationService) {
@@ -1186,7 +1232,7 @@ export class AccidentInvestigationService {
         upstream: "tesla-integration",
       });
     }
-    const receipts = this.teslaIntegrationService?.listReceipts(record.vehicleId) ?? [];
+    const receipts = this.filterReceiptsForCase(record, snapshot);
     return this.createBundleSection(
       "commands_and_receipts",
       "Commands and receipts",
@@ -1479,6 +1525,21 @@ export class AccidentInvestigationService {
     return record;
   }
 
+  private synchronizeCaseLinksFromSnapshot(
+    record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
+  ): AccidentCaseRecord {
+    record.discrepancyCaseIds = snapshot.correlatedCase
+      ? this.uniqueStrings(snapshot.correlatedCase.discrepancyCaseIds)
+      : [];
+    record.externalDocumentIds = this.uniqueStrings(
+      (this.externalDocuments.get(record.caseId) ?? []).map(
+        (document) => document.documentId,
+      ),
+    );
+    return record;
+  }
+
   private findLinkedDiscrepancyIds(record: AccidentCaseRecord): string[] {
     const correlatedCase = this.findCorrelatedTakeoverCase(record);
     if (!correlatedCase) {
@@ -1491,6 +1552,13 @@ export class AccidentInvestigationService {
     record: AccidentCaseRecord,
   ): CorrelatedTakeoverCase | null {
     const { cases } = this.rocOperationsService.rebuildCorrelatedTakeoverCases();
+    return this.selectCorrelatedTakeoverCase(record, cases);
+  }
+
+  private selectCorrelatedTakeoverCase(
+    record: AccidentCaseRecord,
+    cases: readonly CorrelatedTakeoverCase[],
+  ): CorrelatedTakeoverCase | null {
     const candidates = cases
       .filter((candidate) => this.isCorrelationCandidate(record, candidate))
       .sort((left, right) =>
@@ -1498,6 +1566,147 @@ export class AccidentInvestigationService {
         this.scoreCorrelatedCase(record, right),
       );
     return candidates[0] ?? null;
+  }
+
+  private buildBundleSnapshot(record: AccidentCaseRecord): BundleSnapshot {
+    const correlationSnapshot = this.captureResolve(
+      () => this.rocOperationsService.rebuildCorrelatedTakeoverCases(),
+      "rebuildCorrelatedTakeoverCases",
+    );
+    const correlatedCase = this.selectCorrelatedTakeoverCase(
+      record,
+      correlationSnapshot?.cases ?? [],
+    );
+
+    return {
+      timeline: this.buildTimeline(record, correlatedCase),
+      correlatedCase,
+      discrepancies: correlationSnapshot?.discrepancies ?? [],
+      order: record.orderId
+        ? this.captureResolve(
+            () => this.ownedMobilityService?.getOrder(record.orderId!),
+            "getOrder",
+          )
+        : null,
+      dispatchTrace: record.orderId
+        ? this.captureResolve(
+            () => this.ownedMobilityService?.listDispatchTrace(record.orderId!),
+            "listDispatchTrace",
+          )
+        : null,
+      telemetryStatus: this.captureResolve(
+        () => this.teslaIntegrationService?.getTelemetryStatus(record.vehicleId),
+        "getTelemetryStatus",
+      ),
+      publicTelemetrySample: this.captureResolve(
+        () => this.teslaIntegrationService?.getPublicTelemetrySample(record.vehicleId),
+        "getPublicTelemetrySample",
+      ),
+      telemetryProjection: this.captureResolve(
+        () => this.teslaIntegrationService?.getTelemetryProjection(record.vehicleId),
+        "getTelemetryProjection",
+      ),
+      teslaEvents: this.captureResolve(
+        () => this.rocOperationsService.listTeslaAutonomyTransitionEvents(),
+        "listTeslaAutonomyTransitionEvents",
+      ),
+      rocResponses: this.captureResolve(
+        () => this.rocOperationsService.listRocTakeoverResponseRecords(),
+        "listRocTakeoverResponseRecords",
+      ),
+      manualCorrelations: this.captureResolve(
+        () => this.rocOperationsService.listManualTakeoverCorrelations(),
+        "listManualTakeoverCorrelations",
+      ),
+      segments: this.captureResolve(
+        () =>
+          this.vehicleEvidenceService?.listSegmentIndex({
+            vehicleId: record.vehicleId,
+            caseId: record.caseId,
+          }),
+        "listSegmentIndex",
+      ),
+      bookmarks: this.captureResolve(
+        () => this.vehicleEvidenceService?.listBookmarks({ vehicleId: record.vehicleId }),
+        "listBookmarks",
+      ),
+      receipts: this.captureResolve(
+        () => this.teslaIntegrationService?.listReceipts(record.vehicleId),
+        "listReceipts",
+      ),
+    };
+  }
+
+  private filterBookmarksForCase(
+    record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
+    segments: NonNullable<BundleSnapshot["segments"]>,
+  ) {
+    const segmentIds = new Set(segments.map((segment) => segment.segmentId));
+    const eventIds = new Set(
+      (snapshot.teslaEvents ?? [])
+        .filter((event) => this.matchesEventCase(record, event, snapshot.correlatedCase))
+        .map((event) => event.eventId),
+    );
+    const reportBookmarkId =
+      snapshot.correlatedCase?.safetyOperatorTakeoverReport.bookmarkId ?? null;
+
+    return (snapshot.bookmarks ?? []).filter(
+      (bookmark) =>
+        segmentIds.has(bookmark.segmentId) ||
+        bookmark.bookmarkId === reportBookmarkId ||
+        eventIds.has(bookmark.eventId),
+    );
+  }
+
+  private filterReceiptsForCase(record: AccidentCaseRecord, snapshot: BundleSnapshot) {
+    const timestamps = this.collectCaseEvidenceTimestamps(record, snapshot);
+    if (timestamps.length === 0) {
+      return [];
+    }
+    const sorted = [...timestamps].sort((left, right) =>
+      this.compareTimestamps(left, right),
+    );
+    const windowStart = Date.parse(sorted[0]!) - 5 * 60 * 1000;
+    const windowEnd = Date.parse(sorted[sorted.length - 1]!) + 15 * 60 * 1000;
+
+    return (snapshot.receipts ?? []).filter((receipt) => {
+      const issuedAt = Date.parse(receipt.issuedAt);
+      return issuedAt >= windowStart && issuedAt <= windowEnd;
+    });
+  }
+
+  private collectCaseEvidenceTimestamps(
+    record: AccidentCaseRecord,
+    snapshot: BundleSnapshot,
+  ): string[] {
+    return this.uniqueStrings(
+      [
+        record.occurredAt,
+        ...(snapshot.correlatedCase
+          ? [
+              snapshot.correlatedCase.sourceTimestamps.teslaOccurredAt,
+              snapshot.correlatedCase.sourceTimestamps.safetyOccurredAt,
+              snapshot.correlatedCase.sourceTimestamps.safetyServerReceivedAt,
+              snapshot.correlatedCase.sourceTimestamps.rocRequestedAt,
+              snapshot.correlatedCase.sourceTimestamps.rocRespondedAt,
+              snapshot.correlatedCase.sourceTimestamps.rocResolvedAt,
+            ]
+          : []),
+        ...(snapshot.teslaEvents ?? [])
+          .filter((event) => this.matchesEventCase(record, event, snapshot.correlatedCase))
+          .map((event) => event.occurredAt),
+        ...(snapshot.rocResponses ?? [])
+          .filter((response) =>
+            this.matchesResponseCase(record, response, snapshot.correlatedCase),
+          )
+          .flatMap((response) => [response.requestedAt, response.respondedAt]),
+        ...(snapshot.segments ?? []).flatMap((segment) => [
+          segment.startedAt,
+          segment.endedAt,
+        ]),
+      ].filter((value): value is string => Boolean(value)),
+    );
   }
 
   private isCorrelationCandidate(
@@ -1636,6 +1845,23 @@ export class AccidentInvestigationService {
 
   private compareTimestamps(left: string, right: string) {
     return Date.parse(left) - Date.parse(right);
+  }
+
+  private captureResolve<T>(
+    resolver: () => T | null | undefined,
+    source: string,
+  ): T | null {
+    try {
+      const value = resolver();
+      return value ?? null;
+    } catch (error) {
+      this.logger.debug(
+        `bundle snapshot source ${source} degraded: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
   }
 
   private computeHash(value: unknown) {

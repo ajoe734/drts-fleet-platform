@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   CorrelatedTakeoverCase,
@@ -447,5 +447,426 @@ describe("AccidentInvestigationService", () => {
       liabilityConclusionEmitted: false,
       ttlMinutes: 15,
     });
+  });
+
+  it("limits synced bookmarks and command receipts to evidence linked to the case", async () => {
+    const correlatedCase: CorrelatedTakeoverCase = {
+      correlatedTakeoverCaseId: "corr-case-filter-001",
+      vehicleId: "veh-filter-001",
+      orderId: "ord-filter-001",
+      takeoverCorrelationId: "takeover-filter-001",
+      correlationPriority: 1,
+      matchedBy: "vehicle_time_trip",
+      sourceRecordIds: {
+        teslaEventId: "tesla-event-filter-001",
+        safetyOperatorTakeoverReportId: "report-filter-001",
+        rocTakeoverResponseId: "roc-response-filter-001",
+      },
+      sourceTimestamps: {
+        teslaOccurredAt: "2026-06-26T10:00:05.000Z",
+        safetyOccurredAt: "2026-06-26T10:00:00.000Z",
+        safetyServerReceivedAt: "2026-06-26T10:00:20.000Z",
+        rocRequestedAt: "2026-06-26T10:00:25.000Z",
+        rocRespondedAt: "2026-06-26T10:00:40.000Z",
+        rocResolvedAt: null,
+      },
+      teslaEvent: {
+        eventId: "tesla-event-filter-001",
+        takeoverCorrelationId: "takeover-filter-001",
+        autonomySessionId: "session-filter-001",
+        vehicleId: "veh-filter-001",
+        orderId: "ord-filter-001",
+        transitionType: "manual_takeover",
+        occurredAt: "2026-06-26T10:00:05.000Z",
+        source: {
+          sourceSystem: "tesla_fleet_api",
+          sourceRef: "tesla-event-filter-001",
+          ingestedAt: "2026-06-26T10:00:05.000Z",
+          recordedAt: "2026-06-26T10:00:05.000Z",
+          signatureRef: null,
+          schemaVersion: "2026-06",
+        },
+      },
+      safetyOperatorTakeoverReport: {
+        reportId: "report-filter-001",
+        clientGeneratedReportId: "client-report-filter-001",
+        safetyOperatorId: "safe-op-filter-001",
+        vehicleId: "veh-filter-001",
+        orderId: "ord-filter-001",
+        sandboxProgramId: "phase2-tesla-fsd-sandbox-202606",
+        shiftId: "shift-filter-001",
+        assignmentId: "assignment-filter-001",
+        correlationId: "takeover-filter-001",
+        trigger: "vehicle_alert",
+        reasonCode: "sensor_fault",
+        disposition: "remote_assist",
+        fsdResumed: false,
+        bookmarkId: "bookmark-keep-001",
+        incidentId: "incident-filter-001",
+        evidenceArtifactIds: ["artifact-filter-001"],
+        notes: "Linked takeover report.",
+        occurredAt: "2026-06-26T10:00:00.000Z",
+        serverReceivedAt: "2026-06-26T10:00:20.000Z",
+      },
+      rocTakeoverResponse: {
+        responseId: "roc-response-filter-001",
+        takeoverCorrelationId: "takeover-filter-001",
+        autonomySessionId: "session-filter-001",
+        triggeredByTeslaEventId: "tesla-event-filter-001",
+        rocOperatorId: "roc-filter-001",
+        vehicleId: "veh-filter-001",
+        orderId: "ord-filter-001",
+        responseType: "remote_assist",
+        requestedAt: "2026-06-26T10:00:25.000Z",
+        respondedAt: "2026-06-26T10:00:40.000Z",
+        resolvedAt: null,
+        outcomeNote: "Linked ROC response.",
+        source: {
+          sourceSystem: "roc_operator",
+          sourceRef: "roc-response-filter-001",
+          ingestedAt: "2026-06-26T10:00:25.000Z",
+          recordedAt: "2026-06-26T10:00:25.000Z",
+          signatureRef: null,
+          schemaVersion: "2026-06",
+        },
+      },
+      manualCorrelation: null,
+      discrepancyCaseIds: [],
+    };
+
+    const service = new AccidentInvestigationService(
+      {
+        rebuildCorrelatedTakeoverCases: () => ({
+          cases: [correlatedCase],
+          discrepancies: [],
+        }),
+        listTeslaAutonomyTransitionEvents: () => [correlatedCase.teslaEvent!],
+        listRocTakeoverResponseRecords: () => [correlatedCase.rocTakeoverResponse!],
+        listManualTakeoverCorrelations: () => [],
+      } as never,
+      undefined,
+      {
+        getOrder: () => ({
+          orderId: "ord-filter-001",
+          orderNo: "ORD-FILTER-001",
+          pickup: { lat: 25.0478, lng: 121.5319 },
+          dropoff: { lat: 25.052, lng: 121.5436 },
+        }),
+        listDispatchTrace: () => [],
+      } as never,
+      {
+        listTakeoverReports: () => [correlatedCase.safetyOperatorTakeoverReport],
+      } as never,
+      undefined,
+      {
+        getTelemetryStatus: () => ({
+          vehicleId: "veh-filter-001",
+          mode: "public_mock",
+          source: {
+            sourceSystem: "tesla_public_telemetry",
+            sourceRef: "veh-filter-001",
+            ingestedAt: "2026-06-26T10:00:00.000Z",
+            recordedAt: "2026-06-26T10:00:00.000Z",
+            signatureRef: null,
+            schemaVersion: "2026-06",
+          },
+          configuredAt: "2026-06-26T10:00:00.000Z",
+          lastPublicSampleAt: "2026-06-26T10:00:00.000Z",
+          lastProjectionAt: "2026-06-26T10:00:00.000Z",
+        }),
+        getPublicTelemetrySample: () => ({
+          sampleId: "sample-filter-001",
+          externalVehicleRef: "tesla-veh-filter-001",
+          capturedAt: "2026-06-26T10:00:00.000Z",
+          location: { lat: 25.0478, lng: 121.5319 },
+          batteryLevelPct: 80,
+          online: true,
+          source: {
+            sourceSystem: "tesla_public_telemetry",
+            sourceRef: "tesla-veh-filter-001",
+            ingestedAt: "2026-06-26T10:00:00.000Z",
+            recordedAt: "2026-06-26T10:00:00.000Z",
+            signatureRef: null,
+            schemaVersion: "2026-06",
+          },
+        }),
+        getTelemetryProjection: () => ({
+          snapshotId: "snapshot-filter-001",
+          vehicleId: "veh-filter-001",
+          externalVehicleRef: "tesla-veh-filter-001",
+          capturedAt: "2026-06-26T10:00:00.000Z",
+          location: { lat: 25.0478, lng: 121.5319 },
+          speedMps: 0,
+          headingDeg: 180,
+          shiftState: "D",
+          autonomyState: "active",
+          batteryLevelPct: 80,
+          batteryRangeKm: 320.4,
+          charging: false,
+          online: true,
+          source: {
+            sourceSystem: "tesla_public_telemetry",
+            sourceRef: "tesla-veh-filter-001",
+            ingestedAt: "2026-06-26T10:00:00.000Z",
+            recordedAt: "2026-06-26T10:00:00.000Z",
+            signatureRef: null,
+            schemaVersion: "2026-06",
+          },
+        }),
+        listReceipts: () => [
+          {
+            commandId: "receipt-keep-001",
+            idempotencyKey: "idem-keep-001",
+            vehicleId: "veh-filter-001",
+            commandType: "flash_lights",
+            status: "acknowledged",
+            issuedBy: "roc-filter-001",
+            issuedAt: "2026-06-26T10:01:00.000Z",
+            acknowledgedAt: "2026-06-26T10:01:00.000Z",
+            providerRef: "provider-keep-001",
+            failureReasonCode: null,
+            source: {
+              sourceSystem: "tesla_fleet_api",
+              sourceRef: "provider-keep-001",
+              ingestedAt: "2026-06-26T10:01:00.000Z",
+              recordedAt: "2026-06-26T10:01:00.000Z",
+              signatureRef: null,
+              schemaVersion: "2026-06",
+            },
+          },
+          {
+            commandId: "receipt-drop-001",
+            idempotencyKey: "idem-drop-001",
+            vehicleId: "veh-filter-001",
+            commandType: "honk_horn",
+            status: "acknowledged",
+            issuedBy: "roc-filter-002",
+            issuedAt: "2026-06-26T13:45:00.000Z",
+            acknowledgedAt: "2026-06-26T13:45:00.000Z",
+            providerRef: "provider-drop-001",
+            failureReasonCode: null,
+            source: {
+              sourceSystem: "tesla_fleet_api",
+              sourceRef: "provider-drop-001",
+              ingestedAt: "2026-06-26T13:45:00.000Z",
+              recordedAt: "2026-06-26T13:45:00.000Z",
+              signatureRef: null,
+              schemaVersion: "2026-06",
+            },
+          },
+        ],
+      } as never,
+      {
+        listSegmentIndex: () => [
+          {
+            segmentId: "segment-keep-001",
+            recorderId: "recorder-filter-001",
+            vehicleId: "veh-filter-001",
+            caseId: "acc-case-filter-001",
+            manifestId: "manifest-filter-001",
+            artifactId: "artifact-filter-001",
+            artifactType: "video_clip",
+            objectKey: "veh-filter-001/segment-keep.mp4",
+            startedAt: "2026-06-26T09:59:30.000Z",
+            endedAt: "2026-06-26T10:01:30.000Z",
+            checksumSha256: "checksum-keep-001",
+            custodyState: "captured",
+            uploadStatus: "uploaded",
+            retryCount: 0,
+            lastRetryAt: null,
+            eventType: "collision",
+            bookmarked: true,
+          },
+        ],
+        listBookmarks: () => [
+          {
+            bookmarkId: "bookmark-keep-001",
+            recorderId: "recorder-filter-001",
+            vehicleId: "veh-filter-001",
+            segmentId: "segment-keep-001",
+            eventId: "tesla-event-filter-001",
+            eventType: "collision",
+            note: "Linked bookmark",
+            bookmarkedAt: "2026-06-26T10:00:10.000Z",
+          },
+          {
+            bookmarkId: "bookmark-drop-001",
+            recorderId: "recorder-filter-002",
+            vehicleId: "veh-filter-001",
+            segmentId: "segment-other-001",
+            eventId: "tesla-event-other-001",
+            eventType: "collision",
+            note: "Unrelated bookmark from another case",
+            bookmarkedAt: "2026-06-26T13:45:10.000Z",
+          },
+        ],
+      } as never,
+    );
+
+    service.createAccidentCase({
+      caseId: "acc-case-filter-001",
+      vehicleId: "veh-filter-001",
+      orderId: "ord-filter-001",
+      takeoverCorrelationId: "takeover-filter-001",
+      severity: "major",
+      occurredAt: "2026-06-26T10:00:00.000Z",
+      reportedBy: "roc-filter-001",
+    });
+
+    const bundle = await service.generateInvestigationBundle("acc-case-filter-001", {
+      actorId: "investigator-filter-001",
+    });
+
+    const syncedVideo = bundle.sections.find(
+      (section) => section.sectionId === "synced_video",
+    );
+    expect(
+      (syncedVideo?.payload as { bookmarks: Array<{ bookmarkId: string }> }).bookmarks,
+    ).toEqual([expect.objectContaining({ bookmarkId: "bookmark-keep-001" })]);
+
+    const commands = bundle.sections.find(
+      (section) => section.sectionId === "commands_and_receipts",
+    );
+    expect(
+      (commands?.payload as { receipts: Array<{ commandId: string }> }).receipts,
+    ).toEqual([expect.objectContaining({ commandId: "receipt-keep-001" })]);
+  });
+
+  it("reuses a single upstream snapshot across bundle sections", async () => {
+    const getOrder = vi.fn(() => ({
+      orderId: "ord-snapshot-001",
+      orderNo: "ORD-SNAPSHOT-001",
+      pickup: { lat: 25.0478, lng: 121.5319 },
+      dropoff: { lat: 25.052, lng: 121.5436 },
+    }));
+    const listDispatchTrace = vi.fn(() => [{ traceId: "dispatch-trace-snapshot-001" }]);
+    const getPublicTelemetrySample = vi.fn(() => ({
+      sampleId: "sample-snapshot-001",
+      externalVehicleRef: "tesla-veh-snapshot-001",
+      capturedAt: "2026-06-26T11:00:00.000Z",
+      location: { lat: 25.0478, lng: 121.5319 },
+      batteryLevelPct: 76,
+      online: true,
+      source: {
+        sourceSystem: "tesla_public_telemetry",
+        sourceRef: "tesla-veh-snapshot-001",
+        ingestedAt: "2026-06-26T11:00:00.000Z",
+        recordedAt: "2026-06-26T11:00:00.000Z",
+        signatureRef: null,
+        schemaVersion: "2026-06",
+      },
+    }));
+    const getTelemetryProjection = vi.fn(() => ({
+      snapshotId: "projection-snapshot-001",
+      vehicleId: "veh-snapshot-001",
+      externalVehicleRef: "tesla-veh-snapshot-001",
+      capturedAt: "2026-06-26T11:00:00.000Z",
+      location: { lat: 25.0478, lng: 121.5319 },
+      speedMps: 0,
+      headingDeg: 180,
+      shiftState: "D",
+      autonomyState: "active",
+      batteryLevelPct: 76,
+      batteryRangeKm: 300.1,
+      charging: false,
+      online: true,
+      source: {
+        sourceSystem: "tesla_public_telemetry",
+        sourceRef: "tesla-veh-snapshot-001",
+        ingestedAt: "2026-06-26T11:00:00.000Z",
+        recordedAt: "2026-06-26T11:00:00.000Z",
+        signatureRef: null,
+        schemaVersion: "2026-06",
+      },
+    }));
+    const listRocTakeoverResponseRecords = vi.fn(() => []);
+    const rebuildCorrelatedTakeoverCases = vi.fn(() => ({
+      cases: [],
+      discrepancies: [],
+    }));
+
+    const service = new AccidentInvestigationService(
+      {
+        rebuildCorrelatedTakeoverCases,
+        listTeslaAutonomyTransitionEvents: vi.fn(() => []),
+        listRocTakeoverResponseRecords,
+        listManualTakeoverCorrelations: vi.fn(() => []),
+      } as never,
+      undefined,
+      {
+        getOrder,
+        listDispatchTrace,
+      } as never,
+      undefined,
+      undefined,
+      {
+        getTelemetryStatus: vi.fn(() => ({
+          vehicleId: "veh-snapshot-001",
+          mode: "public_mock",
+          source: {
+            sourceSystem: "tesla_public_telemetry",
+            sourceRef: "veh-snapshot-001",
+            ingestedAt: "2026-06-26T11:00:00.000Z",
+            recordedAt: "2026-06-26T11:00:00.000Z",
+            signatureRef: null,
+            schemaVersion: "2026-06",
+          },
+          configuredAt: "2026-06-26T11:00:00.000Z",
+          lastPublicSampleAt: "2026-06-26T11:00:00.000Z",
+          lastProjectionAt: "2026-06-26T11:00:00.000Z",
+        })),
+        getPublicTelemetrySample,
+        getTelemetryProjection,
+        listReceipts: vi.fn(() => []),
+      } as never,
+      {
+        listSegmentIndex: vi.fn(() => []),
+        listBookmarks: vi.fn(() => []),
+      } as never,
+    );
+
+    service.createAccidentCase({
+      caseId: "acc-case-snapshot-001",
+      vehicleId: "veh-snapshot-001",
+      orderId: "ord-snapshot-001",
+      severity: "major",
+      occurredAt: "2026-06-26T11:00:00.000Z",
+      reportedBy: "roc-snapshot-001",
+    });
+    rebuildCorrelatedTakeoverCases.mockClear();
+
+    const bundle = await service.generateInvestigationBundle("acc-case-snapshot-001", {
+      actorId: "investigator-snapshot-001",
+    });
+
+    const vehicleState = bundle.sections.find(
+      (section) => section.sectionId === "vehicle_tesla_state",
+    );
+    const telemetry = bundle.sections.find(
+      (section) => section.sectionId === "telemetry_and_gaps",
+    );
+    expect(vehicleState?.payload).toMatchObject({
+      publicTelemetrySample: expect.objectContaining({
+        sampleId: "sample-snapshot-001",
+      }),
+      stateProjection: expect.objectContaining({
+        snapshotId: "projection-snapshot-001",
+      }),
+    });
+    expect(telemetry?.payload).toMatchObject({
+      publicTelemetrySample: expect.objectContaining({
+        sampleId: "sample-snapshot-001",
+      }),
+      stateProjection: expect.objectContaining({
+        snapshotId: "projection-snapshot-001",
+      }),
+    });
+
+    expect(rebuildCorrelatedTakeoverCases).toHaveBeenCalledTimes(1);
+    expect(getOrder).toHaveBeenCalledTimes(1);
+    expect(listDispatchTrace).toHaveBeenCalledTimes(1);
+    expect(getPublicTelemetrySample).toHaveBeenCalledTimes(1);
+    expect(getTelemetryProjection).toHaveBeenCalledTimes(1);
+    expect(listRocTakeoverResponseRecords).toHaveBeenCalledTimes(1);
   });
 });
