@@ -5,8 +5,8 @@
 **Current Sidecar Owner:** `Claude`
 **Assigned Reviewer:** `Codex2`
 **Parent Owner / Reviewer:** `Codex2` / `Claude2`
-**Last Revised:** `2026-06-26T01:28Z (UTC)`
-**Status:** `in_progress` (sidecar owner `Claude` building the packet; will hand off to reviewer `Codex2`)
+**Last Revised:** `2026-06-26T01:34Z (UTC)`
+**Status:** `review` (sidecar handed to reviewer `Codex2` for acceptance of this packet; owner `Claude` standing by for closeout)
 
 ---
 
@@ -35,7 +35,7 @@
 
 ### Sidecar `P2-GOV-001-SIDECAR-ACCEPTANCE`
 
-- machine truth：Owner=`Claude`，Reviewer=`Codex2`，`status=in_progress`（本輪由 backlog→start），`task_class=sidecar`，`mutates_canonical=false`，`helper_parent=P2-GOV-001`，`helper_kind=acceptance_packet`，`auto_created_by=supervisor-underutilization`。
+- machine truth：Owner=`Claude`，Reviewer=`Codex2`，`status=review`（owner `Claude` 已把本 packet handoff 給 reviewer `Codex2`；前一輪曾被 reopen 回 owner 修訂 sidecar 自身狀態描述），`task_class=sidecar`，`mutates_canonical=false`，`helper_parent=P2-GOV-001`，`helper_kind=acceptance_packet`，`auto_created_by=supervisor-underutilization`。
 - 依賴 `depends_on=["P2-WP0"]`，與 parent 一致。
 
 ### Dependency `P2-WP0`（foundation，已 merged）
@@ -171,7 +171,7 @@
 
 Reviewer 應優先確認：
 
-1. packet 是否忠實保留 machine truth：parent `P2-GOV-001` 為 `review`、Owner=`Codex2`、Reviewer=`Claude2`、`depends_on=[P2-WP0]`；sidecar 為 `in_progress`、Owner=`Claude`、Reviewer=`Codex2`；P2-WP0 已 `merged_to_dev (a00a3bbd7)`。
+1. packet 是否忠實保留 machine truth：parent `P2-GOV-001` 為 `review`、Owner=`Codex2`、Reviewer=`Claude2`、`depends_on=[P2-WP0]`；sidecar 為 `review`（已 handoff 給 reviewer `Codex2`）、Owner=`Claude`、Reviewer=`Codex2`；P2-WP0 已 `merged_to_dev (a00a3bbd7)`。
 2. packet 是否正確說明 **parent 實作尚未在 `dev`**（在 review，code 在 `Codex2` branch），而 `dev` 上只有 P2-WP0 scaffold —— 沒有把「dev 看不到 controller/V0038」誤報成缺陷。
 3. AC-3 / AC-4 是否抓到 acceptance 的硬點：approval doc **hash stored**、**versions rollbackable & effective-dated**、**compliance snapshot reproducible**，而非只要 endpoint 存在。
 4. AC-2 / AC-5 是否守住 policy-driven 佔位（通報時限 / 保存年限不硬編）與「不回頭改寫已 merged 的 `V0037`」邊界。
@@ -180,7 +180,7 @@ Reviewer 應優先確認：
 
 **建議核准用語：**
 
-> `P2-GOV-001 acceptance packet ready: machine truth preserved (parent P2-GOV-001 in review under Codex2 with Claude2 as reviewer, depends_on P2-WP0 which is merged_to_dev at a00a3bbd7; sidecar in_progress under Claude with Codex2 reviewer). Packet correctly states the parent implementation is not yet on dev and that dev currently carries only the P2-WP0 sandbox-governance scaffold plus V0037 av_sandbox/av_evidence schemas. AC checklist binds the parent acceptance hardpoints — experiment lifecycle endpoints, approval-document hash/supersedes/effective-dating, reproducible compliance snapshot, policy-driven notification placeholders, and V0038 governance tables layered on the V0037 foundation without rewriting it — and requires path-scoped evidence to separate task-introduced typecheck errors from the pre-existing apps/api baseline. No canonical truth or main runtime changed.`
+> `P2-GOV-001 acceptance packet ready: machine truth preserved (parent P2-GOV-001 in review under Codex2 with Claude2 as reviewer, depends_on P2-WP0 which is merged_to_dev at a00a3bbd7; sidecar in review, handed to Codex2 by owner Claude). Packet correctly states the parent implementation is not yet on dev and that dev currently carries only the P2-WP0 sandbox-governance scaffold plus V0037 av_sandbox/av_evidence schemas. AC checklist binds the parent acceptance hardpoints — experiment lifecycle endpoints, approval-document hash/supersedes/effective-dating, reproducible compliance snapshot, policy-driven notification placeholders, and V0038 governance tables layered on the V0037 foundation without rewriting it — and requires path-scoped evidence to separate task-introduced typecheck errors from the pre-existing apps/api baseline. No canonical truth or main runtime changed.`
 
 **建議退回用語：**
 
@@ -193,7 +193,7 @@ Reviewer 應優先確認：
 Owner（`Claude`）完成 packet 後，交給 reviewer（`Codex2`）：
 
 ```bash
-AI_NAME=Claude scripts/ai-status.sh handoff P2-GOV-001-SIDECAR-ACCEPTANCE Codex2 "P2-GOV-001 acceptance packet ready at support/sidecars/P2-GOV-001/P2-GOV-001-SIDECAR-ACCEPTANCE.md. It preserves machine truth (parent in review under Codex2/Claude2, depends_on P2-WP0 merged_to_dev a00a3bbd7; sidecar in_progress under Claude/Codex2), records that parent code is not yet on dev and dev only carries the P2-WP0 sandbox-governance scaffold plus V0037 av_sandbox/av_evidence schemas, maps the experiment-lifecycle / approval-doc hash+supersedes+effective-dating / reproducible compliance-snapshot / policy-driven-placeholder / V0038-on-V0037 acceptance hardpoints, and requires path-scoped evidence to split task-introduced typecheck errors from the pre-existing apps/api baseline. Support-only; no canonical truth or main runtime changed."
+AI_NAME=Claude scripts/ai-status.sh handoff P2-GOV-001-SIDECAR-ACCEPTANCE Codex2 "P2-GOV-001 acceptance packet ready at support/sidecars/P2-GOV-001/P2-GOV-001-SIDECAR-ACCEPTANCE.md. It preserves machine truth (parent in review under Codex2/Claude2, depends_on P2-WP0 merged_to_dev a00a3bbd7; sidecar in review, handed to Codex2 by owner Claude), records that parent code is not yet on dev and dev only carries the P2-WP0 sandbox-governance scaffold plus V0037 av_sandbox/av_evidence schemas, maps the experiment-lifecycle / approval-doc hash+supersedes+effective-dating / reproducible compliance-snapshot / policy-driven-placeholder / V0038-on-V0037 acceptance hardpoints, and requires path-scoped evidence to split task-introduced typecheck errors from the pre-existing apps/api baseline. Support-only; no canonical truth or main runtime changed."
 ```
 
 ---
@@ -231,4 +231,5 @@ Parent absorption / 主線採納仍由 parent owner `Codex2` 視需要決定，�
 
 ## 10) Change Log
 
+- 2026-06-26T01:34Z — rev2（reviewer `Codex2` reopen 回應）：把 sidecar **自身** 狀態描述由 `in_progress` 更新為 `review`（已 handoff 給 reviewer `Codex2`），涵蓋 header status block、§2 Current State Baseline 的 sidecar machine-truth 行、§6 reviewer hotspot #1、§6 建議核准用語與 §7 handoff 指令文字。parent acceptance framing（§3）、dependency map（§4）、evidence inventory（§5）維持不變（reviewer 指明 the rest can stay as-is）。Support-only，無 canonical truth 改動。
 - 2026-06-26T01:28Z — 初版建立：依 `scripts/ai-status.sh` single-task slices（parent `P2-GOV-001`=review/Codex2/Claude2、sidecar=in_progress/Claude/Codex2、dependency `P2-WP0`=done/merged_to_dev a00a3bbd7）與 `dev` repo scan（`V0037` av_sandbox/av_evidence + provider_capability_requirements、`phase2-tesla-fsd-sandbox.ts` Phase2 contract baseline、sandbox-governance scaffold-only）整理 `P2-GOV-001` acceptance checklist、dependency map、evidence inventory、reviewer hotspots 與 `Codex2` handoff / closeout 指引。Support-only，無 canonical truth 改動。
