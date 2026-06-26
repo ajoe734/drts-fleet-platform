@@ -270,6 +270,14 @@ import type {
   AcknowledgeTenantRoleCommand,
   DispatchDailyRecord,
   SixMonthOperationsSummary,
+  SandboxExperimentProgramRecord,
+  SandboxJurisdictionProfileRecord,
+  ApprovedOperatingAreaRecord,
+  ApprovedRouteRecord,
+  VehicleEnrollmentRecord,
+  SafetyOperatorQualificationRecord,
+  SuspendSandboxExperimentAuthorizationsCommand,
+  ResumeSandboxExperimentAuthorizationsCommand,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -2392,6 +2400,88 @@ export class ApiClient {
     const search = params.size > 0 ? `?${params.toString()}` : "";
     return this.get<PlatformTenantGovernanceSummaryResponse>(
       `/api/admin/tenant-governance/summary${search}`,
+    );
+  }
+
+  // ── Sandbox governance (P2-GOV-001/002 · admin/sandbox-governance) ──────────
+
+  async listSandboxExperiments(
+    asOf?: string,
+  ): Promise<SandboxExperimentProgramRecord[]> {
+    const search = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
+    return this.getList<SandboxExperimentProgramRecord>(
+      `/api/admin/sandbox-governance/experiments${search}`,
+    );
+  }
+
+  async getSandboxExperiment(
+    experimentId: string,
+    asOf?: string,
+  ): Promise<SandboxExperimentProgramRecord> {
+    const search = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
+    return this.get<SandboxExperimentProgramRecord>(
+      `/api/admin/sandbox-governance/experiments/${encodeURIComponent(
+        experimentId,
+      )}${search}`,
+    );
+  }
+
+  async listSandboxJurisdictions(
+    asOf?: string,
+  ): Promise<SandboxJurisdictionProfileRecord[]> {
+    const search = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
+    return this.getList<SandboxJurisdictionProfileRecord>(
+      `/api/admin/sandbox-governance/jurisdictions${search}`,
+    );
+  }
+
+  async listSandboxOperatingAreas(): Promise<ApprovedOperatingAreaRecord[]> {
+    return this.getList<ApprovedOperatingAreaRecord>(
+      "/api/admin/sandbox-governance/operating-areas",
+    );
+  }
+
+  async listSandboxRoutes(): Promise<ApprovedRouteRecord[]> {
+    return this.getList<ApprovedRouteRecord>(
+      "/api/admin/sandbox-governance/routes",
+    );
+  }
+
+  async listSandboxVehicleEnrollments(): Promise<VehicleEnrollmentRecord[]> {
+    return this.getList<VehicleEnrollmentRecord>(
+      "/api/admin/sandbox-governance/vehicle-enrollments",
+    );
+  }
+
+  async listSandboxSafetyOperatorQualifications(): Promise<
+    SafetyOperatorQualificationRecord[]
+  > {
+    return this.getList<SafetyOperatorQualificationRecord>(
+      "/api/admin/sandbox-governance/safety-operator-qualifications",
+    );
+  }
+
+  async suspendSandboxExperiment(
+    experimentId: string,
+    command: SuspendSandboxExperimentAuthorizationsCommand = {},
+  ): Promise<SandboxExperimentProgramRecord> {
+    return this.post<SandboxExperimentProgramRecord>(
+      `/api/admin/sandbox-governance/experiments/${encodeURIComponent(
+        experimentId,
+      )}/suspend`,
+      { body: command },
+    );
+  }
+
+  async resumeSandboxExperimentAuthorizations(
+    experimentId: string,
+    command: ResumeSandboxExperimentAuthorizationsCommand = {},
+  ): Promise<SandboxExperimentProgramRecord> {
+    return this.post<SandboxExperimentProgramRecord>(
+      `/api/admin/sandbox-governance/experiments/${encodeURIComponent(
+        experimentId,
+      )}/resume-authorizations`,
+      { body: command },
     );
   }
 

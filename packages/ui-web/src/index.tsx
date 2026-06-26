@@ -70,7 +70,7 @@ export type {
   CanvasTheme,
   CanvasTone,
 } from "./canvas-tokens";
-export type { CanvasPillTone } from "./canvas-primitives";
+export type { CanvasPillTone, CanvasIconName } from "./canvas-primitives";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
