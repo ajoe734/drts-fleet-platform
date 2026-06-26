@@ -153,6 +153,41 @@ describe("INT-P2-002 sandbox dispatch hook", () => {
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "veh-av-demo-001",
       driverId: "safety-op-001",
+      sandboxDispatchSnapshot: {
+        candidateRoute: {
+          type: "MultiLineString",
+          coordinates: [
+            [
+              [121.522, 25.044],
+              [121.526, 25.047],
+              [121.529, 25.05],
+              [121.533, 25.054],
+            ],
+          ],
+        },
+        providerCapabilities: {
+          av_dispatch: true,
+          telemetry_stream: true,
+          regulatory_event_feed: true,
+          evidence_recorder: true,
+          odd_geofence: true,
+          minimal_risk_condition: true,
+        },
+        telemetry: {
+          stale: false,
+          minimalRiskConditionActive: false,
+          socPercent: 80,
+          currentTripCount: 0,
+          odometerKm: 25_000,
+        },
+        regulatory: {
+          approvalFresh: true,
+          vehicleCertified: true,
+        },
+        recorder: {
+          healthy: true,
+        },
+      },
     });
 
     expect(assignment.status).toBe("assigned");

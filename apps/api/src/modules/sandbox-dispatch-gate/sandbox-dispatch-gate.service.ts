@@ -23,8 +23,6 @@ import { SANDBOX_DISPATCH_ERROR_CODE_MAP } from "./sandbox-dispatch-gate.types";
 
 const DEFAULT_MIN_SOC_PERCENT = 20;
 const DEFAULT_MAX_ODOMETER_KM = 250_000;
-const DEFAULT_SNAPSHOT_SOC_PERCENT = 80;
-const DEFAULT_SNAPSHOT_ODOMETER_KM = 25_000;
 const REQUIRED_PROVIDER_CAPABILITIES = [
   "av_dispatch",
   "telemetry_stream",
@@ -258,13 +256,7 @@ export class SandboxDispatchGateService {
         sandboxProgramId,
         requestedAt,
       );
-    const candidateRoute =
-      input.candidateRoute ??
-      this.buildGovernanceCandidateRoute(
-        sandboxProgramId,
-        preselectedEnrollment?.approvedRouteIds ?? [],
-      ) ??
-      this.buildDirectCandidateRoute(pickup, dropoff);
+    const candidateRoute = input.candidateRoute ?? null;
     const governanceSnapshot = await this.resolveGovernanceSnapshot({
       sandboxProgramId,
       requestedAt,
@@ -281,30 +273,6 @@ export class SandboxDispatchGateService {
     const enrollment = preselectedEnrollment ?? governanceSnapshot.vehicleEnrollment;
     const safetyOperator =
       input.safetyOperator ?? governanceSnapshot.safetyOperator;
-    const derivedCapabilities =
-      input.providerCapabilities ??
-      (enrollment?.status === "active"
-        ? this.buildDefaultProviderCapabilities()
-        : null);
-    const derivedRegulatory =
-      input.regulatory ??
-      (enrollment?.status === "active"
-        ? {
-            approvalFresh: true,
-            vehicleCertified: true,
-          }
-        : null);
-    const derivedTelemetry =
-      input.telemetry ??
-      (enrollment?.status === "active"
-        ? {
-            stale: false,
-            minimalRiskConditionActive: false,
-            socPercent: DEFAULT_SNAPSHOT_SOC_PERCENT,
-            currentTripCount: 0,
-            odometerKm: DEFAULT_SNAPSHOT_ODOMETER_KM,
-          }
-        : null);
     return {
       orderId: input.orderId,
       dispatchJobId: input.dispatchJobId,
@@ -320,14 +288,14 @@ export class SandboxDispatchGateService {
       candidateRoute,
       pickup,
       dropoff,
-      entitlement: input.entitlement ?? {
-        active: enrollment?.status === "active",
+      entitlement: {
+        active: input.entitlement?.active ?? enrollment?.status === "active",
       },
       vehicleEnrollment: enrollment,
       safetyOperator,
-      providerCapabilities: derivedCapabilities,
-      telemetry: derivedTelemetry,
-      regulatory: derivedRegulatory,
+      providerCapabilities: input.providerCapabilities ?? null,
+      telemetry: input.telemetry ?? null,
+      regulatory: input.regulatory ?? null,
       recorder: {
         healthy:
           input.recorder?.healthy ??
@@ -561,46 +529,6 @@ export class SandboxDispatchGateService {
     return [...new Set(reasons)];
   }
 
-  private buildDirectCandidateRoute(
-    pickup: { lat: number; lng: number } | null,
-    dropoff: { lat: number; lng: number } | null,
-  ): GeoJsonMultiLineString | null {
-    if (!pickup || !dropoff) {
-      return null;
-    }
-    return {
-      type: "MultiLineString",
-      coordinates: [[[pickup.lng, pickup.lat], [dropoff.lng, dropoff.lat]]],
-    };
-  }
-
-  private buildGovernanceCandidateRoute(
-    sandboxProgramId: string,
-    approvedRouteIds: string[],
-  ): GeoJsonMultiLineString | null {
-    if (approvedRouteIds.length === 0) {
-      return null;
-    }
-    const approvedRouteIdSet = new Set(approvedRouteIds);
-    const route =
-      this.sandboxGovernanceService?.listRoutes().find(
-        (item) =>
-          item.sandboxProgramId === sandboxProgramId &&
-          approvedRouteIdSet.has(item.routeId) &&
-          item.active,
-      ) ?? null;
-    return route ? { ...route.geometry, coordinates: route.geometry.coordinates.map((line) => [...line]) } : null;
-  }
-
-  private buildDefaultProviderCapabilities() {
-    return REQUIRED_PROVIDER_CAPABILITIES.reduce<
-      NonNullable<SandboxDispatchGateInput["providerCapabilities"]>
-    >((acc, capability) => {
-      acc[capability] = true;
-      return acc;
-    }, {} as NonNullable<SandboxDispatchGateInput["providerCapabilities"]>);
-  }
-
   private async resolveGovernanceSnapshot(input: {
     sandboxProgramId: string;
     requestedAt: string;
@@ -642,6 +570,7 @@ export class SandboxDispatchGateService {
             sandboxProgramId: input.sandboxProgramId,
             candidatePath: input.candidateRoute,
             asOf: input.requestedAt,
+            toleranceMeters: 25,
           })
         : Promise.resolve(null),
     ]);
