@@ -74,7 +74,9 @@ describe("E2E-P2 sandbox compliance controls", () => {
       undefined,
       buildGovernanceService() as never,
     );
-    const rocOperationsService = new RocOperationsService(safetyOperatorService);
+    const rocOperationsService = new RocOperationsService(
+      safetyOperatorService,
+    );
     const accidentInvestigationService = new AccidentInvestigationService(
       rocOperationsService,
     );
@@ -163,7 +165,8 @@ describe("E2E-P2 sandbox compliance controls", () => {
       requestedAt: "2026-06-26T08:01:00.000Z",
       respondedAt: "2026-06-26T08:01:30.000Z",
       resolvedAt: null,
-      outcomeNote: "ROC response linked through Tesla event with correlation mismatch.",
+      outcomeNote:
+        "ROC response linked through Tesla event with correlation mismatch.",
       source: buildSource(
         "roc_operator",
         "roc-safe-001",
@@ -281,20 +284,20 @@ describe("E2E-P2 sandbox compliance controls", () => {
 
     expect(takeoverReviews[0]?.investigationLink).toMatchObject({
       targetApp: "platform-admin",
-      route: `/platform-admin/investigations?takeoverCaseId=${encodeURIComponent(
-        takeoverReviews[0]!.correlatedTakeoverCaseId,
+      route: `/platform-admin/investigations/${encodeURIComponent(
+        accidentCase.caseId,
       )}`,
-      resourceType: "sandbox_takeover_case",
-      resourceId: takeoverReviews[0]?.correlatedTakeoverCaseId,
+      resourceType: "sandbox_investigation_case",
+      resourceId: accidentCase.caseId,
       requiredScopes: ["sandbox.investigation.read"],
     });
     expect(discrepancies[0]?.investigationLink).toMatchObject({
       targetApp: "platform-admin",
-      route: `/platform-admin/investigations?discrepancyCaseId=${encodeURIComponent(
-        discrepancies[0]!.discrepancyCaseId,
+      route: `/platform-admin/investigations/${encodeURIComponent(
+        accidentCase.caseId,
       )}`,
-      resourceType: "sandbox_takeover_discrepancy",
-      resourceId: discrepancies[0]?.discrepancyCaseId,
+      resourceType: "sandbox_investigation_case",
+      resourceId: accidentCase.caseId,
       requiredScopes: ["sandbox.investigation.read"],
     });
   });

@@ -1,11 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  HttpStatus,
-  Injectable,
-  Logger,
-  Optional,
-} from "@nestjs/common";
+import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   ActionReceipt,
@@ -172,12 +167,16 @@ export class RocOperationsService {
   constructor(
     private readonly safetyOperatorService: SafetyOperatorService,
     @Optional() private readonly incidentService?: IncidentService,
-    @Optional() private readonly vehicleEvidenceService?: VehicleEvidenceService,
-    @Optional() private readonly teslaIntegrationService?: TeslaIntegrationService,
+    @Optional()
+    private readonly vehicleEvidenceService?: VehicleEvidenceService,
+    @Optional()
+    private readonly teslaIntegrationService?: TeslaIntegrationService,
   ) {}
 
   listTeslaAutonomyTransitionEvents() {
-    return this.teslaTransitionEvents.map((event) => this.cloneTeslaEvent(event));
+    return this.teslaTransitionEvents.map((event) =>
+      this.cloneTeslaEvent(event),
+    );
   }
 
   recordTeslaAutonomyTransitionEvent(event: TeslaAutonomyTransitionEvent) {
@@ -194,7 +193,9 @@ export class RocOperationsService {
   }
 
   listRocTakeoverResponseRecords() {
-    return this.takeoverResponses.map((record) => this.cloneRocResponse(record));
+    return this.takeoverResponses.map((record) =>
+      this.cloneRocResponse(record),
+    );
   }
 
   recordRocTakeoverResponseRecord(record: RocTakeoverResponseRecord) {
@@ -232,15 +233,11 @@ export class RocOperationsService {
     return this.cloneManualLink(stored);
   }
 
-  listAlerts(
-    identity: BootstrapRequestIdentity | null,
-  ): RocAlertReadModel[] {
+  listAlerts(identity: BootstrapRequestIdentity | null): RocAlertReadModel[] {
     return this.collectAlerts(identity);
   }
 
-  getOverview(
-    identity: BootstrapRequestIdentity | null,
-  ): RocOverviewReadModel {
+  getOverview(identity: BootstrapRequestIdentity | null): RocOverviewReadModel {
     const alerts = this.collectAlerts(identity);
     const trips = this.listTrips(identity);
     const vehicles = this.listVehicles(identity);
@@ -249,13 +246,15 @@ export class RocOperationsService {
     return {
       generatedAt: new Date().toISOString(),
       activeVehicleCount: vehicles.length,
-      activeTripCount: trips.filter((trip) => trip.status !== "completed").length,
+      activeTripCount: trips.filter((trip) => trip.status !== "completed")
+        .length,
       activeTakeoverCount: this.listTakeovers().filter((candidate) =>
         this.isTakeoverActive(candidate),
       ).length,
       openAlertCount: alerts.filter((alert) => alert.status === "open").length,
-      criticalAlertCount: alerts.filter((alert) => alert.severity === "critical")
-        .length,
+      criticalAlertCount: alerts.filter(
+        (alert) => alert.severity === "critical",
+      ).length,
       acknowledgedAlertCount: alerts.filter(
         (alert) => alert.status === "acknowledged",
       ).length,
@@ -273,9 +272,11 @@ export class RocOperationsService {
       ).length,
       providerHealth: {
         ...providerHealth.health,
-        degradedServices: providerHealth.health.degradedServices.map((service) => ({
-          ...service,
-        })),
+        degradedServices: providerHealth.health.degradedServices.map(
+          (service) => ({
+            ...service,
+          }),
+        ),
       },
     };
   }
@@ -346,7 +347,10 @@ export class RocOperationsService {
     const tripMap = new Map<string, RocTripReadModel>();
 
     for (const assignment of assignments) {
-      const tripKey = this.resolveTripKey(assignment.orderId, assignment.vehicleId);
+      const tripKey = this.resolveTripKey(
+        assignment.orderId,
+        assignment.vehicleId,
+      );
       if (!tripKey) {
         continue;
       }
@@ -418,24 +422,24 @@ export class RocOperationsService {
 
   getProviderHealthSnapshot(): RocProviderHealthSnapshot {
     const items = this.buildProviderHealthItems();
-    const degradedServices: RocProviderHealthSnapshot["health"]["degradedServices"] = items
-      .filter(
-        (item) => item.status === "degraded" || item.status === "down",
-      )
-      .map((item) => ({
-        service: item.displayName,
-        impact: item.message ?? `${item.displayName} requires ROC review.`,
-        severity: item.status === "down" ? "critical" : "warning",
-      }));
+    const degradedServices: RocProviderHealthSnapshot["health"]["degradedServices"] =
+      items
+        .filter((item) => item.status === "degraded" || item.status === "down")
+        .map((item) => ({
+          service: item.displayName,
+          impact: item.message ?? `${item.displayName} requires ROC review.`,
+          severity: item.status === "down" ? "critical" : "warning",
+        }));
 
     return {
       health: {
-        status:
-          degradedServices.some((service) => service.severity === "critical")
-            ? "down"
-            : degradedServices.length > 0
-              ? "degraded"
-              : "healthy",
+        status: degradedServices.some(
+          (service) => service.severity === "critical",
+        )
+          ? "down"
+          : degradedServices.length > 0
+            ? "degraded"
+            : "healthy",
         degradedServices,
         lastCheckedAt: items.reduce(
           (latest, item) =>
@@ -449,8 +453,10 @@ export class RocOperationsService {
 
   getDispatchRestrictions(vehicleId: string): DispatchRestrictionSnapshot {
     const normalizedVehicleId = vehicleId.trim();
-    const stopNewDispatch = this.stopNewDispatchByVehicle.has(normalizedVehicleId);
-    const operationalHold = this.operationalHoldsByVehicle.has(normalizedVehicleId);
+    const stopNewDispatch =
+      this.stopNewDispatchByVehicle.has(normalizedVehicleId);
+    const operationalHold =
+      this.operationalHoldsByVehicle.has(normalizedVehicleId);
     const humanFallback = this.humanFallbacksByVehicle.has(normalizedVehicleId);
 
     const reasonCodes: SandboxDispatchReasonCode[] = [];
@@ -512,8 +518,16 @@ export class RocOperationsService {
     identity: BootstrapRequestIdentity | null,
   ): ActionReceipt {
     const { derivedAlert, state } = this.requireAlertContext(alertId);
-    this.assertAlertActionAllowed(identity, "stop-new-dispatch", derivedAlert, state);
-    const vehicleId = this.requireVehicleContext(derivedAlert, "stop-new-dispatch");
+    this.assertAlertActionAllowed(
+      identity,
+      "stop-new-dispatch",
+      derivedAlert,
+      state,
+    );
+    const vehicleId = this.requireVehicleContext(
+      derivedAlert,
+      "stop-new-dispatch",
+    );
 
     this.stopNewDispatchByVehicle.set(vehicleId, {
       vehicleId,
@@ -538,8 +552,16 @@ export class RocOperationsService {
     identity: BootstrapRequestIdentity | null,
   ): ActionReceipt {
     const { derivedAlert, state } = this.requireAlertContext(alertId);
-    this.assertAlertActionAllowed(identity, "operational-hold", derivedAlert, state);
-    const vehicleId = this.requireVehicleContext(derivedAlert, "operational-hold");
+    this.assertAlertActionAllowed(
+      identity,
+      "operational-hold",
+      derivedAlert,
+      state,
+    );
+    const vehicleId = this.requireVehicleContext(
+      derivedAlert,
+      "operational-hold",
+    );
 
     this.operationalHoldsByVehicle.set(vehicleId, {
       vehicleId,
@@ -587,7 +609,9 @@ export class RocOperationsService {
         ),
         vehicleId,
         orderId:
-          this.normalizeOptional(command.orderId) ?? derivedAlert.orderId ?? null,
+          this.normalizeOptional(command.orderId) ??
+          derivedAlert.orderId ??
+          null,
         sandboxProgramId,
       },
       identity ?? INTERNAL_SYSTEM_IDENTITY,
@@ -609,7 +633,12 @@ export class RocOperationsService {
     identity: BootstrapRequestIdentity | null,
   ): ActionReceipt {
     const { derivedAlert, state } = this.requireAlertContext(alertId);
-    this.assertAlertActionAllowed(identity, "open-incident", derivedAlert, state);
+    this.assertAlertActionAllowed(
+      identity,
+      "open-incident",
+      derivedAlert,
+      state,
+    );
 
     if (!this.incidentService) {
       throw new ApiRequestError(
@@ -683,8 +712,16 @@ export class RocOperationsService {
     identity: BootstrapRequestIdentity | null,
   ): ActionReceipt {
     const { derivedAlert, state } = this.requireAlertContext(alertId);
-    this.assertAlertActionAllowed(identity, "fallback-to-human", derivedAlert, state);
-    const vehicleId = this.requireVehicleContext(derivedAlert, "fallback-to-human");
+    this.assertAlertActionAllowed(
+      identity,
+      "fallback-to-human",
+      derivedAlert,
+      state,
+    );
+    const vehicleId = this.requireVehicleContext(
+      derivedAlert,
+      "fallback-to-human",
+    );
     const actorId = this.resolveActorId(identity, "roc-operator");
     const requestedAt = new Date().toISOString();
     const reason = this.normalizeOptional(command.reason);
@@ -829,7 +866,8 @@ export class RocOperationsService {
       .map((alert) => this.projectAlert(alert, identity))
       .sort((left, right) => {
         const severityRank =
-          this.rankAlertSeverity(left.severity) - this.rankAlertSeverity(right.severity);
+          this.rankAlertSeverity(left.severity) -
+          this.rankAlertSeverity(right.severity);
         if (severityRank !== 0) {
           return severityRank;
         }
@@ -873,7 +911,8 @@ export class RocOperationsService {
     for (const discrepancy of correlationSnapshot.discrepancies) {
       const caseRecord = correlationSnapshot.cases.find(
         (candidate) =>
-          candidate.correlatedTakeoverCaseId === discrepancy.correlatedTakeoverCaseId,
+          candidate.correlatedTakeoverCaseId ===
+          discrepancy.correlatedTakeoverCaseId,
       );
       alerts.push({
         alertId: `roc-alert-discrepancy-${discrepancy.discrepancyCaseId}`,
@@ -1054,49 +1093,58 @@ export class RocOperationsService {
       vehicleIds.add(vehicleId);
     }
 
-    return [...vehicleIds]
-      .sort()
-      .map((vehicleId) => {
-        const activeAssignment = assignments.find(
-          (assignment) =>
-            assignment.vehicleId === vehicleId &&
-            this.isAssignmentActive(assignment.status),
-        );
-        const latestReport = reports
-          .filter((report) => report.vehicleId === vehicleId)
-          .sort((left, right) => (left.occurredAt < right.occurredAt ? 1 : -1))[0];
-        const telemetrySnapshot = this.getTelemetrySnapshot(vehicleId);
-        const telemetryFreshness = this.getTelemetryFreshness(vehicleId, telemetrySnapshot);
-        const regulatoryFreshness = this.getRegulatoryFreshness(vehicleId, latestReport);
-        const restriction = this.getDispatchRestrictions(vehicleId);
-        const recorderSignal = this.vehicleEvidenceService?.getNoNewDispatchSignal(
-          vehicleId,
-        );
-        const gateReasonCodes = [
-          ...(recorderSignal?.active ? (["RECORDER_UNHEALTHY"] as const) : []),
-          ...restriction.reasonCodes,
-        ];
+    return [...vehicleIds].sort().map((vehicleId) => {
+      const activeAssignment = assignments.find(
+        (assignment) =>
+          assignment.vehicleId === vehicleId &&
+          this.isAssignmentActive(assignment.status),
+      );
+      const latestReport = reports
+        .filter((report) => report.vehicleId === vehicleId)
+        .sort((left, right) =>
+          left.occurredAt < right.occurredAt ? 1 : -1,
+        )[0];
+      const telemetrySnapshot = this.getTelemetrySnapshot(vehicleId);
+      const telemetryFreshness = this.getTelemetryFreshness(
+        vehicleId,
+        telemetrySnapshot,
+      );
+      const regulatoryFreshness = this.getRegulatoryFreshness(
+        vehicleId,
+        latestReport,
+      );
+      const restriction = this.getDispatchRestrictions(vehicleId);
+      const recorderSignal =
+        this.vehicleEvidenceService?.getNoNewDispatchSignal(vehicleId);
+      const gateReasonCodes = [
+        ...(recorderSignal?.active ? (["RECORDER_UNHEALTHY"] as const) : []),
+        ...restriction.reasonCodes,
+      ];
 
-        return {
-          vehicleId,
-          sandboxProgramId:
-            activeAssignment?.sandboxProgramId ??
-            latestReport?.sandboxProgramId ??
-            this.findSandboxProgramId(vehicleId),
-          currentOrderId:
-            activeAssignment?.orderId ?? latestReport?.orderId ?? this.findCurrentOrderId(vehicleId),
-          safetyOperatorId:
-            activeAssignment?.safetyOperatorId ?? latestReport?.safetyOperatorId ?? null,
-          telemetrySnapshot,
-          telemetryFreshness,
-          regulatoryFreshness,
-          gateReasonCodes,
-          stopNewDispatchActive: restriction.stopNewDispatchActive,
-          operationalHoldActive: restriction.operationalHoldActive,
-          evidenceFreezeActive: this.evidenceFreezesByVehicle.has(vehicleId),
-          humanFallbackActive: restriction.humanFallbackActive,
-        };
-      });
+      return {
+        vehicleId,
+        sandboxProgramId:
+          activeAssignment?.sandboxProgramId ??
+          latestReport?.sandboxProgramId ??
+          this.findSandboxProgramId(vehicleId),
+        currentOrderId:
+          activeAssignment?.orderId ??
+          latestReport?.orderId ??
+          this.findCurrentOrderId(vehicleId),
+        safetyOperatorId:
+          activeAssignment?.safetyOperatorId ??
+          latestReport?.safetyOperatorId ??
+          null,
+        telemetrySnapshot,
+        telemetryFreshness,
+        regulatoryFreshness,
+        gateReasonCodes,
+        stopNewDispatchActive: restriction.stopNewDispatchActive,
+        operationalHoldActive: restriction.operationalHoldActive,
+        evidenceFreezeActive: this.evidenceFreezesByVehicle.has(vehicleId),
+        humanFallbackActive: restriction.humanFallbackActive,
+      };
+    });
   }
 
   private getTelemetrySnapshot(vehicleId: string) {
@@ -1129,7 +1177,8 @@ export class RocOperationsService {
 
     try {
       const status = this.teslaIntegrationService.getTelemetryStatus(vehicleId);
-      const observedAt = status.lastProjectionAt ?? status.lastSyncAt ?? status.configuredAt;
+      const observedAt =
+        status.lastProjectionAt ?? status.lastSyncAt ?? status.configuredAt;
       if (status.health === "disabled") {
         return {
           dataFreshness: "degraded",
@@ -1156,7 +1205,9 @@ export class RocOperationsService {
       .sort((left, right) => (left.occurredAt < right.occurredAt ? 1 : -1))[0];
     const latestRocResponse = this.takeoverResponses
       .filter((response) => response.vehicleId === vehicleId)
-      .sort((left, right) => (left.requestedAt < right.requestedAt ? 1 : -1))[0];
+      .sort((left, right) =>
+        left.requestedAt < right.requestedAt ? 1 : -1,
+      )[0];
 
     const observedAt =
       latestTeslaEvent?.occurredAt ??
@@ -1228,11 +1279,17 @@ export class RocOperationsService {
         unhealthy[0]?.reasons[0] ??
         degraded[0]?.reasons[0] ??
         "Recorder health is nominal.",
-      affectedVehicleIds: [...new Set([...unhealthy, ...degraded].map((health) => health.vehicleId))],
+      affectedVehicleIds: [
+        ...new Set(
+          [...unhealthy, ...degraded].map((health) => health.vehicleId),
+        ),
+      ],
     };
   }
 
-  private buildTeslaFleetProviderHealth(now: string): RocProviderHealthReadModel {
+  private buildTeslaFleetProviderHealth(
+    now: string,
+  ): RocProviderHealthReadModel {
     const bindings = this.teslaIntegrationService?.listBindings() ?? [];
     if (bindings.length === 0 || !this.teslaIntegrationService) {
       return {
@@ -1256,9 +1313,14 @@ export class RocOperationsService {
           binding.vehicleId,
         );
         lastCheckedAt =
-          lastCheckedAt > (telemetry.lastProjectionAt ?? telemetry.lastSyncAt ?? telemetry.configuredAt)
+          lastCheckedAt >
+          (telemetry.lastProjectionAt ??
+            telemetry.lastSyncAt ??
+            telemetry.configuredAt)
             ? lastCheckedAt
-            : telemetry.lastProjectionAt ?? telemetry.lastSyncAt ?? telemetry.configuredAt;
+            : (telemetry.lastProjectionAt ??
+              telemetry.lastSyncAt ??
+              telemetry.configuredAt);
 
         if (telemetry.health === "disabled") {
           status = "down";
@@ -1286,7 +1348,9 @@ export class RocOperationsService {
     };
   }
 
-  private buildTeslaPublicTelemetryHealth(now: string): RocProviderHealthReadModel {
+  private buildTeslaPublicTelemetryHealth(
+    now: string,
+  ): RocProviderHealthReadModel {
     const bindings = this.teslaIntegrationService?.listBindings() ?? [];
     if (bindings.length === 0 || !this.teslaIntegrationService) {
       return {
@@ -1319,7 +1383,9 @@ export class RocOperationsService {
       displayName: "Tesla public telemetry",
       status: anySample ? "healthy" : "unknown",
       lastCheckedAt,
-      message: anySample ? "Public telemetry fallback available." : "No public telemetry samples captured.",
+      message: anySample
+        ? "Public telemetry fallback available."
+        : "No public telemetry samples captured.",
       affectedVehicleIds: [],
     };
   }
@@ -1346,8 +1412,7 @@ export class RocOperationsService {
     return {
       providerCode: "tesla_regulatory_events",
       displayName: "Tesla regulatory events",
-      status:
-        freshness.dataFreshness === "stale" ? "degraded" : "healthy",
+      status: freshness.dataFreshness === "stale" ? "degraded" : "healthy",
       lastCheckedAt: latest.occurredAt,
       message:
         freshness.dataFreshness === "stale"
@@ -1414,7 +1479,9 @@ export class RocOperationsService {
     const canNotify = this.canNotify(identity);
     const canResolve =
       this.canResolve(identity) ||
-      (state.assignedTo != null && actorId != null && state.assignedTo === actorId);
+      (state.assignedTo != null &&
+        actorId != null &&
+        state.assignedTo === actorId);
     const hasVehicleContext = derivedAlert.vehicleId != null;
     const alreadyFrozen =
       derivedAlert.vehicleId != null &&
@@ -1452,7 +1519,10 @@ export class RocOperationsService {
     actions.push(
       this.buildActionDescriptor(
         "stop-new-dispatch",
-        canStopDispatch && status !== "resolved" && hasVehicleContext && !alreadyStopped,
+        canStopDispatch &&
+          status !== "resolved" &&
+          hasVehicleContext &&
+          !alreadyStopped,
         "high",
         !hasVehicleContext
           ? "vehicle_context_required"
@@ -1494,7 +1564,9 @@ export class RocOperationsService {
     actions.push(
       this.buildActionDescriptor(
         "open-incident",
-        canOpenIncident && status !== "resolved" && state.linkedIncidentId == null,
+        canOpenIncident &&
+          status !== "resolved" &&
+          state.linkedIncidentId == null,
         "high",
         state.linkedIncidentId ? "incident_already_open" : "roc_role_required",
       ),
@@ -1502,7 +1574,10 @@ export class RocOperationsService {
     actions.push(
       this.buildActionDescriptor(
         "start-evidence-freeze",
-        canFreeze && status !== "resolved" && hasVehicleContext && !alreadyFrozen,
+        canFreeze &&
+          status !== "resolved" &&
+          hasVehicleContext &&
+          !alreadyFrozen,
         "high",
         !hasVehicleContext
           ? "vehicle_context_required"
@@ -1517,7 +1592,10 @@ export class RocOperationsService {
     actions.push(
       this.buildActionDescriptor(
         "fallback-to-human",
-        canFallback && status !== "resolved" && hasVehicleContext && !alreadyFallback,
+        canFallback &&
+          status !== "resolved" &&
+          hasVehicleContext &&
+          !alreadyFallback,
         "high",
         !hasVehicleContext
           ? "vehicle_context_required"
@@ -1542,11 +1620,13 @@ export class RocOperationsService {
         "resolve",
         canResolve &&
           status !== "resolved" &&
-          (!derivedAlert.resolveBlockedWhileSourceActive || !derivedAlert.sourceActive),
+          (!derivedAlert.resolveBlockedWhileSourceActive ||
+            !derivedAlert.sourceActive),
         "medium",
         status === "resolved"
           ? "already_resolved"
-          : derivedAlert.resolveBlockedWhileSourceActive && derivedAlert.sourceActive
+          : derivedAlert.resolveBlockedWhileSourceActive &&
+              derivedAlert.sourceActive
             ? "source_still_active"
             : "roc_role_required",
         true,
@@ -1636,15 +1716,15 @@ export class RocOperationsService {
     command: OpenRocIncidentCommand,
     identity: BootstrapRequestIdentity | null,
   ): CreateIncidentCommand {
-    const severity = command.severity ?? (alert.severity === "critical" ? "high" : "medium");
+    const severity =
+      command.severity ?? (alert.severity === "critical" ? "high" : "medium");
     const category =
       command.category ??
       (alert.alertType === "takeover_discrepancy" ? "safety" : "operational");
     const title =
       this.normalizeOptional(command.title) ?? `[ROC] ${alert.title}`;
     const description =
-      this.normalizeOptional(command.description) ??
-      alert.summary;
+      this.normalizeOptional(command.description) ?? alert.summary;
 
     return {
       title,
@@ -1751,13 +1831,21 @@ export class RocOperationsService {
     activeTakeovers: CorrelatedTakeoverCase[],
   ) {
     const reportTime = reports
-      .filter((report) => report.vehicleId === vehicleId && report.orderId === orderId)
-      .sort((left, right) => (left.occurredAt < right.occurredAt ? 1 : -1))[0]
-      ?.occurredAt;
-    const correlatedTime = activeTakeovers
-      .filter((candidate) => candidate.vehicleId === vehicleId && candidate.orderId === orderId)
+      .filter(
+        (report) =>
+          report.vehicleId === vehicleId && report.orderId === orderId,
+      )
       .sort((left, right) =>
-        left.sourceTimestamps.safetyOccurredAt < right.sourceTimestamps.safetyOccurredAt
+        left.occurredAt < right.occurredAt ? 1 : -1,
+      )[0]?.occurredAt;
+    const correlatedTime = activeTakeovers
+      .filter(
+        (candidate) =>
+          candidate.vehicleId === vehicleId && candidate.orderId === orderId,
+      )
+      .sort((left, right) =>
+        left.sourceTimestamps.safetyOccurredAt <
+        right.sourceTimestamps.safetyOccurredAt
           ? 1
           : -1,
       )[0]?.sourceTimestamps.safetyOccurredAt;
@@ -1858,56 +1946,92 @@ export class RocOperationsService {
   private canCoordinate(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["roc_operator", "ops_supervisor", "ops_manager", "dispatch_manager", "safety_officer"])
+      this.hasAnyRole(identity, [
+        "roc_operator",
+        "ops_supervisor",
+        "ops_manager",
+        "dispatch_manager",
+        "safety_officer",
+      ])
     );
   }
 
   private canAssign(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["ops_supervisor", "ops_manager", "dispatch_manager"])
+      this.hasAnyRole(identity, [
+        "ops_supervisor",
+        "ops_manager",
+        "dispatch_manager",
+      ])
     );
   }
 
   private canStopDispatch(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["roc_operator", "ops_supervisor", "ops_manager"])
+      this.hasAnyRole(identity, [
+        "roc_operator",
+        "ops_supervisor",
+        "ops_manager",
+      ])
     );
   }
 
   private canHold(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["safety_officer", "ops_supervisor", "ops_manager"])
+      this.hasAnyRole(identity, [
+        "safety_officer",
+        "ops_supervisor",
+        "ops_manager",
+      ])
     );
   }
 
   private canRequestSafety(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["roc_operator", "dispatch_manager", "ops_supervisor", "ops_manager"])
+      this.hasAnyRole(identity, [
+        "roc_operator",
+        "dispatch_manager",
+        "ops_supervisor",
+        "ops_manager",
+      ])
     );
   }
 
   private canOpenIncident(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["roc_operator", "safety_officer", "ops_supervisor", "ops_manager"])
+      this.hasAnyRole(identity, [
+        "roc_operator",
+        "safety_officer",
+        "ops_supervisor",
+        "ops_manager",
+      ])
     );
   }
 
   private canFreeze(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["safety_officer", "ops_supervisor", "ops_manager"])
+      this.hasAnyRole(identity, [
+        "safety_officer",
+        "ops_supervisor",
+        "ops_manager",
+      ])
     );
   }
 
   private canFallback(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["roc_operator", "ops_supervisor", "ops_manager"])
+      this.hasAnyRole(identity, [
+        "roc_operator",
+        "ops_supervisor",
+        "ops_manager",
+      ])
     );
   }
 
@@ -1918,7 +2042,11 @@ export class RocOperationsService {
   private canResolve(identity: BootstrapRequestIdentity | null) {
     return (
       identity?.realm === "system" ||
-      this.hasAnyRole(identity, ["safety_officer", "ops_supervisor", "ops_manager"])
+      this.hasAnyRole(identity, [
+        "safety_officer",
+        "ops_supervisor",
+        "ops_manager",
+      ])
     );
   }
 
@@ -1929,10 +2057,7 @@ export class RocOperationsService {
     return roles.some((role) => identity?.roles?.includes(role));
   }
 
-  private normalizeRequired(
-    value: string | null | undefined,
-    field: string,
-  ) {
+  private normalizeRequired(value: string | null | undefined, field: string) {
     const normalized = value?.trim?.();
     if (!normalized) {
       throw new ApiRequestError(
@@ -2022,7 +2147,9 @@ export class RocOperationsService {
       },
       teslaEvent: teslaEvent ? this.cloneTeslaEvent(teslaEvent) : null,
       safetyOperatorTakeoverReport: this.cloneTakeoverReport(report),
-      rocTakeoverResponse: rocResponse ? this.cloneRocResponse(rocResponse) : null,
+      rocTakeoverResponse: rocResponse
+        ? this.cloneRocResponse(rocResponse)
+        : null,
       manualCorrelation: manualLink ? this.cloneManualLink(manualLink) : null,
       discrepancyCaseIds: [],
       investigationLink: this.buildInvestigationLink(
@@ -2083,7 +2210,8 @@ export class RocOperationsService {
           (teslaEvent != null &&
             (candidate.triggeredByTeslaEventId === teslaEvent.eventId ||
               (candidate.autonomySessionId != null &&
-                candidate.autonomySessionId === teslaEvent.autonomySessionId)))),
+                candidate.autonomySessionId ===
+                  teslaEvent.autonomySessionId)))),
       (left, right) => {
         const relationRank =
           this.rankPriorityOneRocResponse(left, report, teslaEvent) -
@@ -2152,7 +2280,11 @@ export class RocOperationsService {
       }
     }
 
-    const orderIds = [teslaEvent?.orderId, safetyReport.orderId, rocResponse?.orderId]
+    const orderIds = [
+      teslaEvent?.orderId,
+      safetyReport.orderId,
+      rocResponse?.orderId,
+    ]
       .filter((value): value is string => value != null)
       .filter((value, index, values) => values.indexOf(value) === index);
     if (orderIds.length > 1) {
@@ -2204,20 +2336,13 @@ export class RocOperationsService {
     resourceType: string,
     resourceId: string,
   ): CrossAppResourceLink {
-    const queryKey =
-      resourceType === "sandbox_takeover_discrepancy"
-        ? "discrepancyCaseId"
-        : "takeoverCaseId";
-
     return {
       targetApp: "platform-admin",
-      route: `/platform-admin/investigations?${queryKey}=${encodeURIComponent(
-        resourceId,
-      )}`,
+      route: "/platform-admin/investigations",
       resourceType,
       resourceId,
       openMode: "new_tab",
-      label: "Open investigation",
+      label: "Open investigations queue",
       requiredScopes: ["sandbox.investigation.read"],
     };
   }
@@ -2302,7 +2427,10 @@ export class RocOperationsService {
     report: SafetyOperatorTakeoverReport,
     teslaEvent: TeslaAutonomyTransitionEvent | null,
   ) {
-    if (teslaEvent != null && response.triggeredByTeslaEventId === teslaEvent.eventId) {
+    if (
+      teslaEvent != null &&
+      response.triggeredByTeslaEventId === teslaEvent.eventId
+    ) {
       return 0;
     }
 

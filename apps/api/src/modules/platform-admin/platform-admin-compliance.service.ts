@@ -7,6 +7,7 @@ import type {
   AccidentTimelineEntry,
   ApproveSandboxControlledEvidenceExportCommand,
   ApproveSandboxLegalHoldReleaseCommand,
+  CrossAppResourceLink,
   CorrelatedTakeoverCase,
   CreateSandboxLegalHoldCommand,
   EvidenceDiscrepancyCase,
@@ -51,16 +52,35 @@ export class PlatformAdminComplianceService {
   }
 
   listTakeoverReviews(): CorrelatedTakeoverCase[] {
-    return this.accidentInvestigationService.listCorrelatedTakeoverCases();
+    const investigations = this.listInvestigations();
+    return this.accidentInvestigationService
+      .listCorrelatedTakeoverCases()
+      .map((record) => ({
+        ...record,
+        investigationLink: this.resolveTakeoverInvestigationLink(
+          record,
+          investigations,
+        ),
+      }));
   }
 
   listEvidenceDiscrepancies(): EvidenceDiscrepancyCase[] {
-    return this.accidentInvestigationService.listEvidenceDiscrepancyCases();
+    const investigations = this.listInvestigations();
+    return this.accidentInvestigationService
+      .listEvidenceDiscrepancyCases()
+      .map((record) => ({
+        ...record,
+        investigationLink: this.resolveDiscrepancyInvestigationLink(
+          record,
+          investigations,
+        ),
+      }));
   }
 
   getEvidenceManifest(manifestId: string): SandboxEvidenceManifestView {
     const normalizedManifestId = this.requireNonBlank(manifestId, "manifestId");
-    const items = this.vehicleEvidenceService.listManifestItems(normalizedManifestId);
+    const items =
+      this.vehicleEvidenceService.listManifestItems(normalizedManifestId);
     if (items.length === 0) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -82,7 +102,7 @@ export class PlatformAdminComplianceService {
     const custodyState = items.every(
       (item) => item.custodyState === items[0]?.custodyState,
     )
-      ? items[0]?.custodyState ?? "captured"
+      ? (items[0]?.custodyState ?? "captured")
       : "sealed";
 
     return {
@@ -91,7 +111,8 @@ export class PlatformAdminComplianceService {
       caseId: relatedCase?.caseId ?? items[0]?.caseId ?? null,
       windowStart: capturedAtValues[0] ?? new Date().toISOString(),
       windowEnd:
-        capturedAtValues[capturedAtValues.length - 1] ?? new Date().toISOString(),
+        capturedAtValues[capturedAtValues.length - 1] ??
+        new Date().toISOString(),
       itemCount: items.length,
       custodyState,
       createdAt: items[0]?.source.ingestedAt ?? new Date().toISOString(),
@@ -465,6 +486,78 @@ export class PlatformAdminComplianceService {
       .digest("hex");
   }
 
+  private resolveTakeoverInvestigationLink(
+    record: CorrelatedTakeoverCase,
+    investigations: readonly AccidentCaseRecord[],
+  ): CrossAppResourceLink {
+    const linkedCase =
+      investigations.find(
+        (candidate) =>
+          record.takeoverCorrelationId != null &&
+          candidate.takeoverCorrelationId === record.takeoverCorrelationId,
+      ) ??
+      investigations.find(
+        (candidate) =>
+          record.orderId != null && candidate.orderId === record.orderId,
+      ) ??
+      null;
+
+    if (linkedCase) {
+      return this.buildInvestigationDetailLink(linkedCase.caseId);
+    }
+
+    return this.buildInvestigationQueueLink(
+      "sandbox_takeover_case",
+      record.correlatedTakeoverCaseId,
+    );
+  }
+
+  private resolveDiscrepancyInvestigationLink(
+    record: EvidenceDiscrepancyCase,
+    investigations: readonly AccidentCaseRecord[],
+  ): CrossAppResourceLink {
+    const linkedCase =
+      investigations.find((candidate) =>
+        candidate.discrepancyCaseIds.includes(record.discrepancyCaseId),
+      ) ?? null;
+
+    if (linkedCase) {
+      return this.buildInvestigationDetailLink(linkedCase.caseId);
+    }
+
+    return this.buildInvestigationQueueLink(
+      "sandbox_takeover_discrepancy",
+      record.discrepancyCaseId,
+    );
+  }
+
+  private buildInvestigationDetailLink(caseId: string): CrossAppResourceLink {
+    return {
+      targetApp: "platform-admin",
+      route: `/platform-admin/investigations/${encodeURIComponent(caseId)}`,
+      resourceType: "sandbox_investigation_case",
+      resourceId: caseId,
+      openMode: "new_tab",
+      label: "Open investigation case",
+      requiredScopes: ["sandbox.investigation.read"],
+    };
+  }
+
+  private buildInvestigationQueueLink(
+    resourceType: string,
+    resourceId: string,
+  ): CrossAppResourceLink {
+    return {
+      targetApp: "platform-admin",
+      route: "/platform-admin/investigations",
+      resourceType,
+      resourceId,
+      openMode: "new_tab",
+      label: "Open investigations queue",
+      requiredScopes: ["sandbox.investigation.read"],
+    };
+  }
+
   private recordAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
@@ -499,7 +592,9 @@ export class PlatformAdminComplianceService {
     return { ...record };
   }
 
-  private cloneLegalHold(record: SandboxLegalHoldRecord): SandboxLegalHoldRecord {
+  private cloneLegalHold(
+    record: SandboxLegalHoldRecord,
+  ): SandboxLegalHoldRecord {
     return { ...record };
   }
 }
