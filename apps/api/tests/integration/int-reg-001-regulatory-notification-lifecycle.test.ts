@@ -147,6 +147,26 @@ describe("INT-REG-001 regulatory notification lifecycle", () => {
       expect(acknowledgeBody.data.lifecycleStatus).toBe("acknowledged");
       expect(acknowledgeBody.data.acknowledgementReference).toBe("ACK-INT-001");
 
+      const secondAcknowledgeResponse = await fetch(
+        `${baseUrl}/api/regulatory/notifications/${notificationId}/acknowledge`,
+        {
+          method: "POST",
+          headers: buildHeaders({
+            "x-actor-id": "ops-user-005",
+            "x-roles": "compliance_manager",
+          }),
+          body: JSON.stringify({
+            acknowledgementReference: "ACK-INT-001-B",
+            acknowledgedAt: "2026-06-26T03:35:00.000Z",
+          }),
+        },
+      );
+      expect(secondAcknowledgeResponse.status).toBe(409);
+      const secondAcknowledgeBody = await secondAcknowledgeResponse.json();
+      expect(secondAcknowledgeBody.error.code).toBe(
+        "REGULATORY_NOTIFICATION_ACKNOWLEDGE_INVALID",
+      );
+
       const listResponse = await fetch(`${baseUrl}/api/regulatory/notifications`, {
         method: "GET",
         headers: buildHeaders({

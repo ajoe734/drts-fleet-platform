@@ -171,6 +171,155 @@ describe("RegulatoryReportingService", () => {
     );
   });
 
+  it("does not raise overdue when a backfilled submittedAt beats the deadline", () => {
+    let now = new Date("2026-06-26T07:30:00.000Z");
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+    service.setClockForTests(() => now);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-004",
+        eventType: "security_alert",
+        severity: "cybersecurity",
+        reportVersionKind: "initial",
+        jurisdiction: "US-NHTSA",
+        vehicleId: "veh-reg-004",
+        eventOccurredAt: "2026-06-26T00:00:00.000Z",
+        summary: "Submission was timely even though entered later.",
+      },
+      createIdentity(),
+      "req-reg-create-004",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for review." },
+      createIdentity(),
+      "req-reg-review-004",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-004",
+        roles: ["security_manager"],
+      }),
+      "req-reg-approve-004",
+    );
+
+    now = new Date("2026-06-26T10:05:00.000Z");
+
+    const submitted = service.submitNotification(
+      draft.notificationId,
+      {
+        submissionReference: "SUB-REG-004",
+        submittedAt: "2026-06-26T07:59:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-submit-004",
+        roles: ["security_manager"],
+      }),
+      "req-reg-submit-004",
+    );
+
+    expect(submitted.lifecycleStatus).toBe("submitted");
+    expect(submitted.overdue).toBe(false);
+    expect(submitted.overdueRaisedAt).toBeNull();
+    expect(
+      auditNotificationService
+        .listNotifications()
+        .some((notification) => notification.title === "REGULATORY_NOTIFICATION_OVERDUE"),
+    ).toBe(false);
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .some((entry) => entry.actionName === "REGULATORY_NOTIFICATION_OVERDUE"),
+    ).toBe(false);
+  });
+
+  it("rejects repeated acknowledgement attempts", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new RegulatoryReportingService(auditNotificationService);
+
+    const draft = service.createNotification(
+      {
+        eventId: "evt-reg-005",
+        eventType: "odd_boundary_exit",
+        severity: "incident",
+        reportVersionKind: "follow_up",
+        jurisdiction: "TW-MOTC",
+        vehicleId: "veh-reg-005",
+        eventOccurredAt: "2026-06-26T01:30:00.000Z",
+        summary: "Acknowledgement should be immutable after first receipt.",
+      },
+      createIdentity(),
+      "req-reg-create-005",
+    );
+
+    service.submitReview(
+      draft.notificationId,
+      { note: "Ready for review." },
+      createIdentity(),
+      "req-reg-review-005",
+    );
+    service.approveReview(
+      draft.notificationId,
+      { note: "Approved." },
+      createIdentity({
+        actorId: "ops-user-approve-005",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-approve-005",
+    );
+    service.submitNotification(
+      draft.notificationId,
+      {
+        submissionReference: "SUB-REG-005",
+        submittedAt: "2026-06-26T02:10:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-submit-005",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-submit-005",
+    );
+
+    const acknowledged = service.acknowledgeNotification(
+      draft.notificationId,
+      {
+        acknowledgementReference: "ACK-REG-005",
+        acknowledgedAt: "2026-06-26T02:20:00.000Z",
+      },
+      createIdentity({
+        actorId: "ops-user-ack-005",
+        roles: ["compliance_manager"],
+      }),
+      "req-reg-ack-005",
+    );
+
+    expect(acknowledged.lifecycleStatus).toBe("acknowledged");
+    expect(() =>
+      service.acknowledgeNotification(
+        draft.notificationId,
+        {
+          acknowledgementReference: "ACK-REG-005-B",
+          acknowledgedAt: "2026-06-26T02:30:00.000Z",
+        },
+        createIdentity({
+          actorId: "ops-user-ack-005b",
+          roles: ["compliance_manager"],
+        }),
+        "req-reg-ack-005b",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    const persisted = service.getNotification(draft.notificationId);
+    expect(persisted.acknowledgementReference).toBe("ACK-REG-005");
+    expect(persisted.acknowledgedBy).toBe("ops-user-ack-005");
+    expect(persisted.acknowledgedAt).toBe("2026-06-26T02:20:00.000Z");
+  });
+
   it("keeps overdue latched for late submissions and stops reminders after submit", () => {
     let now = new Date("2026-06-26T10:00:00.000Z");
     const auditNotificationService = new AuditNotificationService();
