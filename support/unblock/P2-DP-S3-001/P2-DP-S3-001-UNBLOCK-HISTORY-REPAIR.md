@@ -101,6 +101,21 @@ These could not run in this worker because the workspace lacks installed
 toolchain modules (`typescript` and `vitest` were not present in
 `node_modules`).
 
+## Closeout Evidence
+
+Task-scoped support change for this unblock task is recorded on:
+
+- branch: `origin/codex2/p2-dp-s3-001-unblock-history-repair`
+- commit: `10c733af864c51774b860a18d8868899201eb37a`
+  `docs(P2-DP-S3-001-UNBLOCK-HISTORY-REPAIR): record contamination and repair path`
+
+Repair work for the parent deliverable remains on the separate integration path:
+
+- branch: `origin/codex2/p2-dp-s3-001-repair`
+- PR: `#959`
+- status at closeout: open, normal non-force push only, contaminated branch left
+  untouched
+
 ## Parent Task Next Step
 
 Parent task `P2-DP-S3-001` should ignore the contaminated shared branch
