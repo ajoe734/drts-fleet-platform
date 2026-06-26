@@ -1882,6 +1882,89 @@ export interface GenerateSandboxComplianceSnapshotCommand {
 }
 
 // ---------------------------------------------------------------------------
+// §3.8B Sandbox fallback-cost policy resolver contracts
+// ---------------------------------------------------------------------------
+
+export const SANDBOX_FALLBACK_COST_POLICY_SCOPES = [
+  "experiment",
+  "partner_program",
+  "tenant_contract",
+] as const;
+export type SandboxFallbackCostPolicyScope =
+  (typeof SANDBOX_FALLBACK_COST_POLICY_SCOPES)[number];
+
+export const SANDBOX_FALLBACK_COST_ABSORBERS = [
+  "platform",
+  "partner_program",
+  "tenant_contract",
+  "passenger",
+] as const;
+export type SandboxFallbackCostAbsorber =
+  (typeof SANDBOX_FALLBACK_COST_ABSORBERS)[number];
+
+export const SANDBOX_FALLBACK_COST_REASONS = [
+  "regulatory_requirement",
+  "safety_intervention",
+  "platform_operational_issue",
+  "experiment_learning",
+  "partner_operational_issue",
+  "tenant_operational_issue",
+] as const;
+export type SandboxFallbackCostReason =
+  (typeof SANDBOX_FALLBACK_COST_REASONS)[number];
+
+export const SANDBOX_FALLBACK_COST_POLICY_RESOLUTIONS = [
+  "regulatory_override",
+  "safety_override",
+  "platform_cause_platform_default",
+  "experiment_policy",
+  "experiment_reason_override",
+  "partner_policy",
+  "partner_reason_override",
+  "tenant_policy",
+  "tenant_reason_override",
+  "default_platform_no_contract",
+] as const;
+export type SandboxFallbackCostPolicyResolution =
+  (typeof SANDBOX_FALLBACK_COST_POLICY_RESOLUTIONS)[number];
+
+export interface SandboxFallbackCostPolicyRecord {
+  policyId: string;
+  scope: SandboxFallbackCostPolicyScope;
+  scopeRef: string;
+  contractId: string | null;
+  defaultAbsorber: SandboxFallbackCostAbsorber;
+  reasonOverrides: Partial<
+    Record<SandboxFallbackCostReason, SandboxFallbackCostAbsorber>
+  >;
+  passengerSurchargeAllowed: false;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  notes: string | null;
+}
+
+export interface ResolveSandboxFallbackCostPolicyCommand {
+  reason: SandboxFallbackCostReason;
+  experimentId?: string | null;
+  partnerProgramId?: string | null;
+  partnerContractId?: string | null;
+  tenantId?: string | null;
+  tenantContractId?: string | null;
+  asOf?: string | null;
+}
+
+export interface SandboxFallbackCostPolicyResolutionRecord {
+  reason: SandboxFallbackCostReason;
+  fallbackCostAbsorber: Exclude<SandboxFallbackCostAbsorber, "passenger">;
+  policyResolution: SandboxFallbackCostPolicyResolution;
+  policyScope: SandboxFallbackCostPolicyScope | "platform_default" | null;
+  policyId: string | null;
+  matchedByReasonOverride: boolean;
+  passengerSurchargeAllowed: false;
+  auditEventCode: "sandbox.billing.fallback_cost_policy.defaulted" | null;
+}
+
+// ---------------------------------------------------------------------------
 // §3.9 Error-code enum
 // ---------------------------------------------------------------------------
 
