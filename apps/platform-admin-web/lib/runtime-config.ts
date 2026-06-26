@@ -1,6 +1,14 @@
+import { createElement } from "react";
+import {
+  DEFAULT_PLATFORM_ADMIN_AUTHORITY,
+  type PlatformAdminAuthority,
+} from "./platform-admin-identity";
+
 type RuntimeConfig = {
   apiBaseUrl: string;
+  platformAdminActorId: string;
   platformAdminAssistantEnabled: boolean;
+  platformAdminScopes: string[];
 };
 
 const DEFAULT_SERVER_API_BASE_URL = "http://localhost:3001";
@@ -39,6 +47,28 @@ export function getRuntimeApiBaseUrl(): string {
   );
 }
 
+export function getRuntimePlatformAdminActorId(): string {
+  if (typeof window === "undefined") {
+    return DEFAULT_PLATFORM_ADMIN_AUTHORITY.actorId;
+  }
+
+  return (
+    window.__DRTS_RUNTIME_CONFIG__?.platformAdminActorId ||
+    DEFAULT_PLATFORM_ADMIN_AUTHORITY.actorId
+  );
+}
+
+export function getRuntimePlatformAdminScopes(): string[] {
+  if (typeof window === "undefined") {
+    return DEFAULT_PLATFORM_ADMIN_AUTHORITY.scopes;
+  }
+
+  return (
+    window.__DRTS_RUNTIME_CONFIG__?.platformAdminScopes ||
+    DEFAULT_PLATFORM_ADMIN_AUTHORITY.scopes
+  );
+}
+
 export function isPlatformAdminAssistantEnabled(): boolean {
   if (typeof window === "undefined") {
     return resolvePlatformAdminAssistantEnabled();
@@ -50,18 +80,22 @@ export function isPlatformAdminAssistantEnabled(): boolean {
   );
 }
 
-export function RuntimeConfigScript() {
+export function RuntimeConfigScript({
+  authority,
+}: {
+  authority: PlatformAdminAuthority;
+}) {
   const config: RuntimeConfig = {
     apiBaseUrl: resolveBrowserApiBaseUrl(),
+    platformAdminActorId: authority.actorId,
     platformAdminAssistantEnabled: resolvePlatformAdminAssistantEnabled(),
+    platformAdminScopes: authority.scopes,
   };
   const serializedConfig = JSON.stringify(config).replace(/</g, "\\u003c");
 
-  return (
-    <script
-      dangerouslySetInnerHTML={{
-        __html: `window.${RUNTIME_CONFIG_WINDOW_KEY} = ${serializedConfig};`,
-      }}
-    />
-  );
+  return createElement("script", {
+    dangerouslySetInnerHTML: {
+      __html: `window.${RUNTIME_CONFIG_WINDOW_KEY} = ${serializedConfig};`,
+    },
+  });
 }

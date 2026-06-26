@@ -66,6 +66,27 @@ const CONTROL_PLANE_REALMS: Record<ControlPlaneActorType, AuthRealm> = {
   ops_user: "ops",
 };
 
+const SANDBOX_PLATFORM_ADMIN_SCOPES = [
+  "sandbox.compliance.read",
+  "sandbox.compliance.manage",
+  "sandbox.investigation.read",
+  "sandbox.investigation.manage",
+  "sandbox.evidence.preview",
+  "sandbox.evidence.export.request",
+  "sandbox.evidence.export.approve",
+  "sandbox.legal_hold.place",
+  "sandbox.legal_hold.release.request",
+  "sandbox.legal_hold.release.approve",
+  "sandbox.regulatory_report.review",
+  "sandbox.regulatory_report.submit",
+] as const;
+
+const SANDBOX_OPS_SCOPES = [
+  "sandbox.compliance.read",
+  "sandbox.investigation.read",
+  "sandbox.evidence.preview",
+] as const;
+
 const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
   platform_admin: [
     "identity:read",
@@ -93,6 +114,7 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "reports:read",
     "reports:write",
     "forwarder:read",
+    ...SANDBOX_PLATFORM_ADMIN_SCOPES,
   ],
   ops_user: [
     "identity:read",
@@ -119,6 +141,7 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "reports:write",
     "forwarder:read",
     "forwarder:write",
+    ...SANDBOX_OPS_SCOPES,
   ],
 };
 

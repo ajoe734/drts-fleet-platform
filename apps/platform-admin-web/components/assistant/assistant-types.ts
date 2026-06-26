@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { buildCanvasTheme } from "@drts/ui-web/canvas-tokens";
+import { buildCanvasTheme } from "../../../../packages/ui-web/src/canvas-tokens";
 
 export const assistantTheme = buildCanvasTheme({
   surface: "platform",

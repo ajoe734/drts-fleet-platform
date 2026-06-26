@@ -3,11 +3,11 @@
 **Date:** 2026-06-26  
 **Feature:** platform-admin sandbox compliance / investigations / evidence / regulatory reporting  
 **Recipient team:** Visual design / UX  
-**Status:** Hand-off input. **No visual decisions in this document.**  
+**Status:** Historical hand-off input. `docs/05-ui/drts-design-canvas/compliance-screens.jsx` is the restored visual authority; this document remains behavioural context only.  
 **Author lane:** Codex  
 **Authority for behaviour/data/API:** `Task Brief P2-DP-C1-001` · `docs/02-architecture/cross-app-navigation-and-shell-topology-20260524.md` · `docs/05-ui/system-design-answers-all-apps-20260524.md`
 
-> This packet exists because `docs/05-ui/drts-design-canvas/Platform Admin.html` and `platform-screens-*.jsx` do **not** contain source screens for the new sandbox compliance route group. Engineering must not invent those visuals. This note defines the required screen set and behaviour so the visual team can add canonical canvas screens later.
+> This packet was written when `docs/05-ui/drts-design-canvas/Platform Admin.html` and `platform-screens-*.jsx` did **not** contain source screens for the sandbox compliance route group. The canonical canvas has since been restored at `docs/05-ui/drts-design-canvas/compliance-screens.jsx`; use that file for visuals and use this packet for behavioural notes only.
 
 ---
 
@@ -23,7 +23,7 @@
   - `/platform-admin/evidence/legal-holds`
   - `/platform-admin/evidence/manifests/[manifestId]`
   - `/platform-admin/regulatory-reports`
-- The current Platform Admin canvas covers `fleet`, `audit`, `health`, `payments`, and other legacy platform surfaces, but it does not define these sandbox compliance screens.
+- The historical Platform Admin canvas covered `fleet`, `audit`, `health`, `payments`, and other legacy platform surfaces first. The dedicated sandbox compliance screens are now restored in `docs/05-ui/drts-design-canvas/compliance-screens.jsx`.
 - Review requirement for `P2-DP-C1-001`: if the canvas lacks the screen, stop visual implementation and write a screen-requirements note instead of inventing UI.
 
 ## 2. Roles and scope-sensitive behaviour
@@ -166,8 +166,8 @@ These screens are platform-owned. Actual visibility and mutation remain backend-
 - The parent implementation blocker is therefore **not** missing scope naming or
   action authority semantics. Those are already fixed by accepted backend/API
   surfaces plus the route list in this packet.
-- The unresolved blocker that still requires follow-up is canonical visual
-  publication: `docs/05-ui/drts-design-canvas/Platform Admin.html` and
-  `platform-screens-*.jsx` still need first-class sandbox compliance /
-  investigation / evidence / regulatory-report screens before engineering can
-  implement the parent task without inventing UI.
+- The canonical visual blocker for engineering is now resolved on the branch by
+  restoring `docs/05-ui/drts-design-canvas/compliance-screens.jsx`. `Platform
+Admin.html` and `platform-screens-*.jsx` still do not embed the restored
+  screen set directly, but engineering no longer needs to invent visuals for
+  this route group.
