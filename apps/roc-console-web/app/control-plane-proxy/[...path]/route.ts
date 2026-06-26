@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  CONTROL_PLANE_DEFAULT_EMAILS,
   CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
   issueControlPlaneRequestAuth,
   stripControlPlaneAuthQueryParams,
 } from "@drts/control-plane-auth";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
+// ROC routes are guarded by `@RequireRealms("system", "ops")` (P2-ROC-001) and
+// `auth.policy` maps `roc/*` to `baseAllowedRealms("ops")`. There is no separate
+// `roc` auth realm (decision packet §C2: no new console/auth realm; §10.3 keeps
+// the existing controller prefix/authority), so ROC duty staff authenticate as
+// an `ops_user` in the `ops` realm. The ROC-specific fallback email keeps audit
+// attribution distinct from the generic Ops Console operator when no IAP
+// identity is present.
+const ROC_DUTY_OPERATOR_EMAIL = "roc-duty@platform.drts";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
@@ -116,7 +123,7 @@ async function applyUpstreamAuth(
   const controlPlaneAuth = issueControlPlaneRequestAuth({
     actorType: "ops_user",
     headers: request.headers,
-    defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
+    defaultEmail: ROC_DUTY_OPERATOR_EMAIL,
     requestId: request.headers.get("x-request-id"),
     ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
     ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),

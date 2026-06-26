@@ -46,25 +46,9 @@ const en: Dictionary = {
   "rocShell.locale.ariaZh": "Switch to Chinese",
   "rocShell.locale.ariaEn": "Switch to English",
 
-  "scaffold.eyebrow": "Design-system scaffold",
-  "scaffold.title": "ROC Console shell",
-  "scaffold.subtitle":
-    "Ops Console shell + @drts/ui-web primitives + roc semantic tokens. Screens are owned by the visual team canvas and are intentionally not built here.",
   "scaffold.banner.title": "No bespoke screens yet",
   "scaffold.banner.body":
-    "Per decision packet §C2 the ROC screens await the visual-team canvas. This scaffold wires the shell, roc semantic tokens, and the availableActions → ActionReceipt contract only.",
-  "scaffold.actions.title": "availableActions → ActionReceipt wiring",
-  "scaffold.actions.hint":
-    "Backend-driven CTAs: every control action is rendered from the resource's availableActions; every write returns an ActionReceipt with a tracking number. Demonstration list below — real resources bind once screens exist.",
-  "scaffold.actions.receiptTracking": "Tracking",
-  "scaffold.actions.receiptAudit": "Audit",
-  "scaffold.actions.invoke": "Invoke",
-  "scaffold.actions.pending": "Submitting…",
-  "scaffold.actions.disabledReason": "Unavailable",
-  "scaffold.demo.ackAlert": "Acknowledge alert",
-  "scaffold.demo.operationalHold": "Apply operational hold",
-  "scaffold.demo.openIncident": "Open incident",
-  "scaffold.demo.evidenceFreeze": "Start evidence freeze",
+    "Per decision packet §C2 the ROC screens await the visual-team canvas. This scaffold wires the shell, roc semantic tokens, and the availableActions → ActionReceipt contract only (see components/roc-action-rail.tsx + lib/action-runtime.ts).",
 };
 
 const zh: Dictionary = {
@@ -104,25 +88,9 @@ const zh: Dictionary = {
   "rocShell.locale.ariaZh": "切換為中文",
   "rocShell.locale.ariaEn": "切換為英文",
 
-  "scaffold.eyebrow": "設計系統骨架",
-  "scaffold.title": "ROC Console 外殼",
-  "scaffold.subtitle":
-    "Ops Console 外殼 + @drts/ui-web primitives + roc 語意 token。螢幕由視覺團隊 canvas 負責，骨架刻意不實作畫面。",
   "scaffold.banner.title": "尚未建立任何畫面",
   "scaffold.banner.body":
-    "依裁決 §C2，ROC 螢幕待視覺團隊 canvas。本骨架僅接線外殼、roc 語意 token，以及 availableActions → ActionReceipt 契約。",
-  "scaffold.actions.title": "availableActions → ActionReceipt 接線",
-  "scaffold.actions.hint":
-    "後端驅動 CTA：每個控制操作由資源的 availableActions 渲染；每個 write 回傳含追蹤編號的 ActionReceipt。下方為示意清單 — 待螢幕建立後綁定真實資源。",
-  "scaffold.actions.receiptTracking": "追蹤編號",
-  "scaffold.actions.receiptAudit": "稽核",
-  "scaffold.actions.invoke": "執行",
-  "scaffold.actions.pending": "送出中…",
-  "scaffold.actions.disabledReason": "無法使用",
-  "scaffold.demo.ackAlert": "確認警示",
-  "scaffold.demo.operationalHold": "套用營運保留",
-  "scaffold.demo.openIncident": "開立事故",
-  "scaffold.demo.evidenceFreeze": "啟動證據保全",
+    "依裁決 §C2，ROC 螢幕待視覺團隊 canvas。本骨架僅接線外殼、roc 語意 token，以及 availableActions → ActionReceipt 契約（見 components/roc-action-rail.tsx + lib/action-runtime.ts）。",
 };
 
 export const translations: Record<Locale, Dictionary> = { en, zh };

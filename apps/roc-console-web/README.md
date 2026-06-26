@@ -21,10 +21,21 @@ built here. What this scaffold wires:
 | --- | --- |
 | Shell (left nav, top bar, sidebar footer, locale) | `components/roc-shell.tsx`, `lib/roc-shell-nav.ts`, `components/roc-health-footer.tsx` |
 | `availableActions` → `ActionReceipt` plumbing | `components/roc-action-rail.tsx`, `lib/action-runtime.ts` |
-| Realm-scoped API client | `lib/api-client.ts` (`x-realm: roc`) + `app/control-plane-proxy/[...path]/route.ts` |
+| API client + control-plane proxy | `lib/api-client.ts` + `app/control-plane-proxy/[...path]/route.ts` |
 
-The home page renders the shell plus a demonstration `availableActions` rail
-that exercises the `ActionReceipt` tracking-number contract end-to-end.
+**Auth realm.** ROC routes are guarded by `@RequireRealms("system", "ops")`
+(P2-ROC-001) and `auth.policy` maps `roc/*` to `baseAllowedRealms("ops")`. There
+is **no separate `roc` auth realm** — decision packet §C2 rejects a new
+console/auth realm and §10.3 keeps the existing controller prefix/authority. ROC
+duty staff therefore authenticate as an `ops_user` in the `ops` realm; a
+ROC-specific actor id / fallback email keeps audit attribution distinct from the
+generic Ops Console operator. Write actions return the real backend
+`ActionReceipt`; failures surface as failures — the scaffold never synthesises an
+`accepted` receipt.
+
+The home route renders the shared `CanvasEmptyState` primitive (no bespoke
+screen). The `availableActions` → `ActionReceipt` rail is reusable plumbing that
+real ROC screens mount once the visual-team canvas defines them.
 
 ## Scripts
 

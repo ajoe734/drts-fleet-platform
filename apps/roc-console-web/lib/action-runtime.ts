@@ -4,13 +4,15 @@
  *
  * Backend read models attach `availableActions: ResourceActionDescriptor[]` to
  * every ROC resource; the UI renders CTAs straight from that list (no
- * frontend role-to-action inference). Every write action returns an
- * `ActionReceipt` carrying the canonical `auditId` tracking number.
+ * frontend role-to-action inference). Every write action POSTs to the
+ * `@Controller("roc")` action routes implemented by P2-ROC-001 (e.g.
+ * `/api/roc/alerts/:alertId/ack`) and returns the canonical `ActionReceipt`
+ * carrying the `auditId` tracking number.
  *
- * The real POST targets the `@Controller("roc")` action routes implemented by
- * P2-ROC-001 (e.g. `/api/roc/alerts/:alertId/ack`). Until the ROC screens bind
- * real resources, the scaffold falls back to a locally-minted `accepted`
- * receipt so the wiring is demonstrable end-to-end without a live backend.
+ * The receipt is whatever the backend returns — there is no client-side
+ * synthesis. A failed call rejects so the caller can surface the error;
+ * the scaffold never fabricates an `accepted` receipt for a request that did
+ * not succeed.
  */
 
 import type { ActionReceipt, ResourceActionDescriptor } from "@drts/contracts";
@@ -27,47 +29,12 @@ export interface RocWriteActionRequest {
   reason?: string;
 }
 
-function mintTrackingId(): string {
-  if (
-    typeof globalThis.crypto !== "undefined" &&
-    typeof globalThis.crypto.randomUUID === "function"
-  ) {
-    return globalThis.crypto.randomUUID();
-  }
-  return `scaffold-${Math.abs(hashString(JSON.stringify(Date.now())))}`;
-}
-
-function hashString(value: string): number {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return hash;
-}
-
-function synthesizeReceipt(request: RocWriteActionRequest): ActionReceipt {
-  return {
-    actionId: request.action.action,
-    auditId: mintTrackingId(),
-    resourceType: request.resourceType,
-    resourceId: request.resourceId,
-    status: "accepted",
-    message:
-      "Scaffold placeholder receipt — no ROC backend bound yet (decision packet §C2: screens await the visual-team canvas).",
-  };
-}
-
 export async function submitRocWriteAction(
   request: RocWriteActionRequest,
 ): Promise<ActionReceipt> {
-  try {
-    return await getRocClient().post<ActionReceipt>(request.path, {
-      body: request.reason ? { reason: request.reason } : {},
-    });
-  } catch {
-    return synthesizeReceipt(request);
-  }
+  return getRocClient().post<ActionReceipt>(request.path, {
+    body: request.reason ? { reason: request.reason } : {},
+  });
 }
 
 /** Human-facing tracking number surfaced next to a completed write action. */

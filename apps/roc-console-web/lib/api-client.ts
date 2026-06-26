@@ -3,14 +3,21 @@
  *
  * Mirrors the Ops Console client: in the browser, requests default to the
  * `/control-plane-proxy` Next route (which mints upstream control-plane auth);
- * server-side / direct calls carry the ROC realm + actor headers so the API
- * resolves the `roc` control-plane realm.
+ * server-side / direct calls carry bootstrap actor headers.
+ *
+ * Realm note: the merged ROC backend (P2-ROC-001) guards `@Controller("roc")`
+ * with `@RequireRealms("system", "ops")` and `auth.policy` maps the `roc/*`
+ * routes to `baseAllowedRealms("ops")`. There is intentionally NO separate
+ * `roc` auth realm — decision packet §C2 rejects a new console/auth realm and
+ * §10.3 keeps the existing controller prefix/authority. ROC duty staff therefore
+ * authenticate as an `ops_user` in the `ops` realm; the ROC-specific actor id
+ * keeps audit attribution distinct from the generic Ops Console operator.
  */
 
 import { ApiClient } from "@drts/api-client";
 import { getRuntimeApiBaseUrl } from "./runtime-config";
 
-const DEMO_ACTOR_ID = "demo-roc-duty";
+const ROC_DUTY_ACTOR_ID = "roc-duty-operator";
 
 const clientCache = new Map<string, ApiClient>();
 
@@ -27,8 +34,8 @@ function createRocBootstrapClient(apiUrl: string): ApiClient {
     baseUrl: apiUrl,
     defaultHeaders: {
       "x-actor-type": "ops_user",
-      "x-actor-id": DEMO_ACTOR_ID,
-      "x-realm": "roc",
+      "x-actor-id": ROC_DUTY_ACTOR_ID,
+      "x-realm": "ops",
     },
     pathTransform: (path) => rewriteControlPlaneProxyPath(apiUrl, path),
   });

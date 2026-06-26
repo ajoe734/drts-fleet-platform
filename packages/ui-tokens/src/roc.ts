@@ -14,18 +14,21 @@ import type { LocalizedDisplayString } from "./status";
  *
  * The ROC Console reuses the Ops Console shell + `@drts/ui-web` primitives; it
  * does NOT introduce a second component library or a bespoke colour palette.
- * Per §4.2 the token layering is:
+ * Every `roc.*` alias here resolves, BY REFERENCE, to an EXISTING token — the
+ * maps below point at the shared `STATUS_TONES` / `REALM_COLORS` ramps; they
+ * never re-declare a new hex palette.
  *
- *   semantic / control-plane tokens  (this file's `CONTROL_SURFACES` + the
- *                                      existing `STATUS_TONES` / `REALM_COLORS`)
- *     └─ roc aliases                  (the `ROC_*` maps below)
- *
- * Every `roc.*` alias resolves to an EXISTING semantic token — the maps below
- * reference the shared ramps by value (identity), they never re-declare a new
- * hex palette. ROC differs from Ops only in its blue/cyan *accent* (wired in
+ * Surfaces (`roc.surface.canvas/panel/elevated` -> `control.surface.*`) are NOT
+ * redefined here. The neutral dark control-plane canvas already exists in
+ * `@drts/ui-web` (`CANVAS_DARK_NAVY_PALETTE` / `CANVAS_LIGHT_PALETTE`, consumed
+ * via `buildCanvasTheme({ surface: "roc", dark: true })`): `roc.surface.canvas`
+ * is that theme's `bg`, `roc.surface.panel` its `surface`, `roc.surface.elevated`
+ * its `surfaceHi`. Duplicating those hex values in the token layer would create a
+ * second source of truth, so this file only records the surface mapping
+ * symbolically in `ROC_TOKEN_ALIAS_TABLE` and leaves the canvas as the single
+ * source. ROC differs from Ops only in its blue/cyan *accent* (wired in
  * `@drts/ui-web` `canvas-tokens.ts` as the `roc` surface accent) so duty staff
- * can tell the two control-plane apps apart; the neutral dark canvas, status
- * tones and realm chips are shared.
+ * can tell the two control-plane apps apart.
  *
  * §4.3 hard rule: status colour expresses state only, never decoration; it must
  * always be paired with text + icon + shape, and every status token must pass
@@ -34,48 +37,7 @@ import type { LocalizedDisplayString } from "./status";
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Control-plane surface tokens (§4.3 `control.surface.*`)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Neutral control-plane monitoring surfaces shared by ROC + Ops. Mirrors the
- * `@drts/ui-web` canvas palette (`CANVAS_DARK_NAVY_PALETTE` / `CANVAS_LIGHT_
- * PALETTE`) so the token layer and the shell render the same surfaces. ROC runs
- * dark by default (中性深色監控盤); the light ramp is provided for completeness.
- */
-export interface ControlSurfaceTokens {
-  readonly canvas: string;
-  readonly panel: string;
-  readonly elevated: string;
-  readonly border: string;
-  readonly borderStrong: string;
-  readonly text: string;
-  readonly textMuted: string;
-}
-
-export const CONTROL_SURFACES = {
-  light: {
-    canvas: "#F7F8FB",
-    panel: "#FFFFFF",
-    elevated: "#FFFFFF",
-    border: "#E5E8EE",
-    borderStrong: "#C9D2DD",
-    text: "#0B1220",
-    textMuted: "#475569",
-  },
-  dark: {
-    canvas: "#0A0E16",
-    panel: "#141B2B",
-    elevated: "#1A2235",
-    border: "#22304A",
-    borderStrong: "#324A6E",
-    text: "#E5EAF3",
-    textMuted: "#94A3B8",
-  },
-} as const satisfies Record<TokenMode, ControlSurfaceTokens>;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// roc.surface.* aliases
+// roc.surface.* (symbolic) — realised by the shared @drts/ui-web canvas
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type RocSurfaceName = "canvas" | "panel" | "elevated";
@@ -86,12 +48,16 @@ export const ROC_SURFACE_NAMES = [
   "elevated",
 ] as const satisfies readonly RocSurfaceName[];
 
-export function resolveRocSurface(
-  name: RocSurfaceName,
-  mode: TokenMode,
-): string {
-  return CONTROL_SURFACES[mode][name];
-}
+/**
+ * The `@drts/ui-web` `CanvasTheme` palette field each `roc.surface.*` token maps
+ * onto. This is a symbolic reference to the existing canvas (the single source
+ * of the neutral surfaces), NOT a redefinition of the colours.
+ */
+export const ROC_SURFACE_CANVAS_FIELD = {
+  canvas: "bg",
+  panel: "surface",
+  elevated: "surfaceHi",
+} as const satisfies Record<RocSurfaceName, string>;
 
 export function isRocSurfaceName(value: string): value is RocSurfaceName {
   return (ROC_SURFACE_NAMES as readonly string[]).includes(value);
@@ -190,9 +156,11 @@ export const ROC_STATE_STATUS_TONE = {
 
 /**
  * Verbatim §4.3 mapping in symbolic form, for documentation + the resolution
- * test. Two naming reconciliations vs the packet text: §4.3 wrote
- * `semantic.critical` (this token system names it `danger`) and
- * `semantic.purple / governance` (resolved to the `platform` realm indigo).
+ * test. The surface rows point at `control.surface.*` — realised by the shared
+ * `@drts/ui-web` control-plane canvas (see `ROC_SURFACE_CANVAS_FIELD`), not
+ * redefined as hex in this package. Two naming reconciliations vs the packet
+ * text: §4.3 wrote `semantic.critical` (this token system names it `danger`)
+ * and `semantic.purple / governance` (resolved to the `platform` realm indigo).
  */
 export const ROC_TOKEN_ALIAS_TABLE = {
   "roc.surface.canvas": "control.surface.canvas",

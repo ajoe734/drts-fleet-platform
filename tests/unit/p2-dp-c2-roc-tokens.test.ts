@@ -7,25 +7,30 @@ import {
 } from "../../packages/ui-tokens/src/colors";
 import { REALM_COLORS } from "../../packages/ui-tokens/src/realms";
 import {
-  CONTROL_SURFACES,
   ROC_ACCENT_TONE,
   ROC_STATE_DISPLAY_STRINGS,
   ROC_STATE_NAMES,
   ROC_STATE_TONES,
+  ROC_SURFACE_CANVAS_FIELD,
   ROC_SURFACE_NAMES,
   ROC_TOKEN_ALIAS_TABLE,
   isRocStateName,
   resolveRocStateTone,
-  resolveRocSurface,
   type RocStateName,
 } from "../../packages/ui-tokens/src/roc";
+import {
+  buildCanvasTheme,
+  CANVAS_DARK_NAVY_PALETTE,
+} from "../../packages/ui-web/src/canvas-tokens";
 
 /**
  * P2-DP-C2-001 — ROC semantic token aliases (decision packet §C2 / §4.3).
  *
  * Two guarantees:
- *  (1) every `roc.*` alias RESOLVES to an existing semantic token — the roc
- *      maps reference the shared ramps, they do not introduce a new palette;
+ *  (1) every `roc.*` alias RESOLVES to an existing token — the accent / state
+ *      maps reference the shared `@drts/ui-tokens` ramps (no new palette), and
+ *      the surface aliases reference the existing `@drts/ui-web` control-plane
+ *      canvas (no duplicate hex in the token layer);
  *  (2) every roc status token passes the colour-blind / weak-colour contrast
  *      test (§4.3 hard rule).
  */
@@ -103,23 +108,29 @@ describe("roc.state.* aliases resolve to existing semantic tokens", () => {
   });
 });
 
-describe("roc.surface.* aliases resolve to control-plane surfaces", () => {
-  it("maps canvas/panel/elevated onto the control surface ramp", () => {
-    for (const mode of MODES) {
+describe("roc.surface.* aliases reference the existing ui-web canvas", () => {
+  it("maps canvas/panel/elevated onto real CanvasTheme fields (no new hex)", () => {
+    for (const dark of [false, true]) {
+      const theme = buildCanvasTheme({ surface: "roc", dark });
       for (const name of ROC_SURFACE_NAMES) {
-        expect(resolveRocSurface(name, mode)).toBe(CONTROL_SURFACES[mode][name]);
+        const field = ROC_SURFACE_CANVAS_FIELD[name];
+        const value = (theme as unknown as Record<string, unknown>)[field];
+        // The surface alias resolves to an existing canvas field, not a
+        // token-layer hex literal.
+        expect(typeof value).toBe("string");
+        expect(value).toMatch(/^#[0-9A-Fa-f]{6}$/);
       }
     }
   });
 
   it("renders a distinct elevation order on the dark monitoring canvas", () => {
-    const dark = CONTROL_SURFACES.dark;
-    // canvas is the deepest layer; panel + elevated sit progressively above it.
-    expect(relativeLuminance(dark.canvas)).toBeLessThan(
-      relativeLuminance(dark.panel),
+    // canvas (bg) is the deepest layer; panel (surface) + elevated (surfaceHi)
+    // sit progressively above it.
+    expect(relativeLuminance(CANVAS_DARK_NAVY_PALETTE.bg)).toBeLessThan(
+      relativeLuminance(CANVAS_DARK_NAVY_PALETTE.surface),
     );
-    expect(relativeLuminance(dark.panel)).toBeLessThanOrEqual(
-      relativeLuminance(dark.elevated),
+    expect(relativeLuminance(CANVAS_DARK_NAVY_PALETTE.surface)).toBeLessThanOrEqual(
+      relativeLuminance(CANVAS_DARK_NAVY_PALETTE.surfaceHi),
     );
   });
 });
@@ -138,10 +149,10 @@ describe("roc status tokens pass the weak-colour contrast test (§4.3)", () => {
     it(`roc.state.${state} dark fg stays legible on the canvas`, () => {
       const ramp = resolveRocStateTone(state, "dark");
       expect(
-        contrastRatio(ramp.fg, CONTROL_SURFACES.dark.canvas),
+        contrastRatio(ramp.fg, CANVAS_DARK_NAVY_PALETTE.bg),
       ).toBeGreaterThanOrEqual(MIN_CONTRAST);
       expect(
-        contrastRatio(ramp.fg, CONTROL_SURFACES.dark.panel),
+        contrastRatio(ramp.fg, CANVAS_DARK_NAVY_PALETTE.surface),
       ).toBeGreaterThanOrEqual(MIN_CONTRAST);
     });
   }

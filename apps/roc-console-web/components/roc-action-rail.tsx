@@ -40,6 +40,12 @@ export interface RocActionRailItem {
   path: string;
   resourceType: string;
   resourceId: string;
+  /**
+   * Reason supplied by the mounting screen for `requiresReason` actions. Reason
+   * capture is a screen concern (awaits the visual-team canvas); the rail simply
+   * forwards whatever the screen provides.
+   */
+  reason?: string;
 }
 
 interface RocActionRailLabels {
@@ -48,6 +54,8 @@ interface RocActionRailLabels {
   tracking: string;
   audit: string;
   disabled: string;
+  /** Surfaced when a write action rejects — the rail never fakes success. */
+  failed: string;
 }
 
 interface RocActionRailProps {
@@ -55,7 +63,7 @@ interface RocActionRailProps {
   labels: RocActionRailLabels;
 }
 
-type RowState = { busy?: boolean; receipt?: ActionReceipt };
+type RowState = { busy?: boolean; receipt?: ActionReceipt; error?: string };
 
 /**
  * Generic availableActions → ActionReceipt rail (decision packet §4.5 / §7.4).
@@ -72,16 +80,24 @@ export function RocActionRail({ items, labels }: RocActionRailProps) {
   async function invoke(item: RocActionRailItem) {
     const key = `${item.resourceId}:${item.descriptor.action}`;
     setRows((prev) => ({ ...prev, [key]: { busy: true } }));
-    const receipt = await submitRocWriteAction({
-      path: item.path,
-      action: item.descriptor,
-      resourceType: item.resourceType,
-      resourceId: item.resourceId,
-      ...(item.descriptor.requiresReason
-        ? { reason: "scaffold-demo-reason" }
-        : {}),
-    });
-    setRows((prev) => ({ ...prev, [key]: { busy: false, receipt } }));
+    try {
+      const receipt = await submitRocWriteAction({
+        path: item.path,
+        action: item.descriptor,
+        resourceType: item.resourceType,
+        resourceId: item.resourceId,
+        ...(item.reason ? { reason: item.reason } : {}),
+      });
+      setRows((prev) => ({ ...prev, [key]: { busy: false, receipt } }));
+    } catch (error) {
+      setRows((prev) => ({
+        ...prev,
+        [key]: {
+          busy: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    }
   }
 
   return (
@@ -139,6 +155,11 @@ export function RocActionRail({ items, labels }: RocActionRailProps) {
                     dot
                   >
                     {labels.tracking}: {receiptTrackingNumber(row.receipt)}
+                  </CanvasPill>
+                ) : null}
+                {row.error ? (
+                  <CanvasPill theme={theme} tone="danger" dot>
+                    {labels.failed}
                   </CanvasPill>
                 ) : null}
               </div>
