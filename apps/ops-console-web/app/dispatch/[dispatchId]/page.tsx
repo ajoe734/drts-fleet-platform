@@ -19,10 +19,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import {
-  formatOpsCodeLabel,
-  formatOpsCodeList,
-} from "@/lib/localized-labels";
+import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
 import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
@@ -1861,7 +1858,8 @@ function readTraceDetailCodeList(
   }
 
   return value.filter(
-    (item): item is string => typeof item === "string" && item.trim().length > 0,
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
   );
 }
 
@@ -1871,7 +1869,8 @@ function findLatestFallbackTrace(trace: DispatchTraceLogRecord[]) {
       .filter((entry) => entry.eventType === "roc.fallback_to_human")
       .sort(
         (left, right) =>
-          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+          new Date(right.createdAt).getTime() -
+          new Date(left.createdAt).getTime(),
       )[0] ?? null
   );
 }
@@ -2065,7 +2064,8 @@ function buildFallbackExceptionRows(
   return [...reports]
     .sort(
       (left, right) =>
-        new Date(right.generatedAt).getTime() - new Date(left.generatedAt).getTime(),
+        new Date(right.generatedAt).getTime() -
+        new Date(left.generatedAt).getTime(),
     )
     .map((report, index) => ({
       reportId: report.reportId,
@@ -2135,7 +2135,11 @@ function renderFallbackWorkspace({
     fallbackReports.find((report) => report.orderId === order.orderId) ??
     fallbackReports[0] ??
     null;
-  const fallbackStage = getFallbackStage(order, currentTask, passengerProjection);
+  const fallbackStage = getFallbackStage(
+    order,
+    currentTask,
+    passengerProjection,
+  );
   const revisedEtaMinutes =
     primaryReport?.revisedEtaMinutes ??
     readTraceDetailNumber(fallbackTrace, "revisedEtaMinutes") ??
@@ -2159,9 +2163,11 @@ function renderFallbackWorkspace({
     currentTask?.taskId ??
     readTraceDetailString(fallbackTrace, "fallbackTaskId");
   const avVehicleId =
-    primaryReport?.avVehicleId ?? readTraceDetailString(fallbackTrace, "avVehicleId");
+    primaryReport?.avVehicleId ??
+    readTraceDetailString(fallbackTrace, "avVehicleId");
   const avDriverId =
-    primaryReport?.avDriverId ?? readTraceDetailString(fallbackTrace, "avDriverId");
+    primaryReport?.avDriverId ??
+    readTraceDetailString(fallbackTrace, "avDriverId");
   const humanVehicleId =
     primaryReport?.humanVehicleId ??
     currentTask?.vehicleId ??
@@ -2173,11 +2179,14 @@ function renderFallbackWorkspace({
   const reportArtifactId =
     primaryReport?.reportArtifactId ??
     readTraceDetailString(fallbackTrace, "reportArtifactId");
-  const generatedAt = primaryReport?.generatedAt ?? fallbackTrace?.createdAt ?? null;
+  const generatedAt =
+    primaryReport?.generatedAt ?? fallbackTrace?.createdAt ?? null;
   const hardReasonCodes =
-    primaryReport?.hardReasonCodes ?? readTraceDetailCodeList(fallbackTrace, "hardReasonCodes");
+    primaryReport?.hardReasonCodes ??
+    readTraceDetailCodeList(fallbackTrace, "hardReasonCodes");
   const softReasonCodes =
-    primaryReport?.softReasonCodes ?? readTraceDetailCodeList(fallbackTrace, "softReasonCodes");
+    primaryReport?.softReasonCodes ??
+    readTraceDetailCodeList(fallbackTrace, "softReasonCodes");
   const exceptionRows = buildFallbackExceptionRows(locale, fallbackReports);
 
   return (
@@ -2220,14 +2229,22 @@ function renderFallbackWorkspace({
                 gap: 8,
               }}
             >
-              <Pill theme={theme} tone={getFallbackStageTone(fallbackStage)} dot>
+              <Pill
+                theme={theme}
+                tone={getFallbackStageTone(fallbackStage)}
+                dot
+              >
                 {getFallbackStageLabel(locale, fallbackStage)}
               </Pill>
               {order.bookingId ? (
-                <Pill theme={theme} tone="accent">{order.bookingId}</Pill>
+                <Pill theme={theme} tone="accent">
+                  {order.bookingId}
+                </Pill>
               ) : null}
               {dispatchJob ? (
-                <Pill theme={theme} tone="neutral">{dispatchJob.dispatchJobId}</Pill>
+                <Pill theme={theme} tone="neutral">
+                  {dispatchJob.dispatchJobId}
+                </Pill>
               ) : null}
             </div>
             {renderFallbackProgress(locale, fallbackStage)}
@@ -2264,12 +2281,18 @@ function renderFallbackWorkspace({
                     mono: true,
                   },
                   {
-                    k: tr(locale, "dispatch.detail.avFallback.previousAssignment"),
+                    k: tr(
+                      locale,
+                      "dispatch.detail.avFallback.previousAssignment",
+                    ),
                     v: previousAssignmentId ?? "—",
                     mono: true,
                   },
                   {
-                    k: tr(locale, "dispatch.detail.avFallback.fallbackAssignment"),
+                    k: tr(
+                      locale,
+                      "dispatch.detail.avFallback.fallbackAssignment",
+                    ),
                     v: fallbackAssignmentId ?? "—",
                     mono: true,
                   },
@@ -2290,8 +2313,14 @@ function renderFallbackWorkspace({
                   theme={theme}
                   tone="info"
                   icon="info"
-                  title={tr(locale, "dispatch.detail.avFallback.sameBooking.title")}
-                  body={tr(locale, "dispatch.detail.avFallback.sameBooking.body")}
+                  title={tr(
+                    locale,
+                    "dispatch.detail.avFallback.sameBooking.title",
+                  )}
+                  body={tr(
+                    locale,
+                    "dispatch.detail.avFallback.sameBooking.body",
+                  )}
                 />
                 <DL
                   theme={theme}
@@ -2308,7 +2337,10 @@ function renderFallbackWorkspace({
                       mono: true,
                     },
                     {
-                      k: tr(locale, "dispatch.detail.avFallback.sandboxDecision"),
+                      k: tr(
+                        locale,
+                        "dispatch.detail.avFallback.sandboxDecision",
+                      ),
                       v: sandboxDecisionId ?? "—",
                       mono: true,
                     },
@@ -2322,7 +2354,10 @@ function renderFallbackWorkspace({
                       mono: false,
                     },
                     {
-                      k: tr(locale, "dispatch.detail.avFallback.reportGenerated"),
+                      k: tr(
+                        locale,
+                        "dispatch.detail.avFallback.reportGenerated",
+                      ),
                       v: generatedAt
                         ? `${formatLongDateTime(locale, generatedAt)} UTC`
                         : "—",
@@ -2346,15 +2381,24 @@ function renderFallbackWorkspace({
                 theme={theme}
                 tone="info"
                 icon="lock"
-                title={tr(locale, "dispatch.detail.passengerRecovery.banner.title")}
-                body={tr(locale, "dispatch.detail.passengerRecovery.banner.body")}
+                title={tr(
+                  locale,
+                  "dispatch.detail.passengerRecovery.banner.title",
+                )}
+                body={tr(
+                  locale,
+                  "dispatch.detail.passengerRecovery.banner.body",
+                )}
               />
               <DL
                 theme={theme}
                 cols={2}
                 items={[
                   {
-                    k: tr(locale, "dispatch.detail.passengerRecovery.fulfillment"),
+                    k: tr(
+                      locale,
+                      "dispatch.detail.passengerRecovery.fulfillment",
+                    ),
                     v: (
                       <Pill theme={theme} tone="warn" dot>
                         {formatOpsCodeLabel(
@@ -2366,44 +2410,30 @@ function renderFallbackWorkspace({
                   },
                   {
                     k: tr(locale, "dispatch.detail.passengerRecovery.status"),
-                    v: formatOpsCodeLabel(locale, passengerProjection.statusCode),
+                    v: formatOpsCodeLabel(
+                      locale,
+                      passengerProjection.statusCode,
+                    ),
                     mono: false,
                   },
                   {
                     k: tr(locale, "dispatch.detail.passengerRecovery.eta"),
-                    v: formatEtaMinutesValue(locale, passengerProjection.etaMinutes),
+                    v: formatEtaMinutesValue(
+                      locale,
+                      passengerProjection.etaMinutes,
+                    ),
                     mono: true,
                   },
                   {
-                    k: tr(locale, "dispatch.detail.passengerRecovery.updatedAt"),
+                    k: tr(
+                      locale,
+                      "dispatch.detail.passengerRecovery.updatedAt",
+                    ),
                     v: `${formatLongDateTime(
                       locale,
                       passengerProjection.updatedAt,
                     )} UTC`,
                     mono: true,
-                  },
-                  {
-                    k: tr(locale, "dispatch.detail.passengerRecovery.noSurcharge"),
-                    v: (
-                      <Pill
-                        theme={theme}
-                        tone={
-                          passengerProjection.extraChargeDisclosed
-                            ? "danger"
-                            : "success"
-                        }
-                      >
-                        {passengerProjection.extraChargeDisclosed
-                          ? tr(
-                              locale,
-                              "dispatch.detail.passengerRecovery.surchargeShown",
-                            )
-                          : tr(
-                              locale,
-                              "dispatch.detail.passengerRecovery.surchargeHidden",
-                            )}
-                      </Pill>
-                    ),
                   },
                 ]}
               />
@@ -2450,7 +2480,10 @@ function renderFallbackWorkspace({
               theme={theme}
               tone="warn"
               density="compact"
-              title={tr(locale, "dispatch.detail.passengerRecovery.empty.title")}
+              title={tr(
+                locale,
+                "dispatch.detail.passengerRecovery.empty.title",
+              )}
               description={tr(
                 locale,
                 "dispatch.detail.passengerRecovery.empty.body",
@@ -2470,59 +2503,72 @@ function renderFallbackWorkspace({
         {exceptionRows.length > 0 ? (
           <Table
             theme={theme}
-            columns={[
-              {
-                h: tr(locale, "dispatch.detail.sandboxExceptions.col.report"),
-                k: "reportId",
-                w: 180,
-                r: (row) => (
-                  <span
-                    style={{
-                      ...monoTextStyle,
-                      color: theme.accent,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {String(row.reportId)}
-                  </span>
-                ),
-              },
-              {
-                h: tr(locale, "dispatch.detail.sandboxExceptions.col.trigger"),
-                k: "trigger",
-                w: 128,
-                r: (row) => (
-                  <Pill theme={theme} tone="warn" dot>
-                    {formatOpsCodeLabel(locale, String(row.trigger))}
-                  </Pill>
-                ),
-              },
-              {
-                h: tr(locale, "dispatch.detail.sandboxExceptions.col.chain"),
-                k: "chain",
-                w: 220,
-              },
-              {
-                h: tr(locale, "dispatch.detail.sandboxExceptions.col.eta"),
-                k: "revisedEta",
-                w: 120,
-              },
-              {
-                h: tr(locale, "dispatch.detail.sandboxExceptions.col.reasons"),
-                k: "reasonCodes",
-                w: 280,
-              },
-              {
-                h: tr(locale, "dispatch.detail.sandboxExceptions.col.artifact"),
-                k: "artifact",
-                w: 200,
-              },
-              {
-                h: tr(locale, "dispatch.detail.sandboxExceptions.col.generated"),
-                k: "generatedAt",
-                w: 180,
-              },
-            ] satisfies CanvasTableColumn<FallbackExceptionRow>[]
+            columns={
+              [
+                {
+                  h: tr(locale, "dispatch.detail.sandboxExceptions.col.report"),
+                  k: "reportId",
+                  w: 180,
+                  r: (row) => (
+                    <span
+                      style={{
+                        ...monoTextStyle,
+                        color: theme.accent,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {String(row.reportId)}
+                    </span>
+                  ),
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.trigger",
+                  ),
+                  k: "trigger",
+                  w: 128,
+                  r: (row) => (
+                    <Pill theme={theme} tone="warn" dot>
+                      {formatOpsCodeLabel(locale, String(row.trigger))}
+                    </Pill>
+                  ),
+                },
+                {
+                  h: tr(locale, "dispatch.detail.sandboxExceptions.col.chain"),
+                  k: "chain",
+                  w: 220,
+                },
+                {
+                  h: tr(locale, "dispatch.detail.sandboxExceptions.col.eta"),
+                  k: "revisedEta",
+                  w: 120,
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.reasons",
+                  ),
+                  k: "reasonCodes",
+                  w: 280,
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.artifact",
+                  ),
+                  k: "artifact",
+                  w: 200,
+                },
+                {
+                  h: tr(
+                    locale,
+                    "dispatch.detail.sandboxExceptions.col.generated",
+                  ),
+                  k: "generatedAt",
+                  w: 180,
+                },
+              ] satisfies CanvasTableColumn<FallbackExceptionRow>[]
             }
             rows={exceptionRows}
           />
@@ -2822,40 +2868,37 @@ async function renderOwnedWorkspace({
       )
     : { data: [] as DispatchCandidate[], failed: false };
   const bookingId = order.bookingId;
-  const [
-    dispatchTrace,
-    passengerProjectionResult,
-    fallbackReportsResult,
-  ] = await Promise.all([
-    resolveOrFallback(
-      () => client.getOrderDispatchTrace(order.orderId),
-      [] as DispatchTraceLogRecord[],
-    ),
-    bookingId
-      ? load(
-          () =>
-            client.get<SandboxFulfillmentProjectionView>(
-              `/api/ops/bookings/${encodeURIComponent(bookingId)}/sandbox-fulfillment?audience=passenger`,
-            ),
-          null as SandboxFulfillmentProjectionView | null,
-        )
-      : Promise.resolve({
-          data: null as SandboxFulfillmentProjectionView | null,
-          failed: false,
-        }),
-    bookingId
-      ? load(
-          () =>
-            client.get<{ items: RocFallbackToHumanReport[] }>(
-              `/api/roc/bookings/${encodeURIComponent(bookingId)}/fallback-reports`,
-            ),
-          { items: [] as RocFallbackToHumanReport[] },
-        )
-      : Promise.resolve({
-          data: { items: [] as RocFallbackToHumanReport[] },
-          failed: false,
-        }),
-  ]);
+  const [dispatchTrace, passengerProjectionResult, fallbackReportsResult] =
+    await Promise.all([
+      resolveOrFallback(
+        () => client.getOrderDispatchTrace(order.orderId),
+        [] as DispatchTraceLogRecord[],
+      ),
+      bookingId
+        ? load(
+            () =>
+              client.get<SandboxFulfillmentProjectionView>(
+                `/api/ops/bookings/${encodeURIComponent(bookingId)}/sandbox-fulfillment?audience=passenger`,
+              ),
+            null as SandboxFulfillmentProjectionView | null,
+          )
+        : Promise.resolve({
+            data: null as SandboxFulfillmentProjectionView | null,
+            failed: false,
+          }),
+      bookingId
+        ? load(
+            () =>
+              client.get<{ items: RocFallbackToHumanReport[] }>(
+                `/api/roc/bookings/${encodeURIComponent(bookingId)}/fallback-reports`,
+              ),
+            { items: [] as RocFallbackToHumanReport[] },
+          )
+        : Promise.resolve({
+            data: { items: [] as RocFallbackToHumanReport[] },
+            failed: false,
+          }),
+    ]);
 
   const sortedCandidates = [...candidatesResult.data].sort(
     (left, right) => left.etaMinutes - right.etaMinutes,
