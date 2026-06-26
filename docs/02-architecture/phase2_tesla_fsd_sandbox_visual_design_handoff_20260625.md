@@ -11,7 +11,20 @@
 
 > ✅ **2026-06-25 更新**：系統設計裁定已回（C1/C2/C3 ACCEPTED，見
 > [`..._decision_packet_c1c6_b1b5`](./phase2_tesla_fsd_sandbox_system_design_decision_packet_c1c6_b1b5_20260625.md)）。
-> 原本 🔒 卡住的頁面全部解鎖，**視覺團隊可全部進場**；各頁歸屬/shell/色系已定（見下表）。
+> 原本 🔒 卡住的頁面全部解鎖，各頁歸屬/shell/色系已定（見下表）。
+>
+> ✅ **2026-06-26 CANVAS 已交付並歸檔** 至 `docs/05-ui/drts-design-canvas/`，**UI build 第二波已派工**（6 tasks，見執行計畫 §2c）。
+> 工程依 canvas 實作（canvas = IA authority，不重設計）。各頁對應 canvas 檔與元件：
+>
+> | 介面 | Canvas 檔 | 主要元件 | UI build task |
+> |---|---|---|---|
+> | A1 ROC Console | `roc-screens-1.jsx` / `roc-screens-2.jsx` / `roc-data.jsx` | `RocShell` + ROC_Overview/LiveBoard/Trips/Vehicles/VehicleDetail/Takeover/Alerts/Incidents/Evidence/Provider/Reports/Handover | `P2-UI-ROC-001/002` |
+> | A2 Safety Operator Mode | `driver-safety-operator.jsx` | SOFrame/SOModeBar/SOSyncStrip + SO_Provisioning/Pretrip/ActiveTrip/IncidentUpload/ShiftHandover | `P2-UI-SAFE-001` |
+> | A3 Sandbox Governance | `platform-sandbox.jsx` | PA_Experiments/ExperimentDetail/SandboxSuspend + PSB_AreasEditor/VehicleEnroll/OperatorQual/TeslaIntegration/Capabilities/Policies | `P2-UI-ADM-001` |
+> | A4 Ops AV fallback | `ops-av-fallback.jsx` | OC_AvFallback/PassengerRecovery/SandboxExceptions | `P2-UI-OPS-001` |
+> | A5 Compliance & Investigation | `compliance-screens.jsx` / `Compliance Console.html` | CmpShell + CMP_Dashboard/TripDetail/TakeoverReview/Accident/Timeline/Manifest/Export/LegalHold/ReportJobs/Regulator | `P2-UI-CMP-001` |
+>
+> 以下原始缺口紀錄保留作脈絡；canvas 已補齊 A1–A5。
 
 ---
 

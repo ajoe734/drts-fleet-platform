@@ -107,6 +107,24 @@ Layer 4                  ▼
 
 ---
 
+## 2c. UI build 第二波（design canvas 已交付，已 dispatch，6 tasks）
+
+2026-06-26 設計團隊交付全 Phase 2 canvas 至 `docs/05-ui/drts-design-canvas/`（`roc-screens-1/2.jsx`、`driver-safety-operator.jsx`、
+`compliance-screens.jsx`、`platform-sandbox.jsx`、`ops-av-fallback.jsx`）。UI gate 解除，worker **依 canvas 實作（canvas=IA authority，不重設計）**。
+派工腳本：[`scripts/dispatch-phase2-tesla-sandbox-ui-wave.py`](../../scripts/dispatch-phase2-tesla-sandbox-ui-wave.py)。元件對照見
+[`..._visual_design_handoff_20260625.md`](./phase2_tesla_fsd_sandbox_visual_design_handoff_20260625.md)。
+
+| ID | Owner→Rev | Canvas | Deps（gated until done） |
+|----|-----------|--------|------|
+| **P2-UI-ROC-001** | Codex→Claude | `roc-screens-1.jsx` | P2-DP-C2-001, P2-ROC-001 |
+| **P2-UI-ROC-002** | Codex2→Codex | `roc-screens-2.jsx`（3 欄 takeover、evidence deep-link） | P2-UI-ROC-001, P2-CORR-001, P2-DP-C1-001 |
+| **P2-UI-SAFE-001** | Codex→Claude2 | `driver-safety-operator.jsx`（離線、不控 FSD） | P2-SAFE-001 |
+| **P2-UI-CMP-001** | Codex2→Codex | `compliance-screens.jsx`（timeline confidence、export step-up、four-eyes） | P2-DP-C1-001, P2-ACC-002, P2-EVD-002 |
+| **P2-UI-ADM-001** | Claude→Codex2 | `platform-sandbox.jsx`（PostGIS 編輯、capability gated） | P2-GOV-001, P2-GOV-002 |
+| **P2-UI-OPS-001** | Codex→Codex2 | `ops-av-fallback.jsx`（messageCode、不 surcharge） | P2-FBK-001, P2-DP-C3-001 |
+
+---
+
 ## 3. 不在本 wave 派 build 的工作（明確排除，附原因）
 
 ### 3.1 外部契約 gate（Gate C–F，等輸入到位）
