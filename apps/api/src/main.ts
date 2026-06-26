@@ -1,16 +1,25 @@
 import "reflect-metadata";
 
+import { RequestMethod } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
 import { buildHealthPayload } from "./health/health.controller";
+import { TESLA_REGULATORY_EVENTS_ROUTE } from "./modules/tesla-regulatory-events/tesla-regulatory-events.controller";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     cors: true,
+    rawBody: true,
   });
   app.setGlobalPrefix("api", {
-    exclude: ["health"],
+    exclude: [
+      "health",
+      {
+        path: TESLA_REGULATORY_EVENTS_ROUTE,
+        method: RequestMethod.POST,
+      },
+    ],
   });
 
   app
