@@ -46,7 +46,11 @@ describe("SandboxDispatchGateService", () => {
         odd_geofence: true,
         minimal_risk_condition: true,
       },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 80 },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+      },
       operatingArea: {
         inBounds: true,
         boundaryRisk: false,
@@ -69,7 +73,9 @@ describe("SandboxDispatchGateService", () => {
 
   it("allows dispatch when all required facts are present and healthy", async () => {
     const vehicleEvidenceService = new VehicleEvidenceService();
-    const recorder = buildMockRecorderFixture({ recorderId: "rec-mock-healthy" });
+    const recorder = buildMockRecorderFixture({
+      recorderId: "rec-mock-healthy",
+    });
     vehicleEvidenceService.registerRecorder(recorder);
 
     const gate = new SandboxDispatchGateService(vehicleEvidenceService);
@@ -98,7 +104,11 @@ describe("SandboxDispatchGateService", () => {
         odd_geofence: true,
         minimal_risk_condition: true,
       },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 80 },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+      },
       operatingArea: {
         inBounds: true,
         boundaryRisk: false,
@@ -138,6 +148,61 @@ describe("SandboxDispatchGateService", () => {
         "PROVIDER_CAPABILITY_MISSING",
       ]),
     );
+  });
+
+  it("blocks dispatch when telemetry quality drops below the regulatory completeness gate", async () => {
+    const gate = new SandboxDispatchGateService();
+
+    const decision = await gate.evaluateDispatch({
+      orderId: "order-av-quality-001",
+      vehicleId: "veh-av-quality-001",
+      sandboxProgramId: "sandbox-program-001",
+      policyVersion: "phase2-tesla-004",
+      bookingWindow: {
+        start: "2026-06-26T14:00:00.000Z",
+        end: "2026-06-26T15:00:00.000Z",
+      },
+      entitlement: { active: true },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: ["odd-downtown-core"],
+        approvedRouteIds: ["route-downtown-loop"],
+      },
+      recorder: { healthy: true },
+      regulatory: { approvalFresh: true, vehicleCertified: true },
+      providerCapabilities: {
+        av_dispatch: true,
+        telemetry_stream: true,
+        regulatory_event_feed: true,
+        evidence_recorder: true,
+        odd_geofence: true,
+        minimal_risk_condition: true,
+      },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 82,
+        qualityScore: 0.62,
+        providerHealthState: "incomplete_hold",
+        dispatchHold: true,
+      },
+      operatingArea: {
+        inBounds: true,
+        boundaryRisk: false,
+        matchedAreaIds: ["odd-downtown-core"],
+      },
+      routeContainment: {
+        contained: true,
+        matchedRouteIds: ["route-downtown-loop"],
+      },
+      safetyOperator: {
+        required: false,
+        available: false,
+      },
+    });
+
+    expect(decision.decision).toBe("block");
+    expect(decision.hardReasonCodes).toContain("TELEMETRY_STALE");
   });
 
   it("does not synthesize healthy provider, regulatory, or telemetry facts for assignment gating", async () => {
@@ -226,7 +291,9 @@ describe("SandboxDispatchGateService", () => {
     expect(gateInput.vehicleEnrollment?.status).toBe("active");
     expect(gateInput.entitlement).toEqual({ active: null });
 
-    await expect(gate.assertAssignmentEligible(gateInput)).rejects.toMatchObject({
+    await expect(
+      gate.assertAssignmentEligible(gateInput),
+    ).rejects.toMatchObject({
       response: {
         error: {
           code: "SANDBOX_REGULATORY_APPROVAL_MISSING",
@@ -317,7 +384,11 @@ describe("SandboxDispatchGateService", () => {
         odd_geofence: true,
         minimal_risk_condition: true,
       },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 70,
+      },
       operatingArea: {
         inBounds: true,
         boundaryRisk: false,
@@ -429,7 +500,9 @@ describe("SandboxDispatchGateService", () => {
       },
     );
 
-    expect(repository.loadDecisionById).toHaveBeenCalledWith("dec-existing-001");
+    expect(repository.loadDecisionById).toHaveBeenCalledWith(
+      "dec-existing-001",
+    );
     expect(repository.loadLatestDecision).not.toHaveBeenCalled();
     expect(repository.updateReleaseAudit).toHaveBeenCalledTimes(1);
     expect(repository.updateReleaseAudit).toHaveBeenCalledWith(
@@ -716,10 +789,16 @@ describe("SandboxDispatchGateService", () => {
         odd_geofence: true,
         minimal_risk_condition: true,
       },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 80 },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+      },
     });
 
-    await expect(gate.assertAssignmentEligible(gateInput)).rejects.toMatchObject({
+    await expect(
+      gate.assertAssignmentEligible(gateInput),
+    ).rejects.toMatchObject({
       response: {
         error: {
           code: "SANDBOX_ODD_OUT_OF_BOUNDS",
@@ -747,7 +826,13 @@ describe("SandboxDispatchGateService", () => {
       entitlement: { active: true },
       candidateRoute: {
         type: "MultiLineString",
-        coordinates: [[[121.521, 25.055], [121.5215, 25.0555], [121.522, 25.056]]],
+        coordinates: [
+          [
+            [121.521, 25.055],
+            [121.5215, 25.0555],
+            [121.522, 25.056],
+          ],
+        ],
       },
       recorder: { healthy: true },
       regulatory: { approvalFresh: true, vehicleCertified: true },
@@ -759,7 +844,11 @@ describe("SandboxDispatchGateService", () => {
         odd_geofence: true,
         minimal_risk_condition: true,
       },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 80 },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 80,
+      },
     });
 
     expect(gateInput.routeContainment).toMatchObject({
@@ -782,7 +871,11 @@ describe("SandboxDispatchGateService", () => {
       sandboxProgramId: "sandbox-program-001",
       policyVersion: "phase2-evd-001",
       entitlement: { active: true },
-      vehicleEnrollment: { status: "active", approvedAreaIds: [], approvedRouteIds: [] },
+      vehicleEnrollment: {
+        status: "active",
+        approvedAreaIds: [],
+        approvedRouteIds: [],
+      },
       recorder: { healthy: true },
       regulatory: { approvalFresh: true, vehicleCertified: true },
       providerCapabilities: {
@@ -793,7 +886,11 @@ describe("SandboxDispatchGateService", () => {
         odd_geofence: true,
         minimal_risk_condition: true,
       },
-      telemetry: { stale: false, minimalRiskConditionActive: false, socPercent: 70 },
+      telemetry: {
+        stale: false,
+        minimalRiskConditionActive: false,
+        socPercent: 70,
+      },
       operatingArea: {
         inBounds: true,
         boundaryRisk: false,

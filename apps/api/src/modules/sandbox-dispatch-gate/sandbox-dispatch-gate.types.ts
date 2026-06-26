@@ -5,6 +5,15 @@ import type {
   SandboxDispatchReasonCode,
 } from "@drts/contracts";
 
+type TeslaProviderHealthState =
+  | "healthy"
+  | "delayed"
+  | "gap_detected"
+  | "backfill"
+  | "complete"
+  | "incomplete_hold"
+  | "regulator_data_incident";
+
 export interface SandboxDispatchGateInput {
   orderId: string;
   dispatchJobId?: string | null;
@@ -61,6 +70,9 @@ export interface SandboxDispatchGateInput {
     socPercent: number | null;
     currentTripCount?: number | null;
     odometerKm?: number | null;
+    qualityScore?: number | null;
+    providerHealthState?: TeslaProviderHealthState | null;
+    dispatchHold?: boolean | null;
   } | null;
   regulatory?: {
     approvalFresh: boolean | null;
@@ -96,8 +108,7 @@ export interface SandboxDispatchEvaluationRecord {
   releaseAudit?: Record<string, unknown> | null;
 }
 
-export interface SandboxDispatchStoredEvaluationRecord
-  extends SandboxDispatchEvaluationRecord {
+export interface SandboxDispatchStoredEvaluationRecord extends SandboxDispatchEvaluationRecord {
   releaseAudit: Record<string, unknown> | null;
 }
 
