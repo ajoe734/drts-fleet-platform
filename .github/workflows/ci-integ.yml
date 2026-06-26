@@ -152,6 +152,10 @@ jobs:
   # governance, driver multi-platform, fleet revenue share, etc.) stay green.
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["0", "1", "2", "3"]
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -167,6 +171,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      E2E_SHARD_INDEX: ${{ matrix.shard }}
+      E2E_SHARD_TOTAL: "4"
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       API_PORT: "3001"
       API_HOST: 0.0.0.0

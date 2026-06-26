@@ -72,6 +72,21 @@ if [[ ${#SUITES[@]} -eq 0 ]]; then
   fi
 fi
 
+
+# Optional CI sharding: with E2E_SHARD_TOTAL>1, keep only this shard's slice of
+# the (deferred-filtered) scenario list so the suite fans across parallel CI
+# jobs. Interleave by index keeps shards balanced; per-scenario DB reset + API
+# restart keeps shards isolated. No-op for explicit local runs (TOTAL defaults 1).
+if [[ "${E2E_SHARD_TOTAL:-1}" -gt 1 ]]; then
+  _idx="${E2E_SHARD_INDEX:-0}"
+  _sharded=()
+  for _i in "${!SUITES[@]}"; do
+    if (( _i % E2E_SHARD_TOTAL == _idx )); then _sharded+=("${SUITES[$_i]}"); fi
+  done
+  SUITES=("${_sharded[@]}")
+  echo "[hermetic] shard ${_idx}/${E2E_SHARD_TOTAL}: ${SUITES[*]:-none}"
+fi
+
 API_PID=""
 stop_api() {
   if [[ -n "$API_PID" ]]; then
