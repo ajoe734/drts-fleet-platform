@@ -69,6 +69,89 @@ describe("OwnedMobilityController tenant booking routes", () => {
     );
   });
 
+  it("returns tenant sandbox fulfillment projections via the tenant booking route", () => {
+    const service = {
+      getTenantSandboxFulfillment: vi.fn().mockReturnValue({
+        bookingId: "booking-e2e-001",
+        orderId: "order-e2e-001",
+        audience: "tenant",
+        fulfillmentMode: "tesla_av",
+        state: "assigned",
+        statusCode: "assigned",
+        messages: [{ messageCode: "sandbox_fulfillment.tesla_av_active", category: "info" }],
+        etaMinutes: 6,
+        extraChargeDisclosed: false,
+        providerBrandDisclosed: false,
+        sandboxTripId: "assignment-e2e-001",
+        updatedAt: "2026-06-26T06:00:00.000Z",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = controller.getTenantSandboxFulfillment(
+      "booking-e2e-001",
+      "tenant-e2e-001",
+      "req-e2e-tenant-sfv",
+    );
+
+    expect(response.data).toMatchObject({
+      bookingId: "booking-e2e-001",
+      audience: "tenant",
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.tesla_av_active",
+        },
+      ],
+    });
+    expect(service.getTenantSandboxFulfillment).toHaveBeenCalledWith(
+      "tenant-e2e-001",
+      "booking-e2e-001",
+    );
+  });
+
+  it("returns partner sandbox fulfillment projections via the partner booking route", () => {
+    const service = {
+      getPartnerSandboxFulfillment: vi.fn().mockReturnValue({
+        bookingId: "booking-e2e-002",
+        orderId: "order-e2e-002",
+        audience: "partner",
+        fulfillmentMode: "human_fallback",
+        state: "en_route_pickup",
+        statusCode: "assigned",
+        messages: [
+          {
+            messageCode: "sandbox_fulfillment.human_fallback_active",
+            category: "warning",
+          },
+        ],
+        etaMinutes: 9,
+        extraChargeDisclosed: false,
+        providerBrandDisclosed: true,
+        sandboxTripId: "assignment-e2e-002",
+        updatedAt: "2026-06-26T06:05:00.000Z",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service);
+
+    const response = controller.getPartnerSandboxFulfillment(
+      "booking-e2e-002",
+      {
+        partnerEntrySlug: "partner-entry-001",
+      } as never,
+      "req-e2e-partner-sfv",
+    );
+
+    expect(response.data).toMatchObject({
+      bookingId: "booking-e2e-002",
+      audience: "partner",
+      providerBrandDisclosed: true,
+    });
+    expect(service.getPartnerSandboxFulfillment).toHaveBeenCalledWith(
+      "partner-entry-001",
+      "booking-e2e-002",
+    );
+  });
+
   it("passes includeIneligible through candidate queries before wrapping the API envelope", async () => {
     const service = {
       listDispatchCandidates: vi.fn().mockResolvedValue([
