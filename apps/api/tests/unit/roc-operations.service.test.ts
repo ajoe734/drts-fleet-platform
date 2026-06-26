@@ -397,6 +397,83 @@ describe("RocOperationsService", () => {
     );
   });
 
+  it("keeps a priority 1 Tesla correlation while attaching a priority 2 ROC candidate", async () => {
+    const {
+      accidentInvestigationService,
+      identity,
+      rocOperationsService,
+      safetyOperatorService,
+      assignmentId,
+      shiftId,
+    } = await buildServices();
+
+    await safetyOperatorService.submitTakeoverReport(
+      {
+        clientGeneratedReportId: "client-report-002c",
+        safetyOperatorId: "safe-op-001",
+        vehicleId: "veh-safe-001",
+        orderId: "ord-safe-001",
+        sandboxProgramId: "sandbox-demo-001",
+        shiftId,
+        assignmentId,
+        correlationId: "corr-safe-002c",
+        trigger: "vehicle_alert",
+        reasonCode: "sensor_fault",
+        disposition: "remote_assist",
+        fsdResumed: false,
+        bookmarkId: null,
+        incidentId: null,
+        evidenceArtifactIds: [],
+        notes: "Priority 1 Tesla should still attach a priority 2 ROC record.",
+        occurredAt: "2026-06-26T03:30:00.000Z",
+      },
+      identity,
+    );
+
+    rocOperationsService.recordTeslaAutonomyTransitionEvent(
+      buildTeslaEvent({
+        eventId: "tesla-event-002c",
+        takeoverCorrelationId: "corr-safe-002c",
+        autonomySessionId: "session-002c",
+        occurredAt: "2026-06-26T03:30:20.000Z",
+        source: buildSource(
+          "tesla_fleet_api",
+          "tesla-event-002c",
+          "2026-06-26T03:30:20.000Z",
+        ),
+      }),
+    );
+    rocOperationsService.recordRocTakeoverResponseRecord(
+      buildRocResponse({
+        responseId: "roc-response-002c",
+        takeoverCorrelationId: null,
+        autonomySessionId: null,
+        triggeredByTeslaEventId: null,
+        requestedAt: "2026-06-26T03:31:10.000Z",
+        respondedAt: "2026-06-26T03:31:40.000Z",
+        source: buildSource(
+          "roc_operator",
+          "roc-response-002c",
+          "2026-06-26T03:31:10.000Z",
+        ),
+      }),
+    );
+
+    const cases = accidentInvestigationService.listCorrelatedTakeoverCases();
+
+    expect(cases).toHaveLength(1);
+    expect(cases[0]).toEqual(
+      expect.objectContaining({
+        correlationPriority: 1,
+        matchedBy: "takeover_correlation_id",
+        sourceRecordIds: expect.objectContaining({
+          teslaEventId: "tesla-event-002c",
+          rocTakeoverResponseId: "roc-response-002c",
+        }),
+      }),
+    );
+  });
+
   it("keeps the safety report correlation id on manual links when source ids disagree", async () => {
     const {
       accidentInvestigationService,
