@@ -664,6 +664,7 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "call_recording",
   "report_artifact",
   "filing_package",
+  "vehicle_evidence",
   "audit_log",
   "webhook_delivery",
   "eligibility_verification",

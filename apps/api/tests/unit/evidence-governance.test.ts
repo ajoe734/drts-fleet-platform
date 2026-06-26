@@ -16,6 +16,7 @@ describe("evidence-governance policy catalog", () => {
         expect.objectContaining({ family: "call_recording" }),
         expect.objectContaining({ family: "report_artifact" }),
         expect.objectContaining({ family: "filing_package" }),
+        expect.objectContaining({ family: "vehicle_evidence" }),
         expect.objectContaining({ family: "audit_log" }),
         expect.objectContaining({ family: "webhook_delivery" }),
         expect.objectContaining({ family: "eligibility_verification" }),

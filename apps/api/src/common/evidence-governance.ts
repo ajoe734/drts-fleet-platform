@@ -213,6 +213,59 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
     ],
   },
   {
+    family: "vehicle_evidence",
+    authorityModule: "vehicle-evidence",
+    description:
+      "Frozen AV evidence windows, manifest hash trees, export bundles, and chain-of-custody traces.",
+    hotRetentionDays: 90,
+    archiveAfterDays: 90,
+    archiveRetentionDays: 2555,
+    archiveTier: "cold_archive",
+    accessRules: [
+      {
+        realms: ["system"],
+        actorTypes: ["system"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["platform"],
+        actorTypes: ["platform_admin"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["ops"],
+        actorTypes: ["ops_user"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+    ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Vehicle-evidence views expose manifest hashes, signature references, and controlled-export metadata without raw signed URLs or detached attestation payloads beyond the active request.",
+      },
+      {
+        surface: "download",
+        rule: "Controlled exports are re-issued as short-lived signed URLs with case reference and watermark metadata, never as durable public links.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Freeze, verify, export, and purge actions append manifest hash, case reference, and access-control metadata without leaking raw evidence binaries.",
+      },
+    ],
+    downloadControl: CONTROLLED_DOWNLOAD_15_MINUTES,
+    legalHold: DEFAULT_LEGAL_HOLD_POLICY,
+    deletionException:
+      "Vehicle evidence remains undeletable while any freeze bundle, regulator handoff, or legal hold references the same manifest hash or freeze identifier.",
+    auditAction: "issue_vehicle_evidence_export",
+    notes: [
+      "Seal-time verification requires recorder checksum confirmation plus provider signature references on every manifest item.",
+      "Object lock and legal hold both suppress purge attempts until an audited override path is used.",
+    ],
+  },
+  {
     family: "audit_log",
     authorityModule: "audit-notification",
     description:
