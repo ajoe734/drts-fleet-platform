@@ -360,6 +360,115 @@ export interface SandboxDispatchDecision {
 }
 
 // ---------------------------------------------------------------------------
+// §3.3A Sandbox fulfillment visibility projection
+// ---------------------------------------------------------------------------
+
+export const SANDBOX_FULFILLMENT_VISIBILITY_AUDIENCES = [
+  "passenger",
+  "tenant",
+  "partner",
+  "ops",
+  "platform_admin",
+] as const;
+export type SandboxFulfillmentVisibilityAudience =
+  (typeof SANDBOX_FULFILLMENT_VISIBILITY_AUDIENCES)[number];
+
+export const SANDBOX_FULFILLMENT_MODES = [
+  "tesla_av",
+  "human_fallback",
+  "mixed",
+  "hidden",
+] as const;
+export type SandboxFulfillmentMode =
+  (typeof SANDBOX_FULFILLMENT_MODES)[number];
+
+export const SANDBOX_FULFILLMENT_STATES = [
+  "pending_dispatch",
+  "assigned",
+  "en_route_pickup",
+  "arrived_pickup",
+  "in_trip",
+  "completed",
+  "cancelled",
+  "hidden",
+] as const;
+export type SandboxFulfillmentState =
+  (typeof SANDBOX_FULFILLMENT_STATES)[number];
+
+export const SANDBOX_FULFILLMENT_DISCLOSURES = [
+  "vehicle_mode_summary",
+  "fallback_to_human",
+  "provider_brand_disclosed",
+  "extra_charge_disclosed",
+  "safety_operator_present",
+] as const;
+export type SandboxFulfillmentDisclosure =
+  (typeof SANDBOX_FULFILLMENT_DISCLOSURES)[number];
+
+export const SANDBOX_FULFILLMENT_VISIBILITY_REASONS = [
+  "av_assignment_active",
+  "human_fallback_active",
+  "mixed_fulfillment_active",
+  "policy_hidden",
+  "dispatch_pending",
+  "trip_completed",
+  "trip_cancelled",
+  "internal_takeover_redacted",
+  "provider_brand_allowed",
+  "provider_brand_withheld",
+] as const;
+export type SandboxFulfillmentVisibilityReason =
+  (typeof SANDBOX_FULFILLMENT_VISIBILITY_REASONS)[number];
+
+export const SANDBOX_FULFILLMENT_MESSAGE_CATEGORIES = [
+  "info",
+  "warning",
+  "critical",
+] as const;
+export type SandboxFulfillmentMessageCategory =
+  (typeof SANDBOX_FULFILLMENT_MESSAGE_CATEGORIES)[number];
+
+export interface SandboxFulfillmentAudienceMessage {
+  messageCode: string;
+  category: SandboxFulfillmentMessageCategory;
+}
+
+export interface SandboxFulfillmentVisibilityRecord {
+  visibilityId: string;
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  audience: SandboxFulfillmentVisibilityAudience;
+  fulfillmentMode: SandboxFulfillmentMode;
+  state: SandboxFulfillmentState;
+  statusCode: string;
+  messages: SandboxFulfillmentAudienceMessage[];
+  disclosures: SandboxFulfillmentDisclosure[];
+  reasonCodes: SandboxFulfillmentVisibilityReason[];
+  etaMinutes: number | null;
+  extraChargeDisclosed: boolean;
+  safetyDisclosurePolicyId: string | null;
+  providerBrandDisclosed: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SandboxFulfillmentProjectionView {
+  bookingId: string;
+  orderId: string;
+  sandboxTripId: string | null;
+  audience: SandboxFulfillmentVisibilityAudience;
+  fulfillmentMode: SandboxFulfillmentMode;
+  state: SandboxFulfillmentState;
+  statusCode: string;
+  messages: SandboxFulfillmentAudienceMessage[];
+  etaMinutes: number | null;
+  extraChargeDisclosed: boolean;
+  providerBrandDisclosed: boolean;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // §3.4 Tesla regulatory telemetry DTOs
 // ---------------------------------------------------------------------------
 

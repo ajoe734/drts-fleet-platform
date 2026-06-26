@@ -2832,6 +2832,14 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         ledgerEntries: [],
         impacts: [],
       })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
       publishWebhookEvent: vi.fn(async () => undefined),
     } as unknown as TenantPartnerService;
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -2918,6 +2926,174 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         ([, payload]) => payload.eventType === "order.completed",
       ),
     ).toHaveLength(1);
+  });
+
+  it("projects sandbox fulfillment with audience-specific disclosure", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "safety-op-001",
+          vehicleId: "veh-av-demo-001",
+          etaMinutes: 4,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000003" },
+        partnerEntrySlug: "partner-entry-001",
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+    });
+
+    const tenantProjection = service.getTenantSandboxFulfillment(
+      "tenant-demo-001",
+      booking.bookingId,
+    );
+    const partnerProjection = service.getPartnerSandboxFulfillment(
+      "partner-entry-001",
+      booking.bookingId,
+    );
+    const passengerProjection = (service as any).mapSandboxFulfillmentProjection(
+      service.getOrder(booking.orderId),
+      "passenger",
+    );
+
+    expect(tenantProjection).toMatchObject({
+      audience: "tenant",
+      fulfillmentMode: "tesla_av",
+      providerBrandDisclosed: false,
+      messages: [
+        {
+          messageCode: "sandbox_fulfillment.tesla_av_active",
+        },
+      ],
+    });
+    expect(partnerProjection).toMatchObject({
+      audience: "partner",
+      providerBrandDisclosed: true,
+    });
+    expect(passengerProjection).toMatchObject({
+      audience: "passenger",
+      providerBrandDisclosed: false,
+    });
+    expect(passengerProjection).not.toHaveProperty("reasonCodes");
+  });
+
+  it("publishes partner sandbox webhook payloads without internal reason codes", () => {
+    const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
+      getPartnerEntry: vi.fn((entrySlug: string) => ({
+        entrySlug,
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        tenantId: "tenant-demo-001",
+        eligibilityMode: "none",
+        businessDispatchSubtype: "enterprise_dispatch",
+      })),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+      candidates: [
+        {
+          driverId: "human-driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 7,
+          operatingArea: "sandbox-zone",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T15:00:00.000Z",
+        pickup: { address: "Sandbox Start" },
+        dropoff: { address: "Sandbox End" },
+        passenger: { name: "Sandbox Rider", phone: "0912000004" },
+        partnerEntrySlug: "partner-entry-002",
+      },
+      "tenant-demo-001",
+    );
+
+    const partnerCalls = (
+      tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+    ).mock.calls.filter(
+      ([, payload]) => payload.eventType === "partner.sandbox_fulfillment.updated",
+    );
+
+    expect(partnerCalls).toHaveLength(1);
+    expect(partnerCalls[0]?.[1]).toMatchObject({
+      eventType: "partner.sandbox_fulfillment.updated",
+      data: {
+        bookingId: booking.bookingId,
+        partnerEntrySlug: "partner-entry-002",
+        messages: [
+          {
+            messageCode: "sandbox_fulfillment.status_update_available",
+          },
+        ],
+      },
+    });
+    expect(partnerCalls[0]?.[1].data).not.toHaveProperty("reasonCodes");
+    expect(partnerCalls[0]?.[1].data).not.toHaveProperty("disclosures");
   });
 
   it("rejects duplicate completion requests after the trip is already completed", () => {
