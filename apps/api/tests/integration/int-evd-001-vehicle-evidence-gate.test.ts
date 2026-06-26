@@ -11,6 +11,16 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
     const recorder = buildMockRecorderFixture({ recorderId: "rec-int-001" });
     vehicleEvidenceService.registerRecorder(recorder);
     const gate = new SandboxDispatchGateService(vehicleEvidenceService);
+    const passengerDisclosure = {
+      channel: "tenant_portal" as const,
+      policyId: "policy-int-evd-001",
+      policyVersion: "phase2-evd-001",
+      messageCode: "sandbox_passenger_disclosure.av_program_notice",
+      requiresAcknowledgement: false,
+      acknowledgementMode: "operator_confirmed_notice" as const,
+      acknowledgedAt: null,
+      acknowledgementRecordId: null,
+    };
 
     vehicleEvidenceService.updateRecorderHealth(recorder.recorderId, {
       overall: "unhealthy",
@@ -54,6 +64,7 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
         contained: true,
         matchedRouteIds: ["route-downtown-loop"],
       },
+      passengerDisclosure,
       safetyOperator: {
         required: false,
         available: false,
@@ -111,6 +122,7 @@ describe("INT-EVD-001 vehicle evidence + dispatch gate", () => {
         contained: true,
         matchedRouteIds: ["route-downtown-loop"],
       },
+      passengerDisclosure,
       safetyOperator: {
         required: false,
         available: false,
