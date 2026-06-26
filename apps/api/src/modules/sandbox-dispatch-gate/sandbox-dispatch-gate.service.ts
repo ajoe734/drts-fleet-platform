@@ -566,7 +566,7 @@ export class SandboxDispatchGateService {
   private normalizeInput(
     input: SandboxDispatchGateInput,
     evaluatedAt: string,
-  ): SandboxDispatchGateInput & {
+  ): Omit<SandboxDispatchGateInput, "passengerDisclosure"> & {
     dispatchJobId: string | null;
     operatingArea: {
       inBounds: boolean;
@@ -629,14 +629,10 @@ export class SandboxDispatchGateService {
       maxConcurrentTrips: number | null;
       maxOdometerKm: number;
     };
-    passengerDisclosure: {
-      channel: PassengerDisclosureChannel | null;
-      policyId: string | null;
-      policyVersion: string | null;
-      messageCode: string | null;
-      requiresAcknowledgement: boolean;
-      acknowledgedAt: string | null;
-    };
+    passengerDisclosure: Exclude<
+      SandboxDispatchGateInput["passengerDisclosure"],
+      undefined
+    >;
     requestedAt: string;
   } {
     const telemetryQualityGate = resolveTeslaTelemetryQualityGateScore();
@@ -712,15 +708,21 @@ export class SandboxDispatchGateService {
         maxConcurrentTrips: input.limits?.maxConcurrentTrips ?? null,
         maxOdometerKm: input.limits?.maxOdometerKm ?? DEFAULT_MAX_ODOMETER_KM,
       },
-      passengerDisclosure: {
-        channel: input.passengerDisclosure?.channel ?? null,
-        policyId: input.passengerDisclosure?.policyId ?? null,
-        policyVersion: input.passengerDisclosure?.policyVersion ?? null,
-        messageCode: input.passengerDisclosure?.messageCode ?? null,
-        requiresAcknowledgement:
-          input.passengerDisclosure?.requiresAcknowledgement === true,
-        acknowledgedAt: input.passengerDisclosure?.acknowledgedAt ?? null,
-      },
+      passengerDisclosure: input.passengerDisclosure
+        ? {
+            channel: input.passengerDisclosure.channel,
+            policyId: input.passengerDisclosure.policyId ?? null,
+            policyVersion: input.passengerDisclosure.policyVersion ?? null,
+            messageCode: input.passengerDisclosure.messageCode ?? null,
+            requiresAcknowledgement:
+              input.passengerDisclosure.requiresAcknowledgement === true,
+            acknowledgementMode:
+              input.passengerDisclosure.acknowledgementMode ?? null,
+            acknowledgedAt: input.passengerDisclosure.acknowledgedAt ?? null,
+            acknowledgementRecordId:
+              input.passengerDisclosure.acknowledgementRecordId ?? null,
+          }
+        : null,
     };
   }
 
@@ -804,14 +806,14 @@ export class SandboxDispatchGateService {
         break;
       }
     }
-    if (!input.passengerDisclosure.policyId) {
+    if (!input.passengerDisclosure?.policyId) {
       reasons.push("PASSENGER_DISCLOSURE_POLICY_MISSING");
     }
-    if (!input.passengerDisclosure.messageCode) {
+    if (!input.passengerDisclosure?.messageCode) {
       reasons.push("PASSENGER_DISCLOSURE_MESSAGE_MISSING");
     }
     if (
-      input.passengerDisclosure.requiresAcknowledgement &&
+      input.passengerDisclosure?.requiresAcknowledgement &&
       !input.passengerDisclosure.acknowledgedAt
     ) {
       reasons.push("PASSENGER_ACKNOWLEDGEMENT_REQUIRED");

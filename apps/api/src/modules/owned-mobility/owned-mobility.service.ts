@@ -741,7 +741,10 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    const buildCreationTraceLogs = () => [
+    const buildCreationTraceLogs = (): [
+      DispatchTraceLogRecord,
+      DispatchTraceLogRecord,
+    ] => [
       this.buildTraceLog(order.orderId, "tenant.booking_created", {
         bookingId,
         businessDispatchSubtype: order.businessDispatchSubtype,
@@ -1127,7 +1130,7 @@ export class OwnedMobilityService implements OnModuleInit {
         orderId: order.orderId,
         disclosure: order.passengerDisclosure,
         command,
-        executor: options?.tx,
+        ...(options?.tx ? { executor: options.tx } : {}),
       });
     if (!record) {
       throw new ApiRequestError(
@@ -1152,7 +1155,9 @@ export class OwnedMobilityService implements OnModuleInit {
         policyId: order.passengerDisclosure.policyId,
         messageCode: order.passengerDisclosure.messageCode,
         acknowledgementRecordId: record.acknowledgementId,
-        actorType: record.actorType,
+        actorType: this.resolvePassengerDisclosureAuditActorType(
+          record.actorType,
+        ),
         actorRef: record.actorRef,
       },
     );
@@ -1173,7 +1178,9 @@ export class OwnedMobilityService implements OnModuleInit {
     this.recordAudit(
       {
         actorId: record.actorRef,
-        actorType: record.actorType,
+        actorType: this.resolvePassengerDisclosureAuditActorType(
+          record.actorType,
+        ),
         tenantId: order.tenantId,
         moduleName: "order",
         actionName: "acknowledge_passenger_disclosure",
@@ -5054,14 +5061,14 @@ export class OwnedMobilityService implements OnModuleInit {
                   previous,
                   resolvedDisclosure,
                 )
-                  ? previous.acknowledgedAt
+                  ? previous?.acknowledgedAt ?? null
                   : null,
                 acknowledgementRecordId:
                   this.canReusePassengerDisclosureAcknowledgement(
                     previous,
                     resolvedDisclosure,
                   )
-                    ? previous.acknowledgementRecordId
+                    ? previous?.acknowledgementRecordId ?? null
                     : null,
               };
 
@@ -5112,12 +5119,18 @@ export class OwnedMobilityService implements OnModuleInit {
   ) {
     return (
       previous?.channel === next.channel &&
-      previous.policyId === next.policyId &&
-      previous.policyVersion === next.policyVersion &&
-      previous.messageCode === next.messageCode &&
-      previous.requiresAcknowledgement === next.requiresAcknowledgement &&
-      previous.acknowledgementMode === next.acknowledgementMode
+      previous?.policyId === next.policyId &&
+      previous?.policyVersion === next.policyVersion &&
+      previous?.messageCode === next.messageCode &&
+      previous?.requiresAcknowledgement === next.requiresAcknowledgement &&
+      previous?.acknowledgementMode === next.acknowledgementMode
     );
+  }
+
+  private resolvePassengerDisclosureAuditActorType(
+    actorType: "passenger" | "tenant_admin" | "ops_user" | "system",
+  ): AuditLogRecord["actorType"] {
+    return actorType === "passenger" ? "referral_passenger" : actorType;
   }
 
   private resolvePassengerDisclosureChannel(

@@ -79,6 +79,7 @@ export const enterpriseDispatchBookingRecord: BookingRecord = {
   quotedFareSource: null,
   quotedFareRuleVersion: null,
   manualFareOverride: null,
+  passengerDisclosure: null,
   approvalState: "approved",
   approvalRequestIds: [],
   complianceGates: [
