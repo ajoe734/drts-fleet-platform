@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import React, {
+  useEffect,
   useMemo,
   useState,
   type CSSProperties,
@@ -10,6 +11,7 @@ import React, {
 } from "react";
 import type {
   AccidentCaseRecord,
+  ActionReceipt,
   AccidentTimelineEntry,
   CorrelatedTakeoverCase,
   EvidenceDiscrepancyCase,
@@ -49,7 +51,11 @@ import {
   legalHoldStatusTone,
   loadSandboxComplianceOverview,
   loadSandboxInvestigationDetail,
+  loadSandboxRegulatorCaseDetail,
+  loadSandboxRegulatorCases,
   manifestHref,
+  regulatorBundleTone,
+  regulatorNotificationTone,
   reportStatusTone,
   sourceTone,
   tripDiscrepancies,
@@ -299,6 +305,25 @@ const COMPLIANCE_SOURCE_KEYS: Record<string, string> = {
   tesla_public_telemetry: "cmp.source.teslaProvided",
 };
 
+const REGULATOR_BUNDLE_STATE_KEYS: Record<string, string> = {
+  missing_manifest: "cmp.regulator.bundle.missingManifest",
+  manifest_ready: "cmp.regulator.bundle.manifestReady",
+  bundle_generated: "cmp.regulator.bundle.bundleGenerated",
+  export_pending_approval: "cmp.regulator.bundle.exportPendingApproval",
+  export_approved: "cmp.regulator.bundle.exportApproved",
+  export_completed: "cmp.regulator.bundle.exportCompleted",
+  export_rejected: "cmp.regulator.bundle.exportRejected",
+};
+
+const REGULATOR_NOTIFICATION_STATE_KEYS: Record<string, string> = {
+  not_started: "cmp.regulator.notification.notStarted",
+  draft: "cmp.regulator.notification.draft",
+  review_pending: "cmp.regulator.notification.reviewPending",
+  review_approved: "cmp.regulator.notification.reviewApproved",
+  submitted: "cmp.regulator.notification.submitted",
+  acknowledged: "cmp.regulator.notification.acknowledged",
+};
+
 function humanizeToken(value: string | null | undefined) {
   if (!value) {
     return EMPTY_VALUE;
@@ -340,6 +365,16 @@ function formatComplianceCode(
 function formatComplianceSource(t: TranslationFn, sourceSystem: string) {
   const key = COMPLIANCE_SOURCE_KEYS[sourceSystem];
   return key ? t(key) : humanizeToken(sourceSystem);
+}
+
+function formatRegulatorBundleState(t: TranslationFn, value: string) {
+  const key = REGULATOR_BUNDLE_STATE_KEYS[value];
+  return key ? t(key) : humanizeToken(value);
+}
+
+function formatRegulatorNotificationState(t: TranslationFn, value: string) {
+  const key = REGULATOR_NOTIFICATION_STATE_KEYS[value];
+  return key ? t(key) : humanizeToken(value);
 }
 
 function timelineSourceLabel(t: TranslationFn, entry: AccidentTimelineEntry) {
@@ -813,6 +848,22 @@ function useOverviewState() {
   return useAsyncData(
     async (client) => loadSandboxComplianceOverview(client),
     [],
+  );
+}
+
+function useRegulatorCasesState() {
+  return useAsyncData(async (client) => loadSandboxRegulatorCases(client), []);
+}
+
+function useRegulatorCaseState(caseId: string) {
+  return useAsyncData(
+    async (client) => {
+      if (!caseId) {
+        return null;
+      }
+      return loadSandboxRegulatorCaseDetail(client, caseId);
+    },
+    [caseId],
   );
 }
 
@@ -3653,6 +3704,657 @@ export function SandboxLegalHoldsPage() {
   );
 }
 
+function SandboxRegulatorCasePanel() {
+  const { t } = useTranslation();
+  const client = usePlatformAdminClient();
+  const authority = usePlatformAdminAuthority();
+  const searchParams = useSearchParams();
+  const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
+  const {
+    data: regulatorCases,
+    loading,
+    error,
+    refresh: refreshCases,
+  } = useRegulatorCasesState();
+  const [selectedExperimentId, setSelectedExperimentId] = useState(
+    searchParams.get("experimentId") ?? "",
+  );
+  const [selectedCaseId, setSelectedCaseId] = useState(
+    searchParams.get("caseId") ?? "",
+  );
+  const [exportReason, setExportReason] = useState("");
+  const [recipientLabel, setRecipientLabel] = useState("");
+  const [recipientScope, setRecipientScope] = useState("");
+  const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const canRequestExportScope = hasScope(
+    scopeSet,
+    SCOPE_CONTROLLED_EXPORT_REQUEST,
+  );
+
+  const experimentOptions = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const item of regulatorCases ?? []) {
+      labels.set(
+        item.experimentId ?? "program_unassigned",
+        item.experimentLabel,
+      );
+    }
+    return [...labels.entries()].map(([experimentId, label]) => ({
+      experimentId,
+      label,
+    }));
+  }, [regulatorCases]);
+
+  useEffect(() => {
+    if (!regulatorCases || regulatorCases.length === 0) {
+      setSelectedExperimentId("");
+      setSelectedCaseId("");
+      return;
+    }
+
+    if (
+      !selectedExperimentId ||
+      !experimentOptions.some(
+        (option) => option.experimentId === selectedExperimentId,
+      )
+    ) {
+      setSelectedExperimentId(experimentOptions[0]?.experimentId ?? "");
+    }
+  }, [experimentOptions, regulatorCases, selectedExperimentId]);
+
+  const visibleCases = useMemo(() => {
+    if (!regulatorCases) {
+      return [];
+    }
+    return regulatorCases.filter(
+      (item) =>
+        (item.experimentId ?? "program_unassigned") === selectedExperimentId,
+    );
+  }, [regulatorCases, selectedExperimentId]);
+
+  useEffect(() => {
+    if (visibleCases.length === 0) {
+      setSelectedCaseId("");
+      return;
+    }
+    if (!visibleCases.some((item) => item.caseId === selectedCaseId)) {
+      setSelectedCaseId(visibleCases[0]?.caseId ?? "");
+    }
+  }, [selectedCaseId, visibleCases]);
+
+  useEffect(() => {
+    setActionError(null);
+    setReceipt(null);
+  }, [selectedCaseId]);
+
+  const selectedSummary = useMemo(
+    () =>
+      visibleCases.find((item) => item.caseId === selectedCaseId) ??
+      regulatorCases?.find((item) => item.caseId === selectedCaseId) ??
+      null,
+    [regulatorCases, selectedCaseId, visibleCases],
+  );
+
+  const {
+    data: regulatorCaseData,
+    loading: caseLoading,
+    error: caseError,
+    refresh: refreshCase,
+  } = useRegulatorCaseState(selectedCaseId);
+  const detail = regulatorCaseData?.detail ?? null;
+  const exports = regulatorCaseData?.exports ?? [];
+  const accessLogs = regulatorCaseData?.accessLogs ?? [];
+
+  useEffect(() => {
+    if (!detail?.jurisdiction || recipientScope.trim().length > 0) {
+      return;
+    }
+    setRecipientScope(`regulator.viewer.${detail.jurisdiction}`);
+  }, [detail?.jurisdiction, recipientScope]);
+
+  useEffect(() => {
+    if (
+      recipientLabel.trim().length > 0 ||
+      detail?.jurisdiction !== "taipei_city"
+    ) {
+      return;
+    }
+    setRecipientLabel("Taipei City Transportation Department");
+  }, [detail?.jurisdiction, recipientLabel]);
+
+  async function handleRequestExport() {
+    if (!selectedCaseId) {
+      return;
+    }
+    if (!canRequestExportScope) {
+      setActionError(missingScopeMessage(t, SCOPE_CONTROLLED_EXPORT_REQUEST));
+      return;
+    }
+
+    setBusy(true);
+    setActionError(null);
+    try {
+      const exportReceipt = await client.requestSandboxRegulatorCaseExport(
+        selectedCaseId,
+        {
+          reason: exportReason,
+          recipientLabel,
+          recipientScope,
+        },
+      );
+      setReceipt(exportReceipt);
+      setExportReason("");
+      await Promise.all([refreshCases(), refreshCase()]);
+    } catch (requestError: unknown) {
+      setActionError(
+        requestError instanceof Error
+          ? requestError.message
+          : String(requestError),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <PageState
+      loading={loading}
+      error={error}
+      empty={
+        regulatorCases && regulatorCases.length === 0
+          ? t("cmp.regulator.empty")
+          : null
+      }
+    >
+      {receipt ? (
+        <CanvasBanner
+          theme={theme}
+          tone="success"
+          icon="check"
+          title={t("cmp.regulator.exportRequestedTitle")}
+          body={receipt.message}
+        />
+      ) : null}
+      {actionError ? (
+        <CanvasBanner
+          theme={theme}
+          tone="danger"
+          icon="warn"
+          title={t("cmp.reports.failedTitle")}
+          body={actionError}
+        />
+      ) : null}
+      <CanvasBanner
+        theme={theme}
+        tone="info"
+        icon="lock"
+        title={t("cmp.reports.readonlyTitle")}
+        body={t("cmp.reports.readonlyBody")}
+      />
+
+      <div style={autoGridStyle("320px")}>
+        <CanvasCard
+          theme={theme}
+          title={t("cmp.regulator.selectorTitle")}
+          subtitle={t("cmp.regulator.selectorSubtitle")}
+        >
+          <div style={fieldGridStyle}>
+            <div style={fieldGridStyle}>
+              <label style={fieldLabelStyle} htmlFor="regulator-experiment">
+                {t("cmp.regulator.selectExperiment")}
+              </label>
+              <select
+                id="regulator-experiment"
+                style={inputStyle}
+                value={selectedExperimentId}
+                onChange={(event) => {
+                  setSelectedExperimentId(event.target.value);
+                  setSelectedCaseId("");
+                }}
+              >
+                {experimentOptions.map((option) => (
+                  <option key={option.experimentId} value={option.experimentId}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={fieldGridStyle}>
+              <label style={fieldLabelStyle} htmlFor="regulator-case">
+                {t("cmp.regulator.selectCase")}
+              </label>
+              <select
+                id="regulator-case"
+                style={inputStyle}
+                value={selectedCaseId}
+                onChange={(event) => setSelectedCaseId(event.target.value)}
+              >
+                {visibleCases.map((item) => (
+                  <option key={item.caseId} value={item.caseId}>
+                    {item.caseLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedSummary ? (
+              <div style={cardStackStyle}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  {statusPill(
+                    formatComplianceCode(t, selectedSummary.status),
+                    investigationStatusTone(selectedSummary.status),
+                  )}
+                  {statusPill(
+                    formatComplianceCode(t, selectedSummary.severity),
+                    accidentSeverityTone(selectedSummary.severity),
+                  )}
+                </div>
+                <div style={mutedStyle}>
+                  {selectedSummary.caseLabel}
+                  {" · "}
+                  {compactDate(selectedSummary.occurredAt)}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </CanvasCard>
+
+        <CanvasCard
+          theme={theme}
+          title={t("cmp.regulator.postureTitle")}
+          subtitle={t("cmp.regulator.postureSubtitle")}
+        >
+          <div style={cardStackStyle}>
+            <div style={evidenceChipRowStyle}>
+              {detail
+                ? statusPill(
+                    detail.legalHold.active
+                      ? t("cmp.regulator.legalHoldActive")
+                      : t("cmp.regulator.legalHoldClear"),
+                    detail.legalHold.active ? "warn" : "success",
+                  )
+                : null}
+              {detail?.masking.applied
+                ? statusPill(t("cmp.regulator.maskingApplied"), "neutral")
+                : null}
+            </div>
+            {detail ? (
+              <CanvasDL
+                theme={theme}
+                cols={1}
+                items={[
+                  {
+                    k: t("cmp.regulator.caseLink"),
+                    v: (
+                      <InlineLink href={investigationHref(detail.caseId)}>
+                        {detail.caseId}
+                      </InlineLink>
+                    ),
+                  },
+                  {
+                    k: t("cmp.regulator.policy"),
+                    v: detail.masking.policyLabel,
+                  },
+                  {
+                    k: t("cmp.regulator.maskedFields"),
+                    v: detail.masking.maskedFields.join(", "),
+                  },
+                ]}
+              />
+            ) : (
+              <div style={mutedStyle}>{t("cmp.regulator.selectCase")}</div>
+            )}
+          </div>
+        </CanvasCard>
+      </div>
+
+      {caseLoading ? (
+        <CanvasCard theme={theme}>
+          <div style={emptyStateStyle}>{t("cmp.pageState.loading")}</div>
+        </CanvasCard>
+      ) : caseError ? (
+        <CanvasBanner
+          theme={theme}
+          tone="danger"
+          icon="warn"
+          title={t("cmp.pageState.loadErrorTitle")}
+          body={caseError}
+        />
+      ) : detail ? (
+        <>
+          <div style={autoGridStyle("240px")}>
+            <CanvasCard
+              theme={theme}
+              title={t("cmp.regulator.manifestTitle")}
+              subtitle={t("cmp.regulator.manifestSubtitle")}
+            >
+              <CanvasDL
+                theme={theme}
+                cols={1}
+                items={[
+                  {
+                    k: t("cmp.label.manifest"),
+                    v: detail.manifestSummary.manifestId ? (
+                      <InlineLink
+                        href={manifestHref(detail.manifestSummary.manifestId)}
+                      >
+                        {detail.manifestSummary.manifestId}
+                      </InlineLink>
+                    ) : (
+                      EMPTY_VALUE
+                    ),
+                    mono: Boolean(detail.manifestSummary.manifestId),
+                  },
+                  {
+                    k: t("cmp.regulator.manifestItems"),
+                    v: String(detail.manifestSummary.itemCount),
+                    mono: true,
+                  },
+                  {
+                    k: t("cmp.regulator.manifestWindow"),
+                    v:
+                      detail.manifestSummary.windowStart &&
+                      detail.manifestSummary.windowEnd
+                        ? `${compactDate(detail.manifestSummary.windowStart)} → ${compactDate(detail.manifestSummary.windowEnd)}`
+                        : EMPTY_VALUE,
+                  },
+                  {
+                    k: t("cmp.regulator.knownGaps"),
+                    v: String(detail.manifestSummary.knownGapCount),
+                    mono: true,
+                  },
+                ]}
+              />
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={t("cmp.regulator.bundleTitle")}
+              subtitle={t("cmp.regulator.bundleSubtitle")}
+            >
+              <div style={cardStackStyle}>
+                {statusPill(
+                  formatRegulatorBundleState(t, detail.bundleStatus.state),
+                  regulatorBundleTone(detail.bundleStatus.state),
+                )}
+                <CanvasDL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      k: t("cmp.regulator.bundleId"),
+                      v: detail.bundleStatus.bundleId ?? EMPTY_VALUE,
+                      mono: Boolean(detail.bundleStatus.bundleId),
+                    },
+                    {
+                      k: t("cmp.regulator.generatedAt"),
+                      v: compactDate(detail.bundleStatus.generatedAt),
+                    },
+                    {
+                      k: t("cmp.regulator.latestExport"),
+                      v:
+                        detail.bundleStatus.latestExportRequestId ??
+                        EMPTY_VALUE,
+                      mono: Boolean(detail.bundleStatus.latestExportRequestId),
+                    },
+                  ]}
+                />
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={t("cmp.regulator.notificationTitle")}
+              subtitle={t("cmp.regulator.notificationSubtitle")}
+            >
+              <div style={cardStackStyle}>
+                {statusPill(
+                  formatRegulatorNotificationState(
+                    t,
+                    detail.notificationStatus.state,
+                  ),
+                  regulatorNotificationTone(
+                    detail.notificationStatus.state,
+                    detail.notificationStatus.overdue,
+                  ),
+                )}
+                <CanvasDL
+                  theme={theme}
+                  cols={1}
+                  items={[
+                    {
+                      k: t("cmp.regulator.reportId"),
+                      v: detail.report.reportId ?? EMPTY_VALUE,
+                      mono: Boolean(detail.report.reportId),
+                    },
+                    {
+                      k: t("cmp.regulator.reportState"),
+                      v: detail.report.status
+                        ? formatComplianceCode(t, detail.report.status)
+                        : EMPTY_VALUE,
+                    },
+                    {
+                      k: t("cmp.regulator.deadlineAt"),
+                      v: compactDate(detail.notificationStatus.deadlineAt),
+                    },
+                    {
+                      k: t("cmp.regulator.acknowledgedAt"),
+                      v: compactDate(detail.notificationStatus.acknowledgedAt),
+                    },
+                  ]}
+                />
+              </div>
+            </CanvasCard>
+          </div>
+
+          <div style={autoGridStyle("360px")}>
+            <CanvasCard
+              theme={theme}
+              title={t("cmp.regulator.exportTitle")}
+              subtitle={t("cmp.regulator.exportSubtitle")}
+            >
+              <div style={fieldGridStyle}>
+                <div style={fieldGridStyle}>
+                  <label
+                    style={fieldLabelStyle}
+                    htmlFor="regulator-export-reason"
+                  >
+                    {t("cmp.regulator.exportReason")}
+                  </label>
+                  <textarea
+                    id="regulator-export-reason"
+                    style={textareaStyle}
+                    value={exportReason}
+                    onChange={(event) => setExportReason(event.target.value)}
+                  />
+                </div>
+
+                <div style={fieldGridStyle}>
+                  <label
+                    style={fieldLabelStyle}
+                    htmlFor="regulator-export-recipient"
+                  >
+                    {t("cmp.regulator.exportRecipientLabel")}
+                  </label>
+                  <input
+                    id="regulator-export-recipient"
+                    style={inputStyle}
+                    value={recipientLabel}
+                    onChange={(event) => setRecipientLabel(event.target.value)}
+                  />
+                </div>
+
+                <div style={fieldGridStyle}>
+                  <label
+                    style={fieldLabelStyle}
+                    htmlFor="regulator-export-scope"
+                  >
+                    {t("cmp.regulator.exportRecipientScope")}
+                  </label>
+                  <input
+                    id="regulator-export-scope"
+                    style={inputStyle}
+                    value={recipientScope}
+                    onChange={(event) => setRecipientScope(event.target.value)}
+                  />
+                </div>
+
+                <div style={mutedStyle}>
+                  {t("cmp.regulator.exportRoutingNote")}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    disabled={
+                      exportReason.trim().length === 0 ||
+                      !detail.manifestSummary.manifestId ||
+                      busy
+                    }
+                    onClick={() => void handleRequestExport()}
+                  >
+                    {busy
+                      ? t("cmp.regulator.exporting")
+                      : t("cmp.regulator.exportAction")}
+                  </CanvasBtn>
+                  {!canRequestExportScope ? (
+                    <div style={mutedStyle}>
+                      {missingScopeMessage(t, SCOPE_CONTROLLED_EXPORT_REQUEST)}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={t("cmp.regulator.latestReceiptTitle")}
+              subtitle={t("cmp.regulator.exportReceiptSubtitle")}
+            >
+              <div style={cardStackStyle}>
+                {receipt ? (
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: t("assistant.receipt.actionId"),
+                        v: receipt.actionId,
+                        mono: true,
+                      },
+                      {
+                        k: t("assistant.receipt.auditId"),
+                        v: receipt.auditId,
+                        mono: true,
+                      },
+                      {
+                        k: t("assistant.receipt.status"),
+                        v: receipt.status,
+                      },
+                    ]}
+                  />
+                ) : (
+                  <div style={mutedStyle}>
+                    {t("cmp.regulator.latestReceiptEmpty")}
+                  </div>
+                )}
+
+                <CanvasTable
+                  theme={theme}
+                  columns={[
+                    {
+                      h: t("cmp.exports.requestColumn"),
+                      w: 170,
+                      r: (row: SandboxControlledEvidenceExportRecord) => (
+                        <span style={monoStyle}>{row.exportRequestId}</span>
+                      ),
+                    },
+                    {
+                      h: t("common.status"),
+                      w: 140,
+                      r: (row: SandboxControlledEvidenceExportRecord) =>
+                        statusPill(
+                          formatComplianceCode(t, row.status),
+                          exportStatusTone(row.status),
+                        ),
+                    },
+                    {
+                      h: t("cmp.regulator.generatedAt"),
+                      w: 180,
+                      r: (row: SandboxControlledEvidenceExportRecord) =>
+                        compactDate(row.requestedAt),
+                    },
+                  ]}
+                  rows={exportRows(exports.slice(0, 5))}
+                />
+              </div>
+            </CanvasCard>
+          </div>
+
+          <CanvasCard
+            theme={theme}
+            title={t("cmp.regulator.accessLogTitle")}
+            subtitle={t("cmp.regulator.accessLogSubtitle")}
+            padding={0}
+          >
+            <CanvasTable
+              theme={theme}
+              columns={[
+                {
+                  h: t("cmp.regulator.accessLogTime"),
+                  w: 180,
+                  r: (row: Record<string, unknown>) =>
+                    compactDate(String(row.createdAt ?? "")),
+                },
+                {
+                  h: t("cmp.regulator.accessLogActor"),
+                  w: 170,
+                  r: (row: Record<string, unknown>) => (
+                    <span style={monoStyle}>
+                      {[row.actorId, row.actorType]
+                        .filter(Boolean)
+                        .join(" · ") || EMPTY_VALUE}
+                    </span>
+                  ),
+                },
+                {
+                  h: t("cmp.regulator.accessLogAction"),
+                  w: 220,
+                  r: (row: Record<string, unknown>) =>
+                    humanizeToken(String(row.actionName ?? "")),
+                },
+                {
+                  h: t("cmp.regulator.accessLogResource"),
+                  w: 220,
+                  r: (row: Record<string, unknown>) => (
+                    <span style={monoStyle}>
+                      {[row.resourceType, row.resourceId]
+                        .filter(Boolean)
+                        .join(" · ") || EMPTY_VALUE}
+                    </span>
+                  ),
+                },
+              ]}
+              rows={accessLogs.map((row) => ({ ...row }))}
+            />
+          </CanvasCard>
+        </>
+      ) : null}
+    </PageState>
+  );
+}
+
 export function SandboxRegulatoryReportsPage() {
   const { t } = useTranslation();
   const client = usePlatformAdminClient();
@@ -3703,11 +4405,6 @@ export function SandboxRegulatoryReportsPage() {
   const acceptedCount =
     data?.regulatoryReports.filter((item) => item.status === "accepted")
       .length ?? 0;
-  const exportReadyCount =
-    data?.controlledExports.filter((item) =>
-      ["approved", "completed"].includes(item.status),
-    ).length ?? 0;
-
   return (
     <ComplianceConsoleFrame
       active={view === "regulator" ? "regulator" : "reportjobs"}
@@ -3735,10 +4432,19 @@ export function SandboxRegulatoryReportsPage() {
           label: t("cmp.reports.scope.reviewQueue"),
           scope: "sandbox.regulatory_report.review",
         },
-        {
-          label: t("cmp.reports.scope.submit"),
-          scope: SCOPE_REGULATORY_REPORT_SUBMIT,
-        },
+        ...(view === "regulator"
+          ? [
+              {
+                label: t("cmp.exports.scope.request"),
+                scope: SCOPE_CONTROLLED_EXPORT_REQUEST,
+              },
+            ]
+          : [
+              {
+                label: t("cmp.reports.scope.submit"),
+                scope: SCOPE_REGULATORY_REPORT_SUBMIT,
+              },
+            ]),
       ]}
     >
       <PageState loading={loading} error={error}>
@@ -3764,134 +4470,7 @@ export function SandboxRegulatoryReportsPage() {
             ) : null}
 
             {view === "regulator" ? (
-              <>
-                <CanvasBanner
-                  theme={theme}
-                  tone="info"
-                  icon="lock"
-                  title={t("cmp.reports.readonlyTitle")}
-                  body={t("cmp.reports.readonlyBody")}
-                />
-                <div style={autoGridStyle("180px")}>
-                  <CanvasCard
-                    theme={theme}
-                    title={t("cmp.reports.card.generatedTitle")}
-                  >
-                    <div style={{ fontSize: 28, fontWeight: 700 }}>
-                      {generatedCount}
-                    </div>
-                    <div style={mutedStyle}>
-                      {t("cmp.reports.card.generatedBody")}
-                    </div>
-                  </CanvasCard>
-                  <CanvasCard
-                    theme={theme}
-                    title={t("cmp.reports.card.submittedTitle")}
-                  >
-                    <div style={{ fontSize: 28, fontWeight: 700 }}>
-                      {submittedCount}
-                    </div>
-                    <div style={mutedStyle}>
-                      {t("cmp.reports.card.submittedBody")}
-                    </div>
-                  </CanvasCard>
-                  <CanvasCard
-                    theme={theme}
-                    title={t("cmp.reports.card.acceptedTitle")}
-                  >
-                    <div style={{ fontSize: 28, fontWeight: 700 }}>
-                      {acceptedCount}
-                    </div>
-                    <div style={mutedStyle}>
-                      {t("cmp.reports.card.acceptedBody")}
-                    </div>
-                  </CanvasCard>
-                  <CanvasCard
-                    theme={theme}
-                    title={t("cmp.reports.card.exportsTitle")}
-                  >
-                    <div style={{ fontSize: 28, fontWeight: 700 }}>
-                      {exportReadyCount}
-                    </div>
-                    <div style={mutedStyle}>
-                      {t("cmp.reports.card.exportsBody")}
-                    </div>
-                  </CanvasCard>
-                </div>
-
-                <div style={autoGridStyle("360px")}>
-                  <CanvasCard
-                    theme={theme}
-                    title={t("cmp.reports.regulatorQueueTitle")}
-                    subtitle={t("cmp.reports.regulatorQueueSubtitle")}
-                    padding={0}
-                  >
-                    <CanvasTable
-                      theme={theme}
-                      columns={[
-                        {
-                          h: t("cmp.label.report"),
-                          w: 190,
-                          r: (row: RegulatoryReportFiling) => (
-                            <span style={monoStyle}>{row.reportId}</span>
-                          ),
-                        },
-                        {
-                          h: t("cmp.label.jurisdiction"),
-                          w: 140,
-                          r: (row: RegulatoryReportFiling) =>
-                            humanizeToken(row.jurisdiction),
-                        },
-                        {
-                          h: t("common.status"),
-                          w: 140,
-                          r: (row: RegulatoryReportFiling) =>
-                            statusPill(
-                              formatComplianceCode(t, row.status),
-                              reportStatusTone(row.status),
-                            ),
-                        },
-                        {
-                          h: t("cmp.reports.linkedCase"),
-                          w: 160,
-                          r: (row: RegulatoryReportFiling) =>
-                            row.caseId ? (
-                              <span style={monoStyle}>{row.caseId}</span>
-                            ) : (
-                              <span style={mutedStyle}>
-                                {t("cmp.reports.programLevel")}
-                              </span>
-                            ),
-                        },
-                      ]}
-                      rows={reportRows(data.regulatoryReports)}
-                    />
-                  </CanvasCard>
-
-                  <CanvasCard
-                    theme={theme}
-                    title={t("cmp.reports.exportPostureTitle")}
-                    subtitle={t("cmp.reports.exportPostureSubtitle")}
-                  >
-                    <div style={cardStackStyle}>
-                      <div style={mutedStyle}>
-                        {t("cmp.reports.approvedExports")} {exportReadyCount}
-                      </div>
-                      <div style={mutedStyle}>
-                        {t("cmp.reports.activeHolds")}{" "}
-                        {
-                          data.legalHolds.filter(
-                            (item) => item.status !== "released",
-                          ).length
-                        }
-                      </div>
-                      <div style={mutedStyle}>
-                        {t("cmp.reports.exportRoutingNote")}
-                      </div>
-                    </div>
-                  </CanvasCard>
-                </div>
-              </>
+              <SandboxRegulatorCasePanel />
             ) : (
               <>
                 <div style={autoGridStyle("180px")}>

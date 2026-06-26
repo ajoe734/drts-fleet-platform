@@ -9,6 +9,8 @@ import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { AccidentInvestigationService } from "../../src/modules/accident-investigation/accident-investigation.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { PlatformAdminComplianceService } from "../../src/modules/platform-admin/platform-admin-compliance.service";
+import { PlatformAdminRegulatorCasesService } from "../../src/modules/regulatory-reporting/platform-admin-regulator-cases.service";
+import { RegulatoryReportingService } from "../../src/modules/regulatory-reporting/regulatory-reporting.service";
 import { RocOperationsService } from "../../src/modules/roc-operations/roc-operations.service";
 import { SafetyOperatorService } from "../../src/modules/safety-operator/safety-operator.service";
 import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
@@ -85,6 +87,15 @@ describe("E2E-P2 sandbox compliance controls", () => {
       accidentInvestigationService,
       auditNotificationService,
       vehicleEvidenceService,
+    );
+    const regulatoryReportingService = new RegulatoryReportingService(
+      auditNotificationService,
+    );
+    const regulatorCasesService = new PlatformAdminRegulatorCasesService(
+      accidentInvestigationService,
+      auditNotificationService,
+      complianceService,
+      regulatoryReportingService,
     );
 
     const recorder = buildMockRecorderFixture({
@@ -300,5 +311,105 @@ describe("E2E-P2 sandbox compliance controls", () => {
       resourceId: accidentCase.caseId,
       requiredScopes: ["sandbox.investigation.read"],
     });
+
+    regulatoryReportingService.createNotification(
+      {
+        eventId: "evt-regulator-001",
+        eventType: "incident_report",
+        severity: "incident",
+        reportVersionKind: "initial",
+        jurisdiction: "taipei_city",
+        vehicleId: accidentCase.vehicleId,
+        incidentId: accidentCase.caseId,
+        reportId: "job-incident-filing-acc-0214",
+        eventOccurredAt: accidentCase.occurredAt,
+        summary: "Initial regulator notification for sandbox compliance test.",
+      },
+      {
+        authMode: "bootstrap_headers",
+        actorType: "platform_admin",
+        actorId: "cmp-regulator-owner-001",
+        realm: "platform",
+        tenantId: null,
+        roleFamilies: ["platform_admin"],
+        roles: ["platform_admin", "compliance_manager"],
+        scopes: ["sandbox.regulatory_report.review"],
+        requestId: "req-regulator-case-notification-001",
+      },
+      "req-regulator-case-notification-001",
+    );
+
+    const regulatorSummary = regulatorCasesService.listRegulatorCases();
+    expect(regulatorSummary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          caseId: accidentCase.caseId,
+          experimentId: "sandbox-demo-001",
+          bundleState: "export_approved",
+          notificationState: "draft",
+          maskingApplied: true,
+        }),
+      ]),
+    );
+
+    const regulatorDetail = regulatorCasesService.getRegulatorCase(
+      accidentCase.caseId,
+    );
+    expect(regulatorDetail).toMatchObject({
+      caseId: accidentCase.caseId,
+      experimentId: "sandbox-demo-001",
+      report: {
+        reportId: "job-incident-filing-acc-0214",
+        status: "generated",
+      },
+      bundleStatus: {
+        state: "export_approved",
+        latestExportStatus: "approved",
+      },
+      notificationStatus: {
+        state: "draft",
+        severity: "incident",
+      },
+      masking: {
+        applied: true,
+        policyFamily: "filing_package",
+      },
+    });
+    expect(regulatorDetail.legalHold.active).toBe(false);
+
+    const regulatorExport = regulatorCasesService.requestRegulatorCaseExport(
+      accidentCase.caseId,
+      {
+        reason: "Follow-up regulator evidence request.",
+      },
+      "cmp-requester-002",
+      "req-regulator-export-002",
+    );
+    expect(regulatorExport.data).toMatchObject({
+      caseId: accidentCase.caseId,
+      status: "pending_approval",
+      recipientScope: "regulator.viewer.taipei_city",
+    });
+
+    expect(
+      regulatorCasesService.listRegulatorCaseExports(accidentCase.caseId),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          exportRequestId: regulatorExport.data.exportRequestId,
+        }),
+      ]),
+    );
+
+    expect(
+      regulatorCasesService.listRegulatorCaseAccessLogs(accidentCase.caseId),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "request_sandbox_evidence_export",
+          resourceId: regulatorExport.data.exportRequestId,
+        }),
+      ]),
+    );
   });
 });

@@ -1774,6 +1774,139 @@ export interface SandboxEvidenceManifestView extends EvidenceManifest {
   items: EvidenceManifestItem[];
 }
 
+export const SANDBOX_REGULATOR_CASE_BUNDLE_STATES = [
+  "missing_manifest",
+  "manifest_ready",
+  "bundle_generated",
+  "export_pending_approval",
+  "export_approved",
+  "export_completed",
+  "export_rejected",
+] as const;
+export type SandboxRegulatorCaseBundleState =
+  (typeof SANDBOX_REGULATOR_CASE_BUNDLE_STATES)[number];
+
+export const SANDBOX_REGULATOR_CASE_NOTIFICATION_STATES = [
+  "not_started",
+  ...REGULATORY_NOTIFICATION_LIFECYCLE_STATUSES,
+] as const;
+export type SandboxRegulatorCaseNotificationState =
+  (typeof SANDBOX_REGULATOR_CASE_NOTIFICATION_STATES)[number];
+
+export interface SandboxRegulatorCaseSummary {
+  caseId: string;
+  caseLabel: string;
+  experimentId: string | null;
+  experimentLabel: string;
+  jurisdiction: string | null;
+  severity: AccidentSeverity;
+  status: AccidentCaseStatus;
+  occurredAt: string;
+  reportedAt: string;
+  manifestId: string | null;
+  reportId: string | null;
+  reportStatus: RegulatoryReportStatus | null;
+  bundleState: SandboxRegulatorCaseBundleState;
+  notificationState: SandboxRegulatorCaseNotificationState;
+  legalHoldActive: boolean;
+  maskingApplied: true;
+}
+
+export interface SandboxRegulatorCaseManifestSummary {
+  manifestId: string | null;
+  itemCount: number;
+  custodyState: EvidenceCustodyState | null;
+  windowStart: string | null;
+  windowEnd: string | null;
+  knownGapCount: number;
+  artifactChecksumSha256: string | null;
+}
+
+export interface SandboxRegulatorCaseBundleStatus {
+  state: SandboxRegulatorCaseBundleState;
+  bundleId: string | null;
+  generatedAt: string | null;
+  manifestHash: string | null;
+  knownGapCount: number;
+  latestExportRequestId: string | null;
+  latestExportStatus: SandboxControlledEvidenceExportStatus | null;
+  latestExportedAt: string | null;
+}
+
+export interface SandboxRegulatorCaseNotificationStatus {
+  state: SandboxRegulatorCaseNotificationState;
+  notificationId: string | null;
+  severity: RegulatoryNotificationSeverity | null;
+  deadlineAt: string | null;
+  overdue: boolean;
+  submittedAt: string | null;
+  acknowledgedAt: string | null;
+}
+
+export interface SandboxRegulatorCaseMaskingStatus {
+  applied: true;
+  policyFamily: "filing_package";
+  policyLabel: string;
+  ruleSummary: string;
+  maskedFields: string[];
+}
+
+export interface SandboxRegulatorCaseView {
+  caseId: string;
+  caseLabel: string;
+  experimentId: string | null;
+  experimentLabel: string;
+  jurisdiction: string | null;
+  vehicleId: string;
+  orderId: string | null;
+  severity: AccidentSeverity;
+  status: AccidentCaseStatus;
+  occurredAt: string;
+  reportedAt: string;
+  summary: string | null;
+  manifestSummary: SandboxRegulatorCaseManifestSummary;
+  bundleStatus: SandboxRegulatorCaseBundleStatus;
+  report: {
+    reportId: string | null;
+    reportType: RegulatoryReportType | null;
+    status: RegulatoryReportStatus | null;
+    acknowledgementRef: string | null;
+    generatedAt: string | null;
+    submittedAt: string | null;
+  };
+  notificationStatus: SandboxRegulatorCaseNotificationStatus;
+  legalHold: {
+    active: boolean;
+    holdId: string | null;
+    status: SandboxLegalHoldStatus | null;
+    scopeSummary: string | null;
+  };
+  masking: SandboxRegulatorCaseMaskingStatus;
+}
+
+export interface SandboxRegulatorCaseAccessLogRecord {
+  auditId: string;
+  createdAt: string;
+  actorId: string | null;
+  actorType:
+    | "system"
+    | "platform_admin"
+    | "tenant_admin"
+    | "ops_user"
+    | "partner_api_key"
+    | "referral_passenger";
+  actionName: string;
+  resourceType: string;
+  resourceId: string | null;
+  requestId: string;
+}
+
+export interface RequestSandboxRegulatorCaseExportCommand {
+  reason: string;
+  recipientLabel?: string | null;
+  recipientScope?: string | null;
+}
+
 export const SANDBOX_KPI_TARGET_STATUSES = ["baseline_collecting"] as const;
 export type SandboxKpiTargetStatus =
   (typeof SANDBOX_KPI_TARGET_STATUSES)[number];

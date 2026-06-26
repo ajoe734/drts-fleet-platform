@@ -503,6 +503,19 @@ export class AccidentInvestigationService {
     return this.cloneBundle(bundle);
   }
 
+  listInvestigationBundles(caseId?: string): AccidentInvestigationBundleView[] {
+    return [...this.bundles.values()]
+      .filter((bundle) => (caseId ? bundle.caseId === caseId : true))
+      .map((bundle) => this.cloneBundle(bundle))
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  }
+
+  getLatestInvestigationBundleForCase(
+    caseId: string,
+  ): AccidentInvestigationBundleView | null {
+    return this.listInvestigationBundles(caseId)[0] ?? null;
+  }
+
   getTimeline(caseId: string): AccidentTimelineEntry[] {
     const record = this.synchronizeCaseLinks(this.requireCase(caseId));
     const correlatedCase = this.findCorrelatedTakeoverCase(record);
