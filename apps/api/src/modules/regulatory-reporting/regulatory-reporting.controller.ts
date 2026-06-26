@@ -222,6 +222,35 @@ export class RegulatoryReportingController {
     );
   }
 
+  @Get("experiments/:experimentId/kpi-dashboard")
+  async getKpiDashboard(
+    @Param("experimentId") experimentId: string,
+    @Query("asOf") asOf: string | undefined,
+    @Query("baselineWindowDays") baselineWindowDays: string | undefined,
+    @Query("baselineWindowTrips") baselineWindowTrips: string | undefined,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const parsedDays = baselineWindowDays
+      ? Number.parseInt(baselineWindowDays, 10)
+      : undefined;
+    const parsedTrips = baselineWindowTrips
+      ? Number.parseInt(baselineWindowTrips, 10)
+      : undefined;
+
+    return toApiSuccessEnvelope(
+      await this.requireRegulatoryReportJobsService().generateKpiDashboard(
+        experimentId,
+        asOf,
+        parsedDays,
+        parsedTrips,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Post("experiments/:experimentId/resume-dossiers")
   async generateResumeAuthorizationDossier(
     @Param("experimentId") experimentId: string,

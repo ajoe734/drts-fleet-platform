@@ -80,6 +80,15 @@ async function createTestApp() {
     {
       listDailyDispatchRecords: async () => [
         {
+          serviceDate: "2026-06-20",
+          orderId: "ord-reg-010-pre",
+          orderNo: "ORD-REG-010-PRE",
+          requestedAt: "2026-06-20T07:30:00.000Z",
+          finalStatus: "completed",
+          finalVehicleId: "veh-av-demo-001",
+          generatedAt: "2026-06-20T07:35:00.000Z",
+        },
+        {
           serviceDate: "2026-06-26",
           orderId: "ord-reg-010-001",
           orderNo: "ORD-REG-010-001",
@@ -97,6 +106,15 @@ async function createTestApp() {
           finalVehicleId: "veh-av-demo-001",
           generatedAt: "2026-06-26T09:20:00.000Z",
         },
+        {
+          serviceDate: "2026-07-01",
+          orderId: "ord-reg-010-post",
+          orderNo: "ORD-REG-010-POST",
+          requestedAt: "2026-07-01T09:15:00.000Z",
+          finalStatus: "completed",
+          finalVehicleId: "veh-av-demo-001",
+          generatedAt: "2026-07-01T09:20:00.000Z",
+        },
       ],
     } as never,
     rocOperationsService,
@@ -104,6 +122,7 @@ async function createTestApp() {
     sandboxGovernanceService,
     incidentService,
     regulatoryNotificationService,
+    safetyOperatorService,
   );
 
   const jurisdiction = sandboxGovernanceService.createJurisdiction({
@@ -504,6 +523,67 @@ describe("E2E-P2-010 regulatory reporting", () => {
           expect.objectContaining({
             reportType: "telemetry_completeness_report",
             status: "completed",
+          }),
+        ]),
+      );
+
+      const kpiDashboardResponse = await fetch(
+        `${baseUrl}/api/regulatory/experiments/${experimentId}/kpi-dashboard?asOf=${encodeURIComponent(
+          "2026-06-26T10:00:00.000Z",
+        )}&baselineWindowDays=14&baselineWindowTrips=12`,
+        {
+          method: "GET",
+          headers: buildHeaders({
+            "x-scopes": "regulatory:read",
+          }),
+        },
+      );
+      expect(kpiDashboardResponse.ok).toBe(true);
+      const kpiDashboardBody = await kpiDashboardResponse.json();
+      expect(kpiDashboardBody.data.baselineWindow).toMatchObject({
+        targetStatus: "baseline_collecting",
+        configuredDays: 14,
+        configuredTrips: 12,
+        tripsCollected: 2,
+      });
+      expect(kpiDashboardBody.data.targets).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "readiness",
+            targetStatus: "baseline_collecting",
+          }),
+          expect.objectContaining({
+            key: "telemetry_freshness",
+            targetStatus: "baseline_collecting",
+          }),
+          expect.objectContaining({
+            key: "notification_timeliness",
+            targetStatus: "baseline_collecting",
+          }),
+          expect.objectContaining({
+            key: "fallback_success",
+            numerator: 2,
+            denominator: 2,
+          }),
+        ]),
+      );
+      expect(kpiDashboardBody.data.safetyGates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "operator_missing",
+            state: "pass",
+            hardAlert: true,
+            failClosed: true,
+          }),
+          expect.objectContaining({
+            key: "telemetry_stale",
+            hardAlert: true,
+            failClosed: true,
+          }),
+          expect.objectContaining({
+            key: "notification_overdue",
+            hardAlert: true,
+            failClosed: true,
           }),
         ]),
       );

@@ -30,18 +30,18 @@
 
 These screens are platform-owned. Actual visibility and mutation remain backend-authoritative.
 
-| Capability                                   | Required scope(s)                    | Notes                                                               |
-| -------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------- |
-| Read investigations                          | `sandbox.investigation.read`         | used by investigation list/detail/timeline                          |
-| Read compliance snapshot                     | `sandbox.compliance.read`            | takeover review + discrepancy triage                                |
-| Read evidence manifest / export / hold views | `sandbox.evidence.preview`           | read-only evidence governance                                       |
-| Request controlled export                    | `sandbox.evidence.export.request`    | requester cannot approve same export                                |
-| Approve controlled export                    | `sandbox.evidence.export.approve`    | four-eyes separation from requester                                 |
-| Place legal hold                             | `sandbox.legal_hold.place`           | platform-only mutation                                              |
-| Request legal hold release                   | `sandbox.legal_hold.release.request` | requester cannot approve same release                               |
-| Approve legal hold release                   | `sandbox.legal_hold.release.approve` | ROC read scope must not release hold                                |
-| Read regulatory reports                      | `sandbox.regulatory_report.review`   | platform-admin filing queue / detail review authority               |
-| Submit regulatory reports                    | `sandbox.regulatory_report.submit`   | submit remains a distinct privileged action from review             |
+| Capability                                   | Required scope(s)                    | Notes                                                   |
+| -------------------------------------------- | ------------------------------------ | ------------------------------------------------------- |
+| Read investigations                          | `sandbox.investigation.read`         | used by investigation list/detail/timeline              |
+| Read compliance snapshot                     | `sandbox.compliance.read`            | takeover review + discrepancy triage                    |
+| Read evidence manifest / export / hold views | `sandbox.evidence.preview`           | read-only evidence governance                           |
+| Request controlled export                    | `sandbox.evidence.export.request`    | requester cannot approve same export                    |
+| Approve controlled export                    | `sandbox.evidence.export.approve`    | four-eyes separation from requester                     |
+| Place legal hold                             | `sandbox.legal_hold.place`           | platform-only mutation                                  |
+| Request legal hold release                   | `sandbox.legal_hold.release.request` | requester cannot approve same release                   |
+| Approve legal hold release                   | `sandbox.legal_hold.release.approve` | ROC read scope must not release hold                    |
+| Read regulatory reports                      | `sandbox.regulatory_report.review`   | platform-admin filing queue / detail review authority   |
+| Submit regulatory reports                    | `sandbox.regulatory_report.submit`   | submit remains a distinct privileged action from review |
 
 ## 3. Cross-app and deep-link rules
 

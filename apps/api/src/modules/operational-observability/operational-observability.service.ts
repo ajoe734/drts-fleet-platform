@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 
 import type {
   AdapterHealthRecord,
@@ -18,6 +18,7 @@ import type {
   ReportJobRecord,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
+  SandboxExperimentProgramRecord,
 } from "@drts/contracts";
 
 import { CallcenterService } from "../callcenter/callcenter.service";
@@ -25,6 +26,8 @@ import { ForwarderService } from "../forwarder/forwarder.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
+import { RegulatoryReportJobsService } from "../regulatory-reporting/regulatory-report-jobs.service";
+import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
 const SYSTEM_IDENTITY: IdentityContext = {
@@ -102,6 +105,8 @@ const ADAPTER_DEGRADATION_THRESHOLDS: OperationalAlertThresholds = {
   unit: "count",
 };
 
+const PHASE2_SANDBOX_PROGRAM_CODE = "phase2-tesla-fsd-sandbox-202606";
+
 @Injectable()
 export class OperationalObservabilityService {
   constructor(
@@ -111,9 +116,15 @@ export class OperationalObservabilityService {
     private readonly forwarderService: ForwarderService,
     private readonly reportingFilingService: ReportingFilingService,
     private readonly tenantPartnerService: TenantPartnerService,
+    @Optional()
+    private readonly regulatoryReportJobsService?: RegulatoryReportJobsService,
+    @Optional()
+    private readonly sandboxGovernanceService?: SandboxGovernanceService,
   ) {}
 
-  getSnapshot(referenceDate = new Date()): OperationalObservabilitySnapshot {
+  async getSnapshot(
+    referenceDate = new Date(),
+  ): Promise<OperationalObservabilitySnapshot> {
     const generatedAt = referenceDate.toISOString();
     const orders = this.ownedMobilityService.listOrders();
     const dispatchJobs = this.ownedMobilityService.listDispatchJobs();
@@ -166,6 +177,8 @@ export class OperationalObservabilityService {
       reconciliationIssues,
       referenceDate,
     );
+    const phase2SandboxKpiDashboard =
+      await this.loadPhase2SandboxKpiDashboard(referenceDate);
     const adapterDetails = this.buildAdapterDetails(adapterHealth);
     const degradedAdapterCount = adapterHealth.filter(
       (adapter) => adapter.status !== "healthy",
@@ -226,6 +239,7 @@ export class OperationalObservabilityService {
       adapters,
       forwarderOps,
       adapterDetails,
+      phase2SandboxKpiDashboard,
       roleViews: [
         {
           route: "ops",
@@ -264,6 +278,39 @@ export class OperationalObservabilityService {
         },
       ],
     };
+  }
+
+  private async loadPhase2SandboxKpiDashboard(referenceDate: Date) {
+    const experiment = this.resolvePhase2SandboxExperiment(referenceDate);
+    if (!experiment || !this.regulatoryReportJobsService) {
+      return null;
+    }
+    return this.regulatoryReportJobsService.generateKpiDashboard(
+      experiment.experimentId,
+      referenceDate.toISOString(),
+    );
+  }
+
+  private resolvePhase2SandboxExperiment(referenceDate: Date) {
+    return (
+      this.sandboxGovernanceService
+        ?.listExperiments(referenceDate.toISOString())
+        .find((candidate) => this.isPhase2SandboxExperiment(candidate)) ?? null
+    );
+  }
+
+  private isPhase2SandboxExperiment(
+    experiment: SandboxExperimentProgramRecord,
+  ) {
+    return (
+      experiment.programCode === PHASE2_SANDBOX_PROGRAM_CODE &&
+      experiment.archivedAt === null &&
+      experiment.versions.some(
+        (version) =>
+          version.versionId === experiment.currentVersionId &&
+          version.lifecycleStatus === "published",
+      )
+    );
   }
 
   private buildDispatchMetrics(
