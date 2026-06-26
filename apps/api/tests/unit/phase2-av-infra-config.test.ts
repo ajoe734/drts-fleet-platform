@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { resolvePhase2AvInfraConfig } from "../../src/config/phase2-av-infra-config";
@@ -67,6 +69,47 @@ describe("resolvePhase2AvInfraConfig", () => {
     expect(config.storageBuckets[0]?.name).toBe("raw-provider-events");
     expect(config.pubsubTopics[0]?.deadLetterTopic).toBe(
       "provider-events-dead-letter",
+    );
+  });
+
+  it("matches the repo-local infra JSON contract for bucket retention and dead-letter topics", () => {
+    const config = resolvePhase2AvInfraConfig({});
+    const infraJsonPath = path.resolve(
+      __dirname,
+      "../../../../infra/gcp/phase2/av-sandbox-infra-config.json",
+    );
+    const infraConfig = JSON.parse(
+      readFileSync(infraJsonPath, "utf8"),
+    ) as {
+      gcp: {
+        storageBuckets: Array<{
+          name: string;
+          retentionDays: number;
+          objectHoldMode: string;
+          retentionLock: boolean;
+        }>;
+        pubsubTopics: Array<{
+          name: string;
+          retentionDays: number;
+          ordering: boolean;
+          deadLetterTopic?: string;
+        }>;
+      };
+    };
+
+    expect(config.storageBuckets).toEqual(
+      infraConfig.gcp.storageBuckets.map((bucket) => ({
+        ...bucket,
+        versioning: true,
+        cmekKey: expect.any(String),
+        purpose: expect.any(String),
+      })),
+    );
+    expect(config.pubsubTopics).toEqual(
+      infraConfig.gcp.pubsubTopics.map((topic) => ({
+        ...topic,
+        purpose: expect.any(String),
+      })),
     );
   });
 
