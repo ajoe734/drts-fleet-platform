@@ -1031,6 +1031,316 @@ export interface RegulatoryReportFiling {
 }
 
 // ---------------------------------------------------------------------------
+// §3.8A Sandbox governance + compliance snapshot
+// ---------------------------------------------------------------------------
+
+export const SANDBOX_GOVERNANCE_NOTIFICATION_CHANNELS = [
+  "email",
+  "slack",
+  "pagerduty",
+  "webhook",
+] as const;
+export type SandboxGovernanceNotificationChannel =
+  (typeof SANDBOX_GOVERNANCE_NOTIFICATION_CHANNELS)[number];
+
+export const SANDBOX_GOVERNANCE_RECIPIENT_KINDS = [
+  "role",
+  "user",
+  "distribution_list",
+  "webhook",
+] as const;
+export type SandboxGovernanceRecipientKind =
+  (typeof SANDBOX_GOVERNANCE_RECIPIENT_KINDS)[number];
+
+export const SANDBOX_GOVERNANCE_NOTIFICATION_TRIGGERS = [
+  "experiment_published",
+  "experiment_suspended",
+  "experiment_authorizations_resumed",
+  "jurisdiction_profile_published",
+  "approval_document_uploaded",
+  "approval_document_superseded",
+  "compliance_snapshot_generated",
+] as const;
+export type SandboxGovernanceNotificationTrigger =
+  (typeof SANDBOX_GOVERNANCE_NOTIFICATION_TRIGGERS)[number];
+
+export interface SandboxGovernanceNotificationRecipient {
+  recipientId: string;
+  kind: SandboxGovernanceRecipientKind;
+  target: string;
+  channels: SandboxGovernanceNotificationChannel[];
+}
+
+export interface SandboxGovernanceNotificationMatrixEntry {
+  trigger: SandboxGovernanceNotificationTrigger;
+  recipients: SandboxGovernanceNotificationRecipient[];
+  escalationWithinMinutes: number | null;
+  retentionDays: number | null;
+}
+
+export interface SandboxGovernancePolicyVersionRefs {
+  routePolicyVersion: string | null;
+  schedulePolicyVersion: string | null;
+  enrollmentPolicyVersion: string | null;
+  capabilityPolicyVersion: string | null;
+  compliancePolicyVersion: string | null;
+}
+
+export const SANDBOX_VERSION_LIFECYCLE_STATUSES = [
+  "draft",
+  "published",
+  "archived",
+] as const;
+export type SandboxVersionLifecycleStatus =
+  (typeof SANDBOX_VERSION_LIFECYCLE_STATUSES)[number];
+
+export const SANDBOX_AUTHORIZATION_STATUSES = [
+  "pending",
+  "active",
+  "suspended",
+] as const;
+export type SandboxAuthorizationStatus =
+  (typeof SANDBOX_AUTHORIZATION_STATUSES)[number];
+
+export interface SandboxExperimentProgramVersionRecord {
+  experimentId: string;
+  versionId: string;
+  versionNo: number;
+  programCode: string;
+  name: string;
+  description: string | null;
+  jurisdictionIds: string[];
+  requiredCapabilities: ProviderCapabilityRequirement[];
+  notificationMatrix: SandboxGovernanceNotificationMatrixEntry[];
+  policyVersions: SandboxGovernancePolicyVersionRefs;
+  lifecycleStatus: SandboxVersionLifecycleStatus;
+  authorizationStatus: SandboxAuthorizationStatus;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  publishedAt: string | null;
+  publishedBy: string | null;
+  rollbackFromVersionId: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
+export interface SandboxExperimentProgramRecord {
+  experimentId: string;
+  programCode: string;
+  currentVersionId: string | null;
+  versions: SandboxExperimentProgramVersionRecord[];
+  archivedAt: string | null;
+}
+
+export interface CreateSandboxExperimentProgramCommand {
+  programCode: string;
+  name: string;
+  description?: string | null;
+  jurisdictionIds?: string[];
+  requiredCapabilities?: ProviderCapabilityRequirement[];
+  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
+  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+}
+
+export interface UpdateSandboxExperimentProgramCommand {
+  name?: string;
+  description?: string | null;
+  jurisdictionIds?: string[];
+  requiredCapabilities?: ProviderCapabilityRequirement[];
+  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
+  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+}
+
+export interface PublishSandboxGovernanceVersionCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+}
+
+export interface RollbackSandboxGovernanceVersionCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+  publish?: boolean;
+}
+
+export interface SuspendSandboxExperimentAuthorizationsCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+  reason?: string | null;
+}
+
+export interface ResumeSandboxExperimentAuthorizationsCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+  reason?: string | null;
+}
+
+export interface SandboxJurisdictionProfileVersionRecord {
+  jurisdictionId: string;
+  versionId: string;
+  versionNo: number;
+  jurisdictionCode: string;
+  name: string;
+  regulatorName: string;
+  approvalLeadTimeDays: number | null;
+  retentionDays: number | null;
+  notificationMatrix: SandboxGovernanceNotificationMatrixEntry[];
+  policyVersions: SandboxGovernancePolicyVersionRefs;
+  lifecycleStatus: SandboxVersionLifecycleStatus;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  publishedAt: string | null;
+  publishedBy: string | null;
+  rollbackFromVersionId: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
+export interface SandboxJurisdictionProfileRecord {
+  jurisdictionId: string;
+  jurisdictionCode: string;
+  currentVersionId: string | null;
+  versions: SandboxJurisdictionProfileVersionRecord[];
+  archivedAt: string | null;
+}
+
+export interface CreateSandboxJurisdictionProfileCommand {
+  jurisdictionCode: string;
+  name: string;
+  regulatorName: string;
+  approvalLeadTimeDays?: number | null;
+  retentionDays?: number | null;
+  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
+  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+}
+
+export interface UpdateSandboxJurisdictionProfileCommand {
+  name?: string;
+  regulatorName?: string;
+  approvalLeadTimeDays?: number | null;
+  retentionDays?: number | null;
+  notificationMatrix?: SandboxGovernanceNotificationMatrixEntry[];
+  policyVersions?: Partial<SandboxGovernancePolicyVersionRefs>;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+}
+
+export const SANDBOX_APPROVAL_DOCUMENT_TYPES = [
+  "permit",
+  "waiver",
+  "insurance_certificate",
+  "operating_plan",
+  "safety_case",
+  "other",
+] as const;
+export type SandboxApprovalDocumentType =
+  (typeof SANDBOX_APPROVAL_DOCUMENT_TYPES)[number];
+
+export interface ApprovalDocumentVersionRecord {
+  documentId: string;
+  versionId: string;
+  versionNo: number;
+  experimentId: string;
+  jurisdictionId: string;
+  documentType: SandboxApprovalDocumentType;
+  title: string;
+  summary: string | null;
+  artifactFileName: string;
+  artifactContentType: string;
+  artifactByteSize: number;
+  artifactSha256: string;
+  artifactUploadedAt: string;
+  artifactUploadedBy: string | null;
+  supersedesVersionId: string | null;
+  lifecycleStatus: SandboxVersionLifecycleStatus;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  publishedAt: string | null;
+  publishedBy: string | null;
+  rollbackFromVersionId: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
+export interface ApprovalDocumentRecord {
+  documentId: string;
+  experimentId: string;
+  jurisdictionId: string;
+  documentType: SandboxApprovalDocumentType;
+  title: string;
+  currentVersionId: string | null;
+  versions: ApprovalDocumentVersionRecord[];
+  archivedAt: string | null;
+}
+
+export interface CreateApprovalDocumentVersionCommand {
+  experimentId: string;
+  jurisdictionId: string;
+  documentType: SandboxApprovalDocumentType;
+  title: string;
+  summary?: string | null;
+  artifactFileName: string;
+  artifactContentType: string;
+  artifactContentBase64: string;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+}
+
+export interface UpdateApprovalDocumentVersionCommand {
+  title?: string;
+  summary?: string | null;
+  artifactFileName: string;
+  artifactContentType: string;
+  artifactContentBase64: string;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  actorId?: string | null;
+}
+
+export interface SandboxComplianceSnapshotRecord {
+  snapshotId: string;
+  experimentId: string;
+  experimentVersionId: string | null;
+  asOf: string;
+  generatedAt: string;
+  generatedBy: string | null;
+  snapshotHashSha256: string;
+  policyVersions: SandboxGovernancePolicyVersionRefs;
+  authorizationStatus: SandboxAuthorizationStatus | null;
+  requiredCapabilities: ProviderCapabilityRequirement[];
+  jurisdictions: SandboxJurisdictionProfileVersionRecord[];
+  approvalDocuments: ApprovalDocumentVersionRecord[];
+  operatingAreas: ApprovedOperatingAreaRecord[];
+  routes: ApprovedRouteRecord[];
+  vehicleEnrollments: VehicleEnrollmentRecord[];
+}
+
+export interface GenerateSandboxComplianceSnapshotCommand {
+  asOf?: string | null;
+  actorId?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // §3.9 Error-code enum
 // ---------------------------------------------------------------------------
 
@@ -1054,5 +1364,9 @@ export const PHASE2_ERROR_CODES = [
   "PHASE2_ACCIDENT_CASE_NOT_FOUND",
   "PHASE2_REGULATORY_REPORT_INVALID_PERIOD",
   "PHASE2_REGULATORY_REPORT_ALREADY_SUBMITTED",
+  "PHASE2_SANDBOX_GOVERNANCE_NOT_FOUND",
+  "PHASE2_SANDBOX_GOVERNANCE_CONFLICT",
+  "PHASE2_SANDBOX_GOVERNANCE_INVALID_EFFECTIVE_RANGE",
+  "PHASE2_SANDBOX_GOVERNANCE_INVALID_VERSION_STATE",
 ] as const;
 export type Phase2ErrorCode = (typeof PHASE2_ERROR_CODES)[number];

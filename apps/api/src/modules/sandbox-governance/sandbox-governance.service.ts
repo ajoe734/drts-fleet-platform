@@ -1,19 +1,44 @@
-import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { createHash, randomUUID } from "node:crypto";
+
+import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ApprovalDocumentRecord,
+  ApprovalDocumentVersionRecord,
   AuditLogRecord,
   ApprovedOperatingAreaRecord,
   ApprovedRouteRecord,
   ApprovedAreaMatchRecord,
+  CreateApprovalDocumentVersionCommand,
+  CreateSandboxExperimentProgramCommand,
+  CreateSandboxJurisdictionProfileCommand,
+  GenerateSandboxComplianceSnapshotCommand,
   GeoJsonMultiLineString,
   GeoJsonMultiPolygon,
   GeoJsonPosition,
   IdentityContext,
+  ProviderCapabilityRequirement,
+  PublishSandboxGovernanceVersionCommand,
+  ResumeSandboxExperimentAuthorizationsCommand,
+  RollbackSandboxGovernanceVersionCommand,
   SafetyOperatorQualificationRecord,
   SafetyOperatorQualificationStatus,
+  SandboxAuthorizationStatus,
+  SandboxComplianceSnapshotRecord,
+  SandboxExperimentProgramRecord,
+  SandboxExperimentProgramVersionRecord,
+  SandboxGovernanceNotificationMatrixEntry,
+  SandboxGovernancePolicyVersionRefs,
+  SandboxJurisdictionProfileRecord,
+  SandboxJurisdictionProfileVersionRecord,
+  SandboxVersionLifecycleStatus,
+  SuspendSandboxExperimentAuthorizationsCommand,
   UpsertApprovedOperatingAreasCommand,
   UpsertApprovedRoutesCommand,
   UpsertSafetyOperatorQualificationsCommand,
+  UpdateApprovalDocumentVersionCommand,
+  UpdateSandboxExperimentProgramCommand,
+  UpdateSandboxJurisdictionProfileCommand,
   UpsertVehicleEnrollmentsCommand,
   ValidateOperatingAreaPointCommand,
   ValidateOperatingAreaPointResult,
@@ -47,6 +72,13 @@ const VEHICLE_STATUS_SET = new Set<string>(VEHICLE_ENROLLMENT_STATUSES);
 const OPERATOR_STATUS_SET = new Set<string>(
   SAFETY_OPERATOR_QUALIFICATION_STATUSES,
 );
+const DEFAULT_POLICY_VERSIONS: SandboxGovernancePolicyVersionRefs = {
+  routePolicyVersion: null,
+  schedulePolicyVersion: null,
+  enrollmentPolicyVersion: null,
+  capabilityPolicyVersion: null,
+  compliancePolicyVersion: null,
+};
 
 const DEFAULT_SCHEDULE = [
   {
@@ -206,6 +238,8 @@ const OPERATOR_STATUS_TRANSITIONS: Record<
   expired: ["expired"],
 };
 
+type ExperimentAction = "suspend" | "resume";
+
 @Injectable()
 export class SandboxGovernanceService implements OnModuleInit {
   private operatingAreas: ApprovedOperatingAreaRecord[] = cloneList(
@@ -217,6 +251,12 @@ export class SandboxGovernanceService implements OnModuleInit {
   );
   private safetyOperatorQualifications: SafetyOperatorQualificationRecord[] =
     cloneList(DEFAULT_OPERATOR_QUALIFICATIONS);
+  private readonly experiments = new Map<string, SandboxExperimentProgramRecord>();
+  private readonly jurisdictions = new Map<
+    string,
+    SandboxJurisdictionProfileRecord
+  >();
+  private readonly approvalDocuments = new Map<string, ApprovalDocumentRecord>();
 
   constructor(
     @Optional()
@@ -245,6 +285,776 @@ export class SandboxGovernanceService implements OnModuleInit {
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
     }
+  }
+
+  listExperiments(asOf?: string) {
+    return [...this.experiments.values()]
+      .map((record) => this.projectExperiment(record, asOf))
+      .sort((left, right) => left.programCode.localeCompare(right.programCode));
+  }
+
+  createExperiment(command: CreateSandboxExperimentProgramCommand) {
+    this.assertNonBlank(command.programCode, "programCode");
+    this.assertNonBlank(command.name, "name");
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+
+    const experimentId = `sandbox_exp_${randomUUID()}`;
+    const now = new Date().toISOString();
+    const version = this.createExperimentVersion({
+      experimentId,
+      versionNo: 1,
+      programCode: command.programCode.trim(),
+      name: command.name.trim(),
+      description: this.normalizeNullableText(command.description),
+      jurisdictionIds: this.normalizeStringArray(command.jurisdictionIds),
+      requiredCapabilities: this.cloneRequirements(
+        command.requiredCapabilities ?? [],
+      ),
+      notificationMatrix: this.cloneNotificationMatrix(
+        command.notificationMatrix ?? [],
+      ),
+      policyVersions: this.mergePolicyVersions(command.policyVersions),
+      lifecycleStatus: "draft",
+      authorizationStatus: "pending",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        now,
+        "effectiveFrom",
+      ),
+      effectiveUntil: this.normalizeNullableTimestamp(
+        command.effectiveUntil,
+        "effectiveUntil",
+      ),
+      publishedAt: null,
+      publishedBy: null,
+      rollbackFromVersionId: null,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    const record: SandboxExperimentProgramRecord = {
+      experimentId,
+      programCode: version.programCode,
+      currentVersionId: version.versionId,
+      versions: [version],
+      archivedAt: null,
+    };
+    this.experiments.set(experimentId, record);
+    return this.projectExperiment(record);
+  }
+
+  getExperiment(experimentId: string, asOf?: string) {
+    return this.projectExperiment(this.requireExperiment(experimentId), asOf);
+  }
+
+  updateExperiment(
+    experimentId: string,
+    command: UpdateSandboxExperimentProgramCommand,
+  ) {
+    const record = this.requireExperiment(experimentId);
+    this.assertNotArchived(record.archivedAt, "experiment", experimentId);
+    const source = this.requireLatestExperimentVersion(record);
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+
+    const now = new Date().toISOString();
+    const version = this.createExperimentVersion({
+      ...source,
+      versionId: `sandbox_exp_ver_${randomUUID()}`,
+      versionNo: source.versionNo + 1,
+      name:
+        command.name !== undefined
+          ? this.requireTrimmed(command.name, "name")
+          : source.name,
+      description:
+        command.description !== undefined
+          ? this.normalizeNullableText(command.description)
+          : source.description,
+      jurisdictionIds:
+        command.jurisdictionIds !== undefined
+          ? this.normalizeStringArray(command.jurisdictionIds)
+          : [...source.jurisdictionIds],
+      requiredCapabilities:
+        command.requiredCapabilities !== undefined
+          ? this.cloneRequirements(command.requiredCapabilities)
+          : this.cloneRequirements(source.requiredCapabilities),
+      notificationMatrix:
+        command.notificationMatrix !== undefined
+          ? this.cloneNotificationMatrix(command.notificationMatrix)
+          : this.cloneNotificationMatrix(source.notificationMatrix),
+      policyVersions:
+        command.policyVersions !== undefined
+          ? this.mergePolicyVersions(command.policyVersions, source.policyVersions)
+          : this.mergePolicyVersions(source.policyVersions),
+      lifecycleStatus: "draft",
+      authorizationStatus: "pending",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        source.effectiveFrom,
+        "effectiveFrom",
+      ),
+      effectiveUntil:
+        command.effectiveUntil !== undefined
+          ? this.normalizeNullableTimestamp(
+              command.effectiveUntil,
+              "effectiveUntil",
+            )
+          : source.effectiveUntil,
+      publishedAt: null,
+      publishedBy: null,
+      rollbackFromVersionId: null,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    record.versions.push(version);
+    record.currentVersionId = version.versionId;
+    return this.projectExperiment(record);
+  }
+
+  archiveExperiment(experimentId: string) {
+    const record = this.requireExperiment(experimentId);
+    record.archivedAt = new Date().toISOString();
+    const latest = this.requireLatestExperimentVersion(record);
+    latest.lifecycleStatus = "archived";
+    latest.updatedAt = record.archivedAt;
+    return this.projectExperiment(record);
+  }
+
+  publishExperimentVersion(
+    experimentId: string,
+    versionId: string,
+    command: PublishSandboxGovernanceVersionCommand,
+  ) {
+    const record = this.requireExperiment(experimentId);
+    const version = this.requireExperimentVersion(record, versionId);
+    if (version.lifecycleStatus !== "draft") {
+      throw this.invalidState(
+        "Experiment version must be draft before publish.",
+        { experimentId, versionId, lifecycleStatus: version.lifecycleStatus },
+      );
+    }
+
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+    const now = new Date().toISOString();
+    version.lifecycleStatus = "published";
+    version.authorizationStatus = "active";
+    version.effectiveFrom = this.normalizeTimestamp(
+      command.effectiveFrom,
+      version.effectiveFrom,
+      "effectiveFrom",
+    );
+    version.effectiveUntil =
+      command.effectiveUntil !== undefined
+        ? this.normalizeNullableTimestamp(command.effectiveUntil, "effectiveUntil")
+        : version.effectiveUntil;
+    version.publishedAt = now;
+    version.publishedBy = this.normalizeNullableText(command.actorId);
+    version.updatedAt = now;
+    version.updatedBy = this.normalizeNullableText(command.actorId);
+    this.endPreviousPublishedExperimentVersion(record, version);
+    record.currentVersionId = version.versionId;
+    return this.projectExperiment(record);
+  }
+
+  suspendExperimentAuthorizations(
+    experimentId: string,
+    command: SuspendSandboxExperimentAuthorizationsCommand,
+  ) {
+    return this.transitionExperimentAuthorizationState(
+      experimentId,
+      "suspend",
+      "suspended",
+      command,
+    );
+  }
+
+  resumeExperimentAuthorizations(
+    experimentId: string,
+    command: ResumeSandboxExperimentAuthorizationsCommand,
+  ) {
+    return this.transitionExperimentAuthorizationState(
+      experimentId,
+      "resume",
+      "active",
+      command,
+    );
+  }
+
+  rollbackExperimentVersion(
+    experimentId: string,
+    versionId: string,
+    command: RollbackSandboxGovernanceVersionCommand,
+  ) {
+    const record = this.requireExperiment(experimentId);
+    const target = this.requireExperimentVersion(record, versionId);
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+    const now = new Date().toISOString();
+    const version = this.createExperimentVersion({
+      ...target,
+      versionId: `sandbox_exp_ver_${randomUUID()}`,
+      versionNo: this.requireLatestExperimentVersion(record).versionNo + 1,
+      lifecycleStatus: command.publish ? "published" : "draft",
+      authorizationStatus: command.publish ? target.authorizationStatus : "pending",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        now,
+        "effectiveFrom",
+      ),
+      effectiveUntil: this.normalizeNullableTimestamp(
+        command.effectiveUntil,
+        "effectiveUntil",
+      ),
+      publishedAt: command.publish ? now : null,
+      publishedBy: command.publish
+        ? this.normalizeNullableText(command.actorId)
+        : null,
+      rollbackFromVersionId: target.versionId,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    record.versions.push(version);
+    if (command.publish) {
+      this.endPreviousPublishedExperimentVersion(record, version);
+    }
+    record.currentVersionId = version.versionId;
+    return this.projectExperiment(record);
+  }
+
+  listJurisdictions(asOf?: string) {
+    return [...this.jurisdictions.values()]
+      .map((record) => this.projectJurisdiction(record, asOf))
+      .sort((left, right) =>
+        left.jurisdictionCode.localeCompare(right.jurisdictionCode),
+      );
+  }
+
+  createJurisdiction(command: CreateSandboxJurisdictionProfileCommand) {
+    this.assertNonBlank(command.jurisdictionCode, "jurisdictionCode");
+    this.assertNonBlank(command.name, "name");
+    this.assertNonBlank(command.regulatorName, "regulatorName");
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+
+    const jurisdictionId = `sandbox_jur_${randomUUID()}`;
+    const now = new Date().toISOString();
+    const version = this.createJurisdictionVersion({
+      jurisdictionId,
+      versionNo: 1,
+      jurisdictionCode: command.jurisdictionCode.trim(),
+      name: command.name.trim(),
+      regulatorName: command.regulatorName.trim(),
+      approvalLeadTimeDays: this.normalizeNullableNumber(
+        command.approvalLeadTimeDays,
+      ),
+      retentionDays: this.normalizeNullableNumber(command.retentionDays),
+      notificationMatrix: this.cloneNotificationMatrix(
+        command.notificationMatrix ?? [],
+      ),
+      policyVersions: this.mergePolicyVersions(command.policyVersions),
+      lifecycleStatus: "draft",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        now,
+        "effectiveFrom",
+      ),
+      effectiveUntil: this.normalizeNullableTimestamp(
+        command.effectiveUntil,
+        "effectiveUntil",
+      ),
+      publishedAt: null,
+      publishedBy: null,
+      rollbackFromVersionId: null,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    const record: SandboxJurisdictionProfileRecord = {
+      jurisdictionId,
+      jurisdictionCode: version.jurisdictionCode,
+      currentVersionId: version.versionId,
+      versions: [version],
+      archivedAt: null,
+    };
+    this.jurisdictions.set(jurisdictionId, record);
+    return this.projectJurisdiction(record);
+  }
+
+  getJurisdiction(jurisdictionId: string, asOf?: string) {
+    return this.projectJurisdiction(this.requireJurisdiction(jurisdictionId), asOf);
+  }
+
+  updateJurisdiction(
+    jurisdictionId: string,
+    command: UpdateSandboxJurisdictionProfileCommand,
+  ) {
+    const record = this.requireJurisdiction(jurisdictionId);
+    this.assertNotArchived(record.archivedAt, "jurisdiction", jurisdictionId);
+    const source = this.requireLatestJurisdictionVersion(record);
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+
+    const now = new Date().toISOString();
+    const version = this.createJurisdictionVersion({
+      ...source,
+      versionId: `sandbox_jur_ver_${randomUUID()}`,
+      versionNo: source.versionNo + 1,
+      name:
+        command.name !== undefined
+          ? this.requireTrimmed(command.name, "name")
+          : source.name,
+      regulatorName:
+        command.regulatorName !== undefined
+          ? this.requireTrimmed(command.regulatorName, "regulatorName")
+          : source.regulatorName,
+      approvalLeadTimeDays:
+        command.approvalLeadTimeDays !== undefined
+          ? this.normalizeNullableNumber(command.approvalLeadTimeDays)
+          : source.approvalLeadTimeDays,
+      retentionDays:
+        command.retentionDays !== undefined
+          ? this.normalizeNullableNumber(command.retentionDays)
+          : source.retentionDays,
+      notificationMatrix:
+        command.notificationMatrix !== undefined
+          ? this.cloneNotificationMatrix(command.notificationMatrix)
+          : this.cloneNotificationMatrix(source.notificationMatrix),
+      policyVersions:
+        command.policyVersions !== undefined
+          ? this.mergePolicyVersions(command.policyVersions, source.policyVersions)
+          : this.mergePolicyVersions(source.policyVersions),
+      lifecycleStatus: "draft",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        source.effectiveFrom,
+        "effectiveFrom",
+      ),
+      effectiveUntil:
+        command.effectiveUntil !== undefined
+          ? this.normalizeNullableTimestamp(
+              command.effectiveUntil,
+              "effectiveUntil",
+            )
+          : source.effectiveUntil,
+      publishedAt: null,
+      publishedBy: null,
+      rollbackFromVersionId: null,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    record.versions.push(version);
+    record.currentVersionId = version.versionId;
+    return this.projectJurisdiction(record);
+  }
+
+  archiveJurisdiction(jurisdictionId: string) {
+    const record = this.requireJurisdiction(jurisdictionId);
+    record.archivedAt = new Date().toISOString();
+    const latest = this.requireLatestJurisdictionVersion(record);
+    latest.lifecycleStatus = "archived";
+    latest.updatedAt = record.archivedAt;
+    return this.projectJurisdiction(record);
+  }
+
+  publishJurisdictionVersion(
+    jurisdictionId: string,
+    versionId: string,
+    command: PublishSandboxGovernanceVersionCommand,
+  ) {
+    const record = this.requireJurisdiction(jurisdictionId);
+    const version = this.requireJurisdictionVersion(record, versionId);
+    if (version.lifecycleStatus !== "draft") {
+      throw this.invalidState(
+        "Jurisdiction version must be draft before publish.",
+        { jurisdictionId, versionId, lifecycleStatus: version.lifecycleStatus },
+      );
+    }
+
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+    const now = new Date().toISOString();
+    version.lifecycleStatus = "published";
+    version.effectiveFrom = this.normalizeTimestamp(
+      command.effectiveFrom,
+      version.effectiveFrom,
+      "effectiveFrom",
+    );
+    version.effectiveUntil =
+      command.effectiveUntil !== undefined
+        ? this.normalizeNullableTimestamp(command.effectiveUntil, "effectiveUntil")
+        : version.effectiveUntil;
+    version.publishedAt = now;
+    version.publishedBy = this.normalizeNullableText(command.actorId);
+    version.updatedAt = now;
+    version.updatedBy = this.normalizeNullableText(command.actorId);
+    this.endPreviousPublishedJurisdictionVersion(record, version);
+    record.currentVersionId = version.versionId;
+    return this.projectJurisdiction(record);
+  }
+
+  rollbackJurisdictionVersion(
+    jurisdictionId: string,
+    versionId: string,
+    command: RollbackSandboxGovernanceVersionCommand,
+  ) {
+    const record = this.requireJurisdiction(jurisdictionId);
+    const target = this.requireJurisdictionVersion(record, versionId);
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+    const now = new Date().toISOString();
+    const version = this.createJurisdictionVersion({
+      ...target,
+      versionId: `sandbox_jur_ver_${randomUUID()}`,
+      versionNo: this.requireLatestJurisdictionVersion(record).versionNo + 1,
+      lifecycleStatus: command.publish ? "published" : "draft",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        now,
+        "effectiveFrom",
+      ),
+      effectiveUntil: this.normalizeNullableTimestamp(
+        command.effectiveUntil,
+        "effectiveUntil",
+      ),
+      publishedAt: command.publish ? now : null,
+      publishedBy: command.publish
+        ? this.normalizeNullableText(command.actorId)
+        : null,
+      rollbackFromVersionId: target.versionId,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    record.versions.push(version);
+    if (command.publish) {
+      this.endPreviousPublishedJurisdictionVersion(record, version);
+    }
+    record.currentVersionId = version.versionId;
+    return this.projectJurisdiction(record);
+  }
+
+  listApprovalDocuments(asOf?: string) {
+    return [...this.approvalDocuments.values()]
+      .map((record) => this.projectApprovalDocument(record, asOf))
+      .sort((left, right) => left.title.localeCompare(right.title));
+  }
+
+  createApprovalDocument(command: CreateApprovalDocumentVersionCommand) {
+    this.requireExperiment(command.experimentId);
+    this.requireJurisdiction(command.jurisdictionId);
+    this.assertNonBlank(command.title, "title");
+    this.assertArtifact(command.artifactFileName, command.artifactContentType);
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+
+    const documentId = `sandbox_doc_${randomUUID()}`;
+    const now = new Date().toISOString();
+    const artifact = this.createArtifactDigest(command.artifactContentBase64);
+    const version = this.createApprovalDocumentVersionRecord({
+      documentId,
+      versionNo: 1,
+      experimentId: command.experimentId,
+      jurisdictionId: command.jurisdictionId,
+      documentType: command.documentType,
+      title: command.title.trim(),
+      summary: this.normalizeNullableText(command.summary),
+      artifactFileName: command.artifactFileName.trim(),
+      artifactContentType: command.artifactContentType.trim(),
+      artifactByteSize: artifact.byteSize,
+      artifactSha256: artifact.sha256,
+      artifactUploadedAt: now,
+      artifactUploadedBy: this.normalizeNullableText(command.actorId),
+      supersedesVersionId: null,
+      lifecycleStatus: "draft",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        now,
+        "effectiveFrom",
+      ),
+      effectiveUntil: this.normalizeNullableTimestamp(
+        command.effectiveUntil,
+        "effectiveUntil",
+      ),
+      publishedAt: null,
+      publishedBy: null,
+      rollbackFromVersionId: null,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    const record: ApprovalDocumentRecord = {
+      documentId,
+      experimentId: command.experimentId,
+      jurisdictionId: command.jurisdictionId,
+      documentType: command.documentType,
+      title: version.title,
+      currentVersionId: version.versionId,
+      versions: [version],
+      archivedAt: null,
+    };
+    this.approvalDocuments.set(documentId, record);
+    return this.projectApprovalDocument(record);
+  }
+
+  getApprovalDocument(documentId: string, asOf?: string) {
+    return this.projectApprovalDocument(
+      this.requireApprovalDocument(documentId),
+      asOf,
+    );
+  }
+
+  uploadApprovalDocumentVersion(
+    documentId: string,
+    command: UpdateApprovalDocumentVersionCommand,
+  ) {
+    const record = this.requireApprovalDocument(documentId);
+    this.assertNotArchived(record.archivedAt, "approval document", documentId);
+    this.assertArtifact(command.artifactFileName, command.artifactContentType);
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+
+    const source = this.requireLatestApprovalDocumentVersion(record);
+    const artifact = this.createArtifactDigest(command.artifactContentBase64);
+    const now = new Date().toISOString();
+    const version = this.createApprovalDocumentVersionRecord({
+      ...source,
+      versionId: `sandbox_doc_ver_${randomUUID()}`,
+      versionNo: source.versionNo + 1,
+      title:
+        command.title !== undefined
+          ? this.requireTrimmed(command.title, "title")
+          : source.title,
+      summary:
+        command.summary !== undefined
+          ? this.normalizeNullableText(command.summary)
+          : source.summary,
+      artifactFileName: command.artifactFileName.trim(),
+      artifactContentType: command.artifactContentType.trim(),
+      artifactByteSize: artifact.byteSize,
+      artifactSha256: artifact.sha256,
+      artifactUploadedAt: now,
+      artifactUploadedBy: this.normalizeNullableText(command.actorId),
+      supersedesVersionId: source.versionId,
+      lifecycleStatus: "draft",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        source.effectiveFrom,
+        "effectiveFrom",
+      ),
+      effectiveUntil:
+        command.effectiveUntil !== undefined
+          ? this.normalizeNullableTimestamp(
+              command.effectiveUntil,
+              "effectiveUntil",
+            )
+          : source.effectiveUntil,
+      publishedAt: null,
+      publishedBy: null,
+      rollbackFromVersionId: null,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    record.versions.push(version);
+    record.currentVersionId = version.versionId;
+    record.title = version.title;
+    return this.projectApprovalDocument(record);
+  }
+
+  archiveApprovalDocument(documentId: string) {
+    const record = this.requireApprovalDocument(documentId);
+    record.archivedAt = new Date().toISOString();
+    const latest = this.requireLatestApprovalDocumentVersion(record);
+    latest.lifecycleStatus = "archived";
+    latest.updatedAt = record.archivedAt;
+    return this.projectApprovalDocument(record);
+  }
+
+  publishApprovalDocumentVersion(
+    documentId: string,
+    versionId: string,
+    command: PublishSandboxGovernanceVersionCommand,
+  ) {
+    const record = this.requireApprovalDocument(documentId);
+    const version = this.requireApprovalDocumentVersion(record, versionId);
+    if (version.lifecycleStatus !== "draft") {
+      throw this.invalidState(
+        "Approval document version must be draft before publish.",
+        { documentId, versionId, lifecycleStatus: version.lifecycleStatus },
+      );
+    }
+
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+    const now = new Date().toISOString();
+    version.lifecycleStatus = "published";
+    version.effectiveFrom = this.normalizeTimestamp(
+      command.effectiveFrom,
+      version.effectiveFrom,
+      "effectiveFrom",
+    );
+    version.effectiveUntil =
+      command.effectiveUntil !== undefined
+        ? this.normalizeNullableTimestamp(command.effectiveUntil, "effectiveUntil")
+        : version.effectiveUntil;
+    version.publishedAt = now;
+    version.publishedBy = this.normalizeNullableText(command.actorId);
+    version.updatedAt = now;
+    version.updatedBy = this.normalizeNullableText(command.actorId);
+    this.endPreviousPublishedApprovalDocumentVersion(record, version);
+    record.currentVersionId = version.versionId;
+    record.title = version.title;
+    return this.projectApprovalDocument(record);
+  }
+
+  rollbackApprovalDocumentVersion(
+    documentId: string,
+    versionId: string,
+    command: RollbackSandboxGovernanceVersionCommand,
+  ) {
+    const record = this.requireApprovalDocument(documentId);
+    const target = this.requireApprovalDocumentVersion(record, versionId);
+    this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
+    const now = new Date().toISOString();
+    const version = this.createApprovalDocumentVersionRecord({
+      ...target,
+      versionId: `sandbox_doc_ver_${randomUUID()}`,
+      versionNo: this.requireLatestApprovalDocumentVersion(record).versionNo + 1,
+      supersedesVersionId: this.requireLatestApprovalDocumentVersion(record).versionId,
+      lifecycleStatus: command.publish ? "published" : "draft",
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        now,
+        "effectiveFrom",
+      ),
+      effectiveUntil: this.normalizeNullableTimestamp(
+        command.effectiveUntil,
+        "effectiveUntil",
+      ),
+      publishedAt: command.publish ? now : null,
+      publishedBy: command.publish
+        ? this.normalizeNullableText(command.actorId)
+        : null,
+      rollbackFromVersionId: target.versionId,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    record.versions.push(version);
+    if (command.publish) {
+      this.endPreviousPublishedApprovalDocumentVersion(record, version);
+    }
+    record.currentVersionId = version.versionId;
+    record.title = version.title;
+    return this.projectApprovalDocument(record);
+  }
+
+  generateComplianceSnapshot(
+    experimentId: string,
+    command: GenerateSandboxComplianceSnapshotCommand,
+  ): SandboxComplianceSnapshotRecord {
+    const record = this.requireExperiment(experimentId);
+    const asOf = this.normalizeTimestamp(
+      command.asOf,
+      new Date().toISOString(),
+      "asOf",
+    );
+    const experimentVersion = this.selectExperimentVersion(record, asOf);
+    if (!experimentVersion) {
+      throw this.notFound("No published experiment version is effective at asOf.", {
+        experimentId,
+        asOf,
+      });
+    }
+
+    const jurisdictions = experimentVersion.jurisdictionIds
+      .map((jurisdictionId) => this.requireJurisdiction(jurisdictionId))
+      .map((jurisdiction) => this.selectJurisdictionVersion(jurisdiction, asOf))
+      .filter(
+        (
+          version,
+        ): version is SandboxJurisdictionProfileVersionRecord => version !== null,
+      );
+
+    const approvalDocuments = [...this.approvalDocuments.values()]
+      .filter(
+        (document) =>
+          document.experimentId === experimentId &&
+          experimentVersion.jurisdictionIds.includes(document.jurisdictionId),
+      )
+      .map((document) => this.selectApprovalDocumentVersion(document, asOf))
+      .filter((version): version is ApprovalDocumentVersionRecord => version !== null)
+      .sort((left, right) => left.versionId.localeCompare(right.versionId));
+
+    const operatingAreas = this.operatingAreas
+      .filter(
+        (item) =>
+          item.sandboxProgramId === experimentVersion.programCode &&
+          isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
+      )
+      .sort(
+        (left, right) =>
+          left.areaId.localeCompare(right.areaId) || left.version - right.version,
+      );
+
+    const routes = this.routes
+      .filter(
+        (item) =>
+          item.sandboxProgramId === experimentVersion.programCode &&
+          isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
+      )
+      .sort(
+        (left, right) =>
+          left.routeId.localeCompare(right.routeId) || left.version - right.version,
+      );
+
+    const vehicleEnrollments = this.vehicleEnrollments
+      .filter(
+        (item) =>
+          item.sandboxProgramId === experimentVersion.programCode &&
+          isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
+      )
+      .sort(
+        (left, right) =>
+          left.enrollmentId.localeCompare(right.enrollmentId) ||
+          left.version - right.version,
+      );
+
+    const snapshotBase = {
+      experimentId,
+      experimentVersionId: experimentVersion.versionId,
+      asOf,
+      policyVersions: this.mergePolicyVersions(experimentVersion.policyVersions),
+      authorizationStatus: experimentVersion.authorizationStatus,
+      requiredCapabilities: this.cloneRequirements(
+        experimentVersion.requiredCapabilities,
+      ),
+      jurisdictions: jurisdictions.map((version) => this.cloneJson(version)),
+      approvalDocuments: approvalDocuments.map((version) => this.cloneJson(version)),
+      operatingAreas: operatingAreas.map((item) => this.cloneJson(item)),
+      routes: routes.map((item) => this.cloneJson(item)),
+      vehicleEnrollments: vehicleEnrollments.map((item) => this.cloneJson(item)),
+    };
+
+    return {
+      snapshotId: `sandbox_snapshot_${randomUUID()}`,
+      generatedAt: new Date().toISOString(),
+      generatedBy: this.normalizeNullableText(command.actorId),
+      snapshotHashSha256: this.computeStableHash(snapshotBase),
+      ...snapshotBase,
+    };
   }
 
   listOperatingAreas() {
@@ -679,6 +1489,556 @@ export class SandboxGovernanceService implements OnModuleInit {
       errorCode,
       `Record ${recordId} cannot transition from ${previous} to ${next}.`,
     );
+  }
+
+  private transitionExperimentAuthorizationState(
+    experimentId: string,
+    action: ExperimentAction,
+    nextStatus: SandboxAuthorizationStatus,
+    command:
+      | SuspendSandboxExperimentAuthorizationsCommand
+      | ResumeSandboxExperimentAuthorizationsCommand,
+  ) {
+    const record = this.requireExperiment(experimentId);
+    const active = this.requireCurrentPublishedExperimentVersion(record);
+    if (action === "suspend" && active.authorizationStatus === "suspended") {
+      throw this.conflict("Experiment authorizations are already suspended.", {
+        experimentId,
+      });
+    }
+    if (action === "resume" && active.authorizationStatus !== "suspended") {
+      throw this.conflict(
+        "Experiment authorizations must be suspended before they can be resumed.",
+        {
+          experimentId,
+          authorizationStatus: active.authorizationStatus,
+        },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const version = this.createExperimentVersion({
+      ...active,
+      versionId: `sandbox_exp_ver_${randomUUID()}`,
+      versionNo: active.versionNo + 1,
+      lifecycleStatus: "published",
+      authorizationStatus: nextStatus,
+      effectiveFrom: this.normalizeTimestamp(
+        command.effectiveFrom,
+        now,
+        "effectiveFrom",
+      ),
+      effectiveUntil: this.normalizeNullableTimestamp(
+        command.effectiveUntil,
+        "effectiveUntil",
+      ),
+      publishedAt: now,
+      publishedBy: this.normalizeNullableText(command.actorId),
+      rollbackFromVersionId: null,
+      createdAt: now,
+      createdBy: this.normalizeNullableText(command.actorId),
+      updatedAt: now,
+      updatedBy: this.normalizeNullableText(command.actorId),
+    });
+
+    record.versions.push(version);
+    this.endPreviousPublishedExperimentVersion(record, version);
+    record.currentVersionId = version.versionId;
+    return this.projectExperiment(record);
+  }
+
+  private endPreviousPublishedExperimentVersion(
+    record: SandboxExperimentProgramRecord,
+    newVersion: SandboxExperimentProgramVersionRecord,
+  ) {
+    for (const candidate of record.versions) {
+      if (
+        candidate.versionId !== newVersion.versionId &&
+        candidate.lifecycleStatus === "published" &&
+        (!candidate.effectiveUntil ||
+          new Date(candidate.effectiveUntil).getTime() >
+            new Date(newVersion.effectiveFrom).getTime())
+      ) {
+        candidate.effectiveUntil = newVersion.effectiveFrom;
+        candidate.updatedAt = newVersion.updatedAt;
+        candidate.updatedBy = newVersion.updatedBy;
+      }
+    }
+  }
+
+  private endPreviousPublishedJurisdictionVersion(
+    record: SandboxJurisdictionProfileRecord,
+    newVersion: SandboxJurisdictionProfileVersionRecord,
+  ) {
+    for (const candidate of record.versions) {
+      if (
+        candidate.versionId !== newVersion.versionId &&
+        candidate.lifecycleStatus === "published" &&
+        (!candidate.effectiveUntil ||
+          new Date(candidate.effectiveUntil).getTime() >
+            new Date(newVersion.effectiveFrom).getTime())
+      ) {
+        candidate.effectiveUntil = newVersion.effectiveFrom;
+        candidate.updatedAt = newVersion.updatedAt;
+        candidate.updatedBy = newVersion.updatedBy;
+      }
+    }
+  }
+
+  private endPreviousPublishedApprovalDocumentVersion(
+    record: ApprovalDocumentRecord,
+    newVersion: ApprovalDocumentVersionRecord,
+  ) {
+    for (const candidate of record.versions) {
+      if (
+        candidate.versionId !== newVersion.versionId &&
+        candidate.lifecycleStatus === "published" &&
+        (!candidate.effectiveUntil ||
+          new Date(candidate.effectiveUntil).getTime() >
+            new Date(newVersion.effectiveFrom).getTime())
+      ) {
+        candidate.effectiveUntil = newVersion.effectiveFrom;
+        candidate.updatedAt = newVersion.updatedAt;
+        candidate.updatedBy = newVersion.updatedBy;
+      }
+    }
+  }
+
+  private projectExperiment(
+    record: SandboxExperimentProgramRecord,
+    asOf?: string,
+  ) {
+    return {
+      ...this.cloneJson(record),
+      effectiveVersion: this.selectExperimentVersion(record, asOf),
+    };
+  }
+
+  private projectJurisdiction(
+    record: SandboxJurisdictionProfileRecord,
+    asOf?: string,
+  ) {
+    return {
+      ...this.cloneJson(record),
+      effectiveVersion: this.selectJurisdictionVersion(record, asOf),
+    };
+  }
+
+  private projectApprovalDocument(
+    record: ApprovalDocumentRecord,
+    asOf?: string,
+  ) {
+    return {
+      ...this.cloneJson(record),
+      effectiveVersion: this.selectApprovalDocumentVersion(record, asOf),
+    };
+  }
+
+  private selectExperimentVersion(
+    record: SandboxExperimentProgramRecord,
+    asOf?: string,
+  ) {
+    return this.selectEffectiveVersion(record.versions, asOf, (version) => version.versionNo);
+  }
+
+  private selectJurisdictionVersion(
+    record: SandboxJurisdictionProfileRecord,
+    asOf?: string,
+  ) {
+    return this.selectEffectiveVersion(record.versions, asOf, (version) => version.versionNo);
+  }
+
+  private selectApprovalDocumentVersion(
+    record: ApprovalDocumentRecord,
+    asOf?: string,
+  ) {
+    return this.selectEffectiveVersion(record.versions, asOf, (version) => version.versionNo);
+  }
+
+  private selectEffectiveVersion<
+    T extends {
+      lifecycleStatus: SandboxVersionLifecycleStatus;
+      effectiveFrom: string;
+      effectiveUntil: string | null;
+      versionNo: number;
+    },
+  >(versions: T[], asOf: string | undefined, rank: (value: T) => number) {
+    const timestamp = asOf ? new Date(asOf).getTime() : Date.now();
+    return (
+      versions
+        .filter((version) => version.lifecycleStatus === "published")
+        .filter((version) => {
+          const start = new Date(version.effectiveFrom).getTime();
+          const end = version.effectiveUntil
+            ? new Date(version.effectiveUntil).getTime()
+            : Number.POSITIVE_INFINITY;
+          return start <= timestamp && timestamp <= end;
+        })
+        .sort((left, right) => rank(right) - rank(left))[0] ?? null
+    );
+  }
+
+  private createExperimentVersion(
+    version: Omit<SandboxExperimentProgramVersionRecord, "versionId"> & {
+      versionId?: string;
+    },
+  ): SandboxExperimentProgramVersionRecord {
+    return {
+      ...this.cloneJson(version),
+      versionId: version.versionId ?? `sandbox_exp_ver_${randomUUID()}`,
+    };
+  }
+
+  private createJurisdictionVersion(
+    version: Omit<SandboxJurisdictionProfileVersionRecord, "versionId"> & {
+      versionId?: string;
+    },
+  ): SandboxJurisdictionProfileVersionRecord {
+    return {
+      ...this.cloneJson(version),
+      versionId: version.versionId ?? `sandbox_jur_ver_${randomUUID()}`,
+    };
+  }
+
+  private createApprovalDocumentVersionRecord(
+    version: Omit<ApprovalDocumentVersionRecord, "versionId"> & {
+      versionId?: string;
+    },
+  ): ApprovalDocumentVersionRecord {
+    return {
+      ...this.cloneJson(version),
+      versionId: version.versionId ?? `sandbox_doc_ver_${randomUUID()}`,
+    };
+  }
+
+  private requireExperiment(experimentId: string) {
+    const record = this.experiments.get(experimentId);
+    if (!record) {
+      throw this.notFound("Sandbox experiment not found.", { experimentId });
+    }
+    return record;
+  }
+
+  private requireExperimentVersion(
+    record: SandboxExperimentProgramRecord,
+    versionId: string,
+  ) {
+    const version = record.versions.find((candidate) => candidate.versionId === versionId);
+    if (!version) {
+      throw this.notFound("Sandbox experiment version not found.", {
+        experimentId: record.experimentId,
+        versionId,
+      });
+    }
+    return version;
+  }
+
+  private requireLatestExperimentVersion(record: SandboxExperimentProgramRecord) {
+    const latest = [...record.versions].sort(
+      (left, right) => right.versionNo - left.versionNo,
+    )[0];
+    if (!latest) {
+      throw this.invalidState("Experiment has no versions.", {
+        experimentId: record.experimentId,
+      });
+    }
+    return latest;
+  }
+
+  private requireCurrentPublishedExperimentVersion(
+    record: SandboxExperimentProgramRecord,
+  ) {
+    const version = this.selectExperimentVersion(record);
+    if (!version) {
+      throw this.invalidState(
+        "Experiment does not have an effective published version.",
+        { experimentId: record.experimentId },
+      );
+    }
+    return version;
+  }
+
+  private requireJurisdiction(jurisdictionId: string) {
+    const record = this.jurisdictions.get(jurisdictionId);
+    if (!record) {
+      throw this.notFound("Sandbox jurisdiction profile not found.", {
+        jurisdictionId,
+      });
+    }
+    return record;
+  }
+
+  private requireJurisdictionVersion(
+    record: SandboxJurisdictionProfileRecord,
+    versionId: string,
+  ) {
+    const version = record.versions.find((candidate) => candidate.versionId === versionId);
+    if (!version) {
+      throw this.notFound("Sandbox jurisdiction version not found.", {
+        jurisdictionId: record.jurisdictionId,
+        versionId,
+      });
+    }
+    return version;
+  }
+
+  private requireLatestJurisdictionVersion(
+    record: SandboxJurisdictionProfileRecord,
+  ) {
+    const latest = [...record.versions].sort(
+      (left, right) => right.versionNo - left.versionNo,
+    )[0];
+    if (!latest) {
+      throw this.invalidState("Jurisdiction has no versions.", {
+        jurisdictionId: record.jurisdictionId,
+      });
+    }
+    return latest;
+  }
+
+  private requireApprovalDocument(documentId: string) {
+    const record = this.approvalDocuments.get(documentId);
+    if (!record) {
+      throw this.notFound("Sandbox approval document not found.", { documentId });
+    }
+    return record;
+  }
+
+  private requireApprovalDocumentVersion(
+    record: ApprovalDocumentRecord,
+    versionId: string,
+  ) {
+    const version = record.versions.find((candidate) => candidate.versionId === versionId);
+    if (!version) {
+      throw this.notFound("Sandbox approval document version not found.", {
+        documentId: record.documentId,
+        versionId,
+      });
+    }
+    return version;
+  }
+
+  private requireLatestApprovalDocumentVersion(record: ApprovalDocumentRecord) {
+    const latest = [...record.versions].sort(
+      (left, right) => right.versionNo - left.versionNo,
+    )[0];
+    if (!latest) {
+      throw this.invalidState("Approval document has no versions.", {
+        documentId: record.documentId,
+      });
+    }
+    return latest;
+  }
+
+  private assertNotArchived(
+    archivedAt: string | null,
+    resourceType: string,
+    resourceId: string,
+  ) {
+    if (archivedAt) {
+      throw this.conflict(`${resourceType} is archived.`, {
+        resourceId,
+        archivedAt,
+      });
+    }
+  }
+
+  private assertEffectiveRange(
+    effectiveFrom?: string | null,
+    effectiveUntil?: string | null,
+  ) {
+    if (!effectiveFrom || !effectiveUntil) {
+      return;
+    }
+    const start = new Date(effectiveFrom).getTime();
+    const end = new Date(effectiveUntil).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PHASE2_SANDBOX_GOVERNANCE_INVALID_EFFECTIVE_RANGE",
+        "effectiveUntil must be greater than or equal to effectiveFrom.",
+        { effectiveFrom, effectiveUntil },
+      );
+    }
+  }
+
+  private assertArtifact(fileName: string, contentType: string) {
+    this.assertNonBlank(fileName, "artifactFileName");
+    this.assertNonBlank(contentType, "artifactContentType");
+  }
+
+  private assertNonBlank(value: string | null | undefined, fieldName: string) {
+    if (!value?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PHASE2_SANDBOX_GOVERNANCE_CONFLICT",
+        `${fieldName} is required.`,
+        { fieldName },
+      );
+    }
+  }
+
+  private requireTrimmed(value: string, fieldName: string) {
+    this.assertNonBlank(value, fieldName);
+    return value.trim();
+  }
+
+  private normalizeNullableText(value?: string | null) {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  private normalizeNullableNumber(value?: number | null) {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (!Number.isFinite(value) || value < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PHASE2_SANDBOX_GOVERNANCE_CONFLICT",
+        "Numeric governance values must be non-negative numbers.",
+        { value },
+      );
+    }
+    return value;
+  }
+
+  private normalizeTimestamp(
+    value: string | null | undefined,
+    fallback: string,
+    fieldName: string,
+  ) {
+    const candidate = value?.trim() ? value : fallback;
+    const timestamp = new Date(candidate).toISOString();
+    if (timestamp === "Invalid Date") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PHASE2_SANDBOX_GOVERNANCE_CONFLICT",
+        `${fieldName} must be an ISO-8601 timestamp.`,
+        { fieldName, value },
+      );
+    }
+    return timestamp;
+  }
+
+  private normalizeNullableTimestamp(
+    value: string | null | undefined,
+    fieldName: string,
+  ) {
+    if (value === undefined || value === null || value.trim().length === 0) {
+      return null;
+    }
+    return this.normalizeTimestamp(value, value, fieldName);
+  }
+
+  private normalizeStringArray(values?: string[]) {
+    if (!values) {
+      return [];
+    }
+    const normalized = values
+      .map((value) => this.requireTrimmed(value, "array item"))
+      .sort((left, right) => left.localeCompare(right));
+    const unique = [...new Set(normalized)];
+    if (unique.length !== normalized.length) {
+      throw this.conflict("Duplicate identifiers are not allowed.", { values });
+    }
+    return unique;
+  }
+
+  private cloneRequirements(values: ProviderCapabilityRequirement[]) {
+    return values.map((value) => ({
+      capability: value.capability,
+      required: Boolean(value.required),
+      minSchemaVersion: this.normalizeNullableText(value.minSchemaVersion),
+      notes: this.normalizeNullableText(value.notes),
+    }));
+  }
+
+  private cloneNotificationMatrix(
+    values: SandboxGovernanceNotificationMatrixEntry[],
+  ) {
+    return values.map((entry) => ({
+      trigger: entry.trigger,
+      recipients: entry.recipients.map((recipient) => ({
+        recipientId: recipient.recipientId,
+        kind: recipient.kind,
+        target: recipient.target,
+        channels: [...recipient.channels].sort(),
+      })),
+      escalationWithinMinutes: this.normalizeNullableNumber(
+        entry.escalationWithinMinutes,
+      ),
+      retentionDays: this.normalizeNullableNumber(entry.retentionDays),
+    }));
+  }
+
+  private mergePolicyVersions(
+    patch?: Partial<SandboxGovernancePolicyVersionRefs>,
+    base: SandboxGovernancePolicyVersionRefs = DEFAULT_POLICY_VERSIONS,
+  ): SandboxGovernancePolicyVersionRefs {
+    return {
+      routePolicyVersion:
+        patch?.routePolicyVersion !== undefined
+          ? this.normalizeNullableText(patch.routePolicyVersion)
+          : base.routePolicyVersion,
+      schedulePolicyVersion:
+        patch?.schedulePolicyVersion !== undefined
+          ? this.normalizeNullableText(patch.schedulePolicyVersion)
+          : base.schedulePolicyVersion,
+      enrollmentPolicyVersion:
+        patch?.enrollmentPolicyVersion !== undefined
+          ? this.normalizeNullableText(patch.enrollmentPolicyVersion)
+          : base.enrollmentPolicyVersion,
+      capabilityPolicyVersion:
+        patch?.capabilityPolicyVersion !== undefined
+          ? this.normalizeNullableText(patch.capabilityPolicyVersion)
+          : base.capabilityPolicyVersion,
+      compliancePolicyVersion:
+        patch?.compliancePolicyVersion !== undefined
+          ? this.normalizeNullableText(patch.compliancePolicyVersion)
+          : base.compliancePolicyVersion,
+    };
+  }
+
+  private createArtifactDigest(contentBase64: string) {
+    const payload = Buffer.from(contentBase64, "base64");
+    return {
+      byteSize: payload.byteLength,
+      sha256: createHash("sha256").update(payload).digest("hex"),
+    };
+  }
+
+  private computeStableHash(value: unknown) {
+    return createHash("sha256").update(stableStringify(value)).digest("hex");
+  }
+
+  private cloneJson<T>(value: T): T {
+    return structuredClone(value);
+  }
+
+  private notFound(message: string, details: Record<string, unknown>) {
+    return new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "PHASE2_SANDBOX_GOVERNANCE_NOT_FOUND",
+      message,
+      details,
+    );
+  }
+
+  private conflict(message: string, details: Record<string, unknown>) {
+    return new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "PHASE2_SANDBOX_GOVERNANCE_CONFLICT",
+      message,
+      details,
+    );
+  }
+
+  private invalidState(message: string, details: Record<string, unknown>) {
+    return this.conflict(message, details);
   }
 
   private recordAudit(
@@ -1152,4 +2512,17 @@ function clone<T>(value: T): T {
 
 function cloneList<T>(values: readonly T[]) {
   return values.map((value) => clone(value));
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
