@@ -139,6 +139,10 @@ export default function RootLayout() {
           name="settings"
           options={{ title: driverRouteTitles.settings }}
         />
+        <Stack.Screen
+          name="safety-operator"
+          options={{ title: driverRouteTitles.safetyOperator }}
+        />
       </Stack>
     </ThemeProvider>
   );
