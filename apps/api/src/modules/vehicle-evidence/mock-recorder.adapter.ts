@@ -60,7 +60,8 @@ export class MockEvidenceRecorderAdapter implements EvidenceRecorderAdapter {
     ];
   }
 
-  async verifyChecksum(_artifactId: string): Promise<boolean> {
+  async verifyChecksum(artifactId: string): Promise<boolean> {
+    void artifactId;
     return true;
   }
 }
