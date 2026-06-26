@@ -54,11 +54,14 @@ import type {
   RedispatchOrderCommand,
   ReservationHoldStatus,
   ResolveExceptionHoldCommand,
+  RocFallbackToHumanCommand,
+  RocFallbackTrigger,
   TenantApprovalEvaluationInputSnapshot,
   TenantApprovalEvaluationResult,
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
   UpdateTenantBookingCommand,
+  SandboxDispatchDecision,
   ServiceProductType,
 } from "@drts/contracts";
 
@@ -158,6 +161,26 @@ type DispatchAssignmentResult = {
   assignmentId: string;
   status: DispatchAssignmentRecord["status"];
   taskId: string;
+};
+
+type HumanFallbackContext = {
+  reportId: string;
+  reportArtifactId: string;
+  rocOperatorId: string | null;
+  trigger: RocFallbackTrigger;
+  sandboxDecision: SandboxDispatchDecision | null;
+};
+
+type HumanFallbackResult = {
+  order: OwnedOrderRecord;
+  dispatchJobId: string;
+  assignmentId: string;
+  taskId: string;
+  previousAssignmentId: string | null;
+  previousVehicleId: string | null;
+  previousDriverId: string | null;
+  avVehicleId: string | null;
+  avDriverId: string | null;
 };
 
 type CreateDispatchAssignmentOptions = {
@@ -2568,6 +2591,187 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
+  async fallbackTripToHuman(
+    orderId: string,
+    command: RocFallbackToHumanCommand,
+    context: HumanFallbackContext,
+    requestId?: string,
+  ): Promise<HumanFallbackResult> {
+    this.requireOrder(orderId);
+    const humanVehicleId = this.requireNonBlankText(
+      command.humanVehicleId,
+      "humanVehicleId",
+    );
+    const humanDriverId = this.requireNonBlankText(
+      command.humanDriverId,
+      "humanDriverId",
+    );
+    const reason = this.requireNonBlankText(command.reason, "reason");
+    const revisedEtaMinutes = this.requirePositiveInteger(
+      command.revisedEtaMinutes,
+      "revisedEtaMinutes",
+    );
+
+    if (
+      this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
+        humanVehicleId,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FALLBACK_REQUIRES_HUMAN_VEHICLE",
+        "Fallback-to-human requires a non-AV vehicle assignment.",
+        {
+          orderId,
+          vehicleId: humanVehicleId,
+        },
+      );
+    }
+
+    const dispatchJob = this.resolveFallbackDispatchJob(
+      orderId,
+      command.dispatchJobId ?? null,
+      requestId,
+    );
+    const activeAssignment = this.findLatestActiveAssignment(orderId);
+    const activeTask = activeAssignment
+      ? this.findTaskByAssignmentId(activeAssignment.assignmentId)
+      : null;
+
+    if (
+      activeAssignment &&
+      activeAssignment.vehicleId === humanVehicleId &&
+      activeAssignment.driverId === humanDriverId &&
+      !this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
+        activeAssignment.vehicleId,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "HUMAN_FALLBACK_ALREADY_ACTIVE",
+        "Order is already assigned to the requested human fallback crew.",
+        {
+          orderId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          assignmentId: activeAssignment.assignmentId,
+        },
+      );
+    }
+
+    const assignmentResult = activeAssignment
+      ? await this.reassignDispatch(
+          {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            vehicleId: humanVehicleId,
+            driverId: humanDriverId,
+            reasonCode: "vehicle_swap",
+            reasonNote: `ROC fallback to human: ${reason}`,
+          },
+          requestId,
+        )
+      : await this.assignDispatch(
+          {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            vehicleId: humanVehicleId,
+            driverId: humanDriverId,
+          },
+          requestId,
+        );
+
+    const nextOrder = this.requireOrder(orderId);
+    const now = new Date().toISOString();
+    const complianceFlags = new Set(nextOrder.complianceFlags);
+    complianceFlags.add("sandbox_human_fallback");
+    complianceFlags.add("sandbox_exception_reported");
+    nextOrder.status = "assigned";
+    nextOrder.etaSnapshot = {
+      etaMinutes: revisedEtaMinutes,
+      calculatedAt: now,
+    };
+    nextOrder.lastDispatchFailureReason = "roc_fallback_to_human";
+    nextOrder.complianceFlags = [...complianceFlags];
+    nextOrder.updatedAt = now;
+
+    const avVehicleId =
+      activeAssignment?.vehicleId ??
+      command.avVehicleId?.trim() ??
+      context.sandboxDecision?.vehicleId ??
+      null;
+    const avDriverId =
+      activeAssignment?.driverId ?? command.avDriverId?.trim() ?? null;
+    const traceLog = this.appendTrace(orderId, "roc.fallback_to_human", {
+      dispatchJobId: dispatchJob.dispatchJobId,
+      trigger: context.trigger,
+      sandboxDecisionId: context.sandboxDecision?.decisionId ?? null,
+      sandboxProgramId: context.sandboxDecision?.sandboxProgramId ?? null,
+      fallbackRequired: context.sandboxDecision?.fallbackRequired ?? false,
+      hardReasonCodes: context.sandboxDecision?.hardReasonCodes ?? [],
+      softReasonCodes: context.sandboxDecision?.softReasonCodes ?? [],
+      reportId: context.reportId,
+      reportArtifactId: context.reportArtifactId,
+      previousAssignmentId: activeAssignment?.assignmentId ?? null,
+      previousTaskId: activeTask?.taskId ?? null,
+      avVehicleId,
+      avDriverId,
+      humanVehicleId,
+      humanDriverId,
+      fallbackAssignmentId: assignmentResult.assignmentId,
+      fallbackTaskId: assignmentResult.taskId,
+      revisedEtaMinutes,
+      reason,
+      rocOperatorId: context.rocOperatorId,
+    });
+
+    this.persistChanges(
+      {
+        orders: [nextOrder],
+        dispatchTraceLogs: [traceLog],
+      },
+      "roc_fallback_to_human",
+    );
+    this.recordAudit(
+      {
+        actorId: context.rocOperatorId,
+        actorType: context.rocOperatorId ? "ops_user" : "system",
+        tenantId: nextOrder.tenantId,
+        moduleName: "dispatch",
+        actionName: "roc_fallback_to_human",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          trigger: context.trigger,
+          sandboxDecisionId: context.sandboxDecision?.decisionId ?? null,
+          reportId: context.reportId,
+          reportArtifactId: context.reportArtifactId,
+          previousAssignmentId: activeAssignment?.assignmentId ?? null,
+          fallbackAssignmentId: assignmentResult.assignmentId,
+          avVehicleId,
+          avDriverId,
+          humanVehicleId,
+          humanDriverId,
+          revisedEtaMinutes,
+          reason,
+        },
+      },
+      requestId,
+    );
+    this.publishOrderUpdate(nextOrder, requestId);
+    this.publishLatestDispatchJobUpdate(orderId, requestId);
+
+    return {
+      order: this.cloneOrder(nextOrder),
+      dispatchJobId: dispatchJob.dispatchJobId,
+      assignmentId: assignmentResult.assignmentId,
+      taskId: assignmentResult.taskId,
+      previousAssignmentId: activeAssignment?.assignmentId ?? null,
+      previousVehicleId: activeAssignment?.vehicleId ?? null,
+      previousDriverId: activeAssignment?.driverId ?? null,
+      avVehicleId,
+      avDriverId,
+    };
+  }
+
   private createDispatchAssignment(
     dispatchJob: DispatchJobRecord,
     order: OwnedOrderRecord,
@@ -3641,6 +3845,22 @@ export class OwnedMobilityService implements OnModuleInit {
     return normalized;
   }
 
+  private requirePositiveInteger(value: number, field: string) {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field} must be a positive integer.`,
+        {
+          field,
+          value,
+        },
+      );
+    }
+
+    return value;
+  }
+
   private assertTenantChannelCannotSetQuotedFare(
     command:
       | Pick<CreateTenantBookingCommand, "quotedFare" | "quotedFareRuleVersion">
@@ -4581,7 +4801,10 @@ export class OwnedMobilityService implements OnModuleInit {
     nextOrder.updatedAt = now;
 
     const traceLogs: DispatchTraceLogRecord[] = [];
-    if (nextOrder.dispatchSemantics === "reservation") {
+    if (
+      nextOrder.dispatchSemantics === "reservation" &&
+      nextOrder.reservationHoldStatus !== "released"
+    ) {
       this.transitionReservationHold(nextOrder, "released");
       nextOrder.reservationHoldExpiresAt = now;
       traceLogs.push(
@@ -5290,6 +5513,37 @@ export class OwnedMobilityService implements OnModuleInit {
       (dispatchJob) =>
         dispatchJob.orderId === orderId && dispatchJob.status !== "closed",
     );
+  }
+
+  private resolveFallbackDispatchJob(
+    orderId: string,
+    dispatchJobId: string | null,
+    requestId?: string,
+  ) {
+    const normalizedDispatchJobId = dispatchJobId?.trim() ?? null;
+    if (normalizedDispatchJobId) {
+      const dispatchJob = this.requireDispatchJob(normalizedDispatchJobId);
+      if (dispatchJob.orderId !== orderId) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "DISPATCH_JOB_ORDER_MISMATCH",
+          "Dispatch job does not belong to the requested trip.",
+          {
+            orderId,
+            dispatchJobId: normalizedDispatchJobId,
+          },
+        );
+      }
+      return dispatchJob;
+    }
+
+    const existingDispatchJob = this.findLatestOpenDispatchJob(orderId);
+    if (existingDispatchJob) {
+      return existingDispatchJob;
+    }
+
+    const createdDispatch = this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+    return this.requireDispatchJob(createdDispatch.dispatchJobId);
   }
 
   private findLatestActiveAssignment(orderId: string) {
