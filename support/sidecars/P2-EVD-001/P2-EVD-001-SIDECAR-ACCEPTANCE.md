@@ -4,9 +4,9 @@
 **Parent Task:** `P2-EVD-001` — Onboard evidence recorder adapter + registry + health + segment index
 **Current Sidecar Owner:** `Claude`
 **Assigned Reviewer:** `Codex2`
-**Parent Owner:** `Codex2` (per machine truth; parent `status=in_progress`, `reviewer=Codex`, `depends_on: P2-WP0`)
-**Last Revised:** `2026-06-26T00:57Z (UTC)`
-**Status:** `in_progress` (Claude is preparing the packet; handoff to `Codex2` follows)
+**Parent Owner:** `Codex2` (per machine truth; parent `status=review`, `reviewer=Codex`, `depends_on: P2-WP0`)
+**Last Revised:** `2026-06-26T01:03Z (UTC)`
+**Status:** `in_progress` (sidecar reopened by reviewer for task-state realignment; Claude is revising, then re-handoff to `Codex2`)
 
 ---
 
@@ -23,11 +23,12 @@
 
 以 `ai-status.json`（透過 `scripts/ai-status.sh show`）、`current-work.md` 與目前 repo 掃描為準：
 
-- 父任務 `P2-EVD-001` 在 machine truth 中目前是 `in_progress`，Owner=`Codex2`，Reviewer=`Codex`，正式依賴為 `P2-WP0`，`last_update=2026-06-26T00:51:36Z`。
-- 本 sidecar `P2-EVD-001-SIDECAR-ACCEPTANCE` 在 machine truth 中目前是 `in_progress`，Owner=`Claude`，Reviewer=`Codex2`，`task_class=sidecar`，`mutates_canonical=false`，`helper_kind=acceptance_packet`，`auto_created_by=supervisor-underutilization`。
-- 依賴 `P2-WP0` 在 machine truth 中是 `done`，`integration_status=merged_to_dev`，commit `a00a3bbd7`（`P2-WP0: Phase2 Tesla/FSD/sandbox contracts + AV dispatch DD foundation`），`push_branch=dev`。**因此 P2-EVD-001 的唯一 formal upstream gate 已滿足**：contract DTO、av_evidence DDL skeleton 與 vehicle-evidence module scaffold 皆已落於 base（worktree HEAD = `a00a3bbd7`）。
+- 父任務 `P2-EVD-001` 在 machine truth 中目前是 `review`（已從 `in_progress` 前進），Owner=`Codex2`，Reviewer=`Codex`，正式依賴為 `P2-WP0`，`last_update=2026-06-26T01:00:51Z`。Codex2 回報已實作 recorder registry/controller、mock recorder adapter、8 維度 health snapshot、no-new-dispatch 訊號與 sandbox dispatch gate 整合、segment index、bookmark、upload retry、shared fixtures 及 unit/integration 測試，commit `b545a10ed` 推送至 `origin/codex2/p2-evd-001`，目前由 reviewer `Codex` 審查中（typecheck 仍卡在 pre-existing repo baseline 問題，非本 task）。
+- 本 sidecar `P2-EVD-001-SIDECAR-ACCEPTANCE` 在 machine truth 中目前是 `in_progress`（由 reviewer `Codex2` reopen 以對齊 task-state narrative），Owner=`Claude`，Reviewer=`Codex2`，`task_class=sidecar`，`mutates_canonical=false`，`helper_kind=acceptance_packet`，`auto_created_by=supervisor-underutilization`。
+- 依賴 `P2-WP0` 在 machine truth 中是 `done`，`integration_status=merged_to_dev`，commit `a00a3bbd7`（`P2-WP0: Phase2 Tesla/FSD/sandbox contracts + AV dispatch DD foundation`），`push_branch=dev`。**因此 P2-EVD-001 的唯一 formal upstream gate 已滿足**：contract DTO、av_evidence DDL skeleton 與 vehicle-evidence module scaffold 皆已落於 base（本 sidecar worktree HEAD = `a00a3bbd7`，即 base `dev`）。
+- **基線視角說明**：下節 Repo Baseline Anchors 反映本 sidecar worktree 的 base `dev`（HEAD `a00a3bbd7`）——即 P2-EVD-001 **實作前**的起點。P2-EVD-001 主線實作目前位於 parent branch `codex2/p2-evd-001`（commit `b545a10ed`，尚未 merge 回 dev），因此 base `dev` 上仍是 interface-only adapter 與 scaffold-only service。本 acceptance checklist（§3）即為審 parent 那份 branch 實作時的對照框架；reviewer 對「是否已實作」的判定應以 parent branch / parent task review 為準，而非 base dev 掃描。
 
-### Repo Baseline Anchors（worktree HEAD `a00a3bbd7`）
+### Repo Baseline Anchors（base `dev`, worktree HEAD `a00a3bbd7` — P2-EVD-001 實作前起點）
 
 - [`apps/api/src/modules/vehicle-evidence/vehicle-evidence.ports.ts`](../../../apps/api/src/modules/vehicle-evidence/vehicle-evidence.ports.ts) — `EvidenceRecorderAdapter` interface（`:16-19`）僅有 `captureWindow(request): Promise<EvidenceManifestItem[]>` 與 `verifyChecksum(artifactId): Promise<boolean>`；**interface-only**，無 health/registry/segment-index 方法；`EvidenceCaptureRequest`（`:9-14`）只含 `vehicleId/windowStart/windowEnd/caseId?`。
 - [`apps/api/src/modules/vehicle-evidence/vehicle-evidence.service.ts`](../../../apps/api/src/modules/vehicle-evidence/vehicle-evidence.service.ts) — scaffold-only：`recorderAdapter: EvidenceRecorderAdapter | null = null`（`:18`），**無** registry、health 評估、segment index、bookmark、upload retry、或 av_evidence persistence 邏輯。
@@ -178,7 +179,7 @@
 
 Reviewer 應優先確認：
 
-1. packet 是否忠實保留 machine truth：parent `P2-EVD-001` 是 `in_progress`，owner=`Codex2`，reviewer=`Codex`，depends_on=`P2-WP0`（已 `done`/`merged_to_dev`）；sidecar 是 `in_progress`，owner=`Claude`，reviewer=`Codex2`。
+1. packet 是否忠實保留 machine truth：parent `P2-EVD-001` 是 `review`（impl 在 parent branch `codex2/p2-evd-001` commit `b545a10ed`，reviewer=`Codex` 審查中），owner=`Codex2`，depends_on=`P2-WP0`（已 `done`/`merged_to_dev`）；sidecar 是 `in_progress`（reopen 後重新對齊），owner=`Claude`，reviewer=`Codex2`。§2 已說明 baseline anchors 取自 base `dev`（實作前起點），parent 實作另在 branch。
 2. AC-0/AC-1 是否正確以 P2-WP0 既有契約與 `EvidenceRecorderAdapter` interface 為起點，不重新定義已存在型別。
 3. AC-2 是否完整涵蓋 8 個 health 維度（device-id/clock-sync/storage/camera/last-segment/encryption/upload-queue/firmware）。
 4. AC-3 是否正確界定 **required** recorder unhealthy ⇒ no-new-dispatch 訊號語意（阻擋新派工、不中斷進行中行程、不參與 FSD 控制），且 sidecar 不修改 gate 模組。
@@ -188,7 +189,7 @@ Reviewer 應優先確認：
 
 **建議核准用語：**
 
-> `P2-EVD-001 acceptance packet ready: preserves machine truth (parent in_progress owner Codex2 reviewer Codex, dep P2-WP0 done/merged_to_dev), grounds baseline in real anchors (EvidenceRecorderAdapter interface-only, av_evidence V0037 manifests, no recorder/health/segment contracts yet), AC checklist covers registry + 8-dimension health + required-recorder-unhealthy no-new-dispatch signal + segment index/bookmark + bounded upload retry + mock recorder + unit/integration green, correctly forbids gate-module edits, V0037 mutation, and contract redefinition, and stays within support-only sidecar boundaries.`
+> `P2-EVD-001 acceptance packet ready: preserves machine truth (parent in review owner Codex2 reviewer Codex with impl on codex2/p2-evd-001 b545a10ed, dep P2-WP0 done/merged_to_dev), grounds baseline in real base-dev anchors (EvidenceRecorderAdapter interface-only, av_evidence V0037 manifests, no recorder/health/segment contracts on base yet — parent impl lives on its branch), AC checklist covers registry + 8-dimension health + required-recorder-unhealthy no-new-dispatch signal + segment index/bookmark + bounded upload retry + mock recorder + unit/integration green, correctly forbids gate-module edits, V0037 mutation, and contract redefinition, and stays within support-only sidecar boundaries.`
 
 **建議退回用語：**
 
@@ -201,7 +202,7 @@ Reviewer 應優先確認：
 Owner（`Claude`）完成 packet 後，交給 reviewer（`Codex2`）：
 
 ```bash
-AI_NAME=Claude python3 scripts/ai_status.py handoff P2-EVD-001-SIDECAR-ACCEPTANCE Codex2 "P2-EVD-001 acceptance packet ready at support/sidecars/P2-EVD-001/P2-EVD-001-SIDECAR-ACCEPTANCE.md. It preserves machine truth (parent in_progress owner Codex2 reviewer Codex, dep P2-WP0 done/merged_to_dev a00a3bbd7), anchors the baseline in real repo state (EvidenceRecorderAdapter interface-only, vehicle-evidence service scaffold, av_evidence V0037 manifests/items, no recorder/health/segment/bookmark contracts yet), and lays out an AC checklist for recorder registry, 8-dimension health, required-recorder-unhealthy no-new-dispatch signal consumed by sandbox-dispatch-gate, segment index + event bookmark, bounded upload retry preserving checksum chain-of-custody, mock recorder, and unit/integration green — while forbidding gate-module edits, V0037 mutation, and contract redefinition. Support-only, canonical truth untouched."
+AI_NAME=Claude python3 scripts/ai_status.py handoff P2-EVD-001-SIDECAR-ACCEPTANCE Codex2 "P2-EVD-001 acceptance packet revised at support/sidecars/P2-EVD-001/P2-EVD-001-SIDECAR-ACCEPTANCE.md. Task-state narrative realigned to current machine truth (parent now in review, owner Codex2 reviewer Codex, impl on codex2/p2-evd-001 b545a10ed; sidecar reopened to in_progress; dep P2-WP0 done/merged_to_dev a00a3bbd7), with an explicit perspective note that baseline anchors reflect base dev (EvidenceRecorderAdapter interface-only, vehicle-evidence service scaffold, av_evidence V0037 manifests/items, no recorder/health/segment/bookmark contracts on base) while parent impl lives on its branch, and lays out an AC checklist for recorder registry, 8-dimension health, required-recorder-unhealthy no-new-dispatch signal consumed by sandbox-dispatch-gate, segment index + event bookmark, bounded upload retry preserving checksum chain-of-custody, mock recorder, and unit/integration green — while forbidding gate-module edits, V0037 mutation, and contract redefinition. Support-only, canonical truth untouched."
 ```
 
 ---
@@ -211,7 +212,7 @@ AI_NAME=Claude python3 scripts/ai_status.py handoff P2-EVD-001-SIDECAR-ACCEPTANC
 Reviewer（`Codex2`）核准：
 
 ```bash
-AI_NAME=Codex2 python3 scripts/ai_status.py approve P2-EVD-001-SIDECAR-ACCEPTANCE "P2-EVD-001 acceptance packet ready: machine truth preserved (parent in_progress, dep P2-WP0 merged_to_dev), baseline anchored to real repo state, AC checklist covers registry + 8-dimension health + required-recorder-unhealthy no-new-dispatch signal + segment index/bookmark + bounded upload retry + mock recorder + unit/integration green, correctly forbids gate edits / V0037 mutation / contract redefinition, support-only sidecar boundaries respected."
+AI_NAME=Codex2 python3 scripts/ai_status.py approve P2-EVD-001-SIDECAR-ACCEPTANCE "P2-EVD-001 acceptance packet ready: machine truth preserved (parent in review with impl on codex2/p2-evd-001 b545a10ed, dep P2-WP0 merged_to_dev), baseline anchored to real base-dev repo state with explicit parent-branch perspective note, AC checklist covers registry + 8-dimension health + required-recorder-unhealthy no-new-dispatch signal + segment index/bookmark + bounded upload retry + mock recorder + unit/integration green, correctly forbids gate edits / V0037 mutation / contract redefinition, support-only sidecar boundaries respected."
 ```
 
 Reviewer（`Codex2`）退回：
@@ -237,6 +238,7 @@ AI_NAME=Claude INTEGRATION_STATUS=not_applicable python3 scripts/ai_status.py do
 
 ## 10) Change Log
 
+- 2026-06-26T01:03Z — 修訂（reviewer reopen 後）：對齊 task-state narrative 與當前 machine truth——parent `P2-EVD-001` 已從 `in_progress` 前進到 `review`（owner `Codex2`、reviewer `Codex`、impl 在 parent branch `codex2/p2-evd-001` commit `b545a10ed`），本 sidecar 由 reviewer reopen 回 `in_progress`。新增「基線視角說明」明確區分：Repo Baseline Anchors 取自本 sidecar worktree 的 base `dev`（HEAD `a00a3bbd7`，P2-EVD-001 實作前起點），parent 主線實作另在其 branch 尚未 merge 回 dev；同步更新 header、§2、§6 hotspot #1、§6/§7/§8 建議用語中所有過時的 task-state 字句。Repo/contract/migration baseline anchors（EvidenceRecorderAdapter interface-only、av_evidence V0037、module 註冊等）對 base dev 仍正確，未更動。
 - 2026-06-26T00:57Z — 初版建立：依 machine truth（`scripts/ai-status.sh show` for P2-EVD-001 / P2-WP0 / sidecar）與 worktree HEAD `a00a3bbd7` repo 掃描（`phase2-tesla-fsd-sandbox.ts` evidence 契約、`vehicle-evidence.ports.ts` interface-only adapter、`vehicle-evidence.service.ts` scaffold、`V0037` av_evidence tables、`app.module.ts` 註冊），整理 `P2-EVD-001` 的 acceptance checklist（registry / 8-dimension health / required-recorder-unhealthy no-new-dispatch / segment index + bookmark / upload retry / mock recorder / unit+integration green）、P2-WP0 dependency gate（已滿足）、downstream gate/accident-investigation/regulatory-reporting 消費關係，以及 reviewer handoff 指引。
 </content>
 </invoke>
