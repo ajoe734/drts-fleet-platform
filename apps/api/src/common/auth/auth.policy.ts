@@ -415,6 +415,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("roc")) {
+    return {
+      routeKey: `roc:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "ROC operational read models and human-only actions",
+    };
+  }
+
   if (
     routePath.startsWith("regulatory/") ||
     routePath === "regulatory"

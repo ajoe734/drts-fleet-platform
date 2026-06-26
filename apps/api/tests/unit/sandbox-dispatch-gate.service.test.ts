@@ -48,4 +48,31 @@ describe("SandboxDispatchGateService", () => {
     expect(decision.decision).toBe("allow");
     expect(decision.hardReasonCodes).toEqual([]);
   });
+
+  it("blocks dispatch when ROC stop/hold restrictions are active", () => {
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      {
+        getDispatchRestrictions: () => ({
+          reasonCodes: ["ROC_STOP_NEW_DISPATCH", "ROC_OPERATIONAL_HOLD"],
+          stopNewDispatchActive: true,
+          operationalHoldActive: true,
+          humanFallbackActive: false,
+        }),
+      } as never,
+    );
+
+    const decision = gate.evaluateDispatch({
+      orderId: "order-av-003",
+      vehicleId: "veh-roc-003",
+      sandboxProgramId: "sandbox-program-001",
+      policyVersion: "phase2-roc-001",
+    });
+
+    expect(decision.decision).toBe("block");
+    expect(decision.hardReasonCodes).toEqual([
+      "ROC_STOP_NEW_DISPATCH",
+      "ROC_OPERATIONAL_HOLD",
+    ]);
+  });
 });

@@ -227,6 +227,17 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("protects ROC routes behind ops or system realm access", () => {
+    const policy = resolveRouteAuthPolicy("POST", "/api/roc/alerts/alert-001/ack");
+
+    expect(policy).toEqual({
+      routeKey: "roc:POST",
+      requiredScopes: [],
+      allowedRealms: ["system", "ops"],
+      description: "ROC operational read models and human-only actions",
+    });
+  });
+
   it("protects fleet partner admin billing routes with billing scopes", () => {
     const policy = resolveRouteAuthPolicy(
       "GET",
