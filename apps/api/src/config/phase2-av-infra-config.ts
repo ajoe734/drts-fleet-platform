@@ -16,8 +16,7 @@ export type Phase2AvTopicName =
 
 export type Phase2AvObjectHoldMode =
   | "none"
-  | "default-event-based-hold"
-  | "default-retention-lock";
+  | "default-event-based-hold";
 
 export interface Phase2AvBucketConfig {
   name: Phase2AvBucketName;
@@ -25,6 +24,7 @@ export interface Phase2AvBucketConfig {
   versioning: true;
   retentionDays: number;
   objectHoldMode: Phase2AvObjectHoldMode;
+  retentionLock: boolean;
   cmekKey: string;
 }
 
@@ -104,6 +104,7 @@ export function resolvePhase2AvInfraConfig(
         versioning: true,
         retentionDays: 30,
         objectHoldMode: "none",
+        retentionLock: false,
         cmekKey: "provider-events",
       },
       {
@@ -112,6 +113,7 @@ export function resolvePhase2AvInfraConfig(
         versioning: true,
         retentionDays: 365,
         objectHoldMode: "none",
+        retentionLock: false,
         cmekKey: "telemetry-archive",
       },
       {
@@ -120,6 +122,7 @@ export function resolvePhase2AvInfraConfig(
         versioning: true,
         retentionDays: 30,
         objectHoldMode: "none",
+        retentionLock: false,
         cmekKey: "video-normal",
       },
       {
@@ -128,6 +131,7 @@ export function resolvePhase2AvInfraConfig(
         versioning: true,
         retentionDays: 2555,
         objectHoldMode: "default-event-based-hold",
+        retentionLock: false,
         cmekKey: "video-incident-locked",
       },
       {
@@ -136,6 +140,7 @@ export function resolvePhase2AvInfraConfig(
         versioning: true,
         retentionDays: 2555,
         objectHoldMode: "default-event-based-hold",
+        retentionLock: false,
         cmekKey: "investigation-bundles",
       },
       {
@@ -143,7 +148,8 @@ export function resolvePhase2AvInfraConfig(
         purpose: "Submitted regulator-facing exports, manifests, and signed attestations.",
         versioning: true,
         retentionDays: 2555,
-        objectHoldMode: "default-retention-lock",
+        objectHoldMode: "none",
+        retentionLock: true,
         cmekKey: "regulatory-reports",
       },
     ],
@@ -153,35 +159,35 @@ export function resolvePhase2AvInfraConfig(
         purpose: "Fan-out raw provider events into validation and normalization workers.",
         ordering: true,
         retentionDays: 7,
-        deadLetterTopic: `${topicPrefix}.provider-events-dead-letter`,
+        deadLetterTopic: "provider-events-dead-letter",
       },
       {
         name: "telemetry-normalized",
         purpose: "Publish validated telemetry samples to downstream consumers and archives.",
         ordering: true,
         retentionDays: 7,
-        deadLetterTopic: `${topicPrefix}.telemetry-normalized-dead-letter`,
+        deadLetterTopic: "telemetry-normalized-dead-letter",
       },
       {
         name: "video-ingest",
         purpose: "Coordinate clip upload, checksum seal, and evidence manifest linking.",
         ordering: true,
         retentionDays: 7,
-        deadLetterTopic: `${topicPrefix}.video-ingest-dead-letter`,
+        deadLetterTopic: "video-ingest-dead-letter",
       },
       {
         name: "evidence-manifest-created",
         purpose: "Trigger manifest verification and investigation bundle assembly.",
         ordering: true,
         retentionDays: 14,
-        deadLetterTopic: `${topicPrefix}.evidence-manifest-dead-letter`,
+        deadLetterTopic: "evidence-manifest-dead-letter",
       },
       {
         name: "regulatory-report-requested",
         purpose: "Drive regulator export generation and dual-control approvals.",
         ordering: true,
         retentionDays: 14,
-        deadLetterTopic: `${topicPrefix}.regulatory-report-dead-letter`,
+        deadLetterTopic: "regulatory-report-dead-letter",
       },
       {
         name: "dr-restore-verify",

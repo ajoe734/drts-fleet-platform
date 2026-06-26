@@ -14,14 +14,14 @@ live apply work begins.
 
 ## 2. Canonical Storage Families
 
-| Family | Bucket | Versioning | Retention | Hold posture | CMEK key |
-| --- | --- | --- | --- | --- | --- |
-| Raw provider intake | `raw-provider-events` | on | 30 days | none | `provider-events` |
-| Telemetry archive | `telemetry-archive` | on | 365 days | none | `telemetry-archive` |
-| Routine video | `video-normal` | on | 30 days | none | `video-normal` |
-| Incident video | `video-incident-locked` | on | 2555 days | default event-based hold | `video-incident-locked` |
-| Investigation bundles | `investigation-bundles` | on | 2555 days | default event-based hold | `investigation-bundles` |
-| Regulatory reports | `regulatory-reports` | on | 2555 days | default retention lock | `regulatory-reports` |
+| Family | Bucket | Versioning | Retention | Hold posture | Retention lock | CMEK key |
+| --- | --- | --- | --- | --- | --- | --- |
+| Raw provider intake | `raw-provider-events` | on | 30 days | none | off | `provider-events` |
+| Telemetry archive | `telemetry-archive` | on | 365 days | none | off | `telemetry-archive` |
+| Routine video | `video-normal` | on | 30 days | none | off | `video-normal` |
+| Incident video | `video-incident-locked` | on | 2555 days | default event-based hold | off | `video-incident-locked` |
+| Investigation bundles | `investigation-bundles` | on | 2555 days | default event-based hold | off | `investigation-bundles` |
+| Regulatory reports | `regulatory-reports` | on | 2555 days | none | on | `regulatory-reports` |
 
 Rules:
 
@@ -30,6 +30,8 @@ Rules:
 - `video-incident-locked`, `investigation-bundles`, and
   `regulatory-reports` are evidentiary families. Objects there are append-only
   from an operational point of view.
+- retention lock is a bucket policy on `regulatory-reports`; it is not modeled
+  as an object-hold mode.
 - Versioning stays enabled on every bucket so restore drills can replay object
   generations, not only the latest object body.
 
@@ -49,6 +51,8 @@ Operational intent:
 - the ingest path must use durable queue semantics, not in-memory buffering
 - dead-letter topics are mandatory for provider, telemetry, video, manifest,
   and regulator flows
+- dead-letter topic names in the canonical config are logical names without
+  environment prefixes; deployment tooling may compose physical names later
 - `dr-restore-verify` is reserved for rehearsals and post-incident replay
 
 ## 4. Secret Manager And KMS Wiring
