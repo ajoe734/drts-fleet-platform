@@ -6,7 +6,7 @@
 - Parent: `P2-DP-S1-001`
 - Owner: `Codex2`
 - Reviewer: `Codex`
-- Audit timestamp: `2026-06-26T11:00:00Z`
+- Audit timestamp: `2026-06-26T11:14:00Z`
 - Canonical machine-truth root:
   `/home/edna/workspace/drts-fleet-platform`
 - Assigned helper worktree:
@@ -30,12 +30,14 @@ not by missing disclosure-policy code.
 3. Because of that merge, `origin/codex2/p2-dp-s1-001` is now `ahead 11 / behind
    0` versus `origin/dev`, and its tree includes unrelated ops-console /
    roc-operations changes that do not belong to `P2-DP-S1-001`.
-4. The contamination is visible in the branch diff. Relative to `origin/dev`,
-   the parent branch includes `apps/ops-console-web/app/dispatch/[dispatchId]/page.tsx`,
-   `apps/ops-console-web/lib/translations.ts`,
-   `apps/api/src/modules/roc-operations/*`, and
-   `apps/api/tests/integration/int-p2-008-roc-human-fallback-route.test.ts`,
-   which are `P2-UI-OPS-001` surfaces rather than disclosure-policy surfaces.
+4. The contamination is no longer provable from
+   `git diff origin/dev...origin/codex2/p2-dp-s1-001` alone, because current
+   `origin/dev` already contains `b79b469f1` and `5bdb8c636`. The correct proof
+   is instead the contaminated merge commit itself (`7af85c58a`) plus the
+   delta from the clean disclosure-only lineage
+   `origin/codex2/p2-dp-s1-001-final...origin/codex2/p2-dp-s1-001`, which
+   still shows the ops-console / roc-operations surfaces mixed into the parent
+   branch tip.
 5. Two older clean disclosure lineages still exist:
    `origin/codex2/p2-dp-s1-001-closeout @ aba1ba321` and
    `origin/codex2/p2-dp-s1-001-final @ eac1fbf3d`. Both avoid the
@@ -100,9 +102,20 @@ not by missing disclosure-policy code.
   - `apps/api/src/modules/sandbox-dispatch-gate/*`
   - `apps/api/src/modules/owned-mobility/*`
   - related disclosure tests and migration
-- `git diff --name-only origin/dev...codex2/p2-dp-s1-001` adds the unrelated
-  ops-console / roc-operations files listed above, proving the branch tip is
-  contaminated compared with the clean disclosure-only lineage
+- `git diff --name-only origin/dev...codex2/p2-dp-s1-001` now shows only the
+  disclosure-policy surfaces above, because trunk already absorbed
+  `b79b469f1` and `5bdb8c636`. That diff therefore no longer isolates the
+  contamination by itself.
+- `git diff --name-only origin/codex2/p2-dp-s1-001-final...origin/codex2/p2-dp-s1-001`
+  still adds the unrelated files from the contaminated tip:
+  - `apps/ops-console-web/app/dispatch/[dispatchId]/page.tsx`
+  - `apps/ops-console-web/lib/translations.ts`
+  - `apps/ops-console-web/tsconfig.json`
+  - `apps/api/src/modules/roc-operations/roc-operations.controller.ts`
+  - `apps/api/src/modules/roc-operations/roc-operations.service.ts`
+  - `apps/api/tests/integration/int-p2-008-roc-human-fallback-route.test.ts`
+  This proves the parent tip is a mixed disclosure + `P2-UI-OPS-001` branch
+  even after `origin/dev` advanced.
 
 ### Tree divergence
 
@@ -231,6 +244,8 @@ Concrete next step:
   - `git log --oneline --decorate --graph --max-count=40 --all --branches='codex2/p2-dp-s1-001*' --branches='origin/dev'`
   - `git log --reverse --format='%H %s' codex2/p2-dp-s1-001 --not codex2/p2-dp-s1-001-final`
   - `git show --stat 7af85c58a --`
+  - `git diff --name-status origin/dev...origin/codex2/p2-dp-s1-001`
+  - `git diff --name-status origin/codex2/p2-dp-s1-001-final...origin/codex2/p2-dp-s1-001`
   - `git show --stat 0c94ddefc --`
   - `git show --stat eac1fbf3d --`
   - `git show --stat aba1ba321 --`
