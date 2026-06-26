@@ -48,10 +48,15 @@ function createLocalId(prefix: string): string {
 }
 
 async function persistQueue(items: SafetyOperatorQueueEntry[]): Promise<void> {
-  await SecureStore.setItemAsync(SAFETY_OPERATOR_QUEUE_KEY, JSON.stringify(items));
+  await SecureStore.setItemAsync(
+    SAFETY_OPERATOR_QUEUE_KEY,
+    JSON.stringify(items),
+  );
 }
 
-export async function loadSafetyOperatorQueue(): Promise<SafetyOperatorQueueEntry[]> {
+export async function loadSafetyOperatorQueue(): Promise<
+  SafetyOperatorQueueEntry[]
+> {
   const raw = await SecureStore.getItemAsync(SAFETY_OPERATOR_QUEUE_KEY);
   if (!raw) {
     return [];

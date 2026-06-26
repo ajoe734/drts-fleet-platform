@@ -1,6 +1,7 @@
 import { ApiClient, createPlatformAdminClient } from "@drts/api-client";
 
-const ACTOR_ID = "platform-admin-web-bootstrap";
+export const PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID =
+  "platform-admin-web-bootstrap";
 const clientCache = new Map<string, ApiClient>();
 
 function rewriteControlPlaneProxyPath(baseUrl: string, path: string): string {
@@ -22,9 +23,13 @@ export function getPlatformAdminClient(apiBaseUrl: string): ApiClient {
         baseUrl: apiBaseUrl,
         pathTransform: (path) => rewriteControlPlaneProxyPath(apiBaseUrl, path),
       })
-    : createPlatformAdminClient(apiBaseUrl, ACTOR_ID, {
+    : createPlatformAdminClient(
+        apiBaseUrl,
+        PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID,
+        {
         pathTransform: (path) => rewriteControlPlaneProxyPath(apiBaseUrl, path),
-      });
+        },
+      );
   clientCache.set(apiBaseUrl, client);
   return client;
 }

@@ -6,6 +6,7 @@ import { RocOperationsModule } from "../roc-operations/roc-operations.module";
 import { ReportingModule } from "../reporting/reporting.module";
 import { SandboxGovernanceModule } from "../sandbox-governance/sandbox-governance.module";
 import { TeslaIntegrationModule } from "../tesla-integration/tesla-integration.module";
+import { PlatformAdminRegulatoryReportingController } from "./platform-admin-regulatory-reporting.controller";
 import { RegulatoryReportJobsService } from "./regulatory-report-jobs.service";
 import { RegulatoryReportingController } from "./regulatory-reporting.controller";
 import { RegulatoryReportingService } from "./regulatory-reporting.service";
@@ -19,7 +20,10 @@ import { RegulatoryReportingService } from "./regulatory-reporting.service";
     SandboxGovernanceModule,
     IncidentModule,
   ],
-  controllers: [RegulatoryReportingController],
+  controllers: [
+    RegulatoryReportingController,
+    PlatformAdminRegulatoryReportingController,
+  ],
   providers: [RegulatoryReportingService, RegulatoryReportJobsService],
   exports: [RegulatoryReportingService, RegulatoryReportJobsService],
 })

@@ -1,12 +1,14 @@
 import { Body, Controller, Get, Headers, Param, Post, Query } from "@nestjs/common";
 
 import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
+import { RequireRealms, RequireScopes } from "../../common/auth";
 import type {
   BookmarkQuery,
   SegmentIndexQuery,
 } from "./vehicle-evidence.ports";
 import { VehicleEvidenceService } from "./vehicle-evidence.service";
 
+@RequireRealms("platform", "ops")
 @Controller("vehicle-evidence")
 export class VehicleEvidenceController {
   constructor(
@@ -14,6 +16,7 @@ export class VehicleEvidenceController {
   ) {}
 
   @Post("recorders")
+  @RequireScopes("sandbox.compliance.manage")
   registerRecorder(
     @Body() body: Parameters<VehicleEvidenceService["registerRecorder"]>[0],
     @Headers("x-request-id") requestId?: string,
@@ -25,6 +28,7 @@ export class VehicleEvidenceController {
   }
 
   @Get("recorders")
+  @RequireScopes("sandbox.compliance.read")
   listRecorders(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       toApiListData(this.vehicleEvidenceService.listRecorders()),
@@ -33,6 +37,7 @@ export class VehicleEvidenceController {
   }
 
   @Post("recorders/:recorderId/health")
+  @RequireScopes("sandbox.compliance.manage")
   updateRecorderHealth(
     @Param("recorderId") recorderId: string,
     @Body() body: Parameters<VehicleEvidenceService["updateRecorderHealth"]>[1],
@@ -45,6 +50,7 @@ export class VehicleEvidenceController {
   }
 
   @Get("recorders/:recorderId/health")
+  @RequireScopes("sandbox.compliance.read")
   getRecorderHealth(
     @Param("recorderId") recorderId: string,
     @Headers("x-request-id") requestId?: string,
@@ -56,6 +62,7 @@ export class VehicleEvidenceController {
   }
 
   @Get("signals/no-new-dispatch/:vehicleId")
+  @RequireScopes("sandbox.compliance.read")
   getNoNewDispatchSignal(
     @Param("vehicleId") vehicleId: string,
     @Headers("x-request-id") requestId?: string,
@@ -67,6 +74,7 @@ export class VehicleEvidenceController {
   }
 
   @Get("segments")
+  @RequireScopes("sandbox.evidence.preview")
   listSegmentIndex(
     @Query("recorderId") recorderId: string | undefined,
     @Query("vehicleId") vehicleId: string | undefined,
@@ -103,6 +111,7 @@ export class VehicleEvidenceController {
   }
 
   @Post("bookmarks")
+  @RequireScopes("sandbox.investigation.manage")
   bookmarkEvent(
     @Body() body: Parameters<VehicleEvidenceService["bookmarkEvent"]>[0],
     @Headers("x-request-id") requestId?: string,
@@ -114,6 +123,7 @@ export class VehicleEvidenceController {
   }
 
   @Get("bookmarks")
+  @RequireScopes("sandbox.evidence.preview")
   listBookmarks(
     @Query("recorderId") recorderId: string | undefined,
     @Query("vehicleId") vehicleId: string | undefined,
@@ -142,6 +152,7 @@ export class VehicleEvidenceController {
   }
 
   @Post("uploads/:artifactId/retry")
+  @RequireScopes("sandbox.investigation.manage")
   retryUpload(
     @Param("artifactId") artifactId: string,
     @Headers("x-request-id") requestId?: string,

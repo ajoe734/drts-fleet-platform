@@ -245,7 +245,10 @@ export const FALLBACK_VEHICLES: RocVehicleReadModel[] = [
     humanFallbackActive: false,
     dispatchGateStatus: "block",
     gateReasonCodes: ["ROC_OPERATIONAL_HOLD"],
-    alertIds: ["roc-alert-discrepancy-tko_0215", "roc-alert-takeover-rate-AV-7732"],
+    alertIds: [
+      "roc-alert-discrepancy-tko_0215",
+      "roc-alert-takeover-rate-AV-7732",
+    ],
   },
   {
     vehicleId: "AV-7715",
@@ -438,13 +441,7 @@ export const FALLBACK_ALERTS: RocAlertReadModel[] = [
         "roc_role_required",
         true,
       ),
-      buildAction(
-        "fallback-to-human",
-        true,
-        "high",
-        "roc_role_required",
-        true,
-      ),
+      buildAction("fallback-to-human", true, "high", "roc_role_required", true),
     ],
   },
   {
@@ -470,13 +467,7 @@ export const FALLBACK_ALERTS: RocAlertReadModel[] = [
     updatedAt: minutesBefore(FALLBACK_GENERATED_AT, 13),
     availableActions: [
       buildAction("ack", true, "low"),
-      buildAction(
-        "stop-new-dispatch",
-        true,
-        "high",
-        "roc_role_required",
-        true,
-      ),
+      buildAction("stop-new-dispatch", true, "high", "roc_role_required", true),
       buildAction("notify", true, "low"),
     ],
   },
@@ -503,13 +494,7 @@ export const FALLBACK_ALERTS: RocAlertReadModel[] = [
     updatedAt: minutesBefore(FALLBACK_GENERATED_AT, 8),
     availableActions: [
       buildAction("ack", true, "low"),
-      buildAction(
-        "operational-hold",
-        true,
-        "high",
-        "roc_role_required",
-        true,
-      ),
+      buildAction("operational-hold", true, "high", "roc_role_required", true),
       buildAction("notify", true, "low"),
     ],
   },

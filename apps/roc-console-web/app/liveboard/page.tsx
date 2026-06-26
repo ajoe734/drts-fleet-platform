@@ -23,7 +23,9 @@ export default async function LiveBoardPage() {
   const data = await getRocLiveBoardPageData();
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={rocTheme}
         title={t("liveboard.title", locale)}
@@ -72,7 +74,9 @@ export default async function LiveBoardPage() {
         </Card>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {data.vehicles
-            .filter((vehicle) => vehicle.currentOrderId || vehicle.autonomyState)
+            .filter(
+              (vehicle) => vehicle.currentOrderId || vehicle.autonomyState,
+            )
             .map((vehicle) => (
               <Card theme={rocTheme} key={vehicle.vehicleId} padding={14}>
                 <div
