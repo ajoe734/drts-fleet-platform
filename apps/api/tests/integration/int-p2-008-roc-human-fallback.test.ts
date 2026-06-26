@@ -6,6 +6,7 @@ import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtu
 
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
@@ -17,6 +18,8 @@ import { SandboxGovernanceService } from "../../src/modules/sandbox-governance/s
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
+
+const SAMPLE_PROOF_PHOTO = "cHJvb2YtcDItMDA4LTAwMQ==";
 
 function createHarness() {
   const eventEmitter = new EventEmitter2();
@@ -80,9 +83,84 @@ function createHarness() {
     sandboxDispatchGateService,
     auditNotificationService,
   );
+  const billingSettlementRepository = {
+    isEnabled: () => true,
+    loadState: async () => ({
+      tenantBillingProfiles: [],
+      tenantInvoices: [],
+      driverFeePlans: [],
+      driverStatements: [],
+      reimbursementBatches: [],
+      reconciliationIssues: [],
+    }),
+    persistChanges: async () => undefined,
+    reportPersistenceFailure: () => undefined,
+    listLiveCompletedTenantTrips: async (
+      tenantId: string,
+      periodStart: string,
+      periodEnd: string,
+    ) => {
+      const start = new Date(periodStart).getTime();
+      const end = new Date(periodEnd).getTime();
+      const ordersById = new Map(
+        ownedMobilityService
+          .listOrders()
+          .filter((order) => order.tenantId === tenantId)
+          .map((order) => [order.orderId, order]),
+      );
+
+      return ownedMobilityService
+        .listDriverTasks()
+        .filter(
+          (task) =>
+            task.status === "completed" &&
+            task.completedAt &&
+            new Date(task.completedAt).getTime() >= start &&
+            new Date(task.completedAt).getTime() <= end,
+        )
+        .flatMap((task) => {
+          const order = ordersById.get(task.orderId);
+          if (!order) {
+            return [];
+          }
+
+          return [
+            {
+              tenantId: order.tenantId ?? tenantId,
+              driverId: task.driverId,
+              orderId: order.orderId,
+              completedAt: task.completedAt ?? order.updatedAt,
+              grossEarning: task.fare ??
+                order.quotedFare ?? {
+                  currency: "NTD",
+                  amountMinor: 0,
+                },
+              orderSource: order.orderSource,
+              serviceBucket: order.serviceBucket,
+              businessDispatchSubtype: order.businessDispatchSubtype,
+              costCenterCode: order.costCenter,
+              riderId: order.passenger.passengerId ?? null,
+              partnerId: order.partnerId,
+              partnerProgramId: order.partnerProgramId,
+              partnerEntrySlug: order.partnerEntrySlug,
+              eligibilityVerificationId: order.eligibilityVerificationId,
+              issuerAuthorizationRef: order.issuerAuthorizationRef,
+              benefitReference: order.benefitReference,
+            },
+          ];
+        });
+    },
+    listLiveDriverTripsInPeriod: async () => [],
+    listLiveDriverTripsInPeriodForDriver: async () => [],
+  };
+  const billingSettlementService = new BillingSettlementService(
+    auditNotificationService,
+    billingSettlementRepository as never,
+  );
 
   return {
     auditNotificationService,
+    billingSettlementService,
     ownedMobilityService,
     rocOperationsService,
     sandboxDispatchGateService,
@@ -93,7 +171,7 @@ function createHarness() {
   };
 }
 
-describe("INT-P2-008 ROC fallback to human", () => {
+describe("INT-P2-008 / E2E-P2-008 ROC fallback to human", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
@@ -102,7 +180,7 @@ describe("INT-P2-008 ROC fallback to human", () => {
     }
   });
 
-  it("reuses the same booking and order when the sandbox gate requires human fallback", async () => {
+  it("E2E-P2-008 reuses the same booking and order when the sandbox gate requires human fallback", async () => {
     const {
       auditNotificationService,
       ownedMobilityService,
@@ -342,6 +420,146 @@ describe("INT-P2-008 ROC fallback to human", () => {
         "roc.intervention.started",
         "roc.intervention.resolved",
         "roc.fallback_to_human.reported",
+      ]),
+    );
+  });
+
+  it("UAT-AV-010 keeps billing and audit chain intact after AV fallback to human", async () => {
+    const {
+      auditNotificationService,
+      billingSettlementService,
+      ownedMobilityService,
+      rocOperationsService,
+      sandboxDispatchGateService,
+      cleanup,
+    } = createHarness();
+    cleanups.push(cleanup);
+
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-26T14:00:00.000Z",
+        reservationWindowEnd: "2026-05-26T15:00:00.000Z",
+        pickup: { address: "Neihu AV Hub", lat: 25.0823, lng: 121.5671 },
+        dropoff: { address: "Songshan Airport", lat: 25.0697, lng: 121.5518 },
+        passenger: { name: "Rider Billing", phone: "0912000012" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const decision = await sandboxDispatchGateService.evaluateDispatch({
+      orderId: booking.orderId,
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-missing-001",
+      sandboxProgramId: "phase2-tesla-fsd-sandbox-202606",
+      policyVersion: "sandbox-dispatch-gate.v1",
+    });
+
+    const fallback = await rocOperationsService.fallbackTripToHuman(
+      booking.orderId,
+      {
+        dispatchJobId: dispatchResult.dispatchJobId,
+        sandboxDecisionId: decision.decisionId,
+        humanVehicleId: "veh-human-010",
+        humanDriverId: "drv-human-010",
+        revisedEtaMinutes: 16,
+        reason: "AV cannot continue and ROC switched to human taxi",
+        rocOperatorId: "ops-roc-010",
+        trigger: "gate_fallback_required",
+      },
+      null,
+      "req-p2-fallback-010",
+    );
+
+    ownedMobilityService.acceptDriverTask(
+      fallback.taskId,
+      { acceptedAt: "2026-05-26T14:06:00.000Z" },
+      "req-p2-accept-010",
+    );
+    ownedMobilityService.departDriverTask(
+      fallback.taskId,
+      {
+        departedAt: "2026-05-26T14:08:00.000Z",
+        currentLocation: { lat: 25.0802, lng: 121.5651 },
+      },
+      "req-p2-depart-010",
+    );
+    ownedMobilityService.arrivedPickup(
+      fallback.taskId,
+      { arrivedAt: "2026-05-26T14:19:00.000Z" },
+      "req-p2-arrive-010",
+    );
+    ownedMobilityService.startDriverTask(
+      fallback.taskId,
+      { startedAt: "2026-05-26T14:23:00.000Z" },
+      "req-p2-start-010",
+    );
+    ownedMobilityService.completeDriverTask(
+      fallback.taskId,
+      {
+        completedAt: "2026-05-26T14:47:00.000Z",
+        actualDistanceKm: 12.4,
+        actualDurationSec: 1440,
+        proof: {
+          photos: [SAMPLE_PROOF_PHOTO],
+        },
+      },
+      "req-p2-complete-010",
+    );
+
+    const invoice = await billingSettlementService.generateTenantInvoice(
+      "tenant-demo-001",
+      {
+        tenantId: "tenant-demo-001",
+        periodStart: "2026-05-01T00:00:00.000Z",
+        periodEnd: "2026-05-31T23:59:59.000Z",
+      },
+      "req-p2-invoice-010",
+    );
+
+    expect(fallback.report).toMatchObject({
+      bookingId: booking.bookingId,
+      orderId: booking.orderId,
+      dispatchJobId: dispatchResult.dispatchJobId,
+      sandboxDecisionId: decision.decisionId,
+      fallbackAssignmentId: fallback.assignmentId,
+      fallbackTaskId: fallback.taskId,
+    });
+    expect(
+      ownedMobilityService
+        .listOrders()
+        .filter((order) => order.bookingId === booking.bookingId),
+    ).toHaveLength(1);
+    expect(ownedMobilityService.getOrder(booking.orderId)).toMatchObject({
+      bookingId: booking.bookingId,
+      status: "completed",
+    });
+    expect(ownedMobilityService.getDriverTask(fallback.taskId)).toMatchObject({
+      taskId: fallback.taskId,
+      driverId: "drv-human-010",
+      vehicleId: "veh-human-010",
+      status: "completed",
+    });
+    expect(invoice.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          orderId: booking.orderId,
+        }),
+      ]),
+    );
+    expect(
+      auditNotificationService.listAuditLogs().map((auditLog) => auditLog.actionName),
+    ).toEqual(
+      expect.arrayContaining([
+        "roc_fallback_to_human",
+        "roc.fallback_to_human.reported",
+        "accept_task",
+        "depart_task",
+        "arrive_pickup",
+        "start_trip",
+        "complete_trip",
       ]),
     );
   });
