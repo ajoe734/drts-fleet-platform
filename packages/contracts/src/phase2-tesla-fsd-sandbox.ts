@@ -262,6 +262,145 @@ export interface ValidateRouteContainmentResult {
   toleranceMeters: number;
 }
 
+// §3.1.5 Tesla Fleet integration control-plane DTOs
+// ---------------------------------------------------------------------------
+
+export const TESLA_FLEET_REGIONS = [
+  "north_america",
+  "europe_middle_east_africa",
+  "asia_pacific",
+] as const;
+export type TeslaFleetRegion = (typeof TESLA_FLEET_REGIONS)[number];
+
+export const TESLA_OAUTH_CONNECTION_STATUSES = [
+  "active",
+  "revoked",
+  "expired",
+] as const;
+export type TeslaOAuthConnectionStatus =
+  (typeof TESLA_OAUTH_CONNECTION_STATUSES)[number];
+
+export interface TeslaOAuthConnectionRecord {
+  connectionId: string;
+  businessAccountId: string;
+  region: TeslaFleetRegion;
+  scopes: string[];
+  status: TeslaOAuthConnectionStatus;
+  authorizedAt: string;
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
+  lastRefreshedAt: string | null;
+  revokedAt: string | null;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaBeginOAuthCommand {
+  businessAccountId: string;
+  region: TeslaFleetRegion;
+  authorizationCode: string;
+  scopes?: string[];
+}
+
+export interface TeslaRefreshOAuthCommand {
+  connectionId: string;
+  reason?: string | null;
+}
+
+export interface TeslaRevokeOAuthCommand {
+  connectionId: string;
+  reason?: string | null;
+}
+
+export interface TeslaDiscoveredVehicle {
+  vin: string;
+  externalVehicleRef: string;
+  connectionId: string;
+  region: TeslaFleetRegion;
+  model: string;
+  online: boolean;
+  batteryLevelPct: number | null;
+  lastSeenAt: string;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaVehicleBindingRecord {
+  bindingId: string;
+  vehicleId: string;
+  vin: string;
+  externalVehicleRef: string;
+  connectionId: string;
+  region: TeslaFleetRegion;
+  boundAt: string;
+  lastDiscoveredAt: string;
+  source: Phase2SourceMetadata;
+}
+
+export interface BindTeslaVehicleCommand {
+  vehicleId: string;
+  vin: string;
+}
+
+export const TESLA_VIRTUAL_KEY_PAIRING_STATUSES = [
+  "unpaired",
+  "pairing_pending",
+  "paired",
+  "revoked",
+  "failed",
+] as const;
+export type TeslaVirtualKeyPairingStatus =
+  (typeof TESLA_VIRTUAL_KEY_PAIRING_STATUSES)[number];
+
+export interface TeslaVirtualKeyRecord {
+  vehicleId: string;
+  externalVehicleRef: string;
+  status: TeslaVirtualKeyPairingStatus;
+  requestedAt: string;
+  pairedAt: string | null;
+  revokedAt: string | null;
+  requestedBy: string;
+  publicKeyHint: string;
+  source: Phase2SourceMetadata;
+}
+
+export interface TeslaPairVirtualKeyCommand {
+  vehicleId: string;
+  requestedBy: string;
+}
+
+export const TESLA_TELEMETRY_MODES = ["fleet_api", "public_mock"] as const;
+export type TeslaTelemetryMode = (typeof TESLA_TELEMETRY_MODES)[number];
+
+export interface ConfigureTeslaTelemetryCommand {
+  vehicleId: string;
+  mode: TeslaTelemetryMode;
+  sampleIntervalSec: number;
+  mockOnline?: boolean;
+  mockBatteryLevelPct?: number | null;
+  mockLocation?: GeoPoint | null;
+}
+
+export interface TeslaTelemetryStatusRecord {
+  vehicleId: string;
+  externalVehicleRef: string;
+  mode: TeslaTelemetryMode;
+  sampleIntervalSec: number;
+  enabled: boolean;
+  configuredAt: string;
+  lastSyncAt: string | null;
+  lastProjectionAt: string | null;
+  lastPublicSampleId: string | null;
+  health: "ok" | "stale" | "disabled";
+  source: Phase2SourceMetadata;
+}
+
+export interface IssueTeslaCommandCommand {
+  vehicleId: string;
+  commandType: TeslaRemoteCommandType;
+  issuedBy: string;
+  idempotencyKey?: string;
+  params?: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // §3.2 Remote command receipt (Tesla command bridge)
 // ---------------------------------------------------------------------------
@@ -517,6 +656,43 @@ export interface PassengerDisclosureRequirementSnapshot {
   acknowledgementMode: PassengerDisclosureAcknowledgementMode;
   acknowledgedAt: string | null;
   acknowledgementRecordId: string | null;
+}
+
+export interface SandboxDispatchAssignmentSnapshot {
+  candidateRoute?: GeoJsonMultiLineString | null;
+  entitlement?: {
+    active: boolean | null;
+  } | null;
+  providerCapabilities?: Partial<
+    Record<Phase2ProviderCapability, boolean | null>
+  > | null;
+  telemetry?: {
+    stale: boolean | null;
+    minimalRiskConditionActive: boolean | null;
+    socPercent: number | null;
+    currentTripCount?: number | null;
+    odometerKm?: number | null;
+    qualityScore?: number | null;
+    providerHealthState?: TeslaProviderHealthState | null;
+    dispatchHold?: boolean | null;
+  } | null;
+  regulatory?: {
+    approvalFresh: boolean | null;
+    vehicleCertified: boolean | null;
+  } | null;
+  recorder?: {
+    healthy: boolean | null;
+  } | null;
+  holdState?: {
+    activeSafetyIncident: boolean | null;
+    programSuspended: boolean | null;
+    vehicleHold: boolean | null;
+  } | null;
+  limits?: {
+    minSocPercent?: number | null;
+    maxConcurrentTrips?: number | null;
+    maxOdometerKm?: number | null;
+  } | null;
 }
 
 export interface UpsertPassengerDisclosurePolicyCommand {
@@ -831,6 +1007,258 @@ export interface SafetyOperatorAssignment {
   assignedAt: string;
   releasedAt: string | null;
   sandboxProgramId: string;
+}
+
+export interface CreateSafetyOperatorAssignmentCommand {
+  safetyOperatorId: string;
+  vehicleId: string;
+  orderId: string | null;
+  sandboxProgramId: string;
+}
+
+export interface EngageSafetyOperatorAssignmentCommand {
+  safetyOperatorId: string;
+}
+
+export interface ReleaseSafetyOperatorAssignmentCommand {
+  safetyOperatorId: string;
+}
+
+export const SAFETY_OPERATOR_SHIFT_STATUSES = [
+  "active",
+  "completed",
+  "abandoned",
+] as const;
+export type SafetyOperatorShiftStatus =
+  (typeof SAFETY_OPERATOR_SHIFT_STATUSES)[number];
+
+export interface SafetyOperatorShift {
+  shiftId: string;
+  safetyOperatorId: string;
+  sandboxProgramId: string;
+  deviceId: string;
+  vehicleId: string | null;
+  assignmentId: string | null;
+  status: SafetyOperatorShiftStatus;
+  startedAt: string;
+  endedAt: string | null;
+  startLocation: GeoPoint | null;
+  endLocation: GeoPoint | null;
+  notes: string | null;
+}
+
+export interface StartSafetyOperatorShiftCommand {
+  safetyOperatorId: string;
+  sandboxProgramId: string;
+  deviceId: string;
+  vehicleId: string | null;
+  assignmentId: string | null;
+  startLocation: GeoPoint | null;
+  notes: string | null;
+}
+
+export interface EndSafetyOperatorShiftCommand {
+  safetyOperatorId: string;
+  deviceId: string;
+  endLocation: GeoPoint | null;
+  notes: string | null;
+}
+
+export interface SafetyOperatorQualificationCheckCommand {
+  safetyOperatorId: string;
+  sandboxProgramId: string;
+  vehicleId: string | null;
+  asOf: string | null;
+}
+
+export interface SafetyOperatorQualificationCheckResult {
+  safetyOperatorId: string;
+  sandboxProgramId: string;
+  vehicleId: string | null;
+  asOf: string;
+  qualified: boolean;
+  matchedQualificationIds: string[];
+  activeAssignmentId: string | null;
+  reasons: string[];
+}
+
+export const SAFETY_OPERATOR_CHECKLIST_ITEM_KEYS = [
+  "vehicle_exterior",
+  "cab_cleanliness",
+  "seatbelts",
+  "brakes",
+  "lights",
+  "tires",
+  "mirrors",
+  "recorder_health",
+  "autonomy_stack",
+  "fallback_comms",
+] as const;
+export type SafetyOperatorChecklistItemKey =
+  (typeof SAFETY_OPERATOR_CHECKLIST_ITEM_KEYS)[number];
+
+export const SAFETY_OPERATOR_CHECKLIST_ITEM_STATUSES = [
+  "pass",
+  "fail",
+  "na",
+] as const;
+export type SafetyOperatorChecklistItemStatus =
+  (typeof SAFETY_OPERATOR_CHECKLIST_ITEM_STATUSES)[number];
+
+export interface SafetyOperatorChecklistItem {
+  itemKey: SafetyOperatorChecklistItemKey;
+  status: SafetyOperatorChecklistItemStatus;
+  note: string | null;
+}
+
+export interface SafetyOperatorPreTripChecklist {
+  checklistId: string;
+  shiftId: string;
+  assignmentId: string | null;
+  safetyOperatorId: string;
+  vehicleId: string;
+  completedAt: string;
+  allPassed: boolean;
+  blockerCodes: string[];
+  items: SafetyOperatorChecklistItem[];
+  notes: string | null;
+}
+
+export interface SubmitSafetyOperatorPreTripChecklistCommand {
+  shiftId: string;
+  assignmentId: string | null;
+  safetyOperatorId: string;
+  vehicleId: string;
+  blockerCodes: string[];
+  items: SafetyOperatorChecklistItem[];
+  notes: string | null;
+}
+
+export const SAFETY_OPERATOR_TAKEOVER_TRIGGERS = [
+  "safety_operator",
+  "vehicle_alert",
+  "roc_request",
+  "odd_boundary",
+  "fallback_system",
+] as const;
+export type SafetyOperatorTakeoverTrigger =
+  (typeof SAFETY_OPERATOR_TAKEOVER_TRIGGERS)[number];
+
+export const SAFETY_OPERATOR_TAKEOVER_REASON_CODES = [
+  "obstacle",
+  "road_hazard",
+  "weather",
+  "construction",
+  "map_mismatch",
+  "sensor_fault",
+  "vehicle_fault",
+  "passenger_emergency",
+  "remote_assist_request",
+  "other",
+] as const;
+export type SafetyOperatorTakeoverReasonCode =
+  (typeof SAFETY_OPERATOR_TAKEOVER_REASON_CODES)[number];
+
+export const SAFETY_OPERATOR_TAKEOVER_DISPOSITIONS = [
+  "continued_manual",
+  "fsd_resumed",
+  "remote_assist",
+  "minimal_risk_stop",
+  "trip_ended",
+] as const;
+export type SafetyOperatorTakeoverDisposition =
+  (typeof SAFETY_OPERATOR_TAKEOVER_DISPOSITIONS)[number];
+
+export interface SafetyOperatorTakeoverReport {
+  reportId: string;
+  clientGeneratedReportId: string;
+  safetyOperatorId: string;
+  vehicleId: string;
+  orderId: string | null;
+  sandboxProgramId: string;
+  shiftId: string | null;
+  assignmentId: string | null;
+  correlationId: string;
+  trigger: SafetyOperatorTakeoverTrigger;
+  reasonCode: SafetyOperatorTakeoverReasonCode;
+  disposition: SafetyOperatorTakeoverDisposition;
+  fsdResumed: boolean;
+  bookmarkId: string | null;
+  incidentId: string | null;
+  evidenceArtifactIds: string[];
+  notes: string | null;
+  occurredAt: string;
+  serverReceivedAt: string;
+}
+
+export interface SubmitSafetyOperatorTakeoverReportCommand {
+  clientGeneratedReportId: string;
+  safetyOperatorId: string;
+  vehicleId: string;
+  orderId: string | null;
+  sandboxProgramId: string;
+  shiftId: string | null;
+  assignmentId: string | null;
+  correlationId: string;
+  trigger: SafetyOperatorTakeoverTrigger;
+  reasonCode: SafetyOperatorTakeoverReasonCode;
+  disposition: SafetyOperatorTakeoverDisposition;
+  fsdResumed: boolean;
+  bookmarkId: string | null;
+  incidentId: string | null;
+  evidenceArtifactIds: string[];
+  notes: string | null;
+  occurredAt: string;
+}
+
+export interface SafetyOperatorTakeoverReportReceipt {
+  reportId: string;
+  clientGeneratedReportId: string;
+  correlationId: string;
+  duplicate: boolean;
+  serverReceivedAt: string;
+}
+
+export interface SubmitSafetyOperatorTakeoverReportResult {
+  report: SafetyOperatorTakeoverReport;
+  receipt: SafetyOperatorTakeoverReportReceipt;
+}
+
+export const SAFETY_OPERATOR_TRIP_CLOSEOUT_STATUSES = [
+  "completed",
+  "handoff",
+  "incident_escalated",
+  "cancelled",
+] as const;
+export type SafetyOperatorTripCloseoutStatus =
+  (typeof SAFETY_OPERATOR_TRIP_CLOSEOUT_STATUSES)[number];
+
+export interface SafetyOperatorTripCloseout {
+  closeoutId: string;
+  assignmentId: string | null;
+  shiftId: string | null;
+  safetyOperatorId: string;
+  vehicleId: string;
+  orderId: string | null;
+  closeoutStatus: SafetyOperatorTripCloseoutStatus;
+  closeoutAt: string;
+  takeoverReportIds: string[];
+  incidentId: string | null;
+  evidenceArtifactIds: string[];
+  notes: string | null;
+}
+
+export interface CreateSafetyOperatorTripCloseoutCommand {
+  assignmentId: string | null;
+  shiftId: string | null;
+  safetyOperatorId: string;
+  vehicleId: string;
+  orderId: string | null;
+  closeoutStatus: SafetyOperatorTripCloseoutStatus;
+  takeoverReportIds: string[];
+  incidentId: string | null;
+  evidenceArtifactIds: string[];
+  notes: string | null;
 }
 
 export const ROC_INTERVENTION_TYPES = [
