@@ -73,12 +73,9 @@ export const embedFallbackStates = {
     tone: "warn",
     title: {
       messageCode: "sandbox_fulfillment.fallback_started.title",
-      resolvedText: "正在為您重新安排車輛",
     },
     body: {
       messageCode: "P2_AV_FALLBACK_INITIATED_V1",
-      resolvedText:
-        "因沙盒運營條件或車輛狀態調整，本次服務正在改派人駕車輛。您的原訂單仍保留，我們將更新預估到達時間。",
     },
     progressState: "vehicle_change_in_progress",
     etaMinutes: null,
@@ -90,12 +87,9 @@ export const embedFallbackStates = {
     tone: "success",
     title: {
       messageCode: "sandbox_fulfillment.fallback_assigned.title",
-      resolvedText: "新車已為您指派",
     },
     body: {
       messageCode: "P2_AV_FALLBACK_ASSIGNED_V1",
-      resolvedText:
-        "已為本次服務改派人駕車輛。除您的合約或方案另有約定外，您不會因本次改派而負擔額外費用。",
     },
     progressState: "human_fallback_assigned",
     etaMinutes: 7,
@@ -107,12 +101,9 @@ export const embedFallbackStates = {
     tone: "success",
     title: {
       messageCode: "sandbox_fulfillment.mode_changed.title",
-      resolvedText: "行程繼續進行",
     },
     body: {
       messageCode: "sandbox_fulfillment.service_continues_with_human_driver",
-      resolvedText:
-        "為確保行程安全，本行程已由車內安全員接為駕駛，目的地與預約不變。",
     },
     progressState: "service_continuing",
     etaMinutes: 4,
@@ -124,12 +115,9 @@ export const embedFallbackStates = {
     tone: "warn",
     title: {
       messageCode: "sandbox_fulfillment.eta_updated.title",
-      resolvedText: "預計時間已更新",
     },
     body: {
       messageCode: "sandbox_fulfillment.eta_updated",
-      resolvedText:
-        "為確保行程安全與服務連續性，已更新新車輛的預估抵達時間，原預約仍維持有效。",
     },
     progressState: null,
     etaMinutes: 9,

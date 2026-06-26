@@ -701,6 +701,21 @@ const en = {
     "Same booking continues. No second booking and no additional charge.",
   "embed.fallback.operatorNote":
     "Transportation provided by {name}. Service status is for reference only.",
+  "sandbox_fulfillment.fallback_started.title":
+    "We are arranging a replacement vehicle",
+  "P2_AV_FALLBACK_INITIATED_V1":
+    "Due to sandbox operating conditions or vehicle status, this service is being reassigned to a human-driven vehicle. Your original booking remains active, and the estimated arrival time will be updated.",
+  "sandbox_fulfillment.fallback_assigned.title":
+    "A replacement vehicle has been assigned",
+  "P2_AV_FALLBACK_ASSIGNED_V1":
+    "A human-driven vehicle has been assigned for this service. Unless otherwise specified by your contract or program, you will not be charged an additional fee due to this reassignment.",
+  "sandbox_fulfillment.mode_changed.title": "Trip continues",
+  "sandbox_fulfillment.service_continues_with_human_driver":
+    "To keep the trip safe, an onboard safety operator has taken over driving. Your destination and booking remain unchanged.",
+  "sandbox_fulfillment.eta_updated.title":
+    "Estimated arrival time updated",
+  "sandbox_fulfillment.eta_updated":
+    "To preserve safety and service continuity, the estimated arrival time for the reassigned vehicle has been updated. Your original booking remains valid.",
   "embed.state.handoff.title": "Ready to book as {name}",
   "embed.state.handoff.badge": "handoff · linked",
   "embed.state.reauth.title": "Sign-in state expired",
@@ -1409,6 +1424,18 @@ const zh: Record<keyof typeof en, string> = {
     "同一筆行程繼續 · 不會重新下單，也不會加收費用。",
   "embed.fallback.operatorNote":
     "接送由 {name} 提供 · 服務狀態僅供參考",
+  "sandbox_fulfillment.fallback_started.title": "正在為您重新安排車輛",
+  "P2_AV_FALLBACK_INITIATED_V1":
+    "因沙盒運營條件或車輛狀態調整，本次服務正在改派人駕車輛。您的原訂單仍保留，我們將更新預估到達時間。",
+  "sandbox_fulfillment.fallback_assigned.title": "新車已為您指派",
+  "P2_AV_FALLBACK_ASSIGNED_V1":
+    "已為本次服務改派人駕車輛。除您的合約或方案另有約定外，您不會因本次改派而負擔額外費用。",
+  "sandbox_fulfillment.mode_changed.title": "行程繼續進行",
+  "sandbox_fulfillment.service_continues_with_human_driver":
+    "為確保行程安全，本行程已由車內安全員接為駕駛，目的地與預約不變。",
+  "sandbox_fulfillment.eta_updated.title": "預計時間已更新",
+  "sandbox_fulfillment.eta_updated":
+    "為確保行程安全與服務連續性，已更新新車輛的預估抵達時間，原預約仍維持有效。",
   "embed.state.handoff.title": "以 {name} 身分為您準備叫車",
   "embed.state.handoff.badge": "handoff · 已交接",
   "embed.state.reauth.title": "登入狀態已逾時",

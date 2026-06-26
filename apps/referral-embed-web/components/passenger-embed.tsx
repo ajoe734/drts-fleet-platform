@@ -863,13 +863,13 @@ function MessageCodeSlot({
   theme,
   label,
   messageCode,
-  message,
 }: {
   theme: ReturnType<typeof buildEmbedTheme>;
   label: string;
   messageCode: string;
-  message: string;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div
       style={{
@@ -903,7 +903,7 @@ function MessageCodeSlot({
           color: "var(--embed-neutral-fg)",
         }}
       >
-        {message}
+        {t(messageCode)}
       </div>
     </div>
   );
@@ -1018,7 +1018,7 @@ function FallbackStateView({ context }: { context: EmbedContext }) {
           <EmbedGlyph name={current.icon} size={28} stroke={2.2} />
         </div>
         <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.25 }}>
-          {current.title.resolvedText}
+          {t(current.title.messageCode)}
         </div>
         <div
           style={{
@@ -1031,7 +1031,7 @@ function FallbackStateView({ context }: { context: EmbedContext }) {
             border: `1px dashed ${theme.neutralBorder}`,
           }}
         >
-          title ← {current.title.messageCode}
+          passengerMessageCode · {current.title.messageCode}
         </div>
       </div>
 
@@ -1099,9 +1099,8 @@ function FallbackStateView({ context }: { context: EmbedContext }) {
 
       <MessageCodeSlot
         theme={theme}
-        label="messageCode"
+        label="passengerMessageCode"
         messageCode={current.body.messageCode}
-        message={current.body.resolvedText}
       />
 
       <Card>
@@ -1387,7 +1386,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
                         : "white",
                   }}
                 >
-                  {embedFallbackStates[screen].title.resolvedText}
+                  {t(embedFallbackStates[screen].title.messageCode)}
                 </Link>
               ))}
             </div>
