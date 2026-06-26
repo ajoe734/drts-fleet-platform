@@ -151,6 +151,46 @@ describe("TeslaRegulatoryEventsService", () => {
     ).toBe(true);
   });
 
+  it("rejects requests that present only x-provider-identity without an mTLS client certificate header", async () => {
+    const { audit, service } = buildService();
+    const payload = JSON.stringify({
+      schemaVersion: "tesla.regulatory-event.v1",
+      providerEventId: "evt-mtls-bypass-001",
+      vehicleId: "veh-demo-007",
+      eventType: "collision",
+      occurredAt: "2026-06-26T02:17:00.000Z",
+    });
+
+    await expect(
+      service.ingest({
+        body: JSON.parse(payload) as unknown,
+        rawBody: Buffer.from(payload),
+        headers: {
+          "x-provider-identity": "tesla-regulatory-sandbox",
+          "x-jws-signature": signDetachedJws(
+            payload,
+            privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+          ),
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "MTLS_IDENTITY_REQUIRED",
+        },
+      },
+    });
+
+    expect(audit.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "ingress.rejected_missing_mtls_identity",
+          moduleName: "tesla-regulatory-events",
+        }),
+      ]),
+    );
+  });
+
   it("rejects DER-encoded ES256 detached signatures because JOSE requires P-1363", async () => {
     const { service } = buildService();
     const payload = JSON.stringify({
@@ -325,5 +365,46 @@ describe("TeslaRegulatoryEventsService", () => {
         normalizationStatus: "accepted",
       }),
     ]);
+  });
+
+  it("keeps duplicate raw inserts idempotent in the repository fallback path", async () => {
+    const repository = new TeslaRegulatoryEventsRepository();
+    const payload = JSON.stringify({
+      schemaVersion: "tesla.regulatory-event.v1",
+      providerEventId: "evt-race-001",
+      vehicleId: "veh-demo-008",
+      eventType: "near_miss",
+      occurredAt: "2026-06-26T02:18:00.000Z",
+    });
+
+    const input = {
+      providerCode: "tesla",
+      providerIdentity: "tesla-regulatory-sandbox",
+      providerEventId: "evt-race-001",
+      schemaVersion: "tesla.regulatory-event.v1",
+      payloadSha256: createHash("sha256").update(Buffer.from(payload)).digest("hex"),
+      payloadBody: payload,
+      payloadBytes: Buffer.byteLength(payload),
+      rawHeaders: [],
+      jwsProtectedHeader: { alg: "ES256", kid: "tesla-test-kid" },
+      jwsSignature: "seeded",
+      jwsKid: "tesla-test-kid",
+      jwsAlg: "ES256",
+      jwsIssuedAt: "2026-06-26T02:18:00.000Z",
+      mtlsClientCert: "CN=tesla-regulatory-sandbox",
+      mtlsFingerprint: null,
+      receivedAt: "2026-06-26T02:18:01.000Z",
+      occurredAt: "2026-06-26T02:18:00.000Z",
+      normalizationStatus: "pending" as const,
+      canonicalEventId: null,
+    };
+
+    const first = await repository.createRawEventIfAbsent(input);
+    const second = await repository.createRawEventIfAbsent(input);
+
+    expect(first.inserted).toBe(true);
+    expect(second.inserted).toBe(false);
+    expect(second.rawEvent.rawEventId).toBe(first.rawEvent.rawEventId);
+    expect(repository.listRawEvents()).toHaveLength(1);
   });
 });

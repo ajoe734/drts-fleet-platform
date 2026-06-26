@@ -24,6 +24,10 @@ type TeslaRegulatoryEventsQueryExecutor = {
   ): Promise<QueryResult<T>>;
 };
 
+type PgErrorWithCode = Error & {
+  code?: string;
+};
+
 export interface TeslaRegulatoryRawEventRecord {
   rawEventId: string;
   providerCode: string;
@@ -306,6 +310,57 @@ export class TeslaRegulatoryEventsRepository {
     );
 
     return this.mapRawEventRow(result.rows[0]!);
+  }
+
+  async createRawEventIfAbsent(
+    input: CreateTeslaRegulatoryRawEventInput,
+    executor?: TeslaRegulatoryEventsQueryExecutor,
+  ): Promise<{
+    rawEvent: TeslaRegulatoryRawEventRecord;
+    inserted: boolean;
+  }> {
+    if (!this.isEnabled()) {
+      const existing = this.rawEvents.get(
+        this.rawEventKey(input.providerCode, input.providerEventId),
+      );
+      if (existing) {
+        return {
+          rawEvent: { ...existing },
+          inserted: false,
+        };
+      }
+
+      return {
+        rawEvent: await this.createRawEvent(input, executor),
+        inserted: true,
+      };
+    }
+
+    try {
+      return {
+        rawEvent: await this.createRawEvent(input, executor),
+        inserted: true,
+      };
+    } catch (error) {
+      if ((error as PgErrorWithCode).code !== "23505") {
+        throw error;
+      }
+
+      const rawEvent = await this.findRawEventByProviderRef(
+        input.providerCode,
+        input.providerEventId,
+        executor,
+        executor ? { forUpdate: true } : undefined,
+      );
+      if (!rawEvent) {
+        throw error;
+      }
+
+      return {
+        rawEvent,
+        inserted: false,
+      };
+    }
   }
 
   async attachCanonicalEvent(

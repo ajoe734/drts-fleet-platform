@@ -24,7 +24,6 @@ import {
   TeslaRegulatoryEventsRepository,
   type CreateTeslaRegulatoryCanonicalEventInput,
   type CreateTeslaRegulatoryRawEventInput,
-  type TeslaRegulatoryCanonicalEventRecord,
   type TeslaRegulatoryRawEventRecord,
 } from "./tesla-regulatory-events.repository";
 
@@ -109,7 +108,6 @@ export class TeslaRegulatoryEventsService {
         request.headers,
         "x-forwarded-client-cert",
         "x-ssl-client-subject-dn",
-        "x-provider-identity",
       );
       const providerIdentity = this.verifyProviderIdentity(clientCert);
       const verifiedJws = this.verifyDetachedJws(rawBody, request.headers);
@@ -613,7 +611,7 @@ export class TeslaRegulatoryEventsService {
     requestId?: string,
   ): Promise<{
     rawEvent: TeslaRegulatoryRawEventRecord;
-    canonicalEvent: TeslaRegulatoryCanonicalEventRecord | null;
+    canonicalEvent: CanonicalEventReceiptRef | null;
     status: TeslaRegulatoryIngressReceipt["status"];
     duplicate: boolean;
   }> {
@@ -648,7 +646,7 @@ export class TeslaRegulatoryEventsService {
     executor?: PoolClient,
   ): Promise<{
     rawEvent: TeslaRegulatoryRawEventRecord;
-    canonicalEvent: TeslaRegulatoryCanonicalEventRecord | null;
+    canonicalEvent: CanonicalEventReceiptRef | null;
     status: TeslaRegulatoryIngressReceipt["status"];
     duplicate: boolean;
   }> {
@@ -670,10 +668,24 @@ export class TeslaRegulatoryEventsService {
       );
     }
 
-    const rawEvent = await this.repository.createRawEvent(rawEventInput, executor);
+    const rawEventResult = await this.repository.createRawEventIfAbsent(
+      rawEventInput,
+      executor,
+    );
+    if (!rawEventResult.inserted) {
+      return this.handleExistingEvent(
+        rawEventResult.rawEvent,
+        canonicalEventInput,
+        payloadSha256,
+        providerIdentity,
+        requestId,
+        executor,
+      );
+    }
+
     if (!canonicalEventInput) {
       return {
-        rawEvent,
+        rawEvent: rawEventResult.rawEvent,
         canonicalEvent: null,
         status: "quarantined",
         duplicate: false,
@@ -683,25 +695,27 @@ export class TeslaRegulatoryEventsService {
     const canonicalEvent = await this.repository.createCanonicalEvent(
       {
         ...canonicalEventInput,
-        rawEventId: rawEvent.rawEventId,
+        rawEventId: rawEventResult.rawEvent.rawEventId,
         source: {
           ...canonicalEventInput.source,
-          ingestedAt: rawEvent.receivedAt,
-          signatureRef: `tesla-regulatory-raw:${rawEvent.rawEventId}`,
+          ingestedAt: rawEventResult.rawEvent.receivedAt,
+          signatureRef: `tesla-regulatory-raw:${rawEventResult.rawEvent.rawEventId}`,
         },
       },
       executor,
     );
     const attachedRawEvent =
       (await this.repository.attachCanonicalEvent(
-        rawEvent.rawEventId,
+        rawEventResult.rawEvent.rawEventId,
         canonicalEvent.eventId,
         executor,
-      )) ?? rawEvent;
+      )) ?? rawEventResult.rawEvent;
 
     return {
       rawEvent: attachedRawEvent,
-      canonicalEvent,
+      canonicalEvent: {
+        eventId: canonicalEvent.eventId,
+      },
       status: "accepted",
       duplicate: false,
     };
@@ -716,7 +730,7 @@ export class TeslaRegulatoryEventsService {
     executor?: PoolClient,
   ): Promise<{
     rawEvent: TeslaRegulatoryRawEventRecord;
-    canonicalEvent: TeslaRegulatoryCanonicalEventRecord | null;
+    canonicalEvent: CanonicalEventReceiptRef | null;
     status: TeslaRegulatoryIngressReceipt["status"];
     duplicate: boolean;
   }> {
@@ -791,7 +805,9 @@ export class TeslaRegulatoryEventsService {
 
       return {
         rawEvent: attachedRawEvent,
-        canonicalEvent,
+        canonicalEvent: {
+          eventId: canonicalEvent.eventId,
+        },
         status: "duplicate",
         duplicate: true,
       };
