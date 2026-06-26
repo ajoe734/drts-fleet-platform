@@ -2271,6 +2271,51 @@ export interface AssignDispatchCommand {
   dispatchJobId: string;
   vehicleId: string;
   driverId: string;
+  sandboxDispatchSnapshot?: {
+    entitlement?: {
+      active: boolean | null;
+    } | null;
+    candidateRoute?: {
+      type: "MultiLineString";
+      coordinates: [number, number][][];
+    } | null;
+    providerCapabilities?: Partial<
+      Record<
+        | "av_dispatch"
+        | "remote_command"
+        | "telemetry_stream"
+        | "regulatory_event_feed"
+        | "evidence_recorder"
+        | "odd_geofence"
+        | "minimal_risk_condition",
+        boolean | null
+      >
+    > | null;
+    telemetry?: {
+      stale: boolean | null;
+      minimalRiskConditionActive: boolean | null;
+      socPercent: number | null;
+      currentTripCount?: number | null;
+      odometerKm?: number | null;
+    } | null;
+    regulatory?: {
+      approvalFresh: boolean | null;
+      vehicleCertified: boolean | null;
+    } | null;
+    recorder?: {
+      healthy: boolean | null;
+    } | null;
+    holdState?: {
+      activeSafetyIncident: boolean | null;
+      programSuspended: boolean | null;
+      vehicleHold: boolean | null;
+    } | null;
+    limits?: {
+      minSocPercent?: number | null;
+      maxConcurrentTrips?: number | null;
+      maxOdometerKm?: number | null;
+    } | null;
+  } | null;
 }
 
 export interface ReassignDispatchCommand {

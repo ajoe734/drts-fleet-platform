@@ -80,6 +80,7 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
+import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityTripCompletedEvent,
@@ -250,6 +251,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly eventEmitter?: EventEmitter2,
     @Optional()
     private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
+    @Optional()
+    private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -2430,6 +2433,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       command.vehicleId,
       command.driverId,
+      command.sandboxDispatchSnapshot ?? null,
       requestId,
     );
   }
@@ -2501,6 +2505,7 @@ export class OwnedMobilityService implements OnModuleInit {
         order,
         command.vehicleId,
         command.driverId,
+        null,
         requestId,
         {
           dispatchAttemptSequence: reassignAttemptSequence + 1,
@@ -2568,6 +2573,7 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     vehicleId: string,
     driverId: string,
+    sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     requestId?: string,
     options?: CreateDispatchAssignmentOptions,
   ): MaybePromise<DispatchAssignmentResult> {
@@ -2579,6 +2585,7 @@ export class OwnedMobilityService implements OnModuleInit {
             order,
             vehicleId,
             driverId,
+            sandboxDispatchSnapshot,
             options,
           );
           this.assertAssignmentEligibilityRecheck(
@@ -2586,6 +2593,14 @@ export class OwnedMobilityService implements OnModuleInit {
             dispatchJob.dispatchJobId,
             vehicleId,
             driverId,
+          );
+          await this.assertSandboxDispatchGate(
+            bundle.order,
+            dispatchJob.dispatchJobId,
+            vehicleId,
+            driverId,
+            sandboxDispatchSnapshot,
+            requestId,
           );
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(bundle.order)],
@@ -2610,15 +2625,26 @@ export class OwnedMobilityService implements OnModuleInit {
       vehicleId,
       driverId,
     );
-    return this.applyDispatchAssignmentBundle(
-      this.buildDispatchAssignmentBundle(
-        dispatchJob,
-        order,
-        vehicleId,
-        driverId,
-        options,
-      ),
+    const sandboxGateResult = this.assertSandboxDispatchGate(
+      order,
+      dispatchJob.dispatchJobId,
+      vehicleId,
+      driverId,
+      sandboxDispatchSnapshot,
       requestId,
+    );
+    return this.afterMaybePromise(sandboxGateResult, () =>
+      this.applyDispatchAssignmentBundle(
+        this.buildDispatchAssignmentBundle(
+          dispatchJob,
+          order,
+          vehicleId,
+          driverId,
+          sandboxDispatchSnapshot,
+          options,
+        ),
+        requestId,
+      ),
     );
   }
 
@@ -4431,6 +4457,48 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
+  private assertSandboxDispatchGate(
+    order: OwnedOrderRecord,
+    dispatchJobId: string,
+    vehicleId: string,
+    driverId: string,
+    sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
+    requestId?: string,
+  ) {
+    if (!this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(vehicleId)) {
+      return;
+    }
+
+    return this.afterMaybePromise(
+      this.sandboxDispatchGateService.buildAssignmentGateInput({
+        orderId: order.orderId,
+        dispatchJobId,
+        vehicleId,
+        driverId,
+        bookingWindow: {
+          start: order.reservationWindowStart,
+          end: order.reservationWindowEnd,
+        },
+        pickup: order.pickup,
+        dropoff: order.dropoff,
+        entitlement: sandboxDispatchSnapshot?.entitlement ?? null,
+        candidateRoute: sandboxDispatchSnapshot?.candidateRoute ?? null,
+        providerCapabilities:
+          sandboxDispatchSnapshot?.providerCapabilities ?? null,
+        telemetry: sandboxDispatchSnapshot?.telemetry ?? null,
+        regulatory: sandboxDispatchSnapshot?.regulatory ?? null,
+        recorder: sandboxDispatchSnapshot?.recorder ?? null,
+        holdState: sandboxDispatchSnapshot?.holdState ?? null,
+        limits: sandboxDispatchSnapshot?.limits ?? null,
+      }),
+      (gateInput) =>
+        this.sandboxDispatchGateService!.assertAssignmentEligible(
+          gateInput,
+          requestId,
+        ),
+    );
+  }
+
   private resolveServiceProductCodeForOrder(
     order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
   ): ServiceProductType | null {
@@ -4450,6 +4518,7 @@ export class OwnedMobilityService implements OnModuleInit {
     order: OwnedOrderRecord,
     vehicleId: string,
     driverId: string,
+    _sandboxDispatchSnapshot?: AssignDispatchCommand["sandboxDispatchSnapshot"],
     options?: CreateDispatchAssignmentOptions,
   ): DispatchAssignmentBundle {
     const now = new Date().toISOString();
