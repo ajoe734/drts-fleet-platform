@@ -18,6 +18,67 @@ const READY_PASSENGER_DISCLOSURE = {
 };
 
 describe("SandboxDispatchGateService", () => {
+  it("reuses the persisted catalog entry id when updating a seeded disclosure message without an explicit entry id", async () => {
+    const persistEntry = vi.fn(async () => undefined);
+    const gate = new SandboxDispatchGateService(
+      undefined,
+      undefined,
+      {
+        isEnabled: vi.fn(() => true),
+        listPassengerDisclosurePolicies: vi.fn(async () => []),
+        listPassengerDisclosureMessageCatalogEntries: vi.fn(async () => [
+          {
+            entryId: "pdc-v1-av-en-us",
+            catalogVersion: "passenger_disclosure.v1",
+            messageCode: "sandbox_passenger_disclosure.av_program_notice",
+            locale: "en-US",
+            bodyText: "baseline",
+            legalApproved: true,
+            createdAt: "2026-06-26T00:00:00.000Z",
+            updatedAt: "2026-06-26T00:00:00.000Z",
+          },
+        ]),
+        listPassengerAcknowledgements: vi.fn(async () => []),
+        upsertPassengerDisclosureMessageCatalogEntry: persistEntry,
+      } as never,
+    );
+
+    const updatedEntry =
+      await gate.upsertPassengerDisclosureMessageCatalogEntry({
+        catalogVersion: "passenger_disclosure.v1",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "updated legal copy",
+        legalApproved: true,
+      });
+
+    expect(updatedEntry.entryId).toBe("pdc-v1-av-en-us");
+    expect(updatedEntry.createdAt).toBe("2026-06-26T00:00:00.000Z");
+    expect(persistEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entryId: "pdc-v1-av-en-us",
+        messageCode: "sandbox_passenger_disclosure.av_program_notice",
+        locale: "en-US",
+        bodyText: "updated legal copy",
+      }),
+    );
+
+    await expect(gate.listPassengerDisclosureMessageCatalogEntries()).resolves
+      .toEqual([
+        expect.objectContaining({
+          entryId: "pdc-v1-av-en-us",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          locale: "en-US",
+          bodyText: "updated legal copy",
+        }),
+        expect.objectContaining({
+          entryId: "pdc-v1-av-zh-tw",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          locale: "zh-TW",
+        }),
+      ]);
+  });
+
   it("blocks dispatch when vehicle evidence reports a required unhealthy recorder", async () => {
     const vehicleEvidenceService = new VehicleEvidenceService();
     const recorder = buildMockRecorderFixture();
