@@ -28,6 +28,14 @@ const PLATFORM_IDENTITY = {
   tenantId: null,
 };
 
+const PLATFORM_IDENTITY_2 = {
+  actorId: "platform-admin-002",
+  actorType: "platform_admin" as const,
+  realm: "platform" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
 function buildChecksum(input: string) {
   return createHash("sha256").update(input).digest("hex");
 }
@@ -370,11 +378,18 @@ describe("VehicleEvidenceService", () => {
       expect(getErrorCode(error)).toBe("EVIDENCE_DELETION_BLOCKED_BY_HOLD");
     }
 
+    const releaseReason = "Investigation closed.";
     auditNotificationService.releaseEvidenceLegalHold(
       hold.holdId,
-      { releaseReason: "Investigation closed." },
+      { releaseReason },
       PLATFORM_IDENTITY,
       "req-release-001",
+    );
+    auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY_2,
+      "req-release-002",
     );
     const purged = service.purgeArtifact(
       artifactId,
@@ -463,6 +478,47 @@ describe("VehicleEvidenceService", () => {
             entry.metadata.emittedEvent === result.emittedEvent,
         ),
     ).toBe(true);
+
+    const releaseReason = "Retention review completed.";
+    const releaseRequested = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY,
+      "req-scheduler-release-request-001",
+    );
+    expect(releaseRequested.status).toBe("release_requested");
+
+    const released = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY_2,
+      "req-scheduler-release-001",
+    );
+    expect(released.status).toBe("released");
+    expect(auditNotificationService.listEvidenceDeletionExceptions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          exceptionId: result.conflictExceptionId,
+          status: "resolved",
+        }),
+      ]),
+    );
+
+    const rerun = await service.runDeletionScheduler(
+      {
+        artifactId: freeze.artifacts[0]!.artifactId,
+        currentTime: "2026-06-26T15:07:00.000Z",
+      },
+      "req-scheduler-run-002",
+    );
+    expect(rerun).toMatchObject({
+      decision: "deferred_by_retention",
+      emittedEvent:
+        PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
+          .deferredByRetention,
+      exceptionIds: [],
+      conflictExceptionId: null,
+    });
   });
 
   it("preserves evidence locally and verifies checksum when provider expiry is near", async () => {

@@ -492,7 +492,7 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
 const LEGAL_HOLD_WORKFLOW = [
   "Platform admin or ops places the hold with a case number, evidence family, subject reference, and reason code.",
   "Legal holds take precedence over regulator, contract, normal-retention, and deletion-request flows until the hold is released.",
-  "Release requires a different platform-admin approver than the actor who placed the hold, and authority-triggered releases must record a release reference.",
+  "Release is a two-step platform-admin workflow: the first call records a release_requested transition, and final approval requires a different platform-admin approver than the requester and the actor who placed the hold; authority-triggered releases must record a release reference.",
   "Archive and deletion workers must skip held evidence until an audited release is recorded by platform admin.",
   "Tenant-visible surfaces may note that evidence is under hold, but they cannot release or delete held evidence directly.",
 ];

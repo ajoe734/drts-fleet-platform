@@ -10,6 +10,7 @@ import type {
   EvidenceDeletionExceptionStatus,
   EvidenceGovernancePrecedence,
   EvidenceLegalHoldRecord,
+  EvidenceLegalHoldReleaseTrigger,
   EvidenceRetentionFamily,
   EvidenceSubjectGovernanceRecord,
   IdentityContext,
@@ -21,6 +22,7 @@ import type {
 import {
   EVIDENCE_DELETION_EXCEPTION_REASON_CODES,
   EVIDENCE_LEGAL_HOLD_REASON_CODES,
+  EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -466,7 +468,7 @@ export class AuditNotificationService implements OnModuleInit {
       );
     }
     this.assertLegalHoldReleaseAllowed(existing.family, actor);
-    if (existing.status !== "active") {
+    if (existing.status === "released") {
       throw new ApiRequestError(
         409,
         "EVIDENCE_LEGAL_HOLD_ALREADY_RELEASED",
@@ -474,43 +476,52 @@ export class AuditNotificationService implements OnModuleInit {
         { holdId: normalizedHoldId, status: existing.status },
       );
     }
-    if (existing.placedByActorId === actor.actorId) {
+
+    if (existing.status === "active") {
+      return this.requestEvidenceLegalHoldRelease(
+        existing,
+        command,
+        actor,
+        requestId,
+      );
+    }
+
+    if (existing.status !== "release_requested") {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_INVALID_STATUS",
+        "The evidence legal hold is not in a releasable state.",
+        { holdId: normalizedHoldId, status: existing.status },
+      );
+    }
+
+    if (
+      existing.releaseRequestedByActorId === actor.actorId ||
+      existing.placedByActorId === actor.actorId
+    ) {
       throw new ApiRequestError(
         409,
         "EVIDENCE_LEGAL_HOLD_SECOND_APPROVER_REQUIRED",
-        "Releasing a legal hold requires a different platform-admin approver than the actor who placed it.",
+        "Final release approval requires a different platform-admin approver than the requester and the actor who placed the hold.",
         {
           holdId: normalizedHoldId,
           placedByActorId: existing.placedByActorId,
+          releaseRequestedByActorId: existing.releaseRequestedByActorId,
           approverActorId: actor.actorId,
         },
       );
     }
 
-    const releaseReason = this.requireNonBlank(
-      command.releaseReason,
-      "releaseReason",
-    );
-    const releaseTrigger = command.releaseTrigger ?? "manual";
-    const releaseReference = this.normalizeOptional(command.releaseReference);
-    if (releaseTrigger === "authority" && !releaseReference) {
-      throw new ApiRequestError(
-        400,
-        "EVIDENCE_LEGAL_HOLD_RELEASE_REFERENCE_REQUIRED",
-        "Authority-triggered legal hold releases require a release reference.",
-        { holdId: normalizedHoldId },
-      );
-    }
-
-    const releaseRequestedAt = new Date().toISOString();
+    const {
+      releaseReason,
+      releaseTrigger,
+      releaseReference,
+    } = this.requirePendingLegalHoldReleaseApproval(existing, command);
     const releasedAt = new Date().toISOString();
 
     const updated: EvidenceLegalHoldRecord = {
       ...existing,
       status: "released",
-      releaseRequestedByActorId: existing.placedByActorId,
-      releaseRequestedByActorType: existing.placedByActorType,
-      releaseRequestedAt,
       releaseTrigger,
       releaseReference,
       releasedByActorId: actor.actorId,
@@ -519,12 +530,6 @@ export class AuditNotificationService implements OnModuleInit {
       releaseReason,
       transitionHistory: [
         ...existing.transitionHistory,
-        {
-          from: "active",
-          to: "release_requested",
-          at: releaseRequestedAt,
-          reason: "release_requested",
-        },
         {
           from: "release_requested",
           to: "released",
@@ -543,6 +548,76 @@ export class AuditNotificationService implements OnModuleInit {
       tenantId: updated.tenantId,
       moduleName: "audit-notification",
       actionName: "release_evidence_legal_hold",
+      resourceType: "evidence_legal_hold",
+      resourceId: updated.holdId,
+      oldValuesSummary: { ...existing },
+      newValuesSummary: { ...updated },
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
+
+    this.resolveSyntheticDeletionConflictExceptionsForHold(
+      updated,
+      actor,
+      requestId,
+    );
+
+    return cloneEvidenceLegalHold(updated);
+  }
+
+  private requestEvidenceLegalHoldRelease(
+    existing: EvidenceLegalHoldRecord,
+    command: ReleaseEvidenceLegalHoldCommand,
+    actor: OperationalIdentity & { actorId: string },
+    requestId?: string,
+  ) {
+    const releaseReason = this.requireNonBlank(
+      command.releaseReason,
+      "releaseReason",
+    );
+    const releaseTrigger = this.requireLegalHoldReleaseTrigger(
+      command.releaseTrigger,
+    );
+    const releaseReference = this.normalizeOptional(command.releaseReference);
+    if (releaseTrigger === "authority" && !releaseReference) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REFERENCE_REQUIRED",
+        "Authority-triggered legal hold releases require a release reference.",
+        { holdId: existing.holdId },
+      );
+    }
+
+    const releaseRequestedAt = new Date().toISOString();
+
+    const updated: EvidenceLegalHoldRecord = {
+      ...existing,
+      status: "release_requested",
+      releaseRequestedByActorId: actor.actorId,
+      releaseRequestedByActorType: actor.actorType,
+      releaseRequestedAt,
+      releaseTrigger,
+      releaseReference,
+      releasedByActorId: null,
+      releasedByActorType: null,
+      releasedAt: null,
+      releaseReason,
+      transitionHistory: [
+        ...existing.transitionHistory,
+        {
+          from: "active",
+          to: "release_requested",
+          at: releaseRequestedAt,
+          reason: "release_requested",
+        },
+      ],
+    };
+
+    this.recordAuditLog({
+      actorId: actor.actorId,
+      actorType: actor.actorType as AuditLogRecord["actorType"],
+      tenantId: updated.tenantId,
+      moduleName: "audit-notification",
+      actionName: "request_evidence_legal_hold_release",
       resourceType: "evidence_legal_hold",
       resourceId: updated.holdId,
       oldValuesSummary: { ...existing },
@@ -843,7 +918,7 @@ export class AuditNotificationService implements OnModuleInit {
 
     this.recordAuditLog({
       actorId: exceptionRecord.requestedByActorId,
-      actorType: exceptionRecord.requestedByActorType,
+      actorType: exceptionRecord.requestedByActorType as AuditLogRecord["actorType"],
       tenantId,
       moduleName: "audit-notification",
       actionName: "register_evidence_deletion_exception",
@@ -1161,6 +1236,109 @@ export class AuditNotificationService implements OnModuleInit {
     return normalized as T[number];
   }
 
+  private requireLegalHoldReleaseTrigger(
+    value: string | null | undefined,
+  ): EvidenceLegalHoldReleaseTrigger {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return "manual";
+    }
+    if (
+      !EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS.includes(
+        normalized as EvidenceLegalHoldReleaseTrigger,
+      )
+    ) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_GOVERNANCE_INVALID_RELEASE_TRIGGER",
+        "The releaseTrigger value is not supported.",
+        {
+          field: "releaseTrigger",
+          value: normalized,
+          allowed: EVIDENCE_LEGAL_HOLD_RELEASE_TRIGGERS,
+        },
+      );
+    }
+    return normalized as EvidenceLegalHoldReleaseTrigger;
+  }
+
+  private requirePendingLegalHoldReleaseApproval(
+    existing: EvidenceLegalHoldRecord,
+    command: ReleaseEvidenceLegalHoldCommand,
+  ) {
+    const releaseReason = this.requireNonBlank(
+      command.releaseReason,
+      "releaseReason",
+    );
+    if (existing.releaseReason && existing.releaseReason !== releaseReason) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REQUEST_MISMATCH",
+        "The releaseReason does not match the pending legal hold release request.",
+        {
+          holdId: existing.holdId,
+          field: "releaseReason",
+          expected: existing.releaseReason,
+          received: releaseReason,
+        },
+      );
+    }
+
+    const releaseTrigger = this.requireLegalHoldReleaseTrigger(
+      command.releaseTrigger ?? existing.releaseTrigger,
+    );
+    if (existing.releaseTrigger && existing.releaseTrigger !== releaseTrigger) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REQUEST_MISMATCH",
+        "The releaseTrigger does not match the pending legal hold release request.",
+        {
+          holdId: existing.holdId,
+          field: "releaseTrigger",
+          expected: existing.releaseTrigger,
+          received: releaseTrigger,
+        },
+      );
+    }
+
+    const requestedReleaseReference = this.normalizeOptional(
+      command.releaseReference,
+    );
+    if (
+      existing.releaseReference &&
+      requestedReleaseReference &&
+      existing.releaseReference !== requestedReleaseReference
+    ) {
+      throw new ApiRequestError(
+        409,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REQUEST_MISMATCH",
+        "The releaseReference does not match the pending legal hold release request.",
+        {
+          holdId: existing.holdId,
+          field: "releaseReference",
+          expected: existing.releaseReference,
+          received: requestedReleaseReference,
+        },
+      );
+    }
+
+    const releaseReference = existing.releaseReference ?? requestedReleaseReference;
+    if (releaseTrigger === "authority" && !releaseReference) {
+      throw new ApiRequestError(
+        400,
+        "EVIDENCE_LEGAL_HOLD_RELEASE_REFERENCE_REQUIRED",
+        "Authority-triggered legal hold releases require a release reference.",
+        { holdId: existing.holdId },
+      );
+    }
+
+    return {
+      releaseReason: existing.releaseReason ?? releaseReason,
+      releaseTrigger,
+      releaseReference,
+    };
+  }
+
   private withEffectiveDeletionExceptionStatus(
     exception: EvidenceDeletionExceptionRecord,
   ): EvidenceDeletionExceptionRecord {
@@ -1250,5 +1428,37 @@ export class AuditNotificationService implements OnModuleInit {
       const detail = error instanceof Error ? error.message : String(error);
       this.logger.warn(`Audit log write-through skipped: ${detail}`);
     });
+  }
+
+  private resolveSyntheticDeletionConflictExceptionsForHold(
+    hold: EvidenceLegalHoldRecord,
+    actor: OperationalIdentity,
+    requestId?: string,
+  ) {
+    const syntheticExceptions = [...this.evidenceDeletionExceptions.values()]
+      .map((exception) => this.withEffectiveDeletionExceptionStatus(exception))
+      .filter(
+        (exception) =>
+          exception.family === hold.family &&
+          exception.subjectId === hold.subjectId &&
+          exception.sourceResourceType === "evidence_legal_hold" &&
+          exception.sourceResourceId === hold.holdId &&
+          exception.requestedByActorId ===
+            "system:evidence-deletion-scheduler" &&
+          exception.requestedByActorType === "system" &&
+          exception.status === "active",
+      );
+
+    for (const exception of syntheticExceptions) {
+      this.resolveEvidenceDeletionException(
+        exception.exceptionId,
+        {
+          resolutionNote:
+            "Legal hold released; clearing scheduler-created deletion conflict exception.",
+        },
+        actor,
+        requestId,
+      );
+    }
   }
 }

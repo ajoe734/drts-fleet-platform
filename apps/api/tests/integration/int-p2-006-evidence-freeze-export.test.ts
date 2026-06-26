@@ -23,6 +23,14 @@ const PLATFORM_IDENTITY = {
   tenantId: null,
 };
 
+const PLATFORM_IDENTITY_2 = {
+  actorId: "platform-admin-002",
+  actorType: "platform_admin" as const,
+  realm: "platform" as const,
+  scopes: ["audit:read"],
+  tenantId: null,
+};
+
 function getErrorCode(error: unknown) {
   if (!(error instanceof ApiRequestError)) {
     throw error;
@@ -153,6 +161,43 @@ describe("INT-P2-006 / E2E-P2-006 / UAT-AV-009 vehicle evidence freeze + export"
             PHASE2_AUDIT_EVENT_CATALOG.evidence.deletionByDecision
               .skippedDueToHold,
           resourceId: freeze.artifacts[0]!.artifactId,
+        }),
+      ]),
+    );
+
+    const releaseReason = "Regulator handoff closed.";
+    const releaseRequested = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY,
+      "req-int-p2-006-release-request",
+    );
+    expect(releaseRequested.status).toBe("release_requested");
+
+    const released = auditNotificationService.releaseEvidenceLegalHold(
+      hold.holdId,
+      { releaseReason },
+      PLATFORM_IDENTITY_2,
+      "req-int-p2-006-release-approve",
+    );
+    expect(released.status).toBe("released");
+
+    const resumedSchedulerResult = await vehicleEvidenceService.runDeletionScheduler(
+      {
+        artifactId: freeze.artifacts[0]!.artifactId,
+        currentTime: "2026-06-26T14:08:00.000Z",
+      },
+      "req-int-p2-006-scheduler-rerun",
+    );
+    expect(resumedSchedulerResult.decision).toBe("deferred_by_retention");
+    expect(resumedSchedulerResult.exceptionIds).toEqual([]);
+    expect(
+      auditNotificationService.listEvidenceDeletionExceptions(),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          exceptionId: schedulerResult.conflictExceptionId,
+          status: "resolved",
         }),
       ]),
     );
