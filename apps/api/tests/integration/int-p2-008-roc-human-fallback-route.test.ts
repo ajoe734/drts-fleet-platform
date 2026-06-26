@@ -132,4 +132,113 @@ describe("INT-P2-008 HTTP routing / ROC fallback to human", () => {
       ]),
     });
   });
+
+  it("exposes ops-readable sandbox fulfillment and booking-scoped fallback reports for the same booking", async () => {
+    const booking = await ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-26T16:00:00.000Z",
+        reservationWindowEnd: "2026-06-26T17:00:00.000Z",
+        pickup: { address: "Taipei Arena", lat: 25.0504, lng: 121.5505 },
+        dropoff: { address: "Songshan Airport", lat: 25.0697, lng: 121.5526 },
+        passenger: { name: "Rider Projection", phone: "0912000015" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchResult = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const decision = await sandboxDispatchGateService.evaluateDispatch({
+      orderId: booking.orderId,
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "veh-av-missing-001",
+      sandboxProgramId: "phase2-tesla-fsd-sandbox-202606",
+      policyVersion: "sandbox-dispatch-gate.v1",
+    });
+    expect(decision.fallbackRequired).toBe(true);
+
+    const fallbackResponse = await fetch(
+      `${baseUrl}/api/roc/trips/${booking.orderId}/fallback-to-human`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "req-p2-fallback-http-002",
+        },
+        body: JSON.stringify({
+          dispatchJobId: dispatchResult.dispatchJobId,
+          sandboxDecisionId: decision.decisionId,
+          humanVehicleId: "veh-demo-004",
+          humanDriverId: "drv-demo-004",
+          revisedEtaMinutes: 11,
+          reason: "Projection parity coverage for ops-console AV fallback",
+          rocOperatorId: "ops-roc-http-002",
+          trigger: "gate_fallback_required",
+        }),
+      },
+    );
+    expect(fallbackResponse.status).toBe(201);
+
+    const projectionResponse = await fetch(
+      `${baseUrl}/api/ops/bookings/${booking.bookingId}/sandbox-fulfillment?audience=passenger`,
+      {
+        headers: {
+          "x-request-id": "req-p2-fallback-http-003",
+        },
+      },
+    );
+
+    expect(projectionResponse.status).toBe(200);
+    await expect(projectionResponse.json()).resolves.toEqual({
+      data: expect.objectContaining({
+        bookingId: booking.bookingId,
+        orderId: booking.orderId,
+        audience: "passenger",
+        fulfillmentMode: "mixed",
+        etaMinutes: 11,
+        extraChargeDisclosed: false,
+        messages: [
+          {
+            messageCode: "sandbox_fulfillment.mixed_fulfillment_active",
+            category: "warning",
+          },
+        ],
+      }),
+      meta: {
+        requestId: "req-p2-fallback-http-003",
+        timestamp: expect.any(String),
+      },
+    });
+
+    const reportsResponse = await fetch(
+      `${baseUrl}/api/roc/bookings/${booking.bookingId}/fallback-reports`,
+      {
+        headers: {
+          "x-request-id": "req-p2-fallback-http-004",
+        },
+      },
+    );
+
+    expect(reportsResponse.status).toBe(200);
+    await expect(reportsResponse.json()).resolves.toEqual({
+      data: {
+        items: [
+          expect.objectContaining({
+            bookingId: booking.bookingId,
+            orderId: booking.orderId,
+            dispatchJobId: dispatchResult.dispatchJobId,
+            sandboxDecisionId: decision.decisionId,
+            humanVehicleId: "veh-demo-004",
+            humanDriverId: "drv-demo-004",
+            revisedEtaMinutes: 11,
+            reportArtifactId: expect.any(String),
+          }),
+        ],
+      },
+      meta: {
+        requestId: "req-p2-fallback-http-004",
+        timestamp: expect.any(String),
+      },
+    });
+  });
 });

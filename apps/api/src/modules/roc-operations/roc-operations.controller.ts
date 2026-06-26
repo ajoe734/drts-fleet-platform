@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type { RocFallbackToHumanCommand } from "@drts/contracts";
 
@@ -10,6 +10,21 @@ import { RocOperationsService } from "./roc-operations.service";
 @Controller("roc")
 export class RocOperationsController {
   constructor(private readonly rocOperationsService: RocOperationsService) {}
+
+  @Get("bookings/:bookingId/fallback-reports")
+  listFallbackReports(
+    @Param("bookingId") bookingId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.rocOperationsService.listFallbackReportsForBooking(
+          bookingId,
+        ),
+      },
+      requestId,
+    );
+  }
 
   @Post("trips/:tripId/fallback-to-human")
   async fallbackToHuman(
