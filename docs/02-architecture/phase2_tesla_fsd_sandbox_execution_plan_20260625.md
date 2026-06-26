@@ -125,6 +125,26 @@ Layer 4                  ▼
 
 ---
 
+## 2d. S1–S6 裁決後追加 wave（已 dispatch，6 tasks）
+
+來源：[`..._open_decisions_s1s6_system_design_response_20260626.md`](./phase2_tesla_fsd_sandbox_open_decisions_s1s6_system_design_response_20260626.md)
+（S1=a S2=b S3=a S4=a S5=a S6=b）。派工腳本：[`scripts/dispatch-phase2-tesla-sandbox-s-decision-wave.py`](../../scripts/dispatch-phase2-tesla-sandbox-s-decision-wave.py)。
+DDL 附錄：[`phase2-tesla-fsd-sandbox/10b_phase2_ddl_decision_packet_addendum.sql`](./phase2-tesla-fsd-sandbox/10b_phase2_ddl_decision_packet_addendum.sql)。
+**deps 設成「擴充」既有 C-task，不重建**（S3⊃C4、S4 合併 C5、S1⊃C3、S2⊃UI-CMP）。
+
+| ID | Owner→Rev | 內容 | Deps |
+|----|-----------|------|------|
+| **P2-DP-S5-001** | Codex→Codex2 | 10b DDL addendum 6 表 migration（IF NOT EXISTS，權威） | P2-WP0 |
+| **P2-DP-S1-001** | Codex2→Codex | PassengerDisclosurePolicy + message catalog + acknowledgement（缺配置 AV fail-closed） | P2-DP-C3-001 |
+| **P2-DP-S3-001** | Codex2→Claude2 | fallback cost policy resolver（預設 platform，乘客不加收） | P2-DP-C4-001 |
+| **P2-DP-S4-001** | Claude→Codex | Phase2 audit context 整合（與 C5 **合併單一 emitter**，共用 Phase1 store） | P2-DP-C5-001 |
+| **P2-DP-S2-001** | Codex→Codex2 | Compliance `CMP_Regulator` panel + regulator-cases API（不建獨立 portal） | P2-UI-CMP-001, P2-DP-C1-001 |
+| **P2-DP-S6-001** | Codex2→Codex | KPI baseline collection（targetStatus=baseline_collecting；安全閘門仍硬性） | P2-ROC-001, P2-REG-002 |
+
+**仍 external-gated（不變）**：B1 Tesla ICD、B2 核可 policy、B3 通報矩陣、B4 recorder、B5 Tesla 帳號 → Gate C/D/E。
+
+---
+
 ## 3. 不在本 wave 派 build 的工作（明確排除，附原因）
 
 ### 3.1 外部契約 gate（Gate C–F，等輸入到位）
