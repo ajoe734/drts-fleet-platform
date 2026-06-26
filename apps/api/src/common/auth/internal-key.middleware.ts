@@ -22,6 +22,7 @@ const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET tenant/roles",
   "POST auth/tenant/bootstrap-session",
   "POST auth/partner/bootstrap-session",
+  "POST internal/providers/tesla/regulatory-events",
 ]);
 const PUBLIC_BOOTSTRAP_REALMS = new Set([
   "platform",
