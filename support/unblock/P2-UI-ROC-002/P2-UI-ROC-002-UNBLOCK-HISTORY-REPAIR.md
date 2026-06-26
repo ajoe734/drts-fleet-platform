@@ -224,3 +224,14 @@ Concrete next step:
 
 No package tests were run in this helper task. This repair is branch-history and
 machine-truth triage only.
+
+## Owner Closeout Addendum
+
+- `review_approved` owner closeout remains branch-scoped only. This helper task
+  does not merge anything to `origin/dev` and does not claim dev deployment.
+- The canonical delivery artifact is this support note on
+  `codex2/p2-ui-roc-002-unblock-history-repair`, pushed through a normal
+  non-force branch update.
+- Parent unblock remains unchanged: replay the four contentful ROC commits onto
+  fresh `origin/dev`, clean the trailing whitespace noted above, then push a new
+  replay branch/PR for `P2-UI-ROC-002`.
