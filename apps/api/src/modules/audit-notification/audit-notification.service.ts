@@ -446,6 +446,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...holdRecord },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceLegalHolds.set(
+      holdRecord.holdId,
+      cloneEvidenceLegalHold(holdRecord),
+    );
 
     return cloneEvidenceLegalHold(holdRecord);
   }
@@ -554,6 +558,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...updated },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceLegalHolds.set(
+      updated.holdId,
+      cloneEvidenceLegalHold(updated),
+    );
 
     this.resolveSyntheticDeletionConflictExceptionsForHold(
       updated,
@@ -624,6 +632,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...updated },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceLegalHolds.set(
+      updated.holdId,
+      cloneEvidenceLegalHold(updated),
+    );
 
     return cloneEvidenceLegalHold(updated);
   }
@@ -724,6 +736,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...exceptionRecord },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceDeletionExceptions.set(
+      exceptionRecord.exceptionId,
+      cloneEvidenceDeletionException(exceptionRecord),
+    );
 
     return cloneEvidenceDeletionException(exceptionRecord);
   }
@@ -787,6 +803,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...updated },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceDeletionExceptions.set(
+      updated.exceptionId,
+      cloneEvidenceDeletionException(updated),
+    );
 
     return cloneEvidenceDeletionException(updated);
   }
@@ -927,6 +947,10 @@ export class AuditNotificationService implements OnModuleInit {
       newValuesSummary: { ...exceptionRecord },
       ...(requestId !== undefined ? { requestId } : {}),
     });
+    this.evidenceDeletionExceptions.set(
+      exceptionRecord.exceptionId,
+      cloneEvidenceDeletionException(exceptionRecord),
+    );
 
     return cloneEvidenceDeletionException(exceptionRecord);
   }
