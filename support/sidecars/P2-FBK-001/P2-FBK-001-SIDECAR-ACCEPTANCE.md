@@ -2,11 +2,16 @@
 
 > **Sidecar self-status:** `in_progress` → handoff to reviewer `Codex`
 > **Task:** P2-FBK-001-SIDECAR-ACCEPTANCE · **Owner:** Claude · **Reviewer:** Codex
-> **Parent:** P2-FBK-001 (owner Codex, reviewer Codex2, `review`)
+> **Parent:** P2-FBK-001 (owner Codex, reviewer Codex2, `review_approved`)
 > **Helper kind:** `acceptance_packet` · **Mutates canonical:** no
-> **Refreshed:** 2026-06-26 — re-anchored to parent tip `4b2f86e8f`; parent advanced
-> `in_progress` → `review`; the prior open review failure (G1/G2 / AC-2) is now **closed
-> on-branch** by the `SANDBOX_FALLBACK_NOT_REQUIRED` guard + negative INT-P2-008 case.
+> **Refreshed:** 2026-06-26 — re-anchored to parent owner-closeout commit `cd6c4a5f9a`
+> (tree-equal to the prior `4b2f86e8f` anchor — implementation evidence below is
+> unchanged) at current branch tip `d83ed7d34` (merge of `origin/dev`); parent advanced
+> `review` → `review_approved`. The dev-merge **reconciled the CI/e2e harness deltas**
+> (former G5 — `ci-integ.yml` / `run-e2e-hermetic.sh` now match `dev`). The prior open
+> review failure (G1/G2 / AC-2) remains **closed on-branch** via the
+> `SANDBOX_FALLBACK_NOT_REQUIRED` guard + negative INT-P2-008 case. The only remaining
+> step to parent `done` is **merge to `dev`** (G4); `done` is gate-blocked until then.
 
 This is a **support-only** artifact. It does **not** modify L1 canonical truth, the
 phase2 contract surface, or the parent runtime implementation. It maps the acceptance
@@ -17,9 +22,12 @@ requires.
 
 Evidence anchors below were re-read at refresh time from:
 - `origin/dev` @ `92dbd14e6` (canonical trunk; the dependency P2-GATE-001 is merged here)
-- the parent fallback branch `origin/codex/p2-fbk-001` @ **`4b2f86e8f`** (current tip;
-  supersedes the earlier `f5a990088` anchor — adds the gate-decision validation guard
-  and the matching negative test; the fallback surface is **not yet on `dev`**)
+- the parent fallback branch `origin/codex/p2-fbk-001`, current tip **`d83ed7d34`**
+  (a merge of `origin/dev` into the branch, 04:47Z). The implementation/owner-closeout
+  commit is **`cd6c4a5f9a`** ("P2-FBK-001: finalize owner closeout"), which is
+  **tree-equal** to the prior `4b2f86e8f` anchor (empty diff) — so every line/symbol
+  anchor in §3 is unchanged; only the diff-vs-`dev` stat shifts because `dev` moved
+  under the branch. The fallback surface is **still not merged to `dev`**.
 - this sidecar branch `claude/p2-fbk-001-sidecar-acceptance`, base `origin/dev`
 
 ---
@@ -37,14 +45,15 @@ breaking the SLA / billing / audit chain.
 - **Parent artifact dirs:** `apps/api/src/modules/sandbox-dispatch-gate/`,
   `apps/api/src/modules/owned-mobility/` (the implementation also touches a new
   `apps/api/src/modules/roc-operations/` controller, see §3).
-- **Parent declared status:** `review` (owner Codex, reviewer Codex2). Parent `next`
-  note: *"Rejected gate-triggered fallback when sandbox decision exists but
-  fallbackRequired=false; added negative INT-P2-008 coverage to prove non-fallback
-  decisions are refused without side effects."* — i.e. the earlier review failure is
-  **resolved on-branch** at `4b2f86e8f` (see §3.3, §4 G1/G2 closed, §5 AC-2).
+- **Parent declared status:** `review_approved` (owner Codex, reviewer Codex2). Parent
+  `next` note: *"Owner closeout commit `cd6c4a5f9a` is pushed to `origin/codex/p2-fbk-001`,
+  but `done` is currently blocked by the integration gate until the approved branch is
+  merged to `dev`; re-run `done` with `INTEGRATION_STATUS=merged_to_dev` after merge."* —
+  i.e. the review is **passed**; the earlier review failure stayed **resolved on-branch**
+  (see §3.3, §4 G1/G2 closed, §5 AC-2) and the only open step is merge-to-`dev` (G4).
 - **Sidecar role:** prepare the acceptance checklist + dependency map so the parent's
-  finalization review has one reference for what "done" requires and which gaps (now
-  G3/G4/G5) remain ahead of merge to `dev`.
+  finalization has one reference for what "done" requires and which gap (now just G3
+  durability follow-up + G4 merge-to-`dev`) remains.
 
 ---
 
@@ -58,20 +67,23 @@ breaking the SLA / billing / audit chain.
 
 **Dependency verdict:** the single *declared* dependency, **P2-GATE-001, is `done` and
 merged to `dev`** (`31d3ed308`/#892). P2-FBK-001 is therefore **not
-dependency-blocked**. The remaining parent work is implementation correctness inside
-the fallback slice (notably the gate-decision validation called out in the parent's
-review-failure note), **not an upstream wait**.
+dependency-blocked**. With the parent now `review_approved`, the remaining work is **not**
+implementation correctness and **not** an upstream dependency wait — it is the
+integration step: **merge the approved branch to `dev`** so the gate lets `done` re-run
+with `INTEGRATION_STATUS=merged_to_dev` (G4).
 
 ---
 
 ## 3. Present Implementation Surface (verified evidence)
 
-Read from the parent branch `origin/codex/p2-fbk-001` @ `4b2f86e8f`
-(`git diff --stat origin/dev origin/codex/p2-fbk-001` = 14 files, +1590/−24). These are
-the surfaces a reviewer can confirm exist; line/symbol anchors are stable at that tip.
-(The `4b2f86e8f` delta over the earlier `f5a990088` anchor is `roc-operations.service.ts`
-+53/−21 and `int-p2-008-roc-human-fallback.test.ts` +149 — the gate-decision guard and
-its negative case; see §3.3 and §3.6.)
+Read from the parent branch `origin/codex/p2-fbk-001` (owner-closeout commit `cd6c4a5f9a`,
+tree-equal to the prior `4b2f86e8f` anchor; current tip `d83ed7d34` merges `origin/dev`).
+After the dev-merge, `git diff --stat origin/dev origin/codex/p2-fbk-001` = **12 files,
++1590/−3** (was 14 files/−24 before the merge — the two CI/e2e harness files,
+`.github/workflows/ci-integ.yml` and `tests/e2e/run-e2e-hermetic.sh`, now match `dev`'s
+`CI-E2E-SHARD` `92dbd14e6`, so they drop out of the delta; this closes former G5). These
+are the surfaces a reviewer can confirm exist; line/symbol anchors are stable at the
+tree-equal closeout commit.
 
 ### 3.1 Contract additions (`packages/contracts/src/phase2-tesla-fsd-sandbox.ts`, +47)
 - `SandboxDispatchDecision.fallbackRequired: boolean` added (the gate's fallback signal).
@@ -98,11 +110,11 @@ its negative case; see §3.3 and §3.6.)
 - `RocOperationsModule` is already registered in `apps/api/src/app.module.ts` (L59/L106
   on `dev`), so the new route is wired once the module change lands.
 
-### 3.3 Orchestration (`apps/api/src/modules/roc-operations/roc-operations.service.ts`, +366)
+### 3.3 Orchestration (`apps/api/src/modules/roc-operations/roc-operations.service.ts`, +387)
 - `fallbackTripToHuman(tripId, command, identity, requestId)`:
   - resolves the trip's order; defaults `trigger` to `roc_manual_intervention`.
   - looks up the gate decision via `sandboxDispatchGateService.findDecisionForOrder(orderId, sandboxDecisionId)`.
-  - **gate-trigger guard (two-branch, @ `4b2f86e8f`):** when
+  - **gate-trigger guard (two-branch, @ `cd6c4a5f9a`):** when
     `trigger === "gate_fallback_required"` —
     - if **no decision** is found → `409 ApiRequestError("SANDBOX_FALLBACK_DECISION_REQUIRED", …)`;
     - if a decision **is** found but `sandboxDecision.fallbackRequired === false` →
@@ -143,7 +155,7 @@ its negative case; see §3.3 and §3.6.)
 ### 3.6 Tests (present on parent branch)
 - `apps/api/tests/integration/int-p2-008-roc-human-fallback.test.ts` (+705) — 4 cases:
   - **E2E-P2-008** reuses the same booking and order on gate-required human fallback.
-  - **negative (new @ `4b2f86e8f`, L306)** — *"rejects gate-triggered human fallback when
+  - **negative (new @ `cd6c4a5f9a`, L306)** — *"rejects gate-triggered human fallback when
     the sandbox decision does not require fallback"*: builds an `allow` decision
     (`fallbackRequired === false`), asserts the call throws `ApiRequestError` with code
     `SANDBOX_FALLBACK_NOT_REQUIRED`, **and proves zero side effects** — 0 interventions,
@@ -167,11 +179,11 @@ so the parent review is explicit about what "done" still requires.
 
 | # | Gap | Status | Evidence |
 |---|---|---|---|
-| ~~G1~~ | **Non-fallback gate decisions now rejected.** The ROC guard rejects a `gate_fallback_required` trigger both when **no** decision is found *and* when a found decision has `fallbackRequired === false` (new `SANDBOX_FALLBACK_NOT_REQUIRED` 409). The earlier review failure is closed. | ✅ closed @ `4b2f86e8f` | `roc-operations.service.ts` L95 `"SANDBOX_FALLBACK_NOT_REQUIRED"`; two-branch guard (§3.3) |
-| ~~G2~~ | **Negative integration test present.** A `gate_fallback_required` request backed by an `allow` (`fallbackRequired:false`) decision is asserted to be rejected with `SANDBOX_FALLBACK_NOT_REQUIRED` and to produce no side effects. | ✅ closed @ `4b2f86e8f` | `int-p2-008-roc-human-fallback.test.ts` L306 (§3.6) |
+| ~~G1~~ | **Non-fallback gate decisions now rejected.** The ROC guard rejects a `gate_fallback_required` trigger both when **no** decision is found *and* when a found decision has `fallbackRequired === false` (new `SANDBOX_FALLBACK_NOT_REQUIRED` 409). The earlier review failure is closed. | ✅ closed @ `cd6c4a5f9a` | `roc-operations.service.ts` L95 `"SANDBOX_FALLBACK_NOT_REQUIRED"`; two-branch guard (§3.3) |
+| ~~G2~~ | **Negative integration test present.** A `gate_fallback_required` request backed by an `allow` (`fallbackRequired:false`) decision is asserted to be rejected with `SANDBOX_FALLBACK_NOT_REQUIRED` and to produce no side effects. | ✅ closed @ `cd6c4a5f9a` | `int-p2-008-roc-human-fallback.test.ts` L306 (§3.6) |
 | G3 | **Report persistence is in-memory.** `fallbackReports` / `reportArtifactId` are retained in-process; no durable repository for the sandbox-exception report the contract/regulatory retention implies. | ⛔ open | `private fallbackReports: RocFallbackToHumanReport[] = []` |
-| G4 | **Not yet on `dev`.** The whole fallback surface (incl. the merged-dependency consumer) lives on `origin/codex/p2-fbk-001` @ `4b2f86e8f`; `INTEGRATION_STATUS` for the parent is **branch-level**, not `merged_to_dev`. | ⛔ open | `git diff --stat origin/dev origin/codex/p2-fbk-001` = 14 files, +1590/−24 |
-| G5 | **CI/e2e harness deltas.** The branch edits `.github/workflows/ci-integ.yml` (−6) and `tests/e2e/run-e2e-hermetic.sh` (−15) alongside adding `E2E-P2-008`; reviewer should confirm the e2e wiring/registration is intentional and green. | ⛔ open | diff stat shows both files modified |
+| G4 | **Not yet on `dev`.** The whole fallback surface (incl. the merged-dependency consumer) lives on `origin/codex/p2-fbk-001` (closeout `cd6c4a5f9a`, tip `d83ed7d34`); the parent is `review_approved` but `done` is gate-blocked until `INTEGRATION_STATUS=merged_to_dev`. | ⛔ open | `git diff --stat origin/dev origin/codex/p2-fbk-001` = 12 files, +1590/−3 |
+| ~~G5~~ | **CI/e2e harness deltas reconciled.** The branch previously edited `.github/workflows/ci-integ.yml` and `tests/e2e/run-e2e-hermetic.sh`; the `origin/dev` merge at `d83ed7d34` brings in `dev`'s `CI-E2E-SHARD` (`92dbd14e6`) so both files now match `dev` and drop out of the delta. Only the additive `E2E-P2-008` registration (`tests/e2e/E2E-P2-008-roc-human-fallback.sh`, +8) remains. | ✅ closed @ `d83ed7d34` | both harness files absent from `git diff --name-only origin/dev origin/codex/p2-fbk-001` |
 
 ---
 
@@ -188,7 +200,7 @@ build/typecheck/test on the mainline branch).
   `ROC_FALLBACK_TRIGGERS` exist and route through the service. ✅ present — and the gate
   trigger now *rejects* a found decision whose `fallbackRequired` is false
   (`SANDBOX_FALLBACK_NOT_REQUIRED`, §3.3), with the negative INT-P2-008 case proving it
-  (§3.6). **G1/G2 closed @ `4b2f86e8f`** — the prior open review failure is resolved.
+  (§3.6). **G1/G2 closed @ `cd6c4a5f9a`** — the prior open review failure is resolved.
 - **AC-3 — New human-driver assignment created.** Active AV assignment cancelled,
   human replacement created on the same dispatch job; non-AV vehicle required. ✅
   present (§3.4) — covered by case 2; idempotency guarded (`HUMAN_FALLBACK_ALREADY_ACTIVE`).
@@ -203,15 +215,16 @@ build/typecheck/test on the mainline branch).
   ✅ present (§3.2).
 - **AC-7 — E2E-P2-008 + UAT-AV-010 covered; integration green on mainline.** Specs
   exist (int-p2-008: **4 cases** incl. both named scenarios + the new negative guard
-  case; e2e shell present). Parent `next` records the verification commands run on the
-  branch (`vitest run …int-p2-008…` + `eslint …roc-operations.service.ts …int-p2-008…`).
-  ◻️ runtime **not re-run in this sidecar**; ⛔ **G4** not yet merged to `dev`, **G5**
-  CI/e2e harness deltas need reviewer confirmation.
+  case; e2e shell present). The parent passed review (`review_approved`). The CI/e2e
+  harness deltas are now reconciled with `dev` via the `d83ed7d34` merge (**G5 closed**).
+  ◻️ runtime **not re-run in this sidecar**; ⛔ **G4** the approved branch is not yet
+  merged to `dev`, so `dev`-level CI green is pending the merge.
 
 **Summary:** AC-1, AC-2, AC-3, AC-4, AC-6 present-and-verified (AC-2's gate-decision
-guard now closed @ `4b2f86e8f`); AC-5 present with one open gap (G3 report durability);
-AC-7 covered on-branch but deferred to parent merge/CI for the `dev`-level green
-(G4/G5). **No AC is blocked by an unmet dependency** — P2-GATE-001 is merged.
+guard closed @ `cd6c4a5f9a`); AC-5 present with one open gap (G3 report durability);
+AC-7 covered on-branch (parent `review_approved`, harness deltas reconciled / G5 closed)
+but deferred to the branch→`dev` merge for the `dev`-level green (G4). **No AC is blocked
+by an unmet dependency** — P2-GATE-001 is merged.
 
 ---
 
@@ -220,14 +233,17 @@ AC-7 covered on-branch but deferred to parent merge/CI for the `dev`-level green
 - **Dependency is unblocked.** P2-GATE-001 is `done` and merged to `dev`
   (`31d3ed308`/#892); the gate exposes `fallbackRequired` + `findDecisionForOrder` that
   the fallback consumes. The parent should not be parked on dependencies.
-- **The prior review failure (G1/G2 / AC-2) is now closed on-branch.** At `4b2f86e8f`
-  `roc-operations.service.ts` rejects a found decision whose `fallbackRequired` is
-  `false` via `SANDBOX_FALLBACK_NOT_REQUIRED`, and `int-p2-008-roc-human-fallback.test.ts`
-  L306 asserts that rejection with zero side effects — exactly the parent's `next` note.
-  The reviewer (Codex2) should confirm this in the parent `review`, not re-open it.
-- **Recommended parent focus order (remaining):** G4/G5 (merge to `dev`; confirm the
-  `ci-integ.yml` −6 and `run-e2e-hermetic.sh` −15 deltas + `E2E-P2-008` registration are
-  intentional and green) → G3 (persist the sandbox-exception report) as a follow-up if
+- **Parent has passed review (`review_approved`).** The prior review failure
+  (G1/G2 / AC-2) was closed on-branch: at closeout `cd6c4a5f9a` (tree-equal to
+  `4b2f86e8f`) `roc-operations.service.ts` rejects a found decision whose
+  `fallbackRequired` is `false` via `SANDBOX_FALLBACK_NOT_REQUIRED`, and
+  `int-p2-008-roc-human-fallback.test.ts` L306 asserts that rejection with zero side
+  effects. Reviewer Codex2 has approved; this is no longer an open review item.
+- **Recommended parent focus order (remaining):** G4 — **merge the approved branch to
+  `dev`**, then re-run `done` with `INTEGRATION_STATUS=merged_to_dev` (the integration
+  gate currently blocks `done` until then). G5 is closed: the `d83ed7d34` `origin/dev`
+  merge reconciled the `ci-integ.yml` / `run-e2e-hermetic.sh` harness deltas with `dev`'s
+  `CI-E2E-SHARD`. G3 (persist the sandbox-exception report) remains a follow-up if
   regulatory retention is in-scope for this slice.
 - **Sidecar made no canonical edits.** Only this support artifact was added; the
   fallback implementation remains owned by the parent on `origin/codex/p2-fbk-001`.
