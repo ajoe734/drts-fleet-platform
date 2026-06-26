@@ -228,10 +228,13 @@ contract checklist items：
 1. 缺少 safety-operator canvas
    目前 repo 內找不到 `driver-safety-operator.jsx`、`SOFrame`、`SOModeBar`、`SOSyncStrip` 或等價 screen spec。
 
-2. driver-app 尚無 safety-operator API client surface
-   `packages/api-client/src` 與 `apps/driver-app/lib/api-client.ts` 尚未露出 `/api/safety-operator/*` 相關 client helper；目前 driver-app route 也沒有 safety-operator screens。
+2. realm token 與 app shell 仍只支援一般 `driver`
+   `packages/ui-tokens/src/realms.ts` 目前只定義 `tenant` / `ops` / `platform` / `system` / `driver`；`apps/driver-app/app/_layout.tsx`、`apps/driver-app/lib/theme.ts`、`apps/driver-app/lib/strings.ts` 也都綁定 `driverTheme` / `driverRouteTitles`。在沒有正式 safety-operator canvas 前，無法合法推導 `SOFrame` 與 `SOModeBar` 應如何映射到獨立 realm。
 
-3. editable-with-audit takeover time 尚無一等欄位承載
+3. driver-app 尚無 safety-operator API client surface
+   `packages/api-client/src/index.ts` 與 `apps/driver-app/lib/api-client.ts` 目前只暴露 `createDriverClient` / `createDriverBearerClient`，且本地 durable key 也都是 `drts.driver.*`；尚未露出 `/api/safety-operator/*` 相關 client helper，也沒有安全員專用 queue / session namespace。
+
+4. editable-with-audit takeover time 尚無一等欄位承載
    現有 contract / service 會儲存 `occurredAt` 與 `serverReceivedAt`，且以 `clientGeneratedReportId` 去重；但沒有獨立的「原始時間 / 編輯後時間 / 編輯原因」欄位結構。
 
 ## 7. 純視覺 open questions（交設計團隊）
