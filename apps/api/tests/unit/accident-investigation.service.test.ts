@@ -817,15 +817,15 @@ describe("AccidentInvestigationService", () => {
             commandType: "flash_lights",
             status: "acknowledged",
             issuedBy: "roc-unrelated-001",
-            issuedAt: "2026-06-26T13:30:45.000Z",
-            acknowledgedAt: "2026-06-26T13:30:45.000Z",
+            issuedAt: "2026-06-26T13:00:45.000Z",
+            acknowledgedAt: "2026-06-26T13:00:45.000Z",
             providerRef: "provider-unrelated-001",
             failureReasonCode: null,
             source: {
               sourceSystem: "tesla_fleet_api",
               sourceRef: "provider-unrelated-001",
-              ingestedAt: "2026-06-26T13:30:45.000Z",
-              recordedAt: "2026-06-26T13:30:45.000Z",
+              ingestedAt: "2026-06-26T13:00:45.000Z",
+              recordedAt: "2026-06-26T13:00:45.000Z",
               signatureRef: null,
               schemaVersion: "2026-06",
             },
@@ -912,6 +912,94 @@ describe("AccidentInvestigationService", () => {
     expect(
       (commands?.payload as { receipts: Array<{ commandId: string }> }).receipts,
     ).toEqual([]);
+  });
+
+  it("matches notification and audit references without substring leakage", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new AccidentInvestigationService(
+      {
+        rebuildCorrelatedTakeoverCases: () => ({
+          cases: [],
+          discrepancies: [],
+        }),
+        listTeslaAutonomyTransitionEvents: () => [],
+        listRocTakeoverResponseRecords: () => [],
+        listManualTakeoverCorrelations: () => [],
+      } as never,
+      auditNotificationService,
+    );
+
+    service.createAccidentCase({
+      caseId: "acc-1",
+      vehicleId: "veh-notif-001",
+      severity: "major",
+      occurredAt: "2026-06-26T14:00:00.000Z",
+      reportedBy: "roc-notif-001",
+      summary: "Case used to validate exact reference matching.",
+    });
+
+    auditNotificationService.recordNotification({
+      tenantId: null,
+      channel: "ops_notice",
+      title: "Investigation update for acc-1",
+      message: "Bundle export queued for case acc-1.",
+      status: "unread",
+    });
+    auditNotificationService.recordNotification({
+      tenantId: null,
+      channel: "ops_notice",
+      title: "Investigation update for acc-10",
+      message: "Bundle export queued for case acc-10.",
+      status: "unread",
+    });
+    auditNotificationService.recordAuditLog({
+      actorId: "investigator-001",
+      actorType: "ops_user",
+      tenantId: null,
+      moduleName: "accident-investigation",
+      actionName: "bundle_generated",
+      resourceType: "accident_case",
+      resourceId: "acc-1",
+      newValuesSummary: {
+        caseId: "acc-1",
+      },
+    });
+    auditNotificationService.recordAuditLog({
+      actorId: "investigator-010",
+      actorType: "ops_user",
+      tenantId: null,
+      moduleName: "accident-investigation",
+      actionName: "bundle_generated",
+      resourceType: "accident_case",
+      resourceId: "acc-10",
+      newValuesSummary: {
+        caseId: "acc-10",
+      },
+    });
+
+    const bundle = await service.generateInvestigationBundle("acc-1", {
+      actorId: "investigator-001",
+    });
+
+    const notificationsAudit = bundle.sections.find(
+      (section) => section.sectionId === "notifications_and_audit",
+    );
+    expect(
+      (
+        notificationsAudit?.payload as {
+          notifications: Array<{ title: string }>;
+          audits: Array<{ resourceId: string | null }>;
+        }
+      ).notifications,
+    ).toEqual([expect.objectContaining({ title: "Investigation update for acc-1" })]);
+    expect(
+      (
+        notificationsAudit?.payload as {
+          notifications: Array<{ title: string }>;
+          audits: Array<{ resourceId: string | null }>;
+        }
+      ).audits,
+    ).toEqual([expect.objectContaining({ resourceId: "acc-1" })]);
   });
 
   it("reuses a single upstream snapshot across bundle sections", async () => {

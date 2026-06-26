@@ -1579,17 +1579,50 @@ export class AccidentInvestigationService {
     item: unknown,
     record: AccidentCaseRecord,
   ) {
-    const serialized = this.stableSerialize(item);
-    return [
-      record.caseId,
-      record.vehicleId,
-      record.orderId,
-      record.takeoverCorrelationId,
-      record.evidenceManifestId,
-      record.regulatoryReportId,
-    ]
-      .filter((value): value is string => Boolean(value))
-      .some((value) => serialized.includes(value));
+    const references = new Set(
+      [
+        record.caseId,
+        record.vehicleId,
+        record.orderId,
+        record.takeoverCorrelationId,
+        record.evidenceManifestId,
+        record.regulatoryReportId,
+      ].filter((value): value is string => Boolean(value)),
+    );
+    return this.containsExactBundleReference(item, references);
+  }
+
+  private containsExactBundleReference(
+    item: unknown,
+    references: ReadonlySet<string>,
+  ): boolean {
+    if (references.size === 0 || item === null || item === undefined) {
+      return false;
+    }
+    if (typeof item === "string") {
+      const normalized = item.trim();
+      if (!normalized) {
+        return false;
+      }
+      if (references.has(normalized)) {
+        return true;
+      }
+      return normalized
+        .split(/[^A-Za-z0-9_-]+/)
+        .filter(Boolean)
+        .some((token) => references.has(token));
+    }
+    if (Array.isArray(item)) {
+      return item.some((value) =>
+        this.containsExactBundleReference(value, references),
+      );
+    }
+    if (typeof item === "object") {
+      return Object.values(item as Record<string, unknown>).some((value) =>
+        this.containsExactBundleReference(value, references),
+      );
+    }
+    return false;
   }
 
   private synchronizeCaseLinks(record: AccidentCaseRecord): AccidentCaseRecord {
@@ -1746,6 +1779,9 @@ export class AccidentInvestigationService {
   }
 
   private filterReceiptsForCase(record: AccidentCaseRecord, snapshot: BundleSnapshot) {
+    if (!this.hasExplicitCaseLink(record, snapshot.correlatedCase)) {
+      return [];
+    }
     const timestamps = this.collectCaseEvidenceTimestamps(record, snapshot);
     if (timestamps.length === 0) {
       return [];
