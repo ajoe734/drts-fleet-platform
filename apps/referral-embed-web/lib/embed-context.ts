@@ -29,7 +29,11 @@ export type EmbedScreen =
   | "nosupply"
   | "ineligible"
   | "denied"
-  | "degraded";
+  | "degraded"
+  | "fb_vehicle_change"
+  | "fb_human_assigned"
+  | "fb_service_continuing"
+  | "fb_eta_updated";
 
 export type EmbedContext = {
   entry: PartnerChannelEntryRecord;
@@ -97,6 +101,10 @@ function toEmbedScreen(value: string | undefined): EmbedScreen {
     case "ineligible":
     case "denied":
     case "degraded":
+    case "fb_vehicle_change":
+    case "fb_human_assigned":
+    case "fb_service_continuing":
+    case "fb_eta_updated":
       return value;
     default:
       return "book";

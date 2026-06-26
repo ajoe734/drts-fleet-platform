@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import type { EmbedContext, EmbedState } from "@/lib/embed-context";
 import { useTranslation } from "@/lib/i18n";
 import {
+  embedFallbackProgress,
+  embedFallbackStates,
   embedReceipt,
   embedResident,
   embedSavedPlaces,
@@ -78,6 +80,9 @@ const EMBED_GLYPHS: Record<string, string> = {
   shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z",
   bolt: "M13 3L5 13h6l-1 8 8-10h-6z",
   info: "M12 8h.02 M11 12h1v5h1 M12 21a9 9 0 100-18 9 9 0 000 18z",
+  refresh: "M21 12a9 9 0 10-3 6.7 M21 12v-5 M21 12h-5",
+  user: "M12 12a4 4 0 100-8 4 4 0 000 8z M5 20a7 7 0 0114 0",
+  car: "M5 16l1.5-5h11L19 16 M7 16v2 M17 16v2 M4 14h16",
 };
 
 function EmbedGlyph({
@@ -405,6 +410,19 @@ type BannerTone =
   | "danger"
   | "info"
   | "neutral";
+
+type FallbackScreen = keyof typeof embedFallbackStates;
+
+const FALLBACK_SCREENS = [
+  "fb_vehicle_change",
+  "fb_human_assigned",
+  "fb_service_continuing",
+  "fb_eta_updated",
+] as const satisfies readonly FallbackScreen[];
+
+function isFallbackScreen(screen: EmbedContext["screen"]): screen is FallbackScreen {
+  return (FALLBACK_SCREENS as readonly string[]).includes(screen);
+}
 
 function bannerPalette(
   theme: ReturnType<typeof buildEmbedTheme>,
@@ -841,6 +859,288 @@ function StateHero({
   );
 }
 
+function MessageCodeSlot({
+  theme,
+  label,
+  messageCode,
+  message,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  label: string;
+  messageCode: string;
+  message: string;
+}) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        padding: "12px 14px",
+        borderRadius: 14,
+        background: "color-mix(in srgb, var(--embed-neutral-bg) 88%, white)",
+        border: `1px dashed ${theme.neutralBorder}`,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: -8,
+          left: 12,
+          fontSize: 9,
+          fontFamily: EMBED_MONO,
+          fontWeight: 700,
+          color: theme.neutralFg,
+          background: "white",
+          padding: "0 6px",
+          borderRadius: 4,
+        }}
+      >
+        {label} · {messageCode}
+      </div>
+      <div
+        style={{
+          fontSize: 13,
+          lineHeight: 1.6,
+          color: "var(--embed-neutral-fg)",
+        }}
+      >
+        {message}
+      </div>
+    </div>
+  );
+}
+
+function FallbackProgressRail({
+  theme,
+  currentState,
+}: {
+  theme: ReturnType<typeof buildEmbedTheme>;
+  currentState: (typeof embedFallbackProgress)[number]["key"];
+}) {
+  const currentIndex = embedFallbackProgress.findIndex(
+    (step) => step.key === currentState,
+  );
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start" }}>
+      {embedFallbackProgress.map((step, index) => {
+        const done = index <= currentIndex;
+        const active = index === currentIndex;
+        return (
+          <div
+            key={step.key}
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 6,
+              position: "relative",
+            }}
+          >
+            {index < embedFallbackProgress.length - 1 ? (
+              <span
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  left: "50%",
+                  right: "-50%",
+                  height: 2,
+                  background:
+                    index < currentIndex ? theme.accent : theme.neutralBorder,
+                }}
+              />
+            ) : null}
+            <span
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 12,
+                zIndex: 1,
+                background: done ? theme.accent : "white",
+                border: `2px solid ${done ? theme.accent : theme.neutralBorder}`,
+                color: done ? "white" : theme.neutralFg,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {done ? <EmbedGlyph name="check" size={12} stroke={3} /> : index + 1}
+            </span>
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: active ? 800 : 600,
+                color: active ? "black" : theme.neutralFg,
+                textAlign: "center",
+                lineHeight: 1.3,
+              }}
+            >
+              {step.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FallbackStateView({ context }: { context: EmbedContext }) {
+  const theme = buildEmbedTheme(context.accent);
+  const { t } = useTranslation();
+  const current = embedFallbackStates[context.screen as FallbackScreen];
+  const tone = toneStyle(theme, current.tone);
+
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 10,
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 58,
+            height: 58,
+            borderRadius: 29,
+            background: tone.background,
+            color: tone.color,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <EmbedGlyph name={current.icon} size={28} stroke={2.2} />
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.25 }}>
+          {current.title.resolvedText}
+        </div>
+        <div
+          style={{
+            fontSize: 9.5,
+            fontFamily: EMBED_MONO,
+            color: theme.neutralFg,
+            background: "color-mix(in srgb, var(--embed-neutral-bg) 88%, white)",
+            padding: "4px 10px",
+            borderRadius: 999,
+            border: `1px dashed ${theme.neutralBorder}`,
+          }}
+        >
+          title ← {current.title.messageCode}
+        </div>
+      </div>
+
+      {current.progressState ? (
+        <Card>
+          <FallbackProgressRail
+            theme={theme}
+            currentState={current.progressState}
+          />
+        </Card>
+      ) : null}
+
+      {current.etaMinutes !== null ? (
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: "var(--embed-accent-soft)",
+                color: "var(--embed-accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <EmbedGlyph name="car" size={22} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12.5, color: "var(--embed-neutral-fg)" }}>
+                {t("embed.fallback.etaLabel")}
+              </div>
+              <div style={{ fontSize: 11, color: theme.neutralFg }}>
+                {t("embed.fallback.etaNote")}
+              </div>
+            </div>
+            <div
+              style={{
+                textAlign: "center",
+                background: "var(--embed-accent-soft)",
+                border: `1px solid ${theme.accent}`,
+                borderRadius: 12,
+                padding: "8px 16px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 26,
+                  fontWeight: 800,
+                  fontFamily: EMBED_MONO,
+                  color: "var(--embed-accent)",
+                  lineHeight: 1,
+                }}
+              >
+                {current.etaMinutes}
+              </div>
+              <div style={{ fontSize: 10, color: theme.neutralFg, marginTop: 3 }}>
+                {t("embed.fallback.minutes")}
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      <MessageCodeSlot
+        theme={theme}
+        label="messageCode"
+        messageCode={current.body.messageCode}
+        message={current.body.resolvedText}
+      />
+
+      <Card>
+        <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <span>{t("embed.fallback.tripId")}</span>
+            <strong style={{ fontFamily: EMBED_MONO }}>{embedTrip.id}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <span>{t("embed.fallback.destination")}</span>
+            <strong>{t("embed.book.dropoff")}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <span>{t("embed.fallback.fare")}</span>
+            <strong>{t("embed.fallback.sameFare")}</strong>
+          </div>
+        </div>
+      </Card>
+
+      <EmbedBanner theme={theme} tone="success" icon="check">
+        {t("embed.fallback.sameBooking")}
+      </EmbedBanner>
+
+      <div
+        style={{
+          fontSize: 10.5,
+          color: theme.neutralFg,
+          textAlign: "center",
+          lineHeight: 1.5,
+        }}
+      >
+        {t("embed.fallback.operatorNote", {
+          name: context.strings.displayName,
+        })}
+      </div>
+    </>
+  );
+}
+
 const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
   denied: { tone: "danger", icon: "ban" },
   ineligible: { tone: "warn", icon: "ban" },
@@ -851,8 +1151,40 @@ const NEGATIVE_VISUAL: Record<string, { tone: BannerTone; icon: string }> = {
 function CompactFlow({ context }: { context: EmbedContext }) {
   const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
+  const fallbackState = isFallbackScreen(context.screen)
+    ? embedFallbackStates[context.screen]
+    : null;
 
   const footer = (() => {
+    if (fallbackState) {
+      return (
+        <>
+          <ActionLink
+            href={buildHref(context, { screen: "trip" })}
+            label={t(
+              fallbackState.publicState === "service_continuing"
+                ? "embed.field.trackTrip"
+                : "embed.field.viewTrip",
+            )}
+          />
+          {fallbackState.secondaryAction === "support" ? (
+            <ActionLink
+              href={buildHref(context, { screen: "trip" })}
+              label={t("embed.field.contactSupport")}
+              tone="default"
+            />
+          ) : null}
+          {fallbackState.secondaryAction === "driver" ? (
+            <ActionLink
+              href={buildHref(context, { screen: "trip" })}
+              label={t("embed.field.contactDriver")}
+              tone="default"
+            />
+          ) : null}
+        </>
+      );
+    }
+
     switch (context.screen) {
       case "trip":
         return (
@@ -934,6 +1266,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
   return (
     <EmbedShell context={context} footer={footer}>
       <FlowNav context={context} />
+      {fallbackState ? <FallbackStateView context={context} /> : null}
       {context.screen === "book" ? (
         <>
           <Card
@@ -1034,6 +1367,31 @@ function CompactFlow({ context }: { context: EmbedContext }) {
               {t("embed.trip.bound")}
             </div>
           </Card>
+          <Card
+            title={t("embed.card.fallback")}
+            subtitle={t("embed.card.fallbackSubtitle")}
+          >
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {FALLBACK_SCREENS.map((screen) => (
+                <Link
+                  key={screen}
+                  href={buildHref(context, { screen })}
+                  style={{
+                    borderRadius: 999,
+                    padding: "6px 10px",
+                    border:
+                      "1px solid color-mix(in srgb, var(--embed-neutral-fg) 18%, transparent)",
+                    background:
+                      context.screen === screen
+                        ? "var(--embed-accent-soft)"
+                        : "white",
+                  }}
+                >
+                  {embedFallbackStates[screen].title.resolvedText}
+                </Link>
+              ))}
+            </div>
+          </Card>
         </>
       ) : null}
 
@@ -1092,7 +1450,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
         </Card>
       ) : null}
 
-      {context.screen === "completed" ? (
+      {!fallbackState && context.screen === "completed" ? (
         <>
           <StateHero
             theme={theme}
@@ -1107,7 +1465,7 @@ function CompactFlow({ context }: { context: EmbedContext }) {
         </>
       ) : null}
 
-      {context.screen === "cancelled" ? (
+      {!fallbackState && context.screen === "cancelled" ? (
         <>
           <StateHero
             theme={theme}
@@ -1122,7 +1480,8 @@ function CompactFlow({ context }: { context: EmbedContext }) {
         </>
       ) : null}
 
-      {(["nosupply", "ineligible", "denied", "degraded"] as const).includes(
+      {!fallbackState &&
+      (["nosupply", "ineligible", "denied", "degraded"] as const).includes(
         context.screen as "nosupply" | "ineligible" | "denied" | "degraded",
       ) ? (
         <>
