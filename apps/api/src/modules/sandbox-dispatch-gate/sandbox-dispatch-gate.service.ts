@@ -4,6 +4,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type { SandboxDispatchDecision } from "@drts/contracts";
 
+import { RocOperationsService } from "../roc-operations/roc-operations.service";
 import { VehicleEvidenceService } from "../vehicle-evidence/vehicle-evidence.service";
 
 export interface SandboxDispatchGateInput {
@@ -23,14 +24,23 @@ export class SandboxDispatchGateService {
   constructor(
     @Optional()
     private readonly vehicleEvidenceService?: VehicleEvidenceService,
+    @Optional()
+    private readonly rocOperationsService?: RocOperationsService,
   ) {}
 
   evaluateDispatch(input: SandboxDispatchGateInput): SandboxDispatchDecision {
     const recorderSignal = this.vehicleEvidenceService?.getNoNewDispatchSignal(
       input.vehicleId,
     );
+    const rocRestrictions = this.rocOperationsService?.getDispatchRestrictions(
+      input.vehicleId,
+    );
+    const hardReasonCodes = [
+      ...(recorderSignal?.active ? (["RECORDER_UNHEALTHY"] as const) : []),
+      ...(rocRestrictions?.reasonCodes ?? []),
+    ];
 
-    const decision: SandboxDispatchDecision = recorderSignal?.active
+    const decision: SandboxDispatchDecision = hardReasonCodes.length > 0
       ? {
           decisionId: randomUUID(),
           orderId: input.orderId,
@@ -39,7 +49,7 @@ export class SandboxDispatchGateService {
           sandboxProgramId: input.sandboxProgramId,
           decision: "block",
           oddInBounds: true,
-          hardReasonCodes: ["RECORDER_UNHEALTHY"],
+          hardReasonCodes,
           softReasonCodes: [],
           requiredSafetyOperatorId: null,
           policyVersion: input.policyVersion,

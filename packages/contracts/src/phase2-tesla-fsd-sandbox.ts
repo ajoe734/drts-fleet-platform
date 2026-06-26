@@ -1,3 +1,5 @@
+import type { ResourceActionDescriptor, UiHealthEnvelope } from "./ui-runtime";
+
 // Phase 2 contracts: Tesla Fleet integration, FSD/AV regulatory telemetry,
 // sandbox dispatch governance, safety-operator / ROC operations, on-board
 // evidence custody, accident investigation, and regulatory reporting.
@@ -458,6 +460,8 @@ export const SANDBOX_DISPATCH_REASON_CODES = [
   "ODD_BOUNDARY_RISK",
   "PROVIDER_CAPABILITY_MISSING",
   "RECORDER_UNHEALTHY",
+  "ROC_STOP_NEW_DISPATCH",
+  "ROC_OPERATIONAL_HOLD",
   "SAFETY_OPERATOR_REQUIRED",
   "SAFETY_OPERATOR_UNAVAILABLE",
   "REGULATORY_APPROVAL_MISSING",
@@ -1005,6 +1009,164 @@ export interface CorrelatedTakeoverCase {
   rocTakeoverResponse: RocTakeoverResponseRecord | null;
   manualCorrelation: ManualTakeoverCorrelationLink | null;
   discrepancyCaseIds: string[];
+}
+
+export const ROC_ALERT_TYPES = [
+  "provider_health",
+  "takeover_discrepancy",
+  "dispatch_gate",
+  "operational_hold",
+  "evidence_freeze",
+  "human_fallback",
+  "manual_attention",
+] as const;
+export type RocAlertType = (typeof ROC_ALERT_TYPES)[number];
+
+export const ROC_ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
+export type RocAlertSeverity = (typeof ROC_ALERT_SEVERITIES)[number];
+
+export const ROC_ALERT_STATUSES = [
+  "open",
+  "acknowledged",
+  "resolved",
+] as const;
+export type RocAlertStatus = (typeof ROC_ALERT_STATUSES)[number];
+
+export interface RocDataFreshness {
+  dataFreshness: "fresh" | "stale" | "degraded" | "unknown";
+  observedAt: string | null;
+  staleAfterMs: number;
+}
+
+export interface RocOverviewReadModel {
+  generatedAt: string;
+  activeVehicleCount: number;
+  activeTripCount: number;
+  activeTakeoverCount: number;
+  openAlertCount: number;
+  criticalAlertCount: number;
+  acknowledgedAlertCount: number;
+  stopNewDispatchVehicleCount: number;
+  operationalHoldVehicleCount: number;
+  evidenceFreezeVehicleCount: number;
+  humanFallbackVehicleCount: number;
+  providerHealth: UiHealthEnvelope;
+}
+
+export interface RocVehicleReadModel {
+  vehicleId: string;
+  sandboxProgramId: string | null;
+  currentOrderId: string | null;
+  safetyOperatorId: string | null;
+  autonomyState:
+    | "manual"
+    | "fsd_supervised"
+    | "fsd_engaged"
+    | "unknown"
+    | null;
+  location: GeoPoint | null;
+  telemetryFreshness: RocDataFreshness;
+  regulatoryFreshness: RocDataFreshness;
+  stopNewDispatchActive: boolean;
+  operationalHoldActive: boolean;
+  evidenceFreezeActive: boolean;
+  humanFallbackActive: boolean;
+  dispatchGateStatus: SandboxDispatchOutcome;
+  gateReasonCodes: SandboxDispatchReasonCode[];
+  alertIds: string[];
+}
+
+export const ROC_TRIP_STATUSES = [
+  "monitoring",
+  "takeover_active",
+  "operational_hold",
+  "human_fallback",
+  "completed",
+] as const;
+export type RocTripStatus = (typeof ROC_TRIP_STATUSES)[number];
+
+export interface RocTripReadModel {
+  tripId: string;
+  orderId: string | null;
+  vehicleId: string;
+  sandboxProgramId: string | null;
+  safetyOperatorId: string | null;
+  status: RocTripStatus;
+  latestTakeoverOccurredAt: string | null;
+  stopNewDispatchActive: boolean;
+  operationalHoldActive: boolean;
+  humanFallbackActive: boolean;
+  alertIds: string[];
+}
+
+export interface RocAlertReadModel {
+  alertId: string;
+  alertType: RocAlertType;
+  status: RocAlertStatus;
+  severity: RocAlertSeverity;
+  title: string;
+  summary: string;
+  vehicleId: string | null;
+  orderId: string | null;
+  sandboxProgramId: string | null;
+  providerCode: string | null;
+  sourceRecordId: string | null;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  assignedTo: string | null;
+  assignedAt: string | null;
+  linkedIncidentId: string | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  openedAt: string;
+  updatedAt: string;
+  availableActions: ResourceActionDescriptor[];
+}
+
+export interface RocProviderHealthReadModel {
+  providerCode: string;
+  displayName: string;
+  status: "healthy" | "degraded" | "down" | "unknown";
+  lastCheckedAt: string;
+  message: string | null;
+  affectedVehicleIds: string[];
+}
+
+export interface RocProviderHealthSnapshot {
+  health: UiHealthEnvelope;
+  items: RocProviderHealthReadModel[];
+}
+
+export interface RocAlertActionCommand {
+  reason?: string | null;
+  note?: string | null;
+}
+
+export interface AssignRocAlertCommand extends RocAlertActionCommand {
+  assigneeId: string;
+}
+
+export interface RequestRocSafetyActionCommand extends RocAlertActionCommand {
+  safetyOperatorId: string;
+  sandboxProgramId: string;
+  orderId?: string | null;
+}
+
+export interface OpenRocIncidentCommand extends RocAlertActionCommand {
+  title?: string | null;
+  description?: string | null;
+  category?: "safety" | "operational" | "other";
+  severity?: "low" | "medium" | "high" | "critical";
+}
+
+export interface StartRocEvidenceFreezeCommand extends RocAlertActionCommand {
+  retentionHours?: number | null;
+}
+
+export interface NotifyRocAlertCommand extends RocAlertActionCommand {
+  channel: "email" | "slack" | "sms" | "pager";
+  target: string;
+  message?: string | null;
 }
 
 // ---------------------------------------------------------------------------
