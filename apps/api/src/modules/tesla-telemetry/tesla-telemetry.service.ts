@@ -135,7 +135,7 @@ export class TeslaTelemetryService {
 
     return this.evaluateTrackerHealth(
       tracker,
-      input.asOf ?? tracker.lastReceivedAt ?? new Date().toISOString(),
+      input.asOf ?? new Date().toISOString(),
     );
   }
 
@@ -584,16 +584,19 @@ export class TeslaTelemetryService {
       state = "complete";
     }
 
-    if (state === "healthy" || state === "complete") {
-      if (heartbeatAgeMs >= holdThresholdMs) {
+    if (heartbeatAgeMs >= holdThresholdMs) {
+      staleHeartbeatAt = tracker.lastReceivedAt;
+      issueCodes.add("STALE_HEARTBEAT");
+      if (state !== "regulator_data_incident") {
         state = "incomplete_hold";
-        staleHeartbeatAt = tracker.lastReceivedAt;
-        issueCodes.add("STALE_HEARTBEAT");
-      } else if (heartbeatAgeMs >= delayThresholdMs) {
-        state = "delayed";
-        staleHeartbeatAt = tracker.lastReceivedAt;
-        issueCodes.add("STALE_HEARTBEAT");
       }
+    } else if (
+      heartbeatAgeMs >= delayThresholdMs &&
+      (state === "healthy" || state === "complete")
+    ) {
+      state = "delayed";
+      staleHeartbeatAt = tracker.lastReceivedAt;
+      issueCodes.add("STALE_HEARTBEAT");
     }
 
     let qualityScore = 1;

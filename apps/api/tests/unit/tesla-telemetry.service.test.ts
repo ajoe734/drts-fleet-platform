@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TeslaTelemetryRepository } from "../../src/modules/tesla-telemetry/tesla-telemetry.repository";
 import { TeslaTelemetryService } from "../../src/modules/tesla-telemetry/tesla-telemetry.service";
 
 describe("TeslaTelemetryService", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function buildService() {
     const repository = new TeslaTelemetryRepository();
     const service = new TeslaTelemetryService(repository);
@@ -347,6 +351,42 @@ describe("TeslaTelemetryService", () => {
     expect((health?.qualityScore ?? 1) < 0.8).toBe(true);
   });
 
+  it("uses the current time when getProviderHealth omits asOf", async () => {
+    const { service } = buildService();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-26T11:03:30.000Z"));
+
+    await service.ingestPublicTelemetrySample(
+      {
+        externalVehicleRef: "VIN-OMIT-ASOF-001",
+        capturedAt: "2026-06-26T11:00:00.000Z",
+        location: { lat: 25.041, lng: 121.521 },
+        batteryLevelPct: 62,
+        online: true,
+      },
+      {
+        eventId: "pub-telemetry-omit-asof-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.public-telemetry.v1",
+        sessionId: "public-session-omit-asof",
+        receivedAt: "2026-06-26T11:00:00.000Z",
+      },
+    );
+
+    const health = await service.getProviderHealth({
+      feedKind: "public_telemetry",
+      externalVehicleRef: "VIN-OMIT-ASOF-001",
+      sessionId: "public-session-omit-asof",
+    });
+
+    expect(health).toMatchObject({
+      healthState: "incomplete_hold",
+      dispatchHold: true,
+      staleHeartbeatAt: "2026-06-26T11:00:00.000Z",
+      evaluatedAt: "2026-06-26T11:03:30.000Z",
+    });
+  });
+
   it("reloads persisted provider health into a new service instance after restart", async () => {
     const repository = new TeslaTelemetryRepository();
     const firstService = new TeslaTelemetryService(repository);
@@ -465,6 +505,92 @@ describe("TeslaTelemetryService", () => {
       staleHeartbeatAt: null,
     });
     expect(recoveredHealth?.issueCodes).not.toContain("STALE_HEARTBEAT");
+  });
+
+  it("escalates backfill to dispatch hold when heartbeat stays stale past the hold threshold", async () => {
+    const { service } = buildService();
+
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-008",
+        externalVehicleRef: "VIN-008",
+        capturedAt: "2026-06-26T17:00:00.000Z",
+        location: { lat: 25.1, lng: 121.6 },
+        speedMps: 8,
+        headingDeg: 90,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 80,
+        batteryRangeKm: 280,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-gap-hold-001",
+        sequenceNo: 1,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-gap-hold",
+        receivedAt: "2026-06-26T17:00:00.000Z",
+      },
+    );
+    await service.ingestVehicleStateSnapshot(
+      {
+        vehicleId: "veh-av-008",
+        externalVehicleRef: "VIN-008",
+        capturedAt: "2026-06-26T17:00:05.000Z",
+        location: { lat: 25.101, lng: 121.601 },
+        speedMps: 10,
+        headingDeg: 95,
+        shiftState: "D",
+        autonomyState: "fsd_engaged",
+        batteryLevelPct: 79,
+        batteryRangeKm: 279,
+        charging: false,
+        online: true,
+      },
+      {
+        eventId: "veh-state-gap-hold-003",
+        sequenceNo: 3,
+        schemaVersion: "tesla.vehicle-state.v1",
+        sessionId: "drive-session-gap-hold",
+        receivedAt: "2026-06-26T17:00:05.000Z",
+      },
+    );
+
+    const gapHealth = await service.getProviderHealth({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-008",
+      sessionId: "drive-session-gap-hold",
+      asOf: "2026-06-26T17:01:06.000Z",
+    });
+
+    expect(gapHealth).toMatchObject({
+      healthState: "gap_detected",
+      dispatchHold: false,
+      missingSequences: [2],
+    });
+
+    const holdHealth = await service.getProviderHealth({
+      feedKind: "vehicle_state",
+      externalVehicleRef: "VIN-008",
+      sessionId: "drive-session-gap-hold",
+      asOf: "2026-06-26T17:03:30.000Z",
+    });
+
+    expect(holdHealth).toMatchObject({
+      healthState: "regulator_data_incident",
+      dispatchHold: true,
+      missingSequences: [2],
+      staleHeartbeatAt: "2026-06-26T17:00:05.000Z",
+      backfillRequestedAt: "2026-06-26T17:01:06.000Z",
+    });
+    expect(holdHealth?.issueCodes).toEqual(
+      expect.arrayContaining([
+        "MISSING_SEQUENCE",
+        "BACKFILL_REQUIRED",
+        "STALE_HEARTBEAT",
+      ]),
+    );
   });
 
   it("quarantines unknown schemas and escalates provider health to regulator_data_incident", async () => {
