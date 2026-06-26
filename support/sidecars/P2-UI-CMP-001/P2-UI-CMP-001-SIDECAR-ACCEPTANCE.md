@@ -110,8 +110,8 @@ Status legend: **PRE** = pre-satisfied by a dependency · **GATE** = gated on ca
 | --- | --- | --- | --- | --- |
 | A1 | Pages under `/platform-admin/*` **match canvas** | parent acceptance | GATE → IMPL | Blocked until `compliance-screens.jsx` / `Platform Admin.html` publish the 9 screens to `dev` (§4). Then diff each screen vs canvas. |
 | A2 | Timeline **marks confidence** (and source/discrepancy) | parent acceptance · req §5.5 | GATE → IMPL | Investigation timeline must render per-fact confidence + source system + discrepancy tags. |
-| A3 | Export **gated by step-up + reason** | parent acceptance · req §5.6 | IMPL | Controlled export request requires reason; approval path distinct; show why an actor is blocked. |
-| A4 | Legal-hold release shows **four-eyes** | parent acceptance · req §5.7 | IMPL | Release request and release approve are separate actors/steps; self-approval forbidden; ROC read scope cannot release. |
+| A3 | Export **gated by step-up + reason** | parent acceptance · req §5.6 | IMPL | List/read is `sandbox.evidence.preview`; request (`export.request`) requires reason; approve (`export.approve`) is a distinct mutation scope; show why an actor is blocked. |
+| A4 | Legal-hold release shows **four-eyes** | parent acceptance · req §5.7 | IMPL | Release request and release approve are separate actor/scope steps (`release.request` ≠ `release.approve`); self-approval forbidden; the read scope (`sandbox.evidence.preview`) cannot place or release. |
 | A5 | **Scope-driven actions** (no client-invented authority) | parent acceptance · req §2 | PRE (contract) → IMPL (wire-up) | Actions visibility/enablement derive from backend scopes in `auth.constants.ts`; frontend must not fabricate authority. |
 | A6 | Cross-app entry via backend `CrossAppResourceLink` | req §3 | PRE (contract) → IMPL | ROC/external deep links resolved from backend link metadata, not client query reconstruction. |
 | A7 | Realm tokens only — **no raw hex** (no 套皮 reskin) | UI Design Contract | PRE (placeholder) → IMPL | Use `@drts/ui-tokens` / `buildCanvasTheme({surface:"platform"})`; self-check diff for hardcoded palette. |
@@ -126,22 +126,37 @@ Status legend: **PRE** = pre-satisfied by a dependency · **GATE** = gated on ca
 
 Routes, scopes, and key rules are taken from
 `docs/05-ui/platform-admin-sandbox-compliance-screen-requirements-20260626.md` §2 & §4–5 and
-verified against `apps/api/src/common/auth/auth.constants.ts`.
+verified **per endpoint** against the `@RequireScopes(...)` decorators on
+`apps/api/src/modules/platform-admin/platform-admin-compliance.controller.ts` and
+`apps/api/src/modules/regulatory-reporting/platform-admin-regulatory-reporting.controller.ts`
+(and the `ApiClient` route map in `packages/api-client/src/index.ts`), not only against the
+scope token list in `auth.constants.ts`.
 
-| Screen | Route | Required scope(s) | Acceptance-critical rule |
+> **Read vs. mutation authority (important):** a screen's *route read authority* is the scope on
+> its `GET` loaders, which is **distinct** from the scopes that gate its write actions. The
+> backend deliberately reads several evidence list views under the shared **`sandbox.evidence.preview`**
+> scope and reserves `export.request` / `export.approve` / `legal_hold.place` /
+> `release.request` / `release.approve` for **mutations only**. The matrix below therefore
+> separates **Read (GET)** from **Mutations** so the parent does not gate a list view behind a
+> mutation scope (which would wrongly hide read-only access).
+
+| Screen | Route | Read (GET) scope · Mutation scope(s) | Acceptance-critical rule |
 | --- | --- | --- | --- |
-| Compliance overview | `/platform-admin/compliance` | `sandbox.compliance.read` | triage/navigation only; not an evidence-mutation authority |
-| Trip compliance detail | `/platform-admin/compliance/trips/[tripId]` | `sandbox.compliance.read` | read drilldown; `trip-not-found` + missing-link states |
-| Investigation queue | `/platform-admin/investigations` | `sandbox.investigation.read` | ROC-linked entry from backend link metadata only |
-| Investigation detail | `/platform-admin/investigations/[caseId]` | `sandbox.investigation.read` | backend case is source of truth; no client identity reconstruction |
-| Investigation timeline | `/platform-admin/investigations/[caseId]/timeline` | `sandbox.investigation.read` | **confidence + source + discrepancy must be visually explicit (A2)** |
-| Evidence exports | `/platform-admin/evidence/exports` | request `sandbox.evidence.export.request` / approve `sandbox.evidence.export.approve` | **four-eyes: requester ≠ approver; self-approval forbidden (A3)** |
-| Legal holds | `/platform-admin/evidence/legal-holds` | place `sandbox.legal_hold.place` / release req `sandbox.legal_hold.release.request` / release approve `sandbox.legal_hold.release.approve` | **four-eyes release; ROC read scope cannot release (A4)** |
-| Evidence manifest detail | `/platform-admin/evidence/manifests/[manifestId]` | `sandbox.evidence.preview` | chain-of-custody / integrity metadata legible; not media-player design |
-| Regulatory reports | `/platform-admin/regulatory-reports` | review `sandbox.regulatory_report.review` / submit `sandbox.regulatory_report.submit` | review and submit stay distinct privileged actions; lifecycle obvious |
+| Compliance overview | `/platform-admin/compliance` | **Read (fan-out):** `sandbox.compliance.read` (takeover-reviews, evidence-discrepancies) **+** `sandbox.investigation.read` (investigations) **+** `sandbox.evidence.preview` (controlled exports, legal holds) **+** `sandbox.regulatory_report.review` (regulatory reports). · No mutations. | triage/navigation only; **not** a single-scope route — the overview loader fans out across all five domain lists, so partial scope yields a partially-populated view, not a hard deny |
+| Trip compliance detail | `/platform-admin/compliance/trips/[tripId]` | **Read:** `sandbox.compliance.read` **+** `sandbox.investigation.read` (filters the same overview dataset by trip). · No mutations. | read drilldown; `trip-not-found` + missing-link states |
+| Investigation queue | `/platform-admin/investigations` | **Read:** `sandbox.investigation.read`. · No mutations. | ROC-linked entry from backend link metadata only |
+| Investigation detail | `/platform-admin/investigations/[caseId]` | **Read:** `sandbox.investigation.read`. · No mutations. | backend case is source of truth; no client identity reconstruction |
+| Investigation timeline | `/platform-admin/investigations/[caseId]/timeline` | **Read:** `sandbox.investigation.read`. · No mutations. | **confidence + source + discrepancy must be visually explicit (A2)** |
+| Evidence exports | `/platform-admin/evidence/exports` | **Read (GET list):** `sandbox.evidence.preview`. · **Mutations:** request `sandbox.evidence.export.request`, approve `sandbox.evidence.export.approve`. | **four-eyes: requester ≠ approver; self-approval forbidden (A3); a preview/read scope alone cannot request or approve** |
+| Legal holds | `/platform-admin/evidence/legal-holds` | **Read (GET list):** `sandbox.evidence.preview`. · **Mutations:** place `sandbox.legal_hold.place`, release-request `sandbox.legal_hold.release.request`, release-approve `sandbox.legal_hold.release.approve`. | **four-eyes release; a preview/read scope alone cannot place or release a hold (A4)** |
+| Evidence manifest detail | `/platform-admin/evidence/manifests/[manifestId]` | **Read:** `sandbox.evidence.preview`. · No mutations. | chain-of-custody / integrity metadata legible; not media-player design |
+| Regulatory reports | `/platform-admin/regulatory-reports` | **Read (GET list):** `sandbox.regulatory_report.review`. · **Mutation:** submit `sandbox.regulatory_report.submit`. | review (read) and submit (mutation) stay distinct privileged actions; lifecycle obvious |
 
 Common required states for every screen: `loading`, `empty`/`no-data`, `permission-denied`,
-`fetch-failed`/`not-found`, and degraded backend freshness where applicable (req §5).
+`fetch-failed`/`not-found`, and degraded backend freshness where applicable (req §5). For the
+**Compliance overview** specifically, `permission-denied` is **per-panel** (a missing domain
+scope blanks that panel) rather than a whole-page deny, because the loader fans out across
+multiple read scopes.
 
 ---
 
@@ -193,6 +208,15 @@ This packet is support-only and does not change machine truth. Requested review:
 - `apps/api/src/common/auth/auth.constants.ts` (sandbox scope tokens)
 - `apps/api/src/modules/platform-admin/platform-admin-compliance.controller.ts`,
   `apps/api/src/modules/regulatory-reporting/platform-admin-regulatory-reporting.controller.ts`
+  — read **per-endpoint `@RequireScopes(...)`**: GET `evidence/exports` & GET
+  `evidence/legal-holds` both read under `sandbox.evidence.preview`; export/hold mutation routes
+  carry the request/approve/place/release scopes; GET `regulatory-reports` reads under
+  `sandbox.regulatory_report.review`.
+- `packages/api-client/src/index.ts` (`listSandbox*` → `/api/platform-admin/*` route map) and
+  `apps/platform-admin-web/lib/sandbox-compliance.ts` `loadSandboxComplianceOverview` — confirms
+  the compliance-overview loader fans out across investigations, takeover-reviews,
+  evidence-discrepancies, controlled exports, legal holds, and regulatory reports (six lists,
+  four read scopes).
 - `apps/platform-admin-web/app/platform-admin/**` (nine placeholder routes),
   `apps/platform-admin-web/components/sandbox-design-pending-screen.tsx`,
   `apps/platform-admin-web/lib/sandbox-compliance.ts`
@@ -201,3 +225,25 @@ This packet is support-only and does not change machine truth. Requested review:
 
 **INTEGRATION_STATUS for this sidecar:** `not_applicable` (support-only acceptance packet;
 no canonical mutation, no runtime/deploy surface).
+
+---
+
+## 10. Revision note — review round 1 (Codex)
+
+Reviewer finding: the §6 per-screen scope matrix understated **read** authority by listing only
+mutation scopes for the evidence list views and a single scope for the compliance overview.
+Addressed by re-verifying each route's `@RequireScopes(...)` decorator on `origin/dev`:
+
+- **Evidence exports** and **Legal holds** — corrected. The `GET` list views read under
+  `sandbox.evidence.preview`; `export.request` / `export.approve` and
+  `legal_hold.place` / `release.request` / `release.approve` are now labelled **mutation-only**.
+- **Compliance overview** — corrected. The matrix now records the multi-scope read fan-out
+  (`compliance.read` + `investigation.read` + `evidence.preview` + `regulatory_report.review`)
+  and notes that `permission-denied` is per-panel, not a single-scope whole-page deny.
+- **Regulatory reports** — clarified that `regulatory_report.review` is the GET/read scope and
+  `regulatory_report.submit` is the mutation.
+- §5 A3/A4 and §9 verification basis updated to match; new sources cited
+  (`platform-admin-regulatory-reporting.controller.ts`, `packages/api-client/src/index.ts`,
+  `loadSandboxComplianceOverview`).
+
+No canonical truth changed; this remains a support-only packet.
