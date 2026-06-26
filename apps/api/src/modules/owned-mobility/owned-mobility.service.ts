@@ -36,6 +36,7 @@ import type {
   DriverTaskRecord,
   EtaSnapshot,
   EscalateTenantBookingApprovalRequestCommand,
+  FulfillmentSegmentRecord,
   ApproveExceptionOverrideCommand,
   ExceptionHoldRecord,
   ExceptionHoldReasonCode,
@@ -59,6 +60,8 @@ import type {
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
   UpdateTenantBookingCommand,
+  SandboxDispatchDecision,
+  SandboxBillingTreatmentRecord,
   ServiceProductType,
 } from "@drts/contracts";
 
@@ -3483,10 +3486,22 @@ export class OwnedMobilityService implements OnModuleInit {
         currency: "NTD",
         amountMinor: 0,
       };
+    const sandboxFulfillmentSegments = this.buildSandboxFulfillmentSegments(
+      order,
+      task,
+      grossEarning,
+    );
+    const sandboxBillingTreatment = this.buildSandboxBillingTreatment(
+      order,
+      task,
+      grossEarning,
+      sandboxFulfillmentSegments,
+    );
     const payload: OwnedMobilityTripCompletedEvent = {
       tenantId: order.tenantId,
       driverId: task.driverId,
       orderId: order.orderId,
+      bookingId: order.bookingId,
       completedAt: task.completedAt,
       grossEarning: { ...grossEarning },
       orderSource: order.orderSource,
@@ -3502,10 +3517,159 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: null,
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      ...(sandboxFulfillmentSegments.length > 0
+        ? { sandboxFulfillmentSegments }
+        : {}),
+      ...(sandboxBillingTreatment
+        ? { sandboxBillingTreatment }
+        : {}),
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
+  }
+
+  private buildSandboxFulfillmentSegments(
+    order: OwnedOrderRecord,
+    completedTask: DriverTaskRecord,
+    grossEarning: MoneyAmount,
+  ): FulfillmentSegmentRecord[] {
+    const orderAssignments = this.dispatchAssignments
+      .filter((assignment) => assignment.orderId === order.orderId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const bookingId = order.bookingId ?? order.orderId;
+    const sandboxTripId = order.orderId;
+
+    return orderAssignments.flatMap((assignment, index) => {
+      const task = this.driverTasks.find(
+        (candidate) => candidate.assignmentId === assignment.assignmentId,
+      );
+      const isAvVehicle = this.isSandboxAvVehicle(assignment.vehicleId);
+      const taskIsCompleted = task?.taskId === completedTask.taskId;
+
+      if (
+        !isAvVehicle &&
+        !taskIsCompleted &&
+        assignment.status === "cancelled" &&
+        task?.status !== "completed"
+      ) {
+        return [];
+      }
+
+      const segmentType = isAvVehicle ? "tesla_av" : "human_taxi";
+      const segmentReason = isAvVehicle
+        ? taskIsCompleted
+          ? "sandbox_av_completed"
+          : "sandbox_av_attempt"
+        : order.complianceFlags.includes("sandbox_human_fallback")
+          ? "roc_human_fallback"
+          : "phase1_human_dispatch";
+      const segmentCost =
+        !isAvVehicle || taskIsCompleted ? { ...grossEarning } : null;
+
+      return [
+        {
+          fulfillmentSegmentId: `segment-${order.orderId}-${index + 1}`,
+          bookingId,
+          orderId: order.orderId,
+          sandboxTripId,
+          segmentType,
+          segmentReason,
+          startedAt:
+            task?.startedAt ??
+            task?.acceptedAt ??
+            assignment.acceptedAt ??
+            assignment.createdAt,
+          endedAt:
+            task?.completedAt ??
+            (assignment.status === "cancelled"
+              ? assignment.updatedAt
+              : null),
+          vehicleId: assignment.vehicleId,
+          vin: null,
+          driverId: assignment.driverId,
+          safetyOperatorId: isAvVehicle ? assignment.driverId : null,
+          sourcePlatform:
+            this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+          distanceKm: task?.actualDistanceKm ?? null,
+          durationSeconds: task?.actualDurationSec ?? null,
+          cost: segmentCost,
+          evidenceReference: null,
+          createdAt: assignment.createdAt,
+        },
+      ];
+    });
+  }
+
+  private buildSandboxBillingTreatment(
+    order: OwnedOrderRecord,
+    completedTask: DriverTaskRecord,
+    grossEarning: MoneyAmount,
+    fulfillmentSegments: FulfillmentSegmentRecord[],
+  ): SandboxBillingTreatmentRecord | null {
+    const bookingId = order.bookingId ?? order.orderId;
+    const currentTaskIsAv = this.isSandboxAvVehicle(completedTask.vehicleId);
+    const previousAvSegment = fulfillmentSegments.find(
+      (segment) =>
+        segment.segmentType === "tesla_av" &&
+        segment.vehicleId !== completedTask.vehicleId,
+    );
+    const humanFallbackApplied =
+      order.complianceFlags.includes("sandbox_human_fallback") ||
+      (!currentTaskIsAv && Boolean(previousAvSegment));
+
+    if (!currentTaskIsAv && !humanFallbackApplied) {
+      return null;
+    }
+
+    return {
+      sandboxBillingTreatmentId: `sandbox-billing-${order.orderId}`,
+      bookingId,
+      orderId: order.orderId,
+      sandboxTripId: order.orderId,
+      treatmentType: humanFallbackApplied ? "fallback_human" : "normal_av",
+      fallbackCostAbsorber: humanFallbackApplied ? "platform" : null,
+      fallbackPolicyId: null,
+      policyResolution: humanFallbackApplied
+        ? "Sandbox AV fallback converted to human fulfillment with no passenger or tenant surcharge."
+        : "Sandbox AV fulfillment completed with no fallback surcharge applied.",
+      passengerExtraChargeAllowed: false,
+      passengerExtraCharge: { currency: "NTD", amountMinor: 0 },
+      internalAvCost: currentTaskIsAv ? { ...grossEarning } : null,
+      internalHumanFallbackCost: humanFallbackApplied
+        ? { ...grossEarning }
+        : null,
+      partnerCharge: null,
+      tenantCharge: null,
+      platformAbsorbed: humanFallbackApplied ? { ...grossEarning } : null,
+      fallbackSurchargeApplied: false,
+      treatmentSnapshot: {
+        bookingId,
+        orderId: order.orderId,
+        fulfillmentMode: humanFallbackApplied
+          ? previousAvSegment
+            ? "mixed"
+            : "human_fallback"
+          : "tesla_av",
+        customerFareMinor: grossEarning.amountMinor,
+        customerFareCurrency: grossEarning.currency,
+        humanDriverSettlementMode: humanFallbackApplied
+          ? "phase1_standard"
+          : "not_applicable",
+        previousAvVehicleId: previousAvSegment?.vehicleId ?? null,
+      },
+      createdAt: completedTask.completedAt ?? new Date().toISOString(),
+    };
+  }
+
+  private isSandboxAvVehicle(vehicleId: string | null | undefined) {
+    return Boolean(
+      vehicleId &&
+        this.sandboxDispatchGateService?.shouldEvaluateSandboxAssignment(
+          vehicleId,
+        ),
+    );
   }
 
   private publishTenantOrderWebhook(
