@@ -42,6 +42,7 @@ export class VehicleEvidenceService {
   private readonly recorderRegistry = new Map<string, StoredRecorder>();
   private readonly healthSnapshots = new Map<string, RecorderHealthReport>();
   private readonly segmentIndex = new Map<string, SegmentIndexEntry>();
+  private readonly artifactCatalog = new Map<string, EvidenceManifestItem>();
   private readonly bookmarks = new Map<string, EventBookmarkRecord>();
 
   registerRecorder(
@@ -245,6 +246,27 @@ export class VehicleEvidenceService {
       .sort((left, right) => (left.startedAt < right.startedAt ? 1 : -1));
   }
 
+  listManifestItems(manifestId: string) {
+    return [...this.artifactCatalog.values()]
+      .filter((item) => item.manifestId === manifestId)
+      .map((item) => this.cloneArtifact(item))
+      .sort((left, right) =>
+        left.capturedAt < right.capturedAt ? -1 : 1,
+      );
+  }
+
+  getArtifact(artifactId: string) {
+    const artifact = this.artifactCatalog.get(artifactId);
+    if (!artifact) {
+      throw new ApiRequestError(
+        404,
+        "EVIDENCE_ARTIFACT_NOT_FOUND",
+        `Artifact ${artifactId} is not indexed.`,
+      );
+    }
+    return this.cloneArtifact(artifact);
+  }
+
   bookmarkEvent(command: EventBookmarkCommand) {
     const segment = this.segmentIndex.get(command.segmentId);
     if (!segment || segment.recorderId !== command.recorderId) {
@@ -408,6 +430,29 @@ export class VehicleEvidenceService {
     options: SeedSegmentOptions,
   ) {
     const segmentId = `segment-${artifactId}`;
+    this.artifactCatalog.set(artifactId, {
+      artifactId,
+      manifestId,
+      artifactType,
+      objectKey: `${vehicleId}/segments/${artifactId}`,
+      contentType:
+        artifactType === "video_clip" ? "video/mp4" : "application/json",
+      byteSize: artifactType === "video_clip" ? 8_388_608 : 262_144,
+      checksumSha256: `seeded-${artifactId}`,
+      capturedAt: options.endedAt,
+      custodyState: "captured",
+      vehicleId,
+      caseId: options.caseId ?? null,
+      retentionUntil: null,
+      source: {
+        sourceSystem: "onboard_recorder",
+        sourceRef: artifactId,
+        ingestedAt: options.endedAt,
+        recordedAt: options.endedAt,
+        signatureRef: null,
+        schemaVersion: "seeded-mock-recorder-v1",
+      },
+    });
     const entry: SegmentIndexEntry = {
       segmentId,
       recorderId,
@@ -434,6 +479,11 @@ export class VehicleEvidenceService {
     options: Pick<SeedSegmentOptions, "startedAt" | "endedAt" | "caseId">,
   ) {
     const segmentId = `segment-${item.artifactId}`;
+    this.artifactCatalog.set(item.artifactId, {
+      ...item,
+      source: { ...item.source },
+      caseId: options.caseId ?? item.caseId ?? null,
+    });
     this.segmentIndex.set(segmentId, {
       segmentId,
       recorderId: registration.recorderId,
@@ -641,5 +691,12 @@ export class VehicleEvidenceService {
 
   private cloneBookmark(record: EventBookmarkRecord): EventBookmarkRecord {
     return { ...record };
+  }
+
+  private cloneArtifact(item: EvidenceManifestItem): EvidenceManifestItem {
+    return {
+      ...item,
+      source: { ...item.source },
+    };
   }
 }

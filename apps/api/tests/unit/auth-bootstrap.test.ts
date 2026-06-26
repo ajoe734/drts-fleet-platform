@@ -16,6 +16,7 @@ import {
   InternalKeyMiddleware,
   JwtAuthService,
   OpenRoute,
+  RequireRealms,
   RequireScopes,
   extractBootstrapRequestIdentity,
   isHealthRequest,
@@ -560,6 +561,59 @@ describe("bootstrap auth guard", () => {
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity?.actorType).toBe("tenant_admin");
     expect(request.identity?.scopes).toContain("tenant:webhooks:write");
+  });
+
+  it("denies ops identities from requesting sandbox legal-hold release", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "ops_user",
+        "x-actor-id": "roc-operator-001",
+        "x-realm": "ops",
+        "x-scopes": "sandbox.investigation.read sandbox.evidence.preview",
+      },
+      method: "POST",
+      originalUrl: "/api/unmatched-route",
+    };
+    class ScopedHandler {
+      handler() {}
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      ScopedHandler.prototype,
+      "handler",
+    );
+    expect(descriptor).toBeDefined();
+    if (!descriptor) {
+      throw new Error("expected descriptor");
+    }
+    RequireRealms("platform")(
+      ScopedHandler,
+    );
+    RequireScopes("sandbox.legal_hold.release.request")(
+      ScopedHandler.prototype,
+      "handler",
+      descriptor,
+    );
+
+    const context = createExecutionContext(
+      request,
+      ScopedHandler.prototype.handler,
+      ScopedHandler,
+    );
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+
+    try {
+      guard.canActivate(context);
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_REALM_DENIED",
+        },
+      });
+    }
   });
 
   it("accepts SSE bootstrap identity from query params on ops dispatch streams", () => {

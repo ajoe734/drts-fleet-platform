@@ -11,6 +11,7 @@ import type {
   ActionReceipt,
   AssignRocAlertCommand,
   CorrelatedTakeoverCase,
+  CrossAppResourceLink,
   CreateIncidentCommand,
   CreateManualTakeoverCorrelationCommand,
   EvidenceDiscrepancyCase,
@@ -2024,6 +2025,10 @@ export class RocOperationsService {
       rocTakeoverResponse: rocResponse ? this.cloneRocResponse(rocResponse) : null,
       manualCorrelation: manualLink ? this.cloneManualLink(manualLink) : null,
       discrepancyCaseIds: [],
+      investigationLink: this.buildInvestigationLink(
+        "sandbox_takeover_case",
+        `takeover-case-${report.reportId}`,
+      ),
     };
 
     const discrepancy = this.buildDiscrepancyCase(caseRecord);
@@ -2176,6 +2181,10 @@ export class RocOperationsService {
       discrepancyTypes: [...discrepancyTypes],
       openedAt: new Date().toISOString(),
       summary: `Discrepancies detected across correlated takeover sources for report ${safetyReport.reportId}.`,
+      investigationLink: this.buildInvestigationLink(
+        "sandbox_takeover_discrepancy",
+        `takeover-discrepancy-${safetyReport.reportId}`,
+      ),
       sourceFacts: {
         teslaOccurredAt: teslaEvent?.occurredAt ?? null,
         safetyOccurredAt: safetyReport.occurredAt,
@@ -2188,6 +2197,28 @@ export class RocOperationsService {
         safetyTakeoverCorrelationId: safetyReport.correlationId,
         rocTakeoverCorrelationId: rocResponse?.takeoverCorrelationId ?? null,
       },
+    };
+  }
+
+  private buildInvestigationLink(
+    resourceType: string,
+    resourceId: string,
+  ): CrossAppResourceLink {
+    const queryKey =
+      resourceType === "sandbox_takeover_discrepancy"
+        ? "discrepancyCaseId"
+        : "takeoverCaseId";
+
+    return {
+      targetApp: "platform-admin",
+      route: `/platform-admin/investigations?${queryKey}=${encodeURIComponent(
+        resourceId,
+      )}`,
+      resourceType,
+      resourceId,
+      openMode: "new_tab",
+      label: "Open investigation",
+      requiredScopes: ["sandbox.investigation.read"],
     };
   }
 

@@ -296,6 +296,11 @@ const en = {
   "adminShell.route.serviceProducts": "Service Products",
   "adminShell.route.vehicleEligibility": "Vehicle Eligibility Matrix",
   "adminShell.route.fleetPartners": "Fleet Partners",
+  "adminShell.route.sandboxCompliance": "Sandbox Compliance",
+  "adminShell.route.sandboxInvestigations": "Sandbox Investigations",
+  "adminShell.route.sandboxEvidenceExports": "Evidence Exports",
+  "adminShell.route.sandboxLegalHolds": "Legal Holds",
+  "adminShell.route.sandboxRegulatoryReports": "Regulatory Reports",
   "adminShell.route.switchboard": "Public Info & Placards",
   "adminShell.route.pricing": "Pricing",
   "adminShell.route.payments": "Payments",
@@ -444,6 +449,19 @@ const en = {
   "assistant.route.notices.title": "Notices & Maintenance",
   "assistant.route.audit.title": "Audit & Evidence",
   "assistant.route.featureFlags.title": "Feature Flags",
+  "assistant.route.sandboxCompliance.title": "Sandbox Compliance",
+  "assistant.route.sandboxComplianceTripDetail.title":
+    "Sandbox Trip Compliance Detail",
+  "assistant.route.sandboxInvestigations.title": "Sandbox Investigations",
+  "assistant.route.sandboxInvestigationDetail.title":
+    "Sandbox Investigation Detail",
+  "assistant.route.sandboxInvestigationTimeline.title":
+    "Sandbox Investigation Timeline",
+  "assistant.route.sandboxEvidenceManifest.title": "Sandbox Evidence Manifest",
+  "assistant.route.sandboxEvidenceExports.title": "Sandbox Evidence Exports",
+  "assistant.route.sandboxLegalHolds.title": "Sandbox Legal Holds",
+  "assistant.route.sandboxRegulatoryReports.title":
+    "Sandbox Regulatory Reports",
 
   // ── Tenants ──
   "tenants.title": "Tenant Management",
@@ -2906,6 +2924,11 @@ const zh: typeof en = {
   "adminShell.route.serviceProducts": "服務產品",
   "adminShell.route.vehicleEligibility": "車輛資格矩陣",
   "adminShell.route.fleetPartners": "車隊夥伴",
+  "adminShell.route.sandboxCompliance": "沙盒合規",
+  "adminShell.route.sandboxInvestigations": "沙盒調查",
+  "adminShell.route.sandboxEvidenceExports": "證據匯出",
+  "adminShell.route.sandboxLegalHolds": "法律保留",
+  "adminShell.route.sandboxRegulatoryReports": "監理報表",
   "adminShell.route.switchboard": "公開資訊",
   "adminShell.route.pricing": "費率治理",
   "adminShell.route.payments": "結算與帳務",
@@ -3044,6 +3067,15 @@ const zh: typeof en = {
   "assistant.route.notices.title": "公告與維護",
   "assistant.route.audit.title": "稽核與證據",
   "assistant.route.featureFlags.title": "功能旗標",
+  "assistant.route.sandboxCompliance.title": "沙盒合規",
+  "assistant.route.sandboxComplianceTripDetail.title": "行程合規詳情",
+  "assistant.route.sandboxInvestigations.title": "沙盒調查",
+  "assistant.route.sandboxInvestigationDetail.title": "調查案件詳情",
+  "assistant.route.sandboxInvestigationTimeline.title": "調查時間軸",
+  "assistant.route.sandboxEvidenceManifest.title": "證據清單",
+  "assistant.route.sandboxEvidenceExports.title": "受控匯出",
+  "assistant.route.sandboxLegalHolds.title": "法律保留",
+  "assistant.route.sandboxRegulatoryReports.title": "監理報表",
 
   // ── Tenants ──
   "tenants.title": "租戶管理",

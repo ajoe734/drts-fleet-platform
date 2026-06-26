@@ -6,9 +6,14 @@
  */
 
 import type {
+  AccidentCaseRecord,
+  AccidentTimelineEntry,
   AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
+  ActionReceipt,
+  ApproveSandboxControlledEvidenceExportCommand,
+  ApproveSandboxLegalHoldReleaseCommand,
   ApplyManualFareOverrideCommand,
   ApproveExceptionOverrideCommand,
   AnnounceCallAgentIdentityCommand,
@@ -58,7 +63,9 @@ import type {
   CreateIncidentFromDispatchExceptionCommand,
   CreateReconciliationIssueCommand,
   CompleteVehicleDebrandingCommand,
+  CorrelatedTakeoverCase,
   CreateMaintenanceRecordCommand,
+  CreateSandboxLegalHoldCommand,
   CrossAppResourceLink,
   DispatchExclusivityRecord,
   CreateTenantUserCommand,
@@ -97,6 +104,7 @@ import type {
   FleetPartnerStatementRecord,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
+  EvidenceDiscrepancyCase,
   EvidenceGovernanceCatalog,
   EvidenceLegalHoldRecord,
   EvidenceRetentionFamily,
@@ -159,6 +167,7 @@ import type {
   ResourceActionDescriptor,
   RevokePartnerIngressCredentialCommand,
   RegisterDriverDeviceCommand,
+  RegulatoryReportFiling,
   ReopenComplaintCaseCommand,
   ReleaseEvidenceLegalHoldCommand,
   ReportJobAccepted,
@@ -170,6 +179,8 @@ import type {
   ReopenReconciliationIssueCommand,
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
+  RequestSandboxControlledEvidenceExportCommand,
+  RequestSandboxLegalHoldReleaseCommand,
   ResolveExceptionHoldCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokeDriverDeviceBindingCommand,
@@ -231,6 +242,10 @@ import type {
   EscalateComplaintToIncidentCommand,
   LinkComplaintToIncidentCommand,
   SubmitExclusivityReviewCommand,
+  SubmitRegulatoryReportCommand,
+  SandboxControlledEvidenceExportRecord,
+  SandboxEvidenceManifestView,
+  SandboxLegalHoldRecord,
   ApproveExclusivityCommand,
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverWorkStateCommand,
@@ -2284,6 +2299,176 @@ export class ApiClient {
   ): Promise<EvidenceDeletionExceptionRecord> {
     return this.post<EvidenceDeletionExceptionRecord>(
       `/api/audit/deletion-exceptions/${encodeURIComponent(exceptionId)}/resolve`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async listSandboxInvestigations(): Promise<{
+    items: AccidentCaseRecord[];
+    refresh: UiRefreshMetadata;
+    emptyState?: EmptyStateEnvelope;
+  }> {
+    return this.get<{
+      items: AccidentCaseRecord[];
+      refresh: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope;
+    }>("/api/platform-admin/investigations");
+  }
+
+  async getSandboxInvestigation(caseId: string): Promise<{
+    item: AccidentCaseRecord;
+    refresh: UiRefreshMetadata;
+  }> {
+    return this.get<{
+      item: AccidentCaseRecord;
+      refresh: UiRefreshMetadata;
+    }>(`/api/platform-admin/investigations/${encodeURIComponent(caseId)}`);
+  }
+
+  async getSandboxInvestigationTimeline(caseId: string): Promise<{
+    items: AccidentTimelineEntry[];
+    refresh: UiRefreshMetadata;
+    emptyState?: EmptyStateEnvelope;
+  }> {
+    return this.get<{
+      items: AccidentTimelineEntry[];
+      refresh: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope;
+    }>(
+      `/api/platform-admin/investigations/${encodeURIComponent(caseId)}/timeline`,
+    );
+  }
+
+  async listSandboxTakeoverReviews(): Promise<{
+    items: CorrelatedTakeoverCase[];
+    refresh: UiRefreshMetadata;
+    emptyState?: EmptyStateEnvelope;
+  }> {
+    return this.get<{
+      items: CorrelatedTakeoverCase[];
+      refresh: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope;
+    }>("/api/platform-admin/compliance/takeover-reviews");
+  }
+
+  async listSandboxEvidenceDiscrepancies(): Promise<{
+    items: EvidenceDiscrepancyCase[];
+    refresh: UiRefreshMetadata;
+    emptyState?: EmptyStateEnvelope;
+  }> {
+    return this.get<{
+      items: EvidenceDiscrepancyCase[];
+      refresh: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope;
+    }>("/api/platform-admin/compliance/evidence-discrepancies");
+  }
+
+  async getSandboxEvidenceManifest(manifestId: string): Promise<{
+    item: SandboxEvidenceManifestView;
+    refresh: UiRefreshMetadata;
+  }> {
+    return this.get<{
+      item: SandboxEvidenceManifestView;
+      refresh: UiRefreshMetadata;
+    }>(`/api/platform-admin/evidence/manifests/${encodeURIComponent(manifestId)}`);
+  }
+
+  async listSandboxControlledExports(): Promise<{
+    items: SandboxControlledEvidenceExportRecord[];
+    refresh: UiRefreshMetadata;
+    emptyState?: EmptyStateEnvelope;
+  }> {
+    return this.get<{
+      items: SandboxControlledEvidenceExportRecord[];
+      refresh: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope;
+    }>("/api/platform-admin/evidence/exports");
+  }
+
+  async requestSandboxControlledExport(
+    command: RequestSandboxControlledEvidenceExportCommand,
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>("/api/platform-admin/evidence/exports/request", {
+      body: command,
+    });
+  }
+
+  async approveSandboxControlledExport(
+    exportRequestId: string,
+    command: ApproveSandboxControlledEvidenceExportCommand = {},
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
+      `/api/platform-admin/evidence/exports/${encodeURIComponent(exportRequestId)}/approve`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async listSandboxLegalHolds(): Promise<{
+    items: SandboxLegalHoldRecord[];
+    refresh: UiRefreshMetadata;
+    emptyState?: EmptyStateEnvelope;
+  }> {
+    return this.get<{
+      items: SandboxLegalHoldRecord[];
+      refresh: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope;
+    }>("/api/platform-admin/evidence/legal-holds");
+  }
+
+  async placeSandboxLegalHold(
+    command: CreateSandboxLegalHoldCommand,
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>("/api/platform-admin/evidence/legal-holds", {
+      body: command,
+    });
+  }
+
+  async requestSandboxLegalHoldRelease(
+    holdId: string,
+    command: RequestSandboxLegalHoldReleaseCommand,
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
+      `/api/platform-admin/evidence/legal-holds/${encodeURIComponent(holdId)}/release-request`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async approveSandboxLegalHoldRelease(
+    holdId: string,
+    command: ApproveSandboxLegalHoldReleaseCommand = {},
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
+      `/api/platform-admin/evidence/legal-holds/${encodeURIComponent(holdId)}/release-approve`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async listSandboxRegulatoryReports(): Promise<{
+    items: RegulatoryReportFiling[];
+    refresh: UiRefreshMetadata;
+    emptyState?: EmptyStateEnvelope;
+  }> {
+    return this.get<{
+      items: RegulatoryReportFiling[];
+      refresh: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope;
+    }>("/api/platform-admin/regulatory-reports");
+  }
+
+  async submitSandboxRegulatoryReport(
+    reportId: string,
+    command: SubmitRegulatoryReportCommand = {},
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
+      `/api/platform-admin/regulatory-reports/${encodeURIComponent(reportId)}/submit`,
       {
         body: command,
       },
