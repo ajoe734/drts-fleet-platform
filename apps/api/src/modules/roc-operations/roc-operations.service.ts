@@ -191,6 +191,7 @@ export class RocOperationsService {
     @Optional() private readonly vehicleEvidenceService?: VehicleEvidenceService,
     @Optional() private readonly teslaIntegrationService?: TeslaIntegrationService,
     @Optional()
+    @Inject(forwardRef(() => OwnedMobilityService))
     private readonly ownedMobilityService?: OwnedMobilityService,
     @Optional()
     @Inject(forwardRef(() => SandboxDispatchGateService))
