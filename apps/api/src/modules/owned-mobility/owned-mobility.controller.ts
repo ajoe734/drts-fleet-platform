@@ -33,6 +33,7 @@ import type {
   ReassignDispatchCommand,
   RedispatchOrderCommand,
   RejectExceptionOverrideCommand,
+  RecordPassengerAcknowledgementCommand,
   RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
   SandboxFulfillmentProjectionView,
@@ -254,6 +255,24 @@ export class OwnedMobilityController {
       this.ownedMobilityService.getTenantSandboxFulfillment(
         this.requireTenantId(tenantId),
         bookingId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/bookings/:bookingId/passenger-disclosure-acknowledgement")
+  async acknowledgePassengerDisclosure(
+    @Param("bookingId") bookingId: string,
+    @Body() command: RecordPassengerAcknowledgementCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.acknowledgePassengerDisclosure(
+        this.requireTenantId(tenantId),
+        bookingId,
+        command,
+        requestId,
       ),
       requestId,
     );

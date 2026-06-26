@@ -5,9 +5,17 @@ import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   AuditLogRecord,
   GeoJsonMultiLineString,
+  PassengerAcknowledgementRecord,
+  PassengerDisclosureChannel,
+  PassengerDisclosureMessageCatalogEntry,
+  PassengerDisclosurePolicy,
+  PassengerDisclosureRequirementSnapshot,
+  RecordPassengerAcknowledgementCommand,
   SandboxDispatchDecision,
   SandboxDispatchReasonCode,
   SandboxScheduleWindow,
+  UpsertPassengerDisclosureMessageCatalogEntryCommand,
+  UpsertPassengerDisclosurePolicyCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -34,11 +42,45 @@ const REQUIRED_PROVIDER_CAPABILITIES = [
   "minimal_risk_condition",
 ] as const;
 
+const BASELINE_DISCLOSURE_CATALOG_VERSION = "passenger_disclosure.v1";
+
+const BASELINE_DISCLOSURE_MESSAGE_CATALOG: PassengerDisclosureMessageCatalogEntry[] =
+  [
+    {
+      entryId: "pdc-v1-av-en-us",
+      catalogVersion: BASELINE_DISCLOSURE_CATALOG_VERSION,
+      messageCode: "sandbox_passenger_disclosure.av_program_notice",
+      locale: "en-US",
+      bodyText:
+        "This trip may be fulfilled by an autonomous vehicle operating under the sandbox program, with remote oversight and a human fallback process available if conditions change.",
+      legalApproved: true,
+      createdAt: "2026-06-26T00:00:00.000Z",
+      updatedAt: "2026-06-26T00:00:00.000Z",
+    },
+    {
+      entryId: "pdc-v1-av-zh-tw",
+      catalogVersion: BASELINE_DISCLOSURE_CATALOG_VERSION,
+      messageCode: "sandbox_passenger_disclosure.av_program_notice",
+      locale: "zh-TW",
+      bodyText:
+        "本趟行程可能由沙盒計畫中的自動駕駛車輛執行，並提供遠端監看與必要時切換真人駕駛的處理流程。",
+      legalApproved: false,
+      createdAt: "2026-06-26T00:00:00.000Z",
+      updatedAt: "2026-06-26T00:00:00.000Z",
+    },
+  ];
+
 @Injectable()
 export class SandboxDispatchGateService {
   private readonly logger = new Logger(SandboxDispatchGateService.name);
 
   private lastDecision: SandboxDispatchDecision | null = null;
+  private disclosurePolicies: PassengerDisclosurePolicy[] = [];
+  private acknowledgementRecords: PassengerAcknowledgementRecord[] = [];
+  private messageCatalogEntries = BASELINE_DISCLOSURE_MESSAGE_CATALOG.map(
+    (entry) => ({ ...entry }),
+  );
+  private disclosureCacheLoaded = false;
 
   constructor(
     @Optional()
@@ -50,6 +92,186 @@ export class SandboxDispatchGateService {
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
   ) {}
+
+  async upsertPassengerDisclosurePolicy(
+    command: UpsertPassengerDisclosurePolicyCommand,
+  ) {
+    await this.ensureDisclosureCacheLoaded();
+    const now = new Date().toISOString();
+    const policyId = command.policyId?.trim() || randomUUID();
+    const nextPolicy: PassengerDisclosurePolicy = {
+      policyId,
+      policyVersion: command.policyVersion,
+      tenantId: command.tenantId?.trim() || null,
+      businessDispatchSubtype: command.businessDispatchSubtype?.trim() || null,
+      partnerEntrySlug: command.partnerEntrySlug?.trim() || null,
+      active: command.active !== false,
+      channelRules: command.channelRules.map((rule) => ({ ...rule })),
+      createdAt:
+        this.disclosurePolicies.find((policy) => policy.policyId === policyId)
+          ?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.disclosurePolicies = [
+      nextPolicy,
+      ...this.disclosurePolicies.filter(
+        (policy) => policy.policyId !== policyId,
+      ),
+    ];
+    if (this.repository) {
+      await this.repository.upsertPassengerDisclosurePolicy(nextPolicy);
+    }
+    return this.clonePassengerDisclosurePolicy(nextPolicy);
+  }
+
+  async upsertPassengerDisclosureMessageCatalogEntry(
+    command: UpsertPassengerDisclosureMessageCatalogEntryCommand,
+  ) {
+    await this.ensureDisclosureCacheLoaded();
+    const now = new Date().toISOString();
+    const entryId =
+      command.entryId?.trim() ||
+      `${command.catalogVersion}:${command.messageCode}:${command.locale}`;
+    const nextEntry: PassengerDisclosureMessageCatalogEntry = {
+      entryId,
+      catalogVersion: command.catalogVersion,
+      messageCode: command.messageCode,
+      locale: command.locale,
+      bodyText: command.bodyText,
+      legalApproved: command.legalApproved,
+      createdAt:
+        this.messageCatalogEntries.find((entry) => entry.entryId === entryId)
+          ?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.messageCatalogEntries = [
+      nextEntry,
+      ...this.messageCatalogEntries.filter(
+        (entry) => entry.entryId !== entryId,
+      ),
+    ];
+    if (this.repository) {
+      await this.repository.upsertPassengerDisclosureMessageCatalogEntry(
+        nextEntry,
+      );
+    }
+    return this.cloneMessageCatalogEntry(nextEntry);
+  }
+
+  async listPassengerDisclosureMessageCatalogEntries() {
+    await this.ensureDisclosureCacheLoaded();
+    return this.messageCatalogEntries.map((entry) =>
+      this.cloneMessageCatalogEntry(entry),
+    );
+  }
+
+  async getPassengerDisclosurePolicy(policyId: string) {
+    await this.ensureDisclosureCacheLoaded();
+    const policy = this.disclosurePolicies.find(
+      (candidate) => candidate.policyId === policyId,
+    );
+    if (!policy) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_DISCLOSURE_POLICY_NOT_FOUND",
+        "Passenger disclosure policy was not found.",
+        { policyId },
+      );
+    }
+    return this.clonePassengerDisclosurePolicy(policy);
+  }
+
+  async resolvePassengerDisclosureForBooking(input: {
+    tenantId: string | null;
+    businessDispatchSubtype: string | null;
+    partnerEntrySlug: string | null;
+    channel: PassengerDisclosureChannel;
+  }): Promise<PassengerDisclosureRequirementSnapshot | null> {
+    await this.ensureDisclosureCacheLoaded();
+    const policy = this.selectPassengerDisclosurePolicy(input);
+    if (!policy) {
+      return null;
+    }
+    const channelRule = policy.channelRules.find(
+      (rule) => rule.channel === input.channel,
+    );
+    if (!channelRule) {
+      return null;
+    }
+    return {
+      channel: input.channel,
+      policyId: policy.policyId,
+      policyVersion: policy.policyVersion,
+      messageCode: this.messageCatalogEntries.some(
+        (entry) => entry.messageCode === channelRule.messageCode,
+      )
+        ? channelRule.messageCode
+        : null,
+      requiresAcknowledgement: channelRule.requiresAcknowledgement,
+      acknowledgementMode: channelRule.acknowledgementMode,
+      acknowledgedAt: null,
+      acknowledgementRecordId: null,
+    };
+  }
+
+  async recordPassengerAcknowledgement(input: {
+    bookingId: string;
+    orderId: string;
+    disclosure: PassengerDisclosureRequirementSnapshot;
+    command?: RecordPassengerAcknowledgementCommand | null;
+  }) {
+    await this.ensureDisclosureCacheLoaded();
+    if (!input.disclosure.requiresAcknowledgement) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_DISCLOSURE_ACKNOWLEDGEMENT_NOT_REQUIRED",
+        "This disclosure does not require an acknowledgement.",
+        {
+          bookingId: input.bookingId,
+          orderId: input.orderId,
+          policyId: input.disclosure.policyId,
+        },
+      );
+    }
+    if (!input.disclosure.messageCode) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_DISCLOSURE_MESSAGE_REQUIRED",
+        "Acknowledgement cannot be recorded because the disclosure message is missing.",
+        {
+          bookingId: input.bookingId,
+          orderId: input.orderId,
+          policyId: input.disclosure.policyId,
+        },
+      );
+    }
+
+    const acknowledgedAt =
+      input.command?.acknowledgedAt ?? new Date().toISOString();
+    const record: PassengerAcknowledgementRecord = {
+      acknowledgementId: randomUUID(),
+      bookingId: input.bookingId,
+      orderId: input.orderId,
+      policyId: input.disclosure.policyId,
+      messageCode: input.disclosure.messageCode,
+      channel: input.disclosure.channel,
+      acknowledgementMode: input.disclosure.acknowledgementMode,
+      actorType: input.command?.actorType ?? "passenger",
+      actorRef: input.command?.actorRef?.trim() || null,
+      acknowledgedAt,
+      evidenceRef: input.command?.evidenceRef?.trim() || null,
+      createdAt: acknowledgedAt,
+    };
+
+    this.acknowledgementRecords = [record, ...this.acknowledgementRecords];
+    if (this.repository) {
+      await this.repository.insertPassengerAcknowledgement(record);
+    }
+
+    return this.cloneAcknowledgementRecord(record);
+  }
 
   async evaluateDispatch(
     input: SandboxDispatchGateInput,
@@ -209,6 +431,7 @@ export class SandboxDispatchGateService {
     recorder?: SandboxDispatchGateInput["recorder"];
     holdState?: SandboxDispatchGateInput["holdState"];
     limits?: SandboxDispatchGateInput["limits"];
+    passengerDisclosure?: SandboxDispatchGateInput["passengerDisclosure"];
   }): Promise<SandboxDispatchGateInput> {
     const recorderSignal = this.vehicleEvidenceService?.getNoNewDispatchSignal(
       input.vehicleId,
@@ -289,6 +512,7 @@ export class SandboxDispatchGateService {
         (enrollment
           ? { maxConcurrentTrips: enrollment.maxConcurrentTrips ?? null }
           : null),
+      passengerDisclosure: input.passengerDisclosure ?? null,
       operatingArea: {
         inBounds: governanceSnapshot.operatingArea.inBounds,
         boundaryRisk: governanceSnapshot.operatingArea.boundaryRisk,
@@ -393,6 +617,14 @@ export class SandboxDispatchGateService {
       maxConcurrentTrips: number | null;
       maxOdometerKm: number;
     };
+    passengerDisclosure: {
+      channel: PassengerDisclosureChannel | null;
+      policyId: string | null;
+      policyVersion: string | null;
+      messageCode: string | null;
+      requiresAcknowledgement: boolean;
+      acknowledgedAt: string | null;
+    };
     requestedAt: string;
   } {
     const telemetryQualityGate = resolveTeslaTelemetryQualityGateScore();
@@ -467,6 +699,15 @@ export class SandboxDispatchGateService {
         minSocPercent: input.limits?.minSocPercent ?? DEFAULT_MIN_SOC_PERCENT,
         maxConcurrentTrips: input.limits?.maxConcurrentTrips ?? null,
         maxOdometerKm: input.limits?.maxOdometerKm ?? DEFAULT_MAX_ODOMETER_KM,
+      },
+      passengerDisclosure: {
+        channel: input.passengerDisclosure?.channel ?? null,
+        policyId: input.passengerDisclosure?.policyId ?? null,
+        policyVersion: input.passengerDisclosure?.policyVersion ?? null,
+        messageCode: input.passengerDisclosure?.messageCode ?? null,
+        requiresAcknowledgement:
+          input.passengerDisclosure?.requiresAcknowledgement === true,
+        acknowledgedAt: input.passengerDisclosure?.acknowledgedAt ?? null,
       },
     };
   }
@@ -550,6 +791,18 @@ export class SandboxDispatchGateService {
         reasons.push("PROVIDER_CAPABILITY_MISSING");
         break;
       }
+    }
+    if (!input.passengerDisclosure.policyId) {
+      reasons.push("PASSENGER_DISCLOSURE_POLICY_MISSING");
+    }
+    if (!input.passengerDisclosure.messageCode) {
+      reasons.push("PASSENGER_DISCLOSURE_MESSAGE_MISSING");
+    }
+    if (
+      input.passengerDisclosure.requiresAcknowledgement &&
+      !input.passengerDisclosure.acknowledgedAt
+    ) {
+      reasons.push("PASSENGER_ACKNOWLEDGEMENT_REQUIRED");
     }
 
     return [...new Set(reasons)];
@@ -845,6 +1098,122 @@ export class SandboxDispatchGateService {
       return false;
     }
     return true;
+  }
+
+  private async ensureDisclosureCacheLoaded() {
+    if (this.disclosureCacheLoaded || !this.repository?.isEnabled()) {
+      this.disclosureCacheLoaded = true;
+      return;
+    }
+
+    const [policies, catalogEntries, acknowledgements] = await Promise.all([
+      this.repository.listPassengerDisclosurePolicies(),
+      this.repository.listPassengerDisclosureMessageCatalogEntries(),
+      this.repository.listPassengerAcknowledgements(),
+    ]);
+
+    this.disclosurePolicies = policies.map((policy) =>
+      this.clonePassengerDisclosurePolicy(policy),
+    );
+    this.messageCatalogEntries =
+      this.mergeBaselineCatalogEntries(catalogEntries);
+    this.acknowledgementRecords = acknowledgements.map((record) =>
+      this.cloneAcknowledgementRecord(record),
+    );
+    this.disclosureCacheLoaded = true;
+  }
+
+  private mergeBaselineCatalogEntries(
+    entries: PassengerDisclosureMessageCatalogEntry[],
+  ) {
+    const deduped = new Map<string, PassengerDisclosureMessageCatalogEntry>();
+    for (const entry of [...BASELINE_DISCLOSURE_MESSAGE_CATALOG, ...entries]) {
+      deduped.set(entry.entryId, this.cloneMessageCatalogEntry(entry));
+    }
+    return [...deduped.values()];
+  }
+
+  private selectPassengerDisclosurePolicy(input: {
+    tenantId: string | null;
+    businessDispatchSubtype: string | null;
+    partnerEntrySlug: string | null;
+    channel: PassengerDisclosureChannel;
+  }) {
+    const candidates = this.disclosurePolicies.filter((policy) => {
+      if (!policy.active) {
+        return false;
+      }
+      if (
+        policy.tenantId !== null &&
+        policy.tenantId !== (input.tenantId?.trim() || null)
+      ) {
+        return false;
+      }
+      if (
+        policy.businessDispatchSubtype !== null &&
+        policy.businessDispatchSubtype !==
+          (input.businessDispatchSubtype?.trim() || null)
+      ) {
+        return false;
+      }
+      if (
+        policy.partnerEntrySlug !== null &&
+        policy.partnerEntrySlug !== (input.partnerEntrySlug?.trim() || null)
+      ) {
+        return false;
+      }
+      return policy.channelRules.some((rule) => rule.channel === input.channel);
+    });
+
+    const sorted = [...candidates].sort((left, right) => {
+      const specificity =
+        Number(left.partnerEntrySlug !== null) +
+        Number(left.businessDispatchSubtype !== null) +
+        Number(left.tenantId !== null) -
+        (Number(right.partnerEntrySlug !== null) +
+          Number(right.businessDispatchSubtype !== null) +
+          Number(right.tenantId !== null));
+      if (specificity !== 0) {
+        return -specificity;
+      }
+      return right.updatedAt.localeCompare(left.updatedAt);
+    });
+
+    return sorted[0] ?? null;
+  }
+
+  async hasPassengerDisclosureMessage(
+    messageCode: string,
+    locale?: string | null,
+  ): Promise<boolean> {
+    await this.ensureDisclosureCacheLoaded();
+    const normalizedLocale = locale?.trim() || null;
+    return this.messageCatalogEntries.some(
+      (entry) =>
+        entry.messageCode === messageCode &&
+        (normalizedLocale === null || entry.locale === normalizedLocale),
+    );
+  }
+
+  private clonePassengerDisclosurePolicy(
+    policy: PassengerDisclosurePolicy,
+  ): PassengerDisclosurePolicy {
+    return {
+      ...policy,
+      channelRules: policy.channelRules.map((rule) => ({ ...rule })),
+    };
+  }
+
+  private cloneMessageCatalogEntry(
+    entry: PassengerDisclosureMessageCatalogEntry,
+  ): PassengerDisclosureMessageCatalogEntry {
+    return { ...entry };
+  }
+
+  private cloneAcknowledgementRecord(
+    record: PassengerAcknowledgementRecord,
+  ): PassengerAcknowledgementRecord {
+    return { ...record };
   }
 
   private cloneDecision(decision: SandboxDispatchDecision) {
