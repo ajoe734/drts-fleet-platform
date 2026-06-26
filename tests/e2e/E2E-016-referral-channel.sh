@@ -119,6 +119,7 @@ export E2E_REALM="partner"
 export E2E_PARTNER_ID="$PARTNER_ID"
 export E2E_PARTNER_PROGRAM_ID="$PARTNER_PROGRAM_ID"
 export E2E_PARTNER_ENTRY_SLUG="$ENTRY_SLUG"
+E2E_EXTRA_SCOPES="billing:read"
 
 log_step "3.1 — GET /partner/referral/statements/:period (settlement evidence)"
 http_call GET "/partner/referral/statements/${PERIOD}"
