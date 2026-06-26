@@ -37,9 +37,12 @@ export default async function VehicleDetailPage({
   if (!data.vehicle) {
     notFound();
   }
+  const vehicle = data.vehicle;
 
   const actionItems = buildSupportedAlertActionItems(data.alerts, locale);
-  const evidenceColumns: CanvasTableColumn<(typeof data.evidenceFiles)[number]>[] = [
+  const evidenceColumns: CanvasTableColumn<
+    (typeof data.evidenceFiles)[number]
+  >[] = [
     {
       h: t("vehicleDetail.evidence.file", locale),
       k: "name",
@@ -67,7 +70,17 @@ export default async function VehicleDetailPage({
       h: t("vehicleDetail.evidence.status", locale),
       w: 110,
       r: (row) => (
-        <Pill theme={rocTheme} tone={row.status === "sealed" ? "success" : row.status === "uploading" ? "info" : "neutral"} dot>
+        <Pill
+          theme={rocTheme}
+          tone={
+            row.status === "sealed"
+              ? "success"
+              : row.status === "uploading"
+                ? "info"
+                : "neutral"
+          }
+          dot
+        >
           {t(`evidenceStatus.${row.status}`, locale)}
         </Pill>
       ),
@@ -75,34 +88,38 @@ export default async function VehicleDetailPage({
   ];
   const providerDown = data.providerHealth.items.some(
     (item) =>
-      item.affectedVehicleIds.includes(data.vehicle.vehicleId) &&
+      item.affectedVehicleIds.includes(vehicle.vehicleId) &&
       (item.status === "degraded" || item.status === "down"),
   );
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={rocTheme}
         title={
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-            {data.vehicle.vehicleId} · {data.vehicle.model}
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            {vehicle.vehicleId} · {vehicle.model}
             <RocStatePill
-              stateKey={resolveVehicleStateKey(data.vehicle)}
-              tone={resolveVehicleStateTone(data.vehicle)}
+              stateKey={resolveVehicleStateKey(vehicle)}
+              tone={resolveVehicleStateTone(vehicle)}
               locale={locale}
             />
           </span>
         }
         subtitle={t("vehicleDetail.subtitle", locale, {
-          area: data.vehicle.areaLabel,
-          operator: data.vehicle.safetyOperatorLabel,
+          area: vehicle.areaLabel,
+          operator: vehicle.safetyOperatorLabel,
         })}
-        meta={
-          <Pill theme={rocTheme} tone="accent" dot>
-            {t("vehicleDetail.meta", locale)}
-          </Pill>
-        }
       />
+      <div style={{ display: "flex", gap: 8, padding: "0 24px" }}>
+        <Pill theme={rocTheme} tone="accent" dot>
+          {t("vehicleDetail.meta", locale)}
+        </Pill>
+      </div>
       <RocRefreshBanner
         refresh={data.refresh}
         usingFallback={data.usingFallback}
@@ -117,10 +134,13 @@ export default async function VehicleDetailPage({
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card theme={rocTheme} title={t("vehicleDetail.freshnessTitle", locale)}>
+          <Card
+            theme={rocTheme}
+            title={t("vehicleDetail.freshnessTitle", locale)}
+          >
             <RocDualFreshness
-              telemetry={data.vehicle.telemetryFreshness}
-              regulatory={data.vehicle.regulatoryFreshness}
+              telemetry={vehicle.telemetryFreshness}
+              regulatory={vehicle.regulatoryFreshness}
               locale={locale}
             />
             <div style={{ marginTop: 12 }}>
@@ -132,27 +152,30 @@ export default async function VehicleDetailPage({
               />
             </div>
           </Card>
-          <Card theme={rocTheme} title={t("vehicleDetail.allowedTitle", locale)}>
+          <Card
+            theme={rocTheme}
+            title={t("vehicleDetail.allowedTitle", locale)}
+          >
             <DL
               theme={rocTheme}
               cols={2}
               items={[
                 {
                   k: t("vehicleDetail.allowed.area", locale),
-                  v: data.vehicle.areaLabel,
+                  v: vehicle.areaLabel,
                 },
                 {
                   k: t("vehicleDetail.allowed.route", locale),
-                  v: data.vehicle.approvedRouteLabel,
+                  v: vehicle.approvedRouteLabel,
                   mono: true,
                 },
                 {
                   k: t("vehicleDetail.allowed.state", locale),
-                  v: t(`state.${resolveVehicleStateKey(data.vehicle)}`, locale),
+                  v: t(`state.${resolveVehicleStateKey(vehicle)}`, locale),
                 },
                 {
                   k: t("vehicleDetail.allowed.speed", locale),
-                  v: `${data.vehicle.speedKmh} km/h`,
+                  v: `${vehicle.speedKmh} km/h`,
                   mono: true,
                 },
               ]}
@@ -160,7 +183,7 @@ export default async function VehicleDetailPage({
             <div style={{ marginTop: 10 }}>
               <Banner
                 theme={rocTheme}
-                tone="neutral"
+                tone="info"
                 icon="lock"
                 body={t("vehicleDetail.allowedBody", locale)}
               />
@@ -172,7 +195,11 @@ export default async function VehicleDetailPage({
             subtitle={t("vehicleDetail.evidenceSubtitle", locale)}
             padding={0}
           >
-            <Table theme={rocTheme} columns={evidenceColumns} rows={data.evidenceFiles} />
+            <Table
+              theme={rocTheme}
+              columns={evidenceColumns}
+              rows={data.evidenceFiles}
+            />
           </Card>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -188,7 +215,11 @@ export default async function VehicleDetailPage({
                 {
                   k: t("vehicleDetail.integration.status", locale),
                   v: (
-                    <Pill theme={rocTheme} tone={providerDown ? "warn" : "success"} dot>
+                    <Pill
+                      theme={rocTheme}
+                      tone={providerDown ? "warn" : "success"}
+                      dot
+                    >
                       {providerDown
                         ? t("providerStatus.degraded", locale)
                         : t("providerStatus.connected", locale)}
@@ -208,7 +239,9 @@ export default async function VehicleDetailPage({
             />
             <div style={{ marginTop: 8 }}>
               <RocEvidenceTag
-                source={providerDown ? "not_exposed_by_provider" : "tesla_provided"}
+                source={
+                  providerDown ? "not_exposed_by_provider" : "tesla_provided"
+                }
                 locale={locale}
               />
             </div>
@@ -233,7 +266,7 @@ export default async function VehicleDetailPage({
             ) : (
               <Banner
                 theme={rocTheme}
-                tone="neutral"
+                tone="info"
                 icon="info"
                 body={t("vehicleDetail.noActions", locale)}
               />

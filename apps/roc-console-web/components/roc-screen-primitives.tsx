@@ -1,15 +1,6 @@
-"use client";
-
 import type { ReactNode } from "react";
-import type {
-  RocDataFreshness,
-  UiRefreshMetadata,
-} from "@drts/contracts";
-import {
-  CanvasBanner,
-  CanvasPill,
-  type CanvasPillTone,
-} from "@drts/ui-web";
+import type { RocDataFreshness, UiRefreshMetadata } from "@drts/contracts";
+import { CanvasBanner, CanvasPill, type CanvasPillTone } from "@drts/ui-web";
 import type { Locale } from "@/lib/translations";
 import { t } from "@/lib/translations";
 import { rocTheme } from "@/lib/roc-theme";

@@ -120,7 +120,9 @@ export interface RocHandoverPageData {
   note: string;
 }
 
-function resolveVehicleViewModel(vehicle: RocVehicleReadModel): RocVehicleViewModel {
+function resolveVehicleViewModel(
+  vehicle: RocVehicleReadModel,
+): RocVehicleViewModel {
   const meta = ROC_VEHICLE_CANVAS_META[vehicle.vehicleId];
   return {
     ...vehicle,
@@ -144,8 +146,7 @@ function resolveTripViewModel(trip: RocTripReadModel): RocTripViewModel {
     startLabel: meta?.startLabel ?? "—",
     distanceLabel: meta?.distanceLabel ?? "—",
     takeoverCount:
-      meta?.takeoverCount ??
-      (trip.latestTakeoverOccurredAt ? 1 : 0),
+      meta?.takeoverCount ?? (trip.latestTakeoverOccurredAt ? 1 : 0),
     safetyOperatorLabel:
       vehicleMeta?.safetyOperatorLabel ?? trip.safetyOperatorId ?? "—",
   };
@@ -308,7 +309,7 @@ function buildHandoverOpenItems(
   alerts: RocAlertViewModel[],
   providers: RocProviderHealthReadModel[],
 ): RocHandoverOpenItem[] {
-  const alertItems = alerts
+  const alertItems: RocHandoverOpenItem[] = alerts
     .filter((alert) => alert.status !== "resolved")
     .slice(0, 3)
     .map((alert) => ({
@@ -336,7 +337,10 @@ function buildHandoverOpenItems(
       title: providerItem.displayName,
       vehicleId: providerItem.affectedVehicleIds[0] ?? "—",
       status: providerItem.status,
-      tone: providerItem.status === "down" ? "danger" : "warn",
+      tone:
+        providerItem.status === "down"
+          ? ("danger" as const)
+          : ("warn" as const),
     },
   ].slice(0, 4);
 }
@@ -361,7 +365,10 @@ export async function getRocHandoverPageData(): Promise<RocHandoverPageData> {
 
   return {
     overview: overviewResult.payload.item,
-    openItems: buildHandoverOpenItems(alerts, providerResult.payload.item.items),
+    openItems: buildHandoverOpenItems(
+      alerts,
+      providerResult.payload.item.items,
+    ),
     refresh: overviewResult.payload.refresh,
     usingFallback:
       overviewResult.usingFallback ||

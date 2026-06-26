@@ -15,7 +15,9 @@ export default async function ProviderPage() {
   const data = await getRocProviderPageData();
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={rocTheme}
         title={t("provider.title", locale)}
@@ -76,7 +78,7 @@ export default async function ProviderPage() {
       </div>
       <Banner
         theme={rocTheme}
-        tone="neutral"
+        tone="info"
         icon="info"
         body={t("provider.banner", locale)}
       />

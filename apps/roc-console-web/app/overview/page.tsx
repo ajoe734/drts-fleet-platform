@@ -1,5 +1,5 @@
 import { getServerLocale } from "@/lib/server-locale";
-import { t, type Locale } from "@/lib/translations";
+import { t } from "@/lib/translations";
 import { rocTheme } from "@/lib/roc-theme";
 import {
   getRocOverviewPageData,
@@ -71,27 +71,27 @@ export default async function OverviewPage() {
   ];
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={rocTheme}
         title={t("overview.title", locale)}
         subtitle={t("overview.subtitle", locale)}
-        meta={
-          <>
-            <Pill theme={rocTheme} tone="accent" dot>
-              {t("overview.meta.monitoring", locale)}
-            </Pill>
-            <Pill theme={rocTheme} tone="neutral">
-              {t("overview.meta.policy", locale)}
-            </Pill>
-          </>
-        }
         actions={
           <Btn theme={rocTheme} icon="export">
             {t("overview.action.log", locale)}
           </Btn>
         }
       />
+      <div style={{ display: "flex", gap: 8, padding: "0 24px" }}>
+        <Pill theme={rocTheme} tone="accent" dot>
+          {t("overview.meta.monitoring", locale)}
+        </Pill>
+        <Pill theme={rocTheme} tone="warn">
+          {t("overview.meta.policy", locale)}
+        </Pill>
+      </div>
       <RocRefreshBanner
         refresh={data.refresh}
         usingFallback={data.usingFallback}
@@ -114,8 +114,9 @@ export default async function OverviewPage() {
           theme={rocTheme}
           label={t("overview.kpi.autonomous", locale)}
           value={String(
-            data.vehicles.filter((vehicle) => vehicle.autonomyState === "fsd_engaged")
-              .length,
+            data.vehicles.filter(
+              (vehicle) => vehicle.autonomyState === "fsd_engaged",
+            ).length,
           )}
           sub={t("overview.kpi.autonomousSub", locale)}
         />
@@ -174,7 +175,7 @@ export default async function OverviewPage() {
           <Card theme={rocTheme} title={t("overview.boundaries", locale)}>
             <Banner
               theme={rocTheme}
-              tone="neutral"
+              tone="info"
               icon="lock"
               body={t("overview.boundariesBody", locale)}
             />
