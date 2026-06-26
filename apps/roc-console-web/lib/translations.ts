@@ -29,6 +29,11 @@ const en: Dictionary = {
   "common.source": "Source",
   "common.openInvestigation": "Open Investigation",
   "common.none": "None",
+  "common.unlinked": "Unlinked",
+  "common.vehicle": "Vehicle",
+  "common.priority": "Priority",
+  "common.updated": "Updated",
+  "response.emptyBody": "No records are currently exposed for this ROC queue.",
 
   "nav.group.monitoring": "Monitoring",
   "nav.group.fleet": "Fleet",
@@ -228,6 +233,12 @@ const en: Dictionary = {
   "takeover.field.response": "Response",
   "takeover.field.outcome": "Outcome",
   "takeover.field.priority": "Priority",
+  "takeover.field.matchedBy": "Matched By",
+  "takeover.field.discrepancy": "Discrepancy",
+  "takeover.field.requested": "Requested",
+  "takeover.field.resolved": "Resolved",
+  "takeover.discrepancy.yes": "Discrepancy linked",
+  "takeover.discrepancy.no": "No discrepancy",
   "takeover.empty": "No takeover cases in the current ROC window.",
 
   "alerts.title": "Alerts",
@@ -242,6 +253,12 @@ const en: Dictionary = {
   "alerts.columns.actions": "availableActions",
   "alerts.actionRail": "Write Actions",
   "alerts.actionRailSub": "ActionReceipt appears after success",
+  "alerts.severity.info": "Info",
+  "alerts.severity.warning": "Warning",
+  "alerts.severity.critical": "Critical",
+  "alerts.status.open": "Open",
+  "alerts.status.acknowledged": "Acknowledged",
+  "alerts.status.resolved": "Resolved",
 
   "incidents.title": "Incidents",
   "incidents.subtitle":
@@ -255,6 +272,11 @@ const en: Dictionary = {
   "incidents.guardrailTitle": "Governance Guardrail",
   "incidents.guardrailBody":
     "Escalation and evidence discrepancy review stay ROC-owned until the linked platform-admin investigation closes.",
+  "incidents.source.takeover_discrepancy": "Takeover discrepancy",
+  "incidents.source.alert": "ROC escalation",
+  "incidents.status.needs_triage": "Needs triage",
+  "incidents.status.open": "Open",
+  "incidents.status.contained": "Contained",
 
   "evidence.title": "Evidence",
   "evidence.subtitle":
@@ -266,6 +288,9 @@ const en: Dictionary = {
   "evidence.columns.source": "Sources",
   "evidence.freeze.active": "Frozen",
   "evidence.freeze.clear": "Not Frozen",
+  "evidence.guardrailTitle": "Platform-Admin Detail Boundary",
+  "evidence.guardrailBody":
+    "ROC shows evidence summary and freeze posture only. Raw evidence drilldown remains in Platform Admin.",
 
   "reports.title": "Reports",
   "reports.subtitle":
@@ -278,6 +303,9 @@ const en: Dictionary = {
   "reports.columns.evidence": "Evidence",
   "reports.status.ready": "Ready",
   "reports.status.pending_review": "Pending Review",
+  "reports.guardrailTitle": "Regulatory Package Boundary",
+  "reports.guardrailBody":
+    "Report readiness is derived from evidence and investigation state; filing detail remains platform-admin owned.",
 
   "handover.title": "Shift Handover",
   "handover.subtitle": "ROC shift handoff · transfer unresolved work",
@@ -315,6 +343,11 @@ const zh: Dictionary = {
   "common.source": "來源",
   "common.openInvestigation": "開啟調查",
   "common.none": "無",
+  "common.unlinked": "未關聯",
+  "common.vehicle": "車輛",
+  "common.priority": "優先級",
+  "common.updated": "更新時間",
+  "response.emptyBody": "目前這個 ROC 佇列沒有可顯示的資料。",
 
   "nav.group.monitoring": "監控",
   "nav.group.fleet": "車輛",
@@ -509,6 +542,12 @@ const zh: Dictionary = {
   "takeover.field.response": "回應",
   "takeover.field.outcome": "處置說明",
   "takeover.field.priority": "優先級",
+  "takeover.field.matchedBy": "比對方式",
+  "takeover.field.discrepancy": "差異案件",
+  "takeover.field.requested": "請求時間",
+  "takeover.field.resolved": "結案時間",
+  "takeover.discrepancy.yes": "已連結差異案件",
+  "takeover.discrepancy.no": "無差異案件",
   "takeover.empty": "目前 ROC 視窗內沒有接管案件。",
 
   "alerts.title": "警示",
@@ -523,6 +562,12 @@ const zh: Dictionary = {
   "alerts.columns.actions": "availableActions",
   "alerts.actionRail": "寫入動作",
   "alerts.actionRailSub": "成功後顯示 ActionReceipt",
+  "alerts.severity.info": "資訊",
+  "alerts.severity.warning": "警告",
+  "alerts.severity.critical": "重大",
+  "alerts.status.open": "開啟",
+  "alerts.status.acknowledged": "已確認",
+  "alerts.status.resolved": "已解除",
 
   "incidents.title": "事故",
   "incidents.subtitle": "需要 ROC 治理判斷的接管差異與升級案件。",
@@ -535,6 +580,11 @@ const zh: Dictionary = {
   "incidents.guardrailTitle": "治理護欄",
   "incidents.guardrailBody":
     "事故升級與證據差異審查在 platform-admin 調查結案前，仍由 ROC 持有。",
+  "incidents.source.takeover_discrepancy": "接管差異",
+  "incidents.source.alert": "ROC 升級事件",
+  "incidents.status.needs_triage": "待分流",
+  "incidents.status.open": "處理中",
+  "incidents.status.contained": "已控制",
 
   "evidence.title": "證據",
   "evidence.subtitle":
@@ -546,6 +596,9 @@ const zh: Dictionary = {
   "evidence.columns.source": "來源",
   "evidence.freeze.active": "已凍結",
   "evidence.freeze.clear": "未凍結",
+  "evidence.guardrailTitle": "Platform Admin 明細邊界",
+  "evidence.guardrailBody":
+    "ROC 僅顯示證據摘要與凍結狀態；原始證據鑽取仍屬 Platform Admin。",
 
   "reports.title": "監理報表",
   "reports.subtitle": "依 ROC 證據狀態整理的監理送件包與接管摘要。",
@@ -557,6 +610,9 @@ const zh: Dictionary = {
   "reports.columns.evidence": "證據數",
   "reports.status.ready": "已就緒",
   "reports.status.pending_review": "待審查",
+  "reports.guardrailTitle": "監理封裝邊界",
+  "reports.guardrailBody":
+    "報表就緒度由證據與調查狀態推導；正式申報細節仍由 platform-admin 持有。",
 
   "handover.title": "交班",
   "handover.subtitle": "ROC 值班交接 · 未結處置移交",
