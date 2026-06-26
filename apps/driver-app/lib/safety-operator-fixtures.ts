@@ -76,12 +76,10 @@ export function buildTakeoverCommand(
     fsdResumed: overrides?.fsdResumed ?? false,
     bookmarkId: overrides?.bookmarkId ?? SAFETY_OPERATOR_FIXTURE.bookmarkId,
     incidentId: overrides?.incidentId ?? null,
-    evidenceArtifactIds:
-      overrides?.evidenceArtifactIds ??
-      [...SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds],
-    notes:
-      overrides?.notes ??
-      "前方施工車臨停，安全員人工接管通過施工窄口。",
+    evidenceArtifactIds: overrides?.evidenceArtifactIds ?? [
+      ...SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds,
+    ],
+    notes: overrides?.notes ?? "前方施工車臨停，安全員人工接管通過施工窄口。",
     occurredAt: overrides?.occurredAt ?? new Date().toISOString(),
   };
 }
@@ -100,11 +98,9 @@ export function buildShiftHandoverCommand(
     closeoutStatus: overrides?.closeoutStatus ?? "handoff",
     takeoverReportIds: overrides?.takeoverReportIds ?? [],
     incidentId: overrides?.incidentId ?? SAFETY_OPERATOR_FIXTURE.incidentId,
-    evidenceArtifactIds:
-      overrides?.evidenceArtifactIds ??
-      [...SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds],
-    notes:
-      overrides?.notes ??
-      "已向下一班安全員交接道路施工風險與證據片段。",
+    evidenceArtifactIds: overrides?.evidenceArtifactIds ?? [
+      ...SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds,
+    ],
+    notes: overrides?.notes ?? "已向下一班安全員交接道路施工風險與證據片段。",
   };
 }

@@ -159,7 +159,10 @@ export class BootstrapAuthGuard implements CanActivate {
           asQueryRecord((request as { query?: unknown }).query),
         )
       : baseHeaders;
-    const routePolicy = resolveRouteAuthPolicy(request.method ?? "GET", requestUrl);
+    const routePolicy = resolveRouteAuthPolicy(
+      request.method ?? "GET",
+      requestUrl,
+    );
     const decoratorScopes =
       this.reflector.getAllAndOverride<string[]>(AUTH_REQUIRED_SCOPES_KEY, [
         context.getHandler(),
@@ -281,8 +284,8 @@ export class BootstrapAuthGuard implements CanActivate {
     }
     const code =
       error instanceof ApiRequestError
-        ? ((error.getResponse() as { error?: { code?: string } })?.error?.code ??
-          null)
+        ? ((error.getResponse() as { error?: { code?: string } })?.error
+            ?.code ?? null)
         : null;
     if (code !== "AUTH_REALM_DENIED" && code !== "AUTH_SCOPE_DENIED") {
       return;
@@ -291,7 +294,8 @@ export class BootstrapAuthGuard implements CanActivate {
     const auditActorType =
       identity.actorType === "driver_user" ? "system" : identity.actorType;
     const method = (request.method ?? "GET").toUpperCase();
-    const rawPath = (request.originalUrl ?? request.url ?? "").split("?")[0] ?? "";
+    const rawPath =
+      (request.originalUrl ?? request.url ?? "").split("?")[0] ?? "";
     const routePath = rawPath
       .replace(/^\/+/, "")
       .replace(/^api\/+/, "")

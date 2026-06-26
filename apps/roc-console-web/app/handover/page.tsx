@@ -37,7 +37,9 @@ export default async function HandoverPage() {
   ];
 
   return (
-    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div
+      style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}
+    >
       <PageHeader
         theme={rocTheme}
         title={t("handover.title", locale)}
@@ -61,7 +63,11 @@ export default async function HandoverPage() {
           alignItems: "start",
         }}
       >
-        <Card theme={rocTheme} title={t("handover.openItems", locale)} padding={0}>
+        <Card
+          theme={rocTheme}
+          title={t("handover.openItems", locale)}
+          padding={0}
+        >
           <Table theme={rocTheme} columns={columns} rows={data.openItems} />
         </Card>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -107,7 +113,10 @@ export default async function HandoverPage() {
               theme={rocTheme}
               cols={1}
               items={[
-                { k: t("handover.nextOperator", locale), v: data.nextOperatorLabel },
+                {
+                  k: t("handover.nextOperator", locale),
+                  v: data.nextOperatorLabel,
+                },
                 { k: t("handover.effective", locale), v: "18:00", mono: true },
               ]}
             />

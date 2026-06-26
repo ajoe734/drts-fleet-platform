@@ -61,8 +61,16 @@ describe("safety operator offline queue", () => {
   });
 
   it("preserves failed entries and clears synced entries only", async () => {
-    await enqueueSafetyOperatorItem("incident_upload", { note: "queued" }, "i-1");
-    await enqueueSafetyOperatorItem("shift_handover", { note: "queued" }, "h-1");
+    await enqueueSafetyOperatorItem(
+      "incident_upload",
+      { note: "queued" },
+      "i-1",
+    );
+    await enqueueSafetyOperatorItem(
+      "shift_handover",
+      { note: "queued" },
+      "h-1",
+    );
 
     await markSafetyOperatorQueueFailed("i-1", "network down");
     await markSafetyOperatorQueueSynced("h-1", { closeoutId: "c-1" });

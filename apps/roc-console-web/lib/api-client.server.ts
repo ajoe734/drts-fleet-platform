@@ -1,7 +1,5 @@
 import { ApiClient } from "@drts/api-client";
-import {
-  issueControlPlaneRequestAuth,
-} from "@drts/control-plane-auth";
+import { issueControlPlaneRequestAuth } from "@drts/control-plane-auth";
 import { headers as nextHeaders } from "next/headers";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";

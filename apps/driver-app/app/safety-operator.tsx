@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useRouter } from "expo-router";
 import {
-  REALM_COLORS,
-  SURFACE_ACCENTS,
-  type TokenMode,
-} from "@drts/ui-tokens";
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useRouter } from "expo-router";
+import { REALM_COLORS, SURFACE_ACCENTS, type TokenMode } from "@drts/ui-tokens";
 import type {
   CreateSafetyOperatorTripCloseoutCommand,
   SubmitSafetyOperatorPreTripChecklistCommand,
@@ -92,7 +95,9 @@ function ModeTab({
       onPress={onPress}
       style={[styles.modeTab, active ? styles.modeTabActive : null]}
     >
-      <Text style={[styles.modeTabText, active ? styles.modeTabTextActive : null]}>
+      <Text
+        style={[styles.modeTabText, active ? styles.modeTabTextActive : null]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -205,20 +210,20 @@ export default function SafetyOperatorScreen() {
   const isProvisioned = isDriverIdentityProvisioned();
 
   const [activeView, setActiveView] = useState<SafetyOperatorView>("active");
-  const [queueSnapshot, setQueueSnapshot] = useState<SafetyOperatorQueueSnapshot>({
-    items: [],
-    queuedCount: 0,
-    failedCount: 0,
-    syncingCount: 0,
-    lastSyncedAt: null,
-  });
+  const [queueSnapshot, setQueueSnapshot] =
+    useState<SafetyOperatorQueueSnapshot>({
+      items: [],
+      queuedCount: 0,
+      failedCount: 0,
+      syncingCount: 0,
+      lastSyncedAt: null,
+    });
   const [takeoverTime, setTakeoverTime] = useState(new Date().toISOString());
   const [takeoverNotes, setTakeoverNotes] = useState(
     "前方施工車臨停，安全員人工接管通過施工窄口。",
   );
-  const [incidentNotes, setIncidentNotes] = useState(
-    "已補上施工區段照片與車內語音片段。",
-  );
+  const [incidentNotes, setIncidentNotes] =
+    useState("已補上施工區段照片與車內語音片段。");
   const [handoverNotes, setHandoverNotes] = useState(
     "交班提醒：施工點位仍有臨停風險，注意右後方機車。",
   );
@@ -229,8 +234,9 @@ export default function SafetyOperatorScreen() {
 
   const checklistBlockedCount = useMemo(
     () =>
-      SAFETY_OPERATOR_CHECKLIST_TEMPLATE.filter((item) => item.status !== "pass")
-        .length,
+      SAFETY_OPERATOR_CHECKLIST_TEMPLATE.filter(
+        (item) => item.status !== "pass",
+      ).length,
     [],
   );
 
@@ -285,7 +291,11 @@ export default function SafetyOperatorScreen() {
       occurredAt: takeoverTime.trim(),
       notes: takeoverNotes.trim(),
     });
-    await enqueueSafetyOperatorItem("takeover_report", command, command.clientGeneratedReportId);
+    await enqueueSafetyOperatorItem(
+      "takeover_report",
+      command,
+      command.clientGeneratedReportId,
+    );
     setSubmissionState("接管回報已寫入 durable queue，正在嘗試同步。");
     await refreshQueueSnapshot();
 
@@ -440,7 +450,10 @@ export default function SafetyOperatorScreen() {
           </View>
         ) : null}
 
-        <SectionCard title="狀態摘要" subtitle="realm separated from normal driver mode">
+        <SectionCard
+          title="狀態摘要"
+          subtitle="realm separated from normal driver mode"
+        >
           <View style={styles.statRow}>
             <StatPill label="車輛" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
             <StatPill label="待同步" value={`${queueSnapshot.queuedCount}`} />
@@ -467,17 +480,26 @@ export default function SafetyOperatorScreen() {
         {activeView === "provisioning" ? (
           <>
             <SectionCard title="安全員資格" subtitle="SO_Provisioning">
-              <Row label="安全員" value={SAFETY_OPERATOR_FIXTURE.operatorName} />
-              <Row label="安全員 ID" value={SAFETY_OPERATOR_FIXTURE.safetyOperatorId} />
-              <Row label="實驗計畫" value={SAFETY_OPERATOR_FIXTURE.sandboxProgramId} />
+              <Row
+                label="安全員"
+                value={SAFETY_OPERATOR_FIXTURE.operatorName}
+              />
+              <Row
+                label="安全員 ID"
+                value={SAFETY_OPERATOR_FIXTURE.safetyOperatorId}
+              />
+              <Row
+                label="實驗計畫"
+                value={SAFETY_OPERATOR_FIXTURE.sandboxProgramId}
+              />
               <Row label="設備" value="SO Tablet 01" />
               <Row label="資格狀態" value="背景審查待補件" danger />
             </SectionCard>
 
             <SectionCard title="可見邊界" subtitle="No FSD control UI">
               <Text style={styles.bodyText}>
-                此 realm 只顯示資格、監看、接管回報、證據與交班。Tesla /
-                FSD 內部控制、遠端控制、恢復自駕按鈕均不顯示。
+                此 realm 只顯示資格、監看、接管回報、證據與交班。Tesla / FSD
+                內部控制、遠端控制、恢復自駕按鈕均不顯示。
               </Text>
             </SectionCard>
           </>
@@ -490,7 +512,11 @@ export default function SafetyOperatorScreen() {
                 <Row
                   key={item.itemKey}
                   label={item.itemKey}
-                  value={item.status === "pass" ? "pass" : `${item.status} · ${item.note ?? ""}`}
+                  value={
+                    item.status === "pass"
+                      ? "pass"
+                      : `${item.status} · ${item.note ?? ""}`
+                  }
                   danger={item.status !== "pass"}
                 />
               ))}
@@ -522,7 +548,10 @@ export default function SafetyOperatorScreen() {
               <Row label="監理事件鮮度" value="48 秒" danger />
             </SectionCard>
 
-            <SectionCard title="接管回報" subtitle="takeover report · editable occurredAt before first submit">
+            <SectionCard
+              title="接管回報"
+              subtitle="takeover report · editable occurredAt before first submit"
+            >
               <Text style={styles.fieldLabel}>發生時間 occurredAt</Text>
               <TextInput
                 autoCapitalize="none"
@@ -531,7 +560,8 @@ export default function SafetyOperatorScreen() {
                 value={takeoverTime}
               />
               <Text style={styles.fieldHint}>
-                初次送出前可調整，送出後只顯示 submitted occurredAt 與 serverReceivedAt。
+                初次送出前可調整，送出後只顯示 submitted occurredAt 與
+                serverReceivedAt。
               </Text>
               <Text style={styles.fieldLabel}>備註 notes</Text>
               <TextInput
@@ -549,17 +579,21 @@ export default function SafetyOperatorScreen() {
               </View>
             </SectionCard>
 
-            <SectionCard title="最近 receipt" subtitle="clientGeneratedReportId dedupe">
+            <SectionCard
+              title="最近 receipt"
+              subtitle="clientGeneratedReportId dedupe"
+            >
               <Row
                 label="clientGeneratedReportId"
                 value={
-                  recentTakeover?.receipt.clientGeneratedReportId ??
-                  "尚未提交"
+                  recentTakeover?.receipt.clientGeneratedReportId ?? "尚未提交"
                 }
               />
               <Row
                 label="serverReceivedAt"
-                value={formatAt(recentTakeover?.receipt.serverReceivedAt ?? null)}
+                value={formatAt(
+                  recentTakeover?.receipt.serverReceivedAt ?? null,
+                )}
               />
               <Row
                 label="duplicate replay"
@@ -573,8 +607,14 @@ export default function SafetyOperatorScreen() {
         {activeView === "incident" ? (
           <>
             <SectionCard title="事故 / 證據上傳" subtitle="SO_IncidentUpload">
-              <Row label="incidentId" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
-              <Row label="bookmarkId" value={SAFETY_OPERATOR_FIXTURE.bookmarkId} />
+              <Row
+                label="incidentId"
+                value={SAFETY_OPERATOR_FIXTURE.incidentId}
+              />
+              <Row
+                label="bookmarkId"
+                value={SAFETY_OPERATOR_FIXTURE.bookmarkId}
+              />
               <Row
                 label="evidenceArtifactIds"
                 value={SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds.join(", ")}

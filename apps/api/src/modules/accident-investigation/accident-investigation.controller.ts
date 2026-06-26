@@ -9,6 +9,7 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { RequireRealms, RequireScopes } from "../../common/auth";
 import {
   buildEmptyStateEnvelope,
   buildUiReadModelList,
@@ -18,6 +19,7 @@ import { AccidentInvestigationService } from "./accident-investigation.service";
 
 const ACCIDENT_REFRESH_STALE_AFTER_MS = 15_000;
 
+@RequireRealms("platform", "ops")
 @Controller("accident-cases")
 export class AccidentInvestigationController {
   constructor(
@@ -25,6 +27,7 @@ export class AccidentInvestigationController {
   ) {}
 
   @Get()
+  @RequireScopes("sandbox.investigation.read")
   listAccidentCases(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       buildUiReadModelList(
@@ -42,6 +45,7 @@ export class AccidentInvestigationController {
   }
 
   @Post()
+  @RequireScopes("sandbox.investigation.manage")
   createAccidentCase(
     @Body() command: CreateAccidentCaseCommand,
     @Headers("x-request-id") requestId?: string,
@@ -53,6 +57,7 @@ export class AccidentInvestigationController {
   }
 
   @Get("takeover-correlations")
+  @RequireScopes("sandbox.compliance.read")
   listCorrelatedTakeoverCases(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       buildUiReadModelList(
@@ -70,6 +75,7 @@ export class AccidentInvestigationController {
   }
 
   @Get("evidence-discrepancies")
+  @RequireScopes("sandbox.compliance.read")
   listEvidenceDiscrepancyCases(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       buildUiReadModelList(
@@ -87,6 +93,7 @@ export class AccidentInvestigationController {
   }
 
   @Get(":caseId")
+  @RequireScopes("sandbox.investigation.read")
   getAccidentCase(
     @Param("caseId") caseId: string,
     @Headers("x-request-id") requestId?: string,
@@ -103,6 +110,7 @@ export class AccidentInvestigationController {
   }
 
   @Post(":caseId/transitions")
+  @RequireScopes("sandbox.investigation.manage")
   transitionAccidentCase(
     @Param("caseId") caseId: string,
     @Body() command: TransitionAccidentCaseCommand,
@@ -115,6 +123,7 @@ export class AccidentInvestigationController {
   }
 
   @Post(":caseId/timeline-facts")
+  @RequireScopes("sandbox.investigation.manage")
   addTimelineFact(
     @Param("caseId") caseId: string,
     @Body() command: AddAccidentTimelineFactCommand,
@@ -127,6 +136,7 @@ export class AccidentInvestigationController {
   }
 
   @Get(":caseId/timeline")
+  @RequireScopes("sandbox.investigation.read")
   getTimeline(
     @Param("caseId") caseId: string,
     @Headers("x-request-id") requestId?: string,
@@ -147,6 +157,7 @@ export class AccidentInvestigationController {
   }
 
   @Post(":caseId/external-documents")
+  @RequireScopes("sandbox.investigation.manage")
   importExternalDocument(
     @Param("caseId") caseId: string,
     @Body() command: ImportAccidentExternalDocumentCommand,
@@ -159,6 +170,7 @@ export class AccidentInvestigationController {
   }
 
   @Get(":caseId/external-documents")
+  @RequireScopes("sandbox.investigation.read")
   listExternalDocuments(
     @Param("caseId") caseId: string,
     @Headers("x-request-id") requestId?: string,
@@ -179,6 +191,7 @@ export class AccidentInvestigationController {
   }
 
   @Post(":caseId/bundles")
+  @RequireScopes("sandbox.investigation.manage")
   async generateInvestigationBundle(
     @Param("caseId") caseId: string,
     @Body() command: GenerateAccidentInvestigationBundleCommand,

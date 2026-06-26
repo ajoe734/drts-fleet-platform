@@ -216,7 +216,8 @@ const zh: Dictionary = {
   "app.versionLabel": "Phase 2 · ROC 畫布",
   "app.environment.production": "正式環境",
   "app.metadata.title": "DRTS 監理運營中心",
-  "app.metadata.description": "監理運營中心 — 自駕車隊即時監控、接管與證據控制平面。",
+  "app.metadata.description":
+    "監理運營中心 — 自駕車隊即時監控、接管與證據控制平面。",
   "common.search": "搜尋車輛、行程、事故…",
   "common.export": "匯出",
   "common.detail": "詳情",
@@ -305,8 +306,7 @@ const zh: Dictionary = {
   "actions.failed": "失敗",
 
   "overview.title": "FSD 沙盒 · 監控總覽",
-  "overview.subtitle":
-    "exp_fsd_taipei_01 · ROC 唯讀監看台 · 無遠端駕駛控制",
+  "overview.subtitle": "exp_fsd_taipei_01 · ROC 唯讀監看台 · 無遠端駕駛控制",
   "overview.meta.monitoring": "ROC 監控",
   "overview.meta.policy": "policy v2026.06",
   "overview.action.log": "值班紀錄",
@@ -373,7 +373,8 @@ const zh: Dictionary = {
   "vehicleDetail.integration.footage": "事故影像",
   "vehicleDetail.integration.footageValue": "原廠未提供 · gated",
   "vehicleDetail.actionsTitle": "可用操作",
-  "vehicleDetail.actionsSubtitle": "CTA 僅來自 availableActions；無遠端駕駛控制。",
+  "vehicleDetail.actionsSubtitle":
+    "CTA 僅來自 availableActions；無遠端駕駛控制。",
   "vehicleDetail.noActions":
     "目前這個車輛情境沒有可由前端直接執行的 availableActions。",
   "vehicleDetail.evidenceTitle": "證據快照",
@@ -385,8 +386,7 @@ const zh: Dictionary = {
   "vehicleDetail.evidence.status": "狀態",
 
   "provider.title": "供應商健康",
-  "provider.subtitle":
-    "Tesla 整合 / telemetry / 監理事件饋送 / 證據上傳",
+  "provider.subtitle": "Tesla 整合 / telemetry / 監理事件饋送 / 證據上傳",
   "provider.banner":
     "能力缺口在 Tesla 契約與 schema coverage 明確核准前，一律 fail-closed。",
 
