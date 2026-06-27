@@ -8,7 +8,11 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 
+import { useTranslation } from "@/lib/i18n";
+
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const REQUIREMENTS_NOTE_PATH =
+  "docs/05-ui/platform-admin-sandbox-compliance-screen-requirements-20260626.md";
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -25,30 +29,27 @@ const cardBodyStyle: CSSProperties = {
 };
 
 export function SandboxComplianceDashboardPage() {
+  const { t } = useTranslation();
+
   return (
     <main style={pageBodyStyle}>
       <CanvasPageHeader
         theme={theme}
-        title="Sandbox compliance"
-        subtitle="Backend contracts for compliance, investigations, evidence, and regulatory reporting are landed. Canonical Platform Admin canvas screens are not."
+        title={t("cmp.blocked.title")}
+        subtitle={t("cmp.blocked.subtitle")}
       />
 
       <CanvasBanner
         theme={theme}
         tone="warn"
-        title="Visual implementation is intentionally blocked"
-        body="The current Platform Admin design canvas does not define this route group. Per the UI design contract, engineering must stop at the requirements note instead of inventing a new console."
+        title={t("cmp.blocked.bannerTitle")}
+        body={t("cmp.blocked.bannerBody")}
       />
 
-      <CanvasCard theme={theme} title="Canonical source of truth">
+      <CanvasCard theme={theme} title={t("cmp.blocked.cardTitle")}>
         <div style={cardBodyStyle}>
-          <div>
-            Visual work for this surface is pending the first-class canvas
-            screens requested in the sandbox compliance hand-off packet.
-          </div>
-          <div>
-            `docs/05-ui/platform-admin-sandbox-compliance-screen-requirements-20260626.md`
-          </div>
+          <div>{t("cmp.blocked.cardBody")}</div>
+          <div>{REQUIREMENTS_NOTE_PATH}</div>
         </div>
       </CanvasCard>
     </main>

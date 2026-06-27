@@ -153,6 +153,15 @@ const cmpEn = {
   "cmp.dashboard.evidence.subject": "Subject",
   "cmp.dashboard.reports.title": "監理報表 · Filing queue",
   "cmp.dashboard.reports.subtitle": "Generated and submitted reports",
+  "cmp.blocked.title": "Sandbox compliance",
+  "cmp.blocked.subtitle":
+    "Backend contracts for compliance, investigations, evidence, and regulatory reporting are landed. Canonical Platform Admin canvas screens are not.",
+  "cmp.blocked.bannerTitle": "Visual implementation is intentionally blocked",
+  "cmp.blocked.bannerBody":
+    "The current Platform Admin design canvas does not define this route group. Per the UI design contract, engineering must stop at the requirements note instead of inventing a new console.",
+  "cmp.blocked.cardTitle": "Canonical source of truth",
+  "cmp.blocked.cardBody":
+    "Visual work for this surface is pending the first-class canvas screens requested in the sandbox compliance hand-off packet.",
 
   // ── Trip Detail ──
   "cmp.trip.titleFallback": "行程合規 · Trip Compliance",
@@ -663,6 +672,15 @@ const cmpZh: Record<keyof typeof cmpEn, string> = {
   "cmp.dashboard.evidence.subject": "主體",
   "cmp.dashboard.reports.title": "監理報表 · Filing queue",
   "cmp.dashboard.reports.subtitle": "已產生與已送出的報表",
+  "cmp.blocked.title": "Sandbox compliance",
+  "cmp.blocked.subtitle":
+    "合規、調查、證據與監理報表的後端契約已落地；Platform Admin 的正式 canvas 畫面尚未提供。",
+  "cmp.blocked.bannerTitle": "視覺實作依約暫停",
+  "cmp.blocked.bannerBody":
+    "目前的 Platform Admin design canvas 尚未定義這組路由。依 UI design contract，工程必須停在需求備註，不能自行發明新的 console。",
+  "cmp.blocked.cardTitle": "Canonical source of truth",
+  "cmp.blocked.cardBody":
+    "這個 surface 的視覺實作仍待 sandbox compliance hand-off packet 要求的一級 canvas 畫面提供後才能繼續。",
 
   "cmp.trip.titleFallback": "行程合規 · Trip Compliance",
   "cmp.trip.titleWithId": "行程合規 · {tripId}",
