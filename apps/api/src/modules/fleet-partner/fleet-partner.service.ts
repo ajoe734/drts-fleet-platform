@@ -692,11 +692,11 @@ export class FleetPartnerService implements OnModuleInit {
     periodMonth: string,
     fleetPartnerId?: string,
   ) {
-    await this.billingSettlementService.generateDriverStatements({
-      periodMonth,
-    });
-    const driverStatements =
-      this.billingSettlementService.listDriverStatements(periodMonth);
+    const driverStatementResult =
+      await this.billingSettlementService.generateDriverStatements({
+        periodMonth,
+      });
+    const driverStatements = driverStatementResult.items;
     const trips =
       await this.billingSettlementService.listSettlementTripsForPeriodMonth(
         periodMonth,
