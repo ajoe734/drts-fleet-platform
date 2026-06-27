@@ -1,11 +1,11 @@
 # P2-DP-C4-001-GATE-ASSIGN-WIRING Acceptance Packet & Dependency Map
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `P2-DP-C4-001-GATE-ASSIGN-WIRING`  
-**Current Sidecar Owner / Reviewer:** `Codex` / `Claude`  
-**Parent Owner / Reviewer:** `Codex2` / `Codex`  
-**Last Revised:** `2026-06-27T22:53Z (UTC)`  
-**Status Snapshot:** sidecar machine truth is `in_progress` at `2026-06-27T22:53:04Z` with reviewer reassigned to `Claude`; parent machine truth remains `backlog` at `2026-06-27T22:36:45Z`
+**Sidecar Kind:** `acceptance_packet`<br>
+**Parent Task:** `P2-DP-C4-001-GATE-ASSIGN-WIRING`<br>
+**Current Sidecar Owner / Reviewer:** `Codex` / `Claude`<br>
+**Parent Owner / Reviewer:** `Claude2` / `Codex`<br>
+**Last Revised:** `2026-06-27T22:59Z (UTC)`<br>
+**Status Snapshot:** sidecar machine truth is `review_approved` at `2026-06-27T22:59:15Z` after administrative restore of the already-granted approval; parent machine truth is `todo` under `Claude2` ownership at `2026-06-27T22:53:06Z`
 
 ---
 
@@ -22,14 +22,14 @@
 
 ### Machine truth
 
-- Parent task `P2-DP-C4-001-GATE-ASSIGN-WIRING` 目前是 `backlog`，owner=`Codex2`、reviewer=`Codex`、formal `depends_on=[]`。
+- Parent task `P2-DP-C4-001-GATE-ASSIGN-WIRING` 目前是 `todo`，owner=`Claude2`、reviewer=`Codex`、formal `depends_on=[]`。
 - Parent acceptance 已明確要求：
   - assign path 必須真的呼叫 `assertAssignmentEligible`
   - sparse snapshot 要在 assign 時被擋下
   - complete snapshot 要放行
   - gate decision 要寫進 `av_sandbox.sandbox_dispatch_decisions`
   - disclosure 缺失時不得指派 AV
-- 本 sidecar `P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE` 目前是 `in_progress`，owner=`Codex`、reviewer=`Claude`；machine truth `next` 已記錄 reviewer 從 `Codex2` 改派為 `Claude`，原因是 `Codex2` quota-paused 會拖慢 approval handoff。
+- 本 sidecar `P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE` 目前是 `review_approved`，owner=`Codex`、reviewer=`Claude`；review notes 已確認 9 個 evidence anchors 全部對得上 dev baseline、diff 只新增 support artifact，且 pre-closeout review branch tip `8536a772d` 已 push；現在只剩 owner formal closeout。
 
 ### Repo baseline
 
@@ -213,5 +213,7 @@ Owner closeout reminder after `review_approved`:
 
 ## 8) Change Log
 
+- `2026-06-27T22:59Z` — owner closeout 前修正狀態機：`progress` 會把 `review_approved` 退回 `in_progress`，因此先做純行政性 approval restore，讓 sidecar 回到 `review_approved`，再刷新 header / machine-truth snapshot 準備正式 closeout commit。
+- `2026-06-27T22:57Z` — closeout 前重新對齊 machine truth：parent owner/status 更新為 `Claude2` / `todo`，sidecar status 更新為 `review_approved`，並補記 reviewer approval 與 pushed branch-tip `8536a772d`。
 - `2026-06-27T22:53Z` — 對齊最新 machine truth：sidecar reviewer 由 `Codex2` 改派為 `Claude`，同步修正 header、reviewer hotspots 與 handoff / approve / reopen 指令。
 - `2026-06-27T22:51Z` — 初版建立：依 machine truth、`owned-mobility` / `sandbox-dispatch-gate` repo baseline、current E2E coverage 與 parent acceptance 目標整理 acceptance checklist、dependency map、review hotspots 與 handoff 指令。
