@@ -5,7 +5,7 @@ import { buildMockRecorderFixture } from "../../../../packages/shared-test-fixtu
 import { createPublicFleetHarness } from "./e2e-p2-test-helpers";
 
 describe("E2E-P2-006 evidence freeze", () => {
-  it("starts evidence freeze from a recorder alert and keeps the freeze active even after recorder health recovers", () => {
+  it("starts evidence freeze from a recorder alert and keeps the freeze active even after recorder health recovers", async () => {
     const harness = createPublicFleetHarness();
     const recorder = buildMockRecorderFixture({
       recorderId: "rec-e2e-p2-006",
@@ -42,7 +42,7 @@ describe("E2E-P2-006 evidence freeze", () => {
     const vehicle = harness.rocOperationsService
       .listVehicles(null)
       .find((item) => item.vehicleId === "veh-demo-001");
-    const blockedDecision = harness.sandboxDispatchGateService.evaluateDispatch({
+    const blockedDecision = await harness.sandboxDispatchGateService.evaluateDispatch({
       orderId: "ord-e2e-p2-006",
       vehicleId: "veh-demo-001",
       sandboxProgramId: harness.sandboxProgramId,
@@ -74,11 +74,56 @@ describe("E2E-P2-006 evidence freeze", () => {
     });
 
     const unblockedDecision =
-      harness.sandboxDispatchGateService.evaluateDispatch({
+      await harness.sandboxDispatchGateService.evaluateDispatch({
         orderId: "ord-e2e-p2-006-retry",
         vehicleId: "veh-demo-001",
         sandboxProgramId: harness.sandboxProgramId,
         policyVersion: "phase2-e2e-p2-006",
+        passengerDisclosure: {
+          channel: "tenant_portal" as const,
+          policyId: "policy-test-av-001",
+          policyVersion: "test-v1",
+          messageCode: "sandbox_passenger_disclosure.av_program_notice",
+          requiresAcknowledgement: false,
+          acknowledgementMode: "operator_confirmed_notice" as const,
+          acknowledgedAt: null,
+          acknowledgementRecordId: null,
+        },
+        bookingWindow: {
+          start: "2026-06-26T14:00:00.000Z",
+          end: "2026-06-26T15:00:00.000Z",
+        },
+        entitlement: { active: true },
+        vehicleEnrollment: {
+          status: "active",
+          approvedAreaIds: ["odd-downtown-core"],
+          approvedRouteIds: ["route-downtown-loop"],
+        },
+        recorder: { healthy: true },
+        regulatory: { approvalFresh: true, vehicleCertified: true },
+        providerCapabilities: {
+          av_dispatch: true,
+          telemetry_stream: true,
+          regulatory_event_feed: true,
+          evidence_recorder: true,
+          odd_geofence: true,
+          minimal_risk_condition: true,
+        },
+        telemetry: {
+          stale: false,
+          minimalRiskConditionActive: false,
+          socPercent: 80,
+        },
+        operatingArea: {
+          inBounds: true,
+          boundaryRisk: false,
+          matchedAreaIds: ["odd-downtown-core"],
+        },
+        routeContainment: {
+          contained: true,
+          matchedRouteIds: ["route-downtown-loop"],
+        },
+        safetyOperator: { required: false, available: false },
       });
     const recoveredVehicle = harness.rocOperationsService
       .listVehicles(null)
