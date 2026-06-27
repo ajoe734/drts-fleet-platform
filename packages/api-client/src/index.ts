@@ -180,7 +180,6 @@ import type {
   ReopenReconciliationIssueCommand,
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
-  RequestSandboxRegulatorCaseExportCommand,
   RequestSandboxControlledEvidenceExportCommand,
   RequestSandboxLegalHoldReleaseCommand,
   ResolveExceptionHoldCommand,
@@ -248,9 +247,6 @@ import type {
   SandboxControlledEvidenceExportRecord,
   SandboxEvidenceManifestView,
   SandboxLegalHoldRecord,
-  SandboxRegulatorCaseAccessLogRecord,
-  SandboxRegulatorCaseSummary,
-  SandboxRegulatorCaseView,
   ApproveExclusivityCommand,
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverWorkStateCommand,
@@ -2724,70 +2720,6 @@ export class ApiClient {
       {
         body: command,
       },
-    );
-  }
-
-  async listSandboxRegulatorCases(): Promise<{
-    items: SandboxRegulatorCaseSummary[];
-    refresh: UiRefreshMetadata;
-    emptyState?: EmptyStateEnvelope;
-  }> {
-    return this.get<{
-      items: SandboxRegulatorCaseSummary[];
-      refresh: UiRefreshMetadata;
-      emptyState?: EmptyStateEnvelope;
-    }>("/api/platform-admin/compliance/regulator-cases");
-  }
-
-  async getSandboxRegulatorCase(caseId: string): Promise<{
-    item: SandboxRegulatorCaseView;
-    refresh: UiRefreshMetadata;
-  }> {
-    return this.get<{
-      item: SandboxRegulatorCaseView;
-      refresh: UiRefreshMetadata;
-    }>(
-      `/api/platform-admin/compliance/regulator-cases/${encodeURIComponent(caseId)}`,
-    );
-  }
-
-  async listSandboxRegulatorCaseExports(caseId: string): Promise<{
-    items: SandboxControlledEvidenceExportRecord[];
-    refresh: UiRefreshMetadata;
-    emptyState?: EmptyStateEnvelope;
-  }> {
-    return this.get<{
-      items: SandboxControlledEvidenceExportRecord[];
-      refresh: UiRefreshMetadata;
-      emptyState?: EmptyStateEnvelope;
-    }>(
-      `/api/platform-admin/compliance/regulator-cases/${encodeURIComponent(caseId)}/exports`,
-    );
-  }
-
-  async requestSandboxRegulatorCaseExport(
-    caseId: string,
-    command: RequestSandboxRegulatorCaseExportCommand,
-  ): Promise<ActionReceipt> {
-    return this.post<ActionReceipt>(
-      `/api/platform-admin/compliance/regulator-cases/${encodeURIComponent(caseId)}/exports`,
-      {
-        body: command,
-      },
-    );
-  }
-
-  async listSandboxRegulatorCaseAccessLogs(caseId: string): Promise<{
-    items: SandboxRegulatorCaseAccessLogRecord[];
-    refresh: UiRefreshMetadata;
-    emptyState?: EmptyStateEnvelope;
-  }> {
-    return this.get<{
-      items: SandboxRegulatorCaseAccessLogRecord[];
-      refresh: UiRefreshMetadata;
-      emptyState?: EmptyStateEnvelope;
-    }>(
-      `/api/platform-admin/compliance/regulator-cases/${encodeURIComponent(caseId)}/access-logs`,
     );
   }
 

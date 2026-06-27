@@ -1774,139 +1774,6 @@ export interface SandboxEvidenceManifestView extends EvidenceManifest {
   items: EvidenceManifestItem[];
 }
 
-export const SANDBOX_REGULATOR_CASE_BUNDLE_STATES = [
-  "missing_manifest",
-  "manifest_ready",
-  "bundle_generated",
-  "export_pending_approval",
-  "export_approved",
-  "export_completed",
-  "export_rejected",
-] as const;
-export type SandboxRegulatorCaseBundleState =
-  (typeof SANDBOX_REGULATOR_CASE_BUNDLE_STATES)[number];
-
-export const SANDBOX_REGULATOR_CASE_NOTIFICATION_STATES = [
-  "not_started",
-  ...REGULATORY_NOTIFICATION_LIFECYCLE_STATUSES,
-] as const;
-export type SandboxRegulatorCaseNotificationState =
-  (typeof SANDBOX_REGULATOR_CASE_NOTIFICATION_STATES)[number];
-
-export interface SandboxRegulatorCaseSummary {
-  caseId: string;
-  caseLabel: string;
-  experimentId: string | null;
-  experimentLabel: string;
-  jurisdiction: string | null;
-  severity: AccidentSeverity;
-  status: AccidentCaseStatus;
-  occurredAt: string;
-  reportedAt: string;
-  manifestId: string | null;
-  reportId: string | null;
-  reportStatus: RegulatoryReportStatus | null;
-  bundleState: SandboxRegulatorCaseBundleState;
-  notificationState: SandboxRegulatorCaseNotificationState;
-  legalHoldActive: boolean;
-  maskingApplied: true;
-}
-
-export interface SandboxRegulatorCaseManifestSummary {
-  manifestId: string | null;
-  itemCount: number;
-  custodyState: EvidenceCustodyState | null;
-  windowStart: string | null;
-  windowEnd: string | null;
-  knownGapCount: number;
-  artifactChecksumSha256: string | null;
-}
-
-export interface SandboxRegulatorCaseBundleStatus {
-  state: SandboxRegulatorCaseBundleState;
-  bundleId: string | null;
-  generatedAt: string | null;
-  manifestHash: string | null;
-  knownGapCount: number;
-  latestExportRequestId: string | null;
-  latestExportStatus: SandboxControlledEvidenceExportStatus | null;
-  latestExportedAt: string | null;
-}
-
-export interface SandboxRegulatorCaseNotificationStatus {
-  state: SandboxRegulatorCaseNotificationState;
-  notificationId: string | null;
-  severity: RegulatoryNotificationSeverity | null;
-  deadlineAt: string | null;
-  overdue: boolean;
-  submittedAt: string | null;
-  acknowledgedAt: string | null;
-}
-
-export interface SandboxRegulatorCaseMaskingStatus {
-  applied: true;
-  policyFamily: "filing_package";
-  policyLabel: string;
-  ruleSummary: string;
-  maskedFields: string[];
-}
-
-export interface SandboxRegulatorCaseView {
-  caseId: string;
-  caseLabel: string;
-  experimentId: string | null;
-  experimentLabel: string;
-  jurisdiction: string | null;
-  vehicleId: string;
-  orderId: string | null;
-  severity: AccidentSeverity;
-  status: AccidentCaseStatus;
-  occurredAt: string;
-  reportedAt: string;
-  summary: string | null;
-  manifestSummary: SandboxRegulatorCaseManifestSummary;
-  bundleStatus: SandboxRegulatorCaseBundleStatus;
-  report: {
-    reportId: string | null;
-    reportType: RegulatoryReportType | null;
-    status: RegulatoryReportStatus | null;
-    acknowledgementRef: string | null;
-    generatedAt: string | null;
-    submittedAt: string | null;
-  };
-  notificationStatus: SandboxRegulatorCaseNotificationStatus;
-  legalHold: {
-    active: boolean;
-    holdId: string | null;
-    status: SandboxLegalHoldStatus | null;
-    scopeSummary: string | null;
-  };
-  masking: SandboxRegulatorCaseMaskingStatus;
-}
-
-export interface SandboxRegulatorCaseAccessLogRecord {
-  auditId: string;
-  createdAt: string;
-  actorId: string | null;
-  actorType:
-    | "system"
-    | "platform_admin"
-    | "tenant_admin"
-    | "ops_user"
-    | "partner_api_key"
-    | "referral_passenger";
-  actionName: string;
-  resourceType: string;
-  resourceId: string | null;
-  requestId: string;
-}
-
-export interface RequestSandboxRegulatorCaseExportCommand {
-  reason: string;
-  recipientLabel?: string | null;
-  recipientScope?: string | null;
-}
-
 export const SANDBOX_KPI_TARGET_STATUSES = ["baseline_collecting"] as const;
 export type SandboxKpiTargetStatus =
   (typeof SANDBOX_KPI_TARGET_STATUSES)[number];
@@ -2290,6 +2157,89 @@ export interface SandboxComplianceSnapshotRecord {
 export interface GenerateSandboxComplianceSnapshotCommand {
   asOf?: string | null;
   actorId?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// §3.8B Sandbox fallback-cost policy resolver contracts
+// ---------------------------------------------------------------------------
+
+export const SANDBOX_FALLBACK_COST_POLICY_SCOPES = [
+  "experiment",
+  "partner_program",
+  "tenant_contract",
+] as const;
+export type SandboxFallbackCostPolicyScope =
+  (typeof SANDBOX_FALLBACK_COST_POLICY_SCOPES)[number];
+
+export const SANDBOX_FALLBACK_COST_ABSORBERS = [
+  "platform",
+  "partner_program",
+  "tenant_contract",
+  "passenger",
+] as const;
+export type SandboxFallbackCostAbsorber =
+  (typeof SANDBOX_FALLBACK_COST_ABSORBERS)[number];
+
+export const SANDBOX_FALLBACK_COST_REASONS = [
+  "regulatory_requirement",
+  "safety_intervention",
+  "platform_operational_issue",
+  "experiment_learning",
+  "partner_operational_issue",
+  "tenant_operational_issue",
+] as const;
+export type SandboxFallbackCostReason =
+  (typeof SANDBOX_FALLBACK_COST_REASONS)[number];
+
+export const SANDBOX_FALLBACK_COST_POLICY_RESOLUTIONS = [
+  "regulatory_override",
+  "safety_override",
+  "platform_cause_platform_default",
+  "experiment_policy",
+  "experiment_reason_override",
+  "partner_policy",
+  "partner_reason_override",
+  "tenant_policy",
+  "tenant_reason_override",
+  "default_platform_no_contract",
+] as const;
+export type SandboxFallbackCostPolicyResolution =
+  (typeof SANDBOX_FALLBACK_COST_POLICY_RESOLUTIONS)[number];
+
+export interface SandboxFallbackCostPolicyRecord {
+  policyId: string;
+  scope: SandboxFallbackCostPolicyScope;
+  scopeRef: string;
+  contractId: string | null;
+  defaultAbsorber: SandboxFallbackCostAbsorber;
+  reasonOverrides: Partial<
+    Record<SandboxFallbackCostReason, SandboxFallbackCostAbsorber>
+  >;
+  passengerSurchargeAllowed: false;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  notes: string | null;
+}
+
+export interface ResolveSandboxFallbackCostPolicyCommand {
+  reason: SandboxFallbackCostReason;
+  experimentId?: string | null;
+  partnerProgramId?: string | null;
+  partnerContractId?: string | null;
+  tenantId?: string | null;
+  tenantContractId?: string | null;
+  asOf?: string | null;
+}
+
+export interface SandboxFallbackCostPolicyResolutionRecord {
+  reason: SandboxFallbackCostReason;
+  fallbackCostAbsorber: Exclude<SandboxFallbackCostAbsorber, "passenger">;
+  policyResolution: SandboxFallbackCostPolicyResolution;
+  policyScope: SandboxFallbackCostPolicyScope | "platform_default" | null;
+  policyId: string | null;
+  matchedByReasonOverride: boolean;
+  passengerSurchargeAllowed: false;
+  auditEventCode: "sandbox.billing.fallback_cost_policy.defaulted" | null;
 }
 
 // ---------------------------------------------------------------------------
