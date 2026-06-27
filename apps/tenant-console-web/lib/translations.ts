@@ -3907,6 +3907,101 @@ const en = {
   "dashboard.callout.partialDataSub":
     "Some dashboard sections fell back because the current authorization source did not answer all reads.",
 
+  // ── av fallback (phase2 20260626) ──
+  "avFallback.list.title": "Bookings · AV fulfillment tracking",
+  "avFallback.list.subtitle":
+    "Planned vs actual fulfillment · fallback stage · tenant-safe service status",
+  "avFallback.list.banner":
+    "This list tracks autonomous fulfillment and human fallback on the same booking. No replacement booking is created and fallback surcharge stays disabled.",
+  "avFallback.list.degraded.title":
+    "Some AV fulfillment rows could not be loaded",
+  "avFallback.list.degraded.body":
+    "The booking list loaded, but one or more sandbox fulfillment projections were unavailable. Refresh and verify tenant booking health if the gap persists.",
+  "avFallback.list.empty.title": "No AV fulfillment bookings are visible",
+  "avFallback.list.empty.body":
+    "The tenant booking snapshot did not return any currently visible autonomous or human-fallback fulfillment rows.",
+  "avFallback.action.allBookings": "All bookings",
+  "avFallback.action.detail": "Detail",
+  "bookingList.header.avFulfillment": "AV fulfillment",
+  "avFallback.column.booking": "Booking",
+  "avFallback.column.passenger": "Passenger",
+  "avFallback.column.route": "Route",
+  "avFallback.column.planned": "Planned",
+  "avFallback.column.actual": "Actual",
+  "avFallback.column.stage": "Fallback stage",
+  "avFallback.column.eta": "ETA",
+  "avFallback.column.surcharge": "Surcharge",
+  "avFallback.mode.plannedAv": "AV",
+  "avFallback.mode.av": "AV",
+  "avFallback.mode.human": "Human",
+  "avFallback.stage.vehicle_change_in_progress": "Vehicle change in progress",
+  "avFallback.stage.human_fallback_assigned": "Human driver assigned",
+  "avFallback.stage.service_continuing": "Service continuing",
+  "avFallback.stageHelp.vehicle_change_in_progress":
+    "A replacement vehicle is being arranged so the original booking can continue.",
+  "avFallback.stageHelp.human_fallback_assigned":
+    "A human driver has been assigned on the existing booking chain.",
+  "avFallback.stageHelp.service_continuing":
+    "The trip is continuing on the same booking with the updated fulfillment mode and ETA.",
+  "avFallback.value.etaMinutes": "{count}m",
+  "avFallback.value.etaPending": "ETA pending",
+  "avFallback.message.note":
+    "Copy is rendered from the backend message code for the tenant surface.",
+  "avFallback.detail.title": "AV -> human fallback",
+  "avFallback.detail.subtitle":
+    "Same booking chain · updated ETA · billing and SLA treatment",
+  "avFallback.detail.passenger": "Passenger",
+  "avFallback.detail.plannedActualTitle": "Planned vs actual fulfillment",
+  "avFallback.detail.plannedActualSub":
+    "Tenant-visible fulfillment mode and updated ETA only",
+  "avFallback.detail.plannedLabel": "Planned",
+  "avFallback.detail.actualLabel": "Actual",
+  "avFallback.detail.scheduledPickup": "Scheduled pickup {value}",
+  "avFallback.detail.updatedEta": "Updated ETA {value}",
+  "avFallback.detail.stageTitle": "Fallback stage",
+  "avFallback.detail.stageSub":
+    "Same booking, reassigned fulfillment, no internal ROC reason codes",
+  "avFallback.detail.messageTitle": "Tenant notification copy",
+  "avFallback.detail.messageSub":
+    "Rendered from tenant-safe backend message code",
+  "avFallback.detail.billingTitle": "Billing and SLA treatment",
+  "avFallback.detail.billingSub":
+    "Customer charge and SLA stay on the original booking chain",
+  "avFallback.detail.disclosureTitle": "Disclosure scope",
+  "avFallback.detail.disclosureSub":
+    "What the tenant surface may and may not show",
+  "avFallback.detail.disclosureBody":
+    "Tenants may see planned and actual fulfillment mode, fallback stage, ETA updates, billing treatment, and SLA treatment. Internal AV reason codes, raw events, evidence artifacts, and ROC notes stay hidden.",
+  "avFallback.billing.charge": "Trip charge",
+  "avFallback.billing.originalFare": "Original fare remains",
+  "avFallback.billing.surcharge": "Fallback surcharge",
+  "avFallback.billing.dimension": "Billing dimension",
+  "avFallback.billing.sla": "SLA treatment",
+  "avFallback.billing.rebooking": "Rebooking",
+  "avFallback.billing.noneBoolean": "No · false",
+  "avFallback.billing.sameBooking": "No · same booking",
+  "avFallback.billing.slaUpdatedEta": "On-time performance uses the updated ETA",
+  "avFallback.billing.note":
+    "Billing differentiates AV and human fallback fulfillment internally, but the tenant is not charged extra and SLA uses the revised ETA.",
+  "avFallback.billing.noSurcharge": "No",
+  "avFallback.billing.noSurchargeLong": "No surcharge · no extra charge",
+  "tenantMessageCode.sandbox_fulfillment.tesla_av_active":
+    "This booking is currently assigned to autonomous-vehicle fulfillment. Use the latest published ETA shown on this booking.",
+  "tenantMessageCode.sandbox_fulfillment.human_fallback_active":
+    "This booking was reassigned to a human driver to maintain service continuity. The original booking stays active and the fare remains unchanged.",
+  "tenantMessageCode.sandbox_fulfillment.service_continues_with_human_driver":
+    "This trip is continuing with a human driver for service continuity. The booking remains unchanged and the latest ETA on this page is authoritative.",
+  "tenantMessageCode.sandbox_fulfillment.mixed_fulfillment_active":
+    "This booking moved from autonomous to human fulfillment on the same trip chain. Use the updated ETA and billing treatment shown here.",
+  "tenantMessageCode.sandbox_fulfillment.status_update_available":
+    "A service status update is available for this booking. Use the latest fulfillment status and ETA shown here.",
+  "tenantMessageCode.sandbox_fulfillment.trip_completed":
+    "This trip completed on the original booking chain. Billing and reporting stay attached to the same booking.",
+  "tenantMessageCode.sandbox_fulfillment.trip_cancelled":
+    "This trip was cancelled. Booking, billing, and audit attribution remain attached to the original booking record.",
+  "tenantMessageCode.sandbox_fulfillment.default":
+    "Service status was updated for this booking. Use the tenant-safe fulfillment and ETA details shown on this page.",
+
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "Not available",
 } as const;
@@ -7562,6 +7657,92 @@ const zh: Record<keyof typeof en, string> = {
     "功能旗標明細目前無法取得，或沒有任何租戶專屬模組旗標啟用。",
   "dashboard.callout.partialDataSub":
     "部分儀表板區塊已回退，因為目前的授權來源未回應所有讀取。",
+
+  // ── av fallback (phase2 20260626) ──
+  "avFallback.list.title": "訂單 · AV 履約追蹤",
+  "avFallback.list.subtitle": "計畫 vs 實際履約 · 轉派階段 · 租戶可見服務狀態",
+  "avFallback.list.banner":
+    "此清單顯示自駕履約與人駕 fallback，仍維持同一筆 booking。系統不會另開新 booking，fallback 也不會加收費用。",
+  "avFallback.list.degraded.title": "部分 AV 履約資料未成功載入",
+  "avFallback.list.degraded.body":
+    "訂單清單已載入，但一筆或多筆 sandbox fulfillment projection 暫時不可用。若持續發生，請重新整理並檢查租戶 booking API 健康狀態。",
+  "avFallback.list.empty.title": "目前沒有可見的 AV 履約訂單",
+  "avFallback.list.empty.body":
+    "目前的租戶 booking 快照沒有回傳任何可見的自駕或人駕 fallback 履約列。",
+  "avFallback.action.allBookings": "全部訂單",
+  "avFallback.action.detail": "詳情",
+  "bookingList.header.avFulfillment": "AV 履約",
+  "avFallback.column.booking": "訂單",
+  "avFallback.column.passenger": "乘客",
+  "avFallback.column.route": "路線",
+  "avFallback.column.planned": "計畫",
+  "avFallback.column.actual": "實際",
+  "avFallback.column.stage": "轉派階段",
+  "avFallback.column.eta": "ETA",
+  "avFallback.column.surcharge": "加收",
+  "avFallback.mode.plannedAv": "AV",
+  "avFallback.mode.av": "AV",
+  "avFallback.mode.human": "人駕",
+  "avFallback.stage.vehicle_change_in_progress": "重新安排車輛",
+  "avFallback.stage.human_fallback_assigned": "人駕已指派",
+  "avFallback.stage.service_continuing": "行程繼續",
+  "avFallback.stageHelp.vehicle_change_in_progress":
+    "系統正在安排替代車輛，原預約與 booking 鏈維持不變。",
+  "avFallback.stageHelp.human_fallback_assigned":
+    "已在既有 booking 鏈上改派人駕，乘客服務不中斷。",
+  "avFallback.stageHelp.service_continuing":
+    "行程已在同一筆 booking 上繼續，請以更新後的履約模式與 ETA 為準。",
+  "avFallback.value.etaMinutes": "{count} 分",
+  "avFallback.value.etaPending": "ETA 待更新",
+  "avFallback.message.note": "文案由後端 messageCode 渲染，且僅顯示租戶可見內容。",
+  "avFallback.detail.title": "AV -> 人駕 fallback",
+  "avFallback.detail.subtitle": "同一 booking 鏈 · 更新 ETA · 計費與 SLA 處理",
+  "avFallback.detail.passenger": "乘客",
+  "avFallback.detail.plannedActualTitle": "計畫 vs 實際履約",
+  "avFallback.detail.plannedActualSub": "僅顯示租戶可見的履約模式與更新後 ETA",
+  "avFallback.detail.plannedLabel": "計畫",
+  "avFallback.detail.actualLabel": "實際",
+  "avFallback.detail.scheduledPickup": "原預約上車時間 {value}",
+  "avFallback.detail.updatedEta": "更新後 ETA {value}",
+  "avFallback.detail.stageTitle": "轉派進度",
+  "avFallback.detail.stageSub": "同一 booking 改派履約，不顯示 ROC 內部原因碼",
+  "avFallback.detail.messageTitle": "租戶通知文案",
+  "avFallback.detail.messageSub": "由租戶安全的 backend messageCode 渲染",
+  "avFallback.detail.billingTitle": "計費與 SLA 處理",
+  "avFallback.detail.billingSub": "對租戶的費用與 SLA 仍維持在原 booking 鏈上",
+  "avFallback.detail.disclosureTitle": "揭露範圍",
+  "avFallback.detail.disclosureSub": "租戶畫面可見與不可見的資訊邊界",
+  "avFallback.detail.disclosureBody":
+    "租戶可見：計畫/實際履約模式、fallback 階段、ETA 更新、計費處理與 SLA 處理。AV 內部原因碼、raw event、證據檔案與 ROC notes 仍維持隱藏。",
+  "avFallback.billing.charge": "本趟費用",
+  "avFallback.billing.originalFare": "維持原價",
+  "avFallback.billing.surcharge": "fallback 加收",
+  "avFallback.billing.dimension": "計費維度",
+  "avFallback.billing.sla": "SLA 處理",
+  "avFallback.billing.rebooking": "重新下單",
+  "avFallback.billing.noneBoolean": "否 · false",
+  "avFallback.billing.sameBooking": "無 · 同一訂單",
+  "avFallback.billing.slaUpdatedEta": "準點與否以更新後 ETA 為準",
+  "avFallback.billing.note":
+    "AV 與人駕 fallback 的內部計費維度會分開處理，但租戶端不加收費用，SLA 也以 revised ETA 評估。",
+  "avFallback.billing.noSurcharge": "否",
+  "avFallback.billing.noSurchargeLong": "無加收 · no surcharge",
+  "tenantMessageCode.sandbox_fulfillment.tesla_av_active":
+    "本趟目前仍由自駕車履約。請以本頁顯示的最新 ETA 與服務狀態為準。",
+  "tenantMessageCode.sandbox_fulfillment.human_fallback_active":
+    "本趟已改派人駕以維持服務連續性。原 booking 繼續有效，租戶費用維持不變。",
+  "tenantMessageCode.sandbox_fulfillment.service_continues_with_human_driver":
+    "本趟已由人駕接續履約以維持服務連續性。原 booking 不變，請以本頁最新 ETA 為準。",
+  "tenantMessageCode.sandbox_fulfillment.mixed_fulfillment_active":
+    "本趟已在同一筆 booking 上從自駕轉為人駕履約。請以本頁更新後的 ETA 與計費處理為準。",
+  "tenantMessageCode.sandbox_fulfillment.status_update_available":
+    "此 booking 有新的服務狀態更新。請以本頁顯示的最新履約狀態與 ETA 為準。",
+  "tenantMessageCode.sandbox_fulfillment.trip_completed":
+    "本趟已完成，計費與報表歸屬仍維持在原 booking 鏈上。",
+  "tenantMessageCode.sandbox_fulfillment.trip_cancelled":
+    "本趟已取消，booking、計費與稽核歸屬仍維持在原始訂單紀錄上。",
+  "tenantMessageCode.sandbox_fulfillment.default":
+    "此 booking 的服務狀態已更新。請以本頁顯示的租戶可見履約資訊與 ETA 為準。",
 
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "無資料",

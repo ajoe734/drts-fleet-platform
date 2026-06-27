@@ -1192,6 +1192,12 @@ export default async function BookingsPage({
         activeTab={activeHeaderTab}
         actions={
           <div style={actionRowStyle}>
+            <Link
+              href="/bookings?fulfillment=av"
+              style={actionLinkStyle("secondary")}
+            >
+              {t("bookingList.header.avFulfillment", undefined, locale)}
+            </Link>
             <Link href="#booking-filters" style={actionLinkStyle("secondary")}>
               {t("bookingList.header.filter", undefined, locale)}
             </Link>

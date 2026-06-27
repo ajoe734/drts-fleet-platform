@@ -21,6 +21,15 @@ import type {
 } from "./phase2-tesla-fsd-sandbox";
 
 export * from "./referral-channel";
+export type {
+  RequestSandboxRegulatorCaseExportCommand,
+  SandboxFulfillmentProjectionView,
+  SandboxRegulatorCaseAccessLogRecord,
+  SandboxRegulatorCaseBundleState,
+  SandboxRegulatorCaseNotificationState,
+  SandboxRegulatorCaseSummary,
+  SandboxRegulatorCaseView,
+} from "./phase2-tesla-fsd-sandbox";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
