@@ -2,10 +2,10 @@
 
 **Sidecar Kind:** `acceptance_packet`  
 **Parent Task:** `P2-DP-C4-001-GATE-ASSIGN-WIRING`  
-**Current Sidecar Owner / Reviewer:** `Codex` / `Codex2`  
+**Current Sidecar Owner / Reviewer:** `Codex` / `Claude`  
 **Parent Owner / Reviewer:** `Codex2` / `Codex`  
-**Last Revised:** `2026-06-27T22:51Z (UTC)`  
-**Status Snapshot:** sidecar machine truth was `in_progress` at `2026-06-27T22:49:20Z`; parent machine truth remains `backlog` at `2026-06-27T22:36:45Z`
+**Last Revised:** `2026-06-27T22:53Z (UTC)`  
+**Status Snapshot:** sidecar machine truth is `in_progress` at `2026-06-27T22:53:04Z` with reviewer reassigned to `Claude`; parent machine truth remains `backlog` at `2026-06-27T22:36:45Z`
 
 ---
 
@@ -29,7 +29,7 @@
   - complete snapshot 要放行
   - gate decision 要寫進 `av_sandbox.sandbox_dispatch_decisions`
   - disclosure 缺失時不得指派 AV
-- 本 sidecar `P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE` 目前是 `in_progress`，owner=`Codex`、reviewer=`Codex2`。
+- 本 sidecar `P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE` 目前是 `in_progress`，owner=`Codex`、reviewer=`Claude`；machine truth `next` 已記錄 reviewer 從 `Codex2` 改派為 `Claude`，原因是 `Codex2` quota-paused 會拖慢 approval handoff。
 
 ### Repo baseline
 
@@ -165,7 +165,7 @@ Verification note: 這份 packet 是 support-only repo scan，未執行 runtime 
 
 ---
 
-## 6) Reviewer Hotspots (`Codex2`)
+## 6) Reviewer Hotspots (`Claude`)
 
 1. 確認 parent patch 把 gate 放在 shared assignment path，而不是只補一個單獨 `assignDispatch` 分支或只加 direct evaluate test。
 2. 確認新注入的 gate dependency 沒有破壞 `OwnedMobilityService` constructor 的 harness 相容性。
@@ -186,22 +186,22 @@ Verification note: 這份 packet 是 support-only repo scan，未執行 runtime 
 
 ## 7) Reviewer Handoff Commands
 
-Owner handoff to `Codex2`:
+Owner handoff to `Claude`:
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE Codex2 "Acceptance packet ready at support/sidecars/P2-DP-C4-001-GATE-ASSIGN-WIRING/P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE.md. It captures the current gap that OwnedMobility assignment still bypasses sandbox gate calls, maps the existing gate capabilities and decision persistence surfaces, highlights passengerDisclosure=null and constructor/billing integration constraints, and frames reviewer checks around real booking->dispatch->assign enforcement without modifying canonical truth."
+AI_NAME=Codex scripts/ai-status.sh handoff P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE Claude "Acceptance packet ready at support/sidecars/P2-DP-C4-001-GATE-ASSIGN-WIRING/P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE.md. It captures the current gap that OwnedMobility assignment still bypasses sandbox gate calls, maps the existing gate capabilities and decision persistence surfaces, highlights passengerDisclosure=null and constructor/billing integration constraints, and frames reviewer checks around real booking->dispatch->assign enforcement without modifying canonical truth."
 ```
 
 Reviewer approve:
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh approve P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE "Acceptance packet verified: it preserves machine truth, documents the current assign-path gap against existing sandbox gate capabilities, highlights disclosure-state plus constructor/billing integration risks, and stays within support-only scope."
+AI_NAME=Claude scripts/ai-status.sh approve P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE "Acceptance packet verified: it preserves machine truth, documents the current assign-path gap against existing sandbox gate capabilities, highlights disclosure-state plus constructor/billing integration risks, and stays within support-only scope."
 ```
 
 Reviewer reopen:
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh reopen P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE "packet needs revision: [specify machine-truth mismatch / missing reviewer hotspot / evidence anchor issue / support-scope violation]"
+AI_NAME=Claude scripts/ai-status.sh reopen P2-DP-C4-001-GATE-ASSIGN-WIRING-SIDECAR-ACCEPTANCE "packet needs revision: [specify machine-truth mismatch / missing reviewer hotspot / evidence anchor issue / support-scope violation]"
 ```
 
 Owner closeout reminder after `review_approved`:
@@ -213,4 +213,5 @@ Owner closeout reminder after `review_approved`:
 
 ## 8) Change Log
 
+- `2026-06-27T22:53Z` — 對齊最新 machine truth：sidecar reviewer 由 `Codex2` 改派為 `Claude`，同步修正 header、reviewer hotspots 與 handoff / approve / reopen 指令。
 - `2026-06-27T22:51Z` — 初版建立：依 machine truth、`owned-mobility` / `sandbox-dispatch-gate` repo baseline、current E2E coverage 與 parent acceptance 目標整理 acceptance checklist、dependency map、review hotspots 與 handoff 指令。
