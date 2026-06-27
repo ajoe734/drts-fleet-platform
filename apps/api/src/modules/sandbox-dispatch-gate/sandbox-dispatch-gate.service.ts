@@ -116,6 +116,23 @@ export class SandboxDispatchGateService {
   async upsertPassengerDisclosurePolicy(
     command: UpsertPassengerDisclosurePolicyCommand,
   ) {
+    if (!command.policyVersion?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_DISCLOSURE_POLICY_INVALID",
+        "policyVersion is required.",
+      );
+    }
+    if (
+      !Array.isArray(command.channelRules) ||
+      command.channelRules.length === 0
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_DISCLOSURE_POLICY_INVALID",
+        "channelRules must be a non-empty array.",
+      );
+    }
     await this.ensureDisclosureCacheLoaded();
     const now = new Date().toISOString();
     const policyId = command.policyId?.trim() || randomUUID();
@@ -148,6 +165,20 @@ export class SandboxDispatchGateService {
   async upsertPassengerDisclosureMessageCatalogEntry(
     command: UpsertPassengerDisclosureMessageCatalogEntryCommand,
   ) {
+    for (const [field, value] of [
+      ["catalogVersion", command.catalogVersion],
+      ["messageCode", command.messageCode],
+      ["locale", command.locale],
+      ["bodyText", command.bodyText],
+    ] as const) {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "PASSENGER_DISCLOSURE_CATALOG_INVALID",
+          `${field} is required.`,
+        );
+      }
+    }
     await this.ensureDisclosureCacheLoaded();
     const now = new Date().toISOString();
     const existingEntry = this.findMessageCatalogEntry(
