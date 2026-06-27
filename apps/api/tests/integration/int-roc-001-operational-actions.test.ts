@@ -18,6 +18,17 @@ import { SandboxGovernanceService } from "../../src/modules/sandbox-governance/s
 import { TeslaIntegrationService } from "../../src/modules/tesla-integration/tesla-integration.service";
 import { VehicleEvidenceService } from "../../src/modules/vehicle-evidence/vehicle-evidence.service";
 
+const READY_PASSENGER_DISCLOSURE = {
+  channel: "tenant_portal" as const,
+  policyId: "policy-test-av-001",
+  policyVersion: "test-v1",
+  messageCode: "sandbox_passenger_disclosure.av_program_notice",
+  requiresAcknowledgement: false,
+  acknowledgementMode: "operator_confirmed_notice" as const,
+  acknowledgedAt: null,
+  acknowledgementRecordId: null,
+};
+
 const sandboxGovernanceService = {
   listSafetyOperatorQualifications: () => [
     {
@@ -162,11 +173,52 @@ describe("INT-ROC-001 ROC operational actions", () => {
       );
       expect(holdResponse.ok).toBe(true);
 
-      const decision = gate.evaluateDispatch({
+      const decision = await gate.evaluateDispatch({
         orderId: "ord-roc-001",
         vehicleId: recorder.vehicleId,
         sandboxProgramId: "sandbox-demo-001",
         policyVersion: "phase2-roc-001",
+        bookingWindow: {
+          start: "2026-06-26T14:00:00.000Z",
+          end: "2026-06-26T15:00:00.000Z",
+        },
+        entitlement: { active: true },
+        vehicleEnrollment: {
+          status: "active",
+          approvedAreaIds: ["odd-downtown-core"],
+          approvedRouteIds: ["route-downtown-loop"],
+        },
+        regulatory: {
+          approvalFresh: true,
+          vehicleCertified: true,
+        },
+        providerCapabilities: {
+          av_dispatch: true,
+          telemetry_stream: true,
+          regulatory_event_feed: true,
+          evidence_recorder: true,
+          odd_geofence: true,
+          minimal_risk_condition: true,
+        },
+        telemetry: {
+          stale: false,
+          minimalRiskConditionActive: false,
+          socPercent: 80,
+        },
+        operatingArea: {
+          inBounds: true,
+          boundaryRisk: false,
+          matchedAreaIds: ["odd-downtown-core"],
+        },
+        routeContainment: {
+          contained: true,
+          matchedRouteIds: ["route-downtown-loop"],
+        },
+        safetyOperator: {
+          required: false,
+          available: false,
+        },
+        passengerDisclosure: READY_PASSENGER_DISCLOSURE,
       });
       expect(decision.decision).toBe("block");
       expect(decision.hardReasonCodes).toEqual(
