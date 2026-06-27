@@ -37,10 +37,6 @@ import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
-import {
-  TenantAvFallbackListSurface,
-  loadTenantAvFallbackListItems,
-} from "@/lib/tenant-av-fallback";
 import { t as translate, type Locale } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
@@ -1126,20 +1122,6 @@ export default async function BookingsPage({
 }) {
   const locale = await getServerLocale();
   const resolvedSearchParams = await searchParams;
-  const fulfillmentView = first(resolvedSearchParams.fulfillment);
-  if (fulfillmentView === "av") {
-    const data = await loadBookingsPageData(locale);
-    const avFallbackData = await loadTenantAvFallbackListItems(data.bookings);
-
-    return (
-      <TenantAvFallbackListSurface
-        degraded={avFallbackData.degraded}
-        items={avFallbackData.items}
-        locale={locale}
-      />
-    );
-  }
-
   const query = parseBookingListQuery(resolvedSearchParams);
   const forcedEmptyReason = parseEmptyReason(
     first(resolvedSearchParams.emptyReason),
