@@ -1,7 +1,7 @@
 import { ApiClient, createPlatformAdminClient } from "@drts/api-client";
-import { PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID } from "./platform-admin-identity";
-import { getRuntimePlatformAdminActorId } from "./runtime-config";
 
+export const PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID =
+  "platform-admin-web-bootstrap";
 const clientCache = new Map<string, ApiClient>();
 
 function rewriteControlPlaneProxyPath(baseUrl: string, path: string): string {
@@ -12,21 +12,8 @@ function rewriteControlPlaneProxyPath(baseUrl: string, path: string): string {
   return path.replace(/^\/api(?=\/|$)/, "") || "/";
 }
 
-function resolveClientCacheKey(apiBaseUrl: string, actorId: string): string {
-  if (apiBaseUrl.startsWith("/control-plane-proxy")) {
-    return apiBaseUrl;
-  }
-
-  return `${apiBaseUrl}::${actorId}`;
-}
-
-export function getPlatformAdminClient(
-  apiBaseUrl: string,
-  actorId = getRuntimePlatformAdminActorId(),
-): ApiClient {
-  const resolvedActorId = actorId || PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID;
-  const cacheKey = resolveClientCacheKey(apiBaseUrl, resolvedActorId);
-  const cachedClient = clientCache.get(cacheKey);
+export function getPlatformAdminClient(apiBaseUrl: string): ApiClient {
+  const cachedClient = clientCache.get(apiBaseUrl);
   if (cachedClient) {
     return cachedClient;
   }
@@ -36,9 +23,13 @@ export function getPlatformAdminClient(
         baseUrl: apiBaseUrl,
         pathTransform: (path) => rewriteControlPlaneProxyPath(apiBaseUrl, path),
       })
-    : createPlatformAdminClient(apiBaseUrl, resolvedActorId, {
+    : createPlatformAdminClient(
+        apiBaseUrl,
+        PLATFORM_ADMIN_BOOTSTRAP_ACTOR_ID,
+        {
         pathTransform: (path) => rewriteControlPlaneProxyPath(apiBaseUrl, path),
-      });
-  clientCache.set(cacheKey, client);
+        },
+      );
+  clientCache.set(apiBaseUrl, client);
   return client;
 }

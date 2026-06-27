@@ -8,21 +8,12 @@ export default defineConfig({
         __dirname,
         "packages/contracts/src/index.ts",
       ),
-      "@drts/ui-tokens": path.resolve(
-        __dirname,
-        "packages/ui-tokens/src/index.ts",
-      ),
-      "@drts/ui-web": path.resolve(
-        __dirname,
-        "packages/ui-web/src/index.tsx",
-      ),
     },
   },
   test: {
     environment: "node",
     globals: true,
     include: [
-      "apps/api/tests/integration/**/*.test.ts",
       "tests/integ/**/*.test.ts",
       "tests/unit/**/*.test.ts",
       "tests/integration/**/*.test.ts",

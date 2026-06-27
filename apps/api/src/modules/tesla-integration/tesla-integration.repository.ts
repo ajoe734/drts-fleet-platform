@@ -4,23 +4,8 @@ import type { CommandReceipt } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
 
-type CommandReceiptRow = {
-  commandId: string;
-  idempotencyKey: string;
-  vehicleId: string;
-  commandType: string;
-  status: string;
-  issuedBy: string;
-  issuedAt: string;
-  acknowledgedAt: string | null;
-  providerRef: string | null;
-  failureReasonCode: string | null;
-  sourceSystem: string;
-  sourceRef: string | null;
-  sourceIngestedAt: string;
-  sourceRecordedAt: string | null;
-  sourceSignatureRef: string | null;
-  sourceSchemaVersion: string;
+type JsonRecordRow = {
+  record: unknown;
 };
 
 @Injectable()
@@ -38,31 +23,15 @@ export class TeslaIntegrationRepository {
       return [];
     }
 
-    const result = await this.databaseService!.query<CommandReceiptRow>(
+    const result = await this.databaseService!.query<JsonRecordRow>(
       `
-        SELECT
-          command_id AS "commandId",
-          idempotency_key AS "idempotencyKey",
-          vehicle_id AS "vehicleId",
-          command_type AS "commandType",
-          status,
-          issued_by AS "issuedBy",
-          issued_at AS "issuedAt",
-          acknowledged_at AS "acknowledgedAt",
-          provider_ref AS "providerRef",
-          failure_reason_code AS "failureReasonCode",
-          source_system AS "sourceSystem",
-          source_ref AS "sourceRef",
-          source_ingested_at AS "sourceIngestedAt",
-          source_recorded_at AS "sourceRecordedAt",
-          source_signature_ref AS "sourceSignatureRef",
-          source_schema_version AS "sourceSchemaVersion"
+        SELECT record
         FROM av_sandbox.command_receipts
         ORDER BY issued_at DESC
       `,
     );
 
-    return result.rows.map((row) => this.mapCommandReceipt(row));
+    return result.rows.map((row) => this.parseRecord<CommandReceipt>(row.record));
   }
 
   async insertCommandReceipt(record: CommandReceipt) {
@@ -83,14 +52,9 @@ export class TeslaIntegrationRepository {
           provider_ref,
           failure_reason_code,
           idempotency_key,
-          source_system,
-          source_ref,
-          source_ingested_at,
-          source_recorded_at,
-          source_signature_ref,
-          source_schema_version
+          record
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb
         )
         ON CONFLICT (command_id) DO NOTHING
       `,
@@ -105,12 +69,7 @@ export class TeslaIntegrationRepository {
         record.providerRef,
         record.failureReasonCode,
         record.idempotencyKey,
-        record.source.sourceSystem,
-        record.source.sourceRef,
-        record.source.ingestedAt,
-        record.source.recordedAt,
-        record.source.signatureRef,
-        record.source.schemaVersion,
+        JSON.stringify(record),
       ],
     );
   }
@@ -122,26 +81,11 @@ export class TeslaIntegrationRepository {
     );
   }
 
-  private mapCommandReceipt(row: CommandReceiptRow): CommandReceipt {
-    return {
-      commandId: row.commandId,
-      idempotencyKey: row.idempotencyKey,
-      vehicleId: row.vehicleId,
-      commandType: row.commandType as CommandReceipt["commandType"],
-      status: row.status as CommandReceipt["status"],
-      issuedBy: row.issuedBy,
-      issuedAt: row.issuedAt,
-      acknowledgedAt: row.acknowledgedAt,
-      providerRef: row.providerRef,
-      failureReasonCode: row.failureReasonCode,
-      source: {
-        sourceSystem: row.sourceSystem as CommandReceipt["source"]["sourceSystem"],
-        sourceRef: row.sourceRef,
-        ingestedAt: row.sourceIngestedAt,
-        recordedAt: row.sourceRecordedAt ?? row.sourceIngestedAt,
-        signatureRef: row.sourceSignatureRef,
-        schemaVersion: row.sourceSchemaVersion,
-      },
-    };
+  private parseRecord<T>(record: unknown): T {
+    if (!record || typeof record !== "object") {
+      throw new Error("Invalid Tesla integration record loaded from persistence.");
+    }
+
+    return record as T;
   }
 }

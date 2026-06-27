@@ -7,18 +7,12 @@
 
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { ApiClient } from "@drts/api-client";
-import { usePlatformAdminAuthority } from "./platform-admin-authority";
 import { getRuntimeApiBaseUrl } from "./runtime-config";
 import { getPlatformAdminClient } from "./platform-admin-client-factory";
 
 export function usePlatformAdminClient() {
   const apiBaseUrl = getRuntimeApiBaseUrl();
-  const authority = usePlatformAdminAuthority();
-
-  return useMemo(
-    () => getPlatformAdminClient(apiBaseUrl, authority.actorId),
-    [apiBaseUrl, authority.actorId],
-  );
+  return useMemo(() => getPlatformAdminClient(apiBaseUrl), [apiBaseUrl]);
 }
 
 export function useAsyncData<T>(
