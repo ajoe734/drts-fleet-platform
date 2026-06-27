@@ -81,6 +81,7 @@ import {
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
+import { SandboxFallbackCostPolicyResolverService } from "../billing-settlement/sandbox-fallback-cost-policy-resolver.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
@@ -205,6 +206,7 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
   amountMinor: 150000,
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
+const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
 
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
@@ -252,6 +254,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly eventEmitter?: EventEmitter2,
     @Optional()
     private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
+    @Optional()
+    private readonly sandboxFallbackCostPolicyResolver: SandboxFallbackCostPolicyResolverService = new SandboxFallbackCostPolicyResolverService(),
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -3518,7 +3522,7 @@ export class OwnedMobilityService implements OnModuleInit {
       issuerAuthorizationRef: order.issuerAuthorizationRef,
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
-      tenantServiceProgramId: null,
+      tenantServiceProgramId: this.resolveTenantServiceProgramId(order),
       sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
       ...(sandboxFulfillmentSegments.length > 0
         ? { sandboxFulfillmentSegments }
@@ -3624,30 +3628,62 @@ export class OwnedMobilityService implements OnModuleInit {
       return null;
     }
 
+    const fallbackPolicyResolution = humanFallbackApplied
+      ? this.sandboxFallbackCostPolicyResolver.resolveHumanFallbackPolicy(
+          order,
+          completedTask.completedAt ?? null,
+        )
+      : null;
+    const fallbackCostAbsorber =
+      fallbackPolicyResolution?.fallbackCostAbsorber ?? null;
+    const fallbackPolicyId = fallbackPolicyResolution?.fallbackPolicyId ?? null;
+    const policyResolution =
+      fallbackPolicyResolution?.policyResolution ?? "normal_av_no_fallback";
+    const treatmentType = humanFallbackApplied
+      ? fallbackCostAbsorber === "partner"
+        ? "partner_program_adjusted"
+        : fallbackCostAbsorber === "tenant_contract"
+          ? "tenant_contract_adjusted"
+          : "fallback_human"
+      : "normal_av";
+    const partnerCharge =
+      humanFallbackApplied && fallbackCostAbsorber === "partner"
+        ? { ...grossEarning }
+        : null;
+    const tenantCharge =
+      humanFallbackApplied && fallbackCostAbsorber === "tenant_contract"
+        ? { ...grossEarning }
+        : null;
+    const platformAbsorbed =
+      humanFallbackApplied && fallbackCostAbsorber === "platform"
+        ? { ...grossEarning }
+        : null;
+
     return {
       sandboxBillingTreatmentId: `sandbox-billing-${order.orderId}`,
       bookingId,
       orderId: order.orderId,
       sandboxTripId: order.orderId,
-      treatmentType: humanFallbackApplied ? "fallback_human" : "normal_av",
-      fallbackCostAbsorber: humanFallbackApplied ? "platform" : null,
-      fallbackPolicyId: null,
-      policyResolution: humanFallbackApplied
-        ? "Sandbox AV fallback converted to human fulfillment with no passenger or tenant surcharge."
-        : "Sandbox AV fulfillment completed with no fallback surcharge applied.",
+      treatmentType,
+      fallbackCostAbsorber,
+      fallbackPolicyId,
+      policyResolution,
       passengerExtraChargeAllowed: false,
       passengerExtraCharge: { currency: "NTD", amountMinor: 0 },
       internalAvCost: currentTaskIsAv ? { ...grossEarning } : null,
       internalHumanFallbackCost: humanFallbackApplied
         ? { ...grossEarning }
         : null,
-      partnerCharge: null,
-      tenantCharge: null,
-      platformAbsorbed: humanFallbackApplied ? { ...grossEarning } : null,
+      partnerCharge,
+      tenantCharge,
+      platformAbsorbed,
       fallbackSurchargeApplied: false,
       treatmentSnapshot: {
         bookingId,
         orderId: order.orderId,
+        fallbackCostAbsorber,
+        fallbackPolicyId,
+        policyResolution,
         fulfillmentMode: humanFallbackApplied
           ? previousAvSegment
             ? "mixed"
@@ -3662,6 +3698,10 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private isSandboxAvVehicle(vehicleId: string | null | undefined) {
     return vehicleId?.startsWith("veh-av") ?? false;
+  }
+
+  private resolveTenantServiceProgramId(order: OwnedOrderRecord) {
+    return order.partnerProgramId ?? DEFAULT_TENANT_SERVICE_PROGRAM_ID;
   }
 
   private publishTenantOrderWebhook(
