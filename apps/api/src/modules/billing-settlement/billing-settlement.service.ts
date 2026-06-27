@@ -24,12 +24,10 @@ import type {
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
-  ResolveSandboxFallbackCostPolicyCommand,
   ResourceActionDescriptor,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
   SettlementMatrixRecord,
-  SandboxFallbackCostPolicyResolutionRecord,
   TenantBillingProfile,
   TenantInvoiceListData,
   TenantInvoiceRecord,
@@ -77,7 +75,6 @@ import {
   type ReferralStatementStatus,
 } from "./referral-statement.types";
 import { ForwarderService } from "../forwarder/forwarder.service";
-import { SandboxFallbackCostPolicyResolverService } from "./sandbox-fallback-cost-policy-resolver.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityTripCompletedEvent,
@@ -420,8 +417,6 @@ export class BillingSettlementService implements OnModuleInit {
     @Optional()
     private readonly billingSettlementRepository?: BillingSettlementRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
-    @Optional()
-    private readonly sandboxFallbackCostPolicyResolver: SandboxFallbackCostPolicyResolverService = new SandboxFallbackCostPolicyResolverService(),
   ) {}
 
   @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
@@ -1010,40 +1005,6 @@ export class BillingSettlementService implements OnModuleInit {
 
   listSettlementMatrix(): SettlementMatrixRecord[] {
     return buildSettlementMatrix();
-  }
-
-  resolveSandboxFallbackCostPolicy(
-    command: ResolveSandboxFallbackCostPolicyCommand,
-    requestId?: string,
-  ): SandboxFallbackCostPolicyResolutionRecord {
-    const resolution =
-      this.sandboxFallbackCostPolicyResolver.resolvePolicy(command);
-
-    if (resolution.auditEventCode) {
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "system",
-          tenantId: command.tenantId ?? null,
-          moduleName: "billing-settlement",
-          actionName: resolution.auditEventCode,
-          resourceType: "sandbox_fallback_cost_policy",
-          resourceId:
-            command.experimentId ??
-            command.partnerProgramId ??
-            command.tenantContractId ??
-            null,
-          newValuesSummary: {
-            reason: resolution.reason,
-            fallbackCostAbsorber: resolution.fallbackCostAbsorber,
-            policyResolution: resolution.policyResolution,
-          },
-        },
-        requestId,
-      );
-    }
-
-    return resolution;
   }
 
   getTenantInvoice(tenantId: string, invoiceId: string) {
