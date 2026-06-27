@@ -6,7 +6,8 @@
 **Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer:** `Codex2` / `Codex`  
 **Machine-Truth Snapshot Used For Draft:** sidecar `in_progress` (`last_update=2026-06-27T13:36:39Z`); parent `in_progress` (`last_update=2026-06-27T13:34:06Z`)  
-**Last Revised:** `2026-06-27T13:39:32Z (UTC)`  
+**Review Approval Snapshot:** sidecar `review_approved` (`last_update=2026-06-27T13:42:42Z`; reviewer note: packet maps the three restore anchors, current missing or regressed surfaces, and compose-with-current-`dev` checkpoints)  
+**Last Revised:** `2026-06-27T13:44:10Z (UTC)`  
 **Scope Guardrail:** support artifact only; no canonical truth or runtime implementation changes are made by this sidecar
 
 ---
@@ -213,6 +214,21 @@ AI_NAME=Codex2 scripts/ai-status.sh reopen P2-MERGE-CHAOS-RESTORE-001-SIDECAR-AC
 
 ---
 
-## 9) Change Log
+## 9) Owner Closeout Notes
+
+- Reviewer approval remains recorded in machine truth as `review_approved` for `P2-MERGE-CHAOS-RESTORE-001-SIDECAR-ACCEPTANCE`.
+- Focused closeout re-check on the current branch still matches the packet baseline:
+  - all six restore signature paths listed in Section 3.1 remain absent on current trunk
+  - `apps/platform-admin-web/app/platform-admin/compliance/page.tsx` still renders `SandboxDesignPendingScreen`
+  - `apps/platform-admin-web/lib/sandbox-compliance.ts` still lacks `loadSandboxRegulatorCases`, `loadSandboxRegulatorCaseDetail`, `regulatorBundleTone`, and `regulatorNotificationTone`
+  - `apps/tenant-console-web/app/bookings/page.tsx` still lacks any `av-fallback` reference
+  - `apps/tenant-console-web/lib/translations.ts` still lacks `avFallback.*` keys
+- Closeout keeps scope limited to this support packet; no canonical truth, runtime, or restore implementation files are changed here.
+- Integration status for this sidecar is `not_applicable`: the artifact is support-only and has no deploy target, even though branch commit and push evidence are still required for `done`.
+
+---
+
+## 10) Change Log
 
 - `2026-06-27T13:39:32Z` - Initial packet created from machine-truth state, restore-source commit inspection, direct path presence checks, and targeted trunk scans for the regulator-cases and tenant AV fallback regressions.
+- `2026-06-27T13:44:10Z` - Refreshed the packet for owner closeout after review approval, re-ran the focused baseline checks, and recorded support-only integration handling for task finalization.
