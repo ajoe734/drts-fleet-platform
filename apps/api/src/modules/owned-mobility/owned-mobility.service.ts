@@ -331,6 +331,7 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
+      passengerDisclosure: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -458,6 +459,7 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug: null,
       eligibilityVerificationId: null,
       issuerAuthorizationRef: null,
+      passengerDisclosure: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -637,6 +639,7 @@ export class OwnedMobilityService implements OnModuleInit {
       eligibilityVerificationId:
         partnerContext?.eligibilityVerificationId ?? null,
       issuerAuthorizationRef: partnerContext?.issuerAuthorizationRef ?? null,
+      passengerDisclosure: null,
       serviceBucket: "business_dispatch",
       dispatchSemantics: "reservation",
       businessDispatchSubtype: command.businessDispatchSubtype,
@@ -5085,6 +5088,7 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerEntrySlug: order.partnerEntrySlug,
       eligibilityVerificationId: order.eligibilityVerificationId,
       issuerAuthorizationRef: order.issuerAuthorizationRef,
+      passengerDisclosure: order.passengerDisclosure,
       status:
         order.status === "cancelled"
           ? "cancelled"
