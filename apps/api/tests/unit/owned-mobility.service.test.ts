@@ -267,6 +267,108 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
+  it("resolves sandbox fallback billing treatment from partner and tenant policy", () => {
+    const { service } = createOwnedMobilityService();
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        pickup: { address: "台中市西屯區台灣大道 1 號" },
+        dropoff: { address: "台中市南屯區公益路 2 號" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+      },
+      "tenant-demo-001",
+    ) as { orderId: string };
+    const order = service.listOrders().find((item) => item.orderId === booking.orderId);
+    expect(order).toBeDefined();
+
+    const completedTask = {
+      taskId: "task-human-fallback-001",
+      vehicleId: "veh-human-demo-001",
+      completedAt: "2026-06-27T12:00:00.000Z",
+    };
+    const grossEarning = { currency: "NTD", amountMinor: 150000 };
+    const fulfillmentSegments = [
+      {
+        fulfillmentSegmentId: "segment-av-attempt-001",
+        bookingId: order!.bookingId ?? order!.orderId,
+        orderId: order!.orderId,
+        sandboxTripId: order!.orderId,
+        segmentType: "tesla_av",
+        segmentReason: "sandbox_av_attempt",
+        startedAt: "2026-06-27T11:30:00.000Z",
+        endedAt: "2026-06-27T11:45:00.000Z",
+        vehicleId: "veh-av-demo-001",
+        vin: null,
+        driverId: "safety-op-001",
+        safetyOperatorId: "safety-op-001",
+        sourcePlatform: "portal",
+        distanceKm: null,
+        durationSeconds: null,
+        cost: null,
+        evidenceReference: null,
+        createdAt: "2026-06-27T11:30:00.000Z",
+      },
+    ];
+
+    const partnerTreatment = (service as any).buildSandboxBillingTreatment(
+      {
+        ...order,
+        partnerProgramId: "program-airport-alpha",
+      },
+      completedTask,
+      grossEarning,
+      fulfillmentSegments,
+    );
+    expect(partnerTreatment).toMatchObject({
+      treatmentType: "partner_program_adjusted",
+      fallbackCostAbsorber: "partner",
+      fallbackPolicyId: "fallback-policy-partner-airport-001",
+      policyResolution: "partner_policy",
+      partnerCharge: grossEarning,
+      tenantCharge: null,
+      platformAbsorbed: null,
+    });
+
+    const tenantTreatment = (service as any).buildSandboxBillingTreatment(
+      order,
+      completedTask,
+      grossEarning,
+      fulfillmentSegments,
+    );
+    expect(tenantTreatment).toMatchObject({
+      treatmentType: "tenant_contract_adjusted",
+      fallbackCostAbsorber: "tenant_contract",
+      fallbackPolicyId: "fallback-policy-tenant-demo-001",
+      policyResolution: "tenant_policy",
+      partnerCharge: null,
+      tenantCharge: grossEarning,
+      platformAbsorbed: null,
+    });
+
+    const defaultPlatformTreatment = (service as any).buildSandboxBillingTreatment(
+      {
+        ...order,
+        tenantId: "tenant-no-policy-001",
+        partnerProgramId: null,
+      },
+      completedTask,
+      grossEarning,
+      fulfillmentSegments,
+    );
+    expect(defaultPlatformTreatment).toMatchObject({
+      treatmentType: "fallback_human",
+      fallbackCostAbsorber: "platform",
+      fallbackPolicyId: null,
+      policyResolution: "default_platform_no_contract",
+      partnerCharge: null,
+      tenantCharge: null,
+      platformAbsorbed: grossEarning,
+    });
+  });
+
   it("persists exact service product on the driver task created by assignment", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
