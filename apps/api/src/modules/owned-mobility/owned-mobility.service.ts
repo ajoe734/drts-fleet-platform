@@ -2597,10 +2597,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(
-    command: AssignDispatchCommand,
-    requestId?: string,
-  ): any {
+  assignDispatch(command: AssignDispatchCommand, requestId?: string): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2614,10 +2611,7 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  reassignDispatch(
-    command: ReassignDispatchCommand,
-    requestId?: string,
-  ): any {
+  reassignDispatch(command: ReassignDispatchCommand, requestId?: string): any {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2652,8 +2646,9 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    const reassignAttemptSequence =
-      this.nextAttemptSequence(dispatchJob.dispatchJobId);
+    const reassignAttemptSequence = this.nextAttemptSequence(
+      dispatchJob.dispatchJobId,
+    );
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -3716,13 +3711,12 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: this.resolveTenantServiceProgramId(order),
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
       ...(sandboxFulfillmentSegments.length > 0
         ? { sandboxFulfillmentSegments }
         : {}),
-      ...(sandboxBillingTreatment
-        ? { sandboxBillingTreatment }
-        : {}),
+      ...(sandboxBillingTreatment ? { sandboxBillingTreatment } : {}),
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -3781,9 +3775,7 @@ export class OwnedMobilityService implements OnModuleInit {
             assignment.createdAt,
           endedAt:
             task?.completedAt ??
-            (assignment.status === "cancelled"
-              ? assignment.updatedAt
-              : null),
+            (assignment.status === "cancelled" ? assignment.updatedAt : null),
           vehicleId: assignment.vehicleId,
           vin: null,
           driverId: assignment.driverId,
@@ -4725,7 +4717,10 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAssignmentEligibilityRecheck(
-    order: Pick<OwnedOrderRecord, "orderId" | "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "serviceBucket" | "businessDispatchSubtype"
+    >,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
@@ -4839,7 +4834,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
-      : order.businessDispatchSubtype ?? null;
+      : (order.businessDispatchSubtype ?? null);
   }
 
   private assertSandboxDispatchGate(
@@ -4916,7 +4911,10 @@ export class OwnedMobilityService implements OnModuleInit {
     if (order.serviceProductCode) {
       return order;
     }
-    return { ...order, serviceProductCode: this.resolveServiceProductCodeForOrder(order) };
+    return {
+      ...order,
+      serviceProductCode: this.resolveServiceProductCodeForOrder(order),
+    };
   }
 
   private buildDispatchAssignmentBundle(
@@ -4988,7 +4986,10 @@ export class OwnedMobilityService implements OnModuleInit {
     nextOrder.updatedAt = now;
 
     const traceLogs: DispatchTraceLogRecord[] = [];
-    if (nextOrder.dispatchSemantics === "reservation") {
+    if (
+      nextOrder.dispatchSemantics === "reservation" &&
+      nextOrder.reservationHoldStatus !== "released"
+    ) {
       this.transitionReservationHold(nextOrder, "released");
       nextOrder.reservationHoldExpiresAt = now;
       traceLogs.push(
@@ -5522,7 +5523,7 @@ export class OwnedMobilityService implements OnModuleInit {
                     ? previous.acknowledgedAt
                     : null,
                 acknowledgementRecordId: canReuseAcknowledgement
-                  ? previous?.acknowledgementRecordId ?? null
+                  ? (previous?.acknowledgementRecordId ?? null)
                   : null,
               };
 

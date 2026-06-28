@@ -266,6 +266,7 @@ const VEHICLE_LICENSE_BY_ID: Record<string, VehicleLicenseType> = {
   "veh-demo-002": "taxi",
   "veh-demo-003": "taxi",
   "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
 };
 
 @Injectable()
