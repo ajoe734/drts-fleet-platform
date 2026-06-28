@@ -181,6 +181,11 @@ const en = {
   "avFallback.actions.failed": "Action failed",
   "avFallback.actions.disabled": "Disabled",
   "avFallback.actions.reasonRequired": "Reason required",
+  "avFallback.actions.reason.avMonitor": "AV fallback action: {alertId}",
+  "avFallback.actions.reason.passengerRecovery":
+    "Passenger recovery action: {alertId}",
+  "avFallback.actions.reason.sandboxException":
+    "Sandbox exception action: {alertId}",
   "avFallback.actions.readOnly":
     "No writable actions emitted for this resource.",
 
@@ -4499,6 +4504,11 @@ const zh: Record<keyof typeof en, string> = {
   "avFallback.actions.failed": "動作失敗",
   "avFallback.actions.disabled": "不可執行",
   "avFallback.actions.reasonRequired": "需要原因",
+  "avFallback.actions.reason.avMonitor": "AV fallback 動作：{alertId}",
+  "avFallback.actions.reason.passengerRecovery":
+    "Passenger recovery 動作：{alertId}",
+  "avFallback.actions.reason.sandboxException":
+    "Sandbox 例外動作：{alertId}",
   "avFallback.actions.readOnly": "此資源目前沒有後端發出的可寫 action。",
 
   // ── Ops action labels ──

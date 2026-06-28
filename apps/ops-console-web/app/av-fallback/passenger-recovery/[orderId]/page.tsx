@@ -99,10 +99,9 @@ function buildWriteActionItems(
       : {}),
     ...(descriptor.requiresReason
       ? {
-          reason:
-            locale === "zh"
-              ? `Passenger recovery 動作：${alert.alertId}`
-              : `Passenger recovery action: ${alert.alertId}`,
+          reason: t("avFallback.actions.reason.passengerRecovery", locale, {
+            alertId: alert.alertId,
+          }),
         }
       : {}),
   }));

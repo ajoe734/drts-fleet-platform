@@ -114,10 +114,9 @@ function buildWriteActionItems(
       : {}),
     ...(descriptor.requiresReason
       ? {
-          reason:
-            locale === "zh"
-              ? `AV fallback 動作：${alert.alertId}`
-              : `AV fallback action: ${alert.alertId}`,
+          reason: t("avFallback.actions.reason.avMonitor", locale, {
+            alertId: alert.alertId,
+          }),
         }
       : {}),
   }));

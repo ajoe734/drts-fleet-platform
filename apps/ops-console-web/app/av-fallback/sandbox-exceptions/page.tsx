@@ -136,10 +136,11 @@ function buildActionItems(
         : {}),
       ...(descriptor.requiresReason
         ? {
-            reason:
-              locale === "zh"
-                ? `Sandbox 例外動作：${alert.alertId}`
-                : `Sandbox exception action: ${alert.alertId}`,
+            reason: t(
+              "avFallback.actions.reason.sandboxException",
+              locale,
+              { alertId: alert.alertId },
+            ),
           }
         : {}),
     },
