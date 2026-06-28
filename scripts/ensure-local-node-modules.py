@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULES_YAML = Path("node_modules/.modules.yaml")
+WORKSPACE_IMPORTER_DIRS = ("apps", "packages")
 
 
 @dataclass
@@ -34,6 +35,40 @@ def _parse_virtual_store_dir(modules_yaml: Path) -> str | None:
         if match:
             return match.group(1).strip().strip('"').strip("'")
     return None
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _workspace_node_modules_candidates(root: Path) -> list[Path]:
+    candidates: list[Path] = [root / "node_modules"]
+    for importer_dir in WORKSPACE_IMPORTER_DIRS:
+        base = root / importer_dir
+        if not base.is_dir():
+            continue
+        for entry in base.iterdir():
+            candidates.append(entry / "node_modules")
+    return candidates
+
+
+def _external_node_modules_symlink_offenders(root: Path) -> list[str]:
+    offenders: list[str] = []
+    for candidate in _workspace_node_modules_candidates(root):
+        if not candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            continue
+        if _is_within(resolved, root):
+            continue
+        offenders.append(f"{candidate.relative_to(root)} -> {resolved}")
+    return offenders
 
 
 def _candidate_pnpm_symlinks(root: Path) -> list[Path]:
@@ -71,6 +106,15 @@ def _external_virtual_store_links(root: Path) -> list[str]:
     return offenders
 
 
+def _virtual_store_is_local(root: Path, virtual_store_dir: str | None) -> bool:
+    if virtual_store_dir is None:
+        return False
+
+    expected = (root / "node_modules/.pnpm").resolve(strict=False)
+    actual = (root / "node_modules" / virtual_store_dir).resolve(strict=False)
+    return actual == expected
+
+
 def check_node_modules_health(root: Path) -> HealthCheck:
     node_modules = root / "node_modules"
     modules_yaml = root / MODULES_YAML
@@ -81,10 +125,23 @@ def check_node_modules_health(root: Path) -> HealthCheck:
 
     details: list[str] = []
     virtual_store_dir = _parse_virtual_store_dir(modules_yaml)
-    if virtual_store_dir != ".pnpm":
+    if not _virtual_store_is_local(root, virtual_store_dir):
         details.append(
-            "node_modules/.modules.yaml points virtualStoreDir at "
-            f"{virtual_store_dir or '<missing>'} instead of .pnpm"
+            "node_modules/.modules.yaml does not point virtualStoreDir at the "
+            f"local .pnpm store (got {virtual_store_dir or '<missing>'})"
+        )
+
+    external_node_modules_links = _external_node_modules_symlink_offenders(root)
+    if external_node_modules_links:
+        preview = "; ".join(external_node_modules_links[:5])
+        suffix = (
+            f" (+{len(external_node_modules_links) - 5} more)"
+            if len(external_node_modules_links) > 5
+            else ""
+        )
+        details.append(
+            "workspace importer node_modules symlinks escape the local "
+            f"workspace root: {preview}{suffix}"
         )
 
     external_links = _external_virtual_store_links(root)
@@ -98,7 +155,30 @@ def check_node_modules_health(root: Path) -> HealthCheck:
     return HealthCheck(True, "healthy", ["node_modules uses the local .pnpm virtual store"])
 
 
+def _unlink_external_node_modules_symlinks(root: Path) -> list[str]:
+    removed: list[str] = []
+    for candidate in _workspace_node_modules_candidates(root):
+        if not candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            resolved = candidate
+        if _is_within(resolved, root):
+            continue
+        candidate.unlink()
+        removed.append(str(candidate.relative_to(root)))
+    return removed
+
+
 def repair_node_modules(root: Path) -> int:
+    removed = _unlink_external_node_modules_symlinks(root)
+    if removed:
+        print(
+            "[node-modules-health] Removing external node_modules symlinks: "
+            + ", ".join(removed),
+            file=sys.stderr,
+        )
     env = dict(os.environ)
     env["CI"] = "true"
     result = subprocess.run(

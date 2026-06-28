@@ -4,8 +4,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
+      "@drts/api-client": ["../../packages/api-client/src/index.ts"],
       "@drts/contracts": ["../../packages/contracts/src/index.ts"],
-      "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"]
+      "@drts/ui-tokens": ["../../packages/ui-tokens/src/index.ts"],
+      "@drts/ui-web": ["../../packages/ui-web/src/index.tsx"]
     }
   },
   "include": ["next-env.d.ts", ".next/types/**/*.ts", "**/*.ts", "**/*.tsx"],
