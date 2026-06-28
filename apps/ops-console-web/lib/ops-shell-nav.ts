@@ -57,6 +57,13 @@ export function buildOpsShellNav(
       icon: "callcenter",
       label: t("nav.callcenter", locale),
     },
+    {
+      key: "av-fallback",
+      href: "/av-fallback",
+      icon: "warn",
+      label: t("nav.avFallback", locale),
+      matchPaths: ["/av-fallback"],
+    },
     { divider: t("nav.group.casework", locale) },
     {
       key: "complaints",
