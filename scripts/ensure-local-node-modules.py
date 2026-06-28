@@ -56,6 +56,19 @@ def _workspace_node_modules_candidates(root: Path) -> list[Path]:
     return candidates
 
 
+def _workspace_node_modules_symlink_offenders(root: Path) -> list[str]:
+    offenders: list[str] = []
+    for candidate in _workspace_node_modules_candidates(root):
+        if not candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            resolved = candidate
+        offenders.append(f"{candidate.relative_to(root)} -> {resolved}")
+    return offenders
+
+
 def _external_node_modules_symlink_offenders(root: Path) -> list[str]:
     offenders: list[str] = []
     for candidate in _workspace_node_modules_candidates(root):
@@ -124,6 +137,19 @@ def check_node_modules_health(root: Path) -> HealthCheck:
         return HealthCheck(False, "missing", [f"{MODULES_YAML} is missing"])
 
     details: list[str] = []
+    workspace_node_modules_symlinks = _workspace_node_modules_symlink_offenders(root)
+    if workspace_node_modules_symlinks:
+        preview = "; ".join(workspace_node_modules_symlinks[:5])
+        suffix = (
+            f" (+{len(workspace_node_modules_symlinks) - 5} more)"
+            if len(workspace_node_modules_symlinks) > 5
+            else ""
+        )
+        details.append(
+            "workspace node_modules directories are symlinked instead of local: "
+            f"{preview}{suffix}"
+        )
+
     virtual_store_dir = _parse_virtual_store_dir(modules_yaml)
     if not _virtual_store_is_local(root, virtual_store_dir):
         details.append(
@@ -155,16 +181,10 @@ def check_node_modules_health(root: Path) -> HealthCheck:
     return HealthCheck(True, "healthy", ["node_modules uses the local .pnpm virtual store"])
 
 
-def _unlink_external_node_modules_symlinks(root: Path) -> list[str]:
+def _unlink_symlinked_node_modules_dirs(root: Path) -> list[str]:
     removed: list[str] = []
     for candidate in _workspace_node_modules_candidates(root):
         if not candidate.is_symlink():
-            continue
-        try:
-            resolved = candidate.resolve(strict=False)
-        except OSError:
-            resolved = candidate
-        if _is_within(resolved, root):
             continue
         candidate.unlink()
         removed.append(str(candidate.relative_to(root)))
@@ -172,10 +192,10 @@ def _unlink_external_node_modules_symlinks(root: Path) -> list[str]:
 
 
 def repair_node_modules(root: Path) -> int:
-    removed = _unlink_external_node_modules_symlinks(root)
+    removed = _unlink_symlinked_node_modules_dirs(root)
     if removed:
         print(
-            "[node-modules-health] Removing external node_modules symlinks: "
+            "[node-modules-health] Removing symlinked node_modules directories: "
             + ", ".join(removed),
             file=sys.stderr,
         )
