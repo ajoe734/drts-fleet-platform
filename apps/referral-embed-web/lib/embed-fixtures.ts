@@ -23,6 +23,65 @@ export const embedTrip = {
   plate: "BKR-2208",
 };
 
+export const EMBED_TRIP_FALLBACK_SCREENS = [
+  "vehicle_change_in_progress",
+  "human_fallback_assigned",
+  "service_continuing",
+  "eta_updated",
+] as const;
+
+export type EmbedTripFallbackScreen =
+  (typeof EMBED_TRIP_FALLBACK_SCREENS)[number];
+
+export const EMBED_TRIP_FALLBACK_PROGRESS = [
+  "vehicle_change_in_progress",
+  "human_fallback_assigned",
+  "service_continuing",
+] as const;
+
+export type EmbedTripFallbackProgressStage =
+  (typeof EMBED_TRIP_FALLBACK_PROGRESS)[number];
+
+export const embedTripFallbackStates = {
+  vehicle_change_in_progress: {
+    passengerMessageCode: "pax.fallback.vehicle_change_in_progress",
+    icon: "refresh",
+    tone: "warn",
+    progressStage: "vehicle_change_in_progress",
+    etaMin: null,
+  },
+  human_fallback_assigned: {
+    passengerMessageCode: "pax.fallback.human_fallback_assigned",
+    icon: "user",
+    tone: "success",
+    progressStage: "human_fallback_assigned",
+    etaMin: 7,
+  },
+  service_continuing: {
+    passengerMessageCode: "pax.fallback.service_continuing",
+    icon: "check",
+    tone: "success",
+    progressStage: "service_continuing",
+    etaMin: 4,
+  },
+  eta_updated: {
+    passengerMessageCode: "pax.fallback.eta_updated",
+    icon: "clock",
+    tone: "warn",
+    progressStage: null,
+    etaMin: 9,
+  },
+} as const satisfies Record<
+  EmbedTripFallbackScreen,
+  {
+    passengerMessageCode: string;
+    icon: string;
+    tone: "success" | "warn";
+    progressStage: EmbedTripFallbackProgressStage | null;
+    etaMin: number | null;
+  }
+>;
+
 export const embedTripHistory = [
   {
     id: "PT-9F20K7",
