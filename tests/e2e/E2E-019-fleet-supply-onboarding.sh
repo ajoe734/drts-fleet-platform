@@ -20,18 +20,14 @@
 #      terminal "ready" state for a fully-credentialed subject, surfaces precise reason
 #      codes for a not_ready subject, and enforces realm/scope on the portal route.
 #
-# Explicit boundaries (see "GATED LEGS" section at the end — these are logged, never
-# silently passed, consistent with tests/e2e/README.md and gate-deferred.txt):
-#   - Fleet-partner self-service create-driver / create-vehicle / upload-document /
-#     submit / RESUBMIT is an unbuilt scaffold (apps/api/.../supply-submission.service.ts is
-#     `export class SupplySubmissionService {}`). The "creates / uploads / submits / resubmits"
-#     legs of the spec narrative are driven from the supply-review seed fixtures instead and
-#     the missing write API is reported as a tracked gap.
-#   - The readiness read-model is repository-backed; in the default in-memory stack it does not
-#     observe a runtime in-memory approval, and the DB-backed stack carries no seeded
-#     submissions to approve. So the "the just-approved submission's own canonical subject
-#     becomes readiness=ready" link is asserted at the engine level on seeded canonical
-#     subjects, and the runtime-approval->same-subject-readiness join is reported as a seam.
+# Current live-dev proof:
+#   - The fleet-partner self-service write path is exercised directly through
+#     the public partner API: create draft, upsert driver/vehicle drafts, attach
+#     document metadata, submit, request revision, resubmit, and approve.
+#   - The runtime approval -> same canonical vehicle readiness read-back is
+#     asserted when the DB-backed stack exposes the just-approved subject.
+#   - Legacy seed-driven review legs remain best-effort only: shared long-lived
+#     dev DBs may not contain the old seed submissions in the expected states.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,6 +38,8 @@ SCENARIO="E2E-019"
 FLEET_PARTNER_ID="${E2E_SUPPLY_FLEET_PARTNER_ID:-fleet-demo-001}"
 # Portal readiness routes require realm partner|system plus the billing:read scope.
 READINESS_SCOPES="${E2E_SUPPLY_READINESS_SCOPES:-billing:read partner:entries:read}"
+SELF_SERVICE_WRITE_VERIFIED=false
+RUNTIME_READINESS_JOIN_VERIFIED=false
 
 TMP_FILES=()
 cleanup() {
@@ -70,6 +68,14 @@ post_json() { # path json
   TMP_FILES+=("$f")
   printf '%s' "$2" > "$f"
   http_call POST "$1" "$f"
+}
+
+put_json() {
+  local f
+  f=$(mktemp)
+  TMP_FILES+=("$f")
+  printf '%s' "$2" > "$f"
+  http_call PUT "$1" "$f"
 }
 
 assert_error_code() { # expected-code
@@ -136,13 +142,135 @@ log_info "vehicle_onboarding submission: ${VEHICLE_SUB:-<none>}"
 save_evidence "$SCENARIO" "supply-review" "driver_submission" "${DRIVER_SUB:-none}"
 save_evidence "$SCENARIO" "supply-review" "vehicle_submission" "${VEHICLE_SUB:-none}"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# LEG 1B — Fleet-partner self-service write path (live API)
+# ══════════════════════════════════════════════════════════════════════════════
+log_surface "Fleet Partner Portal — self-service supply write path"
+log_step "LEG 1B — create draft, attach drafts/documents, submit, revise, resubmit, approve"
+
+RUN_SUFFIX="$(date +%s)"
+PLATE_NO="E2E-${RUN_SUFFIX: -4}"
+
+use_partner_actor
+post_json "/fleet-partner/supply-submissions" \
+  '{"submissionType":"vehicle_onboarding"}'
+assert_status "200|201"
+LIVE_SUBMISSION_ID="$(json_get '.data.submission_id')"
+LIVE_REV="$(json_get '.data.revision_no')"
+[[ -n "$LIVE_SUBMISSION_ID" ]] || { log_fail "No live submission id returned"; exit 1; }
+[[ "$(json_get '.data.status')" == "draft" ]] || { log_fail "Live submission did not start as draft"; exit 1; }
+log_ok "Live self-service submission created: ${LIVE_SUBMISSION_ID}"
+save_evidence "$SCENARIO" "self-service" "live_submission_id" "$LIVE_SUBMISSION_ID"
+
+put_json "/fleet-partner/supply-submissions/${LIVE_SUBMISSION_ID}/driver-draft" \
+  "{\"name\":\"E2E Self Serve Driver ${RUN_SUFFIX}\",\"mobile\":\"0912${RUN_SUFFIX: -6}\",\"professionalDriverLicenseNo\":\"PDL-${RUN_SUFFIX}\",\"professionalDriverLicenseExpiry\":\"2028-01-01\",\"taxiDriverRegistrationNo\":\"TAXI-${RUN_SUFFIX}\",\"taxiDriverRegistrationArea\":\"taipei\",\"taxiDriverRegistrationExpiry\":\"2028-01-01\",\"supportedServiceProductCodes\":[\"standard_taxi\"],\"preferredVehicleSubmissionId\":null}"
+assert_status "200|201"
+log_ok "Driver draft upserted through partner API"
+
+put_json "/fleet-partner/supply-submissions/${LIVE_SUBMISSION_ID}/vehicle-draft" \
+  "{\"plateNo\":\"${PLATE_NO}\",\"licenseType\":\"taxi\",\"brand\":\"Toyota\",\"model\":\"Sienta\",\"modelYear\":2025,\"seatCount\":4,\"luggageCapacity\":2,\"businessArea\":\"taipei\",\"supportedServiceProductCodes\":[\"standard_taxi\"],\"airportTransferEligible\":false,\"fixedFareAllowed\":true,\"currentDriverSubmissionId\":null}"
+assert_status "200|201"
+log_ok "Vehicle draft upserted through partner API (${PLATE_NO})"
+
+for DOC_TYPE in insurance_policy fleet_participation_contract; do
+  post_json "/fleet-partner/supply-submissions/${LIVE_SUBMISSION_ID}/documents" \
+    "{\"documentType\":\"${DOC_TYPE}\",\"fileObjectKey\":\"e2e/${LIVE_SUBMISSION_ID}/${DOC_TYPE}.pdf\",\"originalFileName\":\"${DOC_TYPE}.pdf\",\"contentType\":\"application/pdf\",\"fileSize\":2048,\"checksumSha256\":\"${DOC_TYPE}-${RUN_SUFFIX}\",\"effectiveFrom\":\"2026-06-25\",\"effectiveUntil\":\"2027-06-24\"}"
+  assert_status "200|201"
+done
+log_ok "Supply documents attached through partner API"
+
+post_json "/fleet-partner/supply-submissions/${LIVE_SUBMISSION_ID}/submit" \
+  "{\"expectedRevisionNo\":${LIVE_REV},\"comment\":\"E2E first submit\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "submitted" ]] || { log_fail "Live submit did not reach submitted"; exit 1; }
+LIVE_REV="$(json_get '.data.revision_no')"
+LIVE_SUBMITTER="$(json_get '.data.submitted_by')"
+log_ok "Live submission draft -> submitted (rev ${LIVE_REV})"
+
+use_admin_actor
+post_json "/admin/supply-review/submissions/${LIVE_SUBMISSION_ID}/start" \
+  "{\"expectedRevisionNo\":${LIVE_REV},\"reasonCode\":\"manual_screening\",\"comment\":\"E2E start live review\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "in_review" ]] || { log_fail "Live start did not reach in_review"; exit 1; }
+LIVE_REV="$(json_get '.data.revision_no')"
+log_ok "Live submission submitted -> in_review (rev ${LIVE_REV})"
+
+post_json "/admin/supply-review/submissions/${LIVE_SUBMISSION_ID}/request-revision" \
+  "{\"expectedRevisionNo\":$((LIVE_REV - 1)),\"reasonCode\":\"stale_probe\"}"
+assert_status "409"
+assert_error_code "SUBMISSION_REVISION_CONFLICT"
+
+post_json "/admin/supply-review/submissions/${LIVE_SUBMISSION_ID}/request-revision" \
+  "{\"expectedRevisionNo\":${LIVE_REV},\"reasonCode\":\"documents_unclear\",\"comment\":\"E2E requests a clearer file label.\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "needs_revision" ]] || { log_fail "Live request-revision did not reach needs_revision"; exit 1; }
+LIVE_REV="$(json_get '.data.revision_no')"
+log_ok "Live submission in_review -> needs_revision (rev ${LIVE_REV})"
+
+use_partner_actor
+put_json "/fleet-partner/supply-submissions/${LIVE_SUBMISSION_ID}/driver-draft" \
+  "{\"name\":\"E2E Self Serve Driver Revised ${RUN_SUFFIX}\",\"mobile\":\"0912${RUN_SUFFIX: -6}\",\"professionalDriverLicenseNo\":\"PDL-${RUN_SUFFIX}\",\"professionalDriverLicenseExpiry\":\"2028-01-01\",\"taxiDriverRegistrationNo\":\"TAXI-${RUN_SUFFIX}\",\"taxiDriverRegistrationArea\":\"taipei\",\"taxiDriverRegistrationExpiry\":\"2028-01-01\",\"supportedServiceProductCodes\":[\"standard_taxi\"],\"preferredVehicleSubmissionId\":null}"
+assert_status "200|201"
+
+post_json "/fleet-partner/supply-submissions/${LIVE_SUBMISSION_ID}/submit" \
+  "{\"expectedRevisionNo\":${LIVE_REV},\"comment\":\"E2E resubmit after revision\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "submitted" ]] || { log_fail "Live resubmit did not reach submitted"; exit 1; }
+LIVE_REV="$(json_get '.data.revision_no')"
+log_ok "Live submission needs_revision -> submitted (rev ${LIVE_REV})"
+
+use_admin_actor
+post_json "/admin/supply-review/submissions/${LIVE_SUBMISSION_ID}/start" \
+  "{\"expectedRevisionNo\":${LIVE_REV},\"reasonCode\":\"manual_screening_after_revision\"}"
+assert_status "200|201"
+LIVE_REV="$(json_get '.data.revision_no')"
+
+if [[ -n "$LIVE_SUBMITTER" && "$LIVE_SUBMITTER" != "null" ]]; then
+  use_actor_id "$LIVE_SUBMITTER"
+  post_json "/admin/supply-review/submissions/${LIVE_SUBMISSION_ID}/approve" \
+    "{\"expectedRevisionNo\":${LIVE_REV},\"reasonCode\":\"self_approval_probe\"}"
+  assert_status "403"
+  assert_error_code "REVIEWER_SELF_APPROVAL_DENIED"
+fi
+
+use_admin_actor
+post_json "/admin/supply-review/submissions/${LIVE_SUBMISSION_ID}/approve" \
+  "{\"expectedRevisionNo\":${LIVE_REV},\"reasonCode\":\"all_documents_valid\",\"comment\":\"E2E live approval\"}"
+assert_status "200|201"
+[[ "$(json_get '.data.status')" == "approved" ]] || { log_fail "Live approval did not reach approved"; exit 1; }
+CANON_DRIVER=$(json_get '.data.canonical_driver_id')
+CANON_VEHICLE=$(json_get '.data.canonical_vehicle_id')
+CANON_CONTRACT=$(json_get '.data.canonical_contract_id')
+CANON_POLICY=$(json_get '.data.canonical_policy_id')
+for pair in "driver:${CANON_DRIVER}" "vehicle:${CANON_VEHICLE}" "contract:${CANON_CONTRACT}" "policy:${CANON_POLICY}"; do
+  kind="${pair%%:*}"; val="${pair#*:}"
+  if [[ -z "$val" || "$val" == "null" ]]; then
+    log_fail "Live approval did not provision a canonical ${kind} id"
+    exit 1
+  fi
+done
+SELF_SERVICE_WRITE_VERIFIED=true
+log_ok "Live self-service create/submit/resubmit/approve provisioned canonical records"
+chain_set "self-service" "live_submission_id" "$LIVE_SUBMISSION_ID"
+chain_set "regulatory-registry" "live_canonical_driver_id" "$CANON_DRIVER"
+chain_set "regulatory-registry" "live_canonical_vehicle_id" "$CANON_VEHICLE"
+save_evidence "$SCENARIO" "regulatory-registry" "live_canonical_vehicle_id" "$CANON_VEHICLE"
+
+use_partner_actor
+http_call GET "/fleet-partner/readiness/vehicles/${CANON_VEHICLE}"
+if [[ "$RESP_STATUS" == "200" ]]; then
+  RUNTIME_READINESS_JOIN_VERIFIED=true
+  log_ok "Runtime approval -> same canonical vehicle readiness is observable (${CANON_VEHICLE})"
+else
+  log_warn "GATED: live-approved canonical vehicle ${CANON_VEHICLE} is not observable through readiness yet (HTTP ${RESP_STATUS})."
+fi
+
 REVIEW_LEG_ENABLED=true
 if [[ -z "$DRIVER_SUB" || -z "$VEHICLE_SUB" ]]; then
   REVIEW_LEG_ENABLED=false
   log_warn "GATED: no seeded driver+vehicle supply submissions are present."
-  log_warn "  The fleet-partner self-service submission write API is an unbuilt scaffold"
-  log_warn "  (supply-submission.service.ts), and the DB-backed stack carries no submission"
-  log_warn "  seed rows. The review/approve legs cannot run here; exercising readiness only."
+  log_warn "  Live self-service write path was verified above; only legacy seed-driven"
+  log_warn "  review/approve fixture legs are skipped on this DB-backed stack."
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -328,16 +456,18 @@ log_ok "Readiness portal route enforces billing:read scope"
 # GATED LEGS — tracked gaps, reported (never silently passed)
 # ══════════════════════════════════════════════════════════════════════════════
 log_step "GATED LEGS — tracked gaps in the spec narrative"
-log_warn "GATED: fleet-partner self-service create-driver / create-vehicle / upload-document /"
-log_warn "       submit / RESUBMIT is unbuilt (supply-submission.service.ts scaffold). The"
-log_warn "       'creates/uploads/submits/resubmits' steps were driven from supply-review seed"
-log_warn "       fixtures; wire the §3.1 write API to lift this gate."
-log_warn "GATED: runtime-approval -> same-canonical-subject readiness=ready join. Readiness reads"
-log_warn "       its submission/affiliation state from the repository, so an in-memory runtime"
-log_warn "       approval is not observable through readiness, and the DB stack has no submission"
-log_warn "       seed to approve. The readiness 'ready' terminal is asserted on seeded canonical"
-log_warn "       subjects instead. Lift once both halves share one persisted read-model in CI."
+if [[ "$SELF_SERVICE_WRITE_VERIFIED" == "true" ]]; then
+  log_ok "Fleet-partner self-service create/draft/document/submit/resubmit API is verified."
+else
+  log_warn "GATED: fleet-partner self-service create/draft/document/submit/resubmit API was not verified."
+fi
+
+if [[ "$RUNTIME_READINESS_JOIN_VERIFIED" == "true" ]]; then
+  log_ok "Runtime approval -> same-canonical-subject readiness read-back is verified."
+else
+  log_warn "GATED: runtime approval -> same-canonical-subject readiness read-back is not verified on this stack."
+fi
 
 print_chain_summary
-echo -e "\n${GREEN}${BOLD}E2E-019 fleet supply onboarding: buildable chain verified; gated legs reported.${RESET}"
+echo -e "\n${GREEN}${BOLD}E2E-019 fleet supply onboarding: live write path and readiness checks completed.${RESET}"
 exit 0
