@@ -280,16 +280,21 @@ export class OwnedMobilityService implements OnModuleInit {
     @Optional()
     @Inject(forwardRef(() => SandboxDispatchGateService))
     private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
-  ) {
+  ) {}
+
+  async onModuleInit() {
+    // Register call-recording listeners here (not in the constructor): with the
+    // forwardRef circular dependency on SandboxDispatchGateService, registering
+    // cross-service callbacks during construction can bind them to a partially
+    // resolved instance whose in-memory order state is never populated. Doing it
+    // in onModuleInit binds to the fully-resolved singleton.
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
     );
     this.callcenterService.registerRecordingStateChangeListener((event) =>
       this.handleCallRecordingStateChanged(event),
     );
-  }
 
-  async onModuleInit() {
     if (!this.ownedMobilityRepository) {
       return;
     }
