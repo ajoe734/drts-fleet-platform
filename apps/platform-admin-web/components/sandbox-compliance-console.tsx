@@ -2407,7 +2407,12 @@ export function SandboxInvestigationTimelinePage() {
 
             <div style={timelineListStyle}>
               {sortedTimeline.map((entry) => (
-                <div key={entry.entryId} style={timelineEntryStyle}>
+                <div
+                  key={entry.entryId}
+                  style={timelineEntryStyle}
+                  data-confidence={entry.confidence}
+                  data-source-system={entry.sourceSystem}
+                >
                   <div
                     style={{
                       display: "flex",
