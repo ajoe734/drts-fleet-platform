@@ -38,6 +38,7 @@ function createServices() {
     ownedMobilityService.listOrders(),
   );
 
+  ownedMobilityService.registerCallRecordingListeners();
   return {
     auditService,
     callcenterService,
