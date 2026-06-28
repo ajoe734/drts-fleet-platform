@@ -409,6 +409,52 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
+  it("stamps serviceProductCode at booking intake and carries it through assignment + task", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T14:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    // Booking-origin: the precise code is on the order the moment it is created,
+    // before any dispatch/derivation downstream.
+    expect(service.getOrder(booking.orderId)?.serviceProductCode).toBe(
+      "credit_card_airport_transfer",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    // Same value flows to the driver task (carried from the order, not re-derived).
+    expect(service.getDriverTask(assignment.taskId)?.serviceProductCode).toBe(
+      "credit_card_airport_transfer",
+    );
+  });
+
   it("uses repository transactions for assignment-time recheck when persistence is enabled", async () => {
     let vehicleDispatchable = true;
     const repository = {
@@ -664,6 +710,65 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(allCandidates).toHaveLength(1);
     expect(allCandidates[0]?.hardReasonCodes).toEqual([
       "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+    ]);
+  });
+
+  it("never offers an airport-permit-failing vehicle even under scarcity", async () => {
+    const runtimeEligibilityEvaluator = {
+      evaluate: vi.fn().mockResolvedValue({
+        serviceProductId: "svc-airport",
+        serviceProductCode: "credit_card_airport_transfer",
+        policyVersion:
+          "service:svc-airport@2026-06-20T00:00:00.000Z|capability:cap-3@2026-06-20T00:00:00.000Z",
+        decision: "ineligible",
+        hardReasonCodes: ["MISSING_AIRPORT_ELIGIBILITY"],
+        softReasonCodes: [],
+        missingRequirements: [],
+        locationState: "fresh",
+        evaluatedAt: "2026-06-20T12:00:01.000Z",
+      }),
+    };
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-no-airport",
+          vehicleId: "veh-demo-002",
+          etaMinutes: 8,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      runtimeEligibilityEvaluator,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-06-20T13:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
+        dropoff: { address: "Taoyuan Airport" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    // Default dispatch must NOT re-admit the airport-ineligible vehicle: the
+    // broad business_dispatch candidate cannot satisfy the airport transfer.
+    const fallbackCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    );
+    expect(fallbackCandidates).toHaveLength(0);
+
+    // It still appears in the diagnostic includeIneligible view.
+    const allCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+      true,
+    );
+    expect(allCandidates).toHaveLength(1);
+    expect(allCandidates[0]?.hardReasonCodes).toEqual([
+      "MISSING_AIRPORT_ELIGIBILITY",
     ]);
   });
 

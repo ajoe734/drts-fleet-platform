@@ -126,6 +126,19 @@ const LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL = `
 `;
 const DEFAULT_CURRENCY = "NTD";
 
+// The precise service-product code carried into settlement. Previously the trip
+// record only stored `businessDispatchSubtype`, which is null for standard taxi
+// and loses the exact product identity; resolving it here keeps the precise
+// serviceProductCode flowing booking -> dispatch -> task -> settlement.
+function resolvePreciseServiceProductCode(
+  order: Pick<OwnedOrderRecord, "businessDispatchSubtype" | "serviceProductCode">,
+): string | null {
+  // Prefer the booking-origin precise code stamped on the order; otherwise keep
+  // the prior settlement value (businessDispatchSubtype) byte-for-byte so legacy
+  // / unstamped orders are unchanged.
+  return order.serviceProductCode ?? order.businessDispatchSubtype;
+}
+
 @Injectable()
 export class BillingSettlementRepository {
   private readonly logger = new Logger(BillingSettlementRepository.name);
@@ -324,7 +337,7 @@ export class BillingSettlementRepository {
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
-        serviceProduct: order.businessDispatchSubtype,
+        serviceProduct: resolvePreciseServiceProductCode(order),
         tenantServiceProgramId: null,
         sourcePlatform: order.orderSource,
       };
@@ -840,7 +853,7 @@ export class BillingSettlementRepository {
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
-        serviceProduct: order.businessDispatchSubtype,
+        serviceProduct: resolvePreciseServiceProductCode(order),
         tenantServiceProgramId: null,
         sourcePlatform: order.orderSource,
       };

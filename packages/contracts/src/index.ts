@@ -2370,6 +2370,11 @@ export interface OwnedOrderRecord {
   serviceBucket: Phase1ServiceBucket;
   dispatchSemantics: DispatchSemantics;
   businessDispatchSubtype: BusinessDispatchSubtype | null;
+  // Precise service-product code resolved once at booking intake and carried
+  // (not re-derived) through dispatch → candidate → assignment → task →
+  // settlement. Optional for legacy/in-flight orders persisted before this
+  // field existed; consumers fall back to deriving it from the bucket/subtype.
+  serviceProductCode?: ServiceProductType | null;
   status: OwnedOrderStatus;
   pickup: AddressPayload;
   dropoff: AddressPayload;
@@ -2658,6 +2663,7 @@ export interface DispatchAssignmentRecord {
   dispatchJobId: string;
   orderId: string;
   taskId: string;
+  serviceProductCode?: ServiceProductType | null;
   vehicleId: string;
   driverId: string;
   assignmentType: "metered" | "fixed_price";
