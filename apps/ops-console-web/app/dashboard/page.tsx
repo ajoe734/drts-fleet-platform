@@ -919,6 +919,7 @@ function createFallbackObservabilitySnapshot(
       oldestReconciliationLagMinutes: null,
     },
     adapterDetails: [],
+    phase2SandboxKpiDashboard: null,
     roleViews: [],
   };
 }
