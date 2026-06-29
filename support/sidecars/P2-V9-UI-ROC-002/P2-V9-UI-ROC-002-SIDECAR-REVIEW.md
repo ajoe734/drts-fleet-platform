@@ -1,12 +1,12 @@
 # P2-V9-UI-ROC-002 Review Packet & Evidence Summary
 
-**Sidecar Kind:** `review_packet`  
-**Parent Task:** `P2-V9-UI-ROC-002`  
-**Parent Owner:** `Codex`  
-**Parent Reviewer:** `Codex2`  
-**Sidecar Owner:** `Codex2`  
-**Sidecar Reviewer:** `Codex`  
-**Refreshed:** `2026-06-29` (UTC)  
+**Sidecar Kind:** `review_packet`
+**Parent Task:** `P2-V9-UI-ROC-002`
+**Parent Owner:** `Codex`
+**Parent Reviewer:** `Codex2`
+**Sidecar Owner:** `Codex2`
+**Sidecar Reviewer:** `Codex`
+**Refreshed:** `2026-06-29` (UTC)
 **Status:** `REVIEW SUPPORT ARTIFACT` - support-only; no canonical truth or runtime files changed.
 
 This packet exists to hand the current `P2-V9-UI-ROC-002-SIDECAR-REVIEW` slice to
@@ -107,13 +107,12 @@ Why it matters:
 
 Requirements note evidence:
 
-- [docs/05-ui/roc-console-takeover-alerts-incidents-evidence-reports-screen-requirements-20260626.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-p2-v9-ui-roc-002-sidecar-review/docs/05-ui/roc-console-takeover-alerts-incidents-evidence-reports-screen-requirements-20260626.md:9)
+- `docs/05-ui/roc-console-takeover-alerts-incidents-evidence-reports-screen-requirements-20260626.md:9`
   states that only the shared ROC shell/tokens are available and that canonical route
-  source screens are absent
-- the same document at
-  [lines 23-24](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-p2-v9-ui-roc-002-sidecar-review/docs/05-ui/roc-console-takeover-alerts-incidents-evidence-reports-screen-requirements-20260626.md:23)
+  source screens are absent.
+- `docs/05-ui/roc-console-takeover-alerts-incidents-evidence-reports-screen-requirements-20260626.md:23-24`
   says engineering must stop visual invention and produce a screen-requirements hand-off
-  when the referenced canvas is missing
+  when the referenced canvas is missing.
 
 Tracked-tree evidence:
 
@@ -125,12 +124,11 @@ Tracked-tree evidence:
 
 ### 4.2 The hold component exists and points back to the requirements hand-off
 
-Hold-path evidence from
-[apps/roc-console-web/components/roc-response-screen-hold.tsx](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-p2-v9-ui-roc-002-sidecar-review/apps/roc-console-web/components/roc-response-screen-hold.tsx:12):
+Hold-path evidence from `apps/roc-console-web/components/roc-response-screen-hold.tsx`:
 
-- lines 12-13 hard-code the requirements document path
+- lines 12-13 hard-code the requirements document path.
 - lines 31-49 render a warning banner plus empty-state content that routes the user back
-  to that hand-off note instead of inventing the missing final screens
+  to that hand-off note instead of inventing the missing final screens.
 
 ### 4.3 The blocked state supersedes the earlier bespoke runtime review target
 
@@ -152,12 +150,12 @@ Current branch evidence:
 ### 4.4 Earlier unblock planning already constrained this lane to hold-state scope
 
 Planning evidence from
-[support/unblock/P2-UI-ROC-002/P2-UI-ROC-002-UNBLOCK-PLANNING-DECISION.md](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-p2-v9-ui-roc-002-sidecar-review/support/unblock/P2-UI-ROC-002/P2-UI-ROC-002-UNBLOCK-PLANNING-DECISION.md:32):
+`support/unblock/P2-UI-ROC-002/P2-UI-ROC-002-UNBLOCK-PLANNING-DECISION.md`:
 
-- the accepted scope cut explicitly said engineering must not invent bespoke response
-  layouts while the canonical ROC canvas is absent
-- the allowed implementation was limited to shell scaffolding, response-route hold states,
-  backend-authoritative action plumbing, and a design hand-off
+- lines 45-49 explicitly say engineering must not invent bespoke response layouts while
+  the canonical ROC canvas is absent.
+- lines 65-70 limit the allowed implementation to shell scaffolding, response-route hold
+  states, backend-authoritative action plumbing, and a design hand-off.
 
 This matches the current parent `blocked` note and explains why the branch ended at the
 hold path instead of shipping the bespoke response surfaces from `4f2326c357d8...`.
@@ -195,9 +193,9 @@ What to verify:
 
 Suggested checks:
 
-- `AI_NAME=Codex2 scripts/ai-status.sh show P2-V9-UI-ROC-002-SIDECAR-REVIEW`
-- `AI_NAME=Codex2 scripts/ai-status.sh show P2-V9-UI-ROC-002`
-- `AI_NAME=Codex2 scripts/ai-status.sh show P2-V9-UI-ROC-001`
+- `AI_NAME=Codex scripts/ai-status.sh show P2-V9-UI-ROC-002-SIDECAR-REVIEW`
+- `AI_NAME=Codex scripts/ai-status.sh show P2-V9-UI-ROC-002`
+- `AI_NAME=Codex scripts/ai-status.sh show P2-V9-UI-ROC-001`
 - `git rev-parse origin/codex/p2-v9-ui-roc-002`
 - `git show --stat --summary 4f2326c357d8ece7896d8bda9299981db3b48237`
 - `find docs/05-ui/drts-design-canvas -path '*driver-app-9-20260628*' -print`
@@ -207,7 +205,7 @@ Suggested checks:
 
 If approved, reviewer can use:
 
-`AI_NAME=Codex2 scripts/ai-status.sh approve P2-V9-UI-ROC-002-SIDECAR-REVIEW "<review conclusion>"`
+`AI_NAME=Codex scripts/ai-status.sh approve P2-V9-UI-ROC-002-SIDECAR-REVIEW "<review conclusion>"`
 
 If not approved, reopen with the specific metadata mismatch or evidence gap.
 
