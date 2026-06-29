@@ -538,7 +538,9 @@ const routeSpecs: RouteSpec[] = [
 ];
 
 test.describe("P2-V9-UI-VERIFY-001 route smoke", () => {
-  test.setTimeout(300_000);
+  // This single smoke walks 33 routes serially and typically needs just over
+  // five minutes in a clean worktree once screenshots are captured.
+  test.setTimeout(420_000);
 
   test("smokes routed surfaces and captures screenshots", async ({ page }) => {
     const cache = new Map<string, string>();
