@@ -208,7 +208,17 @@ describe("SandboxGovernanceService", () => {
   it("deduplicates matching route ids across historical route versions", async () => {
     const service = createService();
     await service.updateOperatingAreas(
-      { items: [buildArea(), buildArea({ version: 2, effectiveFrom: "2026-07-01T00:00:00.000Z", effectiveUntil: null, updatedAt: "2026-07-01T00:00:00.000Z" })] },
+      {
+        items: [
+          buildArea(),
+          buildArea({
+            version: 2,
+            effectiveFrom: "2026-07-01T00:00:00.000Z",
+            effectiveUntil: null,
+            updatedAt: "2026-07-01T00:00:00.000Z",
+          }),
+        ],
+      },
       { actorId: "tester", actorType: "system", tenantId: null },
     );
     await service.updateRoutes(
@@ -320,12 +330,16 @@ describe("SandboxGovernanceService", () => {
     );
   });
 
-  it("clears seed fixtures when persistence loads empty tables", async () => {
+  it("bootstraps seed fixtures when persistence loads empty tables", async () => {
     const repository = {
       loadOperatingAreas: vi.fn().mockResolvedValue([]),
       loadRoutes: vi.fn().mockResolvedValue([]),
       loadVehicleEnrollments: vi.fn().mockResolvedValue([]),
       loadSafetyOperatorQualifications: vi.fn().mockResolvedValue([]),
+      replaceOperatingAreas: vi.fn().mockResolvedValue(undefined),
+      replaceRoutes: vi.fn().mockResolvedValue(undefined),
+      replaceVehicleEnrollments: vi.fn().mockResolvedValue(undefined),
+      replaceSafetyOperatorQualifications: vi.fn().mockResolvedValue(undefined),
       reportPersistenceFailure: vi.fn(),
     };
     const service = new SandboxGovernanceService(
@@ -335,10 +349,36 @@ describe("SandboxGovernanceService", () => {
 
     await service.onModuleInit();
 
-    expect(service.listOperatingAreas()).toEqual([]);
-    expect(service.listRoutes()).toEqual([]);
-    expect(service.listVehicleEnrollments()).toEqual([]);
-    expect(service.listSafetyOperatorQualifications()).toEqual([]);
+    expect(repository.replaceOperatingAreas).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ areaId: "odd-downtown-core" }),
+      ]),
+    );
+    expect(repository.replaceRoutes).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ routeId: "route-downtown-loop" }),
+      ]),
+    );
+    expect(repository.replaceVehicleEnrollments).toHaveBeenCalledWith([
+      expect.objectContaining({ vehicleId: "veh-av-demo-001" }),
+    ]);
+    expect(repository.replaceSafetyOperatorQualifications).toHaveBeenCalledWith(
+      [expect.objectContaining({ safetyOperatorId: "safety-op-001" })],
+    );
+    expect(service.listOperatingAreas()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ areaId: "odd-downtown-core" }),
+      ]),
+    );
+    expect(service.listRoutes()).toEqual([
+      expect.objectContaining({ routeId: "route-downtown-loop" }),
+    ]);
+    expect(service.listVehicleEnrollments()).toEqual([
+      expect.objectContaining({ vehicleId: "veh-av-demo-001" }),
+    ]);
+    expect(service.listSafetyOperatorQualifications()).toEqual([
+      expect.objectContaining({ safetyOperatorId: "safety-op-001" }),
+    ]);
   });
 
   it("rolls back in-memory changes and rethrows when persistence fails", async () => {
@@ -408,9 +448,13 @@ describe("SandboxGovernanceService", () => {
       actorId: "ops-user-1",
     });
     const initialVersionId = initial.currentVersionId as string;
-    service.publishApprovalDocumentVersion(initial.documentId, initialVersionId, {
-      actorId: "ops-user-1",
-    });
+    service.publishApprovalDocumentVersion(
+      initial.documentId,
+      initialVersionId,
+      {
+        actorId: "ops-user-1",
+      },
+    );
 
     const next = service.uploadApprovalDocumentVersion(initial.documentId, {
       artifactFileName: "permit-v2.pdf",
@@ -508,14 +552,20 @@ describe("SandboxGovernanceService", () => {
     );
 
     const asOf = publishedDocument.effectiveVersion?.effectiveFrom as string;
-    const snapshotA = service.generateComplianceSnapshot(experiment.experimentId, {
-      asOf,
-      actorId: "auditor-1",
-    });
-    const snapshotB = service.generateComplianceSnapshot(experiment.experimentId, {
-      asOf,
-      actorId: "auditor-2",
-    });
+    const snapshotA = service.generateComplianceSnapshot(
+      experiment.experimentId,
+      {
+        asOf,
+        actorId: "auditor-1",
+      },
+    );
+    const snapshotB = service.generateComplianceSnapshot(
+      experiment.experimentId,
+      {
+        asOf,
+        actorId: "auditor-2",
+      },
+    );
 
     expect(snapshotA.snapshotHashSha256).toBe(snapshotB.snapshotHashSha256);
     expect(snapshotA.policyVersions).toMatchObject({

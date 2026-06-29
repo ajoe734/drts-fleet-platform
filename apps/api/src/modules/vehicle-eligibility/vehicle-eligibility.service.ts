@@ -266,6 +266,7 @@ const VEHICLE_LICENSE_BY_ID: Record<string, VehicleLicenseType> = {
   "veh-demo-002": "taxi",
   "veh-demo-003": "taxi",
   "veh-demo-004": "business_vehicle",
+  "veh-av-demo-001": "business_vehicle",
 };
 
 @Injectable()
@@ -436,8 +437,17 @@ export class VehicleEligibilityService implements OnModuleInit {
   }
 
   resolveServiceProductForOwnedOrder(
-    order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
+    >,
   ): ServiceProductType {
+    // Prefer the precise code stamped at booking intake; only derive it from the
+    // bucket/subtype for legacy/in-flight orders that predate the stored field.
+    if (order.serviceProductCode) {
+      return order.serviceProductCode;
+    }
+
     if (order.serviceBucket === "standard_taxi") {
       return "taxi_realtime";
     }

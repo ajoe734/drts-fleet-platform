@@ -22,7 +22,9 @@ function createHarness() {
   const eventEmitter = new EventEmitter2();
   const auditNotificationService = new AuditNotificationService();
   const opsDispatchEventsService = new OpsDispatchEventsService(eventEmitter);
-  const driverProfileService = new DriverProfileService(auditNotificationService);
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
+  );
   const regulatoryRegistryRepository = {
     isEnabled: () => true,
     upsertDriverLocation: async () => true,
@@ -93,7 +95,6 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       complaintService,
       reportingService,
       reportingFilingService,
-      regulatoryRegistryService,
       cleanup,
     } = createHarness();
     cleanups.push(cleanup);
@@ -305,6 +306,13 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       accuracyM: 150,
       recordedAt: "2026-06-20T01:04:45.000Z",
     });
+    await regulatoryRegistryService.recordDriverLocation({
+      driverId: "safety-op-001",
+      lat: 24.2668,
+      lng: 120.6204,
+      accuracyM: 25,
+      recordedAt: "2026-06-20T01:04:50.000Z",
+    });
 
     const snapshot = await reportingService.captureDispatchableSupplySnapshot(
       new Date("2026-06-20T01:05:00.000Z"),
@@ -323,8 +331,8 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
         expect.objectContaining({
           businessArea: "taichung-port",
           serviceProductCode: "enterprise_dispatch",
-          dispatchableVehicleCount: 1,
-          availableDriverCount: 1,
+          dispatchableVehicleCount: 2,
+          availableDriverCount: 2,
           sourceHealth: "location_low_accuracy",
         }),
       ]),

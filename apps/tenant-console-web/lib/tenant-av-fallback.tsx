@@ -47,6 +47,10 @@ export function resolveTenantAvFallbackStage(
     return null;
   }
 
+  if (projection.statusCode.toLowerCase().includes("vehicle_change")) {
+    return "vehicle_change_in_progress";
+  }
+
   if (
     projection.state === "en_route_pickup" ||
     projection.state === "arrived_pickup" ||
@@ -151,6 +155,10 @@ export async function loadTenantAvFallbackDetailItem(
   }
 
   const projection = projectionResult.value;
+  if (projection.fulfillmentMode === "hidden") {
+    return null;
+  }
+
   return {
     booking: bookingResult.value,
     projection,

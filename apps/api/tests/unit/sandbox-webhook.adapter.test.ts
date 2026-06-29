@@ -26,6 +26,7 @@ function createOwnedMobilityHarness() {
     callcenterService,
     taskEventsService as never,
   );
+  ownedMobilityService.registerCallRecordingListeners();
 
   return {
     adapter: new SandboxWebhookAdapter(callcenterService),

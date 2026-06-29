@@ -1193,7 +1193,7 @@ export default async function BookingsPage({
         actions={
           <div style={actionRowStyle}>
             <Link
-              href="/bookings?fulfillment=av"
+              href="/bookings/av-fallback"
               style={actionLinkStyle("secondary")}
             >
               {t("bookingList.header.avFulfillment", undefined, locale)}

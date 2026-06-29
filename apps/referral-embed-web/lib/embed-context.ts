@@ -11,6 +11,10 @@ import {
   isEmbedAuthorityError,
   issuePartnerIngressHandoff,
 } from "./embed-api";
+import {
+  EMBED_TRIP_FALLBACK_SCREENS,
+  type EmbedTripFallbackScreen,
+} from "./embed-fixtures";
 
 export type EmbedState =
   | "handoff"
@@ -29,7 +33,8 @@ export type EmbedScreen =
   | "nosupply"
   | "ineligible"
   | "denied"
-  | "degraded";
+  | "degraded"
+  | EmbedTripFallbackScreen;
 
 export type EmbedContext = {
   entry: PartnerChannelEntryRecord;
@@ -87,6 +92,13 @@ function toEmbedState(
 }
 
 function toEmbedScreen(value: string | undefined): EmbedScreen {
+  if (
+    value &&
+    (EMBED_TRIP_FALLBACK_SCREENS as readonly string[]).includes(value)
+  ) {
+    return value as EmbedTripFallbackScreen;
+  }
+
   switch (value) {
     case "trip":
     case "trips":

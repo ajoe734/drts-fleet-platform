@@ -5,10 +5,22 @@ import { ServiceProductService } from "../../src/modules/service-product/service
 
 function createService(options?: {
   serviceProductOverrides?: Record<string, unknown>;
+  candidates?: Array<{
+    vehicleId: string;
+    driverId: string;
+    operatingArea: string;
+    serviceBuckets: string[];
+    etaMinutes: number;
+    currentLocation: null;
+  }>;
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
       (serviceBucket: string, destination?: unknown) => {
+        if (options?.candidates) {
+          return options.candidates;
+        }
+
         if (serviceBucket === "business_dispatch") {
           return [
             {
@@ -92,6 +104,36 @@ describe("VehicleEligibilityService", () => {
       requiredDocuments: [],
       trainingRequired: false,
       permitRequired: false,
+    });
+  });
+
+  it("treats the seeded AV demo vehicle as a business-vehicle capability", () => {
+    const { service } = createService({
+      candidates: [
+        {
+          vehicleId: "veh-av-demo-001",
+          driverId: "safety-op-001",
+          operatingArea: "taichung-port",
+          serviceBuckets: ["business_dispatch"],
+          etaMinutes: 6,
+          currentLocation: null,
+        },
+      ],
+    });
+
+    expect(service.listEligibleSupply("enterprise_dispatch")).toEqual([
+      expect.objectContaining({
+        vehicleId: "veh-av-demo-001",
+        driverId: "safety-op-001",
+        serviceProduct: "enterprise_dispatch",
+      }),
+    ]);
+    expect(
+      service.resolveRuntimeVehicleCapability("veh-av-demo-001"),
+    ).toMatchObject({
+      vehicleId: "veh-av-demo-001",
+      licenseType: "business_vehicle",
+      businessDispatchEligible: true,
     });
   });
 

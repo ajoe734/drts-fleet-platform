@@ -238,6 +238,11 @@ const en: Dictionary = {
   "takeover.field.resolved": "Resolved",
   "takeover.discrepancy.yes": "Discrepancy linked",
   "takeover.discrepancy.no": "No discrepancy",
+  "takeover.guardrailBody":
+    "Tesla event, safety-operator report, and ROC disposition stay visible side-by-side without narrative merge.",
+  "takeover.status.pending": "Pending",
+  "takeover.status.in_review": "In Review",
+  "takeover.status.reviewed": "Reviewed",
   "takeover.empty": "No takeover cases in the current ROC window.",
 
   "alerts.title": "Alerts",
@@ -271,6 +276,13 @@ const en: Dictionary = {
   "incidents.guardrailTitle": "Governance Guardrail",
   "incidents.guardrailBody":
     "Escalation and evidence discrepancy review stay ROC-owned until the linked platform-admin investigation closes.",
+  "incidents.policyBody":
+    "Filing deadlines remain policy-driven placeholders until the sandbox approval letter fixes the regulator timing.",
+  "incidents.initialDeadlineLabel": "Initial Filing Deadline",
+  "incidents.finalDeadlineLabel": "Final Filing Deadline",
+  "incidents.initialDeadline": "<= 1 hour (policy)",
+  "incidents.finalDeadline": "<= 10 days (policy)",
+  "incidents.evidenceLink": "Evidence Queue",
   "incidents.source.takeover_discrepancy": "Takeover discrepancy",
   "incidents.source.alert": "ROC escalation",
   "incidents.status.needs_triage": "Needs triage",
@@ -300,6 +312,10 @@ const en: Dictionary = {
   "reports.columns.window": "Window",
   "reports.columns.status": "Status",
   "reports.columns.evidence": "Evidence",
+  "reports.generate": "Generate Report",
+  "reports.kind.takeover_discrepancy_package":
+    "Takeover discrepancy package",
+  "reports.kind.takeover_case_summary": "Takeover case summary",
   "reports.status.ready": "Ready",
   "reports.status.pending_review": "Pending Review",
   "reports.guardrailTitle": "Regulatory Package Boundary",
@@ -546,6 +562,11 @@ const zh: Dictionary = {
   "takeover.field.resolved": "結案時間",
   "takeover.discrepancy.yes": "已連結差異案件",
   "takeover.discrepancy.no": "無差異案件",
+  "takeover.guardrailBody":
+    "Tesla 事件、安全員回報與 ROC 處置必須並列顯示，不可合併成單一敘事。",
+  "takeover.status.pending": "待處置",
+  "takeover.status.in_review": "處置中",
+  "takeover.status.reviewed": "已研判",
   "takeover.empty": "目前 ROC 視窗內沒有接管案件。",
 
   "alerts.title": "警示",
@@ -578,6 +599,13 @@ const zh: Dictionary = {
   "incidents.guardrailTitle": "治理護欄",
   "incidents.guardrailBody":
     "事故升級與證據差異審查在 platform-admin 調查結案前，仍由 ROC 持有。",
+  "incidents.policyBody":
+    "通報時限目前仍是 policy-driven 佔位，待沙盒核准函正式確認主管機關時限。",
+  "incidents.initialDeadlineLabel": "初報時限",
+  "incidents.finalDeadlineLabel": "結報時限",
+  "incidents.initialDeadline": "<= 1 小時（policy）",
+  "incidents.finalDeadline": "<= 10 日（policy）",
+  "incidents.evidenceLink": "證據佇列",
   "incidents.source.takeover_discrepancy": "接管差異",
   "incidents.source.alert": "ROC 升級事件",
   "incidents.status.needs_triage": "待分流",
@@ -606,6 +634,9 @@ const zh: Dictionary = {
   "reports.columns.window": "時間窗",
   "reports.columns.status": "狀態",
   "reports.columns.evidence": "證據數",
+  "reports.generate": "產生報表",
+  "reports.kind.takeover_discrepancy_package": "接管差異封裝",
+  "reports.kind.takeover_case_summary": "接管案件摘要",
   "reports.status.ready": "已就緒",
   "reports.status.pending_review": "待審查",
   "reports.guardrailTitle": "監理封裝邊界",

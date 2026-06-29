@@ -229,6 +229,17 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
+  {
+    vehicleId: "veh-av-demo-001",
+    plateNo: "ABC-AV01",
+    operatingArea: "taichung-port",
+    supportedServiceBuckets: ["business_dispatch"],
+    dispatchableFlag: true,
+    exclusivityApproved: true,
+    insuranceStatus: "valid",
+    updatedAt: SEED_TIMESTAMP,
+    supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
+  },
 ];
 
 const DRIVER_SEED: DriverRegistryRecord[] = [
@@ -260,6 +271,13 @@ const DRIVER_SEED: DriverRegistryRecord[] = [
     workState: "available",
     licensesValid: true,
   }),
+  createSeedDriver({
+    driverId: "safety-op-001",
+    name: "Safety Operator Demo One",
+    supportedServiceBuckets: ["business_dispatch"],
+    workState: "available",
+    licensesValid: true,
+  }),
 ];
 
 const CONTRACT_SEED: VehicleContractRecord[] = [
@@ -283,6 +301,23 @@ const CONTRACT_SEED: VehicleContractRecord[] = [
   {
     contractId: "contract-demo-004",
     vehicleId: "veh-demo-004",
+    partnerId: "partner-demo-004",
+    partnerType: "enterprise_partner",
+    contractType: "service_fleet_contract",
+    operatingAreaId: "taichung-port",
+    serviceScope: "business_dispatch",
+    startAt: "2026-01-01T00:00:00.000Z",
+    endAt: "2026-12-31T23:59:59.000Z",
+    status: "active",
+    lifecycleStatus: "active",
+    approvedBy: "platform-admin-demo-001",
+    approvedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    contractId: "contract-av-demo-001",
+    vehicleId: "veh-av-demo-001",
     partnerId: "partner-demo-004",
     partnerType: "enterprise_partner",
     contractType: "service_fleet_contract",
@@ -342,6 +377,20 @@ const POLICY_SEED: InsurancePolicyRecord[] = [
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   },
+  {
+    policyId: "policy-av-demo-001",
+    vehicleId: "veh-av-demo-001",
+    policyNo: "POL-BIZ-AV01",
+    insuranceType: "passenger_liability",
+    insurerName: "Demo Insurance",
+    coverageAmount: 3000000,
+    startAt: "2026-01-01T00:00:00.000Z",
+    endAt: "2026-12-31T23:59:59.000Z",
+    status: "active",
+    lifecycleStatus: "active",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
 ];
 
 const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
@@ -377,6 +426,20 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
     vehicleId: "veh-demo-004",
     declarationStatus: "submitted",
     declarationFileId: "file-demo-004",
+    reviewStatus: "approved",
+    lifecycleStatus: "active",
+    reviewerId: "platform-admin-demo-001",
+    reviewedAt: "2026-01-01T00:00:00.000Z",
+    exclusiveProviderName: "Acme Dispatch",
+    effectiveStart: "2026-01-01T00:00:00.000Z",
+    effectiveEnd: "2026-12-31T23:59:59.000Z",
+    terminationReason: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    vehicleId: "veh-av-demo-001",
+    declarationStatus: "submitted",
+    declarationFileId: "file-av-demo-001",
     reviewStatus: "approved",
     lifecycleStatus: "active",
     reviewerId: "platform-admin-demo-001",
@@ -434,6 +497,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
     {
       vehicleId: "veh-demo-004",
       driverId: "drv-demo-004",
+      etaMinutes: 9,
+    },
+    {
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
       etaMinutes: 9,
     },
   ];
@@ -644,7 +712,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
         resolvedCanonicalVehicleId,
         {
           entityType: "vehicle",
-          message: "Vehicle canonical state provisioned from approved submission.",
+          message:
+            "Vehicle canonical state provisioned from approved submission.",
           occurredAt: command.approvedAt,
           relatedEntityId: current.submissionId,
           emitEvent: false,
@@ -689,9 +758,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
         actionName: "create_vehicle_fleet_affiliation",
         resourceType: "vehicle_fleet_affiliation",
         resourceId: affiliation.affiliationId,
-        newValuesSummary: this.buildVehicleFleetAffiliationAuditSummary(
-          affiliation,
-        ),
+        newValuesSummary:
+          this.buildVehicleFleetAffiliationAuditSummary(affiliation),
       },
       requestId,
     );
@@ -1984,8 +2052,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
     command: ProvisionFromSubmissionCommand,
     approvedAt: string,
   ): VehicleFleetAffiliationRecord {
-    const basisDocument =
-      this.selectVehicleAffiliationBasisDocument(command.documents);
+    const basisDocument = this.selectVehicleAffiliationBasisDocument(
+      command.documents,
+    );
 
     return {
       affiliationId: randomUUID(),
@@ -1996,8 +2065,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
       ),
       effectiveFrom:
         this.dateOnlyToIso(basisDocument?.effectiveFrom ?? null) ?? approvedAt,
-      effectiveUntil:
-        this.dateOnlyToInclusiveIso(basisDocument?.effectiveUntil ?? null),
+      effectiveUntil: this.dateOnlyToInclusiveIso(
+        basisDocument?.effectiveUntil ?? null,
+      ),
       status: "active",
       sourceSubmissionId: command.submission.submissionId,
       createdAt: approvedAt,

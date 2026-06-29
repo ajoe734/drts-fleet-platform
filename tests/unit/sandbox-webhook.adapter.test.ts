@@ -32,6 +32,7 @@ function createServices() {
     opsDispatchEventsService,
   );
 
+  ownedMobilityService.registerCallRecordingListeners();
   return {
     callcenterService,
     ownedMobilityService,

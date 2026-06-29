@@ -4,7 +4,6 @@ import { rocTheme } from "@/lib/roc-theme";
 import { getRocHandoverPageData } from "@/lib/roc-page-data";
 import { RocRefreshBanner } from "@/components/roc-screen-primitives";
 import {
-  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasPageHeader as PageHeader,
@@ -45,9 +44,9 @@ export default async function HandoverPage() {
         title={t("handover.title", locale)}
         subtitle={t("handover.subtitle", locale)}
         actions={
-          <Btn theme={rocTheme} variant="primary" icon="check">
-            {t("handover.action", locale)}
-          </Btn>
+          <Pill theme={rocTheme} tone="neutral">
+            {t("common.reviewOnly", locale)}
+          </Pill>
         }
       />
       <RocRefreshBanner
