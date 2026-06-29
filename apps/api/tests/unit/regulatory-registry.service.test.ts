@@ -66,6 +66,49 @@ function createService(
 }
 
 describe("RegulatoryRegistryService", () => {
+  it("seeds the AV demo vehicle as dispatchable business-dispatch supply", () => {
+    const { service } = createService();
+
+    const vehicle = service
+      .listVehicles()
+      .find((candidate) => candidate.vehicleId === "veh-av-demo-001");
+    const driver = service
+      .listDrivers()
+      .find((candidate) => candidate.driverId === "safety-op-001");
+    const pair = service
+      .listSupplyPairs()
+      .find((candidate) => candidate.vehicleId === "veh-av-demo-001");
+
+    expect(vehicle).toMatchObject({
+      vehicleId: "veh-av-demo-001",
+      supportedServiceBuckets: ["business_dispatch"],
+      dispatchableFlag: true,
+      insuranceStatus: "valid",
+      supplyLifecycle: {
+        dispatch: {
+          eligible: true,
+          blockedReasons: [],
+        },
+      },
+    });
+    expect(driver).toMatchObject({
+      driverId: "safety-op-001",
+      supportedServiceBuckets: ["business_dispatch"],
+      dispatchEligible: true,
+    });
+    expect(pair).toMatchObject({
+      vehicleId: "veh-av-demo-001",
+      driverId: "safety-op-001",
+      etaMinutes: 9,
+    });
+    expect(
+      service.getVehicleDispatchability("veh-av-demo-001", "business_dispatch"),
+    ).toBe(true);
+    expect(
+      service.getDriverAvailability("safety-op-001", "business_dispatch"),
+    ).toBe(true);
+  });
+
   it("rejects dispatch enable when exclusivity review is still pending", () => {
     const { service } = createService();
 
