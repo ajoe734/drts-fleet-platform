@@ -23,7 +23,7 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
   imports: [
     DatabaseModule,
     AuditNotificationModule,
-    BillingSettlementModule,
+    forwardRef(() => BillingSettlementModule),
     forwardRef(() => OwnedMobilityModule),
   ],
   controllers: [TenantPartnerController],

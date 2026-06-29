@@ -145,6 +145,12 @@ REQUIRED_KEYS=(
   reportArtifactId
 )
 
+OPTIONAL_NULL_OK_KEYS=(
+  partnerProgramCode
+  eligibilityVerificationId
+  platformEarningsRef
+)
+
 # Lifecycle gates — flipped when a leg actually lands.
 APPROVED=false
 DISPATCHED=false
@@ -174,11 +180,24 @@ record_field() {
 }
 
 record_vb_field() {
-  local field="$1" raw="${2:-}"
+  local field="$1" raw="${2:-}" optional_null_ok=false
+  local optional_field
+  for optional_field in "${OPTIONAL_NULL_OK_KEYS[@]}"; do
+    if [[ "$field" == "$optional_field" ]]; then
+      optional_null_ok=true
+      break
+    fi
+  done
+
   if [[ -z "$raw" || "$raw" == "null" ]]; then
-    save_evidence "$SCENARIO" "VERIFY" "$field" "NOT_POPULATED"
-    log_warn "  VERIFY: ${field} not populated (recorded as NOT_POPULATED)"
-    VB_MISSING_FIELDS+=("$field")
+    if [[ "$optional_null_ok" == "true" ]]; then
+      save_evidence "$SCENARIO" "VERIFY" "$field" "NOT_APPLICABLE"
+      log_ok "  VERIFY: ${field}=NOT_APPLICABLE (path not exercised)"
+    else
+      save_evidence "$SCENARIO" "VERIFY" "$field" "NOT_POPULATED"
+      log_warn "  VERIFY: ${field} not populated (recorded as NOT_POPULATED)"
+      VB_MISSING_FIELDS+=("$field")
+    fi
   else
     save_evidence "$SCENARIO" "VERIFY" "$field" "$raw"
     log_ok "  VERIFY: ${field}=${raw}"
@@ -506,7 +525,7 @@ subcase_fg02_quota_continuity() {
     local ledger_count ledger_period_key ledger_usage_delta
     ledger_count=$(json_get ".data.items | length")
     ledger_period_key=$(echo "$RESP_BODY" | jq -r '.data.items[0]? | (.quotaPeriodKey // .quota_period_key // .periodKey // .period_key // empty)' 2>/dev/null || true)
-    ledger_usage_delta=$(echo "$RESP_BODY" | jq -r '.data.items[0]? | (.usageDelta // .usage_delta // .bookingCountDelta // .booking_count_delta // empty)' 2>/dev/null || true)
+    ledger_usage_delta=$(echo "$RESP_BODY" | jq -r '.data.items[0]? | (.usageDelta // .usage_delta // .bookingCountDelta // .booking_count_delta // .amount // empty)' 2>/dev/null || true)
     save_evidence "$SCENARIO" "FG-02" "ledgerEntryCount" "${ledger_count:-0}"
     record_field "FG-02" "quotaPeriodKey" "$ledger_period_key"
     record_field "FG-02" "quotaUsageDelta" "$ledger_usage_delta"

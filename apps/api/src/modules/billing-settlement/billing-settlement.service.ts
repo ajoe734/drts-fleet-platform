@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Optional,
+  forwardRef,
+} from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
 
 import type {
@@ -75,6 +82,7 @@ import {
   type ReferralStatementStatus,
 } from "./referral-statement.types";
 import { ForwarderService } from "../forwarder/forwarder.service";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityTripCompletedEvent,
@@ -417,6 +425,9 @@ export class BillingSettlementService implements OnModuleInit {
     @Optional()
     private readonly billingSettlementRepository?: BillingSettlementRepository,
     @Optional() private readonly forwarderService?: ForwarderService,
+    @Optional()
+    @Inject(forwardRef(() => TenantPartnerService))
+    private readonly tenantPartnerService?: TenantPartnerService,
   ) {}
 
   @OnEvent(OWNED_MOBILITY_TRIP_COMPLETED_EVENT)
@@ -589,22 +600,31 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
-    const lines: InvoiceLineRecord[] = eligibleTrips.map((trip) => ({
-      lineId: `invoice-line-${randomUUID()}`,
-      orderId: trip.orderId,
-      description: this.buildInvoiceLineDescription(trip),
-      amount: { ...trip.grossEarning },
-      channelKey: this.getSettlementChannelKey(trip),
-      orderSource: trip.orderSource,
-      serviceBucket: trip.serviceBucket,
-      businessDispatchSubtype: trip.businessDispatchSubtype,
-      partnerId: trip.partnerId,
-      partnerProgramId: trip.partnerProgramId,
-      partnerEntrySlug: trip.partnerEntrySlug,
-      eligibilityVerificationId: trip.eligibilityVerificationId,
-      issuerAuthorizationRef: trip.issuerAuthorizationRef,
-      benefitReference: trip.benefitReference,
-    }));
+    const lines: InvoiceLineRecord[] = eligibleTrips.map((trip) => {
+      const governance = this.resolveInvoiceLineGovernance(trip);
+
+      return {
+        lineId: `invoice-line-${randomUUID()}`,
+        orderId: trip.orderId,
+        description: this.buildInvoiceLineDescription(trip),
+        amount: { ...trip.grossEarning },
+        costCenterCode: governance.costCenterCode,
+        costCenterName: governance.costCenterName,
+        ownerUserId: governance.ownerUserId,
+        activeFlag: governance.activeFlag,
+        legacy_unmapped: governance.legacy_unmapped,
+        channelKey: this.getSettlementChannelKey(trip),
+        orderSource: trip.orderSource,
+        serviceBucket: trip.serviceBucket,
+        businessDispatchSubtype: trip.businessDispatchSubtype,
+        partnerId: trip.partnerId,
+        partnerProgramId: trip.partnerProgramId,
+        partnerEntrySlug: trip.partnerEntrySlug,
+        eligibilityVerificationId: trip.eligibilityVerificationId,
+        issuerAuthorizationRef: trip.issuerAuthorizationRef,
+        benefitReference: trip.benefitReference,
+      };
+    });
     const amount = this.sumMoney(lines.map((line) => line.amount));
     const now = new Date().toISOString();
     const invoiceId = `invoice-${randomUUID()}`;
@@ -2558,6 +2578,32 @@ export class BillingSettlementService implements OnModuleInit {
       serviceProduct: trip.serviceProduct ?? null,
       tenantServiceProgramId: trip.tenantServiceProgramId ?? null,
       sourcePlatform: trip.sourcePlatform ?? null,
+    };
+  }
+
+  private resolveInvoiceLineGovernance(trip: BillingSettlementTripRecord) {
+    const costCenterCode = trip.costCenterCode?.trim().toUpperCase() ?? null;
+    if (!costCenterCode) {
+      return {
+        costCenterCode: null,
+        costCenterName: null,
+        ownerUserId: null,
+        activeFlag: null,
+        legacy_unmapped: false,
+      };
+    }
+
+    const costCenter = this.tenantPartnerService?.findCostCenter(
+      trip.tenantId,
+      costCenterCode,
+    );
+
+    return {
+      costCenterCode,
+      costCenterName: costCenter?.name ?? null,
+      ownerUserId: costCenter?.ownerUserId ?? null,
+      activeFlag: costCenter?.activeFlag ?? null,
+      legacy_unmapped: !costCenter,
     };
   }
 
