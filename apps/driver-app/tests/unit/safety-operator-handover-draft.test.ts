@@ -5,6 +5,7 @@ import {
   describeSafetyOperatorQueuedShiftHandover,
   parseSafetyOperatorQueuedShiftHandover,
   resolveSafetyOperatorShiftHandoverCommand,
+  selectSafetyOperatorHandoverTakeoverLinkage,
 } from "@/lib/safety-operator-handover-draft";
 import type { SafetyOperatorQueueEntry } from "@/lib/safety-operator-offline-queue";
 
@@ -112,5 +113,54 @@ describe("safety operator shift handover queue payload", () => {
 
     expect(detail.summary).toBe("handoff · takeover 1 + pending 1");
     expect(detail.detail).toContain("takeover-queued");
+  });
+
+  it("does not fall back to an older synced report when a newer takeover is still queued", () => {
+    const linkage = selectSafetyOperatorHandoverTakeoverLinkage(
+      [
+        {
+          id: "queue-2",
+          clientGeneratedId: "takeover-queued",
+          kind: "takeover_report",
+          status: "queued",
+          createdAt: "2026-06-29T05:02:00.000Z",
+          updatedAt: "2026-06-29T05:02:00.000Z",
+          syncedAt: null,
+          errorMessage: null,
+          duplicateAccepted: false,
+          payload: {},
+          receipt: null,
+        },
+        {
+          id: "queue-1",
+          clientGeneratedId: "takeover-synced",
+          kind: "takeover_report",
+          status: "synced",
+          createdAt: "2026-06-29T05:00:00.000Z",
+          updatedAt: "2026-06-29T05:00:30.000Z",
+          syncedAt: "2026-06-29T05:00:30.000Z",
+          errorMessage: null,
+          duplicateAccepted: false,
+          payload: {},
+          receipt: { reportId: "report-older" },
+        },
+      ],
+      "report-older",
+    );
+
+    expect(linkage.takeoverReportIds).toEqual([]);
+    expect(linkage.pendingTakeoverClientGeneratedIds).toEqual([
+      "takeover-queued",
+    ]);
+  });
+
+  it("falls back to the recent synced report only when no queued takeover exists", () => {
+    const linkage = selectSafetyOperatorHandoverTakeoverLinkage(
+      [],
+      "report-recent",
+    );
+
+    expect(linkage.takeoverReportIds).toEqual(["report-recent"]);
+    expect(linkage.pendingTakeoverClientGeneratedIds).toEqual([]);
   });
 });

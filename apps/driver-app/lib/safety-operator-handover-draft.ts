@@ -110,3 +110,47 @@ export function resolveSafetyOperatorShiftHandoverCommand(
     unresolvedPendingTakeoverIds,
   };
 }
+
+export function selectSafetyOperatorHandoverTakeoverLinkage(
+  queueEntries: SafetyOperatorQueueEntry[],
+  fallbackReportId?: string | null,
+): {
+  takeoverReportIds: string[];
+  pendingTakeoverClientGeneratedIds: string[];
+} {
+  const latestTakeoverQueueEntry = queueEntries.find(
+    (entry) => entry.kind === "takeover_report",
+  );
+
+  const queuedReportId = (
+    latestTakeoverQueueEntry?.receipt as TakeoverReceiptLike | null
+  )?.reportId;
+
+  if (typeof queuedReportId === "string" && queuedReportId.trim()) {
+    return {
+      takeoverReportIds: [queuedReportId.trim()],
+      pendingTakeoverClientGeneratedIds: [],
+    };
+  }
+
+  if (latestTakeoverQueueEntry) {
+    return {
+      takeoverReportIds: [],
+      pendingTakeoverClientGeneratedIds: [
+        latestTakeoverQueueEntry.clientGeneratedId,
+      ],
+    };
+  }
+
+  if (typeof fallbackReportId === "string" && fallbackReportId.trim()) {
+    return {
+      takeoverReportIds: [fallbackReportId.trim()],
+      pendingTakeoverClientGeneratedIds: [],
+    };
+  }
+
+  return {
+    takeoverReportIds: [],
+    pendingTakeoverClientGeneratedIds: [],
+  };
+}

@@ -28,6 +28,7 @@ import {
   describeSafetyOperatorQueuedShiftHandover,
   parseSafetyOperatorQueuedShiftHandover,
   resolveSafetyOperatorShiftHandoverCommand,
+  selectSafetyOperatorHandoverTakeoverLinkage,
   type SafetyOperatorQueuedShiftHandover,
 } from "@/lib/safety-operator-handover-draft";
 import {
@@ -846,25 +847,17 @@ export default function SafetyOperatorScreen() {
   async function submitShiftHandover() {
     setScreenError(null);
     const liveQueueSnapshot = await getSafetyOperatorQueueSnapshot();
-    const latestTakeoverQueueEntry = liveQueueSnapshot.items.find(
-      (entry) => entry.kind === "takeover_report",
+    const takeoverLinkage = selectSafetyOperatorHandoverTakeoverLinkage(
+      liveQueueSnapshot.items,
+      recentTakeover?.report.reportId,
     );
-    const latestTakeoverReportId =
-      latestTakeoverQueueEntry?.receipt &&
-      typeof latestTakeoverQueueEntry.receipt === "object" &&
-      "reportId" in latestTakeoverQueueEntry.receipt &&
-      typeof latestTakeoverQueueEntry.receipt.reportId === "string"
-        ? latestTakeoverQueueEntry.receipt.reportId
-        : recentTakeover?.report.reportId;
     const command = buildShiftHandoverCommand({
-      takeoverReportIds: latestTakeoverReportId ? [latestTakeoverReportId] : [],
+      takeoverReportIds: takeoverLinkage.takeoverReportIds,
       notes: handoverNotes.trim(),
     });
     const queuedHandover = buildSafetyOperatorQueuedShiftHandover(
       command,
-      latestTakeoverQueueEntry && !latestTakeoverReportId
-        ? [latestTakeoverQueueEntry.clientGeneratedId]
-        : [],
+      takeoverLinkage.pendingTakeoverClientGeneratedIds,
     );
     const queued = await enqueueSafetyOperatorItem(
       "shift_handover",
