@@ -226,6 +226,26 @@ export default function SandboxExperimentDetailPage() {
 
   const status = program ? experimentDisplayStatus(program) : "draft";
 
+  // Canvas (platform-sandbox.jsx · PA_ExperimentDetail) renders the subtitle as
+  // "name · jurisdiction · area". Compose it from already-loaded records so the
+  // runtime header matches the v9 design authority rather than name-only.
+  const subtitle = useMemo(() => {
+    const jurisdictionLabel = jurisdictionVersions
+      .map((profileVersion) => profileVersion.name)
+      .filter((label): label is string => Boolean(label))
+      .join(" / ");
+    const areaLabel = areas
+      .map((area) => area.name)
+      .filter((label): label is string => Boolean(label))
+      .join(" / ");
+    const parts = [
+      version?.name ?? program?.programCode ?? experimentId,
+      jurisdictionLabel,
+      areaLabel,
+    ].filter((part) => part.length > 0);
+    return parts.join(" · ");
+  }, [jurisdictionVersions, areas, version, program, experimentId]);
+
   if (!loading && error) {
     return (
       <>
@@ -255,7 +275,7 @@ export default function SandboxExperimentDetailPage() {
             </CanvasPill>
           </span>
         }
-        subtitle={version?.name ?? program?.programCode ?? experimentId}
+        subtitle={subtitle}
         actions={
           <Link href="/sandbox/suspend" style={{ textDecoration: "none" }}>
             <CanvasBtn theme={theme} variant="secondary" danger icon="warn">

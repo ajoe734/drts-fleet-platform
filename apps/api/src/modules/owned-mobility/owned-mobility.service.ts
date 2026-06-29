@@ -219,6 +219,16 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
 
+// Hard eligibility reasons that must NEVER be re-admitted by the scarcity
+// fallback below. Dispatching a vehicle that failed the airport-permit gate to an
+// airport-transfer order is a compliance violation, not a graceful degradation:
+// a broad business_dispatch candidate must not satisfy an airport-transfer order
+// just because no airport-eligible supply is currently available. Other hard
+// reasons keep the existing anti-stranding fallback behaviour.
+const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
+  "MISSING_AIRPORT_ELIGIBILITY",
+]);
+
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
   private orderSequence = 1;
@@ -270,7 +280,22 @@ export class OwnedMobilityService implements OnModuleInit {
     @Optional()
     @Inject(forwardRef(() => SandboxDispatchGateService))
     private readonly sandboxDispatchGateService?: SandboxDispatchGateService,
-  ) {
+  ) {}
+
+  private callRecordingListenersRegistered = false;
+
+  // Register call-recording listeners here (not in the constructor): with the
+  // forwardRef circular dependency on SandboxDispatchGateService, registering
+  // cross-service callbacks during construction can bind them to a partially
+  // resolved CallcenterService reference whose events never reach the
+  // fully-resolved singleton. onModuleInit runs once on the resolved instance.
+  // Idempotent so unit tests (which construct directly and may invoke it more
+  // than once) do not double-register.
+  registerCallRecordingListeners() {
+    if (this.callRecordingListenersRegistered) {
+      return;
+    }
+    this.callRecordingListenersRegistered = true;
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
     );
@@ -280,6 +305,8 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    this.registerCallRecordingListeners();
+
     if (!this.ownedMobilityRepository) {
       return;
     }
@@ -412,7 +439,7 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.orders = [order, ...this.orders];
+    this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const traceLog = this.appendTrace(
       order.orderId,
       "order.ready_for_dispatch",
@@ -545,7 +572,7 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.orders = [order, ...this.orders];
+    this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const session = this.callcenterService.linkOrderToCallSession({
       callId: command.callId,
       callType: "booking",
@@ -755,7 +782,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
-      this.orders = [order, ...this.orders];
+      this.orders = [this.stampServiceProductCode(order), ...this.orders];
       if (persistOrderWrite) {
         this.persistChanges(
           {
@@ -2587,10 +2614,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(
-    command: AssignDispatchCommand,
-    requestId?: string,
-  ): any {
+  assignDispatch(command: AssignDispatchCommand, requestId?: string): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2604,10 +2628,7 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  reassignDispatch(
-    command: ReassignDispatchCommand,
-    requestId?: string,
-  ): any {
+  reassignDispatch(command: ReassignDispatchCommand, requestId?: string): any {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2642,8 +2663,9 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    const reassignAttemptSequence =
-      this.nextAttemptSequence(dispatchJob.dispatchJobId);
+    const reassignAttemptSequence = this.nextAttemptSequence(
+      dispatchJob.dispatchJobId,
+    );
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -3706,13 +3728,12 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: this.resolveTenantServiceProgramId(order),
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
       ...(sandboxFulfillmentSegments.length > 0
         ? { sandboxFulfillmentSegments }
         : {}),
-      ...(sandboxBillingTreatment
-        ? { sandboxBillingTreatment }
-        : {}),
+      ...(sandboxBillingTreatment ? { sandboxBillingTreatment } : {}),
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -3771,9 +3792,7 @@ export class OwnedMobilityService implements OnModuleInit {
             assignment.createdAt,
           endedAt:
             task?.completedAt ??
-            (assignment.status === "cancelled"
-              ? assignment.updatedAt
-              : null),
+            (assignment.status === "cancelled" ? assignment.updatedAt : null),
           vehicleId: assignment.vehicleId,
           vin: null,
           driverId: assignment.driverId,
@@ -4715,7 +4734,10 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAssignmentEligibilityRecheck(
-    order: Pick<OwnedOrderRecord, "orderId" | "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "serviceBucket" | "businessDispatchSubtype"
+    >,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
@@ -4811,8 +4833,16 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private resolveServiceProductCodeForOrder(
-    order: Pick<OwnedOrderRecord, "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
+    >,
   ): ServiceProductType | null {
+    // Booking-origin value wins; derivation is only a legacy fallback.
+    if (order.serviceProductCode) {
+      return order.serviceProductCode;
+    }
+
     if (this.vehicleEligibilityService) {
       return this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
         order,
@@ -4821,7 +4851,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
-      : order.businessDispatchSubtype ?? null;
+      : (order.businessDispatchSubtype ?? null);
   }
 
   private assertSandboxDispatchGate(
@@ -4891,6 +4921,19 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
+  // Stamp the precise service-product code onto a freshly-built order so it
+  // originates at booking intake and flows unchanged downstream. Idempotent: an
+  // order that already carries the code is returned untouched.
+  private stampServiceProductCode<T extends OwnedOrderRecord>(order: T): T {
+    if (order.serviceProductCode) {
+      return order;
+    }
+    return {
+      ...order,
+      serviceProductCode: this.resolveServiceProductCodeForOrder(order),
+    };
+  }
+
   private buildDispatchAssignmentBundle(
     dispatchJob: DispatchJobRecord,
     order: OwnedOrderRecord,
@@ -4909,6 +4952,7 @@ export class OwnedMobilityService implements OnModuleInit {
       dispatchJobId: dispatchJob.dispatchJobId,
       orderId: order.orderId,
       taskId,
+      serviceProductCode,
       vehicleId,
       driverId,
       assignmentType: order.fixedPrice ? "fixed_price" : "metered",
@@ -4959,7 +5003,10 @@ export class OwnedMobilityService implements OnModuleInit {
     nextOrder.updatedAt = now;
 
     const traceLogs: DispatchTraceLogRecord[] = [];
-    if (nextOrder.dispatchSemantics === "reservation") {
+    if (
+      nextOrder.dispatchSemantics === "reservation" &&
+      nextOrder.reservationHoldStatus !== "released"
+    ) {
       this.transitionReservationHold(nextOrder, "released");
       nextOrder.reservationHoldExpiresAt = now;
       traceLogs.push(
@@ -5493,7 +5540,7 @@ export class OwnedMobilityService implements OnModuleInit {
                     ? previous.acknowledgedAt
                     : null,
                 acknowledgementRecordId: canReuseAcknowledgement
-                  ? previous?.acknowledgementRecordId ?? null
+                  ? (previous?.acknowledgementRecordId ?? null)
                   : null,
               };
 
@@ -5916,7 +5963,16 @@ export class OwnedMobilityService implements OnModuleInit {
       return visibleCandidates;
     }
 
-    return evaluatedCandidates;
+    // Scarcity fallback: surface decorated ineligible rows so dispatch is not a
+    // bare empty list -- EXCEPT candidates that hard-failed a non-bypassable gate
+    // (e.g. the airport-permit requirement), which must never be offered for the
+    // exact service product even when no eligible supply exists.
+    return evaluatedCandidates.filter(
+      (candidate) =>
+        !candidate.hardReasonCodes.some((code) =>
+          NON_BYPASSABLE_HARD_REASON_CODES.has(code),
+        ),
+    );
   }
 
   private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {

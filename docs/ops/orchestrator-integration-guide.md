@@ -55,6 +55,7 @@ change the checkout to use this value.
 ## 3. Hook point B — adapters that open PRs
 
 **Where:**
+
 - `.orchestrator/adapters/copilot_cloud.py` — already accepts `base_branch`
   via `cloud.get("base_branch")`. Make sure the supervisor populates the
   cloud config block with the routed value (or override at call site).
@@ -83,26 +84,26 @@ glance which integration layer a given task is currently in.
     "BE-APR-NOTIFY-001": {
       "status": "review_approved",
       "owner": "Codex",
-      "gate_layer": "merge",          // <-- new
-      "track": "backend",             // <-- new
-      "base_branch": "backend-dev"
+      "gate_layer": "merge", // <-- new
+      "track": "backend", // <-- new
+      "base_branch": "backend-dev",
       // ...
-    }
-  }
+    },
+  },
 }
 ```
 
 Suggested state machine for `gate_layer`:
 
-| When                                                                 | Set to    |
-| -------------------------------------------------------------------- | --------- |
-| Worker dispatched, PR not yet open                                   | `feat`    |
-| PR open against `merge/*`                                            | `merge`   |
-| Squashed into `merge/*`                                              | `integrated` |
-| Promotion PR open against `*-publish`                                 | `publish-pr` |
-| Merged into `*-publish`                                              | `publish` |
-| Pulled into a `release/*` branch                                     | `release` |
-| Merged to `main`                                                     | `main`    |
+| When                                  | Set to       |
+| ------------------------------------- | ------------ |
+| Worker dispatched, PR not yet open    | `feat`       |
+| PR open against `merge/*`             | `merge`      |
+| Squashed into `merge/*`               | `integrated` |
+| Promotion PR open against `*-publish` | `publish-pr` |
+| Merged into `*-publish`               | `publish`    |
+| Pulled into a `release/*` branch      | `release`    |
+| Merged to `main`                      | `main`       |
 
 The orchestrator already polls PR state via the GitHub bus; extending it to
 update this field is a small additive change.
@@ -118,16 +119,16 @@ defaults from `branch_routing.DEFAULTS`):
 {
   "branch_strategy": {
     "tracks": {
-      "backend":  "backend-dev",
-      "frontend": "frontend-dev"
+      "backend": "backend-dev",
+      "frontend": "frontend-dev",
     },
     "publish_branches": {
-      "backend":  "backend-staging",
-      "frontend": "frontend-staging"
+      "backend": "backend-staging",
+      "frontend": "frontend-staging",
     },
-    "default_track": "backend"
+    "default_track": "backend",
     // track_rules omitted → uses the defaults shipped in branch_routing.DEFAULTS
-  }
+  },
 }
 ```
 
@@ -151,9 +152,11 @@ LONG_LIVED_PUSH_ALLOWED = {
 }
 ```
 
-Workers themselves never push directly to these — they push their
-`codex/*` / `claude/*` / `gemini/*` head and open a PR; the supervisor (or a
-human reviewer) does the merge.
+Workers themselves never push directly to these long-lived branches. They push
+their `codex/*` / `claude/*` / `gemini/*` head and open a PR. They must not merge
+before reviewer approval, green required CI, and no unresolved blocking feedback;
+after those gates pass, an integration-authorized worker, supervisor, release
+manager, or human reviewer may perform the merge.
 
 ---
 

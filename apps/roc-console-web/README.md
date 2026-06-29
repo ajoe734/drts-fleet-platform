@@ -2,7 +2,7 @@
 
 Phase 2 Tesla FSD sandbox — Regulatory Operations Centre (監理運營中心) web app.
 
-**This is a design-system scaffold only.** Per decision packet §C2
+Per decision packet §C2
 (`docs/02-architecture/phase2_tesla_fsd_sandbox_system_design_decision_packet_c1c6_b1b5_20260625.md`),
 the ROC Console:
 
@@ -14,12 +14,14 @@ the ROC Console:
   (`packages/ui-tokens/src/roc.ts`, §4.3 table) for surfaces, accent and status
   state colours.
 
-ROC screens are owned by the visual-team canvas and are intentionally not
-built here. What this scaffold wires:
+The app now ships the core v9 monitoring surfaces plus the shared shell/runtime
+plumbing. What is implemented here:
 
 | Surface                                           | File                                                                                   |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Shell (left nav, top bar, sidebar footer, locale) | `components/roc-shell.tsx`, `lib/roc-shell-nav.ts`, `components/roc-health-footer.tsx` |
+| Overview / Live Board / Trips / Vehicles          | `app/overview/page.tsx`, `app/liveboard/page.tsx`, `app/trips/page.tsx`, `app/vehicles/page.tsx` |
+| Vehicle detail / Provider / Handover              | `app/vehicles/[vehicleId]/page.tsx`, `app/provider/page.tsx`, `app/handover/page.tsx` |
 | `availableActions` → `ActionReceipt` plumbing     | `components/roc-action-rail.tsx`, `lib/action-runtime.ts`                              |
 | API client + control-plane proxy                  | `lib/api-client.ts` + `app/control-plane-proxy/[...path]/route.ts`                     |
 
@@ -40,9 +42,9 @@ generic Ops Console operator. Write actions return the real backend
 `ActionReceipt`; failures surface as failures — the scaffold never synthesises an
 `accepted` receipt.
 
-The home route renders the shared `CanvasEmptyState` primitive (no bespoke
-screen). The `availableActions` → `ActionReceipt` rail is reusable plumbing that
-real ROC screens mount once the visual-team canvas defines them.
+The home route redirects to `/overview`. The `availableActions` →
+`ActionReceipt` rail is reusable plumbing that the implemented screens mount
+only where the backend already exposes supported descriptors.
 
 ## Scripts
 

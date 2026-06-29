@@ -52,21 +52,29 @@ export function formatOpsCodeLabel(
     return getOpsLabel(locale, "unknown");
   }
 
-  const normalized = value.trim().toLowerCase();
+  const normalized = value.trim().toLowerCase().replace(/-/g, "_");
   const key = `opsCode.${normalized}`;
   return key in translations.en ? t(key, locale) : humanizeCode(value);
 }
 
 const OPS_ACTION_LABEL_KEYS: Record<string, string> = {
+  ack: "opsAction.ack",
   add_note: "complaints.action.addNote",
   assign: "complaints.action.assign",
   close: "complaints.action.close",
   create: "complaints.action.create",
   escalate_to_incident: "complaints.action.escalateToIncident",
   export_view: "complaints.action.exportView",
+  fallback_to_human: "opsAction.fallbackToHuman",
   mark_sla_breach: "complaints.action.markSlaBreach",
+  notify: "opsAction.notify",
+  open_incident: "opsAction.openIncident",
+  operational_hold: "opsAction.operationalHold",
+  request_safety_action: "opsAction.requestSafetyAction",
   reopen: "complaints.action.reopen",
   resolve: "complaints.action.resolve",
+  start_evidence_freeze: "opsAction.startEvidenceFreeze",
+  stop_new_dispatch: "opsAction.stopNewDispatch",
 };
 
 export function formatOpsActionLabel(
@@ -77,7 +85,7 @@ export function formatOpsActionLabel(
     return getOpsLabel(locale, "unknown");
   }
 
-  const normalized = action.trim().toLowerCase();
+  const normalized = action.trim().toLowerCase().replace(/-/g, "_");
   const key = OPS_ACTION_LABEL_KEYS[normalized];
   return key ? t(key, locale) : formatOpsCodeLabel(locale, action);
 }

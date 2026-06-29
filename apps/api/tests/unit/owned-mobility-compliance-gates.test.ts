@@ -57,7 +57,7 @@ function createService(options?: {
     publishTaskCancelled: vi.fn(),
   };
 
-  return new OwnedMobilityService(
+  const __svc = new OwnedMobilityService(
     regulatoryRegistryService as never,
     new AuditNotificationService(),
     callcenterService as never,
@@ -66,6 +66,8 @@ function createService(options?: {
     undefined,
     tenantPartnerService as never,
   );
+  __svc.registerCallRecordingListeners();
+  return __svc;
 }
 
 describe("OwnedMobilityService compliance gates", () => {
@@ -119,6 +121,7 @@ describe("OwnedMobilityService compliance gates", () => {
       callcenterService,
       taskEventsService as never,
     );
+    service.registerCallRecordingListeners();
 
     const order = service.createCallCenterOrder({
       callId: "call-ops-001",
@@ -167,6 +170,7 @@ describe("OwnedMobilityService compliance gates", () => {
       callcenterService,
       taskEventsService as never,
     );
+    service.registerCallRecordingListeners();
 
     const session = callcenterService.openCallSession({
       callType: "booking",
@@ -228,6 +232,7 @@ describe("OwnedMobilityService compliance gates", () => {
       callcenterService,
       taskEventsService as never,
     );
+    service.registerCallRecordingListeners();
 
     const session = callcenterService.openCallSession({
       callType: "booking",
