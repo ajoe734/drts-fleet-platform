@@ -7,6 +7,7 @@
 **Sidecar Owner:** `Codex`  
 **Sidecar Reviewer:** `Codex2`  
 **Generated:** `2026-06-28` (UTC)  
+**Closeout Addendum:** `2026-06-29` (UTC)  
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
 This packet is support-only. It does not modify canonical truth, the parent runtime
@@ -34,6 +35,17 @@ Out of scope:
 - reinterpreting the design canvas or inventing a new UI direction
 
 ## 2. Machine-Truth & Branch Anchors
+
+### Closeout addendum (`2026-06-29T03:28:59Z`)
+
+- sidecar row status is now `review_approved`
+- reviewer approval summary: packet accurately captured the AV fallback UI/canvas
+  evidence, `availableActions` + `ActionReceipt` seams, and the live verification
+  drift on the integrated head
+- the detailed sections below remain the original reviewer handoff snapshot from
+  `2026-06-28` UTC
+- this closeout addendum does not change canonical/runtime truth; it only records
+  the sidecar's approved lifecycle state
 
 ### Sidecar row: `P2-V9-UI-OPS-001-SIDECAR-REVIEW`
 
