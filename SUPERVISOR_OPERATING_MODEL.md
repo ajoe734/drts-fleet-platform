@@ -184,6 +184,12 @@ machine-truth trail instead of silently ending:
 - create or hand off an explicit integration closeout follow-up when work remains
 - keep the task open with `progress` or `blocker` if branch closeout itself is incomplete
 
+Merge authority is review-gated, not categorically worker-forbidden. Workers
+must not merge to `dev` before an explicit reviewer approval, green required CI,
+and no unresolved blocking feedback. After those gates pass, an
+integration-authorized worker, supervisor, release manager, or human reviewer may
+perform the merge and must record the resulting `INTEGRATION_STATUS` evidence.
+
 Support-only tasks may skip commit evidence only when they are explicitly non-canonical:
 
 - sidecar review packets
