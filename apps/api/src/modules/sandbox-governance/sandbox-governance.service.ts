@@ -251,12 +251,18 @@ export class SandboxGovernanceService implements OnModuleInit {
   );
   private safetyOperatorQualifications: SafetyOperatorQualificationRecord[] =
     cloneList(DEFAULT_OPERATOR_QUALIFICATIONS);
-  private readonly experiments = new Map<string, SandboxExperimentProgramRecord>();
+  private readonly experiments = new Map<
+    string,
+    SandboxExperimentProgramRecord
+  >();
   private readonly jurisdictions = new Map<
     string,
     SandboxJurisdictionProfileRecord
   >();
-  private readonly approvalDocuments = new Map<string, ApprovalDocumentRecord>();
+  private readonly approvalDocuments = new Map<
+    string,
+    ApprovalDocumentRecord
+  >();
 
   constructor(
     @Optional()
@@ -277,6 +283,24 @@ export class SandboxGovernanceService implements OnModuleInit {
         this.repository.loadVehicleEnrollments(),
         this.repository.loadSafetyOperatorQualifications(),
       ]);
+
+      const hasPersistedGovernanceState =
+        areas.length > 0 ||
+        routes.length > 0 ||
+        enrollments.length > 0 ||
+        qualifications.length > 0;
+
+      if (!hasPersistedGovernanceState) {
+        await this.repository.replaceOperatingAreas(this.operatingAreas);
+        await this.repository.replaceRoutes(this.routes);
+        await this.repository.replaceVehicleEnrollments(
+          this.vehicleEnrollments,
+        );
+        await this.repository.replaceSafetyOperatorQualifications(
+          this.safetyOperatorQualifications,
+        );
+        return;
+      }
 
       this.operatingAreas = cloneList(areas);
       this.routes = cloneList(routes);
@@ -385,7 +409,10 @@ export class SandboxGovernanceService implements OnModuleInit {
           : this.cloneNotificationMatrix(source.notificationMatrix),
       policyVersions:
         command.policyVersions !== undefined
-          ? this.mergePolicyVersions(command.policyVersions, source.policyVersions)
+          ? this.mergePolicyVersions(
+              command.policyVersions,
+              source.policyVersions,
+            )
           : this.mergePolicyVersions(source.policyVersions),
       lifecycleStatus: "draft",
       authorizationStatus: "pending",
@@ -449,7 +476,10 @@ export class SandboxGovernanceService implements OnModuleInit {
     );
     version.effectiveUntil =
       command.effectiveUntil !== undefined
-        ? this.normalizeNullableTimestamp(command.effectiveUntil, "effectiveUntil")
+        ? this.normalizeNullableTimestamp(
+            command.effectiveUntil,
+            "effectiveUntil",
+          )
         : version.effectiveUntil;
     version.publishedAt = now;
     version.publishedBy = this.normalizeNullableText(command.actorId);
@@ -498,7 +528,9 @@ export class SandboxGovernanceService implements OnModuleInit {
       versionId: `sandbox_exp_ver_${randomUUID()}`,
       versionNo: this.requireLatestExperimentVersion(record).versionNo + 1,
       lifecycleStatus: command.publish ? "published" : "draft",
-      authorizationStatus: command.publish ? target.authorizationStatus : "pending",
+      authorizationStatus: command.publish
+        ? target.authorizationStatus
+        : "pending",
       effectiveFrom: this.normalizeTimestamp(
         command.effectiveFrom,
         now,
@@ -588,7 +620,10 @@ export class SandboxGovernanceService implements OnModuleInit {
   }
 
   getJurisdiction(jurisdictionId: string, asOf?: string) {
-    return this.projectJurisdiction(this.requireJurisdiction(jurisdictionId), asOf);
+    return this.projectJurisdiction(
+      this.requireJurisdiction(jurisdictionId),
+      asOf,
+    );
   }
 
   updateJurisdiction(
@@ -627,7 +662,10 @@ export class SandboxGovernanceService implements OnModuleInit {
           : this.cloneNotificationMatrix(source.notificationMatrix),
       policyVersions:
         command.policyVersions !== undefined
-          ? this.mergePolicyVersions(command.policyVersions, source.policyVersions)
+          ? this.mergePolicyVersions(
+              command.policyVersions,
+              source.policyVersions,
+            )
           : this.mergePolicyVersions(source.policyVersions),
       lifecycleStatus: "draft",
       effectiveFrom: this.normalizeTimestamp(
@@ -689,7 +727,10 @@ export class SandboxGovernanceService implements OnModuleInit {
     );
     version.effectiveUntil =
       command.effectiveUntil !== undefined
-        ? this.normalizeNullableTimestamp(command.effectiveUntil, "effectiveUntil")
+        ? this.normalizeNullableTimestamp(
+            command.effectiveUntil,
+            "effectiveUntil",
+          )
         : version.effectiveUntil;
     version.publishedAt = now;
     version.publishedBy = this.normalizeNullableText(command.actorId);
@@ -905,7 +946,10 @@ export class SandboxGovernanceService implements OnModuleInit {
     );
     version.effectiveUntil =
       command.effectiveUntil !== undefined
-        ? this.normalizeNullableTimestamp(command.effectiveUntil, "effectiveUntil")
+        ? this.normalizeNullableTimestamp(
+            command.effectiveUntil,
+            "effectiveUntil",
+          )
         : version.effectiveUntil;
     version.publishedAt = now;
     version.publishedBy = this.normalizeNullableText(command.actorId);
@@ -929,8 +973,10 @@ export class SandboxGovernanceService implements OnModuleInit {
     const version = this.createApprovalDocumentVersionRecord({
       ...target,
       versionId: `sandbox_doc_ver_${randomUUID()}`,
-      versionNo: this.requireLatestApprovalDocumentVersion(record).versionNo + 1,
-      supersedesVersionId: this.requireLatestApprovalDocumentVersion(record).versionId,
+      versionNo:
+        this.requireLatestApprovalDocumentVersion(record).versionNo + 1,
+      supersedesVersionId:
+        this.requireLatestApprovalDocumentVersion(record).versionId,
       lifecycleStatus: command.publish ? "published" : "draft",
       effectiveFrom: this.normalizeTimestamp(
         command.effectiveFrom,
@@ -973,19 +1019,21 @@ export class SandboxGovernanceService implements OnModuleInit {
     );
     const experimentVersion = this.selectExperimentVersion(record, asOf);
     if (!experimentVersion) {
-      throw this.notFound("No published experiment version is effective at asOf.", {
-        experimentId,
-        asOf,
-      });
+      throw this.notFound(
+        "No published experiment version is effective at asOf.",
+        {
+          experimentId,
+          asOf,
+        },
+      );
     }
 
     const jurisdictions = experimentVersion.jurisdictionIds
       .map((jurisdictionId) => this.requireJurisdiction(jurisdictionId))
       .map((jurisdiction) => this.selectJurisdictionVersion(jurisdiction, asOf))
       .filter(
-        (
-          version,
-        ): version is SandboxJurisdictionProfileVersionRecord => version !== null,
+        (version): version is SandboxJurisdictionProfileVersionRecord =>
+          version !== null,
       );
 
     const approvalDocuments = [...this.approvalDocuments.values()]
@@ -995,7 +1043,9 @@ export class SandboxGovernanceService implements OnModuleInit {
           experimentVersion.jurisdictionIds.includes(document.jurisdictionId),
       )
       .map((document) => this.selectApprovalDocumentVersion(document, asOf))
-      .filter((version): version is ApprovalDocumentVersionRecord => version !== null)
+      .filter(
+        (version): version is ApprovalDocumentVersionRecord => version !== null,
+      )
       .sort((left, right) => left.versionId.localeCompare(right.versionId));
 
     const operatingAreas = this.operatingAreas
@@ -1006,7 +1056,8 @@ export class SandboxGovernanceService implements OnModuleInit {
       )
       .sort(
         (left, right) =>
-          left.areaId.localeCompare(right.areaId) || left.version - right.version,
+          left.areaId.localeCompare(right.areaId) ||
+          left.version - right.version,
       );
 
     const routes = this.routes
@@ -1017,7 +1068,8 @@ export class SandboxGovernanceService implements OnModuleInit {
       )
       .sort(
         (left, right) =>
-          left.routeId.localeCompare(right.routeId) || left.version - right.version,
+          left.routeId.localeCompare(right.routeId) ||
+          left.version - right.version,
       );
 
     const vehicleEnrollments = this.vehicleEnrollments
@@ -1036,16 +1088,22 @@ export class SandboxGovernanceService implements OnModuleInit {
       experimentId,
       experimentVersionId: experimentVersion.versionId,
       asOf,
-      policyVersions: this.mergePolicyVersions(experimentVersion.policyVersions),
+      policyVersions: this.mergePolicyVersions(
+        experimentVersion.policyVersions,
+      ),
       authorizationStatus: experimentVersion.authorizationStatus,
       requiredCapabilities: this.cloneRequirements(
         experimentVersion.requiredCapabilities,
       ),
       jurisdictions: jurisdictions.map((version) => this.cloneJson(version)),
-      approvalDocuments: approvalDocuments.map((version) => this.cloneJson(version)),
+      approvalDocuments: approvalDocuments.map((version) =>
+        this.cloneJson(version),
+      ),
       operatingAreas: operatingAreas.map((item) => this.cloneJson(item)),
       routes: routes.map((item) => this.cloneJson(item)),
-      vehicleEnrollments: vehicleEnrollments.map((item) => this.cloneJson(item)),
+      vehicleEnrollments: vehicleEnrollments.map((item) =>
+        this.cloneJson(item),
+      ),
     };
 
     return {
@@ -1124,8 +1182,12 @@ export class SandboxGovernanceService implements OnModuleInit {
       );
     }
 
-    const knownAreaIds = new Set(this.operatingAreas.map((item) => item.areaId));
-    const next = command.items.map((item) => this.validateRoute(item, knownAreaIds));
+    const knownAreaIds = new Set(
+      this.operatingAreas.map((item) => item.areaId),
+    );
+    const next = command.items.map((item) =>
+      this.validateRoute(item, knownAreaIds),
+    );
     ensureUniqueVersionedRecords(
       next,
       (item) => item.routeId,
@@ -1175,7 +1237,9 @@ export class SandboxGovernanceService implements OnModuleInit {
       );
     }
 
-    const next = command.items.map((item) => this.validateVehicleEnrollment(item));
+    const next = command.items.map((item) =>
+      this.validateVehicleEnrollment(item),
+    );
     ensureUniqueVersionedRecords(
       next,
       (item) => item.enrollmentId,
@@ -1300,16 +1364,22 @@ export class SandboxGovernanceService implements OnModuleInit {
     );
     const matches =
       persistedMatches && persistedMatches.length > 0
-        ? persistedMatches.map<ApprovedAreaMatchRecord>((item: {
-            area_id: string;
-            area_kind: "operating_area" | "pickup_dropoff_zone";
-            area_name: string;
-          }) => ({
-            areaId: item.area_id,
-            areaKind: item.area_kind,
-            name: item.area_name,
-          }))
-        : this.findPointMatchesInMemory(command.sandboxProgramId, command.point, asOf);
+        ? persistedMatches.map<ApprovedAreaMatchRecord>(
+            (item: {
+              area_id: string;
+              area_kind: "operating_area" | "pickup_dropoff_zone";
+              area_name: string;
+            }) => ({
+              areaId: item.area_id,
+              areaKind: item.area_kind,
+              name: item.area_name,
+            }),
+          )
+        : this.findPointMatchesInMemory(
+            command.sandboxProgramId,
+            command.point,
+            asOf,
+          );
 
     return {
       sandboxProgramId: command.sandboxProgramId,
@@ -1405,17 +1475,22 @@ export class SandboxGovernanceService implements OnModuleInit {
     validateText(item.sandboxProgramId, "sandboxProgramId");
     validateText(item.name, "name");
     if (!AREA_KIND_SET.has(item.areaKind)) {
-      throw new ApiRequestError(400, "INVALID_OPERATING_AREA_KIND", "Invalid areaKind.");
+      throw new ApiRequestError(
+        400,
+        "INVALID_OPERATING_AREA_KIND",
+        "Invalid areaKind.",
+      );
     }
     validateMultiPolygon(item.geometry, `geometry for ${item.areaId}`);
-    validateEffectiveDates(item.effectiveFrom, item.effectiveUntil, item.areaId);
+    validateEffectiveDates(
+      item.effectiveFrom,
+      item.effectiveUntil,
+      item.areaId,
+    );
     return clone(item);
   }
 
-  private validateRoute(
-    item: ApprovedRouteRecord,
-    knownAreaIds: Set<string>,
-  ) {
+  private validateRoute(item: ApprovedRouteRecord, knownAreaIds: Set<string>) {
     validateText(item.routeId, "routeId");
     validateText(item.sandboxProgramId, "sandboxProgramId");
     validateText(item.name, "name");
@@ -1427,7 +1502,11 @@ export class SandboxGovernanceService implements OnModuleInit {
       );
     }
     validateMultiLineString(item.geometry, `geometry for ${item.routeId}`);
-    validateEffectiveDates(item.effectiveFrom, item.effectiveUntil, item.routeId);
+    validateEffectiveDates(
+      item.effectiveFrom,
+      item.effectiveUntil,
+      item.routeId,
+    );
     return clone(item);
   }
 
@@ -1638,21 +1717,33 @@ export class SandboxGovernanceService implements OnModuleInit {
     record: SandboxExperimentProgramRecord,
     asOf?: string,
   ) {
-    return this.selectEffectiveVersion(record.versions, asOf, (version) => version.versionNo);
+    return this.selectEffectiveVersion(
+      record.versions,
+      asOf,
+      (version) => version.versionNo,
+    );
   }
 
   private selectJurisdictionVersion(
     record: SandboxJurisdictionProfileRecord,
     asOf?: string,
   ) {
-    return this.selectEffectiveVersion(record.versions, asOf, (version) => version.versionNo);
+    return this.selectEffectiveVersion(
+      record.versions,
+      asOf,
+      (version) => version.versionNo,
+    );
   }
 
   private selectApprovalDocumentVersion(
     record: ApprovalDocumentRecord,
     asOf?: string,
   ) {
-    return this.selectEffectiveVersion(record.versions, asOf, (version) => version.versionNo);
+    return this.selectEffectiveVersion(
+      record.versions,
+      asOf,
+      (version) => version.versionNo,
+    );
   }
 
   private selectEffectiveVersion<
@@ -1723,7 +1814,9 @@ export class SandboxGovernanceService implements OnModuleInit {
     record: SandboxExperimentProgramRecord,
     versionId: string,
   ) {
-    const version = record.versions.find((candidate) => candidate.versionId === versionId);
+    const version = record.versions.find(
+      (candidate) => candidate.versionId === versionId,
+    );
     if (!version) {
       throw this.notFound("Sandbox experiment version not found.", {
         experimentId: record.experimentId,
@@ -1733,7 +1826,9 @@ export class SandboxGovernanceService implements OnModuleInit {
     return version;
   }
 
-  private requireLatestExperimentVersion(record: SandboxExperimentProgramRecord) {
+  private requireLatestExperimentVersion(
+    record: SandboxExperimentProgramRecord,
+  ) {
     const latest = [...record.versions].sort(
       (left, right) => right.versionNo - left.versionNo,
     )[0];
@@ -1772,7 +1867,9 @@ export class SandboxGovernanceService implements OnModuleInit {
     record: SandboxJurisdictionProfileRecord,
     versionId: string,
   ) {
-    const version = record.versions.find((candidate) => candidate.versionId === versionId);
+    const version = record.versions.find(
+      (candidate) => candidate.versionId === versionId,
+    );
     if (!version) {
       throw this.notFound("Sandbox jurisdiction version not found.", {
         jurisdictionId: record.jurisdictionId,
@@ -1799,7 +1896,9 @@ export class SandboxGovernanceService implements OnModuleInit {
   private requireApprovalDocument(documentId: string) {
     const record = this.approvalDocuments.get(documentId);
     if (!record) {
-      throw this.notFound("Sandbox approval document not found.", { documentId });
+      throw this.notFound("Sandbox approval document not found.", {
+        documentId,
+      });
     }
     return record;
   }
@@ -1808,7 +1907,9 @@ export class SandboxGovernanceService implements OnModuleInit {
     record: ApprovalDocumentRecord,
     versionId: string,
   ) {
-    const version = record.versions.find((candidate) => candidate.versionId === versionId);
+    const version = record.versions.find(
+      (candidate) => candidate.versionId === versionId,
+    );
     if (!version) {
       throw this.notFound("Sandbox approval document version not found.", {
         documentId: record.documentId,
@@ -2096,7 +2197,10 @@ function validateSchedules(
       );
     }
     seen.add(schedule.scheduleId);
-    if (!Array.isArray(schedule.daysOfWeek) || schedule.daysOfWeek.length === 0) {
+    if (
+      !Array.isArray(schedule.daysOfWeek) ||
+      schedule.daysOfWeek.length === 0
+    ) {
       throw new ApiRequestError(
         400,
         "INVALID_SANDBOX_SCHEDULE_DAYS",
@@ -2188,7 +2292,9 @@ function validateMultiLineString(value: GeoJsonMultiLineString, label: string) {
         `${label} line segments must have at least two coordinates.`,
       );
     }
-    line.forEach((point, index) => validatePosition(point, `${label}[${index}]`));
+    line.forEach((point, index) =>
+      validatePosition(point, `${label}[${index}]`),
+    );
   }
 }
 
@@ -2222,7 +2328,11 @@ function validatePoint(lat: number, lng: number, label: string) {
 
 function validateText(value: string, field: string) {
   if (!value || typeof value !== "string" || value.trim().length === 0) {
-    throw new ApiRequestError(400, "INVALID_TEXT_FIELD", `${field} is required.`);
+    throw new ApiRequestError(
+      400,
+      "INVALID_TEXT_FIELD",
+      `${field} is required.`,
+    );
   }
 }
 
@@ -2233,7 +2343,10 @@ function validateEffectiveDates(
 ) {
   const from = Date.parse(effectiveFrom);
   const until = effectiveUntil ? Date.parse(effectiveUntil) : null;
-  if (Number.isNaN(from) || (effectiveUntil && until !== null && Number.isNaN(until))) {
+  if (
+    Number.isNaN(from) ||
+    (effectiveUntil && until !== null && Number.isNaN(until))
+  ) {
     throw new ApiRequestError(
       400,
       "INVALID_EFFECTIVE_DATES",
@@ -2271,7 +2384,11 @@ function ensureUniqueVersionedRecords<T extends { version: number }>(
 }
 
 function assertNonOverlappingEffectiveWindows<
-  T extends { effectiveFrom: string; effectiveUntil: string | null; version: number },
+  T extends {
+    effectiveFrom: string;
+    effectiveUntil: string | null;
+    version: number;
+  },
 >(values: readonly T[], idOf: (value: T) => string, errorCode: string) {
   const groups = new Map<string, T[]>();
   for (const value of values) {
@@ -2402,10 +2519,16 @@ function pointInMultiPolygon(
   lat: number,
   geometry: GeoJsonMultiPolygon,
 ) {
-  return geometry.coordinates.some((polygon) => pointInPolygon(lng, lat, polygon));
+  return geometry.coordinates.some((polygon) =>
+    pointInPolygon(lng, lat, polygon),
+  );
 }
 
-function pointInPolygon(lng: number, lat: number, polygon: GeoJsonPosition[][]) {
+function pointInPolygon(
+  lng: number,
+  lat: number,
+  polygon: GeoJsonPosition[][],
+) {
   const [outer, ...holes] = polygon;
   if (!outer || !rayCastContains(lng, lat, outer)) {
     return false;
@@ -2459,7 +2582,10 @@ function distanceToPolylineMeters(
 ) {
   let min = Number.POSITIVE_INFINITY;
   for (let i = 0; i < polyline.length - 1; i += 1) {
-    min = Math.min(min, distancePointToSegmentMeters(point, polyline[i]!, polyline[i + 1]!));
+    min = Math.min(
+      min,
+      distancePointToSegmentMeters(point, polyline[i]!, polyline[i + 1]!),
+    );
   }
   return min;
 }
@@ -2480,7 +2606,9 @@ function distancePointToSegmentMeters(
   const aby = by - ay;
   const denom = abx * abx + aby * aby;
   const t =
-    denom === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / denom));
+    denom === 0
+      ? 0
+      : Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / denom));
   const closestX = ax + abx * t;
   const closestY = ay + aby * t;
   return Math.hypot(px - closestX, py - closestY);
