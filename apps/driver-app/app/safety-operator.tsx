@@ -66,6 +66,8 @@ type SafetyOperatorView =
   | "closeout"
   | "handover";
 
+type SyncChannelState = "offline" | "queued" | "syncing" | "failed" | "synced";
+
 const THEME = driverTheme;
 const MODE = THEME.mode as TokenMode;
 const SAFETY_ACCENT = SURFACE_ACCENTS.platform[MODE];
@@ -79,16 +81,20 @@ const INITIAL_QUEUE_SNAPSHOT: SafetyOperatorQueueSnapshot = {
   lastSyncedAt: null,
 };
 
-const VIEW_TABS: Array<{ id: SafetyOperatorView; label: string }> = [
-  { id: "provisioning", label: "資格" },
-  { id: "shiftStart", label: "開班" },
-  { id: "vehicleAssign", label: "派車" },
-  { id: "pretrip", label: "行前" },
-  { id: "active", label: "監看" },
-  { id: "takeover", label: "接管" },
-  { id: "incident", label: "證據" },
-  { id: "closeout", label: "結案" },
-  { id: "handover", label: "交班" },
+const VIEW_TABS: Array<{
+  id: SafetyOperatorView;
+  label: string;
+  screenCode: string;
+}> = [
+  { id: "provisioning", label: "資格", screenCode: "SO_Provisioning" },
+  { id: "shiftStart", label: "開班", screenCode: "SO_ShiftStart" },
+  { id: "vehicleAssign", label: "派車", screenCode: "SO_VehicleAssign" },
+  { id: "pretrip", label: "行前", screenCode: "SO_Pretrip" },
+  { id: "active", label: "監看", screenCode: "SO_ActiveTrip" },
+  { id: "takeover", label: "接管", screenCode: "SO_TakeoverReport" },
+  { id: "incident", label: "證據", screenCode: "SO_IncidentUpload" },
+  { id: "closeout", label: "結案", screenCode: "SO_TripCloseout" },
+  { id: "handover", label: "交班", screenCode: "SO_ShiftHandover" },
 ];
 
 function formatAt(value: string | null) {
@@ -124,7 +130,7 @@ function formatQueueKindLabel(kind: SafetyOperatorQueueEntry["kind"]): string {
     case "takeover_report":
       return "接管回報";
     case "incident_upload":
-      return "證據佇列";
+      return "事故證據";
     case "shift_handover":
       return "交班紀錄";
     default:
@@ -194,9 +200,8 @@ function describeQueueEntry(entry: SafetyOperatorQueueEntry): {
           : "等待證據同步服務接線。",
       };
     }
-    case "shift_handover": {
+    case "shift_handover":
       return describeSafetyOperatorQueuedShiftHandover(entry.payload);
-    }
     default:
       return {
         summary: "待同步項目",
@@ -205,75 +210,78 @@ function describeQueueEntry(entry: SafetyOperatorQueueEntry): {
   }
 }
 
-function ModeTab({
-  active,
-  label,
-  onPress,
+function resolveSyncChannelState(
+  provisioned: boolean,
+  browserOnline: boolean | null,
+  queueSnapshot: SafetyOperatorQueueSnapshot,
+): SyncChannelState {
+  if (!provisioned || browserOnline === false) {
+    return "offline";
+  }
+  if (queueSnapshot.failedCount > 0) {
+    return "failed";
+  }
+  if (queueSnapshot.syncingCount > 0) {
+    return "syncing";
+  }
+  if (queueSnapshot.queuedCount > 0) {
+    return "queued";
+  }
+  return "synced";
+}
+
+function Panel({
+  eyebrow,
+  title,
+  caption,
+  children,
 }: {
-  active: boolean;
-  label: string;
-  onPress: () => void;
+  eyebrow?: string;
+  title: string;
+  caption?: string;
+  children: ReactNode;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={[styles.modeTab, active ? styles.modeTabActive : null]}
-    >
-      <Text
-        style={[styles.modeTabText, active ? styles.modeTabTextActive : null]}
-      >
-        {label}
-      </Text>
-    </Pressable>
+    <View style={styles.panel}>
+      {eyebrow ? <Text style={styles.panelEyebrow}>{eyebrow}</Text> : null}
+      <Text style={styles.panelTitle}>{title}</Text>
+      {caption ? <Text style={styles.panelCaption}>{caption}</Text> : null}
+      <View style={styles.panelBody}>{children}</View>
+    </View>
   );
 }
 
-function StatPill({
+function InlineMetric({
   label,
   value,
   tone = "default",
 }: {
   label: string;
   value: string;
-  tone?: "default" | "danger" | "success";
+  tone?: "default" | "danger" | "success" | "warn";
 }) {
   return (
-    <View
-      style={[
-        styles.statPill,
-        tone === "danger"
-          ? styles.statPillDanger
-          : tone === "success"
-            ? styles.statPillSuccess
-            : null,
-      ]}
-    >
-      <Text style={styles.statPillLabel}>{label}</Text>
-      <Text style={styles.statPillValue}>{value}</Text>
+    <View style={styles.metricCard}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text
+        style={[
+          styles.metricValue,
+          tone === "danger"
+            ? styles.metricValueDanger
+            : tone === "success"
+              ? styles.metricValueSuccess
+              : tone === "warn"
+                ? styles.metricValueWarn
+                : null,
+        ]}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
 
-function SectionCard({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: ReactNode;
-}) {
-  return (
-    <View style={styles.sectionCard}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {subtitle ? <Text style={styles.sectionSubtitle}>{subtitle}</Text> : null}
-      <View style={styles.sectionBody}>{children}</View>
-    </View>
-  );
-}
-
-function Row({
+function DetailRow({
   label,
   value,
   danger = false,
@@ -283,9 +291,9 @@ function Row({
   danger?: boolean;
 }) {
   return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={[styles.rowValue, danger ? styles.rowDanger : null]}>
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={[styles.detailValue, danger ? styles.detailDanger : null]}>
         {value}
       </Text>
     </View>
@@ -352,8 +360,27 @@ function QueueStatusBadge({ status }: { status: SafetyOperatorQueueStatus }) {
   );
 }
 
-function SOFrame({ children }: { children: ReactNode }) {
-  return <View style={styles.screen}>{children}</View>;
+function SOFrame({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.screen}>
+      <View style={styles.frameGlowTop} />
+      <View style={styles.frameGlowBottom} />
+      <View style={styles.frameHeader}>
+        <Text style={styles.frameEyebrow}>安全員模式 · Safety Operator</Text>
+        <Text style={styles.frameTitle}>{title}</Text>
+        <Text style={styles.frameSubtitle}>{subtitle}</Text>
+      </View>
+      {children}
+    </View>
+  );
 }
 
 function SOModeBar({
@@ -367,66 +394,124 @@ function SOModeBar({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.modeBarContent}
       style={styles.modeBar}
+      contentContainerStyle={styles.modeBarContent}
     >
-      {VIEW_TABS.map((tab) => (
-        <ModeTab
-          key={tab.id}
-          active={tab.id === activeView}
-          label={tab.label}
-          onPress={() => onChangeView(tab.id)}
-        />
-      ))}
+      {VIEW_TABS.map((tab) => {
+        const active = tab.id === activeView;
+        return (
+          <Pressable
+            key={tab.id}
+            accessibilityRole="button"
+            onPress={() => onChangeView(tab.id)}
+            style={[styles.modeChip, active ? styles.modeChipActive : null]}
+          >
+            <Text
+              style={[styles.modeChipLabel, active ? styles.modeChipLabelActive : null]}
+            >
+              {tab.label}
+            </Text>
+            <Text
+              style={[styles.modeChipCode, active ? styles.modeChipCodeActive : null]}
+            >
+              {tab.screenCode}
+            </Text>
+          </Pressable>
+        );
+      })}
     </ScrollView>
   );
 }
 
 function SOSyncStrip({
+  syncState,
   queueSnapshot,
   onRetryOutstanding,
 }: {
+  syncState: SyncChannelState;
   queueSnapshot: SafetyOperatorQueueSnapshot;
   onRetryOutstanding: () => void;
 }) {
-  const syncBannerLabel = queueSnapshot.failedCount
-    ? `${queueSnapshot.failedCount} 筆同步失敗`
-    : queueSnapshot.syncingCount
-      ? `${queueSnapshot.syncingCount} 筆同步中`
-      : queueSnapshot.queuedCount
-        ? `${queueSnapshot.queuedCount} 筆待同步`
-        : "已同步";
-  const syncBannerTone =
-    queueSnapshot.failedCount > 0
-      ? styles.syncStripDanger
-      : queueSnapshot.queuedCount > 0 || queueSnapshot.syncingCount > 0
-        ? styles.syncStripQueued
-        : styles.syncStripSynced;
   const retryableCount = queueSnapshot.items.filter(isRetryableQueueEntry).length;
+  const stripCopy =
+    syncState === "offline"
+      ? {
+          title: "離線 replay 模式",
+          body: `queue ${queueSnapshot.items.length} · 所有寫入先留在本機 durable queue`,
+          tone: styles.syncStripOffline,
+        }
+      : syncState === "failed"
+        ? {
+            title: `${queueSnapshot.failedCount} 筆同步失敗`,
+            body: `最近成功 ${formatAt(queueSnapshot.lastSyncedAt)} · 可重試失敗項目`,
+            tone: styles.syncStripFailed,
+          }
+        : syncState === "syncing"
+          ? {
+              title: `${queueSnapshot.syncingCount} 筆同步中`,
+              body: `待同步 ${queueSnapshot.queuedCount} · 最近成功 ${formatAt(
+                queueSnapshot.lastSyncedAt,
+              )}`,
+              tone: styles.syncStripSyncing,
+            }
+          : syncState === "queued"
+            ? {
+                title: `${queueSnapshot.queuedCount} 筆待同步`,
+                body: `最近成功 ${formatAt(queueSnapshot.lastSyncedAt)} · 尚未送達伺服器`,
+                tone: styles.syncStripQueued,
+              }
+            : {
+                title: "Safety Operator 已同步",
+                body: `queue ${queueSnapshot.items.length} · 最近成功 ${formatAt(
+                  queueSnapshot.lastSyncedAt,
+                )}`,
+                tone: styles.syncStripSynced,
+              };
 
   return (
-    <View style={[styles.syncStrip, syncBannerTone]}>
-      <View style={styles.syncStripRow}>
-        <View style={styles.syncStripBody}>
-          <Text style={styles.syncStripTitle}>{syncBannerLabel}</Text>
-          <Text style={styles.syncStripMeta}>
-            queue {queueSnapshot.items.length} · 上次同步{" "}
-            {formatAt(queueSnapshot.lastSyncedAt)}
-          </Text>
+    <View style={[styles.syncStrip, stripCopy.tone]}>
+      <View style={styles.syncStripLeading}>
+        <View style={styles.syncStripDot} />
+        <View style={styles.syncStripCopy}>
+          <Text style={styles.syncStripTitle}>{stripCopy.title}</Text>
+          <Text style={styles.syncStripBody}>{stripCopy.body}</Text>
         </View>
-        <PrimaryButton
-          compact
-          disabled={retryableCount === 0}
-          label="重試可同步項目"
-          variant="secondary"
-          onPress={onRetryOutstanding}
-        />
       </View>
+      <PrimaryButton
+        compact
+        disabled={retryableCount === 0}
+        label="重試同步"
+        variant="secondary"
+        onPress={onRetryOutstanding}
+      />
     </View>
   );
 }
 
-function SOQueueLedger({
+function ScreenLead({
+  code,
+  title,
+  body,
+  aside,
+}: {
+  code: string;
+  title: string;
+  body: string;
+  aside?: ReactNode;
+}) {
+  return (
+    <View style={styles.screenLead}>
+      <View style={styles.screenLeadCopy}>
+        <Text style={styles.screenLeadCode}>{code}</Text>
+        <Text style={styles.screenLeadTitle}>{title}</Text>
+        <Text style={styles.screenLeadBody}>{body}</Text>
+      </View>
+      {aside ? <View style={styles.screenLeadAside}>{aside}</View> : null}
+    </View>
+  );
+}
+
+function QueueLedger({
   queueSnapshot,
   onRetryEntry,
   onRetryOutstanding,
@@ -443,9 +528,10 @@ function SOQueueLedger({
   ).length;
 
   return (
-    <SectionCard
-      title="離線佇列"
-      subtitle="SOSyncStrip · queue depth / status / retry surface"
+    <Panel
+      eyebrow="離線佇列"
+      title="SOSyncStrip ledger"
+      caption="Safety Operator writes stay local-first until a sync receipt lands."
     >
       <View style={styles.queueToolbar}>
         <PrimaryButton
@@ -465,8 +551,8 @@ function SOQueueLedger({
       </View>
 
       {queueSnapshot.items.length === 0 ? (
-        <Text style={styles.bodyText}>
-          目前沒有本機 queue 項目；一旦進入離線或延遲同步，這裡會保留明細。
+        <Text style={styles.emptyBody}>
+          目前沒有 Safety Operator queue 項目。下一次離線提交、同步失敗或重放都會在這裡保留明細。
         </Text>
       ) : (
         queueSnapshot.items.map((entry) => {
@@ -489,7 +575,11 @@ function SOQueueLedger({
               {entry.errorMessage ? (
                 <Text style={styles.queueErrorText}>{entry.errorMessage}</Text>
               ) : null}
-              {entry.receipt ? (
+              {entry.duplicateAccepted ? (
+                <Text style={styles.queueReceiptText}>
+                  duplicate replay 已合併到既有 receipt
+                </Text>
+              ) : entry.receipt ? (
                 <Text style={styles.queueReceiptText}>receipt 已寫回本機佇列</Text>
               ) : null}
               {isRetryableQueueEntry(entry) ? (
@@ -506,7 +596,7 @@ function SOQueueLedger({
           );
         })
       )}
-    </SectionCard>
+    </Panel>
   );
 }
 
@@ -518,6 +608,16 @@ export default function SafetyOperatorScreen() {
     useState<SafetyOperatorView>("shiftStart");
   const [queueSnapshot, setQueueSnapshot] =
     useState<SafetyOperatorQueueSnapshot>(INITIAL_QUEUE_SNAPSHOT);
+  const [browserOnline, setBrowserOnline] = useState<boolean | null>(() => {
+    if (
+      typeof navigator !== "undefined" &&
+      typeof navigator.onLine === "boolean"
+    ) {
+      return navigator.onLine;
+    }
+
+    return null;
+  });
   const [takeoverDraftAudit, setTakeoverDraftAudit] =
     useState<SafetyOperatorTakeoverDraftAudit>(() =>
       createSafetyOperatorTakeoverDraftAudit(
@@ -550,6 +650,7 @@ export default function SafetyOperatorScreen() {
       ).length,
     [],
   );
+
   const unsyncedBreakdown = useMemo(() => {
     return queueSnapshot.items.reduce(
       (summary, entry) => {
@@ -578,8 +679,32 @@ export default function SafetyOperatorScreen() {
     );
   }, [queueSnapshot.items]);
 
+  const syncChannelState = useMemo(
+    () =>
+      resolveSyncChannelState(isProvisioned, browserOnline, queueSnapshot),
+    [browserOnline, isProvisioned, queueSnapshot],
+  );
+
   useEffect(() => {
     void refreshQueueSnapshot();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleOnline = () => setBrowserOnline(true);
+    const handleOffline = () => setBrowserOnline(false);
+
+    setBrowserOnline(typeof navigator.onLine === "boolean" ? navigator.onLine : null);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
 
   async function refreshQueueSnapshot() {
@@ -722,10 +847,7 @@ export default function SafetyOperatorScreen() {
         const queuedHandover = parseSafetyOperatorQueuedShiftHandover(
           entry.payload,
         );
-        await syncShiftHandover(
-          entry.clientGeneratedId,
-          queuedHandover,
-        );
+        await syncShiftHandover(entry.clientGeneratedId, queuedHandover);
         return;
       }
       case "incident_upload":
@@ -877,23 +999,46 @@ export default function SafetyOperatorScreen() {
   }
 
   return (
-    <SOFrame>
-      <View style={styles.modeBanner}>
+    <SOFrame
+      title="Safety Operator Realm"
+      subtitle="與一般 driver mode 分離，只保留資格、班次、接管、證據與交班流程。"
+    >
+      <View style={styles.topRail}>
         <Pressable
           accessibilityRole="button"
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Text style={styles.backButtonText}>返回</Text>
+          <Text style={styles.backButtonText}>返回 Driver</Text>
         </Pressable>
-        <View style={styles.modeBannerBody}>
-          <Text style={styles.modeEyebrow}>安全員模式</Text>
-          <Text style={styles.modeTitle}>Safety Operator</Text>
+        <View style={styles.realmPill}>
+          <Text style={styles.realmPillText}>FSD 沙盒</Text>
         </View>
-        <Text style={styles.modeRealmTag}>FSD 沙盒</Text>
+      </View>
+
+      <View style={styles.heroCard}>
+        <View style={styles.heroCopy}>
+          <Text style={styles.heroEyebrow}>SOFrame</Text>
+          <Text style={styles.heroTitle}>
+            {SAFETY_OPERATOR_FIXTURE.operatorName} · {SAFETY_OPERATOR_FIXTURE.vehicleId}
+          </Text>
+          <Text style={styles.heroBody}>
+            current shift {SAFETY_OPERATOR_FIXTURE.shiftId} · assignment{" "}
+            {SAFETY_OPERATOR_FIXTURE.assignmentId}
+          </Text>
+        </View>
+        <View style={styles.heroStats}>
+          <InlineMetric label="待同步" value={`${queueSnapshot.queuedCount}`} />
+          <InlineMetric
+            label="同步失敗"
+            value={`${queueSnapshot.failedCount}`}
+            tone={queueSnapshot.failedCount > 0 ? "danger" : "success"}
+          />
+        </View>
       </View>
 
       <SOSyncStrip
+        syncState={syncChannelState}
         queueSnapshot={queueSnapshot}
         onRetryOutstanding={() => void retryOutstandingQueueEntries()}
       />
@@ -905,34 +1050,13 @@ export default function SafetyOperatorScreen() {
         showsVerticalScrollIndicator={false}
       >
         {!isProvisioned ? (
-          <View style={styles.warningBanner}>
-            <Text style={styles.warningTitle}>尚未綁定司機裝置</Text>
-            <Text style={styles.warningBody}>
-              目前以本機 durable queue 模式預覽 Safety Operator realm。
-              後續綁定後仍可重放未同步紀錄，且不會混用一般 driver 模式狀態。
+          <View style={styles.noticeBanner}>
+            <Text style={styles.noticeTitle}>裝置尚未完成正式綁定</Text>
+            <Text style={styles.noticeBody}>
+              目前以本機 durable queue 進行離線 replay；一般 driver 狀態與 Safety Operator 狀態不會混用。
             </Text>
           </View>
         ) : null}
-
-        <SectionCard
-          title="Realm 摘要"
-          subtitle="SOFrame · SOModeBar · SOSyncStrip"
-        >
-          <View style={styles.statGrid}>
-            <StatPill label="車輛" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
-            <StatPill label="待同步" value={`${queueSnapshot.queuedCount}`} />
-            <StatPill
-              label="同步中"
-              value={`${queueSnapshot.syncingCount}`}
-              tone={queueSnapshot.syncingCount ? "success" : "default"}
-            />
-            <StatPill
-              label="失敗"
-              value={`${queueSnapshot.failedCount}`}
-              tone={queueSnapshot.failedCount ? "danger" : "success"}
-            />
-          </View>
-        </SectionCard>
 
         {screenError ? (
           <View style={styles.errorBanner}>
@@ -948,165 +1072,202 @@ export default function SafetyOperatorScreen() {
 
         {activeView === "provisioning" ? (
           <>
-            <SectionCard title="安全員資格" subtitle="SO_Provisioning">
-              <Row label="安全員" value={SAFETY_OPERATOR_FIXTURE.operatorName} />
-              <Row
-                label="安全員 ID"
+            <ScreenLead
+              code="SO_Provisioning"
+              title="資格與沙盒上下文"
+              body="安全員資格、裝置綁定與 assignment ownership 在這裡先確認，未通過不得進入 active trip。"
+              aside={
+                <InlineMetric
+                  label="資格狀態"
+                  value={SAFETY_OPERATOR_FIXTURE.qualified ? "qualified" : "blocked"}
+                  tone={SAFETY_OPERATOR_FIXTURE.qualified ? "success" : "danger"}
+                />
+              }
+            />
+            <Panel title="身份與授權" eyebrow="資格">
+              <DetailRow label="安全員" value={SAFETY_OPERATOR_FIXTURE.operatorName} />
+              <DetailRow
+                label="safetyOperatorId"
                 value={SAFETY_OPERATOR_FIXTURE.safetyOperatorId}
               />
-              <Row label="裝置" value={SAFETY_OPERATOR_FIXTURE.deviceId} />
-              <Row
-                label="實驗計畫"
-                value={SAFETY_OPERATOR_FIXTURE.sandboxProgramId}
+              <DetailRow label="sandboxProgramId" value={SAFETY_OPERATOR_FIXTURE.sandboxProgramId} />
+              <DetailRow label="deviceId" value={SAFETY_OPERATOR_FIXTURE.deviceId} />
+              <DetailRow
+                label="activeAssignmentId"
+                value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId}
               />
-              <Row
-                label="資格狀態"
-                value={SAFETY_OPERATOR_FIXTURE.qualified ? "qualified" : "blocked"}
-                danger={!SAFETY_OPERATOR_FIXTURE.qualified}
-              />
-            </SectionCard>
-
-            <SectionCard title="資格對應" subtitle="matchedQualificationIds / reasons">
-              <Row
+            </Panel>
+            <Panel
+              title="資格對應"
+              eyebrow="matchedQualificationIds"
+              caption="這裡只揭露 qualification / assignment context，不包含任何車控或 FSD 控制項。"
+            >
+              <DetailRow
                 label="matchedQualificationIds"
                 value={SAFETY_OPERATOR_FIXTURE.matchedQualificationIds.join(", ")}
               />
               {SAFETY_OPERATOR_FIXTURE.qualificationReasons.map((reason) => (
-                <Text key={reason} style={styles.bodyText}>
+                <Text key={reason} style={styles.supportText}>
                   {reason}
                 </Text>
               ))}
-            </SectionCard>
-
-            <SectionCard title="可見邊界" subtitle="No FSD control UI">
-              <Text style={styles.bodyText}>
-                此 realm 只顯示資格、開班、派車、行前、監看、接管回報、證據、結案與交班。
-                Tesla / FSD 內部控制、遠端控制、恢復自駕按鈕均不顯示。
-              </Text>
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "shiftStart" ? (
           <>
-            <SectionCard title="班次啟動" subtitle="SO_ShiftStart">
-              <Row label="shiftId" value={SAFETY_OPERATOR_FIXTURE.shiftId} />
-              <Row
+            <ScreenLead
+              code="SO_ShiftStart"
+              title="開班只進入 Safety Operator realm"
+              body="班次啟動後，不回落到一般 driver cockpit；班次、assignment 與 queue 都是獨立保存。"
+              aside={
+                <InlineMetric
+                  label="shiftStartedAt"
+                  value={formatAt(SAFETY_OPERATOR_FIXTURE.shiftStartedAt)}
+                />
+              }
+            />
+            <Panel title="班次上下文" eyebrow="Shift">
+              <DetailRow label="shiftId" value={SAFETY_OPERATOR_FIXTURE.shiftId} />
+              <DetailRow
                 label="activeAssignmentId"
                 value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId}
               />
-              <Row
-                label="shiftStartedAt"
-                value={formatAt(SAFETY_OPERATOR_FIXTURE.shiftStartedAt)}
-              />
-              <Row
+              <DetailRow
                 label="experimentWindow"
                 value={SAFETY_OPERATOR_FIXTURE.experimentWindow}
               />
-              <Row
+              <DetailRow
                 label="coverageZone"
                 value={SAFETY_OPERATOR_FIXTURE.coverageZone}
               />
-            </SectionCard>
-
-            <SectionCard title="開班邊界">
-              <Text style={styles.bodyText}>
-                開班後只進入 Safety Operator 沙盒流程；一般 driver 工作台、平台接單與
-                Safety Operator queue 分開保存，不共用班次狀態。
-              </Text>
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "vehicleAssign" ? (
           <>
-            <SectionCard title="裝置與車輛綁定" subtitle="SO_VehicleAssign">
-              <Row label="deviceId" value={SAFETY_OPERATOR_FIXTURE.deviceId} />
-              <Row label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
-              <Row
+            <ScreenLead
+              code="SO_VehicleAssign"
+              title="裝置、車輛、order context"
+              body="派車只揭露 assignment / vehicle 綁定，後續接管、證據與 closeout 都沿用這組上下文。"
+              aside={<InlineMetric label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />}
+            />
+            <Panel title="車輛與任務綁定" eyebrow="Vehicle">
+              <DetailRow label="deviceId" value={SAFETY_OPERATOR_FIXTURE.deviceId} />
+              <DetailRow label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
+              <DetailRow label="assignmentId" value={SAFETY_OPERATOR_FIXTURE.assignmentId} />
+              <DetailRow label="orderId" value={SAFETY_OPERATOR_FIXTURE.orderId} />
+              <DetailRow
                 label="vehicleAssignedAt"
                 value={formatAt(SAFETY_OPERATOR_FIXTURE.vehicleAssignedAt)}
               />
-              <Row
-                label="assignmentId"
-                value={SAFETY_OPERATOR_FIXTURE.assignmentId}
-              />
-              <Row label="orderId" value={SAFETY_OPERATOR_FIXTURE.orderId} />
-            </SectionCard>
-
-            <SectionCard title="派車上下文">
-              <Text style={styles.bodyText}>
-                這裡只顯示安全員對當前車輛與任務的綁定情境，不暴露任何 Tesla / FSD
-                內部車控指令。後續接管、證據與 closeout 都沿用這組 assignment context。
-              </Text>
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "pretrip" ? (
           <>
-            <SectionCard title="行前檢查" subtitle="SO_Pretrip">
-              {SAFETY_OPERATOR_CHECKLIST_TEMPLATE.map((item) => (
-                <Row
-                  key={item.itemKey}
-                  label={item.itemKey}
-                  value={
-                    item.status === "pass"
-                      ? "pass"
-                      : `${item.status} · ${item.note ?? ""}`
-                  }
-                  danger={item.status !== "pass"}
+            <ScreenLead
+              code="SO_Pretrip"
+              title="行前檢查與 blocker codes"
+              body="提交時會一起帶入 checklist、blockerCodes、notes 與 completedAt，失敗時保留在 durable queue。"
+              aside={
+                <InlineMetric
+                  label="blocker"
+                  value={`${checklistBlockedCount}`}
+                  tone={checklistBlockedCount > 0 ? "warn" : "success"}
                 />
+              }
+            />
+            <Panel title="Checklist" eyebrow="Pretrip">
+              {SAFETY_OPERATOR_CHECKLIST_TEMPLATE.map((item) => (
+                <View key={item.itemKey} style={styles.checklistRow}>
+                  <View style={styles.checklistCopy}>
+                    <Text style={styles.checklistItem}>{item.itemKey}</Text>
+                    {item.note ? (
+                      <Text style={styles.checklistNote}>{item.note}</Text>
+                    ) : null}
+                  </View>
+                  <View
+                    style={[
+                      styles.checklistBadge,
+                      item.status === "pass"
+                        ? styles.checklistBadgePass
+                        : item.status === "na"
+                          ? styles.checklistBadgeNa
+                          : styles.checklistBadgeFail,
+                    ]}
+                  >
+                    <Text style={styles.checklistBadgeText}>{item.status}</Text>
+                  </View>
+                </View>
               ))}
-            </SectionCard>
-
-            <SectionCard title="檢查結論">
-              <Text style={styles.bodyText}>
-                {checklistBlockedCount === 0
-                  ? "所有檢查項目已通過。"
-                  : `${checklistBlockedCount} 個項目仍需複核；提交時會把 blockerCodes、notes 與 completedAt 一起寫入離線佇列。`}
-              </Text>
               <View style={styles.buttonRow}>
                 <PrimaryButton
                   label="送出行前檢查"
                   onPress={() => void submitPreTripChecklist()}
                 />
               </View>
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "active" ? (
           <>
-            <SectionCard title="行程監看" subtitle="SO_ActiveTrip">
-              <Row label="shiftId" value={SAFETY_OPERATOR_FIXTURE.shiftId} />
-              <Row
-                label="assignmentId"
-                value={SAFETY_OPERATOR_FIXTURE.assignmentId}
-              />
-              <Row label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
-              <Row label="orderId" value={SAFETY_OPERATOR_FIXTURE.orderId} />
-              <Row label="Telemetry 鮮度" value="2 秒" />
-              <Row label="監理事件鮮度" value="48 秒" danger />
-            </SectionCard>
-
-            <SectionCard title="未同步摘要">
-              <Row label="pretrip" value={`${unsyncedBreakdown.pretrip}`} />
-              <Row label="takeover" value={`${unsyncedBreakdown.takeover}`} />
-              <Row label="incident" value={`${unsyncedBreakdown.incident}`} />
-              <Row label="handover" value={`${unsyncedBreakdown.handover}`} />
-            </SectionCard>
+            <ScreenLead
+              code="SO_ActiveTrip"
+              title="主監看面只做情境、queue 與接管入口"
+              body="active trip 提供 shift / assignment / vehicle / order context、最近同步結果與 unsynced breakdown，不提供任何 Tesla/FSD control UI。"
+              aside={
+                <InlineMetric
+                  label="最近同步"
+                  value={formatAt(queueSnapshot.lastSyncedAt)}
+                />
+              }
+            />
+            <Panel title="Active trip context" eyebrow="Live">
+              <DetailRow label="shiftId" value={SAFETY_OPERATOR_FIXTURE.shiftId} />
+              <DetailRow label="assignmentId" value={SAFETY_OPERATOR_FIXTURE.assignmentId} />
+              <DetailRow label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
+              <DetailRow label="orderId" value={SAFETY_OPERATOR_FIXTURE.orderId} />
+              <DetailRow label="Telemetry 鮮度" value="2 秒" />
+              <DetailRow label="監理事件鮮度" value="48 秒" danger />
+            </Panel>
+            <Panel title="未同步摘要" eyebrow="Unsynced">
+              <View style={styles.metricGrid}>
+                <InlineMetric label="pretrip" value={`${unsyncedBreakdown.pretrip}`} />
+                <InlineMetric label="takeover" value={`${unsyncedBreakdown.takeover}`} />
+                <InlineMetric label="incident" value={`${unsyncedBreakdown.incident}`} />
+                <InlineMetric label="handover" value={`${unsyncedBreakdown.handover}`} />
+              </View>
+              <Text style={styles.supportText}>
+                此 realm 僅顯示 assignment、trip、takeover、incident、closeout、handover 上下文；不顯示遠端控制、resume FSD 或任何內部車控。
+              </Text>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "takeover" ? (
           <>
-            <SectionCard title="接管回報" subtitle="SO_TakeoverReport">
-              <Row
+            <ScreenLead
+              code="SO_TakeoverReport"
+              title="可編輯 occurredAt，但 audit 先留本機"
+              body="送出前可反覆修正 takeover time；原始系統時間、修正歷程與 clientGeneratedReportId 都會保留在本地 queue，直到第一次 acceptance。"
+              aside={
+                <InlineMetric
+                  label="修正次數"
+                  value={`${takeoverDraftAudit.corrections.length}`}
+                />
+              }
+            />
+            <Panel title="接管草稿" eyebrow="Takeover">
+              <DetailRow
                 label="原始系統時間"
                 value={formatAt(takeoverDraftAudit.originalSystemOccurredAt)}
               />
-              <Row
+              <DetailRow
                 label="目前送出時間"
                 value={formatAt(takeoverDraftAudit.correctedOccurredAt)}
               />
@@ -1118,8 +1279,7 @@ export default function SafetyOperatorScreen() {
                 value={takeoverEditValue}
               />
               <Text style={styles.fieldHint}>
-                送出前可反覆修正；每次套用修正都會留下本地 audit。送出後只以提交的
-                occurredAt 與 serverReceivedAt 顯示同步結果。
+                submit 後伺服器只保存送出的 `occurredAt` 與 `serverReceivedAt`；本輪沒有 post-submit patch。
               </Text>
               <Text style={styles.fieldLabel}>備註 notes</Text>
               <TextInput
@@ -1140,12 +1300,11 @@ export default function SafetyOperatorScreen() {
                   onPress={() => void submitTakeover()}
                 />
               </View>
-            </SectionCard>
-
-            <SectionCard title="時間修正 audit" subtitle="editable occurredAt with audit trail">
+            </Panel>
+            <Panel title="時間修正 audit" eyebrow="Audit trail">
               {takeoverDraftAudit.corrections.length === 0 ? (
-                <Text style={styles.bodyText}>
-                  目前尚未記錄時間修正；原始系統時間會隨首次送出一起保留在本機佇列。
+                <Text style={styles.emptyBody}>
+                  目前尚未記錄時間修正；原始系統時間會在首次送出前持續保留於本地 draft。
                 </Text>
               ) : (
                 takeoverDraftAudit.corrections.map((correction, index) => (
@@ -1161,58 +1320,46 @@ export default function SafetyOperatorScreen() {
                   </View>
                 ))
               )}
-            </SectionCard>
-
-            <SectionCard title="最近 receipt" subtitle="clientGeneratedReportId dedupe">
-              <Row
+            </Panel>
+            <Panel title="最近 receipt" eyebrow="Idempotency">
+              <DetailRow
                 label="clientGeneratedReportId"
-                value={
-                  recentTakeover?.receipt.clientGeneratedReportId ?? "尚未提交"
-                }
+                value={recentTakeover?.receipt.clientGeneratedReportId ?? "尚未提交"}
               />
-              <Row
+              <DetailRow
                 label="submitted occurredAt"
-                value={formatAt(
-                  submittedTakeoverAudit?.correctedOccurredAt ?? null,
-                )}
+                value={formatAt(submittedTakeoverAudit?.correctedOccurredAt ?? null)}
               />
-              <Row
-                label="original system time"
-                value={formatAt(
-                  submittedTakeoverAudit?.originalSystemOccurredAt ?? null,
-                )}
-              />
-              <Row
+              <DetailRow
                 label="serverReceivedAt"
-                value={formatAt(
-                  recentTakeover?.receipt.serverReceivedAt ?? null,
-                )}
+                value={formatAt(recentTakeover?.receipt.serverReceivedAt ?? null)}
               />
-              <Row
-                label="local corrections"
-                value={`${submittedTakeoverAudit?.corrections.length ?? 0}`}
-              />
-              <Row
+              <DetailRow
                 label="duplicate replay"
                 value={recentTakeover?.receipt.duplicate ? "yes" : "no"}
                 danger={Boolean(recentTakeover?.receipt.duplicate)}
               />
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "incident" ? (
           <>
-            <SectionCard title="事故 / 證據上傳" subtitle="SO_IncidentUpload">
-              <Row
-                label="incidentId"
-                value={SAFETY_OPERATOR_FIXTURE.incidentId}
-              />
-              <Row
-                label="bookmarkId"
-                value={SAFETY_OPERATOR_FIXTURE.bookmarkId}
-              />
-              <Row
+            <ScreenLead
+              code="SO_IncidentUpload"
+              title="事故與證據只做 linkage，不做車控"
+              body="incident、bookmark、evidence metadata 可先排入本地 queue；同步服務未接線時，狀態會如實停留在 pending / failed。"
+              aside={
+                <InlineMetric
+                  label="evidence"
+                  value={`${SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds.length}`}
+                />
+              }
+            />
+            <Panel title="Incident linkage" eyebrow="Evidence">
+              <DetailRow label="incidentId" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
+              <DetailRow label="bookmarkId" value={SAFETY_OPERATOR_FIXTURE.bookmarkId} />
+              <DetailRow
                 label="evidenceArtifactIds"
                 value={SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds.join(", ")}
               />
@@ -1237,50 +1384,53 @@ export default function SafetyOperatorScreen() {
                   onPress={() => void queueIncidentEvidence()}
                 />
               </View>
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "closeout" ? (
           <>
-            <SectionCard title="Trip Closeout" subtitle="SO_TripCloseout">
-              <Row label="closeoutStatus" value="handoff" />
-              <Row
+            <ScreenLead
+              code="SO_TripCloseout"
+              title="單趟 closeout context"
+              body="這一段只收斂 trip closeout 所需 incident、takeover 與 end location 上下文；正式 shift handover 仍在下一段單獨送出。"
+              aside={<InlineMetric label="closeoutStatus" value="handoff" />}
+            />
+            <Panel title="Trip closeout" eyebrow="Closeout">
+              <DetailRow label="closeoutStatus" value="handoff" />
+              <DetailRow
                 label="closeoutAt"
                 value={formatAt(SAFETY_OPERATOR_FIXTURE.closeoutEndedAt)}
               />
-              <Row
+              <DetailRow
                 label="endLocation"
                 value={SAFETY_OPERATOR_FIXTURE.endLocationLabel}
               />
-              <Row
-                label="incident linkage"
-                value={SAFETY_OPERATOR_FIXTURE.incidentId}
-              />
-              <Row
+              <DetailRow label="incident linkage" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
+              <DetailRow
                 label="takeover accepted"
                 value={recentTakeover?.report.reportId ? "1" : "0"}
               />
-            </SectionCard>
-
-            <SectionCard title="closeout / handover distinction">
-              <Text style={styles.bodyText}>
-                這個 view 聚焦單趟 closeout 所需的 incident、takeover 與 endLocation
-                上下文；真正交班送出則放在下一個 `SO_ShiftHandover` view。
-              </Text>
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
         {activeView === "handover" ? (
           <>
-            <SectionCard title="交班 / Shift Handover" subtitle="SO_ShiftHandover">
-              <Row label="closeoutStatus" value="handoff" />
-              <Row label="activeAssignmentId" value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId} />
-              <Row
-                label="incident linkage"
-                value={SAFETY_OPERATOR_FIXTURE.incidentId}
-              />
+            <ScreenLead
+              code="SO_ShiftHandover"
+              title="交班收尾與 takeover linkage"
+              body="handover 會解析目前 queue 中的 pending takeover，等待 reportId 可用後才真正完成 closeout / handover 同步。"
+              aside={
+                <InlineMetric
+                  label="handover queue"
+                  value={`${unsyncedBreakdown.handover}`}
+                />
+              }
+            />
+            <Panel title="交班送出" eyebrow="Handover">
+              <DetailRow label="activeAssignmentId" value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId} />
+              <DetailRow label="incident linkage" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
               <Text style={styles.fieldLabel}>交班備註</Text>
               <TextInput
                 multiline
@@ -1299,11 +1449,11 @@ export default function SafetyOperatorScreen() {
                   onPress={() => void clearSyncedQueueItems()}
                 />
               </View>
-            </SectionCard>
+            </Panel>
           </>
         ) : null}
 
-        <SOQueueLedger
+        <QueueLedger
           queueSnapshot={queueSnapshot}
           onRetryEntry={(entry) => void retryQueueEntry(entry)}
           onRetryOutstanding={() => void retryOutstandingQueueEntries()}
@@ -1319,222 +1469,239 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: THEME.colors.appBackground,
   },
-  modeBanner: {
-    backgroundColor: SAFETY_ACCENT.bg,
-    borderBottomColor: SAFETY_ACCENT.border,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: 14,
-  },
-  backButton: {
-    borderColor: SAFETY_ACCENT.border,
+  frameGlowTop: {
+    position: "absolute",
+    top: -120,
+    right: -40,
+    width: 260,
+    height: 260,
     borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    backgroundColor: SAFETY_ACCENT.bg,
+    opacity: 0.35,
   },
-  backButtonText: {
-    color: SAFETY_ACCENT.fg,
-    fontWeight: "600",
+  frameGlowBottom: {
+    position: "absolute",
+    bottom: 90,
+    left: -80,
+    width: 220,
+    height: 220,
+    borderRadius: 999,
+    backgroundColor: SAFETY_REALM.border,
+    opacity: 0.12,
   },
-  modeBannerBody: {
-    flex: 1,
+  frameHeader: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    gap: 4,
   },
-  modeEyebrow: {
+  frameEyebrow: {
     color: SAFETY_REALM.fg,
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
-  modeTitle: {
+  frameTitle: {
     color: THEME.colors.textStrong,
-    fontSize: 20,
-    fontWeight: "700",
-    marginTop: 2,
+    fontSize: 28,
+    fontWeight: "800",
+    letterSpacing: -0.5,
   },
-  modeRealmTag: {
+  frameSubtitle: {
+    color: THEME.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  topRail: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+  },
+  backButton: {
+    borderColor: SAFETY_ACCENT.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: THEME.colors.surface,
+  },
+  backButtonText: {
+    color: THEME.colors.textStrong,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  realmPill: {
+    backgroundColor: SAFETY_ACCENT.bg,
+    borderColor: SAFETY_ACCENT.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  realmPillText: {
     color: SAFETY_ACCENT.fg,
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: "700",
+  },
+  heroCard: {
+    marginHorizontal: 18,
+    marginTop: 14,
+    padding: 18,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: SAFETY_ACCENT.border,
+    backgroundColor: THEME.colors.surface,
+    gap: 16,
+  },
+  heroCopy: {
+    gap: 3,
+  },
+  heroEyebrow: {
+    color: THEME.colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  heroTitle: {
+    color: THEME.colors.textStrong,
+    fontSize: 21,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  heroBody: {
+    color: THEME.colors.textMuted,
+    fontSize: 13,
+  },
+  heroStats: {
+    flexDirection: "row",
+    gap: 10,
   },
   syncStrip: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    marginHorizontal: 18,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 12,
+  },
+  syncStripOffline: {
+    backgroundColor: THEME.colors.warningBg,
+    borderColor: THEME.colors.warning,
   },
   syncStripQueued: {
     backgroundColor: SAFETY_ACCENT.bg,
-    borderBottomColor: SAFETY_ACCENT.border,
-  },
-  syncStripDanger: {
-    backgroundColor: THEME.colors.dangerBg,
-    borderBottomColor: THEME.colors.danger,
-  },
-  syncStripSynced: {
-    backgroundColor: THEME.colors.successBg,
-    borderBottomColor: THEME.colors.success,
-  },
-  syncStripRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-  },
-  syncStripBody: {
-    flex: 1,
-  },
-  syncStripTitle: {
-    color: THEME.colors.textStrong,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  syncStripMeta: {
-    color: THEME.colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  modeBar: {
-    maxHeight: 56,
-  },
-  modeBarContent: {
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  modeTab: {
-    backgroundColor: THEME.colors.surfaceLo,
-    borderColor: THEME.colors.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-  },
-  modeTabActive: {
-    backgroundColor: SAFETY_ACCENT.bg,
     borderColor: SAFETY_ACCENT.border,
   },
-  modeTabText: {
-    color: THEME.colors.textMuted,
-    fontSize: 12,
-    fontWeight: "600",
+  syncStripSyncing: {
+    backgroundColor: THEME.colors.infoBg,
+    borderColor: THEME.colors.info,
   },
-  modeTabTextActive: {
-    color: SAFETY_ACCENT.fg,
-  },
-  content: {
-    gap: 12,
-    padding: 16,
-    paddingBottom: 32,
-  },
-  sectionCard: {
-    backgroundColor: THEME.colors.surface,
-    borderColor: THEME.colors.border,
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
-  },
-  sectionTitle: {
-    color: THEME.colors.textStrong,
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  sectionSubtitle: {
-    color: THEME.colors.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  sectionBody: {
-    gap: 10,
-    marginTop: 14,
-  },
-  row: {
-    alignItems: "center",
-    borderBottomColor: THEME.colors.border,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingBottom: 10,
-  },
-  rowLabel: {
-    color: THEME.colors.textMuted,
-    flex: 1,
-    fontSize: 12,
-    marginRight: 12,
-  },
-  rowValue: {
-    color: THEME.colors.textStrong,
-    flex: 1,
-    fontSize: 13,
-    fontWeight: "600",
-    textAlign: "right",
-  },
-  rowDanger: {
-    color: THEME.colors.danger,
-  },
-  statGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  statPill: {
-    backgroundColor: THEME.colors.surfaceLo,
-    borderColor: THEME.colors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    minWidth: 140,
-    padding: 12,
-  },
-  statPillDanger: {
+  syncStripFailed: {
     backgroundColor: THEME.colors.dangerBg,
     borderColor: THEME.colors.danger,
   },
-  statPillSuccess: {
+  syncStripSynced: {
     backgroundColor: THEME.colors.successBg,
     borderColor: THEME.colors.success,
   },
-  statPillLabel: {
-    color: THEME.colors.textMuted,
-    fontSize: 11,
+  syncStripLeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
-  statPillValue: {
+  syncStripDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 999,
+    backgroundColor: THEME.colors.textStrong,
+  },
+  syncStripCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  syncStripTitle: {
     color: THEME.colors.textStrong,
-    fontSize: 16,
-    fontWeight: "700",
-    marginTop: 6,
-  },
-  bodyText: {
-    color: THEME.colors.text,
     fontSize: 14,
-    lineHeight: 21,
+    fontWeight: "800",
   },
-  warningBanner: {
+  syncStripBody: {
+    color: THEME.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  modeBar: {
+    marginTop: 12,
+    maxHeight: 74,
+  },
+  modeBarContent: {
+    gap: 10,
+    paddingHorizontal: 18,
+    paddingBottom: 4,
+  },
+  modeChip: {
+    minWidth: 104,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    backgroundColor: THEME.colors.surface,
+    gap: 4,
+  },
+  modeChipActive: {
+    backgroundColor: SAFETY_ACCENT.bg,
+    borderColor: SAFETY_ACCENT.border,
+  },
+  modeChipLabel: {
+    color: THEME.colors.textStrong,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  modeChipLabelActive: {
+    color: SAFETY_ACCENT.fg,
+  },
+  modeChipCode: {
+    color: THEME.colors.textDim,
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  modeChipCodeActive: {
+    color: SAFETY_ACCENT.fg,
+  },
+  content: {
+    padding: 18,
+    paddingTop: 14,
+    paddingBottom: 32,
+    gap: 14,
+  },
+  noticeBanner: {
     backgroundColor: THEME.colors.warningBg,
     borderColor: THEME.colors.warning,
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: 1,
     padding: 14,
   },
-  warningTitle: {
+  noticeTitle: {
     color: THEME.colors.textStrong,
     fontSize: 14,
-    fontWeight: "700",
+    fontWeight: "800",
   },
-  warningBody: {
+  noticeBody: {
     color: THEME.colors.text,
     fontSize: 13,
-    lineHeight: 20,
-    marginTop: 6,
+    lineHeight: 19,
+    marginTop: 4,
   },
   errorBanner: {
     backgroundColor: THEME.colors.dangerBg,
     borderColor: THEME.colors.danger,
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 12,
+    padding: 13,
   },
   errorBannerText: {
     color: THEME.colors.danger,
@@ -1544,30 +1711,203 @@ const styles = StyleSheet.create({
   infoBanner: {
     backgroundColor: THEME.colors.infoBg,
     borderColor: THEME.colors.info,
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 12,
+    padding: 13,
   },
   infoBannerText: {
     color: THEME.colors.textStrong,
     fontSize: 13,
     lineHeight: 19,
   },
+  screenLead: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  screenLeadCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  screenLeadAside: {
+    width: 120,
+  },
+  screenLeadCode: {
+    color: THEME.colors.textDim,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  screenLeadTitle: {
+    color: THEME.colors.textStrong,
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  screenLeadBody: {
+    color: THEME.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  panel: {
+    backgroundColor: THEME.colors.surface,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    padding: 16,
+    gap: 6,
+  },
+  panelEyebrow: {
+    color: SAFETY_REALM.fg,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  panelTitle: {
+    color: THEME.colors.textStrong,
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  panelCaption: {
+    color: THEME.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  panelBody: {
+    gap: 10,
+    marginTop: 4,
+  },
+  metricGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  metricCard: {
+    flex: 1,
+    minWidth: 94,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    backgroundColor: THEME.colors.surfaceLo,
+    padding: 12,
+    gap: 6,
+  },
+  metricLabel: {
+    color: THEME.colors.textMuted,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  metricValue: {
+    color: THEME.colors.textStrong,
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  metricValueDanger: {
+    color: THEME.colors.danger,
+  },
+  metricValueSuccess: {
+    color: THEME.colors.success,
+  },
+  metricValueWarn: {
+    color: THEME.colors.warning,
+  },
+  detailRow: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.colors.border,
+  },
+  detailLabel: {
+    flex: 1,
+    color: THEME.colors.textMuted,
+    fontSize: 12,
+  },
+  detailValue: {
+    flex: 1,
+    color: THEME.colors.textStrong,
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "right",
+  },
+  detailDanger: {
+    color: THEME.colors.danger,
+  },
+  supportText: {
+    color: THEME.colors.text,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  emptyBody: {
+    color: THEME.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  checklistRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: THEME.colors.border,
+  },
+  checklistCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  checklistItem: {
+    color: THEME.colors.textStrong,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  checklistNote: {
+    color: THEME.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  checklistBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+  },
+  checklistBadgePass: {
+    backgroundColor: THEME.colors.successBg,
+    borderColor: THEME.colors.success,
+  },
+  checklistBadgeFail: {
+    backgroundColor: THEME.colors.dangerBg,
+    borderColor: THEME.colors.danger,
+  },
+  checklistBadgeNa: {
+    backgroundColor: THEME.colors.surfaceLo,
+    borderColor: THEME.colors.border,
+  },
+  checklistBadgeText: {
+    color: THEME.colors.textStrong,
+    fontSize: 11,
+    fontWeight: "700",
+  },
   fieldLabel: {
     color: THEME.colors.textMuted,
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   fieldHint: {
     color: THEME.colors.textDim,
     fontSize: 11,
     lineHeight: 16,
-    marginTop: -4,
+    marginTop: -3,
   },
   input: {
     backgroundColor: THEME.colors.surfaceLo,
     borderColor: THEME.colors.border,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     color: THEME.colors.textStrong,
     fontSize: 14,
@@ -1581,15 +1921,15 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: "row",
     gap: 10,
-    marginTop: 4,
+    marginTop: 2,
   },
   button: {
     alignItems: "center",
-    borderRadius: 12,
-    borderWidth: 1,
-    flex: 1,
     justifyContent: "center",
     minHeight: 46,
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
     paddingHorizontal: 12,
   },
   buttonCompact: {
@@ -1615,10 +1955,28 @@ const styles = StyleSheet.create({
   buttonText: {
     color: THEME.colors.inverse,
     fontSize: 14,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   buttonSecondaryText: {
     color: THEME.colors.textStrong,
+  },
+  auditCard: {
+    backgroundColor: THEME.colors.surfaceLo,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: THEME.colors.border,
+    padding: 12,
+    gap: 4,
+  },
+  auditTitle: {
+    color: THEME.colors.textStrong,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  auditBody: {
+    color: THEME.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
   },
   tagWrap: {
     flexDirection: "row",
@@ -1626,35 +1984,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
-    backgroundColor: THEME.colors.surfaceLo,
-    borderColor: THEME.colors.border,
     borderRadius: 999,
     borderWidth: 1,
+    borderColor: THEME.colors.border,
+    backgroundColor: THEME.colors.surfaceLo,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   tagText: {
     color: THEME.colors.textStrong,
     fontSize: 12,
-    fontWeight: "600",
-  },
-  auditCard: {
-    backgroundColor: THEME.colors.surfaceLo,
-    borderColor: THEME.colors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-  },
-  auditTitle: {
-    color: THEME.colors.textStrong,
-    fontSize: 13,
     fontWeight: "700",
-  },
-  auditBody: {
-    color: THEME.colors.text,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 4,
   },
   queueToolbar: {
     flexDirection: "row",
@@ -1664,15 +2004,15 @@ const styles = StyleSheet.create({
   queueCard: {
     backgroundColor: THEME.colors.surfaceLo,
     borderColor: THEME.colors.border,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     padding: 12,
   },
   queueCardHeader: {
-    alignItems: "flex-start",
     flexDirection: "row",
-    gap: 12,
     justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
   },
   queueCardTitleBlock: {
     flex: 1,
@@ -1681,7 +2021,7 @@ const styles = StyleSheet.create({
   queueCardTitle: {
     color: THEME.colors.textStrong,
     fontSize: 14,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   queueCardMeta: {
     color: THEME.colors.textDim,
@@ -1690,7 +2030,7 @@ const styles = StyleSheet.create({
   queueCardSummary: {
     color: THEME.colors.textStrong,
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "700",
     marginTop: 8,
   },
   queueCardDetail: {
@@ -1728,7 +2068,7 @@ const styles = StyleSheet.create({
   queueStatusText: {
     color: THEME.colors.textStrong,
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   queueErrorText: {
     color: THEME.colors.danger,
