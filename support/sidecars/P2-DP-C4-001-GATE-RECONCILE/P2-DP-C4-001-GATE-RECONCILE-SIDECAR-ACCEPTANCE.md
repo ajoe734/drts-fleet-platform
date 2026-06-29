@@ -3,7 +3,7 @@
 **Sidecar Kind:** `acceptance_packet`  
 **Parent Task:** `P2-DP-C4-001-GATE-RECONCILE` - Reconcile restored full dispatch gate: ROC service-fallback reasonCode flow + 2 stub-era tests (#951)  
 **Parent Owner / Reviewer:** `Codex2` / `Codex`  
-**Sidecar Owner / Reviewer:** `Codex2` / `Codex`  
+**Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 **Generated:** `2026-06-29` (UTC)  
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; the parent task is already archived as `done` with `integration_status=merged_to_dev`, and this packet does not reopen or mutate canonical truth.
 
@@ -34,10 +34,10 @@ Out of scope:
 
 Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
 
-- owner=`Codex2`
-- reviewer=`Codex`
-- status=`in_progress`
-- last_update=`2026-06-29T03:36:43Z`
+- owner=`Codex`
+- reviewer=`Codex2`
+- status=`review`
+- last_update=`2026-06-29T04:31:45Z`
 - helper_parent=`P2-DP-C4-001-GATE-RECONCILE`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
@@ -171,9 +171,9 @@ The helper packet closes that ambiguity without touching canonical code.
 | --- | --- | --- |
 | Create support artifacts only | PASS | Output is limited to this packet under `support/sidecars/P2-DP-C4-001-GATE-RECONCILE/`. |
 | Do not edit canonical truth | PASS | The packet summarizes machine truth, archive truth, git history, and merged code/test evidence only. |
-| Hand off the packet to the assigned reviewer | READY | The packet now targets the active sidecar reviewer `Codex`. |
+| Hand off the packet to the assigned reviewer | PASS | The packet now targets the active sidecar reviewer `Codex2`, matching the live task row already in `review`. |
 
-## 7. Reviewer Checklist For `Codex`
+## 7. Reviewer Checklist For `Codex2`
 
 1. Confirm the packet stays support-only and does not claim new implementation
    or reopen the parent task.
@@ -214,9 +214,9 @@ No runtime tests were rerun in this helper task.
 
 ## 9. Handoff Command
 
-Owner (`Codex2`) -> Reviewer (`Codex`)
+Owner (`Codex`) -> Reviewer (`Codex2`)
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh handoff P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE Codex \
+AI_NAME=Codex scripts/ai-status.sh handoff P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE Codex2 \
   "Prepared support-only acceptance packet at support/sidecars/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE.md. Packet anchors the active sidecar task row, the archived parent done row (commit 52c6eff4f, merge 24435d436, integration_status=merged_to_dev), the unblock-history-repair branch-hygiene guidance, and static merged-dev evidence for ROC merged restrictions plus the two integration tests. No canonical runtime/contracts/docs were edited and no runtime tests were rerun in this helper task."
 ```
