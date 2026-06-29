@@ -3,6 +3,10 @@ import { defineConfig, type PlaywrightTestConfig } from "@playwright/test";
 const devApiBaseURL =
   process.env.DRTS_DEV_API_BASE_URL ??
   "https://drts-dev-api-waji3fer3a-uc.a.run.app";
+const verifyApiBaseURL =
+  process.env.DRTS_V9_VERIFY_API_BASE_URL ?? "http://127.0.0.1:3401";
+const verifyApiUpstreamURL =
+  process.env.DRTS_V9_VERIFY_UPSTREAM_API_BASE_URL ?? devApiBaseURL;
 
 const rocBaseURL =
   process.env.DRTS_V9_VERIFY_ROC_BASE_URL ?? "http://127.0.0.1:3010";
@@ -31,6 +35,17 @@ function isLocalUrl(url: string, port: number) {
 }
 
 const webServers: NonNullable<PlaywrightTestConfig["webServer"]> = [];
+
+if (isLocalUrl(verifyApiBaseURL, 3401)) {
+  webServers.push({
+    command:
+      `DRTS_V9_VERIFY_UPSTREAM_API_URL=${verifyApiUpstreamURL} ` +
+      `node tests/e2e/utils/v9-verify-api-proxy.mjs`,
+    url: "http://127.0.0.1:3401/healthz",
+    reuseExistingServer: !process.env.CI,
+    timeout: 60_000,
+  });
+}
 
 if (isLocalUrl(rocBaseURL, 3010)) {
   webServers.push({
@@ -68,7 +83,7 @@ if (isLocalUrl(opsBaseURL, 3003)) {
       `pnpm --filter @drts/contracts build && ` +
       `pnpm --filter @drts/ui-tokens build && ` +
       `cd apps/ops-console-web && ` +
-      `DRTS_API_URL=${devApiBaseURL} ` +
+      `DRTS_API_URL=${verifyApiBaseURL} ` +
       `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3003`,
     url: "http://127.0.0.1:3003",
     reuseExistingServer: !process.env.CI,
@@ -82,7 +97,7 @@ if (isLocalUrl(tenantBaseURL, 3004)) {
       `pnpm --filter @drts/contracts build && ` +
       `pnpm --filter @drts/ui-tokens build && ` +
       `cd apps/tenant-console-web && ` +
-      `DRTS_API_URL=${devApiBaseURL} ` +
+      `DRTS_API_URL=${verifyApiBaseURL} ` +
       `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3004`,
     url: "http://127.0.0.1:3004",
     reuseExistingServer: !process.env.CI,

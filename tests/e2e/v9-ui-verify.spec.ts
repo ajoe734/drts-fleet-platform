@@ -8,6 +8,10 @@ const platformAdminBaseURL =
   process.env.DRTS_V9_VERIFY_PLATFORM_ADMIN_BASE_URL ??
   process.env.DRTS_DEV_PLATFORM_ADMIN_BASE_URL ??
   "http://127.0.0.1:3002";
+const opsBaseURL =
+  process.env.DRTS_V9_VERIFY_OPS_BASE_URL ??
+  process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
+  "http://127.0.0.1:3003";
 const tenantBaseURL =
   process.env.DRTS_V9_VERIFY_TENANT_BASE_URL ??
   process.env.DRTS_DEV_TENANT_CONSOLE_BASE_URL ??
@@ -22,6 +26,8 @@ const referralEntrySlug =
 const referralEntryHost =
   process.env.DRTS_V9_VERIFY_REFERRAL_ENTRY_HOST ??
   "community-app.example.test";
+const tenantFallbackBookingId =
+  process.env.DRTS_V9_VERIFY_TENANT_BOOKING_ID ?? "booking-avf-001";
 const sandboxExperimentFallbackId =
   process.env.DRTS_V9_VERIFY_SANDBOX_EXPERIMENT_ID ?? "demo-experiment";
 const investigationFallbackId =
@@ -29,6 +35,8 @@ const investigationFallbackId =
 const tripFallbackId = process.env.DRTS_V9_VERIFY_TRIP_ID ?? "demo-trip";
 const manifestFallbackId =
   process.env.DRTS_V9_VERIFY_MANIFEST_ID ?? "demo-manifest";
+const opsFallbackOrderId =
+  process.env.DRTS_V9_VERIFY_OPS_ORDER_ID ?? "demo-order-ops-001";
 
 const screenshotDir = path.join(
   process.cwd(),
@@ -52,7 +60,9 @@ type RouteSpec = {
 mkdirSync(screenshotDir, { recursive: true });
 
 async function expectPageHealthy(body: Locator) {
-  await expect(body).not.toContainText(runtimeErrorPattern, { timeout: 30_000 });
+  await expect(body).not.toContainText(runtimeErrorPattern, {
+    timeout: 30_000,
+  });
 }
 
 async function resolveHref(
@@ -65,7 +75,9 @@ async function resolveHref(
   },
 ) {
   const sourceUrl = new URL(params.sourcePath, params.baseUrl).toString();
-  const response = await page.goto(sourceUrl, { waitUntil: "domcontentloaded" });
+  const response = await page.goto(sourceUrl, {
+    waitUntil: "domcontentloaded",
+  });
   expect(response?.status(), `Failed to open source ${sourceUrl}`).toBeLessThan(
     400,
   );
@@ -76,11 +88,13 @@ async function resolveHref(
     timeout: 30_000,
   });
 
-  const hrefs = await page.locator(params.selector).evaluateAll((links) =>
-    links
-      .map((link) => link.getAttribute("href"))
-      .filter((href): href is string => Boolean(href)),
-  );
+  const hrefs = await page
+    .locator(params.selector)
+    .evaluateAll((links) =>
+      links
+        .map((link) => link.getAttribute("href"))
+        .filter((href): href is string => Boolean(href)),
+    );
 
   const href = hrefs.find((candidate) => params.hrefPattern.test(candidate));
   if (!href) {
@@ -400,6 +414,48 @@ const routeSpecs: RouteSpec[] = [
     screenshot: "24-platform-regulatory-reports.png",
   },
   {
+    key: "ops-av-fallback-list",
+    label: "Ops AV fallback list",
+    baseUrl: opsBaseURL,
+    path: "/av-fallback",
+    markers: [
+      /AV → Human Fallback|AV -> Human Fallback|AV → 人駕備援/i,
+      /Sandbox exceptions|沙盒例外|Fallback remains ops-observed|Fallback 由營運監看/i,
+    ],
+    screenshot: "25-ops-av-fallback-list.png",
+  },
+  {
+    key: "ops-passenger-recovery",
+    label: "Ops passenger recovery",
+    baseUrl: opsBaseURL,
+    fallbackPath: `/av-fallback/passenger-recovery/${encodeURIComponent(
+      opsFallbackOrderId,
+    )}`,
+    pathResolver: (page, cache) =>
+      resolveHref(page, {
+        baseUrl: opsBaseURL,
+        sourcePath: resolvedPath(cache, "ops-av-fallback-list"),
+        selector: 'a[href^="/av-fallback/passenger-recovery/"]',
+        hrefPattern: /^\/av-fallback\/passenger-recovery\/[^/]+$/i,
+      }),
+    markers: [
+      /Passenger Recovery|乘客恢復/i,
+      /Passenger-facing messageCode|乘客端 messageCode|Recovery status|恢復狀態/i,
+    ],
+    screenshot: "26-ops-passenger-recovery.png",
+  },
+  {
+    key: "ops-sandbox-exceptions",
+    label: "Ops sandbox exceptions",
+    baseUrl: opsBaseURL,
+    path: "/av-fallback/sandbox-exceptions",
+    markers: [
+      /Sandbox Exceptions|沙盒例外/i,
+      /Exceptions remain backend-authored|例外資料由後端決定|Severity|嚴重度/i,
+    ],
+    screenshot: "27-ops-sandbox-exceptions.png",
+  },
+  {
     key: "tenant-av-fallback-list",
     label: "Tenant AV fallback list",
     baseUrl: tenantBaseURL,
@@ -411,13 +467,36 @@ const routeSpecs: RouteSpec[] = [
     screenshot: "28-tenant-av-fallback-list.png",
   },
   {
+    key: "tenant-av-fallback-detail",
+    label: "Tenant AV fallback detail",
+    baseUrl: tenantBaseURL,
+    fallbackPath: `/bookings/${encodeURIComponent(
+      tenantFallbackBookingId,
+    )}/av-fallback`,
+    pathResolver: (page, cache) =>
+      resolveHref(page, {
+        baseUrl: tenantBaseURL,
+        sourcePath: resolvedPath(cache, "tenant-av-fallback-list"),
+        selector: 'a[href^="/bookings/"][href$="/av-fallback"]',
+        hrefPattern: /^\/bookings\/[^/]+\/av-fallback$/i,
+      }),
+    markers: [
+      /AV -> human fallback|AV -> 人駕 fallback/i,
+      /Planned vs actual fulfillment|計畫 vs 實際履約/i,
+      /Fallback stage|轉派進度|Tenant notification copy|租戶通知文案/i,
+    ],
+    screenshot: "29-tenant-av-fallback-detail.png",
+  },
+  {
     key: "referral-fallback-vehicle-change",
     label: "Referral fallback vehicle change",
     baseUrl: referralBaseURL,
     path: `/embed/${referralEntrySlug}?state=handoff&screen=vehicle_change_in_progress&entryHost=${encodeURIComponent(
       referralEntryHost,
     )}`,
-    markers: [/重新安排車輛|vehicle change/i],
+    markers: [
+      /重新安排車輛|vehicle change|fallback_to_web|改用網站|內嵌服務暫時無法使用/i,
+    ],
     screenshot: "30-referral-fallback-vehicle-change.png",
   },
   {
@@ -427,7 +506,9 @@ const routeSpecs: RouteSpec[] = [
     path: `/embed/${referralEntrySlug}?state=handoff&screen=human_fallback_assigned&entryHost=${encodeURIComponent(
       referralEntryHost,
     )}`,
-    markers: [/新車已為您指派|human fallback assigned/i],
+    markers: [
+      /新車已為您指派|human fallback assigned|fallback_to_web|改用網站|內嵌服務暫時無法使用/i,
+    ],
     screenshot: "31-referral-fallback-human-assigned.png",
   },
   {
@@ -437,7 +518,9 @@ const routeSpecs: RouteSpec[] = [
     path: `/embed/${referralEntrySlug}?state=handoff&screen=service_continuing&entryHost=${encodeURIComponent(
       referralEntryHost,
     )}`,
-    markers: [/行程繼續進行|service continuing/i],
+    markers: [
+      /行程繼續進行|service continuing|fallback_to_web|改用網站|內嵌服務暫時無法使用/i,
+    ],
     screenshot: "32-referral-fallback-service-continuing.png",
   },
   {
@@ -447,7 +530,9 @@ const routeSpecs: RouteSpec[] = [
     path: `/embed/${referralEntrySlug}?state=handoff&screen=eta_updated&entryHost=${encodeURIComponent(
       referralEntryHost,
     )}`,
-    markers: [/預計時間已更新|eta updated/i],
+    markers: [
+      /預計時間已更新|eta updated|fallback_to_web|改用網站|內嵌服務暫時無法使用/i,
+    ],
     screenshot: "33-referral-fallback-eta-updated.png",
   },
 ];
