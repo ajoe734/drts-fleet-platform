@@ -202,4 +202,95 @@ describe("safety operator shift handover queue payload", () => {
     expect(linkage.takeoverReportIds).toEqual(["report-recent"]);
     expect(linkage.pendingTakeoverClientGeneratedIds).toEqual([]);
   });
+
+  it("ignores newer takeover queue entries from a different assignment scope", () => {
+    const linkage = selectSafetyOperatorHandoverTakeoverLinkage(
+      [
+        {
+          id: "queue-old",
+          clientGeneratedId: "takeover-old",
+          kind: "takeover_report",
+          status: "failed",
+          createdAt: "2026-06-29T05:03:00.000Z",
+          updatedAt: "2026-06-29T05:04:00.000Z",
+          syncedAt: null,
+          errorMessage: "timeout",
+          duplicateAccepted: false,
+          payload: {
+            command: {
+              clientGeneratedReportId: "takeover-old",
+              assignmentId: "assignment-old",
+              shiftId: "shift-old",
+              orderId: "order-old",
+            },
+          },
+          receipt: null,
+        },
+      ],
+      "report-current",
+      {
+        assignmentId: "assignment-current",
+        shiftId: "shift-current",
+        orderId: "order-current",
+      },
+    );
+
+    expect(linkage.takeoverReportIds).toEqual(["report-current"]);
+    expect(linkage.pendingTakeoverClientGeneratedIds).toEqual([]);
+  });
+
+  it("prefers the newest takeover entry inside the active assignment scope", () => {
+    const linkage = selectSafetyOperatorHandoverTakeoverLinkage(
+      [
+        {
+          id: "queue-other",
+          clientGeneratedId: "takeover-other",
+          kind: "takeover_report",
+          status: "failed",
+          createdAt: "2026-06-29T05:05:00.000Z",
+          updatedAt: "2026-06-29T05:06:00.000Z",
+          syncedAt: null,
+          errorMessage: "timeout",
+          duplicateAccepted: false,
+          payload: {
+            assignmentId: "assignment-other",
+            shiftId: "shift-other",
+            orderId: "order-other",
+          },
+          receipt: null,
+        },
+        {
+          id: "queue-current",
+          clientGeneratedId: "takeover-current",
+          kind: "takeover_report",
+          status: "queued",
+          createdAt: "2026-06-29T05:01:00.000Z",
+          updatedAt: "2026-06-29T05:02:00.000Z",
+          syncedAt: null,
+          errorMessage: null,
+          duplicateAccepted: false,
+          payload: {
+            command: {
+              clientGeneratedReportId: "takeover-current",
+              assignmentId: "assignment-current",
+              shiftId: "shift-current",
+              orderId: "order-current",
+            },
+          },
+          receipt: null,
+        },
+      ],
+      "report-current",
+      {
+        assignmentId: "assignment-current",
+        shiftId: "shift-current",
+        orderId: "order-current",
+      },
+    );
+
+    expect(linkage.takeoverReportIds).toEqual([]);
+    expect(linkage.pendingTakeoverClientGeneratedIds).toEqual([
+      "takeover-current",
+    ]);
+  });
 });

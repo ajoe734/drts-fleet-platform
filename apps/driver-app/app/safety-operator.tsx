@@ -846,14 +846,18 @@ export default function SafetyOperatorScreen() {
   async function submitShiftHandover() {
     setScreenError(null);
     const liveQueueSnapshot = await getSafetyOperatorQueueSnapshot();
+    const baseCommand = buildShiftHandoverCommand({
+      notes: handoverNotes.trim(),
+    });
     const takeoverLinkage = selectSafetyOperatorHandoverTakeoverLinkage(
       liveQueueSnapshot.items,
       recentTakeover?.report.reportId,
+      baseCommand,
     );
-    const command = buildShiftHandoverCommand({
+    const command = {
+      ...baseCommand,
       takeoverReportIds: takeoverLinkage.takeoverReportIds,
-      notes: handoverNotes.trim(),
-    });
+    };
     const queuedHandover = buildSafetyOperatorQueuedShiftHandover(
       command,
       takeoverLinkage.pendingTakeoverClientGeneratedIds,

@@ -11,6 +11,20 @@ interface TakeoverReceiptLike {
   reportId?: string;
 }
 
+interface SafetyOperatorTakeoverScope {
+  assignmentId?: string | null;
+  shiftId?: string | null;
+  orderId?: string | null;
+}
+
+interface TakeoverCommandLike extends SafetyOperatorTakeoverScope {
+  clientGeneratedReportId?: string;
+}
+
+interface TakeoverPayloadLike extends SafetyOperatorTakeoverScope {
+  command?: TakeoverCommandLike;
+}
+
 export function buildSafetyOperatorQueuedShiftHandover(
   command: CreateSafetyOperatorTripCloseoutCommand,
   pendingTakeoverClientGeneratedIds: string[],
@@ -114,12 +128,14 @@ export function resolveSafetyOperatorShiftHandoverCommand(
 export function selectSafetyOperatorHandoverTakeoverLinkage(
   queueEntries: SafetyOperatorQueueEntry[],
   fallbackReportId?: string | null,
+  handoverScope?: SafetyOperatorTakeoverScope,
 ): {
   takeoverReportIds: string[];
   pendingTakeoverClientGeneratedIds: string[];
 } {
   const latestTakeoverQueueEntry = queueEntries
     .filter((entry) => entry.kind === "takeover_report")
+    .filter((entry) => matchesTakeoverScope(entry, handoverScope))
     .reduce<SafetyOperatorQueueEntry | null>((latestEntry, entry) => {
       if (!latestEntry) {
         return entry;
@@ -164,4 +180,62 @@ export function selectSafetyOperatorHandoverTakeoverLinkage(
     takeoverReportIds: [],
     pendingTakeoverClientGeneratedIds: [],
   };
+}
+
+function matchesTakeoverScope(
+  entry: SafetyOperatorQueueEntry,
+  handoverScope?: SafetyOperatorTakeoverScope,
+): boolean {
+  if (!handoverScope) {
+    return true;
+  }
+
+  const requestedScope = normalizeTakeoverScope(handoverScope);
+  if (
+    !requestedScope.assignmentId &&
+    !requestedScope.shiftId &&
+    !requestedScope.orderId
+  ) {
+    return true;
+  }
+
+  const entryScope = normalizeTakeoverScope(extractTakeoverScope(entry.payload));
+  return (
+    (!requestedScope.assignmentId ||
+      entryScope.assignmentId === requestedScope.assignmentId) &&
+    (!requestedScope.shiftId || entryScope.shiftId === requestedScope.shiftId) &&
+    (!requestedScope.orderId || entryScope.orderId === requestedScope.orderId)
+  );
+}
+
+function extractTakeoverScope(payload: unknown): SafetyOperatorTakeoverScope {
+  if (payload == null || typeof payload !== "object") {
+    return {};
+  }
+
+  const payloadLike = payload as TakeoverPayloadLike;
+  if (payloadLike.command && typeof payloadLike.command === "object") {
+    return payloadLike.command;
+  }
+
+  return payloadLike;
+}
+
+function normalizeTakeoverScope(
+  scope: SafetyOperatorTakeoverScope,
+): SafetyOperatorTakeoverScope {
+  return {
+    assignmentId: normalizeScopeValue(scope.assignmentId),
+    shiftId: normalizeScopeValue(scope.shiftId),
+    orderId: normalizeScopeValue(scope.orderId),
+  };
+}
+
+function normalizeScopeValue(value?: string | null): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
