@@ -8263,9 +8263,8 @@ if __name__ == "__main__":
 
 
 class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
-    """RCA fix: fresh task worktrees must get node_modules (symlinked from the
-    canonical checkout) so workers can typecheck/build at closeout instead of
-    stranding `blocked` on a missing/slow per-worktree install."""
+    """Fresh task worktrees must self-repair local node_modules state instead
+    of inheriting symlinks that escape the worktree root."""
 
     def _mk(self):
         import shutil
@@ -8274,24 +8273,58 @@ class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
         (root / "apps" / "foo").mkdir(parents=True); (root / "apps" / "foo" / "node_modules").mkdir()
         (root / "packages" / "bar").mkdir(parents=True); (root / "packages" / "bar" / "node_modules").mkdir()
         dest = Path(tempfile.mkdtemp()); self.addCleanup(lambda: shutil.rmtree(dest, ignore_errors=True))
+        (dest / "scripts").mkdir(parents=True)
+        (dest / "scripts" / "ensure-local-node-modules.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         (dest / "apps" / "foo").mkdir(parents=True); (dest / "packages" / "bar").mkdir(parents=True)
         return root, dest
 
-    def test_symlinks_root_and_workspace_node_modules(self):
+    def test_repairs_local_node_modules_in_fresh_worktree(self):
         root, dest = self._mk()
-        supervisor._provision_worktree_node_modules(root, dest)
-        self.assertTrue((dest / "node_modules").is_symlink())
-        self.assertEqual((dest / "node_modules").resolve(), (root / "node_modules").resolve())
-        self.assertTrue((dest / "apps" / "foo" / "node_modules").is_symlink())
-        self.assertTrue((dest / "packages" / "bar" / "node_modules").is_symlink())
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+            error = supervisor._provision_worktree_node_modules(root, dest)
+
+        self.assertIsNone(error)
+        run.assert_called_once_with(
+            [
+                supervisor.sys.executable,
+                str(dest / "scripts" / "ensure-local-node-modules.py"),
+                "repair",
+                "--root",
+                str(dest),
+            ],
+            cwd=str(dest),
+            text=True,
+            capture_output=True,
+            timeout=600.0,
+        )
 
     def test_noop_on_canonical_root(self):
         root, _ = self._mk()
-        supervisor._provision_worktree_node_modules(root, root)
-        self.assertFalse((root / "node_modules").is_symlink())
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            error = supervisor._provision_worktree_node_modules(root, root)
 
-    def test_does_not_clobber_existing_node_modules(self):
+        self.assertIsNone(error)
+        run.assert_not_called()
+
+    def test_reports_missing_repair_script(self):
         root, dest = self._mk()
-        (dest / "node_modules").mkdir()
-        supervisor._provision_worktree_node_modules(root, dest)
-        self.assertFalse((dest / "node_modules").is_symlink())
+        (dest / "scripts" / "ensure-local-node-modules.py").unlink()
+
+        error = supervisor._provision_worktree_node_modules(root, dest)
+
+        self.assertIn("missing node_modules repair script", error)
+
+    def test_reports_repair_failure_details(self):
+        root, dest = self._mk()
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="pnpm install failed",
+            )
+            error = supervisor._provision_worktree_node_modules(root, dest)
+
+        self.assertIn("exit code 1", error)
+        self.assertIn("pnpm install failed", error)

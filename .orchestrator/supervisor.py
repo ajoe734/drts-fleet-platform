@@ -1406,42 +1406,44 @@ def ensure_coordination_workspace(
     return destination.resolve(), None, base_branch, "created_coordination_worktree"
 
 
-def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> None:
-    """Symlink node_modules from the canonical checkout into a fresh task worktree.
+def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> str | None:
+    """Bootstrap local node_modules inside a fresh task worktree.
 
-    Worktrees start empty of node_modules (gitignored) and nothing else provisioned
-    them, so a worker that didn't run a slow `pnpm install` itself failed tsc/next
-    build at closeout → task stranded `blocked`. pnpm's content-addressable store is
-    shared, so symlinks resolve correctly and cost nothing. Best-effort: never raises.
-    See fix/orchestrator-rca-worktree-nm-and-unblock-recursion.
+    Older supervisor provisioning symlinked node_modules back to the canonical
+    checkout. That avoided a per-worktree install, but it breaks the repository's
+    local-node-modules health contract and causes Turbopack to reject app-level
+    node_modules symlinks that escape the worktree root. Best-effort: return an
+    error summary instead of raising so worker dispatch can continue with evidence.
     """
     try:
         if destination.resolve() == repo_root.resolve():
-            return  # canonical fallback already has node_modules
-        src_root = repo_root / "node_modules"
-        if src_root.is_dir():
-            dst_root = destination / "node_modules"
-            if not dst_root.exists():
-                try:
-                    dst_root.symlink_to(src_root)
-                except OSError:
-                    pass
-        for parent in ("apps", "packages"):
-            base = repo_root / parent
-            if not base.is_dir():
-                continue
-            for pkg in base.iterdir():
-                src = pkg / "node_modules"
-                if not src.is_dir():
-                    continue
-                dst = destination / parent / pkg.name / "node_modules"
-                if dst.parent.is_dir() and not dst.exists():
-                    try:
-                        dst.symlink_to(src)
-                    except OSError:
-                        pass
-    except Exception:
-        pass
+            return None  # canonical fallback already has its own node_modules
+        repair_script = destination / "scripts" / "ensure-local-node-modules.py"
+        if not repair_script.is_file():
+            return f"missing node_modules repair script at {repair_script}"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(repair_script),
+                "repair",
+                "--root",
+                str(destination),
+            ],
+            cwd=str(destination),
+            text=True,
+            capture_output=True,
+            timeout=600.0,
+        )
+        if result.returncode == 0:
+            return None
+        detail = (result.stderr or result.stdout or "").strip().replace("\n", " ")
+        detail_suffix = f": {detail[:400]}" if detail else ""
+        return (
+            "local node_modules repair failed with "
+            f"exit code {result.returncode}{detail_suffix}"
+        )
+    except Exception as exc:
+        return f"local node_modules repair raised {exc!r}"
 
 
 def ensure_execution_workspace(
@@ -1496,7 +1498,20 @@ def ensure_execution_workspace(
             },
         )
         return repo_root, branch, base_branch, "fallback_canonical"
-    _provision_worktree_node_modules(repo_root, destination)
+    bootstrap_error = _provision_worktree_node_modules(repo_root, destination)
+    if bootstrap_error:
+        write_activity_log(
+            config,
+            {
+                "type": "worker_workspace_bootstrap_warning",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, request.agent_id),
+                "message": (
+                    "Created isolated worker worktree but could not bootstrap local node_modules. "
+                    f"branch={branch} workspace={destination} detail={bootstrap_error}"
+                ),
+            },
+        )
     return destination.resolve(), branch, base_branch, "created_worktree"
 
 
