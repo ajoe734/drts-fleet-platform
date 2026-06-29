@@ -41,15 +41,15 @@ Current machine-truth fields:
 
 - owner=`Codex2`
 - reviewer=`Codex`
-- status=`in_progress`
+- status=`review_approved`
 - depends_on=`P2-V9-UI-ROC-001`
 - helper_parent=`P2-V9-UI-ROC-002`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
 - artifact=`support/sidecars/P2-V9-UI-ROC-002/P2-V9-UI-ROC-002-SIDECAR-REVIEW.md`
 
-This packet is a support artifact only. Reviewer should confirm transient fields such as
-`status`, `next`, and `last_update` directly via `scripts/ai-status.sh show`.
+This packet is a support artifact only. Closeout should still confirm transient fields
+such as `status`, `next`, and `last_update` directly via `scripts/ai-status.sh show`.
 
 ### Parent task - `P2-V9-UI-ROC-002`
 
@@ -203,7 +203,7 @@ Suggested checks:
 - `git ls-tree -r --name-only origin/codex/p2-v9-ui-roc-002 | grep 'driver-app-9-20260628'`
 - `git diff --check -- support/sidecars/P2-V9-UI-ROC-002/P2-V9-UI-ROC-002-SIDECAR-REVIEW.md`
 
-If approved, reviewer can use:
+Reviewer approval has already been recorded in machine truth via:
 
 `AI_NAME=Codex scripts/ai-status.sh approve P2-V9-UI-ROC-002-SIDECAR-REVIEW "<review conclusion>"`
 
