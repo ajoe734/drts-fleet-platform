@@ -108,15 +108,8 @@ export interface RocProviderPageData {
   usingFallback: boolean;
 }
 
-export interface RocAlertsPageData {
-  alerts: RocAlertViewModel[];
-  refresh: UiRefreshMetadata;
-  usingFallback: boolean;
-}
-
 export interface RocTakeoverPageData {
   takeovers: CorrelatedTakeoverCase[];
-  vehicles: RocVehicleViewModel[];
   alerts: RocAlertViewModel[];
   refresh: UiRefreshMetadata;
   usingFallback: boolean;
@@ -383,35 +376,17 @@ export async function getRocProviderPageData(): Promise<RocProviderPageData> {
   };
 }
 
-export async function getRocAlertsPageData(): Promise<RocAlertsPageData> {
-  const alertsResult = await loadList(
-    "/api/roc/alerts",
-    buildFallbackList(FALLBACK_ALERTS),
-  );
-
-  return {
-    alerts: alertsResult.payload.items.map(resolveAlertViewModel),
-    refresh: alertsResult.payload.refresh,
-    usingFallback: alertsResult.usingFallback,
-  };
-}
-
 export async function getRocTakeoverPageData(): Promise<RocTakeoverPageData> {
-  const [takeoversResult, alertsResult, vehiclesResult] = await Promise.all([
+  const [takeoversResult, alertsResult] = await Promise.all([
     loadList("/api/roc/takeovers", buildFallbackList(FALLBACK_TAKEOVERS)),
     loadList("/api/roc/alerts", buildFallbackList(FALLBACK_ALERTS)),
-    loadList("/api/roc/vehicles", buildFallbackList(FALLBACK_VEHICLES)),
   ]);
 
   return {
     takeovers: takeoversResult.payload.items,
-    vehicles: vehiclesResult.payload.items.map(resolveVehicleViewModel),
     alerts: alertsResult.payload.items.map(resolveAlertViewModel),
     refresh: takeoversResult.payload.refresh,
-    usingFallback:
-      takeoversResult.usingFallback ||
-      alertsResult.usingFallback ||
-      vehiclesResult.usingFallback,
+    usingFallback: takeoversResult.usingFallback || alertsResult.usingFallback,
   };
 }
 
@@ -579,9 +554,7 @@ export async function getRocEvidencePageData(
   };
 }
 
-export async function getRocReportsPageData(
-  locale: Locale = "en",
-): Promise<RocReportsPageData> {
+export async function getRocReportsPageData(): Promise<RocReportsPageData> {
   const [takeoversResult, alertsResult] = await Promise.all([
     loadList("/api/roc/takeovers", buildFallbackList(FALLBACK_TAKEOVERS)),
     loadList("/api/roc/alerts", buildFallbackList(FALLBACK_ALERTS)),
@@ -594,7 +567,7 @@ export async function getRocReportsPageData(
         ? "takeover_discrepancy_package"
         : "takeover_case_summary",
     subject: `${item.vehicleId} · ${item.correlatedTakeoverCaseId}`,
-    windowLabel: formatShortTime(item.sourceTimestamps.safetyOccurredAt, locale),
+    windowLabel: formatShortTime(item.sourceTimestamps.safetyOccurredAt, "en"),
     status:
       item.discrepancyCaseIds.length > 0
         ? ("pending_review" as const)
