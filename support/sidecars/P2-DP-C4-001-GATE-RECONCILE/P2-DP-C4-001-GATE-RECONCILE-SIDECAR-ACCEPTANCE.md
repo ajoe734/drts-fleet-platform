@@ -18,6 +18,9 @@ local rails or superseded unblock notes.
 This refreshed version corrects the sidecar reviewer reference from `Claude2`
 to `Codex2` and re-hands off the packet on the active task branch after the
 previous review attempt failed on stale reviewer metadata.
+The historical unblock helpers are now archived, so this refresh verifies
+their timestamps and closeout evidence from `ai-task-archive.jsonl` rather than
+from the live task board.
 
 ---
 
@@ -50,7 +53,7 @@ Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
 - owner=`Codex`
 - reviewer=`Codex2`
 - status=`in_progress`
-- last_update=`2026-06-29T03:25:32Z`
+- last_update=`2026-06-29T04:06:02Z`
 - helper_parent=`P2-DP-C4-001-GATE-RECONCILE`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
@@ -83,6 +86,8 @@ Machine-truth archive row: `P2-DP-C4-001-GATE-RECONCILE`
 
 The timeline matters here because earlier helper notes can look like live
 blockers if dates are ignored.
+Both helper rows below are archived; the timestamps and closeout metadata were
+verified from `/home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`.
 
 | Timestamp (UTC) | Task | Status at that time | How to treat it now |
 | --- | --- | --- | --- |
@@ -223,9 +228,8 @@ The following checks were performed while preparing this packet:
 - read `AI_COLLABORATION_GUIDE.md`
 - checked machine truth with:
   - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
-  - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR`
-  - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-MANUAL-UNBLOCK`
-  - `grep -m 1 '"id": "P2-DP-C4-001-GATE-RECONCILE"' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
+  - `grep -n '"id": "P2-DP-C4-001-GATE-RECONCILE"' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
+  - `grep -n 'P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
 - inspected current merged code and tests with:
   - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '503,581p'`
   - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '707,777p'`
