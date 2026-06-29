@@ -11,15 +11,6 @@ const nextConfig: NextConfig = {
     "@drts/ui-tokens",
     "@drts/ui-web",
   ],
-  webpack(config) {
-    config.resolve.alias = {
-      ...(config.resolve.alias ?? {}),
-      "@drts/contracts": path.join(__dirname, "../../packages/contracts/src"),
-      "@drts/ui-tokens": path.join(__dirname, "../../packages/ui-tokens/src"),
-    };
-
-    return config;
-  },
 };
 
 export default nextConfig;
