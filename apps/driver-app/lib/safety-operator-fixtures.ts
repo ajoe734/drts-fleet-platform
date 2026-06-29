@@ -10,10 +10,12 @@ import type {
 export const SAFETY_OPERATOR_FIXTURE = {
   safetyOperatorId: "so_2024_0118",
   sandboxProgramId: "exp_fsd_taipei_01",
+  deviceId: "so_tablet_01",
   vehicleId: "AV-7720",
   orderId: "order_av_88231",
   shiftId: "shift_so_260626_am",
   assignmentId: "soa_88231",
+  activeAssignmentId: "soa_88231",
   correlationId: "corr_takeover_88231",
   incidentId: "incident_av_88231",
   bookmarkId: "bookmark_220145",
@@ -21,6 +23,20 @@ export const SAFETY_OPERATOR_FIXTURE = {
   experimentWindow: "08:00-18:00",
   coverageZone: "信義 / 南港 沙盒區",
   operatorName: "陳柏宇",
+  qualified: true,
+  matchedQualificationIds: [
+    "tesla_fsd_sandbox_v9",
+    "taipei_city_autonomy_ops",
+  ],
+  qualificationReasons: [
+    "沙盒資格已核驗",
+    "需在交班前補齊施工區段證據關聯",
+  ],
+  shiftStartedAt: "2026-06-28T08:00:00.000Z",
+  vehicleAssignedAt: "2026-06-28T08:04:00.000Z",
+  systemDetectedTakeoverAt: "2026-06-28T09:18:00.000Z",
+  closeoutEndedAt: "2026-06-28T10:12:00.000Z",
+  endLocationLabel: "台北市信義區松仁路 89 號",
 } as const;
 
 export const SAFETY_OPERATOR_CHECKLIST_TEMPLATE: readonly SafetyOperatorChecklistItem[] =

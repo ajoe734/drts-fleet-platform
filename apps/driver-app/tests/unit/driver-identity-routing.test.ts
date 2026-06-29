@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { resetDriverAppToOnboarding } from "../../lib/driver-identity-routing";
+import {
+  allowUnprovisionedDriverRoute,
+  resetDriverAppToOnboarding,
+} from "../../lib/driver-identity-routing";
 
 describe("resetDriverAppToOnboarding", () => {
   it("dismisses the existing stack before routing to onboarding", () => {
@@ -29,5 +32,19 @@ describe("resetDriverAppToOnboarding", () => {
 
     expect(dismissAll).not.toHaveBeenCalled();
     expect(replace).toHaveBeenCalledWith("/onboarding");
+  });
+});
+
+describe("allowUnprovisionedDriverRoute", () => {
+  it("keeps onboarding, index, and safety-operator routes accessible before provisioning", () => {
+    expect(allowUnprovisionedDriverRoute([])).toBe(true);
+    expect(allowUnprovisionedDriverRoute(["index"])).toBe(true);
+    expect(allowUnprovisionedDriverRoute(["onboarding"])).toBe(true);
+    expect(allowUnprovisionedDriverRoute(["safety-operator"])).toBe(true);
+  });
+
+  it("rejects other driver routes until provisioning is complete", () => {
+    expect(allowUnprovisionedDriverRoute(["trip"])).toBe(false);
+    expect(allowUnprovisionedDriverRoute(["jobs"])).toBe(false);
   });
 });
