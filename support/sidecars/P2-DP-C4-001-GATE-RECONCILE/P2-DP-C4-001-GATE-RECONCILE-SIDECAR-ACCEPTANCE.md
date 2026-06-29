@@ -5,8 +5,8 @@
 **Parent Owner:** `Codex2`  
 **Parent Reviewer:** `Codex`  
 **Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Claude2`  
-**Generated:** `2026-06-28` (UTC)  
+**Sidecar Reviewer:** `Codex2`  
+**Generated:** `2026-06-29` (UTC)  
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; the parent task is already `done` and `merged_to_dev`, and this packet does not reopen or change canonical truth.
 
 This packet was dispatched after the parent task had already closed on
@@ -14,6 +14,10 @@ This packet was dispatched after the parent task had already closed on
 acceptance checklist, dependency map, and branch-history cautions into one
 reviewer-facing support artifact so later follow-up work does not rely on stale
 local rails or superseded unblock notes.
+
+This refreshed version corrects the sidecar reviewer reference from `Claude2`
+to `Codex2` and re-hands off the packet on the active task branch after the
+previous review attempt failed on stale reviewer metadata.
 
 ---
 
@@ -39,13 +43,14 @@ Out of scope:
 
 ## 2. Machine Truth Anchors
 
-### 2.1 Sidecar task snapshot at authoring start
+### 2.1 Sidecar task snapshot at refresh time
 
 Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex`
-- reviewer=`Claude2`
+- reviewer=`Codex2`
 - status=`in_progress`
+- last_update=`2026-06-29T03:25:32Z`
 - helper_parent=`P2-DP-C4-001-GATE-RECONCILE`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
@@ -55,9 +60,9 @@ Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
   - `Do not edit canonical truth`
   - `Hand off the packet to the assigned reviewer`
 
-### 2.2 Parent task snapshot
+### 2.2 Parent task archived snapshot
 
-Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE`
+Machine-truth archive row: `P2-DP-C4-001-GATE-RECONCILE`
 
 - status=`done`
 - owner=`Codex2`
@@ -67,6 +72,7 @@ Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE`
 - commit_subject=`closeout(P2-DP-C4-001-GATE-RECONCILE): finalize review-approved owner handoff`
 - push_ref=`origin/codex2/p2-dp-c4-001-gate-reconcile`
 - integration_status=`merged_to_dev`
+- merged_ref=`origin/dev`
 - merge_commit=`24435d436448d48f496cd2d796e5398435d3d8d4`
 - artifacts:
   - `apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts`
@@ -187,22 +193,25 @@ editing canonical implementation files.
 | --- | --- | --- |
 | Create support artifacts only | PASS | Output is limited to `support/sidecars/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE.md`. |
 | Do not edit canonical truth | PASS | This packet summarizes machine truth and merged evidence only; it does not modify parent runtime, contracts, or L1 product docs. |
-| Hand off the packet to the assigned reviewer | READY | Packet includes the parent evidence summary, dependency map, supersession timeline, and reviewer-specific cautions needed for `Claude2` approval. |
+| Hand off the packet to the assigned reviewer | READY | Packet includes the parent evidence summary, dependency map, supersession timeline, and reviewer-specific cautions needed for `Codex2` approval. |
 
 ---
 
-## 7. Reviewer Checklist For `Claude2`
+## 7. Reviewer Checklist For `Codex2`
 
-1. Confirm the packet stays support-only and does not claim any new canonical
+1. Confirm this refreshed packet consistently names `Codex2` as the sidecar
+   reviewer and no longer carries the stale `Claude2` references from the
+   failed handoff.
+2. Confirm the packet stays support-only and does not claim any new canonical
    implementation change.
-2. Confirm the latest machine-truth authority is the parent `done` row dated
+3. Confirm the latest machine-truth authority is the parent `done` row dated
    `2026-06-27T07:49:08Z`, not the older unblock-helper notes from
    `07:36:18Z` or `07:42:48Z`.
-3. Confirm the acceptance expansion accurately distinguishes current in-tree
+4. Confirm the acceptance expansion accurately distinguishes current in-tree
    code/test evidence from recorded closeout verification.
-4. Confirm future follow-up guidance points to fresh branches from `origin/dev`
+5. Confirm future follow-up guidance points to fresh branches from `origin/dev`
    rather than the contaminated local parent-stem branches.
-5. If satisfied, approve this sidecar without reopening the already-closed
+6. If satisfied, approve this sidecar without reopening the already-closed
    parent task.
 
 ---
@@ -214,9 +223,9 @@ The following checks were performed while preparing this packet:
 - read `AI_COLLABORATION_GUIDE.md`
 - checked machine truth with:
   - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
-  - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE`
   - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR`
   - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-MANUAL-UNBLOCK`
+  - `grep -m 1 '"id": "P2-DP-C4-001-GATE-RECONCILE"' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
 - inspected current merged code and tests with:
   - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '503,581p'`
   - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '707,777p'`
@@ -237,9 +246,11 @@ No runtime tests were rerun in this helper task.
 
 ## 9. Handoff Note
 
-Ready for reviewer: `Claude2`
+Ready for reviewer: `Codex2`
 
 This sidecar should be reviewed as a support packet only. The parent task
 `P2-DP-C4-001-GATE-RECONCILE` is already closed and merged; the reviewer is
 being asked to validate packet completeness, citation accuracy, and branch-rail
-guidance, not to re-litigate the parent implementation itself.
+guidance, not to re-litigate the parent implementation itself. This refreshed
+handoff specifically repairs the stale reviewer metadata that broke the prior
+review attempt.
