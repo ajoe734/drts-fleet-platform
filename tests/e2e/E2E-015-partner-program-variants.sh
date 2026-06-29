@@ -37,7 +37,39 @@ SCENARIO="E2E-015"
 chain_init
 
 TMP_DIR="$(mktemp -d /tmp/drts-e2e-015-XXXXXX)"
+ORIGINAL_MATRIX_FILE="${TMP_DIR}/original-vehicle-eligibility-matrix.json"
+MATRIX_FIXTURE="${TMP_DIR}/e2e-015-vehicle-eligibility-matrix.json"
+SERVICE_PRODUCT_RESTORE_DIR="${TMP_DIR}/service-products"
+SUPPLY_CONFIG_RESTORE_NEEDED=false
 cleanup() {
+  if [[ "${SUPPLY_CONFIG_RESTORE_NEEDED}" == "true" ]]; then
+    log_warn "Cleanup: restoring E2E-015 runtime supply configuration."
+    switch_actor "platform_admin" "e2e-platform-admin-015-cleanup"
+
+    if [[ -f "$ORIGINAL_MATRIX_FILE" ]]; then
+      http_call PUT "/admin/vehicle-eligibility-matrix" "$ORIGINAL_MATRIX_FILE"
+      if [[ "${RESP_STATUS:-}" =~ ^(200|201)$ ]]; then
+        log_ok "Cleanup restored vehicle eligibility matrix."
+      else
+        log_warn "Cleanup could not restore vehicle eligibility matrix. HTTP ${RESP_STATUS:-unknown}"
+        log_warn "Body: ${RESP_BODY:-<empty>}"
+      fi
+    fi
+
+    if [[ -d "$SERVICE_PRODUCT_RESTORE_DIR" ]]; then
+      while IFS= read -r restore_file; do
+        service_product_id="$(basename "$restore_file" .json)"
+        http_call PUT "/admin/service-products/${service_product_id}" "$restore_file"
+        if [[ "${RESP_STATUS:-}" =~ ^(200|201)$ ]]; then
+          log_ok "Cleanup restored service product ${service_product_id}."
+        else
+          log_warn "Cleanup could not restore service product ${service_product_id}. HTTP ${RESP_STATUS:-unknown}"
+          log_warn "Body: ${RESP_BODY:-<empty>}"
+        fi
+      done < <(find "$SERVICE_PRODUCT_RESTORE_DIR" -type f -name "*.json" | sort)
+    fi
+  fi
+
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -466,6 +498,90 @@ ensure_service_product_active() {
   log_ok "${kind} service product active for booking guard: ${service_product_id}"
 }
 
+ensure_runtime_supply_config() {
+  local kind="$1"
+  local subtype="$2"
+
+  mkdir -p "$SERVICE_PRODUCT_RESTORE_DIR"
+
+  log_step "${kind}.0b - prepare runtime supply for ${subtype}"
+  http_call GET "/admin/service-products"
+  assert_status "200"
+
+  local service_product_id restore_file update_file
+  service_product_id=$(echo "$RESP_BODY" | jq -r --arg type "$subtype" \
+    '.data.items[] | select((.serviceProductType // .service_product_type) == $type) | (.serviceProductId // .service_product_id)' \
+    2>/dev/null | head -1 || true)
+  assert_non_empty "${kind} runtime supply serviceProductId" "$service_product_id"
+
+  restore_file="${SERVICE_PRODUCT_RESTORE_DIR}/${service_product_id}.json"
+  update_file="${TMP_DIR}/${kind}-service-product-runtime-supply.json"
+  if [[ ! -f "$restore_file" ]]; then
+    echo "$RESP_BODY" | jq --arg id "$service_product_id" '
+      def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase));
+      (.data.items[] | select((.serviceProductId // .service_product_id) == $id) | camel) as $item
+      | {
+          displayName: $item.displayName,
+          description: $item.description,
+          timing: $item.timing,
+          active: $item.active,
+          allowedLicenseTypes: $item.allowedLicenseTypes,
+          meterRequired: $item.meterRequired,
+          fixedFareAllowed: $item.fixedFareAllowed,
+          defaultBillingMode: $item.defaultBillingMode,
+          defaultProofRequirements: $item.defaultProofRequirements
+        }
+    ' > "$restore_file"
+  fi
+
+  echo "$RESP_BODY" | jq --arg id "$service_product_id" '
+    def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase));
+    (.data.items[] | select((.serviceProductId // .service_product_id) == $id) | camel) as $item
+    | {
+        displayName: $item.displayName,
+        description: $item.description,
+        timing: $item.timing,
+        active: true,
+        allowedLicenseTypes: ((($item.allowedLicenseTypes // []) + ["multi_purpose_taxi"]) | unique),
+        meterRequired: $item.meterRequired,
+        fixedFareAllowed: $item.fixedFareAllowed,
+        defaultBillingMode: $item.defaultBillingMode,
+        defaultProofRequirements: $item.defaultProofRequirements
+      }
+  ' > "$update_file"
+
+  http_call PUT "/admin/service-products/${service_product_id}" "$update_file"
+  assert_status "200|201"
+  SUPPLY_CONFIG_RESTORE_NEEDED=true
+
+  http_call GET "/admin/vehicle-eligibility-matrix"
+  assert_status "200"
+  if [[ ! -f "$ORIGINAL_MATRIX_FILE" ]]; then
+    echo "$RESP_BODY" | jq 'def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase)); {items: ((.data.items // []) | map(camel))}' > "$ORIGINAL_MATRIX_FILE"
+  fi
+
+  echo "$RESP_BODY" | jq --arg subtype "$subtype" --arg now "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '
+    def camel: with_entries(.key |= gsub("_(?<x>[a-z])"; .x | ascii_upcase));
+    {
+      items: ((.data.items // []) | map(camel) | map(
+        if .licenseType == "multi_purpose_taxi" then
+          .supportedProducts = (((.supportedProducts // []) + [$subtype]) | unique)
+          | .airportPermit = true
+          | .businessDispatchEligible = true
+          | .fixedFareAllowed = true
+          | .active = true
+          | .updatedAt = $now
+        else . end
+      ))
+    }
+  ' > "$MATRIX_FIXTURE"
+
+  http_call PUT "/admin/vehicle-eligibility-matrix" "$MATRIX_FIXTURE"
+  assert_status "200|201"
+  save_evidence "$SCENARIO" "$kind" "runtimeSupplyVehicleLicense" "multi_purpose_taxi"
+  log_ok "${kind} runtime supply can use multi_purpose_taxi for ${subtype}"
+}
+
 assert_reference_token_blocks_booking() {
   local kind="$1"
   local subtype="$2"
@@ -560,6 +676,7 @@ run_variant_case() {
 
   switch_actor "platform_admin" "e2e-platform-admin-015"
   ensure_service_product_active "$kind" "$subtype" "$display_name"
+  ensure_runtime_supply_config "$kind" "$subtype"
   write_entry_fixture \
     "$entry_fixture" \
     "$partner_code" \
