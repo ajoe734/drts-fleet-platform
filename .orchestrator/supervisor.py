@@ -1446,6 +1446,33 @@ def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> str 
         return f"local node_modules repair raised {exc!r}"
 
 
+def _bootstrap_worktree_node_modules(
+    config: dict[str, Any],
+    request: DeliveryRequest,
+    repo_root: Path,
+    destination: Path,
+    *,
+    branch: str,
+    source: str,
+) -> None:
+    bootstrap_error = _provision_worktree_node_modules(repo_root, destination)
+    if not bootstrap_error:
+        return
+    action = "Created" if source == "created_worktree" else "Reused"
+    write_activity_log(
+        config,
+        {
+            "type": "worker_workspace_bootstrap_warning",
+            "task_id": request.task_id,
+            "target_agent": display_name_for(config, request.agent_id),
+            "message": (
+                f"{action} isolated worker worktree but could not bootstrap local node_modules. "
+                f"branch={branch} workspace={destination} detail={bootstrap_error}"
+            ),
+        },
+    )
+
+
 def ensure_execution_workspace(
     config: dict[str, Any],
     request: DeliveryRequest,
@@ -1465,11 +1492,27 @@ def ensure_execution_workspace(
     base = _worker_worktree_base(config, repo_root)
     existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
     if existing is not None:
+        _bootstrap_worktree_node_modules(
+            config,
+            request,
+            repo_root,
+            existing,
+            branch=branch,
+            source="existing_worktree",
+        )
         return existing, branch, base_branch, "existing_worktree"
 
     base.mkdir(parents=True, exist_ok=True)
     destination = _candidate_worktree_path(base, request.agent_id, request.task_id)
     if destination.exists() and _current_branch(destination) == branch:
+        _bootstrap_worktree_node_modules(
+            config,
+            request,
+            repo_root,
+            destination,
+            branch=branch,
+            source="existing_path",
+        )
         return destination.resolve(), branch, base_branch, "existing_path"
 
     branch_checked_out = _worktree_for_branch(repo_root, branch) is not None
@@ -1498,20 +1541,14 @@ def ensure_execution_workspace(
             },
         )
         return repo_root, branch, base_branch, "fallback_canonical"
-    bootstrap_error = _provision_worktree_node_modules(repo_root, destination)
-    if bootstrap_error:
-        write_activity_log(
-            config,
-            {
-                "type": "worker_workspace_bootstrap_warning",
-                "task_id": request.task_id,
-                "target_agent": display_name_for(config, request.agent_id),
-                "message": (
-                    "Created isolated worker worktree but could not bootstrap local node_modules. "
-                    f"branch={branch} workspace={destination} detail={bootstrap_error}"
-                ),
-            },
-        )
+    _bootstrap_worktree_node_modules(
+        config,
+        request,
+        repo_root,
+        destination,
+        branch=branch,
+        source="created_worktree",
+    )
     return destination.resolve(), branch, base_branch, "created_worktree"
 
 

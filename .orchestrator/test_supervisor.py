@@ -497,7 +497,10 @@ class ExecutionWorkspaceTests(unittest.TestCase):
     def _repo_config(self, root: Path) -> dict:
         (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
         return {
-            "paths": {"status_file": str(root / "ai-status.json")},
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+            },
             "agents": {
                 "codex2": {
                     "id": "codex2",
@@ -539,16 +542,59 @@ class ExecutionWorkspaceTests(unittest.TestCase):
                 task_id="PBK-UI-003",
                 metadata={"mode": "execution"},
             )
-            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
-                self._repo_config(root),
-                request,
-                supervisor.route_task("PBK-UI-003"),
-            )
+            with mock.patch.object(
+                supervisor,
+                "_provision_worktree_node_modules",
+                return_value=None,
+            ) as provision:
+                workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                    self._repo_config(root),
+                    request,
+                    supervisor.route_task("PBK-UI-003"),
+                )
 
             self.assertEqual(workspace, existing.resolve())
             self.assertEqual(branch, "codex2/pbk-ui-003")
             self.assertEqual(base_branch, "dev")
             self.assertEqual(source, "existing_worktree")
+            provision.assert_called_once_with(root.resolve(), existing.resolve())
+
+    def test_bootstraps_existing_path_when_reusing_task_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            destination = root / ".artifacts/worktrees/auto/codex2-pbk-ui-003"
+            destination.mkdir(parents=True)
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            with (
+                mock.patch.object(supervisor, "_worktree_for_branch", return_value=None),
+                mock.patch.object(supervisor, "_current_branch", return_value="codex2/pbk-ui-003"),
+                mock.patch.object(
+                    supervisor,
+                    "_provision_worktree_node_modules",
+                    return_value=None,
+                ) as provision,
+            ):
+                workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                    self._repo_config(root),
+                    request,
+                    supervisor.route_task("PBK-UI-003"),
+                )
+
+            self.assertEqual(workspace, destination.resolve())
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_path")
+            provision.assert_called_once_with(root.resolve(), destination)
 
     def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
