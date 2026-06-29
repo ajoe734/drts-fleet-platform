@@ -1,75 +1,54 @@
 # P2-DP-C4-001-GATE-RECONCILE Acceptance Packet
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `P2-DP-C4-001-GATE-RECONCILE` - Reconcile restored full dispatch gate: ROC service-fallback reasonCode flow + 2 stub-era tests (#951)  
-**Parent Owner:** `Codex2`  
-**Parent Reviewer:** `Codex`  
-**Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Codex2`  
-**Generated:** `2026-06-29` (UTC)  
-**Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; the parent task is already `done` and `merged_to_dev`, and this packet does not reopen or change canonical truth.
-
-This packet was dispatched after the parent task had already closed on
-`2026-06-27`. Its purpose is narrower than a parent review packet: freeze the
-acceptance checklist, dependency map, and branch-history cautions into one
-reviewer-facing support artifact so later follow-up work does not rely on stale
-local rails or superseded unblock notes.
-
-This refreshed version removes the earlier `Claude2` residue and re-aligns the
-packet to the live sidecar review row after repeated review bounces on stale
-owner/reviewer/status metadata.
-The historical unblock helpers are now archived, so this refresh verifies
-their timestamps and closeout evidence from `ai-task-archive.jsonl` rather than
-from the live task board.
-
----
+**Sidecar Kind:** `acceptance_packet`
+**Parent Task:** `P2-DP-C4-001-GATE-RECONCILE`
+**Parent Owner / Reviewer:** `Codex2` / `Codex`
+**Sidecar Owner / Reviewer:** `Codex` / `Codex2`
+**Generated:** `2026-06-29` (UTC)
+**Purpose:** support-only acceptance packet for an already closed parent task. This artifact freezes the acceptance checklist, dependency map, and reviewer handoff context without modifying canonical truth.
 
 ## 1. Scope Boundary
 
 In scope:
 
-- restate the sidecar acceptance lines from machine truth as a reviewer-ready
-  checklist
-- pin the canonical parent delivery rail, closeout commit, and merge evidence
-- map the historical unblock helpers and explain which notes are now superseded
-- capture the current `dev` snapshot evidence that the ROC restriction merge
-  path and the two cited integration tests still exist in-tree
+- restate the parent acceptance line as reviewer-checkable evidence slices
+- pin the authoritative parent closeout, merge, and branch-hygiene rails
+- map the archived helper artifacts by supersession order
+- record the current in-tree code and test anchors that still reflect the merged parent result
 
 Out of scope:
 
-- modifying parent runtime code, tests, contracts, or task-board semantics
-- rewriting the already-merged parent delivery history
-- reviving deleted task-head branches or treating stale local branches as valid
-  resume rails
+- modifying runtime code, tests, contracts, or task-board semantics
+- reopening the already closed parent task
+- treating stale local task-stem branches as valid resume rails
 
----
+## 2. Authority Chain
 
-## 2. Machine Truth Anchors
+### 2.1 Sidecar live-row snapshot at generation time
 
-### 2.1 Sidecar task snapshot at handoff time
-
-Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
+`AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
+returned:
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`review`
-- last_update=`2026-06-29T04:24:07Z`
+- status=`in_progress`
+- last_update=`2026-06-29T04:25:51Z`
 - helper_parent=`P2-DP-C4-001-GATE-RECONCILE`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
 - artifact=`support/sidecars/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE.md`
-- acceptance:
-  - `Create support artifacts only`
-  - `Do not edit canonical truth`
-  - `Hand off the packet to the assigned reviewer`
 
-### 2.2 Parent task archived snapshot
+This packet is the only task-owned file for the sidecar. Reviewer handoff is
+performed through machine truth after the owner commit/push, not by editing any
+canonical product files.
 
-Machine-truth archive row: `P2-DP-C4-001-GATE-RECONCILE`
+### 2.2 Parent archived closeout authority
 
+`/home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl` records the
+authoritative parent row:
+
+- task=`P2-DP-C4-001-GATE-RECONCILE`
 - status=`done`
-- owner=`Codex2`
-- reviewer=`Codex`
 - last_update=`2026-06-27T07:49:08Z`
 - commit_hash=`52c6eff4f532a717087b9023a13c933c035ac178`
 - commit_subject=`closeout(P2-DP-C4-001-GATE-RECONCILE): finalize review-approved owner handoff`
@@ -77,25 +56,34 @@ Machine-truth archive row: `P2-DP-C4-001-GATE-RECONCILE`
 - integration_status=`merged_to_dev`
 - merged_ref=`origin/dev`
 - merge_commit=`24435d436448d48f496cd2d796e5398435d3d8d4`
-- artifacts:
-  - `apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts`
-  - `apps/api/tests/integration/int-roc-001-operational-actions.test.ts`
-  - `apps/api/tests/integration/e2e-p2-008-human-fallback.test.ts`
 
-### 2.3 Historical unblock helpers and supersession order
+The same archived row records the parent artifacts:
 
-The timeline matters here because earlier helper notes can look like live
-blockers if dates are ignored.
-Both helper rows below are archived; the timestamps and closeout metadata were
-verified from `/home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`.
+- `apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts`
+- `apps/api/tests/integration/int-roc-001-operational-actions.test.ts`
+- `apps/api/tests/integration/e2e-p2-008-human-fallback.test.ts`
 
-| Timestamp (UTC) | Task | Status at that time | How to treat it now |
+### 2.3 Supersession timeline
+
+Older helper notes remain useful only when read with their timestamps:
+
+| Timestamp (UTC) | Task | Status | How to treat it now |
 | --- | --- | --- | --- |
-| `2026-06-27T07:36:18Z` | `P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-MANUAL-UNBLOCK` | `done` | Historical only. Its note that the parent still awaited a PostGIS reland was true then, but it is superseded by the later parent `done` row. |
-| `2026-06-27T07:42:48Z` | `P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR` | `done` | Still relevant as branch-hygiene evidence. It documents which local task-stem branches are contaminated or audit-only. |
-| `2026-06-27T07:49:08Z` | `P2-DP-C4-001-GATE-RECONCILE` | `done` + `merged_to_dev` | Latest machine-truth authority. Review should prefer this row over older unblock notes. |
+| `2026-06-27T07:36:18Z` | `P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-MANUAL-UNBLOCK` | `done` | Historical only. Its "parent still blocked by PostGIS reland" note was true then, but it is superseded by the later parent `done` row. |
+| `2026-06-27T07:42:48Z` | `P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR` | `done` | Still relevant for branch-hygiene guidance. It documents which same-stem local branches are stale or contaminated. |
+| `2026-06-27T07:49:08Z` | `P2-DP-C4-001-GATE-RECONCILE` | `done` + `merged_to_dev` | Latest machine-truth authority. Review should prefer this row over the older helper notes. |
 
----
+### 2.4 Current `dev` ancestry check
+
+At packet generation time:
+
+- `origin/dev` resolves to `7bd059d626e7f5ba738b554d7fa25e05aaaac65a`
+- `git merge-base --is-ancestor 24435d436448d48f496cd2d796e5398435d3d8d4 HEAD` returned success
+
+Reviewer implication:
+
+- the parent merge commit remains on the current ancestry rail
+- this packet is inspecting still-present merged behavior, not a detached or stale local reconstruction
 
 ## 3. Dependency Map
 
@@ -105,159 +93,98 @@ This sidecar has no formal `depends_on` entries.
 
 Reviewer implication:
 
-- no upstream task remains blocking the creation of this packet
-- the packet is summarizing already-landed parent evidence, not waiting for a
-  new implementation slice to finish
+- nothing upstream blocks creation of this packet
+- the packet summarizes already-landed parent evidence rather than waiting for another implementation slice
 
 ### 3.2 Informative evidence inputs
 
 | Input | Status | Why it matters |
 | --- | --- | --- |
-| Parent task `P2-DP-C4-001-GATE-RECONCILE` | `done` / `merged_to_dev` | This is the authoritative record that the gate-reconcile work closed successfully. |
-| Merge commit `24435d436448d48f496cd2d796e5398435d3d8d4` | present on current branch ancestry | This is the canonical delivered rail on `origin/dev`, with subject `P2-DP-C4-001: reconcile restored full dispatch gate (#977)`. |
-| Owner closeout commit `52c6eff4f532a717087b9023a13c933c035ac178` | recorded in machine truth | This preserves the final verification command set tied to the parent `done` transition. |
-| `P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR` artifact | `done`, support-only | This explains why future work must not resume from local `codex/...-gate-reconcile` or `codex2/...-gate-reconcile` task-stem branches. |
+| Parent archive row `P2-DP-C4-001-GATE-RECONCILE` | `done` / `merged_to_dev` | Authoritative closeout record for the parent task. |
+| Merge commit `24435d436448d48f496cd2d796e5398435d3d8d4` | present in current ancestry | Canonical delivered rail on `origin/dev`. |
+| Closeout commit `52c6eff4f532a717087b9023a13c933c035ac178` | archived on the parent row | Preserves the owner closeout verification command set. |
+| History-repair helper artifact | `done`, support-only | Documents that stale same-stem local branches must not be reused for follow-up work. |
+| Current service and integration-test files | present in-tree | Show that the merged ROC reconciliation paths and both cited tests still exist in the current snapshot. |
 
-### 3.3 Safe follow-up rule
+### 3.3 Resume-rail caution
 
-The unblock-history-repair artifact
 `support/unblock/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR.md`
-documents that:
+records that:
 
 - `origin/dev @ 24435d436448...` is the only canonical parent delivery rail
-- local `codex2/p2-dp-c4-001-gate-reconcile` is audit evidence only
-- local `codex/p2-dp-c4-001-gate-reconcile` is a contaminated stray ref from
-  another task
+- local `codex2/p2-dp-c4-001-gate-reconcile` is audit-only
+- local `codex/p2-dp-c4-001-gate-reconcile` is a contaminated stray ref
 
 Reviewer implication:
 
-- if any follow-up is ever needed, it should branch from current `origin/dev`,
-  not from either stale local parent-stem branch
-
----
+- if a follow-up task is ever opened, it should branch from current `origin/dev`
+- follow-up work should not resume from either stale local parent-stem branch
 
 ## 4. Parent Acceptance Expansion
 
-The parent task has one compact machine-truth acceptance line. This section
-expands it into reviewer-checkable slices without changing the parent result.
+The parent archive row carries one compressed acceptance line:
+
+> `#951 all required checks green; ROC stop-new-dispatch + operational-hold reflected in gate hardReasonCodes; full safety gate restored on dev (line count back to ~1483 not 93); no safety check silently bypassed`
+
+This section expands that line into evidence slices without changing the parent
+result.
 
 | Acceptance slice | Evidence mode | Evidence |
 | --- | --- | --- |
-| ROC stop-new-dispatch and operational-hold restrictions are merged into gate input before evaluation | present in current `dev` snapshot | `apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts:503-580` merges `input.roc` with service restrictions and stores the merged result on `roc`; `:707-777` repeats that merge during normalization so the evaluated gate input contains merged `reasonCodes`, `stopNewDispatchActive`, and `operationalHoldActive`. |
-| ROC hard reason codes actually drive blocking decisions | present in current `dev` snapshot | `sandbox-dispatch-gate.service.ts:861` appends `input.roc.reasonCodes`; `:1485-1516` computes `hardReasonCodes` from the normalized input and returns a blocking decision when any hard reason exists. |
-| ROC operational-actions integration test asserts both ROC hard-reason codes | present in current `dev` snapshot | `apps/api/tests/integration/int-roc-001-operational-actions.test.ts:223-228` expects `ROC_STOP_NEW_DISPATCH` and `ROC_OPERATIONAL_HOLD` in `decision.hardReasonCodes`. |
-| Human-fallback integration test asserts the dual ROC hard-reason path after fallback activation | present in current `dev` snapshot | `apps/api/tests/integration/e2e-p2-008-human-fallback.test.ts:464-469` expects the evaluated decision to block with `ROC_STOP_NEW_DISPATCH` and `ROC_OPERATIONAL_HOLD`. |
-| Full gate is restored on `dev`, not the old stub-era shape | present in current `dev` snapshot | `apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts` is currently `1551` lines long (`wc -l`), which is consistent with the restored full-gate shape and not the old ~93-line stub noted in the parent summary. |
-| Required verification suite was green at parent closeout | recorded verification, not rerun by this helper | Merge commit `24435d436...` records `pnpm vitest run tests/unit/sandbox-dispatch-gate.service.test.ts tests/integration/int-roc-001-operational-actions.test.ts tests/integration/e2e-p2-008-human-fallback.test.ts`; closeout commit `52c6eff4f...` records the broader five-test vitest closeout run. |
+| ROC service restrictions are merged before evaluation | present in current tree | `apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts:503-580` merges `input.roc` with `rocOperationsService` restrictions and returns `roc: mergedRocRestriction`. |
+| Normalized evaluation input preserves merged ROC fields | present in current tree | `sandbox-dispatch-gate.service.ts:707-777` rebuilds normalized `roc` from `mergedRocRestriction`, including `reasonCodes`, `stopNewDispatchActive`, `operationalHoldActive`, and `humanFallbackActive`. |
+| ROC reason codes feed the hard-reason decision path | present in current tree | `sandbox-dispatch-gate.service.ts:861` appends `input.roc.reasonCodes`; `:1485-1516` computes `hardReasonCodes` from the normalized input and blocks when any hard reason exists. |
+| ROC operational-actions integration test still asserts both ROC hard reasons | present in current tree | `apps/api/tests/integration/int-roc-001-operational-actions.test.ts:223-229` expects `ROC_STOP_NEW_DISPATCH` and `ROC_OPERATIONAL_HOLD` in `decision.hardReasonCodes`. |
+| Human-fallback integration test still asserts the dual ROC hard-reason path | present in current tree | `apps/api/tests/integration/e2e-p2-008-human-fallback.test.ts:464-469` expects a blocking decision containing `ROC_STOP_NEW_DISPATCH` and `ROC_OPERATIONAL_HOLD`. |
+| Full gate remains restored, not the old stub-era file | present in current tree | `wc -l apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts` returned `1551`, which is consistent with the restored full-gate shape and not the earlier ~93-line stub. |
+| Parent verification commands were recorded at closeout | recorded in parent history | Merge commit `24435d436...` records the three-file vitest verification run. Closeout commit `52c6eff4f...` records the five-file owner re-verification run. |
 
-### Reviewer note on evidence mode
+### 4.1 Evidence-mode distinction
 
-This helper task did not rerun the parent suite. The packet intentionally
-separates:
+This sidecar did not rerun the parent test suite. The packet intentionally
+separates two evidence classes:
 
-- current repository evidence: code paths and test assertions still present on
-  the merged `dev` snapshot
-- recorded verification evidence: command lines captured in the parent merge
-  and closeout commits
+- current repository evidence: code paths and test assertions still present in-tree
+- recorded closeout evidence: verification commands captured in the parent merge and closeout commits
 
-That distinction matters because this sidecar is support-only and does not
-claim a fresh runtime revalidation of the already-closed parent.
+That separation is required because this sidecar is support-only and must not
+claim fresh canonical revalidation of an already closed parent task.
 
----
-
-## 5. Branch and Resume Rail Cautions
-
-The most useful non-parent evidence in this packet is the branch-history guard
-captured by the unblock-history-repair helper.
-
-### 5.1 What the history-repair artifact proves
-
-`support/unblock/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR.md:17-40`
-records that the parent had already landed on `origin/dev`, while a same-stem
-local branch under `codex/...` pointed at an unrelated ROC planning commit.
-
-`...UNBLOCK-HISTORY-REPAIR.md:107-132` then codifies the non-destructive repair
-path:
-
-- trust merged `origin/dev`
-- treat `codex2/...-gate-reconcile` as audit-only
-- treat `codex/...-gate-reconcile` as contaminated and unusable for resume
-
-### 5.2 Why this belongs in the acceptance packet
-
-Without this note, a reviewer or follow-up owner could mistakenly reconstruct
-acceptance from the wrong local rail and conclude the parent was still blocked
-or missing commits. The history-repair artifact closes that ambiguity without
-editing canonical implementation files.
-
----
-
-## 6. Sidecar Acceptance Checklist
+## 5. Sidecar Acceptance Checklist
 
 | Sidecar acceptance item | Result | Evidence |
 | --- | --- | --- |
-| Create support artifacts only | PASS | Output is limited to `support/sidecars/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE.md`. |
-| Do not edit canonical truth | PASS | This packet summarizes machine truth and merged evidence only; it does not modify parent runtime, contracts, or L1 product docs. |
-| Hand off the packet to the assigned reviewer | PASS | Packet includes the parent evidence summary, dependency map, supersession timeline, and reviewer-specific cautions needed for `Codex2` review, and the task is now in `review`. |
+| Create support artifacts only | PASS | Output is limited to `support/sidecars/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE.md` plus machine-truth status updates through `scripts/ai-status.sh`. |
+| Do not edit canonical truth | PASS | No runtime, contract, or product-truth file is modified. This packet summarizes archive rows, existing support artifacts, and in-tree evidence only. |
+| Hand off the packet to the assigned reviewer | READY | Reviewer target is `Codex2`. Formal handoff is completed through `AI_NAME=Codex scripts/ai-status.sh handoff ...` after the task-scoped commit/push. |
 
----
+## 6. Reviewer Checklist For `Codex2`
 
-## 7. Reviewer Checklist For `Codex2`
+1. Confirm the packet treats the archived parent `done` row from `2026-06-27T07:49:08Z` as the highest authority, not the earlier unblock-helper notes.
+2. Confirm the packet stays support-only and does not claim any new canonical implementation change.
+3. Confirm the dependency map correctly distinguishes formal dependencies (`none`) from informative evidence inputs (parent archive row, merge commit, closeout commit, history-repair helper, current in-tree code/tests).
+4. Confirm the acceptance expansion accurately separates current in-tree evidence from recorded parent verification.
+5. Confirm the resume-rail guidance points any future follow-up to fresh branches from `origin/dev`, not to the stale local parent-stem branches documented by the history-repair helper.
+6. If satisfied, approve this sidecar without reopening the already closed parent task.
 
-1. Confirm this refreshed packet consistently names `Codex` as the sidecar
-   owner, `Codex2` as the sidecar reviewer, `review` as the active sidecar
-   status, and no longer carries the stale `Claude2` residue or earlier
-   owner/reviewer inversions from the failed handoffs.
-2. Confirm the packet stays support-only and does not claim any new canonical
-   implementation change.
-3. Confirm the latest machine-truth authority is the parent `done` row dated
-   `2026-06-27T07:49:08Z`, not the older unblock-helper notes from
-   `07:36:18Z` or `07:42:48Z`.
-4. Confirm the acceptance expansion accurately distinguishes current in-tree
-   code/test evidence from recorded closeout verification.
-5. Confirm future follow-up guidance points to fresh branches from `origin/dev`
-   rather than the contaminated local parent-stem branches.
-6. If satisfied, approve this sidecar without reopening the already-closed
-   parent task.
+## 7. Author Verification
 
----
+The following checks were run while preparing this packet:
 
-## 8. Author Verification
-
-The following checks were performed while preparing this packet:
-
-- read `AI_COLLABORATION_GUIDE.md`
-- checked machine truth with:
-  - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
-  - `AI_NAME=Codex scripts/ai-status.sh handoff P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE Codex2 "<packet-ready summary>"`
-  - `grep -n '"id": "P2-DP-C4-001-GATE-RECONCILE"' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
-  - `grep -n 'P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
-  - `grep -n 'P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE' /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl | tail -n 40`
-- inspected current merged code and tests with:
-  - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '503,581p'`
-  - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '707,777p'`
-  - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '856,866p'`
-  - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '1483,1518p'`
-  - `nl -ba apps/api/tests/integration/int-roc-001-operational-actions.test.ts | sed -n '220,228p'`
-  - `nl -ba apps/api/tests/integration/e2e-p2-008-human-fallback.test.ts | sed -n '460,470p'`
-- inspected commit evidence with:
-  - `git show --stat --summary --no-patch 24435d436448d48f496cd2d796e5398435d3d8d4`
-  - `git show --stat --summary --no-patch 52c6eff4f532a717087b9023a13c933c035ac178`
-  - `git show --stat --summary --no-patch 7ea246211ff29c39aec8f71c140b22989ef9628c`
-- checked restored service-file size with:
-  - `wc -l apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts`
+- `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
+- `grep -n 'P2-DP-C4-001-GATE-RECONCILE' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
+- `sed -n '1,260p' support/unblock/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-HISTORY-REPAIR.md`
+- `git merge-base --is-ancestor 24435d436448d48f496cd2d796e5398435d3d8d4 HEAD`
+- `git rev-parse origin/dev`
+- `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '503,581p'`
+- `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '707,777p'`
+- `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '856,866p'`
+- `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '1483,1518p'`
+- `nl -ba apps/api/tests/integration/int-roc-001-operational-actions.test.ts | sed -n '220,230p'`
+- `nl -ba apps/api/tests/integration/e2e-p2-008-human-fallback.test.ts | sed -n '460,472p'`
+- `wc -l apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts`
+- `git show --stat --summary --no-patch 24435d436448d48f496cd2d796e5398435d3d8d4`
+- `git show --stat --summary --no-patch 52c6eff4f532a717087b9023a13c933c035ac178`
+- `git show --stat --summary --no-patch 7ea246211ff29c39aec8f71c140b22989ef9628c`
 
 No runtime tests were rerun in this helper task.
-
----
-
-## 9. Handoff Note
-
-Handed off to reviewer: `Codex2`
-
-This sidecar should be reviewed as a support packet only. The parent task
-`P2-DP-C4-001-GATE-RECONCILE` is already closed and merged; the reviewer is
-being asked to validate packet completeness, citation accuracy, and branch-rail
-guidance, not to re-litigate the parent implementation itself. This refreshed
-handoff also aligns the packet to the live `review` row so the reviewer is not
-checking against stale sidecar ownership metadata.
