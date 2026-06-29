@@ -1407,39 +1407,27 @@ def ensure_coordination_workspace(
 
 
 def _provision_worktree_node_modules(repo_root: Path, destination: Path) -> None:
-    """Symlink node_modules from the canonical checkout into a fresh task worktree.
+    """Repair node_modules locally inside a fresh task worktree.
 
-    Worktrees start empty of node_modules (gitignored) and nothing else provisioned
-    them, so a worker that didn't run a slow `pnpm install` itself failed tsc/next
-    build at closeout → task stranded `blocked`. pnpm's content-addressable store is
-    shared, so symlinks resolve correctly and cost nothing. Best-effort: never raises.
-    See fix/orchestrator-rca-worktree-nm-and-unblock-recursion.
+    New worktrees inherit gitignored paths from the canonical checkout state. When
+    those paths are symlinked back to the canonical root, isolated worktrees fail
+    health checks and can resolve packages against the wrong virtual store. Run the
+    local repair script instead so each worktree gets a local `.pnpm` store layout.
+    Best-effort: never raises.
     """
     try:
         if destination.resolve() == repo_root.resolve():
             return  # canonical fallback already has node_modules
-        src_root = repo_root / "node_modules"
-        if src_root.is_dir():
-            dst_root = destination / "node_modules"
-            if not dst_root.exists():
-                try:
-                    dst_root.symlink_to(src_root)
-                except OSError:
-                    pass
-        for parent in ("apps", "packages"):
-            base = repo_root / parent
-            if not base.is_dir():
-                continue
-            for pkg in base.iterdir():
-                src = pkg / "node_modules"
-                if not src.is_dir():
-                    continue
-                dst = destination / parent / pkg.name / "node_modules"
-                if dst.parent.is_dir() and not dst.exists():
-                    try:
-                        dst.symlink_to(src)
-                    except OSError:
-                        pass
+        repair_script = repo_root / "scripts" / "ensure-local-node-modules.py"
+        if not repair_script.is_file():
+            return
+        subprocess.run(
+            [sys.executable, str(repair_script), "repair", "--root", str(destination)],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     except Exception:
         pass
 

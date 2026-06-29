@@ -8263,9 +8263,7 @@ if __name__ == "__main__":
 
 
 class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
-    """RCA fix: fresh task worktrees must get node_modules (symlinked from the
-    canonical checkout) so workers can typecheck/build at closeout instead of
-    stranding `blocked` on a missing/slow per-worktree install."""
+    """Fresh task worktrees should self-heal node_modules into a local store."""
 
     def _mk(self):
         import shutil
@@ -8277,21 +8275,33 @@ class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
         (dest / "apps" / "foo").mkdir(parents=True); (dest / "packages" / "bar").mkdir(parents=True)
         return root, dest
 
-    def test_symlinks_root_and_workspace_node_modules(self):
+    def test_repairs_worktree_node_modules_locally(self):
         root, dest = self._mk()
-        supervisor._provision_worktree_node_modules(root, dest)
-        self.assertTrue((dest / "node_modules").is_symlink())
-        self.assertEqual((dest / "node_modules").resolve(), (root / "node_modules").resolve())
-        self.assertTrue((dest / "apps" / "foo" / "node_modules").is_symlink())
-        self.assertTrue((dest / "packages" / "bar" / "node_modules").is_symlink())
+        repair_script = root / "scripts" / "ensure-local-node-modules.py"
+        repair_script.parent.mkdir(parents=True, exist_ok=True)
+        repair_script.write_text("print('ok')\n", encoding="utf-8")
+
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            supervisor._provision_worktree_node_modules(root, dest)
+
+        run.assert_called_once_with(
+            [sys.executable, str(repair_script), "repair", "--root", str(dest)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
     def test_noop_on_canonical_root(self):
         root, _ = self._mk()
-        supervisor._provision_worktree_node_modules(root, root)
-        self.assertFalse((root / "node_modules").is_symlink())
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            supervisor._provision_worktree_node_modules(root, root)
 
-    def test_does_not_clobber_existing_node_modules(self):
+        run.assert_not_called()
+
+    def test_noop_when_repair_script_is_missing(self):
         root, dest = self._mk()
-        (dest / "node_modules").mkdir()
-        supervisor._provision_worktree_node_modules(root, dest)
-        self.assertFalse((dest / "node_modules").is_symlink())
+        with mock.patch.object(supervisor.subprocess, "run") as run:
+            supervisor._provision_worktree_node_modules(root, dest)
+
+        run.assert_not_called()
