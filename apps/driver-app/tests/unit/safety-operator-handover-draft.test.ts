@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSafetyOperatorQueuedShiftHandover,
+  describeSafetyOperatorQueuedShiftHandover,
   parseSafetyOperatorQueuedShiftHandover,
   resolveSafetyOperatorShiftHandoverCommand,
 } from "@/lib/safety-operator-handover-draft";
@@ -88,5 +89,28 @@ describe("safety operator shift handover queue payload", () => {
 
     expect(parsed.command.takeoverReportIds).toEqual(["report-001"]);
     expect(parsed.pendingTakeoverClientGeneratedIds).toEqual([]);
+  });
+
+  it("describes queued handovers with pending takeover linkage", () => {
+    const detail = describeSafetyOperatorQueuedShiftHandover(
+      buildSafetyOperatorQueuedShiftHandover(
+        {
+          assignmentId: "assignment-1",
+          shiftId: "shift-1",
+          safetyOperatorId: "so-1",
+          vehicleId: "AV-7720",
+          orderId: "order-1",
+          closeoutStatus: "handoff",
+          takeoverReportIds: ["report-001"],
+          incidentId: "incident-1",
+          evidenceArtifactIds: ["artifact-1"],
+          notes: "legacy handover",
+        },
+        ["takeover-queued"],
+      ),
+    );
+
+    expect(detail.summary).toBe("handoff · takeover 1 + pending 1");
+    expect(detail.detail).toContain("takeover-queued");
   });
 });

@@ -10,7 +10,6 @@ import {
 import { useRouter } from "expo-router";
 import { REALM_COLORS, SURFACE_ACCENTS, type TokenMode } from "@drts/ui-tokens";
 import type {
-  CreateSafetyOperatorTripCloseoutCommand,
   SubmitSafetyOperatorPreTripChecklistCommand,
   SubmitSafetyOperatorTakeoverReportCommand,
   SubmitSafetyOperatorTakeoverReportResult,
@@ -26,6 +25,7 @@ import {
 } from "@/lib/safety-operator-fixtures";
 import {
   buildSafetyOperatorQueuedShiftHandover,
+  describeSafetyOperatorQueuedShiftHandover,
   parseSafetyOperatorQueuedShiftHandover,
   resolveSafetyOperatorShiftHandoverCommand,
   type SafetyOperatorQueuedShiftHandover,
@@ -195,14 +195,7 @@ function describeQueueEntry(entry: SafetyOperatorQueueEntry): {
       };
     }
     case "shift_handover": {
-      const payload =
-        entry.payload as Partial<CreateSafetyOperatorTripCloseoutCommand>;
-      return {
-        summary: `${payload.closeoutStatus ?? "handoff"} · takeover ${
-          payload.takeoverReportIds?.length ?? 0
-        }`,
-        detail: payload.notes ?? "交班紀錄等待同步。",
-      };
+      return describeSafetyOperatorQueuedShiftHandover(entry.payload);
     }
     default:
       return {

@@ -55,6 +55,26 @@ export function parseSafetyOperatorQueuedShiftHandover(
   };
 }
 
+export function describeSafetyOperatorQueuedShiftHandover(payload: unknown): {
+  summary: string;
+  detail: string;
+} {
+  const queuedHandover = parseSafetyOperatorQueuedShiftHandover(payload);
+  const linkedTakeoverCount = queuedHandover.command.takeoverReportIds.length;
+  const pendingLinkageCount =
+    queuedHandover.pendingTakeoverClientGeneratedIds.length;
+
+  return {
+    summary: `${queuedHandover.command.closeoutStatus ?? "handoff"} · takeover ${linkedTakeoverCount}${
+      pendingLinkageCount > 0 ? ` + pending ${pendingLinkageCount}` : ""
+    }`,
+    detail:
+      pendingLinkageCount > 0
+        ? `待接管關聯 ${queuedHandover.pendingTakeoverClientGeneratedIds.join(", ")}`
+        : queuedHandover.command.notes ?? "交班紀錄等待同步。",
+  };
+}
+
 export function resolveSafetyOperatorShiftHandoverCommand(
   queuedHandover: SafetyOperatorQueuedShiftHandover,
   queueEntries: SafetyOperatorQueueEntry[],
