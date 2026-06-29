@@ -15,9 +15,9 @@ acceptance checklist, dependency map, and branch-history cautions into one
 reviewer-facing support artifact so later follow-up work does not rely on stale
 local rails or superseded unblock notes.
 
-This refreshed version corrects the sidecar reviewer reference from `Claude2`
-to `Codex2` and re-hands off the packet on the active task branch after the
-previous review attempt failed on stale reviewer metadata.
+This refreshed version removes the earlier `Claude2` residue and re-aligns the
+packet to the live sidecar review row after repeated review bounces on stale
+owner/reviewer/status metadata.
 The historical unblock helpers are now archived, so this refresh verifies
 their timestamps and closeout evidence from `ai-task-archive.jsonl` rather than
 from the live task board.
@@ -46,14 +46,14 @@ Out of scope:
 
 ## 2. Machine Truth Anchors
 
-### 2.1 Sidecar task snapshot at refresh time
+### 2.1 Sidecar task snapshot at handoff time
 
 Machine-truth row: `P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress`
-- last_update=`2026-06-29T04:06:02Z`
+- status=`review`
+- last_update=`2026-06-29T04:24:07Z`
 - helper_parent=`P2-DP-C4-001-GATE-RECONCILE`
 - helper_kind=`acceptance_packet`
 - mutates_canonical=`false`
@@ -198,15 +198,16 @@ editing canonical implementation files.
 | --- | --- | --- |
 | Create support artifacts only | PASS | Output is limited to `support/sidecars/P2-DP-C4-001-GATE-RECONCILE/P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE.md`. |
 | Do not edit canonical truth | PASS | This packet summarizes machine truth and merged evidence only; it does not modify parent runtime, contracts, or L1 product docs. |
-| Hand off the packet to the assigned reviewer | READY | Packet includes the parent evidence summary, dependency map, supersession timeline, and reviewer-specific cautions needed for `Codex2` approval. |
+| Hand off the packet to the assigned reviewer | PASS | Packet includes the parent evidence summary, dependency map, supersession timeline, and reviewer-specific cautions needed for `Codex2` review, and the task is now in `review`. |
 
 ---
 
 ## 7. Reviewer Checklist For `Codex2`
 
-1. Confirm this refreshed packet consistently names `Codex2` as the sidecar
-   reviewer and no longer carries the stale `Claude2` references from the
-   failed handoff.
+1. Confirm this refreshed packet consistently names `Codex` as the sidecar
+   owner, `Codex2` as the sidecar reviewer, `review` as the active sidecar
+   status, and no longer carries the stale `Claude2` residue or earlier
+   owner/reviewer inversions from the failed handoffs.
 2. Confirm the packet stays support-only and does not claim any new canonical
    implementation change.
 3. Confirm the latest machine-truth authority is the parent `done` row dated
@@ -228,8 +229,10 @@ The following checks were performed while preparing this packet:
 - read `AI_COLLABORATION_GUIDE.md`
 - checked machine truth with:
   - `AI_NAME=Codex scripts/ai-status.sh show P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE`
+  - `AI_NAME=Codex scripts/ai-status.sh handoff P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE Codex2 "<packet-ready summary>"`
   - `grep -n '"id": "P2-DP-C4-001-GATE-RECONCILE"' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
   - `grep -n 'P2-DP-C4-001-GATE-RECONCILE-UNBLOCK-' /home/edna/workspace/drts-fleet-platform/ai-task-archive.jsonl`
+  - `grep -n 'P2-DP-C4-001-GATE-RECONCILE-SIDECAR-ACCEPTANCE' /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl | tail -n 40`
 - inspected current merged code and tests with:
   - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '503,581p'`
   - `nl -ba apps/api/src/modules/sandbox-dispatch-gate/sandbox-dispatch-gate.service.ts | sed -n '707,777p'`
@@ -250,11 +253,11 @@ No runtime tests were rerun in this helper task.
 
 ## 9. Handoff Note
 
-Ready for reviewer: `Codex2`
+Handed off to reviewer: `Codex2`
 
 This sidecar should be reviewed as a support packet only. The parent task
 `P2-DP-C4-001-GATE-RECONCILE` is already closed and merged; the reviewer is
 being asked to validate packet completeness, citation accuracy, and branch-rail
 guidance, not to re-litigate the parent implementation itself. This refreshed
-handoff specifically repairs the stale reviewer metadata that broke the prior
-review attempt.
+handoff also aligns the packet to the live `review` row so the reviewer is not
+checking against stale sidecar ownership metadata.
