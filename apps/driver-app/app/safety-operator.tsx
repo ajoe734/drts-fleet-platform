@@ -11,7 +11,6 @@ import { useRouter } from "expo-router";
 import { REALM_COLORS, SURFACE_ACCENTS, type TokenMode } from "@drts/ui-tokens";
 import type {
   SubmitSafetyOperatorPreTripChecklistCommand,
-  SubmitSafetyOperatorTakeoverReportCommand,
   SubmitSafetyOperatorTakeoverReportResult,
 } from "@drts/contracts";
 
