@@ -1,0 +1,92 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  buildSafetyOperatorQueuedShiftHandover,
+  parseSafetyOperatorQueuedShiftHandover,
+  resolveSafetyOperatorShiftHandoverCommand,
+} from "@/lib/safety-operator-handover-draft";
+import type { SafetyOperatorQueueEntry } from "@/lib/safety-operator-offline-queue";
+
+describe("safety operator shift handover queue payload", () => {
+  it("resolves synced takeover report ids from pending clientGeneratedIds", () => {
+    const queued = buildSafetyOperatorQueuedShiftHandover(
+      {
+        assignmentId: "assignment-1",
+        shiftId: "shift-1",
+        safetyOperatorId: "so-1",
+        vehicleId: "AV-7720",
+        orderId: "order-1",
+        closeoutStatus: "handoff",
+        takeoverReportIds: [],
+        incidentId: "incident-1",
+        evidenceArtifactIds: ["artifact-1"],
+        notes: "handover",
+      },
+      ["takeover-001"],
+    );
+    const queueEntries: SafetyOperatorQueueEntry[] = [
+      {
+        id: "queue-1",
+        clientGeneratedId: "takeover-001",
+        kind: "takeover_report",
+        status: "synced",
+        createdAt: "2026-06-29T05:00:00.000Z",
+        updatedAt: "2026-06-29T05:00:30.000Z",
+        syncedAt: "2026-06-29T05:00:30.000Z",
+        errorMessage: null,
+        duplicateAccepted: false,
+        payload: {},
+        receipt: { reportId: "report-001" },
+      },
+    ];
+
+    const resolved = resolveSafetyOperatorShiftHandoverCommand(
+      queued,
+      queueEntries,
+    );
+
+    expect(resolved.command.takeoverReportIds).toEqual(["report-001"]);
+    expect(resolved.unresolvedPendingTakeoverIds).toEqual([]);
+  });
+
+  it("keeps unresolved takeover references until the queued takeover is synced", () => {
+    const queued = buildSafetyOperatorQueuedShiftHandover(
+      {
+        assignmentId: "assignment-1",
+        shiftId: "shift-1",
+        safetyOperatorId: "so-1",
+        vehicleId: "AV-7720",
+        orderId: "order-1",
+        closeoutStatus: "handoff",
+        takeoverReportIds: [],
+        incidentId: "incident-1",
+        evidenceArtifactIds: ["artifact-1"],
+        notes: "handover",
+      },
+      ["takeover-queued"],
+    );
+
+    const resolved = resolveSafetyOperatorShiftHandoverCommand(queued, []);
+
+    expect(resolved.command.takeoverReportIds).toEqual([]);
+    expect(resolved.unresolvedPendingTakeoverIds).toEqual(["takeover-queued"]);
+  });
+
+  it("upgrades legacy queued handover payloads without pending takeover metadata", () => {
+    const parsed = parseSafetyOperatorQueuedShiftHandover({
+      assignmentId: "assignment-1",
+      shiftId: "shift-1",
+      safetyOperatorId: "so-1",
+      vehicleId: "AV-7720",
+      orderId: "order-1",
+      closeoutStatus: "handoff",
+      takeoverReportIds: ["report-001"],
+      incidentId: "incident-1",
+      evidenceArtifactIds: ["artifact-1"],
+      notes: "legacy handover",
+    });
+
+    expect(parsed.command.takeoverReportIds).toEqual(["report-001"]);
+    expect(parsed.pendingTakeoverClientGeneratedIds).toEqual([]);
+  });
+});

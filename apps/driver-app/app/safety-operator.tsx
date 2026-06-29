@@ -25,6 +25,12 @@ import {
   SAFETY_OPERATOR_INCIDENT_TAGS,
 } from "@/lib/safety-operator-fixtures";
 import {
+  buildSafetyOperatorQueuedShiftHandover,
+  parseSafetyOperatorQueuedShiftHandover,
+  resolveSafetyOperatorShiftHandoverCommand,
+  type SafetyOperatorQueuedShiftHandover,
+} from "@/lib/safety-operator-handover-draft";
+import {
   clearSafetyOperatorSyncedQueueEntries,
   enqueueSafetyOperatorItem,
   getSafetyOperatorQueueSnapshot,
@@ -667,11 +673,24 @@ export default function SafetyOperatorScreen() {
 
   async function syncShiftHandover(
     clientGeneratedId: string,
-    command: CreateSafetyOperatorTripCloseoutCommand,
+    queuedHandover: SafetyOperatorQueuedShiftHandover,
   ) {
     await markSafetyOperatorQueueSyncing(clientGeneratedId);
     try {
-      await getDriverClient().createSafetyOperatorTripCloseout(command);
+      const liveQueueSnapshot = await getSafetyOperatorQueueSnapshot();
+      const resolvedHandover = resolveSafetyOperatorShiftHandoverCommand(
+        queuedHandover,
+        liveQueueSnapshot.items,
+      );
+      if (resolvedHandover.unresolvedPendingTakeoverIds.length > 0) {
+        throw new Error(
+          "待關聯的接管回報尚未取得 reportId；交班紀錄會保留在佇列，待接管同步完成後再重試。",
+        );
+      }
+
+      await getDriverClient().createSafetyOperatorTripCloseout(
+        resolvedHandover.command,
+      );
       await markSafetyOperatorQueueSynced(clientGeneratedId, {
         closeoutAt: new Date().toISOString(),
       });
@@ -706,12 +725,16 @@ export default function SafetyOperatorScreen() {
         await syncTakeoverReport(queuedReport);
         return;
       }
-      case "shift_handover":
+      case "shift_handover": {
+        const queuedHandover = parseSafetyOperatorQueuedShiftHandover(
+          entry.payload,
+        );
         await syncShiftHandover(
           entry.clientGeneratedId,
-          entry.payload as CreateSafetyOperatorTripCloseoutCommand,
+          queuedHandover,
         );
         return;
+      }
       case "incident_upload":
         setScreenError(
           "證據同步服務尚未接線；這筆項目會繼續保留在 Safety Operator 本機佇列。",
@@ -723,7 +746,18 @@ export default function SafetyOperatorScreen() {
   }
 
   async function retryOutstandingQueueEntries() {
-    for (const entry of queueSnapshot.items) {
+    const retryOrder: Record<SafetyOperatorQueueEntry["kind"], number> = {
+      pretrip: 0,
+      takeover_report: 1,
+      incident_upload: 2,
+      shift_handover: 3,
+    };
+
+    const retryableItems = [...queueSnapshot.items].sort(
+      (left, right) => retryOrder[left.kind] - retryOrder[right.kind],
+    );
+
+    for (const entry of retryableItems) {
       if (!isRetryableQueueEntry(entry)) {
         continue;
       }
@@ -818,17 +852,34 @@ export default function SafetyOperatorScreen() {
 
   async function submitShiftHandover() {
     setScreenError(null);
-    const takeoverIds = recentTakeover?.report.reportId
-      ? [recentTakeover.report.reportId]
-      : [];
+    const liveQueueSnapshot = await getSafetyOperatorQueueSnapshot();
+    const latestTakeoverQueueEntry = liveQueueSnapshot.items.find(
+      (entry) => entry.kind === "takeover_report",
+    );
+    const latestTakeoverReportId =
+      latestTakeoverQueueEntry?.receipt &&
+      typeof latestTakeoverQueueEntry.receipt === "object" &&
+      "reportId" in latestTakeoverQueueEntry.receipt &&
+      typeof latestTakeoverQueueEntry.receipt.reportId === "string"
+        ? latestTakeoverQueueEntry.receipt.reportId
+        : recentTakeover?.report.reportId;
     const command = buildShiftHandoverCommand({
-      takeoverReportIds: takeoverIds,
+      takeoverReportIds: latestTakeoverReportId ? [latestTakeoverReportId] : [],
       notes: handoverNotes.trim(),
     });
-    const queued = await enqueueSafetyOperatorItem("shift_handover", command);
+    const queuedHandover = buildSafetyOperatorQueuedShiftHandover(
+      command,
+      latestTakeoverQueueEntry && !latestTakeoverReportId
+        ? [latestTakeoverQueueEntry.clientGeneratedId]
+        : [],
+    );
+    const queued = await enqueueSafetyOperatorItem(
+      "shift_handover",
+      queuedHandover,
+    );
     setSubmissionState("交班紀錄已寫入 durable queue。");
     await refreshQueueSnapshot();
-    await syncShiftHandover(queued.clientGeneratedId, command);
+    await syncShiftHandover(queued.clientGeneratedId, queuedHandover);
   }
 
   async function clearSyncedQueueItems() {

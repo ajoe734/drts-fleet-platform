@@ -45,6 +45,35 @@ describe("safety operator takeover draft audit", () => {
     expect(unchanged).toBe(draft);
   });
 
+  it("normalizes valid ISO-like timestamps before comparing or storing them", () => {
+    const draft = createSafetyOperatorTakeoverDraftAudit(
+      "2026-06-28T09:18:00.000Z",
+    );
+
+    const normalized = applySafetyOperatorTakeoverCorrection(
+      draft,
+      "2026-06-28T17:18:00+08:00",
+      "2026-06-28T09:20:00.000Z",
+    );
+
+    expect(normalized.correctedOccurredAt).toBe("2026-06-28T09:18:00.000Z");
+    expect(normalized).toBe(draft);
+  });
+
+  it("rejects invalid occurredAt timestamps before they are queued locally", () => {
+    const draft = createSafetyOperatorTakeoverDraftAudit(
+      "2026-06-28T09:18:00.000Z",
+    );
+
+    expect(() =>
+      applySafetyOperatorTakeoverCorrection(
+        draft,
+        "not-an-iso-timestamp",
+        "2026-06-28T09:20:00.000Z",
+      ),
+    ).toThrowError("接管發生時間必須是有效 ISO 時間。");
+  });
+
   it("wraps queued takeover payloads with draft audit metadata", () => {
     const draft = createSafetyOperatorTakeoverDraftAudit(
       "2026-06-28T09:18:00.000Z",

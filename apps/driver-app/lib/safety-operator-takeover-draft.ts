@@ -32,10 +32,7 @@ export function applySafetyOperatorTakeoverCorrection(
   nextOccurredAt: string,
   editedAt = new Date().toISOString(),
 ): SafetyOperatorTakeoverDraftAudit {
-  const trimmedOccurredAt = nextOccurredAt.trim();
-  if (!trimmedOccurredAt) {
-    throw new Error("接管發生時間不得為空。");
-  }
+  const trimmedOccurredAt = normalizeSafetyOperatorOccurredAt(nextOccurredAt);
 
   if (trimmedOccurredAt === draftAudit.correctedOccurredAt) {
     return draftAudit;
@@ -53,6 +50,19 @@ export function applySafetyOperatorTakeoverCorrection(
       },
     ],
   };
+}
+
+function normalizeSafetyOperatorOccurredAt(nextOccurredAt: string): string {
+  const trimmedOccurredAt = nextOccurredAt.trim();
+  if (!trimmedOccurredAt) {
+    throw new Error("接管發生時間不得為空。");
+  }
+
+  if (Number.isNaN(Date.parse(trimmedOccurredAt))) {
+    throw new Error("接管發生時間必須是有效 ISO 時間。");
+  }
+
+  return new Date(trimmedOccurredAt).toISOString();
 }
 
 export function buildSafetyOperatorQueuedTakeoverReport(
