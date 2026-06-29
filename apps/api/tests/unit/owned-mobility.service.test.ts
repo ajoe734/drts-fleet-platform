@@ -42,10 +42,7 @@ function createOwnedMobilityService(options?: {
     serviceBucket: string,
   ) => boolean;
   driverAvailable?: boolean;
-  getDriverAvailability?: (
-    driverId: string,
-    serviceBucket: string,
-  ) => boolean;
+  getDriverAvailability?: (driverId: string, serviceBucket: string) => boolean;
   enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
   serviceProductOverrides?: Record<string, unknown>;
@@ -76,10 +73,11 @@ function createOwnedMobilityService(options?: {
         options?.vehicleDispatchable ??
         true,
     ),
-    getDriverAvailability: vi.fn((driverId: string, serviceBucket: string) =>
-      options?.getDriverAvailability?.(driverId, serviceBucket) ??
-      options?.driverAvailable ??
-      true,
+    getDriverAvailability: vi.fn(
+      (driverId: string, serviceBucket: string) =>
+        options?.getDriverAvailability?.(driverId, serviceBucket) ??
+        options?.driverAvailable ??
+        true,
     ),
   };
   const auditNotificationService = {
@@ -529,7 +527,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
       "tenant-demo-001",
     );
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
 
     const candidates = await service.listDispatchCandidates(
       dispatchJob.dispatchJobId,
@@ -554,7 +554,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(runtimeEligibilityEvaluator.evaluate).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to decorated ineligible rows instead of returning a bare empty list", async () => {
+  it("falls back to decorated ineligible rows for bypassable hard reasons", async () => {
     const runtimeEligibilityEvaluator = {
       evaluate: vi.fn().mockResolvedValue({
         serviceProductId: "svc-enterprise",
@@ -562,7 +562,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         policyVersion:
           "service:svc-enterprise@2026-06-20T00:00:00.000Z|capability:cap-2@2026-06-20T00:00:00.000Z",
         decision: "ineligible",
-        hardReasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
+        hardReasonCodes: ["DRIVER_NOT_READY"],
         softReasonCodes: [],
         missingRequirements: [],
         locationState: "fresh",
@@ -593,7 +593,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
       "tenant-demo-001",
     );
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
 
     const fallbackCandidates = await service.listDispatchCandidates(
       dispatchJob.dispatchJobId,
@@ -605,6 +607,61 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
     expect(fallbackCandidates).toHaveLength(1);
     expect(fallbackCandidates[0]?.eligibilityDecision).toBe("ineligible");
+    expect(allCandidates).toHaveLength(1);
+    expect(allCandidates[0]?.hardReasonCodes).toEqual(["DRIVER_NOT_READY"]);
+  });
+
+  it("never offers a service-product-mismatched vehicle even under scarcity", async () => {
+    const runtimeEligibilityEvaluator = {
+      evaluate: vi.fn().mockResolvedValue({
+        serviceProductId: "svc-enterprise",
+        serviceProductCode: "enterprise_dispatch",
+        policyVersion: "service:svc-enterprise-v1|capability:cap-4-v1",
+        decision: "ineligible",
+        hardReasonCodes: ["VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT"],
+        softReasonCodes: ["MISSING_LOCATION"],
+        missingRequirements: [],
+        locationState: "missing",
+        evaluatedAt: "2026-06-20T12:00:01.000Z",
+      }),
+    };
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      candidates: [
+        {
+          driverId: "drv-wrong-product",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 8,
+          operatingArea: "taipei",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      runtimeEligibilityEvaluator,
+    });
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-20T13:00:00.000Z",
+        reservationWindowEnd: "2026-06-20T14:00:00.000Z",
+        pickup: { address: "HQ", lat: 25.033, lng: 121.5654 },
+        dropoff: { address: "Office" },
+        passenger: { name: "Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    const fallbackCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    );
+    expect(fallbackCandidates).toHaveLength(0);
+
+    const allCandidates = await service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+      true,
+    );
     expect(allCandidates).toHaveLength(1);
     expect(allCandidates[0]?.hardReasonCodes).toEqual([
       "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
@@ -650,7 +707,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
       "tenant-demo-001",
     );
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
 
     // Default dispatch must NOT re-admit the airport-ineligible vehicle: the
     // broad business_dispatch candidate cannot satisfy the airport transfer.
@@ -2628,7 +2687,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const snapshot = service.getReportingSnapshot();
     expect(
       snapshot.dispatchAssignments.filter(
-        (assignment) => assignment.dispatchJobId === dispatchResult.dispatchJobId,
+        (assignment) =>
+          assignment.dispatchJobId === dispatchResult.dispatchJobId,
       ),
     ).toEqual([
       expect.objectContaining({

@@ -14,7 +14,7 @@ import {
   type ReferralUsageDailyRow,
   type ReferralUsagePeriod,
 } from "./referral-portal-fixtures";
-import type { Locale } from "./translations";
+import { t, type Locale } from "./translations";
 import type {
   PartnerReferralDashboardRecord,
   PartnerReferralRevenuePeriodRecord,
@@ -71,7 +71,7 @@ function maskReferralRider(tripId: string, locale: Locale = "zh") {
     .replace(/[^A-Z0-9]/gi, "")
     .slice(-3)
     .toUpperCase();
-  return (locale === "en" ? "Resident" : "住戶") + " ••••" + (suffix || "REF");
+  return t("referral.rider.maskedPrefix", locale) + " ••••" + (suffix || "REF");
 }
 
 function inferReferralRoute(tripId: string, locale: Locale = "zh") {
@@ -127,7 +127,7 @@ function mapReferralStatement(
     issued: record.generatedAt.slice(0, 10),
     artifactId: record.artifactRef.artifactId,
     artifactHash: record.artifactRef.manifestHash,
-    direction: locale === "en" ? "DRTS → Partner" : "DRTS → 夥伴",
+    direction: t("referral.statement.directionValue", locale),
     lines: record.lines.map((line) => mapReferralLine(line, locale)),
   };
 }
@@ -188,7 +188,7 @@ function localizeReferralStatement(
 ): ReferralStatementView {
   return {
     ...statement,
-    direction: locale === "en" ? "DRTS → Partner" : statement.direction,
+    direction: t("referral.statement.directionValue", locale),
     lines: statement.lines.map((line) =>
       localizeReferralStatementLine(line, locale),
     ),

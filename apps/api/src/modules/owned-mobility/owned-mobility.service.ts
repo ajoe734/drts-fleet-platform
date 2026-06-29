@@ -205,13 +205,13 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 
 // Hard eligibility reasons that must NEVER be re-admitted by the scarcity
-// fallback below. Dispatching a vehicle that failed the airport-permit gate to an
-// airport-transfer order is a compliance violation, not a graceful degradation:
-// a broad business_dispatch candidate must not satisfy an airport-transfer order
-// just because no airport-eligible supply is currently available. Other hard
+// fallback below. These are hard capability mismatches, not graceful
+// degradation cases: a candidate that lacks the exact service product or
+// airport permit would be rejected by the assignment recheck anyway. Other hard
 // reasons keep the existing anti-stranding fallback behaviour.
 const NON_BYPASSABLE_HARD_REASON_CODES: ReadonlySet<string> = new Set([
   "MISSING_AIRPORT_ELIGIBILITY",
+  "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
 ]);
 
 @Injectable()
@@ -2428,10 +2428,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  assignDispatch(
-    command: AssignDispatchCommand,
-    requestId?: string,
-  ): any {
+  assignDispatch(command: AssignDispatchCommand, requestId?: string): any {
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -2444,10 +2441,7 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
-  reassignDispatch(
-    command: ReassignDispatchCommand,
-    requestId?: string,
-  ): any {
+  reassignDispatch(command: ReassignDispatchCommand, requestId?: string): any {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -2482,8 +2476,9 @@ export class OwnedMobilityService implements OnModuleInit {
         !["completed", "cancelled", "rejected"].includes(task.status),
     );
     const now = new Date().toISOString();
-    const reassignAttemptSequence =
-      this.nextAttemptSequence(dispatchJob.dispatchJobId);
+    const reassignAttemptSequence = this.nextAttemptSequence(
+      dispatchJob.dispatchJobId,
+    );
     const dispatchAttempt: DispatchAttemptRecord = {
       attemptId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -3512,7 +3507,8 @@ export class OwnedMobilityService implements OnModuleInit {
       benefitReference: order.benefitReference,
       serviceProduct: order.businessDispatchSubtype,
       tenantServiceProgramId: null,
-      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
+      sourcePlatform:
+        this.forwarderSourceMap.get(order.orderId) ?? order.orderSource,
     };
 
     this.eventEmitter.emit(OWNED_MOBILITY_TRIP_COMPLETED_EVENT, payload);
@@ -4346,7 +4342,10 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private assertAssignmentEligibilityRecheck(
-    order: Pick<OwnedOrderRecord, "orderId" | "serviceBucket" | "businessDispatchSubtype">,
+    order: Pick<
+      OwnedOrderRecord,
+      "orderId" | "serviceBucket" | "businessDispatchSubtype"
+    >,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
@@ -4460,7 +4459,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     return order.serviceBucket === "standard_taxi"
       ? "taxi_realtime"
-      : order.businessDispatchSubtype ?? null;
+      : (order.businessDispatchSubtype ?? null);
   }
 
   // Stamp the precise service-product code onto a freshly-built order so it
@@ -4470,7 +4469,10 @@ export class OwnedMobilityService implements OnModuleInit {
     if (order.serviceProductCode) {
       return order;
     }
-    return { ...order, serviceProductCode: this.resolveServiceProductCodeForOrder(order) };
+    return {
+      ...order,
+      serviceProductCode: this.resolveServiceProductCodeForOrder(order),
+    };
   }
 
   private buildDispatchAssignmentBundle(
