@@ -36,6 +36,10 @@ export interface SafetyOperatorQueueSnapshot {
   lastSyncedAt: string | null;
 }
 
+interface ShiftHandoverPayloadLike {
+  pendingTakeoverClientGeneratedIds?: string[];
+}
+
 function createLocalId(prefix: string): string {
   if (
     typeof globalThis.crypto !== "undefined" &&
@@ -181,5 +185,33 @@ export async function markSafetyOperatorQueueSynced(
 
 export async function clearSafetyOperatorSyncedQueueEntries(): Promise<void> {
   const items = await loadSafetyOperatorQueue();
-  await persistQueue(items.filter((item) => item.status !== "synced"));
+  const protectedTakeoverIds = new Set(
+    items
+      .filter(
+        (item) => item.kind === "shift_handover" && item.status !== "synced",
+      )
+      .flatMap((item) => {
+        const payload = item.payload as ShiftHandoverPayloadLike | null;
+        if (!payload || !Array.isArray(payload.pendingTakeoverClientGeneratedIds)) {
+          return [];
+        }
+
+        return payload.pendingTakeoverClientGeneratedIds
+          .map((value) => value.trim())
+          .filter(Boolean);
+      }),
+  );
+
+  await persistQueue(
+    items.filter((item) => {
+      if (item.status !== "synced") {
+        return true;
+      }
+
+      return (
+        item.kind === "takeover_report" &&
+        protectedTakeoverIds.has(item.clientGeneratedId)
+      );
+    }),
+  );
 }
