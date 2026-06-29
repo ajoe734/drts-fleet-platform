@@ -118,9 +118,20 @@ export function selectSafetyOperatorHandoverTakeoverLinkage(
   takeoverReportIds: string[];
   pendingTakeoverClientGeneratedIds: string[];
 } {
-  const latestTakeoverQueueEntry = queueEntries.find(
-    (entry) => entry.kind === "takeover_report",
-  );
+  const latestTakeoverQueueEntry = queueEntries
+    .filter((entry) => entry.kind === "takeover_report")
+    .reduce<SafetyOperatorQueueEntry | null>((latestEntry, entry) => {
+      if (!latestEntry) {
+        return entry;
+      }
+
+      const latestTimestamp =
+        latestEntry.updatedAt || latestEntry.createdAt || "";
+      const entryTimestamp = entry.updatedAt || entry.createdAt || "";
+      return entryTimestamp.localeCompare(latestTimestamp) > 0
+        ? entry
+        : latestEntry;
+    }, null);
 
   const queuedReportId = (
     latestTakeoverQueueEntry?.receipt as TakeoverReceiptLike | null

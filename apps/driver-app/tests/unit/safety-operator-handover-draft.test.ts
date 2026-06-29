@@ -119,19 +119,6 @@ describe("safety operator shift handover queue payload", () => {
     const linkage = selectSafetyOperatorHandoverTakeoverLinkage(
       [
         {
-          id: "queue-2",
-          clientGeneratedId: "takeover-queued",
-          kind: "takeover_report",
-          status: "queued",
-          createdAt: "2026-06-29T05:02:00.000Z",
-          updatedAt: "2026-06-29T05:02:00.000Z",
-          syncedAt: null,
-          errorMessage: null,
-          duplicateAccepted: false,
-          payload: {},
-          receipt: null,
-        },
-        {
           id: "queue-1",
           clientGeneratedId: "takeover-synced",
           kind: "takeover_report",
@@ -144,6 +131,19 @@ describe("safety operator shift handover queue payload", () => {
           payload: {},
           receipt: { reportId: "report-older" },
         },
+        {
+          id: "queue-2",
+          clientGeneratedId: "takeover-queued",
+          kind: "takeover_report",
+          status: "queued",
+          createdAt: "2026-06-29T05:02:00.000Z",
+          updatedAt: "2026-06-29T05:02:00.000Z",
+          syncedAt: null,
+          errorMessage: null,
+          duplicateAccepted: false,
+          payload: {},
+          receipt: null,
+        },
       ],
       "report-older",
     );
@@ -151,6 +151,45 @@ describe("safety operator shift handover queue payload", () => {
     expect(linkage.takeoverReportIds).toEqual([]);
     expect(linkage.pendingTakeoverClientGeneratedIds).toEqual([
       "takeover-queued",
+    ]);
+  });
+
+  it("prefers the newest takeover entry by updatedAt instead of input order", () => {
+    const linkage = selectSafetyOperatorHandoverTakeoverLinkage(
+      [
+        {
+          id: "queue-1",
+          clientGeneratedId: "takeover-synced",
+          kind: "takeover_report",
+          status: "synced",
+          createdAt: "2026-06-29T05:00:00.000Z",
+          updatedAt: "2026-06-29T05:01:00.000Z",
+          syncedAt: "2026-06-29T05:01:00.000Z",
+          errorMessage: null,
+          duplicateAccepted: false,
+          payload: {},
+          receipt: { reportId: "report-older" },
+        },
+        {
+          id: "queue-2",
+          clientGeneratedId: "takeover-pending",
+          kind: "takeover_report",
+          status: "failed",
+          createdAt: "2026-06-29T05:02:00.000Z",
+          updatedAt: "2026-06-29T05:03:00.000Z",
+          syncedAt: null,
+          errorMessage: "timeout",
+          duplicateAccepted: false,
+          payload: {},
+          receipt: null,
+        },
+      ],
+      "report-older",
+    );
+
+    expect(linkage.takeoverReportIds).toEqual([]);
+    expect(linkage.pendingTakeoverClientGeneratedIds).toEqual([
+      "takeover-pending",
     ]);
   });
 
