@@ -4,6 +4,17 @@ export type DriverOnboardingRouter = {
   replace: (href: string) => void;
 };
 
+export function allowUnprovisionedDriverRoute(segments: string[]): boolean {
+  const topLevelRoute = segments[0];
+
+  return (
+    topLevelRoute == null ||
+    topLevelRoute === "index" ||
+    topLevelRoute === "onboarding" ||
+    topLevelRoute === "safety-operator"
+  );
+}
+
 export function resetDriverAppToOnboarding(
   router: DriverOnboardingRouter,
 ): void {
