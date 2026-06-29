@@ -179,6 +179,21 @@ next actionable step is now concrete:
 4. Re-run driver-app typecheck/build.
 5. Open the replacement PR and move the parent review rail to that PR.
 
+## Helper Task Closeout Evidence
+
+This unblock task itself is captured on its own helper rail and was pushed
+without rewriting any shared history:
+
+- helper branch:
+  `codex2/p2-v9-ui-safe-001-unblock-history-repair`
+- helper closeout commit:
+  `96f0b4885918d3f3e7d5346ee554ab6d097f82a7`
+  `P2-V9-UI-SAFE-001-UNBLOCK-HISTORY-REPAIR: document contaminated owner replay rail`
+- remote push evidence:
+  `git ls-remote --heads origin codex2/p2-v9-ui-safe-001-unblock-history-repair`
+  resolves to
+  `96f0b4885918d3f3e7d5346ee554ab6d097f82a7 refs/heads/codex2/p2-v9-ui-safe-001-unblock-history-repair`
+
 ## Why This Is Safe
 
 - No shared branch is rewritten.
