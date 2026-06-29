@@ -2,6 +2,8 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
 const mocks = vi.hoisted(() => ({
   back: vi.fn(),
   getSafetyOperatorQueueSnapshot: vi.fn(),
@@ -128,7 +130,12 @@ describe("SafetyOperatorScreen", () => {
       await flushEffects();
     });
 
-    const text = collectText(renderer.toJSON()).join(" ");
+    const text = renderer.root
+      .findAllByType("Text")
+      .flatMap((node: { props: { children?: unknown } }) =>
+        collectText(node.props.children),
+      )
+      .join(" ");
 
     expect(text).toContain("Safety Operator Realm");
     expect(text).toContain("FSD 沙盒");

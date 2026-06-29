@@ -22,6 +22,7 @@ const referralBaseURL =
   process.env.DRTS_V9_VERIFY_REFERRAL_BASE_URL ??
   process.env.DRTS_DEV_REFERRAL_EMBED_BASE_URL ??
   "http://127.0.0.1:3014";
+const skipWebServer = process.env.DRTS_V9_VERIFY_SKIP_WEBSERVER === "true";
 
 function isLocalUrl(url: string, port: number) {
   return (
@@ -39,7 +40,7 @@ if (isLocalUrl(rocBaseURL, 3010)) {
       `pnpm --filter @drts/ui-tokens build && ` +
       `cd apps/roc-console-web && ` +
       `DRTS_API_URL=${devApiBaseURL} ` +
-      `pnpm exec next dev --hostname 127.0.0.1 --port 3010`,
+      `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3010`,
     url: "http://127.0.0.1:3010",
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,
@@ -53,7 +54,7 @@ if (isLocalUrl(platformAdminBaseURL, 3002)) {
       `pnpm --filter @drts/ui-tokens build && ` +
       `cd apps/platform-admin-web && ` +
       `DRTS_API_URL=${devApiBaseURL} ` +
-      `pnpm exec next dev --hostname 127.0.0.1 --port 3002`,
+      `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3002`,
     url: "http://127.0.0.1:3002",
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,
@@ -68,7 +69,7 @@ if (isLocalUrl(opsBaseURL, 3003)) {
       `pnpm --filter @drts/ui-tokens build && ` +
       `cd apps/ops-console-web && ` +
       `DRTS_API_URL=${devApiBaseURL} ` +
-      `pnpm exec next dev --hostname 127.0.0.1 --port 3003`,
+      `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3003`,
     url: "http://127.0.0.1:3003",
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,
@@ -82,7 +83,7 @@ if (isLocalUrl(tenantBaseURL, 3004)) {
       `pnpm --filter @drts/ui-tokens build && ` +
       `cd apps/tenant-console-web && ` +
       `DRTS_API_URL=${devApiBaseURL} ` +
-      `pnpm exec next dev --hostname 127.0.0.1 --port 3004`,
+      `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3004`,
     url: "http://127.0.0.1:3004",
     reuseExistingServer: !process.env.CI,
     timeout: 300_000,
@@ -95,7 +96,7 @@ if (isLocalUrl(referralBaseURL, 3014)) {
       `cd apps/referral-embed-web && ` +
       `DRTS_API_URL=${devApiBaseURL} ` +
       `REFERRAL_EMBED_ALLOWED_HOSTS=community-app.example.test,localhost:3014,127.0.0.1:3014 ` +
-      `pnpm exec next dev --hostname 127.0.0.1 --port 3014`,
+      `pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3014`,
     url: "http://127.0.0.1:3014",
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
@@ -117,5 +118,5 @@ export default defineConfig({
       height: 1100,
     },
   },
-  ...(webServers.length > 0 ? { webServer: webServers } : {}),
+  ...(!skipWebServer && webServers.length > 0 ? { webServer: webServers } : {}),
 });
