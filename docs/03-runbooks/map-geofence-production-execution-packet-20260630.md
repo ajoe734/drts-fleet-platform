@@ -740,6 +740,13 @@ Residual follow-up:
 
 Goal: let admins author, review, publish, and retire geofences safely.
 
+Support packet:
+
+- `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-GATE-B-GOVERNANCE.md`
+  defines Gate B production acceptance for service-area boundaries, stop
+  policies, Phase 2 ODD/route layers, publish/retire audit, evaluator proof,
+  and admin-to-callcenter E2E evidence.
+
 Work:
 
 - Add Platform Admin route for service-area boundaries and stop policies.
