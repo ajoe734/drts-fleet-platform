@@ -896,6 +896,12 @@ Verification:
 
 Goal: decide when the map/geofence stack is safe for production.
 
+Support packet:
+
+- `support/sidecars/MAP-REL-001/MAP-GAP-TO-TASK-COVERAGE-MATRIX.md`
+  maps every `MAP-GAP-*` item to execution tasks, owners/reviewers, release
+  gates, E2E/observability evidence, and remaining production blockers.
+
 Work:
 
 - Own final release checklist and gate evidence.
