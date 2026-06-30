@@ -334,6 +334,10 @@ test.describe("ops console parity smoke", () => {
       .count();
     if (providerStatus !== "no_spatial_data") {
       expect(mapPointCount).toBeGreaterThan(0);
+      const routeCount = Number(
+        await board.getAttribute("data-ops-map-route-count"),
+      );
+      expect(routeCount).toBeGreaterThan(0);
       await expect(board.locator("[data-ops-map-render-mode]")).toHaveAttribute(
         "data-ops-map-render-mode",
         "tile",
@@ -347,6 +351,9 @@ test.describe("ops console parity smoke", () => {
       );
       await expect(
         board.locator('img[src*="/mock-map-tiles/"]').first(),
+      ).toBeVisible();
+      await expect(
+        board.locator("[data-ops-map-route-line]").first(),
       ).toBeVisible();
       await expect(board.getByText(/Zoom in|放大/).first()).toBeVisible();
     }

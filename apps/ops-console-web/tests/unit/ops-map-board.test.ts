@@ -152,6 +152,15 @@ describe("ops map board model", () => {
       "candidate",
       "candidate",
     ]);
+    expect(model.routeSegments).toEqual([
+      expect.objectContaining({
+        key: "order-1:route",
+        orderId: "order-1",
+        jobId: "job-1",
+        pickup: { lat: 25.037519, lng: 121.56368 },
+        dropoff: { lat: 25.033879, lng: 121.568743 },
+      }),
+    ]);
     expect(model.candidateSupplyPoints).toBe(2);
     expect(model.staleCandidatePoints).toBe(1);
     expect(model.noLocationCandidateCount).toBe(0);
@@ -184,6 +193,7 @@ describe("ops map board model", () => {
     expect(model.providerStatus).toBe("degraded_projection");
     expect(model.fallbackReason).toBe("missing_coordinates");
     expect(model.points.map((point) => point.kind)).toEqual(["dropoff"]);
+    expect(model.routeSegments).toEqual([]);
     expect(model.ordersMissingPickupCoordinates).toBe(1);
     expect(model.noLocationCandidateCount).toBe(1);
     expect(hasOpsMapCoordinates(model.points[0])).toBe(true);

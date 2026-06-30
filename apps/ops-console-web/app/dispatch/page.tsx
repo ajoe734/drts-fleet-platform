@@ -37,6 +37,7 @@ import {
   type OpsMapBoardModel,
   type OpsMapPointKind,
   type OpsMapProviderStatus,
+  type OpsMapRouteSegment,
   type OpsMapTileViewport,
 } from "./ops-map-board";
 import {
@@ -327,6 +328,14 @@ const spatialMapFallbackStyle: CSSProperties = {
   padding: 18,
   textAlign: "center",
   background: `linear-gradient(135deg, ${theme.surfaceHi}, ${theme.infoBg})`,
+};
+
+const spatialRouteOverlayStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  pointerEvents: "none",
 };
 
 const spatialLegendStyle: CSSProperties = {
@@ -1629,6 +1638,55 @@ function getOpsMapPointVisual(kind: OpsMapPointKind): {
   }
 }
 
+function renderOpsMapRouteLine(
+  route: OpsMapRouteSegment,
+  viewport: OpsMapTileViewport,
+) {
+  const pickup = projectOpsMapPointToViewport(
+    {
+      key: `${route.key}:pickup`,
+      kind: "pickup",
+      label: route.label,
+      lat: route.pickup.lat,
+      lng: route.pickup.lng,
+    },
+    viewport,
+  );
+  const dropoff = projectOpsMapPointToViewport(
+    {
+      key: `${route.key}:dropoff`,
+      kind: "dropoff",
+      label: route.label,
+      lat: route.dropoff.lat,
+      lng: route.dropoff.lng,
+    },
+    viewport,
+  );
+
+  if (!pickup.visible && !dropoff.visible) {
+    return null;
+  }
+
+  return (
+    <line
+      key={route.key}
+      className="spatial-route-line"
+      data-ops-map-job-id={route.jobId ?? ""}
+      data-ops-map-order-id={route.orderId}
+      data-ops-map-route-line={route.key}
+      x1={pickup.leftPct}
+      x2={dropoff.leftPct}
+      y1={pickup.topPct}
+      y2={dropoff.topPct}
+      stroke={theme.info}
+      strokeDasharray="8 7"
+      strokeLinecap="round"
+      strokeWidth="3"
+      vectorEffect="non-scaling-stroke"
+    />
+  );
+}
+
 function renderSpatialOverlayGroup(label: string, values: string[]): ReactNode {
   if (values.length === 0) {
     return null;
@@ -1731,6 +1789,7 @@ function renderDispatchSpatialBoard({
       data-ops-map-fallback-reason={model.fallbackReason}
       data-ops-map-policy-codes={model.overlays.policyCodes.join("|")}
       data-ops-map-provider-status={model.providerStatus}
+      data-ops-map-route-count={model.routeSegments.length}
       data-ops-map-service-areas={model.overlays.serviceAreaCodes.join("|")}
     >
       <div style={spatialBoardHeaderStyle}>
@@ -1881,6 +1940,20 @@ function renderDispatchSpatialBoard({
                 {t("dispatch.workflow.map.tileFallback", locale)}
               </div>
             )}
+            {model.routeSegments.length > 0 ? (
+              <svg
+                aria-hidden="true"
+                data-ops-map-route-layer="true"
+                focusable="false"
+                style={spatialRouteOverlayStyle}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                {model.routeSegments.map((route) =>
+                  renderOpsMapRouteLine(route, viewport),
+                )}
+              </svg>
+            ) : null}
             {model.points.map((point) => {
               const visual = getOpsMapPointVisual(point.kind);
               const coords = projectOpsMapPointToViewport(point, viewport);
@@ -2012,6 +2085,27 @@ function renderDispatchSpatialBoard({
             <strong style={{ color: theme.text }}>
               {t("dispatch.workflow.map.legend", locale)}
             </strong>
+            {model.routeSegments.length > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: theme.text,
+                  fontSize: 12,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-block",
+                    width: 28,
+                    borderTop: `3px dashed ${theme.info}`,
+                  }}
+                />
+                {t("dispatch.workflow.map.legend.route", locale)}
+              </div>
+            ) : null}
             {(["pickup", "dropoff", "candidate"] as OpsMapPointKind[]).map(
               (kind) => {
                 const visual = getOpsMapPointVisual(kind);

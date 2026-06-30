@@ -28,6 +28,20 @@ export interface OpsMapPoint {
   freshness?: DispatchCandidateLocationState;
 }
 
+export interface OpsMapCoordinate {
+  lat: number;
+  lng: number;
+}
+
+export interface OpsMapRouteSegment {
+  key: string;
+  orderId: string;
+  jobId?: string;
+  label: string;
+  pickup: OpsMapCoordinate;
+  dropoff: OpsMapCoordinate;
+}
+
 export interface OpsMapOverlaySummary {
   serviceAreaCodes: string[];
   policyCodes: string[];
@@ -47,6 +61,7 @@ export interface OpsMapBoardModel {
   providerStatus: OpsMapProviderStatus;
   fallbackReason: "none" | "missing_coordinates" | "no_visible_points";
   points: OpsMapPoint[];
+  routeSegments: OpsMapRouteSegment[];
   overlays: OpsMapOverlaySummary;
   ordersWithPickupCoordinates: number;
   ordersMissingPickupCoordinates: number;
@@ -139,6 +154,7 @@ export function buildOpsMapBoardModel({
 }: BuildOpsMapBoardInput): OpsMapBoardModel {
   const visibleOrders = orders.slice(0, visibleLimit);
   const points: OpsMapPoint[] = [];
+  const routeSegments: OpsMapRouteSegment[] = [];
   let candidateSupplyPoints = 0;
   let staleCandidatePoints = 0;
   let noLocationCandidateCount = 0;
@@ -149,29 +165,43 @@ export function buildOpsMapBoardModel({
       ? { jobId: job.dispatchJobId, etaMinutes: job.latestEtaMinutes }
       : {};
 
-    if (hasOpsMapCoordinates(order.pickup)) {
+    const pickup = hasOpsMapCoordinates(order.pickup) ? order.pickup : null;
+    const dropoff = hasOpsMapCoordinates(order.dropoff) ? order.dropoff : null;
+
+    if (pickup) {
       points.push({
         key: `${order.orderId}:pickup`,
         kind: "pickup",
         label: order.orderNo,
-        lat: order.pickup.lat,
-        lng: order.pickup.lng,
+        lat: pickup.lat,
+        lng: pickup.lng,
         orderId: order.orderId,
-        subtitle: order.pickup.addressName ?? order.pickup.address,
+        subtitle: pickup.addressName ?? pickup.address,
         ...jobFields,
       });
     }
 
-    if (hasOpsMapCoordinates(order.dropoff)) {
+    if (dropoff) {
       points.push({
         key: `${order.orderId}:dropoff`,
         kind: "dropoff",
         label: order.orderNo,
-        lat: order.dropoff.lat,
-        lng: order.dropoff.lng,
+        lat: dropoff.lat,
+        lng: dropoff.lng,
         orderId: order.orderId,
-        subtitle: order.dropoff.addressName ?? order.dropoff.address,
+        subtitle: dropoff.addressName ?? dropoff.address,
         ...jobFields,
+      });
+    }
+
+    if (pickup && dropoff) {
+      routeSegments.push({
+        key: `${order.orderId}:route`,
+        orderId: order.orderId,
+        label: order.orderNo,
+        pickup: { lat: pickup.lat, lng: pickup.lng },
+        dropoff: { lat: dropoff.lat, lng: dropoff.lng },
+        ...(job ? { jobId: job.dispatchJobId } : {}),
       });
     }
 
@@ -226,6 +256,7 @@ export function buildOpsMapBoardModel({
           ? "missing_coordinates"
           : "none",
     points,
+    routeSegments,
     overlays: buildOpsMapOverlaySummary(visibleOrders),
     ordersWithPickupCoordinates,
     ordersMissingPickupCoordinates,
