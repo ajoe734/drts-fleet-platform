@@ -27,6 +27,11 @@ type LiveSettlementTripRow = {
   cost_center_record?: unknown | null;
 };
 
+type LiveTripGovernanceRow = {
+  cost_center_code?: string | null;
+  cost_center_record?: unknown | null;
+};
+
 export type StoredTenantInvoiceRecord = TenantInvoiceRecord & {
   artifactDownloadMetadata: ControlledDownloadMetadata;
 };
@@ -54,6 +59,13 @@ export type LiveSettlementTripRecord = {
   serviceProduct?: string | null;
   tenantServiceProgramId?: string | null;
   sourcePlatform?: string | null;
+};
+
+export type LiveTripGovernanceRecord = {
+  costCenterCode: string | null;
+  costCenterName: string | null;
+  costCenterOwnerUserId: string | null;
+  costCenterActiveFlag: boolean | null;
 };
 
 export type BillingSettlementState = {
@@ -309,6 +321,72 @@ export class BillingSettlementRepository {
         sourcePlatform: order.orderSource,
       };
     });
+  }
+
+  async resolveLiveTripGovernance(
+    tenantId: string,
+    orderId: string,
+  ): Promise<LiveTripGovernanceRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<LiveTripGovernanceRow>(
+      `
+        SELECT
+          COALESCE(
+            NULLIF(orders.record->>'costCenter', ''),
+            NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,costCenterCode}', ''),
+            quota.cost_center_code
+          ) AS cost_center_code,
+          cost_centers.record AS cost_center_record
+        FROM ops.phase1_owned_orders AS orders
+        LEFT JOIN core.phase1_tenant_approval_requests AS approval
+          ON approval.tenant_id = $1
+         AND approval.order_id = orders.order_id
+        LEFT JOIN LATERAL (
+          SELECT ledger.cost_center_code
+          FROM core.phase1_tenant_quota_ledger AS ledger
+          WHERE ledger.tenant_id = $1
+            AND ledger.cost_center_code IS NOT NULL
+            AND (
+              ledger.booking_id = COALESCE(orders.record->>'bookingId', '')
+              OR ledger.booking_id = approval.booking_id
+              OR ledger.evaluation_id = approval.evaluation_id
+            )
+          ORDER BY ledger.created_at DESC
+          LIMIT 1
+        ) AS quota ON TRUE
+        LEFT JOIN core.phase1_tenant_cost_centers AS cost_centers
+          ON cost_centers.tenant_id = $1
+         AND cost_centers.code = COALESCE(
+           NULLIF(orders.record->>'costCenter', ''),
+           NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,costCenterCode}', ''),
+           quota.cost_center_code
+         )
+        WHERE orders.order_id = $2
+          AND COALESCE(orders.record->>'tenantId', '') = $1
+        LIMIT 1
+      `,
+      [tenantId, orderId],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    const costCenter = this.parseNullableRecord<TenantCostCenterRecord>(
+      row.cost_center_record,
+      "core.phase1_tenant_cost_centers",
+    );
+
+    return {
+      costCenterCode: this.normalizeNullableText(row.cost_center_code),
+      costCenterName: costCenter?.name ?? null,
+      costCenterOwnerUserId: costCenter?.ownerUserId ?? null,
+      costCenterActiveFlag: costCenter?.activeFlag ?? null,
+    };
   }
 
   /**

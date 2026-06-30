@@ -603,31 +603,33 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
-    const lines: InvoiceLineRecord[] = eligibleTrips.map((trip) => {
-      const governance = this.resolveInvoiceLineGovernance(trip);
+    const lines: InvoiceLineRecord[] = await Promise.all(
+      eligibleTrips.map(async (trip) => {
+        const governance = await this.resolveInvoiceLineGovernance(trip);
 
-      return {
-        lineId: `invoice-line-${randomUUID()}`,
-        orderId: trip.orderId,
-        description: this.buildInvoiceLineDescription(trip),
-        amount: { ...trip.grossEarning },
-        costCenterCode: governance.costCenterCode,
-        costCenterName: governance.costCenterName,
-        ownerUserId: governance.ownerUserId,
-        activeFlag: governance.activeFlag,
-        legacy_unmapped: governance.legacy_unmapped,
-        channelKey: this.getSettlementChannelKey(trip),
-        orderSource: trip.orderSource,
-        serviceBucket: trip.serviceBucket,
-        businessDispatchSubtype: trip.businessDispatchSubtype,
-        partnerId: trip.partnerId,
-        partnerProgramId: trip.partnerProgramId,
-        partnerEntrySlug: trip.partnerEntrySlug,
-        eligibilityVerificationId: trip.eligibilityVerificationId,
-        issuerAuthorizationRef: trip.issuerAuthorizationRef,
-        benefitReference: trip.benefitReference,
-      };
-    });
+        return {
+          lineId: `invoice-line-${randomUUID()}`,
+          orderId: trip.orderId,
+          description: this.buildInvoiceLineDescription(trip),
+          amount: { ...trip.grossEarning },
+          costCenterCode: governance.costCenterCode,
+          costCenterName: governance.costCenterName,
+          ownerUserId: governance.ownerUserId,
+          activeFlag: governance.activeFlag,
+          legacy_unmapped: governance.legacy_unmapped,
+          channelKey: this.getSettlementChannelKey(trip),
+          orderSource: trip.orderSource,
+          serviceBucket: trip.serviceBucket,
+          businessDispatchSubtype: trip.businessDispatchSubtype,
+          partnerId: trip.partnerId,
+          partnerProgramId: trip.partnerProgramId,
+          partnerEntrySlug: trip.partnerEntrySlug,
+          eligibilityVerificationId: trip.eligibilityVerificationId,
+          issuerAuthorizationRef: trip.issuerAuthorizationRef,
+          benefitReference: trip.benefitReference,
+        };
+      }),
+    );
     const amount = this.sumMoney(lines.map((line) => line.amount));
     const now = new Date().toISOString();
     const invoiceId = `invoice-${randomUUID()}`;
@@ -2633,8 +2635,10 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
-  private resolveInvoiceLineGovernance(trip: BillingSettlementTripRecord) {
-    const costCenterCode = this.resolveInvoiceLineCostCenterCode(trip);
+  private async resolveInvoiceLineGovernance(
+    trip: BillingSettlementTripRecord,
+  ) {
+    const costCenterCode = await this.resolveInvoiceLineCostCenterCode(trip);
     if (!costCenterCode) {
       return {
         costCenterCode: null,
@@ -2649,23 +2653,45 @@ export class BillingSettlementService implements OnModuleInit {
       trip.tenantId,
       costCenterCode,
     );
+    const persistedGovernance = await this.resolvePersistedTripGovernance(
+      trip,
+      costCenterCode,
+    );
     const hasEmbeddedCostCenter =
       trip.costCenterCode?.trim().toUpperCase() === costCenterCode &&
       Boolean(trip.costCenterName ?? trip.costCenterOwnerUserId);
+    const hasPersistedCostCenter =
+      persistedGovernance?.costCenterCode === costCenterCode &&
+      Boolean(
+        persistedGovernance.costCenterName ??
+        persistedGovernance.costCenterOwnerUserId,
+      );
 
     return {
       costCenterCode,
-      costCenterName: costCenter?.name ?? trip.costCenterName ?? null,
+      costCenterName:
+        costCenter?.name ??
+        trip.costCenterName ??
+        persistedGovernance?.costCenterName ??
+        null,
       ownerUserId:
-        costCenter?.ownerUserId ?? trip.costCenterOwnerUserId ?? null,
-      activeFlag: costCenter?.activeFlag ?? trip.costCenterActiveFlag ?? null,
-      legacy_unmapped: !costCenter && !hasEmbeddedCostCenter,
+        costCenter?.ownerUserId ??
+        trip.costCenterOwnerUserId ??
+        persistedGovernance?.costCenterOwnerUserId ??
+        null,
+      activeFlag:
+        costCenter?.activeFlag ??
+        trip.costCenterActiveFlag ??
+        persistedGovernance?.costCenterActiveFlag ??
+        null,
+      legacy_unmapped:
+        !costCenter && !hasEmbeddedCostCenter && !hasPersistedCostCenter,
     };
   }
 
-  private resolveInvoiceLineCostCenterCode(
+  private async resolveInvoiceLineCostCenterCode(
     trip: BillingSettlementTripRecord,
-  ): string | null {
+  ): Promise<string | null> {
     const tripCostCenterCode =
       trip.costCenterCode?.trim().toUpperCase() ?? null;
     if (tripCostCenterCode) {
@@ -2673,13 +2699,49 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     try {
-      return (
-        this.tenantPartnerService
-          ?.getTenantOrder(trip.tenantId, trip.orderId)
-          .costCenter?.trim()
-          .toUpperCase() ?? null
-      );
+      const tenantOrderCostCenter = this.tenantPartnerService
+        ?.getTenantOrder(trip.tenantId, trip.orderId)
+        .costCenter?.trim()
+        .toUpperCase();
+      if (tenantOrderCostCenter) {
+        return tenantOrderCostCenter;
+      }
     } catch {
+      // Cloud Run instances may not share the in-memory order cache; fall back
+      // to the persisted operational/governance records below.
+    }
+
+    const persistedGovernance = await this.resolvePersistedTripGovernance(trip);
+    return persistedGovernance?.costCenterCode ?? null;
+  }
+
+  private async resolvePersistedTripGovernance(
+    trip: BillingSettlementTripRecord,
+    expectedCostCenterCode?: string | null,
+  ) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return null;
+    }
+
+    try {
+      const governance =
+        await this.billingSettlementRepository.resolveLiveTripGovernance(
+          trip.tenantId,
+          trip.orderId,
+        );
+      if (
+        expectedCostCenterCode &&
+        governance?.costCenterCode &&
+        governance.costCenterCode !== expectedCostCenterCode
+      ) {
+        return null;
+      }
+      return governance;
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "resolve_live_trip_governance",
+      );
       return null;
     }
   }
