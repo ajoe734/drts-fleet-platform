@@ -1,9 +1,9 @@
 # MAP-OBS-001 Observability Evidence Contract
 
-**Sidecar task:** `MAP-OBS-001-SIDECAR-EVIDENCE`  
-**Parent task:** `MAP-OBS-001` - Spatial observability and audit  
-**Parent owner/reviewer:** `Codex2` / `Codex`  
-**Sidecar owner/reviewer:** `Codex` / `Codex2`  
+**Sidecar task:** `MAP-OBS-001-SIDECAR-EVIDENCE`
+**Parent task:** `MAP-OBS-001` - Spatial observability and audit
+**Parent owner/reviewer:** `Codex2` / `Codex`
+**Sidecar owner/reviewer:** `Codex` / `Codex2`
 **Scope boundary:** support artifact only. This contract defines the observability/audit evidence needed for production readiness; it does not implement metrics by itself.
 
 ## 1. Production Observability Verdict
