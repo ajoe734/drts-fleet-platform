@@ -80,3 +80,47 @@ project into a healthy one (ideally `drts-dev-bobo-20260503` where dev runs), th
 - With that shim + `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform`
   and the e2e env (JWT_SECRET=ci-e2e-secret, PARTNER_INGRESS_KEY_BANK_DEMO_*_AIRPORT, etc.),
   `tests/e2e/run-e2e-hermetic.sh` runs each scenario green against a real booted API.
+
+---
+
+## UPDATE 2026-06-30 — dev migrated to `drts-dev-ray-tw-20260530` (the `-tw` project)
+
+The old dev Cloud Run (`waji3fer3a` on `drts-dev-bobo-20260503`) and the WIF host
+(`drts-dev-ray-20260527`) are retired. **dev now runs on `drts-dev-ray-tw-20260530`**
+(the same project as the VM), deployed via the `current` profile (GitHub `DEV_*` vars
+repointed there).
+
+**New dev URLs (hash `ne55h7sy3a`):** `https://drts-dev-<app>-ne55h7sy3a-uc.a.run.app`
+(api + platform-admin / ops-console / fleet-partner-portal / tenant-console / bank-console /
+partner-booking / enterprise-dispatch / channel-partner-portal / referral-embed).
+
+**What was provisioned in `drts-dev-ray-tw-20260530`:**
+- Enabled APIs: run, artifactregistry, cloudbuild, iamcredentials, sts, secretmanager, sqladmin, compute.
+- Artifact Registry repo `drts` (us-central1).
+- WIF: pool `github-actions-pool` + OIDC provider `github`
+  (`projects/1048889254056/locations/global/workloadIdentityPools/github-actions-pool/providers/github`,
+  attribute-condition `assertion.repository=='ajoe734/drts-fleet-platform'`).
+- Deployer SA `gha-deployer@…` (run.admin, artifactregistry.writer, iam.serviceAccountUser,
+  cloudsql.client, secretmanager.admin, serviceusage.serviceUsageConsumer, storage.admin) bound to
+  the repo via `roles/iam.workloadIdentityUser`.
+- **Runtime SA `drts-dev-runtime@…`** — MUST be distinct from the deployer SA (deploy guard at
+  deploy-dev.yml ~L732 fails if runtime == deployer). Granted secretmanager.secretAccessor +
+  cloudsql.client; deployer has serviceAccountUser on it.
+- **Cloud SQL** `drts-dev-db` (POSTGRES_16, ENTERPRISE edition, db-g1-small, us-central1) +
+  database `drts_fleet_platform` (the deploy's migrate Cloud Run job applies migrations).
+- Secrets (prefix `drts-dev`): `-db-url` (Cloud SQL unix-socket DSN
+  `postgresql://postgres:<pw>@/drts_fleet_platform?host=/cloudsql/<connName>`), `-jwt-secret`,
+  `-api-key-salt`, `-controlled-download-signing-secret`. (`-internal-key` / `-llm-gateway-api-key`
+  are optional — deploy degrades gracefully; LLM gateway falls back to `mock`.)
+- GitHub `DEV_*` repointed: `DEV_GCP_PROJECT_ID`, `DEV_ARTIFACT_PROJECT_ID`,
+  `DEV_GCP_CLOUDSQL_INSTANCE=drts-dev-ray-tw-20260530:us-central1:drts-dev-db`,
+  `DEV_GCP_RUNTIME_SERVICE_ACCOUNT=drts-dev-runtime@…`, secrets `DEV_WIF_PROVIDER` /
+  `DEV_WIF_SERVICE_ACCOUNT`.
+
+**Deploy dev going forward:**
+`gh workflow run deploy-dev.yml --ref dev -f source_ref=<full-40hex-SHA> -f target_profile=current`
+(`--ref dev` required by the "don't deploy from main" guard; the `current` profile = `-tw`).
+
+**Gotchas hit during the move:** default Cloud SQL edition is ENTERPRISE_PLUS (rejects shared-core
+tiers — use `--edition=ENTERPRISE`); the migrate job + services run as the runtime SA which needs
+`secretAccessor` (compute@ default fails); runtime SA must differ from deployer SA.
