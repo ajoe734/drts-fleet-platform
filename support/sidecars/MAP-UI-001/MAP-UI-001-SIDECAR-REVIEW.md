@@ -10,6 +10,7 @@ the current `MAP-UI-001` implementation handoff.
 
 - Sidecar task: `MAP-UI-001-SIDECAR-REVIEW`
 - Sidecar owner/reviewer: `Codex` -> `Codex2`
+- Sidecar task status at closeout capture: `review_approved`
 - Parent task: `MAP-UI-001`
 - Parent owner/reviewer: `Codex` -> `Claude2`
 - Parent task status at capture time: `review`
@@ -23,6 +24,25 @@ Parent task summary from machine truth:
 > preview readiness, test coverage, and the design-canvas requirements note
 > clarifying that final surface visual sign-off still needs canvas
 > update/approval.
+
+## Review Approval Snapshot
+
+Reviewer approval recorded in machine truth for this sidecar task:
+
+> Reviewed owner commit `5d260c6b8` on
+> `origin/codex/map-ui-001-sidecar-review`. Packet accurately reflects current
+> machine truth, execution docs, and repo-visible gaps: no visible
+> `AddressMapPicker` / `AddressMapPairPicker` exports in
+> `packages/ui-web/src/client.tsx`, only
+> `packages/ui-web/tests/unit/management-shell.test.ts` in `ui-web` tests, and
+> no tracked address-map-picker design-canvas requirements note in this
+> snapshot.
+
+Important boundary at closeout:
+
+- This approval is for the sidecar support packet only.
+- The parent task `MAP-UI-001` remains in `review` and still needs its own
+  owner/reviewer resolution on the claimed picker implementation snapshot.
 
 ## Canonical Review Expectations
 
@@ -133,3 +153,10 @@ Prepared for sidecar reviewer `Codex2`.
 Recommended disposition for the parent `MAP-UI-001` review: require the owner
 to provide the exact reviewable branch/commit or reopen if the claimed picker
 artifacts are not actually present on the reviewed snapshot.
+
+Owner closeout note:
+
+- Sidecar closeout does not change the parent task's canonical implementation
+  status.
+- The only closeout deliverable is this reviewer packet on
+  `codex/map-ui-001-sidecar-review`.
