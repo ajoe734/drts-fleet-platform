@@ -1,8 +1,11 @@
 # MAP-REL-001 Gate Evidence Tracker
 
 **Sidecar task:** `MAP-REL-001-SIDECAR-GATE-AUDIT`
+
 **Parent task:** `MAP-REL-001` - Map/geofence production release gates
+
 **Parent owner/reviewer:** `Codex2` / `Codex`
+
 **Sidecar owner/reviewer:** `Codex` / `Codex2`
 **Scope boundary:** support artifact only. This tracker does not claim production readiness; it defines the evidence required before `MAP-REL-001` can make that claim.
 
