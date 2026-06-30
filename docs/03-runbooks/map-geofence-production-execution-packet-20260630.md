@@ -767,6 +767,13 @@ Verification:
 Goal: give drivers a real map/navigation handoff without making the driver app
 the service-area authority.
 
+Support packet:
+
+- `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT.md`
+  defines the Gate D production acceptance, mobile UAT evidence, simulator/unit
+  checks, heartbeat coexistence, external navigation assertions, and do-not-claim
+  rules for driver map/navigation readiness.
+
 Work:
 
 - Add native map SDK behind a driver map adapter.
