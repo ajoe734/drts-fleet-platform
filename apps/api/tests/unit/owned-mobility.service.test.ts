@@ -7,11 +7,13 @@ import {
   RESERVATION_HOLD_VALID_TRANSITIONS,
   EXCEPTION_HOLD_REASON_CODES,
 } from "@drts/contracts";
+import type { ServiceAreaEvaluationResult } from "@drts/contracts";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
@@ -49,6 +51,7 @@ function createOwnedMobilityService(options?: {
   runtimeEligibilityEvaluator?: {
     evaluate: ReturnType<typeof vi.fn>;
   };
+  serviceAreaService?: ServiceAreaService;
   repository?: {
     isEnabled: () => boolean;
     persistChanges: (...args: any[]) => Promise<unknown>;
@@ -141,6 +144,9 @@ function createOwnedMobilityService(options?: {
     serviceProductService,
     undefined,
     options?.runtimeEligibilityEvaluator as never,
+    undefined,
+    undefined,
+    options?.serviceAreaService,
   );
 
   return {
@@ -153,6 +159,401 @@ function createOwnedMobilityService(options?: {
 describe("OwnedMobilityService queue and reservation orchestration", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("hard-blocks coordinate-bearing phone orders in no-pickup service-area policies", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    expect(() =>
+      service.createCallCenterOrder({
+        callId: "call-map-block-001",
+        agentId: "ops-agent-001",
+        recordingId: "recording-map-block-001",
+        pickup: {
+          address: "台北車站禁止上車區",
+          lat: 25.0478,
+          lng: 121.517,
+        },
+        dropoff: {
+          address: "信義區",
+          lat: 25.06,
+          lng: 121.58,
+        },
+        passenger: { name: "Map Rider", phone: "0912000000" },
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createCallCenterOrder({
+        callId: "call-map-block-002",
+        agentId: "ops-agent-001",
+        recordingId: "recording-map-block-002",
+        pickup: {
+          address: "台北車站禁止上車區",
+          lat: 25.0478,
+          lng: 121.517,
+        },
+        dropoff: {
+          address: "信義區",
+          lat: 25.06,
+          lng: 121.58,
+        },
+        passenger: { name: "Map Rider", phone: "0912000000" },
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PICKUP_NOT_ALLOWED",
+          details: {
+            decision: "not_serviceable",
+            reasonCodes: ["PICKUP_NOT_ALLOWED"],
+            geometryVersionRefs: [
+              "service_area:TAIPEI_CORE@1",
+              "stop_policy:TPE_STATION_PICKUP_BLOCK@1",
+            ],
+          },
+        },
+      });
+    }
+  });
+
+  it("routes manual-review service-area stops away from normal dispatch", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-001",
+          vehicleId: "vehicle-map-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createCallCenterOrder({
+      callId: "call-map-review-001",
+      agentId: "ops-agent-001",
+      recordingId: "recording-map-review-001",
+      pickup: {
+        address: "信義醫院管制入口",
+        lat: 25.0338,
+        lng: 121.5645,
+      },
+      dropoff: {
+        address: "市府轉運站",
+        lat: 25.041,
+        lng: 121.55,
+      },
+      passenger: { name: "Map Rider", phone: "0912000000" },
+    });
+
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.complianceFlags).toContain("service_area_manual_review");
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      blocking: false,
+      evidenceRefs: expect.arrayContaining([
+        "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1",
+        "STOP_REQUIRES_MANUAL_REVIEW",
+      ]),
+    });
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+    try {
+      service.dispatchOrder(order.orderId, { mode: "auto" });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "DISPATCH_REQUIRES_MANUAL_REVIEW",
+          details: {
+            gateTypes: ["service_area"],
+            reasonCodes: expect.arrayContaining([
+              "STOP_REQUIRES_MANUAL_REVIEW",
+            ]),
+          },
+        },
+      });
+    }
+  });
+
+  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    const order = service.createCallCenterOrder(
+      {
+        callId: "call-map-audit-001",
+        agentId: "ops-agent-geo-001",
+        recordingId: "recording-map-audit-001",
+        pickup: {
+          address: "台北市政府",
+          lat: 25.0375,
+          lng: 121.5637,
+          coordinateSource: "provider_candidate",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "exact",
+          providerCandidateId: "mock-candidate-city-hall",
+          selectedByActorId: "ops-agent-geo-001",
+          selectedAt: "2026-06-30T10:00:00.000Z",
+          surface: "callcenter",
+        },
+        dropoff: {
+          address: "信義區松仁路",
+          lat: 25.034,
+          lng: 121.568,
+          coordinateSource: "manual_pin",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "manual",
+          pinnedByActorId: "ops-agent-geo-001",
+          pinnedAt: "2026-06-30T10:01:00.000Z",
+          surface: "callcenter",
+        },
+        passenger: { name: "Map Audit Rider", phone: "0912000000" },
+      },
+      "req-map-audit-001",
+    );
+
+    const detail = service.getOrder(order.orderId);
+    const spatialAudit = detail.spatialAudit;
+
+    expect(spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "ops-agent-geo-001",
+      actorType: "ops_user",
+      surface: "callcenter",
+      serviceProductType: "taxi_realtime",
+      decision: "serviceable",
+      serviceAreaCodes: ["TAIPEI_CORE"],
+      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+      missingItems: [],
+    });
+    expect(spatialAudit?.stops).toEqual([
+      expect.objectContaining({
+        kind: "pickup",
+        addressText: "台北市政府",
+        location: { lat: 25.0375, lng: 121.5637 },
+        provenanceComplete: true,
+        missingItems: [],
+        coordinateProvenance: expect.objectContaining({
+          coordinateSource: "provider_candidate",
+          geocodeProvider: "mock_geo",
+          selectedByActorId: "ops-agent-geo-001",
+          surface: "callcenter",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "dropoff",
+        addressText: "信義區松仁路",
+        location: { lat: 25.034, lng: 121.568 },
+        provenanceComplete: true,
+        missingItems: [],
+        coordinateProvenance: expect.objectContaining({
+          coordinateSource: "manual_pin",
+          pinnedByActorId: "ops-agent-geo-001",
+          surface: "callcenter",
+        }),
+      }),
+    ]);
+    expect(detail.complianceFlags).toEqual(
+      expect.arrayContaining(["recording_bound", "service_area_serviceable"]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "ops-agent-geo-001",
+        actorType: "ops_user",
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: order.orderId,
+        requestId: "req-map-audit-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "serviceable",
+          surface: "callcenter",
+          serviceProductType: "taxi_realtime",
+          provenanceComplete: true,
+        }),
+      }),
+    );
+  });
+
+  it("keeps text-only legacy orders in explicit service-area manual review", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-legacy-001",
+          vehicleId: "vehicle-map-legacy-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Caller only gave a landmark" },
+      dropoff: { address: "Caller only gave another landmark" },
+      passenger: { name: "Legacy Rider", phone: "0912000000" },
+    });
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.complianceFlags).toContain(
+      "service_area_legacy_text_manual_review",
+    );
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      evidenceState: "missing",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      surface: "passenger_entry",
+      decision: "manual_review",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            surface: "passenger_entry",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            surface: "passenger_entry",
+          }),
+        }),
+      ],
+    });
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("uses immutable spatial snapshots instead of re-evaluating created orders", () => {
+    const serviceableEvaluation: ServiceAreaEvaluationResult = {
+      decision: "serviceable",
+      serviceProductType: "taxi_realtime",
+      evaluatedAt: "2026-06-30T10:02:00.000Z",
+      stops: [
+        {
+          kind: "pickup",
+          location: { lat: 25.0375, lng: 121.5637 },
+          serviceAreaCodes: ["TAIPEI_CORE"],
+          policyCodes: [],
+          geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        },
+        {
+          kind: "dropoff",
+          location: { lat: 25.041, lng: 121.55 },
+          serviceAreaCodes: ["TAIPEI_CORE"],
+          policyCodes: [],
+          geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        },
+      ],
+      serviceAreaCodes: ["TAIPEI_CORE"],
+      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+      reasonCodes: [],
+      reasonMessages: [],
+    };
+    const changedEvaluation: ServiceAreaEvaluationResult = {
+      ...serviceableEvaluation,
+      decision: "not_serviceable",
+      reasonCodes: ["PICKUP_AREA_NOT_SERVICEABLE"],
+      reasonMessages: ["pickup is outside the service area."],
+      stops: serviceableEvaluation.stops.map((stop) => ({
+        ...stop,
+        decision: "not_serviceable",
+        reasonCodes: ["PICKUP_AREA_NOT_SERVICEABLE"],
+        reasonMessages: ["pickup is outside the service area."],
+      })),
+    };
+    const evaluate = vi
+      .fn()
+      .mockReturnValueOnce(serviceableEvaluation)
+      .mockReturnValue(changedEvaluation);
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: { evaluate } as unknown as ServiceAreaService,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: {
+        address: "台北市政府",
+        lat: 25.0375,
+        lng: 121.5637,
+        coordinateSource: "provider_candidate",
+        geocodeProvider: "mock_geo",
+        geocodeConfidence: "exact",
+        selectedByActorId: "passenger-001",
+        selectedAt: "2026-06-30T10:02:00.000Z",
+      },
+      dropoff: {
+        address: "市府轉運站",
+        lat: 25.041,
+        lng: 121.55,
+        coordinateSource: "provider_candidate",
+        geocodeProvider: "mock_geo",
+        geocodeConfidence: "exact",
+        selectedByActorId: "passenger-001",
+        selectedAt: "2026-06-30T10:02:30.000Z",
+      },
+      passenger: { name: "Immutable Rider", phone: "0912000000" },
+    });
+    const firstDetail = service.getOrder(order.orderId);
+    firstDetail.spatialAudit?.reasonCodes.push("MUTATED_REASON");
+    if (firstDetail.spatialAudit?.stops[0]?.location) {
+      firstDetail.spatialAudit.stops[0].location.lat = 0;
+    }
+
+    const freshDetail = service.getOrder(order.orderId);
+    const serviceAreaGate = freshDetail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(freshDetail.spatialAudit).toMatchObject({
+      decision: "serviceable",
+      reasonCodes: [],
+      stops: [
+        expect.objectContaining({
+          location: { lat: 25.0375, lng: 121.5637 },
+        }),
+        expect.objectContaining({
+          location: { lat: 25.041, lng: 121.55 },
+        }),
+      ],
+    });
+    expect(serviceAreaGate).toMatchObject({
+      state: "clear",
+      evidenceRefs: ["service_area:TAIPEI_CORE@1"],
+    });
   });
 
   it("enforces queue check-in eligibility and keeps stable queue positions", () => {
