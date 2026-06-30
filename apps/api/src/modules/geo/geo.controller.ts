@@ -12,11 +12,6 @@ import { GeoService } from "./geo.service";
 export class GeoController {
   constructor(private readonly geoService: GeoService) {}
 
-  @Get("health")
-  health(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(this.geoService.health(), requestId);
-  }
-
   @Get("search")
   async search(
     @Query() query: Record<string, string | undefined>,

@@ -3,9 +3,12 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 
 import { AppModule } from "./app.module";
+import { resolveMapProviderRuntimeConfig } from "./common/map-provider";
 import { buildHealthPayload } from "./health/health.controller";
 
 async function bootstrap() {
+  resolveMapProviderRuntimeConfig(process.env);
+
   const app = await NestFactory.create(AppModule, {
     cors: true,
   });

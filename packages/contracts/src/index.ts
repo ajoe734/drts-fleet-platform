@@ -208,58 +208,6 @@ export interface GeoReverseResponse {
   resolvedAt: string;
 }
 
-export const GEO_PROVIDER_MODES = ["mock", "external", "disabled"] as const;
-export type GeoProviderMode = (typeof GEO_PROVIDER_MODES)[number];
-
-export const GEO_PROVIDER_OPERATIONAL_STATUSES = [
-  "healthy",
-  "degraded",
-  "unhealthy",
-] as const;
-export type GeoProviderOperationalStatus =
-  (typeof GEO_PROVIDER_OPERATIONAL_STATUSES)[number];
-
-export const GEO_PROVIDER_HEALTH_CHECK_STATUSES = [
-  "pass",
-  "warn",
-  "fail",
-] as const;
-export type GeoProviderHealthCheckStatus =
-  (typeof GEO_PROVIDER_HEALTH_CHECK_STATUSES)[number];
-
-export interface GeoProviderHealthCheck {
-  name: string;
-  status: GeoProviderHealthCheckStatus;
-  message: string;
-}
-
-export interface GeoProviderHealthResponse {
-  provider: string;
-  mode: GeoProviderMode;
-  status: GeoProviderOperationalStatus;
-  environment: string;
-  generatedAt: string;
-  failClosed: boolean;
-  mockAllowed: boolean;
-  requiredSecretNames: string[];
-  missingSecretNames: string[];
-  quota: {
-    dailyLimit: number | null;
-    minuteLimit: number | null;
-    warningThresholdPercent: number;
-    criticalThresholdPercent: number;
-    policy: "mock_unlimited" | "provider_enforced";
-  };
-  keyRestrictions: {
-    browserAllowedOrigins: string[];
-    mobileBundleIds: string[];
-    mobilePackageNames: string[];
-    serverKeyConfigured: boolean;
-    browserKeyConfigured: boolean;
-  };
-  checks: GeoProviderHealthCheck[];
-}
-
 export function isValidLatitude(value: unknown): value is number {
   return (
     typeof value === "number" &&
@@ -2638,6 +2586,7 @@ export const COMPLIANCE_GATE_TYPES = [
   "recording",
   "proof",
   "eligibility",
+  "service_area",
 ] as const;
 export type ComplianceGateType = (typeof COMPLIANCE_GATE_TYPES)[number];
 
@@ -2956,6 +2905,7 @@ export interface OwnedOrderRecord {
   approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   complianceFlags: string[];
+  spatialAudit?: OwnedOrderSpatialAuditSnapshot | null;
   cancelledAt: string | null;
   cancelReason: string | null;
   reservationHoldStatus: ReservationHoldStatus;
