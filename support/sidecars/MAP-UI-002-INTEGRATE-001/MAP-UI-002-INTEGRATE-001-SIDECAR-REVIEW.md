@@ -120,11 +120,35 @@ and called out three production blockers:
 ### C. Integration task purpose
 
 `MAP-UI-002-INTEGRATE-001` exists so downstream work does not accidentally absorb only one
-half of the solution. The integrated branch combines:
+half of the solution. The integrated branch carries forward primitive content from
+`MAP-UI-002`, incorporates the hardening branch from `MAP-UI-002-HARDEN-001`, and adds
+the integrated closeout commit:
 
-- `58cb496ef` - primitive branch from `MAP-UI-002`
-- `414f27484` - hardening branch from `MAP-UI-002-HARDEN-001`
+- `58cb496ef` - primitive source commit reviewed on `codex2/map-ui-002`
+- `414f27484` - hardening ancestor on `origin/codex/map-ui-002-integrate-001`
 - `4c08c6a28` - closeout commit adding the integrated Storybook preview and closeout note
+
+Important ancestry caveat:
+
+- `git merge-base --is-ancestor 58cb496ef01f4e76e7ebe24b1e539596da38d06f origin/codex/map-ui-002-integrate-001`
+  returns false, so the integration branch should not be described as literally
+  containing commit `58cb496ef`
+- the correct claim is narrower: the integration branch preserves and evolves the
+  primitive artifact set first introduced by `58cb496ef`
+
+Evidence for the carry-forward claim:
+
+- relative to `58cb496ef`, the integration branch still contains modified descendants of
+  the same primitive-facing files:
+  - `packages/ui-web/src/geometry-editor.tsx`
+  - `packages/ui-web/src/index.tsx`
+  - `packages/ui-web/src/geometry-editor.stories.tsx`
+  - `apps/platform-admin-web/components/sandbox/sandbox-geometry-map.tsx`
+- it also adds the hardened package-local test surface
+  `packages/ui-web/tests/unit/geometry-editor.test.ts`
+- `git diff --name-status 58cb496ef01f4e76e7ebe24b1e539596da38d06f origin/codex/map-ui-002-integrate-001 -- ...`
+  shows those primitive files as modified rather than absent, which is the evidence this
+  packet relies on
 
 That means the review question for `MAP-UI-002-INTEGRATE-001` is narrower than the
 original parent review question:
@@ -238,6 +262,11 @@ Recommended reviewer flow:
 
 3. Confirm the reviewed integration branch still contains the expected artifact set.
    - `git ls-tree --name-only -r origin/codex/map-ui-002-integrate-001 packages/ui-web apps/platform-admin-web support/sidecars/MAP-UI-002`
+   - `git merge-base --is-ancestor 58cb496ef01f4e76e7ebe24b1e539596da38d06f origin/codex/map-ui-002-integrate-001`
+     is expected to fail; review the packet wording accordingly
+   - `git diff --name-status 58cb496ef01f4e76e7ebe24b1e539596da38d06f origin/codex/map-ui-002-integrate-001 -- packages/ui-web/src/geometry-editor.tsx packages/ui-web/src/index.tsx apps/platform-admin-web/components/sandbox/sandbox-geometry-map.tsx packages/ui-web/tests/unit/geometry-editor.test.ts packages/ui-web/src/geometry-editor.stories.tsx support/sidecars/MAP-UI-002/MAP-UI-002-INTEGRATE-001-CLOSEOUT.md`
+     should show carried-forward primitive files as `M` plus the new hardened test and
+     closeout artifacts as `A`
 
 4. Spot-check the three previously blocked areas on the integration branch.
    - package-local geometry-editor test location
