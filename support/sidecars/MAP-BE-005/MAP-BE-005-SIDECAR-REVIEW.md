@@ -1,11 +1,11 @@
 # MAP-BE-005 Review Packet & Evidence Summary
 
-**Sidecar Kind:** `review_packet`  
-**Parent Task:** `MAP-BE-005`  
-**Parent Owner / Reviewer:** `Codex` / `Claude2`  
-**Sidecar Owner / Reviewer:** `Codex` / `Codex2`  
-**Generated:** `2026-06-30` (UTC)  
-**Snapshot Basis:** `scripts/ai-status.sh show`, `ai-activity-log.jsonl`, `git show`, `git blame`, `git rev-parse`, and current code anchors  
+- **Sidecar Kind:** `review_packet`
+- **Parent Task:** `MAP-BE-005`
+- **Parent Owner / Reviewer:** `Codex` / `Claude2`
+- **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
+- **Generated:** `2026-06-30` (UTC)
+- **Snapshot Basis:** `scripts/ai-status.sh show`, `ai-activity-log.jsonl`, `git show`, `git blame`, `git rev-parse`, and current code anchors
 **Status:** `REVIEW SUPPORT ARTIFACT`
 
 This packet is support-only. It does not modify canonical truth or parent
@@ -60,11 +60,11 @@ Out of scope:
 - `owner=Codex`
 - `reviewer=Codex2`
 - `status=in_progress`
-- `last_update=2026-06-30T22:04:07Z`
+- `last_update=2026-06-30T22:10:06Z`
 - `helper_parent=MAP-BE-005`
 - `helper_kind=review_packet`
 - `mutates_canonical=false`
-- `next=Preparing sidecar review packet and evidence summary`
+- `next=Resuming sidecar review packet repair; checking markdown formatting consistency and packet validation evidence before re-handoff.`
 
 ### 2.2 Parent row
 
@@ -122,6 +122,9 @@ Relevant `ai-activity-log.jsonl` entries for `MAP-BE-005-SIDECAR-REVIEW`:
 | `chair_reassignment_applied` | `2026-06-30T21:33:31Z` | `Orchestrator` | Owner reassigned from `Gemini2` to `Gemini`. |
 | `task_proactive_rebalanced` | `2026-06-30T22:03:34Z` | `Orchestrator` | Availability-first reassignment moved owner from `Gemini` to `Codex` and reviewer from `Codex` to `Codex2`. |
 | `start` | `2026-06-30T22:04:07Z` | `Codex` | Current sidecar owner started packet preparation. |
+| `handoff` | `2026-06-30T22:08:28Z` | `Codex` | First packet revision handed to `Codex2` with a claim that `git diff --check` passed for the packet. |
+| `reopen` | `2026-06-30T22:09:40Z` | `Codex2` | Review failed because commit `4a47b84c6` still carried trailing whitespace on opening metadata lines, so the recorded packet validation was not self-consistent. |
+| `progress` | `2026-06-30T22:10:06Z` | `Codex` | Repairing the packet and refreshing the validation evidence before re-handoff. |
 
 ---
 
@@ -156,6 +159,22 @@ Review implication:
 - do not use `origin/dev...HEAD` as the proof surface for the parent task
 - use the current-file anchors in Sections 4 and 5 plus the parent handoff
   evidence from machine truth
+
+### 3.1 Reopen Cause And Repair Target
+
+The first sidecar handoff used commit `4a47b84c6`, which added this packet as a
+new file. `git show --check 4a47b84c6 -- support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
+reports trailing whitespace on the opening metadata lines because that revision
+used Markdown hard-break spacing.
+
+Repair implication:
+
+- the reopen was about packet formatting / validation consistency, not parent
+  scope drift
+- this revision removes the metadata trailing whitespace instead of relying on
+  hard-break formatting
+- reviewer validation for the re-handoff should target the current `HEAD`, not
+  the superseded `4a47b84c6` handoff note
 
 ---
 
@@ -285,7 +304,10 @@ Prioritize these checks during review:
 
 If the reviewer wants to reproduce the evidence quickly:
 
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-005-SIDECAR-REVIEW`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-005`
+- `git show --check HEAD -- support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
+- `grep -n '[[:blank:]]$' support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
 - `git show --stat --format=fuller deb5e1d36`
 - `git blame -L 586,603 packages/contracts/src/index.ts`
 - `git blame -L 6062,6555 apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
@@ -304,12 +326,27 @@ accepting the parent handoff evidence:
   sidecar slice
 - [x] No canonical-truth edits: parent code, docs, contracts, and runtime are
   unchanged by this packet
+- [x] Reopen addressed: the previous `4a47b84c6` whitespace-only validation
+  mismatch is repaired in this revision
 - [x] Reviewer handoff ready: the next machine-truth step is a sidecar
   `handoff` to `Codex2`
 
 ---
 
-## 8. Handoff Note
+## 8. Repair Summary
+
+- Prior handoff `2026-06-30T22:08:28Z` over-claimed packet validation on
+  `4a47b84c6`.
+- Root cause was metadata-line trailing whitespace introduced by Markdown
+  hard-break formatting.
+- This revision removes that whitespace and refreshes the sidecar timeline
+  through the reopen / repair cycle.
+- Fresh handoff evidence should cite the current repair commit and a whitespace
+  clean validation result for this file.
+
+---
+
+## 9. Handoff Note
 
 When handing this packet to `Codex2`, summarize:
 
@@ -319,6 +356,8 @@ When handing this packet to `Codex2`, summarize:
   parent handoff evidence
 - the key anomaly is that `deb5e1d36` (labeled `MAP-BE-004`) already contains
   the main `MAP-BE-005` code surface
+- the earlier `4a47b84c6` packet handoff was reopened for trailing whitespace;
+  the current commit is the packet-repair revision
 
 If the sidecar review passes, the reviewer should run:
 
