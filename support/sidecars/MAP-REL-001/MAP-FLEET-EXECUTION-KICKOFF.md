@@ -26,8 +26,8 @@ Sidecar packets are acceptance contracts. They do not replace implementation, E2
 
 As of 2026-06-30 UTC, the remaining map/geofence queue has no task in `ready`.
 
-- `review-blocked`: 9 tasks are already in `review` and waiting reviewer approval or explicit reopen.
-- `dependency-blocked`: 8 tasks are still in `backlog` or `todo` because at least one prerequisite task is not yet closed on an integrated branch.
+- `review-blocked`: 10 tasks are already in `review` and waiting reviewer approval or explicit reopen, including the integrated `GeometryEditor` branch for Platform Admin.
+- `dependency-blocked`: 7 tasks are still in `backlog` or `todo` because at least one prerequisite task is not yet closed on an integrated branch or review outcome.
 - `ready`: 0 tasks. The next supervisor cycle should spend effort on review throughput, not on opening more parallel implementation work.
 
 Merged prerequisites already satisfied on `dev`:
@@ -49,8 +49,8 @@ Evidence source rule:
 
 1. Review/merge contract and backend authority tasks: `MAP-BE-001`, `MAP-BE-002`, `MAP-BE-003`, `MAP-BE-005`.
 2. Review/merge shared UI and proof prerequisites: `MAP-UI-001`, `MAP-UI-002`, `MAP-UI-002-HARDEN-001`, `MAP-FE-CALL-001`, `MAP-QA-001`.
-3. Execute `MAP-UI-002-INTEGRATE-001` so Platform Admin gets one validated `GeometryEditor` branch with hardening included.
-4. Start/finish remaining surfaces in parallel: `MAP-FE-ADM-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-MOB-DRV-001`.
+3. Review/merge `MAP-UI-002-INTEGRATE-001` so Platform Admin gets one validated `GeometryEditor` branch with hardening included.
+4. Start/finish remaining surfaces in parallel once their current review prerequisites close: `MAP-FE-ADM-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-MOB-DRV-001`.
 5. Implement `MAP-OBS-001` only after backend event names and surface reason codes are stable.
 6. Implement `MAP-QA-002` only after the surface tasks expose stable hooks or explicit UAT artifacts.
 7. Close `MAP-REL-001` only after Gate A-E evidence is attached and every remaining gap is `closed`, `failed`, or explicitly `external-gated`.
@@ -70,13 +70,13 @@ Evidence source rule:
 | `MAP-FE-CALL-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now validates Gate A evidence while keeping final Gate A claim blocked on `MAP-QA-002`. | Gate A | `MAP-UI-001 review`, `MAP-BE-004 done`, `MAP-BE-005 review` |
 | `MAP-QA-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now closes or reopens the offline harness/fixture packet so `MAP-QA-002` has stable mocked-provider rails. | Gate A-E proof foundation | `MAP-BE-002 review`, `MAP-UI-001 review` |
 | `MAP-UI-002-HARDEN-001` | `Codex2` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now validates the hardening proof and package-local checks before closeout. | Gate B foundation | `MAP-BE-006 done` |
+| `MAP-UI-002-INTEGRATE-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now validates the integrated `GeometryEditor` branch, exact upstream commits, and restored admin consumer wiring before `MAP-FE-ADM-001` treats it as stable input. | Gate B | `MAP-UI-002 review`, `MAP-UI-002-HARDEN-001 review` |
 
 ### 4.2 Dependency-blocked queue
 
 | Task | Owner / reviewer | Status | Class | Current start condition or next action | Production gate | Dependency snapshot |
 | --- | --- | --- | --- | --- | --- | --- |
-| `MAP-UI-002-INTEGRATE-001` | `Codex` / `Claude2` | `backlog` | `dependency-blocked` | Do not start implementation until `MAP-UI-002` and `MAP-UI-002-HARDEN-001` are review-approved or have final commits pinned into one integration branch. | Gate B | `MAP-UI-002 review`, `MAP-UI-002-HARDEN-001 review` |
-| `MAP-FE-ADM-001` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | Do not start implementation until `MAP-BE-006` is consumed together with an integrated `GeometryEditor` branch from `MAP-UI-002-INTEGRATE-001`. | Gate B | `MAP-BE-006 done`, `MAP-UI-002 review`, `MAP-UI-002-HARDEN-001 review`, `MAP-UI-002-INTEGRATE-001 backlog` |
+| `MAP-FE-ADM-001` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | Do not start implementation until `MAP-BE-006` is consumed together with the integrated `GeometryEditor` branch now under review in `MAP-UI-002-INTEGRATE-001`; wait for that review outcome before treating the admin dependency set as stable. | Gate B | `MAP-BE-006 done`, `MAP-UI-002 review`, `MAP-UI-002-HARDEN-001 review`, `MAP-UI-002-INTEGRATE-001 review` |
 | `MAP-FE-TEN-001` | `Claude2` / `Codex2` | `backlog` | `dependency-blocked` | Do not start implementation until `MAP-UI-001` and `MAP-BE-005` are accepted or pinned into a stable review branch together with `MAP-BE-004`. | Gate E | `MAP-UI-001 review`, `MAP-BE-004 done`, `MAP-BE-005 review` |
 | `MAP-FE-CON-001` | `Codex2` / `Claude` | `backlog` | `dependency-blocked` | Do not start implementation until `MAP-UI-001` and `MAP-BE-005` are accepted or pinned into a stable review branch together with `MAP-BE-004`. | Gate E | `MAP-UI-001 review`, `MAP-BE-004 done`, `MAP-BE-005 review` |
 | `MAP-MOB-DRV-001` | `Codex2` / `Claude2` | `backlog` | `dependency-blocked` | Do not start implementation until stable trip coordinates and persisted snapshots are available from `MAP-BE-003` and `MAP-BE-005`. | Gate D | `MAP-BE-003 review`, `MAP-BE-005 review` |
