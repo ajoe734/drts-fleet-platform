@@ -26,6 +26,8 @@ Verifier-compatible final mark shape:
 <metric-or-topic-id>: <PASS|FAIL|EXTERNAL-GATED> - <short evidence summary>
 ```
 
+For `MAP-REL-001` alignment, keep the literal `OBS-MAP-*` topic identifiers in section 6 unchanged. Replace only the verdict and summary text after the colon.
+
 If any required row remains `FAIL`, `EXTERNAL-GATED`, missing, or unsupported by backend evidence, `MAP-REL-001` must not claim production readiness.
 
 Every required row in sections 3-6 is self-contained on purpose. Do not leave row-level `Query / command`, `Owner task(s)`, `Result`, or `Artifact` cells blank and expect sections 7 or 9 to carry the evidence indirectly. Shared logs are supplemental only.
@@ -80,25 +82,47 @@ Every required row in sections 3-6 is self-contained on purpose. Do not leave ro
 | `ServiceAreaPolicyBlockSpike` | `ServiceAreaPolicyBlockSpike: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Alert rule parses; distinguishes policy blocks by reason/area. | `<alert lint/parse command plus policy block query>` | `MAP-BE-004`, `MAP-BE-006`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + reason/area alert evidence>` | `<alert config + lint output path>` |
 | `ServiceAreaEvaluationUnavailable` | `ServiceAreaEvaluationUnavailable: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Alert rule parses; evaluator unavailable/provider unavailable is fail-closed or manually reviewed. | `<alert lint/parse command plus evaluator unavailable query>` | `MAP-BE-004`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + fail-closed/manual-review evidence>` | `<alert config + lint output path>` |
 
-## 6. Runbook Distinction Matrix
+## 6. Verifier Topic Matrix
 
-| Topic | Final mark | Required distinction | Query / command | Owner task(s) | Result | Artifact |
+The production readiness verifier consumes the following topic marks literally. Keep each line as a standalone line in the final evidence file and replace only the verdict and summary text.
+
+```text
+OBS-MAP-PROVIDER-OUTAGE: <PASS|FAIL|EXTERNAL-GATED> - <summary>
+OBS-MAP-ADDRESS-AMBIGUITY: <PASS|FAIL|EXTERNAL-GATED> - <summary>
+OBS-MAP-POLICY-DENIAL: <PASS|FAIL|EXTERNAL-GATED> - <summary>
+OBS-MAP-COORDINATELESS-ATTEMPT: <PASS|FAIL|EXTERNAL-GATED> - <summary>
+OBS-MAP-MANUAL-OVERRIDE: <PASS|FAIL|EXTERNAL-GATED> - <summary>
+OBS-MAP-GEOMETRY-MUTATION: <PASS|FAIL|EXTERNAL-GATED> - <summary>
+```
+
+Each topic row below must remain `FAIL` or `EXTERNAL-GATED` until every cited metric, audit, alert, and runbook distinction is backed by a real query or command output plus artifact link.
+
+| Verifier topic marker | Final mark | Required distinction and supporting rows | Query / command | Owner task(s) | Result | Artifact |
 | --- | --- | --- | --- | --- | --- | --- |
-| provider outage | `provider outage: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Runbook distinguishes provider outage from policy denial and address ambiguity. | `<runbook lint command plus section link check>` | `MAP-INFRA-001`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + distinction confirmed>` | `<runbook path + section>` |
-| address ambiguity | `address ambiguity: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Runbook explains no-match/low-confidence handling and manual review fallback. | `<runbook lint command plus section link check>` | `MAP-BE-002`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + fallback guidance confirmed>` | `<runbook path + section>` |
-| policy denial | `policy denial: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Runbook explains no-pickup/no-dropoff/not-serviceable/manual-review reason handling. | `<runbook lint command plus section link check>` | `MAP-BE-004`, `MAP-BE-006`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + reason handling confirmed>` | `<runbook path + section>` |
-| postgis | `postgis: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Runbook explains PostGIS/evaluator failure and safe fail-closed behavior. | `<runbook lint command plus PostGIS/evaluator section link check>` | `MAP-BE-006`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + fail-closed behavior confirmed>` | `<runbook path + section>` |
-| manual override | `manual override: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Runbook explains actor/reason/manual-review-required policy for manual fallback. | `<runbook lint command plus manual override section link check>` | `MAP-FE-CALL-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-OBS-001` | `<PASS|FAIL|EXTERNAL-GATED + actor/reason policy confirmed>` | `<runbook path + section>` |
+| `OBS-MAP-PROVIDER-OUTAGE` | `OBS-MAP-PROVIDER-OUTAGE: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Distinguish provider outage from address ambiguity and policy denial. Support with `map_provider_errors_total`, `map_geocode_latency_ms`, `map_provider_quota_usage_percent` when quota is relevant, `geo.manual_override.created` when fallback is exercised, `MapProviderErrorRateHigh`, `MapProviderLatencyHigh`, `MapProviderQuotaUsageHigh`/`MapProviderQuotaUsageCritical`, and the provider-outage runbook section. | `<query bundle covering provider error/result codes, latency/quota alert lint, fallback audit export, and provider-outage runbook section>` | `MAP-INFRA-001`, `MAP-BE-002`, `MAP-QA-002`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + why outage is distinguishable>` | `<artifact bundle index path>` |
+| `OBS-MAP-ADDRESS-AMBIGUITY` | `OBS-MAP-ADDRESS-AMBIGUITY: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Distinguish no-match or low-confidence ambiguity from true provider failure. Support with `map_geocode_requests_total`, `map_provider_errors_total` showing separate ambiguity vs outage result codes, `geo.address.resolved`, `geo.pin.confirmed` when user/manual disambiguation occurs, and the address-ambiguity runbook section. If no page-worthy alert is expected, say so explicitly instead of inventing one. | `<query bundle covering no-match/low-confidence metrics, resolved/confirmed audit rows, and address-ambiguity runbook section>` | `MAP-BE-001`, `MAP-BE-002`, `MAP-UI-001`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + why ambiguity is not misread as outage>` | `<artifact bundle index path>` |
+| `OBS-MAP-POLICY-DENIAL` | `OBS-MAP-POLICY-DENIAL: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Distinguish no-pickup, no-dropoff, not-serviceable, and manual-review policy outcomes from provider failure. Support with `service_area_policy_blocks_total`, `service_area_evaluations_total`, `service_area.evaluated`, `ServiceAreaPolicyBlockSpike`, and the policy-denial runbook section. | `<query bundle covering policy block metrics by reason/area, service-area audit export, alert lint output, and policy-denial runbook section>` | `MAP-BE-004`, `MAP-BE-006`, `MAP-QA-002`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + why denial is policy-derived>` | `<artifact bundle index path>` |
+| `OBS-MAP-COORDINATELESS-ATTEMPT` | `OBS-MAP-COORDINATELESS-ATTEMPT: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Prove coordinate-less booking attempts are counted and cannot silently create a normal dispatchable order. Support with `coordinate_less_booking_attempts_total`, `service_area_evaluations_total` where attempts route to manual review or hard block, `geo.manual_override.created` or explicit rejection evidence, `CoordinateLessDispatchAttemptHigh`, and the coordinate-less/manual-fallback runbook section. | `<query bundle covering coordinate-less counters by surface/role/policy result, alert lint output, and manual fallback or rejection evidence>` | `MAP-BE-005`, `MAP-FE-CALL-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + why silent coordinate-less dispatch is prevented>` | `<artifact bundle index path>` |
+| `OBS-MAP-MANUAL-OVERRIDE` | `OBS-MAP-MANUAL-OVERRIDE: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Prove manual override stays explicit, actor-attributed, and reviewable. Support with `geo.manual_override.created`, `geo.pin.confirmed`, `service_area.evaluated` when manual review is involved, any linked `coordinate_less_booking_attempts_total` evidence, and the manual-override runbook section. | `<query bundle covering override actor/reason/manualReviewRequired fields, confirmed pin evidence, and manual-override runbook section>` | `MAP-FE-CALL-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-BE-005`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + why override cannot masquerade as normal dispatch>` | `<artifact bundle index path>` |
+| `OBS-MAP-GEOMETRY-MUTATION` | `OBS-MAP-GEOMETRY-MUTATION: <PASS|FAIL|EXTERNAL-GATED> - <summary>` | Prove geometry publish/retire mutations are metered, audited, and recoverable. Support with `service_area_geometry_mutations_total`, `service_area.policy.published`, `service_area.policy.retired`, `ServiceAreaEvaluationUnavailable` when PostGIS/evaluator failures are relevant, and the geometry-mutation/PostGIS fail-closed runbook section. | `<query bundle covering geometry mutation metrics, publish/retire audit exports, evaluator-failure alert lint, and PostGIS runbook section>` | `MAP-BE-006`, `MAP-FE-ADM-001`, `MAP-OBS-001`, `MAP-REL-001` | `<PASS|FAIL|EXTERNAL-GATED + why geometry changes are traceable and fail-closed>` | `<artifact bundle index path>` |
 
 ## 7. Command Log
 
 Supplemental shared log only. Every required row above still needs its own `Query / command`, `Result`, and `Artifact` entry even when the same command appears here.
+
+Keep the literal command strings below unchanged when filling the final evidence file. `MAP-REL-001` reviews and related verifier logic may search for these exact command families.
 
 | Command | Branch/SHA | Result | Output artifact |
 | --- | --- | --- | --- |
 | `pnpm --filter @drts/api typecheck` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
 | `pnpm --filter @drts/api lint` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
 | `pnpm --filter @drts/api test` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
+| `pnpm --filter @drts/ui-web test` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
+| `pnpm --filter @drts/ops-console-web typecheck` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
+| `pnpm --filter @drts/platform-admin-web typecheck` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
+| `pnpm --filter @drts/driver-app test` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
+| `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
+| `pnpm test:e2e` | `<branch>@<sha>` | `<PASS|FAIL>` | `<path>` |
 | `pnpm exec eslint infra/alerts docs/03-runbooks --max-warnings=0` | `<branch>@<sha>` | `<PASS|FAIL|SUBSTITUTED>` | `<path and substitute rationale>` |
 | `node scripts/verify-map-geofence-production-readiness.mjs --json` | `<branch>@<sha>` | `<PASS|FAIL expected until QA/REL complete>` | `<path>` |
 
@@ -134,6 +158,8 @@ Mark any `yes` item as release-blocking:
 
 | Failure condition | Yes/No | Notes |
 | --- | --- | --- |
+| Any required `OBS-MAP-*` topic mark is missing, renamed, or left as a placeholder line. | `<yes/no>` | `<notes>` |
+| Required verifier command families are absent or renamed in section 7. | `<yes/no>` | `<notes>` |
 | Provider outage and address ambiguity share the same metric/result code. | `<yes/no>` | `<notes>` |
 | Policy denial and provider failure are indistinguishable in UI/support evidence. | `<yes/no>` | `<notes>` |
 | Coordinate-less attempts are not counted. | `<yes/no>` | `<notes>` |
