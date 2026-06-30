@@ -896,6 +896,13 @@ Verification:
 
 Goal: decide when the map/geofence stack is safe for production.
 
+Support tracker:
+
+- `support/sidecars/MAP-REL-001/MAP-REL-001-GATE-EVIDENCE-TRACKER.md`
+  defines the Gate A-E evidence matrix, blocking tasks, final evidence packet,
+  rollout/rollback checklist, and do-not-claim rules that `MAP-REL-001` must
+  satisfy before any production-ready statement.
+
 Work:
 
 - Own final release checklist and gate evidence.
