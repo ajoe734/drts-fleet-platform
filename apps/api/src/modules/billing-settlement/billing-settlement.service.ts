@@ -115,6 +115,9 @@ export type BillingSettlementTripRecord = {
     | "insurance_replacement_vehicle"
     | "travel_agency_transfer";
   costCenterCode: string | null;
+  costCenterName?: string | null;
+  costCenterOwnerUserId?: string | null;
+  costCenterActiveFlag?: boolean | null;
   riderId: string | null;
   partnerId: string | null;
   partnerProgramId: string | null;
@@ -2552,6 +2555,14 @@ export class BillingSettlementService implements OnModuleInit {
       ...incoming,
       costCenterCode:
         incoming.costCenterCode ?? existing.costCenterCode ?? null,
+      costCenterName:
+        incoming.costCenterName ?? existing.costCenterName ?? null,
+      costCenterOwnerUserId:
+        incoming.costCenterOwnerUserId ??
+        existing.costCenterOwnerUserId ??
+        null,
+      costCenterActiveFlag:
+        incoming.costCenterActiveFlag ?? existing.costCenterActiveFlag ?? null,
       partnerId: incoming.partnerId ?? existing.partnerId,
       partnerProgramId: incoming.partnerProgramId ?? existing.partnerProgramId,
       partnerEntrySlug: incoming.partnerEntrySlug ?? existing.partnerEntrySlug,
@@ -2606,6 +2617,9 @@ export class BillingSettlementService implements OnModuleInit {
       businessDispatchSubtype:
         trip.businessDispatchSubtype ?? "enterprise_dispatch",
       costCenterCode: trip.costCenterCode,
+      costCenterName: trip.costCenterName ?? null,
+      costCenterOwnerUserId: trip.costCenterOwnerUserId ?? null,
+      costCenterActiveFlag: trip.costCenterActiveFlag ?? null,
       riderId: trip.riderId,
       partnerId: trip.partnerId,
       partnerProgramId: trip.partnerProgramId,
@@ -2635,13 +2649,17 @@ export class BillingSettlementService implements OnModuleInit {
       trip.tenantId,
       costCenterCode,
     );
+    const hasEmbeddedCostCenter =
+      trip.costCenterCode?.trim().toUpperCase() === costCenterCode &&
+      Boolean(trip.costCenterName ?? trip.costCenterOwnerUserId);
 
     return {
       costCenterCode,
-      costCenterName: costCenter?.name ?? null,
-      ownerUserId: costCenter?.ownerUserId ?? null,
-      activeFlag: costCenter?.activeFlag ?? null,
-      legacy_unmapped: !costCenter,
+      costCenterName: costCenter?.name ?? trip.costCenterName ?? null,
+      ownerUserId:
+        costCenter?.ownerUserId ?? trip.costCenterOwnerUserId ?? null,
+      activeFlag: costCenter?.activeFlag ?? trip.costCenterActiveFlag ?? null,
+      legacy_unmapped: !costCenter && !hasEmbeddedCostCenter,
     };
   }
 

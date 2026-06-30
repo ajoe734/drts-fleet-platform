@@ -9,6 +9,7 @@ import type {
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   TenantBillingProfile,
+  TenantCostCenterRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
 
@@ -22,6 +23,8 @@ type JsonRecordRow = {
 type LiveSettlementTripRow = {
   order_record: unknown;
   task_record: unknown;
+  cost_center_code?: string | null;
+  cost_center_record?: unknown | null;
 };
 
 export type StoredTenantInvoiceRecord = TenantInvoiceRecord & {
@@ -38,6 +41,9 @@ export type LiveSettlementTripRecord = {
   serviceBucket: OwnedOrderRecord["serviceBucket"];
   businessDispatchSubtype: OwnedOrderRecord["businessDispatchSubtype"];
   costCenterCode: string | null;
+  costCenterName?: string | null;
+  costCenterOwnerUserId?: string | null;
+  costCenterActiveFlag?: boolean | null;
   riderId: string | null;
   partnerId: string | null;
   partnerProgramId: string | null;
@@ -220,10 +226,30 @@ export class BillingSettlementRepository {
       `
         SELECT
           orders.record AS order_record,
-          tasks.record AS task_record
+          tasks.record AS task_record,
+          COALESCE(
+            NULLIF(orders.record->>'costCenter', ''),
+            quota.cost_center_code
+          ) AS cost_center_code,
+          cost_centers.record AS cost_center_record
         FROM ops.phase1_driver_tasks AS tasks
         INNER JOIN ops.phase1_owned_orders AS orders
           ON orders.order_id = tasks.order_id
+        LEFT JOIN LATERAL (
+          SELECT ledger.cost_center_code
+          FROM core.phase1_tenant_quota_ledger AS ledger
+          WHERE ledger.tenant_id = $1
+            AND ledger.booking_id = COALESCE(orders.record->>'bookingId', '')
+            AND ledger.cost_center_code IS NOT NULL
+          ORDER BY ledger.created_at DESC
+          LIMIT 1
+        ) AS quota ON TRUE
+        LEFT JOIN core.phase1_tenant_cost_centers AS cost_centers
+          ON cost_centers.tenant_id = $1
+         AND cost_centers.code = COALESCE(
+           NULLIF(orders.record->>'costCenter', ''),
+           quota.cost_center_code
+         )
         WHERE tasks.status = 'completed'
           AND ${LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL}
           AND COALESCE(orders.record->>'tenantId', '') = $1
@@ -250,6 +276,14 @@ export class BillingSettlementRepository {
           amountMinor: 0,
         };
 
+      const costCenter = this.parseNullableRecord<TenantCostCenterRecord>(
+        row.cost_center_record,
+        "core.phase1_tenant_cost_centers",
+      );
+      const costCenterCode =
+        this.normalizeNullableText(row.cost_center_code) ??
+        this.normalizeNullableText(order.costCenter);
+
       return {
         tenantId: order.tenantId ?? tenantId,
         driverId: task.driverId,
@@ -259,7 +293,10 @@ export class BillingSettlementRepository {
         orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
-        costCenterCode: order.costCenter,
+        costCenterCode,
+        costCenterName: costCenter?.name ?? null,
+        costCenterOwnerUserId: costCenter?.ownerUserId ?? null,
+        costCenterActiveFlag: costCenter?.activeFlag ?? null,
         riderId: order.passenger?.passengerId ?? null,
         partnerId: order.partnerId,
         partnerProgramId: order.partnerProgramId,
@@ -619,6 +656,14 @@ export class BillingSettlementRepository {
           amountMinor: 0,
         };
 
+      const costCenter = this.parseNullableRecord<TenantCostCenterRecord>(
+        row.cost_center_record,
+        "core.phase1_tenant_cost_centers",
+      );
+      const costCenterCode =
+        this.normalizeNullableText(row.cost_center_code) ??
+        this.normalizeNullableText(order.costCenter);
+
       return {
         tenantId: order.tenantId ?? "",
         driverId: task.driverId,
@@ -628,7 +673,10 @@ export class BillingSettlementRepository {
         orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
-        costCenterCode: order.costCenter,
+        costCenterCode,
+        costCenterName: costCenter?.name ?? null,
+        costCenterOwnerUserId: costCenter?.ownerUserId ?? null,
+        costCenterActiveFlag: costCenter?.activeFlag ?? null,
         riderId: order.passenger?.passengerId ?? null,
         partnerId: order.partnerId,
         partnerProgramId: order.partnerProgramId,
@@ -643,11 +691,24 @@ export class BillingSettlementRepository {
     });
   }
 
+  private parseNullableRecord<T>(record: unknown, source: string): T | null {
+    if (record === null || record === undefined) {
+      return null;
+    }
+
+    return this.parseRecord<T>(record, source);
+  }
+
   private parseRecord<T>(record: unknown, source: string): T {
     if (!record || typeof record !== "object") {
       throw new Error(`Invalid persisted record loaded from ${source}`);
     }
 
     return record as T;
+  }
+
+  private normalizeNullableText(value: string | null | undefined) {
+    const normalized = value?.trim();
+    return normalized ? normalized.toUpperCase() : null;
   }
 }
