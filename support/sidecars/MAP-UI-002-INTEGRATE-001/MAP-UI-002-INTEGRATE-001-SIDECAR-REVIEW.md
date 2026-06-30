@@ -1,10 +1,10 @@
 # MAP-UI-002-INTEGRATE-001 Review Packet & Evidence Summary
 
-**Sidecar Kind:** `review_packet`  
-**Parent Task:** `MAP-UI-002-INTEGRATE-001` - GeometryEditor primitive/hardening integration closeout  
-**Parent Owner / Reviewer:** `Codex` / `Claude2`  
-**Sidecar Owner / Reviewer:** `Codex2` / `Codex`  
-**Generated:** `2026-06-30` (UTC)  
+**Sidecar Kind:** `review_packet`
+**Parent Task:** `MAP-UI-002-INTEGRATE-001` - GeometryEditor primitive/hardening integration closeout
+**Parent Owner / Reviewer:** `Codex` / `Claude2`
+**Sidecar Owner / Reviewer:** `Codex2` / `Codex`
+**Generated:** `2026-06-30` (UTC)
 **Status:** `REVIEW SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime code, parent acceptance, or parent review outcome.
 
 This packet exists to hand reviewer `Codex` a compact, machine-truth-anchored summary for
@@ -206,6 +206,18 @@ with the recorded blocker lineage:
 - it does not claim the Platform Admin governance workflow is complete
 - it does not claim Gate B production evidence; `MAP-FE-ADM-001`, `MAP-QA-002`,
   `MAP-OBS-001`, and `MAP-REL-001` still gate that outcome per the parent closeout note
+
+### D. Support-slice verification refresh
+
+The previous sidecar add commit `7f053f94f` is not acceptable as evidence for a clean
+handoff because `git show --check 7f053f94f -- support/sidecars/MAP-UI-002-INTEGRATE-001/MAP-UI-002-INTEGRATE-001-SIDECAR-REVIEW.md`
+reports trailing whitespace on lines 3-7.
+
+This revision corrects that support-artifact-only defect. Reviewer evidence for this
+slice should therefore use the current branch state, not the original add commit, with:
+
+- `git diff --check -- support/sidecars/MAP-UI-002-INTEGRATE-001/MAP-UI-002-INTEGRATE-001-SIDECAR-REVIEW.md`
+- `git show --check HEAD -- support/sidecars/MAP-UI-002-INTEGRATE-001/MAP-UI-002-INTEGRATE-001-SIDECAR-REVIEW.md`
 
 ---
 
