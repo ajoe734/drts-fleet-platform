@@ -93,6 +93,15 @@ Snapshot source: `scripts/ai-status.sh list` on 2026-06-30.
 
 ## Surface Execution Tasks
 
+Fleet work packets now available in this branch:
+
+| Surface / gate                        | Work packet                                                                 | Use for                                                                                                                       |
+| ------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Callcenter / Gate A                   | `support/sidecars/MAP-FE-CALL-001/MAP-FE-CALL-001-GATE-A-EVIDENCE.md`       | Parent review and `MAP-QA-002` serviceable, blocked, manual-review, provider-degraded, snapshot, and Ops-visibility evidence. |
+| Platform Admin / Gate B               | `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-GATE-B-GOVERNANCE.md`       | Admin geofence governance implementation, publish/retire UI, evaluator proof, audit evidence, and `E2E-MAP-002`.              |
+| Tenant / Concierge / Partner / Gate E | `support/sidecars/MAP-FE-ENTRY-SURFACES/MAP-FE-ENTRY-GATE-E-CONSISTENCY.md` | Tenant/concierge/partner shared picker alignment, degraded/provider-outage anti-bypass, and `E2E-MAP-004` / `E2E-MAP-005`.    |
+| Driver / Gate D                       | `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT.md`            | Driver trip map/navigation implementation, heartbeat coexistence, degraded fallback, and `E2E-MAP-007` mobile UAT.            |
+
 ### Callcenter Phone Booking
 
 Production owner tasks: `MAP-FE-CALL-001`, `MAP-BE-004`, `MAP-BE-005`,
