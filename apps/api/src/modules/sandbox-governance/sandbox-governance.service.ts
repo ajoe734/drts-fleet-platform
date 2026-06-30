@@ -9,7 +9,9 @@ import type {
   ApprovedOperatingAreaRecord,
   ApprovedRouteRecord,
   ApprovedAreaMatchRecord,
+  CreateSandboxOperatingAreaDraftCommand,
   CreateApprovalDocumentVersionCommand,
+  CreateSandboxRouteDraftCommand,
   CreateSandboxExperimentProgramCommand,
   CreateSandboxJurisdictionProfileCommand,
   GenerateSandboxComplianceSnapshotCommand,
@@ -29,6 +31,9 @@ import type {
   SandboxExperimentProgramVersionRecord,
   SandboxGovernanceNotificationMatrixEntry,
   SandboxGovernancePolicyVersionRefs,
+  SandboxGeometryLifecycleCommand,
+  SandboxGeometryLifecycleStatus,
+  SandboxGeoJsonFeatureCollection,
   SandboxJurisdictionProfileRecord,
   SandboxJurisdictionProfileVersionRecord,
   SandboxVersionLifecycleStatus,
@@ -49,6 +54,7 @@ import type {
 } from "@drts/contracts";
 import {
   SAFETY_OPERATOR_QUALIFICATION_STATUSES,
+  SANDBOX_GEOMETRY_LIFECYCLE_STATUSES,
   SANDBOX_HOLIDAY_POLICIES,
   SANDBOX_OPERATING_AREA_KINDS,
   VEHICLE_ENROLLMENT_STATUSES,
@@ -61,6 +67,7 @@ import { SandboxGovernanceRepository } from "./sandbox-governance.repository";
 type AuditActor = Pick<IdentityContext, "actorId" | "tenantId"> & {
   actorType: AuditLogRecord["actorType"];
 };
+type SandboxGeometryRecord = ApprovedOperatingAreaRecord | ApprovedRouteRecord;
 
 const SANDBOX_PROGRAM_ID = "phase2-tesla-fsd-sandbox-202606";
 const SEED_TIMESTAMP = "2026-06-26T00:00:00.000Z";
@@ -68,6 +75,9 @@ const DEFAULT_ROUTE_TOLERANCE_METERS = 25;
 const DAY_SET = new Set([0, 1, 2, 3, 4, 5, 6]);
 const HOLIDAY_POLICY_SET = new Set<string>(SANDBOX_HOLIDAY_POLICIES);
 const AREA_KIND_SET = new Set<string>(SANDBOX_OPERATING_AREA_KINDS);
+const GEOMETRY_LIFECYCLE_STATUS_SET = new Set<string>(
+  SANDBOX_GEOMETRY_LIFECYCLE_STATUSES,
+);
 const VEHICLE_STATUS_SET = new Set<string>(VEHICLE_ENROLLMENT_STATUSES);
 const OPERATOR_STATUS_SET = new Set<string>(
   SAFETY_OPERATOR_QUALIFICATION_STATUSES,
@@ -317,7 +327,11 @@ export class SandboxGovernanceService implements OnModuleInit {
       .sort((left, right) => left.programCode.localeCompare(right.programCode));
   }
 
-  createExperiment(command: CreateSandboxExperimentProgramCommand) {
+  createExperiment(
+    command: CreateSandboxExperimentProgramCommand,
+    actor?: AuditActor,
+    requestId?: string,
+  ) {
     this.assertNonBlank(command.programCode, "programCode");
     this.assertNonBlank(command.name, "name");
     this.assertEffectiveRange(command.effectiveFrom, command.effectiveUntil);
@@ -366,7 +380,16 @@ export class SandboxGovernanceService implements OnModuleInit {
       archivedAt: null,
     };
     this.experiments.set(experimentId, record);
-    return this.projectExperiment(record);
+    const projected = this.projectExperiment(record);
+    this.recordAudit(
+      "sandbox_governance.experiment.created",
+      "sandbox_experiment",
+      experimentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.experimentAuditSummary(version),
+    );
+    return projected;
   }
 
   getExperiment(experimentId: string, asOf?: string) {
@@ -376,6 +399,8 @@ export class SandboxGovernanceService implements OnModuleInit {
   updateExperiment(
     experimentId: string,
     command: UpdateSandboxExperimentProgramCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireExperiment(experimentId);
     this.assertNotArchived(record.archivedAt, "experiment", experimentId);
@@ -439,22 +464,46 @@ export class SandboxGovernanceService implements OnModuleInit {
 
     record.versions.push(version);
     record.currentVersionId = version.versionId;
-    return this.projectExperiment(record);
+    const projected = this.projectExperiment(record);
+    this.recordAudit(
+      "sandbox_governance.experiment.updated",
+      "sandbox_experiment",
+      experimentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.experimentAuditSummary(version),
+    );
+    return projected;
   }
 
-  archiveExperiment(experimentId: string) {
+  archiveExperiment(
+    experimentId: string,
+    actor?: AuditActor,
+    requestId?: string,
+  ) {
     const record = this.requireExperiment(experimentId);
     record.archivedAt = new Date().toISOString();
     const latest = this.requireLatestExperimentVersion(record);
     latest.lifecycleStatus = "archived";
     latest.updatedAt = record.archivedAt;
-    return this.projectExperiment(record);
+    const projected = this.projectExperiment(record);
+    this.recordAudit(
+      "sandbox_governance.experiment.archived",
+      "sandbox_experiment",
+      experimentId,
+      this.governanceActor(actor),
+      requestId,
+      this.experimentAuditSummary(latest),
+    );
+    return projected;
   }
 
   publishExperimentVersion(
     experimentId: string,
     versionId: string,
     command: PublishSandboxGovernanceVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireExperiment(experimentId);
     const version = this.requireExperimentVersion(record, versionId);
@@ -487,30 +536,47 @@ export class SandboxGovernanceService implements OnModuleInit {
     version.updatedBy = this.normalizeNullableText(command.actorId);
     this.endPreviousPublishedExperimentVersion(record, version);
     record.currentVersionId = version.versionId;
-    return this.projectExperiment(record);
+    const projected = this.projectExperiment(record);
+    this.recordAudit(
+      "sandbox_governance.experiment.published",
+      "sandbox_experiment",
+      experimentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.experimentAuditSummary(version),
+    );
+    return projected;
   }
 
   suspendExperimentAuthorizations(
     experimentId: string,
     command: SuspendSandboxExperimentAuthorizationsCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     return this.transitionExperimentAuthorizationState(
       experimentId,
       "suspend",
       "suspended",
       command,
+      actor,
+      requestId,
     );
   }
 
   resumeExperimentAuthorizations(
     experimentId: string,
     command: ResumeSandboxExperimentAuthorizationsCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     return this.transitionExperimentAuthorizationState(
       experimentId,
       "resume",
       "active",
       command,
+      actor,
+      requestId,
     );
   }
 
@@ -518,6 +584,8 @@ export class SandboxGovernanceService implements OnModuleInit {
     experimentId: string,
     versionId: string,
     command: RollbackSandboxGovernanceVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireExperiment(experimentId);
     const target = this.requireExperimentVersion(record, versionId);
@@ -556,7 +624,16 @@ export class SandboxGovernanceService implements OnModuleInit {
       this.endPreviousPublishedExperimentVersion(record, version);
     }
     record.currentVersionId = version.versionId;
-    return this.projectExperiment(record);
+    const projected = this.projectExperiment(record);
+    this.recordAudit(
+      "sandbox_governance.experiment.rolled_back",
+      "sandbox_experiment",
+      experimentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.experimentAuditSummary(version),
+    );
+    return projected;
   }
 
   listJurisdictions(asOf?: string) {
@@ -567,7 +644,11 @@ export class SandboxGovernanceService implements OnModuleInit {
       );
   }
 
-  createJurisdiction(command: CreateSandboxJurisdictionProfileCommand) {
+  createJurisdiction(
+    command: CreateSandboxJurisdictionProfileCommand,
+    actor?: AuditActor,
+    requestId?: string,
+  ) {
     this.assertNonBlank(command.jurisdictionCode, "jurisdictionCode");
     this.assertNonBlank(command.name, "name");
     this.assertNonBlank(command.regulatorName, "regulatorName");
@@ -616,7 +697,16 @@ export class SandboxGovernanceService implements OnModuleInit {
       archivedAt: null,
     };
     this.jurisdictions.set(jurisdictionId, record);
-    return this.projectJurisdiction(record);
+    const projected = this.projectJurisdiction(record);
+    this.recordAudit(
+      "sandbox_governance.jurisdiction.created",
+      "sandbox_jurisdiction",
+      jurisdictionId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.jurisdictionAuditSummary(version),
+    );
+    return projected;
   }
 
   getJurisdiction(jurisdictionId: string, asOf?: string) {
@@ -629,6 +719,8 @@ export class SandboxGovernanceService implements OnModuleInit {
   updateJurisdiction(
     jurisdictionId: string,
     command: UpdateSandboxJurisdictionProfileCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireJurisdiction(jurisdictionId);
     this.assertNotArchived(record.archivedAt, "jurisdiction", jurisdictionId);
@@ -691,22 +783,46 @@ export class SandboxGovernanceService implements OnModuleInit {
 
     record.versions.push(version);
     record.currentVersionId = version.versionId;
-    return this.projectJurisdiction(record);
+    const projected = this.projectJurisdiction(record);
+    this.recordAudit(
+      "sandbox_governance.jurisdiction.updated",
+      "sandbox_jurisdiction",
+      jurisdictionId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.jurisdictionAuditSummary(version),
+    );
+    return projected;
   }
 
-  archiveJurisdiction(jurisdictionId: string) {
+  archiveJurisdiction(
+    jurisdictionId: string,
+    actor?: AuditActor,
+    requestId?: string,
+  ) {
     const record = this.requireJurisdiction(jurisdictionId);
     record.archivedAt = new Date().toISOString();
     const latest = this.requireLatestJurisdictionVersion(record);
     latest.lifecycleStatus = "archived";
     latest.updatedAt = record.archivedAt;
-    return this.projectJurisdiction(record);
+    const projected = this.projectJurisdiction(record);
+    this.recordAudit(
+      "sandbox_governance.jurisdiction.archived",
+      "sandbox_jurisdiction",
+      jurisdictionId,
+      this.governanceActor(actor),
+      requestId,
+      this.jurisdictionAuditSummary(latest),
+    );
+    return projected;
   }
 
   publishJurisdictionVersion(
     jurisdictionId: string,
     versionId: string,
     command: PublishSandboxGovernanceVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireJurisdiction(jurisdictionId);
     const version = this.requireJurisdictionVersion(record, versionId);
@@ -738,13 +854,24 @@ export class SandboxGovernanceService implements OnModuleInit {
     version.updatedBy = this.normalizeNullableText(command.actorId);
     this.endPreviousPublishedJurisdictionVersion(record, version);
     record.currentVersionId = version.versionId;
-    return this.projectJurisdiction(record);
+    const projected = this.projectJurisdiction(record);
+    this.recordAudit(
+      "sandbox_governance.jurisdiction.published",
+      "sandbox_jurisdiction",
+      jurisdictionId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.jurisdictionAuditSummary(version),
+    );
+    return projected;
   }
 
   rollbackJurisdictionVersion(
     jurisdictionId: string,
     versionId: string,
     command: RollbackSandboxGovernanceVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireJurisdiction(jurisdictionId);
     const target = this.requireJurisdictionVersion(record, versionId);
@@ -780,7 +907,16 @@ export class SandboxGovernanceService implements OnModuleInit {
       this.endPreviousPublishedJurisdictionVersion(record, version);
     }
     record.currentVersionId = version.versionId;
-    return this.projectJurisdiction(record);
+    const projected = this.projectJurisdiction(record);
+    this.recordAudit(
+      "sandbox_governance.jurisdiction.rolled_back",
+      "sandbox_jurisdiction",
+      jurisdictionId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.jurisdictionAuditSummary(version),
+    );
+    return projected;
   }
 
   listApprovalDocuments(asOf?: string) {
@@ -789,7 +925,11 @@ export class SandboxGovernanceService implements OnModuleInit {
       .sort((left, right) => left.title.localeCompare(right.title));
   }
 
-  createApprovalDocument(command: CreateApprovalDocumentVersionCommand) {
+  createApprovalDocument(
+    command: CreateApprovalDocumentVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
+  ) {
     this.requireExperiment(command.experimentId);
     this.requireJurisdiction(command.jurisdictionId);
     this.assertNonBlank(command.title, "title");
@@ -844,7 +984,16 @@ export class SandboxGovernanceService implements OnModuleInit {
       archivedAt: null,
     };
     this.approvalDocuments.set(documentId, record);
-    return this.projectApprovalDocument(record);
+    const projected = this.projectApprovalDocument(record);
+    this.recordAudit(
+      "sandbox_governance.approval_document.created",
+      "sandbox_approval_document",
+      documentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.approvalDocumentAuditSummary(version),
+    );
+    return projected;
   }
 
   getApprovalDocument(documentId: string, asOf?: string) {
@@ -857,6 +1006,8 @@ export class SandboxGovernanceService implements OnModuleInit {
   uploadApprovalDocumentVersion(
     documentId: string,
     command: UpdateApprovalDocumentVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireApprovalDocument(documentId);
     this.assertNotArchived(record.archivedAt, "approval document", documentId);
@@ -910,22 +1061,46 @@ export class SandboxGovernanceService implements OnModuleInit {
     record.versions.push(version);
     record.currentVersionId = version.versionId;
     record.title = version.title;
-    return this.projectApprovalDocument(record);
+    const projected = this.projectApprovalDocument(record);
+    this.recordAudit(
+      "sandbox_governance.approval_document.version_uploaded",
+      "sandbox_approval_document",
+      documentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.approvalDocumentAuditSummary(version),
+    );
+    return projected;
   }
 
-  archiveApprovalDocument(documentId: string) {
+  archiveApprovalDocument(
+    documentId: string,
+    actor?: AuditActor,
+    requestId?: string,
+  ) {
     const record = this.requireApprovalDocument(documentId);
     record.archivedAt = new Date().toISOString();
     const latest = this.requireLatestApprovalDocumentVersion(record);
     latest.lifecycleStatus = "archived";
     latest.updatedAt = record.archivedAt;
-    return this.projectApprovalDocument(record);
+    const projected = this.projectApprovalDocument(record);
+    this.recordAudit(
+      "sandbox_governance.approval_document.archived",
+      "sandbox_approval_document",
+      documentId,
+      this.governanceActor(actor),
+      requestId,
+      this.approvalDocumentAuditSummary(latest),
+    );
+    return projected;
   }
 
   publishApprovalDocumentVersion(
     documentId: string,
     versionId: string,
     command: PublishSandboxGovernanceVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireApprovalDocument(documentId);
     const version = this.requireApprovalDocumentVersion(record, versionId);
@@ -958,13 +1133,24 @@ export class SandboxGovernanceService implements OnModuleInit {
     this.endPreviousPublishedApprovalDocumentVersion(record, version);
     record.currentVersionId = version.versionId;
     record.title = version.title;
-    return this.projectApprovalDocument(record);
+    const projected = this.projectApprovalDocument(record);
+    this.recordAudit(
+      "sandbox_governance.approval_document.published",
+      "sandbox_approval_document",
+      documentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.approvalDocumentAuditSummary(version),
+    );
+    return projected;
   }
 
   rollbackApprovalDocumentVersion(
     documentId: string,
     versionId: string,
     command: RollbackSandboxGovernanceVersionCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireApprovalDocument(documentId);
     const target = this.requireApprovalDocumentVersion(record, versionId);
@@ -1004,7 +1190,16 @@ export class SandboxGovernanceService implements OnModuleInit {
     }
     record.currentVersionId = version.versionId;
     record.title = version.title;
-    return this.projectApprovalDocument(record);
+    const projected = this.projectApprovalDocument(record);
+    this.recordAudit(
+      "sandbox_governance.approval_document.rolled_back",
+      "sandbox_approval_document",
+      documentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.approvalDocumentAuditSummary(version),
+    );
+    return projected;
   }
 
   generateComplianceSnapshot(
@@ -1052,6 +1247,8 @@ export class SandboxGovernanceService implements OnModuleInit {
       .filter(
         (item) =>
           item.sandboxProgramId === experimentVersion.programCode &&
+          item.active &&
+          this.geometryLifecycleStatus(item) === "active" &&
           isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
       )
       .sort(
@@ -1064,6 +1261,8 @@ export class SandboxGovernanceService implements OnModuleInit {
       .filter(
         (item) =>
           item.sandboxProgramId === experimentVersion.programCode &&
+          item.active &&
+          this.geometryLifecycleStatus(item) === "active" &&
           isEffective(item.effectiveFrom, item.effectiveUntil, asOf),
       )
       .sort(
@@ -1119,6 +1318,208 @@ export class SandboxGovernanceService implements OnModuleInit {
     return cloneList(this.operatingAreas);
   }
 
+  exportOperatingAreasGeoJson(): SandboxGeoJsonFeatureCollection<GeoJsonMultiPolygon> {
+    return {
+      type: "FeatureCollection",
+      generatedAt: new Date().toISOString(),
+      features: this.operatingAreas.map((item) => ({
+        type: "Feature",
+        geometry: clone(item.geometry),
+        properties: {
+          resourceType: "approved_operating_area",
+          areaId: item.areaId,
+          sandboxProgramId: item.sandboxProgramId,
+          name: item.name,
+          areaKind: item.areaKind,
+          version: item.version,
+          active: item.active,
+          lifecycleStatus: this.geometryLifecycleStatus(item),
+          effectiveFrom: item.effectiveFrom,
+          effectiveUntil: item.effectiveUntil,
+        },
+      })),
+    };
+  }
+
+  exportPickupDropoffZonesGeoJson(): SandboxGeoJsonFeatureCollection<GeoJsonMultiPolygon> {
+    const collection = this.exportOperatingAreasGeoJson();
+    return {
+      ...collection,
+      features: collection.features.filter(
+        (feature) => feature.properties.areaKind === "pickup_dropoff_zone",
+      ),
+    };
+  }
+
+  async createOperatingAreaDraft(
+    command: CreateSandboxOperatingAreaDraftCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    if (!command?.item) {
+      throw new ApiRequestError(
+        400,
+        "INVALID_OPERATING_AREA_DRAFT",
+        "Operating area draft creation requires an item.",
+      );
+    }
+    const now = new Date().toISOString();
+    const draft = this.validateOperatingArea({
+      ...command.item,
+      active: false,
+      lifecycleStatus: "draft",
+      submittedForReviewAt: null,
+      publishedAt: null,
+      retiredAt: null,
+      updatedAt: now,
+      updatedBy: this.lifecycleActorId(actor, command),
+    });
+    validateSchedules(draft.schedules, draft.areaId);
+    const next = [...this.operatingAreas, draft];
+    ensureUniqueVersionedRecords(
+      next,
+      (item) => item.areaId,
+      "DUPLICATE_OPERATING_AREA_VERSION",
+    );
+    await this.replaceOperatingAreasState(next, "create operating area draft");
+    this.recordAudit(
+      "sandbox_governance.operating_area.draft_created",
+      "approved_operating_area",
+      draft.areaId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(draft, command),
+    );
+    return clone(draft);
+  }
+
+  async createPickupDropoffZoneDraft(
+    command: CreateSandboxOperatingAreaDraftCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    if (!command?.item) {
+      return this.createOperatingAreaDraft(command, actor, requestId);
+    }
+    return this.createOperatingAreaDraft(
+      {
+        ...command,
+        item: {
+          ...command.item,
+          areaKind: "pickup_dropoff_zone",
+        },
+      },
+      actor,
+      requestId,
+    );
+  }
+
+  async submitOperatingAreaForReview(
+    areaId: string,
+    version: number,
+    command: SandboxGeometryLifecycleCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    const lifecycleCommand = command ?? {};
+    const item = this.requireOperatingArea(areaId, version);
+    this.assertLifecycleStatus(item, ["draft"], "submit for review");
+    const now = new Date().toISOString();
+    const updated = this.validateOperatingArea({
+      ...item,
+      active: false,
+      lifecycleStatus: "review",
+      submittedForReviewAt: now,
+      updatedAt: now,
+      updatedBy: this.lifecycleActorId(actor, lifecycleCommand),
+    });
+    await this.replaceOperatingAreaVersion(updated, "submit operating area");
+    this.recordAudit(
+      "sandbox_governance.operating_area.submitted_for_review",
+      "approved_operating_area",
+      areaId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(updated, lifecycleCommand),
+    );
+    return clone(updated);
+  }
+
+  async publishOperatingArea(
+    areaId: string,
+    version: number,
+    command: SandboxGeometryLifecycleCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    const lifecycleCommand = command ?? {};
+    const item = this.requireOperatingArea(areaId, version);
+    this.assertLifecycleStatus(item, ["draft", "review"], "publish");
+    const now = new Date().toISOString();
+    const updated = this.validateOperatingArea({
+      ...item,
+      active: true,
+      lifecycleStatus: "active",
+      effectiveFrom: lifecycleCommand.effectiveFrom ?? item.effectiveFrom,
+      effectiveUntil:
+        lifecycleCommand.effectiveUntil !== undefined
+          ? lifecycleCommand.effectiveUntil
+          : item.effectiveUntil,
+      publishedAt: now,
+      retiredAt: null,
+      updatedAt: now,
+      updatedBy: this.lifecycleActorId(actor, lifecycleCommand),
+    });
+    validateSchedules(updated.schedules, updated.areaId);
+    const next = this.replaceOperatingAreaInMemory(updated);
+    this.assertActiveOperatingAreaWindows(next);
+    await this.replaceOperatingAreasState(next, "publish operating area");
+    this.recordAudit(
+      "sandbox_governance.operating_area.published",
+      "approved_operating_area",
+      areaId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(updated, lifecycleCommand),
+    );
+    return clone(updated);
+  }
+
+  async retireOperatingArea(
+    areaId: string,
+    version: number,
+    command: SandboxGeometryLifecycleCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    const lifecycleCommand = command ?? {};
+    const item = this.requireOperatingArea(areaId, version);
+    this.assertLifecycleStatus(item, ["draft", "review", "active"], "retire");
+    const now = new Date().toISOString();
+    const updated = this.validateOperatingArea({
+      ...item,
+      active: false,
+      lifecycleStatus: "retired",
+      effectiveUntil:
+        lifecycleCommand.effectiveUntil !== undefined
+          ? lifecycleCommand.effectiveUntil
+          : (item.effectiveUntil ?? now),
+      retiredAt: now,
+      updatedAt: now,
+      updatedBy: this.lifecycleActorId(actor, lifecycleCommand),
+    });
+    await this.replaceOperatingAreaVersion(updated, "retire operating area");
+    this.recordAudit(
+      "sandbox_governance.operating_area.retired",
+      "approved_operating_area",
+      areaId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(updated, lifecycleCommand),
+    );
+    return clone(updated);
+  }
+
   async updateOperatingAreas(
     command: UpsertApprovedOperatingAreasCommand,
     actor: AuditActor,
@@ -1138,22 +1539,9 @@ export class SandboxGovernanceService implements OnModuleInit {
       (item) => item.areaId,
       "DUPLICATE_OPERATING_AREA_VERSION",
     );
-    assertNonOverlappingEffectiveWindows(
-      next,
-      (item) => item.areaId,
-      "OVERLAPPING_OPERATING_AREA_EFFECTIVE_WINDOW",
-    );
+    this.assertActiveOperatingAreaWindows(next);
     next.forEach((item) => validateSchedules(item.schedules, item.areaId));
-    const previous = cloneList(this.operatingAreas);
-    const persisted = sortVersionedRecords(next, (item) => item.areaId);
-    this.operatingAreas = persisted;
-    await this.persist(
-      () => this.repository?.replaceOperatingAreas(this.operatingAreas),
-      () => {
-        this.operatingAreas = previous;
-      },
-      "replace areas",
-    );
+    await this.replaceOperatingAreasState(next, "replace areas");
     this.recordAudit(
       "sandbox_governance.operating_areas_updated",
       "approved_operating_area",
@@ -1167,6 +1555,201 @@ export class SandboxGovernanceService implements OnModuleInit {
 
   listRoutes() {
     return cloneList(this.routes);
+  }
+
+  exportRoutesGeoJson(): SandboxGeoJsonFeatureCollection<GeoJsonMultiLineString> {
+    return {
+      type: "FeatureCollection",
+      generatedAt: new Date().toISOString(),
+      features: this.routes.map((item) => ({
+        type: "Feature",
+        geometry: clone(item.geometry),
+        properties: {
+          resourceType: "approved_route",
+          routeId: item.routeId,
+          sandboxProgramId: item.sandboxProgramId,
+          name: item.name,
+          areaId: item.areaId,
+          version: item.version,
+          active: item.active,
+          lifecycleStatus: this.geometryLifecycleStatus(item),
+          effectiveFrom: item.effectiveFrom,
+          effectiveUntil: item.effectiveUntil,
+        },
+      })),
+    };
+  }
+
+  async createRouteDraft(
+    command: CreateSandboxRouteDraftCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    if (!command?.item) {
+      throw new ApiRequestError(
+        400,
+        "INVALID_ROUTE_DRAFT",
+        "Route draft creation requires an item.",
+      );
+    }
+    const knownAreaIds = new Set(
+      this.operatingAreas.map((item) => item.areaId),
+    );
+    const now = new Date().toISOString();
+    const draft = this.validateRoute(
+      {
+        ...command.item,
+        active: false,
+        lifecycleStatus: "draft",
+        submittedForReviewAt: null,
+        publishedAt: null,
+        retiredAt: null,
+        updatedAt: now,
+        updatedBy: this.lifecycleActorId(actor, command),
+      },
+      knownAreaIds,
+    );
+    validateSchedules(draft.schedules, draft.routeId);
+    const next = [...this.routes, draft];
+    ensureUniqueVersionedRecords(
+      next,
+      (item) => item.routeId,
+      "DUPLICATE_APPROVED_ROUTE_VERSION",
+    );
+    await this.replaceRoutesState(next, "create route draft");
+    this.recordAudit(
+      "sandbox_governance.route.draft_created",
+      "approved_route",
+      draft.routeId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(draft, command),
+    );
+    return clone(draft);
+  }
+
+  async submitRouteForReview(
+    routeId: string,
+    version: number,
+    command: SandboxGeometryLifecycleCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    const lifecycleCommand = command ?? {};
+    const item = this.requireRoute(routeId, version);
+    this.assertLifecycleStatus(item, ["draft"], "submit for review");
+    const now = new Date().toISOString();
+    const knownAreaIds = new Set(
+      this.operatingAreas.map((area) => area.areaId),
+    );
+    const updated = this.validateRoute(
+      {
+        ...item,
+        active: false,
+        lifecycleStatus: "review",
+        submittedForReviewAt: now,
+        updatedAt: now,
+        updatedBy: this.lifecycleActorId(actor, lifecycleCommand),
+      },
+      knownAreaIds,
+    );
+    await this.replaceRouteVersion(updated, "submit route");
+    this.recordAudit(
+      "sandbox_governance.route.submitted_for_review",
+      "approved_route",
+      routeId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(updated, lifecycleCommand),
+    );
+    return clone(updated);
+  }
+
+  async publishRoute(
+    routeId: string,
+    version: number,
+    command: SandboxGeometryLifecycleCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    const lifecycleCommand = command ?? {};
+    const item = this.requireRoute(routeId, version);
+    this.assertLifecycleStatus(item, ["draft", "review"], "publish");
+    const now = new Date().toISOString();
+    const knownAreaIds = new Set(
+      this.operatingAreas.map((area) => area.areaId),
+    );
+    const updated = this.validateRoute(
+      {
+        ...item,
+        active: true,
+        lifecycleStatus: "active",
+        effectiveFrom: lifecycleCommand.effectiveFrom ?? item.effectiveFrom,
+        effectiveUntil:
+          lifecycleCommand.effectiveUntil !== undefined
+            ? lifecycleCommand.effectiveUntil
+            : item.effectiveUntil,
+        publishedAt: now,
+        retiredAt: null,
+        updatedAt: now,
+        updatedBy: this.lifecycleActorId(actor, lifecycleCommand),
+      },
+      knownAreaIds,
+    );
+    validateSchedules(updated.schedules, updated.routeId);
+    const next = this.replaceRouteInMemory(updated);
+    this.assertActiveRouteWindows(next);
+    await this.replaceRoutesState(next, "publish route");
+    this.recordAudit(
+      "sandbox_governance.route.published",
+      "approved_route",
+      routeId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(updated, lifecycleCommand),
+    );
+    return clone(updated);
+  }
+
+  async retireRoute(
+    routeId: string,
+    version: number,
+    command: SandboxGeometryLifecycleCommand,
+    actor: AuditActor,
+    requestId?: string,
+  ) {
+    const lifecycleCommand = command ?? {};
+    const item = this.requireRoute(routeId, version);
+    this.assertLifecycleStatus(item, ["draft", "review", "active"], "retire");
+    const now = new Date().toISOString();
+    const knownAreaIds = new Set(
+      this.operatingAreas.map((area) => area.areaId),
+    );
+    const updated = this.validateRoute(
+      {
+        ...item,
+        active: false,
+        lifecycleStatus: "retired",
+        effectiveUntil:
+          lifecycleCommand.effectiveUntil !== undefined
+            ? lifecycleCommand.effectiveUntil
+            : (item.effectiveUntil ?? now),
+        retiredAt: now,
+        updatedAt: now,
+        updatedBy: this.lifecycleActorId(actor, lifecycleCommand),
+      },
+      knownAreaIds,
+    );
+    await this.replaceRouteVersion(updated, "retire route");
+    this.recordAudit(
+      "sandbox_governance.route.retired",
+      "approved_route",
+      routeId,
+      actor,
+      requestId,
+      this.geometryMutationSummary(updated, lifecycleCommand),
+    );
+    return clone(updated);
   }
 
   async updateRoutes(
@@ -1193,22 +1776,9 @@ export class SandboxGovernanceService implements OnModuleInit {
       (item) => item.routeId,
       "DUPLICATE_APPROVED_ROUTE_VERSION",
     );
-    assertNonOverlappingEffectiveWindows(
-      next,
-      (item) => item.routeId,
-      "OVERLAPPING_APPROVED_ROUTE_EFFECTIVE_WINDOW",
-    );
+    this.assertActiveRouteWindows(next);
     next.forEach((item) => validateSchedules(item.schedules, item.routeId));
-    const previous = cloneList(this.routes);
-    const persisted = sortVersionedRecords(next, (item) => item.routeId);
-    this.routes = persisted;
-    await this.persist(
-      () => this.repository?.replaceRoutes(this.routes),
-      () => {
-        this.routes = previous;
-      },
-      "replace routes",
-    );
+    await this.replaceRoutesState(next, "replace routes");
     this.recordAudit(
       "sandbox_governance.approved_routes_updated",
       "approved_route",
@@ -1442,6 +2012,7 @@ export class SandboxGovernanceService implements OnModuleInit {
           item.sandboxProgramId === sandboxProgramId &&
           isEffective(item.effectiveFrom, item.effectiveUntil, asOf) &&
           item.active &&
+          this.geometryLifecycleStatus(item) === "active" &&
           pointInMultiPolygon(point.lng, point.lat, item.geometry),
       )
       .filter(keepLatestVersionById((item) => item.areaId))
@@ -1464,16 +2035,215 @@ export class SandboxGovernanceService implements OnModuleInit {
           item.sandboxProgramId === sandboxProgramId &&
           isEffective(item.effectiveFrom, item.effectiveUntil, asOf) &&
           item.active &&
+          this.geometryLifecycleStatus(item) === "active" &&
           lineContainedInRoute(candidatePath, item.geometry, toleranceMeters),
       )
       .filter(keepLatestVersionById((item) => item.routeId))
       .map((item) => item.routeId);
   }
 
+  private geometryLifecycleStatus(
+    item: Pick<SandboxGeometryRecord, "active" | "lifecycleStatus">,
+  ): SandboxGeometryLifecycleStatus {
+    return item.lifecycleStatus ?? (item.active ? "active" : "draft");
+  }
+
+  private lifecycleActorId(
+    actor: AuditActor,
+    command?: SandboxGeometryLifecycleCommand,
+  ) {
+    return this.normalizeNullableText(command?.actorId ?? actor.actorId);
+  }
+
+  private geometryMutationSummary(
+    item: SandboxGeometryRecord,
+    command?: SandboxGeometryLifecycleCommand,
+  ) {
+    return {
+      version: item.version,
+      lifecycleStatus: this.geometryLifecycleStatus(item),
+      active: item.active,
+      effectiveFrom: item.effectiveFrom,
+      effectiveUntil: item.effectiveUntil,
+      actorId: this.normalizeNullableText(command?.actorId),
+      notes: this.normalizeNullableText(command?.notes),
+    };
+  }
+
+  private requireOperatingArea(areaId: string, version: number) {
+    this.assertPositiveIntegerVersion(version, "operating area");
+    const item = this.operatingAreas.find(
+      (candidate) =>
+        candidate.areaId === areaId && candidate.version === version,
+    );
+    if (!item) {
+      throw this.notFound("Sandbox operating area version not found.", {
+        areaId,
+        version,
+      });
+    }
+    return clone(item);
+  }
+
+  private requireRoute(routeId: string, version: number) {
+    this.assertPositiveIntegerVersion(version, "route");
+    const item = this.routes.find(
+      (candidate) =>
+        candidate.routeId === routeId && candidate.version === version,
+    );
+    if (!item) {
+      throw this.notFound("Sandbox route version not found.", {
+        routeId,
+        version,
+      });
+    }
+    return clone(item);
+  }
+
+  private assertPositiveIntegerVersion(version: number, resourceType: string) {
+    if (!Number.isInteger(version) || version <= 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_SANDBOX_GEOMETRY_VERSION",
+        `${resourceType} version must be a positive integer.`,
+        { version },
+      );
+    }
+  }
+
+  private assertLifecycleStatus(
+    item: SandboxGeometryRecord,
+    allowed: readonly SandboxGeometryLifecycleStatus[],
+    action: string,
+  ) {
+    const status = this.geometryLifecycleStatus(item);
+    if (allowed.includes(status)) {
+      return;
+    }
+    throw this.invalidState(
+      `Sandbox geometry must be ${allowed.join(" or ")} before ${action}.`,
+      {
+        lifecycleStatus: status,
+        version: item.version,
+      },
+    );
+  }
+
+  private assertLifecycleActiveConsistency(
+    item: SandboxGeometryRecord,
+    resourceId: string,
+  ) {
+    const status = this.geometryLifecycleStatus(item);
+    if (!GEOMETRY_LIFECYCLE_STATUS_SET.has(status)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_SANDBOX_GEOMETRY_LIFECYCLE_STATUS",
+        `Record ${resourceId} has an invalid lifecycleStatus.`,
+        { resourceId, lifecycleStatus: status },
+      );
+    }
+    if (item.active !== (status === "active")) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_SANDBOX_GEOMETRY_LIFECYCLE_STATE",
+        `Record ${resourceId} active flag must match lifecycleStatus.`,
+        { resourceId, active: item.active, lifecycleStatus: status },
+      );
+    }
+  }
+
+  private replaceOperatingAreaInMemory(updated: ApprovedOperatingAreaRecord) {
+    return this.operatingAreas.map((item) =>
+      item.areaId === updated.areaId && item.version === updated.version
+        ? clone(updated)
+        : item,
+    );
+  }
+
+  private replaceRouteInMemory(updated: ApprovedRouteRecord) {
+    return this.routes.map((item) =>
+      item.routeId === updated.routeId && item.version === updated.version
+        ? clone(updated)
+        : item,
+    );
+  }
+
+  private async replaceOperatingAreaVersion(
+    updated: ApprovedOperatingAreaRecord,
+    context: string,
+  ) {
+    await this.replaceOperatingAreasState(
+      this.replaceOperatingAreaInMemory(updated),
+      context,
+    );
+  }
+
+  private async replaceRouteVersion(
+    updated: ApprovedRouteRecord,
+    context: string,
+  ) {
+    await this.replaceRoutesState(this.replaceRouteInMemory(updated), context);
+  }
+
+  private async replaceOperatingAreasState(
+    next: ApprovedOperatingAreaRecord[],
+    context: string,
+  ) {
+    const previous = cloneList(this.operatingAreas);
+    this.operatingAreas = sortVersionedRecords(next, (item) => item.areaId);
+    await this.persist(
+      () => this.repository?.replaceOperatingAreas(this.operatingAreas),
+      () => {
+        this.operatingAreas = previous;
+      },
+      context,
+    );
+  }
+
+  private async replaceRoutesState(
+    next: ApprovedRouteRecord[],
+    context: string,
+  ) {
+    const previous = cloneList(this.routes);
+    this.routes = sortVersionedRecords(next, (item) => item.routeId);
+    await this.persist(
+      () => this.repository?.replaceRoutes(this.routes),
+      () => {
+        this.routes = previous;
+      },
+      context,
+    );
+  }
+
+  private assertActiveOperatingAreaWindows(
+    values: readonly ApprovedOperatingAreaRecord[],
+  ) {
+    assertNonOverlappingEffectiveWindows(
+      values.filter(
+        (item) =>
+          item.active && this.geometryLifecycleStatus(item) === "active",
+      ),
+      (item) => item.areaId,
+      "OVERLAPPING_OPERATING_AREA_EFFECTIVE_WINDOW",
+    );
+  }
+
+  private assertActiveRouteWindows(values: readonly ApprovedRouteRecord[]) {
+    assertNonOverlappingEffectiveWindows(
+      values.filter(
+        (item) =>
+          item.active && this.geometryLifecycleStatus(item) === "active",
+      ),
+      (item) => item.routeId,
+      "OVERLAPPING_APPROVED_ROUTE_EFFECTIVE_WINDOW",
+    );
+  }
+
   private validateOperatingArea(item: ApprovedOperatingAreaRecord) {
     validateText(item.areaId, "areaId");
     validateText(item.sandboxProgramId, "sandboxProgramId");
     validateText(item.name, "name");
+    this.assertLifecycleActiveConsistency(item, item.areaId);
     if (!AREA_KIND_SET.has(item.areaKind)) {
       throw new ApiRequestError(
         400,
@@ -1494,6 +2264,7 @@ export class SandboxGovernanceService implements OnModuleInit {
     validateText(item.routeId, "routeId");
     validateText(item.sandboxProgramId, "sandboxProgramId");
     validateText(item.name, "name");
+    this.assertLifecycleActiveConsistency(item, item.routeId);
     if (item.areaId && !knownAreaIds.has(item.areaId)) {
       throw new ApiRequestError(
         400,
@@ -1577,6 +2348,8 @@ export class SandboxGovernanceService implements OnModuleInit {
     command:
       | SuspendSandboxExperimentAuthorizationsCommand
       | ResumeSandboxExperimentAuthorizationsCommand,
+    actor?: AuditActor,
+    requestId?: string,
   ) {
     const record = this.requireExperiment(experimentId);
     const active = this.requireCurrentPublishedExperimentVersion(record);
@@ -1623,7 +2396,18 @@ export class SandboxGovernanceService implements OnModuleInit {
     record.versions.push(version);
     this.endPreviousPublishedExperimentVersion(record, version);
     record.currentVersionId = version.versionId;
-    return this.projectExperiment(record);
+    const projected = this.projectExperiment(record);
+    this.recordAudit(
+      action === "suspend"
+        ? "sandbox_governance.experiment.authorization_suspended"
+        : "sandbox_governance.experiment.authorization_resumed",
+      "sandbox_experiment",
+      experimentId,
+      this.governanceActor(actor, command),
+      requestId,
+      this.experimentAuditSummary(version),
+    );
+    return projected;
   }
 
   private endPreviousPublishedExperimentVersion(
@@ -2140,6 +2924,66 @@ export class SandboxGovernanceService implements OnModuleInit {
 
   private invalidState(message: string, details: Record<string, unknown>) {
     return this.conflict(message, details);
+  }
+
+  private governanceActor(
+    actor?: AuditActor,
+    command?: { actorId?: string | null },
+  ): AuditActor {
+    return (
+      actor ?? {
+        actorId: this.normalizeNullableText(command?.actorId),
+        actorType: "platform_admin",
+        tenantId: null,
+      }
+    );
+  }
+
+  private experimentAuditSummary(
+    version: SandboxExperimentProgramVersionRecord,
+  ) {
+    return {
+      experimentId: version.experimentId,
+      programCode: version.programCode,
+      versionId: version.versionId,
+      versionNo: version.versionNo,
+      lifecycleStatus: version.lifecycleStatus,
+      authorizationStatus: version.authorizationStatus,
+      effectiveFrom: version.effectiveFrom,
+      effectiveUntil: version.effectiveUntil,
+      rollbackFromVersionId: version.rollbackFromVersionId,
+    };
+  }
+
+  private jurisdictionAuditSummary(
+    version: SandboxJurisdictionProfileVersionRecord,
+  ) {
+    return {
+      jurisdictionId: version.jurisdictionId,
+      jurisdictionCode: version.jurisdictionCode,
+      versionId: version.versionId,
+      versionNo: version.versionNo,
+      lifecycleStatus: version.lifecycleStatus,
+      effectiveFrom: version.effectiveFrom,
+      effectiveUntil: version.effectiveUntil,
+      rollbackFromVersionId: version.rollbackFromVersionId,
+    };
+  }
+
+  private approvalDocumentAuditSummary(version: ApprovalDocumentVersionRecord) {
+    return {
+      documentId: version.documentId,
+      experimentId: version.experimentId,
+      jurisdictionId: version.jurisdictionId,
+      documentType: version.documentType,
+      versionId: version.versionId,
+      versionNo: version.versionNo,
+      lifecycleStatus: version.lifecycleStatus,
+      effectiveFrom: version.effectiveFrom,
+      effectiveUntil: version.effectiveUntil,
+      artifactSha256: version.artifactSha256,
+      rollbackFromVersionId: version.rollbackFromVersionId,
+    };
   }
 
   private recordAudit(

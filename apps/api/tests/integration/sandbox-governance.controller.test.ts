@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { SandboxGovernanceController } from "../../src/modules/sandbox-governance/sandbox-governance.controller";
 import { SandboxGovernanceService } from "../../src/modules/sandbox-governance/sandbox-governance.service";
 
+const PROGRAM_ID = "phase2-tesla-fsd-sandbox-202606";
+const BASE_TIMESTAMP = "2026-06-26T00:00:00.000Z";
+
 function createController() {
   return new SandboxGovernanceController(new SandboxGovernanceService());
 }
@@ -140,5 +143,248 @@ describe("sandbox-governance controller routes", () => {
       controller.listExperiments("2026-06-26T01:00:00.000Z", "req-list").data
         .items,
     ).toHaveLength(1);
+  });
+
+  it("serves geometry draft lifecycle and GeoJSON exports for map clients", async () => {
+    const controller = createController();
+    const areaDraft = (
+      await controller.createOperatingAreaDraft(
+        {
+          actorId: "map-editor",
+          item: {
+            areaId: "odd-riverside-draft",
+            sandboxProgramId: PROGRAM_ID,
+            name: "Riverside ODD",
+            areaKind: "operating_area",
+            version: 1,
+            active: true,
+            geometry: {
+              type: "MultiPolygon",
+              coordinates: [
+                [
+                  [
+                    [121.6, 25.1],
+                    [121.61, 25.1],
+                    [121.61, 25.11],
+                    [121.6, 25.11],
+                    [121.6, 25.1],
+                  ],
+                ],
+              ],
+            },
+            schedules: [],
+            effectiveFrom: BASE_TIMESTAMP,
+            effectiveUntil: "2026-07-10T00:00:00.000Z",
+            createdAt: BASE_TIMESTAMP,
+            updatedAt: BASE_TIMESTAMP,
+          },
+        },
+        null,
+        "req-area-draft",
+      )
+    ).data;
+
+    expect(areaDraft).toMatchObject({
+      areaId: "odd-riverside-draft",
+      active: false,
+      lifecycleStatus: "draft",
+    });
+    expect(
+      (
+        await controller.validatePoint(
+          {
+            sandboxProgramId: PROGRAM_ID,
+            point: { lat: 25.105, lng: 121.605 },
+            asOf: "2026-07-02T00:00:00.000Z",
+          },
+          "req-validate-before-publish",
+        )
+      ).data.inApprovedArea,
+    ).toBe(false);
+
+    await controller.submitOperatingAreaForReview(
+      areaDraft.areaId,
+      String(areaDraft.version),
+      { actorId: "reviewer" },
+      null,
+      "req-area-review",
+    );
+    const publishedArea = (
+      await controller.publishOperatingArea(
+        areaDraft.areaId,
+        String(areaDraft.version),
+        { actorId: "approver" },
+        null,
+        "req-area-publish",
+      )
+    ).data;
+
+    expect(publishedArea.lifecycleStatus).toBe("active");
+    expect(
+      (
+        await controller.validatePoint(
+          {
+            sandboxProgramId: PROGRAM_ID,
+            point: { lat: 25.105, lng: 121.605 },
+            asOf: "2026-07-02T00:00:00.000Z",
+          },
+          "req-validate-after-publish",
+        )
+      ).data.matches,
+    ).toEqual([
+      {
+        areaId: "odd-riverside-draft",
+        areaKind: "operating_area",
+        name: "Riverside ODD",
+      },
+    ]);
+
+    const routeDraft = (
+      await controller.createRouteDraft(
+        {
+          actorId: "map-editor",
+          item: {
+            routeId: "route-riverside-draft",
+            sandboxProgramId: PROGRAM_ID,
+            name: "Riverside ODD route",
+            areaId: null,
+            version: 1,
+            active: true,
+            geometry: {
+              type: "MultiLineString",
+              coordinates: [
+                [
+                  [121.6, 25.1],
+                  [121.605, 25.105],
+                  [121.61, 25.11],
+                ],
+              ],
+            },
+            schedules: [],
+            effectiveFrom: BASE_TIMESTAMP,
+            effectiveUntil: "2026-07-10T00:00:00.000Z",
+            createdAt: BASE_TIMESTAMP,
+            updatedAt: BASE_TIMESTAMP,
+          },
+        },
+        null,
+        "req-route-draft",
+      )
+    ).data;
+    await controller.submitRouteForReview(
+      routeDraft.routeId,
+      String(routeDraft.version),
+      { actorId: "reviewer" },
+      null,
+      "req-route-review",
+    );
+    await controller.publishRoute(
+      routeDraft.routeId,
+      String(routeDraft.version),
+      { actorId: "approver" },
+      null,
+      "req-route-publish",
+    );
+
+    expect(
+      controller.exportOperatingAreasGeoJson("req-area-geojson").data,
+    ).toEqual(
+      expect.objectContaining({
+        type: "FeatureCollection",
+        features: expect.arrayContaining([
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              areaId: "odd-riverside-draft",
+              lifecycleStatus: "active",
+            }),
+          }),
+        ]),
+      }),
+    );
+    expect(controller.exportRoutesGeoJson("req-route-geojson").data).toEqual(
+      expect.objectContaining({
+        type: "FeatureCollection",
+        features: expect.arrayContaining([
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              routeId: "route-riverside-draft",
+              lifecycleStatus: "active",
+            }),
+          }),
+        ]),
+      }),
+    );
+
+    const zoneDraft = (
+      await controller.createPickupDropoffZoneDraft(
+        {
+          actorId: "map-editor",
+          item: {
+            areaId: "pickup-riverside-curb",
+            sandboxProgramId: PROGRAM_ID,
+            name: "Riverside curb pickup",
+            areaKind: "operating_area",
+            version: 1,
+            active: true,
+            geometry: {
+              type: "MultiPolygon",
+              coordinates: [
+                [
+                  [
+                    [121.602, 25.102],
+                    [121.604, 25.102],
+                    [121.604, 25.104],
+                    [121.602, 25.104],
+                    [121.602, 25.102],
+                  ],
+                ],
+              ],
+            },
+            schedules: [],
+            effectiveFrom: BASE_TIMESTAMP,
+            effectiveUntil: "2026-07-10T00:00:00.000Z",
+            createdAt: BASE_TIMESTAMP,
+            updatedAt: BASE_TIMESTAMP,
+          },
+        },
+        null,
+        "req-zone-draft",
+      )
+    ).data;
+    expect(zoneDraft).toMatchObject({
+      areaId: "pickup-riverside-curb",
+      areaKind: "pickup_dropoff_zone",
+      lifecycleStatus: "draft",
+    });
+    await controller.submitPickupDropoffZoneForReview(
+      zoneDraft.areaId,
+      String(zoneDraft.version),
+      { actorId: "reviewer" },
+      null,
+      "req-zone-review",
+    );
+    await controller.publishPickupDropoffZone(
+      zoneDraft.areaId,
+      String(zoneDraft.version),
+      { actorId: "approver" },
+      null,
+      "req-zone-publish",
+    );
+    expect(
+      controller.exportPickupDropoffZonesGeoJson("req-zone-geojson").data,
+    ).toEqual(
+      expect.objectContaining({
+        type: "FeatureCollection",
+        features: expect.arrayContaining([
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              areaId: "pickup-riverside-curb",
+              areaKind: "pickup_dropoff_zone",
+              lifecycleStatus: "active",
+            }),
+          }),
+        ]),
+      }),
+    );
   });
 });

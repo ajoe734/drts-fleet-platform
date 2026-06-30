@@ -18,6 +18,8 @@ import type {
   ServiceAreaEvaluationDecision,
   ServiceAreaEvaluationResult,
   ServiceAreaEvaluationStopKind,
+  ServiceAreaGeoJsonFeature,
+  ServiceAreaGeoJsonResponse,
   ServiceAreaGeometry,
   ServiceAreaStopEvaluation,
   ServiceProductType,
@@ -52,7 +54,7 @@ type ServiceAreaMutationContext = {
 
 const DEFAULT_SERVICE_AREAS: ServiceAreaBoundaryRecord[] = [
   {
-    serviceAreaId: "svc-area-taipei-core",
+    serviceAreaId: "11111111-1111-4111-8111-111111111111",
     areaCode: "TAIPEI_CORE",
     displayName: "Taipei core operating area",
     status: "active",
@@ -78,7 +80,7 @@ const DEFAULT_SERVICE_AREAS: ServiceAreaBoundaryRecord[] = [
     updatedAt: DEFAULT_SEED_TIMESTAMP,
   },
   {
-    serviceAreaId: "svc-area-taoyuan-airport",
+    serviceAreaId: "22222222-2222-4222-8222-222222222222",
     areaCode: "TAOYUAN_AIRPORT",
     displayName: "Taoyuan airport transfer area",
     status: "active",
@@ -99,7 +101,7 @@ const DEFAULT_SERVICE_AREAS: ServiceAreaBoundaryRecord[] = [
 
 const DEFAULT_STOP_POLICIES: StopPolicyRecord[] = [
   {
-    stopPolicyId: "stop-policy-taipei-station-pickup-block",
+    stopPolicyId: "33333333-3333-4333-8333-333333333333",
     policyCode: "TPE_STATION_PICKUP_BLOCK",
     displayName: "Taipei station pickup curb restriction",
     status: "active",
@@ -126,7 +128,7 @@ const DEFAULT_STOP_POLICIES: StopPolicyRecord[] = [
     updatedAt: DEFAULT_SEED_TIMESTAMP,
   },
   {
-    stopPolicyId: "stop-policy-xinyi-hospital-manual-review",
+    stopPolicyId: "44444444-4444-4444-8444-444444444444",
     policyCode: "XINYI_HOSPITAL_MANUAL_REVIEW",
     displayName: "Xinyi hospital access manual review",
     status: "active",
@@ -169,12 +171,8 @@ export class ServiceAreaService implements OnModuleInit {
     }
     try {
       const state = await this.serviceAreaRepository.loadState();
-      if (state.serviceAreas.length > 0) {
-        this.serviceAreas = state.serviceAreas;
-      }
-      if (state.stopPolicies.length > 0) {
-        this.stopPolicies = state.stopPolicies;
-      }
+      this.serviceAreas = this.mergeSeededServiceAreas(state.serviceAreas);
+      this.stopPolicies = this.mergeSeededStopPolicies(state.stopPolicies);
     } catch (error) {
       this.serviceAreaRepository.reportPersistenceFailure(error, "module init");
     }
@@ -186,6 +184,69 @@ export class ServiceAreaService implements OnModuleInit {
 
   listStopPolicies() {
     return this.stopPolicies.map((record) => this.clone(record));
+  }
+
+  exportGeoJson(): ServiceAreaGeoJsonResponse {
+    const serviceAreaFeatures =
+      this.serviceAreas.map<ServiceAreaGeoJsonFeature>((record) => ({
+        type: "Feature",
+        id: record.serviceAreaId,
+        geometry: this.geometryToGeoJson(record.geometry),
+        properties: {
+          recordKind: "service_area",
+          serviceAreaId: record.serviceAreaId,
+          areaCode: record.areaCode,
+          displayName: record.displayName,
+          status: record.status,
+          sourceGeometry: this.clone(record.geometry),
+          serviceProductTypes: [...record.serviceProductTypes],
+          effectiveFrom: record.effectiveFrom,
+          effectiveUntil: record.effectiveUntil,
+          version: record.version,
+          geometryVersionRef: this.geometryVersionRef(
+            "service_area",
+            record.areaCode,
+            record.version,
+          ),
+          metadata: this.clone(record.metadata ?? {}),
+        },
+      }));
+    const stopPolicyFeatures = this.stopPolicies.map<ServiceAreaGeoJsonFeature>(
+      (record) => ({
+        type: "Feature",
+        id: record.stopPolicyId,
+        geometry: this.geometryToGeoJson(record.geometry),
+        properties: {
+          recordKind: "stop_policy",
+          stopPolicyId: record.stopPolicyId,
+          policyCode: record.policyCode,
+          displayName: record.displayName,
+          status: record.status,
+          direction: record.direction,
+          effect: record.effect,
+          sourceGeometry: this.clone(record.geometry),
+          serviceAreaCodes: [...record.serviceAreaCodes],
+          serviceProductTypes: [...record.serviceProductTypes],
+          reasonCode: record.reasonCode,
+          reasonMessage: record.reasonMessage,
+          effectiveFrom: record.effectiveFrom,
+          effectiveUntil: record.effectiveUntil,
+          version: record.version,
+          geometryVersionRef: this.geometryVersionRef(
+            "stop_policy",
+            record.policyCode,
+            record.version,
+          ),
+          metadata: this.clone(record.metadata ?? {}),
+        },
+      }),
+    );
+
+    return {
+      type: "FeatureCollection",
+      features: [...serviceAreaFeatures, ...stopPolicyFeatures],
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async createServiceArea(
@@ -211,8 +272,8 @@ export class ServiceAreaService implements OnModuleInit {
       updatedAt: now,
     };
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
-    this.serviceAreas = [record, ...this.serviceAreas];
     await this.persistServiceArea(record, "create_service_area");
+    this.serviceAreas = [record, ...this.serviceAreas];
     const audit = this.recordAudit(
       "service_area.boundary.created",
       "service_area_boundary",
@@ -265,7 +326,12 @@ export class ServiceAreaService implements OnModuleInit {
     }
     record.updatedAt = new Date().toISOString();
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
-    await this.persistServiceArea(record, "update_service_area");
+    try {
+      await this.persistServiceArea(record, "update_service_area");
+    } catch (error) {
+      this.replaceServiceArea(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.boundary.updated",
       "service_area_boundary",
@@ -301,9 +367,15 @@ export class ServiceAreaService implements OnModuleInit {
         { serviceAreaId, status: record.status },
       );
     }
+    const previous = this.clone(record);
     record.status = "review";
     record.updatedAt = new Date().toISOString();
-    await this.persistServiceArea(record, "submit_service_area_review");
+    try {
+      await this.persistServiceArea(record, "submit_service_area_review");
+    } catch (error) {
+      this.replaceServiceArea(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.boundary.submitted_for_review",
       "service_area_boundary",
@@ -332,6 +404,7 @@ export class ServiceAreaService implements OnModuleInit {
         { serviceAreaId, status: record.status },
       );
     }
+    const previous = this.clone(record);
     if (command.effectiveFrom !== undefined) {
       record.effectiveFrom = this.normalizeEffectiveFrom(
         command.effectiveFrom,
@@ -351,7 +424,12 @@ export class ServiceAreaService implements OnModuleInit {
       publishReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
-    await this.persistServiceArea(record, "publish_service_area");
+    try {
+      await this.persistServiceArea(record, "publish_service_area");
+    } catch (error) {
+      this.replaceServiceArea(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.boundary.published",
       "service_area_boundary",
@@ -386,6 +464,7 @@ export class ServiceAreaService implements OnModuleInit {
         { serviceAreaId, status: record.status },
       );
     }
+    const previous = this.clone(record);
     record.status = "retired";
     record.effectiveUntil =
       this.normalizeEffectiveUntil(command.effectiveUntil) ??
@@ -396,7 +475,12 @@ export class ServiceAreaService implements OnModuleInit {
       retireReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
-    await this.persistServiceArea(record, "retire_service_area");
+    try {
+      await this.persistServiceArea(record, "retire_service_area");
+    } catch (error) {
+      this.replaceServiceArea(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.boundary.retired",
       "service_area_boundary",
@@ -443,8 +527,8 @@ export class ServiceAreaService implements OnModuleInit {
       updatedAt: now,
     };
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
-    this.stopPolicies = [record, ...this.stopPolicies];
     await this.persistStopPolicy(record, "create_stop_policy");
+    this.stopPolicies = [record, ...this.stopPolicies];
     const audit = this.recordAudit(
       "service_area.stop_policy.created",
       "stop_policy",
@@ -519,7 +603,12 @@ export class ServiceAreaService implements OnModuleInit {
     }
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
     record.updatedAt = new Date().toISOString();
-    await this.persistStopPolicy(record, "update_stop_policy");
+    try {
+      await this.persistStopPolicy(record, "update_stop_policy");
+    } catch (error) {
+      this.replaceStopPolicy(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.stop_policy.updated",
       "stop_policy",
@@ -555,9 +644,15 @@ export class ServiceAreaService implements OnModuleInit {
         { stopPolicyId, status: record.status },
       );
     }
+    const previous = this.clone(record);
     record.status = "review";
     record.updatedAt = new Date().toISOString();
-    await this.persistStopPolicy(record, "submit_stop_policy_review");
+    try {
+      await this.persistStopPolicy(record, "submit_stop_policy_review");
+    } catch (error) {
+      this.replaceStopPolicy(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.stop_policy.submitted_for_review",
       "stop_policy",
@@ -586,6 +681,7 @@ export class ServiceAreaService implements OnModuleInit {
         { stopPolicyId, status: record.status },
       );
     }
+    const previous = this.clone(record);
     if (command.effectiveFrom !== undefined) {
       record.effectiveFrom = this.normalizeEffectiveFrom(
         command.effectiveFrom,
@@ -605,7 +701,12 @@ export class ServiceAreaService implements OnModuleInit {
       publishReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
-    await this.persistStopPolicy(record, "publish_stop_policy");
+    try {
+      await this.persistStopPolicy(record, "publish_stop_policy");
+    } catch (error) {
+      this.replaceStopPolicy(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.stop_policy.published",
       "stop_policy",
@@ -640,6 +741,7 @@ export class ServiceAreaService implements OnModuleInit {
         { stopPolicyId, status: record.status },
       );
     }
+    const previous = this.clone(record);
     record.status = "retired";
     record.effectiveUntil =
       this.normalizeEffectiveUntil(command.effectiveUntil) ??
@@ -650,7 +752,12 @@ export class ServiceAreaService implements OnModuleInit {
       retireReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
-    await this.persistStopPolicy(record, "retire_stop_policy");
+    try {
+      await this.persistStopPolicy(record, "retire_stop_policy");
+    } catch (error) {
+      this.replaceStopPolicy(previous);
+      throw error;
+    }
     const audit = this.recordAudit(
       "service_area.stop_policy.retired",
       "stop_policy",
@@ -1056,6 +1163,58 @@ export class ServiceAreaService implements OnModuleInit {
     };
   }
 
+  private mergeSeededServiceAreas(persisted: ServiceAreaBoundaryRecord[]) {
+    const persistedKeys = new Set(
+      persisted.flatMap((record) => [
+        record.serviceAreaId,
+        `${record.areaCode}:${record.version}`,
+      ]),
+    );
+    const missingSeeds = DEFAULT_SERVICE_AREAS.filter(
+      (seed) =>
+        !persistedKeys.has(seed.serviceAreaId) &&
+        !persistedKeys.has(`${seed.areaCode}:${seed.version}`),
+    );
+    return [
+      ...persisted.map((record) => this.clone(record)),
+      ...missingSeeds.map((record) => this.clone(record)),
+    ];
+  }
+
+  private mergeSeededStopPolicies(persisted: StopPolicyRecord[]) {
+    const persistedKeys = new Set(
+      persisted.flatMap((record) => [
+        record.stopPolicyId,
+        `${record.policyCode}:${record.version}`,
+      ]),
+    );
+    const missingSeeds = DEFAULT_STOP_POLICIES.filter(
+      (seed) =>
+        !persistedKeys.has(seed.stopPolicyId) &&
+        !persistedKeys.has(`${seed.policyCode}:${seed.version}`),
+    );
+    return [
+      ...persisted.map((record) => this.clone(record)),
+      ...missingSeeds.map((record) => this.clone(record)),
+    ];
+  }
+
+  private replaceServiceArea(previous: ServiceAreaBoundaryRecord) {
+    this.serviceAreas = this.serviceAreas.map((record) =>
+      record.serviceAreaId === previous.serviceAreaId
+        ? this.clone(previous)
+        : record,
+    );
+  }
+
+  private replaceStopPolicy(previous: StopPolicyRecord) {
+    this.stopPolicies = this.stopPolicies.map((record) =>
+      record.stopPolicyId === previous.stopPolicyId
+        ? this.clone(previous)
+        : record,
+    );
+  }
+
   private async persistServiceArea(
     record: ServiceAreaBoundaryRecord,
     context: string,
@@ -1064,6 +1223,7 @@ export class ServiceAreaService implements OnModuleInit {
       await this.serviceAreaRepository?.persistServiceArea(this.clone(record));
     } catch (error) {
       this.serviceAreaRepository?.reportPersistenceFailure(error, context);
+      throw this.persistenceFailure(error, context);
     }
   }
 
@@ -1072,7 +1232,21 @@ export class ServiceAreaService implements OnModuleInit {
       await this.serviceAreaRepository?.persistStopPolicy(this.clone(record));
     } catch (error) {
       this.serviceAreaRepository?.reportPersistenceFailure(error, context);
+      throw this.persistenceFailure(error, context);
     }
+  }
+
+  private persistenceFailure(error: unknown, context: string) {
+    return new ApiRequestError(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      "SERVICE_AREA_PERSISTENCE_FAILED",
+      "Service-area governance mutation could not be persisted.",
+      {
+        context,
+        detail: error instanceof Error ? error.message : String(error),
+      },
+      true,
+    );
   }
 
   private recordAudit(
@@ -1339,6 +1513,50 @@ export class ServiceAreaService implements OnModuleInit {
       return this.circleContainsPoint(geometry, point);
     }
     return this.polygonContainsPoint(geometry, point);
+  }
+
+  private geometryToGeoJson(geometry: ServiceAreaGeometry) {
+    if (geometry.type === "polygon") {
+      return {
+        type: "Polygon" as const,
+        coordinates: [this.closeGeoJsonRing(geometry.coordinates)],
+      };
+    }
+
+    return {
+      type: "Polygon" as const,
+      coordinates: [
+        this.circleToGeoJsonRing(geometry.center, geometry.radiusMeters),
+      ],
+    };
+  }
+
+  private closeGeoJsonRing(points: GeoPoint[]) {
+    const ring = points.map((point) => [point.lng, point.lat]);
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+      ring.push([...first]);
+    }
+    return ring;
+  }
+
+  private circleToGeoJsonRing(center: GeoPoint, radiusMeters: number) {
+    const segments = 48;
+    const latRadius = radiusMeters / 111_320;
+    const lngRadius =
+      radiusMeters /
+      (111_320 * Math.max(Math.cos((center.lat * Math.PI) / 180), 0.01));
+    const ring: number[][] = [];
+    for (let index = 0; index < segments; index += 1) {
+      const angle = (2 * Math.PI * index) / segments;
+      ring.push([
+        center.lng + lngRadius * Math.cos(angle),
+        center.lat + latRadius * Math.sin(angle),
+      ]);
+    }
+    ring.push([...ring[0]!]);
+    return ring;
   }
 
   private circleContainsPoint(circle: GeoCircle, point: GeoPoint) {

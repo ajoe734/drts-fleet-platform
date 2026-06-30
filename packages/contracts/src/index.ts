@@ -368,6 +368,59 @@ export interface ServiceAreaDefinitionsResponse {
   generatedAt: string;
 }
 
+export type ServiceAreaGeoJsonGeometry = {
+  type: "Polygon";
+  coordinates: number[][][];
+};
+
+export type ServiceAreaGeoJsonFeatureProperties =
+  | {
+      recordKind: "service_area";
+      serviceAreaId: string;
+      areaCode: string;
+      displayName: string;
+      status: ServiceAreaRecordStatus;
+      sourceGeometry: ServiceAreaGeometry;
+      serviceProductTypes: ServiceProductType[];
+      effectiveFrom: string;
+      effectiveUntil: string | null;
+      version: number;
+      geometryVersionRef: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      recordKind: "stop_policy";
+      stopPolicyId: string;
+      policyCode: string;
+      displayName: string;
+      status: ServiceAreaRecordStatus;
+      direction: StopPolicyDirection;
+      effect: StopPolicyEffect;
+      sourceGeometry: ServiceAreaGeometry;
+      serviceAreaCodes: string[];
+      serviceProductTypes: ServiceProductType[];
+      reasonCode: string;
+      reasonMessage: string;
+      effectiveFrom: string;
+      effectiveUntil: string | null;
+      version: number;
+      geometryVersionRef: string;
+      metadata?: Record<string, unknown>;
+    };
+
+export interface ServiceAreaGeoJsonFeature {
+  type: "Feature";
+  id: string;
+  geometry: ServiceAreaGeoJsonGeometry;
+  properties: ServiceAreaGeoJsonFeatureProperties;
+}
+
+export interface ServiceAreaGeoJsonResponse {
+  type: "FeatureCollection";
+  features: ServiceAreaGeoJsonFeature[];
+  generatedAt: string;
+}
+
 export interface CreateServiceAreaBoundaryCommand {
   areaCode: string;
   displayName: string;
