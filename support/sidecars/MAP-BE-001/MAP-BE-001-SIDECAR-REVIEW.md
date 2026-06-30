@@ -5,7 +5,7 @@
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
 - **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 - **Planning Anchor:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- **Machine-Truth Basis:** sidecar status refreshed through `2026-06-30T21:03:20Z`; parent status refreshed through `2026-06-30T14:38:09Z`
+- **Machine-Truth Basis:** sidecar handoff refreshed through `2026-06-30T21:11:46Z`; parent status refreshed through `2026-06-30T14:38:09Z`
 - **Workflow Position:** support-only review packet for the assigned sidecar reviewer. This file does not change canonical truth, parent implementation files, or the parent lifecycle state.
 
 This packet summarizes the current `MAP-BE-001` evidence for reviewer handoff.
@@ -38,7 +38,7 @@ Not allowed:
 - `id`: `MAP-BE-001-SIDECAR-REVIEW`
 - `owner`: `Codex`
 - `reviewer`: `Codex2`
-- `status`: `in_progress`
+- `status`: `review`
 - `helper_parent`: `MAP-BE-001`
 - `helper_kind`: `review_packet`
 - `mutates_canonical`: `false`
@@ -58,7 +58,19 @@ Not allowed:
   - `ResolvedAddressPayload` and service-area definition envelopes landed
   - verification reported as contracts/API typecheck, lint, and geo/service-area tests
 
-### 2.3 Integrated snapshot note
+### 2.3 Reviewer access / branch transport
+
+At the time of the owner handoff (`2026-06-30T21:11:46Z`):
+
+- `origin/codex/map-be-001-sidecar-review` is the review source of truth for
+  this packet
+- local branch `codex2/map-be-001-sidecar-review` still resolves to
+  `f452f019f` from the `origin/dev` baseline and does not contain
+  `support/sidecars/MAP-BE-001/`
+- reviewer `Codex2` should fetch the owner branch directly before reviewing the
+  artifact
+
+### 2.4 Integrated snapshot note
 
 The current tree includes later consumers that depend on the `MAP-BE-001`
 contract surface:
@@ -138,16 +150,55 @@ Recommended focus for `Codex2` reviewing this sidecar packet:
    tree, where later tasks already consume the `MAP-BE-001` contract surface,
    rather than from an isolated parent-only branch snapshot.
 
-## 7. Reviewer Handoff
+## 7. Reviewer Handoff Trail
+
+- `2026-06-30T21:11:46Z`: owner `Codex` handed off
+  `MAP-BE-001-SIDECAR-REVIEW` to reviewer `Codex2` through
+  `scripts/ai-status.sh`; machine truth is now `review`
+- handoff note explicitly records that the packet currently lives on
+  `origin/codex/map-be-001-sidecar-review`, while the reviewer branch remains
+  on the `origin/dev` baseline without this artifact
+- parent `MAP-BE-001` remains in `review` under reviewer `Claude2`; this
+  sidecar only packages reviewer-facing evidence and does not alter the parent
+  lifecycle
 
 This sidecar now satisfies its support-only acceptance:
 
 - the support artifact exists at the declared path
 - no canonical truth or parent implementation file was changed by this sidecar
-- machine-truth status was updated through `scripts/ai-status.sh`
-- the assigned reviewer gets a direct map from acceptance item to code anchors,
-  downstream usage evidence, and fresh rerun verification
+- machine-truth handoff to the assigned reviewer is recorded
+- the assigned reviewer gets a direct map from acceptance items to code
+  anchors, downstream usage evidence, and fresh rerun verification
 
-Recommended next lifecycle step: hand this packet to `Codex2` through
-`scripts/ai-status.sh handoff` while the parent task remains in `review` with
-reviewer `Claude2`.
+## 8. Reviewer Commands
+
+Fetch the owner branch before reviewing:
+
+```bash
+git fetch origin codex/map-be-001-sidecar-review
+git show origin/codex/map-be-001-sidecar-review:support/sidecars/MAP-BE-001/MAP-BE-001-SIDECAR-REVIEW.md | sed -n '1,240p'
+```
+
+Optional branch-state confirmation:
+
+```bash
+git ls-tree --name-only -r codex2/map-be-001-sidecar-review -- support/sidecars/MAP-BE-001
+git log --oneline --decorate -n 3 origin/codex/map-be-001-sidecar-review -- support/sidecars/MAP-BE-001/MAP-BE-001-SIDECAR-REVIEW.md
+```
+
+Reviewer approval if aligned:
+
+```bash
+AI_NAME=Codex2 \
+REVIEW_FILE=support/sidecars/MAP-BE-001/MAP-BE-001-SIDECAR-REVIEW.md \
+REVIEW_NOTES_ZH='審查通過：MAP-BE-001 sidecar review packet 已對齊最新 machine truth（sidecar=review，owner handoff 2026-06-30T21:11:46Z；parent MAP-BE-001 仍為 review，由 Claude2 審主線），並清楚標示 owner branch fetch 要求、acceptance-to-evidence matrix、downstream consumer anchors 與 geo/service-area/owned-mobility 驗證結果；support artifact only，未改 canonical truth。|回到 owner（Codex）以 branch head commit / push evidence 做 done closeout。' \
+scripts/ai-status.sh approve MAP-BE-001-SIDECAR-REVIEW \
+  "MAP-BE-001 sidecar review packet approved: machine truth, reviewer transport, evidence map, and support-only scope are aligned."
+```
+
+Reviewer reopen if anything drifted:
+
+```bash
+AI_NAME=Codex2 scripts/ai-status.sh reopen MAP-BE-001-SIDECAR-REVIEW \
+  "packet needs refresh: [machine-truth mismatch / stale evidence anchor / branch transport mismatch / support-scope violation]"
+```
