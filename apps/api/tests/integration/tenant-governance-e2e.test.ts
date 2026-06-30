@@ -324,7 +324,7 @@ async function createHarness(tenantId: string) {
                     currency: "NTD",
                     amountMinor: 0,
                   },
-                costCenter: order.costCenter,
+                costCenterCode: order.costCenter,
                 orderSource: order.orderSource,
                 serviceBucket: order.serviceBucket,
                 businessDispatchSubtype: order.businessDispatchSubtype,
@@ -568,12 +568,15 @@ describe("tenant governance e2e integration", () => {
       "req-e2e-invoice-001",
     );
 
-    // Invoice line schema no longer carries cost-center / owner metadata; the
-    // governance link is preserved upstream through the booking approval audit chain.
     expect(invoice.lines).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           orderId: created.orderId,
+          costCenterCode: "CC-FIN",
+          costCenterName: "Finance",
+          ownerUserId: tenantId + "-finance",
+          activeFlag: true,
+          legacy_unmapped: false,
         }),
       ]),
     );

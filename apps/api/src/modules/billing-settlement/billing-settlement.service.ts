@@ -2352,7 +2352,13 @@ export class BillingSettlementService implements OnModuleInit {
           periodEnd,
         );
       for (const trip of trips) {
-        liveTripMap.set(trip.orderId, trip);
+        liveTripMap.set(
+          trip.orderId,
+          this.mergeLiveSettlementTripRecord(
+            liveTripMap.get(trip.orderId),
+            trip,
+          ),
+        );
       }
       return [...liveTripMap.values()].map((trip) =>
         this.mapLiveTripToSettlementSnapshot(trip),
@@ -2532,6 +2538,38 @@ export class BillingSettlementService implements OnModuleInit {
         trip.tenantId === tenantId && completedAt >= start && completedAt <= end
       );
     });
+  }
+
+  private mergeLiveSettlementTripRecord(
+    existing: LiveSettlementTripRecord | undefined,
+    incoming: LiveSettlementTripRecord,
+  ): LiveSettlementTripRecord {
+    if (!existing) {
+      return incoming;
+    }
+
+    return {
+      ...incoming,
+      costCenterCode:
+        incoming.costCenterCode ?? existing.costCenterCode ?? null,
+      partnerId: incoming.partnerId ?? existing.partnerId,
+      partnerProgramId: incoming.partnerProgramId ?? existing.partnerProgramId,
+      partnerEntrySlug: incoming.partnerEntrySlug ?? existing.partnerEntrySlug,
+      eligibilityVerificationId:
+        incoming.eligibilityVerificationId ??
+        existing.eligibilityVerificationId,
+      issuerAuthorizationRef:
+        incoming.issuerAuthorizationRef ?? existing.issuerAuthorizationRef,
+      benefitReference: incoming.benefitReference ?? existing.benefitReference,
+      serviceProduct:
+        incoming.serviceProduct ?? existing.serviceProduct ?? null,
+      tenantServiceProgramId:
+        incoming.tenantServiceProgramId ??
+        existing.tenantServiceProgramId ??
+        null,
+      sourcePlatform:
+        incoming.sourcePlatform ?? existing.sourcePlatform ?? null,
+    };
   }
 
   private mapLiveTripToSettlementSnapshot(
