@@ -220,4 +220,21 @@ AI_NAME=Codex2 scripts/ai-status.sh approve MAP-UI-002-HARDEN-001-SIDECAR-REVIEW
 
 ---
 
+## 7. Owner Closeout Addendum
+
+Closeout refresh prepared on `2026-06-30` after reviewer approval:
+
+- sidecar machine-truth state is now `review_approved` as of `2026-06-30T20:57:12Z`
+- parent task `MAP-UI-002-HARDEN-001` remains in `review`; this sidecar still does not approve, reopen, or close the parent task
+- reviewer approval message confirms the packet from commit `a68f91dab` stayed support-only, mapped acceptance to code/test anchors, captured the parent artifact-path drift, and included rerun commands
+- reviewer independently reran `pnpm --filter @drts/ui-web test` in the assigned review worktree on `2026-06-30`
+
+Formal closeout boundary:
+
+- this owner closeout only finalizes the sidecar support artifact branch
+- no runtime, canonical product truth, or parent-task implementation files are modified by this addendum
+- expected integration status for sidecar finalization is `not_applicable` because this packet has no deploy target
+
+---
+
 This document is a sidecar support artifact only. It does not alter `ai-status.json`, canonical product truth, or the parent task lifecycle beyond the normal sidecar handoff commands.
