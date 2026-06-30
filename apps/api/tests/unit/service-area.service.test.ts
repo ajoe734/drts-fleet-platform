@@ -8,11 +8,16 @@ function createService() {
   return new ServiceAreaService();
 }
 
-function createMutationService() {
+function createMutationService(repositoryOverrides = {}) {
   const repository = {
+    loadState: vi.fn().mockResolvedValue({
+      serviceAreas: [],
+      stopPolicies: [],
+    }),
     persistServiceArea: vi.fn().mockResolvedValue(undefined),
     persistStopPolicy: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
+    ...repositoryOverrides,
   };
   const auditNotificationService = {
     recordAuditLog: vi.fn((input) => ({
@@ -227,6 +232,135 @@ describe("ServiceAreaService", () => {
         geometryVersionRef: "stop_policy:TPE_STATION_PICKUP_BLOCK@1",
       },
     });
+  });
+
+  it("merges persisted governance state with baseline service-area seeds on startup", async () => {
+    const repository = {
+      loadState: vi.fn().mockResolvedValue({
+        serviceAreas: [
+          {
+            serviceAreaId: "55555555-5555-4555-8555-555555555555",
+            areaCode: "DB_ONLY_CORE",
+            displayName: "Database-only service area",
+            status: "active",
+            geometry: {
+              type: "circle",
+              center: { lat: 24.8, lng: 121.0 },
+              radiusMeters: 1200,
+            },
+            serviceProductTypes: ["taxi_realtime"],
+            effectiveFrom: "2026-01-01T00:00:00.000Z",
+            effectiveUntil: null,
+            version: 1,
+            metadata: { source: "db" },
+            createdAt: "2026-01-02T00:00:00.000Z",
+            updatedAt: "2026-01-02T00:00:00.000Z",
+          },
+        ],
+        stopPolicies: [],
+      }),
+      persistServiceArea: vi.fn(),
+      persistStopPolicy: vi.fn(),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new ServiceAreaService(repository as never);
+
+    await service.onModuleInit();
+
+    const areaCodes = service
+      .listServiceAreas()
+      .map((record) => record.areaCode);
+    expect(areaCodes).toEqual(
+      expect.arrayContaining([
+        "DB_ONLY_CORE",
+        "TAIPEI_CORE",
+        "TAOYUAN_AIRPORT",
+      ]),
+    );
+    expect(new Set(areaCodes).size).toBe(areaCodes.length);
+    expect(
+      service.listStopPolicies().map((record) => record.policyCode),
+    ).toEqual(
+      expect.arrayContaining([
+        "TPE_STATION_PICKUP_BLOCK",
+        "XINYI_HOSPITAL_MANUAL_REVIEW",
+      ]),
+    );
+  });
+
+  it("rejects service-area creates when persistence fails without mutating memory or audit", async () => {
+    const { service, repository, auditNotificationService, context } =
+      createMutationService({
+        persistServiceArea: vi
+          .fn()
+          .mockRejectedValue(new Error("database unavailable")),
+      });
+
+    await expect(
+      service.createServiceArea(
+        {
+          areaCode: "DB_FAIL_CORE",
+          displayName: "Persistence failure area",
+          geometry: {
+            type: "circle",
+            center: { lat: 24.99, lng: 121.3 },
+            radiusMeters: 1200,
+          },
+          serviceProductTypes: ["taxi_realtime"],
+        },
+        context,
+      ),
+    ).rejects.toThrowError(ApiRequestError);
+
+    expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "create_service_area",
+    );
+    expect(
+      service
+        .listServiceAreas()
+        .some((record) => record.areaCode === "DB_FAIL_CORE"),
+    ).toBe(false);
+    expect(auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("rolls back service-area updates when persistence fails", async () => {
+    const { service, repository, context } = createMutationService();
+    const created = await service.createServiceArea(
+      {
+        areaCode: "ROLLBACK_CORE",
+        displayName: "Rollback original area",
+        geometry: {
+          type: "circle",
+          center: { lat: 24.91, lng: 121.22 },
+          radiusMeters: 900,
+        },
+        serviceProductTypes: ["taxi_realtime"],
+      },
+      context,
+    );
+    repository.persistServiceArea.mockRejectedValueOnce(
+      new Error("database unavailable"),
+    );
+
+    await expect(
+      service.updateServiceArea(
+        created.record.serviceAreaId,
+        { displayName: "Rollback mutated area" },
+        context,
+      ),
+    ).rejects.toThrowError(ApiRequestError);
+
+    expect(
+      service
+        .listServiceAreas()
+        .find((record) => record.serviceAreaId === created.record.serviceAreaId)
+        ?.displayName,
+    ).toBe("Rollback original area");
+    expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "update_service_area",
+    );
   });
 
   it("publishes service-area drafts and feeds the evaluator immediately", async () => {
