@@ -33,7 +33,37 @@ Production readiness is still **not proven** because several owner tasks remain 
 | `MAP-FE-ADM-001-SIDECAR-GATEB` | `done` | Platform Admin / Phase 2 Gate B governance packet. |
 | `MAP-FE-ENTRY-SIDECAR-GATEE` | `done` | Tenant / Concierge / Partner Gate E consistency packet. |
 
-## 3. Gap Coverage Matrix
+## 3. Owner / Reviewer / Status Reference
+
+Use this table with the gap matrix below. The gap rows list owner task IDs; this
+reference provides the current fleet owner, reviewer, and status for each task.
+
+| Task | Owner | Reviewer | Current status |
+| --- | --- | --- | --- |
+| `MAP-PROD-000` | `Codex2` | `Codex` | `done` |
+| `MAP-INFRA-001` | `Codex` | `Codex2` | `done` |
+| `MAP-BE-001` | `Codex` | `Claude2` | `review` |
+| `MAP-BE-002` | `Codex` | `Claude2` | `review` |
+| `MAP-BE-003` | `Codex` | `Claude2` | `review` |
+| `MAP-BE-004` | `Codex` | `Codex2` | `done` |
+| `MAP-BE-005` | `Codex` | `Claude2` | `review` |
+| `MAP-BE-006` | `Codex` | `Codex2` | `done` |
+| `MAP-UI-001` | `Codex` | `Claude2` | `review` |
+| `MAP-UI-002` | `Codex2` | `Claude2` | `review` |
+| `MAP-UI-002-HARDEN-001` | `Codex2` | `Claude2` | `review` |
+| `MAP-UI-002-INTEGRATE-001` | `Codex` | `Claude2` | `backlog` |
+| `MAP-FE-CALL-001` | `Codex` | `Claude2` | `review` |
+| `MAP-FE-TEN-001` | `Claude2` | `Codex2` | `backlog` |
+| `MAP-FE-CON-001` | `Codex2` | `Claude` | `backlog` |
+| `MAP-FE-OPS-001` | `Codex` | `Codex2` | `done` |
+| `MAP-FE-ADM-001` | `Codex2` | `Codex` | `todo` |
+| `MAP-MOB-DRV-001` | `Codex2` | `Claude2` | `backlog` |
+| `MAP-QA-001` | `Codex` | `Claude2` | `review` |
+| `MAP-QA-002` | `Codex2` | `Codex` | `todo` |
+| `MAP-OBS-001` | `Codex2` | `Codex` | `todo` |
+| `MAP-REL-001` | `Codex2` | `Codex` | `todo` |
+
+## 4. Gap Coverage Matrix
 
 | Gap | Production requirement | Owner execution tasks | Release gate / E2E evidence | Current blocker |
 | --- | --- | --- | --- | --- |
@@ -51,7 +81,7 @@ Production readiness is still **not proven** because several owner tasks remain 
 | `MAP-GAP-012` Spatial audit trail on orders | Every order stores serviceability decision and policy/version IDs used at creation. | `MAP-BE-005` (`review`), `MAP-BE-004` (`done`), `MAP-OBS-001` (`todo`), `MAP-QA-002` (`todo`) | Gate A/B/E audit assertions across `E2E-MAP-001` through `E2E-MAP-005`. | Snapshot task is review-gated; observability and final E2E evidence missing. |
 | `MAP-GAP-013` UAT evidence for map flows | Playwright/mobile evidence with mocked provider and guarded stage smoke/UAT paths. | `MAP-QA-001` (`review`), `MAP-QA-002` (`todo`), `MAP-MOB-DRV-001` (`backlog`), `MAP-REL-001` (`todo`) | All gates A-E; `MAP-QA-002-SIDECAR-PLAN`; driver UAT sidecar. | Final E2E suite, driver UAT, observability, and release closeout are incomplete. |
 
-## 4. Gate Closeout Ownership
+## 5. Gate Closeout Ownership
 
 | Gate | Required final proof | Blocking tasks as of this matrix |
 | --- | --- | --- |
@@ -61,7 +91,7 @@ Production readiness is still **not proven** because several owner tasks remain 
 | Gate D: Driver safe to navigate | Driver trip map, coordinate-based navigation, heartbeat coexistence, route-authority copy, mobile UAT. | `MAP-MOB-DRV-001`, `MAP-BE-003`, `MAP-BE-005`, `MAP-QA-002`. |
 | Gate E: Degraded safe | Provider outage cannot silently create normal coordinate-less orders on any entry surface; observability distinguishes outage/ambiguity/policy denial. | `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-QA-002`, `MAP-OBS-001`, `MAP-REL-001`. |
 
-## 5. Release Closeout Rules
+## 6. Release Closeout Rules
 
 `MAP-REL-001` should use this matrix as the gap closeout checklist.
 
@@ -70,7 +100,7 @@ Production readiness is still **not proven** because several owner tasks remain 
 - A gap is `external-gated` only when a required physical-device, provider, or stage smoke item is explicitly documented with owner and date.
 - A sidecar `done` status never substitutes for parent implementation or final E2E evidence.
 
-## 6. Parent And QA Handoff
+## 7. Parent And QA Handoff
 
 Recommended note for `MAP-REL-001`:
 
