@@ -1,15 +1,39 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { GeoProviderConfigService } from "../../src/modules/geo/geo-provider-config.service";
 import { GeoController } from "../../src/modules/geo/geo.controller";
 import { GeoService } from "../../src/modules/geo/geo.service";
 import { MockGeoProvider } from "../../src/modules/geo/mock-geo.provider";
 
-function createService() {
-  return new GeoService(new MockGeoProvider());
+function createService(env: Record<string, string | undefined> = {}) {
+  return new GeoService(
+    new MockGeoProvider(),
+    new GeoProviderConfigService({
+      NODE_ENV: "test",
+      DRTS_ENV: "test",
+      MAP_PROVIDER_MODE: "mock",
+      ...env,
+    }),
+  );
 }
 
 describe("GeoService", () => {
+  it("reports mock provider health for local and CI runtime", () => {
+    const service = createService();
+
+    expect(service.health()).toMatchObject({
+      provider: "mock",
+      mode: "mock",
+      status: "healthy",
+      failClosed: false,
+      mockAllowed: true,
+      quota: {
+        policy: "mock_unlimited",
+      },
+    });
+  });
+
   it("searches deterministic mock candidates for CI and E2E", async () => {
     const service = createService();
 
@@ -26,6 +50,24 @@ describe("GeoService", () => {
       placeId: "mock-place-taipei-station",
       location: { lat: 25.0478, lng: 121.5171 },
       confidence: "exact",
+    });
+  });
+
+  it("includes a Taipei core serviceable fixture for production E2E success paths", async () => {
+    const service = createService();
+
+    const result = await service.search({
+      q: "台北市政府",
+      surface: "callcenter",
+      near: { lat: 25.037, lng: 121.564 },
+    });
+
+    expect(result.candidates[0]).toMatchObject({
+      candidateId: "mock-taipei-city-hall",
+      provider: "mock",
+      placeId: "mock-place-taipei-city-hall",
+      location: { lat: 25.0375, lng: 121.5637 },
+      metadata: { serviceArea: "TAIPEI_CORE" },
     });
   });
 
@@ -122,6 +164,84 @@ describe("GeoService", () => {
     }
   });
 
+  it("fails closed when production-like runtime tries to use mock provider", async () => {
+    const service = createService({
+      DRTS_ENV: "production",
+      MAP_PROVIDER_MODE: "mock",
+    });
+
+    expect(service.health()).toMatchObject({
+      mode: "mock",
+      status: "unhealthy",
+      failClosed: true,
+      mockAllowed: false,
+    });
+
+    await expect(
+      service.search({
+        q: "台北車站",
+        surface: "callcenter",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("fails closed with an explicit check when provider mode is invalid", () => {
+    const service = createService({
+      MAP_PROVIDER_MODE: "oops",
+    });
+
+    expect(service.health()).toMatchObject({
+      mode: "disabled",
+      status: "unhealthy",
+      failClosed: true,
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: "provider_mode",
+          status: "fail",
+        }),
+      ]),
+    });
+  });
+
+  it("fails closed when external provider mode is missing required secrets", async () => {
+    const service = createService({
+      DRTS_ENV: "staging",
+      MAP_PROVIDER_MODE: "external",
+      MAP_PROVIDER_ALLOWED_ORIGINS: "https://ops.example.com",
+      MAP_PROVIDER_SERVER_KEY: "",
+    });
+
+    expect(service.health()).toMatchObject({
+      mode: "external",
+      status: "unhealthy",
+      failClosed: true,
+      requiredSecretNames: ["MAP_PROVIDER_SERVER_KEY"],
+      missingSecretNames: ["MAP_PROVIDER_SERVER_KEY"],
+    });
+
+    try {
+      await service.reverse({
+        location: { lat: 25.0478, lng: 121.5171 },
+        surface: "ops_console",
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(503);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "GEO_PROVIDER_NOT_CONFIGURED",
+          retryable: true,
+          details: {
+            mode: "external",
+            missingSecretNames: ["MAP_PROVIDER_SERVER_KEY"],
+          },
+        },
+      });
+      return;
+    }
+
+    throw new Error("Expected external provider configuration to fail closed.");
+  });
+
   it("rejects invalid search and coordinate input before hitting provider", async () => {
     const service = createService();
 
@@ -142,6 +262,19 @@ describe("GeoService", () => {
 });
 
 describe("GeoController", () => {
+  it("wraps provider health in the platform API envelope", () => {
+    const controller = new GeoController(createService());
+
+    const result = controller.health("req-geo-health");
+
+    expect(result.meta.requestId).toBe("req-geo-health");
+    expect(result.data).toMatchObject({
+      provider: "mock",
+      status: "healthy",
+      failClosed: false,
+    });
+  });
+
   it("wraps geo responses in the platform API envelope", async () => {
     const controller = new GeoController(createService());
 

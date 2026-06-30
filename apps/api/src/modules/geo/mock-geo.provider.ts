@@ -26,6 +26,33 @@ type MockPlace = GeocodeCandidate & {
 
 const MOCK_PLACES: MockPlace[] = [
   {
+    candidateId: "mock-taipei-city-hall",
+    provider: PROVIDER_ID,
+    providerCandidateId: "mock:place:taipei-city-hall",
+    placeId: "mock-place-taipei-city-hall",
+    displayName: "Taipei City Hall",
+    address: "台北市信義區市府路1號",
+    normalizedAddress: "臺北市信義區市府路1號",
+    district: "信義區",
+    locality: "臺北市",
+    countryCode: "TW",
+    location: { lat: 25.0375, lng: 121.5637 },
+    confidence: "exact",
+    accuracyM: 20,
+    metadata: { fixture: true, serviceArea: "TAIPEI_CORE" },
+    keywords: [
+      "taipei",
+      "city",
+      "hall",
+      "台北",
+      "臺北",
+      "市政府",
+      "台北市政府",
+      "臺北市政府",
+      "市府路",
+    ],
+  },
+  {
     candidateId: "mock-taipei-station",
     provider: PROVIDER_ID,
     providerCandidateId: "mock:place:taipei-station",

@@ -338,6 +338,7 @@ export class SandboxGovernanceRepository {
         FROM av_sandbox.approved_operating_areas
         WHERE sandbox_program_id = $1
           AND active = true
+          AND COALESCE(record->>'lifecycleStatus', 'active') = 'active'
           AND effective_from <= $2::timestamptz
           AND (effective_until IS NULL OR effective_until > $2::timestamptz)
           AND ST_Covers(
@@ -372,6 +373,7 @@ export class SandboxGovernanceRepository {
         FROM av_sandbox.approved_routes
         WHERE sandbox_program_id = $1
           AND active = true
+          AND COALESCE(record->>'lifecycleStatus', 'active') = 'active'
           AND effective_from <= $2::timestamptz
           AND (effective_until IS NULL OR effective_until > $2::timestamptz)
           AND ST_CoveredBy(

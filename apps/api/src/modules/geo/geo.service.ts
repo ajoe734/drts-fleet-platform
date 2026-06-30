@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 
 import {
   GEO_RESOLUTION_SURFACES,
@@ -14,6 +14,7 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { GeoProviderConfigService } from "./geo-provider-config.service";
 import { GeoProviderError, type GeoProvider } from "./geo.provider";
 import { MockGeoProvider } from "./mock-geo.provider";
 
@@ -33,7 +34,15 @@ type SearchHttpQuery = {
 
 @Injectable()
 export class GeoService {
-  constructor(private readonly geoProvider: MockGeoProvider) {}
+  constructor(
+    private readonly geoProvider: MockGeoProvider,
+    @Optional()
+    private readonly geoProviderConfigService?: GeoProviderConfigService,
+  ) {}
+
+  health() {
+    return this.providerConfig().getHealth();
+  }
 
   async searchFromHttpQuery(query: SearchHttpQuery) {
     const command: SearchGeoQuery = {
@@ -65,6 +74,7 @@ export class GeoService {
     if (command.surface) {
       normalized.surface = this.normalizeSurface(command.surface, "surface");
     }
+    this.assertProviderUsable();
     return this.withProviderErrorMapping(() =>
       this.provider().search(normalized),
     );
@@ -87,6 +97,7 @@ export class GeoService {
         command.manualOverrideReason,
       ),
     };
+    this.assertProviderUsable();
     return this.withProviderErrorMapping(() =>
       this.provider().resolve(normalized),
     );
@@ -101,8 +112,33 @@ export class GeoService {
         command.requestedByActorId,
       ),
     };
+    this.assertProviderUsable();
     return this.withProviderErrorMapping(() =>
       this.provider().reverse(normalized),
+    );
+  }
+
+  private providerConfig() {
+    return this.geoProviderConfigService ?? new GeoProviderConfigService();
+  }
+
+  private assertProviderUsable() {
+    const health = this.providerConfig().getHealth();
+    if (!health.failClosed) {
+      return;
+    }
+    throw new ApiRequestError(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      "GEO_PROVIDER_NOT_CONFIGURED",
+      "Geo provider is not configured for runtime use.",
+      {
+        provider: health.provider,
+        mode: health.mode,
+        environment: health.environment,
+        missingSecretNames: health.missingSecretNames,
+        checks: health.checks,
+      },
+      true,
     );
   }
 

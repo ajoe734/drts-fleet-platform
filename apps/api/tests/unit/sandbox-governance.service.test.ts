@@ -22,6 +22,19 @@ function createService() {
   );
 }
 
+function createAuditedService() {
+  const auditNotificationService = {
+    recordAuditLog: vi.fn(),
+  };
+  return {
+    auditNotificationService,
+    service: new SandboxGovernanceService(
+      auditNotificationService as never,
+      undefined,
+    ),
+  };
+}
+
 function buildArea(
   overrides: Partial<ApprovedOperatingAreaRecord> = {},
 ): ApprovedOperatingAreaRecord {
@@ -205,6 +218,26 @@ describe("SandboxGovernanceService", () => {
     );
   });
 
+  it("rejects geometry records whose active flag conflicts with lifecycle status", async () => {
+    const service = createService();
+
+    await expectApiRequestErrorMessage(
+      async () =>
+        service.updateOperatingAreas(
+          {
+            items: [
+              buildArea({
+                active: true,
+                lifecycleStatus: "draft",
+              }),
+            ],
+          },
+          { actorId: "tester", actorType: "system", tenantId: null },
+        ),
+      /active flag must match lifecycleStatus/i,
+    );
+  });
+
   it("deduplicates matching route ids across historical route versions", async () => {
     const service = createService();
     await service.updateOperatingAreas(
@@ -244,6 +277,187 @@ describe("SandboxGovernanceService", () => {
     });
 
     expect(result.routeIds).toEqual(["route-downtown-loop"]);
+  });
+
+  it("keeps operating-area drafts out of the evaluator until published", async () => {
+    const service = createService();
+    const actor = {
+      actorId: "map-editor",
+      actorType: "ops_user" as const,
+      tenantId: null,
+    };
+    const draftArea = buildArea({
+      areaId: "odd-riverside-draft",
+      name: "Riverside ODD",
+      active: true,
+      effectiveUntil: "2026-07-10T00:00:00.000Z",
+      geometry: {
+        type: "MultiPolygon",
+        coordinates: [
+          [
+            [
+              [121.6, 25.1],
+              [121.61, 25.1],
+              [121.61, 25.11],
+              [121.6, 25.11],
+              [121.6, 25.1],
+            ],
+          ],
+        ],
+      },
+    });
+
+    const draft = await service.createOperatingAreaDraft(
+      { item: draftArea, actorId: "map-editor" },
+      actor,
+    );
+
+    expect(draft.lifecycleStatus).toBe("draft");
+    expect(draft.active).toBe(false);
+    await expect(
+      service.validatePointInApprovedArea({
+        sandboxProgramId: PROGRAM_ID,
+        point: { lat: 25.105, lng: 121.605 },
+        asOf: "2026-07-02T00:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({ inApprovedArea: false });
+
+    const review = await service.submitOperatingAreaForReview(
+      draft.areaId,
+      draft.version,
+      { actorId: "reviewer" },
+      actor,
+    );
+    expect(review.lifecycleStatus).toBe("review");
+
+    const published = await service.publishOperatingArea(
+      draft.areaId,
+      draft.version,
+      { actorId: "approver" },
+      actor,
+    );
+
+    expect(published.lifecycleStatus).toBe("active");
+    await expect(
+      service.validatePointInApprovedArea({
+        sandboxProgramId: PROGRAM_ID,
+        point: { lat: 25.105, lng: 121.605 },
+        asOf: "2026-07-02T00:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      inApprovedArea: true,
+      matches: [
+        {
+          areaId: "odd-riverside-draft",
+          areaKind: "operating_area",
+          name: "Riverside ODD",
+        },
+      ],
+    });
+
+    const geoJson = service.exportOperatingAreasGeoJson();
+    expect(geoJson.features).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "Feature",
+          properties: expect.objectContaining({
+            areaId: "odd-riverside-draft",
+            lifecycleStatus: "active",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("publishes and retires route drafts through the evaluator lifecycle", async () => {
+    const service = createService();
+    const actor = {
+      actorId: "map-editor",
+      actorType: "ops_user" as const,
+      tenantId: null,
+    };
+    const draftRoute = buildRoute({
+      routeId: "route-riverside-draft",
+      name: "Riverside test route",
+      areaId: null,
+      active: true,
+      effectiveUntil: "2026-07-10T00:00:00.000Z",
+      geometry: {
+        type: "MultiLineString",
+        coordinates: [
+          [
+            [121.6, 25.1],
+            [121.605, 25.105],
+            [121.61, 25.11],
+          ],
+        ],
+      },
+    });
+
+    const draft = await service.createRouteDraft(
+      { item: draftRoute, actorId: "map-editor" },
+      actor,
+    );
+
+    expect(draft).toMatchObject({
+      routeId: "route-riverside-draft",
+      active: false,
+      lifecycleStatus: "draft",
+    });
+    await expect(
+      service.validateRouteContainment({
+        sandboxProgramId: PROGRAM_ID,
+        candidatePath: draftRoute.geometry,
+        asOf: "2026-07-02T00:00:00.000Z",
+        toleranceMeters: 25,
+      }),
+    ).resolves.toMatchObject({ contained: false, routeIds: [] });
+
+    const review = await service.submitRouteForReview(
+      draft.routeId,
+      draft.version,
+      { actorId: "reviewer" },
+      actor,
+    );
+    expect(review.lifecycleStatus).toBe("review");
+
+    const published = await service.publishRoute(
+      draft.routeId,
+      draft.version,
+      { actorId: "approver" },
+      actor,
+    );
+    expect(published.lifecycleStatus).toBe("active");
+    await expect(
+      service.validateRouteContainment({
+        sandboxProgramId: PROGRAM_ID,
+        candidatePath: draftRoute.geometry,
+        asOf: "2026-07-02T00:00:00.000Z",
+        toleranceMeters: 25,
+      }),
+    ).resolves.toMatchObject({
+      contained: true,
+      routeIds: ["route-riverside-draft"],
+    });
+
+    const retired = await service.retireRoute(
+      draft.routeId,
+      draft.version,
+      {
+        actorId: "approver",
+        effectiveUntil: "2026-07-03T00:00:00.000Z",
+      },
+      actor,
+    );
+    expect(retired.lifecycleStatus).toBe("retired");
+    await expect(
+      service.validateRouteContainment({
+        sandboxProgramId: PROGRAM_ID,
+        candidatePath: draftRoute.geometry,
+        asOf: "2026-07-04T00:00:00.000Z",
+        toleranceMeters: 25,
+      }),
+    ).resolves.toMatchObject({ contained: false, routeIds: [] });
   });
 
   it("enforces vehicle enrollment lifecycle across versions", async () => {
@@ -403,6 +617,197 @@ describe("SandboxGovernanceService", () => {
     expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
       expect.any(Error),
       "replace areas",
+    );
+  });
+
+  it("audits experiment, jurisdiction, and approval document lifecycle mutations", () => {
+    const { auditNotificationService, service } = createAuditedService();
+    const actor = {
+      actorId: "platform-admin-1",
+      actorType: "platform_admin" as const,
+      tenantId: "tenant-map-ops",
+    };
+
+    const jurisdiction = service.createJurisdiction(
+      {
+        jurisdictionCode: "us-ca-cpuc-audit",
+        name: "California CPUC Audit",
+        regulatorName: "California Public Utilities Commission",
+        actorId: "reg-user-1",
+      },
+      actor,
+      "req-jur-create",
+    );
+    const jurisdictionVersionId = jurisdiction.currentVersionId as string;
+    const updatedJurisdiction = service.updateJurisdiction(
+      jurisdiction.jurisdictionId,
+      {
+        regulatorName: "California Public Utilities Commission Sandbox Desk",
+        actorId: "reg-user-2",
+      },
+      actor,
+      "req-jur-update",
+    );
+    service.publishJurisdictionVersion(
+      jurisdiction.jurisdictionId,
+      updatedJurisdiction.currentVersionId as string,
+      { actorId: "reg-user-3" },
+      actor,
+      "req-jur-publish",
+    );
+
+    const experiment = service.createExperiment(
+      {
+        programCode: "audit-fsd-pilot",
+        name: "Audit FSD Pilot",
+        jurisdictionIds: [jurisdiction.jurisdictionId],
+        actorId: "ops-user-1",
+      },
+      actor,
+      "req-exp-create",
+    );
+    const experimentVersionId = experiment.currentVersionId as string;
+    const updatedExperiment = service.updateExperiment(
+      experiment.experimentId,
+      {
+        description: "Adds map governance audit coverage.",
+        actorId: "ops-user-2",
+      },
+      actor,
+      "req-exp-update",
+    );
+    service.publishExperimentVersion(
+      experiment.experimentId,
+      updatedExperiment.currentVersionId as string,
+      { actorId: "ops-user-3" },
+      actor,
+      "req-exp-publish",
+    );
+    service.suspendExperimentAuthorizations(
+      experiment.experimentId,
+      { actorId: "ops-user-4" },
+      actor,
+      "req-exp-suspend",
+    );
+    service.resumeExperimentAuthorizations(
+      experiment.experimentId,
+      { actorId: "ops-user-5" },
+      actor,
+      "req-exp-resume",
+    );
+
+    const document = service.createApprovalDocument(
+      {
+        experimentId: experiment.experimentId,
+        jurisdictionId: jurisdiction.jurisdictionId,
+        documentType: "permit",
+        title: "Audit Permit",
+        artifactFileName: "audit-permit-v1.pdf",
+        artifactContentType: "application/pdf",
+        artifactContentBase64:
+          Buffer.from("audit-permit-v1").toString("base64"),
+        actorId: "reg-user-4",
+      },
+      actor,
+      "req-doc-create",
+    );
+    const documentVersionId = document.currentVersionId as string;
+    const uploadedDocument = service.uploadApprovalDocumentVersion(
+      document.documentId,
+      {
+        artifactFileName: "audit-permit-v2.pdf",
+        artifactContentType: "application/pdf",
+        artifactContentBase64:
+          Buffer.from("audit-permit-v2").toString("base64"),
+        actorId: "reg-user-5",
+      },
+      actor,
+      "req-doc-upload",
+    );
+    service.publishApprovalDocumentVersion(
+      document.documentId,
+      uploadedDocument.currentVersionId as string,
+      { actorId: "reg-user-6" },
+      actor,
+      "req-doc-publish",
+    );
+    service.rollbackApprovalDocumentVersion(
+      document.documentId,
+      documentVersionId,
+      { actorId: "auditor-1", publish: false },
+      actor,
+      "req-doc-rollback",
+    );
+    service.archiveApprovalDocument(
+      document.documentId,
+      actor,
+      "req-doc-archive",
+    );
+
+    service.rollbackExperimentVersion(
+      experiment.experimentId,
+      experimentVersionId,
+      { actorId: "auditor-2", publish: false },
+      actor,
+      "req-exp-rollback",
+    );
+    service.archiveExperiment(
+      experiment.experimentId,
+      actor,
+      "req-exp-archive",
+    );
+    service.rollbackJurisdictionVersion(
+      jurisdiction.jurisdictionId,
+      jurisdictionVersionId,
+      { actorId: "auditor-3", publish: false },
+      actor,
+      "req-jur-rollback",
+    );
+    service.archiveJurisdiction(
+      jurisdiction.jurisdictionId,
+      actor,
+      "req-jur-archive",
+    );
+
+    const actionNames = auditNotificationService.recordAuditLog.mock.calls.map(
+      ([entry]) => entry.actionName,
+    );
+    expect(actionNames).toEqual(
+      expect.arrayContaining([
+        "sandbox_governance.jurisdiction.created",
+        "sandbox_governance.jurisdiction.updated",
+        "sandbox_governance.jurisdiction.published",
+        "sandbox_governance.jurisdiction.rolled_back",
+        "sandbox_governance.jurisdiction.archived",
+        "sandbox_governance.experiment.created",
+        "sandbox_governance.experiment.updated",
+        "sandbox_governance.experiment.published",
+        "sandbox_governance.experiment.authorization_suspended",
+        "sandbox_governance.experiment.authorization_resumed",
+        "sandbox_governance.experiment.rolled_back",
+        "sandbox_governance.experiment.archived",
+        "sandbox_governance.approval_document.created",
+        "sandbox_governance.approval_document.version_uploaded",
+        "sandbox_governance.approval_document.published",
+        "sandbox_governance.approval_document.rolled_back",
+        "sandbox_governance.approval_document.archived",
+      ]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "sandbox_governance.experiment.created",
+        actorId: "platform-admin-1",
+        actorType: "platform_admin",
+        moduleName: "sandbox-governance",
+        requestId: "req-exp-create",
+        resourceId: experiment.experimentId,
+        resourceType: "sandbox_experiment",
+        tenantId: "tenant-map-ops",
+        newValuesSummary: expect.objectContaining({
+          lifecycleStatus: "draft",
+          programCode: "audit-fsd-pilot",
+        }),
+      }),
     );
   });
 

@@ -36,6 +36,14 @@ export class ServiceAreaController {
     return toApiSuccessEnvelope(definitions, requestId);
   }
 
+  @Get("admin/geojson")
+  exportAdminGeoJson(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.serviceAreaService.exportGeoJson(),
+      requestId,
+    );
+  }
+
   @Post("evaluate")
   evaluateServiceArea(
     @Body() command: EvaluateServiceAreaCommand,
