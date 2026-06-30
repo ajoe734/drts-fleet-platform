@@ -146,3 +146,9 @@ Recommended note for `MAP-QA-002`:
 ```text
 Use MAP-FE-ADM-001-SIDECAR-GATEB for E2E-MAP-002. Gate B E2E must prove admin publish/retire, evaluator refresh, callcenter blocked/manual-review behavior, audit payloads, invalid geometry rejection, and Phase 2 sandbox governance separation.
 ```
+
+Recommended note for `MAP-REL-001`:
+
+```text
+Gate B release closeout must reference MAP-FE-ADM-001-SIDECAR-GATEB before claiming governance-safe publish. No Gate B pass without Platform Admin publish/retire UI evidence, backend evaluator proof, audit payloads, invalid-geometry rejection, callcenter blocked-after-publish, rollback/retire, and Phase 2 ODD/route separation evidence.
+```
