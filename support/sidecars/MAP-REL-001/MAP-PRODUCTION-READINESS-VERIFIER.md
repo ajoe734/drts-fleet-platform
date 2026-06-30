@@ -69,10 +69,12 @@ It checks:
 - Gate C task set is `done`
 - Gate D task set is `done`
 - Gate E task set is `done`
-- QA final evidence references `E2E-MAP-001` through `E2E-MAP-007`
-- OBS final evidence references required metrics, audit events, alerts, and runbook topics
-- REL final evidence references Gate A-E, rollout, rollback, PostGIS/provider prerequisites, smoke outcome, `MAP-QA-002`, `MAP-OBS-001`, and `MAP-GAP-001` through `MAP-GAP-013`
+- QA final evidence marks `E2E-MAP-001` through `E2E-MAP-007` as explicit `PASS`
+- OBS final evidence marks required metrics, audit events, alerts, and runbook topics as explicit `PASS`
+- REL final evidence marks Gate A-E as explicit `PASS` and references rollout, rollback, PostGIS/provider prerequisites, smoke outcome, `MAP-QA-002`, `MAP-OBS-001`, and `MAP-GAP-001` through `MAP-GAP-013`
 - this support doc keeps the non-claim explicit: the verifier is not production evidence by itself
+
+Placeholder rows such as `<PASS|FAIL|EXTERNAL-GATED>` do not satisfy the verifier. The identifier and a real `PASS` verdict must appear on the same line.
 
 ## Gate Mapping
 

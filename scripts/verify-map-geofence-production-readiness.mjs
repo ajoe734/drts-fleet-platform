@@ -253,6 +253,9 @@ const taskMap = new Map(
     .filter((task) => task && typeof task === "object")
     .map((task) => [String(task.id || ""), task]),
 );
+const archivedTaskIds = new Set(
+  (state.archived_task_ids || []).map((taskId) => String(taskId)),
+);
 
 const report = {
   script: relativeToRoot(workspaceRoot, scriptPath),
@@ -340,6 +343,14 @@ if (relEvidence.exists) {
       );
     }
   }
+  for (const gate of gates) {
+    if (!includesPassingMarker(relEvidence.text, gate.id)) {
+      addFailure(
+        evidenceSection,
+        `REL evidence is missing explicit PASS verdict for ${formatMarker(gate.id)}.`,
+      );
+    }
+  }
   if (
     !["pass", "fail", "external-gated"].some((marker) =>
       includesMarker(relEvidence.text, marker),
@@ -375,13 +386,13 @@ const e2eSection = makeSection("E2E Coverage");
 checkTaskDone(e2eSection, taskMap, "MAP-QA-002");
 if (qaEvidence.exists) {
   for (const scenario of e2eScenarios) {
-    if (!includesMarker(qaEvidence.text, scenario)) {
+    if (!includesPassingMarker(qaEvidence.text, scenario)) {
       addFailure(
         e2eSection,
-        `QA evidence is missing scenario marker ${formatMarker(scenario)}.`,
+        `QA evidence is missing explicit PASS marker for ${formatMarker(scenario)}.`,
       );
     } else {
-      addOk(e2eSection, `QA evidence references ${scenario}.`);
+      addOk(e2eSection, `QA evidence marks ${scenario} as PASS.`);
     }
   }
 }
@@ -391,43 +402,43 @@ const obsSection = makeSection("Observability Coverage");
 checkTaskDone(obsSection, taskMap, "MAP-OBS-001");
 if (obsEvidence.exists) {
   for (const marker of observabilityMetrics) {
-    if (!includesMarker(obsEvidence.text, marker)) {
+    if (!includesPassingMarker(obsEvidence.text, marker)) {
       addFailure(
         obsSection,
-        `OBS evidence is missing metric ${formatMarker(marker)}.`,
+        `OBS evidence is missing explicit PASS marker for metric ${formatMarker(marker)}.`,
       );
     } else {
-      addOk(obsSection, `OBS evidence references metric ${marker}.`);
+      addOk(obsSection, `OBS evidence marks metric ${marker} as PASS.`);
     }
   }
   for (const marker of observabilityAuditEvents) {
-    if (!includesMarker(obsEvidence.text, marker)) {
+    if (!includesPassingMarker(obsEvidence.text, marker)) {
       addFailure(
         obsSection,
-        `OBS evidence is missing audit event ${formatMarker(marker)}.`,
+        `OBS evidence is missing explicit PASS marker for audit event ${formatMarker(marker)}.`,
       );
     } else {
-      addOk(obsSection, `OBS evidence references audit event ${marker}.`);
+      addOk(obsSection, `OBS evidence marks audit event ${marker} as PASS.`);
     }
   }
   for (const marker of observabilityAlerts) {
-    if (!includesMarker(obsEvidence.text, marker)) {
+    if (!includesPassingMarker(obsEvidence.text, marker)) {
       addFailure(
         obsSection,
-        `OBS evidence is missing alert ${formatMarker(marker)}.`,
+        `OBS evidence is missing explicit PASS marker for alert ${formatMarker(marker)}.`,
       );
     } else {
-      addOk(obsSection, `OBS evidence references alert ${marker}.`);
+      addOk(obsSection, `OBS evidence marks alert ${marker} as PASS.`);
     }
   }
   for (const marker of observabilityRunbookTopics) {
-    if (!includesMarker(obsEvidence.text, marker)) {
+    if (!includesPassingMarker(obsEvidence.text, marker)) {
       addFailure(
         obsSection,
-        `OBS evidence is missing runbook distinction ${formatMarker(marker)}.`,
+        `OBS evidence is missing explicit PASS marker for runbook distinction ${formatMarker(marker)}.`,
       );
     } else {
-      addOk(obsSection, `OBS evidence references runbook topic ${marker}.`);
+      addOk(obsSection, `OBS evidence marks runbook topic ${marker} as PASS.`);
     }
   }
 }
@@ -441,41 +452,41 @@ for (const gate of gates) {
 
   if (qaEvidence.exists) {
     for (const scenario of gate.scenarios) {
-      if (!includesMarker(qaEvidence.text, scenario)) {
+      if (!includesPassingMarker(qaEvidence.text, scenario)) {
         addFailure(
           gateSection,
-          `${gate.id} requires QA evidence for ${formatMarker(scenario)}.`,
+          `${gate.id} requires explicit QA PASS evidence for ${formatMarker(scenario)}.`,
         );
       } else {
-        addOk(gateSection, `${gate.id} is covered by ${scenario} in QA evidence.`);
+        addOk(gateSection, `${gate.id} has QA PASS evidence for ${scenario}.`);
       }
     }
   }
 
   if (obsEvidence.exists) {
     for (const marker of gate.observability) {
-      if (!includesMarker(obsEvidence.text, marker)) {
+      if (!includesPassingMarker(obsEvidence.text, marker)) {
         addFailure(
           gateSection,
-          `${gate.id} is missing observability marker ${formatMarker(marker)}.`,
+          `${gate.id} is missing observability PASS marker ${formatMarker(marker)}.`,
         );
       } else {
         addOk(
           gateSection,
-          `${gate.id} observability references ${formatMarker(marker)}.`,
+          `${gate.id} observability marks ${formatMarker(marker)} as PASS.`,
         );
       }
     }
   }
 
   if (relEvidence.exists) {
-    if (!includesMarker(relEvidence.text, gate.id)) {
+    if (!includesPassingMarker(relEvidence.text, gate.id)) {
       addFailure(
         gateSection,
-        `REL evidence is missing ${gate.id} verdict coverage.`,
+        `REL evidence is missing explicit PASS verdict for ${gate.id}.`,
       );
     } else {
-      addOk(gateSection, `REL evidence references ${gate.id}.`);
+      addOk(gateSection, `REL evidence marks ${gate.id} as PASS.`);
     }
   }
 
@@ -581,6 +592,10 @@ function addFailure(section, message) {
 function checkTaskDone(section, taskMapValue, taskId) {
   const task = taskMapValue.get(taskId);
   if (!task) {
+    if (archivedTaskIds.has(taskId)) {
+      addOk(section, `${taskId} is archived as done.`);
+      return true;
+    }
     addFailure(section, `${taskId} is missing from ai-status.json.`);
     return false;
   }
@@ -641,6 +656,17 @@ function printReport(reportValue) {
 
 function includesMarker(text, marker) {
   return normalize(text).includes(normalize(marker));
+}
+
+function includesPassingMarker(text, marker) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .some(
+      (line) =>
+        includesMarker(line, marker) &&
+        !/<\s*pass\b/i.test(line) &&
+        /(^|[:|\s,\-])pass(\s|[|,\-.]|$)/i.test(line),
+    );
 }
 
 function normalize(value) {
