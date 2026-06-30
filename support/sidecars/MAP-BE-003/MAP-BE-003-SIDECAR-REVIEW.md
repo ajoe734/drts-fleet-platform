@@ -5,8 +5,8 @@
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
 - **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 - **Planning Anchor:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- **Machine-Truth Basis:** parent row last_update `2026-06-30T14:52:11Z`; sidecar row moved to `in_progress` at `2026-06-30T21:28:43Z`; packet snapshot prepared `2026-06-30` (UTC)
-- **Status:** REVIEW SUPPORT ARTIFACT — does not modify canonical truth, runtime behavior, or parent lifecycle state
+- **Machine-Truth Basis:** parent row last_update `2026-06-30T14:52:11Z`; sidecar row last_update `2026-06-30T21:36:14Z` with status `review_approved`; closeout refresh prepared `2026-06-30` (UTC)
+- **Status:** REVIEW-APPROVED SUPPORT ARTIFACT SNAPSHOT — does not modify canonical truth, runtime behavior, or parent lifecycle state
 
 This packet prepares reviewer-facing evidence for `MAP-BE-003` while keeping the
 sidecar strictly in support scope. The important complication is that the parent
@@ -53,12 +53,19 @@ Out of scope:
 - `id`: `MAP-BE-003-SIDECAR-REVIEW`
 - `owner`: `Codex`
 - `reviewer`: `Codex2`
-- `status`: `in_progress`
+- `status`: `review_approved`
 - `helper_parent`: `MAP-BE-003`
 - `helper_kind`: `review_packet`
 - `mutates_canonical`: `false`
+- reviewer conclusion: the packet correctly distinguishes the canonical-root
+  working-tree delta from the `dev`-visible downstream artifacts and stays
+  support-only
 - artifact path:
   `support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-REVIEW.md`
+
+Owner implication: reviewer approval is already recorded, but the sidecar still
+needs the owner closeout commit / push / `done` lifecycle step before it leaves
+the queue.
 
 ### 2.2 Parent task
 
@@ -93,16 +100,14 @@ records where that review surface exists.
 
 ### 2.3 Current Codex queue relevant to this dispatch
 
-Using `python3 scripts/ai_status.py list` filters:
+Using filtered `scripts/ai-status.sh list` snapshots at closeout-prep time:
 
-- `owner=Codex status=in_progress`: only `MAP-BE-003-SIDECAR-REVIEW`
-- `owner=Codex status=backlog`: no matches
-- `owner=Codex status=todo`: no matches
-- `owner=Codex status=review_approved`: no matches
+- `status=in_progress`: no matches
+- `owner=Codex status=review_approved`: `MAP-BE-003-SIDECAR-REVIEW`
 - `reviewer=Codex status=review`: no matches
 
-Practical meaning: this sidecar is the only task currently waiting on Codex in
-the categories named by the dispatch.
+Practical meaning: this sidecar is the only dispatch-relevant task currently
+waiting on Codex, and it is already past review pending owner closeout.
 
 ---
 
@@ -115,7 +120,9 @@ Current sidecar worktree:
 - path:
   `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-be-003-sidecar-review`
 - branch: `codex/map-be-003-sidecar-review`
-- HEAD: `f452f019f9d887850c907a28a60ce627b930049b`
+- `dev` baseline under the packet: `f452f019f9d887850c907a28a60ce627b930049b`
+- pushed packet anchor before owner closeout:
+  `ecbfa6a9d4ed76f65d579dc389153cbe47f65aa3`
 
 Observed state in this worktree:
 
@@ -271,9 +278,10 @@ Secondary corroboration:
 
 ---
 
-## 5. Reviewer Risks And Reading Order
+## 5. Review Outcome And Reading Order
 
-The assigned sidecar reviewer (`Codex2`) should check these points first:
+The assigned sidecar reviewer (`Codex2`) approved the packet after confirming
+these points:
 
 1. This packet stays support-only and does not pretend to approve the parent.
 2. It accurately records that the parent's api-client delta lives in the
@@ -296,7 +304,7 @@ Practical review order:
 4. Treat `apps/api/tests/unit/service-area.service.test.ts` in this sidecar
    worktree as downstream context, not as the exact parent snapshot.
 
-Suggested approval wording for the **sidecar packet**:
+Recorded approval shape for the **sidecar packet**:
 
 > `審查通過：MAP-BE-003 sidecar review packet 已正確區分 parent review surface 的兩個位置：canonical root working tree 內未提交的 api-client / api-client test delta，以及 dev 已可見的 API delta doc / downstream-evolved service-area test。packet 如實對齊 machine truth（parent 仍為 review，尚無專屬 commit/branch/push 證據），support artifact only，未改 canonical truth。`
 
@@ -306,7 +314,11 @@ Suggested reopen wording:
 
 ---
 
-## 6. Handoff Commands
+## 6. Lifecycle Commands
+
+The handoff / approval commands are preserved here for auditability. At this
+snapshot, the sidecar is already `review_approved` and waiting only on owner
+closeout.
 
 Owner handoff to `Codex2`:
 
@@ -328,6 +340,19 @@ AI_NAME=Codex2 python3 scripts/ai_status.py reopen MAP-BE-003-SIDECAR-REVIEW \
   "packet needs revision: [specify machine-truth mismatch / wrong worktree attribution / incorrect evidence mapping]"
 ```
 
+Owner closeout after review approval:
+
+```bash
+AI_NAME=Codex \
+COMMIT_HASH=<sha> \
+COMMIT_SUBJECT="MAP-BE-003-SIDECAR-REVIEW: finalize review packet closeout" \
+PUSH_REMOTE=origin \
+PUSH_BRANCH=codex/map-be-003-sidecar-review \
+INTEGRATION_STATUS=not_applicable \
+scripts/ai-status.sh done MAP-BE-003-SIDECAR-REVIEW \
+  "Owner finalized the support-only review packet after Codex2 approval, pushed the task-scoped closeout commit, and recorded no-deploy integration status."
+```
+
 ---
 
 ## 7. Change Log
@@ -338,3 +363,6 @@ AI_NAME=Codex2 python3 scripts/ai_status.py reopen MAP-BE-003-SIDECAR-REVIEW \
 - 2026-06-30 - Recorded that `docs/04-api/map-geofence-openapi-delta-20260630.md`
   matches across worktrees, while `apps/api/tests/unit/service-area.service.test.ts`
   has already evolved downstream in `MAP-BE-006`.
+- 2026-06-30 - Refreshed the packet after `review_approved` so the closeout
+  snapshot reflects the reviewer conclusion, the pushed packet anchor, and the
+  pending owner `done` step.
