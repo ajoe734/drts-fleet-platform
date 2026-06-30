@@ -46,6 +46,10 @@ env:
   RUNTIME_SERVICE_ACCOUNT: ${{ vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT }}
   WIF_PROVIDER_VALUE: ${{ secrets.PROD_WIF_PROVIDER }}
   SECRET_PREFIX: ${{ vars.PROD_SECRET_PREFIX || 'drts-prod' }}
+  MAP_PROVIDER_BACKEND: ${{ vars.PROD_MAP_PROVIDER_BACKEND || 'mock' }}
+  MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.PROD_MAP_PROVIDER_ALLOWED_ORIGINS || vars.MAP_PROVIDER_ALLOWED_ORIGINS || '' }}
+  MAP_PROVIDER_MONTHLY_BUDGET_USD: ${{ vars.PROD_MAP_PROVIDER_MONTHLY_BUDGET_USD || vars.MAP_PROVIDER_MONTHLY_BUDGET_USD || '' }}
+  MAP_PROVIDER_BUDGET_ALERT_PCT: ${{ vars.PROD_MAP_PROVIDER_BUDGET_ALERT_PCT || vars.MAP_PROVIDER_BUDGET_ALERT_PCT || '50;80;95' }}
   PLATFORM_ADMIN_ORIGIN: ${{ vars.PROD_PLATFORM_ADMIN_ORIGIN }}
   OPS_CONSOLE_ORIGIN: ${{ vars.PROD_OPS_CONSOLE_ORIGIN }}
   CONTROL_PLANE_API_ORIGIN_ENV: ${{ vars.PROD_CONTROL_PLANE_API_ORIGIN }}
@@ -123,6 +127,14 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
+
+      - name: Validate map provider runtime config
+        run: |
+          MAP_PROVIDER_DEPLOYMENT_TIER=production \
+          MAP_PROVIDER_SECRET_SOURCE=secret_manager \
+          MAP_PROVIDER_PROJECT_ID="$PROJECT_ID" \
+          MAP_PROVIDER_SECRET_PREFIX="$SECRET_PREFIX" \
+          ./scripts/check-map-provider-config.sh
 
       - name: Check production secrets
         run: |
@@ -480,6 +492,10 @@ jobs:
             echo "::warning::Optional secret ${SECRET_PREFIX}-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
           fi
 
+          if [[ "${MAP_PROVIDER_BACKEND}" == "google" ]]; then
+            secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${SECRET_PREFIX}-google-maps-geocoding-api-key:latest,GOOGLE_MAPS_ROUTES_API_KEY=${SECRET_PREFIX}-google-maps-routes-api-key:latest"
+          fi
+
           printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
@@ -495,7 +511,7 @@ jobs:
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,API_PORT=3001" \
+            --set-env-vars "NODE_ENV=production,APP_ENV=production,API_PORT=3001,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
             ${{ steps.exposure.outputs.api }} \
             --min-instances 1 \
             --max-instances 6 \

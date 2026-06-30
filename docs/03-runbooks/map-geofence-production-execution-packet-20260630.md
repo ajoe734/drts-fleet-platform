@@ -41,6 +41,33 @@ in sequence.
 - Do not ship unrestricted geocode keys in browser or mobile bundles.
 - Rotate keys on a scheduled cadence and immediately on suspected exposure.
 
+## Provider operational model
+
+| Surface | Config / secret | Scope | Rule |
+| --- | --- | --- | --- |
+| Backend selector | `MAP_PROVIDER_BACKEND=mock|google` | API env / deploy var | Default to `mock`. Set `google` only when live server keys, quota budget, and audit logging are ready. |
+| Server geocode key | `GOOGLE_MAPS_GEOCODING_API_KEY` via `${SECRET_PREFIX}-google-maps-geocoding-api-key` | API runtime only | Required whenever `MAP_PROVIDER_BACKEND=google` in staging / prod. Never expose to browser or mobile bundles. |
+| Server routes key | `GOOGLE_MAPS_ROUTES_API_KEY` via `${SECRET_PREFIX}-google-maps-routes-api-key` | API runtime only | Required whenever `MAP_PROVIDER_BACKEND=google` in staging / prod. Never expose to browser or mobile bundles. |
+| Public browser key | `GOOGLE_MAPS_BROWSER_KEY` | browser runtime only | Restrict by HTTP referrer. Scope it to map rendering / Places UI only; do not use it for backend geocode or routes. |
+| Allowed origins | `MAP_PROVIDER_ALLOWED_ORIGINS` | deploy var / runtime metadata | Record the referrer allow-list for browser keys. Use `;` in deploy vars because Cloud Run `--set-env-vars` reserves `,` as a separator. |
+| Web CSP readiness | `MAP_PROVIDER_WEB_CSP_READY=true` | deploy var / preflight check | Required before enabling browser surfaces. `script-src`, `connect-src`, and `img-src` must explicitly allow the Google Maps domains actually used by the chosen SDK path. |
+| Android keying | `GOOGLE_MAPS_ANDROID_KEY`, `GOOGLE_MAPS_ANDROID_PACKAGE`, `GOOGLE_MAPS_ANDROID_SHA1_CERTS` | mobile build/runtime config | Restrict Android keys by package name plus SHA fingerprint. Do not reuse browser or server keys. |
+| iOS keying | `GOOGLE_MAPS_IOS_KEY`, `GOOGLE_MAPS_IOS_BUNDLE_ID` | mobile build/runtime config | Restrict iOS keys by bundle identifier. Do not reuse browser or server keys. |
+| Quota budget | `MAP_PROVIDER_MONTHLY_BUDGET_USD` | deploy var / runtime metadata | Record the environment budget in the API health payload so ops can compare spend against the approved monthly ceiling. |
+| Quota alert thresholds | `MAP_PROVIDER_BUDGET_ALERT_PCT` | deploy var / runtime metadata | Defaults to `50;80;95`. Use `;` in deploy vars; runtime also accepts `,` for local convenience. |
+
+### Environment mapping
+
+- Local development: keep `MAP_PROVIDER_BACKEND=mock` unless a developer is
+  explicitly validating live credentials.
+- CI / smoke / Playwright: treat missing live keys as expected and stay on the
+  deterministic mock provider.
+- Staging: use `STAGING_MAP_PROVIDER_BACKEND=google` only after the two server
+  secrets exist in Secret Manager and the rollout remains feature-flag gated.
+- Production: use `PROD_MAP_PROVIDER_BACKEND=google` only after the same
+  staging checks pass, quota alerts are provisioned, and the operator accepts
+  the deploy.
+
 ## Quota and cost policy
 
 - Track provider usage by environment separately.
@@ -82,6 +109,18 @@ The mock provider is the default in:
 - CI smoke paths
 - local development unless a developer explicitly opts into live credentials
 
+### Mock-mode verification
+
+Use the shared preflight before local or CI runs:
+
+```bash
+MAP_PROVIDER_BACKEND=mock scripts/check-map-provider-config.sh
+CI=true MAP_PROVIDER_BACKEND=google scripts/check-map-provider-config.sh
+```
+
+The second command is expected to report that local/CI stays on the mock
+provider unless both live server keys are injected.
+
 ## Rollout order
 
 1. Enable `geoProviderEnabled` in dev and staging only.
@@ -104,6 +143,39 @@ The mock provider is the default in:
 - No page or mobile screen may import a vendor SDK directly before the shared
   provider boundary exists.
 
+## Fail-closed deployment and runtime policy
+
+- `scripts/check-map-provider-config.sh` is the single preflight for local, CI,
+  and deploy rails.
+- In local / CI, `MAP_PROVIDER_BACKEND=google` without live server keys is not
+  a hard failure; the script and `/health` payload both report mock fallback.
+- In staging / prod, `MAP_PROVIDER_BACKEND=google` without
+  `${SECRET_PREFIX}-google-maps-geocoding-api-key` and
+  `${SECRET_PREFIX}-google-maps-routes-api-key` is a hard failure:
+  `deploy-staging.yml` / `deploy-prod.yml` stop before rollout, and the API
+  startup guard also throws if a miswired runtime somehow reaches Cloud Run.
+- Browser and mobile public keys are not yet mounted by the current web/mobile
+  deploy rails. Treat those surfaces as blocked until the corresponding adapter
+  work lands and the keys are restricted plus documented.
+
+## Observability and alerts
+
+- `GET /health` and `GET /api/health` now expose a `mapProvider` block with:
+  requested backend, effective backend, environment, fail-closed state, server
+  key readiness, allowed origins, mobile-config presence, and quota thresholds.
+- Alert specification:
+  - `map_provider.quota.warning`: provider spend > 50% of
+    `MAP_PROVIDER_MONTHLY_BUDGET_USD` for 15 minutes.
+  - `map_provider.quota.high`: provider spend > 80% of budget for 10 minutes.
+  - `map_provider.quota.exhaustion_risk`: provider spend > 95% of budget for 5
+    minutes or sustained upstream `429` / billing errors.
+  - `map_provider.health.down`: `/health` reports `mapProvider.status=down` or
+    deploy preflight fails closed on missing live server keys.
+- Expected response:
+  - freeze any rollout flag that would increase live provider traffic
+  - confirm whether traffic can remain on mock / manual-pin fallback
+  - rotate or reprovision credentials before re-enabling `geoProviderEnabled`
+
 ## Verification checklist
 
 1. `GET /admin/flags` returns the six map/geofence rollout flags.
@@ -113,6 +185,10 @@ The mock provider is the default in:
    fallback, and service-area rejection.
 4. Live provider calls are disabled in CI.
 5. Formal booking creation still blocks when coordinates are absent.
+6. `scripts/check-map-provider-config.sh` exits `0` for local/CI mock mode and
+   exits non-zero when staging / prod request `google` without both server
+   secrets.
+7. `GET /health` exposes the `mapProvider` readiness block.
 
 ## External references
 
