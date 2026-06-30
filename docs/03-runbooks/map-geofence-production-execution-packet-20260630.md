@@ -2,7 +2,9 @@
 
 Date: 2026-06-30
 
-Status: supervisor-ready execution packet
+Status: dispatched execution packet; live readiness is tracked in
+`docs/03-runbooks/map-geofence-production-gap-closure-matrix-20260630.md` and
+`scripts/ai-status.sh list`
 
 Wave ID: `map-geofence-production-20260630`
 
@@ -109,6 +111,10 @@ Recommended command baseline by scope:
 | Cross-surface E2E | `pnpm test:e2e`, plus targeted configs when added by this wave                                                                                         |
 
 ## Task Catalog
+
+This catalog records the intended fleet work split. For live task state,
+reviewer handoff, and release-blocking meaning, use the closure matrix and
+`ai-status` board instead of this original dispatch table.
 
 | ID                | Owner -> Reviewer     | Layer | Depends on                               | Primary artifacts                              |
 | ----------------- | --------------------- | ----- | ---------------------------------------- | ---------------------------------------------- |
