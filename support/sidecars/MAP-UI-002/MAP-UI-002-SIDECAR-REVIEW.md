@@ -1,67 +1,33 @@
-# MAP-UI-002 Review Packet & Evidence Summary
+# MAP-UI-002 Sidecar Review Packet
 
-**Sidecar Kind:** `review_packet`  
-**Parent Task:** `MAP-UI-002` - `GeometryEditor` primitive  
-**Parent Branch / Head:** `codex2/map-ui-002` @ `58cb496ef01f4e76e7ebe24b1e539596da38d06f`  
-**Parent Owner / Reviewer:** `Codex2` / `Claude2`  
-**Sidecar Owner / Reviewer:** `Codex` / `Codex2`  
-**Status:** Support-only reviewer packet. This artifact does not modify canonical truth, parent runtime code, contracts, or machine truth by hand.
+**Sidecar task:** `MAP-UI-002-SIDECAR-REVIEW`  
+**Parent task:** `MAP-UI-002` - shared/admin `GeometryEditor` primitive  
+**Parent branch/head reviewed:** `codex2/map-ui-002` @ `58cb496ef01f4e76e7ebe24b1e539596da38d06f`  
+**Parent owner/reviewer:** `Codex2` / `Claude2`  
+**Sidecar owner/reviewer:** `Codex` / `Codex2`  
+**Scope boundary:** support artifact only. This packet does not modify canonical truth, parent runtime code, contracts, or machine truth by hand.
 
-## 1. Scope Boundary
+## 1. Review Verdict
 
-In scope:
+Do **not** approve the parent `MAP-UI-002` branch yet.
 
-- freeze the current parent review surface for `MAP-UI-002`
-- map the runbook acceptance/work items to concrete file anchors
-- record design-authority alignment against the Platform Admin sandbox canvas and realm-token rules
-- capture an independent verification pass against the parent branch head
-- hand off reviewer hotspots to `Codex2`
+The branch does provide a useful `GeometryEditor` / `GeometryPreviewSurface` primitive and the package/app typecheck + lint gates pass, but the current evidence and validation rules are not production-level for map/geofence governance:
 
-Out of scope:
+1. The parent handoff claims a root vitest command that fails in a clean review worktree.
+2. Draft coordinates are considered submit-ready without latitude/longitude domain validation.
+3. Polygon validation lacks a general simple-polygon/self-intersection check.
 
-- editing `packages/ui-web/`, `apps/platform-admin-web/`, or any parent canonical artifact
-- changing `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl` directly
-- re-scoping the parent from primitive work into full governance publish/review workflow UI
+These are fixable inside the primitive slice and should be corrected before the reviewer treats `canSubmit` / backend-ready payloads as safe for downstream publish workflows.
 
-## 2. Machine-Truth Snapshot
+## 2. Parent Review Surface
 
-### Parent task: `MAP-UI-002`
+`git show --stat --summary 58cb496ef`:
 
-- status: `review`
-- owner / reviewer: `Codex2` / `Claude2`
-- dependency: `MAP-BE-006`
-- artifact roots: `packages/ui-web/`, `apps/platform-admin-web/`
-- last machine-truth `next` note:
-  - shared `GeometryEditor` / preview primitives built in `packages/ui-web`
-  - sandbox map preview wired to the shared renderer
-  - verification recorded with:
-    - `pnpm --filter @drts/ui-web typecheck`
-    - `pnpm --filter @drts/ui-web lint`
-    - `pnpm --filter @drts/platform-admin-web typecheck`
-    - `pnpm --filter @drts/platform-admin-web lint`
-    - `pnpm exec vitest run tests/unit/ui-web-geometry-editor.test.ts`
+- subject: `feat(MAP-UI-002): add geometry editor primitive`
+- files changed: `5`
+- insertions/deletions: `1744` / `80`
 
-### Upstream dependency: `MAP-BE-006`
-
-- status: `done`
-- integration status: `merged_to_dev`
-- branch closeout commit: `55dad2ca4c79fc7370cf069996efb2ddf2cf704a`
-- merged-to-dev commit: `1c06a5cfb56ac94e117d2ed773f5938750be67c0`
-- practical meaning for this packet: backend lifecycle / geometry authority prerequisite is satisfied; this sidecar can review the UI primitive against a completed dependency rather than a placeholder API story
-
-### This sidecar task: `MAP-UI-002-SIDECAR-REVIEW`
-
-- owner / reviewer: `Codex` / `Codex2`
-- mutates canonical: `false`
-- artifact: `support/sidecars/MAP-UI-002/MAP-UI-002-SIDECAR-REVIEW.md`
-- acceptance:
-  - create support artifacts only
-  - do not edit canonical truth
-  - hand off the packet to the assigned reviewer
-
-## 3. Parent Review Surface At `58cb496ef`
-
-`git diff --name-only origin/dev..58cb496ef` resolves to exactly five paths:
+Changed files:
 
 1. `apps/platform-admin-web/components/sandbox/sandbox-geometry-map.tsx`
 2. `packages/ui-web/src/geometry-editor.stories.tsx`
@@ -69,196 +35,187 @@ Out of scope:
 4. `packages/ui-web/src/index.tsx`
 5. `tests/unit/ui-web-geometry-editor.test.ts`
 
-`git show --stat --summary 58cb496ef` reports:
+Acceptance source:
 
-- subject: `feat(MAP-UI-002): add geometry editor primitive`
-- files changed: `5`
-- insertions / deletions: `1744` / `80`
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:556-579`
+- Required: polygon/circle/route-corridor authoring, vertex/radius edit, undo/discard, preview, validation states, backend-ready payloads, review/diff hooks.
+- Critical acceptance: "Invalid geometry cannot be submitted as publish-ready."
 
-This is a bounded primitive-oriented review surface, not a broad admin workflow rewrite.
+## 3. Verification Evidence
 
-## 4. Acceptance Mapping To File Evidence
-
-### A. Primitive data model, validation, snapshot, and export surface
-
-Primary anchor: `packages/ui-web/src/geometry-editor.tsx`
-
-- `11-97`: typed geometry draft / payload / review-diff model
-- `191-201`: empty draft factories for polygon, circle, and route corridor
-- `203-252`: validation rules
-  - polygon requires `>= 3` vertices and non-zero area
-  - circle requires center + positive radius
-  - route corridor requires `>= 2` points + positive radius
-- `263-280`: snapshot builder emits validation state, backend payloads, GeoJSON, review diff, and `canSubmit`
-- `816-901`: backend-ready payload mapping + review diff summary
-- `904-980`: GeoJSON export/import normalization for `Feature`, `FeatureCollection`, `Polygon`, `MultiPolygon`, `Point`, `LineString`, and `MultiLineString`
-
-Acceptance alignment:
-
-- runbook asks for polygon / circle / route corridor authoring plus GeoJSON import/export
-- the parent branch implements all three draft kinds and serializes them into backend-facing payload shapes without introducing provider-specific map SDK truth into the export path
-
-### B. Interactive editor behavior
-
-Primary anchor: `packages/ui-web/src/geometry-editor.tsx`
-
-- `371-544`: editor state, history stack, vertex selection, import state, stage click handling
-- `551-689`: left-side map/editor rail
-  - shape switchers for polygon / circle / route corridor
-  - undo and discard controls
-  - click-to-add geometry on the stage
-  - baseline overlay support for review/diff context
-- `692-810`: right-side reviewer/operator panels
-  - validation state
-  - vertex editor or circle radius editor
-  - backend-ready payload preview
-  - review-diff summary
-  - GeoJSON export/import panel
-
-Acceptance alignment:
-
-- runbook asks for vertex edit, radius edit, undo/discard, preview, and validation states
-- the primitive supplies all of those in a single canvas-style editor surface
-
-### C. Reusable preview adapter boundary
-
-Primary anchors:
-
-- `packages/ui-web/src/geometry-editor.tsx:283-359`
-- `apps/platform-admin-web/components/sandbox/sandbox-geometry-map.tsx:29-114`
-
-Evidence:
-
-- `GeometryPreviewSurface` is exported as a reusable preview renderer rather than being buried inside the admin sandbox page
-- the Platform Admin sandbox adapter converts approved `MultiPolygon` and `MultiLineString` records into `GeometryPreviewItem[]`
-- the admin sandbox file contains only record-to-preview mapping + canvas-like toolbar styling; geometry rendering stays inside `@drts/ui-web`
-
-Acceptance alignment:
-
-- runbook asks to keep rendering provider-specific code behind a small adapter boundary
-- the current parent surface does that: admin sandbox remains a thin adapter over shared preview primitives
-
-### D. Package export and sandbox story coverage
-
-Primary anchors:
-
-- `packages/ui-web/src/index.tsx:158-182`
-- `packages/ui-web/src/geometry-editor.stories.tsx:11-61`
-
-Evidence:
-
-- `@drts/ui-web` re-exports `GeometryEditor`, `GeometryPreviewSurface`, snapshot helpers, import/export helpers, and the public types required by downstream governance screens
-- Storybook story frames the editor inside a Platform-surface canvas card using the same title/subtitle posture as the sandbox canvas
-
-Acceptance alignment:
-
-- the primitive is packaged for reuse rather than trapped in a single app-local file
-- the story provides a reviewer-visible sandbox for the shared component
-
-### E. Targeted test coverage
-
-Primary anchor: `tests/unit/ui-web-geometry-editor.test.ts:15-105`
-
-Covered behaviors:
-
-- backend-ready polygon payload generation
-- invalid route corridor gating
-- GeoJSON import/export round-trip for route corridors
-- review-diff output for edited geometry
-- degraded preview rendering when no geometry exists
-
-## 5. Design Authority Alignment
-
-### A. Runbook / gap-inventory alignment
-
-Canonical planning asks for a shared geometry primitive:
-
-- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md` `MAP-UI-002`
-  - polygon / circle / route corridor
-  - vertex edit / radius edit / undo / discard / preview / validation
-  - backend-ready payloads
-  - review / diff hooks
-- `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
-  - `Platform Admin geometry editor` minimum states include Draft / Preview / Review / Publish / Retire
-  - the recommended remaining slice explicitly separates `GeometryEditor` primitive work from the later governance UI built on top of lifecycle APIs
-
-Interpretation for review:
-
-- `MAP-UI-002` is the primitive foundation
-- the full publish/review/retire workflow shell belongs to downstream governance work, not this parent primitive alone
-
-### B. Canvas alignment
-
-Canvas authority exists for the surrounding Platform Admin surface:
-
-- `docs/05-ui/drts-design-canvas/platform-sandbox.jsx` -> `PSB_AreasEditor`
-- `docs/05-ui/platform-admin-sandbox-governance-v9-parity-20260628.md`
-
-Observed alignment:
-
-- canvas layout uses a `1.6fr / 1fr` split with tool rail, map body, and stacked side cards
-- `GeometryEditor` uses the same structural split at `geometry-editor.tsx:551-813`
-- the Storybook example uses the same `營運區域 / 路線編輯` framing and `buildCanvasTheme({ surface: "platform", density: "compact" })`
-- the sandbox adapter keeps the canvas-like tool rail and caption posture while rendering real approved geometry records
-
-### C. Realm token / palette discipline
-
-The new parent files use theme-driven styling rather than ad hoc hex colors:
-
-- `geometry-editor.tsx` derives all surface, border, text, success, and danger styling from `theme.*`
-- `sandbox-geometry-map.tsx` derives toolbar and map styling from `theme.*`
-- `geometry-editor.stories.tsx` builds the story theme with `buildCanvasTheme({ surface: "platform", density: "compact" })`
-
-Reviewer conclusion:
-
-- no raw standalone palette was introduced in the new geometry-editor surface
-- the primitive follows the repo rule that visual authority stays inside the existing canvas/theme system
-
-## 6. Independent Verification Performed For This Packet
-
-Independent review worktree:
+Review worktree:
 
 - path: `/tmp/codex-map-ui-002-review`
 - branch/head: `codex2/map-ui-002` @ `58cb496ef01f4e76e7ebe24b1e539596da38d06f`
+- setup: `CI=true pnpm install --frozen-lockfile --ignore-scripts` was run for dependency availability; no parent source files were edited.
 
-Environment note:
+Passing checks rerun from the review worktree:
 
-- a fresh worktree did not contain local `node_modules`, so `tsc`, `eslint`, `next`, and `vitest` were initially unavailable
-- for verification only, the existing workspace `node_modules` directories from the canonical repo were linked into the temporary review worktree
-- no parent source files were edited during this setup
+| Command                                            | Result                                                                  |
+| -------------------------------------------------- | ----------------------------------------------------------------------- |
+| `pnpm --filter @drts/ui-web typecheck`             | PASS                                                                    |
+| `pnpm --filter @drts/ui-web lint`                  | PASS                                                                    |
+| `pnpm --filter @drts/platform-admin-web typecheck` | PASS                                                                    |
+| `pnpm --filter @drts/platform-admin-web lint`      | PASS                                                                    |
+| `pnpm --filter @drts/ui-web test`                  | PASS, but only package-local tests were discovered: `1` file, `2` tests |
 
-Commands rerun successfully after the dependency link:
+Failing command from the parent handoff:
 
-1. `pnpm --filter @drts/ui-web typecheck`
-2. `pnpm --filter @drts/ui-web lint`
-3. `pnpm --filter @drts/platform-admin-web typecheck`
-4. `pnpm --filter @drts/platform-admin-web lint`
-5. `pnpm exec vitest run tests/unit/ui-web-geometry-editor.test.ts`
+```text
+pnpm exec vitest run tests/unit/ui-web-geometry-editor.test.ts
+```
 
-Recorded test result:
+Observed result:
 
-- `vitest`: `1` test file passed, `5` tests passed
+```text
+FAIL tests/unit/ui-web-geometry-editor.test.ts
+Error: Cannot find package 'react' imported from /tmp/codex-map-ui-002-review/tests/unit/ui-web-geometry-editor.test.ts
+```
 
-This independent rerun matches the parent task's machine-truth verification claim.
+This directly contradicts the parent task's recorded verification claim for `pnpm exec vitest run tests/unit/ui-web-geometry-editor.test.ts`.
 
-## 7. Reviewer Hotspots For `Codex2`
+## 4. Blocking Findings
 
-- **Test breadth vs acceptance wording:** the unit suite covers payload generation, invalid gating, import/export round-trip, review diff, and degraded preview, but it does not perform DOM-level interaction tests for vertex editing, radius editing, or undo/discard. Decide whether that is sufficient for this primitive slice or whether one interaction test should be requested before parent approval.
-- **Primitive vs workflow boundary:** do not fail `MAP-UI-002` for not shipping effective-date, actor-confirmation, audit-event, publish, or retire controls. Those appear in the gap-inventory's downstream governance workflow model and are not all required to be implemented inside the shared primitive itself.
-- **Circle support is intentional:** the current `PSB_AreasEditor` canvas mock visually emphasizes polygon/route editing, but the runbook explicitly requires circle authoring for the shared primitive. Treat circle support as a required extension from planning truth, not a design drift defect.
-- **Route corridor rendering stays schematic:** the preview renders a centerline plus width signal, while the backend-ready payload keeps authority in `centerline + radiusMeters`. That is acceptable if the reviewer agrees the client should not invent buffered corridor geometry as canonical truth.
-- **Sandbox integration remains read-only by design:** `sandbox-geometry-map.tsx` reuses the preview renderer for approved geometry records and does not invent save/publish APIs. That matches the v9 parity note that mutable area/route editing remains an API-follow-up surface.
+### B1. The recorded test command is not reproducible
 
-## 8. Reviewer Handoff
+Evidence:
+
+- `tests/unit/ui-web-geometry-editor.test.ts:1-2` imports `react` and `react-dom/server`.
+- root `package.json:69-86` lists `@types/react` / `@types/react-dom`, but not direct runtime `react` / `react-dom` dependencies.
+- `packages/ui-web/package.json:13-17` declares `react` / `react-dom` as package peers.
+- Running `pnpm exec vitest run tests/unit/ui-web-geometry-editor.test.ts` from the repo root fails before executing any tests.
+
+Impact:
+
+- The parent review evidence is unreliable because one of the claimed commands does not run in the review worktree.
+- The new test is root-level even though it exercises `@drts/ui-web` React primitives whose runtime peers live with the package/app boundary.
+
+Recommended fix:
+
+- Move the test into `packages/ui-web/tests/unit/geometry-editor.test.ts` or another package-local test path covered by `pnpm --filter @drts/ui-web test`.
+- If the team intentionally wants root-level React component tests, add explicit root `react` / `react-dom` dependencies and make that dependency ownership decision visible in `package.json`.
+- Update the parent handoff evidence to the command that actually executes in CI.
+
+Acceptance after fix:
+
+- `pnpm --filter @drts/ui-web test` must execute the geometry-editor tests, not just existing package-local tests.
+- The previously claimed root command should either pass or no longer be listed as verification evidence.
+
+### B2. Out-of-range coordinates can become `canSubmit: true`
+
+Evidence:
+
+- `packages/ui-web/src/geometry-editor.tsx:203-252` validates point count, radius, circle center presence, and non-zero polygon area.
+- `packages/ui-web/src/geometry-editor.tsx:263-280` sets `canSubmit` directly from `validation.valid`.
+- `packages/ui-web/src/geometry-editor.tsx:466-489` accepts edited vertex numbers when they are finite, but does not check latitude/longitude ranges.
+- `packages/ui-web/src/geometry-editor.tsx:508-524` accepts edited circle center numbers when they are finite, but does not check latitude/longitude ranges.
+- `packages/ui-web/src/geometry-editor.tsx:1279-1287` validates imported GeoJSON coordinates as finite, but does not check latitude/longitude ranges.
+- `packages/ui-web/src/geometry-editor.tsx:816-858` emits backend payloads from the draft coordinates without additional domain validation.
+
+Impact:
+
+- A polygon, route corridor, or circle with `lat=999` or `lng=999` can still satisfy the current validation rules if point count/radius/area requirements pass.
+- That violates the runbook requirement that invalid geometry cannot be submitted as publish-ready.
+- Downstream Platform Admin governance would either push invalid payloads into backend validation or display a submit-ready state for geometry that can never be accepted.
+
+Recommended fix:
+
+- Add a shared coordinate guard, for example:
+  - latitude must be finite and within `[-90, 90]`
+  - longitude must be finite and within `[-180, 180]`
+- Apply it to every polygon vertex, route corridor point, and circle center inside `validateGeometryDraft`.
+- Reuse the guard during GeoJSON import normalization so invalid imports fail early with a visible error.
+- Add tests for invalid polygon vertex, invalid route-corridor point, invalid circle center, and invalid imported GeoJSON.
+
+Acceptance after fix:
+
+- `buildGeometryEditorSnapshot(invalidCoordinateDraft).canSubmit` must be `false`.
+- Validation errors must identify the invalid point/center clearly enough for an admin to repair it.
+- Backend payloads may still be constructed for preview/debug, but submit readiness must be false.
+
+### B3. Self-intersecting polygons are not rejected
+
+Evidence:
+
+- `packages/ui-web/src/geometry-editor.tsx:211-217` checks only de-duplicated vertex count and absolute signed area.
+- `packages/ui-web/src/geometry-editor.tsx:1305-1315` implements signed-area calculation.
+- There is no segment-intersection or simple-polygon validation before `canSubmit` is set.
+
+Impact:
+
+- Some crossing polygons may be caught only if their signed area collapses to zero; there is no general non-self-intersection guarantee.
+- Service-area boundaries and no-pickup/no-dropoff zones need simple, unambiguous rings before they are treated as publish-ready.
+- Without this guard, the UI can present geometry as backend-ready even when backend/PostGIS validation should reject it.
+
+Recommended fix:
+
+- Add a simple-polygon validation pass for polygon drafts:
+  - compare every non-adjacent segment pair
+  - ignore shared endpoints for adjacent edges and the closing edge
+  - reject crossings with a specific validation error
+- Add unit tests for:
+  - a valid simple polygon
+  - a self-intersecting polygon
+  - a repeated sequential point case
+  - a closed-ring import case
+
+Acceptance after fix:
+
+- Self-intersecting polygons must produce `validation.valid === false`.
+- `buildGeometryEditorSnapshot(selfIntersectingPolygon).canSubmit` must be `false`.
+
+## 5. Major Downstream Caveat
+
+`MAP-UI-002` is a primitive, not the full Platform Admin governance screen.
+
+Evidence:
+
+- `apps/platform-admin-web/components/sandbox/sandbox-geometry-map.tsx:29-114` adapts approved area/route records into `GeometryPreviewSurface`.
+- It does not mount `GeometryEditor`, create a draft lifecycle, call publish/review APIs, or enforce role-based publish confirmation.
+
+Interpretation:
+
+- This should not be a parent rejection by itself if `MAP-UI-002` is intentionally limited to the shared primitive.
+- It must remain visible for downstream `MAP-FE-ADM-001`, because Phase 2 still needs the Platform Admin service-area governance route that actually uses the primitive against lifecycle APIs.
+
+## 6. Remediation Plan For Parent Owner
+
+1. Repair test ownership.
+   - Move the geometry editor test under `packages/ui-web` or add intentional root React runtime dependencies.
+   - Ensure the package-level test command discovers and runs the geometry-editor tests.
+
+2. Harden coordinate validation.
+   - Add `isValidGeoPoint` / `validateGeoPoint` helper with lat/lng domain checks.
+   - Apply it to polygon, circle, route corridor, and GeoJSON import paths.
+
+3. Add simple-polygon validation.
+   - Implement non-adjacent segment intersection detection for polygon drafts.
+   - Keep the existing non-zero-area check as a cheap degenerate-ring guard.
+
+4. Expand tests to lock production safety.
+   - Positive: polygon payload, circle payload, route corridor payload, import/export, diff hooks, empty/degraded preview.
+   - Negative: invalid lat/lng, zero/negative radius, insufficient vertices, self-intersection, invalid imported GeoJSON.
+
+5. Rerun and update evidence.
+   - `pnpm --filter @drts/ui-web typecheck`
+   - `pnpm --filter @drts/ui-web lint`
+   - `pnpm --filter @drts/ui-web test`
+   - `pnpm --filter @drts/platform-admin-web typecheck`
+   - `pnpm --filter @drts/platform-admin-web lint`
+
+6. Only then send parent back to reviewer.
+   - The reviewer should see reproducible command output and explicit tests for "invalid geometry cannot be submitted as publish-ready."
+
+## 7. Reviewer Handoff
 
 Review target:
 
 - artifact: `support/sidecars/MAP-UI-002/MAP-UI-002-SIDECAR-REVIEW.md`
-- parent branch head reviewed here: `58cb496ef01f4e76e7ebe24b1e539596da38d06f`
-- reviewer ask: confirm the packet accurately captures the five-file parent review surface, the design-authority boundary, the independent verification rerun, and the reviewer hotspots above
+- parent branch reviewed: `codex2/map-ui-002`
+- parent commit reviewed: `58cb496ef01f4e76e7ebe24b1e539596da38d06f`
 
-Suggested approval wording:
+Suggested review outcome:
 
-> `MAP-UI-002 sidecar review packet approved: the packet accurately freezes parent review state at 58cb496ef, maps the GeometryEditor primitive acceptance to concrete ui-web/admin/test anchors, confirms theme/canvas alignment plus the thin sandbox preview adapter, and records an independent verification rerun without changing canonical truth.`
-
-If approved, the parent owner still decides whether to absorb any optional follow-up on interaction-test breadth before finalizing the canonical task.
+```text
+MAP-UI-002 sidecar packet reviewed. The parent primitive is useful, but the packet identifies production blockers: the claimed root vitest verification command fails, coordinate-range validation is missing before canSubmit, and polygon self-intersection validation is missing. Recommend reopening MAP-UI-002 until the parent branch fixes these blockers and reruns package/app verification.
+```
