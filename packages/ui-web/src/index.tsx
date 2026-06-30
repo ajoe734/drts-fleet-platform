@@ -71,6 +71,37 @@ export type {
   CanvasTone,
 } from "./canvas-tokens";
 export type { CanvasPillTone, CanvasIconName } from "./canvas-primitives";
+export {
+  GeometryEditor,
+  GeometryPreviewSurface,
+  buildGeometryEditorSnapshot,
+  createEmptyGeometryDraft,
+  geometryDraftToGeoJson,
+  parseGeometryDraftGeoJson,
+  validateGeometryDraft,
+} from "./geometry-editor";
+export type {
+  GeoCircle,
+  GeoJsonMultiLineString,
+  GeoJsonMultiPolygon,
+  GeoPoint,
+  GeoPolygon,
+  GeometryBounds,
+  GeometryCircleDraft,
+  GeometryDraft,
+  GeometryDraftKind,
+  GeometryEditorBackendPayloads,
+  GeometryEditorLabels,
+  GeometryEditorProps,
+  GeometryEditorSnapshot,
+  GeometryPolygonDraft,
+  GeometryPreviewItem,
+  GeometryPreviewSurfaceProps,
+  GeometryReviewDiff,
+  GeometryRouteCorridorDraft,
+  GeometryValidationResult,
+  ServiceAreaGeometry,
+} from "./geometry-editor";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
