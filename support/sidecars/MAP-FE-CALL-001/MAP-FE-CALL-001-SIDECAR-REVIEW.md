@@ -1,13 +1,13 @@
 # MAP-FE-CALL-001 Review Packet & Evidence Summary
 
-**Sidecar Task:** `MAP-FE-CALL-001-SIDECAR-REVIEW`  
-**Parent Task:** `MAP-FE-CALL-001` - Callcenter P0 map booking  
-**Helper Kind:** `review_packet`  
-**Current Owner:** `Codex`  
-**Assigned Reviewer:** `Codex2`  
-**Parent Owner / Reviewer:** `Codex` / `Claude2`  
-**Last Revised:** `2026-06-30 (UTC)`  
-**Status:** `REVIEW SUPPORT ARTIFACT` - support-only packet; no canonical truth, runtime, or contract changes.
+- **Sidecar Task:** `MAP-FE-CALL-001-SIDECAR-REVIEW`
+- **Parent Task:** `MAP-FE-CALL-001` - Callcenter P0 map booking
+- **Helper Kind:** `review_packet`
+- **Current Owner:** `Codex`
+- **Assigned Reviewer:** `Codex2`
+- **Parent Owner / Reviewer:** `Codex` / `Claude2`
+- **Last Revised:** `2026-06-30 (UTC)`
+- **Status:** `REVIEW SUPPORT ARTIFACT` - support-only packet; no canonical truth, runtime, or contract changes.
 
 ---
 
