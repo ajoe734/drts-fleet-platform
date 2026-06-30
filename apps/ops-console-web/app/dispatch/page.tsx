@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   AdapterHealthRecord,
   DispatchCandidate,
@@ -25,6 +26,20 @@ import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import { t } from "@/lib/translations";
+import {
+  buildOpsMapBoardModel,
+  buildOpsMapTileViewport,
+  getDefaultOpsMapZoom,
+  normalizeOpsMapBounds,
+  projectOpsMapPointToViewport,
+  resolveOpsMapTileUrlTemplate,
+  shiftOpsMapCenter,
+  type OpsMapBoardModel,
+  type OpsMapPointKind,
+  type OpsMapProviderStatus,
+  type OpsMapRouteSegment,
+  type OpsMapTileViewport,
+} from "./ops-map-board";
 import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
@@ -206,6 +221,160 @@ const selectedMetaCellStyle = {
   gap: 4,
 };
 
+const spatialBoardStyle: CSSProperties = {
+  padding: 16,
+  borderRadius: 16,
+  border: `1px solid ${theme.border}`,
+  background: `linear-gradient(180deg, ${theme.infoBg} 0%, ${theme.surfaceLo} 100%)`,
+  display: "grid",
+  gap: 12,
+};
+
+const spatialBoardHeaderStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(260px, 0.9fr)",
+  gap: 12,
+  alignItems: "start",
+};
+
+const spatialBoardStatsStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 8,
+};
+
+const spatialStatCardStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 12,
+  background: theme.surfaceHi,
+  border: `1px solid ${theme.border}`,
+  display: "grid",
+  gap: 3,
+};
+
+const spatialBoardNoteStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  justifyContent: "space-between",
+  gap: 8,
+  color: theme.textMuted,
+  fontSize: 12,
+};
+
+const spatialOverlayStripStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  padding: 12,
+  borderRadius: 14,
+  background: theme.surfaceHi,
+  border: `1px solid ${theme.border}`,
+};
+
+const spatialOverlayGroupStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 6,
+  color: theme.text,
+  fontSize: 12,
+};
+
+const spatialOverlayLabelStyle: CSSProperties = {
+  color: theme.textDim,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+};
+
+const spatialOverlayChipStyle: CSSProperties = {
+  borderRadius: 999,
+  padding: "3px 8px",
+  background: theme.infoBg,
+  color: theme.info,
+  border: `1px solid ${theme.infoBorder}`,
+  fontWeight: 700,
+};
+
+const spatialMapShellStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(240px, 0.75fr)",
+  gap: 12,
+  alignItems: "start",
+};
+
+const spatialMapStyle: CSSProperties = {
+  position: "relative",
+  height: 360,
+  overflow: "hidden",
+  borderRadius: 16,
+  border: `1px solid ${theme.infoBorder}`,
+  background: `linear-gradient(135deg, ${theme.infoBg} 0%, ${theme.surfaceHi} 52%, ${theme.surfaceLo} 100%)`,
+};
+
+const spatialTileStyle: CSSProperties = {
+  position: "absolute",
+  width: "35.56%",
+  height: "71.12%",
+  objectFit: "cover",
+};
+
+const spatialMapFallbackStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  display: "grid",
+  placeItems: "center",
+  color: theme.textMuted,
+  fontSize: 12,
+  padding: 18,
+  textAlign: "center",
+  background: `linear-gradient(135deg, ${theme.surfaceHi}, ${theme.infoBg})`,
+};
+
+const spatialRouteOverlayStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  pointerEvents: "none",
+};
+
+const spatialLegendStyle: CSSProperties = {
+  padding: 14,
+  borderRadius: 16,
+  background: theme.surfaceHi,
+  border: `1px solid ${theme.border}`,
+  display: "grid",
+  gap: 10,
+};
+
+const spatialMapControlsStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  alignItems: "center",
+};
+
+const spatialMapControlStyle: CSSProperties = {
+  textDecoration: "none",
+  color: "inherit",
+};
+
+const spatialPointBaseStyle: CSSProperties = {
+  position: "absolute",
+  transform: "translate(-50%, -50%)",
+  width: 32,
+  height: 32,
+  borderRadius: 999,
+  border: `2px solid ${theme.surfaceHi}`,
+  color: theme.invert,
+  fontSize: 12,
+  fontWeight: 700,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  boxShadow: theme.shadowSm,
+};
+
 const DRIVER_TASK_PRIORITY: Record<string, number> = {
   on_trip: 0,
   proof_pending: 1,
@@ -252,6 +421,15 @@ const FORWARDED_STATUS_PRIORITY: Record<
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function finiteNumberParam(value: string | string[] | undefined) {
+  const raw = firstParam(value);
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -379,6 +557,11 @@ function buildDispatchHref({
   eligibility,
   facet,
   workItemId,
+  mapZoom,
+  mapLat,
+  mapLng,
+  mapServiceArea,
+  mapPolicyCode,
 }: {
   board: DispatchBoard;
   product?: string | undefined;
@@ -389,6 +572,11 @@ function buildDispatchHref({
   eligibility?: string | undefined;
   facet?: string | undefined;
   workItemId?: string | undefined;
+  mapZoom?: number | string | undefined;
+  mapLat?: number | string | undefined;
+  mapLng?: number | string | undefined;
+  mapServiceArea?: string | undefined;
+  mapPolicyCode?: string | undefined;
 }) {
   const params = new URLSearchParams();
   if (board !== "ready") {
@@ -417,6 +605,21 @@ function buildDispatchHref({
   }
   if (workItemId) {
     params.set("workItemId", workItemId);
+  }
+  if (mapZoom !== undefined) {
+    params.set("mapZoom", String(mapZoom));
+  }
+  if (mapLat !== undefined) {
+    params.set("mapLat", String(mapLat));
+  }
+  if (mapLng !== undefined) {
+    params.set("mapLng", String(mapLng));
+  }
+  if (mapServiceArea && mapServiceArea !== "all") {
+    params.set("mapServiceArea", mapServiceArea);
+  }
+  if (mapPolicyCode && mapPolicyCode !== "all") {
+    params.set("mapPolicyCode", mapPolicyCode);
   }
   const query = params.toString();
   return query ? `/dispatch?${query}` : "/dispatch";
@@ -1400,6 +1603,587 @@ function renderActionButton(
   );
 }
 
+function getOpsMapStatusStyle(status: OpsMapProviderStatus): CSSProperties {
+  const base: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    borderRadius: 999,
+    padding: "5px 10px",
+    border: "1px solid currentColor",
+    fontSize: 11,
+    fontWeight: 700,
+  };
+
+  switch (status) {
+    case "ready":
+      return { ...base, color: theme.success, background: theme.successBg };
+    case "degraded_projection":
+      return { ...base, color: theme.warn, background: theme.warnBg };
+    case "no_spatial_data":
+      return { ...base, color: theme.neutral, background: theme.neutralBg };
+  }
+}
+
+function getOpsMapPointVisual(kind: OpsMapPointKind): {
+  background: string;
+  label: string;
+} {
+  switch (kind) {
+    case "pickup":
+      return { background: theme.info, label: "P" };
+    case "dropoff":
+      return { background: theme.success, label: "D" };
+    case "candidate":
+      return { background: theme.warn, label: "C" };
+  }
+}
+
+function renderOpsMapRouteLine(
+  route: OpsMapRouteSegment,
+  viewport: OpsMapTileViewport,
+) {
+  const pickup = projectOpsMapPointToViewport(
+    {
+      key: `${route.key}:pickup`,
+      kind: "pickup",
+      label: route.label,
+      lat: route.pickup.lat,
+      lng: route.pickup.lng,
+    },
+    viewport,
+  );
+  const dropoff = projectOpsMapPointToViewport(
+    {
+      key: `${route.key}:dropoff`,
+      kind: "dropoff",
+      label: route.label,
+      lat: route.dropoff.lat,
+      lng: route.dropoff.lng,
+    },
+    viewport,
+  );
+
+  if (!pickup.visible && !dropoff.visible) {
+    return null;
+  }
+
+  return (
+    <line
+      key={route.key}
+      className="spatial-route-line"
+      data-ops-map-job-id={route.jobId ?? ""}
+      data-ops-map-order-id={route.orderId}
+      data-ops-map-route-line={route.key}
+      x1={pickup.leftPct}
+      x2={dropoff.leftPct}
+      y1={pickup.topPct}
+      y2={dropoff.topPct}
+      stroke={theme.info}
+      strokeDasharray="8 7"
+      strokeLinecap="round"
+      strokeWidth="3"
+      vectorEffect="non-scaling-stroke"
+    />
+  );
+}
+
+function renderSpatialOverlayGroup(label: string, values: string[]): ReactNode {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={spatialOverlayGroupStyle}>
+      <span style={spatialOverlayLabelStyle}>{label}</span>
+      {values.map((value) => (
+        <span key={value} style={spatialOverlayChipStyle}>
+          {value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function getOrderStopPolicyCodes(order: OwnedOrderRecord) {
+  return (
+    order.spatialAudit?.serviceAreaEvaluation?.stops.flatMap(
+      (stop) => stop.policyCodes,
+    ) ?? []
+  );
+}
+
+function orderMatchesMapFilters(
+  order: OwnedOrderRecord,
+  serviceArea: string,
+  policyCode: string,
+) {
+  const serviceAreaMatches =
+    serviceArea === "all" ||
+    (order.spatialAudit?.serviceAreaCodes ?? []).includes(serviceArea);
+  const policyMatches =
+    policyCode === "all" || getOrderStopPolicyCodes(order).includes(policyCode);
+
+  return serviceAreaMatches && policyMatches;
+}
+
+function renderDispatchSpatialBoard({
+  model,
+  viewport,
+  locale,
+  tileUrlTemplateConfigured,
+  serviceAreaOptions,
+  policyCodeOptions,
+  selectedServiceArea,
+  selectedPolicyCode,
+  buildMapHref,
+  resetMapViewHref,
+}: {
+  model: OpsMapBoardModel;
+  viewport: OpsMapTileViewport | null;
+  locale: Locale;
+  tileUrlTemplateConfigured: boolean;
+  serviceAreaOptions: string[];
+  policyCodeOptions: string[];
+  selectedServiceArea: string;
+  selectedPolicyCode: string;
+  buildMapHref: (
+    overrides: Partial<{
+      mapZoom: number;
+      mapLat: number;
+      mapLng: number;
+      mapServiceArea: string;
+      mapPolicyCode: string;
+    }>,
+  ) => string;
+  resetMapViewHref: string;
+}) {
+  const overlayCount =
+    model.overlays.serviceAreaCodes.length +
+    model.overlays.policyCodes.length +
+    model.overlays.reasonCodes.length +
+    model.overlays.geometryVersionRefs.length;
+  const hasOverlays = overlayCount > 0;
+  const axisBadgeStyle: CSSProperties = {
+    position: "absolute",
+    left: 12,
+    padding: "5px 8px",
+    borderRadius: 999,
+    background: theme.surfaceHi,
+    color: theme.text,
+    fontSize: 11,
+    border: `1px solid ${theme.border}`,
+  };
+  const panTargets = viewport
+    ? {
+        north: shiftOpsMapCenter(viewport, "north"),
+        south: shiftOpsMapCenter(viewport, "south"),
+        west: shiftOpsMapCenter(viewport, "west"),
+        east: shiftOpsMapCenter(viewport, "east"),
+      }
+    : null;
+
+  return (
+    <section
+      className="spatial-board"
+      style={spatialBoardStyle}
+      data-ops-map-fallback-reason={model.fallbackReason}
+      data-ops-map-policy-codes={model.overlays.policyCodes.join("|")}
+      data-ops-map-provider-status={model.providerStatus}
+      data-ops-map-route-count={model.routeSegments.length}
+      data-ops-map-service-areas={model.overlays.serviceAreaCodes.join("|")}
+    >
+      <div style={spatialBoardHeaderStyle}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <strong style={{ color: theme.text, fontSize: 16 }}>
+            {t("dispatch.workflow.map.title", locale)}
+          </strong>
+          <span style={{ color: theme.textMuted, fontSize: 12 }}>
+            {t("dispatch.workflow.map.subtitle", locale)}
+          </span>
+        </div>
+        <div style={spatialBoardStatsStyle}>
+          {[
+            [
+              model.ordersWithPickupCoordinates,
+              t("dispatch.workflow.map.ordersWithCoords", locale),
+            ],
+            [
+              model.candidateSupplyPoints,
+              t("dispatch.workflow.map.supplyPoints", locale),
+            ],
+            [
+              model.staleCandidatePoints,
+              t("dispatch.workflow.map.staleSupply", locale),
+            ],
+            [
+              model.noLocationCandidateCount,
+              t("dispatch.workflow.map.noLocationSupply", locale),
+            ],
+          ].map(([value, label]) => (
+            <div key={label} style={spatialStatCardStyle}>
+              <strong style={{ color: theme.text, fontSize: 18 }}>
+                {value}
+              </strong>
+              <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                {label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={spatialBoardNoteStyle}>
+        <span>{t("dispatch.workflow.map.projectionNote", locale)}</span>
+        <span
+          className={`spatial-map-status spatial-map-status-${model.providerStatus}`}
+          style={getOpsMapStatusStyle(model.providerStatus)}
+        >
+          {t(`dispatch.workflow.map.status.${model.providerStatus}`, locale)}
+        </span>
+      </div>
+
+      {hasOverlays ? (
+        <div
+          style={spatialOverlayStripStyle}
+          data-ops-map-overlay-count={overlayCount}
+        >
+          {renderSpatialOverlayGroup(
+            t("dispatch.workflow.map.overlay.serviceAreas", locale),
+            model.overlays.serviceAreaCodes,
+          )}
+          {renderSpatialOverlayGroup(
+            t("dispatch.workflow.map.overlay.stopPolicies", locale),
+            model.overlays.policyCodes,
+          )}
+          {renderSpatialOverlayGroup(
+            t("dispatch.workflow.map.overlay.reasonCodes", locale),
+            model.overlays.reasonCodes,
+          )}
+          {renderSpatialOverlayGroup(
+            t("dispatch.workflow.map.overlay.geometryRefs", locale),
+            model.overlays.geometryVersionRefs,
+          )}
+        </div>
+      ) : null}
+
+      <div
+        style={filterRowStyle}
+        data-ops-map-service-area-filter={selectedServiceArea}
+        data-ops-map-policy-filter={selectedPolicyCode}
+      >
+        {["all", ...serviceAreaOptions].map((serviceArea) => (
+          <Link
+            key={`service-area:${serviceArea}`}
+            href={buildMapHref({ mapServiceArea: serviceArea })}
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <Pill
+              theme={theme}
+              tone={selectedServiceArea === serviceArea ? "accent" : "neutral"}
+              dot={serviceArea !== "all"}
+            >
+              {serviceArea === "all"
+                ? t("dispatch.workflow.map.overlay.serviceAreas", locale)
+                : serviceArea}
+            </Pill>
+          </Link>
+        ))}
+        {["all", ...policyCodeOptions].map((policyCode) => (
+          <Link
+            key={`policy:${policyCode}`}
+            href={buildMapHref({ mapPolicyCode: policyCode })}
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <Pill
+              theme={theme}
+              tone={selectedPolicyCode === policyCode ? "accent" : "neutral"}
+              dot={policyCode !== "all"}
+            >
+              {policyCode === "all"
+                ? t("dispatch.workflow.map.overlay.stopPolicies", locale)
+                : policyCode}
+            </Pill>
+          </Link>
+        ))}
+      </div>
+
+      {viewport ? (
+        <div style={spatialMapShellStyle}>
+          <div
+            style={spatialMapStyle}
+            data-ops-map-center-lat={viewport.centerLat.toFixed(6)}
+            data-ops-map-center-lng={viewport.centerLng.toFixed(6)}
+            data-ops-map-render-mode={
+              viewport.tiles.length > 0 ? "tile" : "tile_fallback"
+            }
+            data-ops-map-tile-template={
+              tileUrlTemplateConfigured ? "configured" : "missing"
+            }
+            data-ops-map-zoom={viewport.zoom}
+          >
+            {viewport.tiles.length > 0 ? (
+              viewport.tiles.map((tile) => (
+                <img
+                  key={tile.key}
+                  alt=""
+                  aria-hidden="true"
+                  src={tile.src}
+                  style={{
+                    ...spatialTileStyle,
+                    left: `${(tile.leftPx / viewport.width) * 100}%`,
+                    top: `${(tile.topPx / viewport.height) * 100}%`,
+                  }}
+                />
+              ))
+            ) : (
+              <div style={spatialMapFallbackStyle}>
+                {t("dispatch.workflow.map.tileFallback", locale)}
+              </div>
+            )}
+            {model.routeSegments.length > 0 ? (
+              <svg
+                aria-hidden="true"
+                data-ops-map-route-layer="true"
+                focusable="false"
+                style={spatialRouteOverlayStyle}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                {model.routeSegments.map((route) =>
+                  renderOpsMapRouteLine(route, viewport),
+                )}
+              </svg>
+            ) : null}
+            {model.points.map((point) => {
+              const visual = getOpsMapPointVisual(point.kind);
+              const coords = projectOpsMapPointToViewport(point, viewport);
+              const stale =
+                point.freshness === "stale" ||
+                point.freshness === "low_accuracy";
+              if (!coords.visible) {
+                return null;
+              }
+
+              return (
+                <span
+                  key={point.key}
+                  className={`spatial-point spatial-point-${point.kind}${
+                    stale ? " spatial-point-stale" : ""
+                  }`}
+                  data-ops-map-freshness={point.freshness ?? "governed"}
+                  data-ops-map-job-id={point.jobId ?? ""}
+                  data-ops-map-order-id={point.orderId ?? ""}
+                  data-ops-map-point-kind={point.kind}
+                  style={{
+                    ...spatialPointBaseStyle,
+                    left: `${coords.leftPct}%`,
+                    top: `${coords.topPct}%`,
+                    background: visual.background,
+                    opacity: stale ? 0.72 : 1,
+                  }}
+                  title={`${point.label} · ${point.subtitle ?? ""}`}
+                >
+                  {visual.label}
+                </span>
+              );
+            })}
+            <div style={{ ...axisBadgeStyle, top: 12 }}>
+              {t("dispatch.workflow.map.viewport", locale, {
+                zoom: viewport.zoom,
+                lat: viewport.centerLat.toFixed(4),
+                lng: viewport.centerLng.toFixed(4),
+              })}
+            </div>
+            <div
+              style={{
+                ...axisBadgeStyle,
+                bottom: 12,
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+              }}
+            >
+              {panTargets ? (
+                <>
+                  <Link
+                    href={buildMapHref({
+                      mapLat: panTargets.north.lat,
+                      mapLng: panTargets.north.lng,
+                      mapZoom: viewport.zoom,
+                    })}
+                    style={spatialMapControlStyle}
+                  >
+                    {t("dispatch.workflow.map.panNorth", locale)}
+                  </Link>
+                  <Link
+                    href={buildMapHref({
+                      mapLat: panTargets.south.lat,
+                      mapLng: panTargets.south.lng,
+                      mapZoom: viewport.zoom,
+                    })}
+                    style={spatialMapControlStyle}
+                  >
+                    {t("dispatch.workflow.map.panSouth", locale)}
+                  </Link>
+                  <Link
+                    href={buildMapHref({
+                      mapLat: panTargets.west.lat,
+                      mapLng: panTargets.west.lng,
+                      mapZoom: viewport.zoom,
+                    })}
+                    style={spatialMapControlStyle}
+                  >
+                    {t("dispatch.workflow.map.panWest", locale)}
+                  </Link>
+                  <Link
+                    href={buildMapHref({
+                      mapLat: panTargets.east.lat,
+                      mapLng: panTargets.east.lng,
+                      mapZoom: viewport.zoom,
+                    })}
+                    style={spatialMapControlStyle}
+                  >
+                    {t("dispatch.workflow.map.panEast", locale)}
+                  </Link>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <div style={spatialLegendStyle}>
+            <div style={spatialMapControlsStyle}>
+              <Link
+                href={buildMapHref({
+                  mapLat: viewport.centerLat,
+                  mapLng: viewport.centerLng,
+                  mapZoom: viewport.zoom + 1,
+                })}
+                style={spatialMapControlStyle}
+              >
+                <Pill theme={theme} tone="accent">
+                  {t("dispatch.workflow.map.zoomIn", locale)}
+                </Pill>
+              </Link>
+              <Link
+                href={buildMapHref({
+                  mapLat: viewport.centerLat,
+                  mapLng: viewport.centerLng,
+                  mapZoom: viewport.zoom - 1,
+                })}
+                style={spatialMapControlStyle}
+              >
+                <Pill theme={theme} tone="neutral">
+                  {t("dispatch.workflow.map.zoomOut", locale)}
+                </Pill>
+              </Link>
+              <Link href={resetMapViewHref} style={spatialMapControlStyle}>
+                <Pill theme={theme} tone="neutral">
+                  {t("dispatch.workflow.map.resetView", locale)}
+                </Pill>
+              </Link>
+            </div>
+            <strong style={{ color: theme.text }}>
+              {t("dispatch.workflow.map.legend", locale)}
+            </strong>
+            {model.routeSegments.length > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: theme.text,
+                  fontSize: 12,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-block",
+                    width: 28,
+                    borderTop: `3px dashed ${theme.info}`,
+                  }}
+                />
+                {t("dispatch.workflow.map.legend.route", locale)}
+              </div>
+            ) : null}
+            {(["pickup", "dropoff", "candidate"] as OpsMapPointKind[]).map(
+              (kind) => {
+                const visual = getOpsMapPointVisual(kind);
+                return (
+                  <div
+                    key={kind}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      color: theme.text,
+                      fontSize: 12,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 999,
+                        background: visual.background,
+                        display: "inline-block",
+                      }}
+                    />
+                    <span>
+                      {t(`dispatch.workflow.map.legend.${kind}`, locale)}
+                    </span>
+                  </div>
+                );
+              },
+            )}
+            <div style={{ color: theme.textMuted, fontSize: 12 }}>
+              {t("dispatch.workflow.map.legend.stale", locale)}
+            </div>
+            <div style={{ color: theme.textMuted, fontSize: 12 }}>
+              {t("dispatch.workflow.map.legend.noLocation", locale)}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: 14,
+            borderRadius: 14,
+            background: theme.surfaceHi,
+            border: `1px dashed ${theme.infoBorder}`,
+            display: "grid",
+            gap: 4,
+            color: theme.text,
+          }}
+        >
+          <strong>{t("dispatch.workflow.map.emptyTitle", locale)}</strong>
+          <span style={{ fontSize: 12 }}>
+            {t("dispatch.workflow.map.emptyBody", locale)}
+          </span>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 8,
+          color: theme.textMuted,
+          fontSize: 12,
+        }}
+      >
+        <span>
+          {t("dispatch.workflow.map.missingCoords", locale, {
+            count: model.ordersMissingPickupCoordinates,
+          })}
+        </span>
+        <span>{t("dispatch.workflow.map.autoLoadHint", locale)}</span>
+      </div>
+    </section>
+  );
+}
+
 function renderBoardSignalBanner({
   board,
   locale,
@@ -1789,6 +2573,14 @@ export default async function DispatchPage({
   const selectedFacet = (firstParam(resolvedSearchParams.facet) ??
     "all") as ForwardedFacetFilter;
   const focusWorkItemId = firstParam(resolvedSearchParams.workItemId) ?? "";
+  const selectedMapServiceArea =
+    firstParam(resolvedSearchParams.mapServiceArea) ?? "all";
+  const selectedMapPolicyCode =
+    firstParam(resolvedSearchParams.mapPolicyCode) ?? "all";
+  const requestedMapLat = finiteNumberParam(resolvedSearchParams.mapLat);
+  const requestedMapLng = finiteNumberParam(resolvedSearchParams.mapLng);
+  const requestedMapZoom = finiteNumberParam(resolvedSearchParams.mapZoom);
+  const mapTileUrlTemplate = resolveOpsMapTileUrlTemplate(process.env);
 
   const [
     ownedOrdersResult,
@@ -2081,6 +2873,89 @@ export default async function DispatchPage({
   const quotaBlockedCount = sortedOwnedOrders.filter((order) =>
     order.complianceFlags.some((flag) => flag.includes("quota")),
   ).length;
+  const mapBoardJobRecord = Object.fromEntries(
+    visibleOwnedByBoard.map((order) => [
+      order.orderId,
+      jobByOrderId.get(order.orderId),
+    ]),
+  );
+  const mapBoardCandidateRecord = Object.fromEntries(candidatesByJobId);
+  const opsMapOverlaySource =
+    board === "forwarded"
+      ? null
+      : buildOpsMapBoardModel({
+          orders: visibleOwnedByBoard,
+          orderJobMap: mapBoardJobRecord,
+          candidatesByJobId: mapBoardCandidateRecord,
+          visibleLimit: Math.min(visibleOwnedByBoard.length, 10),
+        });
+  const mapFilteredOwnedRecords = visibleOwnedByBoard.filter((order) =>
+    orderMatchesMapFilters(
+      order,
+      selectedMapServiceArea,
+      selectedMapPolicyCode,
+    ),
+  );
+  const opsMapBoard =
+    board === "forwarded"
+      ? null
+      : buildOpsMapBoardModel({
+          orders: mapFilteredOwnedRecords,
+          orderJobMap: mapBoardJobRecord,
+          candidatesByJobId: mapBoardCandidateRecord,
+          visibleLimit: Math.min(mapFilteredOwnedRecords.length, 10),
+        });
+  const opsMapBounds = opsMapBoard
+    ? normalizeOpsMapBounds(opsMapBoard.points)
+    : null;
+  const opsMapViewport =
+    opsMapBoard && opsMapBounds
+      ? buildOpsMapTileViewport({
+          bounds: opsMapBounds,
+          centerLat: requestedMapLat,
+          centerLng: requestedMapLng,
+          zoom:
+            requestedMapZoom ??
+            getDefaultOpsMapZoom(opsMapBounds, 720, 360, 256),
+          tileUrlTemplate: mapTileUrlTemplate,
+        })
+      : null;
+  const buildOpsMapHref = (
+    overrides: Partial<{
+      mapZoom: number;
+      mapLat: number;
+      mapLng: number;
+      mapServiceArea: string;
+      mapPolicyCode: string;
+    }>,
+  ) =>
+    buildDispatchHref({
+      board,
+      product: selectedProduct,
+      timing: selectedTiming,
+      license: selectedLicense,
+      fleet: selectedFleet,
+      approval: selectedApproval,
+      eligibility: selectedEligibility,
+      facet: selectedFacet,
+      mapZoom: overrides.mapZoom ?? opsMapViewport?.zoom,
+      mapLat: overrides.mapLat ?? opsMapViewport?.centerLat,
+      mapLng: overrides.mapLng ?? opsMapViewport?.centerLng,
+      mapServiceArea: overrides.mapServiceArea ?? selectedMapServiceArea,
+      mapPolicyCode: overrides.mapPolicyCode ?? selectedMapPolicyCode,
+    });
+  const resetOpsMapViewHref = buildDispatchHref({
+    board,
+    product: selectedProduct,
+    timing: selectedTiming,
+    license: selectedLicense,
+    fleet: selectedFleet,
+    approval: selectedApproval,
+    eligibility: selectedEligibility,
+    facet: selectedFacet,
+    mapServiceArea: selectedMapServiceArea,
+    mapPolicyCode: selectedMapPolicyCode,
+  });
 
   const currentRefresh =
     board === "forwarded"
@@ -3319,6 +4194,25 @@ export default async function DispatchPage({
                 </span>
                 <span>{formatRefreshSummary(currentRefresh, locale)}</span>
               </div>
+
+              {opsMapBoard
+                ? renderDispatchSpatialBoard({
+                    model: opsMapBoard,
+                    viewport: opsMapViewport,
+                    locale,
+                    tileUrlTemplateConfigured: Boolean(
+                      mapTileUrlTemplate.trim(),
+                    ),
+                    serviceAreaOptions:
+                      opsMapOverlaySource?.overlays.serviceAreaCodes ?? [],
+                    policyCodeOptions:
+                      opsMapOverlaySource?.overlays.policyCodes ?? [],
+                    selectedServiceArea: selectedMapServiceArea,
+                    selectedPolicyCode: selectedMapPolicyCode,
+                    buildMapHref: buildOpsMapHref,
+                    resetMapViewHref: resetOpsMapViewHref,
+                  })
+                : null}
             </div>
 
             {boardEmptyState ? (
