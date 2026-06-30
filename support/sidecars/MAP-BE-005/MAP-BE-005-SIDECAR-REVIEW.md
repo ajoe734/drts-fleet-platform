@@ -26,14 +26,21 @@ That means the reviewer should audit the current code anchors and the parent's
 recorded handoff summary, not expect a task-local `origin/dev...HEAD` diff for
 this sidecar branch.
 
+This revision was refreshed after the `2026-06-30T22:14:09Z` sidecar reopen.
+It preserves the `2026-06-30T22:12:41Z` reviewed handoff checkpoint as the
+audited state, but records the reopened owner-repair state separately so the
+packet does not present a stale intermediate snapshot as timeless current
+machine truth.
+
 ---
 
 ## 1. Scope Boundary
 
 In scope:
 
-- snapshot the current `MAP-BE-005` and `MAP-BE-005-SIDECAR-REVIEW` rows as
-  machine truth records them now
+- snapshot the `MAP-BE-005` parent row at packet-refresh time
+- snapshot both the reopened sidecar row at packet-refresh time and the audited
+  `2026-06-30T22:12:41Z` sidecar handoff state
 - map the parent acceptance bullets to concrete current-file anchors
 - summarize the parent's recorded verification evidence
 - document the revision-history anomaly so review does not target the wrong
@@ -51,24 +58,47 @@ Out of scope:
 
 ---
 
-## 2. Machine-Truth Snapshot
+## 2. Machine-Truth Snapshots
 
-### 2.1 Sidecar row
+### 2.1 Packet-refresh sidecar row (`2026-06-30T22:14:42Z`)
 
-`scripts/ai-status.sh show MAP-BE-005-SIDECAR-REVIEW` currently records:
+At packet-refresh time, `scripts/ai-status.sh show MAP-BE-005-SIDECAR-REVIEW`
+recorded:
 
 - `owner=Codex`
 - `reviewer=Codex2`
 - `status=in_progress`
-- `last_update=2026-06-30T22:10:06Z`
+- `last_update=2026-06-30T22:14:42Z`
 - `helper_parent=MAP-BE-005`
 - `helper_kind=review_packet`
 - `mutates_canonical=false`
-- `next=Resuming sidecar review packet repair; checking markdown formatting consistency and packet validation evidence before re-handoff.`
+- `next=Refreshing the sidecar packet snapshot and timeline so the audited handoff state is separated from the current reopened state.`
 
-### 2.2 Parent row
+This was the owner-repair state after `Codex2` reopened the sidecar at
+`2026-06-30T22:14:09Z`.
 
-`scripts/ai-status.sh show MAP-BE-005` currently records:
+### 2.2 Audited sidecar handoff checkpoint (`2026-06-30T22:12:41Z`)
+
+The sidecar state under review immediately before the latest reopen was:
+
+- `status=review`
+- `last_update=2026-06-30T22:12:41Z`
+- `handoff_agent=Codex`
+- `handoff_target=Codex2`
+
+This checkpoint is reconstructed from the `2026-06-30T22:12:41Z` `handoff`
+entry plus the `2026-06-30T22:13:02Z` orchestrator note that the background
+worker exited after advancing the task to `review`.
+
+The distinction matters: Section 2.1 is the packet-refresh reopened repair
+state;
+this section is the reviewed handoff state that the previous packet revision
+was trying to describe.
+
+### 2.3 Parent row at packet-refresh time
+
+At the same packet-refresh time, `scripts/ai-status.sh show MAP-BE-005`
+recorded:
 
 - `title=Persist service-area snapshot and spatial audit`
 - `owner=Codex`
@@ -95,7 +125,7 @@ Recorded parent `next` summary:
 - recorded validation passed for prettier, contracts typecheck/lint/test,
   api typecheck/lint, and targeted api unit tests
 
-### 2.3 Parent lifecycle chain
+### 2.4 Parent lifecycle chain
 
 Relevant `ai-activity-log.jsonl` entries for `MAP-BE-005`:
 
@@ -109,7 +139,7 @@ Relevant `ai-activity-log.jsonl` entries for `MAP-BE-005`:
 There are no later parent `review_approved` or `done` events yet in machine
 truth. The authoritative parent state remains `review`.
 
-### 2.4 Sidecar lifecycle chain
+### 2.5 Sidecar lifecycle chain
 
 Relevant `ai-activity-log.jsonl` entries for `MAP-BE-005-SIDECAR-REVIEW`:
 
@@ -125,6 +155,14 @@ Relevant `ai-activity-log.jsonl` entries for `MAP-BE-005-SIDECAR-REVIEW`:
 | `handoff` | `2026-06-30T22:08:28Z` | `Codex` | First packet revision handed to `Codex2` with a claim that `git diff --check` passed for the packet. |
 | `reopen` | `2026-06-30T22:09:40Z` | `Codex2` | Review failed because commit `4a47b84c6` still carried trailing whitespace on opening metadata lines, so the recorded packet validation was not self-consistent. |
 | `progress` | `2026-06-30T22:10:06Z` | `Codex` | Repairing the packet and refreshing the validation evidence before re-handoff. |
+| `handoff` | `2026-06-30T22:12:41Z` | `Codex` | Repaired packet revision handed to `Codex2` with clean `git show --check HEAD` and no trailing-whitespace matches. |
+| `worker_completed` | `2026-06-30T22:13:02Z` | `Orchestrator` | Background worker exited after advancing the task to `review`. |
+| `reopen` | `2026-06-30T22:14:09Z` | `Codex2` | Review failed because the packet still described the `22:10:06Z` repair snapshot as current after the `22:12:41Z` handoff had already moved machine truth back to `review`. |
+| `progress` | `2026-06-30T22:14:42Z` | `Codex` | Refreshing the packet snapshot and timeline so the audited handoff state is separated from the current reopened state. |
+
+The key lifecycle fact is that the sidecar really did return to `review` at
+`2026-06-30T22:12:41Z` and only moved back to `in_progress` when the reviewer
+reopened it at `2026-06-30T22:14:09Z`.
 
 ---
 
@@ -328,8 +366,11 @@ accepting the parent handoff evidence:
   unchanged by this packet
 - [x] Reopen addressed: the previous `4a47b84c6` whitespace-only validation
   mismatch is repaired in this revision
-- [x] Reviewer handoff ready: the next machine-truth step is a sidecar
-  `handoff` to `Codex2`
+- [x] Current-state drift addressed: the packet now separates the
+  `2026-06-30T22:12:41Z` audited handoff checkpoint from the
+  `2026-06-30T22:14:42Z` reopened repair state
+- [x] Reviewer re-handoff ready: once this revision is committed and validated,
+  the owner can hand the updated packet back to `Codex2`
 
 ---
 
@@ -339,8 +380,12 @@ accepting the parent handoff evidence:
   `4a47b84c6`.
 - Root cause was metadata-line trailing whitespace introduced by Markdown
   hard-break formatting.
-- This revision removes that whitespace and refreshes the sidecar timeline
-  through the reopen / repair cycle.
+- Re-handoff `2026-06-30T22:12:41Z` fixed the whitespace issue but still left
+  the packet describing the earlier `22:10:06Z` repair snapshot as if it were
+  the current reviewed state.
+- This revision keeps both later states explicit: the audited handoff
+  checkpoint at `2026-06-30T22:12:41Z` and the current reopened repair state at
+  `2026-06-30T22:14:42Z`.
 - Fresh handoff evidence should cite the current repair commit and a whitespace
   clean validation result for this file.
 
@@ -350,6 +395,11 @@ accepting the parent handoff evidence:
 
 When handing this packet to `Codex2`, summarize:
 
+- the packet now distinguishes the `2026-06-30T22:12:41Z` audited handoff
+  checkpoint from the packet-refresh reopened repair state
+- the packet-refresh snapshot shows `in_progress` only because `Codex2`
+  reopened the sidecar at `2026-06-30T22:14:09Z`; after re-handoff machine
+  truth should return to `review`
 - parent `MAP-BE-005` is still `review` in machine truth
 - the implementation surface is already present on `origin/dev` / current `HEAD`
 - current review should target the anchors in this packet plus the recorded
