@@ -324,7 +324,7 @@ async function createHarness(tenantId: string) {
                     currency: "NTD",
                     amountMinor: 0,
                   },
-                costCenterCode: order.costCenter,
+                costCenterCode: null,
                 orderSource: order.orderSource,
                 serviceBucket: order.serviceBucket,
                 businessDispatchSubtype: order.businessDispatchSubtype,

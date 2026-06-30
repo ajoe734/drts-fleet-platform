@@ -2620,7 +2620,7 @@ export class BillingSettlementService implements OnModuleInit {
   }
 
   private resolveInvoiceLineGovernance(trip: BillingSettlementTripRecord) {
-    const costCenterCode = trip.costCenterCode?.trim().toUpperCase() ?? null;
+    const costCenterCode = this.resolveInvoiceLineCostCenterCode(trip);
     if (!costCenterCode) {
       return {
         costCenterCode: null,
@@ -2643,6 +2643,27 @@ export class BillingSettlementService implements OnModuleInit {
       activeFlag: costCenter?.activeFlag ?? null,
       legacy_unmapped: !costCenter,
     };
+  }
+
+  private resolveInvoiceLineCostCenterCode(
+    trip: BillingSettlementTripRecord,
+  ): string | null {
+    const tripCostCenterCode =
+      trip.costCenterCode?.trim().toUpperCase() ?? null;
+    if (tripCostCenterCode) {
+      return tripCostCenterCode;
+    }
+
+    try {
+      return (
+        this.tenantPartnerService
+          ?.getTenantOrder(trip.tenantId, trip.orderId)
+          .costCenter?.trim()
+          .toUpperCase() ?? null
+      );
+    } catch {
+      return null;
+    }
   }
 
   private assertClosedPeriod(periodStart: string, periodEnd: string) {
