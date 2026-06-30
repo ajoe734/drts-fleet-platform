@@ -193,3 +193,9 @@ Recommended note for `MAP-QA-002`:
 ```text
 Use MAP-FE-ENTRY-SIDECAR-GATEE for E2E-MAP-004 and E2E-MAP-005. Final E2E must prove tenant/concierge/partner consistency and provider-outage safety, not just callcenter behavior.
 ```
+
+Recommended note for `MAP-REL-001`:
+
+```text
+Gate E release closeout must reference MAP-FE-ENTRY-SIDECAR-GATEE before claiming degraded/provider-outage safety across all entry surfaces. No Gate E pass without tenant saved-address, tenant booking, concierge, partner/assisted anti-bypass, provider-outage, audit/snapshot, observability, and cross-surface E2E evidence.
+```
