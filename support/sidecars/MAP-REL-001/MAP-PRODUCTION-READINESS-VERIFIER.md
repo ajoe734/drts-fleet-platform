@@ -70,6 +70,7 @@ It checks:
 - Gate D task set is `done`
 - Gate E task set is `done`
 - QA final evidence marks `E2E-MAP-001` through `E2E-MAP-007` as explicit `PASS`
+  and includes required command families plus API/audit assertion `PASS` rows
 - OBS final evidence marks required metrics, audit events, alerts, and runbook topics as explicit `PASS`
 - REL final evidence marks Gate A-E as explicit `PASS` and references rollout, rollback, PostGIS/provider prerequisites, smoke outcome, `MAP-QA-002`, `MAP-OBS-001`, and `MAP-GAP-001` through `MAP-GAP-013`
 - this support doc keeps the non-claim explicit: the verifier is not production evidence by itself
@@ -89,6 +90,42 @@ Current gate bundles checked by the script:
 - Gate E: `MAP-QA-001`, `MAP-QA-002`, `MAP-OBS-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-FE-CALL-001`
 
 If the release sidecars change their canonical gate mapping, update this script together with the support doc.
+
+## QA Evidence Commands And Assertions
+
+The verifier expects final `MAP-QA-002` evidence to include the command families
+below. A scenario `PASS` without command evidence is not enough:
+
+- `pnpm --filter @drts/shared-test-fixtures typecheck`
+- `pnpm --filter @drts/shared-test-fixtures test`
+- `pnpm --filter @drts/shared-test-fixtures lint`
+- `pnpm --filter @drts/api test`
+- `pnpm --filter @drts/ui-web test`
+- `pnpm --filter @drts/ops-console-web typecheck`
+- `pnpm --filter @drts/platform-admin-web typecheck`
+- `pnpm --filter @drts/driver-app test`
+- `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts`
+- `pnpm test:e2e`
+
+Most command rows must carry `PASS` on the same line. The only command-level
+exceptions are `pnpm --filter @drts/driver-app test`, which may be
+`EXTERNAL-GATED` when backed by a mobile UAT packet, and `pnpm test:e2e`, which
+may be `SUBSTITUTED` when the evidence names equivalent or stronger targeted
+configs.
+
+The final QA evidence must also include explicit `PASS` rows for these
+assertion markers:
+
+- pickup/dropoff coordinates
+- coordinate provenance
+- service-area decision snapshot
+- policy/version IDs
+- backend no-pickup/not-serviceable blocking
+- policy publish/retire audit
+- provider outage
+- coordinate-less attempt
+- manual override
+- geometry mutation
 
 ## Observability Topics
 
