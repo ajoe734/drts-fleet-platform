@@ -138,6 +138,54 @@ const e2eScenarios = [
   "E2E-MAP-007",
 ];
 
+const qaCommandMarkers = [
+  {
+    marker: "pnpm --filter @drts/shared-test-fixtures typecheck",
+    acceptedVerdicts: ["pass"],
+  },
+  {
+    marker: "pnpm --filter @drts/shared-test-fixtures test",
+    acceptedVerdicts: ["pass"],
+  },
+  {
+    marker: "pnpm --filter @drts/shared-test-fixtures lint",
+    acceptedVerdicts: ["pass"],
+  },
+  { marker: "pnpm --filter @drts/api test", acceptedVerdicts: ["pass"] },
+  { marker: "pnpm --filter @drts/ui-web test", acceptedVerdicts: ["pass"] },
+  {
+    marker: "pnpm --filter @drts/ops-console-web typecheck",
+    acceptedVerdicts: ["pass"],
+  },
+  {
+    marker: "pnpm --filter @drts/platform-admin-web typecheck",
+    acceptedVerdicts: ["pass"],
+  },
+  {
+    marker: "pnpm --filter @drts/driver-app test",
+    acceptedVerdicts: ["pass", "external-gated"],
+  },
+  {
+    marker:
+      "pnpm exec playwright test -c playwright.map-geofence-harness.config.ts",
+    acceptedVerdicts: ["pass"],
+  },
+  { marker: "pnpm test:e2e", acceptedVerdicts: ["pass", "substituted"] },
+];
+
+const qaAssertionMarkers = [
+  "pickup/dropoff coordinates",
+  "coordinate provenance",
+  "service-area decision snapshot",
+  "policy/version IDs",
+  "Backend blocks no-pickup/not-serviceable",
+  "Policy publish/retire audit",
+  "Provider outage",
+  "coordinate-less attempt",
+  "manual override",
+  "geometry mutation",
+];
+
 const observabilityMetrics = [
   "map_geocode_requests_total",
   "map_geocode_latency_ms",
@@ -393,13 +441,42 @@ const e2eSection = makeSection("E2E Coverage");
 checkTaskDone(e2eSection, taskMap, "MAP-QA-002");
 if (qaEvidence.exists) {
   for (const scenario of e2eScenarios) {
-    if (!includesPassingMarker(qaEvidence.text, scenario)) {
+    if (!includesFinalMarkPassingMarker(qaEvidence.text, scenario)) {
       addFailure(
         e2eSection,
         `QA evidence is missing explicit PASS marker for ${formatMarker(scenario)}.`,
       );
     } else {
       addOk(e2eSection, `QA evidence marks ${scenario} as PASS.`);
+    }
+  }
+  for (const command of qaCommandMarkers) {
+    if (
+      !includesTableRowAcceptedVerdictMarker(
+        qaEvidence.text,
+        command.marker,
+        command.acceptedVerdicts,
+      )
+    ) {
+      addFailure(
+        e2eSection,
+        `QA evidence is missing accepted result for command ${formatMarker(command.marker)}.`,
+      );
+    } else {
+      addOk(
+        e2eSection,
+        `QA evidence includes accepted result for command ${command.marker}.`,
+      );
+    }
+  }
+  for (const marker of qaAssertionMarkers) {
+    if (!includesPassingMarker(qaEvidence.text, marker)) {
+      addFailure(
+        e2eSection,
+        `QA evidence is missing explicit PASS marker for assertion ${formatMarker(marker)}.`,
+      );
+    } else {
+      addOk(e2eSection, `QA evidence marks assertion ${marker} as PASS.`);
     }
   }
 }
@@ -459,7 +536,7 @@ for (const gate of gates) {
 
   if (qaEvidence.exists) {
     for (const scenario of gate.scenarios) {
-      if (!includesPassingMarker(qaEvidence.text, scenario)) {
+      if (!includesFinalMarkPassingMarker(qaEvidence.text, scenario)) {
         addFailure(
           gateSection,
           `${gate.id} requires explicit QA PASS evidence for ${formatMarker(scenario)}.`,
@@ -669,18 +746,56 @@ function includesMarker(text, marker) {
 }
 
 function includesPassingMarker(text, marker) {
+  return includesAcceptedVerdictMarker(text, marker, ["pass"]);
+}
+
+function includesFinalMarkPassingMarker(text, marker) {
+  const finalMarkRegex = new RegExp(
+    `${escapeRegExp(marker)}\\s*(?:\`)?\\s*:`,
+    "i",
+  );
+  return String(text || "")
+    .split(/\r?\n/)
+    .some(
+      (line) =>
+        finalMarkRegex.test(line) &&
+        !/<\s*(pass|result|verdict)\b/i.test(line) &&
+        /(^|[:|\s,\-])pass(\s|[|,\-.]|$)/i.test(line),
+    );
+}
+
+function includesTableRowAcceptedVerdictMarker(text, marker, verdicts) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .some(
+      (line) =>
+        line.trimStart().startsWith("|") &&
+        includesAcceptedVerdictMarker(line, marker, verdicts),
+    );
+}
+
+function includesAcceptedVerdictMarker(text, marker, verdicts) {
+  const verdictPattern = verdicts.map(escapeRegExp).join("|");
+  const verdictRegex = new RegExp(
+    `(^|[:|\\s,\\-])(${verdictPattern})(\\s|[|,\\-.]|$)`,
+    "i",
+  );
   return String(text || "")
     .split(/\r?\n/)
     .some(
       (line) =>
         includesMarker(line, marker) &&
-        !/<\s*pass\b/i.test(line) &&
-        /(^|[:|\s,\-])pass(\s|[|,\-.]|$)/i.test(line),
+        !/<\s*(pass|result|verdict)\b/i.test(line) &&
+        verdictRegex.test(line),
     );
 }
 
 function normalize(value) {
   return String(value || "").toLowerCase();
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function formatMarker(marker) {

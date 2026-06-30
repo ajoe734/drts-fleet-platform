@@ -18,15 +18,25 @@ Copy this file to:
 support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md
 ```
 
-Only replace `<PASS|FAIL|EXTERNAL-GATED>` with `PASS` when the exact scenario has complete evidence. The production readiness verifier accepts a scenario only when the final evidence file contains the scenario ID and `PASS` on the same line.
+Use `<VERDICT>` while this is a template. In the final evidence copy, replace
+it with exactly `PASS`, `FAIL`, or `EXTERNAL-GATED`.
+
+Only use `PASS` when the exact scenario has complete evidence. The production
+readiness verifier accepts a scenario only when the final evidence file
+contains the scenario ID and `PASS` on the same line.
 
 Verifier-compatible final mark shape:
 
 ```text
-E2E-MAP-<scenario-number>: <PASS|FAIL|EXTERNAL-GATED> - <short evidence summary>
+E2E-MAP-<scenario-number>: <VERDICT> - <short evidence summary>
 ```
 
 If any row remains `FAIL`, `EXTERNAL-GATED`, missing, or unsupported by artifacts, `MAP-REL-001` must not claim production readiness.
+
+Every required row in sections 3-5 is self-contained on purpose. Do not leave
+row-level command output, branch/SHA, result, artifact, or API/audit evidence
+blank and expect section 6 to carry the evidence indirectly. Shared artifact
+indexes are supplemental only.
 
 ## 2. Tested Branches And Environment
 
@@ -44,44 +54,50 @@ If any row remains `FAIL`, `EXTERNAL-GATED`, missing, or unsupported by artifact
 
 ## 3. Scenario Evidence Matrix
 
-| Scenario                                                                               | Final mark          | Release gates | Required implementation tasks | Required evidence                  |
-| -------------------------------------------------------------------------------------- | ------------------- | ------------- | ----------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `E2E-MAP-001` Callcenter pins serviceable pickup/dropoff and creates phone order       | `E2E-MAP-001: <PASS | FAIL          | EXTERNAL-GATED> - <summary>`  | Gate A, Gate C visibility          | `MAP-FE-CALL-001`, `MAP-BE-004`, `MAP-BE-005`, `MAP-FE-OPS-001`, `MAP-QA-001`                                                       | Command log; order ID; pickup/dropoff lat/lng/provenance assertion; service-area snapshot assertion; Ops map pin/status screenshot or DOM hook.                                      |
-| `E2E-MAP-002` Admin publishes no-pickup zone then Callcenter attempts pickup inside it | `E2E-MAP-002: <PASS | FAIL          | EXTERNAL-GATED> - <summary>`  | Gate B, Gate A blocked-booking leg | `MAP-FE-ADM-001`, `MAP-UI-002-HARDEN-001`, `MAP-UI-002-INTEGRATE-001`, `MAP-BE-006`, `MAP-FE-CALL-001`, `MAP-BE-004`, `MAP-OBS-001` | Admin publish artifact; geometry validation evidence; evaluator changed result; callcenter blocked reason; audit actor/version/effective-date assertion.                             |
-| `E2E-MAP-003` Manual-review zone                                                       | `E2E-MAP-003: <PASS | FAIL          | EXTERNAL-GATED> - <summary>`  | Gate A, Gate E manual fallback     | `MAP-FE-CALL-001`, `MAP-BE-004`, `MAP-BE-005`, `MAP-QA-001`                                                                         | UI manual-review banner; order status/manual-review marker; persisted snapshot; no normal dispatch job assertion.                                                                    |
-| `E2E-MAP-004` Tenant/concierge consistency                                             | `E2E-MAP-004: <PASS | FAIL          | EXTERNAL-GATED> - <summary>`  | Gate E cross-surface               | `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-BE-004`, `MAP-BE-005`, `MAP-UI-001`                                                        | Tenant and concierge/partner screenshots/traces; same reason codes; same provenance shape; backend anti-bypass assertion.                                                            |
-| `E2E-MAP-005` Provider outage degraded mode                                            | `E2E-MAP-005: <PASS | FAIL          | EXTERNAL-GATED> - <summary>`  | Gate E primary, Gate A/C safety    | `MAP-INFRA-001`, `MAP-UI-001`, `MAP-FE-CALL-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-BE-004`, `MAP-QA-001`, `MAP-OBS-001`     | Offline provider outage route; degraded banner; submit cannot create normal coordinate-less dispatch; backend error/manual-review assertion; no live-provider network call evidence. |
-| `E2E-MAP-006` Ops real map board                                                       | `E2E-MAP-006: <PASS | FAIL          | EXTERNAL-GATED> - <summary>`  | Gate C, Gate E provider fallback   | `MAP-FE-OPS-001`, `MAP-BE-003`, `MAP-BE-005`, `MAP-QA-001`                                                                          | Map-ready hook; order pin count; queue focus/pan/zoom hook; stale/no-location badges; overlay chips; fallback state screenshot or DOM assertion.                                     |
-| `E2E-MAP-007` Driver trip map and navigation                                           | `E2E-MAP-007: <PASS | FAIL          | EXTERNAL-GATED> - <summary>`  | Gate D, Gate E mobile degraded leg | `MAP-MOB-DRV-001`, `MAP-MOB-DRV-001-SIDECAR-UAT`, `MAP-BE-003`, `MAP-BE-005`                                                        | Driver unit/simulator command; navigation URL coordinate assertion; heartbeat assertion; Android/iOS screenshot/video or external-gated UAT packet; route-authority copy evidence.   |
+| Scenario                                                                               | Final mark                           | Release gates                      | Required implementation tasks                                                                                                       | Required evidence                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------- | ------------------------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `E2E-MAP-001` Callcenter pins serviceable pickup/dropoff and creates phone order       | `E2E-MAP-001: <VERDICT> - <summary>` | Gate A, Gate C visibility          | `MAP-FE-CALL-001`, `MAP-BE-004`, `MAP-BE-005`, `MAP-FE-OPS-001`, `MAP-QA-001`                                                       | Command log; order ID; pickup/dropoff lat/lng/provenance assertion; service-area snapshot assertion; Ops map pin/status screenshot or DOM hook.                                      |
+| `E2E-MAP-002` Admin publishes no-pickup zone then Callcenter attempts pickup inside it | `E2E-MAP-002: <VERDICT> - <summary>` | Gate B, Gate A blocked-booking leg | `MAP-FE-ADM-001`, `MAP-UI-002-HARDEN-001`, `MAP-UI-002-INTEGRATE-001`, `MAP-BE-006`, `MAP-FE-CALL-001`, `MAP-BE-004`, `MAP-OBS-001` | Admin publish artifact; geometry validation evidence; evaluator changed result; callcenter blocked reason; audit actor/version/effective-date assertion.                             |
+| `E2E-MAP-003` Manual-review zone                                                       | `E2E-MAP-003: <VERDICT> - <summary>` | Gate A, Gate E manual fallback     | `MAP-FE-CALL-001`, `MAP-BE-004`, `MAP-BE-005`, `MAP-QA-001`                                                                         | UI manual-review banner; order status/manual-review marker; persisted snapshot; no normal dispatch job assertion.                                                                    |
+| `E2E-MAP-004` Tenant/concierge consistency                                             | `E2E-MAP-004: <VERDICT> - <summary>` | Gate E cross-surface               | `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-BE-004`, `MAP-BE-005`, `MAP-UI-001`                                                        | Tenant and concierge/partner screenshots/traces; same reason codes; same provenance shape; backend anti-bypass assertion.                                                            |
+| `E2E-MAP-005` Provider outage degraded mode                                            | `E2E-MAP-005: <VERDICT> - <summary>` | Gate E primary, Gate A/C safety    | `MAP-INFRA-001`, `MAP-UI-001`, `MAP-FE-CALL-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-BE-004`, `MAP-QA-001`, `MAP-OBS-001`     | Offline provider outage route; degraded banner; submit cannot create normal coordinate-less dispatch; backend error/manual-review assertion; no live-provider network call evidence. |
+| `E2E-MAP-006` Ops real map board                                                       | `E2E-MAP-006: <VERDICT> - <summary>` | Gate C, Gate E provider fallback   | `MAP-FE-OPS-001`, `MAP-BE-003`, `MAP-BE-005`, `MAP-QA-001`                                                                          | Map-ready hook; order pin count; queue focus/pan/zoom hook; stale/no-location badges; overlay chips; fallback state screenshot or DOM assertion.                                     |
+| `E2E-MAP-007` Driver trip map and navigation                                           | `E2E-MAP-007: <VERDICT> - <summary>` | Gate D, Gate E mobile degraded leg | `MAP-MOB-DRV-001`, `MAP-MOB-DRV-001-SIDECAR-UAT`, `MAP-BE-003`, `MAP-BE-005`                                                        | Driver unit/simulator command; navigation URL coordinate assertion; heartbeat assertion; Android/iOS screenshot/video or external-gated UAT packet; route-authority copy evidence.   |
 
 ## 4. Command Log
 
 Record command output with branch/SHA and artifact paths. These command family strings are intentionally exact because the release readiness verifier searches for them.
 
-| Command                                                                  | Branch/SHA                         | Result | Output artifact |
-| ------------------------------------------------------------------------ | ---------------------------------- | ------ | --------------- | ---------------- | --------------------------------- |
-| `pnpm --filter @drts/shared-test-fixtures typecheck`                     | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm --filter @drts/shared-test-fixtures test`                          | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm --filter @drts/shared-test-fixtures lint`                          | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm --filter @drts/api test`                                           | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm --filter @drts/ui-web test`                                        | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm --filter @drts/ops-console-web typecheck`                          | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm --filter @drts/platform-admin-web typecheck`                       | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm --filter @drts/driver-app test`                                    | `<branch>@<sha or external-gated>` | `<PASS | FAIL            | EXTERNAL-GATED>` | `<path>`                          |
-| `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts` | `<branch>@<sha>`                   | `<PASS | FAIL>`          | `<path>`         |
-| `pnpm test:e2e`                                                          | `<branch>@<sha>`                   | `<PASS | FAIL            | SUBSTITUTED>`    | `<path and substitute rationale>` |
+| Command                                                                  | Branch/SHA                         | Result     | Output artifact                   |
+| ------------------------------------------------------------------------ | ---------------------------------- | ---------- | --------------------------------- |
+| `pnpm --filter @drts/shared-test-fixtures typecheck`                     | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm --filter @drts/shared-test-fixtures test`                          | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm --filter @drts/shared-test-fixtures lint`                          | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm --filter @drts/api test`                                           | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm --filter @drts/ui-web test`                                        | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm --filter @drts/ops-console-web typecheck`                          | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm --filter @drts/platform-admin-web typecheck`                       | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm --filter @drts/driver-app test`                                    | `<branch>@<sha or external-gated>` | `<RESULT>` | `<path>`                          |
+| `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts` | `<branch>@<sha>`                   | `<RESULT>` | `<path>`                          |
+| `pnpm test:e2e`                                                          | `<branch>@<sha>`                   | `<RESULT>` | `<path and substitute rationale>` |
 
 If `pnpm test:e2e` is substituted, explain why the targeted configs prove every gate with equal or stronger coverage.
 
+Final evidence command rows must use `PASS` unless explicitly allowed by the
+release verifier. `pnpm --filter @drts/driver-app test` may be
+`EXTERNAL-GATED` only when a mobile UAT packet covers the missing repo-local
+automation. `pnpm test:e2e` may be `SUBSTITUTED` only when the row names the
+targeted configs and proves equivalent or stronger Gate A-E coverage.
+
 ## 5. API / Audit Assertions
 
-| Assertion                                                                                                                                        | Scenario(s)                                 | Result | Evidence |
-| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------ | -------- | ------------------------- |
-| Order persists pickup/dropoff coordinates and coordinate provenance.                                                                             | `E2E-MAP-001`, `E2E-MAP-003`, `E2E-MAP-004` | `<PASS | FAIL>`   | `<API response/log path>` |
-| Order persists service-area decision snapshot and policy/version IDs.                                                                            | `E2E-MAP-001` through `E2E-MAP-005`         | `<PASS | FAIL>`   | `<API response/log path>` |
-| Backend blocks no-pickup/not-serviceable attempts even if UI is bypassed.                                                                        | `E2E-MAP-002`, `E2E-MAP-004`, `E2E-MAP-005` | `<PASS | FAIL>`   | `<API response/log path>` |
-| Policy publish/retire audit records actor, version, effect/direction, and effective date.                                                        | `E2E-MAP-002`                               | `<PASS | FAIL>`   | `<audit query/log path>`  |
-| Provider outage, ambiguity, policy denial, coordinate-less attempt, manual override, and geometry mutation are distinguishable in observability. | `E2E-MAP-005`, release Gate E               | `<PASS | FAIL>`   | `<OBS evidence path>`     |
+| Assertion                                                                                                                                        | Scenario(s)                                 | Result      | Evidence                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ----------- | ------------------------- |
+| Order persists pickup/dropoff coordinates and coordinate provenance.                                                                             | `E2E-MAP-001`, `E2E-MAP-003`, `E2E-MAP-004` | `<VERDICT>` | `<API response/log path>` |
+| Order persists service-area decision snapshot and policy/version IDs.                                                                            | `E2E-MAP-001` through `E2E-MAP-005`         | `<VERDICT>` | `<API response/log path>` |
+| Backend blocks no-pickup/not-serviceable attempts even if UI is bypassed.                                                                        | `E2E-MAP-002`, `E2E-MAP-004`, `E2E-MAP-005` | `<VERDICT>` | `<API response/log path>` |
+| Policy publish/retire audit records actor, version, effect/direction, and effective date.                                                        | `E2E-MAP-002`                               | `<VERDICT>` | `<audit query/log path>`  |
+| Provider outage, ambiguity, policy denial, coordinate-less attempt, manual override, and geometry mutation are distinguishable in observability. | `E2E-MAP-005`, release Gate E               | `<VERDICT>` | `<OBS evidence path>`     |
 
 ## 6. Artifact Index
 
