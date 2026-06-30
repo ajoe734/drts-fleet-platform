@@ -135,17 +135,12 @@ export interface ApprovedOperatingAreaRecord {
   areaKind: SandboxOperatingAreaKind;
   version: number;
   active: boolean;
-  lifecycleStatus?: SandboxGeometryLifecycleStatus;
   geometry: GeoJsonMultiPolygon;
   schedules: SandboxScheduleWindow[];
   effectiveFrom: string;
   effectiveUntil: string | null;
   createdAt: string;
   updatedAt: string;
-  submittedForReviewAt?: string | null;
-  publishedAt?: string | null;
-  retiredAt?: string | null;
-  updatedBy?: string | null;
 }
 
 export interface ApprovedRouteRecord {
@@ -155,57 +150,12 @@ export interface ApprovedRouteRecord {
   areaId: string | null;
   version: number;
   active: boolean;
-  lifecycleStatus?: SandboxGeometryLifecycleStatus;
   geometry: GeoJsonMultiLineString;
   schedules: SandboxScheduleWindow[];
   effectiveFrom: string;
   effectiveUntil: string | null;
   createdAt: string;
   updatedAt: string;
-  submittedForReviewAt?: string | null;
-  publishedAt?: string | null;
-  retiredAt?: string | null;
-  updatedBy?: string | null;
-}
-
-export const SANDBOX_GEOMETRY_LIFECYCLE_STATUSES = [
-  "draft",
-  "review",
-  "active",
-  "retired",
-] as const;
-export type SandboxGeometryLifecycleStatus =
-  (typeof SANDBOX_GEOMETRY_LIFECYCLE_STATUSES)[number];
-
-export interface SandboxGeometryLifecycleCommand {
-  actorId?: string | null;
-  notes?: string | null;
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-}
-
-export interface CreateSandboxOperatingAreaDraftCommand extends SandboxGeometryLifecycleCommand {
-  item: ApprovedOperatingAreaRecord;
-}
-
-export interface CreateSandboxRouteDraftCommand extends SandboxGeometryLifecycleCommand {
-  item: ApprovedRouteRecord;
-}
-
-export interface SandboxGeoJsonFeature<
-  TGeometry extends GeoJsonMultiPolygon | GeoJsonMultiLineString,
-> {
-  type: "Feature";
-  geometry: TGeometry;
-  properties: Record<string, string | number | boolean | null>;
-}
-
-export interface SandboxGeoJsonFeatureCollection<
-  TGeometry extends GeoJsonMultiPolygon | GeoJsonMultiLineString,
-> {
-  type: "FeatureCollection";
-  generatedAt: string;
-  features: SandboxGeoJsonFeature<TGeometry>[];
 }
 
 export const VEHICLE_ENROLLMENT_STATUSES = [
@@ -566,7 +516,8 @@ export const FULFILLMENT_SEGMENT_TYPES = [
   "cancelled",
   "non_revenue_recovery",
 ] as const;
-export type FulfillmentSegmentType = (typeof FULFILLMENT_SEGMENT_TYPES)[number];
+export type FulfillmentSegmentType =
+  (typeof FULFILLMENT_SEGMENT_TYPES)[number];
 
 export interface FulfillmentSegmentRecord {
   fulfillmentSegmentId: string;
