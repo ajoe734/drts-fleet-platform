@@ -61,7 +61,7 @@ export class ServiceAreaRepository {
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
-      `Service-area persistence skipped during ${context}: ${detail}`,
+      `Service-area persistence failed during ${context}: ${detail}`,
     );
   }
 

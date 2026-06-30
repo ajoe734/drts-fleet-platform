@@ -14,12 +14,15 @@ import {
 import type {
   AuditLogRecord,
   CreateApprovalDocumentVersionCommand,
+  CreateSandboxOperatingAreaDraftCommand,
   CreateSandboxExperimentProgramCommand,
   CreateSandboxJurisdictionProfileCommand,
+  CreateSandboxRouteDraftCommand,
   GenerateSandboxComplianceSnapshotCommand,
   PublishSandboxGovernanceVersionCommand,
   ResumeSandboxExperimentAuthorizationsCommand,
   RollbackSandboxGovernanceVersionCommand,
+  SandboxGeometryLifecycleCommand,
   SuspendSandboxExperimentAuthorizationsCommand,
   UpsertApprovedOperatingAreasCommand,
   UpsertApprovedRoutesCommand,
@@ -58,9 +61,14 @@ export class SandboxGovernanceController {
   createExperiment(
     @Body() command: CreateSandboxExperimentProgramCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.createExperiment(command),
+      this.sandboxGovernanceService.createExperiment(
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -82,9 +90,15 @@ export class SandboxGovernanceController {
     @Param("experimentId") experimentId: string,
     @Body() command: UpdateSandboxExperimentProgramCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.updateExperiment(experimentId, command),
+      this.sandboxGovernanceService.updateExperiment(
+        experimentId,
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -93,9 +107,14 @@ export class SandboxGovernanceController {
   archiveExperiment(
     @Param("experimentId") experimentId: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.archiveExperiment(experimentId),
+      this.sandboxGovernanceService.archiveExperiment(
+        experimentId,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -106,12 +125,15 @@ export class SandboxGovernanceController {
     @Param("versionId") versionId: string,
     @Body() command: PublishSandboxGovernanceVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.publishExperimentVersion(
         experimentId,
         versionId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -122,11 +144,14 @@ export class SandboxGovernanceController {
     @Param("experimentId") experimentId: string,
     @Body() command: SuspendSandboxExperimentAuthorizationsCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.suspendExperimentAuthorizations(
         experimentId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -137,11 +162,14 @@ export class SandboxGovernanceController {
     @Param("experimentId") experimentId: string,
     @Body() command: ResumeSandboxExperimentAuthorizationsCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.resumeExperimentAuthorizations(
         experimentId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -153,12 +181,15 @@ export class SandboxGovernanceController {
     @Param("versionId") versionId: string,
     @Body() command: RollbackSandboxGovernanceVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.rollbackExperimentVersion(
         experimentId,
         versionId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -179,9 +210,14 @@ export class SandboxGovernanceController {
   createJurisdiction(
     @Body() command: CreateSandboxJurisdictionProfileCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.createJurisdiction(command),
+      this.sandboxGovernanceService.createJurisdiction(
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -203,9 +239,15 @@ export class SandboxGovernanceController {
     @Param("jurisdictionId") jurisdictionId: string,
     @Body() command: UpdateSandboxJurisdictionProfileCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.updateJurisdiction(jurisdictionId, command),
+      this.sandboxGovernanceService.updateJurisdiction(
+        jurisdictionId,
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -214,9 +256,14 @@ export class SandboxGovernanceController {
   archiveJurisdiction(
     @Param("jurisdictionId") jurisdictionId: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.archiveJurisdiction(jurisdictionId),
+      this.sandboxGovernanceService.archiveJurisdiction(
+        jurisdictionId,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -227,12 +274,15 @@ export class SandboxGovernanceController {
     @Param("versionId") versionId: string,
     @Body() command: PublishSandboxGovernanceVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.publishJurisdictionVersion(
         jurisdictionId,
         versionId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -244,12 +294,15 @@ export class SandboxGovernanceController {
     @Param("versionId") versionId: string,
     @Body() command: RollbackSandboxGovernanceVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.rollbackJurisdictionVersion(
         jurisdictionId,
         versionId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -270,9 +323,14 @@ export class SandboxGovernanceController {
   createApprovalDocument(
     @Body() command: CreateApprovalDocumentVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.createApprovalDocument(command),
+      this.sandboxGovernanceService.createApprovalDocument(
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -294,11 +352,14 @@ export class SandboxGovernanceController {
     @Param("documentId") documentId: string,
     @Body() command: UpdateApprovalDocumentVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.uploadApprovalDocumentVersion(
         documentId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -308,9 +369,14 @@ export class SandboxGovernanceController {
   archiveApprovalDocument(
     @Param("documentId") documentId: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.archiveApprovalDocument(documentId),
+      this.sandboxGovernanceService.archiveApprovalDocument(
+        documentId,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -321,12 +387,15 @@ export class SandboxGovernanceController {
     @Param("versionId") versionId: string,
     @Body() command: PublishSandboxGovernanceVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.publishApprovalDocumentVersion(
         documentId,
         versionId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -338,12 +407,15 @@ export class SandboxGovernanceController {
     @Param("versionId") versionId: string,
     @Body() command: RollbackSandboxGovernanceVersionCommand,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
       this.sandboxGovernanceService.rollbackApprovalDocumentVersion(
         documentId,
         versionId,
         command,
+        toAuditActor(identity),
+        requestId,
       ),
       requestId,
     );
@@ -380,6 +452,174 @@ export class SandboxGovernanceController {
     );
   }
 
+  @Get("operating-areas/geojson")
+  exportOperatingAreasGeoJson(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.exportOperatingAreasGeoJson(),
+      requestId,
+    );
+  }
+
+  @Post("operating-areas/drafts")
+  async createOperatingAreaDraft(
+    @Body() command: CreateSandboxOperatingAreaDraftCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.createOperatingAreaDraft(
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("operating-areas/:areaId/versions/:version/submit-review")
+  async submitOperatingAreaForReview(
+    @Param("areaId") areaId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.submitOperatingAreaForReview(
+        areaId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("operating-areas/:areaId/versions/:version/publish")
+  async publishOperatingArea(
+    @Param("areaId") areaId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.publishOperatingArea(
+        areaId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("operating-areas/:areaId/versions/:version/retire")
+  async retireOperatingArea(
+    @Param("areaId") areaId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.retireOperatingArea(
+        areaId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("pickup-dropoff-zones/geojson")
+  exportPickupDropoffZonesGeoJson(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.exportPickupDropoffZonesGeoJson(),
+      requestId,
+    );
+  }
+
+  @Post("pickup-dropoff-zones/drafts")
+  async createPickupDropoffZoneDraft(
+    @Body() command: CreateSandboxOperatingAreaDraftCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.createPickupDropoffZoneDraft(
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("pickup-dropoff-zones/:areaId/versions/:version/submit-review")
+  async submitPickupDropoffZoneForReview(
+    @Param("areaId") areaId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.submitOperatingAreaForReview(
+        areaId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("pickup-dropoff-zones/:areaId/versions/:version/publish")
+  async publishPickupDropoffZone(
+    @Param("areaId") areaId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.publishOperatingArea(
+        areaId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("pickup-dropoff-zones/:areaId/versions/:version/retire")
+  async retirePickupDropoffZone(
+    @Param("areaId") areaId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.retireOperatingArea(
+        areaId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Put("operating-areas")
   async updateOperatingAreas(
     @Body() command: UpsertApprovedOperatingAreasCommand,
@@ -402,6 +642,90 @@ export class SandboxGovernanceController {
   listRoutes(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       { items: this.sandboxGovernanceService.listRoutes() },
+      requestId,
+    );
+  }
+
+  @Get("routes/geojson")
+  exportRoutesGeoJson(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.sandboxGovernanceService.exportRoutesGeoJson(),
+      requestId,
+    );
+  }
+
+  @Post("routes/drafts")
+  async createRouteDraft(
+    @Body() command: CreateSandboxRouteDraftCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.createRouteDraft(
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("routes/:routeId/versions/:version/submit-review")
+  async submitRouteForReview(
+    @Param("routeId") routeId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.submitRouteForReview(
+        routeId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("routes/:routeId/versions/:version/publish")
+  async publishRoute(
+    @Param("routeId") routeId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.publishRoute(
+        routeId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("routes/:routeId/versions/:version/retire")
+  async retireRoute(
+    @Param("routeId") routeId: string,
+    @Param("version") version: string,
+    @Body() command: SandboxGeometryLifecycleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.sandboxGovernanceService.retireRoute(
+        routeId,
+        Number(version),
+        command,
+        toAuditActor(identity),
+        requestId,
+      ),
       requestId,
     );
   }
@@ -451,11 +775,12 @@ export class SandboxGovernanceController {
   }
 
   @Get("safety-operator-qualifications")
-  listSafetyOperatorQualifications(@Headers("x-request-id") requestId?: string) {
+  listSafetyOperatorQualifications(
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
       {
-        items:
-          this.sandboxGovernanceService.listSafetyOperatorQualifications(),
+        items: this.sandboxGovernanceService.listSafetyOperatorQualifications(),
       },
       requestId,
     );
@@ -481,23 +806,23 @@ export class SandboxGovernanceController {
   }
 
   @Post("validate-point")
-  validatePoint(
+  async validatePoint(
     @Body() command: ValidateOperatingAreaPointCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.validatePointInApprovedArea(command),
+      await this.sandboxGovernanceService.validatePointInApprovedArea(command),
       requestId,
     );
   }
 
   @Post("validate-route")
-  validateRoute(
+  async validateRoute(
     @Body() command: ValidateRouteContainmentCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxGovernanceService.validateRouteContainment(command),
+      await this.sandboxGovernanceService.validateRouteContainment(command),
       requestId,
     );
   }

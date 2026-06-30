@@ -8,11 +8,16 @@ function createService() {
   return new ServiceAreaService();
 }
 
-function createMutationService() {
+function createMutationService(repositoryOverrides = {}) {
   const repository = {
+    loadState: vi.fn().mockResolvedValue({
+      serviceAreas: [],
+      stopPolicies: [],
+    }),
     persistServiceArea: vi.fn().mockResolvedValue(undefined),
     persistStopPolicy: vi.fn().mockResolvedValue(undefined),
     reportPersistenceFailure: vi.fn(),
+    ...repositoryOverrides,
   };
   const auditNotificationService = {
     recordAuditLog: vi.fn((input) => ({
@@ -189,6 +194,175 @@ describe("ServiceAreaService", () => {
     expect(envelope.data.stopPolicies.length).toBeGreaterThan(0);
   });
 
+  it("exports governed admin GeoJSON layers with lifecycle metadata", () => {
+    const controller = new ServiceAreaController(createService());
+
+    const envelope = controller.exportAdminGeoJson("req-service-area-geojson");
+    const airportArea = envelope.data.features.find(
+      (feature) =>
+        feature.properties.recordKind === "service_area" &&
+        feature.properties.areaCode === "TAOYUAN_AIRPORT",
+    );
+    const stationPolicy = envelope.data.features.find(
+      (feature) =>
+        feature.properties.recordKind === "stop_policy" &&
+        feature.properties.policyCode === "TPE_STATION_PICKUP_BLOCK",
+    );
+
+    expect(envelope.meta.requestId).toBe("req-service-area-geojson");
+    expect(envelope.data.type).toBe("FeatureCollection");
+    expect(envelope.data.generatedAt).toEqual(expect.any(String));
+    expect(airportArea).toMatchObject({
+      type: "Feature",
+      geometry: { type: "Polygon" },
+      properties: {
+        recordKind: "service_area",
+        areaCode: "TAOYUAN_AIRPORT",
+        status: "active",
+        sourceGeometry: { type: "circle", radiusMeters: 6500 },
+        geometryVersionRef: "service_area:TAOYUAN_AIRPORT@1",
+      },
+    });
+    expect(airportArea?.geometry.coordinates[0]?.length).toBeGreaterThan(4);
+    expect(stationPolicy).toMatchObject({
+      properties: {
+        recordKind: "stop_policy",
+        direction: "pickup",
+        effect: "deny",
+        geometryVersionRef: "stop_policy:TPE_STATION_PICKUP_BLOCK@1",
+      },
+    });
+  });
+
+  it("merges persisted governance state with baseline service-area seeds on startup", async () => {
+    const repository = {
+      loadState: vi.fn().mockResolvedValue({
+        serviceAreas: [
+          {
+            serviceAreaId: "55555555-5555-4555-8555-555555555555",
+            areaCode: "DB_ONLY_CORE",
+            displayName: "Database-only service area",
+            status: "active",
+            geometry: {
+              type: "circle",
+              center: { lat: 24.8, lng: 121.0 },
+              radiusMeters: 1200,
+            },
+            serviceProductTypes: ["taxi_realtime"],
+            effectiveFrom: "2026-01-01T00:00:00.000Z",
+            effectiveUntil: null,
+            version: 1,
+            metadata: { source: "db" },
+            createdAt: "2026-01-02T00:00:00.000Z",
+            updatedAt: "2026-01-02T00:00:00.000Z",
+          },
+        ],
+        stopPolicies: [],
+      }),
+      persistServiceArea: vi.fn(),
+      persistStopPolicy: vi.fn(),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const service = new ServiceAreaService(repository as never);
+
+    await service.onModuleInit();
+
+    const areaCodes = service
+      .listServiceAreas()
+      .map((record) => record.areaCode);
+    expect(areaCodes).toEqual(
+      expect.arrayContaining([
+        "DB_ONLY_CORE",
+        "TAIPEI_CORE",
+        "TAOYUAN_AIRPORT",
+      ]),
+    );
+    expect(new Set(areaCodes).size).toBe(areaCodes.length);
+    expect(
+      service.listStopPolicies().map((record) => record.policyCode),
+    ).toEqual(
+      expect.arrayContaining([
+        "TPE_STATION_PICKUP_BLOCK",
+        "XINYI_HOSPITAL_MANUAL_REVIEW",
+      ]),
+    );
+  });
+
+  it("rejects service-area creates when persistence fails without mutating memory or audit", async () => {
+    const { service, repository, auditNotificationService, context } =
+      createMutationService({
+        persistServiceArea: vi
+          .fn()
+          .mockRejectedValue(new Error("database unavailable")),
+      });
+
+    await expect(
+      service.createServiceArea(
+        {
+          areaCode: "DB_FAIL_CORE",
+          displayName: "Persistence failure area",
+          geometry: {
+            type: "circle",
+            center: { lat: 24.99, lng: 121.3 },
+            radiusMeters: 1200,
+          },
+          serviceProductTypes: ["taxi_realtime"],
+        },
+        context,
+      ),
+    ).rejects.toThrowError(ApiRequestError);
+
+    expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "create_service_area",
+    );
+    expect(
+      service
+        .listServiceAreas()
+        .some((record) => record.areaCode === "DB_FAIL_CORE"),
+    ).toBe(false);
+    expect(auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("rolls back service-area updates when persistence fails", async () => {
+    const { service, repository, context } = createMutationService();
+    const created = await service.createServiceArea(
+      {
+        areaCode: "ROLLBACK_CORE",
+        displayName: "Rollback original area",
+        geometry: {
+          type: "circle",
+          center: { lat: 24.91, lng: 121.22 },
+          radiusMeters: 900,
+        },
+        serviceProductTypes: ["taxi_realtime"],
+      },
+      context,
+    );
+    repository.persistServiceArea.mockRejectedValueOnce(
+      new Error("database unavailable"),
+    );
+
+    await expect(
+      service.updateServiceArea(
+        created.record.serviceAreaId,
+        { displayName: "Rollback mutated area" },
+        context,
+      ),
+    ).rejects.toThrowError(ApiRequestError);
+
+    expect(
+      service
+        .listServiceAreas()
+        .find((record) => record.serviceAreaId === created.record.serviceAreaId)
+        ?.displayName,
+    ).toBe("Rollback original area");
+    expect(repository.reportPersistenceFailure).toHaveBeenCalledWith(
+      expect.any(Error),
+      "update_service_area",
+    );
+  });
+
   it("publishes service-area drafts and feeds the evaluator immediately", async () => {
     const { service, repository, auditNotificationService, context } =
       createMutationService();
@@ -263,6 +437,96 @@ describe("ServiceAreaService", () => {
         }),
       }),
     );
+  });
+
+  it("keeps future-effective published service areas out of evaluator until active", async () => {
+    const { service, context } = createMutationService();
+    const created = await service.createServiceArea(
+      {
+        areaCode: "CYI_CORE",
+        displayName: "Chiayi future operating area",
+        geometry: {
+          type: "circle",
+          center: { lat: 23.48, lng: 120.45 },
+          radiusMeters: 2200,
+        },
+        serviceProductTypes: ["taxi_realtime"],
+        effectiveFrom: "2026-08-01T00:00:00.000Z",
+      },
+      context,
+    );
+    await service.publishServiceArea(
+      created.record.serviceAreaId,
+      { reason: "scheduled launch" },
+      context,
+    );
+
+    expect(
+      service.evaluate({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 23.48, lng: 120.45 },
+        requestedAt: "2026-07-31T23:59:59.000Z",
+      }).decision,
+    ).toBe("not_serviceable");
+    expect(
+      service.evaluate({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 23.48, lng: 120.45 },
+        requestedAt: "2026-08-01T00:00:00.000Z",
+      }),
+    ).toMatchObject({
+      decision: "serviceable",
+      serviceAreaCodes: ["CYI_CORE"],
+      geometryVersionRefs: ["service_area:CYI_CORE@1"],
+    });
+  });
+
+  it("rejects overlapping active versions for the same service-area code", async () => {
+    const { service, repository, context } = createMutationService();
+    const first = await service.createServiceArea(
+      {
+        areaCode: "VERSIONED_CORE",
+        displayName: "Versioned core first window",
+        geometry: {
+          type: "circle",
+          center: { lat: 24.1477, lng: 120.6736 },
+          radiusMeters: 1800,
+        },
+        serviceProductTypes: ["taxi_realtime"],
+        effectiveFrom: "2026-01-01T00:00:00.000Z",
+        effectiveUntil: "2026-12-31T00:00:00.000Z",
+      },
+      context,
+    );
+    await service.publishServiceArea(
+      first.record.serviceAreaId,
+      { reason: "initial version" },
+      context,
+    );
+    const overlapping = await service.createServiceArea(
+      {
+        areaCode: "VERSIONED_CORE",
+        displayName: "Versioned core overlapping window",
+        geometry: {
+          type: "circle",
+          center: { lat: 24.1477, lng: 120.6736 },
+          radiusMeters: 2000,
+        },
+        serviceProductTypes: ["taxi_realtime"],
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
+        effectiveUntil: "2026-07-01T00:00:00.000Z",
+      },
+      context,
+    );
+
+    await expect(
+      service.publishServiceArea(
+        overlapping.record.serviceAreaId,
+        { reason: "overlapping version should fail" },
+        context,
+      ),
+    ).rejects.toThrowError(ApiRequestError);
+    expect(repository.persistServiceArea).toHaveBeenCalledTimes(3);
   });
 
   it("publishes and retires stop policies without losing service-area coverage", async () => {
