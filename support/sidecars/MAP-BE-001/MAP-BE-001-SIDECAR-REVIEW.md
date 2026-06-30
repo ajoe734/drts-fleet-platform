@@ -5,14 +5,15 @@
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
 - **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 - **Planning Anchor:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- **Machine-Truth Basis:** sidecar handoff refreshed through `2026-06-30T21:11:46Z`; parent status refreshed through `2026-06-30T14:38:09Z`
-- **Workflow Position:** support-only review packet for the assigned sidecar reviewer. This file does not change canonical truth, parent implementation files, or the parent lifecycle state.
+- **Machine-Truth Basis:** sidecar review approval refreshed through `2026-06-30T21:15:58Z`; parent status refreshed through `2026-06-30T14:38:09Z`
+- **Workflow Position:** support-only review packet plus owner closeout evidence for the assigned sidecar reviewer flow. This file does not change canonical truth, parent implementation files, or the parent lifecycle state.
 
-This packet summarizes the current `MAP-BE-001` evidence for reviewer handoff.
-The parent task is still `review` in machine truth. The current checkout is an
-integrated tree that already includes downstream consumers from later map tasks,
-so the anchors below cite the current code snapshot plus the machine-truth
-parent summary rather than a standalone `MAP-BE-001` branch diff.
+This packet summarizes the current `MAP-BE-001` evidence, the completed sidecar
+reviewer handoff, and the approval trail that returns the sidecar to owner
+closeout. The parent task is still `review` in machine truth. The current
+checkout is an integrated tree that already includes downstream consumers from
+later map tasks, so the anchors below cite the current code snapshot plus the
+machine-truth parent summary rather than a standalone `MAP-BE-001` branch diff.
 
 ## 1. Scope Boundary
 
@@ -38,7 +39,7 @@ Not allowed:
 - `id`: `MAP-BE-001-SIDECAR-REVIEW`
 - `owner`: `Codex`
 - `reviewer`: `Codex2`
-- `status`: `review`
+- `status` at approval snapshot: `review_approved`
 - `helper_parent`: `MAP-BE-001`
 - `helper_kind`: `review_packet`
 - `mutates_canonical`: `false`
@@ -150,7 +151,7 @@ Recommended focus for `Codex2` reviewing this sidecar packet:
    tree, where later tasks already consume the `MAP-BE-001` contract surface,
    rather than from an isolated parent-only branch snapshot.
 
-## 7. Reviewer Handoff Trail
+## 7. Review And Closeout Trail
 
 - `2026-06-30T21:11:46Z`: owner `Codex` handed off
   `MAP-BE-001-SIDECAR-REVIEW` to reviewer `Codex2` through
@@ -158,19 +159,28 @@ Recommended focus for `Codex2` reviewing this sidecar packet:
 - handoff note explicitly records that the packet currently lives on
   `origin/codex/map-be-001-sidecar-review`, while the reviewer branch remains
   on the `origin/dev` baseline without this artifact
+- `2026-06-30T21:15:58Z`: reviewer `Codex2` approved the packet through
+  `scripts/ai-status.sh approve`; machine truth is now `review_approved`
+- the recorded approval note confirms machine-truth alignment, branch transport,
+  the acceptance-to-evidence matrix, downstream consumer anchors, and the
+  support-only scope, then returns the task to owner `Codex` for branch-head
+  commit/push evidence and `done` closeout
 - parent `MAP-BE-001` remains in `review` under reviewer `Claude2`; this
   sidecar only packages reviewer-facing evidence and does not alter the parent
   lifecycle
 
-This sidecar now satisfies its support-only acceptance:
+This sidecar now satisfies its support-only acceptance and has passed the
+reviewer gate:
 
 - the support artifact exists at the declared path
 - no canonical truth or parent implementation file was changed by this sidecar
-- machine-truth handoff to the assigned reviewer is recorded
+- machine-truth reviewer handoff and approval are recorded
 - the assigned reviewer gets a direct map from acceptance items to code
   anchors, downstream usage evidence, and fresh rerun verification
+- the remaining owner work is administrative closeout only: task-scoped
+  commit/push evidence on this branch plus `scripts/ai-status.sh done`
 
-## 8. Reviewer Commands
+## 8. Reference Commands
 
 Fetch the owner branch before reviewing:
 
