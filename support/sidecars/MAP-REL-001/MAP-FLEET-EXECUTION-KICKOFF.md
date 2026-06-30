@@ -10,8 +10,6 @@
 
 **Scope boundary:** support artifact only. This packet tells fleets how to start and close remaining implementation work; it does not claim production readiness.
 
-**Machine-truth sync:** owner/reviewer/status values below were synchronized against `scripts/ai-status.sh list` on `2026-06-30` UTC. If older planning notes disagree, this packet follows `ai-status` as the current execution control plane.
-
 ## 1. Kickoff Verdict
 
 The map/geofence wave is ready for focused fleet execution, but it is **not** production-ready.
@@ -24,90 +22,129 @@ The fleet should treat current work as three parallel lanes:
 
 Sidecar packets are acceptance contracts. They do not replace implementation, E2E, mobile UAT, audit, or release evidence.
 
-## 2. Current Fleet Board Snapshot
+## 2. Machine-Truth Snapshot
 
-`Blocker class` is intentionally strict:
+As of 2026-06-30 UTC, the remaining map/geofence queue has no task in `ready`.
 
-- `review-blocked` means implementation exists but needs reviewer approval or a reopen with specific fixes.
-- `dependency-blocked` means the task cannot honestly close until upstream implementation/review evidence exists.
-- `ready` means fleet work can start now, but final gate pass still requires the closeout evidence named in this packet.
+- `review-blocked`: 9 tasks are already in `review` and waiting reviewer approval or explicit reopen.
+- `dependency-blocked`: 8 tasks are still in `backlog` or `todo` because at least one prerequisite task is not yet closed on an integrated branch.
+- `ready`: 0 tasks. The next supervisor cycle should spend effort on review throughput, not on opening more parallel implementation work.
 
-| Task | Owner / reviewer | Status | Blocker class | Start condition | Production gate(s) | Fleet action |
-| --- | --- | --- | --- | --- | --- | --- |
-| `MAP-BE-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Reviewer validates provenance contract branch or reopens with concrete fixes. | Gate A/E provenance and audit assertions. | Approve/reopen; consumers must not treat provenance as final until accepted. |
-| `MAP-BE-002` | `Codex` / `Claude2` | `review` | `review-blocked` | Reviewer validates provider-neutral search/resolve/reverse gateway. | Gate A/E geocode authority and degraded behavior. | Approve/reopen before picker and E2E branches rely on it as stable backend authority. |
-| `MAP-BE-003` | `Codex` / `Claude2` | `review` | `review-blocked` | Reviewer validates shared API-client/service seam for map surfaces. | Gate A/C/D/E API-client authority. | Approve/reopen before Ops, Driver, and final E2E rely on typed coordinate data. |
-| `MAP-BE-005` | `Codex` / `Claude2` | `review` | `review-blocked` | Reviewer validates order coordinate/snapshot persistence. | Gate A/B/C/D/E snapshot and spatial audit. | Approve/reopen before any surface claims backend anti-bypass or persisted serviceability. |
-| `MAP-UI-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Reviewer validates shared `AddressMapPicker` contract, fallback, and tests. | Gate A/E entry-surface consistency. | Approve/reopen before Tenant, Concierge, Partner, and callcenter reuse it as stable UI primitive. |
-| `MAP-UI-002` | `Codex2` / `Claude2` | `review` | `review-blocked` | Reviewer validates base `GeometryEditor` behavior. | Gate B governance. | Approve/reopen before integration and Platform Admin build on it. |
-| `MAP-UI-002-HARDEN-001` | `Codex2` / `Claude2` | `review` | `review-blocked` | Reviewer validates geometry hardening fixes. | Gate B governance. | Approve/reopen; integration must not proceed with half-validated geometry behavior. |
-| `MAP-QA-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Reviewer validates mocked-provider E2E harness. | All gates test foundation. | Approve/reopen before `MAP-QA-002` uses the harness as final evidence substrate. |
-| `MAP-FE-CALL-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Reviewer validates callcenter map booking implementation branch. | Gate A and Gate E. | Approve/reopen; Gate A still cannot pass until backend/provider E2E, observability, and release evidence exist. |
-| `MAP-UI-002-INTEGRATE-001` | `Codex` / `Claude2` | `backlog` | `dependency-blocked` | `MAP-UI-002` and `MAP-UI-002-HARDEN-001` are approved or final commits are explicitly named. | Gate B governance. | Start immediately after review unblock to produce one importable `GeometryEditor` surface. |
-| `MAP-FE-ADM-001` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | `MAP-BE-006` is done and `MAP-UI-002-INTEGRATE-001` is available. | Gate B governance. | Implement Platform Admin publish/retire and Phase 2 policy separation against the Gate B sidecar. |
-| `MAP-FE-TEN-001` | `Claude2` / `Codex2` | `backlog` | `dependency-blocked` | `MAP-UI-001`, `MAP-BE-004`, and `MAP-BE-005` are accepted or equivalent commits are named. | Gate E plus entry-surface Gate A assertions. | Implement Tenant saved-address/pin/serviceability flow against shared entry sidecar. |
-| `MAP-FE-CON-001` | `Codex2` / `Claude` | `backlog` | `dependency-blocked` | `MAP-UI-001`, `MAP-BE-004`, and `MAP-BE-005` are accepted or equivalent commits are named. | Gate E plus partner/concierge entry assertions. | Implement Concierge/Partner map picker and anti-bypass behavior against shared entry sidecar. |
-| `MAP-MOB-DRV-001` | `Codex2` / `Claude2` | `backlog` | `dependency-blocked` | `MAP-BE-003` and `MAP-BE-005` are accepted or stable mobile fixture commits are named. | Gate D driver navigation. | Implement native driver trip map/navigation and attach simulator or external-gated UAT evidence. |
-| `MAP-OBS-001` | `Codex2` / `Codex` | `todo` | `ready` | Event names and reason codes from backend/surface branches are stable enough to instrument. | Gate A-E observability. | Start metrics/audit/alert/runbook wiring now; final pass waits for integrated branches emitting real events. |
-| `MAP-QA-002` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | Surface tasks expose stable hooks and `MAP-QA-001` harness is accepted. | Gate A-E E2E proof. | Prepare fixtures now; final close requires implementation branch SHAs, command logs, screenshots/traces, and UAT artifacts. |
-| `MAP-REL-001` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | `MAP-QA-002` and `MAP-OBS-001` attach final evidence. | Gate A-E release closeout. | Close only after every gap is `closed` or explicitly `external-gated` with owner/date. |
+Merged prerequisites already satisfied on `dev`:
+
+| Task | Gate coverage unlocked | Machine-truth state |
+| --- | --- | --- |
+| `MAP-PROD-000` | Provider and rollout policy for Gate A-E | `done`, recorded as merged to `dev` |
+| `MAP-INFRA-001` | Provider config, quota, and health rails for Gate A-E | `done`, recorded as merged to `dev` |
+| `MAP-BE-004` | Backend service-area enforcement for Gate A/C/E surfaces | `done`, recorded as merged to `dev` |
+| `MAP-BE-006` | Governance lifecycle APIs for Gate B | `done`, recorded as merged to `dev` |
+| `MAP-FE-OPS-001` | Ops real-map surface for Gate C | `done`, recorded as merged to `dev` |
+
+Evidence source rule:
+
+- If a task has a dedicated sidecar packet on another branch, the handoff must cite `origin/<branch>@<sha>:<path>`.
+- If a task does not have a dedicated sidecar packet yet, the machine-truth task handoff in `ai-status` plus branch/SHA plus command logs is the required evidence packet.
 
 ## 3. Required Start Order
 
 1. Review/merge contract and backend authority tasks: `MAP-BE-001`, `MAP-BE-002`, `MAP-BE-003`, `MAP-BE-005`.
-2. Review/merge shared UI primitives: `MAP-UI-001`, `MAP-UI-002`, `MAP-UI-002-HARDEN-001`.
-3. Execute `MAP-UI-002-INTEGRATE-001` so Platform Admin gets a single integrated GeometryEditor with hardening.
+2. Review/merge shared UI and proof prerequisites: `MAP-UI-001`, `MAP-UI-002`, `MAP-UI-002-HARDEN-001`, `MAP-FE-CALL-001`, `MAP-QA-001`.
+3. Execute `MAP-UI-002-INTEGRATE-001` so Platform Admin gets one validated `GeometryEditor` branch with hardening included.
 4. Start/finish remaining surfaces in parallel: `MAP-FE-ADM-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-MOB-DRV-001`.
-5. Implement observability in `MAP-OBS-001` against real events/metrics from backend and surfaces.
-6. Implement final cross-surface E2E in `MAP-QA-002`.
-7. Close `MAP-REL-001` only after Gate A-E evidence is attached and every gap is `closed` or explicitly `external-gated`.
+5. Implement `MAP-OBS-001` only after backend event names and surface reason codes are stable.
+6. Implement `MAP-QA-002` only after the surface tasks expose stable hooks or explicit UAT artifacts.
+7. Close `MAP-REL-001` only after Gate A-E evidence is attached and every remaining gap is `closed`, `failed`, or explicitly `external-gated`.
 
-## 4. Task Kickoff Matrix
+## 4. Remaining Task Board
 
-| Task | Status / blocker class | Production gate(s) | Required sidecar/evidence | Must prove before close |
-| --- | --- | --- | --- | --- |
-| `MAP-BE-001` | `review` / `review-blocked` | Gate A/E provenance. | `MAP-GAP-COVERAGE-SIDECAR`; reviewer notes. | Geo contracts keep legacy compatibility, validate coordinates, and preserve provider/manual/saved/reverse/external provenance in tests. |
-| `MAP-BE-002` | `review` / `review-blocked` | Gate A/E geocode authority. | `MAP-GAP-COVERAGE-SIDECAR`; reviewer notes. | Provider-neutral search/resolve/reverse endpoints, deterministic mock provider, normalized errors, and API/contracts checks. |
-| `MAP-BE-003` | `review` / `review-blocked` | Gate A/C/D/E API seam. | `MAP-GAP-COVERAGE-SIDECAR`; reviewer notes. | API-client exports stable coordinate/snapshot types used by Ops, Driver, and final E2E without ad hoc payload parsing. |
-| `MAP-BE-005` | `review` / `review-blocked` | Gate A/B/C/D/E spatial audit. | `MAP-GAP-COVERAGE-SIDECAR`; reviewer notes. | Order creation persists coordinates, provenance, serviceability snapshot, policy/version IDs, and blocks backend bypass. |
-| `MAP-UI-001` | `review` / `review-blocked` | Gate A/E entry consistency. | `MAP-FE-ENTRY-SIDECAR-GATEE`, `MAP-FE-CALL-001-SIDECAR-GATEA`. | Shared picker emits contract payloads, supports serviceability preview, exposes outage/manual fallback, and passes UI checks. |
-| `MAP-UI-002` | `review` / `review-blocked` | Gate B governance. | `MAP-UI-002-SIDECAR-REVIEW`, `MAP-FE-ADM-001-SIDECAR-GATEB`. | Base geometry editor supports polygon/circle/route editing in a reusable package with tests. |
-| `MAP-UI-002-HARDEN-001` | `review` / `review-blocked` | Gate B governance. | `MAP-UI-002-SIDECAR-REVIEW`, hardening review notes. | Geometry validation covers primitive/range/self-intersection and cannot regress admin publish safety. |
-| `MAP-QA-001` | `review` / `review-blocked` | All gates test foundation. | `MAP-QA-002-SIDECAR-PLAN`. | Mocked-provider harness can deterministically exercise map flows without relying on live provider availability. |
-| `MAP-FE-CALL-001` | `review` / `review-blocked` | Gate A and Gate E. | `MAP-FE-CALL-001-SIDECAR-GATEA`, `MAP-GAP-COVERAGE-SIDECAR`. | Phone agents cannot unknowingly create coordinate-less dispatchable orders; serviceable/blocked/manual-review/provider-degraded paths are visible and persisted. |
-| `MAP-UI-002-INTEGRATE-001` | `backlog` / `dependency-blocked` | Gate B governance. | `MAP-UI-002-SIDECAR-REVIEW`, `MAP-UI-002-HARDEN-001` review notes. | Integrated GeometryEditor exposes primitive + range validation + self-intersection blocking in one branch; admin consumers can import it without half-merge risk. |
-| `MAP-FE-ADM-001` | `todo` / `dependency-blocked` | Gate B governance. | `MAP-FE-ADM-001-SIDECAR-GATEB`, `MAP-GAP-COVERAGE-SIDECAR`. | Admin publish/retire without SQL, evaluator refresh, audit payload, invalid geometry rejection, callcenter blocked-after-publish, Phase 2 ODD/route separation, platform-admin checks. |
-| `MAP-FE-TEN-001` | `backlog` / `dependency-blocked` | Gate E plus entry assertions. | `MAP-FE-ENTRY-SIDECAR-GATEE`, `MAP-GAP-COVERAGE-SIDECAR`. | Tenant saved-address pin confirmation, Tenant Console coordinate/provenance submit, serviceability preview, backend anti-bypass, provider outage/manual-review behavior, package checks. |
-| `MAP-FE-CON-001` | `backlog` / `dependency-blocked` | Gate E plus entry assertions. | `MAP-FE-ENTRY-SIDECAR-GATEE`, `MAP-GAP-COVERAGE-SIDECAR`. | Concierge/partner picker integration, customer-safe reason copy, backend anti-bypass, provider outage/manual-review behavior, affected partner-entry inventory, package checks. |
-| `MAP-MOB-DRV-001` | `backlog` / `dependency-blocked` | Gate D driver navigation. | `MAP-MOB-DRV-001-SIDECAR-UAT`, `MAP-GAP-COVERAGE-SIDECAR`. | Native trip map/pins, coordinate-based navigation, heartbeat coexistence, degraded fallback, route-authority copy, Android/iOS simulator or external-gated mobile UAT. |
-| `MAP-OBS-001` | `todo` / `ready` | Gate A-E observability. | `MAP-OBS-001-SIDECAR-EVIDENCE`, `MAP-GAP-COVERAGE-SIDECAR`. | Metrics/audit/alerts/runbook prove provider outage, address ambiguity, policy denial, coordinate-less attempts, manual override, and geometry mutations are distinguishable. |
-| `MAP-QA-002` | `todo` / `dependency-blocked` | Gate A-E E2E proof. | `MAP-QA-002-SIDECAR-PLAN`, `MAP-GAP-COVERAGE-SIDECAR`, all surface sidecars. | `E2E-MAP-001` through `E2E-MAP-007` produce command logs, screenshots/traces/UAT, branch/SHA, and API/audit assertions. |
-| `MAP-REL-001` | `todo` / `dependency-blocked` | Gate A-E release closeout. | `MAP-REL-001-SIDECAR-GATE-AUDIT`, `MAP-GAP-COVERAGE-SIDECAR`. | Gate A-E pass/fail/external-gated report, rollout/rollback flags, PostGIS/provider prereqs, gap closeout, no unsupported production claim. |
+### 4.1 Review-blocked queue
 
-## 5. Minimum Command Families
+| Task | Owner / reviewer | Status | Class | Current start condition or next action | Production gate | Dependency snapshot |
+| --- | --- | --- | --- | --- | --- | --- |
+| `MAP-BE-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now closes or reopens the geo-contract and provenance packet. | Gate A-E foundation | `MAP-PROD-000 done` |
+| `MAP-BE-002` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now closes or reopens the backend geo gateway packet. | Gate A-E foundation | `MAP-BE-001 review`, `MAP-INFRA-001 done` |
+| `MAP-BE-003` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now closes or reopens the typed API-client packet. | Gate A-E foundation | `MAP-BE-001 review`, `MAP-BE-002 review` |
+| `MAP-BE-005` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now closes or reopens the spatial audit snapshot packet. | Gate A-E foundation | `MAP-BE-004 done` |
+| `MAP-UI-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now closes or reopens the shared `AddressMapPicker` packet. | Gate A/C/E foundation | `MAP-BE-003 review` |
+| `MAP-UI-002` | `Codex2` / `Claude2` | `review` | `review-blocked` | Sidecar review currently says "do not approve yet"; missing root test import, coordinate range validation, and polygon self-intersection validation must be fixed or explicitly reopened. | Gate B foundation | `MAP-BE-006 done` |
+| `MAP-FE-CALL-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now validates Gate A evidence while keeping final Gate A claim blocked on `MAP-QA-002`. | Gate A | `MAP-UI-001 review`, `MAP-BE-004 done`, `MAP-BE-005 review` |
+| `MAP-QA-001` | `Codex` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now closes or reopens the offline harness/fixture packet so `MAP-QA-002` has stable mocked-provider rails. | Gate A-E proof foundation | `MAP-BE-002 review`, `MAP-UI-001 review` |
+| `MAP-UI-002-HARDEN-001` | `Codex2` / `Claude2` | `review` | `review-blocked` | Start condition is already satisfied; reviewer now validates the hardening proof and package-local checks before closeout. | Gate B foundation | `MAP-BE-006 done` |
+
+### 4.2 Dependency-blocked queue
+
+| Task | Owner / reviewer | Status | Class | Current start condition or next action | Production gate | Dependency snapshot |
+| --- | --- | --- | --- | --- | --- | --- |
+| `MAP-UI-002-INTEGRATE-001` | `Codex` / `Claude2` | `backlog` | `dependency-blocked` | Do not start implementation until `MAP-UI-002` and `MAP-UI-002-HARDEN-001` are review-approved or have final commits pinned into one integration branch. | Gate B | `MAP-UI-002 review`, `MAP-UI-002-HARDEN-001 review` |
+| `MAP-FE-ADM-001` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | Do not start implementation until `MAP-BE-006` is consumed together with an integrated `GeometryEditor` branch from `MAP-UI-002-INTEGRATE-001`. | Gate B | `MAP-BE-006 done`, `MAP-UI-002 review`, `MAP-UI-002-HARDEN-001 review`, `MAP-UI-002-INTEGRATE-001 backlog` |
+| `MAP-FE-TEN-001` | `Claude2` / `Codex2` | `backlog` | `dependency-blocked` | Do not start implementation until `MAP-UI-001` and `MAP-BE-005` are accepted or pinned into a stable review branch together with `MAP-BE-004`. | Gate E | `MAP-UI-001 review`, `MAP-BE-004 done`, `MAP-BE-005 review` |
+| `MAP-FE-CON-001` | `Codex2` / `Claude` | `backlog` | `dependency-blocked` | Do not start implementation until `MAP-UI-001` and `MAP-BE-005` are accepted or pinned into a stable review branch together with `MAP-BE-004`. | Gate E | `MAP-UI-001 review`, `MAP-BE-004 done`, `MAP-BE-005 review` |
+| `MAP-MOB-DRV-001` | `Codex2` / `Claude2` | `backlog` | `dependency-blocked` | Do not start implementation until stable trip coordinates and persisted snapshots are available from `MAP-BE-003` and `MAP-BE-005`. | Gate D | `MAP-BE-003 review`, `MAP-BE-005 review` |
+| `MAP-OBS-001` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | Do not start final instrumentation until backend event names and surface reason codes stabilize from `MAP-BE-002` and `MAP-BE-005`; `MAP-BE-006` is already available. | Gate A-E proof | `MAP-BE-002 review`, `MAP-BE-005 review`, `MAP-BE-006 done` |
+| `MAP-QA-002` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | Do not start final cross-surface pass until `MAP-FE-CALL-001`, `MAP-FE-ADM-001`, `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-MOB-DRV-001`, and `MAP-QA-001` expose stable hooks or explicit UAT artifacts. | Gate A-E proof | `MAP-FE-CALL-001 review`, `MAP-FE-OPS-001 done`, `MAP-FE-TEN-001 backlog`, `MAP-FE-CON-001 backlog`, `MAP-FE-ADM-001 todo`, `MAP-MOB-DRV-001 backlog`, `MAP-QA-001 review` |
+| `MAP-REL-001` | `Codex2` / `Codex` | `todo` | `dependency-blocked` | Do not start final gate closeout until `MAP-QA-002` and `MAP-OBS-001` deliver final evidence packets on integrated branches. | Gate A-E final audit | `MAP-QA-002 todo`, `MAP-OBS-001 todo` |
+
+## 5. Task Kickoff Matrix
+
+### 5.1 Foundation and review packets
+
+| Task | Required sidecar or evidence packet | Must-run command family | Handoff expectation |
+| --- | --- | --- | --- |
+| `MAP-BE-001` | Machine-truth handoff in `ai-status` plus branch/SHA and command logs. | `Contracts`, `API` | Preserve legacy `AddressPayload.lat/lng` compatibility and explicitly say downstream Gate A-E proof is still pending. |
+| `MAP-BE-002` | Machine-truth handoff in `ai-status` plus branch/SHA and command logs. | `API`, `Contracts` | Record provider error normalization and backend authority coverage; do not claim surface readiness. |
+| `MAP-BE-003` | Machine-truth handoff in `ai-status` plus branch/SHA and command logs. | `API client`, `API` | Record typed client methods and error-envelope coverage needed by downstream web/mobile surfaces. |
+| `MAP-BE-005` | Machine-truth handoff in `ai-status` plus branch/SHA and command logs. | `Contracts`, `API` | Record persisted spatial snapshots, geometry refs, and legacy/manual-review handling; do not claim Gate A-E pass. |
+| `MAP-UI-001` | Machine-truth handoff in `ai-status` plus branch/SHA and command logs. | `Shared UI` | Record shared picker behavior, provider-outage visibility, and any remaining design-canvas signoff work. |
+| `MAP-UI-002` | `origin/codex/map-ui-002-sidecar-review@9810eb16aa126c7aca0cd595e2449171e90f9eef:support/sidecars/MAP-UI-002/MAP-UI-002-SIDECAR-REVIEW.md` | `Shared UI`, `Platform Admin` | Either fix every sidecar blocker or reopen; do not hand off Platform Admin work against a half-validated `GeometryEditor`. |
+| `MAP-FE-CALL-001` | `origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f:support/sidecars/MAP-FE-CALL-001/MAP-FE-CALL-001-GATE-A-EVIDENCE.md` | `Ops Console`, `Cross-surface E2E` | Record serviceable, blocked, manual-review, degraded, backend-authority, and snapshot evidence; state that final Gate A proof still belongs to `MAP-QA-002`. |
+| `MAP-QA-001` | Machine-truth handoff in `ai-status` plus harness docs and artifact paths from the review branch. | `Cross-surface E2E`, `Shared UI`, `API` | Record fixture inventory, targeted Playwright config, and offline-provider assumptions that `MAP-QA-002` must inherit. |
+| `MAP-UI-002-HARDEN-001` | Machine-truth handoff in `ai-status`, package-local verification logs, and commit `414f27484`. | `Shared UI`, `Platform Admin` | Record range validation, self-intersection blocking, and GeoJSON import guardrails; note that one integrated consumer branch is still pending. |
+
+### 5.2 Implementation-start packets
+
+| Task | Required sidecar or evidence packet | Must-run command family | Handoff expectation |
+| --- | --- | --- | --- |
+| `MAP-UI-002-INTEGRATE-001` | Consume the `MAP-UI-002` review packet above plus the `MAP-UI-002-HARDEN-001` review handoff on one branch. | `Shared UI`, `Platform Admin` | Name the exact upstream commits composed together and prove that admin consumers import one integrated `GeometryEditor` surface. |
+| `MAP-FE-ADM-001` | `origin/codex/map-fe-adm-001-sidecar-gateb@3c460c150:support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-GATE-B-GOVERNANCE.md` | `Platform Admin`, `API client` | Record publish/retire, evaluator refresh, audit payload, invalid geometry rejection, and do-not-claim wording for Gate B until final proof lands. |
+| `MAP-FE-TEN-001` | `origin/codex/map-fe-entry-sidecar-gatee@606cce9c7:support/sidecars/MAP-FE-ENTRY-SURFACES/MAP-FE-ENTRY-GATE-E-CONSISTENCY.md` | `Tenant` | Record saved-address pin confirmation, coordinate/provenance submit, serviceability preview, backend anti-bypass, and degraded/manual-review behavior. |
+| `MAP-FE-CON-001` | `origin/codex/map-fe-entry-sidecar-gatee@606cce9c7:support/sidecars/MAP-FE-ENTRY-SURFACES/MAP-FE-ENTRY-GATE-E-CONSISTENCY.md` | `Concierge/Partner` | Record customer-safe reason copy, backend anti-bypass, degraded/manual-review behavior, and affected partner-entry inventory. |
+| `MAP-MOB-DRV-001` | `origin/codex/map-mob-drv-001-sidecar-uat@0e727a5cf:support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-GATE-D-UAT.md` | `Driver App` | Record native map rendering, coordinate-based navigation, heartbeat coexistence, degraded fallback, and Android/iOS simulator or external-gated UAT artifact paths. |
+
+### 5.3 Proof and release packets
+
+| Task | Required sidecar or evidence packet | Must-run command family | Handoff expectation |
+| --- | --- | --- | --- |
+| `MAP-OBS-001` | `origin/codex/map-obs-001-sidecar-evidence@bb497376fae55e5ae42224b4e71a5be7c871d891:support/sidecars/MAP-OBS-001/MAP-OBS-001-EVIDENCE-CONTRACT.md` | `API`, `Release/provider preflight` | Record event names, metrics, alerts, dashboards, and runbook evidence proving provider outage, address ambiguity, policy denial, coordinate-less attempts, manual override, and geometry mutations are distinguishable. |
+| `MAP-QA-002` | Dependency task `MAP-QA-002-SIDECAR-PLAN` plus `origin/codex/map-gap-coverage-sidecar@37aeb91ad:support/sidecars/MAP-REL-001/MAP-GAP-TO-TASK-COVERAGE-MATRIX.md` and all surface sidecars. | `Cross-surface E2E`, `Ops Console`, `Platform Admin`, `Tenant`, `Concierge/Partner`, `Driver App` | Record branch/SHA, command logs, screenshots/traces/UAT artifacts, and explicit surface substitutions for every `E2E-MAP-001` through `E2E-MAP-007` assertion. |
+| `MAP-REL-001` | Dependency task `MAP-REL-001-SIDECAR-GATE-AUDIT` plus `MAP-GAP-COVERAGE-SIDECAR` at `origin/codex/map-gap-coverage-sidecar@37aeb91ad:support/sidecars/MAP-REL-001/MAP-GAP-TO-TASK-COVERAGE-MATRIX.md` and this kickoff packet. | `Release/provider preflight`, `Cross-surface E2E` | Final report must use only `pass`, `fail`, or `external-gated` for Gate A-E and must not claim production-ready without the underlying `MAP-QA-002` and `MAP-OBS-001` evidence. |
+
+## 6. Command Family Expansion
 
 Each fleet handoff should include exact branch/SHA and command output for its packages.
 
-| Surface | Minimum commands |
+| Command family | Exact minimum commands |
 | --- | --- |
-| Shared UI | `pnpm --filter @drts/ui-web typecheck`, `pnpm --filter @drts/ui-web test`, `pnpm --filter @drts/ui-web lint` |
-| API/API-client | `pnpm --filter @drts/api typecheck`, `pnpm --filter @drts/api test`, `pnpm --filter @drts/api lint`, `pnpm --filter @drts/api-client typecheck` |
-| Callcenter/Ops Console | `pnpm --filter @drts/ops-console-web typecheck`, `pnpm --filter @drts/ops-console-web test`, `pnpm --filter @drts/ops-console-web lint`, plus Gate A E2E evidence |
-| Platform Admin | `pnpm --filter @drts/platform-admin-web typecheck`, `pnpm --filter @drts/platform-admin-web test`, `pnpm --filter @drts/platform-admin-web lint` |
-| Tenant | `pnpm --filter @drts/tenant-portal-web typecheck`, `pnpm --filter @drts/tenant-portal-web test`, `pnpm --filter @drts/tenant-console-web typecheck`, `pnpm --filter @drts/tenant-console-web test` |
-| Concierge/Partner | `pnpm --filter @drts/concierge-portal-web typecheck`, `pnpm --filter @drts/concierge-portal-web test`, `pnpm --filter @drts/partner-booking-web typecheck`, `pnpm --filter @drts/partner-booking-web test` |
-| Driver App | `pnpm --filter @drts/driver-app typecheck`, `pnpm --filter @drts/driver-app test`, `pnpm --filter @drts/driver-app lint`, plus simulator/UAT evidence |
-| Cross-surface E2E | `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts`, targeted configs per sidecar, and `pnpm test:e2e` or documented substitutes |
+| `Contracts` | `pnpm --filter @drts/contracts typecheck`, `pnpm --filter @drts/contracts test` |
+| `API` | `pnpm --filter @drts/api typecheck`, `pnpm --filter @drts/api test`, `pnpm --filter @drts/api lint` |
+| `API client` | `pnpm --filter @drts/api-client typecheck` |
+| `Shared UI` | `pnpm --filter @drts/ui-web typecheck`, `pnpm --filter @drts/ui-web test`, `pnpm --filter @drts/ui-web lint` |
+| `Ops Console` | `pnpm --filter @drts/ops-console-web typecheck`, `pnpm --filter @drts/ops-console-web test`, `pnpm --filter @drts/ops-console-web lint` |
+| `Platform Admin` | `pnpm --filter @drts/platform-admin-web typecheck`, `pnpm --filter @drts/platform-admin-web test`, `pnpm --filter @drts/platform-admin-web lint` |
+| `Tenant` | `pnpm --filter @drts/tenant-portal-web typecheck`, `pnpm --filter @drts/tenant-portal-web test`, `pnpm --filter @drts/tenant-console-web typecheck`, `pnpm --filter @drts/tenant-console-web test` |
+| `Concierge/Partner` | `pnpm --filter @drts/concierge-portal-web typecheck`, `pnpm --filter @drts/concierge-portal-web test`, `pnpm --filter @drts/partner-booking-web typecheck`, `pnpm --filter @drts/partner-booking-web test` |
+| `Driver App` | `pnpm --filter @drts/driver-app typecheck`, `pnpm --filter @drts/driver-app test`, `pnpm --filter @drts/driver-app lint`, plus simulator/UAT evidence |
+| `Cross-surface E2E` | `pnpm exec playwright test -c playwright.map-geofence-harness.config.ts`, targeted configs per sidecar, and `pnpm test:e2e` or documented substitutes |
+| `Release/provider preflight` | `scripts/check-map-provider-config.sh`, rerun the required `Cross-surface E2E` commands, and attach the alert/runbook evidence referenced by `MAP-OBS-001` |
 
 If a package has no `test` or `lint` script, the owner must either add it or document the exact substitute evidence. Missing scripts cannot silently count as pass.
 
-## 6. Required Handoff Template
+## 7. Required Handoff Template
 
 Every owner handoff should include:
 
 - Branch and commit SHA under review.
 - Dependencies used and whether each was merged, cherry-picked, or substituted.
-- Sidecar checklist items satisfied.
+- Required sidecar packet ref. If the packet lives on another branch, cite `origin/<branch>@<sha>:<path>`.
 - Commands run with pass/fail result.
 - E2E or UAT artifact paths.
 - Known external-gated items.
@@ -119,7 +156,7 @@ Suggested handoff text:
 This task satisfies branch-level implementation acceptance for <TASK-ID> on <branch>@<sha>. It does not by itself claim Gate <A-E> production pass. Final production readiness remains gated on MAP-QA-002, MAP-OBS-001, and MAP-REL-001 evidence.
 ```
 
-## 7. Do-Not-Claim Rules
+## 8. Do-Not-Claim Rules
 
 No fleet should claim:
 
@@ -138,16 +175,16 @@ Safe interim wording:
 - "Sidecar evidence contract is satisfied."
 - "Release gate remains pending final E2E/observability/release closeout."
 
-## 8. Parent And QA Handoff
+## 9. Parent And Proof Handoff Notes
 
 Recommended note for `MAP-REL-001`:
 
 ```text
-Use support/sidecars/MAP-REL-001/MAP-FLEET-EXECUTION-KICKOFF.md as the fleet kickoff checklist. It defines start order, dependency blockers, required sidecars, commands, handoff templates, and do-not-claim rules for the remaining map/geofence production tasks.
+Use support/sidecars/MAP-REL-001/MAP-FLEET-EXECUTION-KICKOFF.md as the machine-truth kickoff checklist for all remaining map/geofence tasks, and pair it with MAP-GAP-COVERAGE-SIDECAR on origin/codex/map-gap-coverage-sidecar@37aeb91ad:support/sidecars/MAP-REL-001/MAP-GAP-TO-TASK-COVERAGE-MATRIX.md. This packet does not claim production readiness; it only defines owner/reviewer/status, blocker class, start condition, sidecar, command, and handoff rules.
 ```
 
 Recommended note for `MAP-QA-002`:
 
 ```text
-Use MAP-FLEET-KICKOFF-SIDECAR together with MAP-GAP-COVERAGE-SIDECAR to ensure final E2E only counts evidence from implementation branches with stable hooks, command output, and explicit mobile/UAT artifacts where automation is not available.
+Use MAP-FLEET-KICKOFF-SIDECAR together with MAP-QA-002-SIDECAR-PLAN and MAP-GAP-COVERAGE-SIDECAR so final E2E only counts evidence from implementation branches with stable hooks, command output, branch/SHA, and explicit mobile simulator or UAT artifacts where automation is not available.
 ```
