@@ -896,6 +896,13 @@ Verification:
 
 Goal: decide when the map/geofence stack is safe for production.
 
+Support packet:
+
+- `support/sidecars/MAP-REL-001/MAP-FLEET-EXECUTION-KICKOFF.md`
+  gives the remaining fleets a start-order, dependency, evidence, command, and
+  handoff checklist so backlog/todo map work can move into implementation
+  without weakening the production gates.
+
 Work:
 
 - Own final release checklist and gate evidence.
