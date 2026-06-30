@@ -88,6 +88,521 @@ export const SERVICE_PRODUCT_TYPES = [
 ] as const;
 export type ServiceProductType = (typeof SERVICE_PRODUCT_TYPES)[number];
 
+export type GeoPoint = {
+  lat: number;
+  lng: number;
+};
+
+export const GEO_COORDINATE_SOURCES = [
+  "provider_candidate",
+  "manual_pin",
+  "saved_address",
+  "reverse_geocode",
+  "external_platform",
+  "legacy_text",
+] as const;
+export type GeoCoordinateSource = (typeof GEO_COORDINATE_SOURCES)[number];
+
+export const GEO_GEOCODE_CONFIDENCE_LEVELS = [
+  "exact",
+  "interpolated",
+  "approximate",
+  "manual",
+  "unknown",
+] as const;
+export type GeoGeocodeConfidence =
+  (typeof GEO_GEOCODE_CONFIDENCE_LEVELS)[number];
+
+export const GEO_RESOLUTION_SURFACES = [
+  "api",
+  "callcenter",
+  "ops_console",
+  "platform_admin",
+  "tenant_console",
+  "tenant_portal",
+  "concierge_portal",
+  "partner_booking",
+  "passenger_entry",
+  "driver_app",
+  "unknown",
+] as const;
+export type GeoResolutionSurface = (typeof GEO_RESOLUTION_SURFACES)[number];
+
+export interface GeoCoordinateProvenance {
+  coordinateSource: GeoCoordinateSource;
+  geocodeProvider?: string | null;
+  geocodeConfidence?: GeoGeocodeConfidence | null;
+  providerCandidateId?: string | null;
+  placeId?: string | null;
+  coordinateAccuracyM?: number | null;
+  selectedByActorId?: string | null;
+  selectedAt?: string | null;
+  pinnedByActorId?: string | null;
+  pinnedAt?: string | null;
+  manualOverrideReason?: string | null;
+  surface?: GeoResolutionSurface | null;
+}
+
+export interface GeocodeCandidate {
+  candidateId: string;
+  provider: string;
+  providerCandidateId?: string | null;
+  placeId?: string | null;
+  displayName: string;
+  address: string;
+  normalizedAddress?: string | null;
+  district?: string | null;
+  locality?: string | null;
+  countryCode?: string | null;
+  location?: GeoPoint | null;
+  confidence: GeoGeocodeConfidence;
+  accuracyM?: number | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SearchGeoQuery {
+  q: string;
+  near?: GeoPoint | null;
+  locale?: string;
+  limit?: number;
+  surface?: GeoResolutionSurface;
+  requestedByActorId?: string | null;
+}
+
+export interface ResolveAddressCommand {
+  candidateId?: string | null;
+  providerCandidateId?: string | null;
+  placeId?: string | null;
+  addressText: string;
+  selectedPoint?: GeoPoint | null;
+  selectedByActorId?: string | null;
+  surface: GeoResolutionSurface;
+  manualOverrideReason?: string | null;
+}
+
+export interface ReverseGeocodeCommand {
+  location: GeoPoint;
+  locale?: string;
+  surface: GeoResolutionSurface;
+  requestedByActorId?: string | null;
+}
+
+export interface GeoSearchResponse {
+  candidates: GeocodeCandidate[];
+  provider: string;
+  generatedAt: string;
+  degraded?: boolean;
+  reasonCode?: string | null;
+}
+
+export interface GeoResolveResponse {
+  address: ResolvedAddressPayload;
+  candidate?: GeocodeCandidate | null;
+  provider: string;
+  resolvedAt: string;
+}
+
+export interface GeoReverseResponse {
+  address: ResolvedAddressPayload;
+  provider: string;
+  resolvedAt: string;
+}
+
+export const GEO_PROVIDER_MODES = ["mock", "external", "disabled"] as const;
+export type GeoProviderMode = (typeof GEO_PROVIDER_MODES)[number];
+
+export const GEO_PROVIDER_OPERATIONAL_STATUSES = [
+  "healthy",
+  "degraded",
+  "unhealthy",
+] as const;
+export type GeoProviderOperationalStatus =
+  (typeof GEO_PROVIDER_OPERATIONAL_STATUSES)[number];
+
+export const GEO_PROVIDER_HEALTH_CHECK_STATUSES = [
+  "pass",
+  "warn",
+  "fail",
+] as const;
+export type GeoProviderHealthCheckStatus =
+  (typeof GEO_PROVIDER_HEALTH_CHECK_STATUSES)[number];
+
+export interface GeoProviderHealthCheck {
+  name: string;
+  status: GeoProviderHealthCheckStatus;
+  message: string;
+}
+
+export interface GeoProviderHealthResponse {
+  provider: string;
+  mode: GeoProviderMode;
+  status: GeoProviderOperationalStatus;
+  environment: string;
+  generatedAt: string;
+  failClosed: boolean;
+  mockAllowed: boolean;
+  requiredSecretNames: string[];
+  missingSecretNames: string[];
+  quota: {
+    dailyLimit: number | null;
+    minuteLimit: number | null;
+    warningThresholdPercent: number;
+    criticalThresholdPercent: number;
+    policy: "mock_unlimited" | "provider_enforced";
+  };
+  keyRestrictions: {
+    browserAllowedOrigins: string[];
+    mobileBundleIds: string[];
+    mobilePackageNames: string[];
+    serverKeyConfigured: boolean;
+    browserKeyConfigured: boolean;
+  };
+  checks: GeoProviderHealthCheck[];
+}
+
+export function isValidLatitude(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= -90 &&
+    value <= 90
+  );
+}
+
+export function isValidLongitude(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= -180 &&
+    value <= 180
+  );
+}
+
+export function isValidGeoPoint(value: unknown): value is GeoPoint {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<GeoPoint>;
+  return isValidLatitude(candidate.lat) && isValidLongitude(candidate.lng);
+}
+
+export function hasAddressCoordinates(
+  value: Pick<AddressPayload, "lat" | "lng"> | null | undefined,
+): boolean {
+  return isValidLatitude(value?.lat) && isValidLongitude(value?.lng);
+}
+
+export function hasAddressCoordinateProvenance(
+  value: AddressPayload | null | undefined,
+): boolean {
+  if (!hasAddressCoordinates(value)) {
+    return false;
+  }
+  return Boolean(
+    value?.coordinateSource ||
+    value?.geocodeProvider ||
+    value?.placeId ||
+    value?.pinnedByActorId ||
+    value?.pinnedAt,
+  );
+}
+
+export type GeoPolygon = {
+  type: "polygon";
+  coordinates: GeoPoint[];
+};
+
+export type GeoCircle = {
+  type: "circle";
+  center: GeoPoint;
+  radiusMeters: number;
+};
+
+export type ServiceAreaGeometry = GeoPolygon | GeoCircle;
+
+export const SERVICE_AREA_RECORD_STATUSES = [
+  "draft",
+  "review",
+  "active",
+  "retired",
+] as const;
+export type ServiceAreaRecordStatus =
+  (typeof SERVICE_AREA_RECORD_STATUSES)[number];
+
+export interface ServiceAreaBoundaryRecord {
+  serviceAreaId: string;
+  areaCode: string;
+  displayName: string;
+  status: ServiceAreaRecordStatus;
+  geometry: ServiceAreaGeometry;
+  serviceProductTypes: ServiceProductType[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  version: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const STOP_POLICY_DIRECTIONS = ["pickup", "dropoff", "both"] as const;
+export type StopPolicyDirection = (typeof STOP_POLICY_DIRECTIONS)[number];
+
+export const STOP_POLICY_EFFECTS = ["allow", "deny", "manual_review"] as const;
+export type StopPolicyEffect = (typeof STOP_POLICY_EFFECTS)[number];
+
+export interface StopPolicyRecord {
+  stopPolicyId: string;
+  policyCode: string;
+  displayName: string;
+  status: ServiceAreaRecordStatus;
+  direction: StopPolicyDirection;
+  effect: StopPolicyEffect;
+  geometry: ServiceAreaGeometry;
+  serviceAreaCodes: string[];
+  serviceProductTypes: ServiceProductType[];
+  reasonCode: string;
+  reasonMessage: string;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  version: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ServiceAreaEvaluationStopKind = "pickup" | "dropoff";
+
+export interface ServiceAreaEvaluationStop {
+  kind: ServiceAreaEvaluationStopKind;
+  location: GeoPoint;
+}
+
+export interface EvaluateServiceAreaCommand {
+  serviceProductType: ServiceProductType;
+  pickup: GeoPoint;
+  dropoff?: GeoPoint | null;
+  requestedAt?: string;
+}
+
+export const SERVICE_AREA_EVALUATION_DECISIONS = [
+  "serviceable",
+  "manual_review",
+  "not_serviceable",
+] as const;
+export type ServiceAreaEvaluationDecision =
+  (typeof SERVICE_AREA_EVALUATION_DECISIONS)[number];
+
+export interface ServiceAreaStopEvaluation {
+  kind: ServiceAreaEvaluationStopKind;
+  location: GeoPoint;
+  serviceAreaCodes: string[];
+  policyCodes: string[];
+  geometryVersionRefs: string[];
+  decision: ServiceAreaEvaluationDecision;
+  reasonCodes: string[];
+  reasonMessages: string[];
+}
+
+export interface ServiceAreaEvaluationResult {
+  decision: ServiceAreaEvaluationDecision;
+  serviceProductType: ServiceProductType;
+  evaluatedAt: string;
+  stops: ServiceAreaStopEvaluation[];
+  serviceAreaCodes: string[];
+  geometryVersionRefs: string[];
+  reasonCodes: string[];
+  reasonMessages: string[];
+}
+
+export interface ServiceAreaDefinitionsResponse {
+  serviceAreas: ServiceAreaBoundaryRecord[];
+  stopPolicies: StopPolicyRecord[];
+  generatedAt: string;
+}
+
+export type ServiceAreaGeoJsonGeometry = {
+  type: "Polygon";
+  coordinates: number[][][];
+};
+
+export type ServiceAreaGeoJsonFeatureProperties =
+  | {
+      recordKind: "service_area";
+      serviceAreaId: string;
+      areaCode: string;
+      displayName: string;
+      status: ServiceAreaRecordStatus;
+      sourceGeometry: ServiceAreaGeometry;
+      serviceProductTypes: ServiceProductType[];
+      effectiveFrom: string;
+      effectiveUntil: string | null;
+      version: number;
+      geometryVersionRef: string;
+      metadata?: Record<string, unknown>;
+    }
+  | {
+      recordKind: "stop_policy";
+      stopPolicyId: string;
+      policyCode: string;
+      displayName: string;
+      status: ServiceAreaRecordStatus;
+      direction: StopPolicyDirection;
+      effect: StopPolicyEffect;
+      sourceGeometry: ServiceAreaGeometry;
+      serviceAreaCodes: string[];
+      serviceProductTypes: ServiceProductType[];
+      reasonCode: string;
+      reasonMessage: string;
+      effectiveFrom: string;
+      effectiveUntil: string | null;
+      version: number;
+      geometryVersionRef: string;
+      metadata?: Record<string, unknown>;
+    };
+
+export interface ServiceAreaGeoJsonFeature {
+  type: "Feature";
+  id: string;
+  geometry: ServiceAreaGeoJsonGeometry;
+  properties: ServiceAreaGeoJsonFeatureProperties;
+}
+
+export interface ServiceAreaGeoJsonResponse {
+  type: "FeatureCollection";
+  features: ServiceAreaGeoJsonFeature[];
+  generatedAt: string;
+}
+
+export interface CreateServiceAreaBoundaryCommand {
+  areaCode: string;
+  displayName: string;
+  geometry: ServiceAreaGeometry;
+  serviceProductTypes: ServiceProductType[];
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateServiceAreaBoundaryCommand {
+  displayName?: string;
+  geometry?: ServiceAreaGeometry;
+  serviceProductTypes?: ServiceProductType[];
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PublishServiceAreaBoundaryCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface RetireServiceAreaBoundaryCommand {
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface CreateStopPolicyCommand {
+  policyCode: string;
+  displayName: string;
+  direction: StopPolicyDirection;
+  effect: StopPolicyEffect;
+  geometry: ServiceAreaGeometry;
+  serviceAreaCodes: string[];
+  serviceProductTypes: ServiceProductType[];
+  reasonCode: string;
+  reasonMessage: string;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateStopPolicyCommand {
+  displayName?: string;
+  direction?: StopPolicyDirection;
+  effect?: StopPolicyEffect;
+  geometry?: ServiceAreaGeometry;
+  serviceAreaCodes?: string[];
+  serviceProductTypes?: ServiceProductType[];
+  reasonCode?: string;
+  reasonMessage?: string;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PublishStopPolicyCommand {
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface RetireStopPolicyCommand {
+  effectiveUntil?: string | null;
+  reason?: string | null;
+}
+
+export interface ServiceAreaAdminMutationResponse {
+  serviceArea?: ServiceAreaBoundaryRecord;
+  stopPolicy?: StopPolicyRecord;
+  auditId: string | null;
+  generatedAt: string;
+}
+
+export const OWNED_ORDER_SPATIAL_AUDIT_REASONS = [
+  "booking_creation",
+  "legacy_backfill",
+] as const;
+export type OwnedOrderSpatialAuditReason =
+  (typeof OWNED_ORDER_SPATIAL_AUDIT_REASONS)[number];
+
+export const OWNED_ORDER_SPATIAL_AUDIT_DECISIONS = [
+  "serviceable",
+  "manual_review",
+  "not_serviceable",
+  "not_evaluated",
+] as const;
+export type OwnedOrderSpatialAuditDecision =
+  (typeof OWNED_ORDER_SPATIAL_AUDIT_DECISIONS)[number];
+
+export interface OwnedOrderSpatialAuditStopSnapshot {
+  kind: ServiceAreaEvaluationStopKind;
+  addressText: string;
+  location: GeoPoint | null;
+  coordinateProvenance: GeoCoordinateProvenance | null;
+  provenanceComplete: boolean;
+  missingItems: string[];
+}
+
+export interface OwnedOrderSpatialAuditEventRef {
+  auditId: string;
+  actionName: string;
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  createdAt: string;
+}
+
+export interface OwnedOrderSpatialAuditSnapshot {
+  snapshotId: string;
+  snapshotVersion: 1;
+  capturedAt: string;
+  capturedReason: OwnedOrderSpatialAuditReason;
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  surface: GeoResolutionSurface;
+  serviceProductType: ServiceProductType | null;
+  decision: OwnedOrderSpatialAuditDecision;
+  stops: OwnedOrderSpatialAuditStopSnapshot[];
+  serviceAreaEvaluation: ServiceAreaEvaluationResult | null;
+  serviceAreaCodes: string[];
+  geometryVersionRefs: string[];
+  reasonCodes: string[];
+  reasonMessages: string[];
+  missingItems: string[];
+  auditEvents: OwnedOrderSpatialAuditEventRef[];
+}
+
 export const VEHICLE_LICENSE_TYPES = [
   "taxi",
   "multi_purpose_taxi",
@@ -2033,6 +2548,27 @@ export interface AddressPayload {
   sensitive?: boolean;
   lat?: number | null;
   lng?: number | null;
+  placeId?: string | null;
+  geocodeProvider?: string | null;
+  geocodeConfidence?: GeoGeocodeConfidence | null;
+  coordinateSource?: GeoCoordinateSource | null;
+  coordinateAccuracyM?: number | null;
+  providerCandidateId?: string | null;
+  selectedByActorId?: string | null;
+  selectedAt?: string | null;
+  pinnedByActorId?: string | null;
+  pinnedAt?: string | null;
+  manualOverrideReason?: string | null;
+  surface?: GeoResolutionSurface | null;
+  coordinateProvenance?: GeoCoordinateProvenance | null;
+}
+
+export interface ResolvedAddressPayload extends AddressPayload {
+  lat: number;
+  lng: number;
+  coordinateSource: GeoCoordinateSource;
+  geocodeConfidence: GeoGeocodeConfidence;
+  resolvedAt: string;
 }
 
 export interface PassengerProfile {
