@@ -1,12 +1,12 @@
 # MAP-PROD-000 Acceptance Packet & Dependency Map
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `MAP-PROD-000` - Map provider and rollout decision  
-**Sidecar Owner:** `Codex`  
-**Assigned Reviewer:** `Codex2`  
-**Parent Owner / Reviewer (snapshot):** `Codex2` / `Codex`  
-**Generated:** `2026-06-30T15:26:20Z` (UTC)  
-**Machine-Truth Snapshot Scope:** Owner/reviewer/status bullets in this packet are capture-time snapshots collected between `2026-06-30T15:24:34Z` and `2026-06-30T15:26:20Z`. Live task state may advance after this file is committed or handed off; re-run `scripts/ai-status.sh show ...` for current machine truth.
+- **Sidecar Kind:** `acceptance_packet`
+- **Parent Task:** `MAP-PROD-000` - Map provider and rollout decision
+- **Sidecar Owner:** `Codex`
+- **Assigned Reviewer:** `Codex2`
+- **Parent Owner / Reviewer (snapshot):** `Codex2` / `Codex`
+- **Generated:** `2026-06-30T15:26:20Z` (UTC)
+- **Machine-Truth Snapshot Scope:** Owner/reviewer/status bullets in this packet are capture-time snapshots collected between `2026-06-30T15:24:34Z` and `2026-06-30T15:26:20Z`. Live task state may advance after this file is committed or handed off; re-run `scripts/ai-status.sh show ...` for current machine truth.
 
 > **Refresh reason.** This packet supersedes an earlier draft that treated mutable task status as a live assertion. This refresh makes task-state claims explicitly historical and records the split between the parent review commit and this isolated sidecar branch snapshot.
 
@@ -196,32 +196,62 @@ There are no formally recorded upstream blockers in machine truth.
 
 ### 4.2 Practical dependencies
 
-| Dep ID | Anchor | Why It Matters |
-| ------ | ------ | -------------- |
-| D-P-1 | `AI_NAME=Codex scripts/ai-status.sh show MAP-PROD-000-SIDECAR-ACCEPTANCE` | Defines the latest sidecar owner/reviewer pairing, artifact path, and re-handoff requirement. |
-| D-P-2 | `AI_NAME=Codex scripts/ai-status.sh show MAP-PROD-000` | Defines the latest parent acceptance bullets, review status, and cited review commit. |
-| D-P-3 | `git show --name-only --format=fuller --stat 0a2a845a2 -- docs/03-runbooks/map-geofence-production-execution-packet-20260630.md docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md apps/api/tests/unit/feature-flags.service.test.ts apps/api/src/modules/feature-flags` | Confirms the parent review payload exists and names the exact files added on the parent branch. |
-| D-P-4 | `git ls-files docs/03-runbooks/map-geofence-production-execution-packet-20260630.md docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md` | Confirms those parent review docs are absent from this isolated sidecar branch snapshot. |
-| D-P-5 | `apps/api/src/common/auth/feature-gate.guard.ts:24-57` | Existing backend enforcement plane for named rollout flags. |
-| D-P-6 | `apps/api/src/modules/feature-flags/feature-flags.controller.ts:20-87` | Existing admin API for platform defaults, tenant overrides, and enabled-state checks. |
-| D-P-7 | `apps/platform-admin-web/app/feature-flags/page.tsx:416-518,563-589,680-800` | Existing operator-facing registry UI for rollout governance. |
-| D-P-8 | `apps/api/tests/unit/feature-gate.guard.test.ts:103-158,160-203,206-260` | Existing test pattern for named feature-gated routes and tenant scoping. |
-| D-P-9 | `git grep -n -E 'geoProviderEnabled|addressMapPickerEnabled|serviceAreaGateEnforced|opsRealMapEnabled|platformGeometryEditorEnabled|driverTripMapEnabled' -- apps packages support docs` | Confirms the six map/geofence-specific keys are absent from this sidecar branch snapshot outside support text. |
-| D-P-10 | `git grep -n -E 'mapbox|Google Maps|Leaflet|OpenStreetMap|react-native-maps|maps.googleapis|google-map-react' -- apps packages support docs` | Confirms no current app/package provider lock-in on this sidecar branch snapshot and surfaces the historical support-artifact precedent. |
-| D-P-11 | `support/sidecars/OPX-DP-004/OPX-DP-004-SIDECAR-ACCEPTANCE.md:43-49` | Historical Mapbox precedent that the parent owner should classify explicitly rather than inherit silently. |
+- `D-P-1`
+  Anchor: `AI_NAME=Codex scripts/ai-status.sh show MAP-PROD-000-SIDECAR-ACCEPTANCE`
+  Why it matters: Defines the latest sidecar owner/reviewer pairing, artifact path, and re-handoff requirement.
+
+- `D-P-2`
+  Anchor: `AI_NAME=Codex scripts/ai-status.sh show MAP-PROD-000`
+  Why it matters: Defines the latest parent acceptance bullets, review status, and cited review commit.
+
+- `D-P-3`
+  Anchor: `git show --name-only --format=fuller --stat 0a2a845a2 -- docs/03-runbooks/map-geofence-production-execution-packet-20260630.md docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md apps/api/tests/unit/feature-flags.service.test.ts apps/api/src/modules/feature-flags`
+  Why it matters: Confirms the parent review payload exists and names the exact files added on the parent branch.
+
+- `D-P-4`
+  Anchor: `git ls-files docs/03-runbooks/map-geofence-production-execution-packet-20260630.md docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
+  Why it matters: Confirms those parent review docs are absent from this isolated sidecar branch snapshot.
+
+- `D-P-5`
+  Anchor: `apps/api/src/common/auth/feature-gate.guard.ts:24-57`
+  Why it matters: Existing backend enforcement plane for named rollout flags.
+
+- `D-P-6`
+  Anchor: `apps/api/src/modules/feature-flags/feature-flags.controller.ts:20-87`
+  Why it matters: Existing admin API for platform defaults, tenant overrides, and enabled-state checks.
+
+- `D-P-7`
+  Anchor: `apps/platform-admin-web/app/feature-flags/page.tsx:416-518,563-589,680-800`
+  Why it matters: Existing operator-facing registry UI for rollout governance.
+
+- `D-P-8`
+  Anchor: `apps/api/tests/unit/feature-gate.guard.test.ts:103-158,160-203,206-260`
+  Why it matters: Existing test pattern for named feature-gated routes and tenant scoping.
+
+- `D-P-9`
+  Anchor: `git grep -n -E 'geoProviderEnabled|addressMapPickerEnabled|serviceAreaGateEnforced|opsRealMapEnabled|platformGeometryEditorEnabled|driverTripMapEnabled' -- apps packages support docs`
+  Why it matters: Confirms the six map/geofence-specific keys are absent from this sidecar branch snapshot outside support text.
+
+- `D-P-10`
+  Anchor: `git grep -n -E 'mapbox|Google Maps|Leaflet|OpenStreetMap|react-native-maps|maps.googleapis|google-map-react' -- apps packages support docs`
+  Why it matters: Confirms no current app/package provider lock-in on this sidecar branch snapshot and surfaces the historical support-artifact precedent.
+
+- `D-P-11`
+  Anchor: `support/sidecars/OPX-DP-004/OPX-DP-004-SIDECAR-ACCEPTANCE.md:43-49`
+  Why it matters: Historical Mapbox precedent that the parent owner should classify explicitly rather than inherit silently.
 
 ### 4.3 Downstream consumer map
 
-| Consumer / Gate | Current status | Why It Matters |
-| --------------- | -------------- | -------------- |
-| Parent owner `Codex2` | `review` | Owns the canonical provider decision and rollout-policy docs cited in commit `0a2a845a2`. |
-| Parent reviewer `Codex` | `review` | Reviews the canonical parent packet on the parent branch, not in this sidecar worktree. |
-| Sidecar reviewer `Codex2` | `pending after refreshed handoff` | Reviews whether this packet accurately maps the machine-truth snapshot and branch split without mutating canonical files. |
-| `Gate A: Callcenter safe to dispatch` | `carried by parent review` | Needs coordinate-less booking and service-area posture from the parent review docs. |
-| `Gate B: Governance safe to publish` | `carried by parent review` | Needs provider/key/quota/retention and rollout-governance posture from the parent review docs. |
-| `Gate C: Ops safe to operate` | `carried by parent review` | Needs real-map vs degraded ops posture and geometry/service-area handling from the parent review docs. |
-| `Gate D: Driver safe to navigate` | `carried by parent review` | Needs driver-facing map/navigation strategy and degraded behavior from the parent review docs. |
-| `Gate E: Degraded safe` | `carried by parent review` | Needs explicit fallback behavior when coordinates, provider access, or rendering are unavailable. |
+| Consumer / Gate                       | Current status                    | Why It Matters                                                                                                            |
+| ------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Parent owner `Codex2`                 | `review`                          | Owns the canonical provider decision and rollout-policy docs cited in commit `0a2a845a2`.                                 |
+| Parent reviewer `Codex`               | `review`                          | Reviews the canonical parent packet on the parent branch, not in this sidecar worktree.                                   |
+| Sidecar reviewer `Codex2`             | `pending after refreshed handoff` | Reviews whether this packet accurately maps the machine-truth snapshot and branch split without mutating canonical files. |
+| `Gate A: Callcenter safe to dispatch` | `carried by parent review`        | Needs coordinate-less booking and service-area posture from the parent review docs.                                       |
+| `Gate B: Governance safe to publish`  | `carried by parent review`        | Needs provider/key/quota/retention and rollout-governance posture from the parent review docs.                            |
+| `Gate C: Ops safe to operate`         | `carried by parent review`        | Needs real-map vs degraded ops posture and geometry/service-area handling from the parent review docs.                    |
+| `Gate D: Driver safe to navigate`     | `carried by parent review`        | Needs driver-facing map/navigation strategy and degraded behavior from the parent review docs.                            |
+| `Gate E: Degraded safe`               | `carried by parent review`        | Needs explicit fallback behavior when coordinates, provider access, or rendering are unavailable.                         |
 
 ## 5) Reviewer Handoff (`Codex2`)
 
