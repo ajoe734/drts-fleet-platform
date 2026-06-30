@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { installMockMapTileRoutes } from "./map-geofence-harness";
+
 const baseUrl =
   process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
   process.env.OPS_CONSOLE_BASE_URL ??
@@ -292,6 +294,69 @@ test.describe("ops console parity smoke", () => {
         path: `test-results/ops-console-parity/${spec.screenshot}`,
         fullPage: true,
       });
+    }
+  });
+
+  test("dispatch map board exposes governed spatial readiness hooks", async ({
+    page,
+  }) => {
+    await installMockMapTileRoutes(page);
+    await page.goto(`${baseUrl}/dispatch`, { waitUntil: "domcontentloaded" });
+
+    await expect(page).not.toHaveURL(/404/);
+    await expect(page.locator("body")).not.toContainText(
+      /404|Application error/i,
+    );
+    await assertShell(page);
+
+    const board = page.locator(".spatial-board").first();
+    await expect(board).toBeVisible({ timeout: 45_000 });
+    await expect(board).toHaveAttribute(
+      "data-ops-map-provider-status",
+      /^(ready|degraded_projection|no_spatial_data)$/,
+    );
+    await expect(board).toHaveAttribute(
+      "data-ops-map-fallback-reason",
+      /^(none|missing_coordinates|no_visible_points)$/,
+    );
+    await expect(board).toHaveAttribute("data-ops-map-service-areas", /.*/);
+    await expect(board).toHaveAttribute("data-ops-map-policy-codes", /.*/);
+    await expect(board.locator(".spatial-map-status")).toBeVisible();
+    await expect(
+      board.locator("[data-ops-map-service-area-filter]"),
+    ).toHaveAttribute("data-ops-map-service-area-filter", /.*/);
+
+    const providerStatus = await board.getAttribute(
+      "data-ops-map-provider-status",
+    );
+    const mapPointCount = await board
+      .locator("[data-ops-map-point-kind]")
+      .count();
+    if (providerStatus !== "no_spatial_data") {
+      expect(mapPointCount).toBeGreaterThan(0);
+      await expect(board.locator("[data-ops-map-render-mode]")).toHaveAttribute(
+        "data-ops-map-render-mode",
+        "tile",
+      );
+      await expect(
+        board.locator("[data-ops-map-tile-template]"),
+      ).toHaveAttribute("data-ops-map-tile-template", "configured");
+      await expect(board.locator("[data-ops-map-zoom]")).toHaveAttribute(
+        "data-ops-map-zoom",
+        /^\d+$/,
+      );
+      await expect(
+        board.locator('img[src*="/mock-map-tiles/"]').first(),
+      ).toBeVisible();
+      await expect(board.getByText(/Zoom in|放大/).first()).toBeVisible();
+    }
+    if (mapPointCount > 0) {
+      const firstPoint = board.locator("[data-ops-map-point-kind]").first();
+      await expect(firstPoint).toHaveAttribute(
+        "data-ops-map-point-kind",
+        /^(pickup|dropoff|candidate)$/,
+      );
+      await expect(firstPoint).toHaveAttribute("data-ops-map-order-id", /.*/);
     }
   });
 });
