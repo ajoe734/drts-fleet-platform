@@ -156,6 +156,31 @@ export type {
   WorkflowSplitLayoutProps,
 } from "./workflow-primitives";
 export {
+  GeometryEditor,
+  GeometryPreviewSurface,
+  buildGeometryEditorSnapshot,
+  createEmptyGeometryDraft,
+  geometryDraftToGeoJson,
+  parseGeometryDraftGeoJson,
+  validateGeometryDraft,
+} from "./geometry-editor";
+export type {
+  GeometryBounds,
+  GeometryCircleDraft,
+  GeometryDraft,
+  GeometryDraftKind,
+  GeometryEditorBackendPayloads,
+  GeometryEditorLabels,
+  GeometryEditorProps,
+  GeometryEditorSnapshot,
+  GeometryPolygonDraft,
+  GeometryPreviewItem,
+  GeometryPreviewSurfaceProps,
+  GeometryReviewDiff,
+  GeometryRouteCorridorDraft,
+  GeometryValidationResult,
+} from "./geometry-editor";
+export {
   getPartnerBookingArtboardAnchor,
   getPartnerBookingStateHref,
   getPartnerBookingStateScreenMeta,

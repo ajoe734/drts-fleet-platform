@@ -1,0 +1,105 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import {
+  GeometryPreviewSurface,
+  buildGeometryEditorSnapshot,
+  buildCanvasTheme,
+  createEmptyGeometryDraft,
+  geometryDraftToGeoJson,
+  parseGeometryDraftGeoJson,
+  validateGeometryDraft,
+  type GeometryDraft,
+} from "../../packages/ui-web/src/index";
+
+describe("ui-web geometry editor", () => {
+  it("creates backend-ready polygon payloads", () => {
+    const draft: GeometryDraft = {
+      kind: "polygon",
+      points: [
+        { lat: 25.033, lng: 121.5654 },
+        { lat: 25.041, lng: 121.578 },
+        { lat: 25.024, lng: 121.584 },
+      ],
+    };
+
+    const snapshot = buildGeometryEditorSnapshot(draft);
+
+    expect(snapshot.canSubmit).toBe(true);
+    expect(snapshot.backendPayloads.serviceAreaGeometry).toEqual({
+      type: "polygon",
+      coordinates: draft.points,
+    });
+    expect(snapshot.backendPayloads.sandboxAreaGeometry).toEqual({
+      type: "MultiPolygon",
+      coordinates: [
+        [[
+          [121.5654, 25.033],
+          [121.578, 25.041],
+          [121.584, 25.024],
+          [121.5654, 25.033],
+        ]],
+      ],
+    });
+  });
+
+  it("blocks invalid geometry from submit-ready state", () => {
+    const invalid = validateGeometryDraft({
+      kind: "routeCorridor",
+      points: [{ lat: 25.033, lng: 121.5654 }],
+      radiusMeters: 0,
+    });
+
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors).toEqual([
+      "Route corridor requires at least 2 points.",
+      "Route corridor radius must be greater than 0.",
+    ]);
+  });
+
+  it("round-trips GeoJSON import/export for route corridors", () => {
+    const draft: GeometryDraft = {
+      kind: "routeCorridor",
+      points: [
+        { lat: 25.033, lng: 121.5654 },
+        { lat: 25.039, lng: 121.5771 },
+      ],
+      radiusMeters: 180,
+    };
+
+    const parsed = parseGeometryDraftGeoJson(geometryDraftToGeoJson(draft));
+
+    expect(parsed).toEqual(draft);
+  });
+
+  it("exposes review diff hooks for edited geometry", () => {
+    const baseline: GeometryDraft = {
+      kind: "circle",
+      center: { lat: 25.033, lng: 121.5654 },
+      radiusMeters: 200,
+    };
+    const edited: GeometryDraft = {
+      kind: "circle",
+      center: { lat: 25.033, lng: 121.5654 },
+      radiusMeters: 260,
+    };
+
+    const snapshot = buildGeometryEditorSnapshot(edited, baseline);
+
+    expect(snapshot.review.changed).toBe(true);
+    expect(snapshot.review.summary).toContain("Circle radius 260 m.");
+    expect(snapshot.review.beforeGeoJson).not.toBeNull();
+  });
+
+  it("renders degraded preview state when there is no geometry", () => {
+    const markup = renderToStaticMarkup(
+      createElement(GeometryPreviewSurface, {
+        theme: buildCanvasTheme({ surface: "platform", density: "compact" }),
+        items: [{ id: "empty", draft: createEmptyGeometryDraft("polygon") }],
+        emptyLabel: "No geometry loaded",
+      }),
+    );
+
+    expect(markup).toContain("No geometry loaded");
+  });
+});

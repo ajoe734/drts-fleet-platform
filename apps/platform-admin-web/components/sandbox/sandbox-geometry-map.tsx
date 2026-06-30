@@ -5,10 +5,11 @@ import type {
 } from "@drts/contracts";
 import {
   CanvasIcon,
+  GeometryPreviewSurface,
   type CanvasIconName,
   type CanvasTheme,
+  type GeometryPreviewItem,
 } from "@drts/ui-web";
-import { projectSandboxGeometry } from "@/lib/sandbox-governance";
 
 /**
  * Operating-area / route editor surface (canvas PSB_AreasEditor). The tool rail
@@ -33,7 +34,29 @@ export function SandboxGeometryMap({
   emptyLabel,
   tools,
 }: SandboxGeometryMapProps) {
-  const projected = projectSandboxGeometry(areas, routes);
+  const previewItems: GeometryPreviewItem[] = [
+    ...areas.flatMap((area, areaIndex) =>
+      area.geometry.coordinates.map((polygon, polygonIndex) => ({
+        id: `area-${areaIndex}-${polygonIndex}`,
+        tone: "accent" as const,
+        draft: {
+          kind: "polygon" as const,
+          points: (polygon[0] ?? []).slice(0, -1).map(([lng, lat]) => ({ lat, lng })),
+        },
+      })),
+    ),
+    ...routes.flatMap((route, routeIndex) =>
+      route.geometry.coordinates.map((line, lineIndex) => ({
+        id: `route-${routeIndex}-${lineIndex}`,
+        tone: "accent" as const,
+        draft: {
+          kind: "routeCorridor" as const,
+          points: line.map(([lng, lat]) => ({ lat, lng })),
+          radiusMeters: 120,
+        },
+      })),
+    ),
+  ];
 
   const toolRailStyle: CSSProperties = {
     display: "flex",
@@ -79,84 +102,12 @@ export function SandboxGeometryMap({
         })}
       </div>
       <div style={mapBodyStyle}>
-        {projected ? (
-          <svg
-            viewBox={`0 0 ${projected.width} ${projected.height}`}
-            preserveAspectRatio="xMidYMid meet"
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-          >
-            {projected.polygons.map((points, index) => (
-              <polygon
-                key={`poly-${index}`}
-                points={points}
-                fill={`${theme.accent}22`}
-                stroke={theme.accent}
-                strokeWidth={2}
-                strokeDasharray="6 4"
-              />
-            ))}
-            {projected.polylines.map((points, index) => (
-              <polyline
-                key={`line-${index}`}
-                points={points}
-                fill="none"
-                stroke={theme.accentHi}
-                strokeWidth={3}
-              />
-            ))}
-            {projected.endpoints.map((point, index) => (
-              <circle
-                key={`endpoint-${index}`}
-                cx={point.x}
-                cy={point.y}
-                r={6}
-                fill={theme.accent}
-                stroke={theme.surface}
-                strokeWidth={2}
-              />
-            ))}
-            {projected.vertices.map((point, index) => (
-              <rect
-                key={`vertex-${index}`}
-                x={point.x - 4}
-                y={point.y - 4}
-                width={8}
-                height={8}
-                fill={theme.surface}
-                stroke={theme.accent}
-                strokeWidth={2}
-              />
-            ))}
-          </svg>
-        ) : (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: theme.textMuted,
-              fontSize: 12.5,
-            }}
-          >
-            {emptyLabel}
-          </div>
-        )}
-        <div
-          style={{
-            position: "absolute",
-            bottom: 12,
-            left: 12,
-            fontSize: 10.5,
-            color: theme.textMuted,
-            background: theme.surface,
-            padding: "4px 9px",
-            borderRadius: 6,
-          }}
-        >
-          {caption}
-        </div>
+        <GeometryPreviewSurface
+          theme={theme}
+          items={previewItems}
+          caption={caption}
+          emptyLabel={emptyLabel}
+        />
       </div>
     </div>
   );
