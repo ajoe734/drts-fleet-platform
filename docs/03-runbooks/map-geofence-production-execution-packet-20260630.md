@@ -626,6 +626,13 @@ Implementation status as of 2026-06-30:
 
 Goal: make tenant-created addresses/bookings use the same coordinate authority.
 
+Support packet:
+
+- `support/sidecars/MAP-FE-ENTRY-SURFACES/MAP-FE-ENTRY-GATE-E-CONSISTENCY.md`
+  defines the shared Tenant / Concierge / Partner Gate E consistency contract:
+  map picker use, saved-address pin confirmation, reason-code alignment,
+  provider outage handling, backend anti-bypass evidence, and E2E-MAP-004/005.
+
 Work:
 
 - Upgrade Tenant Portal address book from manual lat/lng to map picker plus
@@ -651,6 +658,13 @@ Verification:
 ### `MAP-FE-CON-001` - Concierge And Partner Entry Map Alignment
 
 Goal: align assisted and partner entry surfaces with the same coordinate model.
+
+Support packet:
+
+- `support/sidecars/MAP-FE-ENTRY-SURFACES/MAP-FE-ENTRY-GATE-E-CONSISTENCY.md`
+  defines the shared Tenant / Concierge / Partner Gate E consistency contract:
+  map picker use, customer-safe degraded copy, reason-code alignment, backend
+  anti-bypass evidence, and E2E-MAP-004/005.
 
 Work:
 
