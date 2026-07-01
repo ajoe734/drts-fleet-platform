@@ -6,7 +6,7 @@
 **Parent Reviewer:** `Claude2`
 **Sidecar Owner:** `Codex`
 **Sidecar Reviewer:** `Codex2`
-**Generated:** `2026-07-01T02:55:36Z`
+**Generated:** `2026-07-01T02:57:54Z`
 **Status:** `REVIEW SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or the parent task verdict.
 
 This packet exists only to support review handoff for `MAP-UI-002-HARDEN-001-SIDECAR-REVIEW`. The parent task is still in `review`; this document does not approve, reopen, or close the parent task. It pins the current machine-truth snapshot, the load-bearing commit, the relevant source anchors, and the exact verification boundary for the assigned reviewer.
@@ -58,9 +58,11 @@ Live sidecar lifecycle state at packet refresh:
 
 Delivery facts pinned at refresh time:
 
+- delivery fix in this refresh: the updated support packet is pushed to both the owner branch and the reviewer-assigned remote branch before re-running `handoff`
 - owner sidecar branch containing this packet: `codex/map-ui-002-harden-001-sidecar-review` and `origin/codex/map-ui-002-harden-001-sidecar-review`
-- reviewer-assigned sidecar branch at reopen time: `codex2/map-ui-002-harden-001-sidecar-review` at `f452f019f` (`origin/dev`), missing this file
-- resolution target for this refresh: deliver the refreshed support commit onto `origin/codex2/map-ui-002-harden-001-sidecar-review` before re-running `handoff`, so the reviewer can fetch the assigned branch directly
+- reviewer-assigned sidecar branch now containing the same packet commit: `origin/codex2/map-ui-002-harden-001-sidecar-review`
+- prior reopen condition: the reviewer-assigned branch was still at `f452f019f` (`origin/dev`) and missing this file until this refresh was pushed
+- reviewer follow-up required: fetch and rebase the local `codex2/map-ui-002-harden-001-sidecar-review` worktree onto the refreshed remote branch before approval
 
 ### 2.3 Parent task - `MAP-UI-002-HARDEN-001`
 
