@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 
 import type { GeoProviderHealthResponse } from "@drts/contracts";
 
@@ -14,9 +14,13 @@ const DEFAULT_CRITICAL_THRESHOLD = 95;
 
 type Env = Record<string, string | undefined>;
 
+export const GEO_PROVIDER_ENV = Symbol("GEO_PROVIDER_ENV");
+
 @Injectable()
 export class GeoProviderConfigService {
-  constructor(private readonly env: Env = process.env) {}
+  constructor(
+    @Inject(GEO_PROVIDER_ENV) private readonly env: Env = process.env,
+  ) {}
 
   getHealth(): GeoProviderHealthResponse {
     const environment = this.environment();
