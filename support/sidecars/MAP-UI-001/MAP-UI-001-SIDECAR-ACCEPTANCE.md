@@ -181,12 +181,15 @@ For sidecar reviewer `Codex2`, the useful checks are:
 - [x] Keep the packet MAP-UI-001-specific instead of drifting into generic map
       program commentary.
 - [x] Record both dependency state and reviewer-relevant evidence anchors.
-- [ ] Hand off the packet to the assigned reviewer (`Codex2`).
+- [x] Hand off the packet to the assigned reviewer (`Codex2`).
 
 ## Reviewer Handoff
 
 Owner handoff command:
 `AI_NAME=Codex scripts/ai-status.sh handoff MAP-UI-001-SIDECAR-ACCEPTANCE Codex2 "Prepared MAP-UI-001 acceptance packet with parent acceptance decomposition, dependency map, and current worktree evidence snapshot. Packet records that MAP-BE-003 and MAP-QA-001 remain open and that the June 30 runbook's shared picker anchors are not yet inspectable in this branch snapshot. Verified git diff --check for support/sidecars/MAP-UI-001/MAP-UI-001-SIDECAR-ACCEPTANCE.md; no canonical truth files changed."`
+
+Machine-truth handoff executed at `2026-07-01T15:35:04Z`; the sidecar task is
+now `review`.
 
 Reviewer approval command:
 `AI_NAME=Codex2 scripts/ai-status.sh approve MAP-UI-001-SIDECAR-ACCEPTANCE "Reviewed: packet stays sidecar-only, decomposes MAP-UI-001 acceptance correctly, and accurately records dependency/evidence gaps without over-claiming parent completion."`
