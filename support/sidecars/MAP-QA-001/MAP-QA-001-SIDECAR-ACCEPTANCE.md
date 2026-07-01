@@ -1,8 +1,8 @@
 # MAP-QA-001 SIDECAR ACCEPTANCE
 
-Status: prepared for review handoff to `Gemini`
+Status: refreshed for review handoff to `Codex2`
 Owner: Codex
-Reviewer: Gemini
+Reviewer: Codex2
 Last Update: 2026-07-01
 
 ## 0. Scope Boundary
@@ -11,6 +11,10 @@ This sidecar is a support-only acceptance packet for parent task `MAP-QA-001`.
 It does not modify canonical truth, runtime code, contracts, or execution docs.
 Its purpose is to package the current acceptance checklist, dependency map, and
 live evidence snapshot for reviewer consumption.
+
+This refresh supersedes the earlier Gemini-targeted draft after reviewer
+reassignment and the failed review cycle that reported the sidecar packet as
+missing on the reviewer branch snapshot.
 
 - In scope: acceptance checklist, dependency map, live artifact inventory,
   reviewer-facing evidence anchors, residual blockers
@@ -119,7 +123,7 @@ sidecar handoff.
 | `tests/e2e/map-geofence-harness.ts` with geo/service-area/proxy stubs | Present, but currently only installs `**/mock-map-tiles/**` route | `tests/e2e/map-geofence-harness.ts:1-16` |
 | `tests/e2e/map-geofence-harness.spec.ts` | Missing | direct existence check in this worktree returned `missing` |
 | `playwright.map-geofence-harness.config.ts` | Missing | direct existence check in this worktree returned `missing` |
-| `support/sidecars/MAP-QA-001/MAP-QA-001-MOCK-PROVIDER-HARNESS.md` | Missing before this sidecar task | direct existence check in this worktree returned `missing` |
+| `support/sidecars/MAP-QA-001/MAP-QA-001-MOCK-PROVIDER-HARNESS.md` | Missing | direct existence check in this worktree returned `missing` |
 | documented verification bundle for `MAP-QA-001` | Not directly reproducible from the current visible file set | execution packet claims commands at `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:831-838`, but several named harness artifacts are absent here |
 
 Interpretation: this sidecar does not claim the parent acceptance is complete.
@@ -157,7 +161,7 @@ the execution packet are not visible in this worktree snapshot.
 
 ## 8. Reviewer Handoff Notes
 
-This sidecar packet is ready for `Gemini` review as a support artifact. It does
+This sidecar packet is ready for `Codex2` review as a support artifact. It does
 not certify parent `MAP-QA-001` as done; it packages the current acceptance
 surface, dependency states, and live inventory so the reviewer and parent owner
 can see exactly what is already evidenced versus what still depends on parent
@@ -173,13 +177,13 @@ Suggested reviewer actions:
 Approval command:
 
 ```bash
-AI_NAME=Gemini scripts/ai-status.sh approve MAP-QA-001-SIDECAR-ACCEPTANCE \
+AI_NAME=Codex2 scripts/ai-status.sh approve MAP-QA-001-SIDECAR-ACCEPTANCE \
   "Reviewed MAP-QA-001 acceptance packet: dependency map and live artifact inventory align to current parent snapshot, and the sidecar stays support-only."
 ```
 
 Reopen command:
 
 ```bash
-AI_NAME=Gemini scripts/ai-status.sh reopen MAP-QA-001-SIDECAR-ACCEPTANCE \
+AI_NAME=Codex2 scripts/ai-status.sh reopen MAP-QA-001-SIDECAR-ACCEPTANCE \
   "<reason>"
 ```
