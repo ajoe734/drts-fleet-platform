@@ -24,7 +24,7 @@ missing on the reviewer branch snapshot.
 ## 1. Machine-Truth Baseline
 
 - Sidecar task: `MAP-QA-001-SIDECAR-ACCEPTANCE` is owned by `Codex`, reviewer
-  `Gemini`, and exists to create support artifacts only.
+  `Codex2`, and exists to create support artifacts only.
 - Parent task: `MAP-QA-001` is currently `in_progress` under owner `Gemini`,
   reviewer `Codex2`.
 - Parent declared dependencies in machine truth:
