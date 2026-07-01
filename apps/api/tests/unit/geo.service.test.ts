@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { GeoProviderConfigService } from "../../src/modules/geo/geo-provider-config.service";
 import { GeoController } from "../../src/modules/geo/geo.controller";
 import { GeoService } from "../../src/modules/geo/geo.service";
 import { MockGeoProvider } from "../../src/modules/geo/mock-geo.provider";
+import { MapGeofenceObservabilityService } from "../../src/modules/operational-observability/map-geofence-observability.service";
 
 function createService(env: Record<string, string | undefined> = {}) {
   return new GeoService(
@@ -16,6 +17,30 @@ function createService(env: Record<string, string | undefined> = {}) {
       ...env,
     }),
   );
+}
+
+function createObservedService(env: Record<string, string | undefined> = {}) {
+  const auditNotificationService = {
+    recordAuditLog: vi.fn((input) => ({
+      ...input,
+      auditId: `audit-${input.actionName}`,
+      requestId: input.requestId ?? "generated-request",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    })),
+  };
+  const observability = new MapGeofenceObservabilityService();
+  const service = new GeoService(
+    new MockGeoProvider(),
+    new GeoProviderConfigService({
+      NODE_ENV: "test",
+      DRTS_ENV: "test",
+      MAP_PROVIDER_MODE: "mock",
+      ...env,
+    }),
+    auditNotificationService as never,
+    observability,
+  );
+  return { service, auditNotificationService, observability };
 }
 
 describe("GeoService", () => {
@@ -119,6 +144,48 @@ describe("GeoService", () => {
     });
   });
 
+  it("audits resolved addresses and manual pin overrides with separate counters", async () => {
+    const { service, auditNotificationService, observability } =
+      createObservedService();
+
+    await service.resolve(
+      {
+        addressText: "Caller described a side gate",
+        selectedPoint: { lat: 25.041, lng: 121.55 },
+        selectedByActorId: "agent-002",
+        surface: "callcenter",
+        manualOverrideReason: "caller_confirmed_gate",
+      },
+      "req-geo-manual-pin-001",
+    );
+
+    expect(observability.getSnapshot()).toMatchObject({
+      geo: {
+        resolvedAddressCount: 1,
+        manualOverrideCount: 1,
+      },
+      governance: {
+        manualOverrideCount: 1,
+      },
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "geo.address.resolved",
+        requestId: "req-geo-manual-pin-001",
+        newValuesSummary: expect.objectContaining({
+          coordinateSource: "manual_pin",
+          manualOverrideReason: "caller_confirmed_gate",
+        }),
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "geo.pin.confirmed",
+        requestId: "req-geo-manual-pin-001",
+      }),
+    );
+  });
+
   it("reverse geocodes coordinates to nearest deterministic fixture", async () => {
     const service = createService();
 
@@ -162,6 +229,32 @@ describe("GeoService", () => {
         },
       });
     }
+  });
+
+  it("separates provider outage, ambiguity, and coordinate-less attempts", async () => {
+    const { service, observability } = createObservedService();
+
+    await expect(
+      service.search({
+        q: "__provider_unavailable__",
+        surface: "callcenter",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await service.search({ q: "台北", surface: "callcenter" });
+    await expect(
+      service.resolve({
+        addressText: "No selected candidate or pin",
+        surface: "callcenter",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+
+    expect(observability.getSnapshot()).toMatchObject({
+      geo: {
+        providerOutageCount: 1,
+        addressAmbiguityCount: 1,
+        coordinateLessAttemptCount: 1,
+      },
+    });
   });
 
   it("fails closed when production-like runtime tries to use mock provider", async () => {

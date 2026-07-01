@@ -50,7 +50,7 @@ export class ServiceAreaController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.serviceAreaService.evaluate(command),
+      this.serviceAreaService.evaluate(command, requestId),
       requestId,
     );
   }
