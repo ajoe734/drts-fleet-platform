@@ -28,6 +28,7 @@ cd "$ROOT_DIR"
 
 export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/drts_fleet_platform}"
 export E2E_API_URL="${E2E_API_URL:-http://localhost:3001}"
+export E2E_API_PATH_PREFIX="${E2E_API_PATH_PREFIX:-/api}"
 API_START_CMD="${API_START_CMD:-pnpm --filter @drts/api start}"
 API_PORT="${API_PORT:-3001}"
 API_LOG="${API_LOG:-/tmp/drts-e2e-api.log}"
@@ -107,6 +108,59 @@ start_api() {
   echo "[hermetic] API failed to become healthy"; tail -n 40 "$API_LOG"; return 1
 }
 
+seed_demo_driver_locations() {
+  local recorded_at
+  recorded_at="$(date -u -d "-30 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+    || date -u -v-30S +"%Y-%m-%dT%H:%M:%SZ")"
+
+  seed_driver_location "drv-demo-001" "25.041" "121.55" "$recorded_at"
+  seed_driver_location "drv-demo-004" "25.042" "121.552" "$recorded_at"
+  seed_driver_location "safety-op-001" "25.043" "121.553" "$recorded_at"
+}
+
+seed_driver_location() {
+  local driver_id="$1" lat="$2" lng="$3" recorded_at="$4"
+  local fixture
+  fixture="$(mktemp /tmp/drts-e2e-driver-location-XXXXXX.json)"
+  jq -n \
+    --arg driverId "$driver_id" \
+    --arg recordedAt "$recorded_at" \
+    --argjson lat "$lat" \
+    --argjson lng "$lng" \
+    '{
+      driverId: $driverId,
+      lat: $lat,
+      lng: $lng,
+      accuracyM: 12,
+      recordedAt: $recordedAt
+    }' > "$fixture"
+
+  local status
+  status="$(curl \
+    --silent \
+    --show-error \
+    --output /tmp/drts-e2e-driver-location-response.json \
+    --write-out "%{http_code}" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "X-Request-ID: e2e-hermetic-driver-location-${driver_id}" \
+    -H "x-actor-type: platform_admin" \
+    -H "x-actor-id: e2e-hermetic-seed" \
+    -H "x-realm: platform" \
+    --data "@$fixture" \
+    "${E2E_API_URL}${E2E_API_PATH_PREFIX}/regulatory-registry/driver-location")"
+  rm -f "$fixture"
+
+  if [[ ! "$status" =~ ^(200|201)$ ]]; then
+    echo "[hermetic] failed to seed driver location for ${driver_id}; HTTP ${status}" >&2
+    cat /tmp/drts-e2e-driver-location-response.json >&2 || true
+    rm -f /tmp/drts-e2e-driver-location-response.json
+    return 1
+  fi
+
+  rm -f /tmp/drts-e2e-driver-location-response.json
+}
+
 trap stop_api EXIT
 
 PASS=(); FAIL=()
@@ -115,6 +169,7 @@ for s in "${SUITES[@]}"; do
   stop_api
   if ! reset_db; then FAIL+=("$s"); continue; fi
   if ! start_api; then FAIL+=("$s"); continue; fi
+  if ! seed_demo_driver_locations; then FAIL+=("$s"); continue; fi
   if ./tests/e2e/run-e2e.sh --suite "$s"; then PASS+=("$s"); else FAIL+=("$s"); fi
 done
 
