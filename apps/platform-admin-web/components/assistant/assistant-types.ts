@@ -221,6 +221,7 @@ export type PlatformAdminRouteKey =
   | "tenants"
   | "tenant-detail"
   | "tenant-governance"
+  | "service-areas"
   | "partners"
   | "partner-detail"
   | "users"

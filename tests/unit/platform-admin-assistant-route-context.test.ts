@@ -27,11 +27,11 @@ import type {
 import type { PlatformAdminAssistantPageBridge } from "../../apps/platform-admin-web/components/assistant/route-context";
 
 describe("Platform Admin route registry", () => {
-  it("registers exactly the 31 current platform-admin routes", () => {
+  it("registers exactly the 32 current platform-admin routes", () => {
     // 22 existing platform-admin routes plus 9 sandbox compliance /
-    // investigation surfaces added in the sandbox governance wave.
-    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(31);
-    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(31);
+    // investigation surfaces and 1 service-area governance surface.
+    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(32);
+    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(32);
   });
 
   it("has a unique, valid descriptor per route key", () => {
@@ -132,6 +132,17 @@ describe("acceptance-named routes", () => {
     const ctx = buildRouteContext("/tenants");
     expect(ctx.routeKey).toBe("tenants");
     expect(ctx.visibleEntityRefs).toEqual([]);
+  });
+
+  it("/service-areas → service-area governance write surface", () => {
+    const ctx = buildRouteContext("/service-areas");
+    expect(ctx.routeKey).toBe("service-areas");
+    expect(ctx.activeTab).toBe("boundaries");
+    expect(ctx.availableTabs).toContain("geojson");
+    expect(ctx.refreshTier).toBe("medium");
+    expect(ctx.warnings.map((w) => w.code)).toContain(
+      "platform_write_authority",
+    );
   });
 
   it("/partners/[entrySlug] lifts the slug into a partner-entry ref", () => {

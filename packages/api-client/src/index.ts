@@ -124,6 +124,8 @@ import type {
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
   ServiceRecoveryActionRecord,
+  CreateServiceAreaBoundaryCommand,
+  CreateStopPolicyCommand,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
@@ -167,6 +169,8 @@ import type {
   ReconciliationIssueRecord,
   ResourceActionDescriptor,
   RevokePartnerIngressCredentialCommand,
+  PublishServiceAreaBoundaryCommand,
+  PublishStopPolicyCommand,
   RegisterDriverDeviceCommand,
   RegulatoryReportFiling,
   ReopenComplaintCaseCommand,
@@ -186,6 +190,8 @@ import type {
   ResolveExceptionHoldCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokeDriverDeviceBindingCommand,
+  RetireServiceAreaBoundaryCommand,
+  RetireStopPolicyCommand,
   RotateTenantApiKeyCommand,
   SetPlatformMaintenanceModeCommand,
   SetPlatformTenantRolloutStageCommand,
@@ -263,6 +269,8 @@ import type {
   UpdatePlatformTenantOnboardingCommand,
   UpdatePartnerChannelEntryCommand,
   UpdatePlatformTenantSettingsCommand,
+  UpdateServiceAreaBoundaryCommand,
+  UpdateStopPolicyCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   RecalculateTenantSlaBookingsCommand,
@@ -297,8 +305,13 @@ import type {
   SixMonthOperationsSummary,
   SandboxExperimentProgramRecord,
   SandboxJurisdictionProfileRecord,
+  EvaluateServiceAreaCommand,
   ApprovedOperatingAreaRecord,
   ApprovedRouteRecord,
+  ServiceAreaAdminMutationResponse,
+  ServiceAreaDefinitionsResponse,
+  ServiceAreaEvaluationResult,
+  ServiceAreaGeoJsonResponse,
   VehicleEnrollmentRecord,
   SafetyOperatorQualificationRecord,
   SuspendSandboxExperimentAuthorizationsCommand,
@@ -2901,6 +2914,141 @@ export class ApiClient {
     const search = params.size > 0 ? `?${params.toString()}` : "";
     return this.get<PlatformTenantGovernanceSummaryResponse>(
       `/api/admin/tenant-governance/summary${search}`,
+    );
+  }
+
+  // ── Service-area authority (MAP-FE-ADM-001 · service-area/admin) ──────────
+
+  async getServiceAreaDefinitions(): Promise<ServiceAreaDefinitionsResponse> {
+    return this.get<ServiceAreaDefinitionsResponse>(
+      "/api/service-area/definitions",
+    );
+  }
+
+  async getServiceAreaGeoJson(): Promise<ServiceAreaGeoJsonResponse> {
+    return this.get<ServiceAreaGeoJsonResponse>(
+      "/api/service-area/admin/geojson",
+    );
+  }
+
+  async evaluateServiceArea(
+    command: EvaluateServiceAreaCommand,
+  ): Promise<ServiceAreaEvaluationResult> {
+    return this.post<ServiceAreaEvaluationResult>(
+      "/api/service-area/evaluate",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async createServiceAreaBoundary(
+    command: CreateServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      "/api/service-area/admin/service-areas",
+      { body: command },
+    );
+  }
+
+  async updateServiceAreaBoundary(
+    serviceAreaId: string,
+    command: UpdateServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(
+        serviceAreaId,
+      )}/update`,
+      { body: command },
+    );
+  }
+
+  async submitServiceAreaBoundaryForReview(
+    serviceAreaId: string,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(
+        serviceAreaId,
+      )}/submit-review`,
+    );
+  }
+
+  async publishServiceAreaBoundary(
+    serviceAreaId: string,
+    command: PublishServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(
+        serviceAreaId,
+      )}/publish`,
+      { body: command },
+    );
+  }
+
+  async retireServiceAreaBoundary(
+    serviceAreaId: string,
+    command: RetireServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(
+        serviceAreaId,
+      )}/retire`,
+      { body: command },
+    );
+  }
+
+  async createStopPolicy(
+    command: CreateStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      "/api/service-area/admin/stop-policies",
+      { body: command },
+    );
+  }
+
+  async updateStopPolicy(
+    stopPolicyId: string,
+    command: UpdateStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(
+        stopPolicyId,
+      )}/update`,
+      { body: command },
+    );
+  }
+
+  async submitStopPolicyForReview(
+    stopPolicyId: string,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(
+        stopPolicyId,
+      )}/submit-review`,
+    );
+  }
+
+  async publishStopPolicy(
+    stopPolicyId: string,
+    command: PublishStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(
+        stopPolicyId,
+      )}/publish`,
+      { body: command },
+    );
+  }
+
+  async retireStopPolicy(
+    stopPolicyId: string,
+    command: RetireStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(
+        stopPolicyId,
+      )}/retire`,
+      { body: command },
     );
   }
 

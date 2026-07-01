@@ -18,6 +18,7 @@ import {
   Handshake,
   Languages,
   LayoutDashboard,
+  MapPinned,
   Package,
   Power,
   Radio,
@@ -118,6 +119,12 @@ const routes: NavRoute[] = [
     icon: ShieldCheck,
     section: "tenant",
     labelKey: "adminShell.route.tenantGovernance",
+  },
+  {
+    key: "service-areas",
+    icon: MapPinned,
+    section: "tenant",
+    labelKey: "adminShell.route.serviceAreas",
   },
   {
     key: "partners",
@@ -528,7 +535,10 @@ function Sidebar({
           </div>
         </div>
       </div>
-      <nav aria-label={labelFor(locale, "adminShell.nav.aria")} style={navStyle}>
+      <nav
+        aria-label={labelFor(locale, "adminShell.nav.aria")}
+        style={navStyle}
+      >
         {sections.map((section) => (
           <div key={section.key} style={{ display: "grid", gap: 1 }}>
             <div style={sectionTitleStyle}>
@@ -566,7 +576,10 @@ function RefreshTierBadge({ pathname }: { pathname: string }) {
 
 function SearchBox({ locale }: { locale: Locale }) {
   return (
-    <div aria-label={labelFor(locale, "adminShell.search.aria")} style={searchBoxStyle}>
+    <div
+      aria-label={labelFor(locale, "adminShell.search.aria")}
+      style={searchBoxStyle}
+    >
       <Search size={13} />
       <span style={searchTextStyle}>
         {labelFor(locale, "adminShell.search.placeholder")}
