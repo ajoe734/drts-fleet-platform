@@ -1,9 +1,9 @@
 # MAP-FE-CALL-001 Gate A Evidence Packet
 
-**Sidecar task:** `MAP-FE-CALL-001-SIDECAR-GATEA`  
-**Parent task:** `MAP-FE-CALL-001` - Callcenter P0 map booking  
-**Parent owner/reviewer:** `Codex` / `Claude2`  
-**Sidecar owner/reviewer:** `Codex` / `Codex2`  
+**Sidecar task:** `MAP-FE-CALL-001-SIDECAR-GATEA`
+**Parent task:** `MAP-FE-CALL-001` - Callcenter P0 map booking
+**Parent owner/reviewer:** `Codex` / `Claude2`
+**Sidecar owner/reviewer:** `Codex` / `Codex2`
 **Scope boundary:** support artifact only. This packet maps current callcenter map-booking evidence to Gate A and defines the remaining E2E proof needed before production-readiness can be claimed.
 
 ## 1. Gate A Verdict
