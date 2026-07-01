@@ -208,3 +208,4 @@ Owner closeout note after `review_approved`:
 ## 8. Change Log
 
 - `2026-07-01` - initial packet created; parent blocker summary synced from machine truth; `MAP-BE-006` dependency mapped to policy and geometry observability surfaces; no canonical truth modified
+- `2026-07-01` - `review_approved` recorded with the reviewer conclusion `support-only packet is complete; MAP-BE-006 dependency coverage is explicit; parent blocker summary matches machine truth; no canonical truth modified`; owner closeout requires the final task-scoped commit, normal push, and `done` status writeback
