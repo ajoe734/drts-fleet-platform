@@ -1,27 +1,20 @@
 # MAP-BE-003 Review Packet & Evidence Summary
 
+- **Sidecar Task:** `MAP-BE-003-SIDECAR-REVIEW`
 - **Sidecar Kind:** `review_packet`
-- **Parent Task:** `MAP-BE-003` — Geo and service-area API client coverage
+- **Parent Task:** `MAP-BE-003` - Geo and service-area API client coverage
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
-- **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
+- **Current Sidecar Owner / Reviewer:** `Codex2` / `Codex`
 - **Planning Anchor:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- **Machine-Truth Basis:** parent row last_update `2026-06-30T14:52:11Z`; sidecar row last_update `2026-06-30T21:36:14Z` with status `review_approved`; closeout refresh prepared `2026-06-30` (UTC)
-- **Status:** REVIEW-APPROVED SUPPORT ARTIFACT SNAPSHOT — does not modify canonical truth, runtime behavior, or parent lifecycle state
+- **Machine-Truth Basis:** parent row last_update `2026-06-30T14:52:11Z`; current sidecar row last_update `2026-07-01T03:44:35Z` with status `review`; same-day lifecycle also includes a reviewer-facing `review` snapshot at `2026-07-01T03:41:05Z` and a temporary `in_progress` refresh cycle at `2026-07-01T03:42:51Z`
+- **Status:** REVIEW HANDOFF SNAPSHOT FOR CODEX - support artifact only; current machine truth is owner `Codex2`, reviewer `Codex`, status `review`, and this packet does not modify canonical truth, runtime behavior, or the parent lifecycle state
 
-This packet prepares reviewer-facing evidence for `MAP-BE-003` while keeping the
-sidecar strictly in support scope. The important complication is that the parent
-review surface is **split across worktrees**:
-
-- the assigned sidecar worktree on `codex/map-be-003-sidecar-review` is based on
-  `dev` and does **not** contain the parent's `packages/api-client` delta
-- the canonical root worktree on `phase2-tesla-sandbox-docs-20260625` contains
-  the parent's api-client changes as **uncommitted** working-tree state plus
-  three untracked evidence files
-- downstream `MAP-BE-006` later committed a copy of the API delta doc and a
-  later-evolved `service-area.service.test.ts` onto `dev`
-
-Reviewer implication: do not treat the sidecar worktree alone as the complete
-`MAP-BE-003` review surface.
+This packet exists because the parent `MAP-BE-003` review surface is split across
+multiple worktrees. The reviewer worktree on `codex/map-be-003-sidecar-review`
+is based on `dev` and does not contain the parent `packages/api-client` delta,
+while the canonical root worktree still carries the parent API-client change set
+as working-tree state. Reviewer `Codex` should therefore treat this packet as
+the navigation layer for the parent review, not as a self-contained code delta.
 
 ---
 
@@ -29,18 +22,18 @@ Reviewer implication: do not treat the sidecar worktree alone as the complete
 
 In scope:
 
-- snapshot the sidecar and parent machine-truth rows
-- map each parent acceptance item to concrete evidence
-- explain where the parent review surface actually lives right now
-- record downstream overlap that could mislead a reviewer reading only `dev`
+- summarize the current sidecar and parent machine-truth rows
+- map each parent acceptance item to concrete evidence anchors
+- explain where the parent review surface actually lives today
+- call out branch lineage and downstream overlap that can mislead a reviewer
 
 Out of scope:
 
 - editing canonical implementation files
-- editing `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl`
-  outside the official lifecycle commands
-- approving or reopening the parent task directly from this packet
-- inventing commit / push evidence that the parent has not yet recorded
+- changing `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl`
+  outside official lifecycle commands
+- approving or reopening the parent task from this sidecar
+- inventing parent commit / push evidence that machine truth does not record
 
 ---
 
@@ -48,31 +41,40 @@ Out of scope:
 
 ### 2.1 Sidecar task
 
-`scripts/ai-status.sh show MAP-BE-003-SIDECAR-REVIEW` records:
+Current reviewer-facing row from
+`AI_NAME=Codex scripts/ai-status.sh show MAP-BE-003-SIDECAR-REVIEW` records:
 
-- `id`: `MAP-BE-003-SIDECAR-REVIEW`
-- `owner`: `Codex`
-- `reviewer`: `Codex2`
-- `status`: `review_approved`
+- `owner`: `Codex2`
+- `reviewer`: `Codex`
+- `status`: `review`
 - `helper_parent`: `MAP-BE-003`
 - `helper_kind`: `review_packet`
 - `mutates_canonical`: `false`
-- reviewer conclusion: the packet correctly distinguishes the canonical-root
-  working-tree delta from the `dev`-visible downstream artifacts and stays
-  support-only
-- artifact path:
-  `support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-REVIEW.md`
+- `next`: refreshed
+  `support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-REVIEW.md` to match the
+  current machine-truth lifecycle: reviewer-facing review snapshot at
+  `2026-07-01T03:41:05Z`, temporary `in_progress` refresh cycle at
+  `2026-07-01T03:42:51Z`, and current owner/reviewer `Codex2` / `Codex`
 
-Owner implication: reviewer approval is already recorded, but the sidecar still
-needs the owner closeout commit / push / `done` lifecycle step before it leaves
-the queue.
+Same-day lifecycle notes that matter to the reviewer:
+
+- `2026-07-01T03:41:05Z`: owner `Codex2` handed the packet to reviewer `Codex`
+- `2026-07-01T03:42:51Z`: reviewer `Codex` reopened because the packet still
+  described the stale `2026-06-30` `review_approved` closeout snapshot
+- `2026-07-01T03:44:35Z`: owner `Codex2` re-handed off after refreshing the
+  queue snapshot, review outcome, lifecycle commands, and changelog for the
+  current `Codex2` / `Codex` routing
+
+Reviewer implication:
+
+- the sidecar is currently waiting on `Codex` review
+- it is **not** in `review_approved`
+- it is **not** waiting on owner closeout / `done`
 
 ### 2.2 Parent task
 
-`scripts/ai-status.sh show MAP-BE-003` records:
+`AI_NAME=Codex scripts/ai-status.sh show MAP-BE-003` records:
 
-- `id`: `MAP-BE-003`
-- `title`: `Geo and service-area API client coverage`
 - `owner`: `Codex`
 - `reviewer`: `Claude2`
 - `status`: `review`
@@ -85,7 +87,7 @@ the queue.
   - `api-client typecheck passes`
   - `endpoint docs updated`
 
-The parent `next` field claims the following owner verification already ran:
+The parent `next` field says the owner already ran:
 
 - `pnpm exec prettier --check` on touched client / API / test / docs files
 - `pnpm --filter @drts/api-client typecheck`
@@ -95,91 +97,98 @@ The parent `next` field claims the following owner verification already ran:
 - `pnpm --filter @drts/api test -- --runInBand apps/api/tests/unit/service-area.service.test.ts`
 - `pnpm lint:root`
 
-This sidecar did **not** rerun those commands; it only packages the evidence and
-records where that review surface exists.
+This sidecar does not claim to have rerun those commands. It only packages the
+review surface and the evidence map.
 
 ### 2.3 Current Codex queue relevant to this dispatch
 
-Using filtered `scripts/ai-status.sh list` snapshots at closeout-prep time:
+Using filtered `scripts/ai-status.sh list` snapshots at the current review
+handoff:
 
-- `status=in_progress`: no matches
-- `owner=Codex status=review_approved`: `MAP-BE-003-SIDECAR-REVIEW`
-- `reviewer=Codex status=review`: no matches
+- `owner=Codex2 status=review`: `MAP-BE-003-SIDECAR-REVIEW`
+- `reviewer=Codex status=review`: `MAP-BE-003-SIDECAR-REVIEW`
+- `owner=Codex status=review_approved`: no matches
 
-Practical meaning: this sidecar is the only dispatch-relevant task currently
-waiting on Codex, and it is already past review pending owner closeout.
+Practical meaning:
+
+- this sidecar is the dispatch-relevant task currently waiting on `Codex`
+- there is no `review_approved` closeout task for `Codex` to finalize right now
 
 ---
 
 ## 3. Review Surface Topology
 
-### 3.1 Assigned sidecar worktree (`codex/map-be-003-sidecar-review`)
+### 3.1 Reviewer sidecar worktree
 
-Current sidecar worktree:
+Current reviewer worktree:
 
 - path:
   `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-be-003-sidecar-review`
 - branch: `codex/map-be-003-sidecar-review`
-- `dev` baseline under the packet: `f452f019f9d887850c907a28a60ce627b930049b`
-- pushed packet anchor before owner closeout:
-  `ecbfa6a9d4ed76f65d579dc389153cbe47f65aa3`
 
-Observed state in this worktree:
+Observed state here:
 
-- `docs/04-api/map-geofence-openapi-delta-20260630.md` exists and is tracked
-- `apps/api/tests/unit/service-area.service.test.ts` exists and is tracked
-- `tests/unit/api-client-geo-service-area.test.ts` does **not** exist
-- `packages/api-client/src/index.ts` contains **no** `/api/geo/*` or
-  `/api/service-area/*` client paths in this snapshot
+- `docs/04-api/map-geofence-openapi-delta-20260630.md` is available and tracked
+- `apps/api/tests/unit/service-area.service.test.ts` is available and tracked
+- `tests/unit/api-client-geo-service-area.test.ts` is not present in this
+  worktree
+- `packages/api-client/src/index.ts` in this worktree does not expose the parent
+  geo / service-area client methods
 
-Reviewer implication: this worktree alone cannot prove the parent acceptance
-item "typed api-client methods added".
+Reviewer implication:
+
+- this worktree alone cannot prove the parent acceptance item
+  `typed api-client methods added`
 
 ### 3.2 Canonical root worktree carrying the parent delta
 
-Canonical machine-truth root worktree:
+Canonical root worktree:
 
 - path: `/home/edna/workspace/drts-fleet-platform`
 - branch: `phase2-tesla-sandbox-docs-20260625`
-- HEAD: `9f6dde8223366fe517431592fc6b93eb9f39114d`
+- HEAD: `22c5823d7`
 
-Targeted status for parent-owned files there:
+Verified targeted status there:
 
 - `M packages/api-client/src/index.ts`
-- `?? docs/04-api/map-geofence-openapi-delta-20260630.md`
 - `?? apps/api/tests/unit/service-area.service.test.ts`
+- `?? docs/04-api/map-geofence-openapi-delta-20260630.md`
 - `?? tests/unit/api-client-geo-service-area.test.ts`
 
-Targeted diff evidence:
+Additional topology note:
 
-- `packages/api-client/src/index.ts`: `261 insertions(+), 6 deletions(-)`
-- the API delta doc and both test files are untracked there, so they are part
-  of the current working-tree review surface rather than commit history
+- there is no local or remote branch named `map-be-003`
 
-There is no local or remote branch named `map-be-003`, and
-`git log --all --grep='MAP-BE-003'` returns no dedicated parent commit. The
-parent review therefore currently depends on **working-tree evidence**, not an
-inspectable task-scoped commit.
+Reviewer implication:
 
-### 3.3 Downstream overlap already on `dev`
+- the authoritative parent review surface currently depends on working-tree
+  evidence in the canonical root, not on a dedicated `MAP-BE-003` task branch
+  or inspectable parent commit
 
-`git show --stat ceecb45a0` (`MAP-BE-006: integrate service-area governance on dev`)
-shows that downstream work later committed:
+### 3.3 Helper lineage and downstream overlap
 
-- `docs/04-api/map-geofence-openapi-delta-20260630.md`
-- `apps/api/tests/unit/service-area.service.test.ts`
+Historical support-packet lineage already exists on the reviewer branch
+`origin/codex/map-be-003-sidecar-review`:
 
-Important nuance:
+- `ecbfa6a9d` - `wip(MAP-BE-003-SIDECAR-REVIEW): anchor review packet`
+- `f3ff69fb6` - `MAP-BE-003-SIDECAR-REVIEW: finalize review packet closeout`
 
-- `cmp` confirms the API delta doc is identical between the sidecar worktree and
-  the canonical root working tree
-- `service-area.service.test.ts` is **not** identical between the two worktrees
-- `diff -u` shows the `dev` copy contains additional persistence / rollback /
-  seed-merge coverage that is not present in the canonical-root parent snapshot
+Owner-refresh packet lineage also exists on
+`codex2/map-be-003-sidecar-review`:
 
-Reviewer implication: the API delta doc is safe to inspect from either tree, but
-the `service-area.service.test.ts` on `dev` is a **later** downstream evolution
-and should not be treated as a byte-for-byte parent artifact.
+- `deb27cba9` - `wip(MAP-BE-003-SIDECAR-REVIEW): anchor review packet`
+- `caf9513fa` - `MAP-BE-003-SIDECAR-REVIEW: refresh reviewer handoff packet`
+- `ab440c666` - `wip(MAP-BE-003-SIDECAR-REVIEW): anchor post-handoff packet refresh`
+
+These commits are useful as packet history only. The authoritative routing
+question is answered by current machine truth: owner `Codex2`, reviewer
+`Codex`, status `review`.
+
+Separately, `dev` already contains downstream overlap from `MAP-BE-006`,
+including the tracked API delta doc and a later-evolved
+`apps/api/tests/unit/service-area.service.test.ts`. Reviewer `Codex` should not
+treat the `dev` copy of `service-area.service.test.ts` as a byte-for-byte parent
+artifact.
 
 ---
 
@@ -189,24 +198,27 @@ and should not be treated as a byte-for-byte parent artifact.
 
 Primary evidence lives in the canonical root working tree:
 
-- `packages/api-client/src/index.ts:573-727` adds:
+- `packages/api-client/src/index.ts:320-345` defines `ApiClientError`
+- `packages/api-client/src/index.ts:464-489` parses backend error envelopes and
+  preserves `code`, `details`, `retryable`, and `traceId`
+- `packages/api-client/src/index.ts:575-633` adds:
   - `searchGeo`
   - `resolveGeo`
   - `reverseGeo`
   - `getServiceAreaDefinitions`
   - `getServiceAreaGeoJson`
   - `evaluateServiceArea`
-  - service-area admin lifecycle helpers for boundaries and stop policies
-- `packages/api-client/src/index.ts:320-344` defines `ApiClientError`
-- `packages/api-client/src/index.ts:464-487` parses backend error envelopes and
-  preserves `code`, `details`, `retryable`, and `traceId`
+- `packages/api-client/src/index.ts:787-790` throws `ApiClientError` from the
+  parsed backend envelope
 
-This acceptance item cannot be verified from the sidecar worktree alone because
-that snapshot does not contain the parent `packages/api-client` delta.
+Why this matters:
+
+- the parent acceptance is not only about endpoint wrappers; it also depends on
+  preserving structured backend error envelopes for frontend callers
 
 ### 4.2 `serviceable/manual_review/not_serviceable/provider_unavailable responses covered`
 
-Primary api-client test evidence lives only in the canonical root working tree:
+Primary api-client test evidence lives in the canonical root working tree:
 
 - `tests/unit/api-client-geo-service-area.test.ts:90-128` covers typed
   `searchGeo` request construction
@@ -221,77 +233,81 @@ Primary api-client test evidence lives only in the canonical root working tree:
 - `tests/unit/api-client-geo-service-area.test.ts:265-295` preserves
   `INVALID_COORDINATE`
 
-Supporting backend/service evidence is visible in both worktrees:
+Supporting backend/service evidence:
 
-- `apps/api/tests/unit/service-area.service.test.ts:48-63` asserts
+- `apps/api/tests/unit/service-area.service.test.ts:43-58` asserts
   `serviceable`
-- `apps/api/tests/unit/service-area.service.test.ts:65-109` asserts
+- `apps/api/tests/unit/service-area.service.test.ts:60-103` asserts
   `not_serviceable`
-- `apps/api/tests/unit/service-area.service.test.ts:111-136` asserts
+- `apps/api/tests/unit/service-area.service.test.ts:106-131` asserts
   `manual_review`
 - `apps/api/tests/unit/service-area.service.test.ts:186-214` asserts
-  `generatedAt` freshness and GeoJSON export shape
+  `generatedAt` freshness and GeoJSON export metadata
 
 ### 4.3 `api-client typecheck passes`
 
-This sidecar can only record the machine-truth claim from the parent `next`
-field:
+This sidecar can only preserve the machine-truth verification claim from the
+parent `next` field:
 
 - `pnpm --filter @drts/api-client typecheck`
 - `pnpm exec vitest run tests/unit/api-client-geo-service-area.test.ts`
-
-Additional claimed supporting checks:
-
 - `pnpm --filter @drts/api typecheck`
 - `pnpm --filter @drts/api lint`
 - `pnpm --filter @drts/api test -- --runInBand apps/api/tests/unit/service-area.service.test.ts`
 - `pnpm lint:root`
 
-This packet does **not** convert those claims into new verification evidence. If
-the reviewer wants fresh execution proof, it must be rerun from the canonical
-root worktree that actually contains the parent delta.
+If reviewer `Codex` wants fresh execution proof, those checks need to rerun from
+the canonical root worktree that actually contains the parent delta.
 
 ### 4.4 `endpoint docs updated`
 
-The API delta document is stable and inspectable from either tree:
+The API delta document is stable and inspectable from the reviewer sidecar
+worktree:
 
 - `docs/04-api/map-geofence-openapi-delta-20260630.md:13-44` documents the
   success/error envelope and `ApiClientError` behavior
 - `docs/04-api/map-geofence-openapi-delta-20260630.md:74-132` documents
-  `/api/geo/search`, `/api/geo/resolve`, `/api/geo/reverse`
+  `/api/geo/search`, `/api/geo/resolve`, and `/api/geo/reverse`
 - `docs/04-api/map-geofence-openapi-delta-20260630.md:136-224` documents
-  service-area definitions, GeoJSON export, evaluation, lifecycle endpoints,
-  and error codes
-- `docs/04-api/map-geofence-openapi-delta-20260630.md:226-251` maps client
+  service-area definitions, admin GeoJSON, lifecycle endpoints, evaluation
+  decisions, and error codes
+- `docs/04-api/map-geofence-openapi-delta-20260630.md:226-247` maps client
   methods to endpoints
 
 Secondary corroboration:
 
-- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:260-281`
-  defines `MAP-BE-003` as the api-client / API-doc coverage slice
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:287-310`
+  defines `MAP-BE-003` as the API-client / OpenAPI coverage slice
 - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md:47`
   records that `MAP-BE-003` added typed API-client coverage and endpoint delta
   docs
 - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md:164-165`
-  reiterates that service-area client methods and the OpenAPI delta doc were
-  added in `MAP-BE-003`
+  reiterates that service-area client methods and OpenAPI delta documentation
+  were added in `MAP-BE-003`
+- `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md:288`
+  names the expected client methods:
+  `searchGeo`, `resolveGeo`, `reverseGeo`, `getServiceAreaDefinitions`, and
+  `evaluateServiceArea`
 
 ---
 
-## 5. Review Outcome And Reading Order
+## 5. Reviewer Focus
 
-The assigned sidecar reviewer (`Codex2`) approved the packet after confirming
-these points:
+Reviewer `Codex` should confirm:
 
-1. This packet stays support-only and does not pretend to approve the parent.
-2. It accurately records that the parent's api-client delta lives in the
-   canonical root working tree, not the sidecar `dev` snapshot.
-3. It accurately records that the API delta doc is identical across worktrees,
-   while `service-area.service.test.ts` has already evolved downstream on `dev`.
-4. It does not invent a `MAP-BE-003` commit, branch, or push that does not
-   exist.
-5. It makes the distinction between "machine-truth verification claim" and
-   "sidecar-rerun verification evidence" explicit.
+1. This packet stays support-only and does not mutate canonical truth.
+2. It correctly records that parent `MAP-BE-003` remains in `review`.
+3. It correctly records the same-day sidecar lifecycle:
+   - reviewer-facing `review` snapshot at `2026-07-01T03:41:05Z`
+   - temporary `in_progress` refresh cycle at `2026-07-01T03:42:51Z`
+   - current `review` handoff at `2026-07-01T03:44:35Z`
+4. It correctly distinguishes the two review surfaces:
+   - canonical-root working-tree delta for `packages/api-client` and
+     `tests/unit/api-client-geo-service-area.test.ts`
+   - reviewer-branch tracked doc plus downstream-evolved service-area test
+5. It maps each acceptance item to concrete, inspectable anchors.
+6. It does not invent a parent task commit, branch, or push that machine truth
+   does not currently record.
 
 Practical review order:
 
@@ -300,69 +316,62 @@ Practical review order:
    `tests/unit/api-client-geo-service-area.test.ts` in the canonical root
    worktree.
 3. Use the tracked `docs/04-api/map-geofence-openapi-delta-20260630.md` in this
-   sidecar worktree for doc review, since it matches the canonical-root copy.
-4. Treat `apps/api/tests/unit/service-area.service.test.ts` in this sidecar
+   reviewer worktree for doc review.
+4. Treat `apps/api/tests/unit/service-area.service.test.ts` in this reviewer
    worktree as downstream context, not as the exact parent snapshot.
 
-Recorded approval shape for the **sidecar packet**:
+Suggested approval wording:
 
-> `審查通過：MAP-BE-003 sidecar review packet 已正確區分 parent review surface 的兩個位置：canonical root working tree 內未提交的 api-client / api-client test delta，以及 dev 已可見的 API delta doc / downstream-evolved service-area test。packet 如實對齊 machine truth（parent 仍為 review，尚無專屬 commit/branch/push 證據），support artifact only，未改 canonical truth。`
+> `審查通過：MAP-BE-003 sidecar review packet 已正確對齊 current machine truth（sidecar owner/reviewer 為 Codex2/Codex，當前狀態為 review，parent MAP-BE-003 仍為 review），並清楚區分 reviewer-facing review snapshot、temporary in_progress refresh cycle，以及 parent review surface 的兩個位置：canonical root working tree 內未提交的 api-client / api-client test delta，與 reviewer branch 可見的 API delta doc / downstream-evolved service-area test。packet 已把 acceptance 對應到具體 evidence anchors；support artifact only，未改 canonical truth。`
 
 Suggested reopen wording:
 
-> `packet needs revision: [specify machine-truth mismatch / wrong worktree attribution / incorrect evidence mapping]`
+> `packet needs revision: [machine-truth mismatch / wrong lifecycle timestamp / wrong worktree attribution / incorrect evidence mapping / support-scope violation]`
 
 ---
 
 ## 6. Lifecycle Commands
 
-The handoff / approval commands are preserved here for auditability. At this
-snapshot, the sidecar is already `review_approved` and waiting only on owner
-closeout.
-
-Owner handoff to `Codex2`:
+Historical reopen that created the temporary refresh cycle:
 
 ```bash
-AI_NAME=Codex python3 scripts/ai_status.py handoff MAP-BE-003-SIDECAR-REVIEW Codex2 "MAP-BE-003 review packet is ready at support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-REVIEW.md. The packet records that the parent remains in review, that the authoritative api-client delta currently lives as uncommitted working-tree state in the canonical root on phase2-tesla-sandbox-docs-20260625, and that dev only carries the shared API delta doc plus a downstream-evolved service-area.service test from MAP-BE-006. It maps the parent acceptance items to concrete file anchors and calls out that fresh verification would need to run from the canonical-root worktree containing packages/api-client/src/index.ts and tests/unit/api-client-geo-service-area.test.ts."
+AI_NAME=Codex scripts/ai-status.sh reopen MAP-BE-003-SIDECAR-REVIEW \
+  "packet needs revision: support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-REVIEW.md still describes the old 2026-06-30 review_approved closeout snapshot (owner=Codex, reviewer=Codex2, pending done). Current machine truth on 2026-07-01T03:41:05Z is owner=Codex2, reviewer=Codex, status=review. The queue snapshot, review outcome, lifecycle commands, and changelog therefore misroute the current handoff and need a fresh packet refresh that distinguishes the 2026-07-01 review snapshot from the temporary in_progress refresh cycle."
+```
+
+Owner handoff back to reviewer `Codex`:
+
+```bash
+AI_NAME=Codex2 scripts/ai-status.sh handoff MAP-BE-003-SIDECAR-REVIEW Codex "Refreshed support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-REVIEW.md to match the current machine-truth lifecycle: reviewer-facing review snapshot at 2026-07-01T03:41:05Z, temporary in_progress refresh cycle at 2026-07-01T03:42:51Z, and current owner/reviewer Codex2/Codex. The packet remains support-only, keeps parent MAP-BE-003 in review, and maps the parent acceptance items to the split review surface without changing canonical truth."
 ```
 
 Reviewer approval:
 
 ```bash
-AI_NAME=Codex2 python3 scripts/ai_status.py approve MAP-BE-003-SIDECAR-REVIEW \
-  "Review approved. The packet correctly distinguishes the canonical-root MAP-BE-003 working-tree delta from the dev-visible downstream artifacts and stays support-only."
+AI_NAME=Codex scripts/ai-status.sh approve MAP-BE-003-SIDECAR-REVIEW \
+  "審查通過：MAP-BE-003 sidecar review packet 已正確對齊 current machine truth（sidecar owner/reviewer 為 Codex2/Codex，當前狀態為 review，parent MAP-BE-003 仍為 review），並清楚區分 reviewer-facing review snapshot、temporary in_progress refresh cycle，以及 parent review surface 的兩個位置：canonical root working tree 內未提交的 api-client / api-client test delta，與 reviewer branch 可見的 API delta doc / downstream-evolved service-area test。packet 已把 acceptance 對應到具體 evidence anchors；support artifact only，未改 canonical truth。"
 ```
 
-Reviewer reopen:
+Reviewer reopen if needed:
 
 ```bash
-AI_NAME=Codex2 python3 scripts/ai_status.py reopen MAP-BE-003-SIDECAR-REVIEW \
-  "packet needs revision: [specify machine-truth mismatch / wrong worktree attribution / incorrect evidence mapping]"
-```
-
-Owner closeout after review approval:
-
-```bash
-AI_NAME=Codex \
-COMMIT_HASH=<sha> \
-COMMIT_SUBJECT="MAP-BE-003-SIDECAR-REVIEW: finalize review packet closeout" \
-PUSH_REMOTE=origin \
-PUSH_BRANCH=codex/map-be-003-sidecar-review \
-INTEGRATION_STATUS=not_applicable \
-scripts/ai-status.sh done MAP-BE-003-SIDECAR-REVIEW \
-  "Owner finalized the support-only review packet after Codex2 approval, pushed the task-scoped closeout commit, and recorded no-deploy integration status."
+AI_NAME=Codex scripts/ai-status.sh reopen MAP-BE-003-SIDECAR-REVIEW \
+  "packet needs revision: [machine-truth mismatch / wrong lifecycle timestamp / wrong worktree attribution / incorrect evidence mapping / support-scope violation]"
 ```
 
 ---
 
 ## 7. Change Log
 
-- 2026-06-30 - Created initial sidecar review packet for `MAP-BE-003`.
-- 2026-06-30 - Recorded that the parent review surface is split across the
-  sidecar `dev` worktree and the canonical-root working tree.
-- 2026-06-30 - Recorded that `docs/04-api/map-geofence-openapi-delta-20260630.md`
-  matches across worktrees, while `apps/api/tests/unit/service-area.service.test.ts`
-  has already evolved downstream in `MAP-BE-006`.
-- 2026-06-30 - Refreshed the packet after `review_approved` so the closeout
-  snapshot reflects the reviewer conclusion, the pushed packet anchor, and the
-  pending owner `done` step.
+- 2026-06-30 - Created the initial sidecar review packet and recorded that the
+  parent review surface is split across the sidecar `dev` worktree and the
+  canonical-root working tree.
+- 2026-07-01 - Refreshed the packet for the current `Codex2` / `Codex` routing
+  instead of the older `Codex` / `Codex2` closeout snapshot.
+- 2026-07-01 - Recorded the reviewer-facing `review` snapshot at
+  `2026-07-01T03:41:05Z`, the temporary `in_progress` refresh cycle at
+  `2026-07-01T03:42:51Z`, and the current `review` handoff at
+  `2026-07-01T03:44:35Z`.
+- 2026-07-01 - Preserved earlier `codex/*` and `codex2/*` support-packet
+  lineage as historical context only, without treating it as current machine
+  truth.
