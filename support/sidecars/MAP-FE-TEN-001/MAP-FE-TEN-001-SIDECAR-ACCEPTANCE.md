@@ -150,6 +150,17 @@ not against snapshot `HEAD` alone:
 - The sidecar remains support-only and does not modify canonical or runtime
   files.
 
+## Review Approval And Owner Closeout
+
+- Reviewer approval was recorded in machine truth at `2026-07-01T15:02:51Z`
+  against `origin/codex/map-fe-ten-001-sidecar-acceptance@b09d3f3b6`.
+- Approval scope: the packet remains support-only, maps `MAP-FE-TEN-001`
+  dependencies correctly, and distinguishes repo-visible tenant baseline from
+  owner-claimed handoff evidence that is not present on snapshot `HEAD`.
+- This owner closeout records branch-level finalization for the reviewed packet
+  only. It does not claim merge-to-`dev`, CI completion, or tenant dev
+  deployment.
+
 ## Evidence Index
 
 - Machine truth commands used for this packet:
