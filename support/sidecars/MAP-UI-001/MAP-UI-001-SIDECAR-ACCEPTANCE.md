@@ -5,9 +5,14 @@
 - Parent Task: `MAP-UI-001` - Shared AddressMapPicker
 - Parent Owner / Reviewer: `Claude2` / `Codex2`
 - Helper Kind: `acceptance_packet`
-- Snapshot Captured At: `2026-07-01T15:33:33Z`
-- Snapshot Status At Capture: sidecar `in_progress`; parent `in_progress`
+- Snapshot Captured At: `2026-07-01T15:37:46Z`
+- Snapshot Status At Capture: sidecar `in_progress` after review retry; parent `in_progress`
 - Class: support-only; no canonical-truth mutation
+
+> Snapshot note: `ai-status.json` is authoritative. This packet is a
+> reviewer-facing support snapshot captured at `2026-07-01T15:37:46Z`, so any
+> later handoff or approval will move machine truth before this markdown
+> updates.
 
 ## Purpose
 
@@ -39,8 +44,15 @@ This packet records that mismatch instead of flattening it into a false
 
 ## Machine-Truth Snapshot
 
+- `ai-status.json` is authoritative; this markdown only snapshots the state
+  visible from the owner branch at `2026-07-01T15:37:46Z`.
 - Sidecar task `MAP-UI-001-SIDECAR-ACCEPTANCE` is `in_progress` with next step:
-  `Preparing acceptance packet, dependency map, and reviewer handoff artifact for MAP-UI-001 sidecar support.`
+  `Review failed because the acceptance packet file is missing. Inspecting existing sidecar acceptance examples and MAP-UI-001 context, then creating the support artifact and task-scoped commit.`
+- Correct owner branch for this sidecar is
+  `codex/map-ui-001-sidecar-acceptance`. Remote
+  `origin/codex/map-ui-001-sidecar-acceptance` points to commit
+  `a65d6e74332d2de08acd8ec94a14f34f9554eecc`, and `git ls-tree` confirms this
+  packet exists on that remote branch.
 - Parent task `MAP-UI-001` is `in_progress`, owned by `Claude2`, reviewed by
   `Codex2`, and officially depends on `MAP-BE-003`.
 - Parent recorded acceptance in machine truth:
@@ -49,16 +61,31 @@ This packet records that mismatch instead of flattening it into a false
   `ui-web checks pass`.
 - `MAP-BE-003` remains `in_progress`. Its own machine-truth status explicitly
   says it is still blocked by `MAP-BE-001=review` and `MAP-BE-002=in_progress`.
+- `MAP-BE-002` remains `in_progress`, and its current task record still carries
+  failed-review findings for provider-neutral gateway binding and invalid
+  non-positive `limit` handling on direct service calls.
 - `MAP-QA-001` also remains `in_progress` and depends on both `MAP-BE-002` and
   `MAP-UI-001`, so mock-provider CI proof is not yet a settled downstream gate.
+- The parent task's recorded `planning_ref` and `gap_ref` point to `20260701`
+  docs that are not present in this worktree, so this packet uses the
+  inspectable `20260630` runbook/gap docs plus machine-truth task slices for
+  reviewer-visible evidence anchors.
 
 ## Canonical Parent Acceptance Decomposition
 
-Canonical sources:
+Canonical sources available in this worktree:
 
 - `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:516-554`
 - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md:308-317`
 - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md:529-579`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-001`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-003`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-002`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-QA-001`
+
+The `20260701` `planning_ref` / `gap_ref` recorded in the parent task are not
+inspectable in this branch snapshot, so this packet does not cite them as file
+anchors.
 
 Taken together, the parent `MAP-UI-001` acceptance decomposes into these
 reviewable items:
@@ -103,6 +130,11 @@ condition, because `MAP-QA-001` is still in progress.
 
 ### Inspectable mismatches and missing anchors
 
+- `origin/codex/map-ui-001-sidecar-acceptance`
+  contains `support/sidecars/MAP-UI-001/MAP-UI-001-SIDECAR-ACCEPTANCE.md`.
+  The prior review failure therefore reflects a branch/worktree mismatch
+  (`codex2/map-ui-001-sidecar-acceptance` versus the owner branch), not the
+  absence of the packet on the owner branch.
 - `packages/ui-web/src/client.tsx:1-16`
   currently exports only management-shell and theme-context helpers in this
   worktree. No `AddressMapPicker` or `AddressMapPairPicker` export is
@@ -138,7 +170,7 @@ the branch under review.
 | --- | --- | --- | --- |
 | `MAP-BE-003` | `in_progress` | Official parent dependency. Supplies typed geo/service-area API-client methods and endpoint documentation the shared picker should consume instead of ad hoc fetch code. | Do not approve the parent as complete while this dependency remains open in machine truth. |
 | `MAP-BE-001` | `review` | Transitive contract dependency. Defines the `AddressPayload` / provenance shape the picker must emit. | Parent reviewer should compare any picker payload helpers against `packages/contracts/src/index.ts:131-144,295-307,2542-2572`. |
-| `MAP-BE-002` | `in_progress` | Transitive geo gateway dependency. Owns provider-neutral search/resolve/reverse behavior plus deterministic mock behavior. | Parent verification must stay mock-provider-only while this remains open; machine truth also records unresolved gateway findings. |
+| `MAP-BE-002` | `in_progress` | Transitive geo gateway dependency. Owns provider-neutral search/resolve/reverse behavior plus deterministic mock behavior. | Parent verification must stay mock-provider-only while this remains open; its current task record still reports unresolved findings around provider-neutral injection and invalid direct-service `limit` handling. |
 | `MAP-QA-001` | `in_progress` | Downstream acceptance gate. Owns the deterministic mock-provider fixtures and E2E harness needed by the parent acceptance line. | Treat "CI uses a mock provider" as pending evidence until this task lands or equivalent proof is linked in parent review. |
 
 ### Downstream consumers waiting on MAP-UI-001
@@ -165,12 +197,15 @@ For sidecar reviewer `Codex2`, the useful checks are:
    material under `support/sidecars/MAP-UI-001/`.
 2. Confirm the acceptance decomposition matches the canonical runbook and gap
    inventory rather than inventing new requirements.
-3. Confirm the packet explicitly records the current evidence mismatch:
+3. Confirm the review uses
+   `codex/map-ui-001-sidecar-acceptance` / `origin/codex/map-ui-001-sidecar-acceptance`,
+   not the reviewer-lane branch named in the failed retry note.
+4. Confirm the packet explicitly records the current evidence mismatch:
    canonical docs describe shared picker artifacts that are not inspectable in
    this worktree snapshot.
-4. Confirm the packet does not over-claim parent readiness while
+5. Confirm the packet does not over-claim parent readiness while
    `MAP-BE-003` and `MAP-QA-001` are still open in machine truth.
-5. If the parent branch later gains the missing picker exports, requirements
+6. If the parent branch later gains the missing picker exports, requirements
    note, or mock-provider evidence, reopen or refresh this packet instead of
    silently treating this snapshot as evergreen.
 
@@ -185,11 +220,15 @@ For sidecar reviewer `Codex2`, the useful checks are:
 
 ## Reviewer Handoff
 
-Owner handoff command:
-`AI_NAME=Codex scripts/ai-status.sh handoff MAP-UI-001-SIDECAR-ACCEPTANCE Codex2 "Prepared MAP-UI-001 acceptance packet with parent acceptance decomposition, dependency map, and current worktree evidence snapshot. Packet records that MAP-BE-003 and MAP-QA-001 remain open and that the June 30 runbook's shared picker anchors are not yet inspectable in this branch snapshot. Verified git diff --check for support/sidecars/MAP-UI-001/MAP-UI-001-SIDECAR-ACCEPTANCE.md; no canonical truth files changed."`
+Review this packet on `origin/codex/map-ui-001-sidecar-acceptance` at commit
+`a65d6e74332d2de08acd8ec94a14f34f9554eecc` or newer.
 
-Machine-truth handoff executed at `2026-07-01T15:35:04Z`; the sidecar task is
-now `review`.
+Owner handoff command:
+`AI_NAME=Codex scripts/ai-status.sh handoff MAP-UI-001-SIDECAR-ACCEPTANCE Codex2 "Refreshed MAP-UI-001 acceptance packet snapshot and reissued review handoff. The support artifact is present on origin/codex/map-ui-001-sidecar-acceptance at a65d6e74332d2de08acd8ec94a14f34f9554eecc; packet now records the correct branch evidence, current dependency status, and the missing shared-export / missing canvas-note gaps. Verified git diff --check for support/sidecars/MAP-UI-001/MAP-UI-001-SIDECAR-ACCEPTANCE.md; no canonical truth files changed."`
+
+The previous review retry failed because the dispatch note referenced
+`codex2/map-ui-001-sidecar-acceptance`, which is not the owner branch for this
+sidecar artifact.
 
 Reviewer approval command:
 `AI_NAME=Codex2 scripts/ai-status.sh approve MAP-UI-001-SIDECAR-ACCEPTANCE "Reviewed: packet stays sidecar-only, decomposes MAP-UI-001 acceptance correctly, and accurately records dependency/evidence gaps without over-claiming parent completion."`
@@ -204,7 +243,12 @@ Reviewer approval command:
   `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-001-SIDECAR-ACCEPTANCE`,
   `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-001`,
   `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-003`,
+  `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-002`,
   `AI_NAME=Codex scripts/ai-status.sh show MAP-QA-001`.
+- Confirm the correct review branch and remote artifact with:
+  `git ls-remote --heads origin codex/map-ui-001-sidecar-acceptance`
+  and
+  `git ls-tree --name-only -r origin/codex/map-ui-001-sidecar-acceptance -- support/sidecars/MAP-UI-001`.
 - Re-run the evidence-gap probes:
   `git grep -n "AddressMapPicker\\|AddressMapPairPicker" packages/ui-web apps/ops-console-web docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
   and
