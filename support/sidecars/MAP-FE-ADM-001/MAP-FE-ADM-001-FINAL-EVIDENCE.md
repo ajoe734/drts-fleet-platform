@@ -2,7 +2,7 @@
 
 Task: `MAP-FE-ADM-001` - Platform Admin geofence governance UI
 
-Owner: `Codex`
+Owner: `Codex2`
 
 Branch: `codex/map-fe-adm-001-governance-ui`
 
