@@ -27,12 +27,12 @@ As of this tracker, the fleet has a good task breakdown and several base tasks a
 
 Current status summary captured during this sidecar pass:
 
-| Status    | MAP tasks                                                                                                                                     |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `done`    | `MAP-PROD-000`, `MAP-INFRA-001`, `MAP-BE-004`, `MAP-BE-006`, `MAP-FE-OPS-001`, `MAP-PROD-000-SIDECAR-ACCEPTANCE`, `MAP-UI-002-SIDECAR-REVIEW` |
-| `review`  | `MAP-BE-001`, `MAP-BE-002`, `MAP-BE-003`, `MAP-BE-005`, `MAP-UI-001`, `MAP-UI-002`, `MAP-FE-CALL-001`, `MAP-QA-001`, `MAP-UI-002-HARDEN-001`  |
-| `todo`    | `MAP-FE-ADM-001`, `MAP-QA-002`, `MAP-OBS-001`, `MAP-REL-001`                                                                                  |
-| `backlog` | `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-MOB-DRV-001`, `MAP-UI-002-INTEGRATE-001`                                                             |
+| Status    | MAP tasks                                                                                                                                                                |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `done`    | `MAP-PROD-000`, `MAP-INFRA-001`, `MAP-BE-004`, `MAP-BE-006`, `MAP-FE-OPS-001`, `MAP-PROD-000-SIDECAR-ACCEPTANCE`, `MAP-UI-002-SIDECAR-REVIEW`                            |
+| `review`  | `MAP-BE-001`, `MAP-BE-002`, `MAP-BE-003`, `MAP-BE-005`, `MAP-UI-001`, `MAP-UI-002`, `MAP-FE-CALL-001`, `MAP-QA-001`, `MAP-UI-002-HARDEN-001`, `MAP-UI-002-INTEGRATE-001` |
+| `todo`    | `MAP-FE-ADM-001`, `MAP-QA-002`, `MAP-OBS-001`, `MAP-REL-001`                                                                                                             |
+| `backlog` | `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-MOB-DRV-001`                                                                                                                    |
 
 Important interpretation:
 

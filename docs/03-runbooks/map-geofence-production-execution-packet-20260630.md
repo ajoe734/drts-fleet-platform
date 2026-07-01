@@ -154,8 +154,8 @@ reviewer handoff, and release-blocking meaning, use the closure matrix and
 | `MAP-PROD-000`    | `Claude` -> `Codex`   | L0    | None                                     | provider decision record, rollout flags        |
 | `MAP-INFRA-001`   | `Codex` -> `Codex2`   | L0    | `MAP-PROD-000`                           | env schema, provider config, quota/health docs |
 | `MAP-BE-001`      | `Codex` -> `Claude2`  | L1    | `MAP-PROD-000`                           | `packages/contracts`, migration plan           |
-| `MAP-BE-002`      | `Claude2` -> `Codex`  | L1    | `MAP-BE-001`, `MAP-INFRA-001`            | `apps/api/src/modules/geo`                     |
-| `MAP-BE-003`      | `Codex2` -> `Codex`   | L1    | `MAP-BE-001`, `MAP-BE-002`               | `packages/api-client`, API docs                |
+| `MAP-BE-002`      | `Codex` -> `Claude2`  | L1    | `MAP-BE-001`, `MAP-INFRA-001`            | `apps/api/src/modules/geo`                     |
+| `MAP-BE-003`      | `Codex` -> `Claude2`  | L1    | `MAP-BE-001`, `MAP-BE-002`               | `packages/api-client`, API docs                |
 | `MAP-BE-004`      | `Codex` -> `Codex2`   | L1    | `MAP-BE-001`, `MAP-BE-003`               | booking creation services                      |
 | `MAP-BE-005`      | `Codex` -> `Claude2`  | L1    | `MAP-BE-004`                             | order/booking persistence and audit            |
 | `MAP-BE-006`      | `Codex` -> `Codex2`   | L1    | `MAP-BE-001`                             | service-area admin APIs                        |
@@ -165,12 +165,12 @@ reviewer handoff, and release-blocking meaning, use the closure matrix and
 | `MAP-FE-TEN-001`  | `Claude2` -> `Codex2` | L3    | `MAP-UI-001`, `MAP-BE-004`, `MAP-BE-005` | Tenant Portal and Tenant Console               |
 | `MAP-FE-CON-001`  | `Codex2` -> `Claude`  | L3    | `MAP-UI-001`, `MAP-BE-004`, `MAP-BE-005` | Concierge and partner entry                    |
 | `MAP-FE-OPS-001`  | `Codex` -> `Codex2`   | L3    | `MAP-BE-003`, `MAP-BE-005`, `MAP-UI-001` | Ops real map board                             |
-| `MAP-FE-ADM-001`  | `Claude` -> `Codex`   | L3    | `MAP-BE-006`, `MAP-UI-002`               | Platform Admin service-area governance         |
+| `MAP-FE-ADM-001`  | `Codex2` -> `Codex`   | L3    | `MAP-BE-006`, `MAP-UI-002`               | Platform Admin service-area governance         |
 | `MAP-MOB-DRV-001` | `Codex2` -> `Claude2` | L3    | `MAP-BE-003`, `MAP-BE-005`               | Driver trip map/navigation                     |
 | `MAP-QA-001`      | `Codex` -> `Claude2`  | L4    | `MAP-BE-002`, `MAP-UI-001`               | mocked provider fixtures and E2E harness       |
-| `MAP-QA-002`      | `Copilot` -> `Codex`  | L4    | all L3 tasks                             | cross-surface E2E suite                        |
-| `MAP-OBS-001`     | `Gemini` -> `Claude`  | L4    | `MAP-BE-002`, `MAP-BE-005`, `MAP-BE-006` | metrics, audit events, dashboards              |
-| `MAP-REL-001`     | `Claude` -> `Codex`   | L4    | `MAP-QA-002`, `MAP-OBS-001`              | release gates and rollout closeout             |
+| `MAP-QA-002`      | `Codex2` -> `Codex`   | L4    | all L3 tasks                             | cross-surface E2E suite                        |
+| `MAP-OBS-001`     | `Codex2` -> `Codex`   | L4    | `MAP-BE-002`, `MAP-BE-005`, `MAP-BE-006` | metrics, audit events, dashboards              |
+| `MAP-REL-001`     | `Codex2` -> `Codex`   | L4    | `MAP-QA-002`, `MAP-OBS-001`              | release gates and rollout closeout             |
 
 ## Detailed Task Briefs
 
