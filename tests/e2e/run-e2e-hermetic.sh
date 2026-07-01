@@ -108,6 +108,12 @@ start_api() {
   echo "[hermetic] API failed to become healthy"; tail -n 40 "$API_LOG"; return 1
 }
 
+dump_api_log_for_suite() {
+  local suite="$1"
+  echo "[hermetic] API log tail for failed E2E-${suite}" >&2
+  tail -n "${E2E_API_LOG_TAIL_LINES:-220}" "$API_LOG" >&2 || true
+}
+
 seed_demo_driver_locations() {
   local recorded_at
   recorded_at="$(date -u -d "-30 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
@@ -170,7 +176,12 @@ for s in "${SUITES[@]}"; do
   if ! reset_db; then FAIL+=("$s"); continue; fi
   if ! start_api; then FAIL+=("$s"); continue; fi
   if ! seed_demo_driver_locations; then FAIL+=("$s"); continue; fi
-  if ./tests/e2e/run-e2e.sh --suite "$s"; then PASS+=("$s"); else FAIL+=("$s"); fi
+  if ./tests/e2e/run-e2e.sh --suite "$s"; then
+    PASS+=("$s")
+  else
+    FAIL+=("$s")
+    dump_api_log_for_suite "$s"
+  fi
 done
 
 echo "════════════════════════════════════════"
