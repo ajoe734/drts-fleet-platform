@@ -28,6 +28,11 @@ This runbook keeps map provider failures, address ambiguity, service-area policy
 - `serviceArea.outOfAreaCount`: not-serviceable results without a stop-policy denial.
 - `governance.geometryMutationCount`: service-area or stop-policy create/update/publish/retire activity.
 
+The snapshot counters above are cumulative process-local evidence. Alert state
+for `map_provider_outage` and `map_geofence_denial_burst` uses a trailing
+15-minute rolling signal so historical outage or denial events do not latch the
+alert after the current/recent signal clears.
+
 ## Provider Outage
 
 Signals:
@@ -35,12 +40,39 @@ Signals:
 - `GET /api/geo/health` has `failClosed=true` or `status=unhealthy`.
 - `mapGeofence.geo.providerOutageCount` increases.
 - `map_provider_errors_total{retryable="true"}` or `map_provider_fail_closed` alerts fire.
+- `MapProviderErrorRateHigh` or `MapProviderOutageFailClosed` alerts fire.
 
 Actions:
 
 1. Confirm provider mode, missing secrets, quota, and runtime environment from `/api/geo/health`.
 2. Check whether failures are retryable provider errors before routing to address-correction teams.
 3. Keep coordinate-less booking blocked. Manual pin fallback requires actor and reason audit evidence.
+
+## Provider Latency
+
+Signals:
+
+- `map_geocode_latency_ms` p95 is elevated by provider, surface, operation, and result.
+- `MapProviderLatencyHigh` alert fires.
+
+Actions:
+
+1. Compare p95 latency by provider and surface before routing as a global outage.
+2. Check whether latency coincides with retryable provider errors or quota pressure.
+3. Keep address ambiguity and policy denial triage separate from provider latency.
+
+## Provider Quota
+
+Signals:
+
+- `map_provider_quota_usage_percent` is at or above 80% warning or 95% critical.
+- `MapProviderQuotaUsageHigh` or `MapProviderQuotaUsageCritical` alert fires.
+
+Actions:
+
+1. Confirm provider, environment, and quota period before throttling traffic.
+2. Prefer reducing non-dispatch-critical geocode traffic before blocking active dispatch flows.
+3. Prepare manual pin fallback only with `geo.manual_override.created` audit evidence.
 
 ## Address Ambiguity
 
@@ -90,6 +122,7 @@ Signals:
 
 - `mapGeofence.geo.manualOverrideCount` and `mapGeofence.governance.manualOverrideCount` increase.
 - Audit contains both `geo.address.resolved` and `geo.pin.confirmed`.
+- Audit contains `geo.manual_override.created`.
 - `geo.pin.confirmed` includes `manualOverrideReason`, actor, surface, and coordinate source `manual_pin`.
 
 Actions:
@@ -109,8 +142,8 @@ Signals:
 Actions:
 
 1. Inspect actor, action, version, effective dates, reason, and geometry version references.
-2. For policy publish/retire, verify `service_area.stop_policy.published` or `service_area.stop_policy.retired`.
-3. For boundary publish/retire, verify `service_area.boundary.published` or `service_area.boundary.retired`.
+2. For policy publish/retire, verify `service_area.policy.published` or `service_area.policy.retired` plus the preserved `service_area.stop_policy.*` event.
+3. For boundary publish/retire, verify `service_area.policy.published` or `service_area.policy.retired` plus the preserved `service_area.boundary.*` event.
 
 ## External Gaps
 

@@ -441,6 +441,9 @@ export class ServiceAreaService implements OnModuleInit {
         areaCode: record.areaCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        effectiveFrom: record.effectiveFrom,
+        effectiveUntil: record.effectiveUntil,
         geometryVersionRef: this.geometryVersionRef(
           "service_area",
           record.areaCode,
@@ -468,13 +471,13 @@ export class ServiceAreaService implements OnModuleInit {
       );
     }
     const previous = this.clone(record);
+    const retiredAt = new Date().toISOString();
     record.status = "retired";
     record.effectiveUntil =
-      this.normalizeEffectiveUntil(command.effectiveUntil) ??
-      new Date().toISOString();
+      this.normalizeEffectiveUntil(command.effectiveUntil) ?? retiredAt;
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
     record.metadata = this.withLifecycleMetadata(record.metadata, {
-      retiredAt: new Date().toISOString(),
+      retiredAt,
       retireReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
@@ -492,7 +495,10 @@ export class ServiceAreaService implements OnModuleInit {
         areaCode: record.areaCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        effectiveFrom: record.effectiveFrom,
         effectiveUntil: record.effectiveUntil,
+        retiredAt,
         reason: command.reason ?? null,
       },
       context,
@@ -718,6 +724,11 @@ export class ServiceAreaService implements OnModuleInit {
         policyCode: record.policyCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        direction: record.direction,
+        effect: record.effect,
+        effectiveFrom: record.effectiveFrom,
+        effectiveUntil: record.effectiveUntil,
         geometryVersionRef: this.geometryVersionRef(
           "stop_policy",
           record.policyCode,
@@ -745,13 +756,13 @@ export class ServiceAreaService implements OnModuleInit {
       );
     }
     const previous = this.clone(record);
+    const retiredAt = new Date().toISOString();
     record.status = "retired";
     record.effectiveUntil =
-      this.normalizeEffectiveUntil(command.effectiveUntil) ??
-      new Date().toISOString();
+      this.normalizeEffectiveUntil(command.effectiveUntil) ?? retiredAt;
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
     record.metadata = this.withLifecycleMetadata(record.metadata, {
-      retiredAt: new Date().toISOString(),
+      retiredAt,
       retireReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
@@ -769,7 +780,12 @@ export class ServiceAreaService implements OnModuleInit {
         policyCode: record.policyCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        direction: record.direction,
+        effect: record.effect,
+        effectiveFrom: record.effectiveFrom,
         effectiveUntil: record.effectiveUntil,
+        retiredAt,
         reason: command.reason ?? null,
       },
       context,
@@ -1293,7 +1309,7 @@ export class ServiceAreaService implements OnModuleInit {
     oldValuesSummary?: Record<string, unknown>,
   ) {
     this.recordGeometryMutationMetric(actionName);
-    return (
+    const audit =
       this.auditNotificationService?.recordAuditLog({
         actorId: context.actorId,
         actorType: context.actorType,
@@ -1305,8 +1321,66 @@ export class ServiceAreaService implements OnModuleInit {
         ...(oldValuesSummary ? { oldValuesSummary } : {}),
         newValuesSummary,
         ...(context.requestId ? { requestId: context.requestId } : {}),
-      }) ?? null
+      }) ?? null;
+    this.recordPolicyCompatibilityAudit(
+      actionName,
+      resourceType,
+      resourceId,
+      newValuesSummary,
+      context,
+      oldValuesSummary,
     );
+    return audit;
+  }
+
+  private recordPolicyCompatibilityAudit(
+    actionName: string,
+    resourceType: string,
+    resourceId: string,
+    newValuesSummary: Record<string, unknown>,
+    context: ServiceAreaMutationContext,
+    oldValuesSummary?: Record<string, unknown>,
+  ) {
+    const policyActionName = this.compatibilityPolicyActionName(actionName);
+    if (!policyActionName) {
+      return;
+    }
+
+    this.auditNotificationService?.recordAuditLog({
+      actorId: context.actorId,
+      actorType: context.actorType,
+      tenantId: null,
+      moduleName: "service-area",
+      actionName: policyActionName,
+      resourceType: "service_area_policy",
+      resourceId,
+      ...(oldValuesSummary ? { oldValuesSummary } : {}),
+      newValuesSummary: {
+        ...newValuesSummary,
+        policyId: resourceId,
+        policyCode:
+          newValuesSummary.policyCode ?? newValuesSummary.areaCode ?? null,
+        policyKind: resourceType,
+        actorId: context.actorId,
+        actorRole: context.actorType,
+        direction: newValuesSummary.direction ?? null,
+        effect: newValuesSummary.effect ?? null,
+      },
+      ...(context.requestId ? { requestId: context.requestId } : {}),
+    });
+  }
+
+  private compatibilityPolicyActionName(actionName: string) {
+    switch (actionName) {
+      case "service_area.boundary.published":
+      case "service_area.stop_policy.published":
+        return "service_area.policy.published";
+      case "service_area.boundary.retired":
+      case "service_area.stop_policy.retired":
+        return "service_area.policy.retired";
+      default:
+        return null;
+    }
   }
 
   private recordServiceAreaEvaluationAudit(

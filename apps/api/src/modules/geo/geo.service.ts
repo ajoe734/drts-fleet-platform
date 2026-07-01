@@ -127,6 +127,7 @@ export class GeoService {
     if (response.address.coordinateSource === "manual_pin") {
       this.mapGeofenceObservabilityService?.recordGeoOutcome("manual_override");
       this.recordGeoPinConfirmed(response, normalized, requestId);
+      this.recordGeoManualOverrideCreated(response, normalized, requestId);
     }
     return response;
   }
@@ -271,6 +272,17 @@ export class GeoService {
       newValuesSummary: {
         provider: response.provider,
         surface: response.address.surface ?? null,
+        actorId,
+        actorRole: actorId ? "ops_user" : "system",
+        candidateId:
+          response.address.providerCandidateId ??
+          response.address.placeId ??
+          null,
+        lat: response.address.lat,
+        lng: response.address.lng,
+        confidence: response.address.geocodeConfidence ?? null,
+        provenance: response.address.coordinateSource,
+        accuracyMeters: response.address.coordinateAccuracyM ?? null,
         coordinateSource: response.address.coordinateSource,
         geocodeConfidence: response.address.geocodeConfidence ?? null,
         coordinateAccuracyM: response.address.coordinateAccuracyM ?? null,
@@ -297,10 +309,47 @@ export class GeoService {
         response.address.normalizedAddress ?? response.address.address,
       newValuesSummary: {
         surface: response.address.surface ?? null,
+        actorId,
+        actorRole: actorId ? "ops_user" : "system",
+        stopRole: null,
+        lat: response.address.lat,
+        lng: response.address.lng,
+        provenance: response.address.coordinateSource,
+        serviceAreaPreviewDecision: null,
         coordinateSource: response.address.coordinateSource,
         manualOverrideReason: response.address.manualOverrideReason ?? null,
         selectedByActorId: response.address.selectedByActorId ?? null,
         pinnedByActorId: response.address.pinnedByActorId ?? null,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private recordGeoManualOverrideCreated(
+    response: GeoResolveResponse,
+    command: ResolveAddressCommand,
+    requestId?: string,
+  ) {
+    const actorId = command.selectedByActorId ?? null;
+    this.auditNotificationService?.recordAuditLog({
+      actorId,
+      actorType: actorId ? "ops_user" : "system",
+      tenantId: null,
+      moduleName: "geo",
+      actionName: "geo.manual_override.created",
+      resourceType: "geo_manual_override",
+      resourceId:
+        response.address.normalizedAddress ?? response.address.address,
+      newValuesSummary: {
+        surface: response.address.surface ?? null,
+        actorId,
+        actorRole: actorId ? "ops_user" : "system",
+        reasonCode: response.address.manualOverrideReason ?? null,
+        providerState: response.provider,
+        lat: response.address.lat,
+        lng: response.address.lng,
+        manualReviewRequired: true,
+        coordinateSource: response.address.coordinateSource,
       },
       ...(requestId ? { requestId } : {}),
     });

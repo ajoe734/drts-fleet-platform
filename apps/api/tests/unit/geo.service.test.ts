@@ -173,6 +173,11 @@ describe("GeoService", () => {
         actionName: "geo.address.resolved",
         requestId: "req-geo-manual-pin-001",
         newValuesSummary: expect.objectContaining({
+          actorId: "agent-002",
+          actorRole: "ops_user",
+          lat: 25.041,
+          lng: 121.55,
+          provenance: "manual_pin",
           coordinateSource: "manual_pin",
           manualOverrideReason: "caller_confirmed_gate",
         }),
@@ -182,6 +187,29 @@ describe("GeoService", () => {
       expect.objectContaining({
         actionName: "geo.pin.confirmed",
         requestId: "req-geo-manual-pin-001",
+        newValuesSummary: expect.objectContaining({
+          actorId: "agent-002",
+          actorRole: "ops_user",
+          lat: 25.041,
+          lng: 121.55,
+          provenance: "manual_pin",
+          serviceAreaPreviewDecision: null,
+        }),
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "geo.manual_override.created",
+        requestId: "req-geo-manual-pin-001",
+        newValuesSummary: expect.objectContaining({
+          actorId: "agent-002",
+          actorRole: "ops_user",
+          reasonCode: "caller_confirmed_gate",
+          providerState: "mock",
+          manualReviewRequired: true,
+          lat: 25.041,
+          lng: 121.55,
+        }),
       }),
     );
   });
