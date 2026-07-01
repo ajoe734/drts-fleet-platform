@@ -7,7 +7,10 @@ function isPlatformAdminProject(testInfo: TestInfo) {
 }
 
 async function mockServiceAreaAuthority(page: Page) {
-  const serviceAreas = [
+  let stopPolicyStatus = "review";
+  let stopPolicyVersion = 3;
+
+  const buildServiceAreas = () => [
     {
       serviceAreaId: "svc-area-e2e-001",
       areaCode: "TAIPEI_CORE",
@@ -32,12 +35,12 @@ async function mockServiceAreaAuthority(page: Page) {
     },
   ];
 
-  const stopPolicies = [
+  const buildStopPolicies = () => [
     {
       stopPolicyId: "stop-policy-e2e-001",
       policyCode: "TPE_STATION_PICKUP_BLOCK",
       displayName: "Taipei station pickup curb restriction",
-      status: "review",
+      status: stopPolicyStatus,
       direction: "pickup",
       effect: "deny",
       geometry: {
@@ -51,14 +54,14 @@ async function mockServiceAreaAuthority(page: Page) {
       reasonMessage: "Pickup is not allowed at this curb zone.",
       effectiveFrom: "2026-07-10T00:00:00.000Z",
       effectiveUntil: null,
-      version: 3,
+      version: stopPolicyVersion,
       metadata: { source: "e2e" },
       createdAt: "2026-06-29T00:00:00.000Z",
       updatedAt: "2026-06-30T12:00:00.000Z",
     },
   ];
-  const serviceArea = serviceAreas[0];
-  const stopPolicy = stopPolicies[0];
+  const serviceArea = buildServiceAreas()[0];
+  const stopPolicy = buildStopPolicies()[0];
 
   if (!serviceArea || !stopPolicy) {
     throw new Error("Service-area E2E fixture is incomplete.");
@@ -71,7 +74,11 @@ async function mockServiceAreaAuthority(page: Page) {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          data: { serviceAreas, stopPolicies, generatedAt },
+          data: {
+            serviceAreas: buildServiceAreas(),
+            stopPolicies: buildStopPolicies(),
+            generatedAt,
+          },
           meta: {
             request_id: "req-service-area-defs-e2e",
             timestamp: generatedAt,
@@ -84,6 +91,8 @@ async function mockServiceAreaAuthority(page: Page) {
   await page.route(
     "**/control-plane-proxy/service-area/admin/geojson",
     async (route) => {
+      const currentServiceArea = buildServiceAreas()[0]!;
+      const currentStopPolicy = buildStopPolicies()[0]!;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -113,9 +122,9 @@ async function mockServiceAreaAuthority(page: Page) {
                   areaCode: "TAIPEI_CORE",
                   displayName: "Taipei core operating area",
                   status: "active",
-                  sourceGeometry: serviceArea.geometry,
-                  serviceProductTypes: serviceArea.serviceProductTypes,
-                  effectiveFrom: serviceArea.effectiveFrom,
+                  sourceGeometry: currentServiceArea.geometry,
+                  serviceProductTypes: currentServiceArea.serviceProductTypes,
+                  effectiveFrom: currentServiceArea.effectiveFrom,
                   effectiveUntil: null,
                   version: 2,
                   geometryVersionRef: "svc_area:TAIPEI_CORE@v2",
@@ -142,18 +151,18 @@ async function mockServiceAreaAuthority(page: Page) {
                   stopPolicyId: "stop-policy-e2e-001",
                   policyCode: "TPE_STATION_PICKUP_BLOCK",
                   displayName: "Taipei station pickup curb restriction",
-                  status: "review",
+                  status: currentStopPolicy.status,
                   direction: "pickup",
                   effect: "deny",
-                  sourceGeometry: stopPolicy.geometry,
+                  sourceGeometry: currentStopPolicy.geometry,
                   serviceAreaCodes: ["TAIPEI_CORE"],
-                  serviceProductTypes: stopPolicy.serviceProductTypes,
+                  serviceProductTypes: currentStopPolicy.serviceProductTypes,
                   reasonCode: "PICKUP_NOT_ALLOWED",
                   reasonMessage: "Pickup is not allowed at this curb zone.",
-                  effectiveFrom: stopPolicy.effectiveFrom,
+                  effectiveFrom: currentStopPolicy.effectiveFrom,
                   effectiveUntil: null,
-                  version: 3,
-                  geometryVersionRef: "stop_policy:TPE_STATION_PICKUP_BLOCK@v3",
+                  version: currentStopPolicy.version,
+                  geometryVersionRef: `stop_policy:TPE_STATION_PICKUP_BLOCK@v${currentStopPolicy.version}`,
                   metadata: { source: "e2e" },
                 },
               },
@@ -161,6 +170,106 @@ async function mockServiceAreaAuthority(page: Page) {
           },
           meta: {
             request_id: "req-service-area-geojson-e2e",
+            timestamp: generatedAt,
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/service-area/evaluate",
+    async (route) => {
+      const body = route.request().postDataJSON() as {
+        pickup?: { lat: number; lng: number };
+        dropoff?: { lat: number; lng: number };
+      };
+      const isOutsideControl =
+        body.pickup && body.pickup.lat > 25.2 && body.pickup.lng > 121.8;
+      const decision = isOutsideControl ? "serviceable" : "not_serviceable";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            decision,
+            serviceProductType: "taxi_realtime",
+            evaluatedAt: generatedAt,
+            stops: [
+              {
+                kind: "pickup",
+                location: body.pickup,
+                serviceAreaCodes: ["TAIPEI_CORE"],
+                policyCodes: isOutsideControl
+                  ? []
+                  : ["TPE_STATION_PICKUP_BLOCK"],
+                geometryVersionRefs: [
+                  `stop_policy:TPE_STATION_PICKUP_BLOCK@v${stopPolicyVersion}`,
+                ],
+                decision,
+                reasonCodes: isOutsideControl ? [] : ["PICKUP_NOT_ALLOWED"],
+                reasonMessages: isOutsideControl
+                  ? []
+                  : ["Pickup is not allowed at this curb zone."],
+              },
+            ],
+            serviceAreaCodes: ["TAIPEI_CORE"],
+            geometryVersionRefs: [
+              `stop_policy:TPE_STATION_PICKUP_BLOCK@v${stopPolicyVersion}`,
+            ],
+            reasonCodes: isOutsideControl ? [] : ["PICKUP_NOT_ALLOWED"],
+            reasonMessages: isOutsideControl
+              ? []
+              : ["Pickup is not allowed at this curb zone."],
+          },
+          meta: {
+            request_id: "req-service-area-evaluate-e2e",
+            timestamp: generatedAt,
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/service-area/admin/stop-policies/stop-policy-e2e-001/publish",
+    async (route) => {
+      stopPolicyStatus = "active";
+      stopPolicyVersion = 4;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            stopPolicy: buildStopPolicies()[0],
+            auditId: "audit-stop-policy-publish-e2e",
+            generatedAt,
+          },
+          meta: {
+            request_id: "req-service-area-publish-e2e",
+            timestamp: generatedAt,
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/service-area/admin/stop-policies/stop-policy-e2e-001/retire",
+    async (route) => {
+      stopPolicyStatus = "retired";
+      stopPolicyVersion = 5;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            stopPolicy: buildStopPolicies()[0],
+            auditId: "audit-stop-policy-retire-e2e",
+            generatedAt,
+          },
+          meta: {
+            request_id: "req-service-area-retire-e2e",
             timestamp: generatedAt,
           },
         }),
@@ -203,5 +312,60 @@ test.describe("platform admin service-area governance", () => {
     await expect(
       page.getByTestId("service-area-sandbox-boundary-warning"),
     ).toHaveAttribute("data-sandbox-operating-areas-owned-by", "/sandbox");
+
+    await page.getByTestId("stop-policy-row-TPE_STATION_PICKUP_BLOCK").click();
+    await expect(
+      page.getByTestId("service-area-geometry-editor"),
+    ).toHaveAttribute("data-geometry-type", "circle");
+    await expect(
+      page.getByTestId("service-area-geometry-editor"),
+    ).toHaveAttribute("data-validation-state", "valid");
+
+    await page
+      .getByTestId("service-area-audit-reason")
+      .fill("Gate B e2e policy board approval");
+    await page
+      .getByRole("button", { name: "Run affected sample preview" })
+      .click();
+    await expect(
+      page.getByTestId("service-area-affected-preview"),
+    ).toHaveAttribute("data-preview-state", "fresh");
+    await expect(
+      page.getByTestId("service-area-affected-preview"),
+    ).toHaveAttribute("data-preview-blocked", "2");
+    await expect(
+      page.getByTestId("service-area-affected-sample-target-pickup"),
+    ).toHaveAttribute("data-evaluator-decision", "not_serviceable");
+    await expect(
+      page.getByTestId("service-area-affected-preview"),
+    ).toHaveAttribute(
+      "data-preview-version-refs",
+      /stop_policy:TPE_STATION_PICKUP_BLOCK@v3/,
+    );
+
+    await page.getByRole("button", { name: "Publish" }).click();
+    await expect(
+      page.getByTestId("service-area-mutation-receipt"),
+    ).toHaveAttribute("data-audit-id", "audit-stop-policy-publish-e2e");
+    await expect(
+      page.getByTestId("service-area-mutation-receipt"),
+    ).toHaveAttribute(
+      "data-mutation-version-ref",
+      "stop_policy:TPE_STATION_PICKUP_BLOCK@v4",
+    );
+
+    await page
+      .getByTestId("service-area-audit-reason")
+      .fill("Gate B e2e rollback after policy verification");
+    await page.getByRole("button", { name: "Retire" }).click();
+    await expect(
+      page.getByTestId("service-area-mutation-receipt"),
+    ).toHaveAttribute("data-audit-id", "audit-stop-policy-retire-e2e");
+    await expect(
+      page.getByTestId("service-area-mutation-receipt"),
+    ).toHaveAttribute(
+      "data-mutation-version-ref",
+      "stop_policy:TPE_STATION_PICKUP_BLOCK@v5",
+    );
   });
 });

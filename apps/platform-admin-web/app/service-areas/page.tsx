@@ -7,9 +7,23 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { ServiceAreaGeometryEditor } from "@/components/service-area-geometry-editor";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  buildAffectedEvaluationSamples,
+  getGeometryVersionRef,
+  getServiceAreaGovernanceRecordCode,
+  getServiceAreaGovernanceRecordId,
+  summarizeServiceAreaEvaluationResults,
+  validateServiceAreaGeometry,
+  type AffectedEvaluationSample,
+  type EvaluationPreviewSummary,
+} from "@/lib/service-area-governance";
 import type {
+  ServiceAreaAdminMutationResponse,
   ServiceAreaBoundaryRecord,
+  ServiceAreaEvaluationResult,
+  ServiceAreaGeometry,
   ServiceAreaGeoJsonFeature,
   ServiceAreaGeoJsonResponse,
   ServiceAreaRecordStatus,
@@ -117,6 +131,18 @@ type StopPolicyRow = Record<string, unknown> & {
 
 type ImportedFeatureKind = "service_area" | "stop_policy";
 
+type PreviewSampleResult = {
+  sample: AffectedEvaluationSample;
+  result: ServiceAreaEvaluationResult;
+};
+
+type AffectedPreviewProof = {
+  selectionKey: string;
+  checkedAt: string;
+  samples: PreviewSampleResult[];
+  summary: EvaluationPreviewSummary;
+};
+
 function statusTone(
   status: ServiceAreaRecordStatus,
 ): "success" | "neutral" | "warn" | "danger" {
@@ -206,6 +232,12 @@ export default function ServiceAreaGovernancePage() {
   const [effectiveUntil, setEffectiveUntil] = useState("");
   const [reason, setReason] = useState("");
   const [importText, setImportText] = useState("");
+  const [draftGeometry, setDraftGeometry] =
+    useState<ServiceAreaGeometry | null>(null);
+  const [affectedPreview, setAffectedPreview] =
+    useState<AffectedPreviewProof | null>(null);
+  const [lastMutationReceipt, setLastMutationReceipt] =
+    useState<ServiceAreaAdminMutationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -246,6 +278,37 @@ export default function ServiceAreaGovernancePage() {
       : (stopPolicies.find((record) => record.stopPolicyId === selection.id) ??
           null);
   }, [selection, serviceAreas, stopPolicies]);
+
+  useEffect(() => {
+    setDraftGeometry(
+      selectedRecord ? cloneGeometry(selectedRecord.geometry) : null,
+    );
+    setAffectedPreview(null);
+  }, [selection?.id, selection?.kind, selectedRecord?.version]);
+
+  useEffect(() => {
+    setLastMutationReceipt(null);
+  }, [selection?.id, selection?.kind]);
+
+  const selectedRecordKey = selectedRecord
+    ? `${selection?.kind ?? "record"}:${getServiceAreaGovernanceRecordId(
+        selectedRecord,
+      )}:${selectedRecord.version}`
+    : "";
+
+  const draftGeometryErrors = useMemo(
+    () => validateServiceAreaGeometry(draftGeometry),
+    [draftGeometry],
+  );
+
+  const hasUnsavedGeometryDraft =
+    Boolean(selectedRecord && draftGeometry) &&
+    JSON.stringify(selectedRecord?.geometry) !== JSON.stringify(draftGeometry);
+
+  const hasFreshAffectedPreview =
+    Boolean(affectedPreview) &&
+    affectedPreview?.selectionKey === selectedRecordKey &&
+    affectedPreview.summary.total > 0;
 
   const boundaryRows = useMemo<BoundaryRow[]>(
     () =>
@@ -410,7 +473,10 @@ export default function ServiceAreaGovernancePage() {
       setError(null);
       setNotice(null);
       try {
-        await action();
+        const result = await action();
+        if (isMutationResponse(result)) {
+          setLastMutationReceipt(result);
+        }
         setNotice(`${label} completed. Refreshed governance definitions.`);
         await load();
       } catch (actionError: unknown) {
@@ -441,17 +507,37 @@ export default function ServiceAreaGovernancePage() {
     if (current.selectedRecord.status !== "draft") {
       throw new Error("Only draft records can be submitted for review.");
     }
-    if (current.selection.kind === "service_area") {
-      await client.submitServiceAreaBoundaryForReview(current.selection.id);
-    } else {
-      await client.submitStopPolicyForReview(current.selection.id);
+    if (hasUnsavedGeometryDraft) {
+      throw new Error(
+        "Save the GeometryEditor draft before submitting review.",
+      );
     }
-  }, [client, requireSelectionAndReason]);
+    if (current.selection.kind === "service_area") {
+      return await client.submitServiceAreaBoundaryForReview(
+        current.selection.id,
+      );
+    } else {
+      return await client.submitStopPolicyForReview(current.selection.id);
+    }
+  }, [client, hasUnsavedGeometryDraft, requireSelectionAndReason]);
 
   const publish = useCallback(async () => {
     const current = requireSelectionAndReason();
     if (!["draft", "review"].includes(current.selectedRecord.status)) {
       throw new Error("Only draft or review records can be published.");
+    }
+    if (draftGeometryErrors.length) {
+      throw new Error(
+        "Resolve GeometryEditor validation errors before publish.",
+      );
+    }
+    if (hasUnsavedGeometryDraft) {
+      throw new Error("Save the GeometryEditor draft before publish.");
+    }
+    if (!hasFreshAffectedPreview) {
+      throw new Error(
+        "Run affected sample preview before publish so evaluator/version refs are visible.",
+      );
     }
     const command = {
       effectiveFrom: effectiveFrom || null,
@@ -459,14 +545,20 @@ export default function ServiceAreaGovernancePage() {
       reason,
     };
     if (current.selection.kind === "service_area") {
-      await client.publishServiceAreaBoundary(current.selection.id, command);
+      return await client.publishServiceAreaBoundary(
+        current.selection.id,
+        command,
+      );
     } else {
-      await client.publishStopPolicy(current.selection.id, command);
+      return await client.publishStopPolicy(current.selection.id, command);
     }
   }, [
     client,
+    draftGeometryErrors.length,
     effectiveFrom,
     effectiveUntil,
+    hasFreshAffectedPreview,
+    hasUnsavedGeometryDraft,
     reason,
     requireSelectionAndReason,
   ]);
@@ -478,11 +570,108 @@ export default function ServiceAreaGovernancePage() {
     }
     const command = { effectiveUntil: effectiveUntil || null, reason };
     if (current.selection.kind === "service_area") {
-      await client.retireServiceAreaBoundary(current.selection.id, command);
+      return await client.retireServiceAreaBoundary(
+        current.selection.id,
+        command,
+      );
     } else {
-      await client.retireStopPolicy(current.selection.id, command);
+      return await client.retireStopPolicy(current.selection.id, command);
     }
   }, [client, effectiveUntil, reason, requireSelectionAndReason]);
+
+  const saveGeometry = useCallback(async () => {
+    const current = requireSelectionAndReason();
+    if (!draftGeometry) {
+      throw new Error("No GeometryEditor draft is loaded.");
+    }
+    if (draftGeometryErrors.length) {
+      throw new Error("Resolve GeometryEditor validation errors before save.");
+    }
+    if (["active", "retired"].includes(current.selectedRecord.status)) {
+      throw new Error(
+        "Only draft or review records can save geometry changes.",
+      );
+    }
+    const metadata = {
+      ...(current.selectedRecord.metadata ?? {}),
+      geometryEditor: "platform-admin-web",
+      geometryEditorReason: reason,
+      previousGeometryVersionRef: getGeometryVersionRef(current.selectedRecord),
+    };
+    if (current.selection.kind === "service_area") {
+      return await client.updateServiceAreaBoundary(current.selection.id, {
+        geometry: draftGeometry,
+        metadata,
+      });
+    }
+    return await client.updateStopPolicy(current.selection.id, {
+      geometry: draftGeometry,
+      metadata,
+    });
+  }, [
+    client,
+    draftGeometry,
+    draftGeometryErrors.length,
+    reason,
+    requireSelectionAndReason,
+  ]);
+
+  const runAffectedPreview = useCallback(async () => {
+    if (!selectedRecord) {
+      setError("Select a boundary or stop policy before preview.");
+      return;
+    }
+    if (draftGeometryErrors.length) {
+      setError("Resolve GeometryEditor validation errors before preview.");
+      return;
+    }
+    if (hasUnsavedGeometryDraft) {
+      setError("Save the GeometryEditor draft before preview.");
+      return;
+    }
+
+    setBusy("Affected preview");
+    setError(null);
+    setNotice(null);
+    try {
+      const samples = buildAffectedEvaluationSamples(selectedRecord, {
+        requestedAt: effectiveFrom || selectedRecord.effectiveFrom,
+      });
+      const results = await Promise.all(
+        samples.map(async (sample) => ({
+          sample,
+          result: await client.evaluateServiceArea(sample.command),
+        })),
+      );
+      const summary = summarizeServiceAreaEvaluationResults(
+        results.map((entry) => entry.result),
+      );
+      setAffectedPreview({
+        selectionKey: selectedRecordKey,
+        checkedAt: new Date().toISOString(),
+        samples: results,
+        summary,
+      });
+      setNotice(
+        "Affected sample preview completed. Publish gate is now armed.",
+      );
+    } catch (previewError: unknown) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : String(previewError),
+      );
+    } finally {
+      setBusy(null);
+    }
+  }, [
+    client,
+    draftGeometryErrors.length,
+    effectiveFrom,
+    hasUnsavedGeometryDraft,
+    selectedRecord,
+    selectedRecordKey,
+  ]);
 
   const createDraftFromImport = useCallback(
     async (kind: ImportedFeatureKind) => {
@@ -761,6 +950,206 @@ export default function ServiceAreaGovernancePage() {
 
             <CanvasCard
               theme={theme}
+              title="GeometryEditor"
+              subtitle="Edit governed polygon/circle geometry before review or publish. Active/retired records stay read-only; create a new draft for changes."
+            >
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 12 }}
+                data-testid="service-area-geometry-editor-panel"
+                data-selected-record-code={
+                  selectedRecord
+                    ? getServiceAreaGovernanceRecordCode(selectedRecord)
+                    : ""
+                }
+                data-unsaved-geometry-draft={
+                  hasUnsavedGeometryDraft ? "true" : "false"
+                }
+              >
+                {selectedRecord && draftGeometry ? (
+                  <>
+                    <ServiceAreaGeometryEditor
+                      theme={theme}
+                      value={draftGeometry}
+                      onChange={(nextGeometry) => {
+                        setDraftGeometry(nextGeometry);
+                        setAffectedPreview(null);
+                      }}
+                      disabled={["active", "retired"].includes(
+                        selectedRecord.status,
+                      )}
+                      recordLabel={getServiceAreaGovernanceRecordCode(
+                        selectedRecord,
+                      )}
+                    />
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <CanvasBtn
+                        theme={theme}
+                        disabled={
+                          Boolean(busy) ||
+                          !hasUnsavedGeometryDraft ||
+                          ["active", "retired"].includes(selectedRecord.status)
+                        }
+                        onClick={() =>
+                          void runAction("Save geometry", () => saveGeometry())
+                        }
+                      >
+                        Save GeometryEditor draft
+                      </CanvasBtn>
+                      <CanvasBtn
+                        theme={theme}
+                        variant="ghost"
+                        disabled={Boolean(busy)}
+                        onClick={() => {
+                          setDraftGeometry(
+                            cloneGeometry(selectedRecord.geometry),
+                          );
+                          setAffectedPreview(null);
+                        }}
+                      >
+                        Reset to saved geometry
+                      </CanvasBtn>
+                    </div>
+                  </>
+                ) : (
+                  <div style={helpStyle}>
+                    Select a boundary or stop policy to load governed geometry.
+                  </div>
+                )}
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title="Affected sample preview"
+              subtitle="Evaluator proof required before publish: sample pickup/dropoff points must show decision, policy reason, and geometry version refs."
+            >
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+                data-testid="service-area-affected-preview"
+                data-preview-state={
+                  affectedPreview
+                    ? affectedPreview.selectionKey === selectedRecordKey
+                      ? "fresh"
+                      : "stale"
+                    : "missing"
+                }
+                data-preview-total={affectedPreview?.summary.total ?? 0}
+                data-preview-blocked={affectedPreview?.summary.blocked ?? 0}
+                data-preview-manual-review={
+                  affectedPreview?.summary.manualReview ?? 0
+                }
+                data-preview-serviceable={
+                  affectedPreview?.summary.serviceable ?? 0
+                }
+                data-preview-version-refs={
+                  affectedPreview?.summary.versionRefs.join(",") ?? ""
+                }
+                data-preview-reason-codes={
+                  affectedPreview?.summary.reasonCodes.join(",") ?? ""
+                }
+              >
+                <div style={helpStyle}>
+                  Publish is blocked until this preview is fresh for the
+                  selected record/version. The preview calls the backend
+                  service-area evaluator instead of trusting UI geometry alone.
+                </div>
+                <CanvasBtn
+                  theme={theme}
+                  variant="primary"
+                  disabled={Boolean(busy) || !selectedRecord}
+                  onClick={() => void runAffectedPreview()}
+                >
+                  Run affected sample preview
+                </CanvasBtn>
+                {affectedPreview ? (
+                  <>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                        gap: 8,
+                      }}
+                    >
+                      <SummaryCard
+                        label="Samples"
+                        value={affectedPreview.summary.total}
+                      />
+                      <SummaryCard
+                        label="Blocked"
+                        value={affectedPreview.summary.blocked}
+                      />
+                      <SummaryCard
+                        label="Manual review"
+                        value={affectedPreview.summary.manualReview}
+                      />
+                      <SummaryCard
+                        label="Serviceable"
+                        value={affectedPreview.summary.serviceable}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        border: `1px solid ${theme.border}`,
+                        borderRadius: 10,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {affectedPreview.samples.map(({ sample, result }) => (
+                        <div
+                          key={sample.sampleId}
+                          style={{
+                            borderBottom: `1px solid ${theme.border}`,
+                            display: "grid",
+                            gridTemplateColumns:
+                              "minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(180px, 1fr)",
+                            gap: 8,
+                            padding: 10,
+                          }}
+                          data-testid={`service-area-affected-sample-${sample.sampleId}`}
+                          data-evaluator-decision={result.decision}
+                          data-geometry-version-refs={result.geometryVersionRefs.join(
+                            ",",
+                          )}
+                          data-reason-codes={result.reasonCodes.join(",")}
+                        >
+                          <div>
+                            <strong>{sample.label}</strong>
+                            <div style={helpStyle}>
+                              {sample.targetVersionRef}
+                            </div>
+                          </div>
+                          <CanvasPill
+                            theme={theme}
+                            tone={decisionTone(result.decision)}
+                            dot
+                          >
+                            {result.decision}
+                          </CanvasPill>
+                          <div
+                            style={{
+                              ...helpStyle,
+                              fontFamily: theme.monoFamily,
+                            }}
+                          >
+                            refs:{" "}
+                            {result.geometryVersionRefs.join(" / ") || "none"}
+                            <br />
+                            reasons: {result.reasonCodes.join(" / ") || "none"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div style={helpStyle}>
+                    No evaluator preview yet. Select a record and run preview.
+                  </div>
+                )}
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
               title="GeoJSON import / export"
               subtitle="Import creates a draft from an exported feature. Backend publish remains explicit."
             >
@@ -835,8 +1224,72 @@ export default function ServiceAreaGovernancePage() {
                 />
                 <VersionLine
                   label="Mutation audit"
-                  value="Backend returns auditId on lifecycle mutations; UI shows completion and refreshes definitions."
+                  value={
+                    lastMutationReceipt?.auditId ??
+                    "No mutation receipt captured in this session."
+                  }
                 />
+                <VersionLine
+                  label="Evaluator proof"
+                  value={
+                    affectedPreview
+                      ? `${affectedPreview.summary.total} samples · refs ${affectedPreview.summary.versionRefs.join(
+                          " / ",
+                        )}`
+                      : "Run affected sample preview before publish."
+                  }
+                />
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title="Mutation receipt"
+              subtitle="Backend audit receipt for publish, retire, review submit, geometry save, or draft import."
+            >
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 8 }}
+                data-testid="service-area-mutation-receipt"
+                data-audit-id={lastMutationReceipt?.auditId ?? ""}
+                data-mutation-generated-at={
+                  lastMutationReceipt?.generatedAt ?? ""
+                }
+                data-mutation-record-id={
+                  lastMutationReceipt
+                    ? getMutationRecordId(lastMutationReceipt)
+                    : ""
+                }
+                data-mutation-version-ref={
+                  lastMutationReceipt
+                    ? getMutationVersionRef(lastMutationReceipt)
+                    : ""
+                }
+              >
+                {lastMutationReceipt ? (
+                  <>
+                    <VersionLine
+                      label="Audit ID"
+                      value={lastMutationReceipt.auditId ?? "not returned"}
+                    />
+                    <VersionLine
+                      label="Generated"
+                      value={lastMutationReceipt.generatedAt}
+                    />
+                    <VersionLine
+                      label="Record"
+                      value={getMutationRecordLabel(lastMutationReceipt)}
+                    />
+                    <VersionLine
+                      label="Version ref"
+                      value={getMutationVersionRef(lastMutationReceipt)}
+                    />
+                  </>
+                ) : (
+                  <div style={helpStyle}>
+                    No mutation receipt yet. Lifecycle actions display audit IDs
+                    and version refs here after the backend responds.
+                  </div>
+                )}
               </div>
             </CanvasCard>
 
@@ -905,4 +1358,68 @@ function VersionLine({ label, value }: { label: string; value: string }) {
       </span>
     </div>
   );
+}
+
+function cloneGeometry(geometry: ServiceAreaGeometry): ServiceAreaGeometry {
+  return geometry.type === "circle"
+    ? {
+        type: "circle",
+        center: { ...geometry.center },
+        radiusMeters: geometry.radiusMeters,
+      }
+    : {
+        type: "polygon",
+        coordinates: geometry.coordinates.map((point) => ({ ...point })),
+      };
+}
+
+function isMutationResponse(
+  value: unknown,
+): value is ServiceAreaAdminMutationResponse {
+  const candidate = value as Partial<ServiceAreaAdminMutationResponse> | null;
+  return Boolean(
+    candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.generatedAt === "string" &&
+    ("serviceArea" in candidate || "stopPolicy" in candidate),
+  );
+}
+
+function decisionTone(
+  decision: ServiceAreaEvaluationResult["decision"],
+): "success" | "warn" | "danger" {
+  switch (decision) {
+    case "serviceable":
+      return "success";
+    case "manual_review":
+      return "warn";
+    case "not_serviceable":
+      return "danger";
+  }
+}
+
+function getMutationRecord(
+  receipt: ServiceAreaAdminMutationResponse,
+): ServiceAreaBoundaryRecord | StopPolicyRecord | null {
+  return receipt.serviceArea ?? receipt.stopPolicy ?? null;
+}
+
+function getMutationRecordId(receipt: ServiceAreaAdminMutationResponse) {
+  const record = getMutationRecord(receipt);
+  return record ? getServiceAreaGovernanceRecordId(record) : "";
+}
+
+function getMutationVersionRef(receipt: ServiceAreaAdminMutationResponse) {
+  const record = getMutationRecord(receipt);
+  return record ? getGeometryVersionRef(record) : "not returned";
+}
+
+function getMutationRecordLabel(receipt: ServiceAreaAdminMutationResponse) {
+  const record = getMutationRecord(receipt);
+  if (!record) {
+    return "No record returned";
+  }
+  return `${getServiceAreaGovernanceRecordCode(record)} · ${record.status} · v${
+    record.version
+  }`;
 }
