@@ -4,33 +4,28 @@
 - **Parent Task:** `MAP-BE-005`
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
 - **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
-- **Generated:** `2026-06-30` (UTC)
-- **Snapshot Basis:** `scripts/ai-status.sh show`, `ai-activity-log.jsonl`, `git show`, `git blame`, `git rev-parse`, and current code anchors
-**Status:** `REVIEW SUPPORT ARTIFACT`
+- **Refreshed:** `2026-07-01` (UTC)
+- **Snapshot Basis:** `scripts/ai-status.sh show`, `ai-activity-log.jsonl` slices, `git rev-parse`, `git rev-list`, `git diff`, `git show`, `git blame`, and current code anchors
+- **Status:** `REVIEW SUPPORT ARTIFACT`
 
-This packet is support-only. It does not modify canonical truth or parent
-implementation files. Its job is to give the sidecar reviewer one place to
-audit:
+This packet is support-only. It preserves the previously approved
+`2026-06-30` packet evidence, but refreshes the lifecycle narrative for the
+`2026-07-01` redispatch of the same sidecar task ID.
 
-- the parent `MAP-BE-005` machine-truth state and lifecycle
-- the recorded handoff evidence from the parent owner
-- the exact current code anchors that implement the claimed spatial-audit slice
-- the revision-history caveat that the `MAP-BE-005` surface is already present
-  on `origin/dev`, but not under a standalone `MAP-BE-005` closeout commit
+Current reviewer caveats:
 
-The main reviewer caveat is that `MAP-BE-005` is still `review` in machine
-truth, but the relevant code is already on `origin/dev` and current `HEAD`
-through commit `deb5e1d366f1789c29bd26818b14ffcb801a43a3`
-(`MAP-BE-004: finalize service-area booking creation enforcement (#1013)`).
-That means the reviewer should audit the current code anchors and the parent's
-recorded handoff summary, not expect a task-local `origin/dev...HEAD` diff for
-this sidecar branch.
+- this sidecar ID already reached `review_approved` and `done` on
+  `2026-06-30`
+- orchestrator recreated the same sidecar ID on `2026-07-01T03:38:59Z` and
+  reassigned ownership after a `Gemini` worker failure
+- the owner branch still carries support-artifact history only; parent
+  `MAP-BE-005` implementation remains on `origin/dev` through commit
+  `deb5e1d366f1789c29bd26818b14ffcb801a43a3`
+  (`MAP-BE-004: finalize service-area booking creation enforcement (#1013)`)
 
-This revision was refreshed after the `2026-06-30T22:14:09Z` sidecar reopen.
-It preserves the `2026-06-30T22:12:41Z` reviewed handoff checkpoint as the
-audited state, but records the reopened owner-repair state separately so the
-packet does not present a stale intermediate snapshot as timeless current
-machine truth.
+Review implication: audit the refreshed packet, the current machine-truth
+slices, and the current-file anchors. Do not expect a new parent implementation
+diff on this sidecar branch.
 
 ---
 
@@ -38,14 +33,12 @@ machine truth.
 
 In scope:
 
-- snapshot the `MAP-BE-005` parent row at packet-refresh time
-- snapshot both the reopened sidecar row at packet-refresh time and the audited
-  `2026-06-30T22:12:41Z` sidecar handoff state
+- snapshot the current `MAP-BE-005-SIDECAR-REVIEW` row at `2026-07-01`
+- preserve the earlier `2026-06-30` approved-cycle history for the same task ID
+- snapshot the current parent `MAP-BE-005` row
 - map the parent acceptance bullets to concrete current-file anchors
-- summarize the parent's recorded verification evidence
-- document the revision-history anomaly so review does not target the wrong
-  comparison base
-- hand the packet to the assigned reviewer without touching parent code
+- document the current branch-state caveat so review targets the right surface
+- hand the refreshed packet to `Codex2` without touching parent code
 
 Out of scope:
 
@@ -53,51 +46,49 @@ Out of scope:
 - editing parent implementation, tests, migrations, or contracts
 - changing `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl`
   except through official status commands
-- reconciling the parent task's eventual closeout state; that remains parent
-  owner work after review
+- re-closing the task from this packet itself; closeout remains a separate
+  owner step after reviewer approval
 
 ---
 
 ## 2. Machine-Truth Snapshots
 
-### 2.1 Packet-refresh sidecar row (`2026-06-30T22:14:42Z`)
+### 2.1 Current sidecar row (`2026-07-01T03:39:39Z`)
 
-At packet-refresh time, `scripts/ai-status.sh show MAP-BE-005-SIDECAR-REVIEW`
-recorded:
+At refresh time, `AI_NAME=Codex scripts/ai-status.sh show
+MAP-BE-005-SIDECAR-REVIEW` recorded:
 
 - `owner=Codex`
 - `reviewer=Codex2`
 - `status=in_progress`
-- `last_update=2026-06-30T22:14:42Z`
+- `last_update=2026-07-01T03:39:39Z`
 - `helper_parent=MAP-BE-005`
 - `helper_kind=review_packet`
 - `mutates_canonical=false`
-- `next=Refreshing the sidecar packet snapshot and timeline so the audited handoff state is separated from the current reopened state.`
+- `next=Preparing MAP-BE-005 review packet and evidence summary for reviewer handoff`
 
-This was the owner-repair state after `Codex2` reopened the sidecar at
-`2026-06-30T22:14:09Z`.
+This is the current owner-work state after the `2026-07-01` redispatch.
 
-### 2.2 Audited sidecar handoff checkpoint (`2026-06-30T22:12:41Z`)
+### 2.2 Prior completed-cycle checkpoints (`2026-06-30`)
 
-The sidecar state under review immediately before the latest reopen was:
+Before the `2026-07-01` redispatch, the same sidecar task ID had already
+completed one full review cycle:
 
-- `status=review`
-- `last_update=2026-06-30T22:12:41Z`
-- `handoff_agent=Codex`
-- `handoff_target=Codex2`
+- `2026-06-30T22:22:03Z`: `Codex2` recorded `review_approved` for approved
+  packet commit `a833c2163`
+- `2026-06-30T22:23:41Z`: formal owner closeout commit
+  `2fac7332d2b6b466ae1a45a5ed9e0d082ec17a0d` was created on
+  `codex/map-be-005-sidecar-review`
+- `2026-06-30T22:23:56Z`: `Codex` recorded `done` with
+  `integration_status=not_applicable`
 
-This checkpoint is reconstructed from the `2026-06-30T22:12:41Z` `handoff`
-entry plus the `2026-06-30T22:13:02Z` orchestrator note that the background
-worker exited after advancing the task to `review`.
+Historical branch fact: `git diff --name-only a833c2163..2fac7332d -- support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
+is empty, so the closeout commit changed task lifecycle state only, not the
+packet content itself.
 
-The distinction matters: Section 2.1 is the packet-refresh reopened repair
-state;
-this section is the reviewed handoff state that the previous packet revision
-was trying to describe.
+### 2.3 Parent row at refresh time
 
-### 2.3 Parent row at packet-refresh time
-
-At the same packet-refresh time, `scripts/ai-status.sh show MAP-BE-005`
+At the same refresh time, `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-005`
 recorded:
 
 - `title=Persist service-area snapshot and spatial audit`
@@ -136,7 +127,7 @@ Relevant `ai-activity-log.jsonl` entries for `MAP-BE-005`:
 | `start` | `2026-06-30T15:01:12Z` | `Codex` | Started spatial-audit persistence and test work. |
 | `handoff` | `2026-06-30T15:08:59Z` | `Codex` | Handed implementation to `Claude2` with detailed evidence and validation results. |
 
-There are no later parent `review_approved` or `done` events yet in machine
+There are still no later parent `review_approved` or `done` events in machine
 truth. The authoritative parent state remains `review`.
 
 ### 2.5 Sidecar lifecycle chain
@@ -145,74 +136,68 @@ Relevant `ai-activity-log.jsonl` entries for `MAP-BE-005-SIDECAR-REVIEW`:
 
 | Event | Timestamp UTC | Agent | Note |
 | --- | --- | --- | --- |
-| `assign` | `2026-06-30T21:27:58Z` | `Codex` | Sidecar auto-assigned to `Gemini2` with reviewer `Codex`. |
-| `sidecar_task_created` | `2026-06-30T21:28:00Z` | `Orchestrator` | Review-packet sidecar created for `MAP-BE-005`. |
-| `worker_failed` | `2026-06-30T21:28:05Z` | `Orchestrator` | First `Gemini2` worker exited before terminal status. |
-| `worker_failed` | `2026-06-30T21:28:15Z` | `Orchestrator` | Second `Gemini2` worker exited before terminal status. |
-| `chair_reassignment_applied` | `2026-06-30T21:33:31Z` | `Orchestrator` | Owner reassigned from `Gemini2` to `Gemini`. |
-| `task_proactive_rebalanced` | `2026-06-30T22:03:34Z` | `Orchestrator` | Availability-first reassignment moved owner from `Gemini` to `Codex` and reviewer from `Codex` to `Codex2`. |
-| `start` | `2026-06-30T22:04:07Z` | `Codex` | Current sidecar owner started packet preparation. |
-| `handoff` | `2026-06-30T22:08:28Z` | `Codex` | First packet revision handed to `Codex2` with a claim that `git diff --check` passed for the packet. |
-| `reopen` | `2026-06-30T22:09:40Z` | `Codex2` | Review failed because commit `4a47b84c6` still carried trailing whitespace on opening metadata lines, so the recorded packet validation was not self-consistent. |
-| `progress` | `2026-06-30T22:10:06Z` | `Codex` | Repairing the packet and refreshing the validation evidence before re-handoff. |
-| `handoff` | `2026-06-30T22:12:41Z` | `Codex` | Repaired packet revision handed to `Codex2` with clean `git show --check HEAD` and no trailing-whitespace matches. |
-| `worker_completed` | `2026-06-30T22:13:02Z` | `Orchestrator` | Background worker exited after advancing the task to `review`. |
-| `reopen` | `2026-06-30T22:14:09Z` | `Codex2` | Review failed because the packet still described the `22:10:06Z` repair snapshot as current after the `22:12:41Z` handoff had already moved machine truth back to `review`. |
-| `progress` | `2026-06-30T22:14:42Z` | `Codex` | Refreshing the packet snapshot and timeline so the audited handoff state is separated from the current reopened state. |
+| `assign` | `2026-06-30T21:27:58Z` | `Codex` | Sidecar first assigned to `Gemini2` with reviewer `Codex`. |
+| `sidecar_task_created` | `2026-06-30T21:28:00Z` | `Orchestrator` | Review-packet sidecar first created for `MAP-BE-005`. |
+| `task_proactive_rebalanced` | `2026-06-30T22:03:34Z` | `Orchestrator` | Ownership moved from `Gemini` to `Codex`; reviewer moved from `Codex` to `Codex2`. |
+| `start` | `2026-06-30T22:04:07Z` | `Codex` | First Codex owner cycle began. |
+| `handoff` | `2026-06-30T22:08:28Z` | `Codex` | First packet revision handed to `Codex2`. |
+| `reopen` | `2026-06-30T22:09:40Z` | `Codex2` | Review failed because commit `4a47b84c6` still had trailing whitespace. |
+| `handoff` | `2026-06-30T22:12:41Z` | `Codex` | Whitespace-repaired packet handed back to `Codex2`. |
+| `reopen` | `2026-06-30T22:14:09Z` | `Codex2` | Review failed because the packet still described stale machine-truth state as current. |
+| `handoff` | `2026-06-30T22:17:25Z` | `Codex` | Timeline-split packet revision handed back to `Codex2`. |
+| `review_approved` | `2026-06-30T22:18:38Z` | `Codex2` | Approved packet commit `a833c2163`. |
+| `done` | `2026-06-30T22:23:56Z` | `Codex` | First cycle formally closed out; branch pushed and integration marked `not_applicable`. |
+| `assign` | `2026-07-01T03:38:58Z` | `Codex` | Same sidecar ID assigned again, this time to `Gemini` with reviewer `Codex`. |
+| `sidecar_task_created` | `2026-07-01T03:38:59Z` | `Orchestrator` | Same sidecar ID auto-created again for `MAP-BE-005`. |
+| `worker_failed` | `2026-07-01T03:39:08Z` | `Orchestrator` | `Gemini` worker exited before producing a terminal task state. |
+| `task_proactive_rebalanced` | `2026-07-01T03:39:11Z` | `Orchestrator` | Availability-first reassignment moved owner from `Gemini` to `Codex` and reviewer from `Codex` to `Codex2`. |
+| `start` | `2026-07-01T03:39:39Z` | `Codex` | Current owner cycle began to refresh and re-handoff the packet. |
 
-The key lifecycle fact is that the sidecar really did return to `review` at
-`2026-06-30T22:12:41Z` and only moved back to `in_progress` when the reviewer
-reopened it at `2026-06-30T22:14:09Z`.
+The key lifecycle fact is that the `2026-07-01` work is a second owner cycle on
+the same task ID, not an undiscovered continuation of the old `2026-06-30`
+reopen.
 
 ---
 
 ## 3. Revision And Branch Caveat
 
+### 3.1 Current branch facts
+
 Current repository facts in this sidecar worktree:
 
-- `git rev-parse HEAD` and `git rev-parse origin/dev` both resolve to
+- `git rev-parse HEAD` resolves to
+  `2fac7332d2b6b466ae1a45a5ed9e0d082ec17a0d`
+- `git rev-parse origin/dev` resolves to
   `f452f019f9d887850c907a28a60ce627b930049b`
-- `git diff origin/dev...HEAD` is empty
-- the sidecar branch therefore carries no task-local diff before this packet is
-  added
+- `git rev-list --left-right --count origin/dev...HEAD` reports `0 4`
+- `git diff --name-only origin/dev...HEAD` lists only:
+  `support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
 
-However, `git blame` on the key `MAP-BE-005` lines attributes the current
-implementation to commit `deb5e1d366f1789c29bd26818b14ffcb801a43a3`, whose
-subject is:
+That means the owner branch is a support-only branch whose entire diff versus
+`origin/dev` is the packet file.
 
-- `MAP-BE-004: finalize service-area booking creation enforcement (#1013)`
+Parent implementation caveat:
 
-`git show --stat --format=fuller deb5e1d36` confirms that commit already
-contains the main `MAP-BE-005` surfaces:
+- `git blame` on the key `MAP-BE-005` lines still attributes the current
+  implementation to commit `deb5e1d366f1789c29bd26818b14ffcb801a43a3`
+- `git show --stat --format=fuller deb5e1d36` confirms that commit already
+  contains the main `MAP-BE-005` surfaces:
+  - `packages/contracts/src/index.ts` `+433`
+  - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` `+614 / -3`
+  - `apps/api/tests/unit/owned-mobility.service.test.ts` `+401`
+  - `apps/api/tests/unit/service-area.service.test.ts` `+404`
+  - plus the `geo` and `service-area` module/controller/repository/service
+    files
 
-- `packages/contracts/src/index.ts` `+433`
-- `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` `+614 / -3`
-- `apps/api/tests/unit/owned-mobility.service.test.ts` `+401`
-- `apps/api/tests/unit/service-area.service.test.ts` `+404`
-- plus the `geo` and `service-area` module/controller/repository/service files
+### 3.2 Review implication
 
-Review implication:
-
-- do not expect a dedicated `MAP-BE-005` closeout commit on this branch
-- do not use `origin/dev...HEAD` as the proof surface for the parent task
-- use the current-file anchors in Sections 4 and 5 plus the parent handoff
-  evidence from machine truth
-
-### 3.1 Reopen Cause And Repair Target
-
-The first sidecar handoff used commit `4a47b84c6`, which added this packet as a
-new file. `git show --check 4a47b84c6 -- support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
-reports trailing whitespace on the opening metadata lines because that revision
-used Markdown hard-break spacing.
-
-Repair implication:
-
-- the reopen was about packet formatting / validation consistency, not parent
-  scope drift
-- this revision removes the metadata trailing whitespace instead of relying on
-  hard-break formatting
-- reviewer validation for the re-handoff should target the current `HEAD`, not
-  the superseded `4a47b84c6` handoff note
+- do not expect a new parent implementation diff on this sidecar branch
+- do not use `origin/dev...HEAD` as proof of the parent runtime work; it proves
+  only the support artifact branch scope
+- use the current-file anchors in Sections 4 and 5 plus the parent machine-truth
+  handoff evidence
+- confirm that this refreshed packet correctly explains both the prior completed
+  cycle and the current redispatch cycle for the same sidecar ID
 
 ---
 
@@ -258,15 +243,14 @@ Snapshot-first gate resolution:
 - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:6519-6555`
   deep-clones stored service-area evaluations and spatial snapshots
 - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:7234-7238`
-  returns cloned `spatialAudit` data from `getOrder`, preventing caller mutation
-  from mutating the stored record
+  returns cloned `spatialAudit` data from `getOrder`, preventing caller
+  mutation from mutating the stored record
 
 Test proof:
 
-- `apps/api/tests/unit/owned-mobility.service.test.ts:454-557`
-  mutates the first returned snapshot, confirms evaluator is only called once,
-  and verifies a fresh read still shows the original serviceable snapshot and
-  evidence refs
+- `apps/api/tests/unit/owned-mobility.service.test.ts:454-557` mutates the
+  first returned snapshot, confirms evaluator is only called once, and verifies
+  a fresh read still shows the original serviceable snapshot and evidence refs
 
 ### 4.3 `audit events emitted`
 
@@ -278,9 +262,9 @@ Test proof:
 
 Test proof:
 
-- `apps/api/tests/unit/owned-mobility.service.test.ts:371-387`
-  asserts the audit log is recorded with actor, surface, decision, request id,
-  and provenance completeness
+- `apps/api/tests/unit/owned-mobility.service.test.ts:371-387` asserts the
+  audit log is recorded with actor, surface, decision, request id, and
+  provenance completeness
 
 ### 4.4 `legacy text-only state explicit`
 
@@ -294,9 +278,9 @@ Test proof:
 
 Test proof:
 
-- `apps/api/tests/unit/owned-mobility.service.test.ts:390-452`
-  verifies missing pickup/dropoff coordinates become explicit `legacy_text`
-  provenance, queue the order into manual review, and prevent auto-dispatch
+- `apps/api/tests/unit/owned-mobility.service.test.ts:390-452` verifies missing
+  pickup/dropoff coordinates become explicit `legacy_text` provenance, queue
+  the order into manual review, and prevent auto-dispatch
 
 ### 4.5 `api tests pass`
 
@@ -332,9 +316,12 @@ Prioritize these checks during review:
    deep enough that callers cannot mutate stored snapshot state.
 5. Legacy text-only orders must remain explicit manual-review cases rather than
    silently flowing into normal dispatch.
-6. Treat the revision history carefully: current `HEAD` already contains the
-   parent surface, but the parent task is still `review`. Do not treat that as
-   parent closeout; it is a review-context caveat only.
+6. Packet lifecycle accuracy matters here: the file should distinguish the
+   `2026-06-30` completed cycle from the `2026-07-01` redispatch cycle on the
+   same task ID.
+7. Treat the revision history carefully: current `HEAD` already contains the
+   support artifact history, while the parent task is still `review`. Do not
+   treat the sidecar's prior `done` event as parent closeout.
 
 ---
 
@@ -344,8 +331,11 @@ If the reviewer wants to reproduce the evidence quickly:
 
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-005-SIDECAR-REVIEW`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-005`
+- `grep -n 'MAP-BE-005-SIDECAR-REVIEW' "$AI_STATUS_ROOT/ai-activity-log.jsonl" | tail -n 40`
+- `git diff --name-only origin/dev...HEAD`
 - `git show --check HEAD -- support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
 - `grep -n '[[:blank:]]$' support/sidecars/MAP-BE-005/MAP-BE-005-SIDECAR-REVIEW.md`
+- `git show --stat --format=fuller 2fac7332d`
 - `git show --stat --format=fuller deb5e1d36`
 - `git blame -L 586,603 packages/contracts/src/index.ts`
 - `git blame -L 6062,6555 apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
@@ -360,34 +350,33 @@ accepting the parent handoff evidence:
 
 ## 7. Sidecar Scope Compliance
 
-- [x] Support artifact only: this packet is the only intended file for the
-  sidecar slice
+- [x] Support artifact only: the owner branch diff versus `origin/dev` is still
+  the packet file only
 - [x] No canonical-truth edits: parent code, docs, contracts, and runtime are
-  unchanged by this packet
-- [x] Reopen addressed: the previous `4a47b84c6` whitespace-only validation
-  mismatch is repaired in this revision
-- [x] Current-state drift addressed: the packet now separates the
-  `2026-06-30T22:12:41Z` audited handoff checkpoint from the
-  `2026-06-30T22:14:42Z` reopened repair state
-- [x] Reviewer re-handoff ready: once this revision is committed and validated,
-  the owner can hand the updated packet back to `Codex2`
+  unchanged by this packet refresh
+- [x] Prior completed cycle preserved: the `2026-06-30` approved/closed cycle
+  is explicitly documented instead of overwritten
+- [x] Redispatch captured: the `2026-07-01` recreated-task timeline is now
+  explicit
+- [x] Reviewer re-handoff ready: once this refresh is committed, validated, and
+  pushed, the owner can hand the packet back to `Codex2`
 
 ---
 
-## 8. Repair Summary
+## 8. Refresh Summary
 
-- Prior handoff `2026-06-30T22:08:28Z` over-claimed packet validation on
-  `4a47b84c6`.
-- Root cause was metadata-line trailing whitespace introduced by Markdown
-  hard-break formatting.
-- Re-handoff `2026-06-30T22:12:41Z` fixed the whitespace issue but still left
-  the packet describing the earlier `22:10:06Z` repair snapshot as if it were
-  the current reviewed state.
-- This revision keeps both later states explicit: the audited handoff
-  checkpoint at `2026-06-30T22:12:41Z` and the current reopened repair state at
-  `2026-06-30T22:14:42Z`.
-- Fresh handoff evidence should cite the current repair commit and a whitespace
-  clean validation result for this file.
+- `2026-06-30` already produced an approved packet revision (`a833c2163`) and a
+  formal closeout commit (`2fac7332d`)
+- `2026-07-01` recreated the same sidecar task ID and reassigned it back to
+  `Codex` after a `Gemini` worker failure
+- this refresh does not change the parent evidence map; it updates the packet so
+  reviewer context matches current machine truth
+- the branch-state caveat is now explicit: the owner branch contains support
+  material only, while the parent implementation surface remains rooted on
+  `origin/dev` via `deb5e1d36`
+- no parent code or test reruns were added by this packet refresh; the packet
+  still records the parent owner's earlier validation claims and current code
+  anchors
 
 ---
 
@@ -395,23 +384,23 @@ accepting the parent handoff evidence:
 
 When handing this packet to `Codex2`, summarize:
 
-- the packet now distinguishes the `2026-06-30T22:12:41Z` audited handoff
-  checkpoint from the packet-refresh reopened repair state
-- the packet-refresh snapshot shows `in_progress` only because `Codex2`
-  reopened the sidecar at `2026-06-30T22:14:09Z`; after re-handoff machine
-  truth should return to `review`
+- the sidecar already completed one approved cycle on `2026-06-30`, but the
+  same task ID was recreated on `2026-07-01`
+- current machine truth is `in_progress` only because this is a new redispatch
+  cycle; after owner handoff it should return to `review`
 - parent `MAP-BE-005` is still `review` in machine truth
-- the implementation surface is already present on `origin/dev` / current `HEAD`
-- current review should target the anchors in this packet plus the recorded
-  parent handoff evidence
-- the key anomaly is that `deb5e1d36` (labeled `MAP-BE-004`) already contains
-  the main `MAP-BE-005` code surface
-- the earlier `4a47b84c6` packet handoff was reopened for trailing whitespace;
-  the current commit is the packet-repair revision
+- current owner branch differs from `origin/dev` only by this packet file
+- parent implementation proof still comes from the current-file anchors plus the
+  parent handoff evidence, not from a new sidecar branch code diff
+- `deb5e1d36` remains the key integration commit containing the `MAP-BE-005`
+  runtime surface even though its subject is labeled `MAP-BE-004`
+- the historical `2026-06-30` approved packet content was unchanged by the
+  formal closeout commit; this refresh is about lifecycle clarity for the new
+  dispatch, not a new parent implementation claim
 
 If the sidecar review passes, the reviewer should run:
 
 - `AI_NAME=Codex2 scripts/ai-status.sh approve MAP-BE-005-SIDECAR-REVIEW "<review conclusion>"`
 
 After that, the owner can handle sidecar closeout according to the normal
-review-approved → done protocol.
+`review_approved -> done` protocol.
