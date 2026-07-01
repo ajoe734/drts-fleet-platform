@@ -5,12 +5,12 @@
 - Parent Task: `MAP-UI-001` - Shared AddressMapPicker
 - Parent Owner / Reviewer: `Claude2` / `Codex2`
 - Helper Kind: `acceptance_packet`
-- Snapshot Captured At: `2026-07-01T15:37:46Z`
+- Snapshot Captured At: `2026-07-01T15:39:29Z`
 - Snapshot Status At Capture: sidecar `in_progress` after review retry; parent `in_progress`
 - Class: support-only; no canonical-truth mutation
 
 > Snapshot note: `ai-status.json` is authoritative. This packet is a
-> reviewer-facing support snapshot captured at `2026-07-01T15:37:46Z`, so any
+> reviewer-facing support snapshot captured at `2026-07-01T15:39:29Z`, so any
 > later handoff or approval will move machine truth before this markdown
 > updates.
 
@@ -45,14 +45,13 @@ This packet records that mismatch instead of flattening it into a false
 ## Machine-Truth Snapshot
 
 - `ai-status.json` is authoritative; this markdown only snapshots the state
-  visible from the owner branch at `2026-07-01T15:37:46Z`.
+  visible from the owner branch at `2026-07-01T15:39:29Z`.
 - Sidecar task `MAP-UI-001-SIDECAR-ACCEPTANCE` is `in_progress` with next step:
   `Review failed because the acceptance packet file is missing. Inspecting existing sidecar acceptance examples and MAP-UI-001 context, then creating the support artifact and task-scoped commit.`
 - Correct owner branch for this sidecar is
   `codex/map-ui-001-sidecar-acceptance`. Remote
-  `origin/codex/map-ui-001-sidecar-acceptance` points to commit
-  `a65d6e74332d2de08acd8ec94a14f34f9554eecc`, and `git ls-tree` confirms this
-  packet exists on that remote branch.
+  `origin/codex/map-ui-001-sidecar-acceptance` contains this packet at branch
+  HEAD, and `git ls-tree` confirms the artifact exists on that remote branch.
 - Parent task `MAP-UI-001` is `in_progress`, owned by `Claude2`, reviewed by
   `Codex2`, and officially depends on `MAP-BE-003`.
 - Parent recorded acceptance in machine truth:
@@ -220,11 +219,11 @@ For sidecar reviewer `Codex2`, the useful checks are:
 
 ## Reviewer Handoff
 
-Review this packet on `origin/codex/map-ui-001-sidecar-acceptance` at commit
-`a65d6e74332d2de08acd8ec94a14f34f9554eecc` or newer.
+Review this packet on `origin/codex/map-ui-001-sidecar-acceptance` at current
+branch HEAD.
 
 Owner handoff command:
-`AI_NAME=Codex scripts/ai-status.sh handoff MAP-UI-001-SIDECAR-ACCEPTANCE Codex2 "Refreshed MAP-UI-001 acceptance packet snapshot and reissued review handoff. The support artifact is present on origin/codex/map-ui-001-sidecar-acceptance at a65d6e74332d2de08acd8ec94a14f34f9554eecc; packet now records the correct branch evidence, current dependency status, and the missing shared-export / missing canvas-note gaps. Verified git diff --check for support/sidecars/MAP-UI-001/MAP-UI-001-SIDECAR-ACCEPTANCE.md; no canonical truth files changed."`
+`AI_NAME=Codex scripts/ai-status.sh handoff MAP-UI-001-SIDECAR-ACCEPTANCE Codex2 "Refreshed MAP-UI-001 acceptance packet snapshot and reissued review handoff. The support artifact is present on origin/codex/map-ui-001-sidecar-acceptance at current branch HEAD; packet now records the correct branch evidence, current dependency status, and the missing shared-export / missing canvas-note gaps. Verified git diff --check for support/sidecars/MAP-UI-001/MAP-UI-001-SIDECAR-ACCEPTANCE.md; no canonical truth files changed."`
 
 The previous review retry failed because the dispatch note referenced
 `codex2/map-ui-001-sidecar-acceptance`, which is not the owner branch for this
