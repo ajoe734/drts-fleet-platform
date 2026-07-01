@@ -330,10 +330,13 @@ const helperSection = makeSection("Helper Context");
 for (const helper of helperTasks) {
   const task = taskMap.get(helper.id);
   if (!task) {
-    addFailure(helperSection, `${helper.id} is missing from ai-status.json.`);
-    continue;
-  }
-  if (task.status !== "done") {
+    if (archivedTaskIds.has(helper.id)) {
+      addOk(helperSection, `${helper.id} is archived as done.`);
+    } else {
+      addFailure(helperSection, `${helper.id} is missing from ai-status.json.`);
+      continue;
+    }
+  } else if (task.status !== "done") {
     addFailure(
       helperSection,
       `${helper.id} must be done; current status is ${task.status}.`,
