@@ -1,8 +1,8 @@
 # MAP-OBS-001 Final Observability Evidence
 
-Task: `MAP-OBS-001`  
-Branch: `codex/map-obs-001-production-observability`  
-Base SHA before this work: `40f5c36f017f347fdb8981c549cf61614944830d`  
+Task: `MAP-OBS-001`
+Branch: `codex/map-obs-001-production-observability`
+Base SHA before this work: `40f5c36f017f347fdb8981c549cf61614944830d`
 Final implementation commit: recorded in handoff because this file is committed with the implementation.
 
 ## Verdict
