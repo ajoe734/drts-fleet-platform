@@ -5,7 +5,7 @@
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
 - **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
 - **Planning Anchor:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- **Machine-Truth Basis:** sidecar `in_progress` as of `2026-07-01T03:05:43Z`; parent `review` as of `2026-06-30T14:38:09Z`
+- **Machine-Truth Basis:** sidecar handoff body prepared from `in_progress` as of `2026-07-01T03:05:43Z`, then approved at `2026-07-01T03:11:28Z`; parent `review` as of `2026-06-30T14:38:09Z`
 - **Integrated Snapshot:** current branch `codex/map-be-001-sidecar-review` on a `dev`-based integrated tree that already includes later map consumers
 
 This refresh replaces an older draft of the same artifact that described the
@@ -13,6 +13,16 @@ sidecar as already `review_approved`. The current dispatch restarted
 `MAP-BE-001-SIDECAR-REVIEW` on `2026-07-01`; this file is the reviewer handoff
 packet for the current run and should be judged against current machine truth,
 current code anchors, and fresh verification captured below.
+
+Owner closeout note:
+
+- reviewer approval is now recorded in machine truth with the summary
+  "MAP-BE-001 sidecar review packet approved: machine truth, reviewer
+  transport, acceptance evidence map, and support-only scope are aligned on
+  origin/codex/map-be-001-sidecar-review@460d382fd."
+- the packet body below remains the approved reviewer handoff content; this
+  closeout refresh only makes the lifecycle state explicit before the owner
+  finalizes the sidecar as `done`
 
 ## 1. Scope Boundary
 
@@ -38,11 +48,13 @@ Not allowed:
 - `id`: `MAP-BE-001-SIDECAR-REVIEW`
 - `owner`: `Codex`
 - `reviewer`: `Codex2`
-- `status`: `in_progress`
+- `status`: `review_approved`
 - `helper_parent`: `MAP-BE-001`
 - `helper_kind`: `review_packet`
 - `mutates_canonical`: `false`
 - artifact path: `support/sidecars/MAP-BE-001/MAP-BE-001-SIDECAR-REVIEW.md`
+- approval summary: packet, evidence map, reviewer transport, and support-only
+  scope aligned on `origin/codex/map-be-001-sidecar-review@460d382fd`
 
 ### 2.2 Parent task
 
@@ -74,6 +86,13 @@ Machine-truth spot checks for the reviewer:
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh show MAP-BE-001-SIDECAR-REVIEW
 AI_NAME=Codex2 scripts/ai-status.sh show MAP-BE-001
+```
+
+For the approved packet snapshot specifically, reviewers can pin the reviewed
+blob to:
+
+```bash
+git show 460d382fd3b200eec452440456aaa992c894bd9d:support/sidecars/MAP-BE-001/MAP-BE-001-SIDECAR-REVIEW.md | sed -n '1,260p'
 ```
 
 ### 2.4 Integrated snapshot note
@@ -172,3 +191,13 @@ Reopen if the packet drifted or if the support-only boundary was violated:
 AI_NAME=Codex2 scripts/ai-status.sh reopen MAP-BE-001-SIDECAR-REVIEW \
   "packet needs refresh: [machine-truth mismatch / stale evidence anchor / branch transport mismatch / support-scope violation]"
 ```
+
+## 8. Owner Closeout Snapshot
+
+- current sidecar lifecycle for this artifact: `review_approved` -> owner
+  closeout -> `done`
+- required closeout evidence: task-scoped commit, normal non-force push, and
+  `INTEGRATION_STATUS=not_applicable` because this sidecar only ships support
+  material
+- canonical/runtime implication: none; parent owner decides separately whether
+  to absorb the packet into mainline review history
