@@ -873,6 +873,11 @@ describe("OperationalObservabilityService", () => {
       serviceArea: {
         policyDenialCount: 1,
       },
+      recentAlertSignals: {
+        providerOutageCount: 2,
+        policyDenialCount: 1,
+        windowMinutes: 15,
+      },
     });
     expect(snapshot.adapterDetails).toEqual([
       expect.objectContaining({
@@ -1013,6 +1018,11 @@ describe("OperationalObservabilityService", () => {
     expect(snapshot.mapGeofence).toMatchObject({
       geo: { providerOutageCount: 1 },
       serviceArea: { policyDenialCount: 4 },
+      recentAlertSignals: {
+        providerOutageCount: 0,
+        policyDenialCount: 0,
+        windowMinutes: 15,
+      },
     });
     expect(providerAlert).toMatchObject({
       measuredValue: 0,

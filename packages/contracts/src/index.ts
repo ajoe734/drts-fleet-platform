@@ -6225,6 +6225,11 @@ export interface OperationalMapGeofenceMetrics {
     stopPolicyRetiredCount: number;
     manualOverrideCount: number;
   };
+  recentAlertSignals: {
+    providerOutageCount: number;
+    policyDenialCount: number;
+    windowMinutes: number;
+  };
   lastEventAt: string | null;
 }
 

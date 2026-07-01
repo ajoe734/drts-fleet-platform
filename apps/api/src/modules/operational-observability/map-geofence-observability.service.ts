@@ -50,6 +50,11 @@ export interface MapGeofenceObservabilitySnapshot {
     stopPolicyRetiredCount: number;
     manualOverrideCount: number;
   };
+  recentAlertSignals: {
+    providerOutageCount: number;
+    policyDenialCount: number;
+    windowMinutes: number;
+  };
   lastEventAt: string | null;
 }
 
@@ -188,12 +193,13 @@ export class MapGeofenceObservabilityService {
     }
   }
 
-  getSnapshot(): MapGeofenceObservabilitySnapshot {
+  getSnapshot(referenceDate = new Date()): MapGeofenceObservabilitySnapshot {
     return {
       providerHealth: { ...this.providerHealth },
       geo: { ...this.geoCounters },
       serviceArea: { ...this.serviceAreaCounters },
       governance: { ...this.governanceCounters },
+      recentAlertSignals: this.getRecentAlertSignals(referenceDate),
       lastEventAt: this.lastEventAt,
     };
   }
