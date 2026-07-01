@@ -1,27 +1,28 @@
 # MAP-BE-003 Sidecar Acceptance Packet
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `MAP-BE-003` - Geo and service-area API client coverage  
-**Parent Owner / Reviewer:** `Codex2` / `Gemini`  
-**Sidecar Owner / Reviewer:** `Codex` / `Codex2`  
-**Generated:** `2026-07-01` (UTC, packet rev1)  
-**Snapshot anchor (parent `last_update`):** `2026-07-01T10:25:15Z`  
-**Snapshot anchor (sidecar `last_update`):** `2026-07-01T14:57:40Z`  
-**Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; does not modify
-canonical truth, runtime behavior, or the parent task lifecycle.
+- **Sidecar Kind:** `acceptance_packet`
+- **Parent Task:** `MAP-BE-003` - Geo and service-area API client coverage
+- **Parent Owner / Reviewer:** `Codex2` / `Gemini`
+- **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
+- **Generated:** `2026-07-01` (UTC, packet rev2)
+- **Snapshot anchor (parent `last_update`):** `2026-07-01T10:25:15Z`
+- **Snapshot anchor (sidecar `last_update`):** `2026-07-01T15:04:53Z`
+- **Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or the parent task lifecycle.
 
-This packet rebuilds the missing acceptance artifact that caused the prior
-review failure for `MAP-BE-003-SIDECAR-ACCEPTANCE`. It packages the current
-acceptance checklist, dependency map, and reviewer evidence path for
-`MAP-BE-003` without changing the parent implementation.
+This revision replaces rev1 after the prior handoff failed for two concrete
+reasons: the reviewer-facing branch did not contain the declared artifact, and
+the owner branch commit failed `git show --check` because of trailing
+whitespace and a blank line at EOF. Rev2 keeps the packet support-only while
+re-aligning the acceptance checklist, dependency map, and reviewer path to the
+current machine truth.
 
 Current machine truth still says parent `MAP-BE-003` is `in_progress` and is a
-readiness blocker for Gate A / C / D. This packet is therefore a reviewer-facing
+readiness blocker for Gate A / C / D. This packet is therefore a reviewer
 navigation layer, not proof that the parent slice is already ready for `done`.
 
-As of this packet snapshot, the authoritative parent evidence is split across
-worktrees: the current sidecar branch carries only this support artifact, while
-the parent `packages/api-client` delta and related tests/docs live as
+As of this packet snapshot, inspectable parent evidence is split across
+worktrees: this sidecar branch carries only the support artifact, while the
+parent `packages/api-client` delta and related tests/docs remain
 modified/untracked state in the canonical root worktree
 `/home/edna/workspace/drts-fleet-platform`.
 
@@ -67,15 +68,20 @@ Machine-truth fields at packet generation:
 - `helper_parent`: `MAP-BE-003`
 - `helper_kind`: `acceptance_packet`
 - `mutates_canonical`: `false`
+- `last_update`: `2026-07-01T15:04:53Z`
+- `next`:
+  - `Inspecting current branch packet, fixing whitespace/file placement issues, and preparing re-handoff to Codex2.`
 - `artifacts`:
   - `support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-ACCEPTANCE.md`
 - acceptance:
   - `Create support artifacts only`
   - `Do not edit canonical truth`
   - `Hand off the packet to the assigned reviewer`
-- prior review note:
-  - the artifact was missing from the assigned worktree, canonical root, and
-    checked `*map-be-003-sidecar-acceptance` branches
+- prior review note carried in machine truth:
+  - reviewer branch `codex2/map-be-003-sidecar-acceptance` at
+    `f452f019f9d887850c907a28a60ce627b930049b` did not contain this artifact
+  - owner branch commit `b9995aba13f6289e52dded5ff129a32a49d806cd` failed
+    `git show --check` on markdown trailing whitespace and blank EOF
 
 ### 2.2 Parent task - `MAP-BE-003`
 
@@ -102,12 +108,15 @@ Machine-truth fields at packet generation:
   - `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md`
 - `gap_ref`:
   - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md`
+- `last_update`: `2026-07-01T10:25:15Z`
 - `next` summary:
   - readiness blocker handoff; `34` failures reported
   - Gate A (`Callcenter safe to dispatch`), Gate C (`Ops safe to operate`),
     and Gate D (`Driver safe to navigate`) currently blocked
-  - open dependencies still called out as `MAP-BE-001=review` and
-    `MAP-BE-002=in_progress`
+  - parent `next` still calls out open dependencies as
+    `MAP-BE-001=review owner=Codex; MAP-BE-002=review owner=Claude2`
+  - live task records currently read `MAP-BE-001.status=review` and
+    `MAP-BE-002.status=in_progress`
   - parent must not be marked `done` until acceptance artifacts are real and
     readiness verification passes
 
@@ -127,20 +136,27 @@ Observed from the canonical root worktree
 Observed from this sidecar worktree on branch
 `codex/map-be-003-sidecar-acceptance`:
 
-- this packet path did not exist before the current rebuild
+- `support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-ACCEPTANCE.md` now exists
+  here
 - `tests/unit/api-client-geo-service-area.test.ts` is absent here
 - `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md` is absent
   here
 
 Observed branch state relevant to reviewer expectations:
 
-- local `codex/map-be-003` resolves to the same commit as `origin/dev`:
+- local `codex2/map-be-003-sidecar-acceptance` resolves to `origin/dev` at
+  `f452f019f9d887850c907a28a60ce627b930049b`
+- local `codex/map-be-003` also resolves to
   `f452f019f9d887850c907a28a60ce627b930049b`
 - there is no remote parent branch `origin/codex/map-be-003`
-- only sidecar review branches exist remotely for `map-be-003`
+- the prior review note explicitly identified
+  `codex/map-be-003-sidecar-acceptance` commit
+  `b9995aba13f6289e52dded5ff129a32a49d806cd` as the only committed location of
+  this packet before rev2 cleanup
 
-Reviewer implication: the parent acceptance evidence is currently a
-canonical-root working-tree review surface, not a dedicated pushed task branch.
+Reviewer implication: review the packet from the owner sidecar branch and the
+parent implementation evidence from the canonical-root working tree. Do not
+expect the reviewer branch or a dedicated parent task branch to contain both.
 
 ---
 
@@ -153,7 +169,7 @@ MAP-BE-003
 ├── MAP-BE-001 (status=review, owner=Codex, reviewer=Claude2)
 │   └── Publishes coordinate provenance / resolve / reverse / service-area
 │       contract types imported by @drts/api-client.
-└── MAP-BE-002 (status=in_progress, owner=Claude2, reviewer=Codex2)
+└── MAP-BE-002 (status=in_progress; parent next still abbreviates it as review)
     └── Publishes the geo gateway endpoints and normalized backend error
         behavior that the new client methods wrap.
 ```
@@ -165,6 +181,9 @@ Upstream rationale:
 - `MAP-BE-002` is the backend endpoint and error-shape dependency. Without the
   provider-neutral gateway, `MAP-BE-003` would only document fetch wrappers
   against an unstable backend surface.
+- `MAP-BE-002` remains a live blocker because its own task record still reports
+  review-failed findings on provider-neutral binding and direct-service invalid
+  `limit` handling.
 
 ### 3.2 Direct downstream consumers
 
@@ -182,9 +201,10 @@ dependent slices:
 
 Planning anchors:
 
-- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:150-163`
-  records the original L1/L2/L3 dependency table where `MAP-BE-003` gates
-  `MAP-BE-004`, `MAP-UI-001`, `MAP-FE-OPS-001`, and `MAP-MOB-DRV-001`
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:123-136`
+  lists `MAP-BE-003` with upstream dependencies `MAP-BE-001` and `MAP-BE-002`,
+  and the downstream links to `MAP-BE-004`, `MAP-UI-001`, `MAP-FE-OPS-001`,
+  and `MAP-MOB-DRV-001`
 - `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md:73`
   includes `MAP-BE-003` under `FLEETS-MAP-001` coordinate-authority closeout
 - `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md:76`
@@ -200,26 +220,27 @@ Planning anchors:
 ## 4. Acceptance Checklist With Evidence
 
 The table below is intentionally split between what this sidecar directly
-observed and what remains an owner-asserted machine-truth claim.
+observed and what remains a parent-task requirement that this support branch did
+not rerun.
 
 | Parent acceptance item | Packet status | Evidence anchor / note |
 | --- | --- | --- |
 | `typed api-client methods added` | Observed in canonical-root working tree | `packages/api-client/src/index.ts:339-364` adds `ApiClientError`; `:483-512` parses backend error envelopes; `:594-653` adds `searchGeo`, `resolveGeo`, `reverseGeo`, `getServiceAreaDefinitions`, `getServiceAreaGeoJson`, and `evaluateServiceArea`. |
-| `serviceable/manual_review/not_serviceable/provider_unavailable responses covered` | Observed in canonical-root working tree and QA artifact | `tests/unit/api-client-geo-service-area.test.ts:93-130` search query construction; `:133-194` resolve/reverse; `:197-212` definitions freshness; `:215-237` serviceable/manual_review/not_serviceable; `:240-266` `GEO_PROVIDER_UNAVAILABLE`; `:268-298` `INVALID_COORDINATE`; `support/sidecars/MAP-QA-002/artifacts/vitest-api-client-map-geofence-surface-provenance-20260701T0952Z.json:1` records `9/9` passing tests. |
-| `api-client typecheck passes` | Owner-asserted in machine truth; not rerun by this sidecar | Parent `next` records `pnpm --filter @drts/api-client typecheck` as completed. This sidecar did not rerun typecheck because the parent delta is not present in this support branch. |
-| `endpoint docs updated` | Observed in canonical-root working tree | `docs/04-api/map-geofence-openapi-delta-20260630.md:1-43` defines shared envelope/error semantics; `:74-132` documents geo search/resolve/reverse; `:136-166` documents definitions/GeoJSON; `:202-250` documents evaluate semantics and the published client-method table. |
+| `serviceable/manual_review/not_serviceable/provider_unavailable responses covered` | Observed in canonical-root working tree and QA artifact | `tests/unit/api-client-geo-service-area.test.ts:93-130` covers provider-neutral geo search query construction; `:133-195` covers resolve/reverse; `:197-213` covers definitions freshness; `:215-238` covers `serviceable` / `manual_review` / `not_serviceable`; `:240-266` preserves `GEO_PROVIDER_UNAVAILABLE`; `:268-298` preserves `INVALID_COORDINATE`; `support/sidecars/MAP-QA-002/artifacts/vitest-api-client-map-geofence-surface-provenance-20260701T0952Z.json:1` records `9/9` passing tests. |
+| `api-client typecheck passes` | Not independently verified by this sidecar | `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:280-283` lists `pnpm --filter @drts/api-client typecheck` as the parent verification bar. This support branch does not carry the parent delta, so the sidecar did not rerun it. |
+| `endpoint docs updated` | Observed in canonical-root working tree | `docs/04-api/map-geofence-openapi-delta-20260630.md:13-43` defines shared envelope/error semantics; `:74-132` documents geo search/resolve/reverse; `:136-166` documents definitions/admin GeoJSON; `:202-247` documents evaluate semantics and the published client-method table. |
 
 Supporting backend evidence for the service-area decision surface:
 
 - `apps/api/tests/unit/service-area.service.test.ts:43-58` asserts
   `serviceable`
-- `apps/api/tests/unit/service-area.service.test.ts:60-77` asserts
-  `not_serviceable`
+- `apps/api/tests/unit/service-area.service.test.ts:60-104` asserts
+  `not_serviceable` and deny stop-policy behavior
 - `apps/api/tests/unit/service-area.service.test.ts:106-131` asserts
   `manual_review`
 - `apps/api/tests/unit/service-area.service.test.ts:156-179` asserts
   `INVALID_COORDINATE`
-- `apps/api/tests/unit/service-area.service.test.ts:181-220` asserts
+- `apps/api/tests/unit/service-area.service.test.ts:181-230` asserts
   definitions freshness and governed GeoJSON export metadata
 
 ---
@@ -230,18 +251,20 @@ Recommended review order for `Codex2`:
 
 1. Re-read live machine truth for `MAP-BE-003` and
    `MAP-BE-003-SIDECAR-ACCEPTANCE` before trusting any snapshot here.
-2. Confirm this sidecar branch now contains
-   `support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-ACCEPTANCE.md`.
+2. Confirm the owner sidecar branch contains
+   `support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-ACCEPTANCE.md` and that the
+   latest owner commit passes `git show --check`.
 3. Inspect the canonical root worktree state listed in §2.3 instead of assuming
-   the parent evidence exists on a pushed `MAP-BE-003` branch.
+   the parent evidence exists on a pushed `MAP-BE-003` branch or on the reviewer
+   branch.
 4. Review `packages/api-client/src/index.ts:339-364`, `:483-512`, and `:594-653`
    to confirm the typed geo/service-area methods and structured error handling.
 5. Review `tests/unit/api-client-geo-service-area.test.ts:93-298` plus the QA
    JSON artifact to confirm response coverage and preserved error metadata.
-6. Review `docs/04-api/map-geofence-openapi-delta-20260630.md:74-250` to
+6. Review `docs/04-api/map-geofence-openapi-delta-20260630.md:74-247` to
    confirm endpoint delta documentation is aligned with the client surface.
-7. Treat the parent `api-client typecheck passes` item as a machine-truth owner
-   claim unless you rerun the checks from the canonical root worktree yourself.
+7. Treat the parent `api-client typecheck passes` item as still requiring
+   owner-side evidence or an independent rerun from the canonical root worktree.
 
 ---
 
@@ -249,15 +272,17 @@ Recommended review order for `Codex2`:
 
 - The parent implementation is still stranded in canonical-root working-tree
   state; without a parent task commit/branch, evidence can drift or be lost.
-- The current sidecar branch does not contain the parent api-client test/doc
-  artifacts, so reviewer confusion is likely unless they follow the topology in
-  §2.3.
+- The current sidecar branch still does not contain the parent api-client
+  test/doc artifacts, so reviewer confusion is likely unless they follow the
+  topology in §2.3.
 - Parent `MAP-BE-003` still reports readiness failures and open dependencies in
   machine truth; this packet must not be used to justify a premature parent
   closeout.
-- `MAP-BE-002` is still `in_progress`, and its current review findings include
-  swappability and direct-service input-validation gaps. Those remain genuine
-  upstream risks for the final `MAP-BE-003` readiness story.
+- Parent `MAP-BE-003.next` currently says `MAP-BE-002=review owner=Claude2`,
+  but the live `MAP-BE-002` task record remains `status=in_progress` with
+  review-failed findings about provider-neutral binding and direct-service
+  `limit` validation. This packet preserves that mismatch instead of
+  normalizing it.
 
 ---
 
@@ -265,17 +290,19 @@ Recommended review order for `Codex2`:
 
 This sidecar is complete once the reviewer confirms:
 
-- the missing artifact has been recreated at the declared path
+- the missing artifact has been recreated at the declared path on the owner
+  sidecar branch
+- the latest owner commit passes `git show --check`
 - the packet stays support-only and does not mutate canonical truth
 - the packet accurately distinguishes sidecar-branch evidence from
   canonical-root parent evidence
-- the dependency map and acceptance checklist align with current machine truth
+- the dependency map and acceptance checklist align with current machine truth,
+  including the recorded `MAP-BE-002` status mismatch
 
 Suggested approval wording:
 
-> `審查通過：MAP-BE-003 acceptance packet 已補齊，正確記錄 parent MAP-BE-003 目前仍為 in_progress/readiness blocker，並清楚區分 sidecar branch 與 canonical-root working-tree 的 evidence topology。packet 已把 acceptance checklist、dependency map、與 reviewer walk 對齊目前 machine truth；support artifact only，未改 canonical truth。`
+> `審查通過：MAP-BE-003 acceptance packet 已在 owner sidecar branch 補齊，latest commit diff/check 乾淨，packet 正確記錄 parent MAP-BE-003 仍為 in_progress/readiness blocker，並明寫 parent next 與 MAP-BE-002 live status 的差異；support artifact only，未改 canonical truth。`
 
 Suggested reopen wording:
 
-> `packet needs revision: [missing machine-truth alignment / incorrect topology / wrong evidence anchors / support-scope violation]`
-
+> `packet needs revision: [missing artifact on owner branch / whitespace-check failure / incorrect topology / wrong evidence anchors / support-scope violation]`
