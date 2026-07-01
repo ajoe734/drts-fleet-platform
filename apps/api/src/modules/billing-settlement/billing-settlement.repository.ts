@@ -241,12 +241,30 @@ export class BillingSettlementRepository {
           tasks.record AS task_record,
           COALESCE(
             NULLIF(orders.record->>'costCenter', ''),
+            approval.cost_center_code,
             quota.cost_center_code
           ) AS cost_center_code,
           cost_centers.record AS cost_center_record
         FROM ops.phase1_driver_tasks AS tasks
         INNER JOIN ops.phase1_owned_orders AS orders
           ON orders.order_id = tasks.order_id
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(
+            NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,costCenterCode}', ''),
+            NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,cost_center_code}', ''),
+            NULLIF(approval.record #>> '{evaluation_snapshot,input_snapshot,costCenterCode}', ''),
+            NULLIF(approval.record #>> '{evaluation_snapshot,input_snapshot,cost_center_code}', '')
+          ) AS cost_center_code
+          FROM core.phase1_tenant_approval_requests AS approval
+          WHERE approval.tenant_id = $1
+            AND (
+              approval.order_id = orders.order_id
+              OR approval.record->>'orderId' = orders.order_id
+              OR approval.record->>'order_id' = orders.order_id
+            )
+          ORDER BY approval.created_at DESC
+          LIMIT 1
+        ) AS approval ON TRUE
         LEFT JOIN LATERAL (
           SELECT ledger.cost_center_code
           FROM core.phase1_tenant_quota_ledger AS ledger
@@ -260,6 +278,7 @@ export class BillingSettlementRepository {
           ON cost_centers.tenant_id = $1
          AND cost_centers.code = COALESCE(
            NULLIF(orders.record->>'costCenter', ''),
+           approval.cost_center_code,
            quota.cost_center_code
          )
         WHERE tasks.status = 'completed'
