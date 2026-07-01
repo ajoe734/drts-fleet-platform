@@ -6,7 +6,7 @@
 **Parent Reviewer:** `Claude2`
 **Sidecar Owner:** `Codex`
 **Sidecar Reviewer:** `Codex2`
-**Generated:** `2026-06-30T20:54:00Z`
+**Generated:** `2026-07-01T02:51:03Z`
 **Status:** `REVIEW SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or the parent task verdict.
 
 This packet exists only to support review handoff for `MAP-UI-002-HARDEN-001-SIDECAR-REVIEW`. The parent task is still in `review`; this document does not approve, reopen, or close the parent task. It pins the current machine-truth snapshot, the load-bearing commit, the relevant source anchors, and the exact verification boundary for the assigned reviewer.
@@ -46,11 +46,11 @@ Stable fields from machine truth:
 - depends_on=`MAP-BE-006`
 - artifact=`support/sidecars/MAP-UI-002-HARDEN-001/MAP-UI-002-HARDEN-001-SIDECAR-REVIEW.md`
 
-Live sidecar lifecycle state at packet creation:
+Live sidecar lifecycle state at packet refresh:
 
 - status=`in_progress`
-- next=`整理 review packet、evidence summary 與 reviewer handoff`
-- last_update=`2026-06-30T20:52:12Z`
+- next=`Refreshing review packet to match current machine truth, verifying parent commit anchors, and preparing reviewer handoff.`
+- last_update=`2026-07-01T02:50:51Z`
 
 ### 2.2 Parent task - `MAP-UI-002-HARDEN-001`
 
@@ -89,7 +89,7 @@ Machine truth names the active parent review commit as:
 - commit=`414f27484`
 - subject=`wip(MAP-UI-002-HARDEN-001): anchor geometry editor hardening`
 
-Reachability check at packet creation:
+Reachability check at packet refresh:
 
 - local branches containing `414f27484`:
   - `codex/map-ui-002-integrate-001`
@@ -120,7 +120,7 @@ This matters because the sidecar branch itself stays on `origin/dev`; parent cod
 
 - `packages/ui-web/package.json`
   - `test` script is `vitest run --passWithNoTests`
-- independent check on this sidecar branch at `2026-06-30`:
+- independent check on this sidecar branch at `2026-07-01`:
   - `pnpm --filter @drts/ui-web test`
   - result: `Test Files 1 passed (1)`, `Tests 2 passed (2)`
 
@@ -220,21 +220,4 @@ AI_NAME=Codex2 scripts/ai-status.sh approve MAP-UI-002-HARDEN-001-SIDECAR-REVIEW
 
 ---
 
-## 7. Owner Closeout Addendum
-
-Closeout refresh prepared on `2026-06-30` after reviewer approval:
-
-- sidecar machine-truth state is now `review_approved` as of `2026-06-30T20:57:12Z`
-- parent task `MAP-UI-002-HARDEN-001` remains in `review`; this sidecar still does not approve, reopen, or close the parent task
-- reviewer approval message confirms the packet from commit `a68f91dab` stayed support-only, mapped acceptance to code/test anchors, captured the parent artifact-path drift, and included rerun commands
-- reviewer independently reran `pnpm --filter @drts/ui-web test` in the assigned review worktree on `2026-06-30`
-
-Formal closeout boundary:
-
-- this owner closeout only finalizes the sidecar support artifact branch
-- no runtime, canonical product truth, or parent-task implementation files are modified by this addendum
-- expected integration status for sidecar finalization is `not_applicable` because this packet has no deploy target
-
----
-
-This document is a sidecar support artifact only. It does not alter `ai-status.json`, canonical product truth, or the parent task lifecycle beyond the normal sidecar handoff commands.
+This document is a sidecar support artifact only. It does not alter `ai-status.json`, canonical product truth, or the parent task lifecycle beyond the normal sidecar handoff commands. Reviewer approval and owner closeout must be recorded separately through the status workflow.
