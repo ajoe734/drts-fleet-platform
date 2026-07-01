@@ -120,7 +120,7 @@ this sidecar branch.
 
 ## Handoff
 
-Prepared for reviewer `Codex`.
+Prepared for reviewer `Codex2`.
 
 This sidecar creates only the support artifact required by
 `MAP-BE-002-SIDECAR-REVIEW`. No canonical implementation files were modified in
