@@ -4,40 +4,36 @@
 **Parent Task:** `MAP-FE-ADM-001` - Platform Admin geofence governance UI
 **Parent Owner / Reviewer:** `Codex2` / `Codex`
 **Sidecar Owner / Reviewer:** `Codex` / `Codex2`
-**Reviewed branch / head:** `codex/map-fe-adm-001-gateb-corrective @ 69b0980c6`
+**Last reviewed implementation head:** `codex/map-fe-adm-001-gateb-corrective @ 69b0980c6`
 **Generated:** `2026-07-01` (UTC)
-**Status:** `REVIEW SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or the parent branch.
+**Status:** `REVIEW SUPPORT ARTIFACT` - support-only; does not modify canonical truth or parent runtime code.
 
-This packet supports review handoff for `MAP-FE-ADM-001`. It does not replace the
-parent branch evidence or reinterpret the parent acceptance. Its job is to pin the current
-machine-truth baseline, summarize the actual reviewed corrective branch, and separate the
-repo-local corrective proof from the still-open MAP-QA / MAP-REL production gates.
-
----
+This packet reflects the current machine-truth posture after reviewer `Codex` reopened the
+parent task at `2026-07-01T02:07:04Z`. It replaces the stale "parent is still in review on
+PR #1026" framing with the actual state: the corrective branch added meaningful Gate B proof,
+but the parent task is back to `in_progress` because review still found three concrete gaps.
 
 ## 1. Scope Boundary
 
 In scope:
 
-- summarize the current machine-truth state for `MAP-FE-ADM-001` and this sidecar
-- identify the active reviewed branch/head and the evidence already present there
-- tell reviewer `Codex2` what the current corrective branch does prove versus what still
-  remains outside this packet
+- anchor the sidecar to current machine truth for this sidecar and parent task
+- summarize what `69b0980c6` did add
+- record the exact reviewer reopen reasons that still block parent approval
+- hand reviewer-ready evidence back to owner without changing canonical truth
 
 Out of scope:
 
-- editing the parent branch implementation
-- changing L1/L2 canonical truth, contracts, runtime code, or governance semantics
-- approving the parent task by implication
-- claiming full production readiness, MAP-QA closeout, or MAP-REL closeout
-
----
+- editing the parent implementation
+- changing L1/L2 product truth, contracts, or governance semantics
+- claiming the parent branch passed review
+- claiming MAP-QA-002, MAP-REL, or downstream callcenter proof is complete
 
 ## 2. Machine-Truth Anchors
 
 ### Sidecar task - `MAP-FE-ADM-001-SIDECAR-REVIEW`
 
-Stable fields from `scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-REVIEW`:
+Stable identity fields from `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-REVIEW`:
 
 - owner=`Codex`
 - reviewer=`Codex2`
@@ -47,191 +43,183 @@ Stable fields from `scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-REVIEW`:
 - mutates_canonical=`false`
 - artifact=`support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-SIDECAR-REVIEW.md`
 
-Live sidecar lifecycle truth remains in machine truth. Do not treat this file as the source of
-truth for the sidecar's transient `status` or `last_update`.
+Lifecycle state is intentionally not treated as durable here. Reviewer should rely on
+`scripts/ai-status.sh show` at read time for the live sidecar status.
 
 ### Parent task - `MAP-FE-ADM-001`
 
-Current machine-truth snapshot:
+Current machine-truth snapshot from `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001`:
 
 - owner=`Codex2`
 - reviewer=`Codex`
-- status=`review`
+- status=`in_progress`
 - dependencies=`MAP-BE-006`, `MAP-UI-002`, `MAP-UI-002-HARDEN-001`, `MAP-UI-002-INTEGRATE-001`
 - planning ref=`docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
 - gap ref=`docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
 
-Current parent `next` summary in machine truth says:
+Current parent `next` summary says review failed because:
 
-- `Codex2` handed the parent back to reviewer `Codex` at `2026-07-01T02:03:18Z`
-- the active review target is stacked draft `PR #1026` on `codex/map-fe-adm-001-gateb-corrective @ 69b0980c6`
-- the corrective branch claims screen-requirements fallback, task-scoped `GeometryEditor`,
-  backend affected sample preview, mutation receipt audit/version hooks, helper unit coverage,
-  and Playwright Gate B smoke are all implemented
-- validated commands in the handoff were `platform-admin` typecheck/lint, `api-client`
-  typecheck, unit helper test, e2e eslint, prettier check, contracts build, Playwright
-  `platform-admin-service-area-governance`, and `git diff --check`
-- the parent is still not claiming full production readiness; `MAP-QA-002` and `MAP-REL`
-  remain open
-
-### Routing trail
-
-Task-specific `ai-activity-log.jsonl` anchors show the transition that this packet must match:
-
-- `2026-07-01T01:20:02Z` - `Codex` reopened the parent because the earlier branch lacked a
-  matching screen handoff, first-class geometry flow, affected sample preview, and publish /
-  retire acceptance proof
-- `2026-07-01T01:24:16Z` - `Codex2` re-handed the earlier branch `9ff0d1113`, explicitly
-  keeping those concerns open
-- `2026-07-01T01:28:40Z` - `Codex` reopened again because the packet still described an
-  invented full UI without the required fallback/evidence
-- `2026-07-01T02:03:18Z` - `Codex2` handed off the corrective review target `69b0980c6`
-  with the new evidence list and validation summary
+- `/service-areas` still relies on only a fallback screen-requirements note
+- affected-preview freshness ignores `effectiveFrom` changes
+- submit-review requires a UI reason but never sends it to API audit
+- GeoJSON import does not surface mutation receipts
 
 Practical meaning:
 
-- parent `MAP-FE-ADM-001` is no longer in the old failed-review posture captured by the prior
-  sidecar packet
-- the current reviewer framing must talk about a live `review` on the corrective branch, not a
-  stale `in_progress` or reopened state
+- the prior sidecar packet that described the parent as a live `review` target is stale
+- reviewer handoff must now be framed as a reopen packet for owner corrective work
 
-### Dependency baseline
+## 3. Routing Trail
 
-Related machine-truth slices at packet time:
+Task-scoped `ai-activity-log.jsonl` anchors:
 
-- `MAP-UI-002` remains `review`
-- `MAP-UI-002-HARDEN-001` remains `review`
-- `MAP-UI-002-INTEGRATE-001` remains `review`
-- `scripts/ai-status.sh show MAP-BE-006` currently returns `Task not found`
+- `2026-07-01T02:03:18Z` - `Codex2` handed off the corrective target
+  `codex/map-fe-adm-001-gateb-corrective @ 69b0980c6`
+- `2026-07-01T02:07:04Z` - `Codex` reopened the parent after reviewing `69b0980c6`
+- `2026-07-01T02:12:42Z` - `Codex2` reopened this sidecar so the packet could be refreshed to
+  current machine truth and the actual residual gaps
 
-Practical meaning:
+This sidecar must align to the last two events above, not the earlier `02:03:18Z`
+review-ready moment.
 
-- the corrective branch answers the reopen with a task-scoped Platform Admin geometry surface;
-  it does not claim that a shared design-system `GeometryEditor` already exists
-- reviewer should read the parent evidence as a corrective branch proving repo-local governance
-  wiring and test coverage, while still respecting the remaining QA / release gates
+## 4. What The Corrective Branch Did Add
 
----
+The corrective branch still matters. Reviewer reopen is not "nothing changed"; it is "the
+branch improved materially, but not enough to clear review."
 
-## 3. Reviewed Evidence Surface
-
-Primary evidence anchors on `codex/map-fe-adm-001-gateb-corrective @ 69b0980c6`:
+Evidence anchors on `69b0980c6`:
 
 - `apps/platform-admin-web/app/service-areas/page.tsx`
-  - keeps `/service-areas` as the dedicated Platform Admin governance route
-  - lifecycle controls require reason-gated review / publish / retire actions
-    (`page.tsx:861-949`)
-  - task-scoped `ServiceAreaGeometryEditor` is mounted with read-only behavior for active /
-    retired records and explicit save/reset flows (`page.tsx:951-1019`)
-  - affected sample preview is now a first-class publish gate that must be fresh before publish
-    and records evaluator decisions / geometry version refs (`page.tsx:1021-1149`)
-  - mutation receipt exposes backend audit ID, generated timestamp, record identity, and
-    version ref after actions (`page.tsx:1245-1294`)
+  - dedicated `/service-areas` governance route
+  - reason-gated review / publish / retire controls
+  - task-scoped `ServiceAreaGeometryEditor`
+  - affected sample preview section and publish gate
+  - mutation receipt panel
 - `apps/platform-admin-web/components/service-area-geometry-editor.tsx`
-  - provides the task-scoped geometry surface for polygon/circle editing, validation state,
-    GeoJSON/native import/export, and preview summary (`service-area-geometry-editor.tsx:18-198`)
+  - task-scoped polygon/circle editor with import/export and validation state
 - `apps/platform-admin-web/lib/service-area-governance.ts`
-  - blocks invalid coordinates and self-intersecting polygons (`service-area-governance.ts:65-103`)
-  - builds affected evaluator samples and summarizes evaluator proof for publish gating
-    (`service-area-governance.ts:186-260`)
+  - coordinate validation and self-intersection rejection helpers
+  - affected sample construction / evaluation summary helpers
 - `packages/api-client/src/index.ts`
-  - exposes typed service-area helpers for definitions, GeoJSON export, evaluate, create/update,
-    submit-review, publish, retire, and stop-policy mutations (`index.ts:2920-3025`)
+  - typed service-area create/update/submit-review/publish/retire/evaluate helpers
 - `tests/unit/platform-admin-service-area-governance.test.ts`
-  - proves self-intersection rejection, affected sample generation, and evaluator summary logic
-    (`platform-admin-service-area-governance.test.ts:37-117`)
-- `tests/unit/platform-admin-assistant-route-context.test.ts`
-  - proves `/service-areas` is registered as a Platform Admin write surface with route metadata
-    (`platform-admin-assistant-route-context.test.ts:137-146`)
+  - helper coverage for invalid geometry and affected preview logic
 - `tests/e2e/platform-admin-service-area-governance.spec.ts`
-  - mocks definitions, GeoJSON export, evaluator, publish, and retire endpoints
-  - asserts GeometryEditor valid state, fresh affected preview, evaluator decision/version refs,
-    publish receipt, and retire receipt (`platform-admin-service-area-governance.spec.ts:180-370`)
+  - mocked smoke that exercises preview, publish receipt, and retire receipt
 - `docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260701.md`
-  - supplies the screen-requirements fallback the earlier review reopen demanded
-  - defines required regions, test hooks, publish safety rules, and explicit evidence boundary
-    (`platform-admin-service-area-governance-screen-requirements-20260701.md:13-46`)
+  - fallback screen-requirements note added by the corrective pass
 - `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-FINAL-EVIDENCE.md`
-  - states the corrective scope pass and its exact remaining-work boundary
-    (`MAP-FE-ADM-001-FINAL-EVIDENCE.md:11-25`, `:102-107`)
+  - owner evidence summary for the corrective scope
 
----
+Practical meaning:
 
-## 4. Evidence Summary
+- the reopen is not disputing that `69b0980c6` improved the branch
+- the reopen is specifically about residual correctness and evidence-boundary gaps
 
-| Review question | Current posture | Evidence anchor |
-| --- | --- | --- |
-| Is there a dedicated Platform Admin governance route? | `YES_FOR_UI_SURFACE` | `/service-areas` route, route-context coverage, and page test hooks |
-| Are typed client methods present for service-area governance APIs? | `YES_FOR_CLIENT_WIRING` | `packages/api-client/src/index.ts:2920-3025` |
-| Is the earlier missing screen handoff now addressed? | `YES_FOR_SCREEN_REQUIREMENTS_FALLBACK` | `docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260701.md:13-46` |
-| Does the branch now include a geometry editor flow? | `YES_FOR_TASK_SCOPED_FIX` | `service-areas/page.tsx:951-1019` plus `service-area-geometry-editor.tsx:18-198` |
-| Is invalid geometry blocked before publish? | `YES_FOR_REPO_LOCAL_PROOF` | validation helpers and unit test coverage for self-intersection / coordinate errors |
-| Is affected sample preview required before publish? | `YES_FOR_REPO_LOCAL_PROOF` | publish gate + preview summary in `service-areas/page.tsx:524-540` and `:1021-1149` |
-| Does the branch now capture mutation receipt / audit-version hooks? | `YES_FOR_REPO_LOCAL_PROOF` | mutation receipt panel in `service-areas/page.tsx:1245-1294` |
-| Does the Playwright smoke exercise preview + publish + retire flow? | `YES_FOR_MOCKED_SMOKE_SCOPE` | `platform-admin-service-area-governance.spec.ts:180-370` |
-| Does this branch alone prove downstream callcenter / full production readiness? | `NO` | parent machine truth and final evidence both keep `MAP-QA-002` / `MAP-REL` open |
+## 5. Reviewer Reopen Findings
 
-The cleanest way to read the reviewed branch is:
+### 5.1 Parent status mismatch was the first stale-packet failure
 
-- it fixes the exact repo-local gaps that caused the prior parent reopen
-- it proves a task-scoped governance surface now exists with geometry editing, preview gating,
-  mutation receipt hooks, and mocked smoke coverage
-- it does not collapse the remaining QA / release obligations into this branch, and it does not
-  by itself prove cross-surface callcenter behavior or full production release readiness
+The previous sidecar packet said parent `MAP-FE-ADM-001` was `review` on draft `PR #1026`.
+Current machine truth is `in_progress` with a recorded review failure at
+`2026-07-01T02:07:04Z`. Any reviewer packet that keeps the earlier framing is stale.
 
----
+### 5.2 Affected preview freshness is keyed too narrowly
 
-## 5. Reviewer Hotspots
+Relevant code in `service-areas/page.tsx`:
 
-Reviewer `Codex2` should verify:
+- `hasFreshAffectedPreview` only checks whether `affectedPreview.selectionKey === selectedRecordKey`
+  and `summary.total > 0`
+- `selectedRecordKey` is derived from record kind/id/version
+- `runAffectedPreview()` uses `effectiveFrom || selectedRecord.effectiveFrom` when building
+  samples
 
-1. This sidecar now matches machine truth: parent `MAP-FE-ADM-001` is `review`, not
-   `in_progress`.
-2. The active reviewed head is `codex/map-fe-adm-001-gateb-corrective @ 69b0980c6` on draft
-   `PR #1026`, not the earlier `9ff0d1113` branch state.
-3. The packet no longer describes `GeometryEditor`, affected preview, or mutation receipt as
-   missing; it describes them as corrective-scope evidence now present on the reviewed branch.
-4. The packet still preserves the evidence boundary from the parent handoff and final evidence:
-   this is a corrective-scope pass, not a claim that `MAP-QA-002`, callcenter downstream proof,
-   or `MAP-REL` are complete.
-5. The screen-requirements fallback doc, page-level publish gate, helper unit tests, and
-   Playwright smoke are all called out explicitly, so the reviewer can cross-check the reopen
-   reasons against the new evidence.
-6. The packet remains support-only and does not mutate parent code, canonical truth, or task
-   acceptance.
+Why review failed:
 
-Suggested sidecar approval wording:
+- changing `effectiveFrom` changes the publish-relevant evaluator request
+- but the freshness test does not include `effectiveFrom`
+- a preview can therefore remain "fresh" in UI state after the operator changes the effective
+  window, which undercuts the publish gate claim
 
-> `審查通過：MAP-FE-ADM-001 sidecar review packet 已更新為目前 machine truth 的 parent review 狀態，並正確對齊 corrective branch codex/map-fe-adm-001-gateb-corrective@69b0980c6 的證據。packet 清楚區分了已補齊的 screen-requirements fallback、task-scoped GeometryEditor、affected preview、mutation receipt 與 mocked Playwright smoke，並保留 MAP-QA-002 / MAP-REL / downstream callcenter proof 仍未關閉的邊界，未改 canonical truth。`
+### 5.3 Submit-review requires a reason in UI but never sends that reason to API audit
 
-Suggested reopen wording:
+Relevant code:
 
-> `packet needs refresh: [machine-truth mismatch / reviewed-head moved / evidence summary underclaims or overclaims corrective scope / support-scope violation]`
+- `requireSelectionAndReason()` blocks review/publish/retire unless `reason.trim()` exists
+- `submitReview()` then calls `client.submitServiceAreaBoundaryForReview(id)` or
+  `client.submitStopPolicyForReview(id)` with no command body
+- `packages/api-client/src/index.ts` defines those helpers as bare POSTs to `/submit-review`
+  without `{ body: ... }`
 
----
+Why review failed:
 
-## 6. Owner Verification
+- the UI presents review submission as reason-gated lifecycle evidence
+- but the reason is not forwarded to backend audit on submit-review
+- this means the claimed audit trail is incomplete for one of the core lifecycle transitions
 
-Verification run for this sidecar refresh:
+### 5.4 GeoJSON draft import does not surface mutation receipts
+
+Relevant code:
+
+- `runAction()` only stores receipts when the action returns a `ServiceAreaAdminMutationResponse`
+- `createDraftFromImport()` awaits `client.createServiceAreaBoundary(...)` or
+  `client.createStopPolicy(...)` but does not return the awaited result
+- the page copy says the mutation receipt panel covers "publish, retire, review submit,
+  geometry save, or draft import"
+
+Why review failed:
+
+- the receipt panel contract overclaims import behavior
+- import can create a draft but the returned mutation receipt is discarded before
+  `setLastMutationReceipt(result)` can run
+- reviewer therefore cannot accept the receipt/audit evidence claim for import flows
+
+## 6. Current Read Of The Corrective Branch
+
+The cleanest reviewer summary is:
+
+- `69b0980c6` closes the earlier "no GeometryEditor / no preview / no receipt surface"
+  objections at a repo-local UI level
+- the screen-requirements note is still best read as fallback support evidence, not as proof
+  that the broader screen-handoff concern is fully settled
+- the branch does not yet satisfy review because the publish-proof freshness key, submit-review
+  audit reason propagation, and import receipt surfacing are still inconsistent with the
+  evidence being claimed
+- MAP-QA-002, MAP-REL, and downstream callcenter behavior remain outside this sidecar and
+  should stay outside the claim boundary
+
+## 7. Reviewer Handoff Guidance
+
+Owner `Codex2` should refresh the parent branch and next handoff around these exact fixes:
+
+1. Make affected-preview freshness invalidated by every publish-relevant input, including
+   `effectiveFrom`.
+2. Ensure submit-review sends the reason payload required by the UI so backend audit can record
+   it.
+3. Ensure GeoJSON import returns and surfaces a mutation receipt if the UI claims that evidence
+   exists.
+4. Keep the screen-requirements fallback and task-scoped GeometryEditor evidence clearly scoped
+   as repo-local corrective proof, not full production acceptance.
+
+Suggested reviewer handoff wording:
+
+> `packet refreshed to current machine truth: parent MAP-FE-ADM-001 is back to in_progress after review failed on 69b0980c6. Corrective branch evidence is summarized, but reviewer still needs owner fixes for affected-preview freshness vs effectiveFrom, submit-review reason propagation to API audit, and GeoJSON import mutation receipts.`
+
+Suggested approval wording for a future refresh:
+
+> `sidecar matches current machine truth and accurately reflects the latest parent review posture, reviewed head, remaining reopen findings, and support-only scope without overclaiming QA/release readiness.`
+
+## 8. Verification
+
+Verification used for this sidecar refresh:
 
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-REVIEW`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001`
-- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002`
-- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002-HARDEN-001`
-- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002-INTEGRATE-001`
-- `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-006` (returned `Task not found`)
-- task-scoped `grep` against `/home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl`
-- `git show 69b0980c6:apps/platform-admin-web/app/service-areas/page.tsx`
-- `git show 69b0980c6:apps/platform-admin-web/components/service-area-geometry-editor.tsx`
-- `git show 69b0980c6:apps/platform-admin-web/lib/service-area-governance.ts`
-- `git show 69b0980c6:packages/api-client/src/index.ts`
-- `git show 69b0980c6:tests/unit/platform-admin-service-area-governance.test.ts`
-- `git show 69b0980c6:tests/unit/platform-admin-assistant-route-context.test.ts`
-- `git show 69b0980c6:tests/e2e/platform-admin-service-area-governance.spec.ts`
-- `git show 69b0980c6:docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260701.md`
-- `git show 69b0980c6:support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-FINAL-EVIDENCE.md`
+- `grep -n 'MAP-FE-ADM-001' /home/edna/workspace/drts-fleet-platform/ai-activity-log.jsonl | tail -n 20`
+- `git show 69b0980c6:apps/platform-admin-web/app/service-areas/page.tsx | sed -n '288,730p'`
+- `git show 69b0980c6:apps/platform-admin-web/app/service-areas/page.tsx | sed -n '1218,1296p'`
+- `git show 69b0980c6:packages/api-client/src/index.ts | sed -n '2940,3035p'`
 - `git diff --check -- support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-SIDECAR-REVIEW.md`
-- `git diff --no-index --check /dev/null support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-SIDECAR-REVIEW.md`
 
 Not applicable:
 
@@ -240,5 +228,5 @@ Not applicable:
 - lint
 - app execution
 
-Reason: this sidecar writes one support artifact only and summarizes already-recorded parent
-evidence rather than changing runtime or canonical truth.
+Reason: this sidecar only updates support documentation and cites already-recorded parent
+review evidence.
