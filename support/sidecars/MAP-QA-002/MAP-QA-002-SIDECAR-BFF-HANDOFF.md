@@ -6,7 +6,7 @@
 - Sidecar Owner / Reviewer: `Codex` / `Codex2`
 - Parent Owner / Reviewer: `Codex2` / `Codex`
 - Date: `2026-07-01`
-- Status: `READY FOR REVIEW`
+- Status: `FINALIZED`
 - Class: support / sidecar only; no canonical-truth mutation
 
 ## Purpose
@@ -20,6 +20,15 @@ questions for the parent owner:
    landed operator journey in this checkout?
 3. Which repo-vs-acceptance gaps still need explicit QA planning before
    `MAP-QA-002` can claim all seven scenarios?
+
+## Owner Closeout Note
+
+- Machine truth already recorded this sidecar as `review_approved` before owner
+  closeout.
+- This final pass does not change the approved packet scope; it only records
+  the finalized support-artifact state for branch closeout.
+- Integration scope remains branch-only for this helper packet. The parent
+  owner decides whether and how to absorb these notes into canonical QA work.
 
 ## Shared-Truth Baseline
 
@@ -166,3 +175,5 @@ AI_NAME=Codex scripts/ai-status.sh handoff MAP-QA-002-SIDECAR-BFF-HANDOFF Codex2
 - 2026-07-01 - Codex refreshed the packet against current machine truth and the
   `origin/dev` checkout, replacing stale `MAP-FE-OPS-001` and dependency-readiness
   assumptions with current repo evidence.
+- 2026-07-01 - Codex finalized the approved packet for owner closeout without
+  changing the reviewed support scope.
