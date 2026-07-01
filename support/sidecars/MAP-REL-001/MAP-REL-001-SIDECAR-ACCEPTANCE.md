@@ -1,9 +1,9 @@
 # MAP-REL-001 SIDECAR ACCEPTANCE
 
 Snapshot Type: owner support packet
-Snapshot Captured At: 2026-07-01T02:37:19Z
-Snapshot Status At Capture: `in_progress`
-Worktree / HEAD: `codex/map-rel-001-sidecar-acceptance` @ `f452f019f`
+Snapshot Captured At: 2026-07-01T02:42:37Z
+Snapshot Status At Capture: `review_approved`
+Reviewer-Approved Worktree / HEAD: `codex/map-rel-001-sidecar-acceptance` @ `b891e1b81`
 Sidecar Owner / Reviewer: `Codex` / `Codex2`
 Parent Task: `MAP-REL-001`
 Parent Owner / Reviewer: `Codex2` / `Codex`
@@ -26,12 +26,12 @@ the parent task's evidence.
 
 `ai-status.json` remains authoritative. This markdown file is only a reviewer
 snapshot captured via `AI_NAME=Codex scripts/ai-status.sh show ...` on
-`2026-07-01T02:37:19Z`.
+`2026-07-01T02:42:37Z`.
 
 | Task | Status | Owner / Reviewer | Why it matters to `MAP-REL-001` |
 | ---- | ------ | ---------------- | -------------------------------- |
-| `MAP-REL-001-SIDECAR-ACCEPTANCE` | `in_progress` | `Codex` / `Codex2` | This support packet only. |
-| `MAP-REL-001` | `in_progress` | `Codex2` / `Codex` | Parent release-gate closeout depends directly on `MAP-QA-002` and `MAP-OBS-001`. Current `next` still says CI E2E is pending because local `psql` was unavailable. |
+| `MAP-REL-001-SIDECAR-ACCEPTANCE` | `review_approved` | `Codex` / `Codex2` | This support packet is approved and waiting on owner closeout only. |
+| `MAP-REL-001` | `in_progress` | `Codex2` / `Codex` | Parent release-gate closeout depends directly on `MAP-QA-002` and `MAP-OBS-001`. Current `next` says corrective push #2 landed on PR `#1022` and is waiting on CI E2E. |
 | `MAP-QA-002` | `in_progress` | `Codex2` / `Codex` | Owns final cross-surface E2E evidence for all five release gates. |
 | `MAP-OBS-001` | `in_progress` | `Codex2` / `Codex` | Owns metrics, audit, alert, and runbook evidence; approved owner branch is on PR `#1027` but not yet merged to `dev`. |
 | `MAP-QA-001` | `review` | `Codex` / `Claude2` | Provides the offline harness and deterministic provider fixtures that `MAP-QA-002` should consume. |
@@ -124,7 +124,7 @@ board drift.
 ### Referenced by planning docs but missing from this worktree
 
 The execution packet claims these files already exist, but a direct path check
-on `2026-07-01T02:37:19Z` returned `MISSING`:
+on `2026-07-01T02:42:37Z` returned `MISSING`:
 
 | Missing path | Why it matters |
 | ------------ | -------------- |
@@ -154,7 +154,16 @@ as already-satisfied release inputs.
    `MAP-BE-006`, and `MAP-FE-OPS-001` should be escalated or reconciled before
    the parent is allowed to say "no unsupported production claim."
 
-## Reviewer Handoff
+## Review Record
+
+Reviewer approval was recorded in machine truth at `2026-07-01T02:41:14Z`
+against approved branch head `b891e1b81`. The approval note says this packet
+remains sidecar-only, matches the current `MAP-REL-001` / `MAP-QA-002` /
+`MAP-OBS-001` machine-truth rows, and correctly flags missing evidence paths
+plus non-discoverable dependency rows without overstating release readiness.
+
+The following state-transition commands remain the provenance trail for this
+slice:
 
 Owner handoff command:
 
@@ -167,6 +176,18 @@ Reviewer approval command:
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh approve MAP-REL-001-SIDECAR-ACCEPTANCE "Reviewed: MAP-REL-001 support packet stays sidecar-only, accurately records the current gate/dependency state, and does not over-claim missing machine-truth rows or absent evidence artifacts."
 ```
+
+## Closeout Recheck
+
+- Re-ran
+  `git diff --check -- support/sidecars/MAP-REL-001/MAP-REL-001-SIDECAR-ACCEPTANCE.md`
+  at `2026-07-01T02:42:37Z`: `PASS`.
+- Re-spot-checked the listed machine-truth rows at `2026-07-01T02:42:37Z`:
+  the dependency and blocker narrative in this packet still matches current
+  task states, with this sidecar now at `review_approved`.
+- Re-ran targeted path checks at `2026-07-01T02:42:37Z`: every path listed in
+  "Referenced by planning docs but missing from this worktree" still returned
+  `MISSING`.
 
 ## Local Verification For This Sidecar Slice
 
