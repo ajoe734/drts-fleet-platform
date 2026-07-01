@@ -100,6 +100,7 @@ export type BillingSettlementTripRecord = {
   tenantId: string;
   driverId: string;
   orderId: string;
+  bookingId?: string | null;
   completedAt: string;
   orderSource: NonNullable<InvoiceLineRecord["orderSource"]>;
   grossEarning: MoneyAmount;
@@ -2555,6 +2556,7 @@ export class BillingSettlementService implements OnModuleInit {
 
     return {
       ...incoming,
+      bookingId: incoming.bookingId ?? existing.bookingId ?? null,
       costCenterCode:
         incoming.costCenterCode ?? existing.costCenterCode ?? null,
       costCenterName:
@@ -2607,6 +2609,7 @@ export class BillingSettlementService implements OnModuleInit {
       tenantId: trip.tenantId,
       driverId: trip.driverId,
       orderId: trip.orderId,
+      bookingId: trip.bookingId ?? null,
       completedAt: trip.completedAt,
       orderSource: trip.orderSource,
       grossEarning: { ...trip.grossEarning },
@@ -2758,7 +2761,11 @@ export class BillingSettlementService implements OnModuleInit {
     try {
       const approvalRequest = this.tenantPartnerService
         ?.listApprovalRequests(trip.tenantId)
-        .find((request) => request.orderId === trip.orderId);
+        .find(
+          (request) =>
+            request.orderId === trip.orderId ||
+            (trip.bookingId ? request.bookingId === trip.bookingId : false),
+        );
       const costCenterCode =
         approvalRequest?.evaluationSnapshot.inputSnapshot?.costCenterCode
           ?.trim()
@@ -2782,6 +2789,7 @@ export class BillingSettlementService implements OnModuleInit {
         await this.billingSettlementRepository.resolveLiveTripGovernance(
           trip.tenantId,
           trip.orderId,
+          trip.bookingId ?? null,
         );
       if (
         expectedCostCenterCode &&

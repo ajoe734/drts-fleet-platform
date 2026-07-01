@@ -3492,6 +3492,7 @@ export class OwnedMobilityService implements OnModuleInit {
       tenantId: order.tenantId,
       driverId: task.driverId,
       orderId: order.orderId,
+      bookingId: order.bookingId ?? null,
       completedAt: task.completedAt,
       grossEarning: { ...grossEarning },
       orderSource: order.orderSource,

@@ -40,6 +40,7 @@ export type LiveSettlementTripRecord = {
   tenantId: string;
   driverId: string;
   orderId: string;
+  bookingId: string | null;
   completedAt: string;
   grossEarning: MoneyAmount;
   orderSource: OwnedOrderRecord["orderSource"];
@@ -253,7 +254,11 @@ export class BillingSettlementRepository {
             NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,costCenterCode}', ''),
             NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,cost_center_code}', ''),
             NULLIF(approval.record #>> '{evaluation_snapshot,input_snapshot,costCenterCode}', ''),
-            NULLIF(approval.record #>> '{evaluation_snapshot,input_snapshot,cost_center_code}', '')
+            NULLIF(approval.record #>> '{evaluation_snapshot,input_snapshot,cost_center_code}', ''),
+            NULLIF(approval.record #>> '{evaluationSnapshot,auditSummary,costCenterCode}', ''),
+            NULLIF(approval.record #>> '{evaluationSnapshot,auditSummary,cost_center_code}', ''),
+            NULLIF(approval.record #>> '{evaluation_snapshot,audit_summary,costCenterCode}', ''),
+            NULLIF(approval.record #>> '{evaluation_snapshot,audit_summary,cost_center_code}', '')
           ) AS cost_center_code
           FROM core.phase1_tenant_approval_requests AS approval
           WHERE approval.tenant_id = $1
@@ -261,6 +266,9 @@ export class BillingSettlementRepository {
               approval.order_id = orders.order_id
               OR approval.record->>'orderId' = orders.order_id
               OR approval.record->>'order_id' = orders.order_id
+              OR approval.booking_id = COALESCE(orders.record->>'bookingId', orders.record->>'booking_id', '')
+              OR approval.record->>'bookingId' = COALESCE(orders.record->>'bookingId', orders.record->>'booking_id', '')
+              OR approval.record->>'booking_id' = COALESCE(orders.record->>'bookingId', orders.record->>'booking_id', '')
             )
           ORDER BY approval.created_at DESC
           LIMIT 1
@@ -269,7 +277,7 @@ export class BillingSettlementRepository {
           SELECT ledger.cost_center_code
           FROM core.phase1_tenant_quota_ledger AS ledger
           WHERE ledger.tenant_id = $1
-            AND ledger.booking_id = COALESCE(orders.record->>'bookingId', '')
+            AND ledger.booking_id = COALESCE(orders.record->>'bookingId', orders.record->>'booking_id', '')
             AND ledger.cost_center_code IS NOT NULL
           ORDER BY ledger.created_at DESC
           LIMIT 1
@@ -319,6 +327,7 @@ export class BillingSettlementRepository {
         tenantId: order.tenantId ?? tenantId,
         driverId: task.driverId,
         orderId: order.orderId,
+        bookingId: order.bookingId ?? null,
         completedAt: task.completedAt ?? order.updatedAt,
         grossEarning: { ...grossEarning },
         orderSource: order.orderSource,
@@ -345,6 +354,7 @@ export class BillingSettlementRepository {
   async resolveLiveTripGovernance(
     tenantId: string,
     orderId: string,
+    bookingId?: string | null,
   ): Promise<LiveTripGovernanceRecord | null> {
     if (!this.isEnabled()) {
       return null;
@@ -367,6 +377,9 @@ export class BillingSettlementRepository {
               approval.order_id = $2
               OR approval.record->>'orderId' = $2
               OR approval.record->>'order_id' = $2
+              OR ($3 IS NOT NULL AND approval.booking_id = $3)
+              OR ($3 IS NOT NULL AND approval.record->>'bookingId' = $3)
+              OR ($3 IS NOT NULL AND approval.record->>'booking_id' = $3)
             )
           ORDER BY approval.created_at DESC
           LIMIT 1
@@ -381,6 +394,10 @@ export class BillingSettlementRepository {
             NULLIF(matched_approval.record #>> '{evaluationSnapshot,inputSnapshot,cost_center_code}', ''),
             NULLIF(matched_approval.record #>> '{evaluation_snapshot,input_snapshot,costCenterCode}', ''),
             NULLIF(matched_approval.record #>> '{evaluation_snapshot,input_snapshot,cost_center_code}', ''),
+            NULLIF(matched_approval.record #>> '{evaluationSnapshot,auditSummary,costCenterCode}', ''),
+            NULLIF(matched_approval.record #>> '{evaluationSnapshot,auditSummary,cost_center_code}', ''),
+            NULLIF(matched_approval.record #>> '{evaluation_snapshot,audit_summary,costCenterCode}', ''),
+            NULLIF(matched_approval.record #>> '{evaluation_snapshot,audit_summary,cost_center_code}', ''),
             quota.cost_center_code
           ) AS cost_center_code
           FROM (SELECT 1) AS root
@@ -392,7 +409,7 @@ export class BillingSettlementRepository {
             WHERE ledger.tenant_id = $1
               AND ledger.cost_center_code IS NOT NULL
               AND (
-                ledger.booking_id = COALESCE(matched_order.record->>'bookingId', '')
+                ledger.booking_id = COALESCE(matched_order.record->>'bookingId', matched_order.record->>'booking_id', $3, '')
                 OR ledger.booking_id = COALESCE(matched_order.record->>'booking_id', '')
                 OR ledger.booking_id = matched_approval.booking_id
                 OR ledger.evaluation_id = matched_approval.evaluation_id
@@ -416,7 +433,7 @@ export class BillingSettlementRepository {
          AND cost_centers.code = governance.cost_center_code
         LIMIT 1
       `,
-      [tenantId, orderId],
+      [tenantId, orderId, bookingId ?? null],
     );
 
     const row = result.rows[0];
@@ -833,6 +850,7 @@ export class BillingSettlementRepository {
         tenantId: order.tenantId ?? "",
         driverId: task.driverId,
         orderId: order.orderId,
+        bookingId: order.bookingId ?? null,
         completedAt: task.completedAt ?? order.updatedAt,
         grossEarning: { ...grossEarning },
         orderSource: order.orderSource,

@@ -7,6 +7,7 @@ export type OwnedMobilityTripCompletedEvent = {
   tenantId: string;
   driverId: string;
   orderId: string;
+  bookingId: string | null;
   completedAt: string;
   grossEarning: MoneyAmount;
   orderSource: OwnedOrderRecord["orderSource"];
