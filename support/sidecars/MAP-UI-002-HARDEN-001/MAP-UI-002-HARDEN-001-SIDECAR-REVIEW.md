@@ -6,10 +6,12 @@
 **Parent Reviewer:** `Claude2`
 **Sidecar Owner:** `Codex`
 **Sidecar Reviewer:** `Codex2`
-**Generated:** `2026-07-01T02:51:03Z`
+**Generated:** `2026-07-01T02:55:36Z`
 **Status:** `REVIEW SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or the parent task verdict.
 
 This packet exists only to support review handoff for `MAP-UI-002-HARDEN-001-SIDECAR-REVIEW`. The parent task is still in `review`; this document does not approve, reopen, or close the parent task. It pins the current machine-truth snapshot, the load-bearing commit, the relevant source anchors, and the exact verification boundary for the assigned reviewer.
+
+This refresh addresses the 2026-07-01 reopen: the previous packet lived on the owner sidecar branch, but the reviewer-assigned branch `codex2/map-ui-002-harden-001-sidecar-review` was still at `f452f019f` (`origin/dev`) and did not contain this artifact.
 
 ---
 
@@ -49,10 +51,18 @@ Stable fields from machine truth:
 Live sidecar lifecycle state at packet refresh:
 
 - status=`in_progress`
-- next=`Refreshing review packet to match current machine truth, verifying parent commit anchors, and preparing reviewer handoff.`
-- last_update=`2026-07-01T02:50:51Z`
+- next=`Inspecting existing review packet, commit state, and handoff evidence after reopen.`
+- last_update=`2026-07-01T02:54:12Z`
 
-### 2.2 Parent task - `MAP-UI-002-HARDEN-001`
+### 2.2 Sidecar delivery branches
+
+Delivery facts pinned at refresh time:
+
+- owner sidecar branch containing this packet: `codex/map-ui-002-harden-001-sidecar-review` and `origin/codex/map-ui-002-harden-001-sidecar-review`
+- reviewer-assigned sidecar branch at reopen time: `codex2/map-ui-002-harden-001-sidecar-review` at `f452f019f` (`origin/dev`), missing this file
+- resolution target for this refresh: deliver the refreshed support commit onto `origin/codex2/map-ui-002-harden-001-sidecar-review` before re-running `handoff`, so the reviewer can fetch the assigned branch directly
+
+### 2.3 Parent task - `MAP-UI-002-HARDEN-001`
 
 Stable parent fields from machine truth:
 
@@ -82,7 +92,7 @@ Current recorded parent handoff claim:
   - `pnpm --filter @drts/platform-admin-web test`
   - `pnpm --filter @drts/platform-admin-web lint`
 
-### 2.3 Load-bearing parent commit
+### 2.4 Load-bearing parent commit
 
 Machine truth names the active parent review commit as:
 
@@ -110,7 +120,7 @@ Artifact-path drift note:
 - the load-bearing commit itself adds `packages/ui-web/tests/unit/geometry-editor.test.ts`
 - reviewer should treat the package-local path in the commit as the operative evidence path
 
-This matters because the sidecar branch itself stays on `origin/dev`; parent code review evidence must therefore be anchored to the commit object and machine-truth record, not to the current worktree contents.
+This matters because the parent implementation commit is not checked out in this sidecar review worktree. The sidecar branch carries support material only, so parent code review evidence must remain anchored to the commit object and machine-truth record rather than inferred from this worktree's runtime files.
 
 ---
 
@@ -178,8 +188,8 @@ This is an inference from current package verification behavior plus the parent 
 | 2 | `out-of-range lat/lng cannot be canSubmit true` | **PASS** | `buildGeometryEditorSnapshot()` binds `canSubmit` to `validation.valid` in `packages/ui-web/src/geometry-editor.tsx:277-295`; `validatePoint()` rejects world-range violations in `1326-1355`; the regression test at `packages/ui-web/tests/unit/geometry-editor.test.ts:63-77` asserts `snapshot.canSubmit === false` |
 | 3 | `self-intersecting polygons cannot be canSubmit true` | **PASS** | polygon validation adds `Polygon cannot self-intersect.` from `packages/ui-web/src/geometry-editor.tsx:225-226` and `1371-1412`; the regression test at `packages/ui-web/tests/unit/geometry-editor.test.ts:79-94` asserts `snapshot.canSubmit === false` |
 | 4 | `GeoJSON import rejects invalid coordinates` | **PASS** | `positionToPoint()` throws latitude/longitude range errors in `packages/ui-web/src/geometry-editor.tsx:1293-1309`; GeoJSON parse flow reaches that guard through `956-1047`; the regression test at `packages/ui-web/tests/unit/geometry-editor.test.ts:111-130` expects `GeoJSON latitude must be between -90 and 90.` |
-| 5 | `ui-web and platform-admin checks pass` | **RECORDED PASS** | parent machine truth records successful runs of the six commands listed in section 2.2; this sidecar branch did not rerun the full parent verification set because the parent implementation commit is not checked out here |
-| 6 | `reviewer evidence links the sidecar blockers` | **PASS** | this packet ties the prior blocker claims directly to the validating functions, exported surface, regression tests, parent commit, and recorded verification commands |
+| 5 | `ui-web and platform-admin checks pass` | **RECORDED PASS** | parent machine truth records successful runs of the six commands listed in section 2.3; this sidecar branch did not rerun the full parent verification set because the parent implementation commit is not checked out here |
+| 6 | `reviewer evidence links the sidecar blockers` | **PASS** | this packet ties the prior blocker claims directly to the validating functions, exported surface, regression tests, parent commit, recorded verification commands, and the branch-delivery fix for the prior reopen |
 
 ---
 
@@ -187,24 +197,28 @@ This is an inference from current package verification behavior plus the parent 
 
 Recommended review path for `Codex2`:
 
-1. Inspect commit `414f27484` directly, or switch to a branch that contains it:
+1. Fetch the reviewer-assigned sidecar branch so the support artifact is present in the review worktree:
+   - `git fetch origin`
+   - `git switch codex2/map-ui-002-harden-001-sidecar-review`
+   - `git rebase origin/codex2/map-ui-002-harden-001-sidecar-review`
+2. Inspect parent commit `414f27484` directly, or switch to a branch that contains it:
    - local: `codex2/map-ui-002-harden-001`
    - remote: `origin/codex/map-ui-002-integrate-001`
-2. Re-run the parent verification commands on a branch that contains the commit:
+3. Re-run the parent verification commands on a branch that contains the commit:
    - `pnpm --filter @drts/ui-web typecheck`
    - `pnpm --filter @drts/ui-web test`
    - `pnpm --filter @drts/ui-web lint`
    - `pnpm --filter @drts/platform-admin-web typecheck`
    - `pnpm --filter @drts/platform-admin-web test`
    - `pnpm --filter @drts/platform-admin-web lint`
-3. Focus on the three blocker closures:
+4. Focus on the three blocker closures:
    - world-range validation propagates into `canSubmit=false`
    - self-intersection propagates into `canSubmit=false`
    - GeoJSON import rejects invalid coordinate payloads before draft adoption
 
 Review boundary:
 
-- this packet independently confirms the support artifact structure, commit reachability, code anchors, test anchors, and current package test-discovery behavior
+- this packet independently confirms the support artifact structure, commit reachability, code anchors, test anchors, current package test-discovery behavior, and the reason the prior review reopen occurred
 - it does not independently certify the parent's full six-command verification pass from this sidecar branch
 
 ---
@@ -215,7 +229,7 @@ Suggested reviewer approval command after packet review:
 
 ```bash
 AI_NAME=Codex2 scripts/ai-status.sh approve MAP-UI-002-HARDEN-001-SIDECAR-REVIEW \
-  "Review packet added at support/sidecars/MAP-UI-002-HARDEN-001/MAP-UI-002-HARDEN-001-SIDECAR-REVIEW.md; anchored to parent review state and commit 414f27484 with code/test evidence for coordinate-range, self-intersection, and GeoJSON import hardening"
+  "Review packet delivered on codex2/map-ui-002-harden-001-sidecar-review at support/sidecars/MAP-UI-002-HARDEN-001/MAP-UI-002-HARDEN-001-SIDECAR-REVIEW.md; anchored to parent review state and commit 414f27484 with code/test evidence for coordinate-range, self-intersection, and GeoJSON import hardening"
 ```
 
 ---
