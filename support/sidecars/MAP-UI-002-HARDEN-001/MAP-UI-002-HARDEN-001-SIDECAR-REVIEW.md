@@ -6,12 +6,12 @@
 **Parent Reviewer:** `Claude2`
 **Sidecar Owner:** `Codex`
 **Sidecar Reviewer:** `Codex2`
-**Generated:** `2026-07-01T02:57:54Z`
+**Generated:** `2026-07-01T16:21:31Z`
 **Status:** `REVIEW SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or the parent task verdict.
 
 This packet exists only to support review handoff for `MAP-UI-002-HARDEN-001-SIDECAR-REVIEW`. The parent task is still in `review`; this document does not approve, reopen, or close the parent task. It pins the current machine-truth snapshot, the load-bearing commit, the relevant source anchors, and the exact verification boundary for the assigned reviewer.
 
-This refresh addresses the 2026-07-01 reopen: the previous packet lived on the owner sidecar branch, but the reviewer-assigned branch `codex2/map-ui-002-harden-001-sidecar-review` was still at `f452f019f` (`origin/dev`) and did not contain this artifact.
+This refresh is driven by the 2026-07-01 redispatch of the sidecar owner lane. The earlier reopen remains relevant context: the previous packet initially lived only on the owner sidecar branch, while the reviewer-assigned branch `codex2/map-ui-002-harden-001-sidecar-review` was still at `f452f019f` (`origin/dev`) and missing this artifact until the delivery fix was pushed.
 
 ---
 
@@ -51,18 +51,18 @@ Stable fields from machine truth:
 Live sidecar lifecycle state at packet refresh:
 
 - status=`in_progress`
-- next=`Inspecting existing review packet, commit state, and handoff evidence after reopen.`
-- last_update=`2026-07-01T02:54:12Z`
+- next=`Preparing review packet, evidence summary, and reviewer handoff artifact`
+- last_update=`2026-07-01T16:19:40Z`
 
 ### 2.2 Sidecar delivery branches
 
 Delivery facts pinned at refresh time:
 
-- delivery fix in this refresh: the updated support packet is pushed to both the owner branch and the reviewer-assigned remote branch before re-running `handoff`
-- owner sidecar branch containing this packet: `codex/map-ui-002-harden-001-sidecar-review` and `origin/codex/map-ui-002-harden-001-sidecar-review`
-- reviewer-assigned sidecar branch now containing the same packet commit: `origin/codex2/map-ui-002-harden-001-sidecar-review`
-- prior reopen condition: the reviewer-assigned branch was still at `f452f019f` (`origin/dev`) and missing this file until this refresh was pushed
-- reviewer follow-up required: fetch and rebase the local `codex2/map-ui-002-harden-001-sidecar-review` worktree onto the refreshed remote branch before approval
+- the earlier delivery fix is still intact: both remote sidecar branches already carry the packet history before this refresh
+- owner sidecar branch carrying this packet: `codex/map-ui-002-harden-001-sidecar-review` and `origin/codex/map-ui-002-harden-001-sidecar-review`
+- reviewer-assigned remote branch carrying this packet: `origin/codex2/map-ui-002-harden-001-sidecar-review`
+- current local reviewer branch status at inspection time: `codex2/map-ui-002-harden-001-sidecar-review` is behind `origin/codex2/map-ui-002-harden-001-sidecar-review` and must be refreshed before approval
+- prior reopen condition for historical context: the reviewer-assigned branch had been left at `f452f019f` (`origin/dev`) and missing this file until the owner-side delivery fix was pushed
 
 ### 2.3 Parent task - `MAP-UI-002-HARDEN-001`
 
@@ -132,7 +132,7 @@ This matters because the parent implementation commit is not checked out in this
 
 - `packages/ui-web/package.json`
   - `test` script is `vitest run --passWithNoTests`
-- independent check on this sidecar branch at `2026-07-01`:
+- independent check on this sidecar branch at `2026-07-01T16:21:15Z`:
   - `pnpm --filter @drts/ui-web test`
   - result: `Test Files 1 passed (1)`, `Tests 2 passed (2)`
 
@@ -203,6 +203,7 @@ Recommended review path for `Codex2`:
    - `git fetch origin`
    - `git switch codex2/map-ui-002-harden-001-sidecar-review`
    - `git rebase origin/codex2/map-ui-002-harden-001-sidecar-review`
+   - rationale: the local reviewer branch was behind its remote at packet refresh time
 2. Inspect parent commit `414f27484` directly, or switch to a branch that contains it:
    - local: `codex2/map-ui-002-harden-001`
    - remote: `origin/codex/map-ui-002-integrate-001`
