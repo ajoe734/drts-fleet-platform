@@ -25,13 +25,14 @@ The integration work is **NOT on `dev`** and not on this sidecar branch. It live
 - **Subject:** `MAP-UI-002-INTEGRATE-001: close geometry editor integration`
 - **Position vs `origin/dev`:** integration branch is **2 commits ahead / 1 behind** (dev has moved forward independently).
 
-The two integrated source commits on the branch:
+The branch carries **exactly two commits above `dev`** (`origin/dev...branch` left/right count = `1 2`, i.e. 2 ahead / 1 behind). Its full history above the `dev` merge-base (`1c06a5cfb`) is:
 
-| Commit | Meaning |
-| --- | --- |
-| `58cb496ef` | `MAP-UI-002` primitive (`feat(MAP-UI-002): add geometry editor primitive`) |
-| `414f27484` | `MAP-UI-002-HARDEN-001` hardening (`wip(MAP-UI-002-HARDEN-001): anchor geometry editor hardening`) |
-| `4c08c6a28` | INTEGRATE-001 closeout tip (exports barrel + Storybook + closeout evidence) |
+| Commit | Subject | Content |
+| --- | --- | --- |
+| `414f27484` | `wip(MAP-UI-002-HARDEN-001): anchor geometry editor hardening` | Squashed anchor on top of `dev@1c06a5cfb` that **re-lands the MAP-UI-002 primitive source together with the MAP-UI-002-HARDEN-001 hardening** in one commit: `geometry-editor.tsx` (1666) + `index.tsx` barrel (31) + `tests/unit/geometry-editor.test.ts` (163) |
+| `4c08c6a28` | `MAP-UI-002-INTEGRATE-001: close geometry editor integration` | Closeout tip: Storybook `geometry-editor.stories.tsx` (56) + closeout evidence doc (58) |
+
+**Provenance correction (was mis-stated in an earlier draft):** the standalone primitive commit `58cb496ef` (`feat(MAP-UI-002): add geometry editor primitive`) is **NOT** in this branch's history — it lives on `codex2/map-ui-002`. Verify: `git merge-base --is-ancestor 58cb496ef origin/codex/map-ui-002-integrate-001` → **false**; `git branch -a --contains 58cb496ef` → `codex2/map-ui-002`. The integration branch reconstructs the primitive content **inside** the `414f27484` anchor rather than by inheriting `58cb496ef`, and hardening mutated it, so the on-branch `geometry-editor.tsx` blob (`caf443e2…`) differs from the primitive's blob (`a7e1a56a4…`). The primitive+hardening **code** is present together on the branch; the primitive **commit** is not.
 
 **Reviewer note:** read from `origin/codex/map-ui-002-integrate-001`, not from `origin/dev` and not from the canonical root working tree. This is distinct from the sibling sidecar-review runs on `codex/`, `codex2/`, `gemini/`, `gemini2/` `…-integrate-001-sidecar-review` branches — this packet is the `claude/` support slice and makes no canonical edits.
 
@@ -101,7 +102,7 @@ Parent acceptance bullets mapped to verifiable state on `origin/codex/map-ui-002
 
 | # | Parent acceptance | Verdict | Evidence |
 | --- | --- | --- | --- |
-| 1 | final integrated branch contains GeometryEditor primitive **and** hardening validation | ✅ code-verified | Primitive (`58cb496ef`) + hardening (`414f27484`) both on branch; `GeometryEditor@385`, range guards `@1350/1354`, self-intersection `@1371` all present together |
+| 1 | final integrated branch contains GeometryEditor primitive **and** hardening validation | ✅ code-verified | Primitive **source** + hardening validation both present, re-landed together by anchor `414f27484` (the standalone primitive commit `58cb496ef` is on `codex2/map-ui-002`, **not** in this branch history — see §1 provenance correction); `GeometryEditor@385`, range guards `@1350/1354`, self-intersection `@1371` all present together |
 | 2 | no root-level React test dependency leak remains | ✅ code-verified | Stale leak file `tests/unit/ui-web-geometry-editor.test.ts` is **absent**; geometry tests live package-local at `packages/ui-web/tests/unit/geometry-editor.test.ts`; test #8 uses `renderToStaticMarkup` (SSR string), so no `jsdom`/`@testing-library` added; **root & `ui-web` `package.json` unchanged** by branch |
 | 3 | package-local geometry-editor tests cover invalid coordinates and self-intersection | ✅ code-verified | Tests #3 (out-of-range coords), #4 (self-intersecting polygon), #6 (GeoJSON invalid coords) present and assert `canSubmit=false` / rejection |
 | 4 | sandbox/admin preview adapter from MAP-UI-002 is preserved | ✅ code-verified | `apps/platform-admin-web/components/sandbox/sandbox-geometry-map.tsx` present on **both** `origin/dev` and the integration branch (preserved, not dropped) |
@@ -154,6 +155,9 @@ git fetch origin
 B=origin/codex/map-ui-002-integrate-001
 git log --format='%H %s' -1 $B
 git rev-list --left-right --count origin/dev...$B
+git log --oneline $(git merge-base origin/dev $B)..$B          # exactly: 4c08c6a28, 414f27484
+git merge-base --is-ancestor 58cb496ef $B && echo "on-branch" || echo "primitive commit NOT on branch"
+git branch -a --contains 58cb496ef                             # -> codex2/map-ui-002
 git diff --stat $(git merge-base origin/dev $B) $B
 git show $B:packages/ui-web/src/geometry-editor.tsx | grep -nE 'function (GeometryEditor|validateGeometryDraft|buildBackendPayloads|buildReviewDiff|buildGeometryEditorSnapshot|isLatitudeInRange|isLongitudeInRange|polygonHasSelfIntersection|segmentsIntersect)'
 git show $B:packages/ui-web/tests/unit/geometry-editor.test.ts | grep -nE '(it|test)\('
