@@ -2,6 +2,7 @@
 
 - Sidecar task: `MAP-BE-002-SIDECAR-REVIEW`
 - Sidecar owner / reviewer: `Codex` / `Codex2`
+- Sidecar status: `review_approved`
 - Parent task: `MAP-BE-002`
 - Parent status / owner / reviewer: `review` / `Codex` / `Claude2`
 - Last revised: `2026-07-01` (UTC)
@@ -9,24 +10,43 @@
 
 ## 1. Scope Boundary
 
-This sidecar exists only to package reviewer-facing evidence for `MAP-BE-002`.
+This sidecar exists only to package reviewer-facing evidence for `MAP-BE-002`
+and to preserve the reviewer handoff / approval context for owner closeout.
 
-- In scope: machine-truth snapshot, current repo evidence map, reviewer hotspots,
-  and handoff wording.
-- Out of scope: changing the parent implementation, rewriting the parent
+- In scope: machine-truth snapshot, integrated repo evidence map, reviewer
+  hotspots, review outcome, and owner closeout notes.
+- Out of scope: changing the parent implementation, rewriting parent
   acceptance, or closing the parent task from this packet.
 
 ## 2. Machine-Truth Snapshot
 
-Current task state from `scripts/ai-status.sh show`:
+Current task state from `scripts/ai-status.sh show` and the activity log:
 
-- `MAP-BE-002-SIDECAR-REVIEW` is `in_progress` under `Codex` / `Codex2` after
-  the owner start at `2026-07-01T03:20:47Z`.
+- `MAP-BE-002-SIDECAR-REVIEW` is `review_approved` under `Codex` / `Codex2`
+  with `last_update=2026-07-01T03:26:18Z`.
 - `MAP-BE-002` remains `review` under `Codex` / `Claude2` with
   `last_update=2026-06-30T14:45:24Z`.
-- Within phase `map-geofence-production-20260630`, `MAP-BE-002-SIDECAR-REVIEW`
-  is the active Codex-owned helper slice still awaiting owner completion; the
-  earlier `MAP-BE-001` and UI/QA sidecars in this wave are already `done`.
+- `MAP-INFRA-001` is still referenced as a dependency in planning and task
+  metadata, but `AI_NAME=Codex scripts/ai-status.sh show MAP-INFRA-001`
+  currently returns `Task not found: MAP-INFRA-001`.
+
+Reviewer approval already recorded in machine truth:
+
+> Reviewed support-only packet. Corrected packet ownership metadata to match
+> machine truth, verified artifact remains limited to
+> `support/sidecars/MAP-BE-002/MAP-BE-002-SIDECAR-REVIEW.md`, committed as
+> `53b8a1494` (`wip(MAP-BE-002-SIDECAR-REVIEW): align packet ownership
+> metadata`), and pushed to `origin/codex2/map-be-002-sidecar-review`.
+> Verification: `git diff --check`.
+
+Practical interpretation for owner closeout:
+
+- reviewer `Codex2` approved the sidecar scope
+- parent `MAP-BE-002` is still not closed from this helper slice
+- any remaining owner work must stay limited to this support artifact plus
+  closeout commit / push / status evidence
+
+## 3. Parent Scope And Recorded Verification
 
 Parent `MAP-BE-002` machine truth currently records this completed scope in its
 `next` field:
@@ -54,13 +74,10 @@ Recorded parent verification in machine truth:
 
 Dependency note:
 
-- `MAP-INFRA-001` is listed as a dependency in the parent task and in the
-  planning docs, but `AI_NAME=Codex scripts/ai-status.sh show MAP-INFRA-001`
-  currently returns `Task not found: MAP-INFRA-001`.
-- For this packet, treat `MAP-INFRA-001` as planning/integration context rather
-  than a live task slice the reviewer can inspect from machine truth.
+- treat `MAP-INFRA-001` as planning / integration context rather than a live
+  task slice the reviewer can inspect from machine truth
 
-## 3. Current Repo Evidence Map
+## 4. Current Repo Evidence Map
 
 ### Contracts
 
@@ -135,7 +152,7 @@ runtime health / fail-closed dependency seam now consumed by the gateway:
 - production guard against mock provider use
 - missing-secret detection
 - quota / key restriction reporting
-- unhealthy/degraded/healthy operational status
+- unhealthy / degraded / healthy operational status
 
 `apps/api/src/modules/geo/geo.service.ts:43-45` and `125-143` show the gateway
 using that config seam for `/geo/health` and fail-closed runtime checks before
@@ -155,12 +172,13 @@ provider calls proceed.
 - fail-closed behavior for invalid mode and missing external-provider secrets
 - controller envelope wrapping
 
-## 4. Integration Reality The Reviewer Should Know
+## 5. Branch And Integration Reality
 
-The current worktree is clean and sits at `origin/dev`; it is **not** a parent
-review branch carrying a private `MAP-BE-002` diff.
+The parent geo gateway evidence is already visible on the integrated file
+surface reachable from `origin/dev`; this sidecar branch is not a private parent
+implementation branch.
 
-Current git history shows:
+Relevant branch evidence:
 
 - `deb5e1d366f1789c29bd26818b14ffcb801a43a3`
   (`MAP-BE-004: finalize service-area booking creation enforcement`) introduced
@@ -170,72 +188,51 @@ Current git history shows:
   (`MAP-BE-006: integrate service-area governance on dev`) later added
   `geo-provider-config.service.ts` and updated `geo.service.ts` so the gateway
   uses fail-closed provider-health checks.
+- owner handoff for this sidecar was recorded from commit `8d1428bdf`
+  (`wip(MAP-BE-002-SIDECAR-REVIEW): anchor review packet`) on
+  `origin/codex/map-be-002-sidecar-review`.
+- reviewer approval was recorded from commit `53b8a1494`
+  (`wip(MAP-BE-002-SIDECAR-REVIEW): align packet ownership metadata`) on
+  `origin/codex2/map-be-002-sidecar-review`.
 
 Practical consequence:
 
-- reviewer validation should inspect the **current integrated file surface**
-  rather than assume a single task-scoped `MAP-BE-002` commit is present in this
-  worktree
-- this sidecar does **not** resolve the parent task's closeout metadata; it only
-  packages the current evidence shape for review
+- reviewer validation should inspect the current integrated geo file surface,
+  not assume a single task-scoped `MAP-BE-002` implementation commit exists in
+  this sidecar worktree
+- owner closeout for this sidecar must remain support-only and branch-scoped
 
-## 5. Drift / Hotspots To Reconcile During Review
+## 6. Drift / Hotspots To Reconcile During Parent Review
 
 1. Parent machine truth cites
    `pnpm exec vitest run tests/unit/contracts-geo-provenance.test.ts`, but the
-   current tracked repo does not contain `tests/unit/contracts-geo-provenance.test.ts`.
-   The provenance contract is still visible in
-   `packages/contracts/src/index.ts:131-261`, and API-level geo coverage is in
-   `apps/api/tests/unit/geo.service.test.ts`, but reviewer `Codex2` should ask
-   whether the standalone contract test was renamed, removed after integration,
-   or only existed on a transient branch.
-2. Parent acceptance in the execution packet names the three geo endpoints, but
-   the current integrated module also exposes `GET /api/geo/health` through the
-   `MAP-INFRA-001` seam. Reviewer should treat `/geo/health` as dependency
-   context, not as scope creep in `MAP-BE-002`.
-3. No cache layer is visible in the current gateway file set. If the reviewer
-   expected cache hooks from the planning text, this should be handled as an
-   explicit current-state omission/question rather than silently inferred.
+   current tracked repo does not contain
+   `tests/unit/contracts-geo-provenance.test.ts`.
+2. Parent acceptance names the three geo endpoints, but the integrated module
+   also exposes `GET /api/geo/health` through the `MAP-INFRA-001` seam. Treat
+   `/geo/health` as dependency context, not `MAP-BE-002` scope creep.
+3. No cache layer is visible in the current gateway file set. If the parent
+   reviewer expected cache hooks from planning text, that gap should be handled
+   as an explicit current-state question.
 
-## 6. Reviewer Checklist
+## 7. Reviewer Outcome And Owner Closeout Handoff
 
-Reviewer `Codex2` should confirm:
+Reviewer `Codex2` has already approved the packet as support-only and confirmed
+the artifact boundary stayed limited to this markdown file.
 
-1. The gateway exposes `search`, `resolve`, and `reverse` routes, and those are
-   the parent-owned API seams this packet is reviewing.
-2. Controller/service responses stay within the contract shapes from
-   `packages/contracts/src/index.ts`.
-3. The mock provider is deterministic enough for CI/E2E and includes both
-   serviceable Taipei fixtures and an out-of-area fixture.
-4. Error handling cleanly separates validation errors, provider outage, and
-   provider-not-configured fail-closed behavior.
-5. Resolve/reverse flows preserve provenance fields such as `surface`,
-   `selectedByActorId`, `pinnedByActorId`, `manualOverrideReason`,
-   `geocodeProvider`, and `geocodeConfidence`.
-6. The missing `tests/unit/contracts-geo-provenance.test.ts` path is either
-   explained or accepted as drift with sufficient replacement evidence.
-7. This packet remains support-only and does not claim parent closeout or
-   canonical-truth changes.
+Owner closeout still needs to provide:
 
-## 7. Handoff Commands
+1. a task-scoped closeout commit on `codex/map-be-002-sidecar-review`
+2. a normal non-force push of that closeout commit
+3. a `done` status update carrying `COMMIT_HASH`, `COMMIT_SUBJECT`,
+   `PUSH_REMOTE`, `PUSH_BRANCH`, and `INTEGRATION_STATUS`
 
-Owner handoff to reviewer:
-
-```bash
-AI_NAME=Codex scripts/ai-status.sh handoff MAP-BE-002-SIDECAR-REVIEW Codex2 \
-  "MAP-BE-002 sidecar review packet is ready at support/sidecars/MAP-BE-002/MAP-BE-002-SIDECAR-REVIEW.md. It preserves current machine truth (sidecar owner/reviewer Codex/Codex2; parent MAP-BE-002 still in review under Codex/Claude2), maps the integrated geo gateway evidence across packages/contracts/src/index.ts, apps/api/src/modules/geo, and apps/api/tests/unit/geo.service.test.ts, and flags the current drift that tests/unit/contracts-geo-provenance.test.ts is no longer present in the tracked repo. Support artifact only; no canonical truth changed."
-```
-
-Suggested reviewer approval wording:
-
-> `審查通過：MAP-BE-002 sidecar review packet 已對齊目前 machine truth（sidecar Codex/Codex2，parent MAP-BE-002 仍為 review），正確彙整 contracts + geo gateway + mock fixtures + fail-closed config seam 的現況證據，也清楚標記 contracts-geo-provenance test path drift；support artifact only，未改 canonical truth。`
-
-Suggested reviewer reopen wording:
-
-> `packet needs refresh: [machine-truth mismatch / stale file anchor / unresolved geo-provenance test drift / support-scope violation]`
+Because this is a support-only sidecar with no deploy target, the expected
+integration status for `done` is `not_applicable`.
 
 ## 8. Scope Compliance
 
 - [x] Support artifact only
 - [x] No canonical truth edits
-- [x] Reviewer handoff command prepared for the assigned reviewer
+- [x] Reviewer approval recorded in machine truth
+- [x] Owner closeout remains limited to task-scoped artifact + status evidence
