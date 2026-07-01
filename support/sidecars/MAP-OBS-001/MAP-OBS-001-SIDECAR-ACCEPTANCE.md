@@ -1,13 +1,13 @@
 # MAP-OBS-001 Acceptance Packet & Dependency Map
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `MAP-OBS-001` - Spatial observability and audit  
-**Parent Owner:** `Codex2`  
-**Parent Reviewer:** `Codex`  
-**Sidecar Owner:** `Codex`  
-**Sidecar Reviewer:** `Codex2`  
-**Generated:** `2026-07-01` (UTC)  
-**Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; live lifecycle fields remain authoritative in `ai-status.json`.
+- **Sidecar Kind:** `acceptance_packet`
+- **Parent Task:** `MAP-OBS-001` - Spatial observability and audit
+- **Parent Owner:** `Codex2`
+- **Parent Reviewer:** `Codex`
+- **Sidecar Owner:** `Codex`
+- **Sidecar Reviewer:** `Codex2`
+- **Generated:** `2026-07-01` (UTC)
+- **Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; live lifecycle fields remain authoritative in `ai-status.json`.
 
 This packet complements
 `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE-TEMPLATE.md`.
