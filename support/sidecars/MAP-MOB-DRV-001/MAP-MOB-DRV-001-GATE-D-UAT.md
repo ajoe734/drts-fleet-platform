@@ -1,9 +1,9 @@
 # MAP-MOB-DRV-001 Gate D Driver Navigation UAT Packet
 
-**Sidecar task:** `MAP-MOB-DRV-001-SIDECAR-UAT`  
-**Parent task:** `MAP-MOB-DRV-001` - Driver trip map and navigation  
-**Parent owner/reviewer:** `Codex2` / `Claude2`  
-**Sidecar owner/reviewer:** `Codex` / `Codex2`  
+**Sidecar task:** `MAP-MOB-DRV-001-SIDECAR-UAT`
+**Parent task:** `MAP-MOB-DRV-001` - Driver trip map and navigation
+**Parent owner/reviewer:** `Codex2` / `Claude2`
+**Sidecar owner/reviewer:** `Codex` / `Codex2`
 **Scope boundary:** support artifact only. This packet defines implementation and evidence expectations; it does not implement the native map itself.
 
 ## 1. Gate D Verdict

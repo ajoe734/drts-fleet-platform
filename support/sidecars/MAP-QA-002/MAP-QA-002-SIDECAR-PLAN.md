@@ -1,9 +1,9 @@
 # MAP-QA-002 Sidecar Plan: Cross-Surface Map/Geofence E2E Coverage
 
-**Sidecar task:** `MAP-QA-002-SIDECAR-PLAN`  
-**Parent task:** `MAP-QA-002` - Cross-surface map/geofence E2E suite  
-**Parent owner/reviewer:** `Codex2` / `Codex`  
-**Sidecar owner/reviewer:** `Codex` / `Codex2`  
+**Sidecar task:** `MAP-QA-002-SIDECAR-PLAN`
+**Parent task:** `MAP-QA-002` - Cross-surface map/geofence E2E suite
+**Parent owner/reviewer:** `Codex2` / `Codex`
+**Sidecar owner/reviewer:** `Codex` / `Codex2`
 **Scope boundary:** support artifact only. This plan does not claim the final E2E suite is complete; it defines the coverage contract that `MAP-QA-002` must satisfy before `MAP-REL-001` can claim production readiness.
 
 ## 1. Production E2E Entry Criteria
