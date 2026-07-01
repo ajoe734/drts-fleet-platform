@@ -32,6 +32,9 @@ import {
   Shell,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
+import DriverTripMap, {
+  type DriverTripMapLocation,
+} from "@/components/driver-trip-map";
 import { getPlatformDisplayLabel } from "@/components/platform-task-badge";
 import {
   appendProofPhotos,
@@ -668,60 +671,6 @@ function getTripLockBody(state: TripExperienceState | null): {
   }
 }
 
-function getTripSurfacePalette(
-  task: DriverTaskRecord | null,
-  state: TripExperienceState | null,
-) {
-  switch (state) {
-    case "sync_failed":
-      return {
-        backgroundColor: driverCanvasTheme.dangerBg,
-        borderColor: driverCanvasTheme.dangerBorder,
-        accentColor: driverCanvasTheme.danger,
-      };
-    case "forwarded_pending":
-      return {
-        backgroundColor: driverCanvasTheme.warnBg,
-        borderColor: driverCanvasTheme.warnBorder,
-        accentColor: driverCanvasTheme.warn,
-      };
-    case "forwarded_confirmed":
-      return {
-        backgroundColor: driverCanvasTheme.successBg,
-        borderColor: driverCanvasTheme.successBorder,
-        accentColor: driverCanvasTheme.success,
-      };
-    case "forwarded_completed":
-    case "forwarded_lost":
-    case "forwarded_cancelled":
-      return {
-        backgroundColor: driverCanvasTheme.surfaceLo,
-        borderColor: driverCanvasTheme.borderStrong,
-        accentColor: driverCanvasTheme.textMuted,
-      };
-    case "forwarded_offered":
-      return {
-        backgroundColor: driverCanvasTheme.infoBg,
-        borderColor: driverCanvasTheme.infoBorder,
-        accentColor: driverCanvasTheme.info,
-      };
-    default:
-      if (task?.sourcePlatform) {
-        return {
-          backgroundColor: driverCanvasTheme.infoBg,
-          borderColor: driverCanvasTheme.infoBorder,
-          accentColor: driverCanvasTheme.info,
-        };
-      }
-
-      return {
-        backgroundColor: driverCanvasTheme.accentBg,
-        borderColor: driverCanvasTheme.accentBorder,
-        accentColor: driverCanvasTheme.accent,
-      };
-  }
-}
-
 function getIdleBottomActionLabel(state: TripExperienceState | null) {
   switch (state) {
     case "forwarded_pending":
@@ -867,6 +816,8 @@ export default function TripScreen() {
   const [locationTrackingMessage, setLocationTrackingMessage] = useState<
     string | null
   >(null);
+  const [driverMapLocation, setDriverMapLocation] =
+    useState<DriverTripMapLocation | null>(null);
   const [trackingRetryKey, setTrackingRetryKey] = useState(0);
   const [trackingDiagnostic, setTrackingDiagnostic] =
     useState<TrackingDiagnosticState | null>(null);
@@ -947,10 +898,6 @@ export default function TripScreen() {
     expenseAmountInvalid,
     completionBlockedByTracking,
   });
-  const tripSurfacePalette = getTripSurfacePalette(
-    taskDetail,
-    tripExperienceState,
-  );
   const tripAuthorityBanner = getTripAuthorityBannerProps(
     taskDetail,
     tripExperienceState,
@@ -1050,12 +997,6 @@ export default function TripScreen() {
     businessDispatchSubtype: orderDetail?.businessDispatchSubtype ?? null,
     dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
   });
-  const routeOverlayLabel =
-    routeMetricDistance !== "待同步"
-      ? `${routeMetricDistance} · ${routeMetricDuration}`
-      : orderDetail?.etaSnapshot?.etaMinutes != null
-        ? `ETA ${orderDetail.etaSnapshot.etaMinutes} 分`
-        : routeMetricDuration;
   const footerNotice =
     completionSubmitBlocker === "proof_requirements_unavailable"
       ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
@@ -1193,6 +1134,7 @@ export default function TripScreen() {
     clearDurationTicker();
     setLocationTrackingState("idle");
     setLocationTrackingMessage(null);
+    setDriverMapLocation(null);
     lastTrackedCoordinateRef.current = null;
     resetDriverAppToOnboarding(router);
   }
@@ -1295,6 +1237,7 @@ export default function TripScreen() {
   useEffect(() => {
     if (!shouldTrackTripHeartbeat) {
       lastTrackedCoordinateRef.current = null;
+      setDriverMapLocation(null);
       setLocationTrackingState("idle");
       setLocationTrackingMessage(null);
       void stopDriverLocationHeartbeat();
@@ -1323,6 +1266,12 @@ export default function TripScreen() {
         }
 
         if (result.latestUpdate) {
+          setDriverMapLocation({
+            latitude: result.latestUpdate.latitude,
+            longitude: result.latestUpdate.longitude,
+            accuracyM: result.latestUpdate.accuracyM,
+            recordedAt: result.latestUpdate.recordedAt,
+          });
           lastTrackedCoordinateRef.current = {
             latitude: result.latestUpdate.latitude,
             longitude: result.latestUpdate.longitude,
@@ -1353,6 +1302,31 @@ export default function TripScreen() {
     taskDetail?.taskId,
     trackingRetryKey,
   ]);
+
+  useEffect(() => {
+    const seededUpdate = getLatestDriverLocationUpdate();
+    if (seededUpdate) {
+      setDriverMapLocation({
+        latitude: seededUpdate.latitude,
+        longitude: seededUpdate.longitude,
+        accuracyM: seededUpdate.accuracyM,
+        recordedAt: seededUpdate.recordedAt,
+      });
+    }
+
+    if (!shouldTrackTripHeartbeat) {
+      return;
+    }
+
+    return subscribeToDriverLocationUpdates((update) => {
+      setDriverMapLocation({
+        latitude: update.latitude,
+        longitude: update.longitude,
+        accuracyM: update.accuracyM,
+        recordedAt: update.recordedAt,
+      });
+    });
+  }, [shouldTrackTripHeartbeat, taskDetail?.taskId]);
 
   useEffect(() => {
     if (!isTripInProgress) {
@@ -1400,6 +1374,7 @@ export default function TripScreen() {
         setLocationTrackingState("idle");
         setLocationTrackingMessage(null);
         resetCompletionDraft();
+        setDriverMapLocation(null);
         lastTrackedCoordinateRef.current = null;
       }
 
@@ -1557,6 +1532,7 @@ export default function TripScreen() {
         setLocationTrackingState("idle");
         setLocationTrackingMessage(null);
         resetCompletionDraft();
+        setDriverMapLocation(null);
         lastTrackedCoordinateRef.current = null;
       }
 
@@ -1826,55 +1802,13 @@ export default function TripScreen() {
             body={tripAuthorityBanner.description}
           />
 
-          <Card theme={driverCanvasTheme} padding={0} style={styles.mapCard}>
-            <View
-              style={[
-                styles.mapSurface,
-                {
-                  backgroundColor: tripSurfacePalette.backgroundColor,
-                  borderColor: tripSurfacePalette.borderColor,
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.mapGlow,
-                  {
-                    backgroundColor: `${tripSurfacePalette.accentColor}1F`,
-                  },
-                ]}
-              />
-              <View style={styles.mapGrid} />
-              <View
-                style={[
-                  styles.mapPath,
-                  { borderColor: `${tripSurfacePalette.accentColor}80` },
-                ]}
-              />
-              <View
-                style={[
-                  styles.mapMarker,
-                  styles.mapMarkerPickup,
-                  { backgroundColor: driverCanvasTheme.success },
-                ]}
-              />
-              <View
-                style={[
-                  styles.mapMarker,
-                  styles.mapMarkerDropoff,
-                  { backgroundColor: driverCanvasTheme.danger },
-                ]}
-              />
-              <View style={styles.mapBadge}>
-                <Ionicons
-                  name="location-outline"
-                  size={12}
-                  color={driverCanvasTheme.success}
-                />
-                <Text style={styles.mapBadgeText}>{routeOverlayLabel}</Text>
-              </View>
-            </View>
-          </Card>
+          <DriverTripMap
+            task={taskDetail}
+            order={orderDetail}
+            driverLocation={driverMapLocation}
+            sourcePlatformOffline={sourcePlatformOffline}
+            nativeMapAvailable={false}
+          />
 
           <Card theme={driverCanvasTheme} padding={14} style={styles.routeCard}>
             <RouteStop
@@ -1980,7 +1914,7 @@ export default function TripScreen() {
               <Ionicons
                 name={tripLockBody.icon}
                 size={28}
-                color={tripSurfacePalette.accentColor}
+                color={getCanvasToneSet(tripAuthorityBanner.tone).fg}
               />
               <Text style={styles.lockCardTitle}>{tripLockBody.title}</Text>
               <Text style={styles.lockCardDetail}>{tripLockBody.detail}</Text>
@@ -2277,83 +2211,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     color: driverCanvasTheme.textMuted,
-    fontFamily: driverCanvasTheme.monoFamily,
-  },
-  mapCard: {
-    overflow: "hidden",
-    borderRadius: 14,
-  },
-  mapSurface: {
-    position: "relative",
-    minHeight: 174,
-    borderWidth: 1,
-    borderColor: driverCanvasTheme.border,
-    overflow: "hidden",
-  },
-  mapGlow: {
-    position: "absolute",
-    top: -68,
-    right: -18,
-    width: 200,
-    height: 200,
-    borderRadius: 999,
-  },
-  mapGrid: {
-    ...StyleSheet.absoluteFillObject,
-    margin: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderColor: "rgba(255,255,255,0.06)",
-  },
-  mapPath: {
-    position: "absolute",
-    top: 52,
-    left: 54,
-    width: 156,
-    height: 68,
-    borderWidth: 2,
-    borderRadius: 30,
-    transform: [{ rotate: "-12deg" }],
-    opacity: 0.72,
-  },
-  mapMarker: {
-    position: "absolute",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    shadowOpacity: 0.38,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 2,
-  },
-  mapMarkerPickup: {
-    top: 60,
-    left: 66,
-  },
-  mapMarkerDropoff: {
-    right: 56,
-    bottom: 48,
-  },
-  mapBadge: {
-    position: "absolute",
-    bottom: 10,
-    left: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: driverCanvasTheme.surface,
-    borderWidth: 1,
-    borderColor: driverCanvasTheme.border,
-  },
-  mapBadgeText: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "700",
-    color: driverCanvasTheme.text,
     fontFamily: driverCanvasTheme.monoFamily,
   },
   routeCard: {
