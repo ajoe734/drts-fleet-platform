@@ -2712,7 +2712,28 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     const persistedGovernance = await this.resolvePersistedTripGovernance(trip);
-    return persistedGovernance?.costCenterCode ?? null;
+    if (persistedGovernance?.costCenterCode) {
+      return persistedGovernance.costCenterCode;
+    }
+
+    return this.resolveApprovalRequestCostCenterCode(trip);
+  }
+
+  private resolveApprovalRequestCostCenterCode(
+    trip: BillingSettlementTripRecord,
+  ): string | null {
+    try {
+      const approvalRequest = this.tenantPartnerService
+        ?.listApprovalRequests(trip.tenantId)
+        .find((request) => request.orderId === trip.orderId);
+      const costCenterCode =
+        approvalRequest?.evaluationSnapshot.inputSnapshot?.costCenterCode
+          ?.trim()
+          .toUpperCase() ?? null;
+      return costCenterCode || null;
+    } catch {
+      return null;
+    }
   }
 
   private async resolvePersistedTripGovernance(
