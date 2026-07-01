@@ -6,8 +6,8 @@
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
 - **Current Sidecar Owner / Reviewer:** `Codex2` / `Codex`
 - **Planning Anchor:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- **Machine-Truth Basis:** parent row last_update `2026-06-30T14:52:11Z`; sidecar row last_update `2026-07-01T03:30:48Z` with status `in_progress`
-- **Status:** READY FOR REVIEW HANDOFF - support artifact only; does not modify canonical truth, runtime behavior, or the parent lifecycle state
+- **Machine-Truth Basis:** parent row last_update `2026-06-30T14:52:11Z`; sidecar row last_update `2026-07-01T03:36:58Z` with status `in_progress`
+- **Status:** IN PROGRESS FOR REVIEWER HANDOFF - support artifact only; owner `Codex2` is refreshing the packet for reviewer `Codex` and does not modify canonical truth, runtime behavior, or the parent lifecycle state
 
 This packet exists because the parent `MAP-BE-003` review surface is split across
 multiple worktrees. The assigned sidecar branch is based on `dev` and does not
@@ -50,7 +50,7 @@ records:
 - `helper_parent`: `MAP-BE-003`
 - `helper_kind`: `review_packet`
 - `mutates_canonical`: `false`
-- `next`: `Preparing review packet, evidence summary, and reviewer handoff artifacts`
+- `next`: `Refreshing sidecar review packet to match machine truth owner=Codex2 reviewer=Codex status=in_progress before reviewer handoff.`
 
 Dispatch note:
 
@@ -58,7 +58,8 @@ Dispatch note:
   because the earlier owner lane hit a repeated terminal loop
 - the reviewer target for this current lifecycle is `Codex`
 - an earlier support packet lineage exists on `origin/codex/map-be-003-sidecar-review`,
-  but this branch is the current machine-truth owner branch
+  but it reflects a prior lifecycle snapshot and this branch is the current
+  machine-truth owner branch
 
 ### 2.2 Parent task
 
@@ -143,8 +144,9 @@ Two earlier support-only packet commits already exist on
 - `ecbfa6a9d` - `wip(MAP-BE-003-SIDECAR-REVIEW): anchor review packet`
 - `f3ff69fb6` - `MAP-BE-003-SIDECAR-REVIEW: finalize review packet closeout`
 
-Those commits are useful as historical packet lineage, but they are not the
-current machine-truth owner branch for this helper task.
+Those commits are useful as historical packet lineage, but they capture an older
+`Codex` owner / `Codex2` reviewer closeout path and are not the current
+machine-truth owner branch for this helper task.
 
 Separately, `dev` already contains downstream overlap from `MAP-BE-006`,
 including the tracked API delta doc and a later-evolved
@@ -267,6 +269,13 @@ Suggested reopen wording:
 
 > `packet needs revision: [machine-truth mismatch / wrong worktree attribution / incorrect evidence mapping / support-scope violation]`
 
+Reviewer queue note:
+
+- while this sidecar remains `in_progress`, reviewer `Codex` should treat this
+  packet as pre-handoff material
+- once owner `Codex2` runs the handoff command below, the sidecar should enter
+  `review` and the reviewer can respond with `approve` or `reopen`
+
 ---
 
 ## 6. Handoff Commands
@@ -277,7 +286,7 @@ Owner handoff to reviewer `Codex`:
 AI_NAME=Codex2 scripts/ai-status.sh handoff MAP-BE-003-SIDECAR-REVIEW Codex "MAP-BE-003 review packet is ready at support/sidecars/MAP-BE-003/MAP-BE-003-SIDECAR-REVIEW.md. The packet records that parent MAP-BE-003 remains in review, that the authoritative api-client delta currently lives as working-tree state in the canonical root on phase2-tesla-sandbox-docs-20260625, and that this sidecar branch only exposes the stable API delta doc plus downstream overlap on service-area test coverage. It maps the parent acceptance items to concrete file anchors without changing canonical truth."
 ```
 
-Reviewer approval:
+Reviewer approval after sidecar status enters `review`:
 
 ```bash
 AI_NAME=Codex scripts/ai-status.sh approve MAP-BE-003-SIDECAR-REVIEW \
