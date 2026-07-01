@@ -2,161 +2,141 @@
 
 ## Scope
 
-This sidecar packet supports `MAP-UI-001` without editing canonical truth. It
-is limited to reviewer-facing evidence, review entry points, and risk notes for
-the current `MAP-UI-001` implementation handoff.
+This sidecar packet refreshes reviewer-facing evidence for `MAP-UI-001` as of
+`2026-07-01`. It creates support material only and does not modify canonical
+runtime or product truth.
 
-## Machine-Truth Snapshot
+## Snapshot Provenance
 
-- Sidecar task: `MAP-UI-001-SIDECAR-REVIEW`
-- Sidecar owner/reviewer: `Codex` -> `Codex2`
-- Sidecar task status at closeout capture: `review_approved`
-- Parent task: `MAP-UI-001`
-- Parent owner/reviewer: `Codex` -> `Claude2`
-- Parent task status at capture time: `review`
-- Parent task last update: `2026-06-30T16:01:21Z`
+- Worktree reviewed: `codex/map-ui-001-sidecar-review` at `e458f3865`
+- Sidecar machine truth: `MAP-UI-001-SIDECAR-REVIEW` owner `Codex`, reviewer
+  `Claude2`, status `in_progress`
+- Parent machine truth: `MAP-UI-001` owner `Claude2`, reviewer `Codex`, status
+  `in_progress`
+- This file supersedes an older packet revision that still claimed sidecar
+  reviewer `Codex2`, sidecar status `review_approved`, and parent status
+  `review`. Those values are stale against current machine truth on
+  `2026-07-01`.
 
-Parent task summary from machine truth:
+## Machine-Truth / Repo Drift
 
-> Implemented provider-neutral `AddressMapPicker`/`AddressMapPairPicker`
-> primitives and contract helpers in `@drts/ui-web/client`. Review payload
-> provenance helpers, manual fallback, provider outage visibility, service-area
-> preview readiness, test coverage, and the design-canvas requirements note
-> clarifying that final surface visual sign-off still needs canvas
-> update/approval.
+- `MAP-UI-001` machine truth currently points to:
+  - `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md`
+  - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md`
+- Neither path exists in this worktree.
+- The nearest tracked planning/spec packet visible here remains:
+  - `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
+  - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
 
-## Review Approval Snapshot
+Implication: reviewer comments should distinguish between live machine-truth
+metadata and repo-visible documents. The `20260701` references may exist on a
+different branch or may need metadata repair.
 
-Reviewer approval recorded in machine truth for this sidecar task:
+## Canonical Expectations Still Visible In Tracked Docs
 
-> Reviewed owner commit `5d260c6b8` on
-> `origin/codex/map-ui-001-sidecar-review`. Packet accurately reflects current
-> machine truth, execution docs, and repo-visible gaps: no visible
-> `AddressMapPicker` / `AddressMapPairPicker` exports in
-> `packages/ui-web/src/client.tsx`, only
-> `packages/ui-web/tests/unit/management-shell.test.ts` in `ui-web` tests, and
-> no tracked address-map-picker design-canvas requirements note in this
-> snapshot.
+From `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md:36-41`:
 
-Important boundary at closeout:
+- `MAP-UI-001` is described as having added provider-neutral
+  `AddressMapPicker` / `AddressMapPairPicker` primitives in
+  `@drts/ui-web/client`.
+- The same section says helper functions, component tests, and a design-canvas
+  requirements note were added.
+- The same note says the current canvas still only shows text pickup/dropoff
+  fields.
 
-- This approval is for the sidecar support packet only.
-- The parent task `MAP-UI-001` remains in `review` and still needs its own
-  owner/reviewer resolution on the claimed picker implementation snapshot.
+From `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:522-554`:
 
-## Canonical Review Expectations
-
-From
-`docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`:
-
-- Goal: prevent each web surface from inventing different map/address
-  semantics.
-- Acceptance:
-  - Picker can produce pickup and dropoff payloads with lat/lng/provenance.
-  - Picker can call service-area evaluation after required points exist.
-  - CI uses a mock provider, not a live provider.
-- Verification command baseline:
+- `MAP-UI-001` acceptance still expects a reusable picker with provider
+  search, pinned marker, manual fallback, service-area preview, and
+  lat/lng/provenance payload emission.
+- Verification still points at:
   - `pnpm --filter @drts/ui-web typecheck`
   - `pnpm --filter @drts/ui-web test`
   - `pnpm --filter @drts/ui-web lint`
+- The implementation-status note dated `2026-06-30` claims the picker
+  primitives, helper tests, and
+  `docs/05-ui/drts-design-canvas/address-map-picker-screen-requirements-20260630.md`
+  already exist.
 
-From
-`docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`:
+## Repo-Visible Evidence In This Worktree
 
-- The repo-level narrative says `MAP-UI-001` added shared provider-neutral
-  picker primitives, payload helpers, manual coordinate fallback helpers,
-  service-area preview command construction, and mock-provider-friendly tests.
-- The same document says a design-canvas requirements note was added because
-  the current design canvas still only shows text pickup/dropoff fields.
+1. `packages/ui-web/src/client.tsx:3-16` exports only `ManagementShell` and
+   management-theme helpers. No `AddressMapPicker` or `AddressMapPairPicker`
+   export is present.
+2. `packages/ui-web/tests/` currently contains only
+   `packages/ui-web/tests/unit/management-shell.test.ts`.
+3. `git grep -n "AddressMapPicker|AddressMapPairPicker" -- packages/ui-web apps docs/05-ui`
+   returns no matches in the current worktree.
+4. `docs/05-ui/drts-design-canvas/ops-screens-1.jsx:440-446` still renders
+   plain `pickup` and `drop` text inputs plus adjacent form fields. That matches
+   the documented caveat that the canvas does not yet define a final map-picker
+   screen.
+5. No tracked file matching
+   `docs/05-ui/drts-design-canvas/address-map-picker*` exists in this worktree,
+   despite the `2026-06-30` runbook claim that such a requirements note was
+   added.
+6. Local ref discovery does not reveal an obvious current-owner implementation
+   branch for review:
+   - no visible non-sidecar `claude2/*map-ui-001*` branch is present locally
+   - the only visible non-sidecar `map-ui-001` branch is `codex/map-ui-001`
+   - `git grep -n "AddressMapPicker|AddressMapPairPicker" codex/map-ui-001 -- packages/ui-web apps docs/05-ui support/sidecars/MAP-UI-001`
+     also returns no matches
 
-## Evidence Inventory
+## Reviewer Implications
 
-Evidence captured from the current sidecar worktree:
-
-1. Machine-truth state confirms `MAP-UI-001` is in `review` and claims the
-   implementation/verification summary above.
-2. The task execution packet contains the expected acceptance and command
-   baseline for reviewer validation.
-3. The current tracked `packages/ui-web` tree does not expose visible
-   `AddressMapPicker` or `AddressMapPairPicker` symbols in this worktree.
-4. `packages/ui-web/src/client.tsx` currently exports only the management shell
-   and theme helpers, not a visible address-map picker surface.
-5. `packages/ui-web/tests` currently contains `tests/unit/management-shell.test.ts`
-   only; no visible address-map picker test file is present in this worktree.
-6. No tracked
-   `docs/05-ui/drts-design-canvas/address-map-picker-screen-requirements-20260630.md`
-   file is present in this worktree.
+- The parent `MAP-UI-001` is currently `in_progress`, not `review`. This packet
+  should be treated as a pre-review evidence baseline and drift report, not as
+  proof that the implementation is ready for approval.
+- The strongest current mismatch is:
+  - tracked docs say picker primitives/tests/design note exist
+  - repo-visible `ui-web` and design-canvas files in this worktree do not show
+    them
+- Before a real parent-task review can proceed, the reviewer should require:
+  1. the exact owner branch or commit containing the claimed picker primitives
+     and helper tests
+  2. verification output from the same snapshot for `typecheck`, `test`, and
+     `lint`
+  3. the promised design-canvas requirements note, or an explicit "canvas lacks
+     screen, stop here" artifact that matches the UI design contract
+- If the owner cannot produce a reviewable snapshot, either the parent task
+  should remain/revert to a non-review state or the narrative docs/machine
+  truth should be corrected so reviewers are not asked to validate invisible
+  work.
 
 ## Reviewer Entry Points
 
-Use these as the first-pass review anchors:
-
 - Machine truth:
+  - `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-001-SIDECAR-REVIEW`
   - `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-001`
-- Expected acceptance contract:
-  - `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- Repo-level implementation narrative:
+- Tracked narrative/spec docs:
   - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
-- Current shared UI export surface:
+  - `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
+- Repo-visible surface checks:
   - `packages/ui-web/src/client.tsx`
-- Current shared UI test inventory:
   - `packages/ui-web/tests/`
-
-## Review Risk Note
-
-The current sidecar worktree shows a material gap between the repo-level
-implementation narrative and the visible tracked artifacts:
-
-- The docs and task status describe shared `AddressMapPicker` /
-  `AddressMapPairPicker` primitives, helper functions, tests, and a design
-  requirements note.
-- The current baseline visible from this worktree does not show those symbols,
-  those tests, or that design note as tracked files.
-
-That means this packet cannot prove the parent task solely from the current
-baseline. The reviewer should confirm one of these before approval:
-
-1. The owner has an unmerged branch or commit containing the claimed picker
-   primitives/tests/design note.
-2. The implementation landed under different file/symbol names and should be
-   mapped explicitly during review.
-3. The parent task status/docs overstate what is currently reviewable and
-   should be reopened if the missing artifacts cannot be produced.
-
-## Suggested Reviewer Checklist
-
-1. Verify the owner's actual commit or branch for the claimed `@drts/ui-web`
-   picker primitives.
-2. Confirm contract payload provenance, manual fallback, provider outage state,
-   and service-area preview command logic against the owner diff, not just repo
-   narrative docs.
-3. Confirm the claimed `ui-web` verification commands were run against the same
-   implementation snapshot being reviewed.
-4. Confirm the design-canvas requirement note exists on the reviewed snapshot,
-   or reopen if the visual-sign-off caveat is undocumented.
+  - `docs/05-ui/drts-design-canvas/ops-screens-1.jsx`
+- Drift checks:
+  - confirm the missing `20260701` refs above
+  - confirm no `address-map-picker*` design note exists in this worktree
 
 ## Sidecar Verification
 
-Checks performed for this sidecar task:
-
-- Confirmed the sidecar task started from `backlog` and was moved to
-  `in_progress` via `scripts/ai-status.sh`.
-- Confirmed this sidecar creates support material only and does not edit
-  canonical runtime/product truth files.
-- Confirmed the packet is limited to
-  `support/sidecars/MAP-UI-001/MAP-UI-001-SIDECAR-REVIEW.md`.
+- Recorded owner progress with `AI_NAME=Codex scripts/ai-status.sh start`.
+- Rechecked current sidecar and parent task slices with `scripts/ai-status.sh show`.
+- Re-read the tracked docs and repo-visible file surfaces cited above.
+- Edited only this support artifact.
+- No automated tests were run because this sidecar slice changes reviewer
+  material only.
 
 ## Handoff
 
-Prepared for sidecar reviewer `Codex2`.
+Prepared for sidecar reviewer `Claude2`.
 
-Recommended disposition for the parent `MAP-UI-001` review: require the owner
-to provide the exact reviewable branch/commit or reopen if the claimed picker
-artifacts are not actually present on the reviewed snapshot.
+Recommended disposition:
 
-Owner closeout note:
-
-- Sidecar closeout does not change the parent task's canonical implementation
-  status.
-- The only closeout deliverable is this reviewer packet on
-  `codex/map-ui-001-sidecar-review`.
+1. Approve this sidecar packet only if it accurately captures the current
+   machine-truth/doc/worktree mismatch.
+2. Do not treat the parent `MAP-UI-001` as implementation-reviewable from this
+   worktree alone.
+3. Require the parent owner to provide the exact implementation snapshot and
+   verification evidence before any parent-task approval attempt.
