@@ -8,7 +8,7 @@ Branch: `codex/map-fe-adm-001-governance-ui`
 
 Base: `origin/codex/map-rel-001-dev-guardrails`
 
-Status: **PARTIAL PASS - UI/API-client/test hooks implemented; live Gate B E2E remains blocked by backend/API boot issue.**
+Status: **PASS for MAP-FE-ADM-001 scope - Platform Admin UI/API-client/test hooks implemented and live Gate B Playwright smoke passed.**
 
 ## Scope Implemented
 
@@ -45,6 +45,8 @@ Status: **PARTIAL PASS - UI/API-client/test hooks implemented; live Gate B E2E r
 - `apps/platform-admin-web/components/assistant/route-context.ts`
 - `apps/platform-admin-web/lib/translations.ts`
 - `packages/api-client/src/index.ts`
+- `apps/api/src/modules/geo/geo-provider-config.service.ts`
+- `apps/api/src/modules/geo/geo.module.ts`
 - `tests/e2e/platform-admin-service-area-governance.spec.ts`
 - `tests/unit/platform-admin-assistant-route-context.test.ts`
 - `support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-FINAL-EVIDENCE.md`
@@ -59,35 +61,35 @@ pnpm exec prettier --write apps/platform-admin-web/app/service-areas/page.tsx ap
 pnpm --filter @drts/platform-admin-web typecheck
 pnpm --filter @drts/platform-admin-web lint
 pnpm --filter @drts/api-client typecheck
+pnpm --filter @drts/api typecheck
+pnpm --filter @drts/api test -- tests/unit/geo.service.test.ts
 pnpm typecheck:root
 pnpm exec eslint tests/e2e/platform-admin-service-area-governance.spec.ts --max-warnings=0
 pnpm test:unit -- tests/unit/platform-admin-assistant-route-context.test.ts
+API_PORT=3401 API_HOST=127.0.0.1 NODE_ENV=test DRTS_ENV=test MAP_PROVIDER_MODE=mock pnpm --filter @drts/api dev
+curl -sS --max-time 5 http://127.0.0.1:3401/health
+curl -sS --max-time 5 http://127.0.0.1:3401/api/geo/health
+pnpm exec playwright test tests/e2e/platform-admin-service-area-governance.spec.ts --project=platform-admin-assistant-off
 git diff --check
 ```
 
 Notes:
 
 - `pnpm test:unit -- tests/unit/platform-admin-assistant-route-context.test.ts` currently runs the full configured Vitest unit suite in this repo; result was `51 passed (51)` files and `378 passed (378)` tests.
+- `pnpm --filter @drts/api test -- tests/unit/geo.service.test.ts` currently runs the full configured API Vitest suite in this repo; result was `111 passed (111)` files and `795 passed (795)` tests.
 - `pnpm --filter @drts/contracts build`, `pnpm --filter @drts/ui-tokens build`, and `pnpm --filter @drts/control-plane-auth build` were run to satisfy Playwright/webServer prerequisites before retrying E2E.
+- API runtime smoke passed with `/health` and `/api/geo/health`; both reported healthy mock-provider state.
+- Live Playwright result: `1 passed (1.3m)` for `platform-admin-service-area-governance.spec.ts` on `platform-admin-assistant-off`.
 
-Blocked:
+## API Boot Unblock
 
-```bash
-pnpm exec playwright test tests/e2e/platform-admin-service-area-governance.spec.ts --project=platform-admin-assistant-off
-```
-
-Result: **BLOCKED before UI assertions**. The Playwright webServer starts `pnpm --filter @drts/api dev`; API boot fails with an existing Nest DI error:
-
-```text
-UnknownDependenciesException: Nest can't resolve dependencies of the GeoProviderConfigService (?).
-```
-
-An earlier attempt also failed before prerequisite builds because `@drts/contracts/dist/index.js` was missing after fresh install; after building contracts/ui-tokens/control-plane-auth, the blocker became the API DI failure above.
+- Fixed the existing Nest DI blocker by adding an explicit `GEO_PROVIDER_ENV` token and registering it in `GeoModule`.
+- Preserved isolated unit-test construction via `new GeoProviderConfigService(customEnv)`.
+- Verified `GeoModule dependencies initialized` and `Nest application successfully started` during local API runtime smoke.
 
 ## Remaining Work / Do Not Claim
 
-- Do not claim Gate B production readiness yet.
-- Live Playwright E2E remains pending until API dev boot is fixed.
+- Do not claim full map/geofence production readiness from this PR alone.
 - Backend evaluator before/after publish evidence is not captured in this task.
 - Callcenter blocked/manual-review behavior after publish is not captured in this task.
 - Backend audit payload inspection for publish/retire is not captured in this task.
