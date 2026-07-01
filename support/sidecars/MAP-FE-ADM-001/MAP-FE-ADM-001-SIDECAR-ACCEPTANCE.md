@@ -3,24 +3,26 @@
 - **Parent Task:** `MAP-FE-ADM-001` - Platform Admin geofence governance UI
 - **Sidecar Task:** `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE`
 - **Packet Scope:** support artifact only; no canonical truth, runtime, or parent-branch edits
-- **Current Sidecar Status:** `in_progress` (`owner=Codex`, `reviewer=Codex2`, `last_update=2026-07-01T14:50:29Z`)
+- **Current Sidecar Status:** `review_approved` (`owner=Codex`, `reviewer=Codex2`, `last_update=2026-07-01T14:55:22Z`)
 - **Current Parent Status:** `in_progress` (`owner=Codex2`, `reviewer=Gemini`, `last_update=2026-07-01T10:16:22Z`)
 
 ## 1. Why This Refresh Exists
 
-This packet supersedes the earlier closeout-oriented sidecar snapshot.
+This packet supersedes the earlier closeout-oriented sidecar snapshot and now
+carries the reviewer-approved helper state that is waiting on owner closeout.
 
 Current machine truth shows:
 
 - `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` was redispatched to `Codex` at
-  `2026-07-01T14:50:00Z` via availability-first reassignment.
+  `2026-07-01T14:50:00Z` via availability-first reassignment, then approved at
+  `2026-07-01T14:55:22Z` after review of owner commit `702006a12`.
 - `MAP-FE-ADM-001` is still `in_progress`; it is not in a closeout-ready state.
 - the earlier `MAP-FE-ADM-001-SIDECAR-REVIEW` packet is no longer a live task
   slice; it is archived as `done` and must not be described as pending review.
 
-The purpose of this refresh is narrow: give reviewer `Codex2` an updated
-acceptance checklist, dependency map, and handoff summary that match the live
-board and archived dependency evidence.
+The purpose of this refresh is still narrow: preserve an updated acceptance
+checklist, dependency map, and closeout summary that match the live board and
+archived dependency evidence without changing canonical truth.
 
 ## 2. Source Basis
 
@@ -44,8 +46,8 @@ Important boundary:
 
 | Task | Status | Owner -> Reviewer | Snapshot for this packet |
 | --- | --- | --- | --- |
-| `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` | `in_progress` | `Codex` -> `Codex2` | Live sidecar helper. Current work is limited to this support packet. |
-| `MAP-FE-ADM-001` | `in_progress` | `Codex2` -> `Gemini` | Parent remains open. The `next` field is the acceptance baseline for this packet. |
+| `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` | `review_approved` | `Codex` -> `Codex2` | Reviewer approved commit `702006a12`; owner closeout is limited to this support packet and commit evidence. |
+| `MAP-FE-ADM-001` | `in_progress` | `Codex2` -> `Gemini` | Parent remains open. The live `next` field is now release/readiness oriented, not closeout-ready. |
 | `MAP-UI-002` | `review` | `Codex2` -> `Claude2` | Shared `GeometryEditor` primitive is still under review. |
 | `MAP-UI-002-HARDEN-001` | `review` | `Codex2` -> `Claude2` | Validation hardening is still under review and still blocks safe governance publish claims. |
 | `MAP-UI-002-INTEGRATE-001` | `review` | `Codex` -> `Claude2` | Integrated primitive + hardening branch is still review-gated. |
@@ -62,19 +64,22 @@ Live machine truth still lists the parent acceptance targets as:
 3. `audit actor version effect direction effective date visible`
 4. `platform-admin checks pass`
 
-The current parent `next` field says the task is still blocked by these open
-gaps:
+The current parent `next` field now records release/readiness posture rather
+than a per-gap UI list:
 
-1. `/service-areas` shipped with only a fallback screen-requirements note.
-2. affected-preview freshness ignores `effectiveFrom` changes.
-3. submit-review reason is required in UI but never reaches API audit.
-4. GeoJSON import does not surface mutation receipts.
+1. map/geofence OBS runtime evidence was refreshed on the branch.
+2. dispatch integrity remains `PASS` (`43 ok / 15 warnings / 0 failures`).
+3. production readiness remains `FAIL` (`14 ok / 0 warnings / 34 failures`).
+4. no one should claim production ready until metrics backend query outputs,
+   audit exports, alert dry-run/firing evidence, dashboard/stage artifacts,
+   final persisted DB/stage/API audit evidence, QA/OBS/REL final evidence, and
+   open review/backlog tasks close.
 
 Operational implication:
 
 - this sidecar may summarize acceptance criteria and dependency posture
-- it must not imply the parent is ready for `review_approved`, `done`, or Gate B
-  production closure
+- it must not imply the parent is ready for `review_approved`, `done`, Gate B
+  closure, or broader production-readiness closeout
 
 ## 5. Dependency Map
 
@@ -146,7 +151,10 @@ All implementation tasks
 Current live `MAP-REL-001` status matters because its `next` field says:
 
 - latest blocker report:
-  `support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md`
+  `support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md` generated
+  `2026-07-01T10:41:09.378Z`
+- the last blocker-handoff notifier posted `3` task notes and skipped `13`
+  duplicates; do not rerun it until after the next status/report refresh
 - dispatch integrity remains `PASS`
 - production readiness remains `FAIL` (`14 ok / 0 warnings / 34 failures`)
 - no one should claim production-ready status until QA/OBS/REL final evidence
@@ -157,9 +165,9 @@ Reviewer conclusion:
 - even if the parent branch proves repo-local fixes, this acceptance packet must
   stop short of any production-readiness claim
 
-## 6. Reviewer Handoff Notes
+## 6. Reviewer Approval And Closeout Notes
 
-Reviewer `Codex2` should check only the following:
+Reviewer `Codex2` approved the packet on the following basis:
 
 1. the packet matches the current live owner/reviewer map:
    `MAP-FE-ADM-001` is `Codex2 -> Gemini`, not `Codex2 -> Codex`
@@ -173,7 +181,13 @@ Reviewer `Codex2` should check only the following:
    truth and does not overclaim readiness
 5. the packet remains support-only and does not modify canonical truth
 
-This packet is not:
+Owner closeout preserves the same boundaries:
+
+- this commit does not change canonical truth, runtime code, or parent-branch state
+- this commit keeps the packet scoped to support evidence and closeout context
+- later parent or release-slice movement should be handled by a new sidecar refresh, not retroactively claimed by this closeout
+
+This packet is still not:
 
 - approval of the parent implementation
 - proof that Gate B is closed
