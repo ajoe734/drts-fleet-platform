@@ -418,6 +418,45 @@ export class BillingSettlementRepository {
     };
   }
 
+  async resolveCostCenterGovernance(
+    tenantId: string,
+    costCenterCode: string,
+  ): Promise<LiveTripGovernanceRecord | null> {
+    if (!this.databaseService) {
+      return null;
+    }
+
+    const result = await this.databaseService.query<LiveTripGovernanceRow>(
+      `
+          SELECT
+            code AS cost_center_code,
+            record AS cost_center_record
+          FROM core.phase1_tenant_cost_centers
+          WHERE tenant_id = $1
+            AND code = $2
+          LIMIT 1
+        `,
+      [tenantId, costCenterCode],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    const costCenter = this.parseNullableRecord<TenantCostCenterRecord>(
+      row.cost_center_record,
+      "core.phase1_tenant_cost_centers",
+    );
+
+    return {
+      costCenterCode: this.normalizeNullableText(row.cost_center_code),
+      costCenterName: costCenter?.name ?? null,
+      costCenterOwnerUserId: costCenter?.ownerUserId ?? null,
+      costCenterActiveFlag: costCenter?.activeFlag ?? null,
+    };
+  }
+
   /**
    * Distinct `YYYY-MM` period months that have at least one live card-benefit
    * airport-transfer settlement trip for the issuer tenant. Mirrors the

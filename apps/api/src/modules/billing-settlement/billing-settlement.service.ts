@@ -2657,14 +2657,22 @@ export class BillingSettlementService implements OnModuleInit {
       trip,
       costCenterCode,
     );
+    const persistedCostCenterGovernance =
+      await this.resolvePersistedCostCenterGovernance(
+        trip.tenantId,
+        costCenterCode,
+      );
     const hasEmbeddedCostCenter =
       trip.costCenterCode?.trim().toUpperCase() === costCenterCode &&
       Boolean(trip.costCenterName ?? trip.costCenterOwnerUserId);
     const hasPersistedCostCenter =
-      persistedGovernance?.costCenterCode === costCenterCode &&
+      (persistedGovernance?.costCenterCode === costCenterCode ||
+        persistedCostCenterGovernance?.costCenterCode === costCenterCode) &&
       Boolean(
-        persistedGovernance.costCenterName ??
-        persistedGovernance.costCenterOwnerUserId,
+        persistedGovernance?.costCenterName ??
+        persistedGovernance?.costCenterOwnerUserId ??
+        persistedCostCenterGovernance?.costCenterName ??
+        persistedCostCenterGovernance?.costCenterOwnerUserId,
       );
 
     return {
@@ -2673,20 +2681,45 @@ export class BillingSettlementService implements OnModuleInit {
         costCenter?.name ??
         trip.costCenterName ??
         persistedGovernance?.costCenterName ??
+        persistedCostCenterGovernance?.costCenterName ??
         null,
       ownerUserId:
         costCenter?.ownerUserId ??
         trip.costCenterOwnerUserId ??
         persistedGovernance?.costCenterOwnerUserId ??
+        persistedCostCenterGovernance?.costCenterOwnerUserId ??
         null,
       activeFlag:
         costCenter?.activeFlag ??
         trip.costCenterActiveFlag ??
         persistedGovernance?.costCenterActiveFlag ??
+        persistedCostCenterGovernance?.costCenterActiveFlag ??
         null,
       legacy_unmapped:
         !costCenter && !hasEmbeddedCostCenter && !hasPersistedCostCenter,
     };
+  }
+
+  private async resolvePersistedCostCenterGovernance(
+    tenantId: string,
+    costCenterCode: string,
+  ) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return null;
+    }
+
+    try {
+      return await this.billingSettlementRepository.resolveCostCenterGovernance(
+        tenantId,
+        costCenterCode,
+      );
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "resolve_cost_center_governance",
+      );
+      return null;
+    }
   }
 
   private async resolveInvoiceLineCostCenterCode(
