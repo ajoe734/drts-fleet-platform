@@ -172,6 +172,49 @@ write_service_product_fixture() {
     }' > "$file"
 }
 
+write_service_area_fixture() {
+  local file="$1"
+  local subtype="$2"
+  local area_code="$3"
+  local display_name="$4"
+
+  jq -n \
+    --arg subtype "$subtype" \
+    --arg areaCode "$area_code" \
+    --arg displayName "$display_name" \
+    '{
+      areaCode: $areaCode,
+      displayName: ($displayName + " E2E service area"),
+      geometry: {
+        type: "polygon",
+        coordinates: [
+          { lat: 25.0005, lng: 121.4505 },
+          { lat: 25.0005, lng: 121.625 },
+          { lat: 25.125, lng: 121.625 },
+          { lat: 25.125, lng: 121.4505 }
+        ]
+      },
+      serviceProductTypes: [$subtype],
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      metadata: {
+        source: "E2E-015",
+        purpose: "partner program spatial authority"
+      }
+    }' > "$file"
+}
+
+write_publish_service_area_fixture() {
+  local file="$1"
+  local kind="$2"
+
+  jq -n \
+    --arg reason "E2E-015 ${kind} partner program spatial authority" \
+    '{
+      reason: $reason,
+      effectiveFrom: "2026-01-01T00:00:00.000Z"
+    }' > "$file"
+}
+
 write_booking_fixture() {
   local file="$1"
   local subtype="$2"
@@ -205,8 +248,28 @@ write_booking_fixture() {
       partnerEntrySlug: $entrySlug,
       eligibilityVerificationId: $eligibilityId,
       benefitReference: $benefitReference,
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: {
+        address: $pickup,
+        lat: 25.041,
+        lng: 121.55,
+        placeId: ("e2e-015-" + $subtype + "-" + $entrySlug + "-pickup"),
+        geocodeProvider: "drts_mock_map",
+        geocodeConfidence: "exact",
+        coordinateSource: "provider_candidate",
+        coordinateAccuracyM: 12,
+        providerCandidateId: ("mock-e2e-015-" + $subtype + "-" + $entrySlug + "-pickup")
+      },
+      dropoff: {
+        address: $dropoff,
+        lat: 25.06,
+        lng: 121.58,
+        placeId: ("e2e-015-" + $subtype + "-" + $entrySlug + "-dropoff"),
+        geocodeProvider: "drts_mock_map",
+        geocodeConfidence: "exact",
+        coordinateSource: "provider_candidate",
+        coordinateAccuracyM: 14,
+        providerCandidateId: ("mock-e2e-015-" + $subtype + "-" + $entrySlug + "-dropoff")
+      },
       reservationWindowStart: $windowStart,
       reservationWindowEnd: $windowEnd,
       passenger: {
@@ -466,6 +529,58 @@ ensure_service_product_active() {
   log_ok "${kind} service product active for booking guard: ${service_product_id}"
 }
 
+ensure_partner_service_area_active() {
+  local kind="$1"
+  local subtype="$2"
+  local area_code="$3"
+  local display_name="$4"
+  local service_area_fixture="${TMP_DIR}/${kind}-service-area.json"
+  local service_area_publish_fixture="${TMP_DIR}/${kind}-service-area-publish.json"
+
+  log_step "${kind}.0b - ensure active service area ${area_code} for ${subtype}"
+  http_call GET "/service-area/definitions"
+  assert_status "200"
+
+  local service_area_id
+  service_area_id=$(echo "$RESP_BODY" | jq -r \
+    --arg areaCode "$area_code" \
+    --arg subtype "$subtype" \
+    '.data.serviceAreas[]?
+     | select((.areaCode // .area_code) == $areaCode)
+     | select((.status // "") == "active")
+     | select((.serviceProductTypes // .service_product_types // []) | index($subtype))
+     | (.serviceAreaId // .service_area_id)' \
+    2>/dev/null | head -1 || true)
+
+  if [[ -n "$service_area_id" ]]; then
+    save_evidence "$SCENARIO" "$kind" "serviceAreaId" "$service_area_id"
+    save_evidence "$SCENARIO" "$kind" "serviceAreaCode" "$area_code"
+    log_ok "${kind} service area already active: ${service_area_id}"
+    return 0
+  fi
+
+  write_service_area_fixture \
+    "$service_area_fixture" \
+    "$subtype" \
+    "$area_code" \
+    "$display_name"
+
+  http_call POST "/service-area/admin/service-areas" "$service_area_fixture"
+  assert_status "200|201"
+
+  service_area_id=$(json_get_first ".data.serviceArea.serviceAreaId" ".data.service_area.service_area_id")
+  assert_non_empty "${kind} serviceAreaId" "$service_area_id"
+
+  write_publish_service_area_fixture "$service_area_publish_fixture" "$kind"
+  http_call POST "/service-area/admin/service-areas/${service_area_id}/publish" "$service_area_publish_fixture"
+  assert_status "200|201"
+
+  save_evidence "$SCENARIO" "$kind" "serviceAreaId" "$service_area_id"
+  save_evidence "$SCENARIO" "$kind" "serviceAreaCode" "$area_code"
+  save_evidence "$SCENARIO" "$kind" "serviceAreaProduct" "$subtype"
+  log_ok "${kind} service area published for ${subtype}: ${service_area_id}"
+}
+
 assert_reference_token_blocks_booking() {
   local kind="$1"
   local subtype="$2"
@@ -555,11 +670,17 @@ run_variant_case() {
   local missing_ref_fixture="${TMP_DIR}/${kind}-missing-ref.json"
   local booking_fixture="${TMP_DIR}/${kind}-booking.json"
   local wrong_subtype_fixture="${TMP_DIR}/${kind}-wrong-subtype-booking.json"
+  local service_area_code="E2E_${kind^^}_${CODE_SUFFIX}"
 
   log_surface "${kind} partner program - entry, eligibility, booking"
 
   switch_actor "platform_admin" "e2e-platform-admin-015"
   ensure_service_product_active "$kind" "$subtype" "$display_name"
+  ensure_partner_service_area_active \
+    "$kind" \
+    "$subtype" \
+    "$service_area_code" \
+    "$display_name"
   write_entry_fixture \
     "$entry_fixture" \
     "$partner_code" \

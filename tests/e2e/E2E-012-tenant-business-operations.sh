@@ -332,8 +332,24 @@ jq \
     | .bookedBy.email = $bookedByEmail
     | .passenger.name = "Tenant Biz Rider"
     | .passenger.phone = "+886912000012"
-    | .pickup.address = "台北車站"
-    | .dropoff.address = "松山機場"
+    | .pickup.address = "E2E-012 Taipei Core Pickup"
+    | .pickup.lat = 25.041
+    | .pickup.lng = 121.55
+    | .pickup.placeId = "e2e-012-taipei-core-pickup"
+    | .pickup.geocodeProvider = "drts_mock_map"
+    | .pickup.geocodeConfidence = "exact"
+    | .pickup.coordinateSource = "provider_candidate"
+    | .pickup.coordinateAccuracyM = 12
+    | .pickup.providerCandidateId = "mock-e2e-012-taipei-core-pickup"
+    | .dropoff.address = "E2E-012 Taipei Core Dropoff"
+    | .dropoff.lat = 25.06
+    | .dropoff.lng = 121.58
+    | .dropoff.placeId = "e2e-012-taipei-core-dropoff"
+    | .dropoff.geocodeProvider = "drts_mock_map"
+    | .dropoff.geocodeConfidence = "exact"
+    | .dropoff.coordinateSource = "provider_candidate"
+    | .dropoff.coordinateAccuracyM = 14
+    | .dropoff.providerCandidateId = "mock-e2e-012-taipei-core-dropoff"
   ' "${SCRIPT_DIR}/fixtures/e2e-booking-enterprise.json" > "$BOOKING_FIXTURE"
 
 http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"

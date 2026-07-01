@@ -1,10 +1,26 @@
 {
   "businessDispatchSubtype": "enterprise_dispatch",
   "pickup": {
-    "address": "1 Smoke Test Plaza, Staging City"
+    "address": "1 Smoke Test Plaza, Taipei Core",
+    "lat": 25.041,
+    "lng": 121.55,
+    "placeId": "smoke-taipei-core-pickup",
+    "geocodeProvider": "drts_mock_map",
+    "geocodeConfidence": "exact",
+    "coordinateSource": "provider_candidate",
+    "coordinateAccuracyM": 12,
+    "providerCandidateId": "mock-smoke-taipei-core-pickup"
   },
   "dropoff": {
-    "address": "99 Destination Ave, Staging City"
+    "address": "99 Destination Ave, Taipei Core",
+    "lat": 25.06,
+    "lng": 121.58,
+    "placeId": "smoke-taipei-core-dropoff",
+    "geocodeProvider": "drts_mock_map",
+    "geocodeConfidence": "exact",
+    "coordinateSource": "provider_candidate",
+    "coordinateAccuracyM": 14,
+    "providerCandidateId": "mock-smoke-taipei-core-dropoff"
   },
   "reservationWindowStart": "__RESERVATION_START__",
   "reservationWindowEnd": "__RESERVATION_END__",

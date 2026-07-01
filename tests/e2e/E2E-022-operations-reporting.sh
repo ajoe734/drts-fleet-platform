@@ -195,8 +195,28 @@ write_app_order_fixture() {
     --arg passengerName "E2E App Rider ${SUFFIX}" \
     --arg passengerPhone "+886900100${SUFFIX}" \
     '{
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: {
+        address: $pickup,
+        lat: 25.041,
+        lng: 121.55,
+        placeId: "e2e-022-app-taipei-core-pickup",
+        geocodeProvider: "drts_mock_map",
+        geocodeConfidence: "exact",
+        coordinateSource: "provider_candidate",
+        coordinateAccuracyM: 12,
+        providerCandidateId: "mock-e2e-022-app-taipei-core-pickup"
+      },
+      dropoff: {
+        address: $dropoff,
+        lat: 25.06,
+        lng: 121.58,
+        placeId: "e2e-022-app-taipei-core-dropoff",
+        geocodeProvider: "drts_mock_map",
+        geocodeConfidence: "exact",
+        coordinateSource: "provider_candidate",
+        coordinateAccuracyM: 14,
+        providerCandidateId: "mock-e2e-022-app-taipei-core-dropoff"
+      },
       passenger: {
         name: $passengerName,
         phone: $passengerPhone
@@ -220,8 +240,28 @@ write_call_center_order_fixture() {
       callId: $callId,
       agentId: $agentId,
       recordingId: $recordingId,
-      pickup: { address: $pickup },
-      dropoff: { address: $dropoff },
+      pickup: {
+        address: $pickup,
+        lat: 25.042,
+        lng: 121.552,
+        placeId: "e2e-022-phone-taipei-core-pickup",
+        geocodeProvider: "drts_mock_map",
+        geocodeConfidence: "exact",
+        coordinateSource: "provider_candidate",
+        coordinateAccuracyM: 12,
+        providerCandidateId: "mock-e2e-022-phone-taipei-core-pickup"
+      },
+      dropoff: {
+        address: $dropoff,
+        lat: 25.061,
+        lng: 121.579,
+        placeId: "e2e-022-phone-taipei-core-dropoff",
+        geocodeProvider: "drts_mock_map",
+        geocodeConfidence: "exact",
+        coordinateSource: "provider_candidate",
+        coordinateAccuracyM: 14,
+        providerCandidateId: "mock-e2e-022-phone-taipei-core-dropoff"
+      },
       passenger: {
         name: $passengerName,
         phone: $passengerPhone

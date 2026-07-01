@@ -1,10 +1,26 @@
 {
   "businessDispatchSubtype": "enterprise_dispatch",
   "pickup": {
-    "address": "5 Call Center Lane, Integration City"
+    "address": "5 Call Center Lane, Taipei Core",
+    "lat": 25.042,
+    "lng": 121.552,
+    "placeId": "e2e-phone-taipei-core-pickup",
+    "geocodeProvider": "drts_mock_map",
+    "geocodeConfidence": "exact",
+    "coordinateSource": "provider_candidate",
+    "coordinateAccuracyM": 12,
+    "providerCandidateId": "mock-phone-taipei-core-pickup"
   },
   "dropoff": {
-    "address": "88 Destination Road, Integration City"
+    "address": "88 Destination Road, Taipei Core",
+    "lat": 25.061,
+    "lng": 121.579,
+    "placeId": "e2e-phone-taipei-core-dropoff",
+    "geocodeProvider": "drts_mock_map",
+    "geocodeConfidence": "exact",
+    "coordinateSource": "provider_candidate",
+    "coordinateAccuracyM": 14,
+    "providerCandidateId": "mock-phone-taipei-core-dropoff"
   },
   "reservationWindowStart": "__WINDOW_START__",
   "reservationWindowEnd": "__WINDOW_END__",

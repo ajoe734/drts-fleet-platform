@@ -3,10 +3,26 @@
   "airportDirection": "dropoff",
   "terminal": "T2",
   "pickup": {
-    "address": "88 Corporate HQ, Staging City"
+    "address": "Taoyuan Airport E2E Pickup Zone",
+    "lat": 25.0797,
+    "lng": 121.2342,
+    "placeId": "e2e-taoyuan-airport-pickup",
+    "geocodeProvider": "drts_mock_map",
+    "geocodeConfidence": "exact",
+    "coordinateSource": "provider_candidate",
+    "coordinateAccuracyM": 18,
+    "providerCandidateId": "mock-taoyuan-airport-pickup"
   },
   "dropoff": {
-    "address": "Staging International Airport, Terminal 2"
+    "address": "Taoyuan Airport Terminal 2 E2E Dropoff",
+    "lat": 25.0805,
+    "lng": 121.235,
+    "placeId": "e2e-taoyuan-airport-t2-dropoff",
+    "geocodeProvider": "drts_mock_map",
+    "geocodeConfidence": "exact",
+    "coordinateSource": "provider_candidate",
+    "coordinateAccuracyM": 18,
+    "providerCandidateId": "mock-taoyuan-airport-t2-dropoff"
   },
   "reservationWindowStart": "__RESERVATION_START__",
   "reservationWindowEnd": "__RESERVATION_END__",
