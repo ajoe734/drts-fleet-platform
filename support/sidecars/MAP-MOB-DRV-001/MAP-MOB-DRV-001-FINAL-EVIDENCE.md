@@ -1,9 +1,9 @@
 # MAP-MOB-DRV-001 Final Evidence
 
-**Task:** MAP-MOB-DRV-001 - Driver trip map and navigation handoff  
-**Branch:** `codex/map-mob-drv-001-driver-navigation`  
-**Worktree:** `/home/edna/workspace/drts-fleet-platform-map-mob-drv-001-driver-navigation`  
-**Date:** 2026-07-01  
+**Task:** MAP-MOB-DRV-001 - Driver trip map and navigation handoff
+**Branch:** `codex/map-mob-drv-001-driver-navigation`
+**Worktree:** `/home/edna/workspace/drts-fleet-platform-map-mob-drv-001-driver-navigation`
+**Date:** 2026-07-01
 **Reviewer:** Claude2
 
 ## Implementation Summary
