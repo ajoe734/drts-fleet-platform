@@ -6,7 +6,7 @@
 - **Current Owner:** `Codex`
 - **Assigned Reviewer:** `Codex2`
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
-- **Last Revised:** `2026-06-30 (UTC)`
+- **Last Revised:** `2026-07-01 (UTC)`
 - **Status:** `REVIEW SUPPORT ARTIFACT` - support-only packet; no canonical truth, runtime, or contract changes.
 
 ---
@@ -18,7 +18,7 @@ This sidecar exists only to package the review trail for `MAP-FE-CALL-001`.
 - In scope: current machine-truth snapshot, dependency/evidence anchors, reviewer hotspots, and handoff wording.
 - Out of scope: changing `apps/ops-console-web`, changing backend/service-area behavior, editing L1/L2 truth, or claiming Gate A production readiness.
 
-The packet intentionally stays conservative: it distinguishes evidence that is directly verifiable in this workspace from evidence that must still be checked on the parent implementation branch by the parent reviewer.
+This refresh aligns the packet to the current `2026-07-01` machine-truth state. The parent task is still under review, but the latest parent `next` field has moved from the older Gate A caution to a concrete reviewer follow-up on shared provenance gating and nested `coordinateProvenance` handling.
 
 ---
 
@@ -26,7 +26,7 @@ The packet intentionally stays conservative: it distinguishes evidence that is d
 
 ### 2.1 Sidecar task
 
-After dispatch pickup, the owner moved this helper task from `todo` to `in_progress` with:
+The owner moved this helper from `todo` to `in_progress` with:
 
 ```bash
 AI_NAME=Codex scripts/ai-status.sh start MAP-FE-CALL-001-SIDECAR-REVIEW "Preparing review packet and evidence summary in support artifact only"
@@ -36,53 +36,63 @@ Task traits from `scripts/ai-status.sh show MAP-FE-CALL-001-SIDECAR-REVIEW`:
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status was dispatched as `todo`
+- status=`in_progress`
 - helper_parent=`MAP-FE-CALL-001`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
+- last_update=`2026-07-01T04:14:07Z`
 
 ### 2.2 Parent task
 
 `scripts/ai-status.sh show MAP-FE-CALL-001` currently records:
 
-- title: `Callcenter P0 map booking`
 - owner / reviewer: `Codex` / `Claude2`
 - status: `review`
+- last_update: `2026-07-01T03:37:38Z`
 - dependencies:
   - `MAP-UI-001`
   - `MAP-BE-004`
   - `MAP-BE-005`
-- artifacts:
-  - `apps/ops-console-web/app/callcenter/page.tsx`
-  - `apps/ops-console-web/`
-  - `tests/e2e/`
 
-Most important parent `next` field:
+Most important parent `next` field, as of this refresh:
 
-> `MAP-FE-CALL-001-SIDECAR-GATEA` produced `support/sidecars/MAP-FE-CALL-001/MAP-FE-CALL-001-GATE-A-EVIDENCE.md` on `origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f`. Parent UI review can proceed, but Gate A remains production-blocked until `MAP-QA-002` proves serviceable, blocked, manual-review, provider-degraded, backend-authority, snapshot, Ops-visibility, and observability scenarios E2E.
+- `apps/ops-console-web/app/callcenter/map-booking.ts` now uses shared `@drts/contracts` `hasAddressCoordinateProvenance`
+- callcenter submit blocking is aligned with backend spatial-audit completeness, including nested `coordinateProvenance`
+- unit coverage was updated for nested provenance readiness and empty nested provenance rejection
+- recorded verification passed:
+  - `pnpm --filter @drts/ops-console-web test -- callcenter-map-booking.test.ts ops-map-board.test.ts`
+  - `pnpm --filter @drts/ops-console-web typecheck`
 
 Interpretation:
 
-- the parent task is in active review, not `done`
-- the sidecar must not present Gate A as passed
-- the existing Gate A packet is an input to review, not a substitute for parent implementation review
+- the parent task is in active review, not `review_approved` or `done`
+- the current review focus is narrower and more concrete than the older Gate A note: shared provenance gating and nested provenance completeness
+- this sidecar must preserve both truths at once:
+  - the parent has fresh slice-level verification for the frontend review surface
+  - Gate A still is not proven end to end by this sidecar alone
 
-### 2.3 Dependency note: `MAP-BE-004`
+### 2.3 Dependency anchors
 
-In this workspace, `scripts/ai-status.sh show MAP-BE-004` returned `Task not found`. That means this packet should not invent a machine-truth status for the dependency.
+`MAP-BE-004`
 
-What *is* directly verifiable from repo history:
+- `scripts/ai-status.sh show MAP-BE-004` returned `Task not found` in this workspace, so this packet must not invent current machine truth for that slice
+- directly verifiable git-history anchor:
+  - commit `deb5e1d366f1789c29bd26818b14ffcb801a43a3`
+  - subject: `MAP-BE-004: finalize service-area booking creation enforcement (#1013)`
 
-- commit `deb5e1d366f1789c29bd26818b14ffcb801a43a3`
-- subject: `MAP-BE-004: finalize service-area booking creation enforcement (#1013)`
-- verification trailer:
-  - `pnpm --filter @drts/contracts typecheck`
-  - `pnpm --filter @drts/api test -- --runInBand apps/api/tests/unit/geo.service.test.ts apps/api/tests/unit/service-area.service.test.ts apps/api/tests/unit/owned-mobility.service.test.ts`
+`MAP-BE-005`
+
+- `scripts/ai-status.sh show MAP-BE-005` is available and currently records:
+  - status=`review`
+  - dependency on `MAP-BE-004`
+  - latest note says spatial audit snapshot persistence, stop-level coordinate provenance, actor/surface metadata, immutable service-area decision snapshots, and related API verification all landed for review
 
 Practical meaning:
 
-- backend service-area enforcement work does exist in git history and is a real dependency anchor for parent review
-- this sidecar should still cite parent machine truth for lifecycle state, and git history for the dependency evidence slice
+- the frontend review packet can safely cite real backend evidence anchors
+- but it should distinguish between:
+  - `MAP-BE-004` as visible git-history evidence only
+  - `MAP-BE-005` as visible machine-truth review-state evidence
 
 ---
 
@@ -90,40 +100,38 @@ Practical meaning:
 
 | ID | Evidence | Direct anchor | Why it matters |
 | --- | --- | --- | --- |
-| E-1 | Parent machine-truth review state | `scripts/ai-status.sh show MAP-FE-CALL-001` | Confirms the parent is still under review and must not be described as closed. |
-| E-2 | Gate A support packet | `origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f` -> `support/sidecars/MAP-FE-CALL-001/MAP-FE-CALL-001-GATE-A-EVIDENCE.md` | Provides the most concrete review/evidence summary currently visible from this workspace. |
-| E-3 | Dependency implementation anchor | commit `deb5e1d366f1789c29bd26818b14ffcb801a43a3` | Confirms service-area booking enforcement landed in repo history and is not hypothetical. |
-| E-4 | Sidecar review branch | current branch `codex/map-fe-call-001-sidecar-review` | Keeps this helper scoped to support material only. |
+| E-1 | Parent machine-truth review state | `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-CALL-001` | Confirms the parent remains in `review`. |
+| E-2 | Parent reviewer follow-up | parent `next` field dated `2026-07-01T03:37:38Z` | Records the current review focus on shared provenance gating and nested `coordinateProvenance`. |
+| E-3 | Gate A support packet | `origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f` -> `support/sidecars/MAP-FE-CALL-001/MAP-FE-CALL-001-GATE-A-EVIDENCE.md` | Preserves the stronger cautionary evidence about missing end-to-end proof. |
+| E-4 | `MAP-BE-004` dependency anchor | commit `deb5e1d366f1789c29bd26818b14ffcb801a43a3` | Confirms service-area enforcement work exists in repo history. |
+| E-5 | `MAP-BE-005` dependency review state | `AI_NAME=Codex scripts/ai-status.sh show MAP-BE-005` | Confirms snapshot/audit persistence work is already in `review`. |
+| E-6 | Sidecar review branch | `origin/codex/map-fe-call-001-sidecar-review@afa29719b` plus this refresh | Keeps the helper scoped to support material only. |
 
-### 3.1 Gate A packet contents already available
+### 3.1 What the Gate A packet still contributes
 
-The existing Gate A packet at `54604cf6f` already captures the strongest concrete evidence available to this sidecar:
+The Gate A packet at `54604cf6f` remains the best single summary of what is **not** yet proven for production readiness:
 
-- frontend guard helpers for coordinate/provenance gating
-- `AddressMapPairPicker` render anchors in the callcenter booking UI
-- unit-test anchors for coordinate-less submit blocking
-- Playwright smoke anchor for fail-closed initial submit
-- explicit list of still-missing E2E scenarios before Gate A can pass
-- release wording that avoids overstating readiness
+- unit and UI-smoke anchors for fail-closed callcenter submission
+- explicit missing E2E scenarios for serviceable, blocked, manual-review, provider-degraded, snapshot, backend-authority, Ops visibility, and observability flows
+- release wording that avoids claiming Gate A pass
 
-That packet should be treated as the baseline evidence reference for this sidecar review.
+The key update in this review packet is that the parent machine-truth `next` field has moved forward since that packet was created. The Gate A packet is therefore supporting evidence, not the primary machine-truth headline.
 
-### 3.2 What this packet cannot independently prove
+### 3.2 Workspace visibility limits
 
-From the refs visible in this workspace, there is no directly discoverable `codex/map-fe-call-001` parent implementation branch/ref to inspect.
+This workspace shows the pushed sidecar refs:
+
+- `origin/codex/map-fe-call-001-sidecar-gatea`
+- `origin/codex/map-fe-call-001-sidecar-review`
+
+It does **not** expose a directly inspectable `origin/codex/map-fe-call-001` ref from which this helper can review the parent implementation diff or name the exact parent implementation SHA.
 
 This packet therefore does **not** claim:
 
 - the parent implementation branch SHA
-- that the parent reviewer `Claude2` has already validated the UI diff
-- that parent acceptance commands have already been rerun from this sidecar workspace
-- that Gate A E2E evidence exists beyond the support packet
-
-Instead, it records the trustworthy minimum:
-
-- the parent task is in `review`
-- the Gate A packet exists and is pushed
-- production-readiness remains blocked on QA/release evidence
+- that `Claude2` has already validated the parent diff
+- that the parent acceptance commands were rerun from this sidecar workspace
+- that Gate A E2E evidence exists beyond the existing support packet
 
 ---
 
@@ -134,30 +142,34 @@ Instead, it records the trustworthy minimum:
 `Codex2` is reviewing the helper packet, not closing the parent feature review. The sidecar is ready for approval if the reviewer agrees that:
 
 1. the artifact stays support-only
-2. the packet accurately reflects parent machine truth as `review`
-3. the packet correctly points to `MAP-FE-CALL-001-GATE-A-EVIDENCE.md` at pushed commit `54604cf6f`
-4. the packet preserves the explicit Gate A caution that E2E proof is still missing
-5. the dependency note for `MAP-BE-004` is framed as git-history evidence, not invented machine truth
+2. the packet accurately reflects the current parent machine truth as `review`
+3. the packet records the new parent follow-up on shared provenance gating and nested provenance completeness
+4. the packet still points to `MAP-FE-CALL-001-GATE-A-EVIDENCE.md` at pushed commit `54604cf6f` as the main Gate A caution/evidence packet
+5. the dependency notes distinguish `MAP-BE-004` git-history evidence from `MAP-BE-005` review-state evidence
 
-### 4.2 Main review takeaways to preserve
+### 4.2 Main takeaways to preserve
 
-- The frontend review surface appears aimed at fail-closed callcenter booking:
-  - no silent coordinate-less normal dispatch
-  - provenance gating exists in the evidence packet
-  - operator-visible blocked/manual-review/degraded states are part of the intended review surface
-- The current evidence is still slice-level evidence:
-  - unit-test and UI-smoke style proof exists
-  - full backend/provider/snapshot/ops-visibility E2E proof is still outstanding
-- Gate A remains blocked by design:
-  - `MAP-QA-002` and release evidence are still required before production-ready claims
+- Parent review is currently focused on correctness of submit gating parity:
+  - shared `@drts/contracts` provenance helper adoption
+  - nested `coordinateProvenance` completeness
+  - updated unit coverage for empty nested provenance rejection
+- The current directly recorded verification is still slice-level:
+  - `ops-console-web` targeted tests passed
+  - `ops-console-web` typecheck passed
+- Gate A still is not proven by this packet:
+  - the existing Gate A packet remains explicit that end-to-end QA/release evidence is still required
+- Backend dependency support exists:
+  - `MAP-BE-004` is visible in git history
+  - `MAP-BE-005` is visible in machine truth as in-review snapshot/audit persistence work
 
 ### 4.3 Recommended parent-review framing
 
 For the parent reviewer (`Claude2`), the safest interpretation remains:
 
-- approve or reopen the parent based on the actual implementation branch diff
-- use the Gate A packet as a checklist, not as proof that production readiness is complete
-- keep release wording aligned with the packet's "do not claim" rules until QA evidence lands
+- approve or reopen the parent based on the actual implementation diff, not on this sidecar alone
+- treat the parent `next` field as the current review focus
+- treat the Gate A packet as the production-readiness caution/checklist
+- keep release wording conservative until `MAP-QA-002` or equivalent release evidence proves the missing E2E scenarios
 
 ---
 
@@ -165,20 +177,21 @@ For the parent reviewer (`Claude2`), the safest interpretation remains:
 
 Reviewer `Codex2` should check the following:
 
-1. This packet creates or updates support material only.
-2. No canonical truth, runtime code, or governance docs were edited by this helper task.
+1. This helper changed support material only.
+2. No canonical truth, runtime code, or governance docs were edited by this task.
 3. The parent task is described as `review`, not `review_approved` or `done`.
-4. The packet points at the pushed Gate A packet commit `54604cf6f` and keeps its constraints intact.
-5. The packet does not overstate `MAP-BE-004`; it cites the visible git commit and explicitly notes the missing task-slice lookup in this workspace.
-6. The packet is useful to hand back to the parent owner/reviewer pair without pretending to replace their code review.
+4. The packet reflects the latest parent `next` field instead of the older stale Gate A-only wording.
+5. The packet still keeps the Gate A packet at `54604cf6f` as a cautionary evidence anchor.
+6. The dependency wording does not overclaim `MAP-BE-004` and correctly separates `MAP-BE-005` as current review-state evidence.
+7. The packet is useful to hand back to the parent owner/reviewer pair without pretending to replace their code review.
 
 Suggested approval conclusion:
 
-> `審查通過：MAP-FE-CALL-001 sidecar review packet 已對齊目前 machine truth，正確記錄 parent task 仍在 review、引用已推送的 Gate A evidence packet（origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f），並保留「Gate A 尚未通過，仍待 MAP-QA-002/ release E2E 證據」的限制。support artifact only；未修改 canonical truth。`
+> `審查通過：MAP-FE-CALL-001 sidecar review packet 已刷新為 2026-07-01 machine truth，正確記錄 parent task 仍在 review、補入目前 reviewer follow-up（shared provenance gating / nested coordinateProvenance completeness / targeted FE verification），同時保留已推送 Gate A evidence packet（origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f）作為尚缺 E2E 證據的限制。support artifact only；未修改 canonical truth。`
 
 Suggested reopen conclusion:
 
-> `packet needs refresh: [parent status drift / wrong Gate A anchor / dependency wording too strong / support-scope violation]`
+> `packet needs refresh: [parent status drift / stale parent next summary / wrong Gate A anchor / dependency wording too strong / support-scope violation]`
 
 ---
 
@@ -187,19 +200,19 @@ Suggested reopen conclusion:
 Owner handoff to `Codex2`:
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CALL-001-SIDECAR-REVIEW Codex2 "Review packet ready at support/sidecars/MAP-FE-CALL-001/MAP-FE-CALL-001-SIDECAR-REVIEW.md. The packet stays support-only, records parent MAP-FE-CALL-001 as currently in review, points to pushed Gate A evidence packet origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f, preserves that Gate A remains blocked pending MAP-QA-002 and release E2E evidence, and cites MAP-BE-004 via visible git-history anchor deb5e1d366f1789c29bd26818b14ffcb801a43a3 without inventing missing machine-truth status."
+AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CALL-001-SIDECAR-REVIEW Codex2 "Review packet refreshed at support/sidecars/MAP-FE-CALL-001/MAP-FE-CALL-001-SIDECAR-REVIEW.md. The packet stays support-only, records parent MAP-FE-CALL-001 as currently in review, captures the 2026-07-01 reviewer follow-up on shared provenance gating and nested coordinateProvenance completeness with the recorded ops-console verification commands, keeps the pushed Gate A evidence packet at origin/codex/map-fe-call-001-sidecar-gatea@54604cf6f as the E2E caution anchor, and distinguishes MAP-BE-004 git-history evidence from MAP-BE-005 review-state evidence."
 ```
 
 Reviewer approval:
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh approve MAP-FE-CALL-001-SIDECAR-REVIEW "Review approved. The packet stays support-only, matches current parent machine truth, anchors the pushed Gate A evidence packet at 54604cf6f, and correctly preserves the rule that Gate A remains blocked until MAP-QA-002/release E2E evidence exists."
+AI_NAME=Codex2 scripts/ai-status.sh approve MAP-FE-CALL-001-SIDECAR-REVIEW "Review approved. The packet stays support-only, matches the 2026-07-01 parent machine truth, captures the current provenance-gating review focus, preserves the pushed Gate A evidence packet at 54604cf6f as the end-to-end caution anchor, and keeps dependency wording appropriately bounded."
 ```
 
 Reviewer reopen:
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh reopen MAP-FE-CALL-001-SIDECAR-REVIEW "packet needs refresh: [parent status drift / wrong Gate A anchor / dependency wording too strong / support-scope violation]"
+AI_NAME=Codex2 scripts/ai-status.sh reopen MAP-FE-CALL-001-SIDECAR-REVIEW "packet needs refresh: [parent status drift / stale parent next summary / wrong Gate A anchor / dependency wording too strong / support-scope violation]"
 ```
 
 Owner closeout note after `review_approved`:
@@ -212,5 +225,6 @@ Owner closeout note after `review_approved`:
 ## 7. Change Log
 
 - `2026-06-30`: created the initial sidecar review packet for `MAP-FE-CALL-001-SIDECAR-REVIEW`.
-- `2026-06-30`: aligned the packet to current parent machine truth (`review`) and linked the pushed Gate A packet commit `54604cf6f`.
-- `2026-06-30`: recorded the dependency note for `MAP-BE-004` using visible git-history evidence rather than assuming unavailable task-slice status.
+- `2026-06-30`: aligned the first packet to then-current parent `review` state and linked the pushed Gate A packet commit `54604cf6f`.
+- `2026-07-01`: refreshed the packet to current parent machine truth, replacing the stale parent `next` summary with the current reviewer follow-up on shared provenance gating and nested `coordinateProvenance` completeness.
+- `2026-07-01`: added `MAP-BE-005` as visible review-state evidence while keeping `MAP-BE-004` constrained to visible git-history evidence.
