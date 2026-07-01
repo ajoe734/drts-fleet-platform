@@ -4,8 +4,8 @@
 
 - Task: `MAP-BE-002-SIDECAR-REVIEW`
 - Parent task: `MAP-BE-002`
-- Owner: `Codex2`
-- Assigned reviewer: `Codex`
+- Owner: `Codex`
+- Assigned reviewer: `Codex2`
 - Slice type: support-only review packet
 - Guardrail: no canonical truth or runtime implementation changes are included in this sidecar
 
