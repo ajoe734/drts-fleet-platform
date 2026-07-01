@@ -5,7 +5,7 @@
 - **Helper Kind:** `review_packet`
 - **Current Owner / Reviewer:** `Codex` / `Codex2`
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
-- **Last Revised:** `2026-07-01T15:46:45Z`
+- **Last Revised:** `2026-07-01T16:02:00Z`
 - **Scope Boundary:** support-only artifact; no canonical truth, runtime, contract, or governance edits.
 
 ## 1. Purpose
@@ -21,15 +21,15 @@ This refresh replaces the stale morning packet content. The same task ID had an 
 
 ### 2.1 Sidecar task
 
-`AI_NAME=Codex scripts/ai-status.sh show MAP-FE-CALL-001-SIDECAR-REVIEW` currently records:
+`AI_NAME=Codex2 scripts/ai-status.sh show MAP-FE-CALL-001-SIDECAR-REVIEW` currently records:
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress`
+- status=`review`
 - helper_parent=`MAP-FE-CALL-001`
 - helper_kind=`review_packet`
 - mutates_canonical=`false`
-- last_update=`2026-07-01T15:46:01Z`
+- last_update=`2026-07-01T15:50:15Z`
 
 Activity-log context for the current cycle:
 
@@ -37,11 +37,12 @@ Activity-log context for the current cycle:
 2. `2026-07-01T15:45:26Z`: Gemini worker exited before terminal status
 3. `2026-07-01T15:45:27Z`: ownership moved to `Codex`, reviewer moved to `Codex2`
 4. `2026-07-01T15:46:01Z`: owner `start` recorded for this refresh
+5. `2026-07-01T15:50:15Z`: owner handed the refreshed packet to reviewer `Codex2`
 
 Review implication:
 
-- this packet is being prepared from the live owner state `in_progress@2026-07-01T15:46:01Z`
-- after owner handoff, live machine truth should move to `review`
+- this packet was prepared from the live owner state `in_progress@2026-07-01T15:46:01Z`
+- live machine truth is now `review@2026-07-01T15:50:15Z` after owner handoff to `Codex2`
 - the earlier morning sidecar cycle is historical context only and should not drive this review
 
 ### 2.2 Parent task
