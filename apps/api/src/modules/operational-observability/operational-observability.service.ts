@@ -195,7 +195,9 @@ export class OperationalObservabilityService {
     const phase2SandboxKpiDashboard =
       await this.loadPhase2SandboxKpiDashboard(referenceDate);
     const adapterDetails = this.buildAdapterDetails(adapterHealth);
-    const mapGeofence = this.mapGeofenceObservabilityService?.getSnapshot() ?? {
+    const mapGeofence = this.mapGeofenceObservabilityService?.getSnapshot(
+      referenceDate,
+    ) ?? {
       providerHealth: {
         status: "unknown" as const,
         provider: null,
@@ -226,19 +228,17 @@ export class OperationalObservabilityService {
         stopPolicyRetiredCount: 0,
         manualOverrideCount: 0,
       },
+      recentAlertSignals: {
+        providerOutageCount: 0,
+        policyDenialCount: 0,
+        windowMinutes: 15,
+      },
       lastEventAt: null,
     };
     const degradedAdapterCount = adapterHealth.filter(
       (adapter) => adapter.status !== "healthy",
     ).length;
-    const mapGeofenceAlertSignals =
-      this.mapGeofenceObservabilityService?.getRecentAlertSignals(
-        referenceDate,
-      ) ?? {
-        providerOutageCount: 0,
-        policyDenialCount: 0,
-        windowMinutes: 15,
-      };
+    const mapGeofenceAlertSignals = mapGeofence.recentAlertSignals;
 
     return {
       generatedAt,
