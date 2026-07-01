@@ -2,8 +2,8 @@
 
 Task: `MAP-OBS-001`
 Branch: `codex/map-obs-001-production-observability`
-Base SHA before this work: `40f5c36f017f347fdb8981c549cf61614944830d`
-Final implementation commit: recorded in handoff because this file is committed with the implementation.
+Base SHA before this work: `9e91b90e8` (`origin/codex/map-rel-001-dev-guardrails`)
+Final implementation commits: `b4adc0863` and `e6ad810c3`.
 
 ## Verdict
 
