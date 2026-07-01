@@ -34,7 +34,7 @@ export class GeoController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.geoService.resolve(command),
+      await this.geoService.resolve(command, requestId),
       requestId,
     );
   }
@@ -45,7 +45,7 @@ export class GeoController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.geoService.reverse(command),
+      await this.geoService.reverse(command, requestId),
       requestId,
     );
   }

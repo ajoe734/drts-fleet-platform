@@ -6089,6 +6089,8 @@ export const OPERATIONAL_ALERT_KEYS = [
   "webhook_failure_burst",
   "eligibility_review_backlog",
   "adapter_degradation",
+  "map_provider_outage",
+  "map_geofence_denial_burst",
 ] as const;
 export type OperationalAlertKey = (typeof OPERATIONAL_ALERT_KEYS)[number];
 
@@ -6192,6 +6194,40 @@ export interface OperationalForwarderOpsMetrics {
   oldestReconciliationLagMinutes: number | null;
 }
 
+export interface OperationalMapGeofenceMetrics {
+  providerHealth: {
+    status: GeoProviderOperationalStatus | "unknown";
+    provider: string | null;
+    mode: string | null;
+    failClosed: boolean;
+    lastCheckedAt: string | null;
+  };
+  geo: {
+    providerOutageCount: number;
+    addressAmbiguityCount: number;
+    coordinateLessAttemptCount: number;
+    manualOverrideCount: number;
+    resolvedAddressCount: number;
+  };
+  serviceArea: {
+    evaluations: number;
+    serviceableCount: number;
+    manualReviewCount: number;
+    policyDenialCount: number;
+    outOfAreaCount: number;
+    coordinateLessAttemptCount: number;
+  };
+  governance: {
+    geometryMutationCount: number;
+    serviceAreaPublishedCount: number;
+    serviceAreaRetiredCount: number;
+    stopPolicyPublishedCount: number;
+    stopPolicyRetiredCount: number;
+    manualOverrideCount: number;
+  };
+  lastEventAt: string | null;
+}
+
 export interface OperationalAdapterDetailRecord {
   platformCode: PlatformCode;
   status: AdapterHealthStatus;
@@ -6220,6 +6256,7 @@ export interface OperationalRoleView {
     | "reporting"
     | "adapters"
     | "forwarder_ops"
+    | "map_geofence"
   >;
 }
 
@@ -6234,6 +6271,7 @@ export interface OperationalObservabilitySnapshot {
   reporting: OperationalReportingMetrics;
   adapters: OperationalAdapterMetrics;
   forwarderOps: OperationalForwarderOpsMetrics;
+  mapGeofence: OperationalMapGeofenceMetrics;
   adapterDetails: OperationalAdapterDetailRecord[];
   phase2SandboxKpiDashboard: SandboxKpiDashboardRecord | null;
   roleViews: OperationalRoleView[];
