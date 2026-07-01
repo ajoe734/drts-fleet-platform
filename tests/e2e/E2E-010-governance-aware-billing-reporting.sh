@@ -787,8 +787,11 @@ subcase_fg04_report_export() {
   local has_cc has_approval has_quota has_partner has_legacy report_artifact_id
   has_cc=$(echo "$RESP_BODY" | jq -r '
     (..|.costCenterCode? // empty),
+    (..|.cost_center_code? // empty),
     (..|.costCenterName? // empty),
-    (..|.ownerUserId? // empty) | select(. != null and . != "") | "present"' \
+    (..|.cost_center_name? // empty),
+    (..|.ownerUserId? // empty),
+    (..|.owner_user_id? // empty) | select(. != null and . != "") | "present"' \
     2>/dev/null | head -1)
   has_approval=$(echo "$RESP_BODY" | jq -r '
     (..|.approvalState? // empty),
@@ -881,11 +884,11 @@ subcase_invoice_governance_and_audit() {
   matched_line_json=$(echo "$RESP_BODY" | jq -c --arg oid "$ORDER_ID" \
     '.data.lines[]? | select((.orderId // .order_id) == $oid)' 2>/dev/null | head -1 || true)
   if [[ -n "$matched_line_json" ]]; then
-    cc_code=$(echo "$matched_line_json" | jq -r '.costCenterCode // empty' 2>/dev/null || true)
-    cc_name=$(echo "$matched_line_json" | jq -r '.costCenterName // empty' 2>/dev/null || true)
-    owner_user_id=$(echo "$matched_line_json" | jq -r '.ownerUserId // empty' 2>/dev/null || true)
+    cc_code=$(echo "$matched_line_json" | jq -r '.costCenterCode // .cost_center_code // empty' 2>/dev/null || true)
+    cc_name=$(echo "$matched_line_json" | jq -r '.costCenterName // .cost_center_name // empty' 2>/dev/null || true)
+    owner_user_id=$(echo "$matched_line_json" | jq -r '.ownerUserId // .owner_user_id // empty' 2>/dev/null || true)
     approval_state=$(echo "$matched_line_json" | jq -r '.approvalState // empty' 2>/dev/null || true)
-    active_flag=$(echo "$matched_line_json" | jq -r 'if has("activeFlag") then (.activeFlag | tostring) else "" end' 2>/dev/null || true)
+    active_flag=$(echo "$matched_line_json" | jq -r 'if has("activeFlag") then (.activeFlag | tostring) elif has("active_flag") then (.active_flag | tostring) else "" end' 2>/dev/null || true)
     legacy_unmapped=$(echo "$matched_line_json" | jq -r 'if has("legacy_unmapped") then (.legacy_unmapped | tostring) elif has("legacyUnmapped") then (.legacyUnmapped | tostring) else "" end' 2>/dev/null || true)
     partner_id=$(echo "$matched_line_json" | jq -r '.partnerId // empty' 2>/dev/null || true)
     program_id=$(echo "$matched_line_json" | jq -r '.partnerProgramId // empty' 2>/dev/null || true)
