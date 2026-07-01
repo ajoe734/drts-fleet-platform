@@ -8,6 +8,7 @@ import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-regi
 import { ReportingFilingModule } from "../reporting-filing/reporting-filing.module";
 import { SandboxGovernanceModule } from "../sandbox-governance/sandbox-governance.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
+import { MapGeofenceObservabilityModule } from "./map-geofence-observability.module";
 import { OperationalObservabilityController } from "./operational-observability.controller";
 import { OperationalObservabilityService } from "./operational-observability.service";
 
@@ -21,6 +22,7 @@ import { OperationalObservabilityService } from "./operational-observability.ser
     ReportingFilingModule,
     SandboxGovernanceModule,
     TenantPartnerModule,
+    MapGeofenceObservabilityModule,
   ],
   controllers: [OperationalObservabilityController],
   providers: [OperationalObservabilityService],

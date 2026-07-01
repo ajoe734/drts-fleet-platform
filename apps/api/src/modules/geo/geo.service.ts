@@ -14,6 +14,8 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { MapGeofenceObservabilityService } from "../operational-observability/map-geofence-observability.service";
 import { GeoProviderConfigService } from "./geo-provider-config.service";
 import { GEO_PROVIDER, GeoProviderError, type GeoProvider } from "./geo.provider";
 
@@ -38,10 +40,16 @@ export class GeoService {
     private readonly geoProvider: GeoProvider,
     @Optional()
     private readonly geoProviderConfigService?: GeoProviderConfigService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly mapGeofenceObservabilityService?: MapGeofenceObservabilityService,
   ) {}
 
   health() {
-    return this.providerConfig().getHealth();
+    const health = this.providerConfig().getHealth();
+    this.recordProviderHealth(health);
+    return health;
   }
 
   async searchFromHttpQuery(query: SearchHttpQuery) {
@@ -75,12 +83,23 @@ export class GeoService {
       normalized.surface = this.normalizeSurface(command.surface, "surface");
     }
     this.assertProviderUsable();
-    return this.withProviderErrorMapping(() =>
-      this.provider().search(normalized),
+    const response = await this.withProviderErrorMapping(
+      "search",
+      normalized,
+      () => this.provider().search(normalized),
     );
+    if (response.candidates.length !== 1) {
+      this.mapGeofenceObservabilityService?.recordGeoOutcome(
+        "address_ambiguity",
+      );
+    }
+    return response;
   }
 
-  async resolve(command: ResolveAddressCommand): Promise<GeoResolveResponse> {
+  async resolve(
+    command: ResolveAddressCommand,
+    requestId?: string,
+  ): Promise<GeoResolveResponse> {
     const selectedPoint = command.selectedPoint
       ? this.normalizePoint(command.selectedPoint, "selectedPoint")
       : null;
@@ -98,12 +117,24 @@ export class GeoService {
       ),
     };
     this.assertProviderUsable();
-    return this.withProviderErrorMapping(() =>
-      this.provider().resolve(normalized),
+    const response = await this.withProviderErrorMapping(
+      "resolve",
+      normalized,
+      () => this.provider().resolve(normalized),
     );
+    this.mapGeofenceObservabilityService?.recordGeoOutcome("resolved");
+    this.recordGeoAddressResolved(response, normalized, requestId);
+    if (response.address.coordinateSource === "manual_pin") {
+      this.mapGeofenceObservabilityService?.recordGeoOutcome("manual_override");
+      this.recordGeoPinConfirmed(response, normalized, requestId);
+    }
+    return response;
   }
 
-  async reverse(command: ReverseGeocodeCommand): Promise<GeoReverseResponse> {
+  async reverse(
+    command: ReverseGeocodeCommand,
+    requestId?: string,
+  ): Promise<GeoReverseResponse> {
     const normalized: ReverseGeocodeCommand = {
       ...command,
       location: this.normalizePoint(command.location, "location"),
@@ -113,9 +144,14 @@ export class GeoService {
       ),
     };
     this.assertProviderUsable();
-    return this.withProviderErrorMapping(() =>
-      this.provider().reverse(normalized),
+    const response = await this.withProviderErrorMapping(
+      "reverse",
+      normalized,
+      () => this.provider().reverse(normalized),
     );
+    this.mapGeofenceObservabilityService?.recordGeoOutcome("resolved");
+    this.recordGeoAddressResolved(response, normalized, requestId);
+    return response;
   }
 
   private providerConfig() {
@@ -124,9 +160,11 @@ export class GeoService {
 
   private assertProviderUsable() {
     const health = this.providerConfig().getHealth();
+    this.recordProviderHealth(health);
     if (!health.failClosed) {
       return;
     }
+    this.mapGeofenceObservabilityService?.recordGeoOutcome("provider_outage");
     throw new ApiRequestError(
       HttpStatus.SERVICE_UNAVAILABLE,
       "GEO_PROVIDER_NOT_CONFIGURED",
@@ -146,11 +184,16 @@ export class GeoService {
     return this.geoProvider;
   }
 
-  private async withProviderErrorMapping<T>(operation: () => Promise<T>) {
+  private async withProviderErrorMapping<T>(
+    operationName: "search" | "resolve" | "reverse",
+    command: SearchGeoQuery | ResolveAddressCommand | ReverseGeocodeCommand,
+    operation: () => Promise<T>,
+  ) {
     try {
       return await operation();
     } catch (error) {
       if (error instanceof GeoProviderError) {
+        this.recordGeoProviderError(operationName, command, error);
         throw new ApiRequestError(
           error.statusCode,
           error.code,
@@ -161,6 +204,106 @@ export class GeoService {
       }
       throw error;
     }
+  }
+
+  private recordProviderHealth(
+    health: ReturnType<GeoProviderConfigService["getHealth"]>,
+  ) {
+    this.mapGeofenceObservabilityService?.recordProviderHealth({
+      status: health.status,
+      provider: health.provider,
+      mode: health.mode,
+      failClosed: health.failClosed,
+    });
+  }
+
+  private recordGeoProviderError(
+    operationName: "search" | "resolve" | "reverse",
+    command: SearchGeoQuery | ResolveAddressCommand | ReverseGeocodeCommand,
+    error: GeoProviderError,
+  ) {
+    if (error.statusCode >= 500 || error.retryable) {
+      this.mapGeofenceObservabilityService?.recordGeoOutcome("provider_outage");
+      return;
+    }
+    if (error.code === "GEO_CANDIDATE_NOT_FOUND") {
+      const resolveCommand = command as ResolveAddressCommand;
+      const hasCandidateReference = Boolean(
+        resolveCommand.candidateId ||
+        resolveCommand.providerCandidateId ||
+        resolveCommand.placeId,
+      );
+      this.mapGeofenceObservabilityService?.recordGeoOutcome(
+        hasCandidateReference ? "address_ambiguity" : "coordinate_less_attempt",
+      );
+      return;
+    }
+    if (operationName === "search" && error.statusCode === 404) {
+      this.mapGeofenceObservabilityService?.recordGeoOutcome(
+        "address_ambiguity",
+      );
+    }
+  }
+
+  private recordGeoAddressResolved(
+    response: GeoResolveResponse | GeoReverseResponse,
+    command: ResolveAddressCommand | ReverseGeocodeCommand,
+    requestId?: string,
+  ) {
+    const actorId =
+      "selectedByActorId" in command
+        ? (command.selectedByActorId ?? null)
+        : "requestedByActorId" in command
+          ? (command.requestedByActorId ?? null)
+          : null;
+    this.auditNotificationService?.recordAuditLog({
+      actorId,
+      actorType: actorId ? "ops_user" : "system",
+      tenantId: null,
+      moduleName: "geo",
+      actionName: "geo.address.resolved",
+      resourceType: "geo_address",
+      resourceId:
+        response.address.placeId ??
+        response.address.providerCandidateId ??
+        response.address.normalizedAddress ??
+        response.address.address,
+      newValuesSummary: {
+        provider: response.provider,
+        surface: response.address.surface ?? null,
+        coordinateSource: response.address.coordinateSource,
+        geocodeConfidence: response.address.geocodeConfidence ?? null,
+        coordinateAccuracyM: response.address.coordinateAccuracyM ?? null,
+        manualOverrideReason: response.address.manualOverrideReason ?? null,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private recordGeoPinConfirmed(
+    response: GeoResolveResponse,
+    command: ResolveAddressCommand,
+    requestId?: string,
+  ) {
+    const actorId = command.selectedByActorId ?? null;
+    this.auditNotificationService?.recordAuditLog({
+      actorId,
+      actorType: actorId ? "ops_user" : "system",
+      tenantId: null,
+      moduleName: "geo",
+      actionName: "geo.pin.confirmed",
+      resourceType: "geo_pin",
+      resourceId:
+        response.address.normalizedAddress ?? response.address.address,
+      newValuesSummary: {
+        surface: response.address.surface ?? null,
+        coordinateSource: response.address.coordinateSource,
+        manualOverrideReason: response.address.manualOverrideReason ?? null,
+        selectedByActorId: response.address.selectedByActorId ?? null,
+        pinnedByActorId: response.address.pinnedByActorId ?? null,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
   }
 
   private normalizeRequiredText(value: unknown, field: string) {
