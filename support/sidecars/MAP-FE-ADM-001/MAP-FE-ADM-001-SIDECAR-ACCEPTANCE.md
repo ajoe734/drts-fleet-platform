@@ -14,12 +14,22 @@ This packet consolidates the acceptance checklist, dependency map, and
 reviewer-facing status notes for `MAP-FE-ADM-001` without changing the parent
 implementation or the canonical task board.
 
-Current machine-truth scan for actionable Codex-owned work shows only one live
-owner task in scope for this worker:
+Earlier wording overclaimed a live actionable-task scan. This revision limits
+queue statements to a bounded machine-truth snapshot collected after the
+`2026-07-01T02:17:36Z` reopen and refreshed through the
+`2026-07-01T02:18:19Z` owner progress update.
 
-- `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` is `in_progress`
-- no other `owner=Codex` tasks are currently `todo` or `review_approved`
-- no `review` tasks are currently waiting on `reviewer=Codex`
+Scoped snapshot relevant to this packet:
+
+- `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` is `in_progress` on this worker branch
+- `MAP-FE-ADM-001` is `in_progress` after the `2026-07-01T02:07:04Z` reopen
+- `MAP-FE-ADM-001-SIDECAR-REVIEW` is `review_approved` and awaiting separate
+  owner closeout on its own branch
+- `MAP-OBS-001` is already `review` with `reviewer=Codex`
+
+This packet does **not** claim that the broader Codex owner/reviewer queue
+remained unchanged after that snapshot window; it only records the task slices
+and dependency evidence cited below.
 
 Important posture change:
 
@@ -34,6 +44,13 @@ stale `review` posture captured by the earlier review packet.
 
 ## 2. Machine-Truth Snapshot
 
+Snapshot basis for this section:
+
+- live task slices from `scripts/ai-status.sh show` / `list`
+- archive evidence for `MAP-BE-006`
+- activity-log entries through the `2026-07-01T02:17:47Z` worker-start event
+  for the separate `MAP-FE-ADM-001-SIDECAR-REVIEW` closeout dispatch
+
 | Task ID | Status | Owner -> Reviewer | Why it matters now |
 | --- | --- | --- | --- |
 | `MAP-BE-006` | `done` (archived) | `Codex` -> `Codex2` | Backend service-area lifecycle authority is complete and merged to `origin/dev`; the live board no longer shows it, so this packet must use archive evidence instead of `scripts/ai-status.sh show`. |
@@ -42,6 +59,8 @@ stale `review` posture captured by the earlier review packet.
 | `MAP-UI-002-INTEGRATE-001` | `review` | `Codex` -> `Claude2` | Integration branch claims primitive + hardening together, but its own `next` note says this is integration evidence only and not a Gate B production pass. |
 | `MAP-FE-ADM-001` | `in_progress` | `Codex2` -> `Codex` | Parent task is reopened. Latest machine-truth blocker summary is the current acceptance baseline. |
 | `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` | `in_progress` | `Codex` -> `Codex2` | This support packet only. Direct sidecar `depends_on` still lists `MAP-BE-006`. |
+| `MAP-FE-ADM-001-SIDECAR-REVIEW` | `review_approved` | `Codex` -> `Codex2` | Separate sidecar on another branch already cleared reviewer approval before this packet refresh; its pending owner closeout must not be misrepresented as absent Codex-owned work. |
+| `MAP-OBS-001` | `review` | `Codex2` -> `Codex` | Separate parent task was already waiting on `reviewer=Codex` before the earlier acceptance handoff, so this packet cannot claim that no review work was pending globally. |
 
 Latest parent blocker summary from live machine truth:
 
@@ -201,18 +220,17 @@ This pass adds only:
 
 Verification used for this packet:
 
-- `scripts/ai-status.sh list --owner Codex --status todo`
-- `scripts/ai-status.sh list --owner Codex --status in_progress`
-- `scripts/ai-status.sh list --owner Codex --status review_approved`
-- `scripts/ai-status.sh list --reviewer Codex --status review`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-ACCEPTANCE`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001`
-- `sed -n '900,985p' "$AI_STATUS_ROOT/ai-status.json"` for
-  `MAP-UI-002-HARDEN-001` and `MAP-UI-002-INTEGRATE-001`
-- `sed -n '660,740p' "$AI_STATUS_ROOT/ai-status.json"` for `MAP-FE-ADM-001`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002-HARDEN-001`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002-INTEGRATE-001`
+- `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-REVIEW`
+- `AI_NAME=Codex scripts/ai-status.sh list --status in_progress`
+- `AI_NAME=Codex scripts/ai-status.sh list --status review`
+- `AI_NAME=Codex scripts/ai-status.sh list --status review_approved`
 - `grep -n 'MAP-BE-006' "$AI_STATUS_ROOT/ai-task-archive.jsonl"`
-- task-scoped `grep` against `"$AI_STATUS_ROOT/ai-activity-log.jsonl"` for
-  `MAP-FE-ADM-001`
+- `grep -n 'MAP-FE-ADM-001-SIDECAR-ACCEPTANCE\|MAP-FE-ADM-001-SIDECAR-REVIEW\|MAP-OBS-001' "$AI_STATUS_ROOT/ai-activity-log.jsonl" | tail -n 20`
 - `git show origin/codex/map-fe-adm-001-gateb-corrective:...` for the cited
   page, helper, test, screen-requirements, final-evidence, and api-client files
 - `git diff --check -- support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-SIDECAR-ACCEPTANCE.md`
