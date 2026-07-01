@@ -6,8 +6,8 @@
 - **Parent Owner / Reviewer:** `Codex` / `Claude2`
 - **Current Sidecar Owner / Reviewer:** `Codex2` / `Codex`
 - **Planning Anchor:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- **Machine-Truth Basis:** parent row last_update `2026-06-30T14:52:11Z`; sidecar row last_update `2026-07-01T03:36:58Z` with status `in_progress`
-- **Status:** IN PROGRESS FOR REVIEWER HANDOFF - support artifact only; owner `Codex2` is refreshing the packet for reviewer `Codex` and does not modify canonical truth, runtime behavior, or the parent lifecycle state
+- **Machine-Truth Basis:** parent row currently remains `review`; sidecar history includes a `review` snapshot at `2026-07-01T03:38:10Z` and the current `in_progress` refresh cycle recorded at `2026-07-01T03:39:53Z`
+- **Status:** POST-REFRESH REVIEW HANDOFF PACKET - support artifact only; this packet is written for the reviewer-facing handoff state and does not modify canonical truth, runtime behavior, or the parent lifecycle state
 
 This packet exists because the parent `MAP-BE-003` review surface is split across
 multiple worktrees. The assigned sidecar branch is based on `dev` and does not
@@ -41,8 +41,8 @@ Out of scope:
 
 ### 2.1 Sidecar task
 
-`AI_NAME=Codex2 scripts/ai-status.sh show MAP-BE-003-SIDECAR-REVIEW` currently
-records:
+Current owner refresh row from
+`AI_NAME=Codex2 scripts/ai-status.sh show MAP-BE-003-SIDECAR-REVIEW` records:
 
 - `owner`: `Codex2`
 - `reviewer`: `Codex`
@@ -50,7 +50,15 @@ records:
 - `helper_parent`: `MAP-BE-003`
 - `helper_kind`: `review_packet`
 - `mutates_canonical`: `false`
-- `next`: `Refreshing sidecar review packet to match machine truth owner=Codex2 reviewer=Codex status=in_progress before reviewer handoff.`
+- `next`: `packet needs revision: machine-truth mismatch... Please refresh the packet for the post-handoff review state or label the in_progress snapshot as historical.`
+
+Historical lifecycle note:
+
+- the sidecar had already entered `review` at `2026-07-01T03:38:10Z`
+- the row was then returned to `in_progress` at `2026-07-01T03:39:53Z`
+  specifically so the packet wording could be corrected
+- after this refresh, the owner should hand the same task back to reviewer
+  `Codex`, returning the sidecar to `review`
 
 Dispatch note:
 
@@ -271,10 +279,11 @@ Suggested reopen wording:
 
 Reviewer queue note:
 
-- while this sidecar remains `in_progress`, reviewer `Codex` should treat this
-  packet as pre-handoff material
-- once owner `Codex2` runs the handoff command below, the sidecar should enter
-  `review` and the reviewer can respond with `approve` or `reopen`
+- this packet is intended to remain valid after the owner reruns handoff and
+  the sidecar returns to `review`
+- if a reviewer inspects the packet before the command is rerun, treat the
+  current `in_progress` row as a temporary refresh cycle rather than the final
+  review-facing state
 
 ---
 
@@ -306,6 +315,10 @@ AI_NAME=Codex scripts/ai-status.sh reopen MAP-BE-003-SIDECAR-REVIEW \
 
 - 2026-07-01 - Recreated the sidecar review packet on the current
   `codex2/map-be-003-sidecar-review` owner branch after supervisor reassignment.
+- 2026-07-01 - Updated the packet to distinguish the historical
+  `2026-07-01T03:38:10Z` `review` snapshot from the temporary
+  `2026-07-01T03:39:53Z` `in_progress` refresh cycle so the packet stays
+  accurate after handoff back to reviewer `Codex`.
 - 2026-07-01 - Revalidated that the parent review surface is split between the
   clean sidecar `dev` worktree and the canonical-root working tree carrying the
   parent delta.
