@@ -333,39 +333,68 @@ export class BillingSettlementRepository {
 
     const result = await this.databaseService!.query<LiveTripGovernanceRow>(
       `
-        SELECT
-          COALESCE(
-            NULLIF(orders.record->>'costCenter', ''),
-            NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,costCenterCode}', ''),
-            quota.cost_center_code
-          ) AS cost_center_code,
-          cost_centers.record AS cost_center_record
-        FROM ops.phase1_owned_orders AS orders
-        LEFT JOIN core.phase1_tenant_approval_requests AS approval
-          ON approval.tenant_id = $1
-         AND approval.order_id = orders.order_id
-        LEFT JOIN LATERAL (
-          SELECT ledger.cost_center_code
-          FROM core.phase1_tenant_quota_ledger AS ledger
-          WHERE ledger.tenant_id = $1
-            AND ledger.cost_center_code IS NOT NULL
-            AND (
-              ledger.booking_id = COALESCE(orders.record->>'bookingId', '')
-              OR ledger.booking_id = approval.booking_id
-              OR ledger.evaluation_id = approval.evaluation_id
-            )
-          ORDER BY ledger.created_at DESC
+        WITH matched_order AS (
+          SELECT orders.order_id, orders.record
+          FROM ops.phase1_owned_orders AS orders
+          WHERE orders.order_id = $2
+            AND COALESCE(orders.record->>'tenantId', orders.record->>'tenant_id', '') = $1
           LIMIT 1
-        ) AS quota ON TRUE
+        ),
+        matched_approval AS (
+          SELECT approval.*
+          FROM core.phase1_tenant_approval_requests AS approval
+          WHERE approval.tenant_id = $1
+            AND (
+              approval.order_id = $2
+              OR approval.record->>'orderId' = $2
+              OR approval.record->>'order_id' = $2
+            )
+          ORDER BY approval.created_at DESC
+          LIMIT 1
+        ),
+        governance AS (
+          SELECT COALESCE(
+            NULLIF(matched_order.record->>'costCenter', ''),
+            NULLIF(matched_order.record->>'cost_center', ''),
+            NULLIF(matched_order.record->>'costCenterCode', ''),
+            NULLIF(matched_order.record->>'cost_center_code', ''),
+            NULLIF(matched_approval.record #>> '{evaluationSnapshot,inputSnapshot,costCenterCode}', ''),
+            NULLIF(matched_approval.record #>> '{evaluationSnapshot,inputSnapshot,cost_center_code}', ''),
+            NULLIF(matched_approval.record #>> '{evaluation_snapshot,input_snapshot,costCenterCode}', ''),
+            NULLIF(matched_approval.record #>> '{evaluation_snapshot,input_snapshot,cost_center_code}', ''),
+            quota.cost_center_code
+          ) AS cost_center_code
+          FROM (SELECT 1) AS root
+          LEFT JOIN matched_order ON TRUE
+          LEFT JOIN matched_approval ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT ledger.cost_center_code
+            FROM core.phase1_tenant_quota_ledger AS ledger
+            WHERE ledger.tenant_id = $1
+              AND ledger.cost_center_code IS NOT NULL
+              AND (
+                ledger.booking_id = COALESCE(matched_order.record->>'bookingId', '')
+                OR ledger.booking_id = COALESCE(matched_order.record->>'booking_id', '')
+                OR ledger.booking_id = matched_approval.booking_id
+                OR ledger.evaluation_id = matched_approval.evaluation_id
+                OR ledger.record->>'bookingId' = matched_approval.booking_id
+                OR ledger.record->>'booking_id' = matched_approval.booking_id
+                OR ledger.record->>'evaluationId' = matched_approval.evaluation_id
+                OR ledger.record->>'evaluation_id' = matched_approval.evaluation_id
+              )
+            ORDER BY ledger.created_at DESC
+            LIMIT 1
+          ) AS quota ON TRUE
+          WHERE matched_order.order_id IS NOT NULL
+             OR matched_approval.order_id IS NOT NULL
+        )
+        SELECT
+          governance.cost_center_code,
+          cost_centers.record AS cost_center_record
+        FROM governance
         LEFT JOIN core.phase1_tenant_cost_centers AS cost_centers
           ON cost_centers.tenant_id = $1
-         AND cost_centers.code = COALESCE(
-           NULLIF(orders.record->>'costCenter', ''),
-           NULLIF(approval.record #>> '{evaluationSnapshot,inputSnapshot,costCenterCode}', ''),
-           quota.cost_center_code
-         )
-        WHERE orders.order_id = $2
-          AND COALESCE(orders.record->>'tenantId', '') = $1
+         AND cost_centers.code = governance.cost_center_code
         LIMIT 1
       `,
       [tenantId, orderId],
