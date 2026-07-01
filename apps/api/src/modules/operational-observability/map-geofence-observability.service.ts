@@ -53,6 +53,16 @@ export interface MapGeofenceObservabilitySnapshot {
   lastEventAt: string | null;
 }
 
+type RollingAlertEventKind = "provider_outage" | "policy_denial";
+
+type RollingAlertEvent = {
+  kind: RollingAlertEventKind;
+  observedAtMs: number;
+};
+
+const MAP_GEOFENCE_ALERT_WINDOW_MS = 15 * 60 * 1000;
+const MAX_ROLLING_ALERT_EVENTS = 2_000;
+
 @Injectable()
 export class MapGeofenceObservabilityService {
   private providerHealth: MapGeofenceObservabilitySnapshot["providerHealth"] = {
@@ -90,6 +100,7 @@ export class MapGeofenceObservabilityService {
   };
 
   private lastEventAt: string | null = null;
+  private readonly rollingAlertEvents: RollingAlertEvent[] = [];
 
   recordProviderHealth(input: {
     status: GeoProviderOperationalStatus;
@@ -125,6 +136,7 @@ export class MapGeofenceObservabilityService {
         return;
       case "provider_outage":
         this.geoCounters.providerOutageCount += 1;
+        this.recordRollingAlertEvent("provider_outage");
         return;
     }
   }
@@ -141,6 +153,7 @@ export class MapGeofenceObservabilityService {
     }
     if (input.policyDenied) {
       this.serviceAreaCounters.policyDenialCount += 1;
+      this.recordRollingAlertEvent("policy_denial");
       return;
     }
     if (input.decision === "serviceable") {
@@ -185,8 +198,65 @@ export class MapGeofenceObservabilityService {
     };
   }
 
+  getRecentAlertSignals(
+    referenceDate = new Date(),
+    windowMs = MAP_GEOFENCE_ALERT_WINDOW_MS,
+  ) {
+    const referenceMs = referenceDate.getTime();
+    const cutoffMs = referenceMs - windowMs;
+    this.pruneRollingAlertEvents(cutoffMs);
+
+    const eventsInWindow = this.rollingAlertEvents.filter(
+      (event) =>
+        event.observedAtMs >= cutoffMs && event.observedAtMs <= referenceMs,
+    );
+    const failClosedCheckedAtMs = this.providerHealth.lastCheckedAt
+      ? Date.parse(this.providerHealth.lastCheckedAt)
+      : Number.NaN;
+    const failClosedInWindow =
+      this.providerHealth.failClosed &&
+      Number.isFinite(failClosedCheckedAtMs) &&
+      failClosedCheckedAtMs >= cutoffMs &&
+      failClosedCheckedAtMs <= referenceMs;
+
+    return {
+      providerOutageCount:
+        eventsInWindow.filter((event) => event.kind === "provider_outage")
+          .length + (failClosedInWindow ? 1 : 0),
+      policyDenialCount: eventsInWindow.filter(
+        (event) => event.kind === "policy_denial",
+      ).length,
+      windowMinutes: Math.round(windowMs / 60_000),
+    };
+  }
+
   private touch() {
     this.lastEventAt = new Date().toISOString();
     return this.lastEventAt;
+  }
+
+  private recordRollingAlertEvent(kind: RollingAlertEventKind) {
+    const observedAtMs = Date.now();
+    this.rollingAlertEvents.push({ kind, observedAtMs });
+    const cutoffMs = observedAtMs - MAP_GEOFENCE_ALERT_WINDOW_MS;
+    this.pruneRollingAlertEvents(cutoffMs);
+  }
+
+  private pruneRollingAlertEvents(cutoffMs: number) {
+    const firstRetainedIndex = this.rollingAlertEvents.findIndex(
+      (event) => event.observedAtMs >= cutoffMs,
+    );
+    if (firstRetainedIndex > 0) {
+      this.rollingAlertEvents.splice(0, firstRetainedIndex);
+    } else if (firstRetainedIndex === -1) {
+      this.rollingAlertEvents.splice(0);
+    }
+
+    if (this.rollingAlertEvents.length > MAX_ROLLING_ALERT_EVENTS) {
+      this.rollingAlertEvents.splice(
+        0,
+        this.rollingAlertEvents.length - MAX_ROLLING_ALERT_EVENTS,
+      );
+    }
   }
 }

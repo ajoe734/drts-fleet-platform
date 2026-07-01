@@ -772,17 +772,23 @@ describe("OperationalObservabilityService", () => {
   it("aggregates workflow metrics and raises role-routed alerts", async () => {
     const mapGeofenceObservabilityService =
       new MapGeofenceObservabilityService();
-    mapGeofenceObservabilityService.recordProviderHealth({
-      status: "unhealthy",
-      provider: "external-map",
-      mode: "external",
-      failClosed: true,
-    });
-    mapGeofenceObservabilityService.recordGeoOutcome("provider_outage");
-    mapGeofenceObservabilityService.recordServiceAreaEvaluation({
-      decision: "not_serviceable",
-      policyDenied: true,
-    });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-30T10:25:00.000Z"));
+      mapGeofenceObservabilityService.recordProviderHealth({
+        status: "unhealthy",
+        provider: "external-map",
+        mode: "external",
+        failClosed: true,
+      });
+      mapGeofenceObservabilityService.recordGeoOutcome("provider_outage");
+      mapGeofenceObservabilityService.recordServiceAreaEvaluation({
+        decision: "not_serviceable",
+        policyDenied: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
     const { service, callcenterService, reportingFilingService } =
       createServiceFixture(mapGeofenceObservabilityService);
 
@@ -968,5 +974,53 @@ describe("OperationalObservabilityService", () => {
         }),
       ]),
     );
+  });
+
+  it("does not latch map outage or geofence denial alerts from historical counters", async () => {
+    const mapGeofenceObservabilityService =
+      new MapGeofenceObservabilityService();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-30T10:00:00.000Z"));
+      mapGeofenceObservabilityService.recordProviderHealth({
+        status: "unhealthy",
+        provider: "external-map",
+        mode: "external",
+        failClosed: true,
+      });
+      mapGeofenceObservabilityService.recordGeoOutcome("provider_outage");
+      for (let index = 0; index < 4; index += 1) {
+        mapGeofenceObservabilityService.recordServiceAreaEvaluation({
+          decision: "not_serviceable",
+          policyDenied: true,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    const { service } = createServiceFixture(mapGeofenceObservabilityService);
+
+    const snapshot = await service.getSnapshot(
+      new Date("2026-04-30T10:30:00.000Z"),
+    );
+    const providerAlert = snapshot.alerts.find(
+      (alert) => alert.key === "map_provider_outage",
+    );
+    const denialAlert = snapshot.alerts.find(
+      (alert) => alert.key === "map_geofence_denial_burst",
+    );
+
+    expect(snapshot.mapGeofence).toMatchObject({
+      geo: { providerOutageCount: 1 },
+      serviceArea: { policyDenialCount: 4 },
+    });
+    expect(providerAlert).toMatchObject({
+      measuredValue: 0,
+      state: "healthy",
+    });
+    expect(denialAlert).toMatchObject({
+      measuredValue: 0,
+      state: "healthy",
+    });
   });
 });

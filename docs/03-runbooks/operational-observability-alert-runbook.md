@@ -25,8 +25,8 @@ The formal workload, SLA, and degradation baseline now lives in
 | `driver_state_lag`           | ops           | none            | oldest stale driver location lag for dispatch-eligible supply | 10 min  | 20 min   |
 | `webhook_failure_burst`      | platform      | none            | failed webhook deliveries in trailing 1 hour                  | 2       | 5        |
 | `eligibility_review_backlog` | ops           | platform        | total partner eligibility manual-review / denied queue        | 2       | 4        |
-| `map_provider_outage`        | ops           | platform        | map provider outage/fail-closed signal                        | 1       | 3        |
-| `map_geofence_denial_burst`  | ops           | platform        | service-area stop-policy denial count                         | 3       | 10       |
+| `map_provider_outage`        | ops           | platform        | trailing 15-minute provider outage/fail-closed signal         | 1       | 3        |
+| `map_geofence_denial_burst`  | ops           | platform        | trailing 15-minute service-area stop-policy denial count      | 3       | 10       |
 
 ## Snapshot Fields
 
@@ -71,6 +71,11 @@ The shared snapshot exposes these workflow families:
   - provider outage, address ambiguity, coordinate-less attempt, manual override, and resolved address counters
   - service-area serviceable/manual-review/policy-denial/out-of-area counters
   - geometry publish/retire/mutation counters
+
+The `mapGeofence` counters are cumulative process-local evidence. Alert
+measured values for `map_provider_outage` and `map_geofence_denial_burst` are
+derived from a trailing 15-minute rolling signal so old provider failures or
+policy denials do not keep alerts latched after the recent signal clears.
 
 ## Role Views
 
@@ -189,6 +194,7 @@ Check:
 
 - `GET /api/geo/health` provider status, mode, fail-closed flag, and missing secrets
 - `mapGeofence.geo.providerOutageCount`
+- `map_provider_outage` alert measured value, which only counts recent outage/fail-closed signal
 - whether address ambiguity and coordinate-less counters are also increasing
 
 Likely actions:
@@ -202,6 +208,7 @@ Likely actions:
 Check:
 
 - `mapGeofence.serviceArea.policyDenialCount`
+- `map_geofence_denial_burst` alert measured value, which only counts recent policy denial signal
 - latest `service_area.evaluated` audits for `policyCodes`, `reasonCodes`, and `geometryVersionRefs`
 - recent service-area boundary or stop-policy publish/retire audits
 

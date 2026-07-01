@@ -509,6 +509,22 @@ describe("ServiceAreaService", () => {
         }),
       }),
     );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.policy.published",
+        actorId: "platform-admin-geo-001",
+        actorType: "platform_admin",
+        requestId: "req-service-area-admin-001",
+        newValuesSummary: expect.objectContaining({
+          policyId: created.record.serviceAreaId,
+          policyCode: "KHH_CORE",
+          policyKind: "service_area_boundary",
+          geometryType: "polygon",
+          effectiveFrom: "2026-06-01T00:00:00.000Z",
+          reason: "launch kaohsiung pilot",
+        }),
+      }),
+    );
   });
 
   it("keeps future-effective published service areas out of evaluator until active", async () => {
@@ -602,7 +618,8 @@ describe("ServiceAreaService", () => {
   });
 
   it("publishes and retires stop policies without losing service-area coverage", async () => {
-    const { service, repository, context } = createMutationService();
+    const { service, repository, auditNotificationService, context } =
+      createMutationService();
     const policy = await service.createStopPolicy(
       {
         policyCode: "CITY_HALL_PICKUP_BLOCK",
@@ -668,6 +685,35 @@ describe("ServiceAreaService", () => {
       }).decision,
     ).toBe("serviceable");
     expect(repository.persistStopPolicy).toHaveBeenCalledTimes(4);
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.policy.published",
+        requestId: "req-service-area-admin-001",
+        newValuesSummary: expect.objectContaining({
+          policyId: policy.record.stopPolicyId,
+          policyCode: "CITY_HALL_PICKUP_BLOCK",
+          policyKind: "stop_policy",
+          geometryType: "circle",
+          direction: "pickup",
+          effect: "deny",
+          reason: "temporary city hall curb works",
+        }),
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.policy.retired",
+        requestId: "req-service-area-admin-001",
+        newValuesSummary: expect.objectContaining({
+          policyId: policy.record.stopPolicyId,
+          policyCode: "CITY_HALL_PICKUP_BLOCK",
+          policyKind: "stop_policy",
+          effectiveUntil: "2026-07-15T00:00:00.000Z",
+          retiredAt: expect.any(String),
+          reason: "curb works completed",
+        }),
+      }),
+    );
   });
 
   it("rejects self-intersecting service-area geometry before persistence", async () => {

@@ -231,9 +231,14 @@ export class OperationalObservabilityService {
     const degradedAdapterCount = adapterHealth.filter(
       (adapter) => adapter.status !== "healthy",
     ).length;
-    const mapProviderOutageSignal =
-      mapGeofence.geo.providerOutageCount +
-      (mapGeofence.providerHealth.failClosed ? 1 : 0);
+    const mapGeofenceAlertSignals =
+      this.mapGeofenceObservabilityService?.getRecentAlertSignals(
+        referenceDate,
+      ) ?? {
+        providerOutageCount: 0,
+        policyDenialCount: 0,
+        windowMinutes: 15,
+      };
 
     return {
       generatedAt,
@@ -282,14 +287,14 @@ export class OperationalObservabilityService {
         ),
         this.buildAlert(
           "map_provider_outage",
-          mapProviderOutageSignal,
+          mapGeofenceAlertSignals.providerOutageCount,
           MAP_PROVIDER_OUTAGE_THRESHOLDS,
           ["ops", "platform"],
           generatedAt,
         ),
         this.buildAlert(
           "map_geofence_denial_burst",
-          mapGeofence.serviceArea.policyDenialCount,
+          mapGeofenceAlertSignals.policyDenialCount,
           MAP_GEOFENCE_DENIAL_THRESHOLDS,
           ["ops", "platform"],
           generatedAt,
