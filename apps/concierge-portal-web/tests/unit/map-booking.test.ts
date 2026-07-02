@@ -111,7 +111,6 @@ describe("concierge map booking helpers", () => {
 
     expect(payload).toEqual({
       address: "Text only pickup",
-      surface: "concierge_portal",
     });
   });
 });

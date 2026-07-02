@@ -86,13 +86,13 @@ export function buildConciergeManualPinAddress({
   const parsedLat = parseConciergeCoordinate(lat, { min: -90, max: 90 });
   const parsedLng = parseConciergeCoordinate(lng, { min: -180, max: 180 });
   if (parsedLat === null || parsedLng === null) {
-    return { address: trimmedAddress, surface: "concierge_portal" };
+    return { address: trimmedAddress };
   }
 
   const reason =
     manualOverrideReason?.trim() || "concierge assisted-entry map pin";
 
-  return {
+  const payload = {
     address: trimmedAddress,
     lat: parsedLat,
     lng: parsedLng,
@@ -115,4 +115,6 @@ export function buildConciergeManualPinAddress({
       surface: "concierge_portal",
     },
   };
+
+  return payload as AddressPayload;
 }
