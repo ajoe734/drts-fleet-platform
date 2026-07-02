@@ -12,7 +12,7 @@ import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 export function ConciergeShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { setLocale, t } = useTranslation();
+  const { ready: languageReady, setLocale, t } = useTranslation();
   const navItems = getConciergeNavItems(t);
   const activeItem = findConciergeNavItem(pathname, t);
   const { ready, session, signOut } = useConciergePortal();
@@ -66,6 +66,7 @@ export function ConciergeShell({ children }: { children: ReactNode }) {
                 <button
                   aria-label={t("shell.language.toZh")}
                   className="secondary-button"
+                  disabled={!languageReady}
                   onClick={() => setLocale("zh")}
                   type="button"
                 >
@@ -74,6 +75,7 @@ export function ConciergeShell({ children }: { children: ReactNode }) {
                 <button
                   aria-label={t("shell.language.toEn")}
                   className="secondary-button"
+                  disabled={!languageReady}
                   onClick={() => setLocale("en")}
                   type="button"
                 >

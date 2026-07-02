@@ -30,6 +30,12 @@ import {
   formatTraceEventType,
 } from "@/lib/formatters";
 import { useTranslation } from "@/lib/i18n";
+import {
+  buildConciergeManualPinAddress,
+  getConciergeMapBookingGate,
+  parseConciergeMapProviderState,
+  type ConciergeMapProviderState,
+} from "@/lib/map-booking";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 type SubmissionSummary = {
@@ -37,6 +43,38 @@ type SubmissionSummary = {
   trace: DispatchTraceLogRecord[];
   callbackTask: CallbackTaskRecord | null;
 };
+
+const CONCIERGE_PICKUP_FIXTURE_PIN = {
+  lat: "25.037519",
+  lng: "121.56368",
+};
+
+const CONCIERGE_DROPOFF_FIXTURE_PIN = {
+  lat: "25.033879",
+  lng: "121.568743",
+};
+
+type ConciergeMapPinState = "missing" | "confirmed" | "invalid";
+
+function getConciergeMapPinState(
+  lat: string,
+  lng: string,
+): ConciergeMapPinState {
+  if (!lat.trim() && !lng.trim()) {
+    return "missing";
+  }
+
+  const parsedLat = Number(lat);
+  const parsedLng = Number(lng);
+  return Number.isFinite(parsedLat) &&
+    Number.isFinite(parsedLng) &&
+    parsedLat >= -90 &&
+    parsedLat <= 90 &&
+    parsedLng >= -180 &&
+    parsedLng <= 180
+    ? "confirmed"
+    : "invalid";
+}
 
 export default function ConciergeBookingCreatePage() {
   const router = useRouter();
@@ -59,9 +97,18 @@ export default function ConciergeBookingCreatePage() {
   const [pickupAddress, setPickupAddress] = useState(
     desk?.location ?? t("booking.defaultPickup"),
   );
+  const [pickupLat, setPickupLat] = useState("");
+  const [pickupLng, setPickupLng] = useState("");
   const [dropoffAddress, setDropoffAddress] = useState(
     t("booking.defaultDropoff"),
   );
+  const [dropoffLat, setDropoffLat] = useState("");
+  const [dropoffLng, setDropoffLng] = useState("");
+  const [manualPinReason, setManualPinReason] = useState(
+    t("booking.map.defaultReason"),
+  );
+  const [mapProviderState, setMapProviderState] =
+    useState<ConciergeMapProviderState>("manual_fallback");
   const [requestedProduct, setRequestedProduct] =
     useState<RequestedServiceProduct>("standard_taxi");
   const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
@@ -73,6 +120,28 @@ export default function ConciergeBookingCreatePage() {
   const [currentSession, setCurrentSession] =
     useState<CallSessionRecord | null>(null);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
+
+  useEffect(() => {
+    const syncMapProviderState = () => {
+      const query = new URLSearchParams(window.location.search);
+      setMapProviderState(
+        parseConciergeMapProviderState(query.get("mapProviderState")),
+      );
+    };
+    syncMapProviderState();
+    window.addEventListener("popstate", syncMapProviderState);
+    window.addEventListener(
+      "drts:map-provider-state-change",
+      syncMapProviderState,
+    );
+    return () => {
+      window.removeEventListener("popstate", syncMapProviderState);
+      window.removeEventListener(
+        "drts:map-provider-state-change",
+        syncMapProviderState,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     const activeCallId = session?.activeCallId;
@@ -118,6 +187,39 @@ export default function ConciergeBookingCreatePage() {
     currentSession && currentSession.status === "active"
       ? currentSession
       : null;
+  const mapGate = getConciergeMapBookingGate({
+    pickupLat,
+    pickupLng,
+    dropoffLat,
+    dropoffLng,
+  });
+  const mapGateState = mapGate.canSubmit ? "coordinates_ready" : mapGate.reason;
+
+  const pickupPinState = getConciergeMapPinState(pickupLat, pickupLng);
+  const dropoffPinState = getConciergeMapPinState(dropoffLat, dropoffLng);
+  const mapProviderUnavailable = mapProviderState === "provider_unavailable";
+
+  function updatePickupAddress(nextAddress: string) {
+    setPickupAddress(nextAddress);
+    setPickupLat("");
+    setPickupLng("");
+  }
+
+  function updateDropoffAddress(nextAddress: string) {
+    setDropoffAddress(nextAddress);
+    setDropoffLat("");
+    setDropoffLng("");
+  }
+
+  function confirmPickupPin() {
+    setPickupLat(CONCIERGE_PICKUP_FIXTURE_PIN.lat);
+    setPickupLng(CONCIERGE_PICKUP_FIXTURE_PIN.lng);
+  }
+
+  function confirmDropoffPin() {
+    setDropoffLat(CONCIERGE_DROPOFF_FIXTURE_PIN.lat);
+    setDropoffLng(CONCIERGE_DROPOFF_FIXTURE_PIN.lng);
+  }
 
   return (
     <div className="page-shell">
@@ -323,11 +425,33 @@ export default function ConciergeBookingCreatePage() {
                 return;
               }
 
+              if (!mapGate.canSubmit) {
+                setError(t(`booking.map.error.${mapGate.reason}`));
+                return;
+              }
+
               setBusyKey("submit-order");
               setError(null);
               setSubmission(null);
 
               try {
+                const selectedAt = new Date().toISOString();
+                const pickup = buildConciergeManualPinAddress({
+                  address: pickupAddress,
+                  lat: pickupLat,
+                  lng: pickupLng,
+                  actorId: session.operatorId,
+                  selectedAt,
+                  manualOverrideReason: manualPinReason,
+                });
+                const dropoff = buildConciergeManualPinAddress({
+                  address: dropoffAddress,
+                  lat: dropoffLat,
+                  lng: dropoffLng,
+                  actorId: session.operatorId,
+                  selectedAt,
+                  manualOverrideReason: manualPinReason,
+                });
                 const client = createConciergeClient(
                   session.operatorId,
                   session.mode,
@@ -348,12 +472,8 @@ export default function ConciergeBookingCreatePage() {
                 const accepted = await client.createCallCenterOrder({
                   callId: workingSession.callId,
                   agentId: session.operatorId,
-                  pickup: {
-                    address: pickupAddress,
-                  },
-                  dropoff: {
-                    address: dropoffAddress,
-                  },
+                  pickup,
+                  dropoff,
                   passenger: {
                     name: passengerName,
                     phone: passengerPhone,
@@ -468,7 +588,7 @@ export default function ConciergeBookingCreatePage() {
               </label>
               <textarea
                 id="pickup-address"
-                onChange={(event) => setPickupAddress(event.target.value)}
+                onChange={(event) => updatePickupAddress(event.target.value)}
                 required
                 value={pickupAddress}
               />
@@ -479,10 +599,107 @@ export default function ConciergeBookingCreatePage() {
               </label>
               <textarea
                 id="dropoff-address"
-                onChange={(event) => setDropoffAddress(event.target.value)}
+                onChange={(event) => updateDropoffAddress(event.target.value)}
                 required
                 value={dropoffAddress}
               />
+            </div>
+            <div
+              className="field-stack"
+              data-concierge-map-booking-gate={mapGateState}
+              data-concierge-map-provider-state={mapProviderState}
+            >
+              <span className="section-kicker">{t("booking.map.eyebrow")}</span>
+              <h3>{t("booking.map.title")}</h3>
+              <p className="form-help">{t("booking.map.body")}</p>
+              {mapProviderUnavailable ? (
+                <p className="form-help" data-concierge-map-provider-outage>
+                  <strong>{t("booking.map.providerUnavailableTitle")}</strong>{" "}
+                  {t("booking.map.providerUnavailableBody")}
+                </p>
+              ) : null}
+              <div
+                className="form-grid"
+                data-concierge-map-coordinate-entry
+                data-concierge-map-pickup-state={pickupPinState}
+                data-concierge-map-dropoff-state={dropoffPinState}
+              >
+                <div className="field-stack">
+                  <strong>{t("booking.map.pin.pickup")}</strong>
+                  <span className="form-help">
+                    {pickupPinState === "confirmed"
+                      ? t("booking.map.pin.confirmed")
+                      : t("booking.map.pin.required")}
+                  </span>
+                  <div className="inline-actions">
+                    <button
+                      className="secondary-button"
+                      data-concierge-map-confirm-pickup
+                      disabled={mapProviderUnavailable}
+                      onClick={confirmPickupPin}
+                      type="button"
+                    >
+                      {t("booking.map.pin.confirmPickup")}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      data-concierge-map-clear-pickup
+                      onClick={() => {
+                        setPickupLat("");
+                        setPickupLng("");
+                      }}
+                      type="button"
+                    >
+                      {t("booking.map.pin.clearPickup")}
+                    </button>
+                  </div>
+                </div>
+                <div className="field-stack">
+                  <strong>{t("booking.map.pin.dropoff")}</strong>
+                  <span className="form-help">
+                    {dropoffPinState === "confirmed"
+                      ? t("booking.map.pin.confirmed")
+                      : t("booking.map.pin.required")}
+                  </span>
+                  <div className="inline-actions">
+                    <button
+                      className="secondary-button"
+                      data-concierge-map-confirm-dropoff
+                      disabled={mapProviderUnavailable}
+                      onClick={confirmDropoffPin}
+                      type="button"
+                    >
+                      {t("booking.map.pin.confirmDropoff")}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      data-concierge-map-clear-dropoff
+                      onClick={() => {
+                        setDropoffLat("");
+                        setDropoffLng("");
+                      }}
+                      type="button"
+                    >
+                      {t("booking.map.pin.clearDropoff")}
+                    </button>
+                  </div>
+                </div>
+                <div className="field-stack">
+                  <label htmlFor="manual-pin-reason">
+                    {t("booking.map.field.reason")}
+                  </label>
+                  <textarea
+                    id="manual-pin-reason"
+                    onChange={(event) => setManualPinReason(event.target.value)}
+                    value={manualPinReason}
+                  />
+                </div>
+              </div>
+              <p className="form-help">
+                {mapGate.canSubmit
+                  ? t("booking.map.ready")
+                  : t(`booking.map.error.${mapGate.reason}`)}
+              </p>
             </div>
             <div className="field-stack">
               <label htmlFor="callback-due-at">
@@ -517,7 +734,7 @@ export default function ConciergeBookingCreatePage() {
             <div className="inline-actions">
               <button
                 className="primary-button"
-                disabled={busyKey === "submit-order"}
+                disabled={busyKey === "submit-order" || !mapGate.canSubmit}
                 type="submit"
               >
                 {t("booking.submit")}

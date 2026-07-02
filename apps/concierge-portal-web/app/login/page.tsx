@@ -8,7 +8,7 @@ import { useConciergePortal } from "@/lib/portal-state";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { session, signIn } = useConciergePortal();
+  const { ready, session, signIn } = useConciergePortal();
   const { t } = useTranslation();
   const [operatorName, setOperatorName] = useState(
     session?.operatorName ?? t("login.defaultName"),
@@ -89,7 +89,7 @@ export default function LoginPage() {
           </div>
 
           <div className="inline-actions">
-            <button className="primary-button" type="submit">
+            <button className="primary-button" disabled={!ready} type="submit">
               {t("login.submit")}
             </button>
           </div>
