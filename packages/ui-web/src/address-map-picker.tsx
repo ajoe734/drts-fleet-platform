@@ -1,7 +1,14 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { CanvasIcon } from "./canvas-primitives";
 import { buildCanvasTheme, type CanvasTheme } from "./canvas-tokens";
@@ -38,7 +45,10 @@ export type {
   AddressMapPickerProvider,
 } from "./address-map-picker-core";
 
-const DEFAULT_THEME = buildCanvasTheme({ surface: "platform", density: "compact" });
+const DEFAULT_THEME = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
 
 export interface MapBounds {
   minLat: number;
@@ -209,14 +219,24 @@ export function AddressMapPreviewSurface({
         aria-label={ariaLabel}
         viewBox={`0 0 ${STAGE_W} ${STAGE_H}`}
         preserveAspectRatio="none"
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+        }}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerLeave={endDrag}
       >
         {/* grid */}
         {[20, 40, 60, 80].map((g) => (
-          <g key={`grid-${g}`} stroke={theme.border} strokeWidth={0.3} opacity={0.5}>
+          <g
+            key={`grid-${g}`}
+            stroke={theme.border}
+            strokeWidth={0.3}
+            opacity={0.5}
+          >
             <line x1={g} y1={0} x2={g} y2={STAGE_H} />
             <line x1={0} y1={g} x2={STAGE_W} y2={g} />
           </g>
@@ -235,7 +255,10 @@ export function AddressMapPreviewSurface({
                   : pin.label
               }
               tabIndex={pin.draggable ? 0 : undefined}
-              style={{ cursor: pin.draggable ? "grab" : "default", outline: "none" }}
+              style={{
+                cursor: pin.draggable ? "grab" : "default",
+                outline: "none",
+              }}
               onPointerDown={
                 pin.draggable
                   ? (event) => {
@@ -265,7 +288,12 @@ export function AddressMapPreviewSurface({
                   : undefined
               }
             >
-              <circle r={3.4} fill={color} stroke={theme.surface} strokeWidth={1} />
+              <circle
+                r={3.4}
+                fill={color}
+                stroke={theme.surface}
+                strokeWidth={1}
+              />
               <circle r={7} fill={color} opacity={0.18} />
             </g>
           );
@@ -361,7 +389,12 @@ function buttonStyle(
     };
   }
   if (variant === "ghost") {
-    return { ...base, background: "transparent", color: theme.text, border: "1px solid transparent" };
+    return {
+      ...base,
+      background: "transparent",
+      color: theme.text,
+      border: "1px solid transparent",
+    };
   }
   return {
     ...base,
@@ -410,9 +443,18 @@ function StatusBanner({
     >
       <CanvasIcon name={icon} size={16} style={{ color, marginTop: 1 }} />
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: theme.text }}>{title}</div>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: theme.text }}>
+          {title}
+        </div>
         {body ? (
-          <div style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 2, lineHeight: 1.4 }}>
+          <div
+            style={{
+              fontSize: 11.5,
+              color: theme.textMuted,
+              marginTop: 2,
+              lineHeight: 1.4,
+            }}
+          >
             {body}
           </div>
         ) : null}
@@ -458,7 +500,13 @@ function TonePill({
       }}
     >
       <span
-        style={{ width: 6, height: 6, borderRadius: 999, background: color, display: "inline-block" }}
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: color,
+          display: "inline-block",
+        }}
       />
       {children}
     </span>
@@ -467,7 +515,9 @@ function TonePill({
 
 // ── AddressMapPicker ──
 
-export interface AddressMapPickerProps<TServiceProduct extends string = string> {
+export interface AddressMapPickerProps<
+  TServiceProduct extends string = string,
+> {
   /** Provider seam; inject the mock provider in CI/tests. */
   provider: AddressMapPickerProvider;
   /** Surface tag written into coordinate provenance. */
@@ -520,19 +570,39 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   } = props;
 
   const theme = themeProp ?? DEFAULT_THEME;
-  const labels = useMemo(() => resolveAddressPickerLabels(props.labels), [props.labels]);
+  const labels = useMemo(
+    () => resolveAddressPickerLabels(props.labels),
+    [props.labels],
+  );
   const reactId = useId();
   const domId = props.id ?? reactId;
 
   const controlled = value !== undefined;
   const [selection, setSelection] = useState<SelectionState | null>(() =>
     (controlled ? value : defaultValue)
-      ? { address: (controlled ? value : defaultValue) as AddressPayload, manualReason: "" }
+      ? {
+          address: (controlled ? value : defaultValue) as AddressPayload,
+          manualReason: "",
+        }
       : null,
   );
+  useEffect(() => {
+    if (!controlled) {
+      return;
+    }
+    setSelection(
+      value
+        ? {
+            address: value,
+            manualReason: value.manualOverrideReason ?? "",
+          }
+        : null,
+    );
+  }, [controlled, value]);
+
   const selectedAddress = controlled
-    ? value ?? null
-    : selection?.address ?? null;
+    ? (selection?.address ?? value ?? null)
+    : (selection?.address ?? null);
 
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -549,7 +619,8 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   const [providerState, setProviderState] = useState<AddressProviderState>(() =>
     deriveProviderState(providerHealth ?? null),
   );
-  const [serviceability, setServiceability] = useState<ServiceAreaEvaluationResult | null>(null);
+  const [serviceability, setServiceability] =
+    useState<ServiceAreaEvaluationResult | null>(null);
   const [serviceabilityPending, setServiceabilityPending] = useState(false);
 
   // Provider health probe (only when no snapshot was supplied).
@@ -585,11 +656,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
 
   const applySelection = useCallback(
     (address: AddressPayload | null, reason: string) => {
-      if (!controlled) {
-        setSelection(address ? { address, manualReason: reason } : null);
-      }
+      setSelection(address ? { address, manualReason: reason } : null);
     },
-    [controlled],
+    [],
   );
 
   const runServiceability = useCallback(
@@ -814,7 +883,14 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       lastChangeRef.current = signature;
       onChange(change);
     }
-  }, [dispatchReady, onChange, providerState, selectedAddress, serviceability, status]);
+  }, [
+    dispatchReady,
+    onChange,
+    providerState,
+    selectedAddress,
+    serviceability,
+    status,
+  ]);
 
   const pinPoint = addressToGeoPoint(selectedAddress);
   const decision = serviceability?.decision ?? null;
@@ -824,7 +900,12 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       ? confidenceTone(selectedAddress.geocodeConfidence ?? null)
       : "neutral";
 
-  const liveMessage = buildLiveMessage(status, candidates.length, decision, labels);
+  const liveMessage = buildLiveMessage(
+    status,
+    candidates.length,
+    decision,
+    labels,
+  );
 
   return (
     <div
@@ -846,7 +927,8 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       </div>
 
       {/* Provider outage */}
-      {status === "provider_unavailable" || (!providerAvailable && !manualMode) ? (
+      {status === "provider_unavailable" ||
+      (!providerAvailable && !manualMode) ? (
         <StatusBanner
           theme={theme}
           tone="danger"
@@ -866,7 +948,12 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
       ) : null}
 
       {providerState.degraded && providerAvailable ? (
-        <StatusBanner theme={theme} tone="warn" icon="warn" title={labels.degradedNote} />
+        <StatusBanner
+          theme={theme}
+          tone="warn"
+          icon="warn"
+          title={labels.degradedNote}
+        />
       ) : null}
 
       {/* Search */}
@@ -893,7 +980,11 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           />
           <button
             type="button"
-            style={buttonStyle(theme, "primary", !providerAvailable || searching)}
+            style={buttonStyle(
+              theme,
+              "primary",
+              !providerAvailable || searching,
+            )}
             disabled={!providerAvailable || searching}
             onClick={() => void handleSearch()}
           >
@@ -902,27 +993,47 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           </button>
         </div>
         {searchError ? (
-          <div style={{ marginTop: 6, fontSize: 11.5, color: theme.danger }}>{searchError}</div>
+          <div style={{ marginTop: 6, fontSize: 11.5, color: theme.danger }}>
+            {searchError}
+          </div>
         ) : null}
       </div>
 
       {/* Candidates */}
       {status === "candidates" && candidates.length > 0 ? (
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 6 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: theme.textMuted,
+              marginBottom: 6,
+            }}
+          >
             {labels.candidatesTitle}
           </div>
           <ul
             role="listbox"
             aria-label={labels.candidatesTitle}
-            style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}
+            style={{
+              listStyle: "none",
+              margin: 0,
+              padding: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
           >
             {candidates.map((candidate) => {
               const isSelected =
                 selectedAddress?.providerCandidateId ===
                 (candidate.providerCandidateId ?? candidate.candidateId);
               return (
-                <li key={candidate.candidateId} role="option" aria-selected={isSelected}>
+                <li
+                  key={candidate.candidateId}
+                  role="option"
+                  aria-selected={isSelected}
+                >
                   <button
                     type="button"
                     onClick={() => handleSelectCandidate(candidate)}
@@ -943,14 +1054,30 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
                     }}
                   >
                     <span style={{ minWidth: 0 }}>
-                      <span style={{ display: "block", fontSize: 12.5, fontWeight: 600 }}>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                        }}
+                      >
                         {candidate.displayName}
                       </span>
-                      <span style={{ display: "block", fontSize: 11, color: theme.textMuted, overflowWrap: "anywhere" }}>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          color: theme.textMuted,
+                          overflowWrap: "anywhere",
+                        }}
+                      >
                         {candidate.address}
                       </span>
                     </span>
-                    <TonePill theme={theme} tone={confidenceTone(candidate.confidence)}>
+                    <TonePill
+                      theme={theme}
+                      tone={confidenceTone(candidate.confidence)}
+                    >
                       {candidate.confidence}
                     </TonePill>
                   </button>
@@ -970,7 +1097,11 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           title={labels.noMatchTitle}
           body={labels.noMatchBody}
           action={
-            <button type="button" style={buttonStyle(theme, "secondary")} onClick={() => setManualMode(true)}>
+            <button
+              type="button"
+              style={buttonStyle(theme, "secondary")}
+              onClick={() => setManualMode(true)}
+            >
               {labels.manualToggle}
             </button>
           }
@@ -983,11 +1114,23 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
         {...(bounds ? { bounds } : {})}
         emptyLabel={labels.mapEmpty}
         nudgeHint={labels.mapHint}
-        caption={pinPoint ? `${roundCoord(pinPoint.lat)}, ${roundCoord(pinPoint.lng)}` : undefined}
+        caption={
+          pinPoint
+            ? `${roundCoord(pinPoint.lat)}, ${roundCoord(pinPoint.lng)}`
+            : undefined
+        }
         onPinMove={handlePinMove}
         pins={
           pinPoint
-            ? [{ id: "primary", point: pinPoint, tone: pinTone, label: selectedAddress?.address ?? "Selected location", draggable: true }]
+            ? [
+                {
+                  id: "primary",
+                  point: pinPoint,
+                  tone: pinTone,
+                  label: selectedAddress?.address ?? "Selected location",
+                  draggable: true,
+                },
+              ]
             : []
         }
       />
@@ -1005,40 +1148,76 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
             background: theme.surfaceLo,
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 10,
+              alignItems: "flex-start",
+            }}
+          >
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12.5, fontWeight: 600 }}>
                 {selectedAddress.addressName ?? selectedAddress.address}
               </div>
-              <div style={{ fontSize: 11, color: theme.textMuted, overflowWrap: "anywhere" }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  overflowWrap: "anywhere",
+                }}
+              >
                 {selectedAddress.address}
               </div>
             </div>
-            <button type="button" style={buttonStyle(theme, "ghost")} onClick={handleClear}>
+            <button
+              type="button"
+              style={buttonStyle(theme, "ghost")}
+              onClick={handleClear}
+            >
               {labels.clearSelection}
             </button>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <TonePill theme={theme} tone={confidenceTone(selectedAddress.geocodeConfidence ?? null)}>
-              {labels.confidenceLabel}: {selectedAddress.geocodeConfidence ?? "unknown"}
+            <TonePill
+              theme={theme}
+              tone={confidenceTone(selectedAddress.geocodeConfidence ?? null)}
+            >
+              {labels.confidenceLabel}:{" "}
+              {selectedAddress.geocodeConfidence ?? "unknown"}
             </TonePill>
             <TonePill theme={theme} tone="neutral">
-              {labels.provenanceLabel}: {selectedAddress.coordinateSource ?? "unknown"}
+              {labels.provenanceLabel}:{" "}
+              {selectedAddress.coordinateSource ?? "unknown"}
             </TonePill>
             {pinPoint ? (
-              <span style={{ fontSize: 11, color: theme.textMuted, fontFamily: theme.monoFamily }}>
-                {labels.coordinatesLabel}: {roundCoord(pinPoint.lat)}, {roundCoord(pinPoint.lng)}
+              <span
+                style={{
+                  fontSize: 11,
+                  color: theme.textMuted,
+                  fontFamily: theme.monoFamily,
+                }}
+              >
+                {labels.coordinatesLabel}: {roundCoord(pinPoint.lat)},{" "}
+                {roundCoord(pinPoint.lng)}
               </span>
             ) : null}
           </div>
-          <div style={{ fontSize: 10.5, color: theme.textMuted }}>{labels.mapHint}</div>
+          <div style={{ fontSize: 10.5, color: theme.textMuted }}>
+            {labels.mapHint}
+          </div>
         </div>
       ) : null}
 
       {/* Serviceability preview */}
       {enableServiceabilityPreview && serviceProductType && selectedAddress ? (
         serviceabilityPending ? (
-          <StatusBanner theme={theme} tone="info" icon="clock" title={labels.serviceabilityPending} />
+          <StatusBanner
+            theme={theme}
+            tone="info"
+            icon="clock"
+            title={labels.serviceabilityPending}
+          />
         ) : decision ? (
           <StatusBanner
             theme={theme}
@@ -1069,10 +1248,14 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
             background: theme.surface,
           }}
         >
-          <div style={{ fontSize: 12, fontWeight: 700 }}>{labels.manualTitle}</div>
+          <div style={{ fontSize: 12, fontWeight: 700 }}>
+            {labels.manualTitle}
+          </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <label style={{ flex: "1 1 120px" }}>
-              <span style={fieldLabelStyle(theme)}>{labels.manualLatLabel}</span>
+              <span style={fieldLabelStyle(theme)}>
+                {labels.manualLatLabel}
+              </span>
               <input
                 type="text"
                 inputMode="decimal"
@@ -1083,7 +1266,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
               />
             </label>
             <label style={{ flex: "1 1 120px" }}>
-              <span style={fieldLabelStyle(theme)}>{labels.manualLngLabel}</span>
+              <span style={fieldLabelStyle(theme)}>
+                {labels.manualLngLabel}
+              </span>
               <input
                 type="text"
                 inputMode="decimal"
@@ -1096,7 +1281,9 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
           </div>
           {requireManualReason ? (
             <label style={{ display: "block" }}>
-              <span style={fieldLabelStyle(theme)}>{labels.manualReasonLabel}</span>
+              <span style={fieldLabelStyle(theme)}>
+                {labels.manualReasonLabel}
+              </span>
               <input
                 type="text"
                 value={manualReason}
@@ -1108,18 +1295,30 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
             </label>
           ) : null}
           {manualError ? (
-            <div style={{ fontSize: 11.5, color: theme.danger }}>{manualError}</div>
+            <div style={{ fontSize: 11.5, color: theme.danger }}>
+              {manualError}
+            </div>
           ) : null}
           <div>
-            <button type="button" style={buttonStyle(theme, "primary")} onClick={handleManualApply}>
+            <button
+              type="button"
+              style={buttonStyle(theme, "primary")}
+              onClick={handleManualApply}
+            >
               <CanvasIcon name="pin" size={14} />
               {labels.manualApply}
             </button>
           </div>
         </div>
-      ) : !manualMode && providerAvailable && status !== "provider_unavailable" ? (
+      ) : !manualMode &&
+        providerAvailable &&
+        status !== "provider_unavailable" ? (
         <div>
-          <button type="button" style={buttonStyle(theme, "ghost")} onClick={() => setManualMode(true)}>
+          <button
+            type="button"
+            style={buttonStyle(theme, "ghost")}
+            onClick={() => setManualMode(true)}
+          >
             <CanvasIcon name="pin" size={14} />
             {labels.manualToggle}
           </button>
@@ -1178,7 +1377,9 @@ export interface AddressMapPairChange {
   bothDispatchReady: boolean;
 }
 
-export interface AddressMapPairPickerProps<TServiceProduct extends string = string> {
+export interface AddressMapPairPickerProps<
+  TServiceProduct extends string = string,
+> {
   provider: AddressMapPickerProvider;
   surface: GeoResolutionSurface;
   theme?: CanvasTheme;
@@ -1216,10 +1417,18 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
   } = props;
 
   const theme = themeProp ?? DEFAULT_THEME;
-  const resolvedLabels = useMemo(() => resolveAddressPickerLabels(labels), [labels]);
-  const [pickup, setPickup] = useState<AddressPayload | null>(props.pickupValue ?? null);
-  const [dropoff, setDropoff] = useState<AddressPayload | null>(props.dropoffValue ?? null);
-  const [serviceability, setServiceability] = useState<ServiceAreaEvaluationResult | null>(null);
+  const resolvedLabels = useMemo(
+    () => resolveAddressPickerLabels(labels),
+    [labels],
+  );
+  const [pickup, setPickup] = useState<AddressPayload | null>(
+    props.pickupValue ?? null,
+  );
+  const [dropoff, setDropoff] = useState<AddressPayload | null>(
+    props.dropoffValue ?? null,
+  );
+  const [serviceability, setServiceability] =
+    useState<ServiceAreaEvaluationResult | null>(null);
 
   const pickupPoint = addressToGeoPoint(pickup);
   const dropoffPoint = addressToGeoPoint(dropoff);
@@ -1263,7 +1472,8 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
     serviceProductType,
   ]);
 
-  const bothDispatchReady = isDispatchReadyAddress(pickup) && isDispatchReadyAddress(dropoff);
+  const bothDispatchReady =
+    isDispatchReadyAddress(pickup) && isDispatchReadyAddress(dropoff);
 
   useEffect(() => {
     onChange?.({ pickup, dropoff, serviceability, bothDispatchReady });
@@ -1272,7 +1482,14 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
   const decision = serviceability?.decision ?? null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: theme.fontFamily }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+        fontFamily: theme.fontFamily,
+      }}
+    >
       <AddressMapPicker
         provider={provider}
         surface={surface}
