@@ -1366,6 +1366,16 @@ export interface AddressMapPairChange {
   bothDispatchReady: boolean;
 }
 
+function buildPairChangeSignature(change: AddressMapPairChange): string {
+  return JSON.stringify({
+    pickup: change.pickup,
+    dropoff: change.dropoff,
+    serviceability: change.serviceability,
+    providerState: change.providerState,
+    bothDispatchReady: change.bothDispatchReady,
+  });
+}
+
 function mergeProviderStates(
   ...states: AddressProviderState[]
 ): AddressProviderState {
@@ -1448,6 +1458,7 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
     useState<AddressProviderState>(() =>
       deriveProviderState(providerHealth ?? null),
     );
+  const lastChangeSignatureRef = useRef<string | null>(null);
 
   const pickupPoint = addressToGeoPoint(pickup);
   const dropoffPoint = addressToGeoPoint(dropoff);
@@ -1522,13 +1533,19 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
     isDispatchReadyAddress(pickup) && isDispatchReadyAddress(dropoff);
 
   useEffect(() => {
-    onChange?.({
+    const nextChange = {
       pickup,
       dropoff,
       serviceability,
       providerState,
       bothDispatchReady,
-    });
+    } satisfies AddressMapPairChange;
+    const nextSignature = buildPairChangeSignature(nextChange);
+    if (lastChangeSignatureRef.current === nextSignature) {
+      return;
+    }
+    lastChangeSignatureRef.current = nextSignature;
+    onChange?.(nextChange);
   }, [
     bothDispatchReady,
     dropoff,
