@@ -232,6 +232,16 @@ describe("GeoService", () => {
         requestId: "req-geo-manual-pin-001",
       }),
     );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "geo.manual_override.created",
+        requestId: "req-geo-manual-pin-001",
+        newValuesSummary: expect.objectContaining({
+          manualOverrideReason: "caller_confirmed_gate",
+          coordinateSource: "manual_pin",
+        }),
+      }),
+    );
   });
 
   it("reverse geocodes coordinates to nearest deterministic fixture", async () => {
