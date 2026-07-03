@@ -6,6 +6,7 @@
 **Sidecar Owner:** `Codex2`  
 **Sidecar Reviewer:** `Claude2`  
 **Generated:** `2026-07-01` (UTC)  
+**Closeout Refresh:** `2026-07-03` (UTC)  
 **Scope:** support-only artifact; does not edit canonical truth or runtime code.
 
 This packet prepares the reviewer-facing acceptance companion for
@@ -13,6 +14,17 @@ This packet prepares the reviewer-facing acceptance companion for
 to support material and follows current machine truth first. Where older
 planning docs still say `review` as of `2026-06-30`, this packet treats that as
 implementation intent and not the current control-plane state.
+
+## 0. Approval Snapshot
+
+- sidecar status now reached `review_approved` on `2026-07-03T14:10:53Z`
+- reviewer conclusion: scope stayed support-only, kept canonical/runtime truth
+  untouched, and verified every cited anchor against `origin/dev`
+- owner closeout note:
+  - this document still preserves the `2026-07-01` machine-truth snapshot used
+    during review handoff
+  - any `in_progress` wording below is historical snapshot content, not the
+    current sidecar lifecycle state
 
 ## 1. Machine Truth Snapshot
 
@@ -193,8 +205,8 @@ This sidecar does not claim parent completion. It provides:
 
 ## 8. Closeout Readiness
 
-- sidecar should be handed to `Claude2` after this support artifact is committed
-  and sidecar machine truth moves to `review`
+- reviewer handoff is complete and the sidecar is now in
+  `review_approved` pending owner closeout commit/push
 - parent owner `Claude2` remains responsible for deciding when parent
   implementation is actually ready for reviewer acceptance
 - no canonical contract/runtime/governance edits are included in this sidecar
