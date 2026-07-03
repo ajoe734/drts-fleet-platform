@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { MapGeofenceObservabilityService } from "../../src/modules/operational-observability/map-geofence-observability.service";
 import { ServiceAreaController } from "../../src/modules/service-area/service-area.controller";
 import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 
@@ -8,7 +9,10 @@ function createService() {
   return new ServiceAreaService();
 }
 
-function createMutationService(repositoryOverrides = {}) {
+function createMutationService(
+  repositoryOverrides = {},
+  observability?: MapGeofenceObservabilityService,
+) {
   const repository = {
     loadState: vi.fn().mockResolvedValue({
       serviceAreas: [],
@@ -30,18 +34,38 @@ function createMutationService(repositoryOverrides = {}) {
   const service = new ServiceAreaService(
     repository as never,
     auditNotificationService as never,
+    observability,
   );
 
   return {
     service,
     repository,
     auditNotificationService,
+    observability,
     context: {
       actorId: "platform-admin-geo-001",
       actorType: "platform_admin" as const,
       requestId: "req-service-area-admin-001",
     },
   };
+}
+
+function createObservedEvaluationService() {
+  const auditNotificationService = {
+    recordAuditLog: vi.fn((input) => ({
+      ...input,
+      auditId: `audit-${input.actionName}`,
+      requestId: input.requestId ?? "generated-request",
+      createdAt: "2026-07-01T00:00:00.000Z",
+    })),
+  };
+  const observability = new MapGeofenceObservabilityService();
+  const service = new ServiceAreaService(
+    undefined,
+    auditNotificationService as never,
+    observability,
+  );
+  return { service, auditNotificationService, observability };
 }
 
 describe("ServiceAreaService", () => {
@@ -106,6 +130,59 @@ describe("ServiceAreaService", () => {
         "stop_policy:TPE_STATION_PICKUP_BLOCK@1",
       ],
     });
+  });
+
+  it("audits evaluations and separates policy denial from coordinate-less attempts", () => {
+    const { service, auditNotificationService, observability } =
+      createObservedEvaluationService();
+
+    service.evaluate(
+      {
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 25.0478, lng: 121.517 },
+        dropoff: { lat: 25.06, lng: 121.58 },
+        requestedAt: "2026-06-30T00:00:00.000Z",
+      },
+      "req-service-area-eval-001",
+    );
+    expect(() =>
+      service.evaluate(
+        {
+          serviceProductType: "taxi_realtime",
+          pickup: { lat: 25.041 } as never,
+        },
+        "req-service-area-eval-002",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    expect(observability.getSnapshot()).toMatchObject({
+      serviceArea: {
+        evaluations: 2,
+        policyDenialCount: 1,
+        coordinateLessAttemptCount: 1,
+        outOfAreaCount: 0,
+      },
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.evaluated",
+        requestId: "req-service-area-eval-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "not_serviceable",
+          policyCodes: ["TPE_STATION_PICKUP_BLOCK"],
+        }),
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.evaluated",
+        requestId: "req-service-area-eval-002",
+        newValuesSummary: expect.objectContaining({
+          decision: "coordinate_less_attempt",
+          coordinateLessAttempt: true,
+        }),
+      }),
+    );
   });
 
   it("returns manual review when a stop hits a review-only policy", () => {
@@ -364,8 +441,9 @@ describe("ServiceAreaService", () => {
   });
 
   it("publishes service-area drafts and feeds the evaluator immediately", async () => {
+    const observability = new MapGeofenceObservabilityService();
     const { service, repository, auditNotificationService, context } =
-      createMutationService();
+      createMutationService({}, observability);
 
     expect(
       service.evaluate({
@@ -437,6 +515,12 @@ describe("ServiceAreaService", () => {
         }),
       }),
     );
+    expect(observability.getSnapshot()).toMatchObject({
+      governance: {
+        geometryMutationCount: 2,
+        serviceAreaPublishedCount: 1,
+      },
+    });
   });
 
   it("keeps future-effective published service areas out of evaluator until active", async () => {
@@ -530,7 +614,9 @@ describe("ServiceAreaService", () => {
   });
 
   it("publishes and retires stop policies without losing service-area coverage", async () => {
-    const { service, repository, context } = createMutationService();
+    const observability = new MapGeofenceObservabilityService();
+    const { service, repository, auditNotificationService, context } =
+      createMutationService({}, observability);
     const policy = await service.createStopPolicy(
       {
         policyCode: "CITY_HALL_PICKUP_BLOCK",
@@ -596,6 +682,25 @@ describe("ServiceAreaService", () => {
       }).decision,
     ).toBe("serviceable");
     expect(repository.persistStopPolicy).toHaveBeenCalledTimes(4);
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.stop_policy.published",
+        actorId: "platform-admin-geo-001",
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.stop_policy.retired",
+        actorId: "platform-admin-geo-001",
+      }),
+    );
+    expect(observability.getSnapshot()).toMatchObject({
+      governance: {
+        geometryMutationCount: 3,
+        stopPolicyPublishedCount: 1,
+        stopPolicyRetiredCount: 1,
+      },
+    });
   });
 
   it("rejects self-intersecting service-area geometry before persistence", async () => {
