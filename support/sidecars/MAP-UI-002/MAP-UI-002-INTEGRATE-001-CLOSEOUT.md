@@ -6,7 +6,9 @@
 
 **Integration branch:** `codex/map-ui-002-integrate-001`
 
-**Base branch:** `codex2/map-ui-002-harden-001`
+**Base branch:** `dev`
+
+**Closeout refresh:** rebased onto current `origin/dev` tip `f452f019f` on `2026-07-03`
 
 **Source commits included:**
 
@@ -33,14 +35,14 @@ It does **not** claim Gate B production pass. Gate B still requires `MAP-FE-ADM-
 
 | Prior blocker                                | Current evidence                                                                                                                                                                          |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Root-level React test dependency leak        | `tests/unit/ui-web-geometry-editor.test.ts` is absent; geometry tests now live under `packages/ui-web/tests/unit/geometry-editor.test.ts` and run with `pnpm --filter @drts/ui-web test`. |
+| Root-level React test dependency leak        | `tests/unit/ui-web-geometry-editor.test.ts` is absent; geometry tests now live under `packages/ui-web/tests/unit/geometry-editor.test.ts`, run with `pnpm --filter @drts/ui-web test`, and root `pnpm test:unit` stays green with `51` files / `377` tests because root `vitest.config.ts` only includes top-level `tests/**`. |
 | Coordinate range validation missing          | `buildGeometryEditorSnapshot` returns `canSubmit=false` for out-of-range latitude/longitude; covered by package-local test.                                                               |
 | Polygon self-intersection validation missing | `buildGeometryEditorSnapshot` returns `canSubmit=false` for self-intersecting polygon; covered by package-local test.                                                                     |
 | Half-merged primitive/hardening risk         | Integration branch contains primitive exports, hardening validation, tests, Storybook preview, and Platform Admin preview adapter together.                                               |
 
 ## Verification Commands
 
-Run from `/tmp/codex-map-ui-002-integrate-001` after `pnpm install --frozen-lockfile`.
+Run from the repo root after `pnpm install --frozen-lockfile`.
 
 | Command                                            | Result                                                      |
 | -------------------------------------------------- | ----------------------------------------------------------- |
@@ -50,9 +52,11 @@ Run from `/tmp/codex-map-ui-002-integrate-001` after `pnpm install --frozen-lock
 | `pnpm --filter @drts/platform-admin-web typecheck` | Pass                                                        |
 | `pnpm --filter @drts/platform-admin-web test`      | Pass command, but no Platform Admin test files were present |
 | `pnpm --filter @drts/platform-admin-web lint`      | Pass                                                        |
+| `pnpm test:unit`                                   | Pass - 51 files / 377 tests; package-local GeometryEditor test not collected by root config |
 
 ## Handoff Notes
 
 - `MAP-FE-ADM-001` may use this branch as the integrated GeometryEditor baseline once reviewer accepts `MAP-UI-002-INTEGRATE-001`.
 - `MAP-FE-ADM-001` still must implement publish/retire governance flows and prove backend evaluator/audit behavior; this branch only supplies the reusable UI primitive and preview adapter.
 - `MAP-QA-002` must not count this as Gate B E2E evidence until Platform Admin workflow tests exercise a real publish/retire path with backend assertions.
+- Owner closeout rebased the branch onto current `origin/dev` tip `f452f019f` with no conflicts before final verification and push.
