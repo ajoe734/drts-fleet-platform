@@ -282,57 +282,56 @@ const INITIAL_ADDRESS_PROVIDER_STATE: MapPickerProviderState = {
   reasonCode: "available",
 };
 
-const CALLCENTER_MAP_PICKER_LABELS: Record<
-  Locale,
-  Partial<AddressMapPickerLabels>
-> = {
-  en: {
-    searchPlaceholder: "Search a street, terminal, gate, or landmark",
-    candidatesTitle: "Matching locations",
-    noMatchBody:
-      "No reliable match yet. Refine the search or pin the coordinates manually.",
-    manualReasonPlaceholder:
-      "e.g. caller confirmed the exact gate or curb position",
-    providerOutageBody:
-      "Address lookup is unavailable right now. Enter coordinates manually before creating the booking.",
-    mapEmpty:
-      "Search and pin the caller's location before creating the booking.",
-    serviceableTitle: "Serviceable for standard taxi dispatch",
-    manualReviewTitle: "Manual review required before release",
-    notServiceableTitle: "Outside the governed service area",
-  },
-  zh: {
-    searchLabel: "搜尋地址",
-    searchPlaceholder: "搜尋街道、航廈、門口或地標",
-    searchButton: "搜尋",
-    searching: "搜尋中…",
-    candidatesTitle: "候選地址",
-    noMatchTitle: "找不到相符地址",
-    noMatchBody: "目前沒有可靠結果。請調整搜尋，或改為手動輸入座標。",
-    manualToggle: "手動輸入座標",
-    manualTitle: "手動定位",
-    manualLatLabel: "緯度",
-    manualLngLabel: "經度",
-    manualReasonLabel: "手動定位原因",
-    manualReasonPlaceholder: "例如：來電者已確認精確上下車點",
-    manualApply: "使用這個位置",
-    manualInvalid: "請輸入有效的緯度（-90 到 90）與經度（-180 到 180）。",
-    providerOutageTitle: "地址查詢目前不可用",
-    providerOutageBody: "建立電話訂車前，請先手動輸入座標。",
-    degradedNote: "地址結果目前可能不完整。",
-    confidenceLabel: "比對信心",
-    provenanceLabel: "定位來源",
-    coordinatesLabel: "座標",
-    mapEmpty: "先搜尋並確認位置，再建立電話訂車。",
-    mapHint: "可拖曳圖釘，或用方向鍵微調位置。",
-    pinAdjustHint: "已手動調整圖釘。",
-    clearSelection: "清除",
-    serviceableTitle: "符合標準計程車派遣範圍",
-    manualReviewTitle: "需人工審查後才能釋出",
-    notServiceableTitle: "超出受管制的服務範圍",
-    serviceabilityPending: "正在檢查服務範圍…",
-  },
-};
+function getCallcenterMapBookingSectionCopy(
+  t: (key: string, params?: Record<string, string | number>) => string,
+) {
+  return {
+    title: t("callcenter.mapBooking.section.title"),
+    description: t("callcenter.mapBooking.section.description"),
+    pickupTitle: t("callcenter.mapBooking.section.pickupTitle"),
+    dropoffTitle: t("callcenter.mapBooking.section.dropoffTitle"),
+  };
+}
+
+function getCallcenterMapPickerLabels(
+  t: (key: string, params?: Record<string, string | number>) => string,
+): Partial<AddressMapPickerLabels> {
+  return {
+    searchLabel: t("callcenter.mapBooking.picker.searchLabel"),
+    searchPlaceholder: t("callcenter.mapBooking.picker.searchPlaceholder"),
+    searchButton: t("callcenter.mapBooking.picker.searchButton"),
+    searching: t("callcenter.mapBooking.picker.searching"),
+    candidatesTitle: t("callcenter.mapBooking.picker.candidatesTitle"),
+    noMatchTitle: t("callcenter.mapBooking.picker.noMatchTitle"),
+    noMatchBody: t("callcenter.mapBooking.picker.noMatchBody"),
+    manualToggle: t("callcenter.mapBooking.picker.manualToggle"),
+    manualTitle: t("callcenter.mapBooking.picker.manualTitle"),
+    manualLatLabel: t("callcenter.mapBooking.picker.manualLatLabel"),
+    manualLngLabel: t("callcenter.mapBooking.picker.manualLngLabel"),
+    manualReasonLabel: t("callcenter.mapBooking.picker.manualReasonLabel"),
+    manualReasonPlaceholder: t(
+      "callcenter.mapBooking.picker.manualReasonPlaceholder",
+    ),
+    manualApply: t("callcenter.mapBooking.picker.manualApply"),
+    manualInvalid: t("callcenter.mapBooking.picker.manualInvalid"),
+    providerOutageTitle: t("callcenter.mapBooking.picker.providerOutageTitle"),
+    providerOutageBody: t("callcenter.mapBooking.picker.providerOutageBody"),
+    degradedNote: t("callcenter.mapBooking.picker.degradedNote"),
+    confidenceLabel: t("callcenter.mapBooking.picker.confidenceLabel"),
+    provenanceLabel: t("callcenter.mapBooking.picker.provenanceLabel"),
+    coordinatesLabel: t("callcenter.mapBooking.picker.coordinatesLabel"),
+    mapEmpty: t("callcenter.mapBooking.picker.mapEmpty"),
+    mapHint: t("callcenter.mapBooking.picker.mapHint"),
+    pinAdjustHint: t("callcenter.mapBooking.picker.pinAdjustHint"),
+    clearSelection: t("callcenter.mapBooking.picker.clearSelection"),
+    serviceableTitle: t("callcenter.mapBooking.picker.serviceableTitle"),
+    manualReviewTitle: t("callcenter.mapBooking.picker.manualReviewTitle"),
+    notServiceableTitle: t("callcenter.mapBooking.picker.notServiceableTitle"),
+    serviceabilityPending: t(
+      "callcenter.mapBooking.picker.serviceabilityPending",
+    ),
+  };
+}
 
 type MapBookingBannerState = {
   code: CallcenterMapBookingBlockReason | "serviceable" | "manual_review";
@@ -344,68 +343,13 @@ type MapBookingBannerState = {
 };
 
 function getMapBookingBannerState(
-  locale: Locale,
+  t: (key: string, params?: Record<string, string | number>) => string,
   gate: CallcenterMapBookingGate,
   serviceability: ServiceAreaEvaluationResult | null,
   previewStatus: CallcenterServiceabilityPreviewStatus,
 ): MapBookingBannerState {
   const reasonBody =
     serviceability?.reasonMessages?.filter(Boolean).join(" ") ?? "";
-  const copy = {
-    en: {
-      pickupCoordinatesTitle: "Pickup coordinates are required",
-      pickupCoordinatesBody:
-        "Search or pin the pickup before creating the phone booking.",
-      dropoffCoordinatesTitle: "Dropoff coordinates are required",
-      dropoffCoordinatesBody:
-        "Search or pin the dropoff before creating the phone booking.",
-      pickupProvenanceTitle: "Pickup provenance is required",
-      pickupProvenanceBody:
-        "Re-select or manually pin the pickup so coordinate provenance is recorded.",
-      dropoffProvenanceTitle: "Dropoff provenance is required",
-      dropoffProvenanceBody:
-        "Re-select or manually pin the dropoff so coordinate provenance is recorded.",
-      previewPendingTitle: "Checking service area before submit",
-      previewPendingBody:
-        "Wait for the serviceability result before creating the booking.",
-      previewUnavailableTitle: "Service-area preview is unavailable",
-      previewUnavailableBody:
-        "Do not create a normal dispatchable booking until the preview recovers.",
-      blockedTitle: "This trip is outside the service area",
-      blockedBody:
-        "The booking cannot enter normal dispatch with the current pickup/dropoff.",
-      serviceableTitle: "Ready to create a dispatchable phone booking",
-      serviceableBody:
-        "Pickup and dropoff coordinates are pinned and serviceable.",
-      manualReviewTitle: "This booking will enter manual review",
-      manualReviewBody:
-        "Create the booking only if ops should review it before normal dispatch.",
-      manualReviewHelper:
-        "Creates an order flagged for manual review instead of normal dispatch.",
-    },
-    zh: {
-      pickupCoordinatesTitle: "必須先確認上車座標",
-      pickupCoordinatesBody: "建立電話訂車前，先搜尋或手動標記上車點。",
-      dropoffCoordinatesTitle: "必須先確認下車座標",
-      dropoffCoordinatesBody: "建立電話訂車前，先搜尋或手動標記下車點。",
-      pickupProvenanceTitle: "上車點缺少定位來源",
-      pickupProvenanceBody: "請重新選取或手動釘選上車點，保留定位 provenance。",
-      dropoffProvenanceTitle: "下車點缺少定位來源",
-      dropoffProvenanceBody:
-        "請重新選取或手動釘選下車點，保留定位 provenance。",
-      previewPendingTitle: "送出前必須完成服務範圍檢查",
-      previewPendingBody: "請等待 serviceability 結果後再建立電話訂車。",
-      previewUnavailableTitle: "服務範圍預覽目前不可用",
-      previewUnavailableBody: "在預覽恢復前，不要建立可正常派遣的電話訂單。",
-      blockedTitle: "此趟行程不在服務範圍內",
-      blockedBody: "目前的上下車點不可進入正常派遣。",
-      serviceableTitle: "可建立可派遣的電話訂單",
-      serviceableBody: "上下車座標已確認，且通過服務範圍檢查。",
-      manualReviewTitle: "此訂單會先進人工審查",
-      manualReviewBody: "建立後不會直接進 normal dispatch，需先由營運審查。",
-      manualReviewHelper: "建立後會以人工審查狀態進入後續流程。",
-    },
-  }[locale];
 
   if (!gate.canSubmit) {
     switch (gate.reason) {
@@ -414,54 +358,62 @@ function getMapBookingBannerState(
           code: gate.reason,
           tone: "warn",
           icon: "warn",
-          title: copy.pickupCoordinatesTitle,
-          body: copy.pickupCoordinatesBody,
-          submitHelper: copy.pickupCoordinatesTitle,
+          title: t("callcenter.mapBooking.banner.pickupCoordinatesTitle"),
+          body: t("callcenter.mapBooking.banner.pickupCoordinatesBody"),
+          submitHelper: t(
+            "callcenter.mapBooking.banner.pickupCoordinatesTitle",
+          ),
         };
       case "dropoff_coordinates_required":
         return {
           code: gate.reason,
           tone: "warn",
           icon: "warn",
-          title: copy.dropoffCoordinatesTitle,
-          body: copy.dropoffCoordinatesBody,
-          submitHelper: copy.dropoffCoordinatesTitle,
+          title: t("callcenter.mapBooking.banner.dropoffCoordinatesTitle"),
+          body: t("callcenter.mapBooking.banner.dropoffCoordinatesBody"),
+          submitHelper: t(
+            "callcenter.mapBooking.banner.dropoffCoordinatesTitle",
+          ),
         };
       case "pickup_provenance_required":
         return {
           code: gate.reason,
           tone: "warn",
           icon: "warn",
-          title: copy.pickupProvenanceTitle,
-          body: copy.pickupProvenanceBody,
-          submitHelper: copy.pickupProvenanceTitle,
+          title: t("callcenter.mapBooking.banner.pickupProvenanceTitle"),
+          body: t("callcenter.mapBooking.banner.pickupProvenanceBody"),
+          submitHelper: t("callcenter.mapBooking.banner.pickupProvenanceTitle"),
         };
       case "dropoff_provenance_required":
         return {
           code: gate.reason,
           tone: "warn",
           icon: "warn",
-          title: copy.dropoffProvenanceTitle,
-          body: copy.dropoffProvenanceBody,
-          submitHelper: copy.dropoffProvenanceTitle,
+          title: t("callcenter.mapBooking.banner.dropoffProvenanceTitle"),
+          body: t("callcenter.mapBooking.banner.dropoffProvenanceBody"),
+          submitHelper: t(
+            "callcenter.mapBooking.banner.dropoffProvenanceTitle",
+          ),
         };
       case "serviceability_preview_unavailable":
         return {
           code: gate.reason,
           tone: "danger",
           icon: "warn",
-          title: copy.previewUnavailableTitle,
-          body: copy.previewUnavailableBody,
-          submitHelper: copy.previewUnavailableTitle,
+          title: t("callcenter.mapBooking.banner.previewUnavailableTitle"),
+          body: t("callcenter.mapBooking.banner.previewUnavailableBody"),
+          submitHelper: t(
+            "callcenter.mapBooking.banner.previewUnavailableTitle",
+          ),
         };
       case "serviceability_blocked":
         return {
           code: gate.reason,
           tone: "danger",
           icon: "warn",
-          title: copy.blockedTitle,
-          body: reasonBody || copy.blockedBody,
-          submitHelper: copy.blockedTitle,
+          title: t("callcenter.mapBooking.banner.blockedTitle"),
+          body: reasonBody || t("callcenter.mapBooking.banner.blockedBody"),
+          submitHelper: t("callcenter.mapBooking.banner.blockedTitle"),
         };
       case "serviceability_preview_required":
       default:
@@ -469,9 +421,9 @@ function getMapBookingBannerState(
           code: gate.reason,
           tone: previewStatus === "evaluating" ? "info" : "warn",
           icon: previewStatus === "evaluating" ? "clock" : "warn",
-          title: copy.previewPendingTitle,
-          body: copy.previewPendingBody,
-          submitHelper: copy.previewPendingTitle,
+          title: t("callcenter.mapBooking.banner.previewPendingTitle"),
+          body: t("callcenter.mapBooking.banner.previewPendingBody"),
+          submitHelper: t("callcenter.mapBooking.banner.previewPendingTitle"),
         };
     }
   }
@@ -481,9 +433,9 @@ function getMapBookingBannerState(
       code: gate.decision,
       tone: "warn",
       icon: "warn",
-      title: copy.manualReviewTitle,
-      body: reasonBody || copy.manualReviewBody,
-      submitHelper: copy.manualReviewHelper,
+      title: t("callcenter.mapBooking.banner.manualReviewTitle"),
+      body: reasonBody || t("callcenter.mapBooking.banner.manualReviewBody"),
+      submitHelper: t("callcenter.mapBooking.banner.manualReviewHelper"),
     };
   }
 
@@ -491,8 +443,8 @@ function getMapBookingBannerState(
     code: gate.decision,
     tone: "success",
     icon: "ok",
-    title: copy.serviceableTitle,
-    body: reasonBody || copy.serviceableBody,
+    title: t("callcenter.mapBooking.banner.serviceableTitle"),
+    body: reasonBody || t("callcenter.mapBooking.banner.serviceableBody"),
   };
 }
 
@@ -1056,6 +1008,8 @@ export default function CallcenterPage() {
   const router = useRouter();
   const { t, locale } = useTranslation();
   const currentLocale = locale as Locale;
+  const mapBookingSectionCopy = getCallcenterMapBookingSectionCopy(t);
+  const callcenterMapPickerLabels = getCallcenterMapPickerLabels(t);
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
 
@@ -1188,17 +1142,12 @@ export default function CallcenterPage() {
   const mapBookingBanner = useMemo(
     () =>
       getMapBookingBannerState(
-        currentLocale,
+        t,
         mapBookingGate,
         serviceabilityPreview,
         serviceabilityPreviewStatus,
       ),
-    [
-      currentLocale,
-      mapBookingGate,
-      serviceabilityPreview,
-      serviceabilityPreviewStatus,
-    ],
+    [mapBookingGate, serviceabilityPreview, serviceabilityPreviewStatus, t],
   );
   const mapBookingGateCode = mapBookingBanner.code;
 
@@ -2599,14 +2548,10 @@ export default function CallcenterPage() {
                   >
                     <div style={mapBookingHeadingStyle}>
                       <strong style={{ fontSize: 12.5 }}>
-                        {currentLocale === "zh"
-                          ? "上下車定位"
-                          : "Pickup and dropoff map verification"}
+                        {mapBookingSectionCopy.title}
                       </strong>
                       <span style={subtleTextStyle}>
-                        {currentLocale === "zh"
-                          ? "建立電話訂車前，先搜尋或手動確認上下車座標與服務範圍。"
-                          : "Search or manually pin both stops before creating the phone booking."}
+                        {mapBookingSectionCopy.description}
                       </span>
                     </div>
                     <div style={mapBookingPickerStackStyle}>
@@ -2620,18 +2565,14 @@ export default function CallcenterPage() {
                           surface="callcenter"
                           theme={theme}
                           locale={currentLocale === "zh" ? "zh-TW" : "en-US"}
-                          labels={CALLCENTER_MAP_PICKER_LABELS[currentLocale]}
+                          labels={callcenterMapPickerLabels}
                           value={pickupAddress}
                           onChange={(change: AddressMapPickerChange) => {
                             setPickupAddress(change.address);
                             setPickupProviderState(change.providerState);
                           }}
                           actorId={callcenterActorId}
-                          title={
-                            currentLocale === "zh"
-                              ? "上車點"
-                              : "Pickup location"
-                          }
+                          title={mapBookingSectionCopy.pickupTitle}
                         />
                       </div>
                       <div
@@ -2644,18 +2585,14 @@ export default function CallcenterPage() {
                           surface="callcenter"
                           theme={theme}
                           locale={currentLocale === "zh" ? "zh-TW" : "en-US"}
-                          labels={CALLCENTER_MAP_PICKER_LABELS[currentLocale]}
+                          labels={callcenterMapPickerLabels}
                           value={dropoffAddress}
                           onChange={(change: AddressMapPickerChange) => {
                             setDropoffAddress(change.address);
                             setDropoffProviderState(change.providerState);
                           }}
                           actorId={callcenterActorId}
-                          title={
-                            currentLocale === "zh"
-                              ? "下車點"
-                              : "Dropoff location"
-                          }
+                          title={mapBookingSectionCopy.dropoffTitle}
                         />
                       </div>
                     </div>
