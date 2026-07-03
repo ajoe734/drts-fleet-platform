@@ -1,15 +1,14 @@
--- Service-area GIS authority for governed serviceability checks.
--- The geometry columns are the enforcement source for containment checks; the
--- jsonb record mirrors the API contract snapshot for forward-compatible reads.
-
-CREATE EXTENSION IF NOT EXISTS postgis;
+-- Service-area authority for governed serviceability checks.
+-- The API service performs the authoritative geometry evaluation in TypeScript
+-- from the immutable record/jsonb snapshot. The database keeps GeoJSON for audit
+-- and admin export without requiring PostGIS privileges in dev/staging.
 
 CREATE TABLE IF NOT EXISTS ops.service_area_boundaries (
   service_area_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   area_code varchar(80) NOT NULL,
   display_name varchar(200) NOT NULL,
   status varchar(30) NOT NULL DEFAULT 'draft',
-  geometry geometry(MultiPolygon, 4326) NOT NULL,
+  geometry_geojson jsonb NOT NULL DEFAULT '{}'::jsonb,
   service_product_types jsonb NOT NULL DEFAULT '[]'::jsonb,
   effective_from timestamptz NOT NULL DEFAULT now(),
   effective_until timestamptz,
@@ -26,8 +25,20 @@ CREATE TABLE IF NOT EXISTS ops.service_area_boundaries (
 CREATE INDEX IF NOT EXISTS idx_service_area_boundaries_status
   ON ops.service_area_boundaries(status, effective_from, effective_until);
 
-CREATE INDEX IF NOT EXISTS idx_service_area_boundaries_geometry
-  ON ops.service_area_boundaries USING gist (geometry);
+ALTER TABLE ops.service_area_boundaries
+  ADD COLUMN IF NOT EXISTS geometry_geojson jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'ops'
+      AND table_name = 'service_area_boundaries'
+      AND column_name = 'geometry'
+  ) THEN
+    ALTER TABLE ops.service_area_boundaries ALTER COLUMN geometry DROP NOT NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS ops.stop_policies (
   stop_policy_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -36,7 +47,7 @@ CREATE TABLE IF NOT EXISTS ops.stop_policies (
   status varchar(30) NOT NULL DEFAULT 'draft',
   direction varchar(20) NOT NULL,
   effect varchar(30) NOT NULL,
-  geometry geometry(Geometry, 4326) NOT NULL,
+  geometry_geojson jsonb NOT NULL DEFAULT '{}'::jsonb,
   service_area_codes jsonb NOT NULL DEFAULT '[]'::jsonb,
   service_product_types jsonb NOT NULL DEFAULT '[]'::jsonb,
   reason_code varchar(100) NOT NULL,
@@ -58,5 +69,17 @@ CREATE TABLE IF NOT EXISTS ops.stop_policies (
 CREATE INDEX IF NOT EXISTS idx_stop_policies_status
   ON ops.stop_policies(status, direction, effect, effective_from, effective_until);
 
-CREATE INDEX IF NOT EXISTS idx_stop_policies_geometry
-  ON ops.stop_policies USING gist (geometry);
+ALTER TABLE ops.stop_policies
+  ADD COLUMN IF NOT EXISTS geometry_geojson jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'ops'
+      AND table_name = 'stop_policies'
+      AND column_name = 'geometry'
+  ) THEN
+    ALTER TABLE ops.stop_policies ALTER COLUMN geometry DROP NOT NULL;
+  END IF;
+END $$;

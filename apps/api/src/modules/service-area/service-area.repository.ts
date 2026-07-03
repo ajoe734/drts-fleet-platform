@@ -77,7 +77,7 @@ export class ServiceAreaRepository {
           area_code,
           display_name,
           status,
-          geometry,
+          geometry_geojson,
           service_product_types,
           effective_from,
           effective_until,
@@ -88,7 +88,7 @@ export class ServiceAreaRepository {
           updated_at
         ) VALUES (
           $1, $2, $3, $4,
-          ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($5), 4326)),
+          $5::jsonb,
           $6::jsonb,
           $7,
           $8,
@@ -102,7 +102,7 @@ export class ServiceAreaRepository {
           area_code = EXCLUDED.area_code,
           display_name = EXCLUDED.display_name,
           status = EXCLUDED.status,
-          geometry = EXCLUDED.geometry,
+          geometry_geojson = EXCLUDED.geometry_geojson,
           service_product_types = EXCLUDED.service_product_types,
           effective_from = EXCLUDED.effective_from,
           effective_until = EXCLUDED.effective_until,
@@ -143,7 +143,7 @@ export class ServiceAreaRepository {
           status,
           direction,
           effect,
-          geometry,
+          geometry_geojson,
           service_area_codes,
           service_product_types,
           reason_code,
@@ -157,7 +157,7 @@ export class ServiceAreaRepository {
           updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6,
-          ST_SetSRID(ST_GeomFromGeoJSON($7), 4326),
+          $7::jsonb,
           $8::jsonb,
           $9::jsonb,
           $10,
@@ -176,7 +176,7 @@ export class ServiceAreaRepository {
           status = EXCLUDED.status,
           direction = EXCLUDED.direction,
           effect = EXCLUDED.effect,
-          geometry = EXCLUDED.geometry,
+          geometry_geojson = EXCLUDED.geometry_geojson,
           service_area_codes = EXCLUDED.service_area_codes,
           service_product_types = EXCLUDED.service_product_types,
           reason_code = EXCLUDED.reason_code,
