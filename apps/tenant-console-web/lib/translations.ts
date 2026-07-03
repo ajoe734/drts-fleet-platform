@@ -1112,6 +1112,9 @@ const en = {
   "newBooking.card.pickupDropoff.title": "Pickup / drop-off",
   "newBooking.card.pickupDropoff.subtitle":
     "Start from the address book, then adjust directly when needed without opening another geocoding flow.",
+  "newBooking.serviceability.blockedTitle": "Outside the service area",
+  "newBooking.serviceability.blockedBody":
+    "The selected pickup or drop-off is not serviceable. Adjust the pins to a covered location before submitting. The backend enforces this check independently.",
   "newBooking.card.approval.title": "References and approval",
   "newBooking.card.approval.subtitle":
     "Cost center, finance fields, and proxy metadata travel with the command.",
@@ -5041,6 +5044,9 @@ const zh: Record<keyof typeof en, string> = {
   "newBooking.card.pickupDropoff.title": "上車／下車",
   "newBooking.card.pickupDropoff.subtitle":
     "先選地址簿，再視需要直接微調，不另外開 geocoding flow。",
+  "newBooking.serviceability.blockedTitle": "超出服務範圍",
+  "newBooking.serviceability.blockedBody":
+    "所選上車或下車點不在可服務範圍內。送出前請將地圖 pin 調整到涵蓋範圍內。後端會獨立再驗證此限制。",
   "newBooking.card.approval.title": "關聯與審批",
   "newBooking.card.approval.subtitle":
     "成本中心、財務欄位與代訂 metadata 都隨命令一起送出。",
