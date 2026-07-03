@@ -8,6 +8,7 @@ const routeSmokeTargets = [
   "/",
   "/tenants",
   "/health",
+  "/service-area-governance",
   "/notices",
   "/partners/acme-demo",
   "/pricing",

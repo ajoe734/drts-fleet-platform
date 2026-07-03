@@ -18,6 +18,7 @@ import {
   Handshake,
   Languages,
   LayoutDashboard,
+  Map,
   Package,
   Power,
   Radio,
@@ -142,6 +143,12 @@ const routes: NavRoute[] = [
     icon: Package,
     section: "commerce",
     labelKey: "adminShell.route.serviceProducts",
+  },
+  {
+    key: "service-area-governance",
+    icon: Map,
+    section: "fleet",
+    labelKey: "adminShell.route.serviceAreaGovernance",
   },
   {
     key: "vehicle-eligibility",
