@@ -281,6 +281,10 @@ const en = {
   "booking.error.closeSession": "Failed to close the desk session.",
   "booking.error.coordinatesRequired":
     "Confirm pickup and drop-off coordinates before creating this booking.",
+  "booking.error.manualReviewRequired":
+    "This booking was held for manual review before dispatch. Confirm the route in order lookup and continue from the review queue.",
+  "booking.error.outsideServiceArea":
+    "Pickup or drop-off is outside the supported service area. Confirm the route and try again.",
   "booking.error.submit": "Failed to create the assisted-entry booking.",
   "booking.defaultPassengerName": "Chen Passenger",
   "booking.defaultPassengerPhone": "0911222333",
@@ -687,6 +691,10 @@ const zh: Record<keyof typeof en, string> = {
   "booking.error.closeSession": "關閉櫃台工作階段失敗。",
   "booking.error.coordinatesRequired":
     "建立此訂單前，請先確認上車與下車座標。",
+  "booking.error.manualReviewRequired":
+    "此訂單在派車前已改送人工審查。請到訂單查詢確認路線，並從審查佇列繼續處理。",
+  "booking.error.outsideServiceArea":
+    "上車或下車地點不在支援的服務範圍內。請確認路線後再試一次。",
   "booking.error.submit": "建立 assisted-entry 訂單失敗。",
   "booking.defaultPassengerName": "陳旅客",
   "booking.defaultPassengerPhone": "0911222333",

@@ -40,6 +40,10 @@ import {
   formatTraceEventType,
 } from "@/lib/formatters";
 import { useTranslation } from "@/lib/i18n";
+import {
+  buildCallCenterMapFallbackReview,
+  formatConciergeApiError,
+} from "@/lib/map-booking";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 type SubmissionSummary = {
@@ -143,9 +147,11 @@ export default function ConciergeBookingCreatePage() {
       } catch (nextError) {
         if (!cancelled) {
           setError(
-            nextError instanceof Error
-              ? nextError.message
-              : t("booking.error.loadSession"),
+            formatConciergeApiError(
+              nextError,
+              t,
+              "booking.error.loadSession",
+            ),
           );
         }
       }
@@ -236,9 +242,11 @@ export default function ConciergeBookingCreatePage() {
                     setCurrentSession(opened);
                   } catch (nextError) {
                     setError(
-                      nextError instanceof Error
-                        ? nextError.message
-                        : t("booking.error.openSession"),
+                      formatConciergeApiError(
+                        nextError,
+                        t,
+                        "booking.error.openSession",
+                      ),
                     );
                   } finally {
                     setBusyKey(null);
@@ -273,9 +281,11 @@ export default function ConciergeBookingCreatePage() {
                       setCurrentSession(closed);
                     } catch (nextError) {
                       setError(
-                        nextError instanceof Error
-                          ? nextError.message
-                          : t("booking.error.closeSession"),
+                        formatConciergeApiError(
+                          nextError,
+                          t,
+                          "booking.error.closeSession",
+                        ),
                       );
                     } finally {
                       setBusyKey(null);
@@ -379,6 +389,10 @@ export default function ConciergeBookingCreatePage() {
                 serviceability: mapSelection.serviceability,
                 providerState: mapSelection.providerState,
               });
+              const mapFallbackReview = buildCallCenterMapFallbackReview({
+                mapGate,
+                providerState: mapSelection.providerState,
+              });
               if (mapGate.code === "outside_service_area") {
                 router.push(
                   `/ineligible?desk=${desk.deskId}&reason=service_area`,
@@ -428,6 +442,7 @@ export default function ConciergeBookingCreatePage() {
                     phone: passengerPhone,
                   },
                   notes,
+                  mapFallbackReview,
                 });
 
                 recordOrder(accepted.orderId);
@@ -465,9 +480,11 @@ export default function ConciergeBookingCreatePage() {
                 });
               } catch (nextError) {
                 setError(
-                  nextError instanceof Error
-                    ? nextError.message
-                    : t("booking.error.submit"),
+                  formatConciergeApiError(
+                    nextError,
+                    t,
+                    "booking.error.submit",
+                  ),
                 );
               } finally {
                 setBusyKey(null);

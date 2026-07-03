@@ -2639,6 +2639,7 @@ export const COMPLIANCE_GATE_TYPES = [
   "proof",
   "eligibility",
   "service_area",
+  "address_capture",
 ] as const;
 export type ComplianceGateType = (typeof COMPLIANCE_GATE_TYPES)[number];
 
@@ -2697,6 +2698,13 @@ export interface CreateOwnedOrderCommand {
   paymentMethod?: "cash" | "card";
 }
 
+export interface CallCenterMapFallbackReview {
+  reasonCode: string;
+  providerAvailable: boolean;
+  providerDegraded: boolean;
+  providerReasonCode?: string | null;
+}
+
 export interface CreateCallCenterOrderCommand {
   callId: string;
   agentId: string;
@@ -2705,6 +2713,7 @@ export interface CreateCallCenterOrderCommand {
   dropoff: AddressPayload;
   passenger: PassengerProfile;
   notes?: string;
+  mapFallbackReview?: CallCenterMapFallbackReview | null;
 }
 
 export interface CreateTenantBookingCommand {
@@ -2958,6 +2967,7 @@ export interface OwnedOrderRecord {
   complianceGates?: ComplianceGateRecord[];
   complianceFlags: string[];
   spatialAudit?: OwnedOrderSpatialAuditSnapshot | null;
+  mapFallbackReview?: CallCenterMapFallbackReview | null;
   cancelledAt: string | null;
   cancelReason: string | null;
   reservationHoldStatus: ReservationHoldStatus;
