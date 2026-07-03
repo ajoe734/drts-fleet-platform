@@ -3,57 +3,68 @@
 - **Parent Task:** `MAP-FE-ADM-001` - Platform Admin geofence governance UI
 - **Sidecar Task:** `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE`
 - **Packet Scope:** support artifact only; no canonical truth, runtime, or parent-branch edits
-- **Current Sidecar Status:** `review_approved` (`owner=Codex`, `reviewer=Codex2`, `last_update=2026-07-01T14:55:22Z`)
-- **Current Parent Status:** `in_progress` (`owner=Codex2`, `reviewer=Gemini`, `last_update=2026-07-01T10:16:22Z`)
+- **Packet Snapshot:** `2026-07-03T18:03:21Z`
+- **Sidecar Owner -> Reviewer:** `Codex` -> `Codex2`
+- **Parent Owner -> Reviewer:** `Codex2` -> `Claude2`
 
-## 1. Why This Refresh Exists
+## 1. Dispatch Context
 
-This packet supersedes the earlier closeout-oriented sidecar snapshot and now
-carries the reviewer-approved helper state that is waiting on owner closeout.
+- The sidecar was auto-created at `2026-07-03T17:57:07Z` as an
+  `acceptance_packet` helper for `MAP-FE-ADM-001`.
+- The original owner lane (`Gemini2`) hit repeated terminal exits, so the chair
+  reassigned ownership to `Codex` at `2026-07-03T18:02:50Z`.
+- The sidecar is now `in_progress`; its only goal is to refresh this packet and
+  hand it to the assigned reviewer.
+- The chair dispatch note explicitly says this is support-only work and that the
+  listed dependencies are already archived in machine truth.
 
-Current machine truth shows:
+## 2. Source Basis And Boundaries
 
-- `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` was redispatched to `Codex` at
-  `2026-07-01T14:50:00Z` via availability-first reassignment, then approved at
-  `2026-07-01T14:55:22Z` after review of owner commit `702006a12`.
-- `MAP-FE-ADM-001` is still `in_progress`; it is not in a closeout-ready state.
-- the earlier `MAP-FE-ADM-001-SIDECAR-REVIEW` packet is no longer a live task
-  slice; it is archived as `done` and must not be described as pending review.
-
-The purpose of this refresh is still narrow: preserve an updated acceptance
-checklist, dependency map, and closeout summary that match the live board and
-archived dependency evidence without changing canonical truth.
-
-## 2. Source Basis
-
-This packet relies only on sources available from the current worktree and
-machine-truth helpers:
+This packet uses only sources that are readable from the current worktree or
+from canonical machine-truth helpers:
 
 - live task slices from `AI_NAME=Codex scripts/ai-status.sh show ...`
 - archived task slices from `"$AI_STATUS_ROOT/ai-task-archive.jsonl"`
-- dispatch/activity records from `"$AI_STATUS_ROOT/ai-activity-log.jsonl"`
+- dispatch/reassignment records from `"$AI_STATUS_ROOT/ai-activity-log.jsonl"`
 - dependency topology from:
   - `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
   - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
 
-Important boundary:
+Important boundaries:
 
-- the live `MAP-FE-ADM-001` task slice points at `20260701` planning/gap docs,
-  but those paths are not present on this task branch snapshot
+- the live parent task references `20260701` planning/gap docs, but those files
+  are not present on this task branch snapshot
+- the live release task references `support/sidecars/MAP-REL-001/...`, but that
+  directory is also not present on this branch snapshot
+- this packet therefore relies on live task slices for current status, and on
+  the present `20260630` docs only for dependency topology and role boundaries
 - no claim in this packet depends on unreadable files
 
 ## 3. Machine-Truth Snapshot
 
-| Task | Status | Owner -> Reviewer | Snapshot for this packet |
-| --- | --- | --- | --- |
-| `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` | `review_approved` | `Codex` -> `Codex2` | Reviewer approved commit `702006a12`; owner closeout is limited to this support packet and commit evidence. |
-| `MAP-FE-ADM-001` | `in_progress` | `Codex2` -> `Gemini` | Parent remains open. The live `next` field is now release/readiness oriented, not closeout-ready. |
-| `MAP-UI-002` | `review` | `Codex2` -> `Claude2` | Shared `GeometryEditor` primitive is still under review. |
-| `MAP-UI-002-HARDEN-001` | `review` | `Codex2` -> `Claude2` | Validation hardening is still under review and still blocks safe governance publish claims. |
-| `MAP-UI-002-INTEGRATE-001` | `review` | `Codex` -> `Claude2` | Integrated primitive + hardening branch is still review-gated. |
-| `MAP-REL-001` | `in_progress` | `Codex2` -> `Gemini` | Release readiness remains open; latest summary says readiness is still `FAIL` with 34 failures. |
-| `MAP-BE-006` | `done` (archived) | `Codex` -> `Codex2` | Backend lifecycle authority is complete; this sidecar uses archive evidence because the task is no longer live. |
-| `MAP-FE-ADM-001-SIDECAR-REVIEW` | `done` (archived) | `Codex` -> `Codex2` | Earlier review packet is closed out and archived; it is context only, not a live queue item. |
+| Task | State | Packet interpretation |
+| --- | --- | --- |
+| `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` | live `in_progress` | Owner is refreshing a support-only packet for reviewer handoff. |
+| `MAP-FE-ADM-001` | live `in_progress` | Parent implementation remains open; `next` says to inspect branch state and continue implementation. |
+| `MAP-BE-006` | archived `done` | Backend lifecycle authority is complete and recorded as `merged_to_dev`. |
+| `MAP-UI-002` | archived `done` | GeometryEditor primitive closeout is complete and recorded as `merged_to_dev`. |
+| `MAP-UI-002-HARDEN-001` | archived `done` | Validation hardening evidence is archived and reconciled from `origin/dev`. |
+| `MAP-UI-002-INTEGRATE-001` | archived `done` | Primitive + hardening integration evidence is archived and reconciled from `origin/dev`. |
+| `MAP-REL-001` | live `in_progress` | Final release-gate evidence is still open, so this packet cannot imply production readiness. |
+
+Dependency evidence that matters most for this packet:
+
+- `MAP-BE-006` latest archive record includes
+  `integration_status=merged_to_dev` with merge commit
+  `1c06a5cfb56ac94e117d2ed773f5938750be67c0`.
+- `MAP-UI-002` latest archive record includes
+  `integration_status=merged_to_dev` with merge commit
+  `cc6c076705e8ede294f558a981fdfd3d7a2d5842`.
+- `MAP-UI-002-HARDEN-001` archived evidence says invalid coordinates,
+  self-intersecting polygons, and invalid GeoJSON import are blocked before
+  submit.
+- `MAP-UI-002-INTEGRATE-001` archived evidence says the final integrated branch
+  preserved both the GeometryEditor primitive and the hardening fixes.
 
 ## 4. Parent Acceptance Baseline
 
@@ -64,152 +75,134 @@ Live machine truth still lists the parent acceptance targets as:
 3. `audit actor version effect direction effective date visible`
 4. `platform-admin checks pass`
 
-The current parent `next` field now records release/readiness posture rather
-than a per-gap UI list:
+Current operational reading:
 
-1. map/geofence OBS runtime evidence was refreshed on the branch.
-2. dispatch integrity remains `PASS` (`43 ok / 15 warnings / 0 failures`).
-3. production readiness remains `FAIL` (`14 ok / 0 warnings / 34 failures`).
-4. no one should claim production ready until metrics backend query outputs,
-   audit exports, alert dry-run/firing evidence, dashboard/stage artifacts,
-   final persisted DB/stage/API audit evidence, QA/OBS/REL final evidence, and
-   open review/backlog tasks close.
-
-Operational implication:
-
-- this sidecar may summarize acceptance criteria and dependency posture
-- it must not imply the parent is ready for `review_approved`, `done`, Gate B
-  closure, or broader production-readiness closeout
+- the parent task is not in review or closeout; it is still an implementation
+  task owned by `Codex2`
+- this sidecar may restate the acceptance targets and map dependencies
+- this sidecar may not claim that the parent is review-ready, closeout-ready, or
+  production-ready
 
 ## 5. Dependency Map
 
-### 5.1 Direct sidecar dependency
+### 5.1 Direct parent inputs
 
-The sidecar task itself still lists only one direct dependency:
+The parent task and this sidecar both list the same direct dependencies:
 
 - `MAP-BE-006`
+- `MAP-UI-002`
 
-Archive evidence for `MAP-BE-006` shows:
-
-- `status=done`
-- `commit_hash=55dad2ca4c79fc7370cf069996efb2ddf2cf704a`
-- `merge_commit=1c06a5cfb56ac94e117d2ed773f5938750be67c0`
-- `integration_status=merged_to_dev`
-- `pr_url=https://github.com/ajoe734/drts-fleet-platform/pull/1020`
-
-That archived closeout says backend governance already owns:
-
-- service-area boundary and stop-policy lifecycle APIs
-- draft/review/publish/retire and effective dating
-- version refs
-- geometry validation
-- audit
-- published-geometry evaluator refresh
-
-Reviewer conclusion:
-
-- `MAP-FE-ADM-001` should consume backend authority
-- it must not invent a parallel lifecycle or audit contract in the UI packet
-
-### 5.2 Parent implementation dependency chain
-
-The execution packet's dependency graph states:
+Execution topology from the present dependency packet is:
 
 ```text
 MAP-BE-006 + MAP-UI-002
   -> MAP-FE-ADM-001
 ```
 
-The same execution packet describes `MAP-FE-ADM-001` as the Platform Admin
-surface that must:
+### 5.2 Backend authority already delivered
 
-- add the service-area governance route
-- use `GeometryEditor`
-- support draft/review/publish/retire/effective-date workflow
-- preview affected samples before publish
+Archive evidence for `MAP-BE-006` shows the backend slice is already closed and
+merged. The backend acceptance and supporting docs describe it as the authority
+for:
 
-The gap inventory adds an important boundary:
+- service-area boundary and stop-policy lifecycle APIs
+- draft/review/publish/retire flows
+- effective dating and version refs
+- geometry validation and GeoJSON payload handling
+- audit records for governed mutations
+- published-geometry evaluator refresh
 
-- `MAP-BE-006` already covers backend lifecycle APIs and evaluator refresh
-- the Platform Admin map editor, review workflow UI, and publish/retire
-  operator experience remain open in `MAP-UI-002` and `MAP-FE-ADM-001`
+Operational implication:
 
-Reviewer conclusion:
+- `MAP-FE-ADM-001` should consume backend lifecycle authority
+- this sidecar must not invent or describe a parallel backend contract
 
-- current parent acceptance must still track the live `MAP-UI-002*` review chain
-- backend completion alone is not enough to close the Platform Admin acceptance
+### 5.3 GeometryEditor dependency already delivered
 
-### 5.3 Release-gate dependency chain
+Archive evidence for `MAP-UI-002` shows the shared `GeometryEditor` deliverable
+is already closed and merged. The archived acceptance says the primitive now
+covers:
 
-The execution packet also records:
+- backend-ready geometry emit path
+- invalid-geometry blocking
+- import/export behavior
+- review-diff hooks
+- component checks
+
+Supporting archive evidence narrows the remaining risk:
+
+- `MAP-UI-002-HARDEN-001` closed the validation gaps that could otherwise allow
+  out-of-range coordinates or self-intersecting polygons to reach publish flow
+- `MAP-UI-002-INTEGRATE-001` confirmed the primitive and hardening landed
+  together instead of partially overwriting one another
+
+Operational implication:
+
+- the parent owner can treat the UI primitive/hardening chain as delivered
+- remaining work for `MAP-FE-ADM-001` is the Platform Admin governance flow that
+  consumes those shipped dependencies
+
+### 5.4 Release path remains open
+
+The same execution packet records:
 
 ```text
 All implementation tasks
   -> MAP-QA-002 -> MAP-REL-001
 ```
 
-Current live `MAP-REL-001` status matters because its `next` field says:
+Current live machine truth still shows `MAP-REL-001` as `in_progress`, and its
+acceptance requires final Gate A through Gate E evidence plus linked production
+artifacts.
 
-- latest blocker report:
-  `support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md` generated
-  `2026-07-01T10:41:09.378Z`
-- the last blocker-handoff notifier posted `3` task notes and skipped `13`
-  duplicates; do not rerun it until after the next status/report refresh
-- dispatch integrity remains `PASS`
-- production readiness remains `FAIL` (`14 ok / 0 warnings / 34 failures`)
-- no one should claim production-ready status until QA/OBS/REL final evidence
-  exists, Gate A-E tasks are done, and the readiness verifier passes
+Operational implication:
 
-Reviewer conclusion:
+- this sidecar may help acceptance review for the parent implementation slice
+- this sidecar must stop short of any Gate B or production-readiness claim
 
-- even if the parent branch proves repo-local fixes, this acceptance packet must
-  stop short of any production-readiness claim
+## 6. Acceptance Checklist For This Sidecar
 
-## 6. Reviewer Approval And Closeout Notes
+- [x] Support artifact updated only.
+- [x] No canonical truth, runtime, or parent-branch files modified.
+- [x] Parent acceptance targets restated from live machine truth.
+- [x] Direct dependencies mapped to current archived evidence.
+- [x] Reviewer handoff context updated to the current owner/reviewer map.
+- [x] Missing `20260701` and `MAP-REL-001` branch-local files treated as absent,
+      not as cited evidence.
+- [ ] Parent implementation approved or closed out. Not in scope.
+- [ ] Release gates passed. Owned by downstream tasks, not this sidecar.
 
-Reviewer `Codex2` approved the packet on the following basis:
+## 7. Reviewer Handoff Notes
 
-1. the packet matches the current live owner/reviewer map:
-   `MAP-FE-ADM-001` is `Codex2 -> Gemini`, not `Codex2 -> Codex`
-2. the packet treats `MAP-FE-ADM-001-SIDECAR-REVIEW` as archived context, not
-   as a live `review` or `review_approved` task
-3. the packet distinguishes:
-   - archived backend completion from `MAP-BE-006`
-   - live geometry-review gates from `MAP-UI-002*`
-   - live release-readiness blockers from `MAP-REL-001`
-4. the packet preserves the current parent blocker summary from live machine
-   truth and does not overclaim readiness
-5. the packet remains support-only and does not modify canonical truth
+Reviewer `Codex2` should validate the following before approving:
 
-Owner closeout preserves the same boundaries:
+1. The packet matches live owner/reviewer routing:
+   `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` is `Codex -> Codex2`, and
+   `MAP-FE-ADM-001` is `Codex2 -> Claude2`.
+2. The packet treats `MAP-BE-006` and `MAP-UI-002` as archived merged
+   dependencies, not as open blockers.
+3. The packet uses `MAP-UI-002-HARDEN-001` and `MAP-UI-002-INTEGRATE-001` only
+   as supporting archived evidence for publish-safety assumptions.
+4. The packet treats `MAP-REL-001` as still open and avoids any release-ready or
+   production-ready claim.
+5. The packet cites only sources that are actually present on this branch
+   snapshot, except for machine-truth helpers and archive slices.
 
-- this commit does not change canonical truth, runtime code, or parent-branch state
-- this commit keeps the packet scoped to support evidence and closeout context
-- later parent or release-slice movement should be handled by a new sidecar refresh, not retroactively claimed by this closeout
+## 8. Verification
 
-This packet is still not:
+Commands used while refreshing this packet:
 
-- approval of the parent implementation
-- proof that Gate B is closed
-- proof that QA/OBS/REL release evidence is complete
-
-## 7. Verification
-
-Commands used to refresh this packet:
-
+- `AI_NAME=Codex scripts/ai-status.sh start MAP-FE-ADM-001-SIDECAR-ACCEPTANCE "..."`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-ACCEPTANCE`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001`
-- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002`
-- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002-HARDEN-001`
-- `AI_NAME=Codex scripts/ai-status.sh show MAP-UI-002-INTEGRATE-001`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-REL-001`
 - `grep -n '"id": "MAP-BE-006"' "$AI_STATUS_ROOT/ai-task-archive.jsonl"`
-- `grep -n '"id": "MAP-FE-ADM-001-SIDECAR-REVIEW"' "$AI_STATUS_ROOT/ai-task-archive.jsonl"`
-- `grep -n 'MAP-FE-ADM-001-SIDECAR-ACCEPTANCE' "$AI_STATUS_ROOT/ai-activity-log.jsonl" | tail -n 8`
+- `grep -n '"id": "MAP-UI-002"\|"id": "MAP-UI-002-HARDEN-001"\|"id": "MAP-UI-002-INTEGRATE-001"' "$AI_STATUS_ROOT/ai-task-archive.jsonl"`
+- `grep -n 'MAP-FE-ADM-001-SIDECAR-ACCEPTANCE' "$AI_STATUS_ROOT/ai-activity-log.jsonl" | tail -n 6`
 - `sed -n '739,820p' docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-- `sed -n '920,950p' docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
+- `sed -n '929,950p' docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
 - `sed -n '410,424p' docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
 - `git diff --check -- support/sidecars/MAP-FE-ADM-001/MAP-FE-ADM-001-SIDECAR-ACCEPTANCE.md`
 
-No runtime or package verification commands were run for this sidecar refresh
-because the change is support-only and does not alter executable behavior.
+No runtime, package, or Playwright verification was run because this sidecar
+change is support-only and does not alter executable behavior.
