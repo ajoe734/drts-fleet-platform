@@ -88,7 +88,7 @@ export const enterpriseQuotaSummary = {
 export const enterpriseBookingDraft = {
   passenger: "fixture.passenger.guestSato",
   bookedBy: "林宜君",
-  pickup: "fixture.place.taoyuanT2Full",
+  pickup: "fixture.place.taipeiHqFull",
   dropoff: "fixture.place.grandHyattFull",
   reservationWindow: "06/13 15:20",
   costCenterCode: "CC-PRD-07",
@@ -116,10 +116,10 @@ export function getEnterpriseBookingCommandFixture(
   return {
     reservationWindowStart,
     reservationWindowEnd,
-    pickupAddress: "桃園國際機場第一航廈",
-    pickupAddressName: "TPE Terminal 1 arrival hall",
-    pickupLat: 25.0803,
-    pickupLng: 121.2322,
+    pickupAddress: "台北市政府",
+    pickupAddressName: "Taipei City Hall",
+    pickupLat: 25.0375,
+    pickupLng: 121.5637,
     dropoffAddress: "台北君悅酒店",
     dropoffAddressName: "Grand Hyatt Taipei",
     dropoffLat: 25.0355,
