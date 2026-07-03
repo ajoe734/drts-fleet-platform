@@ -156,6 +156,12 @@ const routes: NavRoute[] = [
     labelKey: "adminShell.route.fleetPartners",
   },
   {
+    key: "service-area-governance",
+    icon: Search,
+    section: "fleet",
+    labelKey: "adminShell.route.serviceAreaGovernance",
+  },
+  {
     key: "sandbox",
     icon: FlaskConical,
     section: "sandbox",
