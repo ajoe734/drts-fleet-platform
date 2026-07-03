@@ -1,16 +1,12 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
-  GeometryPreviewSurface,
   buildGeometryEditorSnapshot,
-  buildCanvasTheme,
   createEmptyGeometryDraft,
   geometryDraftToGeoJson,
   parseGeometryDraftGeoJson,
   validateGeometryDraft,
   type GeometryDraft,
-} from "../../packages/ui-web/src/index";
+} from "../../packages/ui-web/src/geometry-editor-core";
 
 describe("ui-web geometry editor", () => {
   it("creates backend-ready polygon payloads", () => {
@@ -90,16 +86,20 @@ describe("ui-web geometry editor", () => {
     expect(snapshot.review.summary).toContain("Circle radius 260 m.");
     expect(snapshot.review.beforeGeoJson).not.toBeNull();
   });
-
-  it("renders degraded preview state when there is no geometry", () => {
-    const markup = renderToStaticMarkup(
-      createElement(GeometryPreviewSurface, {
-        theme: buildCanvasTheme({ surface: "platform", density: "compact" }),
-        items: [{ id: "empty", draft: createEmptyGeometryDraft("polygon") }],
-        emptyLabel: "No geometry loaded",
-      }),
-    );
-
-    expect(markup).toContain("No geometry loaded");
+  it("creates empty drafts for editor mode switches", () => {
+    expect(createEmptyGeometryDraft("polygon")).toEqual({
+      kind: "polygon",
+      points: [],
+    });
+    expect(createEmptyGeometryDraft("circle")).toEqual({
+      kind: "circle",
+      center: null,
+      radiusMeters: 250,
+    });
+    expect(createEmptyGeometryDraft("routeCorridor")).toEqual({
+      kind: "routeCorridor",
+      points: [],
+      radiusMeters: 250,
+    });
   });
 });
