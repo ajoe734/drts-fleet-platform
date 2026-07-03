@@ -1312,7 +1312,6 @@ const en = {
   "adminShell.route.fleet": "Fleet & Compliance",
   "adminShell.route.serviceProducts": "Service Products",
   "adminShell.route.vehicleEligibility": "Vehicle Eligibility Matrix",
-  "adminShell.route.serviceAreaGovernance": "Service-Area Governance",
   "adminShell.route.fleetPartners": "Fleet Partners",
   "adminShell.route.sandboxCompliance": "Sandbox Compliance",
   "adminShell.route.sandboxInvestigations": "Sandbox Investigations",
@@ -1454,7 +1453,6 @@ const en = {
   "assistant.route.fleet.title": "Fleet & Compliance",
   "assistant.route.serviceProducts.title": "Service Products",
   "assistant.route.vehicleEligibility.title": "Vehicle Eligibility Matrix",
-  "assistant.route.serviceAreaGovernance.title": "Service-Area Governance",
   "assistant.route.fleetPartners.title": "Fleet Partners",
   "assistant.route.fleetPartnerDetail.title": "Fleet Partner Detail",
   "assistant.route.switchboard.title": "Public Info & Placards",
@@ -1481,14 +1479,6 @@ const en = {
   "assistant.route.sandboxLegalHolds.title": "Sandbox Legal Holds",
   "assistant.route.sandboxRegulatoryReports.title":
     "Sandbox Regulatory Reports",
-  "designPending.title": "{title} · Design Pending",
-  "designPending.bodySuffix":
-    "This route intentionally stays as a placeholder until the canonical Platform Admin design canvas adds the required screen.",
-  "designPending.note":
-    "This body does not invent a final layout. Functional requirements are captured in the screen handoff note below.",
-  "serviceAreaGovernance.title": "Service-Area Governance",
-  "serviceAreaGovernance.pending.purpose":
-    "Platform-admin needs a canonical taxi geofence governance screen for service-area boundaries, stop policies, lifecycle actions, effective dating, backend-evaluated preview, and audit visibility.",
   "sandbox.pending.title": "{title} · Design Pending",
   "sandbox.pending.bodySuffix":
     "This route intentionally stays as a placeholder until the canonical Platform Admin design canvas adds the required screen.",
@@ -3989,7 +3979,6 @@ const zh: typeof en = {
   "adminShell.route.fleet": "車隊與法遵",
   "adminShell.route.serviceProducts": "服務產品",
   "adminShell.route.vehicleEligibility": "車輛資格矩陣",
-  "adminShell.route.serviceAreaGovernance": "服務區域治理",
   "adminShell.route.fleetPartners": "車隊夥伴",
   "adminShell.route.sandboxCompliance": "沙盒合規",
   "adminShell.route.sandboxInvestigations": "沙盒調查",
@@ -4116,7 +4105,6 @@ const zh: typeof en = {
   "assistant.route.fleet.title": "車隊與法遵",
   "assistant.route.serviceProducts.title": "服務產品",
   "assistant.route.vehicleEligibility.title": "車輛資格矩陣",
-  "assistant.route.serviceAreaGovernance.title": "服務區域治理",
   "assistant.route.fleetPartners.title": "車隊夥伴",
   "assistant.route.fleetPartnerDetail.title": "車隊夥伴詳情",
   "assistant.route.switchboard.title": "公開資訊",
@@ -4138,14 +4126,6 @@ const zh: typeof en = {
   "assistant.route.sandboxEvidenceExports.title": "受控匯出",
   "assistant.route.sandboxLegalHolds.title": "法律保留",
   "assistant.route.sandboxRegulatoryReports.title": "監理報表",
-  "designPending.title": "{title} · 設計待補",
-  "designPending.bodySuffix":
-    "在正式的 Platform Admin design canvas 補上對應畫面之前，這個路由會刻意維持為 placeholder。",
-  "designPending.note":
-    "這個頁面內容不會自行發明最終版面；功能需求已整理在下方的 screen handoff note。",
-  "serviceAreaGovernance.title": "服務區域治理",
-  "serviceAreaGovernance.pending.purpose":
-    "Platform-admin 需要一個正式的計程車 geofence 治理頁，涵蓋服務區域邊界、停靠政策、生命週期操作、生效日期、後端評估預覽與稽核可見性。",
   "sandbox.pending.title": "{title} · 設計待補",
   "sandbox.pending.bodySuffix":
     "在正式的 Platform Admin design canvas 補上對應畫面之前，這個路由會刻意維持為 placeholder。",
