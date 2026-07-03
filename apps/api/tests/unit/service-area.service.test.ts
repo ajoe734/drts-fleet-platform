@@ -9,7 +9,10 @@ function createService() {
   return new ServiceAreaService();
 }
 
-function createMutationService(repositoryOverrides = {}) {
+function createMutationService(
+  repositoryOverrides = {},
+  observability?: MapGeofenceObservabilityService,
+) {
   const repository = {
     loadState: vi.fn().mockResolvedValue({
       serviceAreas: [],
@@ -31,12 +34,14 @@ function createMutationService(repositoryOverrides = {}) {
   const service = new ServiceAreaService(
     repository as never,
     auditNotificationService as never,
+    observability,
   );
 
   return {
     service,
     repository,
     auditNotificationService,
+    observability,
     context: {
       actorId: "platform-admin-geo-001",
       actorType: "platform_admin" as const,
@@ -436,8 +441,9 @@ describe("ServiceAreaService", () => {
   });
 
   it("publishes service-area drafts and feeds the evaluator immediately", async () => {
+    const observability = new MapGeofenceObservabilityService();
     const { service, repository, auditNotificationService, context } =
-      createMutationService();
+      createMutationService({}, observability);
 
     expect(
       service.evaluate({
@@ -509,6 +515,12 @@ describe("ServiceAreaService", () => {
         }),
       }),
     );
+    expect(observability.getSnapshot()).toMatchObject({
+      governance: {
+        geometryMutationCount: 2,
+        serviceAreaPublishedCount: 1,
+      },
+    });
   });
 
   it("keeps future-effective published service areas out of evaluator until active", async () => {
@@ -602,7 +614,9 @@ describe("ServiceAreaService", () => {
   });
 
   it("publishes and retires stop policies without losing service-area coverage", async () => {
-    const { service, repository, context } = createMutationService();
+    const observability = new MapGeofenceObservabilityService();
+    const { service, repository, auditNotificationService, context } =
+      createMutationService({}, observability);
     const policy = await service.createStopPolicy(
       {
         policyCode: "CITY_HALL_PICKUP_BLOCK",
@@ -668,6 +682,25 @@ describe("ServiceAreaService", () => {
       }).decision,
     ).toBe("serviceable");
     expect(repository.persistStopPolicy).toHaveBeenCalledTimes(4);
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.stop_policy.published",
+        actorId: "platform-admin-geo-001",
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "service_area.stop_policy.retired",
+        actorId: "platform-admin-geo-001",
+      }),
+    );
+    expect(observability.getSnapshot()).toMatchObject({
+      governance: {
+        geometryMutationCount: 3,
+        stopPolicyPublishedCount: 1,
+        stopPolicyRetiredCount: 1,
+      },
+    });
   });
 
   it("rejects self-intersecting service-area geometry before persistence", async () => {
