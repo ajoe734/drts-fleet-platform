@@ -56,7 +56,7 @@ utility-form integration only:
 
 - Keep the existing address form row order for `New Address` and `Edit Address`.
 - Replace hand-entered lat / lng as the primary flow with a single `Location
-  (map)` form row that hosts the shared `AddressMapPicker`.
+(map)` form row that hosts the shared `AddressMapPicker`.
 - Edit mode must seed the saved coordinate into the picker so the operator can
   confirm or move the pin without retyping coordinates.
 - If the address is not dispatch-ready, show the warning banner directly beneath
