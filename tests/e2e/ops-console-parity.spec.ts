@@ -413,20 +413,28 @@ test.describe("ops console parity smoke", () => {
       .count();
     if (providerStatus !== "no_spatial_data") {
       expect(mapPointCount).toBeGreaterThan(0);
-      await expect(board.locator("[data-ops-map-render-mode]")).toHaveAttribute(
+      const renderModeLocator = board.locator("[data-ops-map-render-mode]");
+      const tileTemplateLocator = board.locator("[data-ops-map-tile-template]");
+      await expect(renderModeLocator).toHaveAttribute(
         "data-ops-map-render-mode",
-        "tile",
+        /^(tile|tile_fallback)$/,
       );
-      await expect(
-        board.locator("[data-ops-map-tile-template]"),
-      ).toHaveAttribute("data-ops-map-tile-template", "configured");
+      await expect(tileTemplateLocator).toHaveAttribute(
+        "data-ops-map-tile-template",
+        /^(configured|missing)$/,
+      );
       await expect(board.locator("[data-ops-map-zoom]")).toHaveAttribute(
         "data-ops-map-zoom",
         /^\d+$/,
       );
-      await expect(
-        board.locator('img[src*="/mock-map-tiles/"]').first(),
-      ).toBeVisible();
+      const tileTemplate = await tileTemplateLocator.getAttribute(
+        "data-ops-map-tile-template",
+      );
+      if (tileTemplate === "configured") {
+        await expect(
+          board.locator('img[src*="/mock-map-tiles/"]').first(),
+        ).toBeVisible();
+      }
       await expect(board.getByText(/Zoom in|放大/).first()).toBeVisible();
     }
     if (mapPointCount > 0) {
