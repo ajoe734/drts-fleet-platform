@@ -36,6 +36,7 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { MapGeofenceObservabilityService } from "../operational-observability/map-geofence-observability.service";
 import { ServiceAreaRepository } from "./service-area.repository";
 
 const EARTH_RADIUS_M = 6_371_000;
@@ -163,6 +164,8 @@ export class ServiceAreaService implements OnModuleInit {
     @Optional() private readonly serviceAreaRepository?: ServiceAreaRepository,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly mapGeofenceObservabilityService?: MapGeofenceObservabilityService,
   ) {}
 
   async onModuleInit() {
@@ -438,6 +441,9 @@ export class ServiceAreaService implements OnModuleInit {
         areaCode: record.areaCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        effectiveFrom: record.effectiveFrom,
+        effectiveUntil: record.effectiveUntil,
         geometryVersionRef: this.geometryVersionRef(
           "service_area",
           record.areaCode,
@@ -465,13 +471,13 @@ export class ServiceAreaService implements OnModuleInit {
       );
     }
     const previous = this.clone(record);
+    const retiredAt = new Date().toISOString();
     record.status = "retired";
     record.effectiveUntil =
-      this.normalizeEffectiveUntil(command.effectiveUntil) ??
-      new Date().toISOString();
+      this.normalizeEffectiveUntil(command.effectiveUntil) ?? retiredAt;
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
     record.metadata = this.withLifecycleMetadata(record.metadata, {
-      retiredAt: new Date().toISOString(),
+      retiredAt,
       retireReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
@@ -489,7 +495,10 @@ export class ServiceAreaService implements OnModuleInit {
         areaCode: record.areaCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        effectiveFrom: record.effectiveFrom,
         effectiveUntil: record.effectiveUntil,
+        retiredAt,
         reason: command.reason ?? null,
       },
       context,
@@ -715,6 +724,11 @@ export class ServiceAreaService implements OnModuleInit {
         policyCode: record.policyCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        direction: record.direction,
+        effect: record.effect,
+        effectiveFrom: record.effectiveFrom,
+        effectiveUntil: record.effectiveUntil,
         geometryVersionRef: this.geometryVersionRef(
           "stop_policy",
           record.policyCode,
@@ -742,13 +756,13 @@ export class ServiceAreaService implements OnModuleInit {
       );
     }
     const previous = this.clone(record);
+    const retiredAt = new Date().toISOString();
     record.status = "retired";
     record.effectiveUntil =
-      this.normalizeEffectiveUntil(command.effectiveUntil) ??
-      new Date().toISOString();
+      this.normalizeEffectiveUntil(command.effectiveUntil) ?? retiredAt;
     this.assertEffectiveWindow(record.effectiveFrom, record.effectiveUntil);
     record.metadata = this.withLifecycleMetadata(record.metadata, {
-      retiredAt: new Date().toISOString(),
+      retiredAt,
       retireReason: command.reason ?? null,
     });
     record.updatedAt = new Date().toISOString();
@@ -766,7 +780,12 @@ export class ServiceAreaService implements OnModuleInit {
         policyCode: record.policyCode,
         status: record.status,
         version: record.version,
+        geometryType: record.geometry.type,
+        direction: record.direction,
+        effect: record.effect,
+        effectiveFrom: record.effectiveFrom,
         effectiveUntil: record.effectiveUntil,
+        retiredAt,
         reason: command.reason ?? null,
       },
       context,
@@ -774,7 +793,32 @@ export class ServiceAreaService implements OnModuleInit {
     return { record: this.clone(record), audit };
   }
 
-  evaluate(command: EvaluateServiceAreaCommand): ServiceAreaEvaluationResult {
+  evaluate(
+    command: EvaluateServiceAreaCommand,
+    requestId?: string,
+  ): ServiceAreaEvaluationResult {
+    if (
+      !this.hasCompletePoint(command.pickup) ||
+      (command.dropoff !== undefined &&
+        command.dropoff !== null &&
+        !this.hasCompletePoint(command.dropoff))
+    ) {
+      this.mapGeofenceObservabilityService?.recordServiceAreaEvaluation({
+        decision: "coordinate_less_attempt",
+        policyDenied: false,
+      });
+      this.recordServiceAreaEvaluationAudit(
+        {
+          decision: "coordinate_less_attempt",
+          serviceProductType: command.serviceProductType,
+          reasonCodes: ["COORDINATE_LESS_ATTEMPT"],
+          reasonMessages: [
+            "Service-area evaluation requires pickup/dropoff coordinates.",
+          ],
+        },
+        requestId,
+      );
+    }
     const serviceProductType = this.normalizeServiceProductType(
       command.serviceProductType,
     );
@@ -818,7 +862,7 @@ export class ServiceAreaService implements OnModuleInit {
       evaluatedStops.map((stop) => stop.decision),
     );
 
-    return {
+    const result: ServiceAreaEvaluationResult = {
       decision,
       serviceProductType,
       evaluatedAt: new Date().toISOString(),
@@ -836,6 +880,13 @@ export class ServiceAreaService implements OnModuleInit {
         evaluatedStops.flatMap((stop) => stop.reasonMessages),
       ),
     };
+    const policyDenied = this.isPolicyDenied(result);
+    this.mapGeofenceObservabilityService?.recordServiceAreaEvaluation({
+      decision: result.decision,
+      policyDenied,
+    });
+    this.recordServiceAreaEvaluationAudit(result, requestId);
+    return result;
   }
 
   private requireServiceArea(serviceAreaId: string) {
@@ -1257,7 +1308,8 @@ export class ServiceAreaService implements OnModuleInit {
     context: ServiceAreaMutationContext,
     oldValuesSummary?: Record<string, unknown>,
   ) {
-    return (
+    this.recordGeometryMutationMetric(actionName);
+    const audit =
       this.auditNotificationService?.recordAuditLog({
         actorId: context.actorId,
         actorType: context.actorType,
@@ -1269,8 +1321,152 @@ export class ServiceAreaService implements OnModuleInit {
         ...(oldValuesSummary ? { oldValuesSummary } : {}),
         newValuesSummary,
         ...(context.requestId ? { requestId: context.requestId } : {}),
-      }) ?? null
+      }) ?? null;
+    this.recordPolicyCompatibilityAudit(
+      actionName,
+      resourceType,
+      resourceId,
+      newValuesSummary,
+      context,
+      oldValuesSummary,
     );
+    return audit;
+  }
+
+  private recordPolicyCompatibilityAudit(
+    actionName: string,
+    resourceType: string,
+    resourceId: string,
+    newValuesSummary: Record<string, unknown>,
+    context: ServiceAreaMutationContext,
+    oldValuesSummary?: Record<string, unknown>,
+  ) {
+    const policyActionName = this.compatibilityPolicyActionName(actionName);
+    if (!policyActionName) {
+      return;
+    }
+
+    this.auditNotificationService?.recordAuditLog({
+      actorId: context.actorId,
+      actorType: context.actorType,
+      tenantId: null,
+      moduleName: "service-area",
+      actionName: policyActionName,
+      resourceType: "service_area_policy",
+      resourceId,
+      ...(oldValuesSummary ? { oldValuesSummary } : {}),
+      newValuesSummary: {
+        ...newValuesSummary,
+        policyId: resourceId,
+        policyCode:
+          newValuesSummary.policyCode ?? newValuesSummary.areaCode ?? null,
+        policyKind: resourceType,
+        actorId: context.actorId,
+        actorRole: context.actorType,
+        direction: newValuesSummary.direction ?? null,
+        effect: newValuesSummary.effect ?? null,
+      },
+      ...(context.requestId ? { requestId: context.requestId } : {}),
+    });
+  }
+
+  private compatibilityPolicyActionName(actionName: string) {
+    switch (actionName) {
+      case "service_area.boundary.published":
+      case "service_area.stop_policy.published":
+        return "service_area.policy.published";
+      case "service_area.boundary.retired":
+      case "service_area.stop_policy.retired":
+        return "service_area.policy.retired";
+      default:
+        return null;
+    }
+  }
+
+  private recordServiceAreaEvaluationAudit(
+    result:
+      | ServiceAreaEvaluationResult
+      | {
+          decision: "coordinate_less_attempt";
+          serviceProductType: unknown;
+          reasonCodes: string[];
+          reasonMessages: string[];
+        },
+    requestId?: string,
+  ) {
+    this.auditNotificationService?.recordAuditLog({
+      actorId: null,
+      actorType: "system",
+      tenantId: null,
+      moduleName: "service-area",
+      actionName: "service_area.evaluated",
+      resourceType: "service_area_evaluation",
+      resourceId: null,
+      newValuesSummary: {
+        decision: result.decision,
+        serviceProductType: result.serviceProductType ?? null,
+        reasonCodes: result.reasonCodes,
+        reasonMessages: result.reasonMessages,
+        ...("serviceAreaCodes" in result
+          ? {
+              serviceAreaCodes: result.serviceAreaCodes,
+              policyCodes: this.unique(
+                result.stops.flatMap((stop) => stop.policyCodes),
+              ),
+              geometryVersionRefs: result.geometryVersionRefs,
+            }
+          : { coordinateLessAttempt: true }),
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private recordGeometryMutationMetric(actionName: string) {
+    switch (actionName) {
+      case "service_area.boundary.published":
+        this.mapGeofenceObservabilityService?.recordGeometryMutation(
+          "service_area_published",
+        );
+        return;
+      case "service_area.boundary.retired":
+        this.mapGeofenceObservabilityService?.recordGeometryMutation(
+          "service_area_retired",
+        );
+        return;
+      case "service_area.stop_policy.published":
+        this.mapGeofenceObservabilityService?.recordGeometryMutation(
+          "stop_policy_published",
+        );
+        return;
+      case "service_area.stop_policy.retired":
+        this.mapGeofenceObservabilityService?.recordGeometryMutation(
+          "stop_policy_retired",
+        );
+        return;
+      case "service_area.boundary.created":
+      case "service_area.boundary.updated":
+      case "service_area.stop_policy.created":
+      case "service_area.stop_policy.updated":
+        this.mapGeofenceObservabilityService?.recordGeometryMutation(
+          "geometry_mutation",
+        );
+        return;
+    }
+  }
+
+  private isPolicyDenied(result: ServiceAreaEvaluationResult) {
+    return result.stops.some(
+      (stop) =>
+        stop.decision === "not_serviceable" && stop.policyCodes.length > 0,
+    );
+  }
+
+  private hasCompletePoint(value: unknown) {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const point = value as Record<string, unknown>;
+    return point.lat !== undefined && point.lng !== undefined;
   }
 
   private polygonSelfIntersects(points: GeoPoint[]) {
