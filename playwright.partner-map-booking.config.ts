@@ -22,7 +22,11 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && pnpm exec next dev --hostname 127.0.0.1 --port 3007",
+        // Use webpack here: in isolated git worktrees the default Turbopack
+        // dev server rejects the app's node_modules symlink as outside the
+        // filesystem root, which makes this review-time acceptance check fail
+        // before the partner map-booking specs can even start.
+        "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
       url: "http://127.0.0.1:3007",
       reuseExistingServer: !process.env.CI,
       timeout: 300_000,
