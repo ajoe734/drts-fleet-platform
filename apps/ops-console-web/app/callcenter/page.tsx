@@ -28,7 +28,16 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  AddressMapPairPicker,
+  buildAddressPayloadFromCandidate,
+  buildManualAddressPayload,
+  buildServiceAreaPreviewCommand,
+  parseManualGeoPoint,
+  type AddressMapProviderStatus,
+} from "@drts/ui-web/client";
 import type {
+  AddressPayload,
   AttachCallRecordingCommand,
   CallbackTaskRecord,
   CallRecordingState,
@@ -38,10 +47,12 @@ import type {
   CrossAppResourceLink,
   DispatchTraceLogRecord,
   EmptyReason,
+  GeocodeCandidate,
   OpenCallSessionCommand,
   OwnedOrderRecord,
   RefreshTier,
   ResourceActionDescriptor,
+  ServiceAreaEvaluationResult,
   TransferCallToComplaintCommand,
   UiHealthEnvelope,
   UiRefreshMetadata,
@@ -50,6 +61,14 @@ import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
+import {
+  CALLCENTER_MAP_SERVICE_PRODUCT_TYPE,
+  buildCallcenterMapOrderCommand,
+  getCallcenterMapBookingGate,
+  hasCallcenterAddressCoordinates,
+  type CallcenterMapBookingBlockReason,
+  type CallcenterServiceabilityPreviewStatus,
+} from "./map-booking";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -63,6 +82,17 @@ const COMPLAINT_CATEGORY_OPTIONS: ComplaintCategory[] = [
 ];
 
 type Locale = "en" | "zh";
+
+type AddressMapStopKind = "pickup" | "dropoff";
+
+type AddressMapStopState = {
+  query: string;
+  value: AddressPayload | null;
+  candidates: GeocodeCandidate[];
+  providerStatus: AddressMapProviderStatus;
+  manualReason: string;
+  error: string | null;
+};
 
 type RecordingFormState = AttachCallRecordingCommand & {
   agentId: string;
@@ -118,6 +148,17 @@ const INITIAL_ORDER_FORM = {
   dropoffAddress: "",
   notes: "",
 };
+
+function createInitialAddressMapStopState(): AddressMapStopState {
+  return {
+    query: "",
+    value: null,
+    candidates: [],
+    providerStatus: "idle",
+    manualReason: "",
+    error: null,
+  };
+}
 
 const INITIAL_RECORDING_FORM: RecordingFormState = {
   recordingId: "",
@@ -758,6 +799,78 @@ function getActionHelper(
   return descriptor ? renderActionMeta(t, descriptor) : undefined;
 }
 
+function getMapBookingBlockMessageKey(reason: CallcenterMapBookingBlockReason) {
+  const keyByReason: Record<CallcenterMapBookingBlockReason, string> = {
+    pickup_coordinates_required:
+      "callcenter.map.block.pickupCoordinatesRequired",
+    dropoff_coordinates_required:
+      "callcenter.map.block.dropoffCoordinatesRequired",
+    pickup_provenance_required: "callcenter.map.block.pickupProvenanceRequired",
+    dropoff_provenance_required:
+      "callcenter.map.block.dropoffProvenanceRequired",
+    serviceability_preview_required:
+      "callcenter.map.block.serviceabilityPreviewRequired",
+    serviceability_preview_unavailable:
+      "callcenter.map.block.serviceabilityPreviewUnavailable",
+    serviceability_blocked: "callcenter.map.block.serviceabilityBlocked",
+  };
+  return keyByReason[reason];
+}
+
+function getServiceabilityDecisionMessageKey(
+  decision: ServiceAreaEvaluationResult["decision"],
+) {
+  switch (decision) {
+    case "serviceable":
+      return "callcenter.map.serviceability.serviceable";
+    case "manual_review":
+      return "callcenter.map.serviceability.manualReview";
+    case "not_serviceable":
+    default:
+      return "callcenter.map.serviceability.notServiceable";
+  }
+}
+
+function nudgeCoordinate(
+  value: AddressPayload,
+  direction: "north" | "south" | "east" | "west",
+): AddressPayload {
+  if (!hasCallcenterAddressCoordinates(value)) {
+    return value;
+  }
+  const delta = 0.0001;
+  const nextLat =
+    direction === "north"
+      ? value.lat + delta
+      : direction === "south"
+        ? value.lat - delta
+        : value.lat;
+  const nextLng =
+    direction === "east"
+      ? value.lng + delta
+      : direction === "west"
+        ? value.lng - delta
+        : value.lng;
+  const pinnedAt = new Date().toISOString();
+  return {
+    ...value,
+    lat: Math.max(-90, Math.min(90, nextLat)),
+    lng: Math.max(-180, Math.min(180, nextLng)),
+    coordinateSource: "manual_pin",
+    geocodeConfidence: "manual",
+    pinnedAt,
+    coordinateProvenance: {
+      ...(value.coordinateProvenance ?? {
+        coordinateSource: "manual_pin",
+      }),
+      coordinateSource: "manual_pin",
+      geocodeConfidence: "manual",
+      pinnedAt,
+      manualOverrideReason: "agent_pin_nudge",
+    },
+  };
+}
+
 function getPillToneForRecordingState(
   recordingState: CallRecordingState,
 ): CanvasTone {
@@ -838,6 +951,19 @@ export default function CallcenterPage() {
   );
   const [intakeForm, setIntakeForm] = useState(INITIAL_INTAKE_FORM);
   const [orderForm, setOrderForm] = useState(INITIAL_ORDER_FORM);
+  const [pickupMap, setPickupMap] = useState<AddressMapStopState>(
+    createInitialAddressMapStopState,
+  );
+  const [dropoffMap, setDropoffMap] = useState<AddressMapStopState>(
+    createInitialAddressMapStopState,
+  );
+  const [serviceabilityPreview, setServiceabilityPreview] =
+    useState<ServiceAreaEvaluationResult | null>(null);
+  const [serviceabilityPreviewStatus, setServiceabilityPreviewStatus] =
+    useState<CallcenterServiceabilityPreviewStatus>("idle");
+  const [serviceabilityPreviewError, setServiceabilityPreviewError] = useState<
+    string | null
+  >(null);
   const [existingOrderId, setExistingOrderId] = useState("");
   const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
   const [recordingForm, setRecordingForm] = useState<RecordingFormState>(
@@ -987,6 +1113,65 @@ export default function CallcenterPage() {
   }, [selectedCallId]);
 
   useEffect(() => {
+    setOrderForm(INITIAL_ORDER_FORM);
+    setPickupMap(createInitialAddressMapStopState());
+    setDropoffMap(createInitialAddressMapStopState());
+    setServiceabilityPreview(null);
+    setServiceabilityPreviewStatus("idle");
+    setServiceabilityPreviewError(null);
+  }, [selectedSession?.callId]);
+
+  useEffect(() => {
+    if (
+      !hasCallcenterAddressCoordinates(pickupMap.value) ||
+      !hasCallcenterAddressCoordinates(dropoffMap.value)
+    ) {
+      setServiceabilityPreview(null);
+      setServiceabilityPreviewStatus("idle");
+      setServiceabilityPreviewError(null);
+      return;
+    }
+
+    const command = buildServiceAreaPreviewCommand({
+      pickup: pickupMap.value,
+      dropoff: dropoffMap.value,
+      serviceProductType: CALLCENTER_MAP_SERVICE_PRODUCT_TYPE,
+    });
+    if (!command) {
+      setServiceabilityPreview(null);
+      setServiceabilityPreviewStatus("idle");
+      setServiceabilityPreviewError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setServiceabilityPreviewStatus("evaluating");
+    setServiceabilityPreviewError(null);
+
+    void (async () => {
+      try {
+        const preview = await getOpsClient().evaluateServiceArea(command);
+        if (cancelled) {
+          return;
+        }
+        setServiceabilityPreview(preview);
+        setServiceabilityPreviewStatus("ready");
+      } catch (nextError) {
+        if (cancelled) {
+          return;
+        }
+        setServiceabilityPreview(null);
+        setServiceabilityPreviewStatus("error");
+        setServiceabilityPreviewError(resolveErrorMessage(nextError));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dropoffMap.value, pickupMap.value]);
+
+  useEffect(() => {
     const linkedOrderId = selectedSession?.linkedOrderId;
     if (!linkedOrderId) {
       setSelectedOrder(null);
@@ -1021,6 +1206,220 @@ export default function CallcenterPage() {
       cancelled = true;
     };
   }, [selectedSession?.linkedOrderId]);
+
+  function updateAddressMapStop(
+    stopKind: AddressMapStopKind,
+    updater: (current: AddressMapStopState) => AddressMapStopState,
+  ) {
+    if (stopKind === "pickup") {
+      setPickupMap(updater);
+      return;
+    }
+    setDropoffMap(updater);
+  }
+
+  function updateOrderAddress(stopKind: AddressMapStopKind, address: string) {
+    setOrderForm((current) => ({
+      ...current,
+      [stopKind === "pickup" ? "pickupAddress" : "dropoffAddress"]: address,
+    }));
+  }
+
+  function handleAddressQueryChange(
+    stopKind: AddressMapStopKind,
+    value: string,
+  ) {
+    updateOrderAddress(stopKind, value);
+    updateAddressMapStop(stopKind, (current) => ({
+      ...current,
+      query: value,
+      value:
+        current.value && current.value.address === value
+          ? current.value
+          : { address: value },
+      candidates: value.trim() ? current.candidates : [],
+      providerStatus: value.trim() ? current.providerStatus : "idle",
+      error: null,
+    }));
+  }
+
+  async function searchAddressStop(
+    stopKind: AddressMapStopKind,
+    queryText: string,
+  ) {
+    const trimmedQuery = queryText.trim();
+    if (!trimmedQuery) {
+      updateAddressMapStop(stopKind, (current) => ({
+        ...current,
+        candidates: [],
+        providerStatus: "idle",
+        error: null,
+      }));
+      return;
+    }
+
+    updateAddressMapStop(stopKind, (current) => ({
+      ...current,
+      providerStatus: "searching",
+      error: null,
+    }));
+
+    try {
+      const response = await getOpsClient().searchGeo({
+        q: trimmedQuery,
+        locale: currentLocale === "zh" ? "zh-TW" : "en-US",
+        limit: 5,
+        surface: "callcenter",
+        requestedByActorId:
+          selectedSession?.agentId ?? intakeForm.agentId ?? "AGENT-OPS-001",
+      });
+      updateAddressMapStop(stopKind, (current) => ({
+        ...current,
+        candidates: response.candidates,
+        providerStatus: response.degraded
+          ? "provider_unavailable"
+          : response.candidates.length > 0
+            ? "ready"
+            : "no_match",
+        error: response.reasonCode ?? null,
+      }));
+    } catch (nextError) {
+      updateAddressMapStop(stopKind, (current) => ({
+        ...current,
+        candidates: [],
+        providerStatus: "provider_unavailable",
+        error: resolveErrorMessage(nextError),
+      }));
+    }
+  }
+
+  async function selectAddressCandidate(
+    stopKind: AddressMapStopKind,
+    candidate: GeocodeCandidate,
+  ) {
+    const selectedByActorId =
+      selectedSession?.agentId ?? intakeForm.agentId ?? "AGENT-OPS-001";
+    updateAddressMapStop(stopKind, (current) => ({
+      ...current,
+      providerStatus: "searching",
+      error: null,
+    }));
+
+    try {
+      const resolved = await getOpsClient().resolveGeo({
+        candidateId: candidate.candidateId,
+        providerCandidateId:
+          candidate.providerCandidateId ?? candidate.candidateId,
+        placeId: candidate.placeId ?? null,
+        addressText: candidate.address,
+        ...(candidate.location ? { selectedPoint: candidate.location } : {}),
+        selectedByActorId,
+        surface: "callcenter",
+      });
+      const address = resolved.address;
+      updateOrderAddress(stopKind, address.address);
+      updateAddressMapStop(stopKind, (current) => ({
+        ...current,
+        query: address.address,
+        value: address,
+        providerStatus: "ready",
+        error: null,
+      }));
+    } catch (nextError) {
+      const fallbackPayload = buildAddressPayloadFromCandidate(candidate, {
+        actorId: selectedByActorId,
+        surface: "callcenter",
+      });
+      if (hasCallcenterAddressCoordinates(fallbackPayload)) {
+        updateOrderAddress(stopKind, fallbackPayload.address);
+        updateAddressMapStop(stopKind, (current) => ({
+          ...current,
+          query: fallbackPayload.address,
+          value: fallbackPayload,
+          providerStatus: "ready",
+          error: null,
+        }));
+        return;
+      }
+      updateAddressMapStop(stopKind, (current) => ({
+        ...current,
+        providerStatus: "provider_unavailable",
+        error: resolveErrorMessage(nextError),
+      }));
+    }
+  }
+
+  function handleManualCoordinateChange(
+    stopKind: AddressMapStopKind,
+    field: "address" | "lat" | "lng" | "reason",
+    value: string,
+  ) {
+    const selectedByActorId =
+      selectedSession?.agentId ?? intakeForm.agentId ?? "AGENT-OPS-001";
+    updateAddressMapStop(stopKind, (current) => {
+      const address =
+        field === "address" ? value : (current.value?.address ?? current.query);
+      const manualReason =
+        field === "reason" ? value : current.manualReason || "manual pin";
+      const latInput =
+        field === "lat"
+          ? value
+          : typeof current.value?.lat === "number"
+            ? String(current.value.lat)
+            : "";
+      const lngInput =
+        field === "lng"
+          ? value
+          : typeof current.value?.lng === "number"
+            ? String(current.value.lng)
+            : "";
+      const point = parseManualGeoPoint(latInput, lngInput);
+      const nextValue =
+        point && address.trim() && manualReason.trim()
+          ? buildManualAddressPayload({
+              address,
+              lat: point.lat,
+              lng: point.lng,
+              manualOverrideReason: manualReason,
+              actorId: selectedByActorId,
+              surface: "callcenter",
+            })
+          : {
+              ...(current.value ?? { address }),
+              address,
+              lat: point?.lat ?? current.value?.lat ?? null,
+              lng: point?.lng ?? current.value?.lng ?? null,
+              coordinateSource: "manual_pin" as const,
+              geocodeConfidence: "manual" as const,
+              manualOverrideReason: manualReason,
+              surface: "callcenter" as const,
+            };
+
+      return {
+        ...current,
+        query: address,
+        value: nextValue,
+        manualReason,
+        providerStatus: "manual",
+        error: null,
+      };
+    });
+    if (field === "address") {
+      updateOrderAddress(stopKind, value);
+    }
+  }
+
+  function handlePinNudge(
+    stopKind: AddressMapStopKind,
+    direction: "north" | "south" | "east" | "west",
+  ) {
+    updateAddressMapStop(stopKind, (current) => ({
+      ...current,
+      value: current.value ? nudgeCoordinate(current.value, direction) : null,
+      providerStatus: current.value ? "manual" : current.providerStatus,
+      manualReason: current.manualReason || "agent_pin_nudge",
+    }));
+  }
 
   async function loadData(preferredCallId?: string, silent = false) {
     if (!silent) {
@@ -1147,6 +1546,29 @@ export default function CallcenterPage() {
   const attachRecordingAction = selectedSession
     ? getActionDescriptor(selectedSession.availableActions, "attach_recording")
     : undefined;
+  const mapBookingGate = getCallcenterMapBookingGate({
+    pickup: pickupMap.value,
+    dropoff: dropoffMap.value,
+    serviceability: serviceabilityPreview,
+    previewStatus: serviceabilityPreviewStatus,
+  });
+  const mapBookingGateMessage = mapBookingGate.canSubmit
+    ? t(getServiceabilityDecisionMessageKey(mapBookingGate.decision))
+    : t(getMapBookingBlockMessageKey(mapBookingGate.reason));
+  const createBookingHelper = (
+    <div style={{ display: "grid", gap: 6 }}>
+      {getActionHelper(t, createBookingAction)}
+      <span style={subtleTextStyle}>{mapBookingGateMessage}</span>
+      {serviceabilityPreviewStatus === "evaluating" ? (
+        <span style={subtleTextStyle}>
+          {t("callcenter.map.serviceability.evaluating")}
+        </span>
+      ) : null}
+      {serviceabilityPreviewError ? (
+        <span style={subtleTextStyle}>{serviceabilityPreviewError}</span>
+      ) : null}
+    </div>
+  );
   const activeTabIndex = tabs.findIndex((tab) => tab.id === queueView);
   const headerTabs = tabs.map((tab) => (
     <button
@@ -2133,25 +2555,37 @@ export default function CallcenterPage() {
                     if (!selectedSession) {
                       return;
                     }
-                    const command: CreateCallCenterOrderCommand = {
-                      callId: selectedSession.callId,
-                      agentId:
-                        selectedSession.agentId ??
-                        intakeForm.agentId ??
-                        "AGENT-OPS-001",
-                      recordingId: selectedSession.recordingId,
-                      pickup: { address: orderForm.pickupAddress },
-                      dropoff: { address: orderForm.dropoffAddress },
-                      passenger: {
-                        name: orderForm.passengerName,
-                        phone:
-                          orderForm.passengerPhone ||
-                          selectedSession.callerPhone,
-                      },
-                      ...(orderForm.notes.trim()
-                        ? { notes: orderForm.notes.trim() }
-                        : {}),
-                    };
+                    if (!mapBookingGate.canSubmit) {
+                      setOutcomeNotice({
+                        tone: "warning",
+                        message: mapBookingGateMessage,
+                      });
+                      return;
+                    }
+                    if (!pickupMap.value || !dropoffMap.value) {
+                      setOutcomeNotice({
+                        tone: "warning",
+                        message: t(
+                          "callcenter.map.block.serviceabilityPreviewRequired",
+                        ),
+                      });
+                      return;
+                    }
+                    const command: CreateCallCenterOrderCommand =
+                      buildCallcenterMapOrderCommand({
+                        callId: selectedSession.callId,
+                        agentId:
+                          selectedSession.agentId ??
+                          intakeForm.agentId ??
+                          "AGENT-OPS-001",
+                        recordingId: selectedSession.recordingId,
+                        pickup: pickupMap.value,
+                        dropoff: dropoffMap.value,
+                        passengerName: orderForm.passengerName,
+                        passengerPhone: orderForm.passengerPhone,
+                        fallbackPassengerPhone: selectedSession.callerPhone,
+                        notes: orderForm.notes,
+                      });
                     void runGuardedAction(
                       "create-booking",
                       createBookingAction,
@@ -2159,6 +2593,11 @@ export default function CallcenterPage() {
                         const created =
                           await getOpsClient().createCallCenterOrder(command);
                         setOrderForm(INITIAL_ORDER_FORM);
+                        setPickupMap(createInitialAddressMapStopState());
+                        setDropoffMap(createInitialAddressMapStopState());
+                        setServiceabilityPreview(null);
+                        setServiceabilityPreviewStatus("idle");
+                        setServiceabilityPreviewError(null);
                         setOutcomeNotice({
                           tone: "success",
                           message: t("callcenter.notice.phoneBookingCreated", {
@@ -2181,6 +2620,7 @@ export default function CallcenterPage() {
                       <input
                         type="text"
                         required
+                        aria-label={t("callcenter.passengerNamePlaceholder")}
                         value={orderForm.passengerName}
                         onChange={(event) =>
                           setOrderForm((current) => ({
@@ -2197,6 +2637,7 @@ export default function CallcenterPage() {
                     >
                       <input
                         type="text"
+                        aria-label={t("callcenter.passengerPhonePlaceholder")}
                         value={orderForm.passengerPhone}
                         onChange={(event) =>
                           setOrderForm((current) => ({
@@ -2207,42 +2648,105 @@ export default function CallcenterPage() {
                         style={nativeInputStyle}
                       />
                     </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={t("callcenter.pickupAddressPlaceholder")}
-                      required
-                    >
-                      <input
-                        type="text"
-                        required
-                        value={orderForm.pickupAddress}
-                        onChange={(event) =>
-                          setOrderForm((current) => ({
-                            ...current,
-                            pickupAddress: event.target.value,
-                          }))
-                        }
-                        style={nativeInputStyle}
+                    <div style={{ gridColumn: "1 / -1" }}>
+                      <AddressMapPairPicker
+                        id="callcenter-phone-booking-map"
+                        serviceProductType={CALLCENTER_MAP_SERVICE_PRODUCT_TYPE}
+                        serviceability={serviceabilityPreview}
+                        locale={currentLocale === "zh" ? "zhTW" : "en"}
+                        density="compact"
+                        mode="dark"
+                        pickup={{
+                          id: "callcenter-pickup-map",
+                          label: t("callcenter.pickupAddressPlaceholder"),
+                          value: pickupMap.value,
+                          query: pickupMap.query,
+                          candidates: pickupMap.candidates,
+                          providerStatus: pickupMap.providerStatus,
+                          helperText:
+                            pickupMap.error ?? t("callcenter.map.pickupHelper"),
+                          manualFallbackReason: pickupMap.manualReason,
+                          disabled: busyKey === "create-booking",
+                          onQueryChange: (value) =>
+                            handleAddressQueryChange("pickup", value),
+                          onSearch: (value) =>
+                            void searchAddressStop("pickup", value),
+                          onCandidateSelect: (candidate) =>
+                            void selectAddressCandidate("pickup", candidate),
+                          onManualCoordinateChange: (field, value) =>
+                            handleManualCoordinateChange(
+                              "pickup",
+                              field,
+                              value,
+                            ),
+                          onPinNudge: (direction) =>
+                            handlePinNudge("pickup", direction),
+                        }}
+                        dropoff={{
+                          id: "callcenter-dropoff-map",
+                          label: t("callcenter.dropoffAddressPlaceholder"),
+                          value: dropoffMap.value,
+                          query: dropoffMap.query,
+                          candidates: dropoffMap.candidates,
+                          providerStatus: dropoffMap.providerStatus,
+                          helperText:
+                            dropoffMap.error ??
+                            t("callcenter.map.dropoffHelper"),
+                          manualFallbackReason: dropoffMap.manualReason,
+                          disabled: busyKey === "create-booking",
+                          onQueryChange: (value) =>
+                            handleAddressQueryChange("dropoff", value),
+                          onSearch: (value) =>
+                            void searchAddressStop("dropoff", value),
+                          onCandidateSelect: (candidate) =>
+                            void selectAddressCandidate("dropoff", candidate),
+                          onManualCoordinateChange: (field, value) =>
+                            handleManualCoordinateChange(
+                              "dropoff",
+                              field,
+                              value,
+                            ),
+                          onPinNudge: (direction) =>
+                            handlePinNudge("dropoff", direction),
+                        }}
                       />
-                    </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={t("callcenter.dropoffAddressPlaceholder")}
-                      required
-                    >
-                      <input
-                        type="text"
-                        required
-                        value={orderForm.dropoffAddress}
-                        onChange={(event) =>
-                          setOrderForm((current) => ({
-                            ...current,
-                            dropoffAddress: event.target.value,
-                          }))
+                      <div
+                        data-callcenter-map-booking-gate={
+                          mapBookingGate.canSubmit
+                            ? mapBookingGate.decision
+                            : mapBookingGate.reason
                         }
-                        style={nativeInputStyle}
-                      />
-                    </CanvasField>
+                        style={{
+                          marginTop: 8,
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 8,
+                        }}
+                      >
+                        <CanvasPill
+                          theme={theme}
+                          tone={
+                            mapBookingGate.canSubmit
+                              ? mapBookingGate.decision === "manual_review"
+                                ? "warn"
+                                : "success"
+                              : "danger"
+                          }
+                        >
+                          {mapBookingGateMessage}
+                        </CanvasPill>
+                        {serviceabilityPreviewStatus === "evaluating" ? (
+                          <CanvasPill theme={theme} tone="info">
+                            {t("callcenter.map.serviceability.evaluating")}
+                          </CanvasPill>
+                        ) : null}
+                        {serviceabilityPreviewError ? (
+                          <CanvasPill theme={theme} tone="danger">
+                            {serviceabilityPreviewError}
+                          </CanvasPill>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                   <CanvasField
                     theme={theme}
@@ -2250,6 +2754,7 @@ export default function CallcenterPage() {
                   >
                     <textarea
                       rows={3}
+                      aria-label={t("callcenter.opsNotePlaceholder")}
                       value={orderForm.notes}
                       onChange={(event) =>
                         setOrderForm((current) => ({
@@ -2262,8 +2767,10 @@ export default function CallcenterPage() {
                   </CanvasField>
                   <ActionButton
                     theme={theme}
-                    disabled={!createBookingAction?.enabled}
-                    helper={getActionHelper(t, createBookingAction)}
+                    disabled={
+                      !createBookingAction?.enabled || !mapBookingGate.canSubmit
+                    }
+                    helper={createBookingHelper}
                     busy={busyKey === "create-booking"}
                     label={getActionLabel(t, "create_phone_booking")}
                     variant="primary"

@@ -3,6 +3,10 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@drts/contracts": ["../contracts/src/index.ts"]
+    },
     "noEmit": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]

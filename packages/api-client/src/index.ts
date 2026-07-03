@@ -50,6 +50,8 @@ import type {
   CreatePlatformPricingRuleCommand,
   CreatePlatformTenantCommand,
   CreateReportJobCommand,
+  CreateServiceAreaBoundaryCommand,
+  CreateStopPolicyCommand,
   CreateTenantBookingCommand,
   CreateCallCenterOrderCommand,
   CreateCallbackTaskCommand,
@@ -111,10 +113,22 @@ import type {
   GenerateFilingPackageCommand,
   GeneratePlacardVersionCommand,
   GenerateTenantInvoiceCommand,
+  GeoResolveResponse,
+  GeoReverseResponse,
+  GeoSearchResponse,
   IncidentRecord,
   IncidentTimelineEntry,
+  PublishServiceAreaBoundaryCommand,
+  PublishStopPolicyCommand,
   RecordServiceRecoveryActionCommand,
+  EvaluateServiceAreaCommand,
+  RetireServiceAreaBoundaryCommand,
+  RetireStopPolicyCommand,
   ServiceRecoveryActionRecord,
+  ServiceAreaAdminMutationResponse,
+  ServiceAreaDefinitionsResponse,
+  ServiceAreaEvaluationResult,
+  ServiceAreaGeoJsonResponse,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
@@ -164,9 +178,11 @@ import type {
   ReportJobAccepted,
   ReportJobDetailRecord,
   ReportJobRecord,
+  ResolveAddressCommand,
   ResolveReconciliationIssueCommand,
   ResolveComplaintCaseCommand,
   ResolveEvidenceDeletionExceptionCommand,
+  ReverseGeocodeCommand,
   ReopenReconciliationIssueCommand,
   RejectExceptionOverrideCommand,
   RequestExceptionOverrideCommand,
@@ -179,6 +195,7 @@ import type {
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
   PlatformAdapter,
+  SearchGeoQuery,
   UpdatePlatformAdapterCommand,
   SettlementMatrixRecord,
   ShiftRecord,
@@ -237,6 +254,8 @@ import type {
   UpdateDriverProfileCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
+  UpdateServiceAreaBoundaryCommand,
+  UpdateStopPolicyCommand,
   UpdateFleetPartnerCommand,
   UpdateFleetPartnerRevenueShareRuleCommand,
   UpdatePlatformAdminUserRoleCommand,
@@ -288,6 +307,63 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+export interface CallCenterOrderCreateResponse {
+  orderId: string;
+  orderSource: string;
+  callId: string;
+  recordingId: string | null;
+  status: string;
+}
+
+export interface TenantBookingCreateResponse {
+  orderId: string;
+  bookingId: string;
+  serviceBucket: "business_dispatch";
+  businessDispatchSubtype: NonNullable<
+    OwnedOrderRecord["businessDispatchSubtype"]
+  >;
+  dispatchSemantics: "reservation";
+  status: OwnedOrderRecord["status"];
+}
+
+export interface ApiErrorEnvelope {
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+    retryable?: boolean;
+    traceId?: string;
+  };
+}
+
+export class ApiClientError extends Error {
+  readonly statusCode: number;
+  readonly code: string;
+  readonly details: Record<string, unknown> | undefined;
+  readonly retryable: boolean;
+  readonly traceId: string | undefined;
+  readonly rawBody: string;
+
+  constructor(
+    statusCode: number,
+    rawBody: string,
+    envelope: ApiErrorEnvelope | null,
+  ) {
+    super(
+      envelope
+        ? `API error ${statusCode}: ${envelope.error.message}`
+        : `API error ${statusCode}: ${rawBody}`,
+    );
+    this.name = "ApiClientError";
+    this.statusCode = statusCode;
+    this.code = envelope?.error.code ?? "API_ERROR";
+    this.details = envelope?.error.details;
+    this.retryable = envelope?.error.retryable ?? false;
+    this.traceId = envelope?.error.traceId;
+    this.rawBody = rawBody;
+  }
+}
+
 /**
  * Filters for the daily dispatch record operational report
  * (`GET /api/reports/daily-dispatch-records`, SD §2.10 / SA §7.7).
@@ -330,9 +406,7 @@ export interface MonthlyOperationsSummaryRebuildResult {
 }
 
 /** Serialize a report filter object into a `?a=b&c=d` query suffix. */
-function buildReportQuery(
-  query: Record<string, string | undefined>,
-): string {
+function buildReportQuery(query: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (typeof value === "string" && value.trim()) {
@@ -400,6 +474,41 @@ function createRequestToken(): string {
 function hasHeader(headers: Record<string, string>, key: string): boolean {
   const target = key.toLowerCase();
   return Object.keys(headers).some((header) => header.toLowerCase() === target);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseApiErrorEnvelope(rawBody: string): ApiErrorEnvelope | null {
+  try {
+    const parsed = JSON.parse(rawBody) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.error)) {
+      return null;
+    }
+    const { error } = parsed;
+    if (typeof error.code !== "string" || typeof error.message !== "string") {
+      return null;
+    }
+    const envelope: ApiErrorEnvelope = {
+      error: {
+        code: error.code,
+        message: error.message,
+      },
+    };
+    if (isRecord(error.details)) {
+      envelope.error.details = error.details;
+    }
+    if (typeof error.retryable === "boolean") {
+      envelope.error.retryable = error.retryable;
+    }
+    if (typeof error.traceId === "string") {
+      envelope.error.traceId = error.traceId;
+    }
+    return envelope;
+  } catch {
+    return null;
+  }
 }
 
 export class ApiClient {
@@ -480,6 +589,163 @@ export class ApiClient {
     return Array.isArray(result) ? result : (result.items ?? []);
   }
 
+  // ── Geo and service-area authority ──
+
+  async searchGeo(query: SearchGeoQuery): Promise<GeoSearchResponse> {
+    const params = new URLSearchParams();
+    params.set("q", query.q);
+    if (query.near) {
+      params.set("nearLat", String(query.near.lat));
+      params.set("nearLng", String(query.near.lng));
+    }
+    if (query.locale) {
+      params.set("locale", query.locale);
+    }
+    if (typeof query.limit === "number") {
+      params.set("limit", String(query.limit));
+    }
+    if (query.surface) {
+      params.set("surface", query.surface);
+    }
+    if (query.requestedByActorId) {
+      params.set("requestedByActorId", query.requestedByActorId);
+    }
+    return this.get<GeoSearchResponse>(`/api/geo/search?${params.toString()}`);
+  }
+
+  async resolveGeo(
+    command: ResolveAddressCommand,
+  ): Promise<GeoResolveResponse> {
+    return this.post<GeoResolveResponse>("/api/geo/resolve", {
+      body: command,
+    });
+  }
+
+  async reverseGeo(
+    command: ReverseGeocodeCommand,
+  ): Promise<GeoReverseResponse> {
+    return this.post<GeoReverseResponse>("/api/geo/reverse", {
+      body: command,
+    });
+  }
+
+  async getServiceAreaDefinitions(): Promise<ServiceAreaDefinitionsResponse> {
+    return this.get<ServiceAreaDefinitionsResponse>(
+      "/api/service-area/definitions",
+    );
+  }
+
+  async getServiceAreaGeoJson(): Promise<ServiceAreaGeoJsonResponse> {
+    return this.get<ServiceAreaGeoJsonResponse>(
+      "/api/service-area/admin/geojson",
+    );
+  }
+
+  async evaluateServiceArea(
+    command: EvaluateServiceAreaCommand,
+  ): Promise<ServiceAreaEvaluationResult> {
+    return this.post<ServiceAreaEvaluationResult>(
+      "/api/service-area/evaluate",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async createServiceAreaBoundary(
+    command: CreateServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      "/api/service-area/admin/service-areas",
+      { body: command },
+    );
+  }
+
+  async updateServiceAreaBoundary(
+    serviceAreaId: string,
+    command: UpdateServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/update`,
+      { body: command },
+    );
+  }
+
+  async submitServiceAreaBoundaryForReview(
+    serviceAreaId: string,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/submit-review`,
+    );
+  }
+
+  async publishServiceAreaBoundary(
+    serviceAreaId: string,
+    command: PublishServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/publish`,
+      { body: command },
+    );
+  }
+
+  async retireServiceAreaBoundary(
+    serviceAreaId: string,
+    command: RetireServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/retire`,
+      { body: command },
+    );
+  }
+
+  async createStopPolicy(
+    command: CreateStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      "/api/service-area/admin/stop-policies",
+      { body: command },
+    );
+  }
+
+  async updateStopPolicy(
+    stopPolicyId: string,
+    command: UpdateStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/update`,
+      { body: command },
+    );
+  }
+
+  async submitStopPolicyForReview(
+    stopPolicyId: string,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/submit-review`,
+    );
+  }
+
+  async publishStopPolicy(
+    stopPolicyId: string,
+    command: PublishStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/publish`,
+      { body: command },
+    );
+  }
+
+  async retireStopPolicy(
+    stopPolicyId: string,
+    command: RetireStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/retire`,
+      { body: command },
+    );
+  }
+
   private async requestEnvelope<T>(
     method: string,
     path: string,
@@ -537,7 +803,11 @@ export class ApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`API error ${response.status}: ${errorText}`);
+        throw new ApiClientError(
+          response.status,
+          errorText,
+          parseApiErrorEnvelope(errorText),
+        );
       }
 
       return (await response.json()) as ApiSuccessEnvelope<T>;
@@ -796,20 +1066,22 @@ export class ApiClient {
 
   // ── Owned Mobility: Call Center ──
 
-  async createCallCenterOrder(command: CreateCallCenterOrderCommand) {
-    return this.post<{
-      orderId: string;
-      orderSource: string;
-      callId: string;
-      recordingId: string | null;
-      status: string;
-    }>("/api/call-center/orders", { body: command });
+  async createCallCenterOrder(
+    command: CreateCallCenterOrderCommand,
+  ): Promise<CallCenterOrderCreateResponse> {
+    return this.post<CallCenterOrderCreateResponse>("/api/call-center/orders", {
+      body: command,
+    });
   }
 
   // ── Owned Mobility: Tenant Bookings ──
 
-  async createTenantBooking(command: CreateTenantBookingCommand) {
-    return this.post("/api/tenant/bookings", { body: command });
+  async createTenantBooking(
+    command: CreateTenantBookingCommand,
+  ): Promise<TenantBookingCreateResponse> {
+    return this.post<TenantBookingCreateResponse>("/api/tenant/bookings", {
+      body: command,
+    });
   }
 
   async listTenantBookings(): Promise<BookingRecord[]> {
@@ -1724,7 +1996,9 @@ export class ApiClient {
   async listDailyDispatchRecords(
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecord[]> {
-    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    const suffix = buildReportQuery(
+      query as Record<string, string | undefined>,
+    );
     return this.getList<DispatchDailyRecord>(
       `/api/reports/daily-dispatch-records${suffix}`,
     );
@@ -1742,7 +2016,9 @@ export class ApiClient {
   async previewSixMonthOperationsSummary(
     query: OperationsSummaryPreviewQuery = {},
   ): Promise<SixMonthOperationsSummary[]> {
-    const suffix = buildReportQuery(query as Record<string, string | undefined>);
+    const suffix = buildReportQuery(
+      query as Record<string, string | undefined>,
+    );
     return this.getList<SixMonthOperationsSummary>(
       `/api/reports/operations-summary/preview${suffix}`,
     );

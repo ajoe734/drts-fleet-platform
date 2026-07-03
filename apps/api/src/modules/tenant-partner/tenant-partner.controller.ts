@@ -459,13 +459,13 @@ export class TenantPartnerController {
   @Get("partner/referral/statements/:period")
   @RequireRealms("partner")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerReferralStatement(
+  async getPartnerReferralStatement(
     @CurrentIdentity() identity: IdentityContext | null,
     @Param("period") period: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getPartnerReferralStatement(
+      await this.tenantPartnerService.getPartnerReferralStatement(
         identity,
         this.billingSettlementService,
         period,

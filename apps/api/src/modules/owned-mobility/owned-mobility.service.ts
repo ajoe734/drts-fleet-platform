@@ -59,12 +59,20 @@ import type {
   TenantBookingApprovalRequestRecord,
   TenantBookingApprovalState,
   UpdateTenantBookingCommand,
+  GeoPoint,
+  GeoCoordinateProvenance,
+  GeoResolutionSurface,
+  OwnedOrderSpatialAuditSnapshot,
+  OwnedOrderSpatialAuditStopSnapshot,
+  ServiceAreaEvaluationResult,
   ServiceProductType,
 } from "@drts/contracts";
 
 import {
   QUEUE_ENTRY_POLICY_MAP,
   RESERVATION_HOLD_VALID_TRANSITIONS,
+  hasAddressCoordinateProvenance,
+  hasAddressCoordinates,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -80,6 +88,7 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { RuntimeEligibilityEvaluator } from "../vehicle-eligibility/runtime-eligibility-evaluator.service";
+import { ServiceAreaService } from "../service-area/service-area.service";
 import {
   OWNED_MOBILITY_TRIP_COMPLETED_EVENT,
   type OwnedMobilityTripCompletedEvent,
@@ -161,6 +170,20 @@ type DispatchAssignmentResult = {
 
 type CreateDispatchAssignmentOptions = {
   dispatchAttemptSequence?: number;
+};
+
+type ServiceAreaGateResolution = {
+  serviceProductType: ServiceProductType | null;
+  pickup: GeoPoint | null;
+  dropoff: GeoPoint | null;
+  missingItems: string[];
+  evaluation: ServiceAreaEvaluationResult | null;
+};
+
+type SpatialAuditContext = {
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  surface: GeoResolutionSurface;
 };
 
 const BOOKING_RULES: Record<
@@ -260,6 +283,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly eventEmitter?: EventEmitter2,
     @Optional()
     private readonly runtimeEligibilityEvaluator?: RuntimeEligibilityEvaluator,
+    @Optional()
+    private readonly serviceAreaService?: ServiceAreaService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -401,6 +426,15 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
+    this.applyServiceAreaCreationPolicy(
+      order,
+      {
+        actorId: null,
+        actorType: "referral_passenger",
+        surface: "passenger_entry",
+      },
+      requestId,
+    );
     this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const traceLog = this.appendTrace(
       order.orderId,
@@ -533,6 +567,20 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
+    this.applyServiceAreaCreationPolicy(
+      order,
+      {
+        actorId: command.agentId,
+        actorType: "ops_user",
+        surface: this.resolveSpatialAuditSurface(
+          "callcenter",
+          order.pickup,
+          order.dropoff,
+          ["callcenter", "concierge_portal"],
+        ),
+      },
+      requestId,
+    );
     this.orders = [this.stampServiceProductCode(order), ...this.orders];
     const session = this.callcenterService.linkOrderToCallSession({
       callId: command.callId,
@@ -546,10 +594,14 @@ export class OwnedMobilityService implements OnModuleInit {
     if (session.recordingId) {
       order.recordingId = session.recordingId;
       order.status = "ready_for_dispatch";
-      order.complianceFlags = ["recording_bound"];
+      order.complianceFlags = order.complianceFlags.filter(
+        (flag) => flag !== "recording_pending",
+      );
+      this.addComplianceFlag(order, "recording_bound");
       order.updatedAt = now;
     } else {
       order.status = "recording_pending";
+      this.addComplianceFlag(order, "recording_pending");
       order.updatedAt = now;
     }
 
@@ -715,6 +767,11 @@ export class OwnedMobilityService implements OnModuleInit {
       updatedAt: now,
     };
 
+    this.applyServiceAreaCreationPolicy(
+      order,
+      this.resolveBookingSpatialAuditContext(order, identity),
+      requestId,
+    );
     const bookingTraceLog = this.appendTrace(
       order.orderId,
       "tenant.booking_created",
@@ -1517,6 +1574,7 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+    this.assertDispatchComplianceGatesClear(order);
     const candidates = this.listEligibleDispatchCandidates(order);
     const now = new Date().toISOString();
     const isReservation = order.dispatchSemantics === "reservation";
@@ -4782,7 +4840,7 @@ export class OwnedMobilityService implements OnModuleInit {
   private recordAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
-  ) {
+  ): AuditLogRecord | undefined {
     const auditInput: Omit<
       AuditLogRecord,
       "auditId" | "createdAt" | "requestId"
@@ -4794,7 +4852,7 @@ export class OwnedMobilityService implements OnModuleInit {
     if (requestId) {
       auditInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditInput);
+    return this.auditNotificationService.recordAuditLog(auditInput);
   }
 
   private recordReservationEscalationNotifications(
@@ -5377,11 +5435,597 @@ export class OwnedMobilityService implements OnModuleInit {
     );
   }
 
+  private applyServiceAreaCreationPolicy(
+    order: OwnedOrderRecord,
+    context: SpatialAuditContext,
+    requestId?: string,
+  ): void {
+    const resolution = this.resolveServiceAreaGate(order);
+    if (!resolution) {
+      return;
+    }
+
+    order.spatialAudit = this.buildSpatialAuditSnapshot(
+      order,
+      resolution,
+      context,
+    );
+    this.recordSpatialAuditSnapshot(order, context, requestId);
+
+    const { evaluation, missingItems } = resolution;
+    if (missingItems.length > 0) {
+      this.addComplianceFlag(order, "service_area_legacy_text_manual_review");
+    }
+    if (!evaluation) {
+      return;
+    }
+    if (evaluation.decision === "not_serviceable") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        this.resolveServiceAreaBlockCode(evaluation),
+        this.resolveServiceAreaMessage(
+          evaluation,
+          "This booking is outside the service area or violates a stop policy.",
+        ),
+        this.serviceAreaErrorDetails(order, evaluation, missingItems),
+      );
+    }
+    if (evaluation.decision === "manual_review") {
+      this.addComplianceFlag(order, "service_area_manual_review");
+      return;
+    }
+    if (missingItems.length === 0) {
+      this.addComplianceFlag(order, "service_area_serviceable");
+    }
+  }
+
+  private assertDispatchComplianceGatesClear(order: OwnedOrderRecord): void {
+    const gates = this.listComplianceGatesForOrder(order);
+    const dispatchBlocking = gates.filter((gate) =>
+      gate.impacts.some(
+        (impact) => impact.stage === "dispatch" && impact.effect === "blocked",
+      ),
+    );
+    if (dispatchBlocking.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DISPATCH_COMPLIANCE_BLOCKED",
+        "Order cannot dispatch until blocking compliance gates are cleared.",
+        {
+          orderId: order.orderId,
+          gateTypes: dispatchBlocking.map((gate) => gate.gateType),
+          reasonCodes: dispatchBlocking.flatMap((gate) => gate.evidenceRefs),
+          missingItems: dispatchBlocking.flatMap((gate) => gate.missingItems),
+        },
+      );
+    }
+
+    const dispatchReviewRequired = gates.filter((gate) =>
+      gate.impacts.some(
+        (impact) =>
+          impact.stage === "dispatch" && impact.effect === "review_required",
+      ),
+    );
+    if (dispatchReviewRequired.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DISPATCH_REQUIRES_MANUAL_REVIEW",
+        "Order requires manual review before dispatch.",
+        {
+          orderId: order.orderId,
+          gateTypes: dispatchReviewRequired.map((gate) => gate.gateType),
+          reasonCodes: dispatchReviewRequired.flatMap(
+            (gate) => gate.evidenceRefs,
+          ),
+          missingItems: dispatchReviewRequired.flatMap(
+            (gate) => gate.missingItems,
+          ),
+        },
+      );
+    }
+  }
+
+  private resolveServiceAreaGate(
+    order: OwnedOrderRecord,
+  ): ServiceAreaGateResolution | null {
+    if (order.spatialAudit) {
+      return this.resolveServiceAreaGateFromSnapshot(order.spatialAudit);
+    }
+
+    if (!this.serviceAreaService) {
+      return null;
+    }
+
+    const serviceProductType = this.resolveServiceProductCodeForOrder(order);
+    const pickup = this.toServiceAreaPoint(order.pickup);
+    const dropoff = this.toServiceAreaPoint(order.dropoff);
+    const missingItems = [
+      ...(pickup ? [] : ["pickup_coordinates"]),
+      ...(dropoff ? [] : ["dropoff_coordinates"]),
+    ];
+
+    if (!serviceProductType) {
+      return {
+        serviceProductType,
+        pickup,
+        dropoff,
+        missingItems: ["service_product_type", ...missingItems],
+        evaluation: null,
+      };
+    }
+
+    if (!pickup) {
+      return {
+        serviceProductType,
+        pickup,
+        dropoff,
+        missingItems,
+        evaluation: null,
+      };
+    }
+
+    const evaluation = this.serviceAreaService.evaluate({
+      serviceProductType,
+      pickup,
+      ...(dropoff ? { dropoff } : {}),
+      requestedAt: order.createdAt,
+    });
+
+    return {
+      serviceProductType,
+      pickup,
+      dropoff,
+      missingItems,
+      evaluation,
+    };
+  }
+
+  private resolveServiceAreaGateFromSnapshot(
+    snapshot: OwnedOrderSpatialAuditSnapshot,
+  ): ServiceAreaGateResolution {
+    const pickup =
+      snapshot.stops.find((stop) => stop.kind === "pickup")?.location ?? null;
+    const dropoff =
+      snapshot.stops.find((stop) => stop.kind === "dropoff")?.location ?? null;
+
+    return {
+      serviceProductType: snapshot.serviceProductType,
+      pickup,
+      dropoff,
+      missingItems: [...snapshot.missingItems],
+      evaluation: snapshot.serviceAreaEvaluation
+        ? this.cloneServiceAreaEvaluation(snapshot.serviceAreaEvaluation)
+        : null,
+    };
+  }
+
+  private buildSpatialAuditSnapshot(
+    order: OwnedOrderRecord,
+    resolution: ServiceAreaGateResolution,
+    context: SpatialAuditContext,
+  ): OwnedOrderSpatialAuditSnapshot {
+    const evaluation = resolution.evaluation
+      ? this.cloneServiceAreaEvaluation(resolution.evaluation)
+      : null;
+    const decision = evaluation?.decision ?? "manual_review";
+
+    return {
+      snapshotId: randomUUID(),
+      snapshotVersion: 1,
+      capturedAt: new Date().toISOString(),
+      capturedReason: "booking_creation",
+      actorId: context.actorId,
+      actorType: context.actorType,
+      surface: context.surface,
+      serviceProductType: resolution.serviceProductType,
+      decision,
+      stops: [
+        this.buildSpatialAuditStopSnapshot("pickup", order.pickup, context),
+        this.buildSpatialAuditStopSnapshot("dropoff", order.dropoff, context),
+      ],
+      serviceAreaEvaluation: evaluation,
+      serviceAreaCodes: [...(evaluation?.serviceAreaCodes ?? [])],
+      geometryVersionRefs: [...(evaluation?.geometryVersionRefs ?? [])],
+      reasonCodes: [...(evaluation?.reasonCodes ?? [])],
+      reasonMessages: [...(evaluation?.reasonMessages ?? [])],
+      missingItems: [...resolution.missingItems],
+      auditEvents: [],
+    };
+  }
+
+  private buildSpatialAuditStopSnapshot(
+    kind: "pickup" | "dropoff",
+    address: AddressPayload,
+    context: SpatialAuditContext,
+  ): OwnedOrderSpatialAuditStopSnapshot {
+    const location = this.toServiceAreaPoint(address);
+    const missingItems = location ? [] : [`${kind}_coordinates`];
+
+    return {
+      kind,
+      addressText: address.address,
+      location,
+      coordinateProvenance: this.buildCoordinateProvenance(address, context),
+      provenanceComplete: hasAddressCoordinateProvenance(address),
+      missingItems,
+    };
+  }
+
+  private buildCoordinateProvenance(
+    address: AddressPayload,
+    context: SpatialAuditContext,
+  ): GeoCoordinateProvenance | null {
+    if (address.coordinateProvenance) {
+      return this.cloneCoordinateProvenance(address.coordinateProvenance);
+    }
+
+    const hasTopLevelProvenance = Boolean(
+      address.coordinateSource ||
+      address.geocodeProvider ||
+      address.geocodeConfidence ||
+      address.providerCandidateId ||
+      address.placeId ||
+      address.selectedByActorId ||
+      address.selectedAt ||
+      address.pinnedByActorId ||
+      address.pinnedAt ||
+      address.manualOverrideReason,
+    );
+    if (!hasTopLevelProvenance && hasAddressCoordinates(address)) {
+      return null;
+    }
+
+    return {
+      coordinateSource:
+        address.coordinateSource ??
+        (hasAddressCoordinates(address) ? "manual_pin" : "legacy_text"),
+      geocodeProvider: address.geocodeProvider ?? null,
+      geocodeConfidence: address.geocodeConfidence ?? null,
+      providerCandidateId: address.providerCandidateId ?? null,
+      placeId: address.placeId ?? null,
+      coordinateAccuracyM: address.coordinateAccuracyM ?? null,
+      selectedByActorId:
+        address.selectedByActorId ?? address.pinnedByActorId ?? context.actorId,
+      selectedAt: address.selectedAt ?? address.pinnedAt ?? null,
+      pinnedByActorId: address.pinnedByActorId ?? null,
+      pinnedAt: address.pinnedAt ?? null,
+      manualOverrideReason: address.manualOverrideReason ?? null,
+      surface: address.surface ?? context.surface,
+    };
+  }
+
+  private cloneCoordinateProvenance(
+    provenance: GeoCoordinateProvenance,
+  ): GeoCoordinateProvenance {
+    return {
+      ...provenance,
+    };
+  }
+
+  private recordSpatialAuditSnapshot(
+    order: OwnedOrderRecord,
+    context: SpatialAuditContext,
+    requestId?: string,
+  ): void {
+    if (!order.spatialAudit) {
+      return;
+    }
+
+    const auditLog = this.recordAudit(
+      {
+        actorId: context.actorId,
+        actorType: context.actorType,
+        tenantId: order.tenantId,
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: order.orderId,
+        newValuesSummary: {
+          snapshotId: order.spatialAudit.snapshotId,
+          decision: order.spatialAudit.decision,
+          surface: order.spatialAudit.surface,
+          serviceProductType: order.spatialAudit.serviceProductType,
+          serviceAreaCodes: order.spatialAudit.serviceAreaCodes,
+          geometryVersionRefs: order.spatialAudit.geometryVersionRefs,
+          reasonCodes: order.spatialAudit.reasonCodes,
+          missingItems: order.spatialAudit.missingItems,
+          provenanceComplete: order.spatialAudit.stops.every(
+            (stop) => stop.provenanceComplete,
+          ),
+        },
+      },
+      requestId,
+    );
+    if (!auditLog) {
+      return;
+    }
+
+    order.spatialAudit.auditEvents = [
+      ...order.spatialAudit.auditEvents,
+      {
+        auditId: auditLog.auditId,
+        actionName: auditLog.actionName,
+        actorId: auditLog.actorId,
+        actorType: auditLog.actorType,
+        createdAt: auditLog.createdAt,
+      },
+    ];
+  }
+
+  private buildServiceAreaGate(
+    order: OwnedOrderRecord,
+  ): ComplianceGateRecord | null {
+    const resolution = this.resolveServiceAreaGate(order);
+    if (!resolution) {
+      return null;
+    }
+
+    const { evaluation, missingItems, serviceProductType } = resolution;
+    const missingCoordinates = missingItems.length > 0;
+    const decision = evaluation?.decision ?? "manual_review";
+    const blocked = decision === "not_serviceable";
+    const reviewRequired =
+      !blocked && (missingCoordinates || decision === "manual_review");
+    const state: ComplianceGateState = blocked
+      ? "blocked"
+      : reviewRequired
+        ? "review_required"
+        : "clear";
+    const reasonCodes =
+      evaluation?.reasonCodes.length === 0
+        ? []
+        : (evaluation?.reasonCodes ?? []);
+    const evidenceRefs = [
+      ...(evaluation?.geometryVersionRefs ?? []),
+      ...reasonCodes,
+    ];
+
+    return {
+      gateType: "service_area",
+      title: "Service-area and stop-policy authority",
+      state,
+      required: true,
+      blocking: blocked,
+      evidenceState:
+        state === "clear"
+          ? "verified"
+          : missingCoordinates
+            ? "missing"
+            : "submitted",
+      evidenceRefs,
+      missingItems,
+      nextAction:
+        state === "clear"
+          ? "Pickup and dropoff coordinates are serviceable for the selected service product."
+          : blocked
+            ? this.resolveServiceAreaMessage(
+                evaluation,
+                "Booking violates service-area or stop-policy rules and cannot dispatch.",
+              )
+            : missingCoordinates
+              ? "Confirm pickup and dropoff map pins before dispatch, or keep this booking in manual review."
+              : this.resolveServiceAreaMessage(
+                  evaluation,
+                  "Ops must review this stop policy before dispatch.",
+                ),
+      reviewerLabel: state === "clear" ? null : "ops dispatch / service area",
+      overrideAllowed: state !== "clear",
+      overrideActors: state === "clear" ? [] : ["ops_user", "platform_admin"],
+      impacts: [
+        {
+          stage: "dispatch",
+          effect: blocked
+            ? "blocked"
+            : reviewRequired
+              ? "review_required"
+              : "clear",
+          reason:
+            state === "clear"
+              ? `Service-area evaluation is clear for ${serviceProductType ?? "unknown service product"}.`
+              : blocked
+                ? "Dispatch is blocked by service-area or stop-policy authority."
+                : "Dispatch requires manual review before release.",
+        },
+        {
+          stage: "completion",
+          effect: "clear",
+          reason:
+            "Service-area checks are enforced before dispatch and do not block driver completion once released.",
+        },
+        {
+          stage: "settlement",
+          effect: state === "clear" ? "clear" : "review_required",
+          reason:
+            state === "clear"
+              ? "Service-area evaluation evidence is available for audit."
+              : "Spatial review outcome must be retained for compliance follow-up.",
+        },
+      ],
+    };
+  }
+
+  private toServiceAreaPoint(address: AddressPayload): GeoPoint | null {
+    if (!hasAddressCoordinates(address)) {
+      return null;
+    }
+    return {
+      lat: address.lat as number,
+      lng: address.lng as number,
+    };
+  }
+
+  private addComplianceFlag(order: OwnedOrderRecord, flag: string): void {
+    if (!order.complianceFlags.includes(flag)) {
+      order.complianceFlags = [...order.complianceFlags, flag];
+    }
+  }
+
+  private resolveServiceAreaBlockCode(
+    evaluation: ServiceAreaEvaluationResult,
+  ): string {
+    if (evaluation.reasonCodes.includes("PICKUP_NOT_ALLOWED")) {
+      return "PICKUP_NOT_ALLOWED";
+    }
+    if (
+      evaluation.reasonCodes.some((reasonCode) =>
+        reasonCode.endsWith("_AREA_NOT_SERVICEABLE"),
+      )
+    ) {
+      return "SERVICE_AREA_NOT_SERVICEABLE";
+    }
+    return evaluation.reasonCodes[0] ?? "SERVICE_AREA_NOT_SERVICEABLE";
+  }
+
+  private resolveServiceAreaMessage(
+    evaluation: ServiceAreaEvaluationResult | null,
+    fallback: string,
+  ): string {
+    return evaluation?.reasonMessages[0] ?? fallback;
+  }
+
+  private serviceAreaErrorDetails(
+    order: OwnedOrderRecord,
+    evaluation: ServiceAreaEvaluationResult,
+    missingItems: string[],
+  ) {
+    return {
+      orderSource: order.orderSource,
+      tenantId: order.tenantId,
+      serviceProductType: evaluation.serviceProductType,
+      decision: evaluation.decision,
+      serviceAreaCodes: evaluation.serviceAreaCodes,
+      geometryVersionRefs: evaluation.geometryVersionRefs,
+      reasonCodes: evaluation.reasonCodes,
+      reasonMessages: evaluation.reasonMessages,
+      missingItems,
+      spatialAuditSnapshotId: order.spatialAudit?.snapshotId ?? null,
+    };
+  }
+
+  private cloneServiceAreaEvaluation(
+    evaluation: ServiceAreaEvaluationResult,
+  ): ServiceAreaEvaluationResult {
+    return {
+      ...evaluation,
+      stops: evaluation.stops.map((stop) => ({
+        ...stop,
+        location: { ...stop.location },
+        serviceAreaCodes: [...stop.serviceAreaCodes],
+        policyCodes: [...stop.policyCodes],
+        geometryVersionRefs: [...stop.geometryVersionRefs],
+        reasonCodes: [...stop.reasonCodes],
+        reasonMessages: [...stop.reasonMessages],
+      })),
+      serviceAreaCodes: [...evaluation.serviceAreaCodes],
+      geometryVersionRefs: [...evaluation.geometryVersionRefs],
+      reasonCodes: [...evaluation.reasonCodes],
+      reasonMessages: [...evaluation.reasonMessages],
+    };
+  }
+
+  private cloneSpatialAuditSnapshot(
+    snapshot: OwnedOrderSpatialAuditSnapshot,
+  ): OwnedOrderSpatialAuditSnapshot {
+    return {
+      ...snapshot,
+      stops: snapshot.stops.map((stop) => ({
+        ...stop,
+        location: stop.location ? { ...stop.location } : null,
+        coordinateProvenance: stop.coordinateProvenance
+          ? this.cloneCoordinateProvenance(stop.coordinateProvenance)
+          : null,
+        missingItems: [...stop.missingItems],
+      })),
+      serviceAreaEvaluation: snapshot.serviceAreaEvaluation
+        ? this.cloneServiceAreaEvaluation(snapshot.serviceAreaEvaluation)
+        : null,
+      serviceAreaCodes: [...snapshot.serviceAreaCodes],
+      geometryVersionRefs: [...snapshot.geometryVersionRefs],
+      reasonCodes: [...snapshot.reasonCodes],
+      reasonMessages: [...snapshot.reasonMessages],
+      missingItems: [...snapshot.missingItems],
+      auditEvents: snapshot.auditEvents.map((event) => ({ ...event })),
+    };
+  }
+
+  private resolveBookingSpatialAuditContext(
+    order: OwnedOrderRecord,
+    identity?: BootstrapRequestIdentity | null,
+  ): SpatialAuditContext {
+    const isPartnerBooking = Boolean(order.partnerId || order.partnerEntrySlug);
+    const defaultSurface = isPartnerBooking
+      ? "partner_booking"
+      : "tenant_console";
+    return {
+      actorId: identity?.actorId ?? null,
+      actorType: identity
+        ? this.coerceAuditActorType(identity.actorType)
+        : isPartnerBooking
+          ? "partner_api_key"
+          : "tenant_admin",
+      surface: this.resolveSpatialAuditSurface(
+        defaultSurface,
+        order.pickup,
+        order.dropoff,
+        [
+          "tenant_console",
+          "tenant_portal",
+          "concierge_portal",
+          "partner_booking",
+        ],
+      ),
+    };
+  }
+
+  private resolveSpatialAuditSurface(
+    defaultSurface: GeoResolutionSurface,
+    pickup: AddressPayload,
+    dropoff: AddressPayload,
+    allowedSurfaces: readonly GeoResolutionSurface[],
+  ): GeoResolutionSurface {
+    const pickupSurface = this.resolveAddressSurface(pickup);
+    const dropoffSurface = this.resolveAddressSurface(dropoff);
+    const matchingSurface =
+      pickupSurface && pickupSurface === dropoffSurface ? pickupSurface : null;
+    const candidate = matchingSurface ?? pickupSurface ?? dropoffSurface;
+    if (candidate && allowedSurfaces.includes(candidate)) {
+      return candidate;
+    }
+
+    return defaultSurface;
+  }
+
+  private resolveAddressSurface(
+    address: AddressPayload,
+  ): GeoResolutionSurface | null {
+    return address.coordinateProvenance?.surface ?? address.surface ?? null;
+  }
+
+  private coerceAuditActorType(
+    actorType: BootstrapRequestIdentity["actorType"] | null | undefined,
+  ): AuditLogRecord["actorType"] {
+    switch (actorType) {
+      case "platform_admin":
+      case "tenant_admin":
+      case "ops_user":
+      case "partner_api_key":
+      case "referral_passenger":
+        return actorType;
+      default:
+        return "system";
+    }
+  }
+
   private listComplianceGatesForOrder(
     order: OwnedOrderRecord,
     task = this.findLatestTaskForOrder(order.orderId),
   ): ComplianceGateRecord[] {
     const gates: ComplianceGateRecord[] = [];
+    const serviceAreaGate = this.buildServiceAreaGate(order);
+    if (serviceAreaGate) {
+      gates.push(serviceAreaGate);
+    }
+
     const recordingGate = this.buildRecordingGate(order);
     if (recordingGate) {
       gates.push(recordingGate);
@@ -6010,6 +6654,13 @@ export class OwnedMobilityService implements OnModuleInit {
       approvalRequestIds: [...order.approvalRequestIds],
       complianceGates,
       complianceFlags: [...order.complianceFlags],
+      ...(order.spatialAudit !== undefined
+        ? {
+            spatialAudit: order.spatialAudit
+              ? this.cloneSpatialAuditSnapshot(order.spatialAudit)
+              : null,
+          }
+        : {}),
       queueFamily: queueState.queueFamily,
       queueEntryReason: queueState.queueEntryReason,
       noSupplyEscalation: order.noSupplyEscalation

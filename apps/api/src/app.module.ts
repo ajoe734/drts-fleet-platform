@@ -31,6 +31,7 @@ import { FeatureFlagsModule } from "./modules/feature-flags/feature-flags.module
 import { FleetPartnerModule } from "./modules/fleet-partner/fleet-partner.module";
 import { FoundationModule } from "./modules/foundation/foundation.module";
 import { ForwarderModule } from "./modules/forwarder/forwarder.module";
+import { GeoModule } from "./modules/geo/geo.module";
 import { IdentityModule } from "./modules/identity/identity.module";
 import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
@@ -44,6 +45,8 @@ import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "./modules/regulatory-registry/regulatory-registry.module";
 import { ReportingModule } from "./modules/reporting/reporting.module";
 import { ReportingFilingModule } from "./modules/reporting-filing/reporting-filing.module";
+import { SandboxGovernanceModule } from "./modules/sandbox-governance/sandbox-governance.module";
+import { ServiceAreaModule } from "./modules/service-area/service-area.module";
 import { ServiceProductModule } from "./modules/service-product/service-product.module";
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
@@ -74,8 +77,11 @@ import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-
     BillingSettlementModule,
     ReportingModule,
     ReportingFilingModule,
+    SandboxGovernanceModule,
+    ServiceAreaModule,
     ServiceProductModule,
     ForwarderModule,
+    GeoModule,
     FeatureFlagsModule,
     FleetPartnerModule,
     IncidentModule,

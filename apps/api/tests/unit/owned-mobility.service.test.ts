@@ -7,11 +7,13 @@ import {
   RESERVATION_HOLD_VALID_TRANSITIONS,
   EXCEPTION_HOLD_REASON_CODES,
 } from "@drts/contracts";
+import type { ServiceAreaEvaluationResult } from "@drts/contracts";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
 import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
@@ -49,6 +51,7 @@ function createOwnedMobilityService(options?: {
   runtimeEligibilityEvaluator?: {
     evaluate: ReturnType<typeof vi.fn>;
   };
+  serviceAreaService?: ServiceAreaService;
   repository?: {
     isEnabled: () => boolean;
     persistChanges: (...args: any[]) => Promise<unknown>;
@@ -141,6 +144,7 @@ function createOwnedMobilityService(options?: {
     serviceProductService,
     undefined,
     options?.runtimeEligibilityEvaluator as never,
+    options?.serviceAreaService,
   );
 
   return {
@@ -153,6 +157,1350 @@ function createOwnedMobilityService(options?: {
 describe("OwnedMobilityService queue and reservation orchestration", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("hard-blocks coordinate-bearing phone orders in no-pickup service-area policies", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    expect(() =>
+      service.createCallCenterOrder({
+        callId: "call-map-block-001",
+        agentId: "ops-agent-001",
+        recordingId: "recording-map-block-001",
+        pickup: {
+          address: "台北車站禁止上車區",
+          lat: 25.0478,
+          lng: 121.517,
+        },
+        dropoff: {
+          address: "信義區",
+          lat: 25.06,
+          lng: 121.58,
+        },
+        passenger: { name: "Map Rider", phone: "0912000000" },
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.createCallCenterOrder({
+        callId: "call-map-block-002",
+        agentId: "ops-agent-001",
+        recordingId: "recording-map-block-002",
+        pickup: {
+          address: "台北車站禁止上車區",
+          lat: 25.0478,
+          lng: 121.517,
+        },
+        dropoff: {
+          address: "信義區",
+          lat: 25.06,
+          lng: 121.58,
+        },
+        passenger: { name: "Map Rider", phone: "0912000000" },
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PICKUP_NOT_ALLOWED",
+          details: {
+            decision: "not_serviceable",
+            reasonCodes: ["PICKUP_NOT_ALLOWED"],
+            geometryVersionRefs: [
+              "service_area:TAIPEI_CORE@1",
+              "stop_policy:TPE_STATION_PICKUP_BLOCK@1",
+            ],
+          },
+        },
+      });
+    }
+  });
+
+  it("routes manual-review service-area stops away from normal dispatch", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-001",
+          vehicleId: "vehicle-map-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createCallCenterOrder({
+      callId: "call-map-review-001",
+      agentId: "ops-agent-001",
+      recordingId: "recording-map-review-001",
+      pickup: {
+        address: "信義醫院管制入口",
+        lat: 25.0338,
+        lng: 121.5645,
+      },
+      dropoff: {
+        address: "市府轉運站",
+        lat: 25.041,
+        lng: 121.55,
+      },
+      passenger: { name: "Map Rider", phone: "0912000000" },
+    });
+
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.complianceFlags).toContain("service_area_manual_review");
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      blocking: false,
+      evidenceRefs: expect.arrayContaining([
+        "stop_policy:XINYI_HOSPITAL_MANUAL_REVIEW@1",
+        "STOP_REQUIRES_MANUAL_REVIEW",
+      ]),
+    });
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+    try {
+      service.dispatchOrder(order.orderId, { mode: "auto" });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "DISPATCH_REQUIRES_MANUAL_REVIEW",
+          details: {
+            gateTypes: ["service_area"],
+            reasonCodes: expect.arrayContaining([
+              "STOP_REQUIRES_MANUAL_REVIEW",
+            ]),
+          },
+        },
+      });
+    }
+  });
+
+  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    const order = service.createCallCenterOrder(
+      {
+        callId: "call-map-audit-001",
+        agentId: "ops-agent-geo-001",
+        recordingId: "recording-map-audit-001",
+        pickup: {
+          address: "台北市政府",
+          lat: 25.0375,
+          lng: 121.5637,
+          coordinateSource: "provider_candidate",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "exact",
+          providerCandidateId: "mock-candidate-city-hall",
+          selectedByActorId: "ops-agent-geo-001",
+          selectedAt: "2026-06-30T10:00:00.000Z",
+          surface: "callcenter",
+        },
+        dropoff: {
+          address: "信義區松仁路",
+          lat: 25.034,
+          lng: 121.568,
+          coordinateSource: "manual_pin",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "manual",
+          pinnedByActorId: "ops-agent-geo-001",
+          pinnedAt: "2026-06-30T10:01:00.000Z",
+          surface: "callcenter",
+        },
+        passenger: { name: "Map Audit Rider", phone: "0912000000" },
+      },
+      "req-map-audit-001",
+    );
+
+    const detail = service.getOrder(order.orderId);
+    const spatialAudit = detail.spatialAudit;
+
+    expect(spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "ops-agent-geo-001",
+      actorType: "ops_user",
+      surface: "callcenter",
+      serviceProductType: "taxi_realtime",
+      decision: "serviceable",
+      serviceAreaCodes: ["TAIPEI_CORE"],
+      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+      missingItems: [],
+    });
+    expect(spatialAudit?.stops).toEqual([
+      expect.objectContaining({
+        kind: "pickup",
+        addressText: "台北市政府",
+        location: { lat: 25.0375, lng: 121.5637 },
+        provenanceComplete: true,
+        missingItems: [],
+        coordinateProvenance: expect.objectContaining({
+          coordinateSource: "provider_candidate",
+          geocodeProvider: "mock_geo",
+          selectedByActorId: "ops-agent-geo-001",
+          surface: "callcenter",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "dropoff",
+        addressText: "信義區松仁路",
+        location: { lat: 25.034, lng: 121.568 },
+        provenanceComplete: true,
+        missingItems: [],
+        coordinateProvenance: expect.objectContaining({
+          coordinateSource: "manual_pin",
+          pinnedByActorId: "ops-agent-geo-001",
+          surface: "callcenter",
+        }),
+      }),
+    ]);
+    expect(detail.complianceFlags).toEqual(
+      expect.arrayContaining(["recording_bound", "service_area_serviceable"]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "ops-agent-geo-001",
+        actorType: "ops_user",
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: order.orderId,
+        requestId: "req-map-audit-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "serviceable",
+          surface: "callcenter",
+          serviceProductType: "taxi_realtime",
+          provenanceComplete: true,
+        }),
+      }),
+    );
+  });
+
+  it("persists tenant-console map picker provenance into service-area spatial audits", async () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-07-02T10:00:00.000Z",
+        reservationWindowEnd: "2026-07-02T11:00:00.000Z",
+        pickup: {
+          address: "台北市政府",
+          lat: 25.0375,
+          lng: 121.5637,
+          coordinateProvenance: {
+            coordinateSource: "provider_candidate",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "exact",
+            providerCandidateId: "tenant-city-hall-candidate",
+            placeId: "tenant-city-hall-place",
+            coordinateAccuracyM: 8,
+            selectedByActorId: "tenant-user-geo-001",
+            selectedAt: "2026-07-01T09:00:00.000Z",
+            pinnedByActorId: "tenant-user-geo-001",
+            pinnedAt: "2026-07-01T09:00:10.000Z",
+            surface: "tenant_console",
+          },
+        },
+        dropoff: {
+          address: "信義區松仁路",
+          lat: 25.034,
+          lng: 121.568,
+          coordinateProvenance: {
+            coordinateSource: "manual_pin",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "manual",
+            providerCandidateId: null,
+            placeId: null,
+            coordinateAccuracyM: 5,
+            selectedByActorId: "tenant-user-geo-001",
+            selectedAt: "2026-07-01T09:01:00.000Z",
+            pinnedByActorId: "tenant-user-geo-001",
+            pinnedAt: "2026-07-01T09:01:10.000Z",
+            manualOverrideReason: "tenant_admin_confirmed_curb",
+            surface: "tenant_console",
+          },
+        },
+        passenger: { name: "Tenant Map Rider", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+      {
+        authMode: "local_header",
+        actorType: "tenant_admin",
+        actorId: "tenant-user-geo-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roleFamilies: ["tenant"],
+        roles: ["tenant_dispatcher"],
+        scopes: ["owned_mobility:bookings:create"],
+        requestId: "req-tenant-map-audit-001",
+      },
+      "req-tenant-map-audit-001",
+    );
+
+    const detail = service.getOrder(booking.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "tenant-user-geo-001",
+      actorType: "tenant_admin",
+      surface: "tenant_console",
+      serviceProductType: "enterprise_dispatch",
+      decision: "serviceable",
+      serviceAreaCodes: ["TAIPEI_CORE"],
+      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+      missingItems: [],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          addressText: "台北市政府",
+          location: { lat: 25.0375, lng: 121.5637 },
+          provenanceComplete: true,
+          missingItems: [],
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "provider_candidate",
+            providerCandidateId: "tenant-city-hall-candidate",
+            placeId: "tenant-city-hall-place",
+            selectedByActorId: "tenant-user-geo-001",
+            surface: "tenant_console",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          addressText: "信義區松仁路",
+          location: { lat: 25.034, lng: 121.568 },
+          provenanceComplete: true,
+          missingItems: [],
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "manual_pin",
+            manualOverrideReason: "tenant_admin_confirmed_curb",
+            pinnedByActorId: "tenant-user-geo-001",
+            surface: "tenant_console",
+          }),
+        }),
+      ],
+    });
+    expect(serviceAreaGate).toMatchObject({
+      state: "clear",
+      evidenceState: "verified",
+      evidenceRefs: ["service_area:TAIPEI_CORE@1"],
+    });
+    expect(detail.complianceFlags).toContain("service_area_serviceable");
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "tenant-user-geo-001",
+        actorType: "tenant_admin",
+        tenantId: "tenant-demo-001",
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: booking.orderId,
+        requestId: "req-tenant-map-audit-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "serviceable",
+          surface: "tenant_console",
+          serviceProductType: "enterprise_dispatch",
+          provenanceComplete: true,
+        }),
+      }),
+    );
+  });
+
+  it("persists partner-booking manual-pin provenance into service-area spatial audits", async () => {
+    const tenantPartnerService = {
+      getPartnerEntry: vi.fn(() => ({
+        partnerId: "partner-map-ctbc-001",
+        programId: "program-map-airport-001",
+        entrySlug: "ctbc-airport-transfer",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        eligibilityMode: "none",
+      })),
+      getPartnerEligibilityVerification: vi.fn(),
+      previewBookingQuotaImpact: vi.fn(() => ({
+        evaluationId: "quota-preview-partner-map-001",
+        periodKey: "2026-07",
+        impacts: [],
+        combinedTriggered: "none",
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        evaluatedAt: "2026-07-01T08:34:00.000Z",
+        matchedRules: [],
+        outcome: {
+          decision: "allow",
+          approvalRequired: false,
+          blocked: false,
+          warnings: [],
+          reasonCodes: [],
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => undefined),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      tenantPartnerService,
+      serviceAreaService: new ServiceAreaService(),
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerEntrySlug: "ctbc-airport-transfer",
+        reservationWindowStart: "2026-07-02T10:00:00.000Z",
+        reservationWindowEnd: "2026-07-02T11:00:00.000Z",
+        pickup: {
+          address: "桃園國際機場第一航廈",
+          lat: 25.0803,
+          lng: 121.2328,
+          coordinateProvenance: {
+            coordinateSource: "manual_pin",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "manual",
+            coordinateAccuracyM: 5,
+            selectedByActorId: "partner-key-map-001",
+            selectedAt: "2026-07-01T08:32:00.000Z",
+            pinnedByActorId: "partner-key-map-001",
+            pinnedAt: "2026-07-01T08:32:10.000Z",
+            manualOverrideReason: "partner_booking_manual_coordinate_entry",
+            surface: "partner_booking",
+          },
+        },
+        dropoff: {
+          address: "桃園國際機場第二航廈",
+          lat: 25.0777,
+          lng: 121.2325,
+          coordinateProvenance: {
+            coordinateSource: "manual_pin",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "manual",
+            coordinateAccuracyM: 5,
+            selectedByActorId: "partner-key-map-001",
+            selectedAt: "2026-07-01T08:33:00.000Z",
+            pinnedByActorId: "partner-key-map-001",
+            pinnedAt: "2026-07-01T08:33:10.000Z",
+            manualOverrideReason: "partner_booking_manual_coordinate_entry",
+            surface: "partner_booking",
+          },
+        },
+        passenger: { name: "Partner Map Rider", phone: "0912000002" },
+        direction: "dropoff",
+        flightNo: "CI-100",
+        terminal: "T2",
+        benefitReference: "World Elite",
+      },
+      "tenant-demo-001",
+      {
+        authMode: "jwt_bearer",
+        actorType: "partner_api_key",
+        actorId: "partner-key-map-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner-map-ctbc-001",
+        partnerProgramId: "program-map-airport-001",
+        partnerEntrySlug: "ctbc-airport-transfer",
+        roleFamilies: ["partner"],
+        roles: ["partner_booking"],
+        scopes: ["partner:bookings:create"],
+        requestId: "req-partner-map-audit-001",
+      },
+      "req-partner-map-audit-001",
+    );
+
+    expect(tenantPartnerService.getPartnerEntry).toHaveBeenCalledWith(
+      "ctbc-airport-transfer",
+    );
+    expect(
+      tenantPartnerService.getPartnerEligibilityVerification,
+    ).not.toHaveBeenCalled();
+
+    const detail = service.getOrder(booking.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail).toMatchObject({
+      partnerId: "partner-map-ctbc-001",
+      partnerProgramId: "program-map-airport-001",
+      partnerEntrySlug: "ctbc-airport-transfer",
+      serviceProductCode: "credit_card_airport_transfer",
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "partner-key-map-001",
+      actorType: "partner_api_key",
+      surface: "partner_booking",
+      serviceProductType: "credit_card_airport_transfer",
+      decision: "serviceable",
+      serviceAreaCodes: ["TAOYUAN_AIRPORT"],
+      geometryVersionRefs: ["service_area:TAOYUAN_AIRPORT@1"],
+      missingItems: [],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          addressText: "桃園國際機場第一航廈",
+          location: { lat: 25.0803, lng: 121.2328 },
+          provenanceComplete: true,
+          missingItems: [],
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "manual_pin",
+            manualOverrideReason: "partner_booking_manual_coordinate_entry",
+            pinnedByActorId: "partner-key-map-001",
+            surface: "partner_booking",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          addressText: "桃園國際機場第二航廈",
+          location: { lat: 25.0777, lng: 121.2325 },
+          provenanceComplete: true,
+          missingItems: [],
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "manual_pin",
+            manualOverrideReason: "partner_booking_manual_coordinate_entry",
+            pinnedByActorId: "partner-key-map-001",
+            surface: "partner_booking",
+          }),
+        }),
+      ],
+    });
+    expect(serviceAreaGate).toMatchObject({
+      state: "clear",
+      evidenceState: "verified",
+      evidenceRefs: ["service_area:TAOYUAN_AIRPORT@1"],
+    });
+    expect(detail.complianceFlags).toContain("service_area_serviceable");
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "partner-key-map-001",
+        actorType: "partner_api_key",
+        tenantId: "tenant-demo-001",
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: booking.orderId,
+        requestId: "req-partner-map-audit-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "serviceable",
+          surface: "partner_booking",
+          serviceProductType: "credit_card_airport_transfer",
+          provenanceComplete: true,
+        }),
+      }),
+    );
+  });
+
+  it("keeps text-only legacy orders in explicit service-area manual review", () => {
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-legacy-001",
+          vehicleId: "vehicle-map-legacy-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Caller only gave a landmark" },
+      dropoff: { address: "Caller only gave another landmark" },
+      passenger: { name: "Legacy Rider", phone: "0912000000" },
+    });
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.complianceFlags).toContain(
+      "service_area_legacy_text_manual_review",
+    );
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      evidenceState: "missing",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      surface: "passenger_entry",
+      decision: "manual_review",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            surface: "passenger_entry",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            surface: "passenger_entry",
+          }),
+        }),
+      ],
+    });
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("routes provider-unavailable callcenter orders to spatial manual review instead of normal dispatch", () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-callcenter-outage-001",
+          vehicleId: "vehicle-map-callcenter-outage-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createCallCenterOrder(
+      {
+        callId: "call-map-provider-outage-001",
+        agentId: "ops-agent-map-outage-001",
+        recordingId: "recording-map-provider-outage-001",
+        pickup: {
+          address: "Provider outage caller pickup text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "callcenter",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "ops-agent-map-outage-001",
+            selectedAt: "2026-07-01T09:30:00.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "callcenter",
+          },
+        },
+        dropoff: {
+          address: "Provider outage caller dropoff text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "callcenter",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "ops-agent-map-outage-001",
+            selectedAt: "2026-07-01T09:30:10.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "callcenter",
+          },
+        },
+        passenger: {
+          name: "Callcenter Provider Outage Rider",
+          phone: "0912000888",
+        },
+      },
+      "req-callcenter-provider-outage-001",
+    );
+
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.status).toBe("ready_for_dispatch");
+    expect(detail.complianceFlags).toEqual(
+      expect.arrayContaining([
+        "recording_bound",
+        "service_area_legacy_text_manual_review",
+      ]),
+    );
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      evidenceState: "missing",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "ops-agent-map-outage-001",
+      actorType: "ops_user",
+      surface: "callcenter",
+      serviceProductType: "taxi_realtime",
+      decision: "manual_review",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "callcenter",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "callcenter",
+          }),
+        }),
+      ],
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "ops-agent-map-outage-001",
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: order.orderId,
+        requestId: "req-callcenter-provider-outage-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "manual_review",
+          surface: "callcenter",
+          serviceProductType: "taxi_realtime",
+          missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+          provenanceComplete: false,
+        }),
+      }),
+    );
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+    try {
+      service.dispatchOrder(order.orderId, { mode: "auto" });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "DISPATCH_REQUIRES_MANUAL_REVIEW",
+          details: {
+            gateTypes: ["service_area"],
+            missingItems: expect.arrayContaining([
+              "pickup_coordinates",
+              "dropoff_coordinates",
+            ]),
+          },
+        },
+      });
+    }
+  });
+
+  it("preserves concierge provider-unavailable surface while routing assisted-entry phone orders to manual review", () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-concierge-outage-001",
+          vehicleId: "vehicle-map-concierge-outage-001",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createCallCenterOrder(
+      {
+        callId: "call-map-concierge-outage-001",
+        agentId: "concierge-agent-map-outage-001",
+        recordingId: "recording-map-concierge-outage-001",
+        pickup: {
+          address: "Concierge provider outage pickup text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "concierge_portal",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "concierge-agent-map-outage-001",
+            selectedAt: "2026-07-01T09:34:00.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "concierge_portal",
+          },
+        },
+        dropoff: {
+          address: "Concierge provider outage dropoff text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "concierge_portal",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "concierge-agent-map-outage-001",
+            selectedAt: "2026-07-01T09:34:10.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "concierge_portal",
+          },
+        },
+        passenger: {
+          name: "Concierge Provider Outage Rider",
+          phone: "0912000777",
+        },
+      },
+      "req-concierge-provider-outage-001",
+    );
+
+    const detail = service.getOrder(order.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.status).toBe("ready_for_dispatch");
+    expect(detail.complianceFlags).toEqual(
+      expect.arrayContaining([
+        "recording_bound",
+        "service_area_legacy_text_manual_review",
+      ]),
+    );
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      evidenceState: "missing",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "concierge-agent-map-outage-001",
+      actorType: "ops_user",
+      surface: "concierge_portal",
+      serviceProductType: "taxi_realtime",
+      decision: "manual_review",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "concierge_portal",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "concierge_portal",
+          }),
+        }),
+      ],
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "concierge-agent-map-outage-001",
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: order.orderId,
+        requestId: "req-concierge-provider-outage-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "manual_review",
+          surface: "concierge_portal",
+          serviceProductType: "taxi_realtime",
+          missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+          provenanceComplete: false,
+        }),
+      }),
+    );
+    expect(() =>
+      service.dispatchOrder(order.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("routes provider-unavailable tenant bookings to spatial manual review instead of normal dispatch", async () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-provider-outage-001",
+          vehicleId: "vehicle-map-provider-outage-001",
+          etaMinutes: 6,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-07-02T10:00:00.000Z",
+        reservationWindowEnd: "2026-07-02T10:30:00.000Z",
+        pickup: {
+          address: "Provider outage pickup text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "tenant_console",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "tenant-user-provider-outage",
+            selectedAt: "2026-07-01T09:20:00.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "tenant_console",
+          },
+        },
+        dropoff: {
+          address: "Provider outage dropoff text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "tenant_console",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "tenant-user-provider-outage",
+            selectedAt: "2026-07-01T09:20:10.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "tenant_console",
+          },
+        },
+        passenger: {
+          name: "Tenant Provider Outage Rider",
+          phone: "0912000999",
+        },
+        costCenter: "CC-MAP-QA",
+      },
+      "tenant-demo-001",
+      {
+        authMode: "jwt_bearer",
+        actorType: "tenant_admin",
+        actorId: "tenant-user-provider-outage",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roleFamilies: ["tenant"],
+        roles: ["tenant_admin"],
+        scopes: ["tenant:bookings:create"],
+        requestId: "req-tenant-provider-outage-001",
+      },
+      "req-tenant-provider-outage-001",
+    );
+
+    const detail = service.getOrder(booking.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail.complianceFlags).toContain(
+      "service_area_legacy_text_manual_review",
+    );
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      evidenceState: "missing",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      surface: "tenant_console",
+      decision: "manual_review",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "tenant_console",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "tenant_console",
+          }),
+        }),
+      ],
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "tenant-user-provider-outage",
+        actorType: "tenant_admin",
+        tenantId: "tenant-demo-001",
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: booking.orderId,
+        requestId: "req-tenant-provider-outage-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "manual_review",
+          surface: "tenant_console",
+          serviceProductType: "enterprise_dispatch",
+          missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+          provenanceComplete: false,
+        }),
+      }),
+    );
+    expect(() =>
+      service.dispatchOrder(booking.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("routes provider-unavailable partner bookings to spatial manual review instead of normal dispatch", async () => {
+    const tenantPartnerService = {
+      getPartnerEntry: vi.fn(() => ({
+        partnerId: "partner-map-outage-001",
+        programId: "program-map-outage-001",
+        entrySlug: "ctbc-provider-outage",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        eligibilityMode: "none",
+      })),
+      getPartnerEligibilityVerification: vi.fn(),
+      previewBookingQuotaImpact: vi.fn(() => ({
+        evaluationId: "quota-preview-partner-outage-001",
+        periodKey: "2026-07",
+        impacts: [],
+        combinedTriggered: "none",
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        evaluatedAt: "2026-07-01T09:35:00.000Z",
+        matchedRules: [],
+        outcome: {
+          decision: "allow",
+          approvalRequired: false,
+          blocked: false,
+          warnings: [],
+          reasonCodes: [],
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => undefined),
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      tenantPartnerService,
+      serviceAreaService: new ServiceAreaService(),
+      candidates: [
+        {
+          driverId: "driver-map-partner-outage-001",
+          vehicleId: "vehicle-map-partner-outage-001",
+          etaMinutes: 7,
+          operatingArea: "taoyuan",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerEntrySlug: "ctbc-provider-outage",
+        reservationWindowStart: "2026-07-02T12:00:00.000Z",
+        reservationWindowEnd: "2026-07-02T12:30:00.000Z",
+        pickup: {
+          address: "Partner provider outage pickup text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "partner_booking",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "partner-key-provider-outage-001",
+            selectedAt: "2026-07-01T09:35:00.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "partner_booking",
+          },
+        },
+        dropoff: {
+          address: "Partner provider outage dropoff text only",
+          coordinateSource: "legacy_text",
+          geocodeProvider: "mock_geo",
+          geocodeConfidence: "unknown",
+          manualOverrideReason: "map_provider_unavailable",
+          surface: "partner_booking",
+          coordinateProvenance: {
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            selectedByActorId: "partner-key-provider-outage-001",
+            selectedAt: "2026-07-01T09:35:10.000Z",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "partner_booking",
+          },
+        },
+        passenger: {
+          name: "Partner Provider Outage Rider",
+          phone: "0912000666",
+        },
+        direction: "dropoff",
+        flightNo: "CI-200",
+        terminal: "T2",
+        benefitReference: "World Elite",
+      },
+      "tenant-demo-001",
+      {
+        authMode: "jwt_bearer",
+        actorType: "partner_api_key",
+        actorId: "partner-key-provider-outage-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner-map-outage-001",
+        partnerProgramId: "program-map-outage-001",
+        partnerEntrySlug: "ctbc-provider-outage",
+        roleFamilies: ["partner"],
+        roles: ["partner_booking"],
+        scopes: ["partner:bookings:create"],
+        requestId: "req-partner-provider-outage-001",
+      },
+      "req-partner-provider-outage-001",
+    );
+
+    const detail = service.getOrder(booking.orderId);
+    const serviceAreaGate = detail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(detail).toMatchObject({
+      partnerId: "partner-map-outage-001",
+      partnerProgramId: "program-map-outage-001",
+      partnerEntrySlug: "ctbc-provider-outage",
+      serviceProductCode: "credit_card_airport_transfer",
+    });
+    expect(detail.complianceFlags).toContain(
+      "service_area_legacy_text_manual_review",
+    );
+    expect(detail.queueFamily).toBe("manual_review_queue");
+    expect(detail.queueEntryReason).toBe("dispatch_manual_review_required");
+    expect(serviceAreaGate).toMatchObject({
+      state: "review_required",
+      evidenceState: "missing",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+    });
+    expect(detail.spatialAudit).toMatchObject({
+      capturedReason: "booking_creation",
+      actorId: "partner-key-provider-outage-001",
+      actorType: "partner_api_key",
+      surface: "partner_booking",
+      serviceProductType: "credit_card_airport_transfer",
+      decision: "manual_review",
+      missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+      stops: [
+        expect.objectContaining({
+          kind: "pickup",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "partner_booking",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "dropoff",
+          location: null,
+          provenanceComplete: false,
+          coordinateProvenance: expect.objectContaining({
+            coordinateSource: "legacy_text",
+            geocodeProvider: "mock_geo",
+            geocodeConfidence: "unknown",
+            manualOverrideReason: "map_provider_unavailable",
+            surface: "partner_booking",
+          }),
+        }),
+      ],
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "partner-key-provider-outage-001",
+        actorType: "partner_api_key",
+        tenantId: "tenant-demo-001",
+        moduleName: "order",
+        actionName: "order.spatial_audit.snapshot_created",
+        resourceType: "order",
+        resourceId: booking.orderId,
+        requestId: "req-partner-provider-outage-001",
+        newValuesSummary: expect.objectContaining({
+          decision: "manual_review",
+          surface: "partner_booking",
+          serviceProductType: "credit_card_airport_transfer",
+          missingItems: ["pickup_coordinates", "dropoff_coordinates"],
+          provenanceComplete: false,
+        }),
+      }),
+    );
+    expect(() =>
+      service.dispatchOrder(booking.orderId, { mode: "auto" }),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("uses immutable spatial snapshots instead of re-evaluating created orders", () => {
+    const serviceableEvaluation: ServiceAreaEvaluationResult = {
+      decision: "serviceable",
+      serviceProductType: "taxi_realtime",
+      evaluatedAt: "2026-06-30T10:02:00.000Z",
+      stops: [
+        {
+          kind: "pickup",
+          location: { lat: 25.0375, lng: 121.5637 },
+          serviceAreaCodes: ["TAIPEI_CORE"],
+          policyCodes: [],
+          geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        },
+        {
+          kind: "dropoff",
+          location: { lat: 25.041, lng: 121.55 },
+          serviceAreaCodes: ["TAIPEI_CORE"],
+          policyCodes: [],
+          geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+          decision: "serviceable",
+          reasonCodes: [],
+          reasonMessages: [],
+        },
+      ],
+      serviceAreaCodes: ["TAIPEI_CORE"],
+      geometryVersionRefs: ["service_area:TAIPEI_CORE@1"],
+      reasonCodes: [],
+      reasonMessages: [],
+    };
+    const changedEvaluation: ServiceAreaEvaluationResult = {
+      ...serviceableEvaluation,
+      decision: "not_serviceable",
+      reasonCodes: ["PICKUP_AREA_NOT_SERVICEABLE"],
+      reasonMessages: ["pickup is outside the service area."],
+      stops: serviceableEvaluation.stops.map((stop) => ({
+        ...stop,
+        decision: "not_serviceable",
+        reasonCodes: ["PICKUP_AREA_NOT_SERVICEABLE"],
+        reasonMessages: ["pickup is outside the service area."],
+      })),
+    };
+    const evaluate = vi
+      .fn()
+      .mockReturnValueOnce(serviceableEvaluation)
+      .mockReturnValue(changedEvaluation);
+    const { service } = createOwnedMobilityService({
+      serviceAreaService: { evaluate } as unknown as ServiceAreaService,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: {
+        address: "台北市政府",
+        lat: 25.0375,
+        lng: 121.5637,
+        coordinateSource: "provider_candidate",
+        geocodeProvider: "mock_geo",
+        geocodeConfidence: "exact",
+        selectedByActorId: "passenger-001",
+        selectedAt: "2026-06-30T10:02:00.000Z",
+      },
+      dropoff: {
+        address: "市府轉運站",
+        lat: 25.041,
+        lng: 121.55,
+        coordinateSource: "provider_candidate",
+        geocodeProvider: "mock_geo",
+        geocodeConfidence: "exact",
+        selectedByActorId: "passenger-001",
+        selectedAt: "2026-06-30T10:02:30.000Z",
+      },
+      passenger: { name: "Immutable Rider", phone: "0912000000" },
+    });
+    const firstDetail = service.getOrder(order.orderId);
+    firstDetail.spatialAudit?.reasonCodes.push("MUTATED_REASON");
+    if (firstDetail.spatialAudit?.stops[0]?.location) {
+      firstDetail.spatialAudit.stops[0].location.lat = 0;
+    }
+
+    const freshDetail = service.getOrder(order.orderId);
+    const serviceAreaGate = freshDetail.complianceGates?.find(
+      (gate) => gate.gateType === "service_area",
+    );
+
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(freshDetail.spatialAudit).toMatchObject({
+      decision: "serviceable",
+      reasonCodes: [],
+      stops: [
+        expect.objectContaining({
+          location: { lat: 25.0375, lng: 121.5637 },
+        }),
+        expect.objectContaining({
+          location: { lat: 25.041, lng: 121.55 },
+        }),
+      ],
+    });
+    expect(serviceAreaGate).toMatchObject({
+      state: "clear",
+      evidenceRefs: ["service_area:TAIPEI_CORE@1"],
+    });
   });
 
   it("enforces queue check-in eligibility and keeps stable queue positions", () => {

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { installMockMapTileRoutes } from "./map-geofence-harness";
+
 const baseUrl =
   process.env.DRTS_DEV_OPS_CONSOLE_BASE_URL ??
   process.env.OPS_CONSOLE_BASE_URL ??
@@ -267,6 +269,41 @@ async function assertShell(page: Page) {
   );
 }
 
+async function ensureCallcenterMapBookingForm(page: Page) {
+  const mapPair = page.locator(
+    '[data-address-map-pair-picker="callcenter-phone-booking-map"]',
+  );
+
+  await expect(page.locator("body")).not.toContainText(
+    /Loading workspace|載入工作區/i,
+    { timeout: 30_000 },
+  );
+
+  if ((await mapPair.count()) === 0) {
+    await page
+      .getByRole("button", {
+        name: /Open call work session|開啟通話工作階段/i,
+      })
+      .first()
+      .click();
+
+    const openSessionButton = page
+      .getByRole("button", { name: /^Open Session$|^開啟通話$/i })
+      .first();
+    const intakeForm = page.locator("form").filter({
+      has: openSessionButton,
+    });
+    await intakeForm
+      .locator('input[type="text"][required]')
+      .first()
+      .fill("0912-000-301");
+    await openSessionButton.click();
+  }
+
+  await expect(mapPair).toBeVisible({ timeout: 45_000 });
+  return mapPair;
+}
+
 test.describe("ops console parity smoke", () => {
   test.use({ viewport: { width: 1440, height: 950 } });
   test.setTimeout(180_000);
@@ -292,6 +329,113 @@ test.describe("ops console parity smoke", () => {
         path: `test-results/ops-console-parity/${spec.screenshot}`,
         fullPage: true,
       });
+    }
+  });
+
+  test("callcenter phone booking is gated by the map pair picker", async ({
+    page,
+  }) => {
+    await page.goto(`${baseUrl}/callcenter`, { waitUntil: "domcontentloaded" });
+
+    await expect(page).not.toHaveURL(/404/);
+    await expect(page.locator("body")).not.toContainText(
+      /404|Application error/i,
+    );
+    await assertShell(page);
+
+    const mapPair = await ensureCallcenterMapBookingForm(page);
+    await expect(mapPair).toHaveAttribute(
+      "data-service-product-type",
+      "taxi_realtime",
+    );
+    await expect(mapPair).toHaveAttribute(
+      "data-can-evaluate-service-area",
+      "false",
+    );
+    await expect(
+      page.locator('[data-address-map-picker="callcenter-pickup-map"]'),
+    ).toHaveAttribute("data-provider-status", "idle");
+    await expect(
+      page.locator('[data-address-map-picker="callcenter-dropoff-map"]'),
+    ).toHaveAttribute("data-provider-status", "idle");
+
+    const bookingGate = page.locator("[data-callcenter-map-booking-gate]");
+    await expect(bookingGate).toHaveAttribute(
+      "data-callcenter-map-booking-gate",
+      "pickup_coordinates_required",
+    );
+    await expect(bookingGate).toContainText(
+      /Pickup coordinates are required|建立電話訂單前必須先確認上車座標/,
+    );
+    await expect(
+      page
+        .getByRole("button", {
+          name: /Create phone booking|建立電話訂車/i,
+        })
+        .first(),
+    ).toBeDisabled();
+  });
+
+  test("dispatch map board exposes governed spatial readiness hooks", async ({
+    page,
+  }) => {
+    await installMockMapTileRoutes(page);
+    await page.goto(`${baseUrl}/dispatch`, { waitUntil: "domcontentloaded" });
+
+    await expect(page).not.toHaveURL(/404/);
+    await expect(page.locator("body")).not.toContainText(
+      /404|Application error/i,
+    );
+    await assertShell(page);
+
+    const board = page.locator(".spatial-board").first();
+    await expect(board).toBeVisible({ timeout: 45_000 });
+    await expect(board).toHaveAttribute(
+      "data-ops-map-provider-status",
+      /^(ready|degraded_projection|no_spatial_data)$/,
+    );
+    await expect(board).toHaveAttribute(
+      "data-ops-map-fallback-reason",
+      /^(none|missing_coordinates|no_visible_points)$/,
+    );
+    await expect(board).toHaveAttribute("data-ops-map-service-areas", /.*/);
+    await expect(board).toHaveAttribute("data-ops-map-policy-codes", /.*/);
+    await expect(board.locator(".spatial-map-status")).toBeVisible();
+    await expect(
+      board.locator("[data-ops-map-service-area-filter]"),
+    ).toHaveAttribute("data-ops-map-service-area-filter", /.*/);
+
+    const providerStatus = await board.getAttribute(
+      "data-ops-map-provider-status",
+    );
+    const mapPointCount = await board
+      .locator("[data-ops-map-point-kind]")
+      .count();
+    if (providerStatus !== "no_spatial_data") {
+      expect(mapPointCount).toBeGreaterThan(0);
+      await expect(board.locator("[data-ops-map-render-mode]")).toHaveAttribute(
+        "data-ops-map-render-mode",
+        "tile",
+      );
+      await expect(
+        board.locator("[data-ops-map-tile-template]"),
+      ).toHaveAttribute("data-ops-map-tile-template", "configured");
+      await expect(board.locator("[data-ops-map-zoom]")).toHaveAttribute(
+        "data-ops-map-zoom",
+        /^\d+$/,
+      );
+      await expect(
+        board.locator('img[src*="/mock-map-tiles/"]').first(),
+      ).toBeVisible();
+      await expect(board.getByText(/Zoom in|放大/).first()).toBeVisible();
+    }
+    if (mapPointCount > 0) {
+      const firstPoint = board.locator("[data-ops-map-point-kind]").first();
+      await expect(firstPoint).toHaveAttribute(
+        "data-ops-map-point-kind",
+        /^(pickup|dropoff|candidate)$/,
+      );
+      await expect(firstPoint).toHaveAttribute("data-ops-map-order-id", /.*/);
     }
   });
 });

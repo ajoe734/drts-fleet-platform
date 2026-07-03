@@ -2881,6 +2881,37 @@ describe("TenantPartnerService approval rules", () => {
       partnerEntrySlug: "referral-demo-community",
       period: "2026-06",
     });
+
+    const statement = await service.getPartnerReferralStatement(
+      identity,
+      billingSettlementService,
+      "2026-06",
+    );
+    expect(statement).toMatchObject({
+      partnerEntrySlug: "referral-demo-community",
+      period: "2026-06",
+      totals: {
+        tripCount: 2,
+      },
+    });
+    expect(statement.lines).toHaveLength(2);
+
+    await expect(
+      service.getPartnerReferralStatement(
+        identity,
+        billingSettlementService,
+        "2099-12",
+      ),
+    ).rejects.toMatchObject(
+      expect.objectContaining({
+        status: 404,
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "REFERRAL_STATEMENT_NOT_FOUND",
+          }),
+        }),
+      }),
+    );
   });
 
   it("rejects referral portal reads when partner identity scope does not match the provisioned entry", async () => {

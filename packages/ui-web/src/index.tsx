@@ -103,6 +103,23 @@ export {
 } from "./management-theme-context";
 export type { ManagementThemeProviderProps } from "./management-theme-context";
 export {
+  buildAddressPayloadFromCandidate,
+  buildManualAddressPayload,
+  buildServiceAreaPreviewCommand,
+  parseManualGeoPoint,
+  serviceabilityTone,
+} from "./address-map-picker";
+export type {
+  AddressMapPairPickerProps,
+  AddressMapPickerLocale,
+  AddressMapPickerProps,
+  AddressMapProviderStatus,
+  AddressMapSelectionContext,
+  AddressMapStopKind,
+  ManualAddressPayloadInput,
+  ServiceAreaPreviewCommandInput,
+} from "./address-map-picker";
+export {
   AuthorityBadge,
   CalloutBanner,
   DataCellStack,

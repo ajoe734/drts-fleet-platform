@@ -3908,7 +3908,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     REFERRAL_REVENUE_SHARE_RULE_SEED.map((rule) => ({ ...rule }));
 
-  listReferralRevenueShareRules(entrySlug?: string): ReferralRevenueShareRule[] {
+  listReferralRevenueShareRules(
+    entrySlug?: string,
+  ): ReferralRevenueShareRule[] {
     const slug = entrySlug?.trim();
     return this.referralRevenueShareRules
       .filter((rule) => !slug || rule.partnerEntrySlug === slug)
@@ -4106,7 +4108,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       entry.entrySlug,
     );
     const period =
-      periodMonth?.trim() || statements[0]?.period || new Date().toISOString().slice(0, 7);
+      periodMonth?.trim() ||
+      statements[0]?.period ||
+      new Date().toISOString().slice(0, 7);
     const statement = billingSettlementService.getReferralStatement(
       entry.entrySlug,
       period,
@@ -4137,7 +4141,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const statements = await billingSettlementService.listReferralStatements(
       entry.entrySlug,
     );
-    return statements.map((statement) => this.toPartnerReferralUsage(statement));
+    return statements.map((statement) =>
+      this.toPartnerReferralUsage(statement),
+    );
   }
 
   async listPartnerReferralRevenue(
@@ -4163,17 +4169,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return billingSettlementService.listReferralStatements(entry.entrySlug);
   }
 
-  getPartnerReferralStatement(
+  async getPartnerReferralStatement(
     identity: IdentityContext | null,
     billingSettlementService: BillingSettlementService,
     periodMonth: string,
     requestId?: string,
-  ): ReferralStatementRecord {
+  ): Promise<ReferralStatementRecord> {
     const entry = this.requirePartnerReferralPortalEntry(identity, requestId);
-    return billingSettlementService.getReferralStatement(
+    const statements = await billingSettlementService.listReferralStatements(
       entry.entrySlug,
-      periodMonth,
     );
+    const statement = statements.find((item) => item.period === periodMonth);
+    if (!statement) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "REFERRAL_STATEMENT_NOT_FOUND",
+        "Referral statement not found.",
+        {
+          partnerEntrySlug: entry.entrySlug,
+          periodMonth,
+        },
+      );
+    }
+    return statement;
   }
 
   createPlatformPartnerEntry(

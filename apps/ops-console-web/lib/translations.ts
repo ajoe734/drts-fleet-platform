@@ -97,7 +97,8 @@ const en = {
   "approvalRequests.tab.pending": "Pending",
   "approvalRequests.tab.approved": "Approved",
   "approvalRequests.tab.rejected": "Rejected",
-  "approvalRequests.banner.loadFailed.title": "Could not load approval requests",
+  "approvalRequests.banner.loadFailed.title":
+    "Could not load approval requests",
   "approvalRequests.banner.loadFailed.body":
     "You may lack scope, or the service is unavailable.",
   "approvalRequests.empty.loadFailed": "No data to display.",
@@ -745,7 +746,8 @@ const en = {
   "drivers.signals.location": "Live locations",
   "drivers.signals.locationDetail": "{stale} stale or delayed samples",
   "drivers.signals.suppression": "Matching suppressed",
-  "drivers.signals.suppressionDetail": "{degraded} platform status checks degraded",
+  "drivers.signals.suppressionDetail":
+    "{degraded} platform status checks degraded",
   "drivers.col.driverId": "Driver ID",
   "drivers.col.name": "Name",
   "drivers.col.driver": "Driver",
@@ -773,7 +775,8 @@ const en = {
   "drivers.emptyState.notProvisionedTitle": "Driver registry not provisioned",
   "drivers.emptyState.fetchFailedTitle": "Could not load drivers",
   "drivers.emptyState.permissionDeniedTitle": "Permission required",
-  "drivers.emptyState.externalUnavailableTitle": "External dependency unavailable",
+  "drivers.emptyState.externalUnavailableTitle":
+    "External dependency unavailable",
   "drivers.emptyState.filteredEmptyTitle": "No drivers match these filters",
   "drivers.emptyState.noDataBody":
     "The driver registry is healthy, but this environment has no driver records yet.",
@@ -790,7 +793,8 @@ const en = {
   "drivers.emptyState.action.clear_filters": "Clear filters",
   "drivers.emptyState.action.refresh_list": "Refresh list",
   "drivers.emptyState.action.open_adapter_registry": "Open adapter registry",
-  "drivers.emptyState.action.inspect_adapter_registry": "Inspect adapter registry",
+  "drivers.emptyState.action.inspect_adapter_registry":
+    "Inspect adapter registry",
   "drivers.emptyState.action.open_platform_admin_adapter_registry":
     "Open Platform Admin adapter registry",
   "drivers.list.eligibilityClear": "No active blockers",
@@ -1045,8 +1049,7 @@ const en = {
   "drivers.detailPage.card.activeTasksTitle": "Active tasks · {count}",
   "drivers.detailPage.card.noActiveTasks":
     "No owned or forwarded tasks are currently in flight.",
-  "drivers.detailPage.card.earningsTitle":
-    "Earnings · {count} statement(s)",
+  "drivers.detailPage.card.earningsTitle": "Earnings · {count} statement(s)",
   "drivers.detailPage.card.latestStatement":
     "Latest {periodMonth} · {amount} net",
   "drivers.detailPage.card.noStatements":
@@ -1062,8 +1065,7 @@ const en = {
   "drivers.detailPage.card.shiftsTitle": "Shifts & attendance · {count}",
   "drivers.detailPage.card.noShifts":
     "No recent shift or attendance entries for this driver.",
-  "drivers.detailPage.card.incidentsTitle":
-    "Recent incidents · {count}",
+  "drivers.detailPage.card.incidentsTitle": "Recent incidents · {count}",
   "drivers.detailPage.card.noIncidents":
     "No incidents are linked to this driver.",
   "drivers.detailPage.card.locationStatusTitle": "Location & status",
@@ -1686,7 +1688,27 @@ const en = {
   "dispatch.workflow.map.staleSupply": "stale supply points",
   "dispatch.workflow.map.noLocationSupply": "candidate(s) without location",
   "dispatch.workflow.map.projectionNote":
-    "This board is a projection over backend order and location truth. It does not create a second dispatch authority.",
+    "This map renders provider tiles for geographic context while backend order and policy records remain dispatch authority.",
+  "dispatch.workflow.map.tileFallback":
+    "Basemap tiles are not configured in this environment. Pins still use governed coordinates.",
+  "dispatch.workflow.map.viewport": "Zoom {zoom} · center {lat}, {lng}",
+  "dispatch.workflow.map.zoomIn": "Zoom in",
+  "dispatch.workflow.map.zoomOut": "Zoom out",
+  "dispatch.workflow.map.resetView": "Reset map",
+  "dispatch.workflow.map.panNorth": "N",
+  "dispatch.workflow.map.panSouth": "S",
+  "dispatch.workflow.map.panWest": "W",
+  "dispatch.workflow.map.panEast": "E",
+  "dispatch.workflow.map.status.ready":
+    "Map-ready: visible jobs and loaded supply have governed coordinates.",
+  "dispatch.workflow.map.status.degraded_projection":
+    "Degraded projection: some jobs or supply are missing governed coordinates.",
+  "dispatch.workflow.map.status.no_spatial_data":
+    "No governed spatial data is available yet.",
+  "dispatch.workflow.map.overlay.serviceAreas": "Service areas",
+  "dispatch.workflow.map.overlay.stopPolicies": "Stop policies",
+  "dispatch.workflow.map.overlay.reasonCodes": "Reason codes",
+  "dispatch.workflow.map.overlay.geometryRefs": "Geometry versions",
   "dispatch.workflow.map.northWest": "NW · {lat}, {lng}",
   "dispatch.workflow.map.southEast": "SE · {lat}, {lng}",
   "dispatch.workflow.map.legend": "Legend",
@@ -1897,8 +1919,7 @@ const en = {
   "dispatch.workflow.candidateLocationSummary":
     "{count} candidate(s) are currently {state}.",
   "dispatch.workflow.loadCandidatesFailed": "Failed to fetch candidates",
-  "dispatch.workflow.eligibility.includeIneligible":
-    "Show excluded candidates",
+  "dispatch.workflow.eligibility.includeIneligible": "Show excluded candidates",
   "dispatch.workflow.eligibility.includeIneligibleHint":
     "Reveals ineligible candidates with their exclusion reasons.",
   "dispatch.workflow.eligibility.col.eligibility": "Eligibility",
@@ -3007,6 +3028,32 @@ const en = {
   "callcenter.passengerPhonePlaceholder": "Passenger phone",
   "callcenter.pickupAddressPlaceholder": "Pickup address",
   "callcenter.dropoffAddressPlaceholder": "Dropoff address",
+  "callcenter.map.pickupHelper":
+    "Search and pin the exact pickup point before creating a phone order.",
+  "callcenter.map.dropoffHelper":
+    "Search and pin the exact dropoff point before creating a phone order.",
+  "callcenter.map.block.pickupCoordinatesRequired":
+    "Pickup coordinates are required before this phone order can be created.",
+  "callcenter.map.block.dropoffCoordinatesRequired":
+    "Dropoff coordinates are required before this phone order can be created.",
+  "callcenter.map.block.pickupProvenanceRequired":
+    "Pickup coordinate provenance is required.",
+  "callcenter.map.block.dropoffProvenanceRequired":
+    "Dropoff coordinate provenance is required.",
+  "callcenter.map.block.serviceabilityPreviewRequired":
+    "Service-area preview is required before submit.",
+  "callcenter.map.block.serviceabilityPreviewUnavailable":
+    "Service-area preview is unavailable. Keep this call in manual handling.",
+  "callcenter.map.block.serviceabilityBlocked":
+    "This pickup/dropoff is blocked by service-area or stop-policy rules.",
+  "callcenter.map.serviceability.evaluating":
+    "Evaluating service area and stop policies...",
+  "callcenter.map.serviceability.serviceable":
+    "Service area clear. Phone order can be created.",
+  "callcenter.map.serviceability.manualReview":
+    "Manual review required. The order will not be treated as normal dispatch until reviewed.",
+  "callcenter.map.serviceability.notServiceable":
+    "Not serviceable. Do not create a normal dispatch order.",
   "callcenter.opsNotePlaceholder": "Ops note",
   "callcenter.createOrderFromCall": "Create order from call",
   "callcenter.bindExistingOrder": "Bind existing order",
@@ -3811,11 +3858,13 @@ const en = {
   "opsLabel.incidentsAllClear": "No critical incidents. All clear for now.",
   "opsLabel.incidentsLoading": "Loading incidents...",
   "opsLabel.incidentsNoLinkedEntities": "No linked entities",
-  "opsLabel.incidentsSelectHint": "Choose an incident row to inspect timeline and audit flow.",
+  "opsLabel.incidentsSelectHint":
+    "Choose an incident row to inspect timeline and audit flow.",
   "opsLabel.reportsPeriodExample": "2026-04 or 2026-H1",
   "opsLabel.reportsClosedMonthExample": "2026-03",
   "opsLabel.reportsRequestedByExample": "ops-console",
-  "opsLabel.driverRegistryUnavailableSubtitle": "Unable to load driver registry data for {driverId}.",
+  "opsLabel.driverRegistryUnavailableSubtitle":
+    "Unable to load driver registry data for {driverId}.",
   "opsLabel.openDriverDetail": "Open detail for driver {driverId}",
   // ── Ops code labels (migrated from lib/localized-labels.ts) ──
   "opsCode.available": "Available",
@@ -3897,8 +3946,10 @@ const en = {
   "opsCode.enroute": "En Route",
   "opsCode.enroute_pickup": "En Route to Pickup",
   "opsCode.exception_hold": "Exception Hold",
-  "opsCode.exception_hold_confirmation_window_expired": "Confirmation Window Expired",
-  "opsCode.exception_hold_driver_rejected_in_window": "Driver Rejected In Window",
+  "opsCode.exception_hold_confirmation_window_expired":
+    "Confirmation Window Expired",
+  "opsCode.exception_hold_driver_rejected_in_window":
+    "Driver Rejected In Window",
   "opsCode.exception_hold_manual_escalation": "Manual Escalation",
   "opsCode.exception_hold_no_eligible_supply": "No Eligible Supply",
   "opsCode.expired": "Expired",
@@ -4136,8 +4187,7 @@ const en = {
   "reports.ops.format": "Export format",
   "reports.ops.export.accepted":
     "Export job {jobId} queued. Track it in the Jobs tab for the signed download.",
-  "reports.ops.export.jsonDone":
-    "Exported {count} summary row(s) as JSON.",
+  "reports.ops.export.jsonDone": "Exported {count} summary row(s) as JSON.",
   "reports.ops.regenerate.done": "Regenerated {count} record(s) at {time}.",
   "reports.ops.empty.daily":
     "No daily dispatch records for the selected filters.",
@@ -4596,8 +4646,7 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.section.attention.title": "今日待處理",
   "dashboard.section.attention.subtitle": "排序：SOS → no_supply → sync_failed",
   "dashboard.section.healthSignals.title": "健康訊號",
-  "dashboard.section.healthSignals.subtitle":
-    "UiHealthEnvelope · 跨應用相依",
+  "dashboard.section.healthSignals.subtitle": "UiHealthEnvelope · 跨應用相依",
   "dashboard.section.queue.title": "當前 dispatch 隊列 · top 5",
   "dashboard.section.queue.openDispatch": "前往派遣",
   "dashboard.section.adapterRegistry": "查看 adapter registry",
@@ -4899,8 +4948,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.refreshBanner.degradedBody":
     "部分上游司機資料延遲。請保持列表開啟，等下一次健康刷新後再做大量派遣異動。",
   "drivers.refreshBanner.unknownTitle": "司機刷新狀態未知",
-  "drivers.refreshBanner.unknownBody":
-    "後端未提供此快照的新鮮度 metadata。",
+  "drivers.refreshBanner.unknownBody": "後端未提供此快照的新鮮度 metadata。",
   "drivers.refreshBanner.staleTitle": "司機快照已過期",
   "drivers.refreshBanner.staleBody":
     "{source} 快照已超過新鮮度窗口。做派遣關鍵判斷前請重新整理。",
@@ -4914,8 +4962,7 @@ const zh: Record<keyof typeof en, string> = {
     "司機名冊服務健康，但此環境尚未建立任何司機紀錄。",
   "drivers.emptyState.notProvisionedBody":
     "此環境尚未佈建上游司機名冊或平台綁定資料流。",
-  "drivers.emptyState.fetchFailedBody":
-    "服務在產生司機快照前回傳錯誤。",
+  "drivers.emptyState.fetchFailedBody": "服務在產生司機快照前回傳錯誤。",
   "drivers.emptyState.permissionDeniedBody":
     "你的角色可以開啟此工作區，但此司機資料集需要更高範圍的讀取權限。",
   "drivers.emptyState.externalUnavailableBody":
@@ -5080,8 +5127,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.refresh.generatedAt": "生成時間 {value}",
   "drivers.detailPage.refresh.metadataUnavailable":
     "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
-  "drivers.detailPage.refresh.summary":
-    "T3 節奏 · {source} 快照 · {freshness}",
+  "drivers.detailPage.refresh.summary": "T3 節奏 · {source} 快照 · {freshness}",
   "drivers.detailPage.registryBack": "回到司機名冊",
   "drivers.detailPage.title": "司機詳情",
   "drivers.detailPage.registryFetchFailed": "名冊載入失敗",
@@ -5102,8 +5148,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.action.openIncident": "前往事故",
   "drivers.detailPage.action.relatedIncident": "相關事故",
   "drivers.detailPage.action.generateStatement": "產生對帳單",
-  "drivers.detailPage.action.markUnavailableForwarded":
-    "標記 forwarded 不可用",
+  "drivers.detailPage.action.markUnavailableForwarded": "標記 forwarded 不可用",
   "drivers.detailPage.workStateLabel": "工作狀態",
   "drivers.detailPage.deviceBindings": "裝置綁定",
   "drivers.detailPage.tab.overview": "總覽",
@@ -5153,8 +5198,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.banner.sosActive":
     "此司機目前處於 SOS in_response — dispatch action 已停用",
   "drivers.detailPage.banner.openIncidentById": "前往 {incidentId}",
-  "drivers.detailPage.banner.suppressionActive":
-    "此司機目前處於派遣抑制狀態",
+  "drivers.detailPage.banner.suppressionActive": "此司機目前處於派遣抑制狀態",
   "drivers.detailPage.banner.platformPresenceDegraded": "平台在線狀態降級",
   "drivers.detailPage.card.platformBindingTitle": "平台綁定 · {count} 個平台",
   "drivers.detailPage.card.platformBindingSubtitle":
@@ -5162,24 +5206,20 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detailPage.card.noPlatformBindings":
     "這位司機目前沒有任何平台綁定。",
   "drivers.detailPage.card.activeTasksTitle": "進行中任務 · {count}",
-  "drivers.detailPage.card.noActiveTasks":
-    "目前沒有進行中的自有或轉派任務。",
+  "drivers.detailPage.card.noActiveTasks": "目前沒有進行中的自有或轉派任務。",
   "drivers.detailPage.card.earningsTitle": "收入 · {count} 張對帳單",
   "drivers.detailPage.card.latestStatement":
     "最新 {periodMonth} · 淨額 {amount}",
-  "drivers.detailPage.card.noStatements":
-    "這位司機尚未產生任何對帳單。",
+  "drivers.detailPage.card.noStatements": "這位司機尚未產生任何對帳單。",
   "drivers.detailPage.card.manualOverrideTitle": "人工介入與抑制紀錄",
   "drivers.detailPage.card.noManualOverride":
     "這位司機目前沒有人工介入或派遣抑制紀錄。",
   "drivers.detailPage.card.failedRelayTitle": "轉派失敗 · {count}（近期）",
   "drivers.detailPage.card.noRelayFailures": "目前時段內沒有轉派失敗。",
   "drivers.detailPage.card.shiftsTitle": "班次與出勤 · {count}",
-  "drivers.detailPage.card.noShifts":
-    "這位司機沒有近期班次或出勤紀錄。",
+  "drivers.detailPage.card.noShifts": "這位司機沒有近期班次或出勤紀錄。",
   "drivers.detailPage.card.incidentsTitle": "近期事故 · {count}",
-  "drivers.detailPage.card.noIncidents":
-    "目前沒有與這位司機相關的事故。",
+  "drivers.detailPage.card.noIncidents": "目前沒有與這位司機相關的事故。",
   "drivers.detailPage.card.locationStatusTitle": "位置與狀態",
   "drivers.detailPage.location.unknown": "位置未知",
   "drivers.detailPage.location.noSample": "無位置樣本",
@@ -5805,7 +5845,26 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.map.supplyPoints": "候選供給點",
   "dispatch.workflow.map.staleSupply": "過舊供給點",
   "dispatch.workflow.map.projectionNote":
-    "此看板只投影後端訂單與位置真相，不形成第二套派車權威。",
+    "此地圖以 provider tiles 呈現地理脈絡；派車權威仍以後端訂單與政策紀錄為準。",
+  "dispatch.workflow.map.tileFallback":
+    "此環境尚未設定底圖 tiles；點位仍使用治理座標顯示。",
+  "dispatch.workflow.map.viewport": "縮放 {zoom} · 中心 {lat}, {lng}",
+  "dispatch.workflow.map.zoomIn": "放大",
+  "dispatch.workflow.map.zoomOut": "縮小",
+  "dispatch.workflow.map.resetView": "重設地圖",
+  "dispatch.workflow.map.panNorth": "北",
+  "dispatch.workflow.map.panSouth": "南",
+  "dispatch.workflow.map.panWest": "西",
+  "dispatch.workflow.map.panEast": "東",
+  "dispatch.workflow.map.status.ready":
+    "地圖就緒：可見任務與已載入供給都有治理座標。",
+  "dispatch.workflow.map.status.degraded_projection":
+    "退化投影：部分任務或供給缺少治理座標。",
+  "dispatch.workflow.map.status.no_spatial_data": "目前尚無可治理的空間資料。",
+  "dispatch.workflow.map.overlay.serviceAreas": "服務範圍",
+  "dispatch.workflow.map.overlay.stopPolicies": "上下車政策",
+  "dispatch.workflow.map.overlay.reasonCodes": "原因代碼",
+  "dispatch.workflow.map.overlay.geometryRefs": "圖資版本",
   "dispatch.workflow.map.noLocationSupply": "無位置的候選供給",
   "dispatch.workflow.map.northWest": "西北 · {lat}, {lng}",
   "dispatch.workflow.map.southEast": "東南 · {lat}, {lng}",
@@ -5934,8 +5993,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.forwarded.terminal.title": "鏡像已進入終態 · 唯讀",
   "dispatch.detail.forwarded.terminal.body":
     "僅提供強制刷新；對帳與金流於來源平台結算。",
-  "dispatch.detail.forwarded.authorityChain":
-    "合規關卡 · 授權鏈",
+  "dispatch.detail.forwarded.authorityChain": "合規關卡 · 授權鏈",
   "dispatch.detail.forwarded.domain": "domain",
   "dispatch.detail.forwarded.sourcePlatform": "source platform",
   "dispatch.detail.forwarded.routeLocked": "route locked",
@@ -6710,8 +6768,7 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.detail.refresh.freshness.degraded": "降級",
   "incidents.detail.refresh.freshness.unknown": "未知",
   "incidents.detail.refresh.snapshot": "快照 {time} UTC · {source}",
-  "incidents.detail.refresh.snapshotUnavailable":
-    "快照 -- · 中繼資料不可用",
+  "incidents.detail.refresh.snapshotUnavailable": "快照 -- · 中繼資料不可用",
   "incidents.hubTitle": "事故中心",
   "incidents.hubSubtitle":
     "安全 · 碰撞 · 財損 · 服務恢復 — driver SOS / dispatch exception 一律由 ops 接手",
@@ -7055,6 +7112,27 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.passengerPhonePlaceholder": "乘客電話",
   "callcenter.pickupAddressPlaceholder": "上車地址",
   "callcenter.dropoffAddressPlaceholder": "下車地址",
+  "callcenter.map.pickupHelper": "請先搜尋並確認精確上車點，再建立電話訂單。",
+  "callcenter.map.dropoffHelper": "請先搜尋並確認精確下車點，再建立電話訂單。",
+  "callcenter.map.block.pickupCoordinatesRequired":
+    "建立電話訂單前必須先確認上車座標。",
+  "callcenter.map.block.dropoffCoordinatesRequired":
+    "建立電話訂單前必須先確認下車座標。",
+  "callcenter.map.block.pickupProvenanceRequired": "上車座標缺少來源紀錄。",
+  "callcenter.map.block.dropoffProvenanceRequired": "下車座標缺少來源紀錄。",
+  "callcenter.map.block.serviceabilityPreviewRequired":
+    "送出前必須先完成服務範圍預覽。",
+  "callcenter.map.block.serviceabilityPreviewUnavailable":
+    "服務範圍預覽暫不可用，請保留人工處理。",
+  "callcenter.map.block.serviceabilityBlocked":
+    "此上/下車點被服務範圍或停靠政策阻擋。",
+  "callcenter.map.serviceability.evaluating": "正在檢查服務範圍與停靠政策...",
+  "callcenter.map.serviceability.serviceable":
+    "服務範圍通過，可以建立電話訂單。",
+  "callcenter.map.serviceability.manualReview":
+    "需要人工覆核；覆核前不可視為一般正常派遣。",
+  "callcenter.map.serviceability.notServiceable":
+    "不可服務，請勿建立一般派遣訂單。",
   "callcenter.opsNotePlaceholder": "營運備註",
   "callcenter.createOrderFromCall": "從通話建立訂單",
   "callcenter.bindExistingOrder": "綁定現有訂單",
@@ -7792,7 +7870,8 @@ const zh: Record<keyof typeof en, string> = {
   "opsLabel.reportsPeriodExample": "2026-04 或 2026-H1",
   "opsLabel.reportsClosedMonthExample": "2026-03",
   "opsLabel.reportsRequestedByExample": "ops-console",
-  "opsLabel.driverRegistryUnavailableSubtitle": "無法載入司機名冊資料：{driverId}。",
+  "opsLabel.driverRegistryUnavailableSubtitle":
+    "無法載入司機名冊資料：{driverId}。",
   "opsLabel.openDriverDetail": "開啟司機 {driverId} 的明細",
   // ── Ops code labels (migrated from lib/localized-labels.ts) ──
   "opsCode.available": "可派遣",
