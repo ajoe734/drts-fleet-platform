@@ -148,13 +148,28 @@ export function getPartnerProgramGate(params: {
   draft: PartnerBookingDraftValues;
   eligibilityVerificationId: string | null;
   locale?: Locale;
+  /**
+   * Authority-outage reference funnel: the tenant's real program is unknown, so
+   * no program-specific eligibility gate can be applied honestly. The map/
+   * coordinate gate still enforces submit-safety.
+   */
+  referenceFallback?: boolean;
 }): PartnerProgramGate {
   const {
     entry,
     draft,
     eligibilityVerificationId,
     locale = DEFAULT_LOCALE,
+    referenceFallback = false,
   } = params;
+
+  if (referenceFallback) {
+    return {
+      state: "ready",
+      message: t("book.ready", undefined, locale),
+      actionHref: null,
+    };
+  }
 
   if (
     entry.businessDispatchSubtype === "credit_card_airport_transfer" &&
@@ -220,8 +235,20 @@ export function getPartnerBookingFieldErrors(params: {
   draft: PartnerBookingDraftValues;
   subtype: BusinessDispatchSubtype;
   locale?: Locale;
+  /**
+   * Authority-outage reference funnel: only the universal trip / passenger /
+   * window fields are validated. The program subtype is unknown during an
+   * authority outage, so its program-specific required fields are neither
+   * imposed nor silently skipped for a mislabelled program.
+   */
+  referenceFallback?: boolean;
 }): PartnerBookingFieldErrors {
-  const { draft, subtype, locale = DEFAULT_LOCALE } = params;
+  const {
+    draft,
+    subtype,
+    locale = DEFAULT_LOCALE,
+    referenceFallback = false,
+  } = params;
   const errors: PartnerBookingFieldErrors = {};
 
   if (!hasText(draft.pickupAddress)) {
@@ -276,7 +303,7 @@ export function getPartnerBookingFieldErrors(params: {
     errors.reservationWindowEnd = t("error.windowOrder", undefined, locale);
   }
 
-  if (subtype === "credit_card_airport_transfer") {
+  if (!referenceFallback && subtype === "credit_card_airport_transfer") {
     if (!hasText(draft.cardTier)) {
       setRequiredError(errors, "cardTier", "field.cardTier", locale);
     }
@@ -291,7 +318,7 @@ export function getPartnerBookingFieldErrors(params: {
     }
   }
 
-  if (subtype === "insurance_replacement_vehicle") {
+  if (!referenceFallback && subtype === "insurance_replacement_vehicle") {
     if (!hasText(draft.claimNumber)) {
       setRequiredError(errors, "claimNumber", "field.claimNumber", locale);
     }
@@ -355,7 +382,7 @@ export function getPartnerBookingFieldErrors(params: {
     }
   }
 
-  if (subtype === "travel_agency_transfer") {
+  if (!referenceFallback && subtype === "travel_agency_transfer") {
     if (!hasText(draft.groupCode)) {
       setRequiredError(errors, "groupCode", "field.groupCode", locale);
     }
@@ -412,12 +439,14 @@ export function isPartnerBookingDraftReady(params: {
   draft: PartnerBookingDraftValues;
   eligibilityVerificationId: string | null;
   locale?: Locale;
+  referenceFallback?: boolean;
 }): boolean {
   const {
     entry,
     draft,
     eligibilityVerificationId,
     locale = DEFAULT_LOCALE,
+    referenceFallback = false,
   } = params;
   return (
     Object.keys(
@@ -425,6 +454,7 @@ export function isPartnerBookingDraftReady(params: {
         draft,
         subtype: entry.businessDispatchSubtype,
         locale,
+        referenceFallback,
       }),
     ).length === 0 &&
     getPartnerProgramGate({
@@ -432,6 +462,7 @@ export function isPartnerBookingDraftReady(params: {
       draft,
       eligibilityVerificationId,
       locale,
+      referenceFallback,
     }).state === "ready"
   );
 }

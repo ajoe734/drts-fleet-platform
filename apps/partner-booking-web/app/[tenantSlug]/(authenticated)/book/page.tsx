@@ -41,12 +41,17 @@ export default async function PartnerBookPage({
       firstParam(resolvedSearchParams.mapProviderState),
     );
 
+    // Authority outage: `entry` is null. The tenant's real program is unknown,
+    // so render the funnel program-neutral (referenceFallback) rather than
+    // fabricating a specific program form. The placeholder entry only satisfies
+    // the non-null prop shape; no program-specific field is surfaced from it.
     return (
       <PartnerBookingForm
         brand={brand}
         entry={entry ?? buildLocalReferencePartnerEntry(tenantSlug)}
         eligibilityVerificationId={eligibilityVerificationId}
         mapProviderState={mapProviderState}
+        referenceFallback={!entry}
       />
     );
   } catch (error) {

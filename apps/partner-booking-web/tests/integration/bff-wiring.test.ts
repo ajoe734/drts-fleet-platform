@@ -504,13 +504,14 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
-  it("builds a self-contained airport-transfer reference entry for the outage shell", () => {
+  it("builds a self-contained reference-entry placeholder for the outage shell (subtype inert; funnel renders program-neutral)", () => {
     const entry = buildLocalReferencePartnerEntry("ctbc");
     expect(entry).toMatchObject({
       entrySlug: "ctbc",
-      businessDispatchSubtype: "credit_card_airport_transfer",
       // Relaxed eligibility so the reference funnel renders without a live
-      // authority to verify a reference id against.
+      // authority to verify a reference id against. The businessDispatchSubtype
+      // is an inert structural placeholder — during an authority outage the book
+      // page passes referenceFallback so the form never surfaces or gates on it.
       eligibilityMode: "none",
       activeFlag: true,
     });

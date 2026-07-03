@@ -126,6 +126,12 @@ const en = {
   "book.program.insurance_replacement_vehicle": "Insurance replacement vehicle",
   "book.program.travel_agency_transfer": "Travel agency transfer",
   "book.program.enterprise_dispatch": "Enterprise dispatch",
+  "book.program.reference": "Assisted booking (reference mode)",
+  "book.coverage.reference":
+    "Trip location capture and manual review — no program-specific intake",
+  "book.reference.degradedTitle": "Partner service temporarily unavailable",
+  "book.reference.degradedBody":
+    "We couldn't reach this partner's program right now, so this is a generic assisted-booking reference. It captures the trip location and routes to manual review; no program-specific booking is created.",
   "book.coverage.credit_card_airport_transfer":
     "Card tier, flight context, terminal, direction",
   "book.coverage.insurance_replacement_vehicle":
@@ -601,6 +607,11 @@ const zh = {
   "book.program.insurance_replacement_vehicle": "保險理賠代步",
   "book.program.travel_agency_transfer": "旅行社團體接送",
   "book.program.enterprise_dispatch": "企業派車",
+  "book.program.reference": "協助預約（參考模式）",
+  "book.coverage.reference": "僅擷取行程地點並轉人工審核，無 partner 專屬欄位",
+  "book.reference.degradedTitle": "合作夥伴服務暫時無法連線",
+  "book.reference.degradedBody":
+    "目前無法連上此合作夥伴的方案設定，因此改以通用的協助預約參考模式：僅擷取行程地點並轉人工審核，不會建立方案專屬預約。",
   "book.coverage.credit_card_airport_transfer": "卡別、航班、航廈、接送方向",
   "book.coverage.insurance_replacement_vehicle":
     "理賠案號、保單、理賠參照、申請人、代步車型、代步期間",

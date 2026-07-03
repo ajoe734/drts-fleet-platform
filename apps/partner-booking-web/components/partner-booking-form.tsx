@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { AddressPayload } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
@@ -12,7 +12,6 @@ import {
   CanvasPageHeader,
   CanvasPill,
   buildCanvasTheme,
-  worstServiceDecision,
   type AddressMapPickerChange,
   type AddressProviderState,
   type CanvasTheme,
@@ -29,6 +28,7 @@ import {
 import {
   getPartnerMapBookingBannerCode,
   getPartnerMapBookingGate,
+  hasPartnerAddressCoordinates,
   isPartnerProviderOutage,
   PARTNER_MAP_SERVICE_PRODUCT_TYPE,
   type PartnerMapBookingBannerCode,
@@ -234,6 +234,7 @@ export function PartnerBookingForm({
   entry,
   eligibilityVerificationId,
   mapProviderState,
+  referenceFallback = false,
 }: {
   brand: PartnerBrandTemplate;
   entry: Pick<
@@ -247,6 +248,13 @@ export function PartnerBookingForm({
    * env-configured mode (healthy) when unset.
    */
   mapProviderState?: PartnerMapProviderMode;
+  /**
+   * Authority-outage reference funnel. The partner authority was unreachable, so
+   * the tenant's real program is unknown: render program-neutral (no fabricated
+   * program form, no program-specific gating), capture the trip location, and
+   * route to manual review. Never claim a specific program we cannot verify.
+   */
+  referenceFallback?: boolean;
 }) {
   const { locale, t } = useTranslation();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
@@ -258,10 +266,10 @@ export function PartnerBookingForm({
     useState<AddressProviderState>(INITIAL_PROVIDER_STATE);
   const [dropoffProviderState, setDropoffProviderState] =
     useState<AddressProviderState>(INITIAL_PROVIDER_STATE);
-  const [pickupServiceability, setPickupServiceability] =
+  const [serviceabilityPreview, setServiceabilityPreview] =
     useState<ServiceAreaEvaluationResult | null>(null);
-  const [dropoffServiceability, setDropoffServiceability] =
-    useState<ServiceAreaEvaluationResult | null>(null);
+  const [previewStatus, setPreviewStatus] =
+    useState<PartnerServiceabilityPreviewStatus>("idle");
 
   const mapProvider = useMemo(
     () =>
@@ -279,29 +287,62 @@ export function PartnerBookingForm({
     dropoffProviderState,
   );
 
-  // Combine the two single-leg serviceability previews into one decision. The
-  // gate is "ready" only once both legs have been evaluated.
-  const previewStatus: PartnerServiceabilityPreviewStatus =
-    !pickupPin || !dropoffPin
-      ? "idle"
-      : pickupServiceability && dropoffServiceability
-        ? "ready"
-        : "evaluating";
-  const combinedServiceability: ServiceAreaEvaluationResult | null =
-    pickupServiceability && dropoffServiceability
-      ? {
-          ...pickupServiceability,
-          decision: worstServiceDecision(
-            pickupServiceability.decision,
-            dropoffServiceability.decision,
-          ),
+  // Evaluate serviceability in-form (not inside the picker) once both stops
+  // carry coordinates. A failed evaluation surfaces as `error`: the gate blocks
+  // it as a backend serviceability failure (`serviceability_preview_unavailable`)
+  // while the provider is healthy, or degrades to manual review only during a
+  // genuine provider outage — never a silent dispatch. This mirrors the
+  // concierge surface, so a healthy-provider preview failure is reachable rather
+  // than stuck at `evaluating`.
+  useEffect(() => {
+    if (
+      !hasPartnerAddressCoordinates(pickupPin) ||
+      !hasPartnerAddressCoordinates(dropoffPin) ||
+      !mapProvider.evaluateServiceArea
+    ) {
+      setServiceabilityPreview(null);
+      setPreviewStatus("idle");
+      return;
+    }
+
+    let cancelled = false;
+    setPreviewStatus("evaluating");
+    void mapProvider
+      .evaluateServiceArea({
+        serviceProductType: PARTNER_MAP_SERVICE_PRODUCT_TYPE,
+        pickup: { lat: pickupPin.lat, lng: pickupPin.lng },
+        dropoff: { lat: dropoffPin.lat, lng: dropoffPin.lng },
+      })
+      .then((result) => {
+        if (cancelled) {
+          return;
         }
-      : null;
+        setServiceabilityPreview(result);
+        setPreviewStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setServiceabilityPreview(null);
+        setPreviewStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    mapProvider,
+    pickupPin?.lat,
+    pickupPin?.lng,
+    dropoffPin?.lat,
+    dropoffPin?.lng,
+  ]);
 
   const mapGate = getPartnerMapBookingGate({
     pickup: pickupPin,
     dropoff: dropoffPin,
-    serviceability: combinedServiceability,
+    serviceability: serviceabilityPreview,
     previewStatus,
     providerOutage,
   });
@@ -312,12 +353,14 @@ export function PartnerBookingForm({
     draft,
     subtype: entry.businessDispatchSubtype,
     locale,
+    referenceFallback,
   });
   const gate = getPartnerProgramGate({
     entry,
     draft,
     eligibilityVerificationId,
     locale,
+    referenceFallback,
   });
   const ready =
     isPartnerBookingDraftReady({
@@ -325,6 +368,7 @@ export function PartnerBookingForm({
       draft,
       eligibilityVerificationId,
       locale,
+      referenceFallback,
     }) && mapGate.canSubmit;
 
   function updateField(name: string, value: string) {
@@ -337,7 +381,6 @@ export function PartnerBookingForm({
   function handlePickupChange(change: AddressMapPickerChange) {
     setPickupPin(change.address);
     setPickupProviderState(change.providerState);
-    setPickupServiceability(change.serviceability);
     // Only mirror a resolved address into the required text field. Never write
     // an empty string here: clearing the pin (e.g. when the operator hand-types
     // an address during a provider outage) re-fires this handler with a null
@@ -350,7 +393,6 @@ export function PartnerBookingForm({
   function handleDropoffChange(change: AddressMapPickerChange) {
     setDropoffPin(change.address);
     setDropoffProviderState(change.providerState);
-    setDropoffServiceability(change.serviceability);
     if (change.address?.address) {
       updateField("dropoffAddress", change.address.address);
     }
@@ -433,14 +475,14 @@ export function PartnerBookingForm({
     setSubmitted(true);
   }
 
-  const programLabel = getPartnerProgramLabel(
-    entry.businessDispatchSubtype,
-    locale,
-  );
-  const coverage = getPartnerProgramCoverage(
-    entry.businessDispatchSubtype,
-    locale,
-  );
+  // During an authority outage the tenant's program is unknown, so surface a
+  // neutral reference label/coverage instead of a fabricated program name.
+  const programLabel = referenceFallback
+    ? t("book.program.reference")
+    : getPartnerProgramLabel(entry.businessDispatchSubtype, locale);
+  const coverage = referenceFallback
+    ? t("book.coverage.reference")
+    : getPartnerProgramCoverage(entry.businessDispatchSubtype, locale);
   const travelRosterPreview = draft.rosterPassengers
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -493,20 +535,31 @@ export function PartnerBookingForm({
         style={{ padding: 0, background: "transparent" }}
       />
 
+      {referenceFallback ? (
+        <CanvasBanner
+          theme={theme}
+          tone="warn"
+          title={t("book.reference.degradedTitle")}
+          body={t("book.reference.degradedBody")}
+        />
+      ) : null}
+
       <CanvasCard theme={theme}>
         <div style={actionRowStyle}>
           <CanvasPill theme={theme} tone="accent">
             {t("book.program.badge")} · {programLabel}
           </CanvasPill>
-          <CanvasPill theme={theme} tone={gateTone(gate.state)}>
-            {t("book.eligibility.badge")} ·{" "}
-            {gate.state === "ready"
-              ? t("book.eligibility.ready")
-              : gate.state === "blocked"
-                ? t("book.eligibility.blocked")
-                : t("book.eligibility.inline")}
-          </CanvasPill>
-          {eligibilityVerificationId ? (
+          {!referenceFallback ? (
+            <CanvasPill theme={theme} tone={gateTone(gate.state)}>
+              {t("book.eligibility.badge")} ·{" "}
+              {gate.state === "ready"
+                ? t("book.eligibility.ready")
+                : gate.state === "blocked"
+                  ? t("book.eligibility.blocked")
+                  : t("book.eligibility.inline")}
+            </CanvasPill>
+          ) : null}
+          {!referenceFallback && eligibilityVerificationId ? (
             <CanvasPill theme={theme} tone="neutral">
               {t("book.eligibility.referenceId")} · {eligibilityVerificationId}
             </CanvasPill>
@@ -527,7 +580,8 @@ export function PartnerBookingForm({
               {draft.reservationWindowStart} → {draft.reservationWindowEnd}
             </strong>
           </div>
-          {entry.businessDispatchSubtype === "credit_card_airport_transfer" ? (
+          {!referenceFallback &&
+          entry.businessDispatchSubtype === "credit_card_airport_transfer" ? (
             <div style={fieldStyle}>
               <span style={{ ...labelStyle, color: theme.textMuted }}>
                 {t("book.summary.direction")}
@@ -546,28 +600,31 @@ export function PartnerBookingForm({
         </div>
       </CanvasCard>
 
-      <CanvasBanner
-        theme={theme}
-        tone={gateTone(gate.state)}
-        title={t("book.eligibility.badge")}
-        body={gate.message}
-        actions={
-          gate.actionHref ? (
-            <Link
-              href={gate.actionHref}
-              style={{
-                color: theme.accent,
-                fontWeight: 700,
-                textDecoration: "none",
-              }}
-            >
-              {t("book.eligibility.airport.action")}
-            </Link>
-          ) : null
-        }
-      />
+      {!referenceFallback ? (
+        <CanvasBanner
+          theme={theme}
+          tone={gateTone(gate.state)}
+          title={t("book.eligibility.badge")}
+          body={gate.message}
+          actions={
+            gate.actionHref ? (
+              <Link
+                href={gate.actionHref}
+                style={{
+                  color: theme.accent,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                }}
+              >
+                {t("book.eligibility.airport.action")}
+              </Link>
+            ) : null
+          }
+        />
+      ) : null}
 
-      {entry.businessDispatchSubtype === "travel_agency_transfer" ? (
+      {!referenceFallback &&
+      entry.businessDispatchSubtype === "travel_agency_transfer" ? (
         <CanvasCard theme={theme} title={t("book.travel.cardTitle")}>
           <div style={{ display: "grid", gap: 12 }}>
             <div
@@ -728,7 +785,6 @@ export function PartnerBookingForm({
               surface="partner_booking"
               theme={theme}
               locale={locale === "zh" ? "zh-TW" : "en-US"}
-              serviceProductType={PARTNER_MAP_SERVICE_PRODUCT_TYPE}
               value={pickupPin}
               onChange={handlePickupChange}
               title={t("field.pickupAddress")}
@@ -761,7 +817,6 @@ export function PartnerBookingForm({
               surface="partner_booking"
               theme={theme}
               locale={locale === "zh" ? "zh-TW" : "en-US"}
-              serviceProductType={PARTNER_MAP_SERVICE_PRODUCT_TYPE}
               value={dropoffPin}
               onChange={handleDropoffChange}
               title={t("field.dropoffAddress")}
@@ -810,9 +865,10 @@ export function PartnerBookingForm({
         </div>
       </CanvasCard>
 
-      <CanvasCard theme={theme} title={t("book.section.program")}>
-        <div style={gridStyle}>
-          {entry.businessDispatchSubtype === "credit_card_airport_transfer" ? (
+      {!referenceFallback ? (
+        <CanvasCard theme={theme} title={t("book.section.program")}>
+          <div style={gridStyle}>
+            {entry.businessDispatchSubtype === "credit_card_airport_transfer" ? (
             <>
               {renderField({
                 name: "cardTier",
@@ -922,9 +978,10 @@ export function PartnerBookingForm({
                 fullSpan: true,
               })}
             </>
-          ) : null}
-        </div>
-      </CanvasCard>
+            ) : null}
+          </div>
+        </CanvasCard>
+      ) : null}
 
       <CanvasCard theme={theme} title={t("book.section.review")}>
         <div style={{ display: "grid", gap: 12 }}>

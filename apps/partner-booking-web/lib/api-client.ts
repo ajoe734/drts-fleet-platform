@@ -498,13 +498,18 @@ export async function getPublicPartnerEntry(
 }
 
 /**
- * Minimal, backend-free partner entry for the local reference funnel. When the
- * partner authority is unreachable (`local_fallback`) the assisted-entry booking
- * surface still renders as a self-contained reference funnel — validation /
- * preview only, it never submits a live order — so an authority outage never
- * blanks the map picker. The credit-card airport-transfer program is the
- * canonical assisted-entry funnel; eligibility relaxes to `none` because there
- * is no authority to verify a reference id against.
+ * Minimal, backend-free partner entry placeholder for the authority-outage
+ * reference funnel. When the partner authority is unreachable (`local_fallback`)
+ * the assisted-entry booking surface still renders — validation / preview only,
+ * it never submits a live order — so an outage never blanks the map picker.
+ *
+ * IMPORTANT: during an authority outage the tenant's real program is unknown, so
+ * the booking form renders program-neutral (`referenceFallback`) and does NOT
+ * surface or gate on `businessDispatchSubtype`. The subtype below is therefore an
+ * inert structural placeholder only — it must never drive a program-specific
+ * form or gate, otherwise a non-airport tenant would see the wrong intake during
+ * an outage. Eligibility relaxes to `none` because there is no authority to
+ * verify a reference id against.
  */
 export function buildLocalReferencePartnerEntry(
   tenantSlug: string,
@@ -512,6 +517,7 @@ export function buildLocalReferencePartnerEntry(
   return normalizePartnerEntry({
     entrySlug: tenantSlug,
     partnerType: "bank",
+    // Inert placeholder; the reference funnel is program-neutral (see above).
     businessDispatchSubtype: "credit_card_airport_transfer",
     eligibilityMode: "none",
     status: "active",

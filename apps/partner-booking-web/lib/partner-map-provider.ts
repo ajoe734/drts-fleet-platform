@@ -1,7 +1,14 @@
-import type { AddressMapPickerProvider } from "@drts/ui-web";
+import type {
+  AddressMapPickerProvider,
+  ServiceAreaEvaluationResult,
+} from "@drts/ui-web";
 import { createMockAddressProvider } from "@drts/ui-web";
 
-export type PartnerMapProviderMode = "healthy" | "degraded" | "unavailable";
+export type PartnerMapProviderMode =
+  | "healthy"
+  | "degraded"
+  | "unavailable"
+  | "serviceability_error";
 
 /**
  * The partner funnel is a self-contained reference surface: it demonstrates the
@@ -12,17 +19,48 @@ export type PartnerMapProviderMode = "healthy" | "degraded" | "unavailable";
 export function resolvePartnerMapProviderMode(
   value: string | null | undefined,
 ): PartnerMapProviderMode {
-  if (value === "unavailable" || value === "degraded") {
+  if (
+    value === "unavailable" ||
+    value === "degraded" ||
+    value === "serviceability_error"
+  ) {
     return value;
   }
   return "healthy";
 }
 
+/**
+ * Thrown by the mock provider's `serviceability_error` mode: search and health
+ * stay green (the provider is genuinely reachable), but the serviceability
+ * preview fails. This is the "healthy provider, failed backend gate" class that
+ * the booking gate blocks as `serviceability_preview_unavailable` — distinct
+ * from a provider outage, which degrades to manual review.
+ */
+export class PartnerServiceabilityPreviewError extends Error {
+  constructor(message = "Serviceability preview failed.") {
+    super(message);
+    this.name = "PartnerServiceabilityPreviewError";
+  }
+}
+
 export function createConfiguredPartnerMapProvider(
   mode: PartnerMapProviderMode,
 ): AddressMapPickerProvider {
-  return createMockAddressProvider({
+  const base = createMockAddressProvider({
     unavailable: mode === "unavailable",
     degraded: mode === "degraded",
   });
+
+  if (mode !== "serviceability_error") {
+    return base;
+  }
+
+  // Healthy search + health, but serviceability evaluation throws: exercises the
+  // backend-gate-failure path without flipping the provider to an outage.
+  return {
+    ...base,
+    async evaluateServiceArea(): Promise<ServiceAreaEvaluationResult> {
+      throw new PartnerServiceabilityPreviewError();
+    },
+  };
 }
