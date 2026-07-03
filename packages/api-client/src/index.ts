@@ -378,10 +378,14 @@ export class ApiClientError extends Error {
     this.statusCode = input.statusCode;
     this.code = input.code;
     this.apiMessage = input.message;
-    this.details = input.details;
     this.retryable = input.retryable;
-    this.traceId = input.traceId;
     this.rawBody = input.rawBody;
+    if (input.details !== undefined) {
+      this.details = input.details;
+    }
+    if (input.traceId !== undefined) {
+      this.traceId = input.traceId;
+    }
   }
 }
 
@@ -665,10 +669,14 @@ export class ApiClient {
           message:
             apiError?.message ||
             `API request failed with status ${response.status}`,
-          details: apiError?.details,
           retryable: apiError?.retryable ?? false,
-          traceId: apiError?.traceId,
           rawBody: errorText,
+          ...(apiError?.details !== undefined
+            ? { details: apiError.details }
+            : {}),
+          ...(apiError?.traceId !== undefined
+            ? { traceId: apiError.traceId }
+            : {}),
         });
       }
 

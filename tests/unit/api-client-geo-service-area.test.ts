@@ -73,7 +73,6 @@ describe("api client geo and service-area coverage", () => {
       serviceProductType: "taxi_realtime",
       pickup: { lat: 25.033, lng: 121.5654 },
       dropoff: { lat: 25.0478, lng: 121.5319 },
-      surface: "callcenter",
     });
     await client.createServiceAreaBoundary({
       areaCode: "taipei-core",
@@ -233,13 +232,12 @@ describe("api client geo and service-area coverage", () => {
 
     const client = new ApiClient({ baseUrl: "http://localhost:3001" });
 
-    const error = await client
-      .searchGeo({
-        q: "__provider_unavailable__",
-      })
-      .catch((caughtError) => caughtError as ApiClientError);
+    const error = await client.searchGeo({
+      q: "__provider_unavailable__",
+    }).catch((caughtError: unknown) => caughtError);
 
-    expect(error).toMatchObject<ApiClientError>({
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error).toMatchObject({
       name: "ApiClientError",
       statusCode: 503,
       code: "GEO_PROVIDER_UNAVAILABLE",
@@ -249,7 +247,7 @@ describe("api client geo and service-area coverage", () => {
       details: { provider: "mock", outageWindow: "active" },
       rawBody,
     });
-    expect(error.message).toBe(`API error 503: ${rawBody}`);
+    expect((error as ApiClientError).message).toBe(`API error 503: ${rawBody}`);
   });
 
   it("throws ApiClientError for invalid_coordinate service-area failures", async () => {
@@ -280,7 +278,7 @@ describe("api client geo and service-area coverage", () => {
         serviceProductType: "taxi_realtime",
         pickup: { lat: 95, lng: 121.5654 },
       }),
-    ).rejects.toMatchObject<ApiClientError>({
+    ).rejects.toMatchObject({
       name: "ApiClientError",
       statusCode: 400,
       code: "INVALID_COORDINATE",
