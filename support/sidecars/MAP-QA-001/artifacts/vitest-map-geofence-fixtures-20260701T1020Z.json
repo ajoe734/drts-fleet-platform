@@ -3,14 +3,14 @@
   "suite": "shared-test-fixtures",
   "command": "pnpm --filter @drts/shared-test-fixtures test",
   "status": "passed",
-  "executedAt": "2026-07-03T16:24:41Z",
+  "executedAt": "2026-07-03T16:36:59Z",
   "branch": "codex/map-qa-001",
-  "ref": "codex/map-qa-001@a1ef993cb5d2b044bdb41144678750fe5ed191c6+working-tree",
+  "ref": "codex/map-qa-001@e74721c1367d4ec82f57df5d51eb4ae5037a0d7a",
   "results": {
     "testFilesPassed": 1,
     "testsPassed": 8,
     "testsFailed": 0,
-    "durationMs": 501
+    "durationMs": 607
   },
   "coverage": [
     "fixture key catalog",
