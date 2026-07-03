@@ -1,0 +1,8 @@
+
+> @drts/api@0.1.0 typecheck /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-obs-001/apps/api
+> pnpm --filter @drts/contracts build && tsc -p tsconfig.json --noEmit
+
+
+> @drts/contracts@0.1.0 build /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-obs-001/packages/contracts
+> tsc -p tsconfig.json
+
