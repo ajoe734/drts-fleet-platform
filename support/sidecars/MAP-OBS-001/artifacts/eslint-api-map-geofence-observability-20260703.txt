@@ -1,0 +1,4 @@
+
+> @drts/api@0.1.0 lint /home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-map-obs-001/apps/api
+> eslint src --max-warnings=0
+
