@@ -14,3 +14,35 @@ export type {
   ManagementThemeContextValue,
   ManagementThemeProviderProps,
 } from "./management-theme-context";
+export {
+  AddressMapPicker,
+  AddressMapPairPicker,
+  AddressMapPreviewSurface,
+} from "./address-map-picker";
+export type {
+  AddressMapPickerProps,
+  AddressMapPairPickerProps,
+  AddressMapPairChange,
+  AddressMapPreviewSurfaceProps,
+  AddressMapPin,
+  MapBounds,
+} from "./address-map-picker";
+export {
+  AddressProviderUnavailableError,
+  buildServiceAreaPreviewCommand,
+  candidateToAddressPayload,
+  createMockAddressProvider,
+  isDispatchReadyAddress,
+  manualCoordinateToAddressPayload,
+  resolveAddressPickerLabels,
+} from "./address-map-picker-core";
+export type {
+  AddressMapPickerChange,
+  AddressMapPickerLabels,
+  AddressMapPickerProvider,
+  AddressPayload,
+  AddressPickerStatus,
+  GeocodeCandidate,
+  GeoResolutionSurface,
+  ServiceAreaEvaluationResult,
+} from "./address-map-picker-core";

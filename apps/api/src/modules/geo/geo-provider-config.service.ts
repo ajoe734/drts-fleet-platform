@@ -35,6 +35,26 @@ export class GeoProviderConfigService {
     const missingSecretNames = requiredSecretNames.filter(
       (name) => !this.hasValue(name),
     );
+    const dailyLimit = this.positiveInteger("MAP_PROVIDER_DAILY_QUOTA");
+    const minuteLimit = this.positiveInteger("MAP_PROVIDER_MINUTE_QUOTA");
+    const dailyUsed = this.nonNegativeInteger("MAP_PROVIDER_DAILY_QUOTA_USED");
+    const minuteUsed = this.nonNegativeInteger(
+      "MAP_PROVIDER_MINUTE_QUOTA_USED",
+    );
+    const warningThresholdPercent = this.percent(
+      "MAP_PROVIDER_QUOTA_WARNING_PERCENT",
+      DEFAULT_WARNING_THRESHOLD,
+    );
+    const criticalThresholdPercent = this.percent(
+      "MAP_PROVIDER_QUOTA_CRITICAL_PERCENT",
+      DEFAULT_CRITICAL_THRESHOLD,
+    );
+    const usagePercent = this.quotaUsagePercent({
+      dailyLimit,
+      minuteLimit,
+      dailyUsed,
+      minuteUsed,
+    });
     const checks: GeoProviderHealthResponse["checks"] = [];
 
     if (!SUPPORTED_PROVIDER_MODES.has(rawMode)) {
@@ -125,16 +145,19 @@ export class GeoProviderConfigService {
       requiredSecretNames,
       missingSecretNames,
       quota: {
-        dailyLimit: this.positiveInteger("MAP_PROVIDER_DAILY_QUOTA"),
-        minuteLimit: this.positiveInteger("MAP_PROVIDER_MINUTE_QUOTA"),
-        warningThresholdPercent: this.percent(
-          "MAP_PROVIDER_QUOTA_WARNING_PERCENT",
-          DEFAULT_WARNING_THRESHOLD,
+        dailyLimit,
+        minuteLimit,
+        dailyUsed,
+        minuteUsed,
+        usagePercent,
+        status: this.quotaStatus(
+          mode,
+          usagePercent,
+          warningThresholdPercent,
+          criticalThresholdPercent,
         ),
-        criticalThresholdPercent: this.percent(
-          "MAP_PROVIDER_QUOTA_CRITICAL_PERCENT",
-          DEFAULT_CRITICAL_THRESHOLD,
-        ),
+        warningThresholdPercent,
+        criticalThresholdPercent,
         policy: mode === "mock" ? "mock_unlimited" : "provider_enforced",
       },
       keyRestrictions: {
@@ -196,6 +219,15 @@ export class GeoProviderConfigService {
     return Number.isInteger(value) && value > 0 ? value : null;
   }
 
+  private nonNegativeInteger(name: string) {
+    const raw = this.text(name, "");
+    if (!raw) {
+      return null;
+    }
+    const value = Number(raw);
+    return Number.isInteger(value) && value >= 0 ? value : null;
+  }
+
   private percent(name: string, fallback: number) {
     const raw = this.text(name, "");
     if (!raw) {
@@ -205,5 +237,63 @@ export class GeoProviderConfigService {
     return Number.isFinite(value) && value >= 0 && value <= 100
       ? value
       : fallback;
+  }
+
+  private quotaUsagePercent(input: {
+    dailyLimit: number | null;
+    minuteLimit: number | null;
+    dailyUsed: number | null;
+    minuteUsed: number | null;
+  }) {
+    const explicit = this.nonNegativeNumber("MAP_PROVIDER_QUOTA_USAGE_PERCENT");
+    if (explicit !== null) {
+      return this.roundPercent(explicit);
+    }
+
+    const candidates: number[] = [];
+    if (input.dailyLimit && input.dailyUsed !== null) {
+      candidates.push((input.dailyUsed / input.dailyLimit) * 100);
+    }
+    if (input.minuteLimit && input.minuteUsed !== null) {
+      candidates.push((input.minuteUsed / input.minuteLimit) * 100);
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+    return this.roundPercent(Math.max(...candidates));
+  }
+
+  private quotaStatus(
+    mode: GeoProviderHealthResponse["mode"],
+    usagePercent: number | null,
+    warningThresholdPercent: number,
+    criticalThresholdPercent: number,
+  ): GeoProviderHealthResponse["quota"]["status"] {
+    if (usagePercent !== null && usagePercent >= criticalThresholdPercent) {
+      return "critical";
+    }
+    if (usagePercent !== null && usagePercent >= warningThresholdPercent) {
+      return "warning";
+    }
+    if (mode === "mock") {
+      return "healthy";
+    }
+    if (usagePercent === null) {
+      return "unknown";
+    }
+    return "healthy";
+  }
+
+  private nonNegativeNumber(name: string) {
+    const raw = this.text(name, "");
+    if (!raw) {
+      return null;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+
+  private roundPercent(value: number) {
+    return Math.round(value * 10) / 10;
   }
 }
