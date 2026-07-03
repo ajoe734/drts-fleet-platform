@@ -93,13 +93,6 @@ const DEFAULT_BOUNDS: GeometryBounds = {
   maxLng: 121.61,
 };
 
-const WORLD_BOUNDS: GeometryBounds = {
-  minLat: -90,
-  maxLat: 90,
-  minLng: -180,
-  maxLng: 180,
-};
-
 const DEFAULT_CIRCLE_RADIUS_METERS = 250;
 
 export function createEmptyGeometryDraft(kind: GeometryDraftKind): GeometryDraft {
@@ -123,22 +116,15 @@ export function validateGeometryDraft(
   switch (draft.kind) {
     case "polygon": {
       const unique = dedupeSequentialPoints(draft.points);
-      errors.push(...validatePointCollection(unique, "Polygon vertex"));
       if (unique.length < 3) {
         errors.push("Polygon requires at least 3 vertices.");
       }
       if (unique.length >= 3 && Math.abs(signedPolygonArea(unique)) < 1e-8) {
         errors.push("Polygon area must be non-zero.");
       }
-      if (unique.length >= 4 && polygonHasSelfIntersection(unique)) {
-        errors.push("Polygon cannot self-intersect.");
-      }
       break;
     }
     case "circle":
-      if (draft.center) {
-        errors.push(...validatePoint(draft.center, "Circle center"));
-      }
       if (!draft.center) {
         errors.push("Circle center is required.");
       }
@@ -148,7 +134,6 @@ export function validateGeometryDraft(
       break;
     case "routeCorridor": {
       const unique = dedupeSequentialPoints(draft.points);
-      errors.push(...validatePointCollection(unique, "Route point"));
       if (unique.length < 2) {
         errors.push("Route corridor requires at least 2 points.");
       }
@@ -506,12 +491,6 @@ function positionToPoint(position: number[]): GeoPoint {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     throw new Error("GeoJSON coordinates must be finite numbers.");
   }
-  if (!isLatitudeInRange(lat)) {
-    throw new Error("GeoJSON latitude must be between -90 and 90.");
-  }
-  if (!isLongitudeInRange(lng)) {
-    throw new Error("GeoJSON longitude must be between -180 and 180.");
-  }
   return { lat: lat!, lng: lng! };
 }
 
@@ -526,36 +505,6 @@ function dedupeSequentialPoints(points: GeoPoint[]): GeoPoint[] {
   });
 }
 
-function validatePointCollection(points: GeoPoint[], label: string): string[] {
-  return points.flatMap((point, index) => validatePoint(point, `${label} ${index + 1}`));
-}
-
-function validatePoint(point: GeoPoint, label: string): string[] {
-  const errors: string[] = [];
-
-  if (!Number.isFinite(point.lat)) {
-    errors.push(`${label} latitude must be a finite number.`);
-  } else if (!isLatitudeInRange(point.lat)) {
-    errors.push(`${label} latitude must be between -90 and 90.`);
-  }
-
-  if (!Number.isFinite(point.lng)) {
-    errors.push(`${label} longitude must be a finite number.`);
-  } else if (!isLongitudeInRange(point.lng)) {
-    errors.push(`${label} longitude must be between -180 and 180.`);
-  }
-
-  return errors;
-}
-
-function isLatitudeInRange(lat: number): boolean {
-  return lat >= WORLD_BOUNDS.minLat && lat <= WORLD_BOUNDS.maxLat;
-}
-
-function isLongitudeInRange(lng: number): boolean {
-  return lng >= WORLD_BOUNDS.minLng && lng <= WORLD_BOUNDS.maxLng;
-}
-
 function signedPolygonArea(points: GeoPoint[]): number {
   let area = 0;
   for (let index = 0; index < points.length; index += 1) {
@@ -567,95 +516,4 @@ function signedPolygonArea(points: GeoPoint[]): number {
     area += current.lng * next.lat - next.lng * current.lat;
   }
   return area / 2;
-}
-
-function polygonHasSelfIntersection(points: GeoPoint[]): boolean {
-  const ring = closePolygonRing(points);
-  const segmentCount = ring.length - 1;
-
-  for (let index = 0; index < segmentCount; index += 1) {
-    const aStart = ring[index];
-    const aEnd = ring[index + 1];
-    if (!aStart || !aEnd) {
-      continue;
-    }
-
-    for (let compareIndex = index + 1; compareIndex < segmentCount; compareIndex += 1) {
-      const bStart = ring[compareIndex];
-      const bEnd = ring[compareIndex + 1];
-      if (!bStart || !bEnd) {
-        continue;
-      }
-
-      if (segmentsShareEndpoint(index, compareIndex, segmentCount)) {
-        continue;
-      }
-
-      if (segmentsIntersect(aStart, aEnd, bStart, bEnd)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function segmentsShareEndpoint(
-  leftIndex: number,
-  rightIndex: number,
-  segmentCount: number,
-): boolean {
-  return (
-    leftIndex === rightIndex ||
-    Math.abs(leftIndex - rightIndex) === 1 ||
-    (leftIndex === 0 && rightIndex === segmentCount - 1)
-  );
-}
-
-function segmentsIntersect(
-  aStart: GeoPoint,
-  aEnd: GeoPoint,
-  bStart: GeoPoint,
-  bEnd: GeoPoint,
-): boolean {
-  const o1 = orientation(aStart, aEnd, bStart);
-  const o2 = orientation(aStart, aEnd, bEnd);
-  const o3 = orientation(bStart, bEnd, aStart);
-  const o4 = orientation(bStart, bEnd, aEnd);
-
-  if (o1 !== o2 && o3 !== o4) {
-    return true;
-  }
-
-  if (o1 === 0 && pointOnSegment(aStart, bStart, aEnd)) {
-    return true;
-  }
-  if (o2 === 0 && pointOnSegment(aStart, bEnd, aEnd)) {
-    return true;
-  }
-  if (o3 === 0 && pointOnSegment(bStart, aStart, bEnd)) {
-    return true;
-  }
-  if (o4 === 0 && pointOnSegment(bStart, aEnd, bEnd)) {
-    return true;
-  }
-
-  return false;
-}
-
-function orientation(a: GeoPoint, b: GeoPoint, c: GeoPoint): -1 | 0 | 1 {
-  const value = (b.lng - a.lng) * (c.lat - b.lat) - (b.lat - a.lat) * (c.lng - b.lng);
-  if (Math.abs(value) < 1e-10) {
-    return 0;
-  }
-  return value > 0 ? 1 : -1;
-}
-
-function pointOnSegment(start: GeoPoint, point: GeoPoint, end: GeoPoint): boolean {
-  return (
-    point.lng <= Math.max(start.lng, end.lng) + 1e-10 &&
-    point.lng >= Math.min(start.lng, end.lng) - 1e-10 &&
-    point.lat <= Math.max(start.lat, end.lat) + 1e-10 &&
-    point.lat >= Math.min(start.lat, end.lat) - 1e-10
-  );
 }
