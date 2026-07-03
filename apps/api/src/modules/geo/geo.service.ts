@@ -136,6 +136,7 @@ export class GeoService {
     if (response.address.coordinateSource === "manual_pin") {
       this.mapGeofenceObservabilityService?.recordGeoOutcome("manual_override");
       this.recordGeoPinConfirmed(response, normalized, requestId);
+      this.recordGeoManualOverride(response, normalized, requestId);
     }
     return response;
   }
@@ -342,6 +343,33 @@ export class GeoService {
         manualOverrideReason: response.address.manualOverrideReason ?? null,
         selectedByActorId: response.address.selectedByActorId ?? null,
         pinnedByActorId: response.address.pinnedByActorId ?? null,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+  }
+
+  private recordGeoManualOverride(
+    response: GeoResolveResponse,
+    command: ResolveAddressCommand,
+    requestId?: string,
+  ) {
+    const actorId = command.selectedByActorId ?? null;
+    this.auditNotificationService?.recordAuditLog({
+      actorId,
+      actorType: actorId ? "ops_user" : "system",
+      tenantId: null,
+      moduleName: "geo",
+      actionName: "geo.manual_override.created",
+      resourceType: "geo_manual_override",
+      resourceId:
+        response.address.normalizedAddress ?? response.address.address,
+      newValuesSummary: {
+        surface: response.address.surface ?? null,
+        coordinateSource: response.address.coordinateSource,
+        manualOverrideReason: response.address.manualOverrideReason ?? null,
+        selectedByActorId: response.address.selectedByActorId ?? null,
+        pinnedByActorId: response.address.pinnedByActorId ?? null,
+        geocodeProvider: response.address.geocodeProvider ?? null,
       },
       ...(requestId ? { requestId } : {}),
     });
