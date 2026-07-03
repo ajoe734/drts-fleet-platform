@@ -73,6 +73,37 @@ describe("bank-console proxy auth boundary", () => {
     );
   });
 
+  it("does not clear explicit signed-out reset during prefetch", () => {
+    const response = proxy(
+      requestFor(
+        "/?bank=ctbc&locale=zh&role=bank_program_admin&signedOut=0",
+        "drts_bank_console_signed_out=1",
+        { "next-router-prefetch": "1" },
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("clears the signed-out cookie when a demo persona explicitly resets signed-out state", () => {
+    const response = proxy(
+      requestFor(
+        "/?bank=ctbc&locale=zh&role=bank_program_admin&signedOut=0",
+        "drts_bank_console_signed_out=1",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const setCookie = response.headers.get("set-cookie");
+    expect(setCookie).toContain("drts_bank_console_signed_out=");
+    expect(setCookie).toContain("Max-Age=0");
+    expect(setCookie).toContain("Path=/");
+  });
+
   it("clears the signed-out cookie when a demo persona signs in", () => {
     const response = proxy(
       requestFor(

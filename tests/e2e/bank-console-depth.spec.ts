@@ -130,6 +130,11 @@ test.describe("bank console deep runtime coverage", () => {
     await expect(page.locator("main")).toContainText("你目前已登出");
     await expect(page.locator("main")).not.toContainText(protectedData);
 
+    const signedOutCookie = (await page.context().cookies()).find(
+      (cookie) => cookie.name === "drts_bank_console_signed_out",
+    );
+    expect(signedOutCookie?.value).toBe("1");
+
     await page.goto(
       withQuery("/statements/2026-06", {
         bank: "fubon",

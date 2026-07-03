@@ -24,7 +24,7 @@ const ACCOUNT_PERSONAS = [
 ] as const;
 
 function homeHref(bank: string, locale: string, role: string) {
-  const params = new URLSearchParams({ bank, locale, role });
+  const params = new URLSearchParams({ bank, locale, role, signedOut: "0" });
   return `/?${params.toString()}`;
 }
 

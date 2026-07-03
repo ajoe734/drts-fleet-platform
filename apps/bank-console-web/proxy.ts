@@ -67,12 +67,21 @@ function redirectToSignedOutLogin(
 export function proxy(request: NextRequest) {
   const { nextUrl } = request;
   const isLoginPath = nextUrl.pathname === LOGIN_PATH;
-  const isSignedOutRequest = nextUrl.searchParams.get("signedOut") === "1";
+  const signedOutParam = nextUrl.searchParams.get("signedOut");
+  const isSignedOutRequest = signedOutParam === "1";
+  const isSignInResetRequest = signedOutParam === "0";
   const isPrefetch = isPrefetchRequest(request);
   const isDemoSignInRequest =
     nextUrl.pathname === "/" && nextUrl.searchParams.has("role");
   const isSignedOutCookie =
     request.cookies.get(SIGNED_OUT_COOKIE)?.value === "1";
+
+  if (isSignInResetRequest) {
+    if (isPrefetch) {
+      return redirectToSignedOutLogin(request, { persistCookie: false });
+    }
+    return clearSignedOut(NextResponse.next());
+  }
 
   if (isDemoSignInRequest) {
     if (isPrefetch) {
