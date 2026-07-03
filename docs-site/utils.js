@@ -129,8 +129,8 @@ export function agentLabel(value) {
   const normalized = String(value).toLowerCase();
   if (normalized === "claude") return "Claude";
   if (normalized === "claude2") return "Claude2";
-  if (normalized === "gemini") return "Gemini";
-  if (normalized === "gemini2") return "Gemini2";
+  if (normalized === "gemini") return "Antigravity";
+  if (normalized === "gemini2") return "Antigravity2";
   if (normalized === "codex") return "Codex";
   if (normalized === "codex2") return "Codex2";
   if (normalized === "qwen") return "Qwen";
