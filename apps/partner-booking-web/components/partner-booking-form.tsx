@@ -25,6 +25,7 @@ import {
   getPartnerProgramGate,
   getPartnerProgramLabel,
   isPartnerBookingDraftReady,
+  type PartnerBookingDraftValues,
 } from "@/lib/partner-booking-form";
 import { useTranslation } from "@/lib/i18n";
 
@@ -150,6 +151,7 @@ export function PartnerBookingForm({
   brand,
   entry,
   eligibilityVerificationId,
+  initialDraft,
 }: {
   brand: PartnerBrandTemplate;
   entry: Pick<
@@ -157,10 +159,11 @@ export function PartnerBookingForm({
     "businessDispatchSubtype" | "eligibilityMode" | "entrySlug" | "programCode"
   >;
   eligibilityVerificationId: string | null;
+  initialDraft: PartnerBookingDraftValues;
 }) {
   const { locale, t } = useTranslation();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
-  const [draft, setDraft] = useState(createDefaultPartnerBookingDraft);
+  const [draft, setDraft] = useState(initialDraft);
   const [submitted, setSubmitted] = useState(false);
   const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
     pickup: null,

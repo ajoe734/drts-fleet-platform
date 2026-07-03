@@ -68,16 +68,18 @@ test.describe("partner map booking UI", () => {
       "Taipei Main Station",
     );
 
-    await expect(page.getByText("派遣前需人工確認")).toBeVisible();
+    await expect(page.getByText("派遣前需人工確認").first()).toBeVisible();
     await expect(
-      page.getByText("目前可先記錄這趟行程，但正式派遣前仍需人工確認。"),
+      page
+        .getByText("目前可先記錄這趟行程，但正式派遣前仍需人工確認。")
+        .first(),
     ).toBeVisible();
 
     const submit = page.getByRole("button", { name: "驗證下單表單" });
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    await expect(page.getByText("派遣前需人工確認")).toBeVisible();
+    await expect(page.getByText("派遣前需人工確認").first()).toBeVisible();
     await expect(page.getByText("表單驗證通過")).toHaveCount(0);
   });
 });

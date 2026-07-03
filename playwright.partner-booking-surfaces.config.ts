@@ -32,7 +32,7 @@ export default defineConfig({
           },
           {
             command:
-              "cd apps/partner-booking-web && NODE_PATH=/home/edna/workspace/drts-fleet-platform/node_modules/.pnpm/@playwright+test@1.59.1/node_modules:/home/edna/workspace/drts-fleet-platform/node_modules/.pnpm/playwright@1.59.1/node_modules node /home/edna/workspace/drts-fleet-platform/node_modules/.pnpm/next@16.2.3_@playwright+test@1.59.1_babel-plugin-react-compiler@1.0.0_react-dom@19.2.5_react@19.2.5__react@19.2.5/node_modules/next/dist/bin/next dev --webpack --hostname 127.0.0.1 --port 3007",
+              "cd apps/partner-booking-web && NODE_PATH=/home/edna/workspace/drts-fleet-platform/node_modules/.pnpm/@playwright+test@1.59.1/node_modules:/home/edna/workspace/drts-fleet-platform/node_modules/.pnpm/playwright@1.59.1/node_modules:/home/edna/workspace/drts-fleet-platform/node_modules/.pnpm/typescript@5.9.3/node_modules node /home/edna/workspace/drts-fleet-platform/node_modules/.pnpm/next@16.2.3_@playwright+test@1.59.1_babel-plugin-react-compiler@1.0.0_react-dom@19.2.5_react@19.2.5__react@19.2.5/node_modules/next/dist/bin/next dev --webpack --hostname 127.0.0.1 --port 3007",
             url: localPartnerBookingBaseURL,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,

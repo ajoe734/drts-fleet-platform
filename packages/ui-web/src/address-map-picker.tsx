@@ -898,6 +898,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   return (
     <div
       id={domId}
+      data-address-map-picker=""
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1559,6 +1560,7 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
 
   return (
     <div
+      data-address-map-pair-picker=""
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1572,7 +1574,7 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
         theme={theme}
         {...(labels ? { labels } : {})}
         {...(bounds ? { bounds } : {})}
-        value={pickup}
+        defaultValue={pickup}
         onChange={(change) => {
           setPickup(change.address);
           setPickupProviderState(change.providerState);
@@ -1588,7 +1590,7 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
         theme={theme}
         {...(labels ? { labels } : {})}
         {...(bounds ? { bounds } : {})}
-        value={dropoff}
+        defaultValue={dropoff}
         onChange={(change) => {
           setDropoff(change.address);
           setDropoffProviderState(change.providerState);
