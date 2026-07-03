@@ -70,11 +70,20 @@ async function seedDeskSession(page: Page) {
     },
     [
       SESSION_STORAGE_KEY,
+      // Must satisfy `parseStoredState` (operatorName + operatorId + mode +
+      // signedInAt are all required) and resolve to a real desk, otherwise the
+      // `SessionGuard requireDesk` renders the signed-out shell instead of the
+      // booking form.
       JSON.stringify({
+        operatorName: "Concierge E2E",
         operatorId: "concierge-e2e",
         mode: "concierge_operator",
         deskId: "acme-reception",
         activeCallId: null,
+        recentCallIds: [],
+        recentOrderIds: [],
+        recentCallbackTaskIds: [],
+        signedInAt: "2026-07-01T00:00:00.000Z",
       }),
     ],
   );
@@ -86,7 +95,7 @@ async function stubHealthyGeo(
 ) {
   await page.route("**/api/geo/health", (route) =>
     route.fulfill({
-      json: { provider: "mock", mode: "mock", status: "healthy" },
+      json: { data: { provider: "mock", mode: "mock", status: "healthy" } },
     }),
   );
   await page.route("**/api/geo/search**", (route) => {
@@ -95,14 +104,16 @@ async function stubHealthyGeo(
     const candidate = q.includes("air") ? DROPOFF_CANDIDATE : PICKUP_CANDIDATE;
     route.fulfill({
       json: {
-        candidates: [candidate],
-        provider: "mock",
-        generatedAt: "2026-07-01T00:00:00.000Z",
+        data: {
+          candidates: [candidate],
+          provider: "mock",
+          generatedAt: "2026-07-01T00:00:00.000Z",
+        },
       },
     });
   });
   await page.route("**/api/service-area/evaluate", (route) =>
-    route.fulfill({ json: serviceabilityResult(decision) }),
+    route.fulfill({ json: { data: serviceabilityResult(decision) } }),
   );
 }
 
@@ -114,7 +125,7 @@ async function stubHealthyGeo(
 async function stubHealthyGeoWithFailingEvaluate(page: Page) {
   await page.route("**/api/geo/health", (route) =>
     route.fulfill({
-      json: { provider: "mock", mode: "mock", status: "healthy" },
+      json: { data: { provider: "mock", mode: "mock", status: "healthy" } },
     }),
   );
   await page.route("**/api/geo/search**", (route) => {
@@ -123,9 +134,11 @@ async function stubHealthyGeoWithFailingEvaluate(page: Page) {
     const candidate = q.includes("air") ? DROPOFF_CANDIDATE : PICKUP_CANDIDATE;
     route.fulfill({
       json: {
-        candidates: [candidate],
-        provider: "mock",
-        generatedAt: "2026-07-01T00:00:00.000Z",
+        data: {
+          candidates: [candidate],
+          provider: "mock",
+          generatedAt: "2026-07-01T00:00:00.000Z",
+        },
       },
     });
   });
@@ -157,6 +170,18 @@ const submit = (page: Page) =>
   });
 
 test.describe("concierge assisted-entry booking map alignment", () => {
+  test.beforeEach(async ({ context, baseURL }) => {
+    // Pin the portal to English so the submit-button labels are stable
+    // selectors (the portal defaults to zh).
+    await context.addCookies([
+      {
+        name: "drts-locale-v2",
+        value: "en",
+        url: baseURL ?? "http://127.0.0.1:3006",
+      },
+    ]);
+  });
+
   test("serviceable stops become dispatch-ready and never expose coordinates", async ({
     page,
   }) => {
@@ -216,11 +241,13 @@ test.describe("concierge assisted-entry booking map alignment", () => {
     await page.route("**/api/geo/health", (route) =>
       route.fulfill({
         json: {
-          provider: "mock",
-          mode: "disabled",
-          status: "unhealthy",
-          failClosed: true,
-          mockAllowed: true,
+          data: {
+            provider: "mock",
+            mode: "disabled",
+            status: "unhealthy",
+            failClosed: true,
+            mockAllowed: true,
+          },
         },
       }),
     );
