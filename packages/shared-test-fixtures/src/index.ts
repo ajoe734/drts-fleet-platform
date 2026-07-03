@@ -101,3 +101,5 @@ export function buildTeslaPublicTelemetrySampleFixture(
       }),
   };
 }
+
+export * from "./map-geofence-fixtures";
