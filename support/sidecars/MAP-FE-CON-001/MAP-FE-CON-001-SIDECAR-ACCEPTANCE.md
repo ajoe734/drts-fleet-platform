@@ -1,7 +1,7 @@
 # MAP-FE-CON-001 SIDECAR ACCEPTANCE
 
 Snapshot Type: owner support packet from machine-truth and repo-live anchors
-Snapshot Captured At: 2026-07-03T18:24:08Z
+Snapshot Captured At: 2026-07-03T18:29:10Z
 Snapshot Status At Capture: in_progress
 Owner: Codex
 Reviewer: Codex2
@@ -31,8 +31,8 @@ concierge and partner entry map-alignment slice.
 - `ai-status.json` remains authoritative; this markdown file is only a
   snapshot captured via `scripts/ai-status.sh`.
 - Sidecar task `MAP-FE-CON-001-SIDECAR-ACCEPTANCE` is `in_progress` at
-  `2026-07-03T18:22:04Z` with next step
-  `Reconstructing acceptance packet on task branch; validating dependency map against repo-live paths before re-handoff.`
+  `2026-07-03T18:28:00Z` with next step
+  `Revalidating support packet citations against repo-live paths in the assigned worktree; correcting missing-path claims before reviewer handoff.`
 - Parent task `MAP-FE-CON-001` is `in_progress` at `2026-07-03T18:17:34Z`
   with owner / reviewer `Claude2` / `Codex`.
 - Parent machine-truth references currently point at:
@@ -50,8 +50,16 @@ concierge and partner entry map-alignment slice.
   - `partner assisted entry reason codes consistent`
   - `provider outage cannot create silent normal order`
   - `package checks pass`
-- This sidecar file is present on the current task branch, and every repo path
-  cited below was re-validated in this worktree before re-handoff.
+- Repo-live revalidation in this assigned worktree confirmed that the
+  previously questioned code paths do resolve here:
+  - `apps/tenant-console-web/lib/geo-map-provider.ts`
+  - `apps/tenant-console-web/lib/tenant-address-map.ts`
+  - `apps/ops-console-web/app/callcenter/map-booking.ts`
+  - `tests/e2e/tenant-map-booking-ui.spec.ts`
+  - `packages/ui-web/src/address-map-picker-core.ts`
+  - `packages/ui-web/src/address-map-picker.tsx`
+- This sidecar file is present on the current task branch, and every code/doc
+  repo path cited below was re-validated in this worktree before re-handoff.
 - Parent artifact paths currently declared in machine truth but still missing in
   this worktree snapshot:
   - `tests/e2e/concierge-map-booking-ui.spec.ts`
@@ -62,6 +70,9 @@ concierge and partner entry map-alignment slice.
   - `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260702T0301Z.json`
   - `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-partner-ui-20260702T0301Z.json`
   - `support/sidecars/MAP-QA-002/artifacts/vitest-owned-mobility-entry-provider-unavailable-20260701T0941Z.json`
+- Current adjacent support artifacts in-tree are limited to:
+  - `support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md`
+  - `support/sidecars/MAP-QA-001/artifacts/playwright-map-geofence-harness-20260701T1020Z.json`
 
 ## Parent Verification Expected
 
@@ -75,7 +86,8 @@ should include:
 ## Acceptance Checklist
 
 - [x] Packet stays scoped to `MAP-FE-CON-001` support only.
-- [x] Every cited repo path below resolves in the current task worktree.
+- [x] Every cited code/doc repo path below resolves in the current task
+      worktree.
 - [x] Dependency map covers shared picker primitives, contract payloads,
       frontend submit seams, backend gate expectations, and degraded/manual
       behavior.
@@ -84,6 +96,25 @@ should include:
 - [x] Missing parent evidence artifacts are called out explicitly instead of
       being assumed present.
 - [x] No canonical truth or runtime files are modified by this sidecar slice.
+
+## Repo-Live Revalidation Summary
+
+- Revalidated present code paths that were previously called out as missing:
+  - `apps/tenant-console-web/lib/geo-map-provider.ts`
+  - `apps/tenant-console-web/lib/tenant-address-map.ts`
+  - `apps/ops-console-web/app/callcenter/map-booking.ts`
+  - `tests/e2e/tenant-map-booking-ui.spec.ts`
+  - `packages/ui-web/src/address-map-picker-core.ts`
+  - `packages/ui-web/src/address-map-picker.tsx`
+- Still missing parent evidence paths from machine truth:
+  - `tests/e2e/concierge-map-booking-ui.spec.ts`
+  - `tests/e2e/partner-map-booking-ui.spec.ts`
+  - `support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-REVIEW-EVIDENCE-20260701.md`
+  - `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260701T1028Z.json`
+  - `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-partner-ui-20260701T1028Z.json`
+  - `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-concierge-ui-20260702T0301Z.json`
+  - `support/sidecars/MAP-QA-002/artifacts/playwright-map-geofence-partner-ui-20260702T0301Z.json`
+  - `support/sidecars/MAP-QA-002/artifacts/vitest-owned-mobility-entry-provider-unavailable-20260701T0941Z.json`
 
 ## Dependency Map
 
@@ -216,6 +247,8 @@ should include:
 ## What The Reviewer Should Confirm
 
 - The packet now cites only repo-live paths that resolve in this worktree.
+- The earlier rejection list for missing code paths is stale for this worktree;
+  the remaining path mismatch is the parent evidence set above.
 - The packet points the parent owner to existing shared primitives and live
   create seams, not speculative new APIs.
 - The concierge gap is accurately captured as text-only pickup and dropoff
@@ -257,7 +290,7 @@ should include:
 ## Reviewer Handoff
 
 Owner handoff command:
-`AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CON-001-SIDECAR-ACCEPTANCE Codex2 "Updated support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md with a refreshed machine-truth snapshot and repo-live dependency map. Re-validated every cited path in this worktree; the only unresolved paths are the parent machine-truth evidence artifacts still missing from the tree. Verified sidecar-only diff with git diff --check; package checks were not run because this slice changes support material only."`
+`AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CON-001-SIDECAR-ACCEPTANCE Codex2 "Updated support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md with a refreshed machine-truth snapshot and repo-live dependency map. Re-validated every cited code/doc path in this worktree; the only unresolved paths are the parent machine-truth evidence artifacts still missing from the tree. Verified sidecar-only diff with git diff --check; package checks were not run because this slice changes support material only."`
 
 Reviewer approval command:
 `AI_NAME=Codex2 scripts/ai-status.sh approve MAP-FE-CON-001-SIDECAR-ACCEPTANCE "Reviewed: support packet stays sidecar-only, cites repo-live paths only, accurately maps concierge and partner gaps to shared picker and backend dependencies, and clearly distinguishes current references from missing parent evidence artifacts."`
