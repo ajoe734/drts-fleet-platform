@@ -219,6 +219,8 @@ const en = {
   "program.embed.fallback.secondary": "Return to banking app sign-in",
   "field.pickupAddress": "Pickup address",
   "field.dropoffAddress": "Drop-off address",
+  "hint.assistedAddress":
+    "Search the map to pin the exact spot. If the map is unavailable, type the address here and the team will confirm the location before dispatch.",
   "field.reservationWindowStart": "Reservation window start",
   "field.reservationWindowEnd": "Reservation window end",
   "field.passengerName": "Passenger name",
@@ -681,6 +683,8 @@ const zh = {
   "program.embed.fallback.secondary": "回行動銀行登入",
   "field.pickupAddress": "上車地點",
   "field.dropoffAddress": "下車地點",
+  "hint.assistedAddress":
+    "用地圖搜尋以標定精確位置；若地圖暫時無法使用，可直接在此輸入地址，團隊會在派車前先確認地點。",
   "field.reservationWindowStart": "預約開始時間",
   "field.reservationWindowEnd": "預約結束時間",
   "field.passengerName": "乘客姓名",

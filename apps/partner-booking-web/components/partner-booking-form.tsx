@@ -329,14 +329,37 @@ export function PartnerBookingForm({
     setPickupPin(change.address);
     setPickupProviderState(change.providerState);
     setPickupServiceability(change.serviceability);
-    updateField("pickupAddress", change.address?.address ?? "");
+    // Only mirror a resolved address into the required text field. Never write
+    // an empty string here: clearing the pin (e.g. when the operator hand-types
+    // an address during a provider outage) re-fires this handler with a null
+    // address and must not wipe what they just typed.
+    if (change.address?.address) {
+      updateField("pickupAddress", change.address.address);
+    }
   }
 
   function handleDropoffChange(change: AddressMapPickerChange) {
     setDropoffPin(change.address);
     setDropoffProviderState(change.providerState);
     setDropoffServiceability(change.serviceability);
-    updateField("dropoffAddress", change.address?.address ?? "");
+    if (change.address?.address) {
+      updateField("dropoffAddress", change.address.address);
+    }
+  }
+
+  // Assisted-entry text address path. When the map provider is down the picker
+  // disables search and only exposes raw lat/lng entry, so a typed address is
+  // the only way an operator can reach the provider-outage manual-review flow
+  // that the gate already allows. Typing clears the pin so a hand-edited
+  // address is never falsely associated with stale coordinates.
+  function handlePickupAddressText(value: string) {
+    updateField("pickupAddress", value);
+    setPickupPin(null);
+  }
+
+  function handleDropoffAddressText(value: string) {
+    updateField("dropoffAddress", value);
+    setDropoffPin(null);
   }
 
   function renderField(params: {
@@ -669,6 +692,23 @@ export function PartnerBookingForm({
 
       <CanvasCard theme={theme} title={t("book.section.trip")}>
         <div style={{ display: "grid", gap: 14 }}>
+          <label style={{ ...fieldStyle, ...fullSpanStyle }}>
+            <span style={{ ...labelStyle, color: theme.text }}>
+              {t("field.pickupAddress")}
+            </span>
+            <textarea
+              name="pickupAddress"
+              value={draft.pickupAddress}
+              onChange={(event) => handlePickupAddressText(event.target.value)}
+              style={textareaStyle(theme)}
+            />
+            <span style={{ ...hintStyle, color: theme.textMuted }}>
+              {t("hint.assistedAddress")}
+            </span>
+            {errors.pickupAddress ? (
+              <span style={errorStyle}>{errors.pickupAddress}</span>
+            ) : null}
+          </label>
           <div
             data-address-map-picker="partner-pickup-map"
             data-provider-status={pickupProviderState.reasonCode}
@@ -685,6 +725,23 @@ export function PartnerBookingForm({
               title={t("field.pickupAddress")}
             />
           </div>
+          <label style={{ ...fieldStyle, ...fullSpanStyle }}>
+            <span style={{ ...labelStyle, color: theme.text }}>
+              {t("field.dropoffAddress")}
+            </span>
+            <textarea
+              name="dropoffAddress"
+              value={draft.dropoffAddress}
+              onChange={(event) => handleDropoffAddressText(event.target.value)}
+              style={textareaStyle(theme)}
+            />
+            <span style={{ ...hintStyle, color: theme.textMuted }}>
+              {t("hint.assistedAddress")}
+            </span>
+            {errors.dropoffAddress ? (
+              <span style={errorStyle}>{errors.dropoffAddress}</span>
+            ) : null}
+          </label>
           <div
             data-address-map-picker="partner-dropoff-map"
             data-provider-status={dropoffProviderState.reasonCode}
