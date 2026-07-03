@@ -1,16 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
+  AddressPayload,
   CallSessionRecord,
   CallbackTaskRecord,
   DispatchTraceLogRecord,
   OwnedOrderRecord,
+  ServiceAreaEvaluationResult,
 } from "@drts/contracts";
+import {
+  AddressMapPicker,
+  buildCanvasTheme,
+  type AddressMapPickerChange,
+  type AddressMapPickerProvider,
+  type AddressProviderState,
+} from "@drts/ui-web";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
+import {
+  CONCIERGE_MAP_SERVICE_PRODUCT_TYPE,
+  buildConciergeOrderAddress,
+  getConciergeMapBookingBannerCode,
+  getConciergeMapBookingGate,
+  hasConciergeAddressCoordinates,
+  isConciergeProviderOutage,
+  type ConciergeMapBookingBannerCode,
+  type ConciergeServiceabilityPreviewStatus,
+} from "@/lib/map-booking";
 import {
   evaluateDeskEligibility,
   formatDeskHealth,
@@ -37,6 +56,73 @@ type SubmissionSummary = {
   trace: DispatchTraceLogRecord[];
   callbackTask: CallbackTaskRecord | null;
 };
+
+const mapPickerTheme = buildCanvasTheme({ surface: "ops", density: "compact" });
+
+const INITIAL_PROVIDER_STATE: AddressProviderState = {
+  available: true,
+  degraded: false,
+  reasonCode: "available",
+};
+
+/**
+ * Map a stable gate/banner code to customer-safe copy. Backend reason codes are
+ * preserved on the wire and in audit; the desk operator sees plain guidance
+ * with no internal policy jargon.
+ */
+function mapBookingBannerCopy(code: ConciergeMapBookingBannerCode): {
+  chipClass: string;
+  titleKey: string;
+  bodyKey: string;
+} {
+  switch (code) {
+    case "serviceable":
+      return {
+        chipClass: "chip-success",
+        titleKey: "booking.map.banner.serviceableTitle",
+        bodyKey: "booking.map.banner.serviceableBody",
+      };
+    case "manual_review":
+      return {
+        chipClass: "chip-warning",
+        titleKey: "booking.map.banner.manualReviewTitle",
+        bodyKey: "booking.map.banner.manualReviewBody",
+      };
+    case "provider_outage_manual_review":
+      return {
+        chipClass: "chip-warning",
+        titleKey: "booking.map.banner.providerOutageTitle",
+        bodyKey: "booking.map.banner.providerOutageBody",
+      };
+    case "serviceability_blocked":
+      return {
+        chipClass: "chip-warning",
+        titleKey: "booking.map.banner.blockedTitle",
+        bodyKey: "booking.map.banner.blockedBody",
+      };
+    case "serviceability_preview_required":
+      return {
+        chipClass: "chip-warning",
+        titleKey: "booking.map.banner.previewPendingTitle",
+        bodyKey: "booking.map.banner.previewPendingBody",
+      };
+    case "pickup_coordinates_required":
+    case "pickup_provenance_required":
+      return {
+        chipClass: "chip-warning",
+        titleKey: "booking.map.banner.pickupPinTitle",
+        bodyKey: "booking.map.banner.pickupPinBody",
+      };
+    case "dropoff_coordinates_required":
+    case "dropoff_provenance_required":
+    default:
+      return {
+        chipClass: "chip-warning",
+        titleKey: "booking.map.banner.dropoffPinTitle",
+        bodyKey: "booking.map.banner.dropoffPinBody",
+      };
+  }
+}
 
 export default function ConciergeBookingCreatePage() {
   const router = useRouter();
@@ -73,6 +159,103 @@ export default function ConciergeBookingCreatePage() {
   const [currentSession, setCurrentSession] =
     useState<CallSessionRecord | null>(null);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
+  const [pickupPin, setPickupPin] = useState<AddressPayload | null>(null);
+  const [dropoffPin, setDropoffPin] = useState<AddressPayload | null>(null);
+  const [pickupProviderState, setPickupProviderState] =
+    useState<AddressProviderState>(INITIAL_PROVIDER_STATE);
+  const [dropoffProviderState, setDropoffProviderState] =
+    useState<AddressProviderState>(INITIAL_PROVIDER_STATE);
+  const [serviceabilityPreview, setServiceabilityPreview] =
+    useState<ServiceAreaEvaluationResult | null>(null);
+  const [previewStatus, setPreviewStatus] =
+    useState<ConciergeServiceabilityPreviewStatus>("idle");
+
+  const conciergeActorId = session?.operatorId ?? "concierge-operator";
+
+  const mapProvider = useMemo<AddressMapPickerProvider>(() => {
+    const client = createConciergeClient(
+      session?.operatorId ?? "concierge-operator",
+      session?.mode ?? "concierge_operator",
+    );
+    return {
+      async search(query) {
+        return client.searchGeo(query);
+      },
+      async getHealth() {
+        return client.getGeoProviderHealth();
+      },
+    };
+  }, [session?.operatorId, session?.mode]);
+
+  const providerOutage = isConciergeProviderOutage(
+    pickupProviderState,
+    dropoffProviderState,
+  );
+
+  // Evaluate serviceability once both stops carry coordinates. A provider drop
+  // mid-evaluation surfaces as an error status, which the gate treats as a
+  // degraded manual-review path rather than a dispatchable one.
+  useEffect(() => {
+    if (
+      !hasConciergeAddressCoordinates(pickupPin) ||
+      !hasConciergeAddressCoordinates(dropoffPin)
+    ) {
+      setServiceabilityPreview(null);
+      setPreviewStatus("idle");
+      return;
+    }
+
+    const client = createConciergeClient(
+      session?.operatorId ?? "concierge-operator",
+      session?.mode ?? "concierge_operator",
+    );
+    const command = {
+      serviceProductType: CONCIERGE_MAP_SERVICE_PRODUCT_TYPE,
+      pickup: { lat: pickupPin.lat, lng: pickupPin.lng },
+      dropoff: { lat: dropoffPin.lat, lng: dropoffPin.lng },
+      requestedAt: new Date().toISOString(),
+    };
+
+    let cancelled = false;
+    setPreviewStatus("evaluating");
+    void client
+      .evaluateServiceArea(command)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setServiceabilityPreview(result);
+        setPreviewStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setServiceabilityPreview(null);
+        setPreviewStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pickupPin?.lat,
+    pickupPin?.lng,
+    dropoffPin?.lat,
+    dropoffPin?.lng,
+    session?.operatorId,
+    session?.mode,
+  ]);
+
+  const mapGate = getConciergeMapBookingGate({
+    pickup: pickupPin,
+    dropoff: dropoffPin,
+    serviceability: serviceabilityPreview,
+    previewStatus,
+    providerOutage,
+  });
+  const mapBookingBannerCode = getConciergeMapBookingBannerCode(mapGate);
+  const mapBookingBanner = mapBookingBannerCopy(mapBookingBannerCode);
 
   useEffect(() => {
     const activeCallId = session?.activeCallId;
@@ -312,14 +495,22 @@ export default function ConciergeBookingCreatePage() {
               const eligibility = evaluateDeskEligibility(
                 deskRecord,
                 requestedProduct,
-                pickupAddress,
-                dropoffAddress,
+                pickupPin?.address ?? pickupAddress,
+                dropoffPin?.address ?? dropoffAddress,
                 t,
               );
               if (eligibility.state === "ineligible") {
                 router.push(
                   `/ineligible?desk=${desk.deskId}&reason=${eligibility.reasonCode}`,
                 );
+                return;
+              }
+
+              // Map booking gate: a dispatchable order needs confirmed
+              // coordinates; a degraded provider routes to manual review; every
+              // other blocked reason keeps the operator on the form.
+              if (!mapGate.canSubmit) {
+                setError(t(mapBookingBanner.bodyKey));
                 return;
               }
 
@@ -348,12 +539,11 @@ export default function ConciergeBookingCreatePage() {
                 const accepted = await client.createCallCenterOrder({
                   callId: workingSession.callId,
                   agentId: session.operatorId,
-                  pickup: {
-                    address: pickupAddress,
-                  },
-                  dropoff: {
-                    address: dropoffAddress,
-                  },
+                  pickup: buildConciergeOrderAddress(pickupPin, pickupAddress),
+                  dropoff: buildConciergeOrderAddress(
+                    dropoffPin,
+                    dropoffAddress,
+                  ),
                   passenger: {
                     name: passengerName,
                     phone: passengerPhone,
@@ -468,10 +658,32 @@ export default function ConciergeBookingCreatePage() {
               </label>
               <textarea
                 id="pickup-address"
-                onChange={(event) => setPickupAddress(event.target.value)}
+                onChange={(event) => {
+                  setPickupAddress(event.target.value);
+                  setPickupPin(null);
+                }}
                 required
                 value={pickupAddress}
               />
+              <div
+                data-address-map-picker="concierge-pickup-map"
+                data-provider-status={pickupProviderState.reasonCode}
+              >
+                <AddressMapPicker
+                  id="concierge-pickup-map"
+                  provider={mapProvider}
+                  surface="concierge_portal"
+                  theme={mapPickerTheme}
+                  locale={locale === "zh" ? "zh-TW" : "en-US"}
+                  value={pickupPin}
+                  onChange={(change: AddressMapPickerChange) => {
+                    setPickupPin(change.address);
+                    setPickupProviderState(change.providerState);
+                  }}
+                  actorId={conciergeActorId}
+                  title={t("booking.map.pickupTitle")}
+                />
+              </div>
             </div>
             <div className="field-stack">
               <label htmlFor="dropoff-address">
@@ -479,10 +691,41 @@ export default function ConciergeBookingCreatePage() {
               </label>
               <textarea
                 id="dropoff-address"
-                onChange={(event) => setDropoffAddress(event.target.value)}
+                onChange={(event) => {
+                  setDropoffAddress(event.target.value);
+                  setDropoffPin(null);
+                }}
                 required
                 value={dropoffAddress}
               />
+              <div
+                data-address-map-picker="concierge-dropoff-map"
+                data-provider-status={dropoffProviderState.reasonCode}
+              >
+                <AddressMapPicker
+                  id="concierge-dropoff-map"
+                  provider={mapProvider}
+                  surface="concierge_portal"
+                  theme={mapPickerTheme}
+                  locale={locale === "zh" ? "zh-TW" : "en-US"}
+                  value={dropoffPin}
+                  onChange={(change: AddressMapPickerChange) => {
+                    setDropoffPin(change.address);
+                    setDropoffProviderState(change.providerState);
+                  }}
+                  actorId={conciergeActorId}
+                  title={t("booking.map.dropoffTitle")}
+                />
+              </div>
+            </div>
+            <div
+              className="field-stack"
+              data-concierge-map-booking-gate={mapBookingBannerCode}
+            >
+              <span className={`chip ${mapBookingBanner.chipClass}`}>
+                {t(mapBookingBanner.titleKey)}
+              </span>
+              <p className="form-help">{t(mapBookingBanner.bodyKey)}</p>
             </div>
             <div className="field-stack">
               <label htmlFor="callback-due-at">
@@ -517,10 +760,13 @@ export default function ConciergeBookingCreatePage() {
             <div className="inline-actions">
               <button
                 className="primary-button"
-                disabled={busyKey === "submit-order"}
+                disabled={busyKey === "submit-order" || !mapGate.canSubmit}
                 type="submit"
               >
-                {t("booking.submit")}
+                {mapGate.canSubmit &&
+                mapGate.outcome.kind === "provider_outage_manual_review"
+                  ? t("booking.map.submitManualReview")
+                  : t("booking.submit")}
               </button>
             </div>
           </form>
