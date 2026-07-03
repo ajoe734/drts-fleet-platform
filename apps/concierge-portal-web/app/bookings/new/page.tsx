@@ -1,14 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
+  AddressPayload,
   CallSessionRecord,
   CallbackTaskRecord,
   DispatchTraceLogRecord,
   OwnedOrderRecord,
 } from "@drts/contracts";
+import {
+  AddressMapPairPicker,
+  buildAddressPickerLabels,
+  buildCanvasTheme,
+  createConfiguredMockAddressProvider,
+  evaluateAddressSubmitGate,
+  type AddressMapPairChange,
+  type AddressProviderMode,
+} from "@drts/ui-web";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
 import {
@@ -37,6 +47,22 @@ type SubmissionSummary = {
   trace: DispatchTraceLogRecord[];
   callbackTask: CallbackTaskRecord | null;
 };
+
+const mapTheme = buildCanvasTheme({
+  surface: "ops",
+  density: "compact",
+});
+
+function buildFallbackAddress(address: string, selected: AddressPayload | null) {
+  if (!selected) {
+    return { address };
+  }
+
+  return {
+    ...selected,
+    address,
+  };
+}
 
 export default function ConciergeBookingCreatePage() {
   const router = useRouter();
@@ -73,6 +99,22 @@ export default function ConciergeBookingCreatePage() {
   const [currentSession, setCurrentSession] =
     useState<CallSessionRecord | null>(null);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
+  const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
+    pickup: null,
+    dropoff: null,
+    serviceability: null,
+    bothDispatchReady: false,
+  });
+
+  const mapProviderMode =
+    (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
+      | AddressProviderMode
+      | undefined) ?? "healthy";
+  const mapProvider = useMemo(
+    () => createConfiguredMockAddressProvider(mapProviderMode),
+    [mapProviderMode],
+  );
+  const mapLabels = useMemo(() => buildAddressPickerLabels(locale), [locale]);
 
   useEffect(() => {
     const activeCallId = session?.activeCallId;
@@ -323,6 +365,20 @@ export default function ConciergeBookingCreatePage() {
                 return;
               }
 
+              const mapGate = evaluateAddressSubmitGate({
+                pickup: mapSelection.pickup,
+                dropoff: mapSelection.dropoff,
+                serviceability: mapSelection.serviceability,
+              });
+              if (mapGate.code === "outside_service_area") {
+                router.push(`/ineligible?desk=${desk.deskId}&reason=service_area`);
+                return;
+              }
+              if (mapGate.blocking) {
+                setError(t("booking.error.coordinatesRequired"));
+                return;
+              }
+
               setBusyKey("submit-order");
               setError(null);
               setSubmission(null);
@@ -348,12 +404,14 @@ export default function ConciergeBookingCreatePage() {
                 const accepted = await client.createCallCenterOrder({
                   callId: workingSession.callId,
                   agentId: session.operatorId,
-                  pickup: {
-                    address: pickupAddress,
-                  },
-                  dropoff: {
-                    address: dropoffAddress,
-                  },
+                  pickup: buildFallbackAddress(
+                    pickupAddress,
+                    mapSelection.pickup,
+                  ),
+                  dropoff: buildFallbackAddress(
+                    dropoffAddress,
+                    mapSelection.dropoff,
+                  ),
                   passenger: {
                     name: passengerName,
                     phone: passengerPhone,
@@ -463,26 +521,44 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="pickup-address">
-                {t("booking.field.pickup")}
-              </label>
-              <textarea
-                id="pickup-address"
-                onChange={(event) => setPickupAddress(event.target.value)}
-                required
-                value={pickupAddress}
-              />
-            </div>
-            <div className="field-stack">
-              <label htmlFor="dropoff-address">
-                {t("booking.field.dropoff")}
-              </label>
-              <textarea
-                id="dropoff-address"
-                onChange={(event) => setDropoffAddress(event.target.value)}
-                required
-                value={dropoffAddress}
-              />
+              <label>{t("booking.field.route")}</label>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <AddressMapPairPicker
+                  actorId={session?.operatorId ?? null}
+                  bounds={{
+                    minLat: 24.9,
+                    maxLat: 25.2,
+                    minLng: 121.4,
+                    maxLng: 121.7,
+                  }}
+                  dropoffTitle={t("booking.field.dropoff")}
+                  onChange={(change) => {
+                    setMapSelection(change);
+                    setPickupAddress(change.pickup?.address ?? "");
+                    setDropoffAddress(change.dropoff?.address ?? "");
+                    if (error === t("booking.error.coordinatesRequired")) {
+                      setError(null);
+                    }
+                  }}
+                  pickupTitle={t("booking.field.pickup")}
+                  provider={mapProvider}
+                  serviceProductType={requestedProduct}
+                  surface="concierge_portal"
+                  theme={mapTheme}
+                  {...(mapLabels ? { labels: mapLabels } : {})}
+                />
+                <p className="form-help">{t("booking.help.route")}</p>
+                {!evaluateAddressSubmitGate({
+                  pickup: mapSelection.pickup,
+                  dropoff: mapSelection.dropoff,
+                  serviceability: mapSelection.serviceability,
+                }).blocking &&
+                mapSelection.serviceability?.decision === "manual_review" ? (
+                  <p className="form-help">
+                    {t("booking.help.manualReview")}
+                  </p>
+                ) : null}
+              </div>
             </div>
             <div className="field-stack">
               <label htmlFor="callback-due-at">
@@ -517,7 +593,14 @@ export default function ConciergeBookingCreatePage() {
             <div className="inline-actions">
               <button
                 className="primary-button"
-                disabled={busyKey === "submit-order"}
+                disabled={
+                  busyKey === "submit-order" ||
+                  evaluateAddressSubmitGate({
+                    pickup: mapSelection.pickup,
+                    dropoff: mapSelection.dropoff,
+                    serviceability: mapSelection.serviceability,
+                  }).blocking
+                }
                 type="submit"
               >
                 {t("booking.submit")}

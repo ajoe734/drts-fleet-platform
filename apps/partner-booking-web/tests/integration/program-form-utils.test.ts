@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
+import { evaluateAddressSubmitGate } from "@drts/ui-web";
 import {
   createDefaultPartnerBookingDraft,
   getPartnerBookingFieldErrors,
@@ -140,5 +141,40 @@ describe("partner booking program form utilities", () => {
     });
 
     expect(errors.itineraryLink).toBeTruthy();
+  });
+
+  it("requires coordinates before a booking can proceed", () => {
+    expect(
+      evaluateAddressSubmitGate({
+        pickup: { address: "A" },
+        dropoff: { address: "B" },
+        serviceability: null,
+      }),
+    ).toEqual({
+      blocking: true,
+      code: "coordinates_required",
+    });
+  });
+
+  it("keeps manual-review routes explicit without blocking the record step", () => {
+    expect(
+      evaluateAddressSubmitGate({
+        pickup: { address: "A", lat: 25, lng: 121 },
+        dropoff: { address: "B", lat: 25.05, lng: 121.05 },
+        serviceability: {
+          decision: "manual_review",
+          evaluatedAt: "2026-07-03T00:00:00.000Z",
+          geometryVersionRefs: [],
+          reasonCodes: ["STOP_REQUIRES_MANUAL_REVIEW"],
+          reasonMessages: [],
+          serviceAreaCodes: ["mock-core"],
+          serviceProductType: "credit_card_airport_transfer",
+          stops: [],
+        },
+      }),
+    ).toEqual({
+      blocking: false,
+      code: "dispatch_manual_review_required",
+    });
   });
 });

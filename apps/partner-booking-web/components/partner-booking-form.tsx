@@ -5,12 +5,18 @@ import { useMemo, useState, type CSSProperties } from "react";
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
 import {
+  AddressMapPairPicker,
+  buildAddressPickerLabels,
   CanvasBanner,
   CanvasCard,
   CanvasPageHeader,
   CanvasPill,
   buildCanvasTheme,
+  createConfiguredMockAddressProvider,
+  evaluateAddressSubmitGate,
   type CanvasTheme,
+  type AddressMapPairChange,
+  type AddressProviderMode,
 } from "@drts/ui-web";
 import {
   createDefaultPartnerBookingDraft,
@@ -156,6 +162,21 @@ export function PartnerBookingForm({
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(createDefaultPartnerBookingDraft);
   const [submitted, setSubmitted] = useState(false);
+  const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
+    pickup: null,
+    dropoff: null,
+    serviceability: null,
+    bothDispatchReady: false,
+  });
+  const mapProviderMode =
+    (process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE as
+      | AddressProviderMode
+      | undefined) ?? "healthy";
+  const mapProvider = useMemo(
+    () => createConfiguredMockAddressProvider(mapProviderMode),
+    [mapProviderMode],
+  );
+  const mapLabels = useMemo(() => buildAddressPickerLabels(locale), [locale]);
 
   const errors = getPartnerBookingFieldErrors({
     draft,
@@ -173,6 +194,11 @@ export function PartnerBookingForm({
     draft,
     eligibilityVerificationId,
     locale,
+  });
+  const mapGate = evaluateAddressSubmitGate({
+    pickup: mapSelection.pickup,
+    dropoff: mapSelection.dropoff,
+    serviceability: mapSelection.serviceability,
   });
 
   function updateField(name: string, value: string) {
@@ -512,14 +538,40 @@ export function PartnerBookingForm({
 
       <CanvasCard theme={theme} title={t("book.section.trip")}>
         <div style={gridStyle}>
-          {renderField({
-            name: "pickupAddress",
-            label: t("field.pickupAddress"),
-          })}
-          {renderField({
-            name: "dropoffAddress",
-            label: t("field.dropoffAddress"),
-          })}
+          <div style={{ ...fieldStyle, ...fullSpanStyle }}>
+            <span style={{ ...labelStyle, color: theme.text }}>
+              {t("book.map.label")}
+            </span>
+            <AddressMapPairPicker
+              actorId={entry.entrySlug}
+              bounds={{
+                minLat: 24.9,
+                maxLat: 25.2,
+                minLng: 121.4,
+                maxLng: 121.7,
+              }}
+              dropoffTitle={t("field.dropoffAddress")}
+              onChange={(change) => {
+                setMapSelection(change);
+                setDraft((current) => ({
+                  ...current,
+                  pickupAddress: change.pickup?.address ?? "",
+                  dropoffAddress: change.dropoff?.address ?? "",
+                }));
+              }}
+              pickupTitle={t("field.pickupAddress")}
+              provider={mapProvider}
+              serviceProductType={entry.businessDispatchSubtype}
+              surface="partner_booking"
+              theme={theme}
+              {...(mapLabels ? { labels: mapLabels } : {})}
+            />
+            <span style={{ ...hintStyle, color: theme.textMuted }}>
+              {mapGate.code === "dispatch_manual_review_required"
+                ? t("book.map.manualReview")
+                : t("book.map.hint")}
+            </span>
+          </div>
           {renderField({
             name: "reservationWindowStart",
             label: t("field.reservationWindowStart"),
@@ -672,13 +724,27 @@ export function PartnerBookingForm({
       <CanvasCard theme={theme} title={t("book.section.review")}>
         <div style={{ display: "grid", gap: 12 }}>
           <span style={{ color: theme.textMuted }}>
-            {ready ? t("book.ready") : t("book.notReady")}
+            {mapGate.code === "outside_service_area"
+              ? t("book.map.outsideServiceArea")
+              : mapGate.code === "coordinates_required"
+                ? t("book.map.coordinatesRequired")
+                : ready
+                  ? t("book.ready")
+                  : t("book.notReady")}
           </span>
+          {mapGate.code === "dispatch_manual_review_required" ? (
+            <CanvasBanner
+              theme={theme}
+              tone="warn"
+              title={t("book.map.manualReviewTitle")}
+              body={t("book.map.manualReview")}
+            />
+          ) : null}
           <div style={actionRowStyle}>
             <button
               type="submit"
-              style={submitButtonStyle(theme, !ready)}
-              disabled={!ready}
+              style={submitButtonStyle(theme, !ready || mapGate.blocking)}
+              disabled={!ready || mapGate.blocking}
             >
               {t("book.submit")}
             </button>
@@ -688,12 +754,24 @@ export function PartnerBookingForm({
               </span>
             ) : null}
           </div>
-          {submitted && ready ? (
+          {submitted && ready && !mapGate.blocking ? (
             <CanvasBanner
               theme={theme}
-              tone="success"
-              title={t("book.success")}
-              body={t("book.success.detail")}
+              tone={
+                mapGate.code === "dispatch_manual_review_required"
+                  ? "warn"
+                  : "success"
+              }
+              title={
+                mapGate.code === "dispatch_manual_review_required"
+                  ? t("book.map.manualReviewTitle")
+                  : t("book.success")
+              }
+              body={
+                mapGate.code === "dispatch_manual_review_required"
+                  ? t("book.map.manualReview")
+                  : t("book.success.detail")
+              }
             />
           ) : null}
         </div>

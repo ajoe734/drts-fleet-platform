@@ -36,6 +36,17 @@ export {
   manualCoordinateToAddressPayload,
   resolveAddressPickerLabels,
 } from "./address-map-picker-core";
+export {
+  buildAddressPickerLabels,
+  createConfiguredMockAddressProvider,
+  evaluateAddressSubmitGate,
+} from "./address-map-app-support";
+export type {
+  AddressPickerLocale,
+  AddressProviderMode,
+  AddressSubmitGateCode,
+  AddressSubmitGateState,
+} from "./address-map-app-support";
 export type {
   AddressMapPickerChange,
   AddressMapPickerLabels,
