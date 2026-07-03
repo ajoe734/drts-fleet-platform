@@ -119,6 +119,32 @@ describe("GeoService", () => {
     });
   });
 
+  it("normalizes candidate miss into a stable not-found domain error", async () => {
+    const service = createService();
+
+    try {
+      await service.resolve({
+        candidateId: "missing-candidate",
+        addressText: "Unknown stop",
+        surface: "callcenter",
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getStatus()).toBe(404);
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "GEO_CANDIDATE_NOT_FOUND",
+          retryable: false,
+          details: {
+            candidateId: "missing-candidate",
+          },
+        },
+      });
+      return;
+    }
+
+    throw new Error("Expected missing candidate lookup to fail.");
+  });
+
   it("reverse geocodes coordinates to nearest deterministic fixture", async () => {
     const service = createService();
 
@@ -288,5 +314,49 @@ describe("GeoController", () => {
     expect(result.data.candidates[0].candidateId).toBe(
       "mock-taoyuan-airport-t1",
     );
+  });
+
+  it("wraps resolve responses in the platform API envelope", async () => {
+    const controller = new GeoController(createService());
+
+    const result = await controller.resolve(
+      {
+        candidateId: "mock-taipei-city-hall",
+        addressText: "台北市政府",
+        selectedByActorId: "agent-007",
+        surface: "callcenter",
+      },
+      "req-geo-resolve-001",
+    );
+
+    expect(result.meta.requestId).toBe("req-geo-resolve-001");
+    expect(result.data.address).toMatchObject({
+      address: "台北市信義區市府路1號",
+      placeId: "mock-place-taipei-city-hall",
+      geocodeProvider: "mock",
+      surface: "callcenter",
+    });
+  });
+
+  it("wraps reverse responses in the platform API envelope", async () => {
+    const controller = new GeoController(createService());
+
+    const result = await controller.reverse(
+      {
+        location: { lat: 25.0338, lng: 121.5645 },
+        surface: "ops_console",
+        requestedByActorId: "ops-geo-1",
+      },
+      "req-geo-reverse-001",
+    );
+
+    expect(result.meta.requestId).toBe("req-geo-reverse-001");
+    expect(result.data.address).toMatchObject({
+      address: "台北市信義區吳興街252號",
+      placeId: "mock-place-xinyi-hospital",
+      coordinateSource: "reverse_geocode",
+      geocodeProvider: "mock",
+      surface: "ops_console",
+    });
   });
 });

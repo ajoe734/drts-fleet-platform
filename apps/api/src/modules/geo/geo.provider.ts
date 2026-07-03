@@ -7,6 +7,8 @@ import type {
   SearchGeoQuery,
 } from "@drts/contracts";
 
+export const GEO_PROVIDER = Symbol("GEO_PROVIDER");
+
 export interface GeoProvider {
   readonly providerId: string;
   search(command: SearchGeoQuery): Promise<GeoSearchResponse>;

@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Optional } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
 
 import {
   GEO_RESOLUTION_SURFACES,
@@ -15,8 +15,7 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { GeoProviderConfigService } from "./geo-provider-config.service";
-import { GeoProviderError, type GeoProvider } from "./geo.provider";
-import { MockGeoProvider } from "./mock-geo.provider";
+import { GEO_PROVIDER, GeoProviderError, type GeoProvider } from "./geo.provider";
 
 const DEFAULT_SEARCH_LIMIT = 8;
 const MAX_SEARCH_LIMIT = 20;
@@ -35,7 +34,8 @@ type SearchHttpQuery = {
 @Injectable()
 export class GeoService {
   constructor(
-    private readonly geoProvider: MockGeoProvider,
+    @Inject(GEO_PROVIDER)
+    private readonly geoProvider: GeoProvider,
     @Optional()
     private readonly geoProviderConfigService?: GeoProviderConfigService,
   ) {}
