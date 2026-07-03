@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 import {
   API_URL,
+  buildLocalReferencePartnerEntry,
   clearPartnerEntryAuthorityCacheForTests,
   createPartnerBooking,
   getPartnerConfirmation,
@@ -454,6 +455,65 @@ describe("partner-booking-web BFF wiring", () => {
     await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
       code: "PARTNER_AUTHORITY_UNAVAILABLE",
       status: 503,
+    });
+  });
+
+  it("degrades the booking funnel to a reference shell on authority outage without masking a missing entry", async () => {
+    // Authority offline: the assisted-entry booking page opts into the outage
+    // shell so the map picker still renders.
+    const offlineFetch = vi
+      .fn()
+      .mockRejectedValue(new TypeError("fetch failed"));
+    vi.stubGlobal("fetch", offlineFetch);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowAuthorityOutage: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({ slug: "ctbc" }),
+      provenance: expect.objectContaining({
+        source: "local_fallback",
+        fallbackCode: "PARTNER_AUTHORITY_UNAVAILABLE",
+        fallbackStatus: 503,
+      }),
+    });
+
+    // A *definitive* NOT_FOUND is still authoritative — the outage shell must
+    // not resurrect a partner that the backend says does not exist.
+    clearPartnerEntryAuthorityCacheForTests();
+    const notFoundFetch = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          error: {
+            code: "PARTNER_ENTRY_NOT_FOUND",
+            message: "The partner entry could not be found.",
+            details: { entrySlug: "ghost" },
+            retryable: false,
+          },
+        },
+        404,
+      ),
+    );
+    vi.stubGlobal("fetch", notFoundFetch);
+    await expect(
+      getPartnerRouteContext("ghost", { allowAuthorityOutage: true }),
+    ).rejects.toMatchObject({
+      code: "PARTNER_ENTRY_NOT_FOUND",
+      status: 404,
+    });
+  });
+
+  it("builds a self-contained reference-entry placeholder for the outage shell (subtype inert; funnel renders program-neutral)", () => {
+    const entry = buildLocalReferencePartnerEntry("ctbc");
+    expect(entry).toMatchObject({
+      entrySlug: "ctbc",
+      // Relaxed eligibility so the reference funnel renders without a live
+      // authority to verify a reference id against. The businessDispatchSubtype
+      // is an inert structural placeholder — during an authority outage the book
+      // page passes referenceFallback so the form never surfaces or gates on it.
+      eligibilityMode: "none",
+      activeFlag: true,
     });
   });
 

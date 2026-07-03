@@ -262,10 +262,18 @@ function canUseLocalPartnerShellFallback(
   options?: {
     allowInactive?: boolean;
     allowMissing?: boolean;
+    allowAuthorityOutage?: boolean;
   },
 ) {
   const publicShellFallbackAllowed =
     options?.allowInactive || options?.allowMissing;
+  // A definitive NOT_FOUND / INACTIVE answer stays authoritative unless the
+  // caller opted into the public shell. An *outage* (the authority itself is
+  // unreachable / failing) is a different class: `allowAuthorityOutage` lets a
+  // surface degrade to the local reference shell for transient failures without
+  // also masking a real "no such partner" / "inactive" verdict.
+  const outageShellAllowed =
+    publicShellFallbackAllowed || options?.allowAuthorityOutage;
 
   if (error.code === "PARTNER_ENTRY_INACTIVE") {
     return options?.allowInactive;
@@ -276,7 +284,7 @@ function canUseLocalPartnerShellFallback(
   }
 
   if (
-    publicShellFallbackAllowed &&
+    outageShellAllowed &&
     (error.retryable ||
       error.status >= 500 ||
       error.code === "PARTNER_AUTHORITY_REQUEST_FAILED")
@@ -288,7 +296,7 @@ function canUseLocalPartnerShellFallback(
     (error.code === "INTERNAL_KEY_REQUIRED" ||
       error.code === "INTERNAL_KEY_INVALID" ||
       error.code === "PARTNER_AUTHORITY_UNAVAILABLE") &&
-    publicShellFallbackAllowed
+    outageShellAllowed
   );
 }
 
@@ -489,11 +497,40 @@ export async function getPublicPartnerEntry(
   return normalizePartnerEntry(entry);
 }
 
+/**
+ * Minimal, backend-free partner entry placeholder for the authority-outage
+ * reference funnel. When the partner authority is unreachable (`local_fallback`)
+ * the assisted-entry booking surface still renders — validation / preview only,
+ * it never submits a live order — so an outage never blanks the map picker.
+ *
+ * IMPORTANT: during an authority outage the tenant's real program is unknown, so
+ * the booking form renders program-neutral (`referenceFallback`) and does NOT
+ * surface or gate on `businessDispatchSubtype`. The subtype below is therefore an
+ * inert structural placeholder only — it must never drive a program-specific
+ * form or gate, otherwise a non-airport tenant would see the wrong intake during
+ * an outage. Eligibility relaxes to `none` because there is no authority to
+ * verify a reference id against.
+ */
+export function buildLocalReferencePartnerEntry(
+  tenantSlug: string,
+): PartnerChannelEntryRecord {
+  return normalizePartnerEntry({
+    entrySlug: tenantSlug,
+    partnerType: "bank",
+    // Inert placeholder; the reference funnel is program-neutral (see above).
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    eligibilityMode: "none",
+    status: "active",
+    activeFlag: true,
+  });
+}
+
 export async function getPartnerRouteContext(
   tenantSlug: string,
   options?: {
     allowInactive?: boolean;
     allowMissing?: boolean;
+    allowAuthorityOutage?: boolean;
   },
 ): Promise<PartnerRouteContext> {
   try {

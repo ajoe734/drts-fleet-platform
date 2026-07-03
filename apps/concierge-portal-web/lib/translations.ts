@@ -261,6 +261,33 @@ const en = {
   "booking.help.product":
     "Portal validates authorized products before using the existing callcenter order seam.",
   "booking.submit": "Submit assisted-entry booking",
+  "booking.map.pickupTitle": "Confirm pickup location on map",
+  "booking.map.dropoffTitle": "Confirm drop-off location on map",
+  "booking.map.submitManualReview": "Submit for manual review",
+  "booking.map.banner.serviceableTitle": "Ready to dispatch",
+  "booking.map.banner.serviceableBody":
+    "Both locations are confirmed and inside the serviced area.",
+  "booking.map.banner.manualReviewTitle": "Needs a quick review",
+  "booking.map.banner.manualReviewBody":
+    "This trip will be checked by the team before a car is assigned.",
+  "booking.map.banner.providerOutageTitle": "Map service is unavailable",
+  "booking.map.banner.providerOutageBody":
+    "The map lookup is temporarily down. You can still submit the typed address, and the team will confirm the location before dispatch.",
+  "booking.map.banner.blockedTitle": "Location not serviced",
+  "booking.map.banner.blockedBody":
+    "One of the locations is outside the area this desk can serve.",
+  "booking.map.banner.previewPendingTitle": "Checking the route",
+  "booking.map.banner.previewPendingBody":
+    "Confirming both locations are inside the serviced area.",
+  "booking.map.banner.previewUnavailableTitle": "Can't confirm the route",
+  "booking.map.banner.previewUnavailableBody":
+    "We couldn't check whether these locations can be served. Please try again in a moment before submitting.",
+  "booking.map.banner.pickupPinTitle": "Confirm the pickup location",
+  "booking.map.banner.pickupPinBody":
+    "Search or drop a pin so the pickup point is exact before submitting.",
+  "booking.map.banner.dropoffPinTitle": "Confirm the drop-off location",
+  "booking.map.banner.dropoffPinBody":
+    "Search or drop a pin so the drop-off point is exact before submitting.",
   "booking.summary.eyebrow": "Submission accepted",
   "booking.summary.orderId": "Order ID",
   "booking.summary.callId": "Call ID",
@@ -661,6 +688,30 @@ const zh: Record<keyof typeof en, string> = {
   "booking.help.product":
     "入口會先驗證授權產品，再使用既有 callcenter order 接縫。",
   "booking.submit": "提交 assisted-entry 訂單",
+  "booking.map.pickupTitle": "在地圖上確認上車地點",
+  "booking.map.dropoffTitle": "在地圖上確認下車地點",
+  "booking.map.submitManualReview": "送出並轉人工確認",
+  "booking.map.banner.serviceableTitle": "可派車",
+  "booking.map.banner.serviceableBody": "兩個地點都已確認，且位於服務範圍內。",
+  "booking.map.banner.manualReviewTitle": "需要人工確認",
+  "booking.map.banner.manualReviewBody": "本趟行程會由團隊先確認，再指派車輛。",
+  "booking.map.banner.providerOutageTitle": "地圖服務暫時無法使用",
+  "booking.map.banner.providerOutageBody":
+    "地圖查詢暫時中斷。您仍可送出輸入的地址，團隊會在派車前先確認地點。",
+  "booking.map.banner.blockedTitle": "地點不在服務範圍",
+  "booking.map.banner.blockedBody": "其中一個地點超出本櫃台可服務的範圍。",
+  "booking.map.banner.previewPendingTitle": "確認路線中",
+  "booking.map.banner.previewPendingBody":
+    "正在確認兩個地點是否都在服務範圍內。",
+  "booking.map.banner.previewUnavailableTitle": "無法確認路線",
+  "booking.map.banner.previewUnavailableBody":
+    "目前無法確認這些地點是否可服務，請稍候再試後再送出。",
+  "booking.map.banner.pickupPinTitle": "請確認上車地點",
+  "booking.map.banner.pickupPinBody":
+    "送出前，請搜尋或在地圖上標記，讓上車點更精確。",
+  "booking.map.banner.dropoffPinTitle": "請確認下車地點",
+  "booking.map.banner.dropoffPinBody":
+    "送出前，請搜尋或在地圖上標記，讓下車點更精確。",
   "booking.summary.eyebrow": "提交已接受",
   "booking.summary.orderId": "訂單 ID",
   "booking.summary.callId": "通話 ID",
