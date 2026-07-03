@@ -1,9 +1,11 @@
 # MAP-MOB-DRV-001 Final Evidence
 
 **Task:** MAP-MOB-DRV-001 - Driver trip map and navigation handoff
-**Branch:** `codex/map-mob-drv-001-driver-navigation`
-**Worktree:** `/home/edna/workspace/drts-fleet-platform-map-mob-drv-001-driver-navigation`
-**Date:** 2026-07-01
+**Branch:** `codex2/map-mob-drv-001`
+**Commit:** `bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2`
+**Branch@SHA:** `origin/codex2/map-mob-drv-001@bcc3ea1cfd73ac9a69b3bf2e62743fb1448117a2`
+**Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-map-mob-drv-001`
+**Date:** 2026-07-03
 **Reviewer:** Claude2
 
 ## Implementation Summary
@@ -28,12 +30,6 @@
 ## Commands And Results
 
 ```bash
-pnpm install --frozen-lockfile
-```
-
-Result: passed. Lockfile was up to date; dependencies installed in the isolated worktree.
-
-```bash
 pnpm --filter @drts/driver-app typecheck
 ```
 
@@ -46,7 +42,7 @@ pnpm --filter @drts/driver-app lint
 Result: passed.
 
 ```bash
-pnpm --filter @drts/driver-app test
+pnpm --filter @drts/driver-app test -- --runInBand
 ```
 
 Result: passed. `23` test files passed, `112` tests passed.
@@ -61,7 +57,7 @@ Result: passed.
 
 - Android/iOS simulator UAT was not run in this repo-local pass.
 - No native map SDK dependency is present in `apps/driver-app/package.json`; this slice intentionally does not fake native map rendering.
-- Gate D production readiness remains external-gated for simulator/device screenshots or video proving actual app launch, navigation handoff, and platform-specific behavior.
+- Gate D production readiness still needs simulator/device screenshots or video proving actual app launch, navigation handoff, and platform-specific behavior.
 - This branch provides reviewable code and automated evidence for coordinate rendering, external navigation URL generation, route-authority safety copy, degraded fallback, and heartbeat coexistence.
 
 ## Suggested UAT Follow-Up
