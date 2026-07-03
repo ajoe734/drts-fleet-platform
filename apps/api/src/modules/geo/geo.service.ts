@@ -15,7 +15,10 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
-import { MapGeofenceObservabilityService } from "../operational-observability/map-geofence-observability.service";
+import {
+  type MapGeofenceGeoOutcome,
+  MapGeofenceObservabilityService,
+} from "../operational-observability/map-geofence-observability.service";
 import { GeoProviderConfigService } from "./geo-provider-config.service";
 import { GEO_PROVIDER, GeoProviderError, type GeoProvider } from "./geo.provider";
 
@@ -82,11 +85,13 @@ export class GeoService {
     if (command.surface) {
       normalized.surface = this.normalizeSurface(command.surface, "surface");
     }
-    this.assertProviderUsable();
+    this.assertProviderUsable("search");
     const response = await this.withProviderErrorMapping(
       "search",
       normalized,
       () => this.provider().search(normalized),
+      (result) =>
+        result.candidates.length === 1 ? "resolved" : "address_ambiguity",
     );
     if (response.candidates.length !== 1) {
       this.mapGeofenceObservabilityService?.recordGeoOutcome(
@@ -116,11 +121,15 @@ export class GeoService {
         command.manualOverrideReason,
       ),
     };
-    this.assertProviderUsable();
+    this.assertProviderUsable("resolve");
     const response = await this.withProviderErrorMapping(
       "resolve",
       normalized,
       () => this.provider().resolve(normalized),
+      (result) =>
+        result.address.coordinateSource === "manual_pin"
+          ? "manual_override"
+          : "resolved",
     );
     this.mapGeofenceObservabilityService?.recordGeoOutcome("resolved");
     this.recordGeoAddressResolved(response, normalized, requestId);
@@ -143,11 +152,12 @@ export class GeoService {
         command.requestedByActorId,
       ),
     };
-    this.assertProviderUsable();
+    this.assertProviderUsable("reverse");
     const response = await this.withProviderErrorMapping(
       "reverse",
       normalized,
       () => this.provider().reverse(normalized),
+      () => "resolved",
     );
     this.mapGeofenceObservabilityService?.recordGeoOutcome("resolved");
     this.recordGeoAddressResolved(response, normalized, requestId);
@@ -158,13 +168,20 @@ export class GeoService {
     return this.geoProviderConfigService ?? new GeoProviderConfigService();
   }
 
-  private assertProviderUsable() {
+  private assertProviderUsable(
+    operationName: "search" | "resolve" | "reverse",
+  ) {
     const health = this.providerConfig().getHealth();
     this.recordProviderHealth(health);
     if (!health.failClosed) {
       return;
     }
     this.mapGeofenceObservabilityService?.recordGeoOutcome("provider_outage");
+    this.mapGeofenceObservabilityService?.recordGeocodeRequest({
+      operation: operationName,
+      result: "provider_outage",
+      durationMs: 0,
+    });
     throw new ApiRequestError(
       HttpStatus.SERVICE_UNAVAILABLE,
       "GEO_PROVIDER_NOT_CONFIGURED",
@@ -188,12 +205,31 @@ export class GeoService {
     operationName: "search" | "resolve" | "reverse",
     command: SearchGeoQuery | ResolveAddressCommand | ReverseGeocodeCommand,
     operation: () => Promise<T>,
+    resolveSuccessOutcome: (result: T) => MapGeofenceGeoOutcome,
   ) {
+    const startedAt = Date.now();
     try {
-      return await operation();
+      const result = await operation();
+      this.mapGeofenceObservabilityService?.recordGeocodeRequest({
+        operation: operationName,
+        result: resolveSuccessOutcome(result),
+        durationMs: Date.now() - startedAt,
+      });
+      return result;
     } catch (error) {
       if (error instanceof GeoProviderError) {
-        this.recordGeoProviderError(operationName, command, error);
+        const outcome = this.recordGeoProviderError(
+          operationName,
+          command,
+          error,
+        );
+        if (outcome) {
+          this.mapGeofenceObservabilityService?.recordGeocodeRequest({
+            operation: operationName,
+            result: outcome,
+            durationMs: Date.now() - startedAt,
+          });
+        }
         throw new ApiRequestError(
           error.statusCode,
           error.code,
@@ -214,6 +250,7 @@ export class GeoService {
       provider: health.provider,
       mode: health.mode,
       failClosed: health.failClosed,
+      quota: health.quota,
     });
   }
 
@@ -224,7 +261,7 @@ export class GeoService {
   ) {
     if (error.statusCode >= 500 || error.retryable) {
       this.mapGeofenceObservabilityService?.recordGeoOutcome("provider_outage");
-      return;
+      return "provider_outage";
     }
     if (error.code === "GEO_CANDIDATE_NOT_FOUND") {
       const resolveCommand = command as ResolveAddressCommand;
@@ -236,13 +273,17 @@ export class GeoService {
       this.mapGeofenceObservabilityService?.recordGeoOutcome(
         hasCandidateReference ? "address_ambiguity" : "coordinate_less_attempt",
       );
-      return;
+      return hasCandidateReference
+        ? "address_ambiguity"
+        : "coordinate_less_attempt";
     }
     if (operationName === "search" && error.statusCode === 404) {
       this.mapGeofenceObservabilityService?.recordGeoOutcome(
         "address_ambiguity",
       );
+      return "address_ambiguity";
     }
+    return null;
   }
 
   private recordGeoAddressResolved(

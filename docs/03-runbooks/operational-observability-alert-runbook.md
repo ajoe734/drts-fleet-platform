@@ -16,6 +16,11 @@ The current thresholds are operational defaults for Phase 1. They are intentiona
 The formal workload, SLA, and degradation baseline now lives in
 `docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md`.
 
+Map/geofence recent-window alert rules are maintained separately in
+`infra/alerts/map-geofence-alerts.yaml`. Those rules cover provider error rate,
+provider latency, provider quota pressure, coordinate-less attempts,
+service-area policy block bursts, and PostGIS/evaluator unavailability.
+
 ## Alert Taxonomy
 
 | Alert key                    | Primary route | Secondary route | Measured value                                                | Warning | Critical |
@@ -210,6 +215,27 @@ Likely actions:
 - separate stop-policy denial from provider outage and out-of-area results
 - verify whether the denial is expected after a geometry mutation
 - use `docs/03-runbooks/map-geofence-observability-runbook.md#policy-denial`
+
+## Map/Geofence Recent-Window Rules
+
+Use `infra/alerts/map-geofence-alerts.yaml` when the issue is specifically
+about geo/provider/service-area safety rather than the broader in-process
+snapshot alert keys above.
+
+Check:
+
+- `MapProviderErrorRateHigh` for retryable provider failures
+- `MapProviderLatencyHigh` for p95 geocode latency regressions
+- `MapProviderQuotaUsageHigh` and `MapProviderQuotaUsageCritical` for quota pressure
+- `CoordinateLessDispatchAttemptHigh` for fail-closed attempts without coordinates
+- `ServiceAreaPolicyBlockSpike` for stop-policy or boundary denial bursts
+- `ServiceAreaEvaluationUnavailable` for evaluator/PostGIS failures that are not provider outages
+
+Likely actions:
+
+- separate provider outage from quota pressure before escalating
+- confirm address ambiguity/manual override counters are not masking evaluator failure
+- keep coordinate-less and evaluator-unavailable flows fail-closed until reviewed
 
 ## Tenant Governance Alerts
 

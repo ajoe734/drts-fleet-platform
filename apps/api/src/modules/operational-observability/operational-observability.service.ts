@@ -202,6 +202,17 @@ export class OperationalObservabilityService {
         mode: null,
         failClosed: false,
         lastCheckedAt: null,
+        quota: {
+          dailyLimit: null,
+          minuteLimit: null,
+          dailyUsed: null,
+          minuteUsed: null,
+          usagePercent: null,
+          status: "unknown" as const,
+          warningThresholdPercent: null,
+          criticalThresholdPercent: null,
+          policy: null,
+        },
       },
       geo: {
         providerOutageCount: 0,
@@ -209,6 +220,30 @@ export class OperationalObservabilityService {
         coordinateLessAttemptCount: 0,
         manualOverrideCount: 0,
         resolvedAddressCount: 0,
+        requests: {
+          total: 0,
+          successful: 0,
+          providerErrorCount: 0,
+          successRatePercent: null,
+          byOperation: {
+            search: 0,
+            resolve: 0,
+            reverse: 0,
+          },
+          byResult: {
+            resolved: 0,
+            manualOverride: 0,
+            addressAmbiguity: 0,
+            coordinateLessAttempt: 0,
+            providerOutage: 0,
+          },
+        },
+        latencyMs: {
+          count: 0,
+          average: null,
+          max: null,
+          p95: null,
+        },
       },
       serviceArea: {
         evaluations: 0,
