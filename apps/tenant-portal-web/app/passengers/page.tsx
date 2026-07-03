@@ -13,9 +13,10 @@ import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 export default async function PassengersPage({
   searchParams,
 }: {
-  searchParams?: { edit?: string; error?: string };
+  searchParams?: Promise<{ edit?: string; error?: string }>;
 }) {
   const client = await getTenantClient();
+  const resolvedSearchParams = (await searchParams) ?? {};
 
   let passengers: TenantPassengerRecord[] = [];
   let error: string | null = null;
@@ -26,12 +27,12 @@ export default async function PassengersPage({
     error = e instanceof Error ? e.message : "Unknown error";
   }
 
-  const editId = searchParams?.edit;
+  const editId = resolvedSearchParams.edit;
   const editingPassenger = editId
     ? passengers.find((p) => p.passengerId === editId)
     : null;
 
-  const formError = searchParams?.error ?? null;
+  const formError = resolvedSearchParams.error ?? null;
 
   return (
     <main className="app-grid">

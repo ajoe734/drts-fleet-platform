@@ -18,9 +18,10 @@ import {
 export default async function AddressesPage({
   searchParams,
 }: {
-  searchParams?: { edit?: string; error?: string };
+  searchParams?: Promise<{ edit?: string; error?: string }>;
 }) {
   const client = await getTenantClient();
+  const resolvedSearchParams = (await searchParams) ?? {};
 
   let addresses: TenantAddressRecord[] = [];
   let error: string | null = null;
@@ -31,12 +32,12 @@ export default async function AddressesPage({
     error = e instanceof Error ? e.message : "Unknown error";
   }
 
-  const editId = searchParams?.edit;
+  const editId = resolvedSearchParams.edit;
   const editingAddress = editId
     ? addresses.find((a) => a.addressId === editId)
     : null;
 
-  const formError = searchParams?.error ?? null;
+  const formError = resolvedSearchParams.error ?? null;
 
   return (
     <main className="app-grid">
@@ -243,15 +244,9 @@ function readMapCoordinates(formData: FormData): {
   const lat = latVal ? parseFloat(latVal) : null;
   const lng = lngVal ? parseFloat(lngVal) : null;
   const hasCoords =
-    lat != null &&
-    lng != null &&
-    Number.isFinite(lat) &&
-    Number.isFinite(lng);
-  const priorGeocodeSource =
-    ((formData.get("priorGeocodeSource") as string) || "none") as
-      | "none"
-      | "manual"
-      | "provider";
+    lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
+  const priorGeocodeSource = ((formData.get("priorGeocodeSource") as string) ||
+    "none") as "none" | "manual" | "provider";
   return {
     lat: hasCoords ? lat : null,
     lng: hasCoords ? lng : null,
