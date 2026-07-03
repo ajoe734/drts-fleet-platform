@@ -214,37 +214,42 @@ describe("api client geo and service-area coverage", () => {
   });
 
   it("throws ApiClientError for provider_unavailable geo failures", async () => {
+    const rawBody = JSON.stringify({
+      error: {
+        code: "GEO_PROVIDER_UNAVAILABLE",
+        message: "Provider unavailable",
+        details: { provider: "mock", outageWindow: "active" },
+        retryable: true,
+        traceId: "trace-geo-001",
+      },
+    });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 503,
-      text: async () =>
-        JSON.stringify({
-          error: {
-            code: "GEO_PROVIDER_UNAVAILABLE",
-            message: "Provider unavailable",
-            details: { provider: "mock", outageWindow: "active" },
-            retryable: true,
-            traceId: "trace-geo-001",
-          },
-        }),
+      text: async () => rawBody,
     } as Response);
 
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient({ baseUrl: "http://localhost:3001" });
 
-    await expect(
-      client.searchGeo({
+    const error = await client
+      .searchGeo({
         q: "__provider_unavailable__",
-      }),
-    ).rejects.toMatchObject<ApiClientError>({
+      })
+      .catch((caughtError) => caughtError as ApiClientError);
+
+    expect(error).toMatchObject<ApiClientError>({
       name: "ApiClientError",
       statusCode: 503,
       code: "GEO_PROVIDER_UNAVAILABLE",
+      apiMessage: "Provider unavailable",
       retryable: true,
       traceId: "trace-geo-001",
       details: { provider: "mock", outageWindow: "active" },
+      rawBody,
     });
+    expect(error.message).toBe(`API error 503: ${rawBody}`);
   });
 
   it("throws ApiClientError for invalid_coordinate service-area failures", async () => {

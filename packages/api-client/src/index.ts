@@ -358,6 +358,7 @@ export interface RequestOptions {
 export class ApiClientError extends Error {
   readonly statusCode: number;
   readonly code: string;
+  readonly apiMessage: string;
   readonly details?: Record<string, unknown>;
   readonly retryable: boolean;
   readonly traceId?: string;
@@ -372,10 +373,11 @@ export class ApiClientError extends Error {
     traceId?: string;
     rawBody: string;
   }) {
-    super(input.message);
+    super(`API error ${input.statusCode}: ${input.rawBody}`);
     this.name = "ApiClientError";
     this.statusCode = input.statusCode;
     this.code = input.code;
+    this.apiMessage = input.message;
     this.details = input.details;
     this.retryable = input.retryable;
     this.traceId = input.traceId;

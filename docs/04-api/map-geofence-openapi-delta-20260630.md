@@ -39,8 +39,16 @@ All error responses use:
 ```
 
 `@drts/api-client` unwraps success envelopes and throws `ApiClientError` for
-non-2xx responses while preserving `statusCode`, `code`, `details`,
-`retryable`, `traceId`, and `rawBody`.
+non-2xx responses while preserving `statusCode`, `code`, `apiMessage`,
+`details`, `retryable`, `traceId`, and `rawBody`.
+
+Compatibility rule:
+
+- `ApiClientError.message` remains the legacy `API error <status>: <payload>`
+  string so existing web/mobile callers that regex-parse `error.message` keep
+  working.
+- `ApiClientError.apiMessage` exposes the parsed envelope `error.message`
+  string for typed callers that do not want to re-parse `rawBody`.
 
 ## Geo Gateway
 
