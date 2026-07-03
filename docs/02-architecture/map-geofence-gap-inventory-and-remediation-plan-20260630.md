@@ -21,7 +21,7 @@ Current code supports these partial capabilities:
 | Tenant address master                                 | Allows manual lat/lng entry; no map picker.                                                                                                                                                        | `apps/tenant-portal-web/app/addresses/page.tsx:83`                                                                                                                                                                                     |
 | Tenant Console booking                                | Can load saved address lat/lng and has manual address fields; no map pinning.                                                                                                                      | `apps/tenant-console-web/app/bookings/new/tenant-booking-create-form.tsx:956`, `apps/tenant-console-web/app/bookings/new/tenant-booking-create-form.tsx:1518`                                                                          |
 | Concierge booking                                     | Sends text pickup/dropoff only.                                                                                                                                                                    | `apps/concierge-portal-web/app/bookings/new/page.tsx:348`                                                                                                                                                                              |
-| Service-area / stop-policy authority                  | Booking gate and admin lifecycle APIs are archived done; contracts, gateway/client, audit snapshots, frontend map entry, and admin editor still need review or implementation evidence.            | `packages/contracts/src/index.ts:73`, `apps/api/src/modules/service-area/service-area.controller.ts:8`, `infra/migrations/V0047__service_area_geofence_authority.sql:5`, `infra/migrations/V0048__service_area_review_lifecycle.sql:1` |
+| Service-area / stop-policy authority                  | Backend contract, evaluator, booking gate, audit snapshots, PostGIS persistence, and admin lifecycle APIs are in review; frontend map entry and admin editor remain open.                          | `packages/contracts/src/index.ts:73`, `apps/api/src/modules/service-area/service-area.controller.ts:8`, `infra/migrations/V0047__service_area_geofence_authority.sql:5`, `infra/migrations/V0048__service_area_review_lifecycle.sql:1` |
 | Phase 2 sandbox map editor                            | Explicitly called out as missing design / implementation work.                                                                                                                                     | `docs/02-architecture/phase2_tesla_fsd_sandbox_visual_design_handoff_20260625.md:68`                                                                                                                                                   |
 
 Recommendation: treat this as a P0 cross-surface "spatial authority" gap. The first production slice should not be a fancy map board. It should make phone booking and address creation produce governed coordinates, then evaluate those coordinates against service area / stop policies before dispatch.
@@ -45,9 +45,9 @@ Implementation progress as of 2026-06-30:
   pickup/dropoff address payloads through `CreateCallCenterOrderCommand`.
 - `MAP-BE-002` added the API geo gateway with deterministic mock-provider behavior.
 - `MAP-BE-003` added typed API-client coverage and endpoint delta docs for geo and service-area flows.
-- `MAP-BE-004` is archived done: passenger, callcenter, and tenant owned-mobility booking creation now evaluate service-area decisions when coordinates are present; no-pickup/not-serviceable decisions hard-block creation, manual-review decisions route away from normal dispatch, and text-only legacy orders become explicit coordinate-missing manual-review cases. PR #1013 was merged to `origin/dev` as `deb5e1d366f1789c29bd26818b14ffcb801a43a3`.
+- `MAP-BE-004` is in review: passenger, callcenter, and tenant owned-mobility booking creation now evaluate service-area decisions when coordinates are present; no-pickup/not-serviceable decisions hard-block creation, manual-review decisions route away from normal dispatch, and text-only legacy orders become explicit coordinate-missing manual-review cases.
 - `MAP-BE-005` is in review: created orders now carry immutable spatial audit snapshots with coordinate provenance, actor/surface, service-area decision, area/policy/version refs, and audit event evidence.
-- `MAP-BE-006` is archived done: service-area boundary and stop-policy management APIs now support draft/review/publish/retire lifecycle, effective dating, version refs, geometry validation, GeoJSON persistence payloads, mutation audit, and immediate evaluator refresh for published records. The merged dev work also adds Phase 2 sandbox-governance lifecycle APIs, GeoJSON exports for ODD operating areas, approved routes, and pickup/dropoff-zone stop-policy aliases, plus lifecycle audit coverage for sandbox experiments, jurisdictions, approval documents, and experiment authorization suspend/resume paths.
+- `MAP-BE-006` is in review: service-area boundary and stop-policy management APIs now support draft/review/publish/retire lifecycle, effective dating, version refs, geometry validation, GeoJSON persistence payloads, mutation audit, and immediate evaluator refresh for published records. The re-review fix also adds Phase 2 sandbox-governance lifecycle APIs, GeoJSON exports for ODD operating areas, approved routes, and pickup/dropoff-zone stop-policy aliases, plus lifecycle audit coverage for sandbox experiments, jurisdictions, approval documents, and experiment authorization suspend/resume paths.
 - Still open: final visual design sign-off for map picker surfaces, geometry
   editor UI, tenant/concierge/partner map entry, ops/admin/driver map surfaces,
   full metrics/dashboard wiring, release gates, and cross-surface E2E proof
@@ -149,9 +149,9 @@ Concierge booking sends text-only addresses:
 
 Gap: there is no shared map picker or geocode normalization path, so coordinate quality depends on which entry surface created the address/order.
 
-### 7. Service-area authority has backend lifecycle coverage, but no admin UI yet
+### 7. Service-area authority now has backend lifecycle coverage, but no admin UI yet
 
-Backend coverage now spans archived done and in-review work:
+Backend coverage in review:
 
 - Contract types: `packages/contracts/src/index.ts:73`.
 - API controller: `apps/api/src/modules/service-area/service-area.controller.ts:8`.
@@ -163,12 +163,12 @@ Closed or in-review backend deltas:
 
 - API client methods for service-area definitions/evaluation were added in `MAP-BE-003`.
 - OpenAPI delta documentation was added in `MAP-BE-003`.
-- Booking creation now calls service-area evaluation in archived-done `MAP-BE-004`.
+- Booking creation now calls service-area evaluation in `MAP-BE-004`.
 - Order-level spatial audit snapshots were added in `MAP-BE-005`.
-- Admin lifecycle APIs for boundaries and stop policies were added in archived-done `MAP-BE-006`.
+- Admin lifecycle APIs for boundaries and stop policies were added in `MAP-BE-006`.
 - Phase 2 sandbox-governance lifecycle APIs and GeoJSON exports for ODD
   boundaries, approved routes, and pickup/dropoff-zone stop-policy layers were
-  added in the merged `MAP-BE-006` work.
+  added in the `MAP-BE-006` re-review fix.
 - Sandbox-governance experiment, jurisdiction, approval-document, and experiment
   authorization lifecycle mutations now emit audit records with request identity
   and request-id propagation.
@@ -196,7 +196,7 @@ Remaining lifecycle gaps:
 | MAP-GAP-008 | Tenant and concierge flows are not coordinate-consistent  | Tenant address master can hand-enter lat/lng; concierge is text-only.                                                                                     | All address/order entry surfaces use the same picker and validation model.                                            | P1       |
 | MAP-GAP-009 | No coordinate provenance metadata                         | `AddressPayload` only has optional lat/lng.                                                                                                               | Store source, provider, place id, confidence, pinned actor/time, manual override reason.                              | P1       |
 | MAP-GAP-010 | No map/provider degradation policy                        | Existing flows cannot distinguish provider outage from missing coordinates.                                                                               | Deterministic fallbacks: manual coordinate entry, text-only manual review, and provider outage alerts.                | P1       |
-| MAP-GAP-011 | No geometry publication workflow                          | Backend lifecycle APIs are archived done; no Platform Admin geometry editor/review UI yet.                                                                | Draft -> review -> active -> retired geometry lifecycle with effective dating is usable without SQL.                  | P0       |
+| MAP-GAP-011 | No geometry publication workflow                          | Backend lifecycle APIs are in review; no Platform Admin geometry editor/review UI yet.                                                                    | Draft -> review -> active -> retired geometry lifecycle with effective dating is usable without SQL.                  | P0       |
 | MAP-GAP-012 | No spatial audit trail on orders                          | Backend order snapshots are in review; end-to-end reporting proof is still open.                                                                          | Every order stores serviceability decision and policy/version IDs used at creation.                                   | P1       |
 | MAP-GAP-013 | No UAT evidence for map-based flows                       | Current tests cover heartbeat and projection, not true map entry.                                                                                         | Playwright/mobile evidence with mocked provider and real provider smoke path.                                         | P1       |
 
@@ -411,9 +411,9 @@ Acceptance criteria:
 - A published no-pickup zone blocks callcenter/tenant booking creation through backend gate.
 - Phase 2 sandbox routes/areas can be modeled without mixing them with normal taxi service areas.
 
-Implementation note as of 2026-06-30: archived-done `MAP-BE-006` covers the
-backend lifecycle APIs and evaluator refresh path for this phase. The merged
-dev work also covers Phase 2 sandbox ODD boundaries, routes, and
+Implementation note as of 2026-06-30: `MAP-BE-006` covers the backend lifecycle
+APIs and evaluator refresh path for this phase. The re-review fix in
+`codex/map-be-006` also covers Phase 2 sandbox ODD boundaries, routes, and
 pickup/dropoff-zone stop-policy aliases with GeoJSON map-layer exports and
 audited sandbox experiment/jurisdiction/approval-document lifecycle changes. The
 Platform Admin map editor, review workflow UI, and publish/retire operator
@@ -601,13 +601,10 @@ Minimum map layers:
 
 ## Recommended Immediate Remaining Slice
 
-The backend authority foundation is partially archived done and partially in
-review: `MAP-BE-004` and `MAP-BE-006` are done, while `MAP-BE-001`,
-`MAP-BE-002`, `MAP-BE-003`, and `MAP-BE-005` still need review closeout. The
-smallest remaining high-value implementation slice is:
+The backend authority foundation is now in review through `MAP-BE-001` to
+`MAP-BE-006`. The smallest remaining high-value implementation slice is:
 
-1. Land/review the remaining backend map authority stack (`MAP-BE-001`,
-   `MAP-BE-002`, `MAP-BE-003`, and `MAP-BE-005`).
+1. Land/review the backend map authority stack (`MAP-BE-001` to `MAP-BE-006`).
 2. Review and merge `MAP-UI-001` / `MAP-FE-CALL-001`.
 3. Add full Callcenter Playwright evidence for serviceable, manual-review,
    blocked, provider-degraded, and persisted spatial snapshot flows.
