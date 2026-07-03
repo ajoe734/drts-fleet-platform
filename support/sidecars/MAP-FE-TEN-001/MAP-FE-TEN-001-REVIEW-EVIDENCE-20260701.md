@@ -14,6 +14,13 @@ Replaces the hand-typed lat/lng flows on the two tenant surfaces with the shared
 service-area endpoints through same-origin proxy routes, with a degrade-safe
 browser provider adapter.
 
+This closeout now also includes the tenant-lane screen-requirements artifact
+`docs/05-ui/drts-design-canvas/tenant-map-picker-screen-requirements-20260703.md`.
+That artifact is required because the shared primitive note explicitly says a
+consumer lane may not claim final visual completion from the primitive alone:
+Tenant Console booking artboards still show text inputs, and no Tenant Portal
+artboard exists for the address-book surface.
+
 ### Tenant Portal — address book (`apps/tenant-portal-web`)
 
 - `app/addresses/page.tsx`: the New / Edit address forms drop the raw
@@ -68,8 +75,22 @@ browser provider adapter.
 
 Both surfaces pass the shared `tenant` realm theme
 (`buildCanvasTheme({ surface: "tenant", dark: true, density: "compact" })`) to
-the picker. No raw hex palette introduced; colors come from `@drts/ui-tokens`
-via the canvas theme. Surface tags: `tenant_portal`, `tenant_console`.
+the picker. The picker integration itself does not introduce a new raw-hex
+palette; its colors come from `@drts/ui-tokens` via the canvas theme. Surface
+tags: `tenant_portal`, `tenant_console`.
+
+Because the current design canvas still lacks a tenant-surface artboard that
+shows the integrated picker, this branch now closes against
+`docs/05-ui/drts-design-canvas/tenant-map-picker-screen-requirements-20260703.md`
+rather than claiming final artboard parity. The screen-requirements artifact
+anchors:
+
+- Tenant Console booking create: existing two-column tenant canvas layout is
+  preserved, with the pair picker replacing the primary pickup/drop text-entry
+  flow inside the journey card.
+- Tenant Portal address book: no tenant-portal artboard exists, so the picker
+  integration is explicitly limited to utility-form placement plus the required
+  no-coordinate warning, pending a future portal-specific design response.
 
 ## Executed gate evidence (owner closeout on `codex/map-fe-ten-001`)
 
