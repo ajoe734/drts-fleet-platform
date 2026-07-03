@@ -9,6 +9,11 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { AddressMapField } from "@/components/address-map-field";
+import {
+  geocodeSourceFromCoordinateSource,
+  savedAddressToPayload,
+} from "@/lib/tenant-address-map";
 
 export default async function AddressesPage({
   searchParams,
@@ -81,12 +86,8 @@ function NewAddressForm({ formError }: { formError: string | null }) {
           <textarea id="addressText" name="addressText" required rows={3} />
         </div>
         <div className="form-row">
-          <label htmlFor="lat">Latitude</label>
-          <input type="number" step="any" id="lat" name="lat" />
-        </div>
-        <div className="form-row">
-          <label htmlFor="lng">Longitude</label>
-          <input type="number" step="any" id="lng" name="lng" />
+          <label>Location (map)</label>
+          <AddressMapField />
         </div>
         <div className="form-row">
           <label htmlFor="tags">Tags (comma-separated)</label>
@@ -139,23 +140,10 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
           />
         </div>
         <div className="form-row">
-          <label htmlFor="lat">Latitude</label>
-          <input
-            type="number"
-            step="any"
-            id="lat"
-            name="lat"
-            defaultValue={address.lat ?? ""}
-          />
-        </div>
-        <div className="form-row">
-          <label htmlFor="lng">Longitude</label>
-          <input
-            type="number"
-            step="any"
-            id="lng"
-            name="lng"
-            defaultValue={address.lng ?? ""}
+          <label>Location (map)</label>
+          <AddressMapField
+            defaultValue={savedAddressToPayload(address)}
+            priorGeocodeSource={address.geocodeSource ?? "none"}
           />
         </div>
         <div className="form-row">
@@ -245,6 +233,37 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
   );
 }
 
+function readMapCoordinates(formData: FormData): {
+  lat: number | null;
+  lng: number | null;
+  geocodeSource: "none" | "manual" | "provider";
+} {
+  const latVal = (formData.get("lat") as string) ?? "";
+  const lngVal = (formData.get("lng") as string) ?? "";
+  const lat = latVal ? parseFloat(latVal) : null;
+  const lng = lngVal ? parseFloat(lngVal) : null;
+  const hasCoords =
+    lat != null &&
+    lng != null &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng);
+  const priorGeocodeSource =
+    ((formData.get("priorGeocodeSource") as string) || "none") as
+      | "none"
+      | "manual"
+      | "provider";
+  return {
+    lat: hasCoords ? lat : null,
+    lng: hasCoords ? lng : null,
+    geocodeSource: hasCoords
+      ? geocodeSourceFromCoordinateSource(
+          (formData.get("coordinateSource") as string) || null,
+          priorGeocodeSource === "none" ? "provider" : priorGeocodeSource,
+        )
+      : "none",
+  };
+}
+
 async function createAddress(formData: FormData) {
   "use server";
   const snapshot = await getTenantRoleSnapshot();
@@ -262,14 +281,14 @@ async function createAddress(formData: FormData) {
         .filter(Boolean)
     : [];
 
-  const latVal = formData.get("lat") as string;
-  const lngVal = formData.get("lng") as string;
+  const coordinates = readMapCoordinates(formData);
 
   const command: UpsertTenantAddressCommand = {
     addressName: formData.get("addressName") as string,
     addressText: formData.get("addressText") as string,
-    lat: latVal ? parseFloat(latVal) : null,
-    lng: lngVal ? parseFloat(lngVal) : null,
+    lat: coordinates.lat,
+    lng: coordinates.lng,
+    geocodeSource: coordinates.geocodeSource,
     tags,
     ownerPassengerId: (formData.get("ownerPassengerId") as string) || null,
     activeFlag: formData.get("activeFlag") !== null,
@@ -301,15 +320,15 @@ async function updateAddress(formData: FormData) {
         .filter(Boolean)
     : [];
 
-  const latVal = formData.get("lat") as string;
-  const lngVal = formData.get("lng") as string;
+  const coordinates = readMapCoordinates(formData);
 
   const command: UpsertTenantAddressCommand = {
     addressId: formData.get("addressId") as string,
     addressName: formData.get("addressName") as string,
     addressText: formData.get("addressText") as string,
-    lat: latVal ? parseFloat(latVal) : null,
-    lng: lngVal ? parseFloat(lngVal) : null,
+    lat: coordinates.lat,
+    lng: coordinates.lng,
+    geocodeSource: coordinates.geocodeSource,
     tags,
     ownerPassengerId: (formData.get("ownerPassengerId") as string) || null,
     activeFlag: formData.get("activeFlag") !== null,
