@@ -3,7 +3,7 @@
 - **Parent Task:** `MAP-FE-ADM-001` - Platform Admin geofence governance UI
 - **Sidecar Task:** `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE`
 - **Packet Scope:** support artifact only; no canonical truth, runtime, or parent-branch edits
-- **Packet Snapshot:** `2026-07-03T18:03:21Z`
+- **Packet Snapshot:** `2026-07-03T18:09:12Z`
 - **Sidecar Owner -> Reviewer:** `Codex` -> `Codex2`
 - **Parent Owner -> Reviewer:** `Codex2` -> `Claude2`
 
@@ -13,8 +13,13 @@
   `acceptance_packet` helper for `MAP-FE-ADM-001`.
 - The original owner lane (`Gemini2`) hit repeated terminal exits, so the chair
   reassigned ownership to `Codex` at `2026-07-03T18:02:50Z`.
-- The sidecar is now `in_progress`; its only goal is to refresh this packet and
-  hand it to the assigned reviewer.
+- The previous reviewer handoff at `2026-07-03T18:06:19Z` was reopened at
+  `2026-07-03T18:07:59Z` because the packet still described both the sidecar
+  and parent as live `in_progress` after machine truth had advanced the parent
+  task to `review`.
+- The sidecar is now back in live `in_progress`; its only goal is to refresh
+  this packet against the corrected live-state snapshot and hand it to the
+  assigned reviewer.
 - The chair dispatch note explicitly says this is support-only work and that the
   listed dependencies are already archived in machine truth.
 
@@ -45,7 +50,7 @@ Important boundaries:
 | Task | State | Packet interpretation |
 | --- | --- | --- |
 | `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` | live `in_progress` | Owner is refreshing a support-only packet for reviewer handoff. |
-| `MAP-FE-ADM-001` | live `in_progress` | Parent implementation remains open; `next` says to inspect branch state and continue implementation. |
+| `MAP-FE-ADM-001` | live `review` | Parent branch evidence is already pushed and revalidated; `next` says it is ready for reviewer re-approval before owner closeout with `INTEGRATION_STATUS=branch_pushed`. |
 | `MAP-BE-006` | archived `done` | Backend lifecycle authority is complete and recorded as `merged_to_dev`. |
 | `MAP-UI-002` | archived `done` | GeometryEditor primitive closeout is complete and recorded as `merged_to_dev`. |
 | `MAP-UI-002-HARDEN-001` | archived `done` | Validation hardening evidence is archived and reconciled from `origin/dev`. |
@@ -77,11 +82,14 @@ Live machine truth still lists the parent acceptance targets as:
 
 Current operational reading:
 
-- the parent task is not in review or closeout; it is still an implementation
-  task owned by `Codex2`
+- the parent task is already in `review` under `Codex2 -> Claude2`
+- the parent `next` field says the pushed closeout commit
+  `ece4082c53c456d1e885aa725efd171736dec8c1` was revalidated and is ready for
+  reviewer re-approval before owner finalization with
+  `INTEGRATION_STATUS=branch_pushed`
 - this sidecar may restate the acceptance targets and map dependencies
-- this sidecar may not claim that the parent is review-ready, closeout-ready, or
-  production-ready
+- this sidecar may not claim that the parent is already re-approved,
+  closeout-complete, or production-ready
 
 ## 5. Dependency Map
 
@@ -166,7 +174,8 @@ Operational implication:
 - [x] No canonical truth, runtime, or parent-branch files modified.
 - [x] Parent acceptance targets restated from live machine truth.
 - [x] Direct dependencies mapped to current archived evidence.
-- [x] Reviewer handoff context updated to the current owner/reviewer map.
+- [x] Reviewer handoff context updated to the current owner/reviewer map and
+      parent `review` state.
 - [x] Missing `20260701` and `MAP-REL-001` branch-local files treated as absent,
       not as cited evidence.
 - [ ] Parent implementation approved or closed out. Not in scope.
@@ -176,9 +185,10 @@ Operational implication:
 
 Reviewer `Codex2` should validate the following before approving:
 
-1. The packet matches live owner/reviewer routing:
-   `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` is `Codex -> Codex2`, and
-   `MAP-FE-ADM-001` is `Codex2 -> Claude2`.
+1. The packet matches live owner/reviewer routing and states:
+   `MAP-FE-ADM-001-SIDECAR-ACCEPTANCE` is currently live `in_progress` under
+   `Codex -> Codex2` until this resubmission is handed off, and
+   `MAP-FE-ADM-001` is already live `review` under `Codex2 -> Claude2`.
 2. The packet treats `MAP-BE-006` and `MAP-UI-002` as archived merged
    dependencies, not as open blockers.
 3. The packet uses `MAP-UI-002-HARDEN-001` and `MAP-UI-002-INTEGRATE-001` only
@@ -192,7 +202,7 @@ Reviewer `Codex2` should validate the following before approving:
 
 Commands used while refreshing this packet:
 
-- `AI_NAME=Codex scripts/ai-status.sh start MAP-FE-ADM-001-SIDECAR-ACCEPTANCE "..."`
+- `AI_NAME=Codex scripts/ai-status.sh progress MAP-FE-ADM-001-SIDECAR-ACCEPTANCE "..."`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001-SIDECAR-ACCEPTANCE`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-FE-ADM-001`
 - `AI_NAME=Codex scripts/ai-status.sh show MAP-REL-001`
