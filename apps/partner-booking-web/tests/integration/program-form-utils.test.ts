@@ -122,6 +122,50 @@ describe("partner booking program form utilities", () => {
     ).toBe(true);
   });
 
+  it("renders program-neutral during an authority outage: no program-specific field is required regardless of subtype", () => {
+    const draft = createDefaultPartnerBookingDraft();
+
+    // Insurance tenant, but the authority is down so the program is unknown: the
+    // reference funnel must not impose (or mislabel-skip) claim/policy gating.
+    const insuranceErrors = getPartnerBookingFieldErrors({
+      draft,
+      subtype: "insurance_replacement_vehicle",
+      referenceFallback: true,
+    });
+    expect(insuranceErrors.claimNumber).toBeUndefined();
+    expect(insuranceErrors.policyNumber).toBeUndefined();
+    expect(insuranceErrors.replacementVehicleClass).toBeUndefined();
+
+    // Travel tenant, same outage: no roster/group gating either.
+    const travelErrors = getPartnerBookingFieldErrors({
+      draft,
+      subtype: "travel_agency_transfer",
+      referenceFallback: true,
+    });
+    expect(travelErrors.groupCode).toBeUndefined();
+    expect(travelErrors.rosterPassengers).toBeUndefined();
+
+    // Universal fields are still validated in reference mode.
+    expect(insuranceErrors.pickupAddress).toBeTruthy();
+    expect(insuranceErrors.passengerName).toBeTruthy();
+  });
+
+  it("keeps the program gate neutral (ready) during an authority outage instead of applying eligibility gating for a program it cannot verify", () => {
+    const draft = createDefaultPartnerBookingDraft();
+    const gate = getPartnerProgramGate({
+      // Airport transfer normally blocks until an eligibility id is present…
+      entry: makeEntry({ eligibilityMode: "bank_card_inline" }),
+      draft,
+      eligibilityVerificationId: null,
+      referenceFallback: true,
+    });
+
+    // …but the outage funnel cannot verify the program, so the program gate is
+    // neutral; the map/coordinate gate is what enforces submit-safety.
+    expect(gate.state).toBe("ready");
+    expect(gate.actionHref).toBeNull();
+  });
+
   it("rejects invalid itinerary links for travel agency transfers", () => {
     const draft = createDefaultPartnerBookingDraft();
     draft.pickupAddress = "Taipei Main Station";
