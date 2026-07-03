@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   conciergeDeskCatalog,
   evaluateDeskEligibility,
+  evaluateDeskProductEligibility,
+  evaluateDeskTextServiceAreaEligibility,
   resolveDeskAccess,
 } from "../../lib/desk-catalog";
 import { t } from "../../lib/translations";
@@ -60,6 +62,34 @@ describe("desk catalog", () => {
       ),
     ).toMatchObject({
       state: "eligible",
+    });
+  });
+
+  it("keeps product authorization separate from text service-area keyword checks", () => {
+    const acmeDesk = conciergeDeskCatalog.find(
+      (desk) => desk.deskId === "acme-reception",
+    );
+
+    expect(acmeDesk).toBeTruthy();
+    expect(
+      evaluateDeskProductEligibility(
+        acmeDesk!,
+        "standard_taxi",
+        testTranslate,
+      ),
+    ).toMatchObject({
+      state: "eligible",
+    });
+    expect(
+      evaluateDeskTextServiceAreaEligibility(
+        acmeDesk!,
+        "台北市中山區南京東路 1 段 88 號",
+        "台北市內湖區瑞光路 168 號",
+        testTranslate,
+      ),
+    ).toMatchObject({
+      state: "ineligible",
+      reasonCode: "service_area_mismatch",
     });
   });
 });

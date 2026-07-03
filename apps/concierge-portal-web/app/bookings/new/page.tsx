@@ -22,7 +22,8 @@ import {
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
 import {
-  evaluateDeskEligibility,
+  evaluateDeskProductEligibility,
+  evaluateDeskTextServiceAreaEligibility,
   formatDeskHealth,
   formatQueuePolicy,
   formatRecordingAvailability,
@@ -369,16 +370,14 @@ export default function ConciergeBookingCreatePage() {
                 return;
               }
 
-              const eligibility = evaluateDeskEligibility(
+              const productEligibility = evaluateDeskProductEligibility(
                 deskRecord,
                 requestedProduct,
-                pickupAddress,
-                dropoffAddress,
                 t,
               );
-              if (eligibility.state === "ineligible") {
+              if (productEligibility.state === "ineligible") {
                 router.push(
-                  `/ineligible?desk=${desk.deskId}&reason=${eligibility.reasonCode}`,
+                  `/ineligible?desk=${desk.deskId}&reason=${productEligibility.reasonCode}`,
                 );
                 return;
               }
@@ -402,6 +401,21 @@ export default function ConciergeBookingCreatePage() {
               if (mapGate.blocking) {
                 setError(t("booking.error.coordinatesRequired"));
                 return;
+              }
+              if (mapGate.code === "ready") {
+                const textServiceAreaEligibility =
+                  evaluateDeskTextServiceAreaEligibility(
+                    deskRecord,
+                    pickupAddress,
+                    dropoffAddress,
+                    t,
+                  );
+                if (textServiceAreaEligibility.state === "ineligible") {
+                  router.push(
+                    `/ineligible?desk=${desk.deskId}&reason=${textServiceAreaEligibility.reasonCode}`,
+                  );
+                  return;
+                }
               }
 
               setBusyKey("submit-order");
