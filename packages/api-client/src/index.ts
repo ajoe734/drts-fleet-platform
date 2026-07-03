@@ -22,6 +22,7 @@ import type {
   AssignReconciliationIssueCommand,
   AssignComplaintCaseCommand,
   AttachCallRecordingCommand,
+  ApiErrorEnvelope,
   ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
@@ -117,6 +118,10 @@ import type {
   FilingPackageDetailRecord,
   FilingPackageListRecord,
   GenerateDriverStatementCommand,
+  GeoProviderHealthResponse,
+  GeoResolveResponse,
+  GeoReverseResponse,
+  GeoSearchResponse,
   GenerateFilingPackageCommand,
   GeneratePlacardVersionCommand,
   GenerateTenantInvoiceCommand,
@@ -155,6 +160,8 @@ import type {
   PlatformPresenceSummary,
   PlatformPricingRuleRecord,
   ProductRuleCatalog,
+  PublishServiceAreaBoundaryCommand,
+  PublishStopPolicyCommand,
   PublishDriverFeePlanCommand,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
@@ -174,6 +181,7 @@ import type {
   ReportJobAccepted,
   ReportJobDetailRecord,
   ReportJobRecord,
+  ResolveAddressCommand,
   ResolveReconciliationIssueCommand,
   ResolveComplaintCaseCommand,
   ResolveEvidenceDeletionExceptionCommand,
@@ -185,6 +193,7 @@ import type {
   RequestSandboxLegalHoldReleaseCommand,
   ResolveExceptionHoldCommand,
   ResolvePartnerEligibilityReviewCommand,
+  ReverseGeocodeCommand,
   RevokeDriverDeviceBindingCommand,
   RotateTenantApiKeyCommand,
   SetPlatformMaintenanceModeCommand,
@@ -195,6 +204,12 @@ import type {
   UpdatePlatformAdapterCommand,
   SettlementMatrixRecord,
   ShiftRecord,
+  SearchGeoQuery,
+  ServiceAreaAdminMutationResponse,
+  ServiceAreaDefinitionsResponse,
+  ServiceAreaEvaluationResult,
+  ServiceAreaGeoJsonResponse,
+  EvaluateServiceAreaCommand,
   TenantAddressRecord,
   TenantAddressExportViewRecord,
   TenantApiKeyRecord,
@@ -303,7 +318,11 @@ import type {
   SafetyOperatorQualificationRecord,
   SuspendSandboxExperimentAuthorizationsCommand,
   ResumeSandboxExperimentAuthorizationsCommand,
+  RetireServiceAreaBoundaryCommand,
+  RetireStopPolicyCommand,
   CreateSafetyOperatorTripCloseoutCommand,
+  CreateServiceAreaBoundaryCommand,
+  CreateStopPolicyCommand,
   EndSafetyOperatorShiftCommand,
   SafetyOperatorAssignment,
   SafetyOperatorPreTripChecklist,
@@ -316,6 +335,8 @@ import type {
   SubmitSafetyOperatorPreTripChecklistCommand,
   SubmitSafetyOperatorTakeoverReportCommand,
   SubmitSafetyOperatorTakeoverReportResult,
+  UpdateServiceAreaBoundaryCommand,
+  UpdateStopPolicyCommand,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -332,6 +353,34 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   body?: unknown;
   signal?: AbortSignal;
+}
+
+export class ApiClientError extends Error {
+  readonly statusCode: number;
+  readonly code: string;
+  readonly details?: Record<string, unknown>;
+  readonly retryable: boolean;
+  readonly traceId?: string;
+  readonly rawBody: string;
+
+  constructor(input: {
+    statusCode: number;
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+    retryable: boolean;
+    traceId?: string;
+    rawBody: string;
+  }) {
+    super(input.message);
+    this.name = "ApiClientError";
+    this.statusCode = input.statusCode;
+    this.code = input.code;
+    this.details = input.details;
+    this.retryable = input.retryable;
+    this.traceId = input.traceId;
+    this.rawBody = input.rawBody;
+  }
 }
 
 /**
@@ -444,6 +493,32 @@ function createRequestToken(): string {
 function hasHeader(headers: Record<string, string>, key: string): boolean {
   const target = key.toLowerCase();
   return Object.keys(headers).some((header) => header.toLowerCase() === target);
+}
+
+function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
+  if (!body.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(body) as ApiErrorEnvelope;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "error" in parsed &&
+      parsed.error &&
+      typeof parsed.error.code === "string" &&
+      typeof parsed.error.message === "string" &&
+      typeof parsed.error.retryable === "boolean" &&
+      typeof parsed.error.traceId === "string"
+    ) {
+      return parsed.error;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export class ApiClient {
@@ -581,13 +656,181 @@ export class ApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`API error ${response.status}: ${errorText}`);
+        const apiError = parseApiErrorEnvelope(errorText);
+        throw new ApiClientError({
+          statusCode: response.status,
+          code: apiError?.code ?? `HTTP_${response.status}`,
+          message:
+            apiError?.message ||
+            `API request failed with status ${response.status}`,
+          details: apiError?.details,
+          retryable: apiError?.retryable ?? false,
+          traceId: apiError?.traceId,
+          rawBody: errorText,
+        });
       }
 
       return (await response.json()) as ApiSuccessEnvelope<T>;
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  // ── Geo / Service Area ──
+
+  async getGeoProviderHealth(): Promise<GeoProviderHealthResponse> {
+    return this.get<GeoProviderHealthResponse>("/api/geo/health");
+  }
+
+  async searchGeo(query: SearchGeoQuery): Promise<GeoSearchResponse> {
+    const params = new URLSearchParams();
+    params.set("q", query.q);
+    if (query.near) {
+      params.set("nearLat", String(query.near.lat));
+      params.set("nearLng", String(query.near.lng));
+    }
+    if (query.locale) {
+      params.set("locale", query.locale);
+    }
+    if (typeof query.limit === "number") {
+      params.set("limit", String(query.limit));
+    }
+    if (query.surface) {
+      params.set("surface", query.surface);
+    }
+    if (query.requestedByActorId) {
+      params.set("requestedByActorId", query.requestedByActorId);
+    }
+    return this.get<GeoSearchResponse>(`/api/geo/search?${params.toString()}`);
+  }
+
+  async resolveGeo(
+    command: ResolveAddressCommand,
+  ): Promise<GeoResolveResponse> {
+    return this.post<GeoResolveResponse>("/api/geo/resolve", { body: command });
+  }
+
+  async reverseGeo(
+    command: ReverseGeocodeCommand,
+  ): Promise<GeoReverseResponse> {
+    return this.post<GeoReverseResponse>("/api/geo/reverse", { body: command });
+  }
+
+  async getServiceAreaDefinitions(): Promise<ServiceAreaDefinitionsResponse> {
+    return this.get<ServiceAreaDefinitionsResponse>(
+      "/api/service-area/definitions",
+    );
+  }
+
+  async getServiceAreaGeoJson(): Promise<ServiceAreaGeoJsonResponse> {
+    return this.get<ServiceAreaGeoJsonResponse>(
+      "/api/service-area/admin/geojson",
+    );
+  }
+
+  async evaluateServiceArea(
+    command: EvaluateServiceAreaCommand,
+  ): Promise<ServiceAreaEvaluationResult> {
+    return this.post<ServiceAreaEvaluationResult>(
+      "/api/service-area/evaluate",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async createServiceAreaBoundary(
+    command: CreateServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      "/api/service-area/admin/service-areas",
+      { body: command },
+    );
+  }
+
+  async updateServiceAreaBoundary(
+    serviceAreaId: string,
+    command: UpdateServiceAreaBoundaryCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/update`,
+      { body: command },
+    );
+  }
+
+  async submitServiceAreaBoundaryForReview(
+    serviceAreaId: string,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/submit-review`,
+    );
+  }
+
+  async publishServiceAreaBoundary(
+    serviceAreaId: string,
+    command: PublishServiceAreaBoundaryCommand = {},
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/publish`,
+      { body: command },
+    );
+  }
+
+  async retireServiceAreaBoundary(
+    serviceAreaId: string,
+    command: RetireServiceAreaBoundaryCommand = {},
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/service-areas/${encodeURIComponent(serviceAreaId)}/retire`,
+      { body: command },
+    );
+  }
+
+  async createStopPolicy(
+    command: CreateStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      "/api/service-area/admin/stop-policies",
+      { body: command },
+    );
+  }
+
+  async updateStopPolicy(
+    stopPolicyId: string,
+    command: UpdateStopPolicyCommand,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/update`,
+      { body: command },
+    );
+  }
+
+  async submitStopPolicyForReview(
+    stopPolicyId: string,
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/submit-review`,
+    );
+  }
+
+  async publishStopPolicy(
+    stopPolicyId: string,
+    command: PublishStopPolicyCommand = {},
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/publish`,
+      { body: command },
+    );
+  }
+
+  async retireStopPolicy(
+    stopPolicyId: string,
+    command: RetireStopPolicyCommand = {},
+  ): Promise<ServiceAreaAdminMutationResponse> {
+    return this.post<ServiceAreaAdminMutationResponse>(
+      `/api/service-area/admin/stop-policies/${encodeURIComponent(stopPolicyId)}/retire`,
+      { body: command },
+    );
   }
 
   // ── Feature Flags ──

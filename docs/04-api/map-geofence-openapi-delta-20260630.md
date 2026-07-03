@@ -229,6 +229,7 @@ Common errors:
 
 | Method                                    | Endpoint                                                        |
 | ----------------------------------------- | --------------------------------------------------------------- |
+| `getGeoProviderHealth()`                  | `GET /api/geo/health`                                           |
 | `searchGeo(query)`                        | `GET /api/geo/search`                                           |
 | `resolveGeo(command)`                     | `POST /api/geo/resolve`                                         |
 | `reverseGeo(command)`                     | `POST /api/geo/reverse`                                         |
