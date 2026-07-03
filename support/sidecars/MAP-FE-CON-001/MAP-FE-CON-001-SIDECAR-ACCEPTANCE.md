@@ -1,12 +1,14 @@
 # MAP-FE-CON-001 SIDECAR ACCEPTANCE
 
 Snapshot Type: owner support packet from machine-truth and repo-live anchors
-Snapshot Captured At: 2026-07-03T18:17:14Z
+Snapshot Captured At: 2026-07-03T18:24:08Z
 Snapshot Status At Capture: in_progress
 Owner: Codex
 Reviewer: Codex2
 Parent Task: MAP-FE-CON-001
 Parent Title: Concierge and partner map alignment
+Task Branch: `codex/map-fe-con-001-sidecar-acceptance`
+Parent Owner / Reviewer Snapshot: `Claude2` / `Codex`
 
 ## Purpose
 
@@ -29,22 +31,28 @@ concierge and partner entry map-alignment slice.
 - `ai-status.json` remains authoritative; this markdown file is only a
   snapshot captured via `scripts/ai-status.sh`.
 - Sidecar task `MAP-FE-CON-001-SIDECAR-ACCEPTANCE` is `in_progress` at
-  `2026-07-03T18:14:20Z` with next step
-  `Preparing acceptance packet and dependency map support artifact`.
-- Parent task `MAP-FE-CON-001` is `todo` at `2026-07-03T18:11:30Z`; owner
-  and reviewer are `Gemini2` / `Codex`.
+  `2026-07-03T18:22:04Z` with next step
+  `Reconstructing acceptance packet on task branch; validating dependency map against repo-live paths before re-handoff.`
+- Parent task `MAP-FE-CON-001` is `in_progress` at `2026-07-03T18:17:34Z`
+  with owner / reviewer `Claude2` / `Codex`.
+- Parent machine-truth references currently point at:
+  - `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md`
+  - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md`
+- Those `20260701` files are focused addenda for `MAP-FE-ADM-001` and
+  explicitly complement, not replace,
+  `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md` and
+  `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`.
+  This packet therefore uses the `20260630` baseline docs for
+  `MAP-FE-CON-001` dependency semantics and the `20260701` refs only as the
+  current machine-truth parent pointers.
 - Parent acceptance recorded in machine truth:
   - `concierge booking submits coordinates when dispatchable`
   - `partner assisted entry reason codes consistent`
   - `provider outage cannot create silent normal order`
   - `package checks pass`
-- Parent dependency IDs are still recorded as `MAP-UI-001`, `MAP-BE-004`,
-  and `MAP-BE-005`, but `scripts/ai-status.sh show` does not currently
-  resolve those IDs in the active task index. Dependency status notes below
-  therefore come from:
-  - `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
-  - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
-- Parent artifact paths currently declared in machine truth but missing in
+- This sidecar file is present on the current task branch, and every repo path
+  cited below was re-validated in this worktree before re-handoff.
+- Parent artifact paths currently declared in machine truth but still missing in
   this worktree snapshot:
   - `tests/e2e/concierge-map-booking-ui.spec.ts`
   - `tests/e2e/partner-map-booking-ui.spec.ts`
@@ -57,7 +65,8 @@ concierge and partner entry map-alignment slice.
 
 ## Parent Verification Expected
 
-From the 2026-06-30 execution packet, parent-task verification should include:
+From the `2026-06-30` baseline execution packet, parent-task verification
+should include:
 
 - `pnpm --filter @drts/concierge-portal-web typecheck`
 - `pnpm --filter @drts/partner-booking-web typecheck`
@@ -66,37 +75,42 @@ From the 2026-06-30 execution packet, parent-task verification should include:
 ## Acceptance Checklist
 
 - [x] Packet stays scoped to `MAP-FE-CON-001` support only.
-- [x] Dependency map covers shared picker primitive, contract payloads,
-      frontend submit seams, backend gate expectations, and
-      degraded/manual-review behavior.
-- [x] Repo-live gaps are called out explicitly instead of assuming the parent
-      implementation is already present.
-- [x] Existing reference implementations are separated from still-missing
-      parent evidence artifacts.
+- [x] Every cited repo path below resolves in the current task worktree.
+- [x] Dependency map covers shared picker primitives, contract payloads,
+      frontend submit seams, backend gate expectations, and degraded/manual
+      behavior.
+- [x] Current concierge and partner gaps are described from repo-live files,
+      not speculative implementation intent.
+- [x] Missing parent evidence artifacts are called out explicitly instead of
+      being assumed present.
 - [x] No canonical truth or runtime files are modified by this sidecar slice.
 
 ## Dependency Map
 
 ### Shared picker and contract foundation (`MAP-UI-001` baseline)
 
-- `packages/ui-web/src/address-map-picker.tsx:518-1545`
-  `AddressMapPicker` and `AddressMapPairPicker` already cover provider health,
-  search results, manual coordinate fallback with override reason, draggable
-  pin adjustment, and service-area preview banners for `serviceable`,
-  `manual_review`, and `not_serviceable`.
+- `packages/ui-web/src/address-map-picker-core.ts:260-417`
+  Provider outage is explicit via `AddressProviderUnavailableError`, and both
+  provider-candidate and manual-pin flows already emit provenance-bearing
+  `AddressPayload`s.
+- `packages/ui-web/src/address-map-picker.tsx:551-893`
+  `AddressMapPicker` already covers provider health, search, candidate
+  selection, manual coordinate fallback with required reason, draggable pin
+  adjustment, and single-stop serviceability preview.
+- `packages/ui-web/src/address-map-picker.tsx:1402-1544`
+  `AddressMapPairPicker` already composes pickup/dropoff state and shared
+  preview banners once the required points are pinned.
 - `packages/contracts/src/index.ts:2555-2577`
-  `AddressPayload` already supports lat/lng plus provenance
-  (`geocodeProvider`, `geocodeConfidence`, `coordinateSource`,
+  `AddressPayload` already supports lat/lng plus provenance fields such as
+  `geocodeProvider`, `geocodeConfidence`, `coordinateSource`,
   `selectedByActorId`, `pinnedByActorId`, `manualOverrideReason`, `surface`,
-  `coordinateProvenance`).
+  and `coordinateProvenance`.
 - `packages/contracts/src/index.ts:2713-2758`
   Both `CreateCallCenterOrderCommand` and `CreateTenantBookingCommand`
-  already accept full `AddressPayload` pickup and dropoff objects rather
-  than text-only strings.
+  already accept full `AddressPayload` pickup and dropoff objects.
 - `packages/api-client/src/index.ts:691-750`
-  Shared geo and service-area client methods already exist for provider
-  health, search, resolve, reverse, definitions, and
-  `/api/service-area/evaluate`.
+  Shared geo and service-area client methods already exist for provider health,
+  search, resolve, reverse, definitions, and `/api/service-area/evaluate`.
 - `packages/api-client/src/index.ts:1096-1110`
   Frontend create seams already exist for `/api/call-center/orders` and
   `/api/tenant/bookings`.
@@ -106,21 +120,21 @@ From the 2026-06-30 execution packet, parent-task verification should include:
 - `apps/tenant-console-web/lib/geo-map-provider.ts:1-122`
   Reference browser provider wiring proxies the shared picker into same-origin
   `/api/geo/*` routes and converts transport failures into
-  `AddressProviderUnavailableError` so degraded and manual fallback are
+  `AddressProviderUnavailableError`, so degraded and manual fallback are
   explicit.
 - `apps/tenant-console-web/lib/tenant-address-map.ts:1-63`
   Reference mapping helpers show how saved addresses become picker payloads
   and how coordinate presence is tested before submit.
 - `apps/tenant-console-web/app/bookings/new/tenant-booking-create-form.tsx:1627-1661`
-  Reference booking surface embeds `AddressMapPairPicker` and blocks submit
-  with a visible banner when serviceability is `not_serviceable`.
+  Reference booking surface already embeds `AddressMapPairPicker` and shows a
+  visible blocking banner when serviceability is `not_serviceable`.
 - `tests/e2e/tenant-map-booking-ui.spec.ts:1-153`
   Reference Playwright seam already proves mock-provider search -> pin ->
-  serviceability success and block behavior.
+  serviceability success and block behavior without a live geo backend.
 - `apps/ops-console-web/app/callcenter/page.tsx:2557-2607`
-  Adjacent callcenter implementation already mounts two `AddressMapPicker`
-  instances and surfaces a booking gate banner in the live UI.
-- `apps/ops-console-web/app/callcenter/map-booking.ts:13-147`
+  Adjacent callcenter implementation already mounts shared map pickers in the
+  live UI and renders a booking-gate banner.
+- `apps/ops-console-web/app/callcenter/map-booking.ts:1-147`
   Adjacent callcenter helper already encodes the submit gate expected by
   `MAP-BE-004`: coordinates required, provenance required, preview required,
   preview unavailable blocked, and `not_serviceable` blocked before
@@ -129,72 +143,81 @@ From the 2026-06-30 execution packet, parent-task verification should include:
 ### Concierge parent surface (`MAP-FE-CON-001` live gap)
 
 - `apps/concierge-portal-web/app/bookings/new/page.tsx:293-526`
-  Current concierge booking form is still text-first and submits through a
-  single `onSubmit` block without any shared map picker or provider seam.
+  Current concierge booking is still a text-first form with one `onSubmit`
+  block and no shared map picker or provider seam.
 - `apps/concierge-portal-web/app/bookings/new/page.tsx:348-356`
-  Current `createCallCenterOrder` command sends `{ address }` only for both
-  pickup and dropoff. No coordinates or provenance are attached even though
-  the contract allows them.
+  Current `createCallCenterOrder` submission sends `{ address }` only for both
+  pickup and dropoff. No coordinates or provenance are attached even though the
+  contract already supports them.
 - `apps/concierge-portal-web/app/bookings/new/page.tsx:465-485`
-  Pickup and dropoff are still plain `<textarea>` inputs, so dispatch-ready
+  Pickup and dropoff remain plain `<textarea>` inputs, so dispatch-ready
   coordinates cannot be captured client-side.
 - `apps/concierge-portal-web/app/bookings/new/page.tsx:270-287`
   Guardrail routes for denied, ineligible, and recording-unavailable already
-  exist, so the parent task should preserve explicit degraded routing instead
-  of silently falling back when geo or service-area checks fail.
+  exist, so the parent task should preserve explicit degraded routing instead of
+  silently falling back when geo or service-area checks fail.
 
 ### Partner parent surface (`MAP-FE-CON-001` live gap)
 
 - `apps/partner-booking-web/components/partner-booking-form.tsx:513-535`
-  Trip details remain plain text fields for pickup, dropoff, and time
-  window; no shared picker or serviceability preview is mounted.
+  Trip details remain plain text fields for pickup, dropoff, and time window;
+  no shared picker or serviceability preview is mounted.
 - `apps/partner-booking-web/components/partner-booking-form.tsx:672-699`
-  Review and submit currently end in a local success banner only. The form
-  does not yet wire backend booking creation, backend gate rendering, or
-  degraded and manual-review states.
+  Review and submit still stop at local readiness plus a success banner; the
+  form does not yet render backend gate outcomes or persist a booking through
+  the live transport seam.
 - `apps/partner-booking-web/lib/partner-booking-form.ts:9-35`
   The draft model stores pickup and dropoff as strings only.
 - `apps/partner-booking-web/lib/partner-booking-form.ts:219-277`
-  Current field validation checks text presence and window ordering, but not
+  Current validation checks text presence and window ordering, but not
   coordinates, provenance, or service-area outcome.
 - `apps/partner-booking-web/lib/api-client.ts:572-589`
   `createPartnerBooking()` already exists and accepts
-  `CreateTenantBookingCommand`; the parent task needs to wire the current
-  form into this existing command seam with coordinate-bearing
-  `AddressPayload`s.
-- `apps/partner-booking-web/lib/translations.ts:19-29`
-  Funnel copy already distinguishes separate partner surfaces.
+  `CreateTenantBookingCommand`; the parent task needs to wire the current form
+  into this existing command seam with coordinate-bearing `AddressPayload`s.
+- `apps/partner-booking-web/lib/translations.ts:44-70`
+  Current copy still frames submit as local form validation
+  (`Validate booking form` / `Form validation passed`), which matches the live
+  implementation gap above.
 - `apps/partner-booking-web/lib/translations.ts:285-287`
-  Existing manual-review copy is generic user-facing language; parent work
-  should keep reason rendering user-safe and avoid leaking internal policy
-  jargon.
+  Existing manual-review copy is already user-safe; parent work should preserve
+  that tone instead of leaking internal policy jargon.
 
 ### Backend dependency status notes
 
-- `MAP-BE-004`
-  The 2026-06-30 execution packet and 2026-06-30 gap inventory both describe
-  this dependency as the backend booking-creation service-area gate:
+- `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md:1-14`
+  The current parent `planning_ref` is an addendum and explicitly complements
+  the `20260630` baseline rather than replacing it.
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:151-160`
+  Baseline dependency routing still places `MAP-FE-CON-001` on
+  `MAP-UI-001`, `MAP-BE-004`, and `MAP-BE-005`.
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:312-364`
+  `MAP-BE-004` is the backend booking-creation service-area gate:
   coordinate-bearing bookings must evaluate serviceability,
-  `not_serviceable` and no-pickup cases must hard-block, and
+  `not_serviceable` and no-pickup cases hard-block, and
   `manual_review` or coordinate-missing legacy paths must not silently
   dispatch.
-- `MAP-BE-005`
-  The same packet and gap inventory describe this dependency as the immutable
-  spatial-audit snapshot layer: created orders should retain coordinate
-  provenance, decision, area and policy and version refs, actor and surface,
-  and audit evidence. Parent frontend evidence should therefore demonstrate
-  not only UI banners but that booking commands carry the data needed for this
-  backend audit seam.
-- `MAP-UI-001`
-  The same packet and gap inventory describe this dependency as already
-  landed shared `AddressMapPicker` and `AddressMapPairPicker` foundation.
-  Parent work should compose with it rather than invent a concierge-only or
-  partner-only map primitive.
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:365-420`
+  `MAP-BE-005` is the immutable spatial-audit snapshot layer: created orders
+  should retain coordinate provenance, actor/surface, service-area decision,
+  area/policy/version refs, and audit evidence.
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:516-554`
+  `MAP-UI-001` is the accepted shared `AddressMapPicker` /
+  `AddressMapPairPicker` baseline that parent work should compose with rather
+  than replace.
+- `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md:651-672`
+  Parent goal, acceptance, and verification still match the current machine
+  truth: coordinate-bearing concierge submit, consistent partner reason
+  rendering, outage-safe degraded/manual-review behavior, and package checks.
+- `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md:36-49`
+  Baseline inventory also records `MAP-UI-001` as landed and `MAP-BE-004` /
+  `MAP-BE-005` as the authoritative backend gate plus spatial-audit seams.
 
 ## What The Reviewer Should Confirm
 
-- The packet points the parent owner to shared primitives and live contract
-  seams, not to speculative new APIs.
+- The packet now cites only repo-live paths that resolve in this worktree.
+- The packet points the parent owner to existing shared primitives and live
+  create seams, not speculative new APIs.
 - The concierge gap is accurately captured as text-only pickup and dropoff
   submission today, with no coordinate-bearing `CreateCallCenterOrderCommand`
   payload yet.
@@ -211,8 +234,11 @@ From the 2026-06-30 execution packet, parent-task verification should include:
 
 - `scripts/ai-status.sh show MAP-FE-CON-001`
 - `scripts/ai-status.sh show MAP-FE-CON-001-SIDECAR-ACCEPTANCE`
+- `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md`
+- `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md`
 - `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md`
 - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260630.md`
+- `packages/ui-web/src/address-map-picker-core.ts`
 - `packages/ui-web/src/address-map-picker.tsx`
 - `packages/contracts/src/index.ts`
 - `packages/api-client/src/index.ts`
@@ -231,10 +257,10 @@ From the 2026-06-30 execution packet, parent-task verification should include:
 ## Reviewer Handoff
 
 Owner handoff command:
-`AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CON-001-SIDECAR-ACCEPTANCE Codex2 "Prepared MAP-FE-CON-001 support packet at support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md. Packet captures machine-truth snapshot, dependency map, live concierge and partner gaps, and reference map-picker seams without changing canonical or runtime files. Verified sidecar-only diff with git diff --check; parent machine-truth artifact paths still missing in this worktree are called out explicitly for reviewer follow-up."`
+`AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CON-001-SIDECAR-ACCEPTANCE Codex2 "Updated support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md with a refreshed machine-truth snapshot and repo-live dependency map. Re-validated every cited path in this worktree; the only unresolved paths are the parent machine-truth evidence artifacts still missing from the tree. Verified sidecar-only diff with git diff --check; package checks were not run because this slice changes support material only."`
 
 Reviewer approval command:
-`AI_NAME=Codex2 scripts/ai-status.sh approve MAP-FE-CON-001-SIDECAR-ACCEPTANCE "Reviewed: support packet stays sidecar-only, accurately maps concierge and partner gaps to shared picker and backend dependencies, and clearly distinguishes existing references from missing parent evidence paths."`
+`AI_NAME=Codex2 scripts/ai-status.sh approve MAP-FE-CON-001-SIDECAR-ACCEPTANCE "Reviewed: support packet stays sidecar-only, cites repo-live paths only, accurately maps concierge and partner gaps to shared picker and backend dependencies, and clearly distinguishes current references from missing parent evidence artifacts."`
 
 ## Local Verification For This Sidecar Slice
 
@@ -243,7 +269,7 @@ Reviewer approval command:
   changed for this task.
 - Run
   `git diff --check -- support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md`.
-- Spot-check missing parent artifact paths before the parent task claims
-  review evidence exists.
+- Spot-check the missing parent artifact paths above before the parent task
+  claims review evidence exists.
 - Package checks were not run here because this slice does not modify runtime
   code; the expected parent verification commands are recorded above.
