@@ -1,7 +1,7 @@
 # MAP-FE-CON-001 SIDECAR ACCEPTANCE
 
-Snapshot Type: owner support packet from machine-truth and repo-live anchors
-Snapshot Captured At: 2026-07-03T18:29:10Z
+Snapshot Type: owner support packet from machine-truth and branch-local inspection anchors
+Snapshot Captured At: 2026-07-03T18:32:54Z
 Snapshot Status At Capture: in_progress
 Owner: Codex
 Reviewer: Codex2
@@ -31,8 +31,8 @@ concierge and partner entry map-alignment slice.
 - `ai-status.json` remains authoritative; this markdown file is only a
   snapshot captured via `scripts/ai-status.sh`.
 - Sidecar task `MAP-FE-CON-001-SIDECAR-ACCEPTANCE` is `in_progress` at
-  `2026-07-03T18:28:00Z` with next step
-  `Revalidating support packet citations against repo-live paths in the assigned worktree; correcting missing-path claims before reviewer handoff.`
+  `2026-07-03T18:32:05Z` with next step
+  `Review rejection received; correcting the packet wording and replacing it with a worktree-evidenced missing-path inventory.`
 - Parent task `MAP-FE-CON-001` is `in_progress` at `2026-07-03T18:17:34Z`
   with owner / reviewer `Claude2` / `Codex`.
 - Parent machine-truth references currently point at:
@@ -50,16 +50,17 @@ concierge and partner entry map-alignment slice.
   - `partner assisted entry reason codes consistent`
   - `provider outage cannot create silent normal order`
   - `package checks pass`
-- Repo-live revalidation in this assigned worktree confirmed that the
-  previously questioned code paths do resolve here:
+- Branch-local inspection anchors spot-checked in this owner worktree:
   - `apps/tenant-console-web/lib/geo-map-provider.ts`
   - `apps/tenant-console-web/lib/tenant-address-map.ts`
   - `apps/ops-console-web/app/callcenter/map-booking.ts`
   - `tests/e2e/tenant-map-booking-ui.spec.ts`
   - `packages/ui-web/src/address-map-picker-core.ts`
   - `packages/ui-web/src/address-map-picker.tsx`
-- This sidecar file is present on the current task branch, and every code/doc
-  repo path cited below was re-validated in this worktree before re-handoff.
+- Reviewer rejection context: the prior draft used wording that overstated what
+  this sidecar can prove across other worktrees. This revision keeps these
+  files as branch-local inspection anchors only and separates them from
+  still-missing parent evidence.
 - Parent artifact paths currently declared in machine truth but still missing in
   this worktree snapshot:
   - `tests/e2e/concierge-map-booking-ui.spec.ts`
@@ -83,23 +84,35 @@ should include:
 - `pnpm --filter @drts/partner-booking-web typecheck`
 - relevant test and lint commands for touched packages
 
+## Evidence Model
+
+- `ai-status.json` and `scripts/ai-status.sh show ...` remain the source of
+  truth for task ownership, dependency declarations, and parent artifact
+  expectations.
+- This markdown packet contributes only branch-local inspection anchors from
+  the current owner worktree; it does not claim repo-wide or reviewer-worktree
+  validation.
+- Missing parent evidence stays listed as missing until the parent owner either
+  creates those artifacts or updates machine truth to point at the actual
+  delivered paths.
+
 ## Acceptance Checklist
 
 - [x] Packet stays scoped to `MAP-FE-CON-001` support only.
-- [x] Every cited code/doc repo path below resolves in the current task
-      worktree.
+- [x] The packet distinguishes branch-local inspection anchors from machine-
+      truth artifact expectations.
 - [x] Dependency map covers shared picker primitives, contract payloads,
       frontend submit seams, backend gate expectations, and degraded/manual
       behavior.
-- [x] Current concierge and partner gaps are described from repo-live files,
-      not speculative implementation intent.
+- [x] Current concierge and partner gaps are described from cited branch-local
+      files, not speculative implementation intent.
 - [x] Missing parent evidence artifacts are called out explicitly instead of
       being assumed present.
 - [x] No canonical truth or runtime files are modified by this sidecar slice.
 
-## Repo-Live Revalidation Summary
+## Branch-Local Inventory Summary
 
-- Revalidated present code paths that were previously called out as missing:
+- Present branch-local inspection anchors used by the dependency map:
   - `apps/tenant-console-web/lib/geo-map-provider.ts`
   - `apps/tenant-console-web/lib/tenant-address-map.ts`
   - `apps/ops-console-web/app/callcenter/map-booking.ts`
@@ -246,9 +259,11 @@ should include:
 
 ## What The Reviewer Should Confirm
 
-- The packet now cites only repo-live paths that resolve in this worktree.
-- The earlier rejection list for missing code paths is stale for this worktree;
-  the remaining path mismatch is the parent evidence set above.
+- The packet now treats cited code/doc files as branch-local inspection
+  anchors, not as repo-wide or reviewer-worktree validation claims.
+- The earlier rejection is addressed by removing the stale
+  validation framing; the remaining explicit path mismatch is the
+  parent evidence set above.
 - The packet points the parent owner to existing shared primitives and live
   create seams, not speculative new APIs.
 - The concierge gap is accurately captured as text-only pickup and dropoff
@@ -290,10 +305,10 @@ should include:
 ## Reviewer Handoff
 
 Owner handoff command:
-`AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CON-001-SIDECAR-ACCEPTANCE Codex2 "Updated support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md with a refreshed machine-truth snapshot and repo-live dependency map. Re-validated every cited code/doc path in this worktree; the only unresolved paths are the parent machine-truth evidence artifacts still missing from the tree. Verified sidecar-only diff with git diff --check; package checks were not run because this slice changes support material only."`
+`AI_NAME=Codex scripts/ai-status.sh handoff MAP-FE-CON-001-SIDECAR-ACCEPTANCE Codex2 "Updated support/sidecars/MAP-FE-CON-001/MAP-FE-CON-001-SIDECAR-ACCEPTANCE.md to replace the stale validation wording with a machine-truth snapshot plus branch-local inspection-anchor model. Confirmed the packet remains sidecar-only and that the only unresolved paths are the parent machine-truth evidence artifacts still missing from this worktree. Verified formatting with git diff --check; package checks were not run because this slice changes support material only."`
 
 Reviewer approval command:
-`AI_NAME=Codex2 scripts/ai-status.sh approve MAP-FE-CON-001-SIDECAR-ACCEPTANCE "Reviewed: support packet stays sidecar-only, cites repo-live paths only, accurately maps concierge and partner gaps to shared picker and backend dependencies, and clearly distinguishes current references from missing parent evidence artifacts."`
+`AI_NAME=Codex2 scripts/ai-status.sh approve MAP-FE-CON-001-SIDECAR-ACCEPTANCE "Reviewed: support packet stays sidecar-only, uses machine-truth plus branch-local inspection-anchor language, accurately maps concierge and partner gaps to shared picker and backend dependencies, and clearly distinguishes current references from missing parent evidence artifacts."`
 
 ## Local Verification For This Sidecar Slice
 
