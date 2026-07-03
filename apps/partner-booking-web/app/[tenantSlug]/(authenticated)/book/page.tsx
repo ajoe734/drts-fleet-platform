@@ -2,15 +2,22 @@ import { notFound, redirect } from "next/navigation";
 import { PartnerBookingForm } from "@/components/partner-booking-form";
 import {
   PartnerAuthorityError,
+  buildLocalReferencePartnerEntry,
   getPartnerRouteContext,
 } from "@/lib/api-client";
+import { resolvePartnerMapProviderMode } from "@/lib/partner-map-provider";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
   searchParams: Promise<{
     eligibilityVerificationId?: string | string[];
+    mapProviderState?: string | string[];
   }>;
 };
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 export default async function PartnerBookPage({
   params,
@@ -19,21 +26,27 @@ export default async function PartnerBookPage({
   const { tenantSlug } = await params;
   const resolvedSearchParams = await searchParams;
   try {
-    const { brand, entry } = await getPartnerRouteContext(tenantSlug);
+    // Degrade to the local reference shell when the authority is unreachable so
+    // the assisted-entry map picker still renders during a backend outage. A
+    // definitive NOT_FOUND / INACTIVE verdict is still honoured below.
+    const { brand, entry } = await getPartnerRouteContext(tenantSlug, {
+      allowAuthorityOutage: true,
+    });
     const eligibilityVerificationId =
-      (Array.isArray(resolvedSearchParams.eligibilityVerificationId)
-        ? resolvedSearchParams.eligibilityVerificationId[0]
-        : resolvedSearchParams.eligibilityVerificationId) ?? null;
-
-    if (!entry) {
-      redirect(`/${tenantSlug}/inactive`);
-    }
+      firstParam(resolvedSearchParams.eligibilityVerificationId) ?? null;
+    // The partner funnel picker uses a self-contained mock geo provider whose
+    // health is driven per-navigation, so QA can exercise the provider-outage
+    // manual-review path without a live geo backend.
+    const mapProviderState = resolvePartnerMapProviderMode(
+      firstParam(resolvedSearchParams.mapProviderState),
+    );
 
     return (
       <PartnerBookingForm
         brand={brand}
-        entry={entry}
+        entry={entry ?? buildLocalReferencePartnerEntry(tenantSlug)}
         eligibilityVerificationId={eligibilityVerificationId}
+        mapProviderState={mapProviderState}
       />
     );
   } catch (error) {

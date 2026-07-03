@@ -37,6 +37,7 @@ import {
 import {
   createConfiguredPartnerMapProvider,
   resolvePartnerMapProviderMode,
+  type PartnerMapProviderMode,
 } from "@/lib/partner-map-provider";
 import { useTranslation } from "@/lib/i18n";
 
@@ -232,6 +233,7 @@ export function PartnerBookingForm({
   brand,
   entry,
   eligibilityVerificationId,
+  mapProviderState,
 }: {
   brand: PartnerBrandTemplate;
   entry: Pick<
@@ -239,6 +241,12 @@ export function PartnerBookingForm({
     "businessDispatchSubtype" | "eligibilityMode" | "entrySlug" | "programCode"
   >;
   eligibilityVerificationId: string | null;
+  /**
+   * Forces the self-contained mock geo provider health for this funnel. Lets QA
+   * drive the provider-outage manual-review path per-navigation; defaults to the
+   * env-configured mode (healthy) when unset.
+   */
+  mapProviderState?: PartnerMapProviderMode;
 }) {
   const { locale, t } = useTranslation();
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
@@ -258,11 +266,12 @@ export function PartnerBookingForm({
   const mapProvider = useMemo(
     () =>
       createConfiguredPartnerMapProvider(
-        resolvePartnerMapProviderMode(
-          process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE,
-        ),
+        mapProviderState ??
+          resolvePartnerMapProviderMode(
+            process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE,
+          ),
       ),
-    [],
+    [mapProviderState],
   );
 
   const providerOutage = isPartnerProviderOutage(
