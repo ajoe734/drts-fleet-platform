@@ -14,28 +14,32 @@ export default defineConfig({
   projects: [
     {
       name: "ops-assistant-on",
-      testIgnore: /(fleet-partner-portal-.*|tenant-map-booking-ui)\.spec\.ts/,
+      testIgnore:
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3202",
       },
     },
     {
       name: "ops-assistant-off",
-      testIgnore: /(fleet-partner-portal-.*|tenant-map-booking-ui)\.spec\.ts/,
+      testIgnore:
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3202",
       },
     },
     {
       name: "platform-admin-assistant-on",
-      testIgnore: /(fleet-partner-portal-.*|tenant-map-booking-ui)\.spec\.ts/,
+      testIgnore:
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3102",
       },
     },
     {
       name: "platform-admin-assistant-off",
-      testIgnore: /(fleet-partner-portal-.*|tenant-map-booking-ui)\.spec\.ts/,
+      testIgnore:
+        /(fleet-partner-portal-.*|tenant-map-booking-ui|concierge-map-booking-ui|partner-map-booking-ui)\.spec\.ts/,
       use: {
         baseURL: "http://127.0.0.1:3103",
       },
