@@ -12,11 +12,9 @@ import {
   cloneGeometryDraft,
   createEmptyGeometryDraft,
   distanceMeters,
-  geometryDraftToGeoJson,
   hasGeometry,
   parseGeometryDraftGeoJson,
   resolveBounds,
-  validateGeometryDraft,
 } from "./geometry-editor-core";
 import type {
   GeoPoint,
