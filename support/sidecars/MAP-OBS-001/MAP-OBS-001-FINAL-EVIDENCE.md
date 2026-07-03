@@ -1,19 +1,19 @@
 # MAP-OBS-001 Final Observability Evidence
 
 Task: `MAP-OBS-001`
-Implementation branch/SHA: `codex/map-obs-001@b8bcc51d6888`
+Implementation branch/SHA: `codex/map-obs-001@43baac5843a2`
 Merge-base against `origin/dev`: `abd6755a6eb1091dd38e99a1de50ebabebf22bb4`
 Automated evidence log: `support/sidecars/MAP-OBS-001/MAP-OBS-001-AUTOMATED-EVIDENCE-20260701.md`
 
 ## Verdict
 
-MAP-OBS-001 is `PASS` for repo-backed observability scope. Required metrics, audit events, recent-window alerts, and runbook distinctions are implemented in committed API/runtime code and verified by targeted tests plus lint/typecheck artifacts. Production exporter wiring, dashboards, staged traffic, and release-level readiness remain `EXTERNAL-GATED` outside this task.
+MAP-OBS-001 is `PASS` for repo-backed observability scope. Required metrics, audit events, recent-window alerts, and runbook distinctions are implemented in committed API/runtime code and verified by targeted tests plus lint/typecheck artifacts. Final approved head `43baac5843a2` adds only the web observability fallback `mapGeofence` snapshot literals needed to keep dashboard fallback payloads aligned with `OperationalMapGeofenceMetrics`, so the runtime and alert evidence below remains applicable. Production exporter wiring, dashboards, staged traffic, and release-level readiness remain `EXTERNAL-GATED` outside this task.
 
 ## Environment
 
 | Item                     | Value                                                                                                           |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| OBS branch/SHA           | `codex/map-obs-001@b8bcc51d6888`                                                                                |
+| OBS branch/SHA           | `codex/map-obs-001@43baac5843a2`                                                                                |
 | Base branch / merge-base | `origin/dev@abd6755a6eb1091dd38e99a1de50ebabebf22bb4`                                                           |
 | Test environment         | `local isolated task worktree`                                                                                  |
 | Metrics backend          | `repo-backed in-process mapGeofence snapshot; Prometheus/OpenTelemetry exporter mapping remains external-gated` |

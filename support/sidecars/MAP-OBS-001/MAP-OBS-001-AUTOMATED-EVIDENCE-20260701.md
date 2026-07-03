@@ -1,7 +1,7 @@
 # MAP-OBS-001 Automated Evidence
 
 Task: `MAP-OBS-001`
-Implementation branch/SHA: `codex/map-obs-001@b8bcc51d6888`
+Implementation branch/SHA: `codex/map-obs-001@43baac5843a2`
 Merge-base against `origin/dev`: `abd6755a6eb1091dd38e99a1de50ebabebf22bb4`
 
 ## Command Log
@@ -20,4 +20,5 @@ Merge-base against `origin/dev`: `abd6755a6eb1091dd38e99a1de50ebabebf22bb4`
 
 - `support/sidecars/MAP-OBS-001/artifacts/vitest-map-geofence-alerts-20260703T153844Z.json` reports `3/3` tests passed for alert and runbook coverage.
 - `support/sidecars/MAP-OBS-001/artifacts/vitest-map-geofence-observability-runtime-20260703T153844Z.json` reports `39/39` tests passed for geo, service-area, and operational observability runtime coverage.
-- `typecheck`, API `lint`, root alert-test `eslint`, targeted `prettier --check`, and `git diff --check` all passed on the implementation commit above.
+- `typecheck`, API `lint`, root alert-test `eslint`, targeted `prettier --check`, and `git diff --check` all passed on the evidence-producing slice that remains unchanged in the final approved branch head.
+- Final approved head `43baac5843a2` adds only the `mapGeofence` fallback snapshot literals in `apps/platform-admin-web/app/health/page.tsx` and `apps/ops-console-web/app/dashboard/page.tsx`; reviewer approval confirmed the added stub matches `OperationalMapGeofenceMetrics` without changing API, alert, or runbook behavior.
