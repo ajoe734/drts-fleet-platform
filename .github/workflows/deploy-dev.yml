@@ -791,6 +791,34 @@ jobs:
             --wait \
             --project "${{ needs.prepare.outputs.project_id }}"
 
+      - name: Dump migration job diagnostics
+        if: ${{ failure() }}
+        run: |
+          set +e
+          job="${{ needs.prepare.outputs.migration_job }}"
+          region="${{ needs.prepare.outputs.region }}"
+          project="${{ needs.prepare.outputs.project_id }}"
+          execution="$(gcloud run jobs executions list \
+            --job "$job" \
+            --region "$region" \
+            --project "$project" \
+            --sort-by="~metadata.creationTimestamp" \
+            --limit=1 \
+            --format="value(metadata.name)")"
+          echo "latest_execution=${execution:-<none>}"
+          if [[ -n "$execution" ]]; then
+            gcloud run jobs executions describe "$execution" \
+              --region "$region" \
+              --project "$project" || true
+          fi
+          echo "::group::Cloud Run migration logs"
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$job\"" \
+            --project "$project" \
+            --limit 200 \
+            --order desc \
+            --format="value(timestamp,severity,textPayload,jsonPayload.message)" || true
+          echo "::endgroup::"
+
   deploy:
     name: Deploy services
     runs-on: ubuntu-latest
