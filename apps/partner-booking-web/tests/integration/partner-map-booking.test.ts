@@ -139,7 +139,7 @@ describe("partner map booking gate", () => {
     });
   });
 
-  it("treats a preview error as a degraded manual-review path", () => {
+  it("blocks a preview error while the provider is healthy (backend gate error, not a silent submit)", () => {
     expect(
       getPartnerMapBookingGate({
         pickup: readyPickup,
@@ -147,6 +147,21 @@ describe("partner map booking gate", () => {
         serviceability: null,
         previewStatus: "error",
         providerOutage: false,
+      }),
+    ).toEqual({
+      canSubmit: false,
+      reason: "serviceability_preview_unavailable",
+    });
+  });
+
+  it("degrades a preview error to manual review only during a genuine provider outage", () => {
+    expect(
+      getPartnerMapBookingGate({
+        pickup: readyPickup,
+        dropoff: readyDropoff,
+        serviceability: null,
+        previewStatus: "error",
+        providerOutage: true,
       }),
     ).toEqual({
       canSubmit: true,
@@ -180,6 +195,12 @@ describe("partner provider outage + banner codes", () => {
         reason: "serviceability_blocked",
       }),
     ).toBe("serviceability_blocked");
+    expect(
+      getPartnerMapBookingBannerCode({
+        canSubmit: false,
+        reason: "serviceability_preview_unavailable",
+      }),
+    ).toBe("serviceability_preview_unavailable");
   });
 
   it("accepts a coordinate source as provenance", () => {

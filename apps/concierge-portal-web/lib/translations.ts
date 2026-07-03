@@ -279,6 +279,9 @@ const en = {
   "booking.map.banner.previewPendingTitle": "Checking the route",
   "booking.map.banner.previewPendingBody":
     "Confirming both locations are inside the serviced area.",
+  "booking.map.banner.previewUnavailableTitle": "Can't confirm the route",
+  "booking.map.banner.previewUnavailableBody":
+    "We couldn't check whether these locations can be served. Please try again in a moment before submitting.",
   "booking.map.banner.pickupPinTitle": "Confirm the pickup location",
   "booking.map.banner.pickupPinBody":
     "Search or drop a pin so the pickup point is exact before submitting.",
@@ -700,6 +703,9 @@ const zh: Record<keyof typeof en, string> = {
   "booking.map.banner.previewPendingTitle": "確認路線中",
   "booking.map.banner.previewPendingBody":
     "正在確認兩個地點是否都在服務範圍內。",
+  "booking.map.banner.previewUnavailableTitle": "無法確認路線",
+  "booking.map.banner.previewUnavailableBody":
+    "目前無法確認這些地點是否可服務，請稍候再試後再送出。",
   "booking.map.banner.pickupPinTitle": "請確認上車地點",
   "booking.map.banner.pickupPinBody":
     "送出前，請搜尋或在地圖上標記，讓上車點更精確。",

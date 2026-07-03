@@ -80,6 +80,9 @@ const en = {
   "book.map.banner.previewPendingTitle": "Checking the route",
   "book.map.banner.previewPendingBody":
     "Confirming both locations are inside the serviced area.",
+  "book.map.banner.previewUnavailableTitle": "Can't confirm the route",
+  "book.map.banner.previewUnavailableBody":
+    "We couldn't check whether these locations can be served. Please try again in a moment before submitting.",
   "book.map.banner.pickupPinTitle": "Confirm the pickup location",
   "book.map.banner.pickupPinBody":
     "Search or drop a pin so the pickup point is exact.",
@@ -552,6 +555,9 @@ const zh = {
   "book.map.banner.blockedBody": "其中一個地點超出本合作夥伴可服務的範圍。",
   "book.map.banner.previewPendingTitle": "確認路線中",
   "book.map.banner.previewPendingBody": "正在確認兩個地點是否都在服務範圍內。",
+  "book.map.banner.previewUnavailableTitle": "無法確認路線",
+  "book.map.banner.previewUnavailableBody":
+    "目前無法確認這些地點是否可服務，請稍候再試後再送出。",
   "book.map.banner.pickupPinTitle": "請確認上車地點",
   "book.map.banner.pickupPinBody": "請搜尋或在地圖上標記，讓上車點更精確。",
   "book.map.banner.dropoffPinTitle": "請確認下車地點",

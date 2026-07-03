@@ -30,6 +30,7 @@ export type PartnerMapBookingBlockReason =
   | "pickup_provenance_required"
   | "dropoff_provenance_required"
   | "serviceability_preview_required"
+  | "serviceability_preview_unavailable"
   | "serviceability_blocked";
 
 export type PartnerMapBookingOutcome =
@@ -121,11 +122,18 @@ export function getPartnerMapBookingGate({
   if (!hasPartnerCoordinateProvenance(dropoff)) {
     return { canSubmit: false, reason: "dropoff_provenance_required" };
   }
+  // A preview error only degrades to the manual-review fallback when the map
+  // provider is genuinely down. A preview that errored while the provider is
+  // healthy is a real backend serviceability/gate failure: block it instead of
+  // silently promoting a coordinate-carrying order to a manual-review submit.
   if (previewStatus === "error") {
-    return {
-      canSubmit: true,
-      outcome: { kind: "provider_outage_manual_review" },
-    };
+    if (providerOutage) {
+      return {
+        canSubmit: true,
+        outcome: { kind: "provider_outage_manual_review" },
+      };
+    }
+    return { canSubmit: false, reason: "serviceability_preview_unavailable" };
   }
   if (previewStatus !== "ready" || !serviceability) {
     return { canSubmit: false, reason: "serviceability_preview_required" };

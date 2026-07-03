@@ -188,13 +188,27 @@ describe("concierge map booking gate", () => {
     });
   });
 
-  it("treats a preview error as a degraded manual-review path", () => {
+  it("blocks a preview error while the provider is healthy (backend gate error, not a silent submit)", () => {
     const gate = getConciergeMapBookingGate({
       pickup: readyPickup,
       dropoff: readyDropoff,
       serviceability: null,
       previewStatus: "error",
       providerOutage: false,
+    });
+    expect(gate).toEqual({
+      canSubmit: false,
+      reason: "serviceability_preview_unavailable",
+    });
+  });
+
+  it("degrades a preview error to manual review only during a genuine provider outage", () => {
+    const gate = getConciergeMapBookingGate({
+      pickup: readyPickup,
+      dropoff: readyDropoff,
+      serviceability: null,
+      previewStatus: "error",
+      providerOutage: true,
     });
     expect(gate).toEqual({
       canSubmit: true,
@@ -241,6 +255,12 @@ describe("concierge banner code", () => {
         reason: "serviceability_blocked",
       }),
     ).toBe("serviceability_blocked");
+    expect(
+      getConciergeMapBookingBannerCode({
+        canSubmit: false,
+        reason: "serviceability_preview_unavailable",
+      }),
+    ).toBe("serviceability_preview_unavailable");
   });
 });
 

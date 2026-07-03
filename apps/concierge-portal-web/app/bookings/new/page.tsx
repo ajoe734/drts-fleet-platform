@@ -106,6 +106,12 @@ function mapBookingBannerCopy(code: ConciergeMapBookingBannerCode): {
         titleKey: "booking.map.banner.previewPendingTitle",
         bodyKey: "booking.map.banner.previewPendingBody",
       };
+    case "serviceability_preview_unavailable":
+      return {
+        chipClass: "chip-warning",
+        titleKey: "booking.map.banner.previewUnavailableTitle",
+        bodyKey: "booking.map.banner.previewUnavailableBody",
+      };
     case "pickup_coordinates_required":
     case "pickup_provenance_required":
       return {
@@ -192,9 +198,10 @@ export default function ConciergeBookingCreatePage() {
     dropoffProviderState,
   );
 
-  // Evaluate serviceability once both stops carry coordinates. A provider drop
-  // mid-evaluation surfaces as an error status, which the gate treats as a
-  // degraded manual-review path rather than a dispatchable one.
+  // Evaluate serviceability once both stops carry coordinates. A failed
+  // evaluation surfaces as an error status: the gate blocks it as a backend
+  // serviceability failure, or degrades to manual review only during a genuine
+  // provider outage — never a silent dispatch.
   useEffect(() => {
     if (
       !hasConciergeAddressCoordinates(pickupPin) ||

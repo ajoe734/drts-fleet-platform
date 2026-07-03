@@ -106,6 +106,34 @@ async function stubHealthyGeo(
   );
 }
 
+/**
+ * Healthy geo provider (search + health both OK) but the serviceability
+ * evaluation itself fails. This is a backend gate error, distinct from a
+ * provider outage: the gate must block, not degrade to a manual-review submit.
+ */
+async function stubHealthyGeoWithFailingEvaluate(page: Page) {
+  await page.route("**/api/geo/health", (route) =>
+    route.fulfill({
+      json: { provider: "mock", mode: "mock", status: "healthy" },
+    }),
+  );
+  await page.route("**/api/geo/search**", (route) => {
+    const url = new URL(route.request().url());
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const candidate = q.includes("air") ? DROPOFF_CANDIDATE : PICKUP_CANDIDATE;
+    route.fulfill({
+      json: {
+        candidates: [candidate],
+        provider: "mock",
+        generatedAt: "2026-07-01T00:00:00.000Z",
+      },
+    });
+  });
+  await page.route("**/api/service-area/evaluate", (route) =>
+    route.fulfill({ status: 500, json: { message: "evaluation failed" } }),
+  );
+}
+
 function pickerBox(page: Page, stop: "pickup" | "dropoff") {
   return page.locator(`[data-address-map-picker="concierge-${stop}-map"]`);
 }
@@ -158,6 +186,25 @@ test.describe("concierge assisted-entry booking map alignment", () => {
     await expect(gate(page)).toHaveAttribute(
       "data-concierge-map-booking-gate",
       "serviceability_blocked",
+    );
+    await expect(submit(page)).toBeDisabled();
+  });
+
+  test("a failed serviceability evaluation (healthy provider) blocks, never a silent submit", async ({
+    page,
+  }) => {
+    await seedDeskSession(page);
+    await stubHealthyGeoWithFailingEvaluate(page);
+    await page.goto("/bookings/new");
+
+    await pinBothStops(page);
+
+    // Provider is healthy, so this is a backend gate error, not an outage:
+    // the gate must render a blocked preview-unavailable state, not promote
+    // the coordinate-carrying order to a manual-review submit.
+    await expect(gate(page)).toHaveAttribute(
+      "data-concierge-map-booking-gate",
+      "serviceability_preview_unavailable",
     );
     await expect(submit(page)).toBeDisabled();
   });

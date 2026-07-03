@@ -91,6 +91,12 @@ function partnerMapBannerCopy(code: PartnerMapBookingBannerCode): {
         titleKey: "book.map.banner.previewPendingTitle",
         bodyKey: "book.map.banner.previewPendingBody",
       };
+    case "serviceability_preview_unavailable":
+      return {
+        tone: "warn",
+        titleKey: "book.map.banner.previewUnavailableTitle",
+        bodyKey: "book.map.banner.previewUnavailableBody",
+      };
     case "pickup_coordinates_required":
     case "pickup_provenance_required":
       return {
