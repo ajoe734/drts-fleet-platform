@@ -1,8 +1,8 @@
 # MAP-FE-CON-001 SIDECAR ACCEPTANCE
 
 Snapshot Type: owner support packet from machine-truth and branch-local inspection anchors
-Snapshot Captured At: 2026-07-03T18:32:54Z
-Snapshot Status At Capture: in_progress
+Snapshot Captured At: 2026-07-03T18:37:12Z
+Snapshot Status At Capture: review_approved
 Owner: Codex
 Reviewer: Codex2
 Parent Task: MAP-FE-CON-001
@@ -30,11 +30,12 @@ concierge and partner entry map-alignment slice.
 
 - `ai-status.json` remains authoritative; this markdown file is only a
   snapshot captured via `scripts/ai-status.sh`.
-- Sidecar task `MAP-FE-CON-001-SIDECAR-ACCEPTANCE` is `in_progress` at
-  `2026-07-03T18:32:05Z` with next step
-  `Review rejection received; correcting the packet wording and replacing it with a worktree-evidenced missing-path inventory.`
-- Parent task `MAP-FE-CON-001` is `in_progress` at `2026-07-03T18:17:34Z`
-  with owner / reviewer `Claude2` / `Codex`.
+- Sidecar task `MAP-FE-CON-001-SIDECAR-ACCEPTANCE` is `review_approved` at
+  `2026-07-03T18:36:06Z` with reviewer note
+  `Reviewed: support packet stays sidecar-only, uses machine-truth plus branch-local inspection-anchor language, accurately maps concierge and partner gaps to shared picker and backend dependencies, and clearly distinguishes current references from missing parent evidence artifacts.`
+- Parent task `MAP-FE-CON-001` is `in_progress` at `2026-07-03T18:29:19Z`
+  with owner / reviewer `Claude2` / `Codex` and next step
+  `Investigation complete. Dev concierge/partner forms are still text-only (no picker/gate). codex2 branch built against stale unshipped ui-web API; d73cab191 is the REJECTED visible-lat/lng design; accepted picker-based fix was never committed. Plan: build fresh against shipped dev @drts/ui-web AddressMapPicker API, mirroring shipped callcenter (MAP-FE-CALL-001) pattern. Backend anti-bypass (legacy_text->manual_review_queue+audit) already shipped. Implementing concierge lib+page+picker+outage gate, then partner funnel, tests, package checks.`
 - Parent machine-truth references currently point at:
   - `docs/03-runbooks/map-geofence-fleets-execution-tasks-20260701.md`
   - `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md`
@@ -57,10 +58,10 @@ concierge and partner entry map-alignment slice.
   - `tests/e2e/tenant-map-booking-ui.spec.ts`
   - `packages/ui-web/src/address-map-picker-core.ts`
   - `packages/ui-web/src/address-map-picker.tsx`
-- Reviewer rejection context: the prior draft used wording that overstated what
-  this sidecar can prove across other worktrees. This revision keeps these
-  files as branch-local inspection anchors only and separates them from
-  still-missing parent evidence.
+- Reviewer rejection context resolved: the prior draft used wording that
+  overstated what this sidecar can prove across other worktrees. The approved
+  revision keeps these files as branch-local inspection anchors only and
+  separates them from still-missing parent evidence.
 - Parent artifact paths currently declared in machine truth but still missing in
   this worktree snapshot:
   - `tests/e2e/concierge-map-booking-ui.spec.ts`
