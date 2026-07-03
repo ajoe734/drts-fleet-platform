@@ -166,6 +166,11 @@ export function PartnerBookingForm({
     pickup: null,
     dropoff: null,
     serviceability: null,
+    providerState: {
+      available: true,
+      degraded: false,
+      reasonCode: "available",
+    },
     bothDispatchReady: false,
   });
   const mapProviderMode =
@@ -199,6 +204,7 @@ export function PartnerBookingForm({
     pickup: mapSelection.pickup,
     dropoff: mapSelection.dropoff,
     serviceability: mapSelection.serviceability,
+    providerState: mapSelection.providerState,
   });
 
   function updateField(name: string, value: string) {

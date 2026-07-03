@@ -177,4 +177,22 @@ describe("partner booking program form utilities", () => {
       code: "dispatch_manual_review_required",
     });
   });
+
+  it("keeps provider outages in explicit manual review instead of normal ready", () => {
+    expect(
+      evaluateAddressSubmitGate({
+        pickup: { address: "A", lat: 25, lng: 121 },
+        dropoff: { address: "B", lat: 25.05, lng: 121.05 },
+        serviceability: null,
+        providerState: {
+          available: false,
+          degraded: true,
+          reasonCode: "request_failed",
+        },
+      }),
+    ).toEqual({
+      blocking: false,
+      code: "dispatch_manual_review_required",
+    });
+  });
 });

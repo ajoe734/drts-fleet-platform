@@ -53,7 +53,10 @@ const mapTheme = buildCanvasTheme({
   density: "compact",
 });
 
-function buildFallbackAddress(address: string, selected: AddressPayload | null) {
+function buildFallbackAddress(
+  address: string,
+  selected: AddressPayload | null,
+) {
   if (!selected) {
     return { address };
   }
@@ -103,6 +106,11 @@ export default function ConciergeBookingCreatePage() {
     pickup: null,
     dropoff: null,
     serviceability: null,
+    providerState: {
+      available: true,
+      degraded: false,
+      reasonCode: "available",
+    },
     bothDispatchReady: false,
   });
 
@@ -369,9 +377,12 @@ export default function ConciergeBookingCreatePage() {
                 pickup: mapSelection.pickup,
                 dropoff: mapSelection.dropoff,
                 serviceability: mapSelection.serviceability,
+                providerState: mapSelection.providerState,
               });
               if (mapGate.code === "outside_service_area") {
-                router.push(`/ineligible?desk=${desk.deskId}&reason=service_area`);
+                router.push(
+                  `/ineligible?desk=${desk.deskId}&reason=service_area`,
+                );
                 return;
               }
               if (mapGate.blocking) {
@@ -552,11 +563,15 @@ export default function ConciergeBookingCreatePage() {
                   pickup: mapSelection.pickup,
                   dropoff: mapSelection.dropoff,
                   serviceability: mapSelection.serviceability,
+                  providerState: mapSelection.providerState,
                 }).blocking &&
-                mapSelection.serviceability?.decision === "manual_review" ? (
-                  <p className="form-help">
-                    {t("booking.help.manualReview")}
-                  </p>
+                evaluateAddressSubmitGate({
+                  pickup: mapSelection.pickup,
+                  dropoff: mapSelection.dropoff,
+                  serviceability: mapSelection.serviceability,
+                  providerState: mapSelection.providerState,
+                }).code === "dispatch_manual_review_required" ? (
+                  <p className="form-help">{t("booking.help.manualReview")}</p>
                 ) : null}
               </div>
             </div>
@@ -599,6 +614,7 @@ export default function ConciergeBookingCreatePage() {
                     pickup: mapSelection.pickup,
                     dropoff: mapSelection.dropoff,
                     serviceability: mapSelection.serviceability,
+                    providerState: mapSelection.providerState,
                   }).blocking
                 }
                 type="submit"

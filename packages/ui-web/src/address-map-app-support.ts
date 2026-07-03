@@ -1,6 +1,7 @@
 import type {
   AddressMapPickerLabels,
   AddressPayload,
+  AddressProviderState,
   ServiceAreaEvaluationResult,
 } from "./address-map-picker-core";
 import { createMockAddressProvider } from "./address-map-picker-core";
@@ -79,8 +80,9 @@ export function evaluateAddressSubmitGate(params: {
   pickup: AddressPayload | null;
   dropoff: AddressPayload | null;
   serviceability: ServiceAreaEvaluationResult | null;
+  providerState?: AddressProviderState | null;
 }): AddressSubmitGateState {
-  const { pickup, dropoff, serviceability } = params;
+  const { pickup, dropoff, serviceability, providerState } = params;
 
   if (!isDispatchReadyAddress(pickup) || !isDispatchReadyAddress(dropoff)) {
     return {
@@ -97,6 +99,13 @@ export function evaluateAddressSubmitGate(params: {
   }
 
   if (serviceability?.decision === "manual_review") {
+    return {
+      blocking: false,
+      code: "dispatch_manual_review_required",
+    };
+  }
+
+  if (providerState && !providerState.available) {
     return {
       blocking: false,
       code: "dispatch_manual_review_required",
