@@ -2,7 +2,7 @@
 
 - Task: `MAP-FE-TEN-001`
 - Owner: `Claude2`
-- Reviewer: `Gemini2`
+- Reviewer: `Codex2`
 - Branch: `claude2/map-fe-ten-001` (base `dev`)
 - Anchor commits: `89e3a94d5` (tenant-portal address book), `3f8af7882` (tenant-console booking)
 - Depends on: `MAP-UI-001` (shared `AddressMapPicker`, merged #1038), `MAP-BE-004` (geo provider gateway), `MAP-BE-005` (serviceability / booking gate — in progress; FE is degrade-safe and treats the backend gate as authoritative).
@@ -93,6 +93,28 @@ default `playwright.config.ts` projects (which boot ops/platform-admin) via
 reachable backend for the page shell; **not executed in this worker** (no
 dev API / seeded tenant here) — this remains the same device/infra UAT gate
 tracked by the MAP readiness burndown.
+
+## Review round 2 — reviewer finding resolved (Codex2)
+
+**Finding:** in `app/bookings/new/tenant-booking-create-form.tsx`,
+`handlePickupAddressSelect` / `handleDropoffAddressSelect` only updated the
+picker payload when `addressId` was truthy. After choosing a saved address then
+switching the select back to **manual** (empty value), the old saved
+address/coords stayed in `pickup/dropoffPayload` and in the submitted booking
+command — the operator could not clear back to a blank manual flow, and the
+remounted `AddressMapPairPicker` (keyed on `pickerNonce`) re-seeded the stale
+pin from props.
+
+**Fix:** both handlers now clear the corresponding payload to `null` in the
+`else` branch (empty `addressId`), matching the null initial-state that the
+picker treats as blank/manual. The nonce remount then starts the picker blank,
+so no stale saved coordinates survive in state or the submit payload. The
+existing `handlePairChange` logic (dropping a stale `addressId` when the user
+edits a stop away from `saved_address`) is unchanged and complementary.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| tenant-console typecheck | `pnpm --filter tenant-console-web typecheck` | PASS (exit 0) |
 
 ## Integration status
 

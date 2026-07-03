@@ -998,6 +998,10 @@ export function TenantBookingCreateForm({
         if (record) {
           setPickupPayload(savedAddressToPayload(record));
         }
+      } else {
+        // Switching back to manual must clear the saved pin so the remounted
+        // picker starts blank and no stale saved coords survive in the payload.
+        setPickupPayload(null);
       }
       setPickerNonce((nonce) => nonce + 1);
     },
@@ -1012,6 +1016,10 @@ export function TenantBookingCreateForm({
         if (record) {
           setDropoffPayload(savedAddressToPayload(record));
         }
+      } else {
+        // Switching back to manual must clear the saved pin so the remounted
+        // picker starts blank and no stale saved coords survive in the payload.
+        setDropoffPayload(null);
       }
       setPickerNonce((nonce) => nonce + 1);
     },
