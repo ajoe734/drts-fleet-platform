@@ -1,10 +1,10 @@
 # Platform Admin Service-Area Governance - Screen Requirements
 
-**Date:** 2026-07-03  
-**Feature:** platform-admin service-area boundary and stop-policy governance  
-**Recipient team:** Visual design / UX  
-**Status:** Hand-off input. **No visual decisions in this document.**  
-**Author lane:** Codex  
+**Date:** 2026-07-03
+**Feature:** platform-admin service-area boundary and stop-policy governance
+**Recipient team:** Visual design / UX
+**Status:** Hand-off input. **No visual decisions in this document.**
+**Author lane:** Codex
 **Authority for behavior/data/API:** `docs/03-runbooks/map-geofence-production-execution-packet-20260630.md` · `docs/02-architecture/map-geofence-gap-inventory-and-remediation-plan-20260701.md` · `packages/contracts/src/index.ts` · `apps/api/src/modules/service-area/service-area.controller.ts`
 
 > This packet exists because the canonical Platform Admin canvas does not yet
