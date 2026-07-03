@@ -1,18 +1,21 @@
 # MAP-QA-001 Automated Evidence
 
-Recorded: `2026-07-03T16:29:41Z`
+Recorded: `2026-07-03T16:37:51Z`
 
 Branch under verification: `codex/map-qa-001`
 
 Verified code ref during the automation run:
 
-- base anchor: `codex/map-qa-001@a1ef993cb5d2b044bdb41144678750fe5ed191c6`
-- targeted harness/spec/docs changes were still in the working tree during the final verification run
+- committed implementation: `codex/map-qa-001@e74721c1367d4ec82f57df5d51eb4ae5037a0d7a`
 
 Environment preparation:
 
-- `CI=true pnpm install --frozen-lockfile --ignore-scripts`
-  - required because the isolated task worktree did not have root `node_modules`
+- existing root `node_modules` satisfied the targeted verification run
+
+Review context:
+
+- prior 2026-07-03 review failure referenced `codex2/map-qa-001`, which did not contain the owner branch commits for this task
+- this rerun verifies the owner branch contents directly on `codex/map-qa-001`
 
 ## Verification summary
 
