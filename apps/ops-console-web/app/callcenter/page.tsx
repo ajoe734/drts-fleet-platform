@@ -28,13 +28,19 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  AddressMapPicker,
+  type AddressMapPickerChange,
+  type AddressMapPickerLabels,
+  type AddressMapPickerProvider,
+} from "@drts/ui-web/client";
 import type {
+  AddressPayload,
   AttachCallRecordingCommand,
   CallbackTaskRecord,
   CallRecordingState,
   CallSessionRecord,
   ComplaintCategory,
-  CreateCallCenterOrderCommand,
   CrossAppResourceLink,
   DispatchTraceLogRecord,
   EmptyReason,
@@ -42,6 +48,7 @@ import type {
   OwnedOrderRecord,
   RefreshTier,
   ResourceActionDescriptor,
+  ServiceAreaEvaluationResult,
   TransferCallToComplaintCommand,
   UiHealthEnvelope,
   UiRefreshMetadata,
@@ -50,6 +57,15 @@ import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
+import {
+  CALLCENTER_MAP_SERVICE_PRODUCT_TYPE,
+  buildCallcenterMapOrderCommand,
+  getCallcenterMapBookingGate,
+  hasCallcenterAddressCoordinates,
+  type CallcenterMapBookingBlockReason,
+  type CallcenterMapBookingGate,
+  type CallcenterServiceabilityPreviewStatus,
+} from "./map-booking";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -104,6 +120,8 @@ type OutcomeNotice = {
   external?: boolean;
 };
 
+type MapPickerProviderState = AddressMapPickerChange["providerState"];
+
 const INITIAL_INTAKE_FORM: OpenCallSessionCommand = {
   callType: "booking",
   callerPhone: "",
@@ -114,8 +132,6 @@ const INITIAL_INTAKE_FORM: OpenCallSessionCommand = {
 const INITIAL_ORDER_FORM = {
   passengerName: "",
   passengerPhone: "",
-  pickupAddress: "",
-  dropoffAddress: "",
   notes: "",
 };
 
@@ -237,6 +253,248 @@ const queueButtonStyle: CSSProperties = {
   textAlign: "left",
   cursor: "pointer",
 };
+
+const mapBookingSectionStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+  padding: 14,
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+};
+
+const mapBookingPickerStackStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 14,
+};
+
+const mapBookingHeadingStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const INITIAL_ADDRESS_PROVIDER_STATE: MapPickerProviderState = {
+  available: true,
+  degraded: false,
+  reasonCode: "available",
+};
+
+const CALLCENTER_MAP_PICKER_LABELS: Record<
+  Locale,
+  Partial<AddressMapPickerLabels>
+> = {
+  en: {
+    searchPlaceholder: "Search a street, terminal, gate, or landmark",
+    candidatesTitle: "Matching locations",
+    noMatchBody:
+      "No reliable match yet. Refine the search or pin the coordinates manually.",
+    manualReasonPlaceholder:
+      "e.g. caller confirmed the exact gate or curb position",
+    providerOutageBody:
+      "Address lookup is unavailable right now. Enter coordinates manually before creating the booking.",
+    mapEmpty:
+      "Search and pin the caller's location before creating the booking.",
+    serviceableTitle: "Serviceable for standard taxi dispatch",
+    manualReviewTitle: "Manual review required before release",
+    notServiceableTitle: "Outside the governed service area",
+  },
+  zh: {
+    searchLabel: "搜尋地址",
+    searchPlaceholder: "搜尋街道、航廈、門口或地標",
+    searchButton: "搜尋",
+    searching: "搜尋中…",
+    candidatesTitle: "候選地址",
+    noMatchTitle: "找不到相符地址",
+    noMatchBody: "目前沒有可靠結果。請調整搜尋，或改為手動輸入座標。",
+    manualToggle: "手動輸入座標",
+    manualTitle: "手動定位",
+    manualLatLabel: "緯度",
+    manualLngLabel: "經度",
+    manualReasonLabel: "手動定位原因",
+    manualReasonPlaceholder: "例如：來電者已確認精確上下車點",
+    manualApply: "使用這個位置",
+    manualInvalid: "請輸入有效的緯度（-90 到 90）與經度（-180 到 180）。",
+    providerOutageTitle: "地址查詢目前不可用",
+    providerOutageBody: "建立電話訂車前，請先手動輸入座標。",
+    degradedNote: "地址結果目前可能不完整。",
+    confidenceLabel: "比對信心",
+    provenanceLabel: "定位來源",
+    coordinatesLabel: "座標",
+    mapEmpty: "先搜尋並確認位置，再建立電話訂車。",
+    mapHint: "可拖曳圖釘，或用方向鍵微調位置。",
+    pinAdjustHint: "已手動調整圖釘。",
+    clearSelection: "清除",
+    serviceableTitle: "符合標準計程車派遣範圍",
+    manualReviewTitle: "需人工審查後才能釋出",
+    notServiceableTitle: "超出受管制的服務範圍",
+    serviceabilityPending: "正在檢查服務範圍…",
+  },
+};
+
+type MapBookingBannerState = {
+  code: CallcenterMapBookingBlockReason | "serviceable" | "manual_review";
+  tone: Exclude<CanvasTone, "neutral">;
+  icon: "ok" | "warn" | "clock";
+  title: string;
+  body: string;
+  submitHelper?: string;
+};
+
+function getMapBookingBannerState(
+  locale: Locale,
+  gate: CallcenterMapBookingGate,
+  serviceability: ServiceAreaEvaluationResult | null,
+  previewStatus: CallcenterServiceabilityPreviewStatus,
+): MapBookingBannerState {
+  const reasonBody =
+    serviceability?.reasonMessages?.filter(Boolean).join(" ") ?? "";
+  const copy = {
+    en: {
+      pickupCoordinatesTitle: "Pickup coordinates are required",
+      pickupCoordinatesBody:
+        "Search or pin the pickup before creating the phone booking.",
+      dropoffCoordinatesTitle: "Dropoff coordinates are required",
+      dropoffCoordinatesBody:
+        "Search or pin the dropoff before creating the phone booking.",
+      pickupProvenanceTitle: "Pickup provenance is required",
+      pickupProvenanceBody:
+        "Re-select or manually pin the pickup so coordinate provenance is recorded.",
+      dropoffProvenanceTitle: "Dropoff provenance is required",
+      dropoffProvenanceBody:
+        "Re-select or manually pin the dropoff so coordinate provenance is recorded.",
+      previewPendingTitle: "Checking service area before submit",
+      previewPendingBody:
+        "Wait for the serviceability result before creating the booking.",
+      previewUnavailableTitle: "Service-area preview is unavailable",
+      previewUnavailableBody:
+        "Do not create a normal dispatchable booking until the preview recovers.",
+      blockedTitle: "This trip is outside the service area",
+      blockedBody:
+        "The booking cannot enter normal dispatch with the current pickup/dropoff.",
+      serviceableTitle: "Ready to create a dispatchable phone booking",
+      serviceableBody:
+        "Pickup and dropoff coordinates are pinned and serviceable.",
+      manualReviewTitle: "This booking will enter manual review",
+      manualReviewBody:
+        "Create the booking only if ops should review it before normal dispatch.",
+      manualReviewHelper:
+        "Creates an order flagged for manual review instead of normal dispatch.",
+    },
+    zh: {
+      pickupCoordinatesTitle: "必須先確認上車座標",
+      pickupCoordinatesBody: "建立電話訂車前，先搜尋或手動標記上車點。",
+      dropoffCoordinatesTitle: "必須先確認下車座標",
+      dropoffCoordinatesBody: "建立電話訂車前，先搜尋或手動標記下車點。",
+      pickupProvenanceTitle: "上車點缺少定位來源",
+      pickupProvenanceBody: "請重新選取或手動釘選上車點，保留定位 provenance。",
+      dropoffProvenanceTitle: "下車點缺少定位來源",
+      dropoffProvenanceBody:
+        "請重新選取或手動釘選下車點，保留定位 provenance。",
+      previewPendingTitle: "送出前必須完成服務範圍檢查",
+      previewPendingBody: "請等待 serviceability 結果後再建立電話訂車。",
+      previewUnavailableTitle: "服務範圍預覽目前不可用",
+      previewUnavailableBody: "在預覽恢復前，不要建立可正常派遣的電話訂單。",
+      blockedTitle: "此趟行程不在服務範圍內",
+      blockedBody: "目前的上下車點不可進入正常派遣。",
+      serviceableTitle: "可建立可派遣的電話訂單",
+      serviceableBody: "上下車座標已確認，且通過服務範圍檢查。",
+      manualReviewTitle: "此訂單會先進人工審查",
+      manualReviewBody: "建立後不會直接進 normal dispatch，需先由營運審查。",
+      manualReviewHelper: "建立後會以人工審查狀態進入後續流程。",
+    },
+  }[locale];
+
+  if (!gate.canSubmit) {
+    switch (gate.reason) {
+      case "pickup_coordinates_required":
+        return {
+          code: gate.reason,
+          tone: "warn",
+          icon: "warn",
+          title: copy.pickupCoordinatesTitle,
+          body: copy.pickupCoordinatesBody,
+          submitHelper: copy.pickupCoordinatesTitle,
+        };
+      case "dropoff_coordinates_required":
+        return {
+          code: gate.reason,
+          tone: "warn",
+          icon: "warn",
+          title: copy.dropoffCoordinatesTitle,
+          body: copy.dropoffCoordinatesBody,
+          submitHelper: copy.dropoffCoordinatesTitle,
+        };
+      case "pickup_provenance_required":
+        return {
+          code: gate.reason,
+          tone: "warn",
+          icon: "warn",
+          title: copy.pickupProvenanceTitle,
+          body: copy.pickupProvenanceBody,
+          submitHelper: copy.pickupProvenanceTitle,
+        };
+      case "dropoff_provenance_required":
+        return {
+          code: gate.reason,
+          tone: "warn",
+          icon: "warn",
+          title: copy.dropoffProvenanceTitle,
+          body: copy.dropoffProvenanceBody,
+          submitHelper: copy.dropoffProvenanceTitle,
+        };
+      case "serviceability_preview_unavailable":
+        return {
+          code: gate.reason,
+          tone: "danger",
+          icon: "warn",
+          title: copy.previewUnavailableTitle,
+          body: copy.previewUnavailableBody,
+          submitHelper: copy.previewUnavailableTitle,
+        };
+      case "serviceability_blocked":
+        return {
+          code: gate.reason,
+          tone: "danger",
+          icon: "warn",
+          title: copy.blockedTitle,
+          body: reasonBody || copy.blockedBody,
+          submitHelper: copy.blockedTitle,
+        };
+      case "serviceability_preview_required":
+      default:
+        return {
+          code: gate.reason,
+          tone: previewStatus === "evaluating" ? "info" : "warn",
+          icon: previewStatus === "evaluating" ? "clock" : "warn",
+          title: copy.previewPendingTitle,
+          body: copy.previewPendingBody,
+          submitHelper: copy.previewPendingTitle,
+        };
+    }
+  }
+
+  if (gate.decision === "manual_review") {
+    return {
+      code: gate.decision,
+      tone: "warn",
+      icon: "warn",
+      title: copy.manualReviewTitle,
+      body: reasonBody || copy.manualReviewBody,
+      submitHelper: copy.manualReviewHelper,
+    };
+  }
+
+  return {
+    code: gate.decision,
+    tone: "success",
+    icon: "ok",
+    title: copy.serviceableTitle,
+    body: reasonBody || copy.serviceableBody,
+  };
+}
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
@@ -838,6 +1096,20 @@ export default function CallcenterPage() {
   );
   const [intakeForm, setIntakeForm] = useState(INITIAL_INTAKE_FORM);
   const [orderForm, setOrderForm] = useState(INITIAL_ORDER_FORM);
+  const [pickupAddress, setPickupAddress] = useState<AddressPayload | null>(
+    null,
+  );
+  const [dropoffAddress, setDropoffAddress] = useState<AddressPayload | null>(
+    null,
+  );
+  const [pickupProviderState, setPickupProviderState] =
+    useState<MapPickerProviderState>(INITIAL_ADDRESS_PROVIDER_STATE);
+  const [dropoffProviderState, setDropoffProviderState] =
+    useState<MapPickerProviderState>(INITIAL_ADDRESS_PROVIDER_STATE);
+  const [serviceabilityPreview, setServiceabilityPreview] =
+    useState<ServiceAreaEvaluationResult | null>(null);
+  const [serviceabilityPreviewStatus, setServiceabilityPreviewStatus] =
+    useState<CallcenterServiceabilityPreviewStatus>("idle");
   const [existingOrderId, setExistingOrderId] = useState("");
   const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
   const [recordingForm, setRecordingForm] = useState<RecordingFormState>(
@@ -850,6 +1122,17 @@ export default function CallcenterPage() {
     INITIAL_COMPLAINT_TRANSFER_FORM,
   );
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const mapBookingProvider = useMemo<AddressMapPickerProvider>(
+    () => ({
+      async search(query) {
+        return getOpsClient().searchGeo(query);
+      },
+      async getHealth() {
+        return getOpsClient().getGeoProviderHealth();
+      },
+    }),
+    [],
+  );
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
   const sessionResources = useMemo(
@@ -885,6 +1168,39 @@ export default function CallcenterPage() {
   const selectedSession =
     sessionResources.find((session) => session.callId === selectedCallId) ??
     null;
+  const callcenterActorId =
+    selectedSession?.agentId ?? intakeForm.agentId ?? "AGENT-OPS-001";
+  const mapBookingGate = useMemo(
+    () =>
+      getCallcenterMapBookingGate({
+        pickup: pickupAddress,
+        dropoff: dropoffAddress,
+        serviceability: serviceabilityPreview,
+        previewStatus: serviceabilityPreviewStatus,
+      }),
+    [
+      dropoffAddress,
+      pickupAddress,
+      serviceabilityPreview,
+      serviceabilityPreviewStatus,
+    ],
+  );
+  const mapBookingBanner = useMemo(
+    () =>
+      getMapBookingBannerState(
+        currentLocale,
+        mapBookingGate,
+        serviceabilityPreview,
+        serviceabilityPreviewStatus,
+      ),
+    [
+      currentLocale,
+      mapBookingGate,
+      serviceabilityPreview,
+      serviceabilityPreviewStatus,
+    ],
+  );
+  const mapBookingGateCode = mapBookingBanner.code;
 
   const activeSessions = filteredSessions.filter(
     (session) => session.status === "active",
@@ -973,6 +1289,63 @@ export default function CallcenterPage() {
   const complaintTransferCount = sessions.filter(
     (session) => session.linkedCaseNo,
   ).length;
+
+  useEffect(() => {
+    setOrderForm(INITIAL_ORDER_FORM);
+    setPickupAddress(null);
+    setDropoffAddress(null);
+    setPickupProviderState(INITIAL_ADDRESS_PROVIDER_STATE);
+    setDropoffProviderState(INITIAL_ADDRESS_PROVIDER_STATE);
+    setServiceabilityPreview(null);
+    setServiceabilityPreviewStatus("idle");
+  }, [selectedSession?.callId]);
+
+  useEffect(() => {
+    if (
+      !hasCallcenterAddressCoordinates(pickupAddress) ||
+      !hasCallcenterAddressCoordinates(dropoffAddress)
+    ) {
+      setServiceabilityPreview(null);
+      setServiceabilityPreviewStatus("idle");
+      return;
+    }
+
+    const command = {
+      serviceProductType: CALLCENTER_MAP_SERVICE_PRODUCT_TYPE,
+      pickup: { lat: pickupAddress.lat, lng: pickupAddress.lng },
+      dropoff: { lat: dropoffAddress.lat, lng: dropoffAddress.lng },
+      requestedAt: new Date().toISOString(),
+    };
+
+    let cancelled = false;
+    setServiceabilityPreviewStatus("evaluating");
+
+    void getOpsClient()
+      .evaluateServiceArea(command)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setServiceabilityPreview(result);
+        setServiceabilityPreviewStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setServiceabilityPreview(null);
+        setServiceabilityPreviewStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    dropoffAddress?.lat,
+    dropoffAddress?.lng,
+    pickupAddress?.lat,
+    pickupAddress?.lng,
+  ]);
 
   useEffect(() => {
     void loadData();
@@ -1132,6 +1505,11 @@ export default function CallcenterPage() {
         "create_phone_booking",
       )
     : undefined;
+  const createBookingDisabled =
+    !createBookingAction?.enabled || !mapBookingGate.canSubmit;
+  const createBookingHelper = !createBookingAction?.enabled
+    ? getActionHelper(t, createBookingAction)
+    : mapBookingBanner.submitHelper;
   const linkOrderAction = selectedSession
     ? getActionDescriptor(
         selectedSession.availableActions,
@@ -2130,28 +2508,25 @@ export default function CallcenterPage() {
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();
-                    if (!selectedSession) {
+                    if (
+                      !selectedSession ||
+                      !mapBookingGate.canSubmit ||
+                      !hasCallcenterAddressCoordinates(pickupAddress) ||
+                      !hasCallcenterAddressCoordinates(dropoffAddress)
+                    ) {
                       return;
                     }
-                    const command: CreateCallCenterOrderCommand = {
+                    const command = buildCallcenterMapOrderCommand({
                       callId: selectedSession.callId,
-                      agentId:
-                        selectedSession.agentId ??
-                        intakeForm.agentId ??
-                        "AGENT-OPS-001",
+                      agentId: callcenterActorId,
                       recordingId: selectedSession.recordingId,
-                      pickup: { address: orderForm.pickupAddress },
-                      dropoff: { address: orderForm.dropoffAddress },
-                      passenger: {
-                        name: orderForm.passengerName,
-                        phone:
-                          orderForm.passengerPhone ||
-                          selectedSession.callerPhone,
-                      },
-                      ...(orderForm.notes.trim()
-                        ? { notes: orderForm.notes.trim() }
-                        : {}),
-                    };
+                      pickup: pickupAddress,
+                      dropoff: dropoffAddress,
+                      passengerName: orderForm.passengerName,
+                      passengerPhone: orderForm.passengerPhone,
+                      fallbackPassengerPhone: selectedSession.callerPhone,
+                      notes: orderForm.notes,
+                    });
                     void runGuardedAction(
                       "create-booking",
                       createBookingAction,
@@ -2159,6 +2534,12 @@ export default function CallcenterPage() {
                         const created =
                           await getOpsClient().createCallCenterOrder(command);
                         setOrderForm(INITIAL_ORDER_FORM);
+                        setPickupAddress(null);
+                        setDropoffAddress(null);
+                        setPickupProviderState(INITIAL_ADDRESS_PROVIDER_STATE);
+                        setDropoffProviderState(INITIAL_ADDRESS_PROVIDER_STATE);
+                        setServiceabilityPreview(null);
+                        setServiceabilityPreviewStatus("idle");
                         setOutcomeNotice({
                           tone: "success",
                           message: t("callcenter.notice.phoneBookingCreated", {
@@ -2207,42 +2588,86 @@ export default function CallcenterPage() {
                         style={nativeInputStyle}
                       />
                     </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={t("callcenter.pickupAddressPlaceholder")}
-                      required
-                    >
-                      <input
-                        type="text"
-                        required
-                        value={orderForm.pickupAddress}
-                        onChange={(event) =>
-                          setOrderForm((current) => ({
-                            ...current,
-                            pickupAddress: event.target.value,
-                          }))
-                        }
-                        style={nativeInputStyle}
+                  </div>
+                  <div
+                    data-address-map-pair-picker="callcenter-phone-booking-map"
+                    data-service-product-type={
+                      CALLCENTER_MAP_SERVICE_PRODUCT_TYPE
+                    }
+                    data-can-evaluate-service-area="true"
+                    style={mapBookingSectionStyle}
+                  >
+                    <div style={mapBookingHeadingStyle}>
+                      <strong style={{ fontSize: 12.5 }}>
+                        {currentLocale === "zh"
+                          ? "上下車定位"
+                          : "Pickup and dropoff map verification"}
+                      </strong>
+                      <span style={subtleTextStyle}>
+                        {currentLocale === "zh"
+                          ? "建立電話訂車前，先搜尋或手動確認上下車座標與服務範圍。"
+                          : "Search or manually pin both stops before creating the phone booking."}
+                      </span>
+                    </div>
+                    <div style={mapBookingPickerStackStyle}>
+                      <div
+                        data-address-map-picker="callcenter-pickup-map"
+                        data-provider-status={pickupProviderState.reasonCode}
+                      >
+                        <AddressMapPicker
+                          id="callcenter-pickup-map"
+                          provider={mapBookingProvider}
+                          surface="callcenter"
+                          theme={theme}
+                          locale={currentLocale === "zh" ? "zh-TW" : "en-US"}
+                          labels={CALLCENTER_MAP_PICKER_LABELS[currentLocale]}
+                          value={pickupAddress}
+                          onChange={(change: AddressMapPickerChange) => {
+                            setPickupAddress(change.address);
+                            setPickupProviderState(change.providerState);
+                          }}
+                          actorId={callcenterActorId}
+                          title={
+                            currentLocale === "zh"
+                              ? "上車點"
+                              : "Pickup location"
+                          }
+                        />
+                      </div>
+                      <div
+                        data-address-map-picker="callcenter-dropoff-map"
+                        data-provider-status={dropoffProviderState.reasonCode}
+                      >
+                        <AddressMapPicker
+                          id="callcenter-dropoff-map"
+                          provider={mapBookingProvider}
+                          surface="callcenter"
+                          theme={theme}
+                          locale={currentLocale === "zh" ? "zh-TW" : "en-US"}
+                          labels={CALLCENTER_MAP_PICKER_LABELS[currentLocale]}
+                          value={dropoffAddress}
+                          onChange={(change: AddressMapPickerChange) => {
+                            setDropoffAddress(change.address);
+                            setDropoffProviderState(change.providerState);
+                          }}
+                          actorId={callcenterActorId}
+                          title={
+                            currentLocale === "zh"
+                              ? "下車點"
+                              : "Dropoff location"
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div data-callcenter-map-booking-gate={mapBookingGateCode}>
+                      <CanvasBanner
+                        theme={theme}
+                        tone={mapBookingBanner.tone}
+                        icon={mapBookingBanner.icon}
+                        title={mapBookingBanner.title}
+                        body={mapBookingBanner.body}
                       />
-                    </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={t("callcenter.dropoffAddressPlaceholder")}
-                      required
-                    >
-                      <input
-                        type="text"
-                        required
-                        value={orderForm.dropoffAddress}
-                        onChange={(event) =>
-                          setOrderForm((current) => ({
-                            ...current,
-                            dropoffAddress: event.target.value,
-                          }))
-                        }
-                        style={nativeInputStyle}
-                      />
-                    </CanvasField>
+                    </div>
                   </div>
                   <CanvasField
                     theme={theme}
@@ -2262,8 +2687,8 @@ export default function CallcenterPage() {
                   </CanvasField>
                   <ActionButton
                     theme={theme}
-                    disabled={!createBookingAction?.enabled}
-                    helper={getActionHelper(t, createBookingAction)}
+                    disabled={createBookingDisabled}
+                    helper={createBookingHelper}
                     busy={busyKey === "create-booking"}
                     label={getActionLabel(t, "create_phone_booking")}
                     variant="primary"
