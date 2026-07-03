@@ -53,6 +53,37 @@ describe("ui-web geometry editor", () => {
     ]);
   });
 
+  it("rejects out-of-range coordinates from submit-ready state", () => {
+    const snapshot = buildGeometryEditorSnapshot({
+      kind: "polygon",
+      points: [
+        { lat: 25.033, lng: 121.5654 },
+        { lat: 95, lng: 121.578 },
+        { lat: 25.024, lng: 121.584 },
+      ],
+    });
+
+    expect(snapshot.canSubmit).toBe(false);
+    expect(snapshot.validation.errors).toContain(
+      "Polygon vertex 2 latitude must be between -90 and 90.",
+    );
+  });
+
+  it("rejects self-intersecting polygons from submit-ready state", () => {
+    const snapshot = buildGeometryEditorSnapshot({
+      kind: "polygon",
+      points: [
+        { lat: 25.03, lng: 121.56 },
+        { lat: 25.05, lng: 121.58 },
+        { lat: 25.03, lng: 121.58 },
+        { lat: 25.05, lng: 121.56 },
+      ],
+    });
+
+    expect(snapshot.canSubmit).toBe(false);
+    expect(snapshot.validation.errors).toContain("Polygon cannot self-intersect.");
+  });
+
   it("round-trips GeoJSON import/export for route corridors", () => {
     const draft: GeometryDraft = {
       kind: "routeCorridor",
@@ -66,6 +97,28 @@ describe("ui-web geometry editor", () => {
     const parsed = parseGeometryDraftGeoJson(geometryDraftToGeoJson(draft));
 
     expect(parsed).toEqual(draft);
+  });
+
+  it("rejects GeoJSON imports with invalid coordinates", () => {
+    expect(() =>
+      parseGeometryDraftGeoJson(
+        JSON.stringify({
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [121.5654, 25.033],
+                [121.578, 91],
+                [121.584, 25.024],
+                [121.5654, 25.033],
+              ],
+            ],
+          },
+          properties: { geometryEditorKind: "polygon" },
+        }),
+      ),
+    ).toThrowError("GeoJSON latitude must be between -90 and 90.");
   });
 
   it("exposes review diff hooks for edited geometry", () => {
