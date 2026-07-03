@@ -65,6 +65,27 @@ const en = {
     "Program gate clear. Form can be submitted once all required fields are valid.",
   "book.notReady": "Resolve the highlighted fields before submission.",
   "book.submit": "Validate booking form",
+  "book.map.banner.serviceableTitle": "Ready to dispatch",
+  "book.map.banner.serviceableBody":
+    "Both locations are confirmed and inside the serviced area.",
+  "book.map.banner.manualReviewTitle": "Needs a quick review",
+  "book.map.banner.manualReviewBody":
+    "This trip will be checked by the team before a car is assigned.",
+  "book.map.banner.providerOutageTitle": "Map service is unavailable",
+  "book.map.banner.providerOutageBody":
+    "The map lookup is temporarily down. You can still submit the typed address, and the team will confirm the location before dispatch.",
+  "book.map.banner.blockedTitle": "Location not serviced",
+  "book.map.banner.blockedBody":
+    "One of the locations is outside the area this partner can serve.",
+  "book.map.banner.previewPendingTitle": "Checking the route",
+  "book.map.banner.previewPendingBody":
+    "Confirming both locations are inside the serviced area.",
+  "book.map.banner.pickupPinTitle": "Confirm the pickup location",
+  "book.map.banner.pickupPinBody":
+    "Search or drop a pin so the pickup point is exact.",
+  "book.map.banner.dropoffPinTitle": "Confirm the drop-off location",
+  "book.map.banner.dropoffPinBody":
+    "Search or drop a pin so the drop-off point is exact.",
   "book.success": "Form validation passed",
   "book.success.detail":
     "This partner flow is ready to hand a typed payload to the authenticated booking transport.",
@@ -333,8 +354,7 @@ const en = {
     "· certified professional drivers and a licensed fleet",
   "airport.quota.remaining": "Free transfers left this year",
   "airport.features.kicker": "Why book with us",
-  "airport.features.title":
-    "Concierge airport transfer, every detail handled",
+  "airport.features.title": "Concierge airport transfer, every detail handled",
   "airport.features.body":
     "From booking to arrival, professional drivers, live tracking, and consolidated billing keep business trips and homecomings effortless.",
   "airport.vehicles.title": "Choose the right vehicle",
@@ -521,6 +541,21 @@ const zh = {
   "book.ready": "方案閘門已通過；只要必填欄位合法，就可提交。",
   "book.notReady": "請先修正標示欄位，再進行提交。",
   "book.submit": "驗證下單表單",
+  "book.map.banner.serviceableTitle": "可派車",
+  "book.map.banner.serviceableBody": "兩個地點都已確認，且位於服務範圍內。",
+  "book.map.banner.manualReviewTitle": "需要人工確認",
+  "book.map.banner.manualReviewBody": "本趟行程會由團隊先確認，再指派車輛。",
+  "book.map.banner.providerOutageTitle": "地圖服務暫時無法使用",
+  "book.map.banner.providerOutageBody":
+    "地圖查詢暫時中斷。您仍可送出輸入的地址，團隊會在派車前先確認地點。",
+  "book.map.banner.blockedTitle": "地點不在服務範圍",
+  "book.map.banner.blockedBody": "其中一個地點超出本合作夥伴可服務的範圍。",
+  "book.map.banner.previewPendingTitle": "確認路線中",
+  "book.map.banner.previewPendingBody": "正在確認兩個地點是否都在服務範圍內。",
+  "book.map.banner.pickupPinTitle": "請確認上車地點",
+  "book.map.banner.pickupPinBody": "請搜尋或在地圖上標記，讓上車點更精確。",
+  "book.map.banner.dropoffPinTitle": "請確認下車地點",
+  "book.map.banner.dropoffPinBody": "請搜尋或在地圖上標記，讓下車點更精確。",
   "book.success": "表單驗證通過",
   "book.success.detail":
     "此 partner flow 已可把型別安全的 payload 交給已驗證的 booking transport。",

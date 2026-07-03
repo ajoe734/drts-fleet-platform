@@ -2,15 +2,21 @@
 
 import Link from "next/link";
 import { useMemo, useState, type CSSProperties } from "react";
-import type { PartnerChannelEntryRecord } from "@drts/contracts";
+import type { AddressPayload } from "@drts/contracts";
 import type { PartnerBrandTemplate } from "@drts/ui-tokens";
+import type { PartnerChannelEntryRecord } from "@drts/contracts";
 import {
+  AddressMapPicker,
   CanvasBanner,
   CanvasCard,
   CanvasPageHeader,
   CanvasPill,
   buildCanvasTheme,
+  worstServiceDecision,
+  type AddressMapPickerChange,
+  type AddressProviderState,
   type CanvasTheme,
+  type ServiceAreaEvaluationResult,
 } from "@drts/ui-web";
 import {
   createDefaultPartnerBookingDraft,
@@ -20,12 +26,88 @@ import {
   getPartnerProgramLabel,
   isPartnerBookingDraftReady,
 } from "@/lib/partner-booking-form";
+import {
+  getPartnerMapBookingBannerCode,
+  getPartnerMapBookingGate,
+  isPartnerProviderOutage,
+  PARTNER_MAP_SERVICE_PRODUCT_TYPE,
+  type PartnerMapBookingBannerCode,
+  type PartnerServiceabilityPreviewStatus,
+} from "@/lib/partner-map-booking";
+import {
+  createConfiguredPartnerMapProvider,
+  resolvePartnerMapProviderMode,
+} from "@/lib/partner-map-provider";
 import { useTranslation } from "@/lib/i18n";
 
 const baseTheme = buildCanvasTheme({
   surface: "partner",
   density: "compact",
 });
+
+const INITIAL_PROVIDER_STATE: AddressProviderState = {
+  available: true,
+  degraded: false,
+  reasonCode: "available",
+};
+
+/**
+ * Map a stable gate/banner code to customer-safe copy keys. Reason codes match
+ * the concierge surface so assisted-entry copy stays consistent.
+ */
+function partnerMapBannerCopy(code: PartnerMapBookingBannerCode): {
+  tone: "success" | "warn" | "info";
+  titleKey: string;
+  bodyKey: string;
+} {
+  switch (code) {
+    case "serviceable":
+      return {
+        tone: "success",
+        titleKey: "book.map.banner.serviceableTitle",
+        bodyKey: "book.map.banner.serviceableBody",
+      };
+    case "manual_review":
+      return {
+        tone: "warn",
+        titleKey: "book.map.banner.manualReviewTitle",
+        bodyKey: "book.map.banner.manualReviewBody",
+      };
+    case "provider_outage_manual_review":
+      return {
+        tone: "warn",
+        titleKey: "book.map.banner.providerOutageTitle",
+        bodyKey: "book.map.banner.providerOutageBody",
+      };
+    case "serviceability_blocked":
+      return {
+        tone: "warn",
+        titleKey: "book.map.banner.blockedTitle",
+        bodyKey: "book.map.banner.blockedBody",
+      };
+    case "serviceability_preview_required":
+      return {
+        tone: "info",
+        titleKey: "book.map.banner.previewPendingTitle",
+        bodyKey: "book.map.banner.previewPendingBody",
+      };
+    case "pickup_coordinates_required":
+    case "pickup_provenance_required":
+      return {
+        tone: "info",
+        titleKey: "book.map.banner.pickupPinTitle",
+        bodyKey: "book.map.banner.pickupPinBody",
+      };
+    case "dropoff_coordinates_required":
+    case "dropoff_provenance_required":
+    default:
+      return {
+        tone: "info",
+        titleKey: "book.map.banner.dropoffPinTitle",
+        bodyKey: "book.map.banner.dropoffPinBody",
+      };
+  }
+}
 
 const pageStyle: CSSProperties = {
   display: "grid",
@@ -156,6 +238,60 @@ export function PartnerBookingForm({
   const theme = useMemo(() => buildPartnerTheme(brand), [brand]);
   const [draft, setDraft] = useState(createDefaultPartnerBookingDraft);
   const [submitted, setSubmitted] = useState(false);
+  const [pickupPin, setPickupPin] = useState<AddressPayload | null>(null);
+  const [dropoffPin, setDropoffPin] = useState<AddressPayload | null>(null);
+  const [pickupProviderState, setPickupProviderState] =
+    useState<AddressProviderState>(INITIAL_PROVIDER_STATE);
+  const [dropoffProviderState, setDropoffProviderState] =
+    useState<AddressProviderState>(INITIAL_PROVIDER_STATE);
+  const [pickupServiceability, setPickupServiceability] =
+    useState<ServiceAreaEvaluationResult | null>(null);
+  const [dropoffServiceability, setDropoffServiceability] =
+    useState<ServiceAreaEvaluationResult | null>(null);
+
+  const mapProvider = useMemo(
+    () =>
+      createConfiguredPartnerMapProvider(
+        resolvePartnerMapProviderMode(
+          process.env.NEXT_PUBLIC_ADDRESS_PICKER_PROVIDER_MODE,
+        ),
+      ),
+    [],
+  );
+
+  const providerOutage = isPartnerProviderOutage(
+    pickupProviderState,
+    dropoffProviderState,
+  );
+
+  // Combine the two single-leg serviceability previews into one decision. The
+  // gate is "ready" only once both legs have been evaluated.
+  const previewStatus: PartnerServiceabilityPreviewStatus =
+    !pickupPin || !dropoffPin
+      ? "idle"
+      : pickupServiceability && dropoffServiceability
+        ? "ready"
+        : "evaluating";
+  const combinedServiceability: ServiceAreaEvaluationResult | null =
+    pickupServiceability && dropoffServiceability
+      ? {
+          ...pickupServiceability,
+          decision: worstServiceDecision(
+            pickupServiceability.decision,
+            dropoffServiceability.decision,
+          ),
+        }
+      : null;
+
+  const mapGate = getPartnerMapBookingGate({
+    pickup: pickupPin,
+    dropoff: dropoffPin,
+    serviceability: combinedServiceability,
+    previewStatus,
+    providerOutage,
+  });
+  const mapBookingBannerCode = getPartnerMapBookingBannerCode(mapGate);
+  const mapBookingBanner = partnerMapBannerCopy(mapBookingBannerCode);
 
   const errors = getPartnerBookingFieldErrors({
     draft,
@@ -168,18 +304,33 @@ export function PartnerBookingForm({
     eligibilityVerificationId,
     locale,
   });
-  const ready = isPartnerBookingDraftReady({
-    entry,
-    draft,
-    eligibilityVerificationId,
-    locale,
-  });
+  const ready =
+    isPartnerBookingDraftReady({
+      entry,
+      draft,
+      eligibilityVerificationId,
+      locale,
+    }) && mapGate.canSubmit;
 
   function updateField(name: string, value: string) {
     setDraft((current) => ({
       ...current,
       [name]: value,
     }));
+  }
+
+  function handlePickupChange(change: AddressMapPickerChange) {
+    setPickupPin(change.address);
+    setPickupProviderState(change.providerState);
+    setPickupServiceability(change.serviceability);
+    updateField("pickupAddress", change.address?.address ?? "");
+  }
+
+  function handleDropoffChange(change: AddressMapPickerChange) {
+    setDropoffPin(change.address);
+    setDropoffProviderState(change.providerState);
+    setDropoffServiceability(change.serviceability);
+    updateField("dropoffAddress", change.address?.address ?? "");
   }
 
   function renderField(params: {
@@ -511,26 +662,60 @@ export function PartnerBookingForm({
       ) : null}
 
       <CanvasCard theme={theme} title={t("book.section.trip")}>
-        <div style={gridStyle}>
-          {renderField({
-            name: "pickupAddress",
-            label: t("field.pickupAddress"),
-          })}
-          {renderField({
-            name: "dropoffAddress",
-            label: t("field.dropoffAddress"),
-          })}
-          {renderField({
-            name: "reservationWindowStart",
-            label: t("field.reservationWindowStart"),
-            type: "datetime-local",
-            hint: t("hint.policyWindow"),
-          })}
-          {renderField({
-            name: "reservationWindowEnd",
-            label: t("field.reservationWindowEnd"),
-            type: "datetime-local",
-          })}
+        <div style={{ display: "grid", gap: 14 }}>
+          <div
+            data-address-map-picker="partner-pickup-map"
+            data-provider-status={pickupProviderState.reasonCode}
+          >
+            <AddressMapPicker
+              id="partner-pickup-map"
+              provider={mapProvider}
+              surface="partner_booking"
+              theme={theme}
+              locale={locale === "zh" ? "zh-TW" : "en-US"}
+              serviceProductType={PARTNER_MAP_SERVICE_PRODUCT_TYPE}
+              value={pickupPin}
+              onChange={handlePickupChange}
+              title={t("field.pickupAddress")}
+            />
+          </div>
+          <div
+            data-address-map-picker="partner-dropoff-map"
+            data-provider-status={dropoffProviderState.reasonCode}
+          >
+            <AddressMapPicker
+              id="partner-dropoff-map"
+              provider={mapProvider}
+              surface="partner_booking"
+              theme={theme}
+              locale={locale === "zh" ? "zh-TW" : "en-US"}
+              serviceProductType={PARTNER_MAP_SERVICE_PRODUCT_TYPE}
+              value={dropoffPin}
+              onChange={handleDropoffChange}
+              title={t("field.dropoffAddress")}
+            />
+          </div>
+          <div data-partner-map-booking-gate={mapBookingBannerCode}>
+            <CanvasBanner
+              theme={theme}
+              tone={mapBookingBanner.tone}
+              title={t(mapBookingBanner.titleKey)}
+              body={t(mapBookingBanner.bodyKey)}
+            />
+          </div>
+          <div style={gridStyle}>
+            {renderField({
+              name: "reservationWindowStart",
+              label: t("field.reservationWindowStart"),
+              type: "datetime-local",
+              hint: t("hint.policyWindow"),
+            })}
+            {renderField({
+              name: "reservationWindowEnd",
+              label: t("field.reservationWindowEnd"),
+              type: "datetime-local",
+            })}
+          </div>
         </div>
       </CanvasCard>
 
