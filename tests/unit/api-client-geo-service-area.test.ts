@@ -246,4 +246,45 @@ describe("api client geo and service-area coverage", () => {
       details: { provider: "mock", outageWindow: "active" },
     });
   });
+
+  it("throws ApiClientError for invalid_coordinate service-area failures", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () =>
+        JSON.stringify({
+          error: {
+            code: "INVALID_COORDINATE",
+            message: "Pickup coordinate is out of bounds",
+            details: {
+              field: "pickup",
+              coordinate: { lat: 95, lng: 121.5654 },
+            },
+            retryable: false,
+            traceId: "trace-svc-001",
+          },
+        }),
+    } as Response);
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(
+      client.evaluateServiceArea({
+        serviceProductType: "taxi_realtime",
+        pickup: { lat: 95, lng: 121.5654 },
+      }),
+    ).rejects.toMatchObject<ApiClientError>({
+      name: "ApiClientError",
+      statusCode: 400,
+      code: "INVALID_COORDINATE",
+      retryable: false,
+      traceId: "trace-svc-001",
+      details: {
+        field: "pickup",
+        coordinate: { lat: 95, lng: 121.5654 },
+      },
+    });
+  });
 });
