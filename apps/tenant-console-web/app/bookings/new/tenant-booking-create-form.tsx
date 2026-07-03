@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  useCallback,
   useEffect,
   useState,
   useTransition,
@@ -25,6 +26,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import {
+  AddressMapPairPicker,
   CanvasBanner,
   CanvasCard,
   CanvasPageHeader,
@@ -34,6 +36,9 @@ import {
   KpiRow,
   StatusChip,
   buildCanvasTheme,
+  type AddressMapPairChange,
+  type AddressPayload,
+  type ServiceAreaEvaluationResult,
 } from "@drts/ui-web";
 import {
   buildTenantBookingCreateCommand,
@@ -47,6 +52,12 @@ import {
   type TenantBookingValidationMessages,
 } from "./tenant-booking-create-form-utils";
 import { useTranslation } from "@/lib/i18n";
+import { createTenantConsoleGeoProvider } from "@/lib/geo-map-provider";
+import {
+  TENANT_CONSOLE_MAP_SURFACE,
+  coordinateToDraftString,
+  savedAddressToPayload,
+} from "@/lib/tenant-address-map";
 
 type BookingCreateActionMap = {
   submit: ResourceActionDescriptor;
@@ -795,12 +806,28 @@ export function TenantBookingCreateForm({
   const [dropoffAddressId, setDropoffAddressId] = useState(
     pageModel.prefill.dropoffAddressId,
   );
-  const [pickupAddress, setPickupAddress] = useState("");
-  const [pickupLat, setPickupLat] = useState("");
-  const [pickupLng, setPickupLng] = useState("");
-  const [dropoffAddress, setDropoffAddress] = useState("");
-  const [dropoffLat, setDropoffLat] = useState("");
-  const [dropoffLng, setDropoffLng] = useState("");
+  const [pickupPayload, setPickupPayload] = useState<AddressPayload | null>(
+    () => {
+      const record = addresses.find(
+        (row) => row.addressId === pageModel.prefill.pickupAddressId,
+      );
+      return record ? savedAddressToPayload(record) : null;
+    },
+  );
+  const [dropoffPayload, setDropoffPayload] = useState<AddressPayload | null>(
+    () => {
+      const record = addresses.find(
+        (row) => row.addressId === pageModel.prefill.dropoffAddressId,
+      );
+      return record ? savedAddressToPayload(record) : null;
+    },
+  );
+  const [serviceability, setServiceability] =
+    useState<ServiceAreaEvaluationResult | null>(null);
+  const [geoProvider] = useState(() => createTenantConsoleGeoProvider());
+  // Bumped only when a saved address is chosen, to remount the picker with the
+  // new seed value (the picker seeds its internal state from props at mount).
+  const [pickerNonce, setPickerNonce] = useState(0);
   const [reservationWindowStart, setReservationWindowStart] = useState("");
   const [reservationWindowEnd, setReservationWindowEnd] = useState("");
   const [passengerName, setPassengerName] = useState("");
@@ -840,6 +867,15 @@ export function TenantBookingCreateForm({
   const [redirectDelayMs, setRedirectDelayMs] = useState(0);
 
   const estimatedAmountMinor = parseAmountMajor(estimatedAmount);
+  // Booking-command coordinate fields are derived from the picker payloads so
+  // address text and coordinates always travel together (consistent payloads).
+  const pickupAddress = pickupPayload?.address ?? "";
+  const pickupLat = coordinateToDraftString(pickupPayload?.lat);
+  const pickupLng = coordinateToDraftString(pickupPayload?.lng);
+  const dropoffAddress = dropoffPayload?.address ?? "";
+  const dropoffLat = coordinateToDraftString(dropoffPayload?.lat);
+  const dropoffLng = coordinateToDraftString(dropoffPayload?.lng);
+  const notServiceable = serviceability?.decision === "not_serviceable";
   const draft: TenantBookingDraftValues = {
     businessDispatchSubtype,
     selectedPassengerId,
@@ -914,6 +950,7 @@ export function TenantBookingCreateForm({
     pageModel.emptyState != null ||
     pageModel.actions.submit.enabled === false ||
     approvalEvaluation?.outcome?.blocked === true ||
+    notServiceable ||
     missingRequiredFields ||
     Object.keys(formatErrors).length > 0;
 
@@ -953,35 +990,47 @@ export function TenantBookingCreateForm({
     setPassengerPhone(passenger.mobile ?? "");
   }, [passengers, selectedPassengerId]);
 
-  useEffect(() => {
-    if (!pickupAddressId) {
-      return;
+  const handlePickupAddressSelect = useCallback(
+    (addressId: string) => {
+      setPickupAddressId(addressId);
+      if (addressId) {
+        const record = addresses.find((row) => row.addressId === addressId);
+        if (record) {
+          setPickupPayload(savedAddressToPayload(record));
+        }
+      }
+      setPickerNonce((nonce) => nonce + 1);
+    },
+    [addresses],
+  );
+
+  const handleDropoffAddressSelect = useCallback(
+    (addressId: string) => {
+      setDropoffAddressId(addressId);
+      if (addressId) {
+        const record = addresses.find((row) => row.addressId === addressId);
+        if (record) {
+          setDropoffPayload(savedAddressToPayload(record));
+        }
+      }
+      setPickerNonce((nonce) => nonce + 1);
+    },
+    [addresses],
+  );
+
+  const handlePairChange = useCallback((change: AddressMapPairChange) => {
+    setPickupPayload(change.pickup);
+    setDropoffPayload(change.dropoff);
+    setServiceability(change.serviceability);
+    // A user-edited stop is no longer the saved address; drop the stale id so
+    // the submitted payload's addressId matches the pinned coordinates.
+    if (change.pickup && change.pickup.coordinateSource !== "saved_address") {
+      setPickupAddressId("");
     }
-
-    const address = addresses.find((row) => row.addressId === pickupAddressId);
-    if (!address) {
-      return;
+    if (change.dropoff && change.dropoff.coordinateSource !== "saved_address") {
+      setDropoffAddressId("");
     }
-
-    setPickupAddress(address.addressText);
-    setPickupLat(address.lat == null ? "" : String(address.lat));
-    setPickupLng(address.lng == null ? "" : String(address.lng));
-  }, [addresses, pickupAddressId]);
-
-  useEffect(() => {
-    if (!dropoffAddressId) {
-      return;
-    }
-
-    const address = addresses.find((row) => row.addressId === dropoffAddressId);
-    if (!address) {
-      return;
-    }
-
-    setDropoffAddress(address.addressText);
-    setDropoffLat(address.lat == null ? "" : String(address.lat));
-    setDropoffLng(address.lng == null ? "" : String(address.lng));
-  }, [addresses, dropoffAddressId]);
+  }, []);
 
   useEffect(() => {
     if (!redirectTarget) {
@@ -1121,6 +1170,11 @@ export function TenantBookingCreateForm({
 
     if (approvalEvaluation?.outcome?.blocked) {
       setSubmitError(t("newBooking.error.submitBlocked"));
+      return;
+    }
+
+    if (notServiceable) {
+      setSubmitError(t("newBooking.serviceability.blockedBody"));
       return;
     }
 
@@ -1519,7 +1573,7 @@ export function TenantBookingCreateForm({
                   <FieldShell label={t("newBooking.field.savedPickup")}>
                     <select
                       onChange={(event) =>
-                        setPickupAddressId(event.target.value)
+                        handlePickupAddressSelect(event.target.value)
                       }
                       style={inputBaseStyle}
                       value={pickupAddressId}
@@ -1541,7 +1595,7 @@ export function TenantBookingCreateForm({
                   <FieldShell label={t("newBooking.field.savedDropoff")}>
                     <select
                       onChange={(event) =>
-                        setDropoffAddressId(event.target.value)
+                        handleDropoffAddressSelect(event.target.value)
                       }
                       style={inputBaseStyle}
                       value={dropoffAddressId}
@@ -1559,133 +1613,44 @@ export function TenantBookingCreateForm({
                       ))}
                     </select>
                   </FieldShell>
-
-                  <FieldShell
-                    error={visibleFieldErrors.pickupAddress}
-                    fullSpan
-                    label={t("newBooking.field.pickupAddress")}
-                  >
-                    <input
-                      onChange={(event) => {
-                        setPickupAddressId("");
-                        setPickupAddress(event.target.value);
-                      }}
-                      style={{
-                        ...inputBaseStyle,
-                        ...(visibleFieldErrors.pickupAddress
-                          ? { borderColor: "#ef4444" }
-                          : {}),
-                      }}
-                      type="text"
-                      value={pickupAddress}
-                    />
-                  </FieldShell>
-
-                  <FieldShell
-                    error={visibleFieldErrors.dropoffAddress}
-                    fullSpan
-                    label={t("newBooking.field.dropoffAddress")}
-                  >
-                    <input
-                      onChange={(event) => {
-                        setDropoffAddressId("");
-                        setDropoffAddress(event.target.value);
-                      }}
-                      style={{
-                        ...inputBaseStyle,
-                        ...(visibleFieldErrors.dropoffAddress
-                          ? { borderColor: "#ef4444" }
-                          : {}),
-                      }}
-                      type="text"
-                      value={dropoffAddress}
-                    />
-                  </FieldShell>
-
-                  <FieldShell
-                    error={visibleFieldErrors.pickupLat}
-                    label={t("newBooking.field.pickupLat")}
-                  >
-                    <input
-                      inputMode="decimal"
-                      onChange={(event) => {
-                        setPickupAddressId("");
-                        setPickupLat(event.target.value);
-                      }}
-                      style={{
-                        ...inputBaseStyle,
-                        ...(visibleFieldErrors.pickupLat
-                          ? { borderColor: "#ef4444" }
-                          : {}),
-                      }}
-                      type="text"
-                      value={pickupLat}
-                    />
-                  </FieldShell>
-
-                  <FieldShell
-                    error={visibleFieldErrors.pickupLng}
-                    label={t("newBooking.field.pickupLng")}
-                  >
-                    <input
-                      inputMode="decimal"
-                      onChange={(event) => {
-                        setPickupAddressId("");
-                        setPickupLng(event.target.value);
-                      }}
-                      style={{
-                        ...inputBaseStyle,
-                        ...(visibleFieldErrors.pickupLng
-                          ? { borderColor: "#ef4444" }
-                          : {}),
-                      }}
-                      type="text"
-                      value={pickupLng}
-                    />
-                  </FieldShell>
-
-                  <FieldShell
-                    error={visibleFieldErrors.dropoffLat}
-                    label={t("newBooking.field.dropoffLat")}
-                  >
-                    <input
-                      inputMode="decimal"
-                      onChange={(event) => {
-                        setDropoffAddressId("");
-                        setDropoffLat(event.target.value);
-                      }}
-                      style={{
-                        ...inputBaseStyle,
-                        ...(visibleFieldErrors.dropoffLat
-                          ? { borderColor: "#ef4444" }
-                          : {}),
-                      }}
-                      type="text"
-                      value={dropoffLat}
-                    />
-                  </FieldShell>
-
-                  <FieldShell
-                    error={visibleFieldErrors.dropoffLng}
-                    label={t("newBooking.field.dropoffLng")}
-                  >
-                    <input
-                      inputMode="decimal"
-                      onChange={(event) => {
-                        setDropoffAddressId("");
-                        setDropoffLng(event.target.value);
-                      }}
-                      style={{
-                        ...inputBaseStyle,
-                        ...(visibleFieldErrors.dropoffLng
-                          ? { borderColor: "#ef4444" }
-                          : {}),
-                      }}
-                      type="text"
-                      value={dropoffLng}
-                    />
-                  </FieldShell>
                 </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <AddressMapPairPicker
+                    key={pickerNonce}
+                    provider={geoProvider}
+                    surface={TENANT_CONSOLE_MAP_SURFACE}
+                    theme={th}
+                    serviceProductType={businessDispatchSubtype}
+                    pickupValue={pickupPayload}
+                    dropoffValue={dropoffPayload}
+                    onChange={handlePairChange}
+                    pickupTitle={t("newBooking.field.pickupAddress")}
+                    dropoffTitle={t("newBooking.field.dropoffAddress")}
+                  />
+                </div>
+
+                {submitAttempted &&
+                (visibleFieldErrors.pickupAddress ||
+                  visibleFieldErrors.dropoffAddress) ? (
+                  <span style={errorStyle}>
+                    {visibleFieldErrors.pickupAddress ??
+                      visibleFieldErrors.dropoffAddress}
+                  </span>
+                ) : null}
+
+                {notServiceable ? (
+                  <CanvasBanner
+                    theme={th}
+                    tone="danger"
+                    icon="warn"
+                    title={t("newBooking.serviceability.blockedTitle")}
+                    body={
+                      serviceability?.reasonMessages?.join(" ") ||
+                      t("newBooking.serviceability.blockedBody")
+                    }
+                  />
+                ) : null}
               </CanvasCard>
 
               <CanvasCard
