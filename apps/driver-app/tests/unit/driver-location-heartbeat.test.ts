@@ -171,6 +171,64 @@ describe("driver location heartbeat transport", () => {
     });
   });
 
+  it("keeps active trip heartbeat running after external navigation handoff", async () => {
+    const heartbeatModule = await import("../../lib/driver-location-heartbeat");
+    const navigationModule = await import("../../lib/driver-navigation");
+    const openURL = vi.fn().mockResolvedValue(undefined);
+
+    await heartbeatModule.syncDriverLocationHeartbeat({
+      taskId: "task-001",
+      driverId: "driver-001",
+      status: "on_trip",
+    });
+
+    const navigationResult = await navigationModule.openDriverNavigation({
+      stop: {
+        label: "上車點",
+        coordinate: {
+          latitude: 25.0478,
+          longitude: 121.517,
+        },
+      },
+      provider: "system",
+      platform: "android",
+      linking: {
+        canOpenURL: vi.fn().mockResolvedValue(true),
+        openURL,
+      },
+    });
+
+    expect(navigationResult).toMatchObject({
+      status: "opened",
+      provider: "system",
+    });
+    expect(openURL).toHaveBeenCalledWith(
+      "google.navigation:q=25.0478,121.517&mode=d",
+    );
+    expect(heartbeatModule.getActiveDriverHeartbeatTaskId()).toBe("task-001");
+    expect(heartbeatModule.getActiveDriverHeartbeatWorkState()).toBe("on_trip");
+
+    await taskHandler?.({
+      data: {
+        locations: [createLocation(16_000)],
+      },
+    });
+    await flushHeartbeatQueue();
+
+    expect(enqueueDriverLocationEvent).toHaveBeenCalledWith({
+      taskId: "task-001",
+      lat: 25.033,
+      lng: 121.5654,
+      recordedAt: new Date(16_000).toISOString(),
+      accuracyM: 8,
+      workState: "on_trip",
+      appState: "background",
+      transportMode: "background",
+      networkType: "unknown",
+      preserveKeyEvent: false,
+    });
+  });
+
   it("uses a throttled foreground fallback when background permission is unavailable", async () => {
     getBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
     requestBackgroundPermissionsAsync.mockResolvedValue({ granted: false });
