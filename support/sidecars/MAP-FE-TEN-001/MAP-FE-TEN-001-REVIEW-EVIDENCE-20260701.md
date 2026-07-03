@@ -1,9 +1,9 @@
 # MAP-FE-TEN-001 — Tenant address & booking map alignment — Review Evidence
 
 - Task: `MAP-FE-TEN-001`
-- Owner: `Claude2`
+- Owner: `Codex` (closeout re-home from `Claude2`)
 - Reviewer: `Codex2`
-- Branch: `claude2/map-fe-ten-001` (base `dev`)
+- Branch: `codex/map-fe-ten-001` (re-homed from approved `claude2/map-fe-ten-001` onto current `dev`)
 - Anchor commits: `89e3a94d5` (tenant-portal address book), `3f8af7882` (tenant-console booking)
 - Depends on: `MAP-UI-001` (shared `AddressMapPicker`, merged #1038), `MAP-BE-004` (geo provider gateway), `MAP-BE-005` (serviceability / booking gate — in progress; FE is degrade-safe and treats the backend gate as authoritative).
 
@@ -24,7 +24,7 @@ browser provider adapter.
 - `components/address-map-field.tsx`: mirrors the picked coordinate into hidden
   inputs (`lat`, `lng`, `coordinateSource`, `manualOverrideReason`,
   `priorGeocodeSource`) and shows an **advanced warning banner when no
-  coordinate is pinned**, so a saved address always has coordinates *or* an
+  coordinate is pinned**, so a saved address always has coordinates _or_ an
   explicit warning (acceptance #1).
 - `lib/tenant-address-map.ts`: pure mappers — `savedAddressToPayload` (seeds the
   saved pin), `geocodeSourceFromCoordinateSource` (picker `coordinateSource` →
@@ -32,6 +32,9 @@ browser provider adapter.
   saved pin).
 - Server actions (`createAddress` / `updateAddress`) now persist
   `geocodeSource` alongside `lat`/`lng`.
+- Owner closeout on current `dev` also updates `app/addresses/page.tsx` and
+  `app/passengers/page.tsx` to await Promise-based `searchParams`, matching the
+  repo's Next 16 `PageProps` contract without changing surface behavior.
 
 ### Tenant Console — booking (`apps/tenant-console-web`)
 
@@ -68,20 +71,26 @@ Both surfaces pass the shared `tenant` realm theme
 the picker. No raw hex palette introduced; colors come from `@drts/ui-tokens`
 via the canvas theme. Surface tags: `tenant_portal`, `tenant_console`.
 
-## Executed gate evidence (task worktree, HEAD = 3f8af7882)
+## Executed gate evidence (owner closeout on `codex/map-fe-ten-001`)
 
-| Check | Command | Result |
-| --- | --- | --- |
-| tenant-portal typecheck | `pnpm --filter tenant-portal-web typecheck` | PASS (exit 0) |
-| tenant-portal lint | `pnpm --filter tenant-portal-web lint` | PASS (exit 0) |
-| tenant-portal build | `pnpm --filter tenant-portal-web build` | PASS (exit 0) |
-| tenant-console typecheck | `pnpm --filter tenant-console-web typecheck` | PASS (exit 0) |
-| tenant-console lint | `pnpm --filter tenant-console-web lint` | PASS (exit 0) |
-| tenant-console test | `pnpm --filter tenant-console-web test` | PASS — 5 files / 20 tests |
-| tenant-console build | `pnpm --filter tenant-console-web build` | PASS (exit 0) |
-| e2e + config lint | `eslint playwright.tenant-map-booking.config.ts tests/e2e/tenant-map-booking-ui.spec.ts` | PASS (exit 0) |
+| Check                    | Command                                                                                                             | Result                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| tenant-portal typecheck  | `pnpm --filter tenant-portal-web typecheck`                                                                         | PASS (exit 0)             |
+| tenant-portal lint       | `pnpm --filter tenant-portal-web lint`                                                                              | PASS (exit 0)             |
+| tenant-portal build      | `pnpm --filter tenant-portal-web exec next build --webpack`                                                         | PASS (exit 0)             |
+| tenant-console typecheck | `pnpm --filter tenant-console-web typecheck`                                                                        | PASS (exit 0)             |
+| tenant-console lint      | `pnpm --filter tenant-console-web lint`                                                                             | PASS (exit 0)             |
+| tenant-console test      | `pnpm --filter tenant-console-web test`                                                                             | PASS — 5 files / 20 tests |
+| tenant-console build     | `pnpm --filter tenant-console-web build`                                                                            | PASS (exit 0)             |
+| e2e + config lint        | `pnpm exec eslint playwright.tenant-map-booking.config.ts tests/e2e/tenant-map-booking-ui.spec.ts --max-warnings=0` | PASS (exit 0)             |
 
 (acceptance #4 — tenant package checks pass.)
+
+Note: `pnpm --filter tenant-portal-web build` currently resolves to Next 16
+Turbopack and fails only in this isolated worktree because
+`apps/tenant-portal-web/node_modules` is a symlink outside the worktree root.
+The product code path was verified with `next build --webpack`, which completed
+including Next's TypeScript pass and static route generation.
 
 ## e2e (infra-gated)
 
@@ -112,10 +121,10 @@ so no stale saved coordinates survive in state or the submit payload. The
 existing `handlePairChange` logic (dropping a stale `addressId` when the user
 edits a stop away from `saved_address`) is unchanged and complementary.
 
-| Check | Command | Result |
-| --- | --- | --- |
+| Check                    | Command                                      | Result        |
+| ------------------------ | -------------------------------------------- | ------------- |
 | tenant-console typecheck | `pnpm --filter tenant-console-web typecheck` | PASS (exit 0) |
 
 ## Integration status
 
-`branch_pushed` (pending). No dev merge / deploy claimed.
+Branch-only closeout target: `branch_pushed`. No dev merge / deploy claimed.
