@@ -1,0 +1,21 @@
+{
+  "taskId": "MAP-QA-001",
+  "suite": "shared-test-fixtures",
+  "command": "pnpm --filter @drts/shared-test-fixtures test",
+  "status": "passed",
+  "executedAt": "2026-07-03T16:24:41Z",
+  "branch": "codex/map-qa-001",
+  "ref": "codex/map-qa-001@a1ef993cb5d2b044bdb41144678750fe5ed191c6+working-tree",
+  "results": {
+    "testFilesPassed": 1,
+    "testsPassed": 8,
+    "testsFailed": 0,
+    "durationMs": 501
+  },
+  "coverage": [
+    "fixture key catalog",
+    "geo search / resolve / reverse builders",
+    "service-area evaluation states",
+    "health / definitions / admin geojson builders"
+  ]
+}
