@@ -9,6 +9,36 @@ ALTER TABLE ops.service_area_boundaries
 ALTER TABLE ops.stop_policies
   DROP CONSTRAINT IF EXISTS stop_policies_status_check;
 
+DO $$
+DECLARE
+  constraint_name text;
+BEGIN
+  FOR constraint_name IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'ops.service_area_boundaries'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) ILIKE '%status%'
+  LOOP
+    EXECUTE format('ALTER TABLE ops.service_area_boundaries DROP CONSTRAINT IF EXISTS %I', constraint_name);
+  END LOOP;
+END $$;
+
+DO $$
+DECLARE
+  constraint_name text;
+BEGIN
+  FOR constraint_name IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'ops.stop_policies'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) ILIKE '%status%'
+  LOOP
+    EXECUTE format('ALTER TABLE ops.stop_policies DROP CONSTRAINT IF EXISTS %I', constraint_name);
+  END LOOP;
+END $$;
+
 UPDATE ops.service_area_boundaries
 SET status = CASE
     WHEN status IN ('draft', 'review', 'active', 'retired') THEN status
