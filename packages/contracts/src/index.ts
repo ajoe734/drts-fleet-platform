@@ -227,6 +227,15 @@ export const GEO_PROVIDER_HEALTH_CHECK_STATUSES = [
 export type GeoProviderHealthCheckStatus =
   (typeof GEO_PROVIDER_HEALTH_CHECK_STATUSES)[number];
 
+export const GEO_PROVIDER_QUOTA_STATUSES = [
+  "unknown",
+  "healthy",
+  "warning",
+  "critical",
+] as const;
+export type GeoProviderQuotaStatus =
+  (typeof GEO_PROVIDER_QUOTA_STATUSES)[number];
+
 export interface GeoProviderHealthCheck {
   name: string;
   status: GeoProviderHealthCheckStatus;
@@ -246,6 +255,10 @@ export interface GeoProviderHealthResponse {
   quota: {
     dailyLimit: number | null;
     minuteLimit: number | null;
+    dailyUsed: number | null;
+    minuteUsed: number | null;
+    usagePercent: number | null;
+    status: GeoProviderQuotaStatus;
     warningThresholdPercent: number;
     criticalThresholdPercent: number;
     policy: "mock_unlimited" | "provider_enforced";
@@ -6201,6 +6214,17 @@ export interface OperationalMapGeofenceMetrics {
     mode: string | null;
     failClosed: boolean;
     lastCheckedAt: string | null;
+    quota: {
+      dailyLimit: number | null;
+      minuteLimit: number | null;
+      dailyUsed: number | null;
+      minuteUsed: number | null;
+      usagePercent: number | null;
+      status: GeoProviderQuotaStatus;
+      warningThresholdPercent: number | null;
+      criticalThresholdPercent: number | null;
+      policy: "mock_unlimited" | "provider_enforced" | null;
+    };
   };
   geo: {
     providerOutageCount: number;
@@ -6208,6 +6232,30 @@ export interface OperationalMapGeofenceMetrics {
     coordinateLessAttemptCount: number;
     manualOverrideCount: number;
     resolvedAddressCount: number;
+    requests: {
+      total: number;
+      successful: number;
+      providerErrorCount: number;
+      successRatePercent: number | null;
+      byOperation: {
+        search: number;
+        resolve: number;
+        reverse: number;
+      };
+      byResult: {
+        resolved: number;
+        manualOverride: number;
+        addressAmbiguity: number;
+        coordinateLessAttempt: number;
+        providerOutage: number;
+      };
+    };
+    latencyMs: {
+      count: number;
+      average: number | null;
+      max: number | null;
+      p95: number | null;
+    };
   };
   serviceArea: {
     evaluations: number;

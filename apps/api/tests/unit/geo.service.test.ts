@@ -55,6 +55,28 @@ describe("GeoService", () => {
       mockAllowed: true,
       quota: {
         policy: "mock_unlimited",
+        status: "healthy",
+        usagePercent: null,
+      },
+    });
+  });
+
+  it("surfaces configured provider quota usage for observability consumers", () => {
+    const service = createService({
+      MAP_PROVIDER_DAILY_QUOTA: "1000",
+      MAP_PROVIDER_DAILY_QUOTA_USED: "820",
+      MAP_PROVIDER_QUOTA_WARNING_PERCENT: "80",
+      MAP_PROVIDER_QUOTA_CRITICAL_PERCENT: "95",
+    });
+
+    expect(service.health()).toMatchObject({
+      quota: {
+        dailyLimit: 1000,
+        dailyUsed: 820,
+        usagePercent: 82,
+        status: "warning",
+        warningThresholdPercent: 80,
+        criticalThresholdPercent: 95,
       },
     });
   });
@@ -279,6 +301,69 @@ describe("GeoService", () => {
         providerOutageCount: 1,
         addressAmbiguityCount: 1,
         coordinateLessAttemptCount: 1,
+      },
+    });
+  });
+
+  it("tracks geocode success rate and latency samples in map geofence observability", async () => {
+    const { service, observability } = createObservedService({
+      MAP_PROVIDER_DAILY_QUOTA: "1000",
+      MAP_PROVIDER_DAILY_QUOTA_USED: "820",
+      MAP_PROVIDER_QUOTA_WARNING_PERCENT: "80",
+      MAP_PROVIDER_QUOTA_CRITICAL_PERCENT: "95",
+    });
+
+    service.health();
+    await service.search({
+      q: "台北車站",
+      surface: "callcenter",
+    });
+    await service.resolve({
+      addressText: "Caller described a side gate",
+      selectedPoint: { lat: 25.041, lng: 121.55 },
+      selectedByActorId: "agent-002",
+      surface: "callcenter",
+      manualOverrideReason: "caller_confirmed_gate",
+    });
+    await expect(
+      service.search({
+        q: "__provider_unavailable__",
+        surface: "callcenter",
+      }),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+
+    expect(observability.getSnapshot()).toMatchObject({
+      providerHealth: {
+        quota: {
+          dailyLimit: 1000,
+          dailyUsed: 820,
+          usagePercent: 82,
+          status: "warning",
+        },
+      },
+      geo: {
+        requests: {
+          total: 3,
+          successful: 2,
+          providerErrorCount: 1,
+          successRatePercent: 66.7,
+          byOperation: {
+            search: 2,
+            resolve: 1,
+            reverse: 0,
+          },
+          byResult: {
+            resolved: 1,
+            manualOverride: 1,
+            providerOutage: 1,
+          },
+        },
+        latencyMs: {
+          count: 3,
+          average: expect.any(Number),
+          max: expect.any(Number),
+          p95: expect.any(Number),
+        },
       },
     });
   });

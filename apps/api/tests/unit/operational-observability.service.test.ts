@@ -777,6 +777,27 @@ describe("OperationalObservabilityService", () => {
       provider: "external-map",
       mode: "external",
       failClosed: true,
+      quota: {
+        dailyLimit: 1000,
+        minuteLimit: 120,
+        dailyUsed: 830,
+        minuteUsed: 81,
+        usagePercent: 83,
+        status: "warning",
+        warningThresholdPercent: 80,
+        criticalThresholdPercent: 95,
+        policy: "provider_enforced",
+      },
+    });
+    mapGeofenceObservabilityService.recordGeocodeRequest({
+      operation: "search",
+      result: "resolved",
+      durationMs: 120,
+    });
+    mapGeofenceObservabilityService.recordGeocodeRequest({
+      operation: "resolve",
+      result: "provider_outage",
+      durationMs: 420,
     });
     mapGeofenceObservabilityService.recordGeoOutcome("provider_outage");
     mapGeofenceObservabilityService.recordServiceAreaEvaluation({
@@ -860,9 +881,34 @@ describe("OperationalObservabilityService", () => {
         provider: "external-map",
         mode: "external",
         failClosed: true,
+        quota: {
+          usagePercent: 83,
+          status: "warning",
+        },
       },
       geo: {
         providerOutageCount: 1,
+        requests: {
+          total: 2,
+          successful: 1,
+          providerErrorCount: 1,
+          successRatePercent: 50,
+          byOperation: {
+            search: 1,
+            resolve: 1,
+            reverse: 0,
+          },
+          byResult: {
+            resolved: 1,
+            providerOutage: 1,
+          },
+        },
+        latencyMs: {
+          count: 2,
+          average: 270,
+          max: 420,
+          p95: 420,
+        },
       },
       serviceArea: {
         policyDenialCount: 1,
