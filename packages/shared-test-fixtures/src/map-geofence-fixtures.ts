@@ -565,6 +565,10 @@ export function buildMapGeofenceGeoHealthResponse(): GeoProviderHealthResponse {
     quota: {
       dailyLimit: null,
       minuteLimit: null,
+      dailyUsed: null,
+      minuteUsed: null,
+      usagePercent: null,
+      status: "healthy",
       warningThresholdPercent: 80,
       criticalThresholdPercent: 95,
       policy: "mock_unlimited",
