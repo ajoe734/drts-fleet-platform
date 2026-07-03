@@ -200,7 +200,7 @@ export function AddressMapPreviewSurface({
         borderRadius: 10,
         overflow: "hidden",
         border: `1px solid ${theme.border}`,
-        background: `linear-gradient(135deg, ${theme.accentBg}, ${theme.surfaceLo})`,
+        background: theme.surfaceLo,
       }}
     >
       <svg
@@ -468,7 +468,7 @@ function TonePill({
 // ── AddressMapPicker ──
 
 export interface AddressMapPickerProps<TServiceProduct extends string = string> {
-  /** Provider seam; inject the mock provider in CI/stories. */
+  /** Provider seam; inject the mock provider in CI/tests. */
   provider: AddressMapPickerProvider;
   /** Surface tag written into coordinate provenance. */
   surface: GeoResolutionSurface;
@@ -704,9 +704,14 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
         query.trim() ||
         selectedAddress?.address ||
         `Manual location (${roundCoord(lat)}, ${roundCoord(lng)})`,
+      baseAddress: selectedAddress,
+      addressName: selectedAddress?.addressName ?? null,
       surface,
       manualOverrideReason: reason,
       pinnedByActorId: actorId,
+      ...(selectedAddress?.geocodeConfidence
+        ? { geocodeConfidence: selectedAddress.geocodeConfidence }
+        : {}),
     });
     if (!address) {
       setManualError(labels.manualInvalid);
@@ -741,10 +746,14 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
         lat: point.lat,
         lng: point.lng,
         addressText: selectedAddress?.address ?? labels.manualTitle,
+        baseAddress: selectedAddress,
         addressName: selectedAddress?.addressName ?? null,
         surface,
         manualOverrideReason: reason,
         pinnedByActorId: actorId,
+        ...(selectedAddress?.geocodeConfidence
+          ? { geocodeConfidence: selectedAddress.geocodeConfidence }
+          : {}),
       });
       if (!address) {
         return;

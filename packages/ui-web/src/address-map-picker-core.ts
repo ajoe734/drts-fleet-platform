@@ -340,6 +340,8 @@ export interface ManualCoordinateInput {
   addressText: string;
   surface: GeoResolutionSurface;
   manualOverrideReason: string;
+  /** Preserve non-coordinate lineage when nudging an existing selection. */
+  baseAddress?: AddressPayload | null;
   pinnedByActorId?: string | null;
   pinnedAt?: string | null;
   /** Defaults to `"manual"`; a dragged provider pin may keep a finer level. */
@@ -358,24 +360,56 @@ export function manualCoordinateToAddressPayload(
   if (!isValidLatitude(input.lat) || !isValidLongitude(input.lng)) {
     return null;
   }
-  const confidence: GeoGeocodeConfidence = input.geocodeConfidence ?? "manual";
+  const baseAddress = input.baseAddress ?? null;
+  const baseProvenance = baseAddress?.coordinateProvenance ?? null;
+  const confidence: GeoGeocodeConfidence =
+    input.geocodeConfidence ??
+    baseAddress?.geocodeConfidence ??
+    baseProvenance?.geocodeConfidence ??
+    "manual";
+  const placeId = baseAddress?.placeId ?? baseProvenance?.placeId ?? null;
+  const geocodeProvider =
+    baseAddress?.geocodeProvider ?? baseProvenance?.geocodeProvider ?? null;
+  const providerCandidateId =
+    baseAddress?.providerCandidateId ?? baseProvenance?.providerCandidateId ?? null;
+  const selectedByActorId =
+    baseAddress?.selectedByActorId ?? baseProvenance?.selectedByActorId ?? null;
+  const selectedAt = baseAddress?.selectedAt ?? baseProvenance?.selectedAt ?? null;
+  const inheritedAccuracy =
+    baseAddress?.coordinateAccuracyM ?? baseProvenance?.coordinateAccuracyM ?? null;
+  const pinnedByActorId =
+    input.pinnedByActorId ?? baseAddress?.pinnedByActorId ?? null;
+  const pinnedAt = input.pinnedAt ?? baseAddress?.pinnedAt ?? null;
   const provenance: GeoCoordinateProvenance = {
     coordinateSource: "manual_pin",
+    geocodeProvider,
     geocodeConfidence: confidence,
-    pinnedByActorId: input.pinnedByActorId ?? null,
-    pinnedAt: input.pinnedAt ?? null,
+    providerCandidateId,
+    placeId,
+    coordinateAccuracyM: inheritedAccuracy,
+    selectedByActorId,
+    selectedAt,
+    pinnedByActorId,
+    pinnedAt,
     manualOverrideReason: input.manualOverrideReason,
     surface: input.surface,
   };
   return {
-    addressName: input.addressName ?? null,
+    ...(baseAddress ?? {}),
+    addressName: input.addressName ?? baseAddress?.addressName ?? null,
     address: input.addressText,
     lat: input.lat,
     lng: input.lng,
+    placeId,
+    geocodeProvider,
     geocodeConfidence: confidence,
     coordinateSource: "manual_pin",
-    pinnedByActorId: input.pinnedByActorId ?? null,
-    pinnedAt: input.pinnedAt ?? null,
+    coordinateAccuracyM: null,
+    providerCandidateId,
+    selectedByActorId,
+    selectedAt,
+    pinnedByActorId,
+    pinnedAt,
     manualOverrideReason: input.manualOverrideReason,
     surface: input.surface,
     coordinateProvenance: provenance,

@@ -88,6 +88,39 @@ describe("manualCoordinateToAddressPayload", () => {
     expect(isDispatchReadyAddress(payload)).toBe(true);
   });
 
+  it("preserves provider lineage when nudging an existing provider candidate", () => {
+    const selected = candidateToAddressPayload(CANDIDATE, {
+      surface: "callcenter",
+      selectedByActorId: "agent-9",
+    });
+
+    const payload = manualCoordinateToAddressPayload({
+      lat: 25.0341,
+      lng: 121.5649,
+      addressText: "No. 7, Section 5, Xinyi Road, Taipei",
+      addressName: "Taipei 101",
+      surface: "callcenter",
+      manualOverrideReason: "adjust pin to pickup curb",
+      pinnedByActorId: "agent-11",
+      baseAddress: selected,
+    });
+
+    expect(payload).not.toBeNull();
+    expect(payload?.coordinateSource).toBe("manual_pin");
+    expect(payload?.providerCandidateId).toBe("place-1");
+    expect(payload?.placeId).toBe("place-1");
+    expect(payload?.geocodeProvider).toBe("mock-geo");
+    expect(payload?.selectedByActorId).toBe("agent-9");
+    expect(payload?.geocodeConfidence).toBe("exact");
+    expect(payload?.coordinateAccuracyM).toBeNull();
+    expect(payload?.coordinateProvenance?.providerCandidateId).toBe("place-1");
+    expect(payload?.coordinateProvenance?.placeId).toBe("place-1");
+    expect(payload?.coordinateProvenance?.geocodeProvider).toBe("mock-geo");
+    expect(payload?.coordinateProvenance?.selectedByActorId).toBe("agent-9");
+    expect(payload?.coordinateProvenance?.coordinateAccuracyM).toBe(8);
+    expect(payload?.coordinateProvenance?.pinnedByActorId).toBe("agent-11");
+  });
+
   it("returns null for out-of-range coordinates", () => {
     expect(
       manualCoordinateToAddressPayload({
