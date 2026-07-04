@@ -377,6 +377,7 @@ export interface GeometryEditorProps {
   theme?: CanvasTheme;
   initialDraft?: GeometryDraft;
   baselineDraft?: GeometryDraft | null;
+  allowedKinds?: GeometryDraftKind[];
   bounds?: GeometryBounds;
   onChange?: (snapshot: GeometryEditorSnapshot) => void;
   labels?: Partial<GeometryEditorLabels>;
@@ -386,6 +387,7 @@ export function GeometryEditor({
   theme: themeProp,
   initialDraft = createEmptyGeometryDraft("polygon"),
   baselineDraft = null,
+  allowedKinds = ["polygon", "circle", "routeCorridor"],
   bounds,
   onChange,
   labels: labelsProp,
@@ -587,7 +589,9 @@ export function GeometryEditor({
             ["polygon", labels.polygon, "integrationGov"],
             ["circle", labels.circle, "pin"],
             ["routeCorridor", labels.routeCorridor, "dispatch"],
-          ] as const).map(([kind, label, icon]) => {
+          ] as const)
+            .filter(([kind]) => allowedKinds.includes(kind))
+            .map(([kind, label, icon]) => {
             const active = draft.kind === kind;
             return (
               <button
@@ -600,7 +604,7 @@ export function GeometryEditor({
                 {label}
               </button>
             );
-          })}
+            })}
           <span style={{ flex: 1 }} />
           <button
             type="button"

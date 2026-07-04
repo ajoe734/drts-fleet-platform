@@ -1,0 +1,26 @@
+{
+  "taskId": "MAP-REL-001",
+  "artifact": "platform-admin-service-area-governance-checks",
+  "recordedAt": "2026-07-04T05:55:25Z",
+  "branch": "codex2/map-rel-001",
+  "head": "50b77973f0cc570b2911e22e06fd1947f8751f0c",
+  "checks": [
+    {
+      "command": "pnpm --filter @drts/platform-admin-web typecheck",
+      "status": "PASS"
+    },
+    {
+      "command": "pnpm --filter @drts/platform-admin-web lint",
+      "status": "PASS"
+    },
+    {
+      "command": "pnpm --filter @drts/platform-admin-web test",
+      "status": "PASS",
+      "note": "No test files found; command exited 0 with --passWithNoTests."
+    },
+    {
+      "command": "pnpm --filter @drts/ui-web test",
+      "status": "PASS"
+    }
+  ]
+}

@@ -4,7 +4,7 @@
   "owner": "Codex2",
   "reviewer": "Codex",
   "branch": "codex2/map-rel-001",
-  "branchSha": "7d997b1bd5abff23da279cee03d4f1493ed8b75a",
+  "branchSha": "50b77973f0cc570b2911e22e06fd1947f8751f0c",
   "evidenceDate": "2026-07-04",
   "productionEvidence": [
     {
@@ -23,10 +23,13 @@
       "id": "FLEETS-MAP-002",
       "title": "Gate B governance safe to publish",
       "gate": "Gate B",
-      "status": "FAIL",
+      "status": "PASS",
       "artifacts": [
-        "docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260703.md",
-        "support/sidecars/MAP-UI-002/MAP-UI-002-INTEGRATE-001-CLOSEOUT.md",
+        "apps/platform-admin-web/app/service-area-governance/page.tsx",
+        "apps/platform-admin-web/app/service-area-governance/service-areas/[serviceAreaId]/page.tsx",
+        "apps/platform-admin-web/app/service-area-governance/stop-policies/[stopPolicyId]/page.tsx",
+        "apps/platform-admin-web/components/service-area-governance-page.tsx",
+        "support/sidecars/MAP-REL-001/artifacts/platform-admin-service-area-governance-checks-20260704T055525Z.json",
         "support/sidecars/MAP-QA-002/artifacts/service-area-service-vitest-20260704T0414Z.json",
         "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
       ]
@@ -46,7 +49,7 @@
       "id": "FLEETS-MAP-004",
       "title": "Gate D driver safe to navigate",
       "gate": "Gate D",
-      "status": "PASS",
+      "status": "FAIL",
       "artifacts": [
         "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md"
       ]

@@ -4,23 +4,11 @@
   "notes": [
     {
       "action": "handoff",
-      "reason": "Gate B is not marked PASS in final evidence."
-    },
-    {
-      "action": "handoff",
       "reason": "Gate D is not marked PASS in final evidence."
     },
     {
       "action": "handoff",
-      "reason": "FLEETS-MAP-002 is not closed with PASS in final evidence."
-    },
-    {
-      "action": "handoff",
       "reason": "FLEETS-MAP-004 is not closed with PASS in final evidence."
-    },
-    {
-      "action": "handoff",
-      "reason": "Gate B lacks canonical /service-area-governance repo publication: expected apps/platform-admin-web/app/service-area-governance/page.tsx, apps/platform-admin-web/app/service-area-governance/service-areas/[serviceAreaId]/page.tsx, apps/platform-admin-web/app/service-area-governance/stop-policies/[stopPolicyId]/page.tsx."
     },
     {
       "action": "handoff",
