@@ -44,7 +44,7 @@ describe("GeoProviderConfigService", () => {
       MAP_PROVIDER_NAME: "google_maps",
       MAP_PROVIDER_SERVER_KEY: "server-key",
       MAP_PROVIDER_ALLOWED_ORIGINS:
-        "https://ops.example.com,https://admin.example.com",
+        "https://ops.example.com;https://admin.example.com",
       MAP_PROVIDER_DAILY_QUOTA: "1000",
       MAP_PROVIDER_DAILY_QUOTA_USED: "810",
       MAP_PROVIDER_QUOTA_WARNING_PERCENT: "80",
@@ -77,6 +77,22 @@ describe("GeoProviderConfigService", () => {
         }),
       ]),
     });
+  });
+
+  it("accepts comma or semicolon delimiters for browser origin restrictions", () => {
+    const service = new GeoProviderConfigService({
+      DRTS_ENV: "staging",
+      MAP_PROVIDER_MODE: "external",
+      MAP_PROVIDER_SERVER_KEY: "server-key",
+      MAP_PROVIDER_ALLOWED_ORIGINS:
+        "https://ops.example.com, https://admin.example.com;https://dispatch.example.com",
+    });
+
+    expect(service.getHealth().keyRestrictions.browserAllowedOrigins).toEqual([
+      "https://ops.example.com",
+      "https://admin.example.com",
+      "https://dispatch.example.com",
+    ]);
   });
 
   it("fails closed in external mode when the server key is absent", () => {

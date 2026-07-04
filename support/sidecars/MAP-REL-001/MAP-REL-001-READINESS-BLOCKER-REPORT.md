@@ -2,7 +2,7 @@
 
 - Task: `MAP-REL-001`
 - Branch: `codex2/map-rel-001`
-- Head: `fb70f22271bb846783c5ee3b992c25e862e77247`
+- Head: `4cb0104e35b4e9d1dd97126c38b32266767a2db3`
 - Verifier: `report-map-geofence-readiness-blockers`
 - Verdict: `PASS`
 
@@ -30,6 +30,7 @@
 | `gate-d-mobile-uat` | PASS |
 | `geo-runtime-provider-ready` | PASS |
 | `provider-env-alignment` | PASS |
+| `provider-origin-delimiter-alignment` | PASS |
 | `provider-prereqs` | PASS |
 | `provider-prereq-rollout-contract` | PASS |
 | `rollout-rollback` | PASS |

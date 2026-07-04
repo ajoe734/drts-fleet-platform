@@ -207,7 +207,7 @@ export class GeoProviderConfigService {
 
   private csv(name: string) {
     return this.text(name, "")
-      .split(",")
+      .split(/[;,]/)
       .map((value) => value.trim())
       .filter(Boolean);
   }

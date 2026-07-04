@@ -99,7 +99,8 @@ Map provider runtime notes:
 - `MAP_PROVIDER_MODE=external` requires `MAP_PROVIDER_SERVER_KEY` in staging / production; otherwise the API startup guard and geo runtime fail closed.
 - `MAP_PROVIDER_MODE=disabled` is allowed only for local troubleshooting; staging / production preflight rejects it.
 - Set `MAP_PROVIDER_NAME=google_maps` when the external backend is enabled so `/health` and geo audit metadata report the concrete provider name.
-- `MAP_PROVIDER_ALLOWED_ORIGINS` and `MAP_PROVIDER_BUDGET_ALERT_PCT` accept either `,` or `;` delimiters. Use `;` in deploy rails because `gcloud run deploy --set-env-vars` reserves `,`.
+- `MAP_PROVIDER_ALLOWED_ORIGINS` accepts either `,` or `;` delimiters. Use `;` in deploy rails because `gcloud run deploy --set-env-vars` reserves `,`.
+- `MAP_PROVIDER_QUOTA_WARNING_PERCENT` and `MAP_PROVIDER_QUOTA_CRITICAL_PERCENT` control `/health` quota status thresholds for the external provider.
 - `MAP_PROVIDER_ALLOW_MOCK_IN_PROD=true` is the only supported escape hatch for temporary staging/prod mock operation, and deploy preflight rejects mock mode unless that override is explicit.
 - `scripts/check-map-provider-config.sh` is the shared preflight for local shells and deploy workflows.
 - `GET /health`, `GET /api/health`, and `GET /api/geo/health` include the geo provider readiness report alongside the base API status payload.

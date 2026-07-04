@@ -41,6 +41,15 @@ const providerPreflightPath = path.join(
   repoRoot,
   "scripts/check-map-provider-config.sh",
 );
+const deployStagingWorkflowPath = path.join(
+  repoRoot,
+  ".github/workflows/deploy-staging.yml",
+);
+const deployProdWorkflowPath = path.join(
+  repoRoot,
+  ".github/workflows/deploy-prod.yml",
+);
+const apiReadmePath = path.join(repoRoot, "apps/api/README.md");
 
 const finalEvidence = fs.readFileSync(finalEvidencePath, "utf8");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -49,6 +58,9 @@ const geoModule = fs.readFileSync(geoModulePath, "utf8");
 const externalGeoProvider = fs.readFileSync(externalGeoProviderPath, "utf8");
 const geoProviderConfig = fs.readFileSync(geoProviderConfigPath, "utf8");
 const providerPreflight = fs.readFileSync(providerPreflightPath, "utf8");
+const deployStagingWorkflow = fs.readFileSync(deployStagingWorkflowPath, "utf8");
+const deployProdWorkflow = fs.readFileSync(deployProdWorkflowPath, "utf8");
+const apiReadme = fs.readFileSync(apiReadmePath, "utf8");
 const driverEvidencePath = path.join(
   repoRoot,
   "support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md",
@@ -140,11 +152,35 @@ if (!geoRuntimeProviderReady) {
 const providerEnvAligned =
   providerPreflight.includes("MAP_PROVIDER_MODE") &&
   !providerPreflight.includes("MAP_PROVIDER_BACKEND") &&
-  providerPreflight.includes("MAP_PROVIDER_SERVER_KEY");
+  providerPreflight.includes("MAP_PROVIDER_SERVER_KEY") &&
+  deployStagingWorkflow.includes("MAP_PROVIDER_QUOTA_WARNING_PERCENT") &&
+  deployStagingWorkflow.includes("MAP_PROVIDER_QUOTA_CRITICAL_PERCENT") &&
+  !deployStagingWorkflow.includes("MAP_PROVIDER_BUDGET_ALERT_PCT") &&
+  deployProdWorkflow.includes("MAP_PROVIDER_QUOTA_WARNING_PERCENT") &&
+  deployProdWorkflow.includes("MAP_PROVIDER_QUOTA_CRITICAL_PERCENT") &&
+  !deployProdWorkflow.includes("MAP_PROVIDER_BUDGET_ALERT_PCT") &&
+  apiReadme.includes("MAP_PROVIDER_QUOTA_WARNING_PERCENT") &&
+  apiReadme.includes("MAP_PROVIDER_QUOTA_CRITICAL_PERCENT");
 checks.push({ id: "provider-env-alignment", pass: providerEnvAligned });
 if (!providerEnvAligned) {
   blockers.push(
     "Provider preflight still diverges from the geofence runtime contract; expected MAP_PROVIDER_MODE plus MAP_PROVIDER_SERVER_KEY handling.",
+  );
+}
+
+const allowedOriginsDelimiterAligned =
+  geoProviderConfig.includes(".split(/[;,]/)") &&
+  deployStagingWorkflow.includes("MAP_PROVIDER_ALLOWED_ORIGINS") &&
+  deployProdWorkflow.includes("MAP_PROVIDER_ALLOWED_ORIGINS") &&
+  apiReadme.includes("MAP_PROVIDER_ALLOWED_ORIGINS") &&
+  apiReadme.includes("accepts either `,` or `;` delimiters");
+checks.push({
+  id: "provider-origin-delimiter-alignment",
+  pass: allowedOriginsDelimiterAligned,
+});
+if (!allowedOriginsDelimiterAligned) {
+  blockers.push(
+    "MAP_PROVIDER_ALLOWED_ORIGINS delimiter handling is not aligned across runtime, deploy workflows, and API documentation.",
   );
 }
 

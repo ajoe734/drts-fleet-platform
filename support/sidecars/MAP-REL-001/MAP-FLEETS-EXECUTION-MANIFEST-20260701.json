@@ -106,6 +106,7 @@
         "apps/api/tests/unit/external-geo.provider.test.ts",
         "apps/api/tests/unit/map-provider-config.test.ts",
         "apps/api/README.md",
+        "scripts/report-map-geofence-readiness-blockers.mjs",
         ".github/workflows/deploy-staging.yml",
         ".github/workflows/deploy-prod.yml"
       ]
