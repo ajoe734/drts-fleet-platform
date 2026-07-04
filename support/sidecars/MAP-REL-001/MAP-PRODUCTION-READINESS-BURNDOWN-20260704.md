@@ -1,13 +1,12 @@
 # MAP Production Readiness Burndown
 
 Date: `2026-07-04`
-Branch@SHA: `codex/map-rel-001@141146cd072948cba837b2a82647525fe39375da`
+Branch@SHA: `codex/map-rel-001@9c37aa8e621407f74f0d44ccc0c0e2444beb360d`
 
 ## Remaining Work To Reach Gate PASS
 
-1. Land canonical Platform Admin `/service-area-governance` screens and publish `MAP-FE-ADM-001` final evidence so Gate B can pass.
-2. Capture driver-app simulator/device UAT for pickup/dropoff coordinate handoff and navigation launch so Gate D can pass.
-3. Replace the external provider runtime placeholder with a real live-provider adapter and keep `scripts/check-map-provider-config.sh` / `.env.example` aligned with that runtime so Gates A/C/E can pass without unsupported claims.
+1. Canonical /service-area-governance UI publication and MAP-FE-ADM-001 final evidence are still missing.
+2. Driver device/simulator UAT is still absent and E2E-MAP-007 remains MANUAL-UAT.
 
 ## Already Closed Repo-Backed Proof
 

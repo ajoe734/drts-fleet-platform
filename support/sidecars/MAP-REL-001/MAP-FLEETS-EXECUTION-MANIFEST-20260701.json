@@ -1,9 +1,9 @@
 {
   "taskId": "MAP-REL-001",
   "title": "Map/geofence production release gates",
-  "generatedAt": "2026-07-04T04:50:45.685Z",
+  "generatedAt": "2026-07-04T05:05:14.075Z",
   "branch": "codex/map-rel-001",
-  "branchAtSha": "codex/map-rel-001@141146cd072948cba837b2a82647525fe39375da",
+  "branchAtSha": "codex/map-rel-001@9c37aa8e621407f74f0d44ccc0c0e2444beb360d",
   "mergeBaseAgainstDev": "9a9817c13934075da4f49053cc868bce64f564a8",
   "evidenceScope": "repo-backed release audit; no unsupported production claim",
   "dependencyEvidence": [
@@ -62,26 +62,28 @@
     {
       "id": "FLEETS-MAP-PROVIDER-PREREQS",
       "title": "Provider runtime prerequisites align across env docs, preflight, and runtime",
-      "status": "FAIL",
+      "status": "PASS",
       "repoStatus": "PASS",
       "artifacts": [
         ".env.example",
         "scripts/check-map-provider-config.sh",
         "apps/api/src/modules/geo/geo-provider-config.service.ts",
+        "apps/api/src/modules/geo/google-geo.provider.ts",
+        "apps/api/src/modules/geo/geo.module.ts",
         "docs/03-runbooks/map-provider-operational-runbook-20260630.md"
       ],
-      "blocker": "Runtime keeps MAP_PROVIDER_MODE=external fail-closed because the live provider adapter is not implemented."
+      "blocker": ""
     },
     {
       "id": "FLEETS-MAP-GATE-A",
       "title": "Gate A: Callcenter safe to dispatch",
-      "status": "FAIL",
+      "status": "PASS",
       "repoStatus": "PASS",
       "artifacts": [
         "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
         "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md"
       ],
-      "blocker": "Repo-backed proof exists, but production release is still blocked by provider prerequisites/runtime."
+      "blocker": ""
     },
     {
       "id": "FLEETS-MAP-GATE-B",
@@ -99,13 +101,13 @@
     {
       "id": "FLEETS-MAP-GATE-C",
       "title": "Gate C: Ops safe to operate",
-      "status": "FAIL",
+      "status": "PASS",
       "repoStatus": "PASS",
       "artifacts": [
         "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
         "apps/ops-console-web/app/dispatch/ops-map-board.ts"
       ],
-      "blocker": "Repo-backed ops proof exists, but live-provider prerequisites still block production enablement."
+      "blocker": ""
     },
     {
       "id": "FLEETS-MAP-GATE-D",
@@ -121,14 +123,14 @@
     {
       "id": "FLEETS-MAP-GATE-E",
       "title": "Gate E: Degraded safe",
-      "status": "FAIL",
+      "status": "PASS",
       "repoStatus": "PASS",
       "artifacts": [
         "support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md",
         "support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md",
         "docs/03-runbooks/map-provider-operational-runbook-20260630.md"
       ],
-      "blocker": "Repo-backed degraded behavior exists, but production provider prerequisites/runtime still fail release."
+      "blocker": ""
     },
     {
       "id": "FLEETS-MAP-GAP-INVENTORY",
@@ -142,8 +144,8 @@
     }
   ],
   "summary": {
-    "passCount": 4,
-    "failCount": 6,
+    "passCount": 8,
+    "failCount": 2,
     "repoPassCount": 10,
     "releaseVerdict": "FAIL"
   }

@@ -1,1 +1,1 @@
-MAP provider config check: mode=mock tier=local; deterministic mock mode is active.
+MAP provider config check: mode=external provider=google tier=staging; required config inputs are present.

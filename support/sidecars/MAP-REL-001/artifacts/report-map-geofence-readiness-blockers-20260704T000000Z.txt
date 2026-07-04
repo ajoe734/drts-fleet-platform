@@ -1,1 +1,1 @@
-MAP-REL readiness report: FAIL (6 failing release checks)
+MAP-REL readiness report: FAIL (2 failing release checks)
