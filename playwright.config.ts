@@ -6,12 +6,16 @@ function readSelectedProjects() {
 
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
+    if (!value) {
+      continue;
+    }
     if (value.startsWith("--project=")) {
       selectedProjects.add(value.slice("--project=".length));
       continue;
     }
-    if (value === "--project" && argv[index + 1]) {
-      selectedProjects.add(argv[index + 1]);
+    const nextValue = argv[index + 1];
+    if (value === "--project" && typeof nextValue === "string" && nextValue.length > 0) {
+      selectedProjects.add(nextValue);
     }
   }
 
