@@ -910,6 +910,7 @@ export function AddressMapPicker<TServiceProduct extends string = string>(
   return (
     <div
       id={domId}
+      data-address-map-picker=""
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1374,9 +1375,37 @@ export interface AddressMapPairChange {
   pickup: AddressPayload | null;
   dropoff: AddressPayload | null;
   serviceability: ServiceAreaEvaluationResult | null;
+  providerState: AddressProviderState;
   bothDispatchReady: boolean;
 }
 
+function buildPairChangeSignature(change: AddressMapPairChange): string {
+  return JSON.stringify({
+    pickup: change.pickup,
+    dropoff: change.dropoff,
+    serviceability: change.serviceability,
+    providerState: change.providerState,
+    bothDispatchReady: change.bothDispatchReady,
+  });
+}
+
+function mergeProviderStates(
+  ...states: AddressProviderState[]
+): AddressProviderState {
+  const unavailableState = states.find((state) => !state.available);
+  if (unavailableState) {
+    return unavailableState;
+  }
+
+  const degradedState = states.find((state) => state.degraded);
+  if (degradedState) {
+    return degradedState;
+  }
+
+  return (
+    states[0] ?? { available: true, degraded: false, reasonCode: "available" }
+  );
+}
 export interface AddressMapPairPickerProps<
   TServiceProduct extends string = string,
 > {
@@ -1429,13 +1458,45 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
   );
   const [serviceability, setServiceability] =
     useState<ServiceAreaEvaluationResult | null>(null);
+  const [pickupProviderState, setPickupProviderState] =
+    useState<AddressProviderState>(() =>
+      deriveProviderState(providerHealth ?? null),
+    );
+  const [dropoffProviderState, setDropoffProviderState] =
+    useState<AddressProviderState>(() =>
+      deriveProviderState(providerHealth ?? null),
+    );
+  const [serviceabilityProviderState, setServiceabilityProviderState] =
+    useState<AddressProviderState>(() =>
+      deriveProviderState(providerHealth ?? null),
+    );
+  const lastChangeSignatureRef = useRef<string | null>(null);
 
   const pickupPoint = addressToGeoPoint(pickup);
   const dropoffPoint = addressToGeoPoint(dropoff);
+  const providerState = useMemo(
+    () =>
+      mergeProviderStates(
+        pickupProviderState,
+        dropoffProviderState,
+        serviceabilityProviderState,
+      ),
+    [dropoffProviderState, pickupProviderState, serviceabilityProviderState],
+  );
+
+  useEffect(() => {
+    const nextProviderState = deriveProviderState(providerHealth ?? null);
+    setPickupProviderState(nextProviderState);
+    setDropoffProviderState(nextProviderState);
+    setServiceabilityProviderState(nextProviderState);
+  }, [providerHealth]);
 
   useEffect(() => {
     if (!serviceProductType || !provider.evaluateServiceArea || !pickupPoint) {
       setServiceability(null);
+      setServiceabilityProviderState(
+        deriveProviderState(providerHealth ?? null),
+      );
       return;
     }
     const command = buildServiceAreaPreviewCommand({
@@ -1453,11 +1514,19 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
       .then((result) => {
         if (!cancelled) {
           setServiceability(result);
+          setServiceabilityProviderState(
+            deriveProviderState(providerHealth ?? null),
+          );
         }
       })
       .catch(() => {
         if (!cancelled) {
           setServiceability(null);
+          setServiceabilityProviderState({
+            available: false,
+            degraded: true,
+            reasonCode: "request_failed",
+          });
         }
       });
     return () => {
@@ -1476,13 +1545,33 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
     isDispatchReadyAddress(pickup) && isDispatchReadyAddress(dropoff);
 
   useEffect(() => {
-    onChange?.({ pickup, dropoff, serviceability, bothDispatchReady });
-  }, [bothDispatchReady, dropoff, onChange, pickup, serviceability]);
+    const nextChange = {
+      pickup,
+      dropoff,
+      serviceability,
+      providerState,
+      bothDispatchReady,
+    } satisfies AddressMapPairChange;
+    const nextSignature = buildPairChangeSignature(nextChange);
+    if (lastChangeSignatureRef.current === nextSignature) {
+      return;
+    }
+    lastChangeSignatureRef.current = nextSignature;
+    onChange?.(nextChange);
+  }, [
+    bothDispatchReady,
+    dropoff,
+    onChange,
+    pickup,
+    providerState,
+    serviceability,
+  ]);
 
   const decision = serviceability?.decision ?? null;
 
   return (
     <div
+      data-address-map-pair-picker=""
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1496,8 +1585,11 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
         theme={theme}
         {...(labels ? { labels } : {})}
         {...(bounds ? { bounds } : {})}
-        value={pickup}
-        onChange={(change) => setPickup(change.address)}
+        defaultValue={pickup}
+        onChange={(change) => {
+          setPickup(change.address);
+          setPickupProviderState(change.providerState);
+        }}
         actorId={actorId}
         title={pickupTitle}
         enableServiceabilityPreview={false}
@@ -1509,8 +1601,11 @@ export function AddressMapPairPicker<TServiceProduct extends string = string>(
         theme={theme}
         {...(labels ? { labels } : {})}
         {...(bounds ? { bounds } : {})}
-        value={dropoff}
-        onChange={(change) => setDropoff(change.address)}
+        defaultValue={dropoff}
+        onChange={(change) => {
+          setDropoff(change.address);
+          setDropoffProviderState(change.providerState);
+        }}
         actorId={actorId}
         title={dropoffTitle}
         enableServiceabilityPreview={false}

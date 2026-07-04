@@ -457,6 +457,32 @@ describe("partner-booking-web BFF wiring", () => {
     });
   });
 
+  it("lets booking routes fallback on authority outage only when explicitly allowed", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getPartnerRouteContext("ctbc", { allowAuthorityOutage: true }),
+    ).resolves.toMatchObject({
+      inactive: true,
+      entry: null,
+      brand: expect.objectContaining({
+        displayName: "CTBC World Elite",
+        slug: "ctbc",
+      }),
+      provenance: expect.objectContaining({
+        source: "local_fallback",
+        fallbackCode: "PARTNER_AUTHORITY_UNAVAILABLE",
+        fallbackStatus: 503,
+      }),
+    });
+
+    await expect(getPartnerRouteContext("ctbc")).rejects.toMatchObject({
+      code: "PARTNER_AUTHORITY_UNAVAILABLE",
+      status: 503,
+    });
+  });
+
   it("lets public shells fallback when mounted authority returns a server error", async () => {
     process.env.DRTS_INTERNAL_KEY = "dev-internal-key";
     const fetchMock = vi.fn().mockImplementation(() =>

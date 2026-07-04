@@ -11,7 +11,7 @@ const shouldStartLocalPartnerBooking =
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: /partner-booking-surfaces\.spec\.ts/,
+  testMatch: /partner-(booking-surfaces|map-booking-ui)\.spec\.ts/,
   fullyParallel: true,
   retries: 0,
   workers: 1,
@@ -22,12 +22,21 @@ export default defineConfig({
   },
   ...(shouldStartLocalPartnerBooking
     ? {
-        webServer: {
-          command: "pnpm --filter @drts/partner-booking-web dev",
-          url: localPartnerBookingBaseURL,
-          reuseExistingServer: !process.env.CI,
-          timeout: 120_000,
-        },
+        webServer: [
+          {
+            command: "node tests/e2e/mock-map-booking-authority-server.mjs",
+            url: "http://127.0.0.1:3001/api/partner/entries/ctbc",
+            reuseExistingServer: !process.env.CI,
+            timeout: 30_000,
+          },
+          {
+            command:
+              "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/partner-booking-web && DRTS_API_URL=http://127.0.0.1:3001 pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3007",
+            url: localPartnerBookingBaseURL,
+            reuseExistingServer: !process.env.CI,
+            timeout: 120_000,
+          },
+        ],
       }
     : {}),
   timeout: 30_000,

@@ -61,13 +61,27 @@ const en = {
   "book.section.passenger": "Passenger",
   "book.section.program": "Program-specific intake",
   "book.section.review": "Submission readiness",
+  "book.map.label": "Pickup and drop-off map check",
+  "book.map.hint":
+    "Confirm both stops on the map so the booking carries dispatchable coordinates.",
+  "book.map.textFallbackHint":
+    "If address search is unavailable, enter pickup and drop-off text below so support can keep the booking in review.",
+  "book.map.coordinatesRequired":
+    "Confirm pickup and drop-off coordinates before this booking can proceed.",
+  "book.map.manualReviewTitle": "Needs review before dispatch",
+  "book.map.manualReview":
+    "The selected stops can be recorded, but dispatch must review them before normal assignment.",
+  "book.map.outageFallback":
+    "Address search is temporarily unavailable. The request can still be recorded with text addresses and held for review.",
+  "book.map.outsideServiceArea":
+    "The selected route falls outside the service area and cannot be submitted from this surface.",
   "book.ready":
-    "Program gate clear. Form can be submitted once all required fields are valid.",
+    "Program details and locations are confirmed. You can continue with submission.",
   "book.notReady": "Resolve the highlighted fields before submission.",
   "book.submit": "Validate booking form",
   "book.success": "Form validation passed",
   "book.success.detail":
-    "This partner flow is ready to hand a typed payload to the authenticated booking transport.",
+    "This booking is ready for the partner team to continue creating the order.",
   "book.summary.direction": "Airport direction",
   "book.summary.coverage": "Program coverage",
   "book.summary.window": "Reservation window",
@@ -333,8 +347,7 @@ const en = {
     "· certified professional drivers and a licensed fleet",
   "airport.quota.remaining": "Free transfers left this year",
   "airport.features.kicker": "Why book with us",
-  "airport.features.title":
-    "Concierge airport transfer, every detail handled",
+  "airport.features.title": "Concierge airport transfer, every detail handled",
   "airport.features.body":
     "From booking to arrival, professional drivers, live tracking, and consolidated billing keep business trips and homecomings effortless.",
   "airport.vehicles.title": "Choose the right vehicle",
@@ -518,12 +531,21 @@ const zh = {
   "book.section.passenger": "乘客資料",
   "book.section.program": "方案專屬欄位",
   "book.section.review": "送單檢查",
-  "book.ready": "方案閘門已通過；只要必填欄位合法，就可提交。",
+  "book.map.label": "上下車地圖確認",
+  "book.map.hint": "請先在地圖上確認上下車位置，讓訂單帶有可派送座標。",
+  "book.map.textFallbackHint":
+    "若地址查詢暫時無法使用，請先補上下車文字地址，讓客服保留這筆待確認預約。",
+  "book.map.coordinatesRequired": "此訂單在繼續前，必須先確認上下車座標。",
+  "book.map.manualReviewTitle": "派遣前需人工確認",
+  "book.map.manualReview": "目前可先記錄這趟行程，但正式派遣前仍需人工確認。",
+  "book.map.outageFallback":
+    "地址查詢暫時無法使用。此申請仍可先用文字地址記錄，並轉入人工確認。",
+  "book.map.outsideServiceArea": "所選路線超出服務範圍，無法從此入口送出。",
+  "book.ready": "方案資料與地址已確認，可繼續送出預約。",
   "book.notReady": "請先修正標示欄位，再進行提交。",
   "book.submit": "驗證下單表單",
   "book.success": "表單驗證通過",
-  "book.success.detail":
-    "此 partner flow 已可把型別安全的 payload 交給已驗證的 booking transport。",
+  "book.success.detail": "此預約資料已準備完成，可交由合作通路後續建立訂單。",
   "book.summary.direction": "接送方向",
   "book.summary.coverage": "方案欄位覆蓋",
   "book.summary.window": "預約時段",

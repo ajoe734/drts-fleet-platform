@@ -116,6 +116,17 @@ export type {
   MapBounds,
 } from "./address-map-picker";
 export {
+  buildAddressPickerLabels,
+  createConfiguredMockAddressProvider,
+  evaluateAddressSubmitGate,
+} from "./address-map-app-support";
+export type {
+  AddressPickerLocale,
+  AddressProviderMode,
+  AddressSubmitGateCode,
+  AddressSubmitGateState,
+} from "./address-map-app-support";
+export {
   ADDRESS_PICKER_STATUSES,
   AddressProviderUnavailableError,
   addressToGeoPoint,

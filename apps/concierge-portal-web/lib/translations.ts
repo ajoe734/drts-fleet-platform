@@ -247,20 +247,24 @@ const en = {
   "booking.guardrails.ineligible": "Ineligible route",
   "booking.guardrails.recording": "Recording gate",
   "booking.form.eyebrow": "Create order",
-  "booking.form.title":
-    "Submit the proxy booking through the assisted-entry desk.",
+  "booking.form.title": "Create a concierge-assisted booking from this desk.",
   "booking.field.passengerName": "Passenger name",
   "booking.field.passengerPhone": "Passenger phone",
   "booking.field.product": "Requested product",
   "booking.field.eta": "Quoted ETA minutes",
+  "booking.field.route": "Pickup and drop-off map check",
   "booking.field.pickup": "Pickup address",
   "booking.field.dropoff": "Drop-off address",
   "booking.field.callbackDue": "Optional callback due time",
   "booking.field.callbackNote": "Callback note",
   "booking.field.notes": "Desk notes",
   "booking.help.product":
-    "Portal validates authorized products before using the existing callcenter order seam.",
-  "booking.submit": "Submit assisted-entry booking",
+    "Portal checks authorized products before continuing with the existing desk booking flow.",
+  "booking.help.route":
+    "Confirm both stops on the map before creating the concierge-assisted booking.",
+  "booking.help.manualReview":
+    "This trip needs dispatch review before auto-assignment. Continue only if the coordinates are correct.",
+  "booking.submit": "Submit concierge-assisted booking",
   "booking.summary.eyebrow": "Submission accepted",
   "booking.summary.orderId": "Order ID",
   "booking.summary.callId": "Call ID",
@@ -274,14 +278,20 @@ const en = {
   "booking.error.loadSession": "Failed to load the active desk session.",
   "booking.error.openSession": "Failed to open the desk session.",
   "booking.error.closeSession": "Failed to close the desk session.",
-  "booking.error.submit": "Failed to create the assisted-entry booking.",
+  "booking.error.coordinatesRequired":
+    "Confirm pickup and drop-off coordinates before creating this booking.",
+  "booking.error.manualReviewRequired":
+    "This booking was held for manual review before dispatch. Confirm the route in order lookup and continue from the review queue.",
+  "booking.error.outsideServiceArea":
+    "Pickup or drop-off is outside the supported service area. Confirm the route and try again.",
+  "booking.error.submit": "Failed to create the concierge-assisted booking.",
   "booking.defaultPassengerName": "Chen Passenger",
   "booking.defaultPassengerPhone": "0911222333",
   "booking.defaultPickup": "1F, No. 1, Shifu Rd., Xinyi Dist., Taipei City",
   "booking.defaultDropoff":
     "No. 12, Sec. 4, Ren'ai Rd., Da'an Dist., Taipei City",
   "booking.defaultNotes":
-    "Desk-created assisted-entry booking from the concierge portal.",
+    "Desk-created concierge-assisted booking from the concierge portal.",
 
   "degraded.eyebrow": "Degraded",
   "degraded.title": "Desk remains visible, but booking creation is blocked.",
@@ -648,19 +658,24 @@ const zh: Record<keyof typeof en, string> = {
   "booking.guardrails.ineligible": "Ineligible 路由",
   "booking.guardrails.recording": "錄音限制",
   "booking.form.eyebrow": "建立訂單",
-  "booking.form.title": "透過 assisted-entry 櫃台提交代理訂單。",
+  "booking.form.title": "由禮賓櫃台代客建立預約。",
   "booking.field.passengerName": "乘客姓名",
   "booking.field.passengerPhone": "乘客電話",
   "booking.field.product": "申請產品",
   "booking.field.eta": "回報 ETA 分鐘",
+  "booking.field.route": "上車與下車地圖確認",
   "booking.field.pickup": "上車地址",
   "booking.field.dropoff": "下車地址",
   "booking.field.callbackDue": "選填回撥到期時間",
   "booking.field.callbackNote": "回撥備註",
   "booking.field.notes": "櫃台備註",
   "booking.help.product":
-    "入口會先驗證授權產品，再使用既有 callcenter order 接縫。",
-  "booking.submit": "提交 assisted-entry 訂單",
+    "入口會先確認授權產品，再沿用既有櫃台建單流程。",
+  "booking.help.route":
+    "建立禮賓代訂前，請先在地圖上確認上下車位置。",
+  "booking.help.manualReview":
+    "此行程在派遣前仍需人工確認；只有在座標無誤時才可繼續。",
+  "booking.submit": "提交禮賓代訂",
   "booking.summary.eyebrow": "提交已接受",
   "booking.summary.orderId": "訂單 ID",
   "booking.summary.callId": "通話 ID",
@@ -674,12 +689,17 @@ const zh: Record<keyof typeof en, string> = {
   "booking.error.loadSession": "載入目前櫃台工作階段失敗。",
   "booking.error.openSession": "開啟櫃台工作階段失敗。",
   "booking.error.closeSession": "關閉櫃台工作階段失敗。",
-  "booking.error.submit": "建立 assisted-entry 訂單失敗。",
+  "booking.error.coordinatesRequired": "建立此訂單前，請先確認上車與下車座標。",
+  "booking.error.manualReviewRequired":
+    "此訂單在派車前已改送人工審查。請到訂單查詢確認路線，並從審查佇列繼續處理。",
+  "booking.error.outsideServiceArea":
+    "上車或下車地點不在支援的服務範圍內。請確認路線後再試一次。",
+  "booking.error.submit": "建立禮賓代訂失敗。",
   "booking.defaultPassengerName": "陳旅客",
   "booking.defaultPassengerPhone": "0911222333",
   "booking.defaultPickup": "台北市信義區市府路 1 號 1F",
   "booking.defaultDropoff": "台北市大安區仁愛路 4 段 12 號",
-  "booking.defaultNotes": "由禮賓入口建立的 assisted-entry 櫃台訂單。",
+  "booking.defaultNotes": "由禮賓入口建立的代客預約。",
 
   "degraded.eyebrow": "降級",
   "degraded.title": "櫃台仍可見，但已阻擋建立訂單。",

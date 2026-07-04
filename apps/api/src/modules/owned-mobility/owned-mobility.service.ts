@@ -594,6 +594,15 @@ export class OwnedMobilityService implements OnModuleInit {
         : ["recording_pending"],
       cancelledAt: null,
       cancelReason: null,
+      mapFallbackReview: command.mapFallbackReview?.reasonCode
+        ? {
+            reasonCode: command.mapFallbackReview.reasonCode,
+            providerAvailable: command.mapFallbackReview.providerAvailable,
+            providerDegraded: command.mapFallbackReview.providerDegraded,
+            providerReasonCode:
+              command.mapFallbackReview.providerReasonCode ?? null,
+          }
+        : null,
       reservationHoldStatus: "none",
       reservationHoldId: null,
       reservationHoldExpiresAt: null,
@@ -6603,6 +6612,11 @@ export class OwnedMobilityService implements OnModuleInit {
       gates.push(serviceAreaGate);
     }
 
+    const addressCaptureGate = this.buildAddressCaptureGate(order);
+    if (addressCaptureGate) {
+      gates.push(addressCaptureGate);
+    }
+
     const recordingGate = this.buildRecordingGate(order);
     if (recordingGate) {
       gates.push(recordingGate);
@@ -6619,6 +6633,56 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     return gates;
+  }
+
+  private buildAddressCaptureGate(
+    order: OwnedOrderRecord,
+  ): ComplianceGateRecord | null {
+    const fallbackReview = order.mapFallbackReview;
+    if (!fallbackReview?.reasonCode?.trim()) {
+      return null;
+    }
+
+    return {
+      gateType: "address_capture",
+      title: "Address capture fallback review",
+      state: "review_required",
+      required: true,
+      blocking: false,
+      evidenceState: "submitted",
+      evidenceRefs: [
+        fallbackReview.reasonCode,
+        ...(fallbackReview.providerReasonCode
+          ? [fallbackReview.providerReasonCode]
+          : []),
+      ],
+      missingItems: [],
+      nextAction:
+        "Dispatch requires manual review because address capture continued while the map provider was unavailable or degraded.",
+      reviewerLabel: "callcenter / dispatch mapping",
+      overrideAllowed: true,
+      overrideActors: ["ops_user", "platform_admin"],
+      impacts: [
+        {
+          stage: "dispatch",
+          effect: "review_required",
+          reason:
+            "Dispatch stays in manual review until an operator confirms the fallback map capture.",
+        },
+        {
+          stage: "completion",
+          effect: "clear",
+          reason:
+            "Address capture fallback does not block completion after dispatch is explicitly released.",
+        },
+        {
+          stage: "settlement",
+          effect: "review_required",
+          reason:
+            "Audit should retain why dispatch proceeded from a degraded map-capture path.",
+        },
+      ],
+    };
   }
 
   private buildRecordingGate(
@@ -7238,6 +7302,9 @@ export class OwnedMobilityService implements OnModuleInit {
               : null,
           }
         : {}),
+      mapFallbackReview: order.mapFallbackReview
+        ? { ...order.mapFallbackReview }
+        : null,
       queueFamily: queueState.queueFamily,
       queueEntryReason: queueState.queueEntryReason,
       noSupplyEscalation: order.noSupplyEscalation
