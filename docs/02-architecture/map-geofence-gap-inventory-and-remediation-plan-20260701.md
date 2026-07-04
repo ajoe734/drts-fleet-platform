@@ -78,3 +78,44 @@ The following are not part of `MAP-FE-ADM-001` unless separately assigned:
 3. Any new backend contract beyond the existing `/service-area/admin/*`,
    `/service-area/definitions`, `/service-area/admin/geojson`, and
    `/service-area/evaluate` surfaces.
+
+## 2026-07-04 Release Closeout Snapshot
+
+This delta now also acts as the release-closeout superseder for
+`MAP-REL-001`. It records which `MAP-GAP-*` items are closed by repo-backed
+evidence, which remain release-blocked, and who owns the remaining work so no
+gap is left unassigned.
+
+### Gap Ownership And Closeout State
+
+| Gap ID        | Closeout state on 2026-07-04 | Owner task(s)                                               | Evidence                                                                                                                                                                                                                                                                   |
+| ------------- | ---------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAP-GAP-001` | `release-blocked`            | `MAP-INFRA-001`, `MAP-BE-002`, `MAP-REL-001`                | Runtime/provider prereqs still fail release because `apps/api/src/modules/geo/geo-provider-config.service.ts` keeps external mode fail-closed until a live adapter exists; prereq doc drift is captured in `support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md`. |
+| `MAP-GAP-002` | `closed-repo-backed`         | `MAP-BE-002`, `MAP-OBS-001`                                 | `docs/04-api/map-geofence-openapi-delta-20260630.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`.                                                                                                                                                        |
+| `MAP-GAP-003` | `release-blocked`            | `MAP-FE-CALL-001`, `MAP-QA-002`, `MAP-REL-001`              | Cross-surface evidence is present in `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, but production enablement is blocked by provider prerequisites tracked in `MAP-REL-001`.                                                                                  |
+| `MAP-GAP-004` | `closed-repo-backed`         | `MAP-BE-004`, `MAP-BE-005`, `MAP-QA-002`                    | `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`.                                                                                                                                                  |
+| `MAP-GAP-005` | `open`                       | `MAP-FE-ADM-001`, `MAP-REL-001`                             | Canonical `/service-area-governance` publication remains a visual-publication blocker: `docs/05-ui/platform-admin-service-area-governance-screen-requirements-20260703.md`, `support/unblock/MAP-FE-ADM-001/MAP-FE-ADM-001-UNBLOCK-PLANNING-DECISION.md`.                  |
+| `MAP-GAP-006` | `release-blocked`            | `MAP-FE-OPS-001`, `MAP-QA-002`, `MAP-REL-001`               | Ops spatial readiness hooks are covered in `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, but production release remains blocked until live provider prerequisites clear.                                                                                     |
+| `MAP-GAP-007` | `open`                       | `MAP-MOB-DRV-001`, `MAP-REL-001`                            | Driver code proof exists, but device/simulator UAT is still missing: `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`.                                                                                                                                 |
+| `MAP-GAP-008` | `closed-repo-backed`         | `MAP-FE-TEN-001`, `MAP-FE-CON-001`, `MAP-QA-002`            | Tenant/concierge/partner flows share the repo-backed QA matrix in `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`.                                                                                                                                              |
+| `MAP-GAP-009` | `closed-repo-backed`         | `MAP-BE-001`, `MAP-BE-005`, `MAP-QA-002`                    | Coordinate provenance and spatial audit proof are carried by `MAP-QA-002` plus `MAP-OBS-001` final evidence.                                                                                                                                                               |
+| `MAP-GAP-010` | `release-blocked`            | `MAP-INFRA-001`, `MAP-OBS-001`, `MAP-QA-002`, `MAP-REL-001` | Degraded-mode behavior is repo-backed, but production prerequisites remain blocked by provider schema/runtime drift; see `support/sidecars/MAP-REL-001/MAP-READINESS-BLOCKER-REPORT.md`.                                                                                   |
+| `MAP-GAP-011` | `open`                       | `MAP-BE-006`, `MAP-FE-ADM-001`, `MAP-REL-001`               | Backend lifecycle exists, but the governing Platform Admin publish UI and final evidence do not: `support/sidecars/MAP-UI-002/MAP-UI-002-INTEGRATE-001-CLOSEOUT.md`.                                                                                                       |
+| `MAP-GAP-012` | `closed-repo-backed`         | `MAP-BE-005`, `MAP-OBS-001`                                 | Spatial audit evidence is recorded in `support/sidecars/MAP-OBS-001/MAP-OBS-001-FINAL-EVIDENCE.md`.                                                                                                                                                                        |
+| `MAP-GAP-013` | `open`                       | `MAP-QA-002`, `MAP-MOB-DRV-001`, `MAP-REL-001`              | Driver device UAT and staged smoke remain open even though repo-local QA passed: `support/sidecars/MAP-QA-002/MAP-QA-002-FINAL-EVIDENCE.md`, `support/sidecars/MAP-MOB-DRV-001/MAP-MOB-DRV-001-FINAL-EVIDENCE.md`.                                                         |
+
+### Gate Snapshot
+
+| Gate                                | 2026-07-04 release verdict | Why                                                                                                                                               |
+| ----------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate A: Callcenter safe to dispatch | `FAIL`                     | Repo-backed QA/OBS proof exists, but production enablement is still blocked by live-provider prerequisites and fail-closed external-mode runtime. |
+| Gate B: Governance safe to publish  | `FAIL`                     | `MAP-FE-ADM-001` publish UI/final evidence is still missing, so GeometryEditor baseline alone cannot satisfy governance release pass.             |
+| Gate C: Ops safe to operate         | `FAIL`                     | Repo-backed ops readiness hooks exist, but the production live-map release is still blocked by provider prerequisites.                            |
+| Gate D: Driver safe to navigate     | `FAIL`                     | `MAP-MOB-DRV-001` still calls out missing device/simulator UAT and does not claim production Gate D pass.                                         |
+| Gate E: Degraded safe               | `FAIL`                     | Repo-backed degraded behavior exists, but production provider prerequisites and the live external adapter are not release-ready.                  |
+
+### Release Blockers Carried Forward
+
+1. Provider/runtime prerequisite truth is still inconsistent across execution docs, `.env.example`, and release scope; `MAP-REL-001` now owns the reconciled prereq evidence and fail report.
+2. `MAP-FE-ADM-001` remains the canonical owner for Governance gate closure.
+3. `MAP-MOB-DRV-001` remains the canonical owner for driver device/simulator UAT.
