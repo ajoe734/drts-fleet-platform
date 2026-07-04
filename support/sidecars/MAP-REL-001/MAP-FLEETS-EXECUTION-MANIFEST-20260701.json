@@ -1,9 +1,9 @@
 {
   "taskId": "MAP-REL-001",
   "title": "Map/geofence production release gates",
-  "generatedAt": "2026-07-04T07:36:12.046Z",
+  "generatedAt": "2026-07-04T09:02:49.088Z",
   "branch": "codex/map-rel-001",
-  "branchAtSha": "codex/map-rel-001@fcfb8b6c2608d0e181268961e78a761828b375e6",
+  "branchAtSha": "codex/map-rel-001@f236bebc21fd7e9b45f3748d97ce835d8d17a93f",
   "mergeBaseAgainstDev": "9a9817c13934075da4f49053cc868bce64f564a8",
   "evidenceScope": "repo-backed release audit; no unsupported production claim",
   "dependencyEvidence": [

@@ -2,7 +2,7 @@
 
 **Task:** `MAP-REL-001` - Map/geofence production release gates
 **Branch:** `codex/map-rel-001`
-**Branch@SHA:** `codex/map-rel-001@fcfb8b6c2608d0e181268961e78a761828b375e6`
+**Branch@SHA:** `codex/map-rel-001@f236bebc21fd7e9b45f3748d97ce835d8d17a93f`
 **Merge-base against `origin/dev`:** `9a9817c13934075da4f49053cc868bce64f564a8`
 **Date:** `2026-07-04`
 **Manifest:** `support/sidecars/MAP-REL-001/MAP-FLEETS-EXECUTION-MANIFEST-20260701.json`
