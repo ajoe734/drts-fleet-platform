@@ -2,7 +2,7 @@
 
 **Task:** `MAP-REL-001` - Map/geofence production release gates
 **Branch:** `codex2/map-rel-001`
-**Branch@SHA:** `codex2/map-rel-001@004b7bb579e3d74abea9e80d32dda8b266468563`
+**Branch@SHA:** `codex2/map-rel-001@e04f32b048b684ef4fc22862f9dfb71fec9e486f`
 **Worktree:** `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-map-rel-001`
 **Date:** `2026-07-04`
 **Reviewer:** `Codex`
@@ -15,7 +15,7 @@ hard-binds `GEO_PROVIDER` to the mock provider, deploy/preflight rails use the
 same `MAP_PROVIDER_MODE` plus `MAP_PROVIDER_SERVER_KEY` contract, and the
 release closeout no longer carries unassigned `MAP-GAP-*` rows. This evidence
 is limited to branch-scoped repository readiness on
-`codex2/map-rel-001@004b7bb579e3d74abea9e80d32dda8b266468563`; it does not
+`codex2/map-rel-001@e04f32b048b684ef4fc22862f9dfb71fec9e486f`; it does not
 claim a staging or production deployment occurred from this branch.
 
 ## Upstream Evidence Intake
